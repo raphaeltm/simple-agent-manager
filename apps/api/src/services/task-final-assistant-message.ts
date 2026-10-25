@@ -26,7 +26,8 @@ function toTaskAssistantMessage(message: LogicalMessage, cap: number): TaskAssis
 }
 
 /**
- * The newest `count` assistant replies in a chat, newest first, each assembled from its streamed
+ * The newest `count` assistant replies in a chat, newest first (a reply with no text is left
+ * out), each assembled from its streamed
  * chunks inside the object that owns the transcript
  * (`durable-objects/project-data/logical-transcript.ts`) and capped at
  * `taskDetailMessageSnippetLength`. The scan is bounded by `connector.transcriptScanRows`: a reply
@@ -68,12 +69,16 @@ export async function getRecentAssistantMessagesForTask(
   }
 }
 
-/** The newest assistant reply in a chat, or null (see `getRecentAssistantMessagesForTask`). */
+/**
+ * The newest assistant reply with text in a chat, or null. Reads the same recent replies as the
+ * task view (`operations/task-core.ts`), so both report the same final message.
+ */
 export async function getLatestAssistantMessageForTask(
   env: Env,
   projectId: string,
   sessionId: string | null
 ): Promise<TaskAssistantMessage | null> {
-  const [latest] = await getRecentAssistantMessagesForTask(env, projectId, sessionId, 1);
+  const count = getPlatformOperationLimits(env).taskDetailRecentMessageLimit;
+  const [latest] = await getRecentAssistantMessagesForTask(env, projectId, sessionId, count);
   return latest ?? null;
 }

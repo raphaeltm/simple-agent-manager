@@ -19,20 +19,34 @@ import { log } from '../lib/logger';
 import { parseRowsSkippingInvalid } from '../lib/runtime-validation';
 import { listAgentActivityTasks } from '../services/agent-activity';
 import { getConnectorReadLimits } from '../services/connector-read-settings';
+import { TEAM_TEXT_CHARS_MIN } from '../services/connector-read-settings-definition';
 import { listProjectCredentialLimits } from '../services/credential-limit-events/read';
 import * as projectDataService from '../services/project-data';
 import { authorizeProjectOperation } from './authorization';
 import { operationLink } from './connector-read-core';
 import { diagnostic } from './operational-projections';
 import { getPullRequestStates, parseProjectPullRequestUrl } from './pull-request-core';
-import { jsonBytes, RESULT_FRAMING_RESERVE_BYTES, resultByteBudget } from './response-budget';
+import { responseBytes, RESULT_FRAMING_RESERVE_BYTES, resultByteBudget } from './response-budget';
 import { readTeamTasks, type TeamScope, type TeamTaskRow } from './team-lineage';
 import { settle, type Settled, usageSection } from './team-usage';
 import type { OperationContext } from './types';
-import { untrustedTextBlock } from './untrusted-text';
+import { UNTRUSTED_TEXT_GUIDANCE, untrustedTextBlock } from './untrusted-text';
 
-/** Shortest agent text per field a large team is cut to before fewer tasks are listed. */
-const MIN_TEAM_TEXT_CHARS = 100;
+/**
+ * Agent-written text in its untrusted-data envelope, or null when there is none. The guidance
+ * sentence that explains the envelope is stated once per result (`untrustedTextGuidance`).
+ */
+function agentText(kind: string, text: string | null, maxLength: number, moreWith: string) {
+  if (!text) return null;
+  const block = untrustedTextBlock({ kind, text, maxLength, moreWith });
+  return {
+    kind: block.kind,
+    text: block.text,
+    truncated: block.truncated,
+    originalLength: block.originalLength,
+    untrustedContent: block.untrustedContent,
+  };
+}
 
 const AgentSessionRowSchema = v.object({
   workspaceId: v.string(),
@@ -172,12 +186,12 @@ function sessionAttention(
       typeof record.createdAt === 'number' ? new Date(record.createdAt).toISOString() : null,
     ...(mine
       ? {
-          question: untrustedTextBlock({
-            kind: 'agent question',
-            text: typeof record.reason === 'string' ? record.reason : null,
-            maxLength: textChars,
-            moreWith: 'sam_chat_interactions',
-          }),
+          question: agentText(
+            'agent question',
+            typeof record.reason === 'string' ? record.reason : null,
+            textChars,
+            'sam_chat_interactions'
+          ),
           options: Array.isArray(record.options) ? record.options : [],
         }
       : { question: 'Visible to the chat owner; they can read it with sam_chat_interactions.' }),
@@ -292,18 +306,8 @@ function projectTeamTask(
     output: {
       branch: task.outputBranch,
       commitSha: task.outputCommitSha,
-      summary: untrustedTextBlock({
-        kind: 'agent summary',
-        text: task.outputSummary,
-        maxLength: textChars,
-        moreWith: 'sam_task_get',
-      }),
-      evidence: untrustedTextBlock({
-        kind: 'agent evidence',
-        text: task.completionEvidence,
-        maxLength: textChars,
-        moreWith: 'sam_task_get',
-      }),
+      summary: agentText('agent summary', task.outputSummary, textChars, 'sam_task_get'),
+      evidence: agentText('agent evidence', task.completionEvidence, textChars, 'sam_task_get'),
       source: 'agent_reported_not_verified',
     },
     compute: usage
@@ -323,27 +327,41 @@ function projectTeamTask(
 
 export type TeamTask = ReturnType<typeof projectTeamTask>;
 
+/** How many of `tasks`, in order, fit `budget` response bytes as one JSON array. */
+function listedWithin(tasks: readonly TeamTask[], budget: number): number {
+  // One byte per task for the separating comma (counted twice: both copies), two for brackets.
+  let total = 4;
+  for (const [index, task] of tasks.entries()) {
+    total += responseBytes(task) + 2;
+    if (total > budget) return index;
+  }
+  return tasks.length;
+}
+
 /**
- * The tasks that fit `budget` bytes. Agent text is shortened first, since sam_task_get returns it
- * in full; then the lowest-ranked tasks (deepest, least active, least recently updated, as
- * `team-lineage.ts` orders them) are left out. The caller discloses both.
+ * The tasks that fit `budget` response bytes, in the order `team-lineage.ts` ranks them, so the
+ * deepest, least active and least recently updated are left out first. Agent text is shortened
+ * only when that lists more tasks, since sam_task_get returns it in full; the caller discloses
+ * both.
  */
-function fitTasks(project: (textChars: number) => TeamTask[], textChars: number, budget: number) {
-  let chars = textChars;
-  let tasks = project(chars);
-  while (jsonBytes(tasks) > budget && chars > MIN_TEAM_TEXT_CHARS) {
-    chars = Math.max(MIN_TEAM_TEXT_CHARS, Math.floor(chars / 2));
-    tasks = project(chars);
+function fitTasks(
+  full: TeamTask[],
+  project: (textChars: number) => TeamTask[],
+  textChars: number,
+  budget: number
+) {
+  let best = { tasks: full, textChars, listed: listedWithin(full, budget) };
+  for (let chars = textChars; best.listed < full.length && chars > TEAM_TEXT_CHARS_MIN;) {
+    chars = Math.max(TEAM_TEXT_CHARS_MIN, Math.floor(chars / 2));
+    const tasks = project(chars);
+    const listed = listedWithin(tasks, budget);
+    if (listed > best.listed) best = { tasks, textChars: chars, listed };
   }
-  // One byte per task for the separating comma, two for the brackets.
-  const sizes = tasks.map((task) => jsonBytes(task) + 1);
-  let total = sizes.reduce((sum, size) => sum + size, 2);
-  let listed = tasks.length;
-  while (listed > 1 && total > budget) {
-    listed -= 1;
-    total -= sizes[listed] ?? 0;
-  }
-  return { tasks: tasks.slice(0, listed), textChars: chars, notListed: tasks.length - listed };
+  return {
+    tasks: best.tasks.slice(0, best.listed),
+    shortenedTo: best.textChars < textChars ? best.textChars : null,
+    notListed: full.length - best.listed,
+  };
 }
 
 function omittedNote(readCapped: boolean, maxTasks: number, notListed: number): string | null {
@@ -432,9 +450,10 @@ export async function teamStatus(
     },
   };
   const fitted = fitTasks(
+    everyTask,
     project,
     limits.teamTextChars,
-    resultByteBudget(ctx.env) - jsonBytes(summary) - RESULT_FRAMING_RESERVE_BYTES
+    resultByteBudget(ctx.env) - responseBytes(summary) - RESULT_FRAMING_RESERVE_BYTES
   );
   const omitted = omittedNote(team.truncated, limits.teamMaxTasks, fitted.notListed);
 
@@ -445,12 +464,13 @@ export async function teamStatus(
     observedAt: summary.observedAt,
     counts: { ...summary.counts, listed: fitted.tasks.length },
     tasks: fitted.tasks,
-    agentTextCharsPerField: fitted.textChars,
+    ...(fitted.shortenedTo === null ? {} : { agentTextShortenedTo: fitted.shortenedTo }),
     truncated: team.truncated || fitted.notListed > 0,
     ...(omitted ? { omitted } : {}),
     usage: summary.usage,
     deployments: summary.deployments,
     sources: summary.sources,
+    untrustedTextGuidance: UNTRUSTED_TEXT_GUIDANCE,
   };
 }
 

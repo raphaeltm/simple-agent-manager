@@ -118,8 +118,9 @@ list, and on ideas, so you can tell it apart from work you started in SAM.
   (you, a provider usage limit that resets at a given time, credentials, machine capacity, or the
   next message); its pull request with the latest commit and checks; and what the agent reported.
   Reported summaries and evidence are the agent's own claims, and are labelled that way. A large
-  team gets shorter summaries first and then fewer tasks listed, deepest and least recently
-  active first, and the result says so; its counts and usage still cover every task read.
+  team lists as many tasks as fit, leaving out the deepest and least recently active first, and
+  shortens summaries only when that lists more tasks. The result says what it shortened or left
+  out, and its counts and usage still cover every task read.
 - **Usage, only what SAM measures.** Team status shows how long each workspace ran, your SAM AI
   usage today when agents use SAM's AI service, and the latest usage-limit readings your
   providers reported for your credentials. SAM doesn't record token counts per task or which

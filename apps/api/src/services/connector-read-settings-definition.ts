@@ -7,6 +7,9 @@
  * the MCP envelope carries each result twice (text and structured content), so the character
  * budgets below stay well under half of it.
  */
+/** Shortest agent text per field sam_team_status keeps; also the setting's minimum. */
+export const TEAM_TEXT_CHARS_MIN = 100;
+
 export const CONNECTOR_READ_SETTINGS = [
   {
     name: 'connector.transcriptPageMessages',
@@ -65,8 +68,8 @@ export const CONNECTOR_READ_SETTINGS = [
     name: 'connector.teamTextChars',
     defaultValue: 600,
     description:
-      'Characters of each agent summary, evidence note and question per task in sam_team_status. A team too large for one response gets shorter text first, then lists fewer tasks.',
-    range: { min: 100, max: 4_000 },
+      'Characters of each agent summary, evidence note and question per task in sam_team_status. A team too large for one response lists as many tasks as fit, shortening this text only when that lists more of them.',
+    range: { min: TEAM_TEXT_CHARS_MIN, max: 4_000 },
   },
   {
     name: 'connector.channelHistoryPageSize',

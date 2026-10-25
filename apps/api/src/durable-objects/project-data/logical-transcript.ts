@@ -16,6 +16,7 @@
 import type { MessageCursor, MessagePosition } from '@simple-agent-manager/shared';
 
 import type { ProjectDataArchiveExactReadInput } from '../../project-data-archive/contract';
+import { isArchiveReadOutOfTime } from './compact-archive';
 import {
   addRunToActivity,
   assembleMessage,
@@ -222,7 +223,16 @@ export async function readLogicalTranscriptPage(
       exhausted = true;
       break;
     }
-    const page = await reader.page({ before: cursor, after: null }, pageLimit, 'desc');
+    let page: Awaited<ReturnType<MessageContextReader['page']>>;
+    try {
+      page = await reader.page({ before: cursor, after: null }, pageLimit, 'desc');
+    } catch (error) {
+      // An archived transcript out of R2 read time ends the scan like the row budget: what was
+      // read is returned with a resume cursor. With nothing read there is nothing to return.
+      if (scanned === 0 || !isArchiveReadOutOfTime(error)) throw error;
+      exhausted = true;
+      break;
+    }
     const newestFirst = [...page.messages].reverse();
     for (const row of newestFirst) {
       scanned += 1;
@@ -269,7 +279,15 @@ export async function readLogicalTranscriptPage(
 
   const newest = state.entries[0];
   if (newest && newestRole !== null) {
-    newest.continuesInNewerPage = await cursorContinuesRun(reader, request.before, newestRole);
+    // Out of archive read time, the newest entry is reported as starting this page.
+    newest.continuesInNewerPage = await cursorContinuesRun(
+      reader,
+      request.before,
+      newestRole
+    ).catch((error: unknown) => {
+      if (isArchiveReadOutOfTime(error)) return false;
+      throw error;
+    });
   }
 
   return {

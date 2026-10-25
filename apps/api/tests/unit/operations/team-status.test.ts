@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import { jsonBytes, resultByteBudget } from '../../../src/operations/response-budget';
+import { resultByteBudget, responseBytes } from '../../../src/operations/response-budget';
 import { samTeamStatus } from '../../../src/operations/team-operations';
 import type { OperationContext } from '../../../src/operations/types';
 import { getConnectorReadLimits } from '../../../src/services/connector-read-settings';
@@ -36,6 +36,9 @@ vi.mock('../../../src/services/connector-read-settings', async (importOriginal) 
     await importOriginal<typeof import('../../../src/services/connector-read-settings')>();
   return { ...actual, getConnectorReadLimits: vi.fn(actual.getConnectorReadLimits) };
 });
+
+/** A cap at which the wordy team fits only once its agent text is shortened (see that test). */
+const SHORTEN_CAP = 50_000;
 
 describe('sam_team_status', () => {
   let sqlite: Database.Database;
@@ -334,9 +337,9 @@ describe('sam_team_status', () => {
         insertTask(
           task(`wordy-${String(index).padStart(2, '0')}`, {
             parent_task_id: 'root',
-            // Multi-byte text: the budget is in bytes, not characters.
-            output_summary: 'Résumé ✓ '.repeat(250),
-            completion_evidence: 'Évidence ✓ '.repeat(250),
+            // Multi-byte text with quotes: the budget is in bytes, and the text copy escapes quotes.
+            output_summary: 'Résumé ✓ "ok" '.repeat(200),
+            completion_evidence: 'Évidence ✓ {"tests": "pass"} '.repeat(100),
             updated_at: `2026-10-25T07:${String(index).padStart(2, '0')}:00.000Z`,
           })
         );
@@ -347,29 +350,78 @@ describe('sam_team_status', () => {
       (env as unknown as Record<string, unknown>).CONNECTOR_RESPONSE_MAX_BYTES = String(maxBytes);
     }
 
-    it('shortens agent text first and still lists every task when that is enough', async () => {
-      insertWordyTeam(6);
-      respond(60_000);
+    /** What `routes/connector-mcp.ts` measures: the result as structured content and as text. */
+    function envelopeBytes(result: unknown): number {
+      const structuredContent = {
+        data: result,
+        link: 'https://app.example.test/projects/p',
+        untrustedContent: true,
+      };
+      const response = {
+        content: [{ type: 'text', text: JSON.stringify(structuredContent) }],
+        structuredContent,
+      };
+      return new TextEncoder().encode(JSON.stringify(response)).length;
+    }
+
+    it('lists a default-size team without agent text in full at the default cap', async () => {
+      // 40 tasks, the default teamMaxTasks: the fixture's five and 35 more without agent text.
+      for (let index = 0; index < 35; index += 1) {
+        insertTask(task(`quiet-${String(index).padStart(2, '0')}`, { parent_task_id: 'root' }));
+      }
 
       const team = await samTeamStatus.run(ctx(), { projectId: 'p', taskId: 'root' });
 
-      expect(jsonBytes(team)).toBeLessThanOrEqual(resultByteBudget(env));
-      expect(team.agentTextCharsPerField).toBeLessThan(600);
+      expect(team.counts).toMatchObject({ tasks: 40, listed: 40 });
+      expect(team.truncated).toBe(false);
+      expect(team).not.toHaveProperty('agentTextShortenedTo');
+      expect(team.tasks.find((row) => row.taskId === 'quiet-00')?.output).toMatchObject({
+        summary: null,
+        evidence: null,
+      });
+      expect(envelopeBytes(team)).toBeLessThanOrEqual(120_000);
+    });
+
+    it('shortens agent text when that lists every task, and says so', async () => {
+      insertWordyTeam(6);
+      respond(SHORTEN_CAP);
+
+      const team = await samTeamStatus.run(ctx(), { projectId: 'p', taskId: 'root' });
+
+      expect(envelopeBytes(team)).toBeLessThanOrEqual(SHORTEN_CAP);
+      expect(team.agentTextShortenedTo).toBeLessThan(600);
       expect(team.counts).toMatchObject({ tasks: 11, listed: 11 });
       expect(team.truncated).toBe(false);
       expect(team).not.toHaveProperty('omitted');
       const wordy = team.tasks.find((row) => row.taskId === 'wordy-00')!;
-      expect(wordy.output.summary.text).toContain('sam_task_get');
+      expect(wordy.output.summary?.text).toContain('sam_task_get');
     });
 
-    it('lists fewer tasks when even short text does not fit, and says which and why', async () => {
+    it('keeps agent text whole when shortening it would not list another task', async () => {
+      // The next task in rank is too large to list at any text length.
+      sqlite
+        .prepare("UPDATE tasks SET output_summary = ? WHERE id = 'root'")
+        .run('Root summary. '.repeat(40));
+      sqlite.prepare("UPDATE tasks SET title = ? WHERE id = 'child'").run('t'.repeat(30_000));
+      respond(40_000);
+
+      const team = await samTeamStatus.run(ctx(), { projectId: 'p', taskId: 'root' });
+
+      expect(team.tasks.map((row) => row.taskId)).toEqual(['root']);
+      expect(team).not.toHaveProperty('agentTextShortenedTo');
+      expect(team.tasks[0]?.output.summary?.truncated).toBe(false);
+      expect(team.omitted).toContain('4 of the tasks read are not listed');
+      expect(envelopeBytes(team)).toBeLessThanOrEqual(40_000);
+    });
+
+    it('lists fewer tasks when even the shortest text does not fit, and says which and why', async () => {
       insertWordyTeam(30);
       respond(30_000);
 
       const team = await samTeamStatus.run(ctx(), { projectId: 'p', taskId: 'root' });
 
-      expect(jsonBytes(team)).toBeLessThanOrEqual(resultByteBudget(env));
-      expect(team.agentTextCharsPerField).toBe(100);
+      expect(envelopeBytes(team)).toBeLessThanOrEqual(30_000);
+      expect(team.agentTextShortenedTo).toBe(100);
       // Counts and usage still cover every task read.
       expect(team.counts.tasks).toBe(35);
       expect(team.counts.listed).toBe(team.tasks.length);
@@ -385,9 +437,10 @@ describe('sam_team_status', () => {
     it('keeps full agent text for a team that fits', async () => {
       const team = await samTeamStatus.run(ctx(), { projectId: 'p', taskId: 'root' });
 
-      expect(team.agentTextCharsPerField).toBe(600);
+      expect(team).not.toHaveProperty('agentTextShortenedTo');
       expect(team.counts).toMatchObject({ tasks: 5, listed: 5 });
       expect(team).not.toHaveProperty('omitted');
+      expect(responseBytes(team)).toBeLessThanOrEqual(resultByteBudget(env));
     });
   });
 

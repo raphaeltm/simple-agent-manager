@@ -8,6 +8,7 @@
  * as its metadata-only activity summary, and a thought's text only when the caller asked for it.
  */
 import type { ProjectDataArchiveExactReadInput } from '../../project-data-archive/contract';
+import { isArchiveReadOutOfTime } from './compact-archive';
 import {
   addRunToActivity,
   assembleMessage,
@@ -76,11 +77,18 @@ async function walkRun(
   while (cursor) {
     const limit = Math.min(SCAN_PAGE_ROWS, maxRows - rows.length);
     if (limit <= 0) return { rows, complete: false };
-    const page = await reader.page(
-      side === 'before' ? { before: cursor, after: null } : { before: null, after: cursor },
-      limit,
-      side === 'before' ? 'desc' : 'asc'
-    );
+    let page: Awaited<ReturnType<MessageContextReader['page']>>;
+    try {
+      page = await reader.page(
+        side === 'before' ? { before: cursor, after: null } : { before: null, after: cursor },
+        limit,
+        side === 'before' ? 'desc' : 'asc'
+      );
+    } catch (error) {
+      // Out of archive read time: the message is returned as read so far, marked incomplete.
+      if (!isArchiveReadOutOfTime(error)) throw error;
+      return { rows, complete: false };
+    }
     const nearestFirst = side === 'before' ? [...page.messages].reverse() : page.messages;
     for (const row of nearestFirst) {
       if (!continuesRun(run, rowRole(row))) return { rows, complete: true };

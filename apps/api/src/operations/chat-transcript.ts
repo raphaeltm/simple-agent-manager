@@ -22,8 +22,8 @@ import * as projectDataService from '../services/project-data';
 import { OperationError } from './errors';
 import { clampOperationNumber, getPlatformOperationLimits } from './limits';
 import {
-  fitUtf8,
-  jsonBytes,
+  fitText,
+  responseBytes,
   RESULT_FRAMING_RESERVE_BYTES,
   resultByteBudget,
 } from './response-budget';
@@ -102,7 +102,7 @@ function projectEntry(entry: LogicalEntry) {
 
 /** Shrinks one message's text to `maxBytes`, keeping its offsets truthful. */
 function fitMessage(message: LogicalMessage, maxBytes: number): LogicalMessage {
-  const content = fitUtf8(message.content, maxBytes);
+  const content = fitText(message.content, maxBytes);
   if (content.length === message.content.length) return message;
   const end = message.offset + content.length;
   return { ...message, content, truncated: true, nextOffset: end };
@@ -161,11 +161,11 @@ export async function readChatMessages(ctx: OperationContext, input: ChatMessage
         message ? [projectMessage(message)] : []
       )
     : [];
-  const reserve = RESULT_FRAMING_RESERVE_BYTES + jsonBytes(latestMessages);
+  const reserve = RESULT_FRAMING_RESERVE_BYTES + responseBytes(latestMessages);
   let entries = page.entries;
   let nextCursor = page.nextCursor;
   let trimmed = false;
-  while (entries.length > 1 && jsonBytes(entries.map(projectEntry)) + reserve > budget) {
+  while (entries.length > 1 && responseBytes(entries.map(projectEntry)) + reserve > budget) {
     entries = entries.slice(0, -1);
     nextCursor = entries[entries.length - 1]?.start ?? nextCursor;
     trimmed = true;

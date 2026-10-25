@@ -4,6 +4,7 @@ import {
   COMPACT_ARCHIVE_FORMAT,
   compactArchiveTimeout,
   type CompactChunkRef,
+  isCompactArchiveTimeoutError,
   LEGACY_ARCHIVE_FORMAT,
   readCompactChunk,
 } from '../../project-data-archive/compact-r2';
@@ -152,6 +153,19 @@ function compactChunkQuery(sessionId: string, cursor: number | null, filter: Com
   return { query, params };
 }
 
+/** One archive read's shared deadline ran out before its next R2 read. */
+export class CompactArchiveDeadlineError extends Error {
+  constructor() {
+    super('Compact archive operation deadline exceeded');
+    this.name = 'CompactArchiveDeadlineError';
+  }
+}
+
+/** Whether an archive read stopped because its time budget ran out (before or during a read). */
+export function isArchiveReadOutOfTime(error: unknown): boolean {
+  return error instanceof CompactArchiveDeadlineError || isCompactArchiveTimeoutError(error);
+}
+
 /** When an archive read that may span several pages must finish all of its R2 reads. */
 export function compactArchiveReadDeadline(env: Env): number {
   return Date.now() + compactArchiveTimeout(env.PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS);
@@ -176,7 +190,7 @@ export async function* compactRawChunks(
     if (!row) return;
     cursor = Number(row.ordinal);
     const chunkTimeout = perChunkMs ?? sharedDeadline - Date.now();
-    if (chunkTimeout <= 0) throw new Error('Compact archive operation deadline exceeded');
+    if (chunkTimeout <= 0) throw new CompactArchiveDeadlineError();
     const chunk = await readCompactChunk(
       bucket(env),
       reference(row),

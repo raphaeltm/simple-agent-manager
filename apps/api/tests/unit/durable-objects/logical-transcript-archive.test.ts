@@ -20,7 +20,10 @@ import {
   readSourceLogicalTranscript,
   readTargetLogicalTranscript,
 } from '../../../src/durable-objects/project-data/logical-transcript';
-import { targetTranscriptReader } from '../../../src/durable-objects/project-data/message-context';
+import {
+  readTargetMessageContext,
+  targetTranscriptReader,
+} from '../../../src/durable-objects/project-data/message-context';
 import type { Env } from '../../../src/durable-objects/project-data/types';
 import { writeCompactChunk } from '../../../src/project-data-archive/compact-r2';
 import { PROJECT_DATA_ARCHIVE_TABLES } from '../../../src/project-data-archive/contract';
@@ -122,7 +125,10 @@ const CONVERSATION: Array<{ id: string; role: string; content: string; tool?: ob
 describe('whole-message reads of an archived chat', () => {
   afterEach(() => vi.restoreAllMocks());
 
-  function liveSource(): { db: Database.Database; sql: SqlStorage } {
+  function liveSource(conversation: typeof CONVERSATION = CONVERSATION): {
+    db: Database.Database;
+    sql: SqlStorage;
+  } {
     const db = new Database(':memory:');
     const sql = createSqlStorage(db);
     runMigrations(sql);
@@ -130,9 +136,9 @@ describe('whole-message reads of an archived chat', () => {
       `INSERT INTO chat_sessions (id, status, message_count, started_at, ended_at,
          created_at, updated_at, agent_completed_at, materialized_at)
        VALUES ('session', 'stopped', ?, 1000, 1500, 1000, 1500, 1500, 1500)`,
-      CONVERSATION.length
+      conversation.length
     );
-    CONVERSATION.forEach((row, index) => {
+    conversation.forEach((row, index) => {
       sql.exec(
         `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence, origin)
          VALUES (?, 'session', ?, ?, ?, ?, ?, NULL)`,
@@ -150,7 +156,8 @@ describe('whole-message reads of an archived chat', () => {
   /** Move the chat to an archive shard through the production archive steps. */
   async function archiveTo(
     source: SqlStorage,
-    storageFormat: 'sqlite-v1' | 'r2-gzip-v1'
+    storageFormat: 'sqlite-v1' | 'r2-gzip-v1',
+    chunkRows = 4
   ): Promise<{ target: SqlStorage; env: Env & { PROJECT_DATA_ARCHIVE_R2: R2Bucket } }> {
     const target = createSqlStorage(new Database(':memory:'));
     runMigrations(target);
@@ -174,13 +181,13 @@ describe('whole-message reads of an archived chat', () => {
       let cursor: string | null = null;
       let ordinal = 0;
       do {
-        // Small chunks, so one read spans several of them.
+        // Small chunks by default, so one read spans several of them.
         const chunk = await archive.exportArchiveChunk(source, {
           ...BASE,
           tableName,
           ordinal,
           cursor,
-          maxRows: 4,
+          maxRows: chunkRows,
           maxBytes: 100_000,
         });
         const rawChunkRef =
@@ -335,6 +342,119 @@ describe('whole-message reads of an archived chat', () => {
     await expect(fresh.page({ before: null, after: null }, 1, 'desc')).resolves.toMatchObject({
       messages: [expect.objectContaining({ id: 'c1' })],
     });
+    source.db.close();
+  });
+
+  /** 30 exchanges: a request, then a reply streamed as 19 rows. 600 rows in all. */
+  const LONG_CHAT = Array.from({ length: 30 }, (_, exchange) => [
+    { id: `u${exchange}`, role: 'user', content: `Question ${exchange}` },
+    ...Array.from({ length: 19 }, (_, chunk) => ({
+      id: `a${exchange}-${chunk}`,
+      role: 'assistant',
+      content: `${exchange}.${chunk} `,
+    })),
+  ]).flat();
+
+  /** Every R2 read takes 400 ms of a 1 s budget: one read gets through about two pages. */
+  function slowR2(env: Env & { PROJECT_DATA_ARCHIVE_R2: R2Bucket }) {
+    let clock = 1_000_000;
+    vi.spyOn(Date, 'now').mockImplementation(() => clock);
+    const bucket = env.PROJECT_DATA_ARCHIVE_R2;
+    const get = bucket.get.bind(bucket);
+    bucket.get = ((key: string) => {
+      clock += 400;
+      return get(key);
+    }) as typeof bucket.get;
+    return { ...env, PROJECT_DATA_ARCHIVE_R2_TIMEOUT_MS: '1000' } as Env;
+  }
+
+  it('returns what an archived read got through when its time runs out, and resumes', async () => {
+    const source = liveSource(LONG_CHAT);
+    const { target, env } = await archiveTo(source.sql, 'r2-gzip-v1', 300);
+    const budgeted = slowR2(env);
+    const request = {
+      limit: 100,
+      roles: ['user', 'assistant'],
+      maxScanRows: 5_000,
+      maxMessageChars: 10_000,
+      maxPageChars: 1_000_000,
+      includeLatest: false,
+      includeToolTitles: false,
+    };
+
+    const entries: LogicalTranscriptResult['entries'] = [];
+    let before: LogicalTranscriptRequest['before'] = null;
+    let cutByTime = 0;
+    for (let reads = 0; reads < 20; reads += 1) {
+      // Each read has a fresh budget and continues from the previous read's cursor.
+      const page = await readTargetLogicalTranscript(target, budgeted, TARGET_OWNER, {
+        ...request,
+        before,
+      });
+      expect(page.entries.length).toBeGreaterThan(0);
+      if (page.scanBudgetExhausted) cutByTime += 1;
+      entries.push(...page.entries);
+      before = page.nextCursor;
+      if (!page.hasMore) break;
+    }
+    expect(cutByTime).toBeGreaterThan(0);
+
+    const ids = entries.flatMap((entry) => (entry.kind === 'message' ? [entry.messageId] : []));
+    expect(ids).toEqual(
+      LONG_CHAT.filter((row) => row.id.startsWith('u') || row.id.endsWith('-0'))
+        .map((row) => row.id)
+        .reverse()
+    );
+    expect(entries.every((entry) => entry.complete)).toBe(true);
+    source.db.close();
+  });
+
+  it('returns the part of an archived message read before its time ran out', async () => {
+    const reply = [
+      { id: 'u0', role: 'user', content: 'Write it all' },
+      ...Array.from({ length: 599 }, (_, chunk) => ({
+        id: `r${chunk}`,
+        role: 'assistant',
+        content: `${chunk} `,
+      })),
+    ];
+    const source = liveSource(reply);
+    const { target, env } = await archiveTo(source.sql, 'r2-gzip-v1', 300);
+    const budgeted = slowR2(env);
+
+    const result = await readTargetLogicalMessage(target, budgeted, TARGET_OWNER, {
+      messageId: 'r598',
+      maxRows: 5_000,
+      offset: 0,
+      maxChars: 100_000,
+      focus: null,
+      includeThinking: false,
+      includeToolTitles: false,
+    });
+
+    expect(result.found).toBe(true);
+    expect(result.message?.complete).toBe(false);
+    expect(result.message?.content.endsWith('598 ')).toBe(true);
+    expect(result.message?.content.startsWith('0 ')).toBe(false);
+    source.db.close();
+  });
+
+  it('ends a side of an archived comment context where its time ran out', async () => {
+    const source = liveSource(LONG_CHAT);
+    const { target, env } = await archiveTo(source.sql, 'r2-gzip-v1', 300);
+    const budgeted = slowR2(env);
+
+    // Both sides read at once and share one budget, which the anchor and their first R2 reads
+    // use up: the read still returns the anchor, and says both sides have more.
+    const context = await readTargetMessageContext(target, budgeted, TARGET_OWNER, {
+      messageId: 'u29',
+      messagesEachSide: 1_000,
+      maxRows: 5_000,
+      compact: true,
+    });
+
+    expect(context).toMatchObject({ found: true, hasMoreBefore: true, hasMoreAfter: true });
+    expect(context.messages.map((row) => row.id)).toContain('u29');
     source.db.close();
   });
 });

@@ -34,13 +34,6 @@ function resolveMaxRows(env: Env): number {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SESSION_INDEX_MAX_ROWS;
 }
 
-/**
- * Mirror this project's sessions into D1 and record coverage.
- *
- * Indexes the whole project (up to the configured cap) rather than a trailing
- * time window: a partial mirror cannot answer "list this project's sessions"
- * without silently omitting rows, and cannot produce a correct `total`.
- */
 const SUMMARY_COLUMNS = `id, workspace_id, task_id, created_by_user_id, topic, status,
   message_count, started_at, ended_at, created_at, updated_at, agent_completed_at,
   NULLIF(MAX(
@@ -64,6 +57,13 @@ export const SESSION_SUMMARY_DELTA_SQL = `SELECT ${SUMMARY_COLUMNS} FROM chat_se
   ORDER BY updated_at DESC
   LIMIT ?`;
 
+/**
+ * Mirror this project's sessions into D1 and record coverage.
+ *
+ * Indexes the whole project (up to the configured cap) rather than a trailing
+ * time window: a partial mirror cannot answer "list this project's sessions"
+ * without silently omitting rows, and cannot produce a correct `total`.
+ */
 export async function syncSessionSummariesToD1(
   sql: SqlStorage,
   env: Env,

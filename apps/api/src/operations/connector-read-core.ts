@@ -196,9 +196,9 @@ const SessionCursorSchema = v.tuple([v.pipe(v.number(), v.safeInteger()), v.stri
 const InboxCursorSchema = v.object({
   // Absent while no chat without a question has been read yet: the next page starts at the top.
   sessions: v.optional(v.nullable(SessionCursorSchema)),
-  // Absent in cursors issued before questions were selected separately; such a cursor has
-  // already returned its questions with the recency page, so it continues without them.
-  attention: v.optional(v.nullable(SessionCursorSchema), null),
+  // Absent in cursors issued before questions were listed separately: their `sessions`
+  // position covered every chat, so questions continue from that position too.
+  attention: v.optional(v.nullable(SessionCursorSchema)),
   tasks: v.nullable(v.tuple([v.string(), v.string()])),
   notifications: v.nullable(v.string()),
 });
@@ -261,8 +261,9 @@ export async function inboxGet(ctx: OperationContext, input: { limit?: number; c
           .orderBy(desc(schema.sessionSummaries.updatedAt), desc(schema.sessionSummaries.id))
           .limit(limit + 1);
   // A question in a chat that is not among the most recently updated ones is not pushed out.
+  const attentionCursor = cursor?.attention === undefined ? cursor?.sessions : cursor.attention;
   const [attentionRows, rows] = await Promise.all([
-    sessionPage(cursor ? cursor.attention : undefined, true),
+    sessionPage(attentionCursor, true),
     sessionPage(cursor?.sessions, false),
   ]);
   const withQuestion = attentionRows.slice(0, limit);

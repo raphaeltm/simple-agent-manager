@@ -101,14 +101,18 @@ describe('task assistant messages', () => {
     expect(mockGetLogicalTranscriptPage).toHaveBeenCalledTimes(1);
   });
 
-  it('returns null when the newest reply is only whitespace', async () => {
+  it('skips a newest reply with no text, as the task view does', async () => {
     seed([
       { id: 'a1', role: 'assistant', content: 'Earlier reply' },
       { id: 'u1', role: 'user', content: 'And now?' },
       { id: 'a2', role: 'assistant', content: '   ' },
     ]);
 
-    expect(await getLatestAssistantMessageForTask(mockEnv, PROJECT, SESSION)).toBeNull();
+    const latest = await getLatestAssistantMessageForTask(mockEnv, PROJECT, SESSION);
+    const [recent] = await getRecentAssistantMessagesForTask(mockEnv, PROJECT, SESSION, 5);
+
+    expect(latest).toMatchObject({ id: 'a1', content: 'Earlier reply' });
+    expect(recent).toEqual(latest);
   });
 
   it('assembles the whole newest reply from every streamed chunk', async () => {

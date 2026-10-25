@@ -626,6 +626,19 @@ describe('connector operations current membership and creator authority', () => 
     ]);
     expect(Math.max(...lookups)).toBeLessThanOrEqual(2);
   });
+  it('inbox continues a cursor issued before questions were listed separately', async () => {
+    const insert = sqlite.prepare(
+      'INSERT INTO session_summaries (id,project_id,created_by_user_id,updated_at,attention_json) VALUES (?,?,?,?,?)'
+    );
+    insert.run('recent-a', 'project', 'owner', 30, null);
+    insert.run('question-old', 'project', 'owner', 5, '{"message":"Still waiting"}');
+    // The previous inbox listed every chat by recency and stopped after `recent-a`.
+    const cursor = JSON.stringify({ sessions: [30, 'recent-a'], tasks: null, notifications: null });
+
+    const next = await samInboxGet.run(ctx(), { cursor });
+
+    expect(next.pending.map((row) => row.sessionId)).toEqual(['chat', 'question-old']);
+  });
   it('inbox question notifications carry the marker and options needed to answer', async () => {
     mocks.notifications.mockResolvedValue({
       notifications: [

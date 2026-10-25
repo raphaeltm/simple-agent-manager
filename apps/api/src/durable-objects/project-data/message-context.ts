@@ -114,11 +114,18 @@ async function scanSide(
   for (;;) {
     const limit = Math.min(SCAN_PAGE_ROWS, request.maxRows - rows.length);
     if (limit <= 0) return { rows, hasMore: true };
-    const page = await reader.page(
-      side === 'before' ? { before: cursor, after: null } : { before: null, after: cursor },
-      limit,
-      side === 'before' ? 'desc' : 'asc'
-    );
+    let page: Page;
+    try {
+      page = await reader.page(
+        side === 'before' ? { before: cursor, after: null } : { before: null, after: cursor },
+        limit,
+        side === 'before' ? 'desc' : 'asc'
+      );
+    } catch (error) {
+      // Out of archive read time: this side ends where it got to, and says there is more.
+      if (!compactArchive.isArchiveReadOutOfTime(error)) throw error;
+      return { rows, hasMore: true };
+    }
     const nearestFirst = side === 'before' ? [...page.messages].reverse() : page.messages;
     for (const row of nearestFirst) {
       const role = rowRole(row);

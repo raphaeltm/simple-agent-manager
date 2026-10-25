@@ -8,6 +8,7 @@ import { formatMessageRows, getMessages } from '../../../src/durable-objects/pro
 import type { Env } from '../../../src/env';
 import { readChat, searchChats } from '../../../src/operations/chat-core';
 import { readChatMessage } from '../../../src/operations/chat-transcript';
+import { resultByteBudget, responseBytes } from '../../../src/operations/response-budget';
 import type { OperationContext } from '../../../src/operations/types';
 import { getConnectorReadLimits } from '../../../src/services/connector-read-settings';
 import * as projectData from '../../../src/services/project-data';
@@ -104,6 +105,20 @@ async function scanRows(rows: number) {
     )
     .then((module) => module.getConnectorReadLimits(env));
   vi.mocked(getConnectorReadLimits).mockResolvedValue({ ...actual, transcriptScanRows: rows });
+}
+
+/** What `routes/connector-mcp.ts` measures: the result as structured content and as text. */
+function envelopeBytes(result: unknown): number {
+  const structuredContent = {
+    data: result,
+    link: 'https://app.example.test/projects/project',
+    untrustedContent: true,
+  };
+  const response = {
+    content: [{ type: 'text', text: JSON.stringify(structuredContent) }],
+    structuredContent,
+  };
+  return new TextEncoder().encode(JSON.stringify(response)).length;
 }
 
 describe('Connector transcript against actual SQLite message ordering', () => {
@@ -307,7 +322,7 @@ describe('Connector transcript against actual SQLite message ordering', () => {
         ['assistant', 'The deploy is '],
         ['assistant', 'fine.'],
       ]);
-      // An 8,000-byte response cap leaves a 3,200-byte result, a quarter of it for each latest.
+      // A quarter of the result budget goes to each latest message that is not on the page.
       const small = { ...env, CONNECTOR_RESPONSE_MAX_BYTES: '8000' } as Env;
       const smallCtx = { ...ctx, env: small } as OperationContext;
 
@@ -334,33 +349,41 @@ describe('Connector transcript against actual SQLite message ordering', () => {
       expect(user.content.length).toBeGreaterThan(0);
       expect(request.startsWith(user.content)).toBe(true);
       expect(user.nextOffset).toBe(user.content.length);
-      expect(new TextEncoder().encode(user.content).length).toBeLessThanOrEqual(3_200 / 4);
-      expect(new TextEncoder().encode(JSON.stringify(result)).length).toBeLessThanOrEqual(3_200);
+      expect(responseBytes(user.content)).toBeLessThanOrEqual(resultByteBudget(small) / 4);
+      expect(envelopeBytes(result)).toBeLessThanOrEqual(8_000);
     });
 
-    it('cuts an oversized page at a message boundary and loses nothing across pages', async () => {
-      const replies = Array.from({ length: 6 }, (_, index) => `${index}:${'x'.repeat(300)}`);
-      seed(replies.map((reply): [string, string] => ['user', reply]));
-      // A 2,000-byte response cap leaves an 800-byte result budget: a few messages per page.
-      const small = { ...env, CONNECTOR_RESPONSE_MAX_BYTES: '2000' } as Env;
-      const smallCtx = { ...ctx, env: small } as OperationContext;
-      const seen: string[] = [];
-      let cursor: string | undefined;
-      let trimmedOnce = false;
-      for (let pages = 0; pages < 10; pages += 1) {
-        const result = await readChat(smallCtx, {
-          projectId: 'project',
-          sessionId: 'chat',
-          cursor,
-        });
-        if ('coverage' in result) trimmedOnce ||= result.coverage.trimmedToFitResponse;
-        for (const message of result.messages) seen.unshift(message.content);
-        cursor = result.nextCursor ?? undefined;
-        if (!cursor) break;
+    it.each([
+      ['plain text', 6, (index: number) => `${index}:${'x'.repeat(1_500)}`, 20_000],
+      // Quotes and backslashes take 2 bytes in JSON and 4 again in the response's text copy, so
+      // pages of them are what overflow a measure that counts only one copy.
+      ['quotes and backslashes', 22, (index: number) => `${index}:${'"\\'.repeat(1_000)}`, 120_000],
+    ] as const)(
+      'cuts an oversized page at a message boundary, fits the response, and loses nothing (%s)',
+      async (_name, count, reply, cap) => {
+        const replies = Array.from({ length: count }, (_, index) => reply(index));
+        seed(replies.map((text): [string, string] => ['user', text]));
+        const small = { ...env, CONNECTOR_RESPONSE_MAX_BYTES: String(cap) } as Env;
+        const smallCtx = { ...ctx, env: small } as OperationContext;
+        const seen: string[] = [];
+        let cursor: string | undefined;
+        let trimmedOnce = false;
+        for (let pages = 0; pages < 10; pages += 1) {
+          const result = await readChat(smallCtx, {
+            projectId: 'project',
+            sessionId: 'chat',
+            cursor,
+          });
+          expect(envelopeBytes(result)).toBeLessThanOrEqual(cap);
+          if ('coverage' in result) trimmedOnce ||= result.coverage.trimmedToFitResponse;
+          for (const message of result.messages) seen.unshift(message.content);
+          cursor = result.nextCursor ?? undefined;
+          if (!cursor) break;
+        }
+        expect(trimmedOnce).toBe(true);
+        expect(seen).toEqual(replies);
       }
-      expect(trimmedOnce).toBe(true);
-      expect(seen).toEqual(replies);
-    });
+    );
 
     it('rejects an unknown role and accepts thinking on request', async () => {
       seed([
