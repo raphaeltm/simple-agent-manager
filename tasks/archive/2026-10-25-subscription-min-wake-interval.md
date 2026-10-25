@@ -120,7 +120,26 @@ channel can pull an agent back into a fresh turn roughly every 30 seconds.
 - [x] Without the argument, behaviour is byte-for-byte today's (30 s floor), including DMs
 - [x] Invalid combinations fail with clear errors; the subscription record shows the effective interval
 - [x] Docs and agent guidance describe the option
-- [ ] Staging: a live agent chat follows a channel with an interval and the wake spacing is observed
+- [x] Staging: a live agent chat follows a channel with an interval and the wake spacing is observed
+
+## Staging verification (2026-10-25)
+
+- Deploy Staging run 40195813398 green on `831a32eba`; vm-agent container rollout to v1359 completed
+  13:34:59Z before testing (per-application containers endpoint; the list endpoint was stale).
+- Playwright (token-login in the browser context): dashboard, projects, settings, project chat render at
+  1280x800 and 375x667, no console errors.
+- Two Instant chats in staging project Potato (`01KWHD8XS7MQ7R6KWXJYRHDVH4`):
+  - follower task `01M5SNJT24Z5475ERQATK324R6` followed `wake-interval-check` with
+    `minWakeIntervalSeconds: 120` → subscription `36a50141-7d7e-4f78-99b0-0699331b3bc2`,
+    `minWakeIntervalMs: 120000`.
+  - publisher task `01M5SNMPDQTEMCJJ48V62R2QGT` published builds 1–5 at 13:58:14, 13:58:40, 13:59:06,
+    13:59:31, 13:59:57.
+  - Deliveries: wake 1 queued 13:58:15.331, delivered 13:58:20.118 (build 1); wake 2 queued 14:00:20.294
+    (builds 2–5 bundled) = 120.2 s after wake 1 was delivered. Two wakes total, where the old 30 s cooldown
+    would have produced four or five.
+  - Follower transcript: "woken at 13:58:23 UTC: 1 new events: build 1"; "woken at 14:00:51 UTC: 4 new
+    events: build 2, build 3, build 4, build 5".
+- Cleanup: both chats stopped, workspaces deleted.
 
 ## References
 
