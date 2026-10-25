@@ -48,8 +48,11 @@ export interface LogicalActivity {
   updatedAt: number;
   /** False when the scan budget ended before the span's oldest row was read. */
   complete: boolean;
-  /** True when the span continues into the newer page (legacy mid-message cursors only). */
-  continuesInNewerPage: boolean;
+  /**
+   * True when the span continues into the newer page (a cursor that ends mid-span: legacy cursors,
+   * or one from a read that ran out of time); null when that could not be checked in time.
+   */
+  continuesInNewerPage: boolean | null;
 }
 
 export interface LogicalMessage {
@@ -74,8 +77,11 @@ export interface LogicalMessage {
   updatedAt: number;
   /** False when a row budget ended before the whole message was read. */
   complete: boolean;
-  /** True when the message continues into the newer page (legacy mid-message cursors only). */
-  continuesInNewerPage: boolean;
+  /**
+   * True when the message continues into the newer page (a cursor that ends mid-message: legacy
+   * cursors, or one from a read that ran out of time); null when that could not be checked in time.
+   */
+  continuesInNewerPage: boolean | null;
 }
 
 export type LogicalEntry = LogicalMessage | LogicalActivity;

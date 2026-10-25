@@ -8,7 +8,7 @@ import { formatMessageRows, getMessages } from '../../../src/durable-objects/pro
 import type { Env } from '../../../src/env';
 import { readChat, searchChats } from '../../../src/operations/chat-core';
 import { readChatMessage } from '../../../src/operations/chat-transcript';
-import { responseBytes,resultByteBudget } from '../../../src/operations/response-budget';
+import { responseBytes, resultByteBudget } from '../../../src/operations/response-budget';
 import type { OperationContext } from '../../../src/operations/types';
 import { getConnectorReadLimits } from '../../../src/services/connector-read-settings';
 import * as projectData from '../../../src/services/project-data';
@@ -427,6 +427,53 @@ describe('Connector transcript against actual SQLite message ordering', () => {
       await expect(
         readChatMessage(ctx, { projectId: 'project', sessionId: 'chat', messageId: 'gone' })
       ).rejects.toMatchObject({ code: 'not_found' });
+    });
+
+    it('leaves out the last excerpts when all of them would not fit one response', async () => {
+      const replies = Array.from({ length: 5 }, (_, index): [string, string] => [
+        'user',
+        `${index} audit ${'"detail" '.repeat(450)}`,
+      ]);
+      seed(replies);
+      const actual = await vi
+        .importActual<typeof import('../../../src/services/connector-read-settings')>(
+          '../../../src/services/connector-read-settings'
+        )
+        .then((module) => module.getConnectorReadLimits(env));
+      vi.mocked(getConnectorReadLimits).mockResolvedValue({
+        ...actual,
+        searchContextResults: 5,
+        searchExcerptChars: 4_000,
+      });
+      vi.mocked(projectData.searchMessagesWithArchiveMetadata).mockResolvedValue({
+        results: replies.map((_, index) => ({
+          id: String(index).padStart(3, '0'),
+          sessionId: 'chat',
+          sessionTopic: 'Report',
+          sessionTaskId: null,
+          role: 'user',
+          snippet: 'audit',
+          createdAt: 1000,
+        })),
+        query: { query: 'audit' },
+        archiveSearch: { status: 'not_needed' },
+      } as never);
+      const small = { ...env, CONNECTOR_RESPONSE_MAX_BYTES: '30000' } as Env;
+
+      const result = await searchChats({ ...ctx, env: small } as OperationContext, {
+        projectId: 'project',
+        query: 'audit',
+      });
+
+      expect(envelopeBytes(result)).toBeLessThanOrEqual(30_000);
+      const kept = result.results.filter((row) => 'excerpt' in row).length;
+      expect(kept).toBeGreaterThan(0);
+      expect(kept).toBeLessThan(5);
+      expect(result.results[0]).toHaveProperty('excerpt');
+      expect(result.excerptCoverage).toMatchObject({
+        resultsWithExcerpts: kept,
+        droppedToFitResponse: 5 - kept,
+      });
     });
 
     it('adds whole-message excerpts to app search results only', async () => {

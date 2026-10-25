@@ -510,6 +510,29 @@ describe('Connector channel operations', () => {
       expect(page.perMessageChars).toBe(2000);
     });
 
+    it('shortens every post until a page of multi-byte text fits one response', async () => {
+      // Twenty posts of 1,300 three-byte characters fit the character budgets but not the bytes.
+      for (let index = 0; index < 20; index += 1) {
+        await publish('feature.cjk', `${index}${'界'.repeat(1_300)}`);
+      }
+
+      const page = await samChannelHistory.run(ctx(), { projectId: P, channel: 'feature.cjk' });
+
+      expect(page.messages).toHaveLength(20);
+      expect(page.perMessageChars).toBeLessThan(1_200);
+      expect(page.messages.every((post) => post.message.truncated)).toBe(true);
+      const structuredContent = {
+        data: page,
+        link: 'https://app.example.test',
+        untrustedContent: true,
+      };
+      const envelope = JSON.stringify({
+        content: [{ type: 'text', text: JSON.stringify(structuredContent) }],
+        structuredContent,
+      });
+      expect(new TextEncoder().encode(envelope).length).toBeLessThanOrEqual(120_000);
+    });
+
     it('shares one text budget across a page and discloses every cut post', async () => {
       setting('connector.transcriptPageChars', 2000);
       await publish('feature.alpha', 'short');

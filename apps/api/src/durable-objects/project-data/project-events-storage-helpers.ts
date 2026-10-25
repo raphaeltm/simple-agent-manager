@@ -620,7 +620,9 @@ export function mapRows<T>(
     try {
       mapped.push(mapper(row));
     } catch (error) {
-      log.warn('row_skipped', { label, error: String(error) });
+      const id =
+        row && typeof row === 'object' && 'id' in row && typeof row.id === 'string' ? row.id : null;
+      log.warn('row_skipped', { label, id, error: String(error) });
     }
   }
   return mapped;

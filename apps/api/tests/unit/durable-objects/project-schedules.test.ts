@@ -674,6 +674,7 @@ describe('project schedules — real migrations, CRUD and canonical admission', 
       broken
     );
 
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const first = listSchedules(f.sql, f.env, PROJECT, { limit: 2 });
     const second = listSchedules(f.sql, f.env, PROJECT, { limit: 2, cursor: first.nextCursor });
     const listed = [...first.schedules, ...second.schedules].map((row) => row.id);
@@ -681,6 +682,9 @@ describe('project schedules — real migrations, CRUD and canonical admission', 
     expect(new Set(listed)).toEqual(new Set([newest, older, oldest]));
     expect(listed).not.toContain(broken);
     expect(first.nextCursor).not.toBeNull();
+    // The skip is diagnosable: the log names the row it left out (rule 50).
+    expect(warn.mock.calls.map(([line]) => String(line)).join('\n')).toContain(broken);
+    warn.mockRestore();
   });
 
   it('enforces caps, UTF-8 prompt size, finite TTL/horizon and excludes saved bearer tokens', () => {

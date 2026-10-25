@@ -16,6 +16,7 @@ import { readChatMessages, searchExcerpts } from './chat-transcript';
 import { operationLink } from './connector-read-core';
 import { OperationError } from './errors';
 import { clampOperationNumber, getPlatformOperationLimits } from './limits';
+import { responseBytes, resultByteBudget } from './response-budget';
 import type { OperationContext } from './types';
 
 export { groupTokensIntoMessages, type TokenRow } from '../services/message-groups';
@@ -247,9 +248,9 @@ export async function searchChats(
   const context = app
     ? await searchExcerpts(ctx, input.projectId, search.query.query, search.results)
     : null;
-  return {
+  const build = (excerpts: readonly unknown[] | null, dropped: number) => ({
     results: search.results.map((result, index) => {
-      const excerpt = context ? context.excerpts[index] : undefined;
+      const excerpt = excerpts ? excerpts[index] : undefined;
       return {
         ...(app
           ? {
@@ -272,15 +273,30 @@ export async function searchChats(
     archiveSearch: search.archiveSearch,
     rootSearch: search.rootSearch,
     coverageNotes: describeRootSearchCoverage(search.rootSearch),
-    ...(context
+    ...(context && excerpts
       ? {
           excerptCoverage: {
-            resultsWithExcerpts: context.excerpts.filter(Boolean).length,
+            resultsWithExcerpts: excerpts.filter(Boolean).length,
             excerptLimit: context.excerptLimit,
+            ...(dropped > 0 ? { droppedToFitResponse: dropped } : {}),
             readMore:
               'sam_chat_message_get with a result excerpt messageId reads the whole message.',
           },
         }
       : {}),
-  };
+  });
+  if (!context) return build(null, 0);
+  // Excerpts are extra context: when a page with all of them would not fit one response, the
+  // last ones are left out (and counted) rather than failing the search.
+  const excerpts: unknown[] = [...context.excerpts];
+  const budget = resultByteBudget(ctx.env);
+  let dropped = 0;
+  let result = build(excerpts, dropped);
+  for (let index = excerpts.length - 1; index >= 0 && responseBytes(result) > budget; index -= 1) {
+    if (!excerpts[index]) continue;
+    excerpts[index] = null;
+    dropped += 1;
+    result = build(excerpts, dropped);
+  }
+  return result;
 }

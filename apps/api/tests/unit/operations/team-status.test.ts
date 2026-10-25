@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import { responseBytes,resultByteBudget } from '../../../src/operations/response-budget';
+import { responseBytes, resultByteBudget } from '../../../src/operations/response-budget';
 import { samTeamStatus } from '../../../src/operations/team-operations';
 import type { OperationContext } from '../../../src/operations/types';
 import { getConnectorReadLimits } from '../../../src/services/connector-read-settings';

@@ -40,6 +40,7 @@ import {
 import { operationLink, operationPageLimit } from './connector-read-core';
 import { OperationError } from './errors';
 import { getPlatformOperationLimits } from './limits';
+import { responseBytes, resultByteBudget } from './response-budget';
 import { defineOperation, type OperationContext } from './types';
 import { UNTRUSTED_TEXT_GUIDANCE } from './untrusted-text';
 
@@ -96,6 +97,9 @@ export const samChannelsList = defineOperation({
   },
 });
 
+/** Shortest a channel post is cut to so that a page fits one response. */
+const MIN_CHANNEL_POST_CHARS = 100;
+
 export const samChannelHistory = defineOperation({
   name: 'sam_channel_history',
   title: 'Read channel posts',
@@ -115,23 +119,34 @@ export const samChannelHistory = defineOperation({
       })
     );
     // Each post is capped, and the page shares one text budget so a full page stays bounded.
-    const cap = sharedTextCap(
+    let cap = sharedTextCap(
       history.events.map((entry) => channelMessageText(entry.event).length),
       limits.channelMessageChars,
       limits.transcriptPageChars
     );
-    return {
+    const page = (perMessageChars: number) => ({
       channel: channelSummary(ctx, input.projectId, history.channel),
-      messages: history.events.map((entry) => channelPost(ctx, input.projectId, entry, cap)),
+      messages: history.events.map((entry) =>
+        channelPost(ctx, input.projectId, entry, perMessageChars)
+      ),
       hasMore: history.hasMore,
       nextCursor: history.hasMore ? history.cursor : null,
       watermark: history.watermark,
       retentionGap: history.retentionGap,
-      perMessageChars: cap,
+      perMessageChars,
       paging: PAGING_NOTE,
       semantics: CHANNEL_SEMANTICS,
       untrustedTextGuidance: UNTRUSTED_TEXT_GUIDANCE,
-    };
+    });
+    // Characters do not bound bytes: multi-byte text, and quotes the response escapes twice, can
+    // still overflow it. Every post is shortened further until the page fits; none is skipped.
+    let result = page(cap);
+    const budget = resultByteBudget(ctx.env);
+    while (responseBytes(result) > budget && cap > MIN_CHANNEL_POST_CHARS) {
+      cap = Math.max(MIN_CHANNEL_POST_CHARS, Math.floor(cap / 2));
+      result = page(cap);
+    }
+    return result;
   },
 });
 

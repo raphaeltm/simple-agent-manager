@@ -181,7 +181,11 @@ Notes for client developers:
   `partialBefore` or `mayContinueInNewerPage`. Owners and shared writers also get
   `pendingInteractions` and `pendingAttention` (questions agents asked). A read that reaches its
   row budget, or its time budget on an archived chat, returns what it read with
-  `scanBudgetExhausted` and a `nextCursor` to continue from.
+  `scanBudgetExhausted` and a `nextCursor` to continue from; `mayContinueInNewerPage` is `null`
+  when that read had no time left to check it.
+- Results are sized to fit one Connector response. `sam_chats_search` leaves out the last
+  excerpts when they would not fit (`excerptCoverage.droppedToFitResponse`), and
+  `sam_channel_history` shortens every post on the page instead (`perMessageChars`).
 - A task's final-message summary is the newest whole assistant reply, and `recentAssistantMessages`
   lists the last few whole replies, newest first, assembled within a bounded scan
   (`connector.transcriptScanRows`). If that scan holds no assistant text (a very long tool run),

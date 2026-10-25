@@ -279,13 +279,13 @@ export async function readLogicalTranscriptPage(
 
   const newest = state.entries[0];
   if (newest && newestRole !== null) {
-    // Out of archive read time, the newest entry is reported as starting this page.
+    // Out of archive read time this cannot be checked, and says so (null) rather than guess.
     newest.continuesInNewerPage = await cursorContinuesRun(
       reader,
       request.before,
       newestRole
     ).catch((error: unknown) => {
-      if (isArchiveReadOutOfTime(error)) return false;
+      if (isArchiveReadOutOfTime(error)) return null;
       throw error;
     });
   }
