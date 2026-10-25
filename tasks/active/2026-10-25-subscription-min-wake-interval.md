@@ -77,7 +77,8 @@ channel can pull an agent back into a fresh turn roughly every 30 seconds.
 - [x] DO migration 069 (ALTER TABLE ADD COLUMN), row schema, mapper
 - [x] DO normalization: validate (positive integer ms, wake modes only, ≤ lifetime), clamp to floor,
       fingerprint only when set; INSERT the column
-- [x] Queue-time cooldown uses `max(floor, minWakeIntervalMs)` in `materializeCandidate`
+- [x] Queue-time cooldown uses `max(floor, minWakeIntervalMs)` in `recordQueueCheckpoint` (called by
+      `materializeCandidate`)
 - [x] Acceptance-time re-arm (extend-only, opted-in rows only) in `advanceProjectEventPromptAttemptCheckpoint`
 - [x] Services: pass `minWakeIntervalMs` through `followChannelForCaller` and
       `createProjectEventSubscriptionForCaller`
@@ -114,11 +115,11 @@ channel can pull an agent back into a fresh turn roughly every 30 seconds.
 
 ## Acceptance criteria
 
-- [ ] An agent can follow a channel with `minWakeIntervalSeconds: 600` and is woken at most once per
+- [x] An agent can follow a channel with `minWakeIntervalSeconds: 600` and is woken at most once per
       10 minutes, measured from when it received the previous wake; messages in between arrive in one wake
-- [ ] Without the argument, behaviour is byte-for-byte today's (30 s floor), including DMs
-- [ ] Invalid combinations fail with clear errors; the subscription record shows the effective interval
-- [ ] Docs and agent guidance describe the option
+- [x] Without the argument, behaviour is byte-for-byte today's (30 s floor), including DMs
+- [x] Invalid combinations fail with clear errors; the subscription record shows the effective interval
+- [x] Docs and agent guidance describe the option
 - [ ] Staging: a live agent chat follows a channel with an interval and the wake spacing is observed
 
 ## References
