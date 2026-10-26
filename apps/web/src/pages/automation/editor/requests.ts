@@ -114,7 +114,8 @@ export function triggerCreateRequest(state: EditorState): CreateTriggerRequest {
     ...(sourceType === 'github'
       ? {
           githubConfig: {
-            ...buildGitHubConfigForForm(githubInput(state)),
+            eventType: state.github.eventType,
+            filters: buildGitHubFilters(githubInput(state)),
             ...githubQueueConfig(state),
           },
         }
