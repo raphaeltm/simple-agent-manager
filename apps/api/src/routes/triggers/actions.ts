@@ -1,5 +1,5 @@
 /** Authenticated trigger execution actions. */
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -171,8 +171,12 @@ actionRoutes.delete('/:triggerId/executions/:executionId', async (c) => {
     )
     .get();
   if (!execution) throw errors.notFound('Trigger execution');
-  if (execution.status === 'running') {
-    throw errors.conflict('Cannot delete an actively running execution');
+  if (
+    execution.status === 'running' ||
+    ['waiting', 'routing'].includes(execution.status) ||
+    (execution.status === 'queued' && execution.queueExpiresAt)
+  ) {
+    throw errors.conflict('Cannot delete a pending or actively running execution');
   }
   await db
     .delete(schema.triggerExecutions)
@@ -199,11 +203,12 @@ actionRoutes.post('/:triggerId/executions/cleanup', async (c) => {
       and(
         eq(schema.triggerExecutions.triggerId, triggerId),
         eq(schema.triggerExecutions.projectId, projectId),
-        eq(schema.triggerExecutions.status, 'queued')
+        eq(schema.triggerExecutions.status, 'queued'),
+        isNull(schema.triggerExecutions.queueExpiresAt)
       )
     );
   if (!stuck.length) return c.json({ cleaned: 0 });
-  await db
+  const updated = await db
     .update(schema.triggerExecutions)
     .set({
       status: 'failed',
@@ -217,10 +222,12 @@ actionRoutes.post('/:triggerId/executions/cleanup', async (c) => {
           stuck.map((execution) => execution.id)
         ),
         eq(schema.triggerExecutions.triggerId, triggerId),
-        eq(schema.triggerExecutions.projectId, projectId)
+        eq(schema.triggerExecutions.projectId, projectId),
+        eq(schema.triggerExecutions.status, 'queued'),
+        isNull(schema.triggerExecutions.queueExpiresAt)
       )
     );
-  return c.json({ cleaned: stuck.length });
+  return c.json({ cleaned: updated.meta.changes });
 });
 
 export { actionRoutes };

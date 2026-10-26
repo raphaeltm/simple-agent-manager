@@ -64,7 +64,7 @@ export function TriggerRuns({
   ]
     .filter(Boolean)
     .join(' · ');
-  const hasQueued = list.some((run) => run.status === 'queued');
+  const hasQueued = list.some((run) => run.status === 'queued' && !run.queueExpiresAt);
 
   const remove = useAutomationAction(
     (run: TriggerExecutionResponse) => deleteExecution(projectId, trigger.id, run.id),
@@ -155,17 +155,19 @@ export function TriggerRuns({
                           Chat
                         </Link>
                       )}
-                      {canWrite && DELETABLE.has(run.status) && (
-                        <button
-                          type="button"
-                          onClick={() => setConfirmDelete(run)}
-                          disabled={remove.isPending}
-                          aria-label={`Delete the run from ${fullDate(Date.parse(runTime(run)))}`}
-                          className="inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded-md border border-border-default bg-transparent text-fg-muted hover:text-danger-fg"
-                        >
-                          <Trash2 size={16} aria-hidden />
-                        </button>
-                      )}
+                      {canWrite &&
+                        DELETABLE.has(run.status) &&
+                        !(run.status === 'queued' && run.queueExpiresAt) && (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmDelete(run)}
+                            disabled={remove.isPending}
+                            aria-label={`Delete the run from ${fullDate(Date.parse(runTime(run)))}`}
+                            className="inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded-md border border-border-default bg-transparent text-fg-muted hover:text-danger-fg"
+                          >
+                            <Trash2 size={16} aria-hidden />
+                          </button>
+                        )}
                     </div>
                   </li>
                 );

@@ -145,7 +145,7 @@ vi.mock('drizzle-orm/d1', () => ({
       })),
       update: vi.fn(() => ({
         set: vi.fn(() => ({
-          where: vi.fn(() => Promise.resolve()),
+          where: vi.fn(() => Promise.resolve({ meta: { changes: 2 } })),
         })),
       })),
       delete: vi.fn(() => ({

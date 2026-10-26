@@ -236,6 +236,69 @@ describe('webhook trigger management vertical slice', () => {
 
   afterEach(() => sqlite.close());
 
+  it('does not fail or count a reservation promoted after cleanup selected it', async () => {
+    sqlite
+      .prepare(
+        `INSERT INTO trigger_executions(id,trigger_id,project_id,status,created_at) VALUES('promoted','trigger-1','project-1','queued','2026-10-26T00:00:00.000Z')`
+      )
+      .run();
+    const prepare = env.DATABASE.prepare.bind(env.DATABASE);
+    env.DATABASE.prepare = (sql: string) => {
+      if (/^update "trigger_executions"/i.test(sql))
+        sqlite.prepare("UPDATE trigger_executions SET status='running' WHERE id='promoted'").run();
+      return prepare(sql);
+    };
+    const response = await app.request(
+      '/api/projects/project-1/triggers/trigger-1/executions/cleanup',
+      { method: 'POST' },
+      env
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ cleaned: 0 });
+    expect(
+      sqlite.prepare("SELECT status FROM trigger_executions WHERE id='promoted'").get()
+    ).toEqual({ status: 'running' });
+  });
+
+  it('manual cleanup preserves durable queue intents while clearing a legacy reservation', async () => {
+    for (const [id, status, expiresAt] of [
+      ['legacy', 'queued', null],
+      ['managed', 'queued', '2099-01-01T00:00:00.000Z'],
+      ['waiting', 'waiting', '2099-01-01T00:00:00.000Z'],
+      ['routing', 'routing', '2099-01-01T00:00:00.000Z'],
+    ]) {
+      sqlite
+        .prepare(
+          `INSERT INTO trigger_executions(id,trigger_id,project_id,status,queue_expires_at,created_at) VALUES(?,'trigger-1','project-1',?,?,'2026-10-26T00:00:00.000Z')`
+        )
+        .run(id, status, expiresAt);
+    }
+    const response = await app.request(
+      '/api/projects/project-1/triggers/trigger-1/executions/cleanup',
+      { method: 'POST' },
+      env
+    );
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ cleaned: 1 });
+    expect(sqlite.prepare('SELECT id,status FROM trigger_executions ORDER BY id').all()).toEqual([
+      { id: 'legacy', status: 'failed' },
+      { id: 'managed', status: 'queued' },
+      { id: 'routing', status: 'routing' },
+      { id: 'waiting', status: 'waiting' },
+    ]);
+    for (const id of ['managed', 'waiting', 'routing']) {
+      const removed = await app.request(
+        '/api/projects/project-1/triggers/trigger-1/executions/' + id,
+        { method: 'DELETE' },
+        env
+      );
+      expect(removed.status).toBe(409);
+    }
+    expect(sqlite.prepare('SELECT COUNT(*) count FROM trigger_executions').get()).toEqual({
+      count: 4,
+    });
+  });
+
   it('preserves REST credential creation while public ingress is disabled', async () => {
     env.WEBHOOK_TRIGGERS_ENABLED = 'false';
     const response = await app.request(

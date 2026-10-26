@@ -267,6 +267,7 @@ export function executionOutcome(
   switch (execution.status) {
     case 'waiting':
     case 'routing':
+    case 'queued':
       return 'waiting';
     case 'completed':
     case 'routed':

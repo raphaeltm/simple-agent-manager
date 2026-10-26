@@ -30,26 +30,28 @@ for (const scenario of ['normal', 'many-long', 'empty', 'error'] as const) {
       'dropped',
       'dropped',
       'dropped',
+      'queued',
     ] as const;
-    const runs = Array.from({ length: scenario === 'many-long' ? 35 : 7 }, (_, i) => ({
+    const runs = Array.from({ length: scenario === 'many-long' ? 35 : 8 }, (_, i) => ({
       id: `event-${i}`,
       triggerId: trigger.id,
       projectId: PROJECT_ID,
-      status: statuses[i % 7],
+      status: statuses[i % 8],
       skipReason:
-        i % 7 === 3
+        i % 8 === 3
           ? 'queue_expired'
-          : i % 7 === 4
+          : i % 8 === 4
             ? 'queue_full'
-            : i % 7 === 5
+            : i % 8 === 5
               ? 'delivery_uncertain'
-              : i % 7 === 6
+              : i % 8 === 6
                 ? 'target_unavailable'
                 : null,
       taskId: null,
-      routedTaskId: i % 7 === 2 || i % 7 === 3 || i % 7 === 6 ? 'active-run' : null,
+      queueExpiresAt: i % 8 === 7 ? new Date(Date.now() + 60000).toISOString() : null,
+      routedTaskId: i % 8 === 2 || i % 8 === 3 || i % 8 === 6 ? 'active-run' : null,
       subjectKey: 'github:42:7',
-      routedSessionId: i % 7 === 2 ? 'active-session' : null,
+      routedSessionId: i % 8 === 2 ? 'active-session' : null,
       eventType: 'github.issue_comment.created',
       renderedPrompt: 'Follow up comment',
       errorMessage: null,
@@ -76,6 +78,10 @@ for (const scenario of ['normal', 'many-long', 'empty', 'error'] as const) {
       await expect(page.getByText('Queued until a run finishes')).toBeVisible();
       await expect(page.getByText('Dropped: waiting time expired')).toBeVisible();
       await expect(page.getByText('Dropped: queue was full')).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Clear stuck runs' })).toHaveCount(0);
+      await expect(
+        page.getByTestId('trigger-run').filter({ hasText: 'Waiting to start' }).getByRole('button')
+      ).toHaveCount(0);
       await expect(
         page
           .getByTestId('trigger-run')
