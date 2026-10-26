@@ -47,7 +47,7 @@ for (const scenario of ['normal', 'many-long', 'empty', 'error'] as const) {
                 ? 'target_unavailable'
                 : null,
       taskId: null,
-      routedTaskId: i % 7 === 2 || i % 7 === 6 ? 'active-run' : null,
+      routedTaskId: i % 7 === 2 || i % 7 === 3 || i % 7 === 6 ? 'active-run' : null,
       subjectKey: 'github:42:7',
       routedSessionId: i % 7 === 2 ? 'active-session' : null,
       eventType: 'github.issue_comment.created',
@@ -76,6 +76,12 @@ for (const scenario of ['normal', 'many-long', 'empty', 'error'] as const) {
       await expect(page.getByText('Queued until a run finishes')).toBeVisible();
       await expect(page.getByText('Dropped: waiting time expired')).toBeVisible();
       await expect(page.getByText('Dropped: queue was full')).toBeVisible();
+      await expect(
+        page
+          .getByTestId('trigger-run')
+          .filter({ hasText: 'Dropped: waiting time expired' })
+          .getByRole('link')
+      ).toHaveCount(0);
       await expect(
         page.getByTestId('automation-root').getByRole('link', { name: 'Open chat for event 3' })
       ).toHaveAttribute('href', `/projects/${PROJECT_ID}/chat/active-session`);

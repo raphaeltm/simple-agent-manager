@@ -40,7 +40,11 @@ export function runEntry(trigger: TriggerResponse, run: TriggerExecutionResponse
 
 /** Only link the current target; a rejected target is retained solely for audit. */
 export function executionChat(run: TriggerExecutionResponse): ActivityEntry['chat'] {
-  if (run.status === 'waiting' || run.skipReason === 'target_unavailable') return null;
+  if (
+    run.status === 'waiting' ||
+    (run.status === 'dropped' && run.skipReason !== 'delivery_uncertain')
+  )
+    return null;
   const taskId = run.routedTaskId ?? run.taskId;
   return run.routedSessionId ? { sessionId: run.routedSessionId } : taskId ? { taskId } : null;
 }

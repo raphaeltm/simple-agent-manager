@@ -771,10 +771,10 @@ fields inside `githubConfig`, alongside `eventType` and `filters`:
 | `queueMaxPending` | positive integer | `50` | Maximum pending events waiting for capacity or prompt delivery. |
 | `queueTtlSeconds` | positive integer | `86400` | Absolute event lifetime before task creation or follow-up delivery. |
 
-Trigger detail/list responses include `queueStats: { queued, routed, dropped }` for GitHub
-triggers. Totals cover retained execution history. Execution responses can use `waiting`,
+Trigger detail/list responses include `queueStats: { queued, routed, dropped, unconfirmed? }` for GitHub
+triggers. `queued` counts current waiting/routing intents; other counts cover retained execution history. Execution responses can use `waiting`,
 `routing`, `routed`, and `dropped`, alongside existing statuses, and expose `subjectKey`,
 `queueExpiresAt`, `routedExecutionId`, `routedTaskId`, and `routedSessionId`.
-`queue_full`, `queue_expired`, and `target_unavailable` explain drops. A routed execution has a
+`queue_full`, `queue_expired`, and `target_unavailable` explain definite drops. Terminal `delivery_uncertain` preserves the target audit, counts as unconfirmed instead of dropped, and never retargets. A routed execution has a
 confirmed durable prompt receipt; a pending durable handoff stays `routing`. Audit state and
 recipient identities are derived from the canonical execution record.

@@ -489,6 +489,9 @@ describe('activity', () => {
     expect(
       runEntry(trigger(), { ...routed, status: 'dropped', skipReason: 'target_unavailable' }).chat
     ).toBeNull();
+    expect(
+      runEntry(trigger(), { ...routed, status: 'dropped', skipReason: 'queue_expired' }).chat
+    ).toBeNull();
     expect(executionOutcome({ ...routed, status: 'routing' })).toBe('waiting');
   });
 
