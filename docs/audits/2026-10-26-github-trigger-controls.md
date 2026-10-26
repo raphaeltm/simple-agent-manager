@@ -59,3 +59,8 @@ overflow/clipped content assertions. Six screenshots inspected by implementer; e
 under tasks/evidence/2026-10-26-github-trigger-controls. Additional empty/error and
 focused context snapshots follow in review. Initial rubric: hierarchy4, clarity4, mobile4,
 accessibility4, consistency4. Actual Opus review still pending.
+
+Refreshed audit:2/2PASS with normal/many30rows, empty and API500 error results,
+stale draft notice, and focused commentId context picker on both viewports. Ten
+screenshots inspected; no horizontal overflow or clipping assertions failed. The
+HTML/script-looking command text remains an input value, never rendered as markup.
