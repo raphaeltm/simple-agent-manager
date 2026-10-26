@@ -86,3 +86,10 @@ one run. This is an unmet part of #2420's proposal, tracked as SAM Idea
 `01M5WKCK7431DQ4FKBWENZV9QJ`. Coordinator/A have the finding; no new cross-trigger
 or combined-event interface is implemented or silently authorized by this note.
 Do not close #2420 as fully resolved while this acceptance remains unmet.
+
+Coordinator sequencing decision (2026-10-26): foundations ships review events and
+per-trigger affinity. Combined submitted-review plus inline-comment single-owner
+acceptance moves to PR-watch #2421 using canonical PR ownership and shared delivery,
+with duplicate-wake suppression across watches/triggers. This remains unmet #2420
+scope, tracked by Idea `01M5WKCK7431DQ4FKBWENZV9QJ`; do not use Closes #2420.
+Combined staging must still prove supported same-trigger review bursts.
