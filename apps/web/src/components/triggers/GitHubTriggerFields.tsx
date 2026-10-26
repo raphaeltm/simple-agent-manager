@@ -79,13 +79,9 @@ export function GitHubTriggerFields({
   const [moreOpen, setMoreOpen] = useState(() => hasMoreConditions(eventType));
   const choiceErrors: Partial<Record<keyof ExtraFilters, string>> = githubFilterChoiceErrors({
     authorAssociation:
-      eventType !== 'push'
-        ? splitList(extraFilters.authorAssociation?.toUpperCase() ?? '')
-        : undefined,
+      eventType !== 'push' ? splitList(extraFilters.authorAssociation ?? '') : undefined,
     reviewStates:
-      eventType === 'pull_request_review'
-        ? splitList(extraFilters.reviewStates?.toLowerCase() ?? '')
-        : undefined,
+      eventType === 'pull_request_review' ? splitList(extraFilters.reviewStates ?? '') : undefined,
   });
   const text = (
     key: string,
