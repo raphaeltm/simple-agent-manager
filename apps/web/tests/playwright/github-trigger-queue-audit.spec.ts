@@ -169,6 +169,9 @@ test('GitHub queue controls', async ({ page }, info) => {
   await expect(page.getByLabel('Maximum wait (hours)')).toHaveAttribute('aria-invalid', 'true');
   await expect(page.getByLabel('Maximum wait (hours)')).toHaveAttribute('aria-describedby', /.+/);
   await audit(page, 'github-trigger-queue-controls-invalid');
+  await page.getByLabel('Maximum wait (hours)').fill('0.5');
+  await expect(page.getByLabel('Maximum wait (hours)')).toBeVisible();
+  await expect(page.getByLabel('Maximum wait (hours)')).toHaveValue('0.5');
 });
 
 test('GitHub push never promises issue or PR affinity', async ({ page }) => {

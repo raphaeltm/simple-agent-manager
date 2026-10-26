@@ -44,3 +44,5 @@ The two LOW residues are addressed in the follow-up: enum validation has its own
 Follow-up verification: webtypecheck/lint PASS,111focusedtests PASS,24/24desktop/mobilebrowsercases PASS. All60captures refreshed together; mobile field-error view visually inspected. Local delta completeness review PASS.
 
 Review correction: extra inline case normalization was redundant because githubFilterChoiceErrors already normalizes case. Removed it to keep the patch minimal; no case-normalization bug is claimed.
+
+Final scope correction: clearing old submitted errors is limited to GitHub’s When step. What/Review retain their existing handlers, so correcting a bad queue TTL after Save keeps Advanced open. A new desktop/mobile browser regression verifies that correction path; all4affected browser cases and68editor/flow tests pass after narrowing. No additional visual redesign or backend change.

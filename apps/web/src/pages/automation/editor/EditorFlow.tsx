@@ -92,8 +92,8 @@ export function EditorFlow({
   const [errors, setErrors] = useState<Errors>({});
   const changeState = (next: EditorState) => {
     setState(next);
-    // Submitted validation belongs to the old values; fields validate the new values inline.
-    setErrors({});
+    // GitHub choice fields validate edited values inline; do not retain the old step error.
+    if (state.start === 'github') setErrors({});
   };
   const [confirmLeave, setConfirmLeave] = useState(false);
   const initialRef = useRef(JSON.stringify(initial));
@@ -201,7 +201,7 @@ export function EditorFlow({
     ) : step === 'what' ? (
       <StepWhat
         state={state}
-        onChange={changeState}
+        onChange={setState}
         errors={shownErrors}
         lookups={lookups}
         lockedNote={lockedNote}
@@ -209,7 +209,7 @@ export function EditorFlow({
     ) : (
       <StepReview
         state={state}
-        onChange={changeState}
+        onChange={setState}
         errors={shownErrors}
         lookups={lookups}
         saveError={saveError && !saveError.field ? saveError.message : null}
