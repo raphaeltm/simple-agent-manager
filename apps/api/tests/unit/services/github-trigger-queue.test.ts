@@ -330,6 +330,48 @@ describe('durable GitHub trigger queue', () => {
       sqlite.prepare("SELECT status FROM trigger_executions WHERE github_delivery_id='two'").get()
     ).toEqual({ status: 'running' });
   });
+  it.each(['getMailboxMessage', 'getSession', 'acceptPromptDelivery'] as const)(
+    'bounds persistent %s failures at the absolute routing deadline',
+    async (failure) => {
+      vi.useFakeTimers();
+      const { sqlite, env, submit, input, stub } = setup();
+      await acceptGitHubTriggerExecution(
+        env,
+        input('one', 'github:42:7', { subjectAffinity: true }),
+        submit
+      );
+      stub.acceptPromptDelivery.mockRejectedValue(new Error('ProjectData unavailable'));
+      if (failure === 'getMailboxMessage')
+        stub.getMailboxMessage.mockRejectedValue(new Error('Receipt unavailable'));
+      await expect(
+        acceptGitHubTriggerExecution(
+          env,
+          input('two', 'github:42:7', { subjectAffinity: true, queueTtlSeconds: 1 }),
+          submit
+        )
+      ).rejects.toThrow();
+      const read = () =>
+        sqlite
+          .prepare(
+            "SELECT status,skip_reason,routed_execution_id,routed_task_id,routed_session_id FROM trigger_executions WHERE github_delivery_id='two'"
+          )
+          .get();
+      const target = read() as Record<string, unknown>;
+      await drainGitHubTriggerQueue(env, submit);
+      expect(read()).toEqual(target);
+      expect(target.status).toBe('routing');
+      if (failure === 'getSession')
+        stub.getSession.mockRejectedValue(new Error('Session unavailable'));
+      vi.advanceTimersByTime(1001);
+      await drainGitHubTriggerQueue(env, submit);
+      expect(read()).toEqual({ ...target, status: 'dropped', skip_reason: 'delivery_uncertain' });
+      const attempts = stub.getMailboxMessage.mock.calls.length;
+      await drainGitHubTriggerQueue(env, submit);
+      expect(stub.getMailboxMessage).toHaveBeenCalledTimes(attempts);
+      expect(submit).toHaveBeenCalledTimes(1);
+    }
+  );
+
   it('reconciles an existing receipt principal after the target task is deleted', async () => {
     const { sqlite, env, submit, input, loseNextAcceptResponse } = setup();
     await acceptGitHubTriggerExecution(

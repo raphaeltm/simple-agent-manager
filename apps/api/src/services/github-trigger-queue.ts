@@ -184,7 +184,17 @@ export async function processGitHubTriggerExecution(
     .where(eq(schema.triggerExecutions.id, executionId))
     .get();
   if (!row) throw new Error('GitHub execution removed');
-  if (row.status === 'routing') return routeToSession(env, row);
+  if (row.status === 'routing') {
+    try {
+      return await routeToSession(env, row);
+    } catch (error) {
+      // An unavailable receipt/session RPC cannot renew the absolute deadline.
+      // Submission may have happened, so retain the target and never retarget.
+      if (row.queueExpiresAt && row.queueExpiresAt <= new Date().toISOString())
+        return dropUnconfirmedRouting(env, row);
+      throw error;
+    }
+  }
   if (row.status === 'routed') {
     await updateQueueAudit(
       env,
