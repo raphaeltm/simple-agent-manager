@@ -41,7 +41,7 @@ globalThis.fetch = async (url, options) => {
     assert(options.headers.Authorization.startsWith('Bearer '));
     assert(options.headers['X-GitHub-Api-Version'] === '2026-03-10');
     if (process.env.TEST_VARIANT === 'metadata-failure') throw new Error(process.env.GH_APP_PRIVATE_KEY);
-    return new Response(JSON.stringify({ slug: 'test-app', events: ['issues','issue_comment','pull_request','push'], permissions: { issues: 'write', contents: 'read' }, privateCanary: 'PRIVATE_METADATA_CANARY' }));
+    return new Response(JSON.stringify({ slug: 'test-app', events: ['issues','issue_comment','pull_request','push','pull_request_review','pull_request_review_comment'], permissions: { issues: 'write', contents: 'read' }, privateCanary: 'PRIVATE_METADATA_CANARY' }));
   }
   if (url === 'https://api.github.com/app/installations/' + fixture.installationId) return new Response(JSON.stringify({ permissions: { issues: 'write' }, repository_selection: 'selected', suspended_at: null, account: { privateCanary: 'PRIVATE_METADATA_CANARY' } }));
   if (url === 'https://api.github.com/app/hook/config') return new Response(JSON.stringify({ content_type: process.env.TEST_VARIANT === 'hook-content' ? 'form' : 'json', insecure_ssl: process.env.TEST_VARIANT === 'hook-tls' ? '1' : '0', url: (process.env.GITHUB_TRIGGER_AUDIT_ENVIRONMENT === 'production' ? 'https://api.example.test' : 'https://api.sammy.party') + '/api/github/webhook' + (process.env.TEST_VARIANT === 'hook-destination' ? '?secret=PRIVATE_METADATA_CANARY' : ''), secret: 'PRIVATE_METADATA_CANARY' }));

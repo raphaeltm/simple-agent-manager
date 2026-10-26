@@ -37,15 +37,13 @@ No PR watches (#2421). Sister owns #2419/#2420/#2422 filters/review events/MCP c
 
 ## Current evidence
 
-- Existing signed ingress/admission and queue tests pass; full related suite 187 tests. Queue/run-slot recovery-owner regression 36 tests.
-- Workerd prompt delivery regressions: 5 passed (absolute expiry, receipt checkpoint retention).
-- Full typecheck 19 tasks passed; build 9 passed. Serial full tests running after unchanged terminal timeout passed in isolation.
-- Desktop/mobile Playwright 8 passed; committed evidence under tasks/evidence/2026-10-26-github-trigger-queue.
-- Early Cloudflare reviewer findings addressed; independent final review, Opus review and coordinated staging still pending.
-- A took queue controls in a separate editor component and raw MCP queue preservation after reading B ownership DM. Nondefault update + later filter-edit preservation tests pass; reconcile with B filter regions on integration.
-
-- Final local queue review PASS; security principal through wake fix PASS with13 independently rerun tests. Completion release gates pending.
-- Actual Opus review task01M5WFEVMVSEP76DCRBP7B7V1F started; findings being assessed, no approval yet.
-- Full suite legacy fixtures updated; failed files rerun105PASS. Serial final quality/full-suite rerun pending.
-
-- Actual Opus initial review4MEDIUM8LOW addressed: uncertainty classification/counts, stable History link, trueempty/errors, counters, copy/accessibility. Focused backend23PASS, MCP25PASS, webmodel/editor66PASS. Screenshots16 updated/inspected; actual follow-up pending.
+- Pushed integration branch includes B930e8131a and A queue/routing, preserving agreed field ownership. Fresh main b73cfe50f adds marketing docs only; integration reconciliation pending after current quality run.
+- Full A stable quality passed47 tasks: lint/typecheck/test/build, API13910 tests and web4764 tests. Integrated focused checks pass169 backend,77 web and14 desktop/mobile browser cases. Final integrated full quality is running.
+- Workerd prompt delivery regressions pass5; signer37 tests cover bounded issues, PR comments, reviews and inline comments with stable replay. Requested review event subscriptions are checked before live signing.
+- Queue/Cloudflare specialist PASS, security principal-through-wake PASS13 independently rerun tests, integrated completion implementation PASS/release WARN. Cleanup repeats predicates at final write and reports actual changes; managed reservations cannot be deleted or cleared.
+- Two actual A Opus reviews requested changes. All A findings are addressed: uncertain vs definite drop, immutable audit links, counters/copy, cleanup race fence, queue controls beside overlap controls under Advanced, hours input, saved settings and realistic target fixtures. Final actual review approval remains required.
+- Actual B Opus review at930e8131a requested changes (2 high,5 medium,8 low); B is remediating. Final combined actual Opus review will inspect both reports on the pushed integrated candidate before release.
+- Eighteen A screenshots committed under tasks/evidence/2026-10-26-github-trigger-queue. Full combined browser run passes14 cases; no staging mutation or deployment yet.
+- Staging harness uses existing smoke principal, normal APIs and existing CI-held signer. Bounded acceptance: sequential different issues, same-PR comments, sleeping wake, expiry and same-event inline burst; cleanup only owned fixtures. No independent staging deployment by B.
+- #2419 expression/regex scope remains Idea01M5WE2TEWEBMCRF6YKCGE3EDT. #2420 mixed review/inline across separate triggers remains Idea01M5WKCK7431DQ4FKBWENZV9QJ and belongs to later shared PR ownership work; neither issue will be closed by this partial foundation. #2421 watches are excluded.
+- No PR, staging acceptance, merge or production smoke has occurred yet. Release checklist remains open until evidence exists.

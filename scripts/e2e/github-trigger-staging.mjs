@@ -95,7 +95,15 @@ async function readAppMetadata(fixture) {
       !hookDestination.search &&
       !hookDestination.hash,
   };
-  const supportedEvents = ['issues', 'issue_comment', 'pull_request', 'push'];
+  const supportedEvents = [
+    ...new Set([
+      'issues',
+      'issue_comment',
+      'pull_request',
+      'push',
+      ...(fixture.deliveries ?? []).map((item) => item.eventType),
+    ]),
+  ];
   const evidence = {
     webhookConfiguration: hookEvidence,
     appSlug: app.slug,
