@@ -1,5 +1,10 @@
 # Simplify Shared Packages
 
+> **Reconciliation 2026-10-26:** Pointer correction only. #2428 (`e75d6e179`) added a `pr` field to
+> `ChatSessionTaskEmbed`, so the `toolMetadata` Record is now
+> `packages/shared/src/types/session.ts:69` (not `:62`). The other 10-05 pointers hold; all four
+> items are still open.
+
 > **Reconciliation 2026-10-05:** #2225 (9ef726c20) deleted the unused `AGENT_PERMISSION_MODE_DESCRIPTIONS`. Only `AGENT_PERMISSION_MODE_LABELS` remains (`packages/shared/src/constants/agent-settings.ts:24-30`), so the labels/descriptions merge is done. Still open:
 >
 > - Move the computed `isIdle`, `isTerminated` and `workspaceUrl` out of the API response type (`packages/shared/src/types/session.ts:23-27`).

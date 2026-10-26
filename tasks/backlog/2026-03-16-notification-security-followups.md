@@ -1,5 +1,15 @@
 # Notification System — Security Follow-ups
 
+> **Reconciliation 2026-10-26:** Nothing in scope shipped; pointers moved. #2443 (`a3a802caa`)
+> shifted the lines below the `needs_input` dedup block of
+> `apps/api/src/durable-objects/notification.ts` by +3: the `/ws` upgrade is now `:612-627`
+> (untagged `acceptWebSocket` at `:622`), `webSocketMessage` `:629-642` and `updatePreference`
+> `:405-424`. #2381 (`110730c2a`) moved the client `startsWith('/')` check to
+> `NotificationCenter.tsx:94` and the metadata types to
+> `packages/shared/src/types/notification.ts:38,100`, and added three notification types; the read
+> schema now takes its type list from `NOTIFICATION_TYPES` (`notification-row-schemas.ts:21`), but
+> inserts are still unvalidated.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

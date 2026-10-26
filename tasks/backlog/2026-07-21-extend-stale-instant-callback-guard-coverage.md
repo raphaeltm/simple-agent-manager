@@ -1,5 +1,11 @@
 # Extend Stale Instant-Callback Guard to Non-Destructive Regressions
 
+> **Reconciliation 2026-10-26:** Still open; the guard still covers only `failed` task callbacks
+> (`apps/api/src/routes/tasks/callback.ts:321-368`) and `error` activity callbacks. Pointer move:
+> the activity path now lives in `apps/api/src/services/acp-activity-callback-handler.ts`
+> (`rejectSupersededInstantError` at `:225` returns early for anything but `error` at `:234`);
+> `routes/projects/agent-activity-callback.ts` is a 35-line wrapper.
+
 ## Problem
 
 PR (branch `sam/diagnose-fix-remaining-production-0dvhf5`) added a freshness guard (`apps/api/src/routes/_stale-callback-guard.ts`) that rejects destructive `error`/`failed` callbacks arriving from a superseded Instant container generation after a completed recovery. Two adjacent surfaces remain unguarded:

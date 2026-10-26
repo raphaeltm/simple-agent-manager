@@ -1,5 +1,9 @@
 # One branch's unmerged DO migration blocks staging deploys for every other branch
 
+> **Reconciliation 2026-10-26:** Still open. Pointer correction: #2371 (`8394efa14`) added a test
+> above the fail-closed test, which is now `scripts/quality/do-migration-compatibility.test.ts:168`;
+> the preflight error is unchanged at `scripts/deploy/durable-object-migrations.ts:222-230`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** fail-fast detection. The deploy preflight reads the Worker's deployed Durable

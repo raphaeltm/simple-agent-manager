@@ -1,5 +1,9 @@
 # Research: Chat Messages Appear Truncated While Agent Still Working
 
+> **Reconciliation 2026-10-26:** No merge since 10-12 touched B2, B5 or C1, and the 10-05 pointers
+> hold (`makeTaskCompletionCallback` is `server/server.go:1449-1533`). In the 09-30 block, the A1
+> socket gate and fallback poll moved to `useSessionLifecycle.ts:148,324` (#2381, #2359).
+
 > **Reconciliation 2026-10-05:** #2224 (4f223d6fa) fixed B2's 401 case. A rejected token no longer deletes the outbox: the reporter holds rows until a renewed or re-delivered token arrives, and reports a pause longer than `MSG_AUTH_RENEWAL_WAIT` (default 15 min) (`packages/vm-agent/internal/messagereport/credential.go`, `sender.go:143-145,214-221`). VM workspace callback tokens are now renewed before they expire. Still open:
 > - **B2, 403 case:** a node-scoped or other-workspace token gets 403 "Insufficient token scope" (`apps/api/src/routes/workspaces/_helpers.ts:338-376`). That is still terminal and clears the session outbox (`sender.go:217-221`, `messagereport/reporter.go:411-417`). See `2026-10-04-update-after-bootstrap-workspace-token-writer.md`.
 > - **B2, Instant case:** Instant tokens are not renewed (`2026-10-04-instant-generation-aware-callback-token-renewal.md`). Held rows are lost if the runtime is torn down.

@@ -1,5 +1,12 @@
 # A sub-folder's file listing includes the folder itself
 
+> **Reconciliation 2026-10-26:** still open; `files.go` is unchanged since #2383 (`find` call at
+> `packages/vm-agent/internal/server/files.go:97`, `parseFileListOutput` at `:381`). The root is
+> filtered only for owner reads: a teammate's confined root listing also contains the
+> working-tree folder, because `resolveConfinedPath` (`file_confinement.go:86`) returns an absolute
+> path that `-not -name .` does not match. `TestConfinedReadsServeTheWorkingTree`
+> (`file_confinement_test.go:359`) checks only that root listing's status.
+
 ## Problem
 
 Opening a sub-folder in the chat Files panel lists that folder as an entry inside itself. Listing

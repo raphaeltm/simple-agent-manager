@@ -1,5 +1,12 @@
 # Simplify Durable Objects and Database Schema
 
+> **Reconciliation 2026-10-26:** #2443 (`a3a802caa`) added the tasks `parent_task_id` index
+> (partial; migration `0208_tasks_lineage_channel_indexes.sql`, `apps/api/src/db/schema.ts:1139`).
+> Still open: nodes `(user_id, status)` and `status` indexes, the timestamp doc, the task-status and
+> workspace diagrams, recovery paths, JSDoc and the UI-governance decision. Pointers moved: the
+> UI-governance tables are `schema.ts:2538-2734`, routed at `apps/api/src/index.ts:828`; ProjectData
+> `alarm()` is `project-data/index.ts:3039`, `idx_tasks_workspace_id` `schema.ts:1129`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

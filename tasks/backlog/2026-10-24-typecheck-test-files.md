@@ -1,5 +1,13 @@
 # Test files are excluded from `pnpm typecheck`, so type-level proofs inside them prove nothing
 
+> **Reconciliation 2026-10-26:** The `links.ts` example is out of date. #2431 (`35f14a954`), merged
+> before this file landed, rewrote that comment (`packages/shared/src/types/links.ts:21-39`) to rest
+> the compile-time half on T4's `LINK_RELATION_LABELS`, a `Record<LinkRelation, string>` in a source
+> file (`apps/web/src/components/linked-work/relation-labels.ts:15`), so a new union member already
+> fails `pnpm typecheck` through `apps/web`. The map at
+> `packages/shared/tests/link-relations.test.ts:34` is still unchecked and its comment's pointer to
+> `links.ts` is stale; the rest is open.
+
 Found by the T7 delta test review (PR #2430, branch `sam/t7-start-work-replaces-5gdbdk`).
 
 ## Problem

@@ -1,5 +1,10 @@
 # Emit task status events from reconciliation dead-target failures
 
+> **Reconciliation 2026-10-26:** Still open (tests only). Pointer corrections after #2280
+> (2026-10-08): in `services/task-terminal-transition.ts` the project checks are `:157-169`, the
+> already-terminal return `:191-192`, the task-plus-event batch `:339` and the trigger sync `:369`;
+> the identity-mismatch branch is `project-data/reconciliation.ts:100-114`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** the code fix, in 689e1142f (PR #1916) and 510d9d9f9 (PR #2015).

@@ -1,5 +1,11 @@
 # Simplify VM Agent Architecture
 
+> **Reconciliation 2026-10-26:** #2355 (`b467f3898`, released by #2363) removed the platform git
+> commit, push and `gh pr create` path from `internal/server/server.go`, so the
+> `internal/workspacegit/` extraction item is moot; only the `gitPushResult` payload type is left
+> (`server.go:1584-1598,1669-1678`). Sizes above are stale: `session_host.go` 810 lines,
+> `workspaces.go` 2,259, `server.go` 1,697, `bootstrap.go` 3,306. The other items are still open.
+
 **Status:** backlog
 **Priority:** high
 **Estimated Effort:** 1 week

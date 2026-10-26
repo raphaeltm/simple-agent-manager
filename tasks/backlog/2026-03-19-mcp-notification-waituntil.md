@@ -1,5 +1,13 @@
 # Wrap MCP notification blocks in waitUntil()
 
+> **Reconciliation 2026-10-26:** Scope unchanged: all three blocks still `await` the notification
+> round-trip. The `complete_task` blocks moved to `apps/api/src/routes/mcp/task-tools.ts:281-302`
+> (conversation mode) and `:408-430` (task mode); the `update_task_status` block did not move.
+> `_executionCtx` is no longer unused: #2428 (`e75d6e179`) uses it to retry PR storage (`:204`).
+> `handleCompleteTask` is called at `routes/mcp/index.ts:192-198`, and `update_task_status` now
+> runs through `MCP_TOOL_HANDLERS` (`tool-handler-table.ts:144`, #2414 `0620c1595`), called at
+> `index.ts:364` with no context.
+
 > **Reconciliation 2026-10-12:** Scope unchanged: all three blocks still `await` the notification
 > round-trip. Pointers moved: #2293 (`6973ceb77`) and #2307 (`b5f866a90`) cut
 > `apps/api/src/routes/mcp/task-tools.ts` to 454 lines; the blocks are now `:126-153`

@@ -25,9 +25,9 @@ Implement canonical idea 01KQ720TE8Y8ZGVTZPBM8Y4NH0 with Mastra, default-OFF use
 - [x] Live mobile/desktop chat, task/result/attention cards, source links and settings opt-in; retain voice input.
 - [x] Unit/integration/security/Worker regression tests for enable/refresh/disable, stale tabs/in-flight, isolation, duplicate dispatch, interrupted/repeated flows, cancellation and reconnect.
 - [x] Documentation/capability matrix and rollback; visual audit mobile/desktop.
-- [ ] Draft PR, independent Astra High specialist/security/completion review; final-head lint/typecheck/test/build/CI.
+- [x] Draft PR, independent Astra High specialist/security/completion review; final-head lint/typecheck/test/build/CI. (reconciled 2026-10-26: #2386 body: all local reviews passed; final-head CI 39521912269 and E2E 39521912267 passed)
 - [x] Coordinate staging ownership, dedicated test identities, full live staging E2E and cleanup (journey07; prior failures preserved).
-- [ ] Rebase latest main and retest; CodeRabbit request/wait; merge, exact-commit production deployment and minimal smoke.
+- [x] Rebase latest main and retest; CodeRabbit request/wait; merge, exact-commit production deployment and minimal smoke. (reconciled 2026-10-26: head `8a94926d5` rebased onto `31911120b`; CodeRabbit skipped at its file limit after the wait; merged as `f61e07d2a`; production run 39527578978 and minimal smoke in the #2386 body)
 
 ## Acceptance
 
@@ -121,3 +121,12 @@ Live3d87 dispatch completed exactly once and publication passed. The test then r
 Final scanner refresh:77OPEN CODE_SMELL (9CRITICAL/38MAJOR/30MINOR). Independent security review of added grounding complexity findings found no concrete critical/high correctness/security blocker; raw severities remain open. Existing follow-up idea01M5CRNJAHDKYTEHFG2G8DD8T1 also records bounded-output quadratic punctuation trimming as nonblocking reliability debt; no waiver or severity downgrade.
 
 Final6f810 behavior suite passed all6scenarios (one completed read, zero writes, opt-out cleanup). Separate core dashboard/projects/settings smoke passed0page/0console errors with SAM remainingOFF. Earlier full-journey console count remains unattributed; no failed historical result was reclassified.
+
+## Reconciliation 2026-10-26
+
+- Shipped by #2386 (`f61e07d2a`, merged 2026-10-21); first successful production deploy: run
+  39527578978 (head `f61e07d2a`, 2026-10-21). Opus 5.5 design approval is recorded on the PR.
+- Unticked: 0. Open beyond this launch: the broader `/sam` roadmap (idea `01KQ720TE8Y8ZGVTZPBM8Y4NH0`)
+  and the scanner/code-quality debt (idea `01M5CRNJAHDKYTEHFG2G8DD8T1`), as this file says.
+- Verdict: SHIPPED, moved from `tasks/backlog/` to `tasks/archive/` by the 2026-10-26 weekly queue
+  reconciliation.

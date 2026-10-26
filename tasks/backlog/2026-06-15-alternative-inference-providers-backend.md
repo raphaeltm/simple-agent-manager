@@ -1,5 +1,10 @@
 # Alternative Inference Provider Support — Backend-First (via SAM Proxy)
 
+> **Reconciliation 2026-10-26:** no change to the UI follow-up: `apps/web/src` still has no
+> `PROVIDER_PRESETS`, `resolveHarnessDialect` or `byProvider`. The optional cleanup's pointers
+> moved by 18 lines (#2318, `7164053b4`): the claude/codex conditionals are now
+> `apps/api/src/routes/workspaces/runtime.ts:301-311` and `:990-1039`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** the whole backend, in PR #1322 (`11c630bcb`): `harness-capabilities.ts` and

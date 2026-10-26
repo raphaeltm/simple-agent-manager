@@ -1,5 +1,9 @@
 # Make SAM Task Status Trustworthy
 
+> **Reconciliation 2026-10-26:** Still open: only the #2153 staging check. Pointer fixes: #2317
+> and #2318 moved the sweep's expiry check to `apps/api/src/scheduled/stuck-tasks.ts:1157-1165`,
+> and #2317 and #2382 moved the tests to `stuck-task-sleeping-conversation.test.ts:581,917`.
+
 > **Reconciliation 2026-10-12:** Items 1-4 of the 2026-10-05 list are resolved. #2280
 > (`90cbf4ea4`) ends an expired sleep as `cancelled` + `terminal_reason=snapshot_expired`
 > (`apps/api/src/services/session-expiry.ts:9-53`). It also takes `in_progress` rows, so Instant

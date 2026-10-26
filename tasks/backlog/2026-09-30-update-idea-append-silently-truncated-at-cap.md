@@ -1,5 +1,13 @@
 # `update_idea` appends are silently discarded once an Idea reaches the content cap
 
+> **Reconciliation 2026-10-26:** Criterion 3 is partly met. #2427 (`a3404a848`) added idea notes,
+> stored separately in ProjectData; `update_idea` takes `note`, and its description tells agents
+> to post progress as notes (`routes/mcp/tool-definitions-session-idea-tools.ts:174`), so outcomes
+> no longer need the capped description. Appends are still cut silently
+> (`operations/idea-core.ts:398-401`), create and update still slice title and content without
+> notice (`:288,294,449`), and the result is still a bare `updated: true` (`:503`). The Connector
+> tool is now at `platform-operations.ts:197`; criteria 1, 2, 4 and 5 are open.
+
 > **Reconciliation 2026-10-12:** Not fixed; the code moved and now serves a second surface. #2293
 > (`6973ceb77`) moved `create_idea` / `update_idea` into `apps/api/src/operations/idea-core.ts`:
 > the create slice is now `:202`, the replace slice `:323` and the append SQL `:326-328`, with the

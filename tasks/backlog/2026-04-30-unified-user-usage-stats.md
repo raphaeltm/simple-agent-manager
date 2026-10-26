@@ -1,5 +1,12 @@
 # Unified User Usage Stats Page
 
+> **Reconciliation 2026-10-26:** still open; none of the cited usage files changed. The cited
+> post-mortem `docs/notes/2026-04-13-compute-usage-node-overlap-postmortem.md` was deleted by
+> #1174 (`cd4c6e83d`); read it with `git show cd4c6e83d^:<path>`. Its billing-entity rule now
+> lives in `.claude/rules/05-preflight.md:23`. #2414's new `agent_model_*` usage tables
+> (`apps/api/src/db/schema.ts:2329-2366`) count agent model-call spend per project, not per user,
+> and do not cover the AI proxy.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** parts exist, in a different form than planned.

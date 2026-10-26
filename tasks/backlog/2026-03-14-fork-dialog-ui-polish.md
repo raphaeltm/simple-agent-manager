@@ -1,5 +1,9 @@
 # Fork Dialog UI Polish
 
+> **Reconciliation 2026-10-26:** Still no close button. #2399 (`cc2d968df`) moved the session
+> filters into `useSessionFilters`, so the pointers moved: drawer header
+> `MobileSessionDrawer.tsx:95-122`, backdrop `:76-81`, Escape handler `:62-68`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** none of the five items as written; four targeted UI that no longer exists (below).

@@ -1,5 +1,12 @@
 # ACP Session Error Observability & Reconnection Reliability
 
+> **Reconciliation 2026-10-26:** #2318 (`7164053b4`) added a `provider_limit_reached` prompt-failure
+> code (`ClassifyProviderLimit`, `packages/vm-agent/internal/acp/provider_limit.go:30`) and moved the
+> 10-05 pointers: `auth_failure.go:15,57`, `session_host_prompt.go:684-700`, and
+> `taskCallbackErrorMessage` at `packages/vm-agent/internal/server/server.go:1548-1565`. No merge
+> since 10-12 touched the open items; `reportAgentError` still takes a free-form `step`
+> (`session_host_reporting.go:19`).
+
 > **Reconciliation 2026-10-05:** PR #2217 (b79136805, merged 2026-10-03) brought in the ACP Slice D auth-diagnosis commits ee6fd576f and 7640dea85. `ClassifyPromptError` / `ClassifyPromptFailure` (`packages/vm-agent/internal/acp/auth_failure.go:14,53`) now replace the free-form `Prompt failed: %v`. The replacement is a bounded reason code (`model_provider_credential_missing|_rejected`, `model_unavailable`, `provider_overloaded`, `agent_crash`, `network_error`, else `agent_prompt_failed`). It appears in the `ACP Prompt failed` lifecycle/error-reporter payload and the JSON-RPC error (`session_host_prompt.go:657-673`), and in task callbacks (`packages/vm-agent/internal/server/server.go:1542-1553`). A missing agent credential now reports `model_provider_credential_missing` (`session_host_selection.go:51-60`). Project chat shows creator-gated guidance for it (`apps/web/src/components/project-message-view/SessionStatusBanners.tsx:25-48`, `apps/web/src/components/debug/FailureCard.tsx:101-107`). Still open:
 > - Codes for every other lifecycle and error-reporter event. `reportAgentError` still takes a free-form `step` (`session_host_reporting.go:19-37`).
 > - The per-session event timeline, the `GET /workspaces/:id/agent-sessions/:sessionId/events` API (does not exist), and the "Session Log" view.

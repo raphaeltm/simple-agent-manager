@@ -1,5 +1,10 @@
 # Trial Onboarding — Late-Audit Hardening Follow-ups
 
+> **Reconciliation 2026-10-26:** nothing in scope shipped; two pointers moved. HIGH-4's only
+> `bridgeAcpSessionTransition` caller is now `durable-objects/project-data/index.ts:2651-2655`
+> and still passes no `workspaceUrl`. LOW-CF-2's v9 migration is now
+> `apps/api/wrangler.toml:427-428`.
+
 > **Reconciliation 2026-10-12:** nothing in scope shipped; four pointers moved. HIGH-4's only
 > `bridgeAcpSessionTransition` caller is now `durable-objects/project-data/index.ts:2194-2198` and
 > still passes no `workspaceUrl`. LOW-SEC-3's `rateLimitAnonymous` is now

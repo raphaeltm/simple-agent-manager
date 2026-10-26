@@ -1,5 +1,12 @@
 # Repair or retire stale Playwright audit specs (164 failures on main)
 
+> **Reconciliation 2026-10-26:** Seven entries left quarantine: #2348 (`648169652`) repaired
+> `landing-audit.spec.ts`, #2386 (`f61e07d2a`) deleted the `sam-prototype-audit` row above with its
+> page, and #2389, #2426 and #2439 deleted five more quarantined specs with their surfaces. 91 of
+> 134 audit specs are now quarantined. Pointers moved: recoverable-error is
+> `visual-audit-quarantine.txt:74`, scaling-settings `:85`, the Workspace Idle Timeout heading
+> `ProjectSettings.tsx:336` (#2414) and the `/knowledge` redirect `App.tsx:349-352`.
+
 > **Reconciliation 2026-10-12:** One spec left quarantine. #2287 (`195f9f7ca`) repaired
 > `fork-retry-new-chat-audit.spec.ts` and deleted its `visual-audit-quarantine.txt` entry, so the
 > CI visual job now runs it (`scripts/quality/select-playwright-visual-audits.ts` runs every

@@ -1,5 +1,12 @@
 # Avoid deleted-workspace requests when opening ended chat history
 
+> **Reconciliation 2026-10-26:** Still open for the chat's owner. #2381 (`110730c2a`) now passes
+> the workspace id only when the viewer owns the chat (`useSessionLifecycle.ts:69`,
+> `ownedWorkspaceId` in `session-viewer-access.ts:67`), so teammates on a shared chat no longer
+> request it. `useSessionInfrastructure.ts` is unchanged and still retries a 404. Two newer backlog
+> files reported the same retry; both are absorbed into this file (see "Carried over 2026-10-26")
+> and removed from the backlog.
+
 > **Reconciliation 2026-10-12:** still open; `useSessionInfrastructure.ts` did not change this week.
 > Pointer fix for the "Related" line at the end: #2231 (`1c7f8dd90`) moved the restore-provisioning
 > effect from `useProjectChatState.ts:525-557` to
@@ -45,6 +52,24 @@ consolidated here by the weekly queue audit:
 - The 404s fire on page load without opening any drawer, so the Resources drawer is not involved.
 - Once this is fixed, drop the workspace-404 allow-list in
   `apps/web/tests/playwright/staging-tool-rail-verify.spec.ts:167-176`.
+
+## Carried over 2026-10-26
+
+Consolidated by the weekly queue audit from the duplicates `2026-10-19-chat-page-workspace-404-retries`
+and `2026-10-24-chat-retries-deleted-workspace` (removed from the backlog 2026-10-26; see git history):
+
+- Staging, 2026-10-19 (shared-sessions PR, idea `01M59MYE4GY91BWTE8TZF1ZB5D`): the owner's page on a
+  stopped Instant chat logged three 404s for its workspace. Since #2381 only the chat's owner
+  requests it (`ownedWorkspaceId`), so the bug now affects owners of chats whose workspace is gone.
+- Staging, 2026-10-24 02:18Z (comment reader live check): session
+  `160d9aed-b74d-4956-8d2a-1f2fb00a2167`, workspace `01M5K1VJ1G490QGPYTV9APDB8W` made 4 failing
+  requests on desktop and 2 on a phone.
+- Additional acceptance criteria from those files:
+  - [ ] A 404 for the session's workspace means "the workspace is gone": it is not retried, the page
+        makes at most one request for that workspace id, and the chat shows its existing
+        stopped/archived state without console errors.
+  - [ ] Transient failures (network, 5xx) still retry as today.
+  - [ ] Paired tests: one request and the "gone" state on a 404; retries on a 503.
 
 Related: `tasks/backlog/2026-09-09-chat-requests-reaped-task-404.md` is the same symptom from a
 different hook. There, an ended chat requests a deleted task through the restore-provisioning

@@ -1,5 +1,9 @@
 # Pre-existing credential-route hardening (surfaced during Vultr review)
 
+> **Reconciliation 2026-10-26:** Still open; the two routes are still not rate-limited (now
+> `apps/api/src/routes/credentials.ts:297,312`). Pointer correction: the `useProjectChatState.ts`
+> call to `hasByocComputeCredential` is now `:104`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

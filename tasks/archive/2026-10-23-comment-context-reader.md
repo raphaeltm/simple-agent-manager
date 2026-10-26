@@ -182,7 +182,8 @@ chat rows open it. Notifications open it too. The reader:
   claimed (seq 113), verified and released (seq 121). Check the channel before any staging deploy.
 - Staging run 3 (f82042d63, 02:17Z): every feature check passed. The only errors were 404s from
   the chat page retrying a deleted workspace. That is pre-existing, filed as
-  `tasks/backlog/2026-10-24-chat-retries-deleted-workspace.md`.
+  `tasks/backlog/2026-10-24-chat-retries-deleted-workspace.md` (consolidated 2026-10-26 into
+  `tasks/backlog/2026-09-08-ended-chat-requests-deleted-workspace.md`).
 - Rebased onto main `a3404a848` (idea updates): registry and RPC overlaps were additive, and the
   registry count is now 76.
 

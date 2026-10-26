@@ -19,7 +19,7 @@ New chats stage attachments in R2, while existing chats upload directly to a liv
 - [x] Documentation, specialist reviews, mobile/desktop screenshot audits.
 - [x] Staging new/active/sleeping verification.
 - [x] Test resource cleanup.
-- [ ] Green CI, CodeRabbit request/wait, merge and production deployment.
+- [x] Green CI, CodeRabbit request/wait, merge and production deployment. (reconciled 2026-10-26: #2359 merged 2026-10-15 as `0b0dd3ce3`; CodeRabbit requested 16:26 UTC, rate-limited, wait ended 16:41 UTC; first production deploy run 38773686265)
 
 ## Acceptance
 Multiple files upload to R2 immediately and remain removable before send. No workspace transfer or agent prompt until send. Sleeping sessions wake before transfer. Agent receives exact readable file paths. Failed upload/transfer never silently drops attachments. Normal short-text paste remains text.
@@ -49,3 +49,15 @@ Initial deployment 38756062202 failed Cloudflare validation10021 (Worker startup
 - Dashboard/projects/settings navigation passed without page errors. Speech generation/audio retrieval passed200 with17856bytes.
 - Initial live probe selectors and streamed-chunk aggregation were corrected in the local harness; no product patch was needed.
 - Test workspace and VM deleted after verification. Completion reviewer PASS for PR readiness; release gates remain pending.
+
+## Reconciliation 2026-10-26
+
+- Shipped by #2359 (`0b0dd3ce3`, merged 2026-10-15); first successful production deploy: run
+  38773686265 (head `0b0dd3ce3`, 2026-10-15).
+- On `main`: stable-id R2 attachment queue (`apps/web/src/hooks/useAttachments.ts:93-139`), paste and
+  drop in the composer (`ProjectChatComposer.tsx:298,336`), transfer after wake and before the prompt
+  (`prompt-attachments.ts:26`), retried rather than dropped on failure
+  (`vm-prompt-delivery-adapter.ts:165-177`); tests `send-chat-attachments.test.ts`,
+  `useAttachments.test.ts`.
+- Unticked: 0. Verdict: SHIPPED, moved from `tasks/backlog/` to `tasks/archive/` by the 2026-10-26
+  weekly queue reconciliation.

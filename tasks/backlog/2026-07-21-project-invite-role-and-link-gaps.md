@@ -1,5 +1,11 @@
 # Project membership: role granularity + superseded invite-link gaps
 
+> **Reconciliation 2026-10-26:** Both gaps are unchanged. #2381 (`110730c2a`) moved the
+> offboarding routes into `member-offboarding.ts`, so the invite-link create route is now
+> `apps/api/src/routes/projects/members.ts:393-443` (still a bare insert) and the approve handler's
+> hardcoded `role: 'admin'` is at `:680,689`. The panel's single-link `.find` is still
+> `ProjectMembersSection.tsx:322`.
+
 ## Problem
 
 Discovered while documenting the collaboration/multiplayer feature (docs PR for

@@ -1,5 +1,12 @@
 # Make Personal Infrastructure Visible and Add Platform Infra Admin Surface
 
+> **Reconciliation 2026-10-26:** #2403 (`d4b87b304`) removed the Workspaces page and the
+> Infrastructure dropdown: `Infrastructure` now links to `/nodes` for every user
+> (`apps/web/src/components/NavSidebar.tsx:46`), `/workspaces` redirects there
+> (`apps/web/src/App.tsx:405`), and only Admin is gated (`:163-164`, `:283-284`). That makes the
+> Workspaces-in-nav criterion moot. The platform-infra admin half is still open. The references
+> `docs/architecture/credential-security.md` and `.codex/prompts/do.md` no longer exist.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** Nodes and Workspaces are in the nav for every user since PR #994 (`7b653c7ad`).

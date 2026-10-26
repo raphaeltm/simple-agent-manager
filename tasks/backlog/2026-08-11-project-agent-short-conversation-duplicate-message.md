@@ -1,5 +1,11 @@
 # ProjectAgent loadHistory duplicates the user message in short conversations
 
+> **Reconciliation 2026-10-26:** Still open: ProjectAgent `loadHistory`
+> (`apps/api/src/durable-objects/project-agent/index.ts:549-591`) still strips only when
+> `rawRows.length > contextWindow` (`:578`). Pointer correction: #2386 (`f61e07d2a`) moved the
+> sam-session sibling to `sam-session/index.ts:575` (unconditional strip at `:590`); `runAgentLoop`
+> appends the user message at `sam-session/agent-loop.ts:486`.
+
 ## Problem
 
 `apps/api/src/durable-objects/project-agent/index.ts` `loadHistory()` strips the just-persisted user message from history only when the raw fetch exceeded `contextWindow` (`rawRows.length > contextWindow`). For a short conversation (total messages ≤ contextWindow), the just-persisted user message stays in the returned history, and `runAgentLoop` (`sam-session/agent-loop.ts`) separately appends `{ role: 'user', content: userMessage }` — so the model receives the same user message twice on every ProjectAgent chat turn until the conversation outgrows the context window.

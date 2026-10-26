@@ -1,5 +1,10 @@
 # Bootstrap Token Endpoint Has Dual Auth (Unreachable)
 
+> **Reconciliation 2026-10-26:** Still dual-auth and still uncalled: the VM agent redeems through
+> `/api/bootstrap/:token` (`packages/vm-agent/internal/bootstrap/bootstrap.go:717`). The endpoint
+> moved to `apps/api/src/routes/workspaces/runtime.ts:1950-1989` (`requireAuth()` at `:1953`,
+> `verifyWorkspaceCallbackAuth` at `:1955`).
+
 **Date**: 2026-03-12
 **Discovered during**: Callback auth middleware leak review (PR #325)
 **Severity**: Low — endpoint appears to be dead code

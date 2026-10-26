@@ -1,5 +1,11 @@
 # Port Exposure Security Hardening
 
+> **Reconciliation 2026-10-26:** Nothing in scope shipped; pointers moved, logic unchanged. New
+> imports shifted `apps/api/src/index.ts`: the boot-log exemption is now `:436`, the pathname
+> copies `:477,604`, the per-request D1 lookup `:404-433` and the lines in the carried-over JWT
+> item `:485,621`. The Go CORS wildcard check is now
+> `packages/vm-agent/internal/server/server.go:1230-1241`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

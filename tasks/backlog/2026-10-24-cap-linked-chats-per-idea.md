@@ -1,5 +1,13 @@
 # Cap the chats read per idea, and disclose what was dropped
 
+> **Reconciliation 2026-10-26:** #2436 (`e19aa30c1`), the merge that filed this, already caps chats
+> per idea. `listLinksForTargets` (`project-data/links.ts:216`) keeps at most
+> `operations.resourceLinkBatchPerTargetCap` link rows per idea (admin setting, default 50), strong
+> relations first, then newest link; a capped idea reports `atLeast: ['chats']` ("50+",
+> `idea-work.ts:270`). Markers are read only for kept chats, and the `cs.updated_at DESC` query is
+> gone. Still open: a ranking that serves `deriveIdeaStatus` (an open question on an older-linked
+> chat can be cut), the skew test and the round-trip assertion.
+
 ## Problem
 
 `getIdeaWorkSnapshots` (`apps/api/src/durable-objects/project-data/idea-work.ts`) chunks the

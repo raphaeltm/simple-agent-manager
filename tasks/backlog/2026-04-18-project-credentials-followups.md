@@ -1,5 +1,11 @@
 # Project credentials UI follow-ups
 
+> **Reconciliation 2026-10-26:** #2414 (`0620c1595`) moved the Agents tab into
+> `apps/web/src/components/project-settings/ProjectSettingsAgentsTab.tsx`, so
+> `ProjectSettings.tsx` is 419 lines and Finding 2 is done. Still open: Finding 1.
+> `ProjectAgentCard.tsx:168-176` still renders `AgentKeyCard` without `opencodeProvider`; user
+> scope passes it (`AgentCard.tsx:80`).
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** most of Finding 2. `apps/web/src/pages/ProjectSettings.tsx` went from 712 to 503

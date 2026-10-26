@@ -1,5 +1,9 @@
 # Wire Provider Env Var Overrides
 
+> **Reconciliation 2026-10-26:** Pointer correction only. The non-overridable `vm_location` default
+> `'nbg1'` is on the `nodes` table at `apps/api/src/db/schema.ts:1533` (not `:1330`). The other
+> pointers hold; all three items are still open.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** the HIGH Scaleway item. Placement falls back to the provider's default location

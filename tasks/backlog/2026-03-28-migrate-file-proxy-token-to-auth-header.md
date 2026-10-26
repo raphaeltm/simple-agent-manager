@@ -1,5 +1,12 @@
 # Migrate File Proxy Token to Auth Header
 
+> **Reconciliation 2026-10-26:** Nothing in scope shipped; pointers moved. #2383 (`6a7c2995c`)
+> moved `proxyToVmAgent` (list, find, view, git status, git diff) to
+> `apps/api/src/routes/projects/session-workspace-proxy.ts:254`, which still sets `?token=` at
+> `:266`; in `routes/projects/files.ts` the raw, upload and download URLs carry it at `:159`, `:257`
+> and `:314`. `getFileRawUrl` (`apps/web/src/lib/api/files.ts:394`) and `FileViewerPanel.tsx:218`
+> are unchanged.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** the VM agent side. `requireWorkspaceRequestAuth` accepts

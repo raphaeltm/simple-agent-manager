@@ -1,5 +1,11 @@
 # SAM Tools Post-Review Improvements
 
+> **Reconciliation 2026-10-26:** #2436 (`e19aa30c1`) switched `find_related_ideas` from
+> `status = 'draft'` to the `is_idea = 1` predicate (`find-related-ideas.ts:81`), so it searches
+> every idea, as its description says; that item is resolved. `list_ideas`
+> (`list-ideas.ts:53,85-90`) still filters by status alone, without that predicate, so its
+> default also returns ordinary draft tasks. The other items are still open.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** the dynamic import in `retry_subtask` is gone (static imports at

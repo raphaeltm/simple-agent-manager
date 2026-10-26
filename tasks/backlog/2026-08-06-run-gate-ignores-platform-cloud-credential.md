@@ -1,5 +1,10 @@
 # `/tasks/:taskId/run` pre-check ignores the platform cloud credential
 
+> **Reconciliation 2026-10-26:** Still open: two route tests, and the stale comment still at
+> `shared-project-task-lifecycle-positive.test.ts:166-167`. Pointer corrections for the audit list:
+> the submit gate is now `apps/api/src/services/submit-task-implementation.ts:459` (the route file
+> is 77 lines), and the dispatch gate is `routes/mcp/dispatch-tool.ts:414`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** the gate fix, in f2f29eb62 (landed via PR #1943).

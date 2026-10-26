@@ -1,5 +1,12 @@
 # Fix Task Status Display in Dashboard
 
+> **Reconciliation 2026-10-26:** Still open: the dashboard shows only "Active Tasks"
+> (`apps/web/src/pages/Dashboard.tsx:50-54`) and the card still says "Active"
+> (`ActiveTaskCard.tsx:63`); #2318 (`7164053b4`) only added Waiting/Blocked labels. Pointer fixes:
+> `components/project/ProjectInfoPanel.tsx` was deleted (#1130), `routes/mcp.ts` was split (#489;
+> `complete_task` is `routes/mcp/task-tools.ts:167`), and the dashboard filter is
+> `AGENT_ACTIVITY_ACTIVE_TASK_STATUSES` (`apps/api/src/services/agent-activity.ts:16-21`).
+
 ## Problem
 
 Tasks in the project dashboard always appear as "active" regardless of their actual status. Two issues contribute:

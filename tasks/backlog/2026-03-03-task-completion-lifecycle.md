@@ -1,5 +1,12 @@
 # Task Completion Lifecycle
 
+> **Reconciliation 2026-10-26:** #2428 (`e75d6e179`) feeds `pull_request` and check webhooks into a
+> per-project `pull_requests` snapshot that records merges (`routes/github-webhook.ts:78-82` →
+> `apps/api/src/services/github-pull-request-events.ts:24-97`). Nothing transitions a task on
+> merge yet, and #2436 only asks a person about an idea (`operations/idea-status.ts:217-219`).
+> Pointers moved: Complete action `session-tool-actions.ts:364-377`, `useSessionTools.ts:152`,
+> terminal cleanup `routes/tasks/crud.ts:577-586`, PR row `SessionHeader.tsx:544-549`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

@@ -1,5 +1,9 @@
 # Day-2 deploy ops follow-ups (deferred from PR #1313)
 
+> **Reconciliation 2026-10-26:** no change to the open items; the deploy engine, compose renderer
+> and release callback are untouched since 10-12. Pointer moved: the `DEPLOYMENT_LOG_MAX_SIZE` /
+> `DEPLOYMENT_LOG_MAX_FILE` fields are now `apps/api/src/env.ts:270-271`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** env-configurable log rotation, for compose-publish releases only

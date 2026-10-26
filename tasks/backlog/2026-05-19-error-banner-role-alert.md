@@ -1,5 +1,11 @@
 # Add role="alert" to error banner in project chat
 
+> **Reconciliation 2026-10-26:** still open; pointers moved. `FailureCard` now renders at
+> `apps/web/src/components/project-message-view/FloatingHeader.tsx:116` (#2431, `35f14a954`), and
+> its root is `apps/web/src/components/debug/FailureCard.tsx:143-150`. Neither the card root nor
+> the `failure-card-shell` wrapper has `role="alert"` or `aria-live`; the card's only `aria-live`
+> is on the copy-report button (`:293`).
+
 > **Reconciliation 2026-09-30:** still open, retargeted. #1765 (`8eed3b740`) replaced
 > `ErrorBanner` with `FailureCard` (`apps/web/src/components/debug/FailureCard.tsx`, rendered at
 > `apps/web/src/components/project-message-view/FloatingHeader.tsx:107`). Neither the card root

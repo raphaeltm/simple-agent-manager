@@ -1,5 +1,10 @@
 # Knowledge Graph Hardening — Post-Merge Review Findings
 
+> **Reconciliation 2026-10-26:** No open item shipped; pointers moved. The shared
+> `resolveSessionId` is now `routes/mcp/_helpers.ts:417` (#2371, `8394efa14`),
+> `deleteKnowledgeEntity` is `project-data/index.ts:3336-3339` (still no 404), and the
+> `knowledge_relations` table is `durable-objects/migrations.ts:723-733` (still no UNIQUE).
+
 > **Reconciliation 2026-10-12:** No open item shipped. The `KNOWLEDGE_*` `wrangler.toml [vars]`
 > item is superseded: since #2303 (`d23d66498`) `[vars]` holds only values that differ from the
 > code default (`.claude/rules/07-env-and-urls.md:98`), and the vars are already documented in

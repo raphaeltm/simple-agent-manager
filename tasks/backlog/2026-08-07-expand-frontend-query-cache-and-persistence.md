@@ -1,5 +1,13 @@
 # Expand Frontend Query Caching and Safe Persistence
 
+> **Reconciliation 2026-10-26:** #2426 (`833ebc366`) rebuilt ProjectDeployments and
+> ProjectDeploymentEnvironmentDetail as `pages/deployments/*` on TanStack Query
+> (`pages/deployments/data.ts`) and deleted the five deployment panels, and #2389 (`0a0276390`)
+> replaced ProjectTriggerDetail with `pages/automation/TriggerDetail.tsx`, which uses `useQuery`.
+> Still open: ProjectLibrary, ProjectActivity, ProjectTasks, ProjectNotifications,
+> ProjectMembersSection, ProjectRuntimeConfigSection, `pages/AgentContextPage/`, the admin pages
+> and hooks, and staging validation of persistence.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

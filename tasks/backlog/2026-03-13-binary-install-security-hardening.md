@@ -1,5 +1,9 @@
 # Binary Install Security Hardening
 
+> **Reconciliation 2026-10-26:** Pointer correction only. The unpinned, unverified uv installer is
+> at `packages/vm-agent/internal/acp/gateway.go:1066,1085` (Mistral Vibe, Amp) and
+> `apps/api/Dockerfile.vm-agent-container:28`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

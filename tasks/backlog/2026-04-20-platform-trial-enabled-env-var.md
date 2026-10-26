@@ -1,5 +1,11 @@
 # PLATFORM_TRIAL_ENABLED env var to disable trial on self-hosted
 
+> **Reconciliation 2026-10-26:** still open; `getTrialStatus()` (`platform-trial.ts:61-93`) has no
+> switch. #2304 (`980cef76c`) moved the anonymous `/try` switch from KV to the admin setting
+> `trials.enabled` (`apps/api/src/services/admin-settings-registry.ts:476-480`;
+> `services/trial/kill-switch.ts:34-36`), so the `kill-switch.ts:44-72` pointer is gone. Rule 07
+> now puts new runtime switches in that registry, not in an env var or `[vars]`.
+
 > **Reconciliation 2026-09-30:** still open, but needs rescoping. Platform-trial availability
 > means a platform cloud credential exists and `AI_PROXY_ENABLED` is not false
 > (`apps/api/src/services/platform-trial.ts:27-56`). The anonymous `/try` flow has its own KV

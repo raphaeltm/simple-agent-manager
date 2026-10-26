@@ -1,5 +1,10 @@
 # Pre-existing library UI accessibility & styling fixes
 
+> **Reconciliation 2026-10-26:** no change to the open items; the three components are untouched
+> since 10-12. Pointer moved: the FileActionsMenu Playwright case is now
+> `apps/web/tests/playwright/portal-overlay-audit.spec.ts:590` (#2389, `0a0276390`). Both specs are
+> still quarantined (`visual-audit-quarantine.txt:52`, `:68`).
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** the invalid Tailwind class `bg-[rgba(8,15,12,0.5)]-inset` is gone. The light-mode

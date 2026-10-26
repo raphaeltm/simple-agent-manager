@@ -1,5 +1,12 @@
 # CodSpeed fails PRs on `parseCompose` noise, against a stale baseline
 
+> **Reconciliation 2026-10-26:** The stale base comes from the `on.push.paths` filter in
+> `.github/workflows/codspeed.yml:4-10`, not from failing runs. A main commit that touches nothing
+> under `packages/shared/`, `package.json` or the pnpm lock/workspace files gets no run, which is why
+> `ae5500a1d`, `0895115a7`, `45c7490fd` and `39f1ff62c` have none; every main run that started
+> succeeded, through `a3a802caa`. Still open: the `parseCompose` noise floor, a decision on the
+> filter, and the docs note.
+
 ## Problem
 
 `CodSpeed Performance Analysis` reports `parseCompose - minimal single service` as a ~14%

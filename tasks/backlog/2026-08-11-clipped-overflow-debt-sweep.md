@@ -1,5 +1,12 @@
 # Burn down clipped-overflow debt, then promote the guard to blocking everywhere
 
+> **Reconciliation 2026-10-26:** One row is done: #2426 (`833ebc366`) replaced
+> `deployment-control-surface-audit` with `deployments-ui-audit`, which blocks on clipped overflow
+> (struck through in the table). #2389 (`0a0276390`) deleted `triggers-ui-audit.spec.ts`; the
+> trigger surface's blocking call is now in `automation-audit-helpers.ts:65`. `assertNoOverflow`
+> still only reports (`audit-helpers.ts:218`), and the other ten offender specs are still
+> quarantined.
+
 ## Problem
 
 `assertNoClippedOverflow` (added 2026-08-11 with the trigger-page mobile fix,

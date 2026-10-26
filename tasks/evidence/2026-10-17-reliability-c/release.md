@@ -2,6 +2,11 @@
 
 Status: source and coordinated staging sweep validated, including compatible rollback and fixture cleanup. PR/production remain pending. Do not treat this as a completed release.
 
+> **Reconciliation 2026-10-26:** This record stops before the release. The release finished on
+> 2026-10-17: #2371 merged as `8394efa14`, production run 39044559133 (attempt 2) succeeded, the
+> activation record was published by run 39047889679, and cutover happened at 16:15 UTC. The #2371
+> PR body is the final record.
+
 ## Provenance and scope
 
 Task `01M54TW40EA2VTA54SJ34SRJX1`, chat `3cb2972f-c7c7-43d1-ab2b-8db206e84628`, agent session `01M54V4ZKDD3YWQ7HD2P9G47JR`; assigned named branch `sam/ship-reliability-c-kv-4srjx1`. Primary D1 read (0 writes) confirms profile `01KSSMJCG4EE1XS153GNZX5B09`, `openai-codex`, `gpt-6.1-sol`; local turn context agrees. Preserved source remote `74d5b9486f60152c2d9be9f1ba357da3435355eb`, current main `980cef76cfca70842492d501307e660798155747` merged normally. Original sleeping owner remains untouched. All independently shipped main changes retained.

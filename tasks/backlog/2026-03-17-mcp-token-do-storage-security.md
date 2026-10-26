@@ -1,5 +1,9 @@
 # MCP Token Plaintext Storage in Durable Object State
 
+> **Reconciliation 2026-10-26:** Scope unchanged. #2337 (`8fedc6c5b`) moved the token writes to
+> `apps/api/src/durable-objects/task-runner/agent-session-step.ts:142-174`; the storage, redaction
+> and both revoke sites are where the 2026-10-12 block says.
+
 > **Reconciliation 2026-10-12:** Scope unchanged: the raw token is still kept in TaskRunner state.
 > Pointers moved again. It is set at
 > `apps/api/src/durable-objects/task-runner/agent-session-step.ts:132-164`, persisted whole by

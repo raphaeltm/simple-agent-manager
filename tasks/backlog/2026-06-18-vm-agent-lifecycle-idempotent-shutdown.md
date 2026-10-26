@@ -1,5 +1,11 @@
 # VM Agent Lifecycle Ownership and Idempotent Shutdown
 
+> **Reconciliation 2026-10-26:** no change to the open items: `Stop` still never closes
+> `eventStore` and still stops hosts and PTY sessions under the locks (`server_shutdown.go:26-40`).
+> Pointers moved: `eventstore.New` is now `packages/vm-agent/internal/server/server.go:556`, and
+> `messagereport.Reporter.Shutdown` is `internal/messagereport/reporter.go:307-316`, still a bare
+> `close(r.stopC)`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

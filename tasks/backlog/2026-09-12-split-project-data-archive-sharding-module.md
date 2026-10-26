@@ -1,5 +1,9 @@
 # Split `project-data-archive-sharding.ts` (3,663 lines, 4.5x the mandatory ceiling)
 
+> **Reconciliation 2026-10-26:** Still open, and larger. #2429 (`58ae9d5d2`) grew the DO-side twin
+> `durable-objects/project-data/archive-sharding.ts` to 4,163 lines. The scheduled file is 4,200
+> lines (the 09-30 figure of 4,182 was already stale on 10-12).
+
 > **Reconciliation 2026-09-30:** still open, and bigger: the file is now 4,182 lines. Widen the
 > scope to its DO-side twin, `apps/api/src/durable-objects/project-data/archive-sharding.ts`, which
 > is 4,140 lines and has no split task.

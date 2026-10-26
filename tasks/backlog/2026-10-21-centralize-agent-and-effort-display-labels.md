@@ -1,5 +1,12 @@
 # Centralize agent and effort display labels
 
+> **Reconciliation 2026-10-26:** still open. #2414 (`0620c1595`) moved the profile form's
+> `EFFORT_LABELS` out of `ProfileFormDialog.tsx` into
+> `apps/web/src/components/agent-profiles/profile-form-options.ts:25`, now also read by
+> `profile-form-summaries.ts`. The other cited maps are unchanged: `ProfileSelector.tsx:17`,
+> `ProfileList.tsx:50`, `trigger-form-support.ts:10`, `profile-picker/model.ts:15,21`,
+> `SessionHeaderFormatters.ts:45` and `AdminPlatformCredentials.tsx:32`.
+
 ## Problem
 
 The web app maps agent types and effort levels to display text in several independent places, and they already disagree:

@@ -1,5 +1,10 @@
 # Enforce Per-Project Task Execution Timeout
 
+> **Reconciliation 2026-10-26:** Still open; pointers moved. #2317 (`11d4cc80b`) and #2318
+> (`7164053b4`) shifted `apps/api/src/scheduled/stuck-tasks.ts`: the sweep reads only the env value
+> at `:1104`, and the Clef stall-kill paths are now `:1378-1394` and `:1447-1467`. The per-project
+> value is still never read.
+
 > **Reconciliation 2026-10-12:** Premise update. Since #2232 (`f7e68a284`),
 > `TASK_RUN_MAX_EXECUTION_MS` gates a kill path again: past it, a live `in_progress` task is failed
 > when the Clef classifier judges its turn stalled (quiet at least 60 min, confidence at least 0.8;

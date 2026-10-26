@@ -1,5 +1,9 @@
 # Document GCP Prerequisites for Self-Hosting
 
+> **Reconciliation 2026-10-26:** Nothing shipped. The "GCP provisioning credentials" section is now
+> `apps/www/src/content/docs/docs/guides/self-hosting.mdx:175-188` and still lists none of the five
+> APIs.
+
 > **Reconciliation 2026-10-12:** Nothing shipped. Path fix: the guide is
 > `apps/www/src/content/docs/docs/guides/self-hosting.mdx`; `docs/guides/self-hosting.md` does not
 > exist. Its "GCP provisioning credentials" section (`:170-183`) already covers the infrastructure

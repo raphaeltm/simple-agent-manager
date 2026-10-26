@@ -1,5 +1,13 @@
 # Repo History Bloat: Purge Accidentally-Committed Agent State + Add Size Guard
 
+> **Reconciliation 2026-10-26:** The auto-commit is gone. #2363 (`bde4f9821`, source #2355)
+> removed the completion stage/commit/push/PR path from
+> `packages/vm-agent/internal/server/server.go`, so the "chore: save agent work" commits that
+> carried runtime state and binaries can no longer happen; sleep snapshots stage into a temporary
+> index only (`session_snapshot_wip.go:46-58`). Pointers moved: `.codex/*` is now `.gitignore:66`,
+> the state-file notes `:84-91`, and the stale-binary check `ci.yml:180`. Still open: Raphaël's
+> history-rewrite decision and a byte-size blob guard.
+
 > **Reconciliation 2026-10-12:** The auto-commit now stages the `/do` and `/workflow` state
 > files. #2227 (`97f454fdc`) stopped gitignoring `.do-state.md` and `.workflow-state.md`, so sleep
 > snapshots keep them (`.gitignore:79-86`). The completion auto-commit still runs `git add -A`

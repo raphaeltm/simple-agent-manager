@@ -1,5 +1,11 @@
 # Missing test coverage for project credential overrides (PR #753)
 
+> **Reconciliation 2026-10-26:** nothing in scope shipped. `POST /:id/agent-key` is now
+> `apps/api/src/routes/workspaces/runtime.ts:883` (#2318, #2358). #2318 added two route-level
+> `/agent-key` tests (`apps/api/tests/integration/provider-limit-credential-injection.test.ts`,
+> which mocks `getDecryptedAgentKey`, and `provider-limit-platform-attribution.test.ts`, which
+> seeds only user and platform credentials), so HIGH #6 is still open.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** HIGH #2. `apps/api/tests/unit/routes/project-credentials.test.ts:127-212` covers

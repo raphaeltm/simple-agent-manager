@@ -1,5 +1,10 @@
 # Trial SSE: propagate client aborts into `TRIAL_EVENT_BUS.fetch('/poll')`
 
+> **Reconciliation 2026-10-26:** still open; `apps/api/src/routes/trial/events.ts` is unchanged.
+> The `/poll` fetch passes no signal (`:133-136`) and `cancel()` is still empty (`:182-184`). The
+> cited post-mortem was deleted by #1174 (`cd4c6e83d`); read it with
+> `git show cd4c6e83d^:docs/notes/2026-04-19-trial-sse-named-events-postmortem.md`.
+
 ## Problem
 
 In `apps/api/src/routes/trial/events.ts`, the SSE handler calls

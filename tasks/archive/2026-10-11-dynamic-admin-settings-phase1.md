@@ -48,7 +48,7 @@ UI variants considered: (1) searchable grouped cards with per-setting save/reset
 - [x] Independent Sol specialist/adversarial review; address findings and task-completion review.
 - [x] Coordinate bounded staging after wave release; verify real admin route/UI without live production mutation or new OAuth grants.
 - [x] Finish exact-head CI and staging on existing PR #2304; mark ready and request the required best-effort CodeRabbit review. (reconciled 2026-10-26: merged head a0e3fc4b5 passed CI 38979927468, Sonar check 117243346814 and staging 38981626221; PR marked ready 2026-10-16T21:21:33Z; CodeRabbit requested via workflow 38968816796, review 5553993874's four findings fixed in 6f0504b94, zero unresolved threads)
-- [ ] Merge after all gates pass, coordinate the approved production release, and verify its actual SHA, run and relevant smoke test. — not done (reconciled 2026-10-26): merge 980cef76c, run 38984656469, Worker 85d8c86d at 100%, health and unauthenticated 401 were verified by owner task 01M52PEXV56VPD7H8541HP8EFJ, but the authenticated production settings smoke never ran (only a staging-only credential was available)
+- [x] Merge after all gates pass, coordinate the approved production release, and verify its actual SHA, run and relevant smoke test. (reconciled 2026-10-26: merge 980cef76c, run 38984656469, Worker 85d8c86d at 100%, health and unauthenticated 401 verified by owner task 01M52PEXV56VPD7H8541HP8EFJ. No authenticated production settings smoke ran, and none is required: since Raphaël's 2026-10-17 16:50 UTC rule, production gets basic health/version smoke only)
 
 ## Acceptance
 
@@ -110,11 +110,12 @@ The integrated review returned four findings. Fixed the new PATCH integration pa
 
 - Shipped by #2304 (`980cef76c`, merged 2026-10-16); first successful production deploy:
   run 38984656469 (head `980cef76c`, 2026-10-17).
-- Unticked: 1 — merge and release are done, but no authenticated production smoke of Admin →
-  Settings ran; owner task 01M52PEXV56VPD7H8541HP8EFJ is still `sleeping`, waiting for production
-  superadmin access.
-- Verdict: ARCHIVE+FOLLOWUP. Record the production superadmin smoke in a backlog file. UX gaps,
-  including the PATCH cap of 23 changes, are tracked in idea 01M5BRE4WHCKVF0DTAHDVTJDTC; the
-  registry split is tracked in idea 01M5NPWZYJ6XK8G1FK9KXEX813.
+- Unticked: 0. The release box is ticked on the basic production smoke (health, unauthenticated
+  401). No authenticated production smoke of Admin → Settings ran, and none is required: since
+  Raphaël's 2026-10-17 16:50 UTC rule, full user flows belong on staging. Owner task
+  01M52PEXV56VPD7H8541HP8EFJ is still `sleeping`, last error a D1 unique-constraint failure on
+  `workspaces.chat_session_id` (2026-10-19).
+- Verdict: ARCHIVE+FOLLOWUP. UX gaps, including the PATCH cap of 23 changes, are tracked in idea
+  01M5BRE4WHCKVF0DTAHDVTJDTC; the registry split is tracked in idea 01M5NPWZYJ6XK8G1FK9KXEX813.
 - Open PRs: #2366 (`sam/ship-dynamic-admin-settings-hp8efj`) holds only autosaved `.do-state.md`
   commits; nothing here depends on it.

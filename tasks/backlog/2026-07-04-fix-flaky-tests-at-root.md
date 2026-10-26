@@ -1,5 +1,12 @@
 # Fix All Known Flaky Tests at the Root (No Retries)
 
+> **Reconciliation 2026-10-26:** #2407 (`1b99904ce`) fixed a new instance of this file's 1 s
+> `findBy` timeout class, `apps/web/tests/unit/pages/automation-flows.test.tsx`, with a per-file
+> 5 s wait (`CHAINED_LOAD`); it had failed `main` CI run 39717873907, so that production deploy was
+> skipped. None of the tests named below failed in the 100 latest failed CI runs (10-16 to 10-25).
+> Still open: the global `asyncUtilTimeout`, the fetch stub, the Go replay test (its `replay_done`
+> send is now `packages/vm-agent/internal/acp/session_host.go:476-480`) and the rest of the audit.
+
 > **Reconciliation 2026-10-12:** #2271 (`2a5f2e7d3`) fixed one file this task's pattern audit
 > names: `apps/web/tests/unit/components/repo-selector.test.tsx` now waits until the response has
 > rendered, not just until the mock was called (`:80`, `:98`, `:125`, `:154`, `:181`, `:202`). It

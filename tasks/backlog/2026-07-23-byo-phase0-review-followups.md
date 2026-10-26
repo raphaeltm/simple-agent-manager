@@ -1,5 +1,11 @@
 # BYO Phase 0 — deferred review follow-ups (MEDIUM/LOW)
 
+> **Reconciliation 2026-10-26:** Every item is still open. Pointer corrections: the agent-key route
+> is now `apps/api/src/routes/workspaces/runtime.ts:883` (it still resolves via `workspace.userId`),
+> the preferredNodeId query is `durable-objects/task-runner/node-steps.ts:115-117`, and
+> `node-selector.ts` and `node-selector-user-scope.test.ts` were deleted by #2030 (`1d21cb8e1`),
+> so the "`node-selector.ts` half is already pinned" note no longer holds.
+
 **Date:** 2026-07-23
 **Parent:** `tasks/archive/2026-07-23-byo-user-owned-nodes-phase0.md`, PR for branch `sam/build-byo-user-owned-e2d62t`
 **Source:** Phase-0 local specialist review (security-auditor, cloudflare-specialist, test-engineer, task-completion-validator).

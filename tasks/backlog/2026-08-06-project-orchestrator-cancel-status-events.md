@@ -1,5 +1,10 @@
 # Emit task status events when cancelling an orchestrator mission
 
+> **Reconciliation 2026-10-26:** Still open. #2404 (`2585626df`) added an early return for
+> workflow-owned missions, and `cancelMission` is now
+> `apps/api/src/durable-objects/project-orchestrator/index.ts:207-248`; it still cancels tasks by
+> `mission_id` alone, with no status events or trigger sync.
+
 > **Reconciliation 2026-09-30:** still open. `ProjectOrchestrator.cancelMission()`
 > (`durable-objects/project-orchestrator/index.ts:175-206`) still cancels by `mission_id` alone,
 > with no status events and no trigger sync. PR #1916 moved the dead-target and attention-expiry

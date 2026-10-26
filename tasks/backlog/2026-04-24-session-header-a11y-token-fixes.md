@@ -1,5 +1,11 @@
 # Session Header Accessibility and Design Token Fixes
 
+> **Reconciliation 2026-10-26:** no item fixed; #2389, #2417 and #2431 moved the cited lines. In
+> `SessionHeader.tsx` the undefined tokens are now `:319,509-510`, the task badge `:499-524` (its
+> only icon, completed, at `:521`) and the "Expired" chip `:288-289`. In `SessionToolRail.tsx` the
+> focus-ring buttons are `:157,233,306` and the Details `aria-expanded` is `:171`, still without
+> `aria-controls`.
+
 > **Reconciliation 2026-10-12:** no item fixed, but #2280 (`90cbf4ea4`) and #2238 (`0366b17d9`)
 > moved the cited lines in `apps/web/src/components/project-message-view/SessionHeader.tsx`: the
 > undefined tokens are now `:289,473-474`, and the task badge is `:463-488` (its only icon,

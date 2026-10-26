@@ -1,5 +1,11 @@
 # Multi-installation Cloudflare domain namespaces groundwork
 
+> **Reconciliation 2026-10-26:** still open; pointer moved. `apps/api/src/services/dns.ts` is now
+> a re-export barrel (split in `d8f3b1cb9`, 2026-09-20): `createDNSRecord` (`dns-core.ts:186`)
+> still posts the relative name `ws-${workspaceId}` (`:198`), and `createNodeBackendDNSRecord`
+> (`dns-node-backend.ts:54`) posts `${nodeId.toLowerCase()}.vm` (`:81`). `getApiWorkerRoutes`
+> still sets `zone_name: baseDomain` (`scripts/deploy/sync-wrangler-config.ts:524-536`).
+
 ## Constraint
 
 This work must end in a **draft PR**. Do not mark the PR ready, deploy it to production, or merge it without later explicit authorization from Raphaël.

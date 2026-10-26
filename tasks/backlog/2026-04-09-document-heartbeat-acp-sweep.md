@@ -1,5 +1,11 @@
 # Document HEARTBEAT_ACP_SWEEP_TIMEOUT_MS and Node Heartbeat ACP Piggybacking
 
+> **Reconciliation 2026-10-26:** Still open: the var is still missing from `apps/api/.env.example`
+> and the configuration reference. Pointer fix: the default is at
+> `apps/api/src/routes/node-lifecycle.ts:515` and the backup-sweep comment at `:513-514`. #2304
+> (`980cef76c`) lists the var in `scripts/quality/runtime-tunables-baseline.json:436` as an
+> existing env scalar.
+
 > **Reconciliation 2026-09-30:** still open. `HEARTBEAT_ACP_SWEEP_TIMEOUT_MS` is still missing
 > from `apps/api/.env.example` and the docs configuration reference. Corrections: the default
 > is now 15000 ms, not 8000 (`apps/api/src/routes/node-lifecycle.ts:512`), and the sweep is only

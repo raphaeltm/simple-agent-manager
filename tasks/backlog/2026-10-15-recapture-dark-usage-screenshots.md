@@ -1,5 +1,11 @@
 # Re-capture the dark usage screenshots on /enterprise/cost-control/
 
+> **Reconciliation 2026-10-26:** Still open; the images are unchanged since #2082. Two facts to
+> add: each dark file is byte-identical to its `-light` sibling (same md5 for both PNGs and both
+> WebPs), and the defect reaches a second page. The compute-pools feature page renders
+> `sam-usage-tokens.png` from `apps/www/src/data/features/compute-pools.json:60` through the
+> same dark/light picture pair.
+
 ## Problem
 
 `apps/www/public/images/features/sam-usage-tokens.png` and `sam-usage-compute.png` (the dark-theme

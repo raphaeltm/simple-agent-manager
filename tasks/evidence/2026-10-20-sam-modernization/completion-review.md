@@ -1,6 +1,6 @@
 # Task Completion Validation Report
 
-**Task:** `tasks/backlog/2026-10-20-sam-mastra-modernization.md`
+**Task:** `tasks/archive/2026-10-20-sam-mastra-modernization.md` (moved from `tasks/backlog/` on 2026-10-26)
 **Canonical source:** `.codex/tmp/sam-modernization-canonical.md` (all 552 lines reviewed)
 **Branch:** `sam/implement-ship-top-level-y0qh3t`
 **Date:** 2026-10-20

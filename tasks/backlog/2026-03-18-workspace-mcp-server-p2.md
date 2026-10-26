@@ -1,5 +1,12 @@
 # Workspace-Aware MCP Server — Priority 2 (Extended Tools)
 
+> **Reconciliation 2026-10-26:** None of the 17 tools shipped. New overlap: `exec_with_secrets`
+> (#2332, `faaf861ba`; `apps/api/src/routes/mcp/tool-definitions-secret-exec.ts:11`) runs a
+> command with selected managed secrets and never returns their values, a different answer to the
+> need behind `get_project_secret`. Pointers: `projectGet` is now `connector-read-core.ts:152-194`,
+> and the workspace adapter map (`operations/workspace-adapter.ts:21-37`) still omits
+> `sam_project_get`.
+
 > **Reconciliation 2026-10-12:** None of the 17 tools shipped. New overlap for
 > `get_project_context`: #2294 (`a95b46191`) added the Connector operation `sam_project_get`
 > (`apps/api/src/operations/connector-operations.ts:54-62`, `connector-read-core.ts:146-186`):

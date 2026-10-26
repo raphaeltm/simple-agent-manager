@@ -1,5 +1,12 @@
 # Volume status presentation and create-time provider snapshot
 
+> **Reconciliation 2026-10-26:** Item 1 has lost its consumer. #2426 (`833ebc366`) deleted
+> `DeploymentVolumesPanel.tsx`; the new Saved data section shows "in use by the app" / "stored, not
+> attached" from `attachedServerId` (`apps/web/src/pages/deployments/sections/saved-data.tsx:144`),
+> and no web surface renders `volume.status` now, so the `StatusBadge` and visual-audit items are
+> moot. Still open: item 2, the create-time snapshot at `services/deployment-volumes.ts:254`. The
+> overlap item in `2026-08-04-sleeping-status-renders-as-unknown.md` is now at `:61`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** a `StatusBadge` entry for `attached` (success palette) at

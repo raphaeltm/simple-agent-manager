@@ -1,5 +1,10 @@
 # Web App: Lazy Loading, Error Boundaries, and Accessibility
 
+> **Reconciliation 2026-10-26:** Still open; pointers moved. In `apps/web/src/App.tsx` the lazy
+> pages are now `:22-234`, the `page()` wrapper `:245-247` and the only `ErrorBoundary` `:288`;
+> there is still no route-level or `MarkdownRenderer` boundary. The follow-up textarea is
+> `apps/web/src/components/project-chat/ProjectChatComposer.tsx:327` and still has no `aria-label`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

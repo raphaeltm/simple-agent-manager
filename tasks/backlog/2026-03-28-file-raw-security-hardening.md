@@ -1,5 +1,13 @@
 # File Raw Endpoint Security Hardening
 
+> **Reconciliation 2026-10-26:** The symlink item is partly done. #2383 (`6a7c2995c`) resolves the
+> path with `realpath` and keeps it inside the working tree and outside `.git`
+> (`packages/vm-agent/internal/server/file_confinement.go:86-128`, used by `handleFileRaw` at
+> `files.go:272-279`), but only for shared-chat teammates (`?confine=workdir`); owner requests
+> still read the requested path. Still open: the raw proxy's size check reads only
+> `Content-Length` (`apps/api/src/routes/projects/files.ts:198`), and MIME typing is still by
+> extension.
+
 > **Reconciliation 2026-10-05:** Criterion 1 (the JWT in the `FileViewerPanel` `<img src>`) is also claimed by `2026-03-28-migrate-file-proxy-token-to-auth-header.md`, whose 2026-09-30 block owns it; treat that file as the owner. Nothing else changed: the raw paths are untouched and the vm-agent Content-Length check still defaults to `'0'`.
 
 **Created**: 2026-03-28

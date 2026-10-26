@@ -1,5 +1,11 @@
 # Sidebar Redesign — Tier 2: Contextual Panels and Agent Activity
 
+> **Reconciliation 2026-10-26:** Still open: no merge since 10-12 added the contextual panel or the
+> activity log (#2381 only added shared-session access sync to `pages/workspace/`). Pointer fixes:
+> `ToolCallItem` is defined in `packages/acp-client/src/hooks/useAcpMessages.types.ts:55` (there is
+> no `src/types/`), and its status values are now `pending | in_progress | completed | failed`;
+> `Workspace.tsx` is now `apps/web/src/pages/workspace/index.tsx`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** the Port Forwarding stretch goal, as the "Active Ports" section in

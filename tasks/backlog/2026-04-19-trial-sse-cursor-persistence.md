@@ -1,5 +1,10 @@
 # Trial SSE: persist `nextCursor` to DO storage across restarts
 
+> **Reconciliation 2026-10-26:** still open. The `TrialEventBus` migration (v8, `new_classes`) is
+> now `apps/api/wrangler.toml:423-424`, not line 157. Only the `closed` flag is persisted
+> (`trial-event-bus.ts:66,129,186`); `nextCursor` is still in memory (`:49`). Rule 07 forbids
+> rewriting the applied v8 entry, so option 1 cannot be done by editing it.
+
 ## Problem
 
 `TrialEventBus` DO holds the in-memory event buffer and the

@@ -1,5 +1,9 @@
 # Route-Level Error Message Leakage
 
+> **Reconciliation 2026-10-26:** Still open; one pointer moved. #2319 (`5895f58bb`) added logging
+> context to `apps/api/src/middleware/app-error-handler.ts`; the unchanged AppError pass-through is
+> now `:124-126`. The `github.ts:261`, `tts.ts:69` and `knowledge.ts` pointers still hold.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

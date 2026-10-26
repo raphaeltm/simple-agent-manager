@@ -1,5 +1,12 @@
 # A failed Instant acceptance leaves `creating` node and workspace rows behind
 
+> **Reconciliation 2026-10-26:** Code unchanged since #2430, but the caller list and the backstop
+> section below are incomplete. MCP `dispatch_task` is a third caller, through `launchInstantSession`
+> (`instant-session.ts:200`), and `routes/mcp/dispatch-instant.ts:89-116` also only fails the task.
+> `checkProvisioningTimeouts` (`services/timeout.ts:47`) moves a stuck `creating` workspace to
+> `error`, and node cleanup reaps the node once the task links it; a failure before
+> `instant-session.ts:340-342` writes that link leaves a `creating` node no cleanup phase selects.
+
 Filed from the T7 Cloudflare specialist review (task
 `tasks/active/2026-10-24-start-work-replaces-execute.md`). Pre-existing; not introduced
 by T7, which is why it is tracked here rather than fixed in that branch.

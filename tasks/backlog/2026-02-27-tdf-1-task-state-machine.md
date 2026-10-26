@@ -1,5 +1,12 @@
 # TDF-1: Task State Machine — Hardened State Transitions & Execution Step Tracking
 
+> **Reconciliation 2026-10-26:** No merge since 10-12 changed the task transition writes; the 10-12
+> gaps stand. Pointers moved: the conversation-close fence is now
+> `apps/api/src/routes/tasks/crud.ts:878-946` and its separate status event `:950`;
+> `setTaskStatus`'s unfenced UPDATE is `routes/tasks/_helpers.ts:303-306` and its event `:309`.
+> New path: #2436 (`e19aa30c1`) moves idea rows through `operations/idea-transitions.ts:121-131`,
+> one batch, but its UPDATE has no status predicate.
+
 > **Reconciliation 2026-10-12:** #2264 (`23d5c8865`) gave one non-failure transition optimistic
 > locking. Conversation close writes `completed` only if status, `updatedAt` and `workspaceId`
 > still match what it read, else returns 409 (`apps/api/src/routes/tasks/crud.ts:821-890`). Test

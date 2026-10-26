@@ -1,5 +1,12 @@
 # Playwright audit specs crash the app shell when `/api/credentials` is unmocked
 
+> **Reconciliation 2026-10-26:** Partly done. #2439 (`d41ff95d6`) moved `setupAuditRoutes` to
+> `apps/web/tests/playwright/audit-routes.ts:97` and added an opt-in shell helper,
+> `respondToAppShellRoute` (`:72`, answers `/api/credentials` and `/api/github/*` with `[]`), plus
+> `setupProjectAuditRoutes` (`:24`), which also dismisses the wizard. Only the two ideas audits use
+> them. `setupAuditRoutes` still falls back to `{}` (`:106`) and dismisses nothing, and
+> `admin-trials-audit.spec.ts` is unchanged.
+
 ## Problem
 
 `setupAuditRoutes` answers every unmatched `/api/**` request with `{}`. The app shell now

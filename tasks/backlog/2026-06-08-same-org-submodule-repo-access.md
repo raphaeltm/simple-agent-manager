@@ -1,5 +1,11 @@
 # Same-org GitHub submodules under tightly scoped workspace tokens
 
+> **Reconciliation 2026-10-26:** still no Go test exercises `initSubmodules`
+> (`packages/vm-agent/internal/bootstrap/bootstrap.go:872`). Shipped-code pointers moved: the
+> `projectGithubRepositories` table is at `apps/api/src/db/schema.ts:757`;
+> `resolveAdditionalRepositoryIds` is at `apps/api/src/routes/workspaces/runtime.ts:806` and the
+> scoped mint at `:1795-1816` (#2318, `7164053b4`, added 18 lines above them).
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** the whole feature, in PR #1253 (`626d7c786`, merged 2026-06-09): migration

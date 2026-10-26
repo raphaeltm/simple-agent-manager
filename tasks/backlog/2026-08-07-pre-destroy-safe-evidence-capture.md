@@ -1,5 +1,9 @@
 # Pre-Destroy Safe Evidence Capture for Reaped Nodes
 
+> **Reconciliation 2026-10-26:** Still open; cleanup still destroys a node without a capture
+> attempt. Pointer correction: `destroyNodeForCleanup` is now
+> `apps/api/src/scheduled/node-cleanup/shared.ts:302`.
+
 ## Problem
 
 When node cleanup reaps a node (stale heartbeat, max lifetime, incompatible build, stopped handoff), `destroyNodeForCleanup` (`apps/api/src/scheduled/node-cleanup/shared.ts:200`) destroys the VM without capturing any evidence. The operator-grade debug package is unreachable exactly when it is most needed: every node diagnostic route is hard-gated on `status === 'running'`, so a failed-then-reaped node leaves behind only the narrow error-triggered incident snapshot (if an error-level report fired while the agent was alive).

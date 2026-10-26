@@ -1,5 +1,9 @@
 # ACP Subagent Idle Detection Fix
 
+> **Reconciliation 2026-10-26:** Nothing in scope shipped; pointers moved. `runtimeWorkState` is
+> now `apps/web/src/lib/api/sessions.ts:132` and is still never rendered; the lease env vars are
+> `apps/api/src/env.ts:307-308`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** a harness work lease keeps the session awake while Claude background tasks run

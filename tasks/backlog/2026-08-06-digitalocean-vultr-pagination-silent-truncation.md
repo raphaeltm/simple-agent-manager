@@ -1,5 +1,8 @@
 # DigitalOcean/Vultr pagination silently truncates on cap exhaustion
 
+> **Reconciliation 2026-10-26:** Still open; no provider code changed. Pointer correction:
+> `HETZNER_MAX_LIST_PAGES` is now declared at `apps/api/src/env.ts:606`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** the Hetzner half of the Principle XI item. `maxListPages` is a runtime option

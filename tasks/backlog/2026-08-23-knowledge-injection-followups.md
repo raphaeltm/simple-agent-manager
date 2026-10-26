@@ -1,5 +1,10 @@
 # Follow-ups from knowledge-injection relevance ranking (R3)
 
+> **Reconciliation 2026-10-26:** Still open; no item changed. #2430 (`2a8f6d58b`) added the idea
+> block to `get_instructions`, so `instruction-tools.ts` is now 395 lines and item 3's four
+> `parse*(...) || DEFAULT` limits moved to `:143-153`. `knowledge.ts` (747 lines) and
+> `services/project-data-policies.ts:10-13` are unchanged.
+
 > **Reconciliation 2026-10-12:** item 2 is half done. #2213 (`57aaa057b`) moved the knowledge
 > formatters (`KnowledgeEntry`, `formatKnowledgeDirectives`, `formatKnowledgeEntityIndex`,
 > `buildKnowledgeInstructions`) to `routes/mcp/instruction-formatting.ts:138-294`, and

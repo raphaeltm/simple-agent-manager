@@ -1,5 +1,13 @@
 # Project "Node Idle Timeout" setting has no consumer
 
+> **Reconciliation 2026-10-26:** Partly done. #2360 (`239de5913`) removed the dead Node Idle
+> Timeout control, and its "now wired up" comment, from `ScalingSettings.tsx`. The API still
+> validates and stores the field (`routes/projects/project-update.ts:63,210-218,324-327`), the
+> mapper returns it (`lib/mappers.ts:180`), and the shared types and schema keep it
+> (`packages/shared/src/types/project.ts:57,141`, `schemas/projects.ts:52`). Still open: that API
+> surface, the column comment and the regression guard; the MIN/MAX constants live in
+> `packages/shared/src/constants/node-pooling.ts:185,188`, not `scaling.ts`.
+
 ## Problem
 
 `projects.node_idle_timeout_ms` is exposed as an editable field in the project

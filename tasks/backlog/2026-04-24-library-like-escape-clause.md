@@ -1,5 +1,9 @@
 # Fix LIKE ESCAPE clause in library search queries
 
+> **Reconciliation 2026-10-26:** still open; the library search still has no `ESCAPE` clause.
+> #2399 (`cc2d968df`) shifted the `like()` calls in `apps/api/src/services/file-library.ts` to
+> `:439,457,462,547,559,563`; `file-library-directories.ts:155` is unchanged.
+
 > **Reconciliation 2026-09-30:** still open, and more serious than worded. Without an `ESCAPE`
 > clause SQLite treats `\` as a literal, so library searches for names containing `_` or `%` find
 > nothing. Affected: `apps/api/src/services/file-library.ts:446,464,469,554,566,570` and

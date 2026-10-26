@@ -1,5 +1,12 @@
 # Consolidate remaining hand-rolled visibility-aware polls onto `useVisibilityAwarePoll`
 
+> **Reconciliation 2026-10-26:** Progress on the out-of-scope list. #2426 (`833ebc366`) replaced
+> the two hardcoded `ProjectDeploymentEnvironmentDetail.tsx` polls with TanStack Query
+> `refetchInterval` (`pages/deployments/data.ts:52,87`, env-configurable `DEPLOYMENTS_*_POLL_MS` in
+> `lib/poll-intervals.ts:68-79`), which pauses on a hidden tab. New: #2398 (`d431ea877`) added a
+> hand-rolled `visibilitychange` listener in `components/sam/useSamLiveTurn.ts:40` (it gates a live
+> stream, not a poll) instead of using `useDocumentVisible`. Everything else below is unchanged.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** `useRecentChats` moved to TanStack Query (PR #1860), which pauses

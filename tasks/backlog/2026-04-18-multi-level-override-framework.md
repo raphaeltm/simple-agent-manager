@@ -1,5 +1,13 @@
 # Multi-Level Override Framework (Meta-Spec)
 
+> **Reconciliation 2026-10-26:** #2414 (`0620c1595`) added callable AI models, resolved skill →
+> profile → project → SAM defaults with "Same as project/profile" inherit options
+> (`apps/api/src/services/agent-models/access.ts:1-6`). #2399 (`cc2d968df`) made
+> `skills.agent_type` nullable, so a skill overrides the profile's agent only when it sets one
+> (`apps/api/src/services/skills.ts:327`). Still open: phases 3-6 and 8, the audit-trail source
+> tier and the table refresh. The triggers table is now `apps/api/src/db/schema.ts:2902`, still
+> with no model or permission columns.
+
 > **Reconciliation 2026-10-12:** #2261 (`ab76c0f42`) now stores the resolved agent type, model,
 > effort and permission mode on each agent session the task runner or an Instant session starts
 > (`agent_sessions.runtime_contract_json`, written at

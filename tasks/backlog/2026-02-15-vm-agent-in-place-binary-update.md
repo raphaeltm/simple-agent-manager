@@ -1,5 +1,12 @@
 # VM Agent In-Place Binary Update Feature
 
+> **Reconciliation 2026-10-26:** Still open: no merge since 10-12 touched this scope, and nodes still
+> download vm-agent once during cloud-init (`packages/cloud-init/src/template.ts:70`). Pointer fixes:
+> the node page is `apps/web/src/pages/Node.tsx` (no `NodeDetail.tsx` exists), and `lib/api.ts` was
+> split into `apps/web/src/lib/api/nodes.ts` (#597). The build already stamps
+> `internal/sysinfo.Version` (`packages/vm-agent/Makefile:11`) and heartbeats report it as
+> `agentVersion` (`internal/server/health.go:171`); there is no `GET /version` or `POST /update`.
+
 **Status:** backlog  
 **Priority:** medium  
 **Estimated Effort:** 2 weeks  

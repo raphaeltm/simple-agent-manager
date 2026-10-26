@@ -1,5 +1,9 @@
 # Extract API Composition Root Modules
 
+> **Reconciliation 2026-10-26:** still open. `apps/api/src/index.ts` is now 986 lines (942 on
+> 10-12): nine merges added routes, handlers or exports, most from #2413 (+15) and #2417 (+14). It
+> passes the size check only through `EXEMPT_FILES` (`scripts/quality/check-file-sizes.ts:43`).
+
 > **Reconciliation 2026-09-30:** still open. PR #1355 was closed unmerged on 2026-07-20, and
 > `apps/api/src/index.ts` is now 939 lines.
 

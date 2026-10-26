@@ -1,5 +1,12 @@
 # Migrate Remaining Source-Contract UI Tests in Project Agent/Provider Defaults Suites
 
+> **Reconciliation 2026-10-26:** All 7 assertions are still source-text checks. #2414
+> (`0620c1595`) had to repoint assertion #4's `page` to
+> `components/project-settings/ProjectSettingsAgentsTab.tsx` after the settings page was split
+> into tabs, the fragility this file describes. The blocks are now
+> `apps/api/tests/unit/project-agent-defaults.test.ts:416-441` and
+> `apps/api/tests/unit/project-default-provider.test.ts:472-494`.
+
 **Created**: 2026-08-11
 **Priority**: Medium
 **Context**: AI-slop debt burn-down PR (`tasks/archive/2026-08-10-ai-slop-debt-burndown.md`)

@@ -1,5 +1,10 @@
 # Leak-sweep test coverage gaps (follow-up from PR #1245)
 
+> **Reconciliation 2026-10-26:** no change to M2, L1, L2, L3 or L4; the sweep service, admin route
+> and `makeSweepDb` are untouched since 10-12. Pointer moved: the webhook owner-guard tests (L3)
+> are now `apps/api/tests/unit/routes/github-installations.test.ts:1153-1241` (#2327 `64e8d4f8b`,
+> #2304 `980cef76c`), still with numeric ids only.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** M1, the `afterId` cursor case that keeps the personal-type filter

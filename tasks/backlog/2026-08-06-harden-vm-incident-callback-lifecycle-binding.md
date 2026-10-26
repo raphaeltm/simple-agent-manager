@@ -1,5 +1,9 @@
 # Harden VM Incident Callback Lifecycle and Workspace Binding
 
+> **Reconciliation 2026-10-26:** Still open. Pointer correction: the deleted-node `/errors` 410 test
+> is now `apps/api/tests/workers/route-auth-validation.test.ts:920` (#2276 grew the setup above it;
+> `:901` is now the origin-CA test).
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

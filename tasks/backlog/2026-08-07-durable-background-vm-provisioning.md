@@ -1,5 +1,11 @@
 # Make Background VM Provisioning Durable Beyond `waitUntil()`
 
+> **Reconciliation 2026-10-26:** Still open; all three paths still provision inside HTTP
+> `waitUntil()`. Pointers moved: the environment-start `waitUntil` is now
+> `apps/api/src/routes/deployment-environment-lifecycle.ts:437` (#2426; `:590` is now the stop
+> route), release placement is `routes/deployment-release-placement.ts:444` (#2409), and the
+> snapshot relay is `routes/workspaces/session-snapshots.ts:242`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** node POST and workspace create no longer provision inside HTTP `waitUntil()`

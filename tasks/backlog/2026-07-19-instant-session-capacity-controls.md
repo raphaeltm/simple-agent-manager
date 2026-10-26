@@ -1,5 +1,12 @@
 # Instant-Session Capacity Controls: Per-User Quota + Real Request Cancellation
 
+> **Reconciliation 2026-10-26:** Still open; there is no per-user Instant quota. Pointers moved:
+> `acceptInstantSession` is now `apps/api/src/services/instant-session.ts:262-416`, and
+> `VM_AGENT_CONTAINER_MAX_INSTANCES` is at `scripts/deploy/sync-wrangler-config.ts:64,178`,
+> `.github/workflows/deploy-reusable.yml:925` and
+> `scripts/quality/sync-wrangler-config.test.ts:803`. #2386 (`f61e07d2a`) added an
+> `assertLaunchAllowed` fence for SAM-assistant dispatches, which is not a per-user quota.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

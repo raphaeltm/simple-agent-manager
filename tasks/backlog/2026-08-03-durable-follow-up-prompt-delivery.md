@@ -1,5 +1,12 @@
 # Durable follow-up prompt delivery for existing chat sessions
 
+> **Reconciliation 2026-10-26:** Still open. #2381 (`110730c2a`) moved `sendFollowUpPrompt` to
+> `apps/web/src/lib/api/sessions.ts:411-424` (still no key, and its type still omits
+> `deliveryId`), and the `mailbox.delivery_updated` broadcast is now
+> `prompt-delivery-runner.ts:276`. #2381's new "Not delivered" label (`message-attribution.ts:35`)
+> covers only prompts cancelled because the sender's shared access ended; queued, delivering and
+> failed states and retry are still missing.
+
 > **Reconciliation 2026-10-12:** The server half of the idempotency item shipped. #2291
 > (`d4fa4f372`) runs `POST .../sessions/:sessionId/prompt` through `cliOperationReceipt`
 > (`apps/api/src/routes/chat-prompt-route.ts:17-30`), so a retry that repeats the same

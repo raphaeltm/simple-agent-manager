@@ -1,5 +1,11 @@
 # Migrate `cancelStalledPrompt` onto `recordTurnEnd` / `publishTurnEnd`
 
+> **Reconciliation 2026-10-26:** Still open; `cancelStalledPrompt` (`reconciliation.ts:494`) still
+> writes `idle` directly at `:524`. Pointer fix: the ProjectData caller is no longer at
+> `project-data/index.ts:833`. The three hooks are built in `sessionActivityHooks()` at `:883`, and
+> the reconciliation call is at `:3103`. `ReconciliationProcessingHooks` is in
+> `reconciliation-dead-target.ts:11`.
+
 **Source:** task-completion-validator finding (MEDIUM) during the session-activity
 state machine PR. Related: `.claude/rules/57-write-only-cross-boundary-state.md`,
 `.claude/rules/44-dual-write-migration-enumerate-writers.md`,

@@ -1,5 +1,12 @@
 # Notification UI — Accessibility & UX Follow-ups
 
+> **Reconciliation 2026-10-26:** Nothing in scope shipped; pointers moved. #2381 (`110730c2a`)
+> moved `NotificationItem` and `NotificationGroup` to
+> `apps/web/src/components/notifications/NotificationItem.tsx`: `text-fg-secondary` is at `:84,207`,
+> the hover-only actions at `:149`, the group toggle without `aria-controls` at `:195-200` and the
+> `text-[9px]` group badge at `:213`. In `NotificationCenter.tsx` the dialog (still no focus trap)
+> is `:189-195`, the tabs `:214-258`, the tab badge `:252` and "Load more" `:334,369`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

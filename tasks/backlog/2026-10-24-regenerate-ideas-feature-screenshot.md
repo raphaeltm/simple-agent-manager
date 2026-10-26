@@ -1,5 +1,12 @@
 # Regenerate the Ideas marketing screenshot for Start work
 
+> **Reconciliation 2026-10-26:** The image is unchanged, and #2439 (`d41ff95d6`) has since replaced
+> the page it shows. `apps/web/src/pages/ideas/IdeaPage.tsx` has a status card and The idea, Work,
+> Updates and Related sections, with no Conversations sidebar, so the alt text and the "Link chat
+> context" caption need rewriting with the new image. The capture test
+> `apps/web/tests/playwright/marketing-shots-workspace.spec.ts:573` still asserts `Execute this idea`
+> and `Conversations (3)`.
+
 `apps/www/src/data/features/automation.json` points at
 `/images/features/sam-ideas-detail.png`, which still shows the idea detail page with the
 old green **Execute** button. T7 replaced it with **Start work**, which opens a sheet.

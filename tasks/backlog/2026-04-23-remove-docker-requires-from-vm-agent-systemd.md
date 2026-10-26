@@ -1,5 +1,10 @@
 # Remove `Requires=docker.service` from vm-agent systemd unit
 
+> **Reconciliation 2026-10-26:** still open (the test only). #2275 (`5199e5771`) moved the
+> vm-agent unit to `packages/cloud-init/src/template.ts:188-193` and the metadata-block
+> `Requires=docker.service` to `:721-722`. The only `Requires=docker.service` assertion is still
+> on `sam-metadata-block.service` (`packages/cloud-init/tests/generate.test.ts:1679`).
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** PR #733 (`83bdc3e49`, 2026-04-16) removed `Requires=docker.service` from the

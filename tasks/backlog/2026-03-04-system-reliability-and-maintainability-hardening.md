@@ -1,5 +1,12 @@
 # System Reliability and Maintainability Hardening
 
+> **Reconciliation 2026-10-26:** #2304 (`980cef76c`) added a typed admin-settings registry with
+> defaults, validation and audited overrides for runtime tunables
+> (`apps/api/src/services/admin-settings-registry.ts`) and a CI ratchet on new `Env` scalars
+> (`pnpm quality:runtime-tunables`). `Env` is not split (`env.ts` is 1,584 lines). Pointers moved:
+> the subdomain proxies are `apps/api/src/index.ts:208-698` (file now 986 lines), `VM_AGENT_PORT` is
+> read at `:602` and the wrangler binding check is `.github/workflows/ci.yml:600`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:**

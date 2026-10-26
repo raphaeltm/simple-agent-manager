@@ -1,5 +1,11 @@
 # Amp Project Chat MCP Wiring
 
+> **Reconciliation 2026-10-26:** still open: no staging proof that Amp calls a SAM MCP tool. The
+> shipped wiring cited below moved between 09-30 and 10-12 (#2202, #2208, #2217, #2224, #2261):
+> token minting and `mcpServers` are now at
+> `apps/api/src/routes/workspaces/agent-sessions.ts:197-249`, and `createAgentSessionOnNode` at
+> `apps/api/src/services/node-agent.ts:533-558`.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** the code, via #1094 (`afdcfde9f`). The archived task

@@ -1,5 +1,11 @@
 # Notification Phase 2 — Test Coverage Gaps
 
+> **Reconciliation 2026-10-26:** No listed gap closed. Pointer: the `notification side-effects`
+> block is now `apps/api/tests/unit/routes/mcp.test.ts:4815`. #2381 (`110730c2a`) added
+> `apps/web/tests/unit/components/notification-types.test.tsx:151`, which clicks a notification in
+> the real `NotificationCenter` (hook mocked) and asserts navigation; gap 19's `markRead` branches
+> are still untested.
+
 > **Reconciliation 2026-10-12:** No notification tests landed this week. Pointer fixes: gap 9's
 > options cap moved with `request_human_input` to
 > `apps/api/src/routes/mcp/human-input-tool.ts:80-81` (#2213, `57aaa057b`), and gap 6's

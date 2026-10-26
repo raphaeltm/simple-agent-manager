@@ -1,5 +1,10 @@
 # Fix colon refspec injection in git show
 
+> **Reconciliation 2026-10-26:** Still open; pointers moved. #2383 (`6a7c2995c`) shifted
+> `packages/vm-agent/internal/server/git.go`: `sanitizeGitRef`/`isValidRefChar` are now `:404-435`,
+> `sanitizeFilePath` (no `:` check) `:378` and the `ref+":"+showPath` concatenation `:266`.
+> Confined teammate requests go through `confinedGitPath`, which does not reject `:` either.
+
 > **Reconciliation 2026-09-30:** still open, but likely not exploitable. `sanitizeGitRef` /
 > `isValidRefChar` (`packages/vm-agent/internal/server/git.go:355–385`) ban `:` and `{` in the
 > ref, so git always splits `ref:path` at the first colon and a colon in the path cannot change
