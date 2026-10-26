@@ -6,6 +6,9 @@
 > skipped. None of the tests named below failed in the 100 latest failed CI runs (10-16 to 10-25).
 > Still open: the global `asyncUtilTimeout`, the fetch stub, the Go replay test (its `replay_done`
 > send is now `packages/vm-agent/internal/acp/session_host.go:476-480`) and the rest of the audit.
+> Unconfirmed candidates, each failing twice on unrelated branches since 10-16:
+> `comment-send-to-agent-gating.test.tsx` (runs 39496108969, 39494666312), `connector-oauth.test.ts`
+> (39421294504, 40045261908) and `task-callback-auth-routing.test.ts` (40074974736, 40055327379).
 
 > **Reconciliation 2026-10-12:** #2271 (`2a5f2e7d3`) fixed one file this task's pattern audit
 > names: `apps/web/tests/unit/components/repo-selector.test.tsx` now waits until the response has

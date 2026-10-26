@@ -5,6 +5,9 @@
 > `internal/workspacegit/` extraction item is moot; only the `gitPushResult` payload type is left
 > (`server.go:1584-1598,1669-1678`). Sizes above are stale: `session_host.go` 810 lines,
 > `workspaces.go` 2,259, `server.go` 1,697, `bootstrap.go` 3,306. The other items are still open.
+> Also dead since #2363: `WorkspaceRuntime.DefaultBranch` is still set and persisted
+> (`workspaces.go:611`, `workspace_routing.go:299-300,420`) but nothing reads it, and its comments
+> (`server.go:205`, `workspace_routing.go:49`) still say it feeds the push guard.
 
 **Status:** backlog
 **Priority:** high
