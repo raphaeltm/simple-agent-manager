@@ -1,6 +1,7 @@
 import {
   DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
   DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
+  GITHUB_TRIGGER_EVENT_TYPES,
 } from '@simple-agent-manager/shared';
 /**
  * GitHub Trigger Handler
@@ -75,7 +76,7 @@ export async function handleGitHubEventForTriggers(
   }
 
   // Only process event types we support for triggers
-  const supportedEvents = ['issues', 'issue_comment', 'pull_request', 'push'];
+  const supportedEvents: readonly string[] = GITHUB_TRIGGER_EVENT_TYPES;
   if (!supportedEvents.includes(eventType)) {
     return {
       processed: false,

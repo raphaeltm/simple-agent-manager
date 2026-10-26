@@ -532,6 +532,7 @@ describe('webhook trigger management vertical slice', () => {
         routed: 1,
         dropped: 1,
         unconfirmed: 1,
+        retentionDays: 90,
       });
     });
 

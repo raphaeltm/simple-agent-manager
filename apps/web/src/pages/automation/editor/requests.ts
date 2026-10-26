@@ -78,7 +78,7 @@ function githubQueueConfig(state: EditorState) {
   return {
     subjectAffinity: state.github.subjectAffinity,
     queueMaxPending: Number(state.github.queueMaxPending),
-    queueTtlSeconds: Number(state.github.queueTtlSeconds),
+    queueTtlSeconds: Math.round(Number(state.github.queueTtlHours) * 3600),
   };
 }
 
@@ -92,6 +92,13 @@ function githubInput(state: EditorState) {
     bodyContains: state.github.bodyContains,
     branches: state.github.branches,
     ignoreDrafts: state.github.ignoreDrafts,
+    actors: state.github.actors,
+    addedLabel: state.github.addedLabel,
+    authorAssociation: state.github.authorAssociation,
+    ignoreBots: state.github.ignoreBots,
+    commentContains: state.github.commentContains,
+    isPullRequest: state.github.isPullRequest,
+    reviewStates: state.github.reviewStates,
   };
 }
 
@@ -308,18 +315,6 @@ export function validateStep(
       const filters = buildGitHubFilters(githubInput(state));
       if (!areGitHubTriggerActionsValid(state.github.eventType, filters.actions))
         errors.github = 'Some actions do not exist for this GitHub event.';
-      const queue = githubQueueConfig(state);
-      if (
-        ![queue.queueMaxPending, queue.queueTtlSeconds].every(
-          (value) => Number.isSafeInteger(value) && value > 0
-        )
-      )
-        errors.github = 'Event limit and maximum wait must be positive whole numbers.';
-      else {
-        const expiry = new Date(Date.now() + queue.queueTtlSeconds * 1000);
-        if (!Number.isFinite(expiry.getTime()) || expiry.toISOString().length !== 24)
-          errors.github = 'Maximum wait is too large.';
-      }
     }
     if (state.start === 'webhook' && state.webhook.filters.some((filter) => !filter.path.trim()))
       errors.webhook = 'Every filter needs a path, like event.action.';
@@ -389,6 +384,18 @@ export function validateStep(
     if (isTrigger && !state.name.trim()) errors.name = 'Give it a name.';
     if (state.name.trim().length > DEFAULT_TRIGGER_NAME_MAX_LENGTH)
       errors.name = `Keep the name under ${DEFAULT_TRIGGER_NAME_MAX_LENGTH} characters.`;
+    if (state.start === 'github') {
+      const queue = githubQueueConfig(state);
+      if (!Number.isSafeInteger(queue.queueMaxPending) || queue.queueMaxPending < 1)
+        errors.queueMaxPending = 'Pending event limit must be a positive whole number.';
+      if (!Number.isSafeInteger(queue.queueTtlSeconds) || queue.queueTtlSeconds < 1)
+        errors.queueTtlHours = 'Maximum wait must be at least one second.';
+      else {
+        const expiry = new Date(Date.now() + queue.queueTtlSeconds * 1000);
+        if (!Number.isFinite(expiry.getTime()) || expiry.toISOString().length !== 24)
+          errors.queueTtlHours = 'Maximum wait is too large.';
+      }
+    }
     if (isTrigger) {
       const { maxConcurrent } = state.trigger;
       if (

@@ -663,6 +663,7 @@ export type {
   CreateTriggerResponse,
   CronTemplateContext,
   CronValidationResult,
+  GitHubFilterPreviewResponse,
   GitHubTemplateContext,
   GitHubTriggerConfig,
   GitHubTriggerEventType,

@@ -13,8 +13,8 @@ for (const scenario of ['normal', 'many-long', 'empty', 'error'] as const) {
       githubConfig: { ...TRIGGERS.github.githubConfig, subjectAffinity: true },
       queueStats:
         scenario === 'empty'
-          ? { queued: 0, routed: 0, dropped: 0, unconfirmed: 0 }
-          : { queued: 2, routed: 3, dropped: 3, unconfirmed: 1 },
+          ? { queued: 0, routed: 0, dropped: 0, unconfirmed: 0, retentionDays: 90 }
+          : { queued: 2, routed: 3, dropped: 3, unconfirmed: 1, retentionDays: 90 },
       ...(scenario === 'many-long'
         ? { name: 'Follow up on repository issues and pull requests '.repeat(6) }
         : {}),
@@ -49,9 +49,9 @@ for (const scenario of ['normal', 'many-long', 'empty', 'error'] as const) {
                 : null,
       taskId: null,
       queueExpiresAt: i % 8 === 7 ? new Date(Date.now() + 60000).toISOString() : null,
-      routedTaskId: i % 8 === 2 || i % 8 === 3 || i % 8 === 6 ? 'active-run' : null,
+      routedTaskId: [1, 2, 3, 5, 6].includes(i % 8) ? 'active-run' : null,
       subjectKey: 'github:42:7',
-      routedSessionId: i % 8 === 2 ? 'active-session' : null,
+      routedSessionId: [1, 2, 5].includes(i % 8) ? 'active-session' : null,
       eventType: 'github.issue_comment.created',
       renderedPrompt: 'Follow up comment',
       errorMessage: null,
@@ -72,7 +72,7 @@ for (const scenario of ['normal', 'many-long', 'empty', 'error'] as const) {
     if (scenario === 'empty') await expect(page.getByTestId('github-event-queue')).toHaveCount(0);
     else
       await expect(page.getByTestId('github-event-queue')).toContainText(
-        'GitHub events: 2 waiting now · Retained history: 3 delivered · 3 dropped · 1 unconfirmed'
+        'GitHub events: 2 waiting now · History (up to 90 days): 3 delivered · 3 dropped · 1 unconfirmed'
       );
     if (scenario === 'normal') {
       await expect(page.getByText('Queued until a run finishes')).toBeVisible();
@@ -110,6 +110,10 @@ for (const scenario of ['normal', 'many-long', 'empty', 'error'] as const) {
           .filter({ hasText: 'the target chat is unavailable' })
           .getByRole('link')
       ).toHaveCount(0);
+      await page.getByText('Advanced', { exact: true }).click();
+      await expect(page.getByText('Reuse this automation’s issue or PR chat')).toBeVisible();
+      await expect(page.getByText('24 hours', { exact: true })).toBeVisible();
+      await audit(page, 'github-trigger-queue-settings');
       await page.goto(`/projects/${PROJECT_ID}/automation/history?item=trigger:${trigger.id}`);
       await expect(
         page.getByRole('link', { name: /Open chat for .*Delivered to the running chat/ })
@@ -123,16 +127,22 @@ test('GitHub queue controls', async ({ page }, info) => {
   test.skip(!['iPhone SE (375x667)', 'Desktop (1280x800)'].includes(info.project.name));
   await setupAutomationMocks(page);
   await page.goto(`/projects/${PROJECT_ID}/automation/trigger/${TRIGGERS.github.id}/edit`);
-  await expect(page.getByRole('group', { name: 'When events overlap' })).toBeVisible();
+  await page.getByTestId('automation-editor-next').click();
+  await page.getByTestId('automation-editor-next').click();
+  await page.getByText('Advanced options', { exact: true }).click();
+  await expect(page.getByRole('group', { name: 'When GitHub events overlap' })).toBeVisible();
+  await expect(page.getByRole('checkbox', { name: /One run at a time/ })).toBeVisible();
   await expect(page.getByLabel('Pending event limit')).toHaveValue('50');
-  await expect(page.getByLabel('Maximum wait (seconds)')).toHaveValue('86400');
+  await expect(page.getByLabel('Maximum wait (hours)')).toHaveValue('24');
   await audit(page, 'github-trigger-queue-controls-default');
   await page.getByRole('checkbox', { name: /Keep issue and PR follow-ups/ }).check();
   await page.getByLabel('Pending event limit').fill('7');
-  await page.getByLabel('Maximum wait (seconds)').fill('120');
+  await page.getByLabel('Maximum wait (hours)').fill('0.5');
   await audit(page, 'github-trigger-queue-controls-enabled');
-  await page.getByLabel('Maximum wait (seconds)').fill('0');
+  await page.getByLabel('Maximum wait (hours)').fill('0');
   await page.getByTestId('automation-editor-next').click();
-  await expect(page.getByRole('alert')).toContainText('positive whole numbers');
+  await expect(page.getByRole('alert')).toContainText('at least one second');
+  await expect(page.getByLabel('Maximum wait (hours)')).toHaveAttribute('aria-invalid', 'true');
+  await expect(page.getByLabel('Maximum wait (hours)')).toHaveAttribute('aria-describedby', /.+/);
   await audit(page, 'github-trigger-queue-controls-invalid');
 });

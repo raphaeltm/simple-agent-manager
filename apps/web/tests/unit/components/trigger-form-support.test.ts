@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  buildGitHubConfigForForm,
   buildGitHubFilters,
   joinEmailList,
   looksLikeEmail,
@@ -83,5 +84,51 @@ describe('email sender list helpers', () => {
     expect(looksLikeEmail('not-an-email')).toBe(false);
     expect(looksLikeEmail('missing-domain@')).toBe(false);
     expect(looksLikeEmail('a b@x.test')).toBe(false);
+  });
+});
+
+describe('new structured filter scopes', () => {
+  const input = {
+    eventType: 'pull_request_review' as const,
+    actions: 'submitted',
+    labels: 'bug',
+    ignoreActors: '',
+    commandPrefix: '/sam',
+    bodyContains: '',
+    branches: '',
+    ignoreDrafts: true,
+    actors: 'alice',
+    addedLabel: 'sam',
+    authorAssociation: 'MEMBER',
+    ignoreBots: true,
+    commentContains: 'fix',
+    isPullRequest: 'true',
+    reviewStates: 'changes_requested',
+  };
+  it('serializes review filters and omits hidden changed-label settings', () => {
+    expect(buildGitHubFilters(input)).toMatchObject({
+      actors: ['alice'],
+      authorAssociation: ['MEMBER'],
+      ignoreBots: true,
+      commentContains: 'fix',
+      isPullRequest: true,
+      reviewStates: ['changes_requested'],
+      commandPrefix: '/sam',
+    });
+    expect(buildGitHubFilters(input)).not.toHaveProperty('addedLabel');
+  });
+  it('omits scoped filters for push, preserving sender restrictions', () => {
+    const filters = buildGitHubFilters({ ...input, eventType: 'push' });
+    expect(filters).toEqual({ actors: ['alice'], ignoreBots: true });
+  });
+  it('preserves untouched original filters and clears scoped ones when changing event', () => {
+    const original = {
+      eventType: 'pull_request_review' as const,
+      filters: buildGitHubFilters(input),
+    };
+    expect(buildGitHubConfigForForm({ ...input, addedLabel: '' }, original)).toBeUndefined();
+    expect(
+      buildGitHubConfigForForm({ ...input, eventType: 'push', actions: '' }, original)?.filters
+    ).toEqual({ actors: ['alice'], ignoreBots: true });
   });
 });

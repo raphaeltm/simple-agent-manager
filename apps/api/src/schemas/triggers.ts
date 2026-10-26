@@ -1,4 +1,9 @@
-import { areGitHubTriggerActionsValid } from '@simple-agent-manager/shared';
+import {
+  areGitHubTriggerActionsValid,
+  GITHUB_AUTHOR_ASSOCIATIONS,
+  GITHUB_REVIEW_STATES,
+  GITHUB_TRIGGER_EVENT_TYPES,
+} from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 import { ResourceRequirementsSchema } from './resource-requirements';
@@ -8,19 +13,25 @@ const TriggerStatusSchema = v.picklist(['active', 'paused', 'disabled']);
 const TaskModeSchema = v.picklist(['task', 'conversation']);
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
 
-const GitHubEventTypeSchema = v.picklist(['issues', 'issue_comment', 'pull_request', 'push']);
+const GitHubEventTypeSchema = v.picklist(GITHUB_TRIGGER_EVENT_TYPES);
 
-const GitHubFiltersSchema = v.optional(
-  v.strictObject({
-    actions: v.optional(v.array(v.string())),
-    labels: v.optional(v.array(v.string())),
-    ignoreActors: v.optional(v.array(v.string())),
-    commandPrefix: v.optional(v.string()),
-    bodyContains: v.optional(v.string()),
-    branches: v.optional(v.array(v.string())),
-    ignoreDrafts: v.optional(v.boolean()),
-  })
-);
+export const GitHubFiltersValueSchema = v.strictObject({
+  actions: v.optional(v.array(v.string())),
+  labels: v.optional(v.array(v.string())),
+  ignoreActors: v.optional(v.array(v.string())),
+  actors: v.optional(v.array(v.pipe(v.string(), v.trim(), v.minLength(1)))),
+  addedLabel: v.optional(v.string()),
+  authorAssociation: v.optional(v.array(v.picklist(GITHUB_AUTHOR_ASSOCIATIONS))),
+  ignoreBots: v.optional(v.boolean()),
+  commentContains: v.optional(v.string()),
+  isPullRequest: v.optional(v.boolean()),
+  reviewStates: v.optional(v.array(v.picklist(GITHUB_REVIEW_STATES))),
+  commandPrefix: v.optional(v.string()),
+  bodyContains: v.optional(v.string()),
+  branches: v.optional(v.array(v.string())),
+  ignoreDrafts: v.optional(v.boolean()),
+});
+const GitHubFiltersSchema = v.optional(GitHubFiltersValueSchema);
 
 export const GitHubConfigValueSchema = v.pipe(
   v.strictObject({

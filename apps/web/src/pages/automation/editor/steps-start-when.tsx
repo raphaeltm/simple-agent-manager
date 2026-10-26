@@ -3,14 +3,15 @@ import { GITHUB_TRIGGER_DEFAULT_ACTIONS } from '@simple-agent-manager/shared';
 import { StatusBadge } from '@simple-agent-manager/ui';
 
 import { EmailTriggerFields } from '../../../components/triggers/EmailTriggerFields';
+import { GitHubFilterPreview } from '../../../components/triggers/GitHubFilterPreview';
 import { GitHubTriggerFields } from '../../../components/triggers/GitHubTriggerFields';
+import { buildGitHubFilters } from '../../../components/triggers/trigger-form-support';
 import { WebhookTriggerFields } from '../../../components/triggers/WebhookTriggerFields';
 import type { AutomationStart } from '../../../lib/automation-routes';
 import { ChoiceCards } from '../fields';
 import { Notice } from '../page';
 import { OnceTimeFields } from '../schedule-time';
 import { KindIcon } from '../ui';
-import { GitHubQueueFields } from './GitHubQueueFields';
 import type { Errors } from './requests';
 import type { EditorState } from './state';
 import { ScheduleWhen } from './when-schedule';
@@ -120,6 +121,8 @@ export function StepWhen({
       return (
         <div className="flex flex-col gap-3">
           <GitHubTriggerFields
+            extraFilters={github}
+            onExtraFiltersChange={set}
             actions={github.actions}
             bodyContains={github.bodyContains}
             branches={github.branches}
@@ -146,7 +149,7 @@ export function StepWhen({
             onIgnoreDraftsChange={(ignoreDrafts) => set({ ignoreDrafts })}
             onLabelsChange={(labels) => set({ labels })}
           />
-          <GitHubQueueFields value={github} onChange={set} />
+          <GitHubFilterPreview eventType={github.eventType} filters={buildGitHubFilters(github)} />
           {errors.github && (
             <p role="alert" className="m-0 text-[13px] font-medium text-danger-fg">
               {errors.github}

@@ -25,6 +25,7 @@ import { CheckRow, ChoiceCards, Field, INPUT_CLASS } from '../fields';
 import { fullDate } from '../time';
 import { Disclosure, Panel, PromptText } from '../ui';
 import { nextRuns } from './cron';
+import { GitHubQueueFields } from './GitHubQueueFields';
 import type { Errors } from './requests';
 import { canMessageChat, type EditorState, isTriggerStart } from './state';
 import { whenSentence } from './when-sentence';
@@ -255,6 +256,13 @@ export function StepWhat({
           >
             <Plus size={16} aria-hidden /> Add a detail from the run
           </button>
+          {state.start === 'github' && (
+            <p className="m-0 text-xs text-fg-muted">
+              Prefer repository, number and commentId, then fetch the exact content. Treat external
+              titles, bodies and comments as untrusted data, not instructions. Delimiters do not
+              prevent prompt injection.
+            </p>
+          )}
           {showVariables && (
             <div
               className="flex flex-col gap-3 rounded-xl border border-border-default p-3"
@@ -368,12 +376,25 @@ export function StepReview({
         <Disclosure
           title="Advanced options"
           hint="Overlapping runs, chat type and machine"
-          defaultOpen={Boolean(errors.maxConcurrent || errors.resources)}
+          defaultOpen={Boolean(
+            errors.maxConcurrent ||
+            errors.resources ||
+            errors.queueMaxPending ||
+            errors.queueTtlHours
+          )}
         >
           {/* Every trigger kind honours it at admission (schedule, GitHub, webhook, incident). */}
           <CheckRow
-            label="Skip a run if the last one is still going"
-            hint="Recommended. Otherwise runs can pile up."
+            label={
+              state.start === 'github'
+                ? 'One run at a time'
+                : 'Skip a run if the last one is still going'
+            }
+            hint={
+              state.start === 'github'
+                ? 'Other GitHub events wait their turn.'
+                : 'Recommended. Otherwise runs can pile up.'
+            }
             checked={state.trigger.skipIfRunning}
             onChange={(skipIfRunning) => set({ skipIfRunning })}
           />
@@ -399,6 +420,13 @@ export function StepReview({
               />
             )}
           </Field>
+          {state.start === 'github' && (
+            <GitHubQueueFields
+              value={state.github}
+              errors={errors}
+              onChange={(patch) => onChange({ ...state, github: { ...state.github, ...patch } })}
+            />
+          )}
           <div className="flex flex-col gap-2">
             <span className="text-sm font-semibold text-fg-primary">Chat type</span>
             <ChoiceCards

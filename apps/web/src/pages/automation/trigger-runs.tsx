@@ -60,7 +60,9 @@ export function TriggerRuns({
   ].filter(Boolean);
   const queueSummary = [
     stats?.queued ? `${stats.queued} waiting now` : '',
-    retained.length ? `Retained history: ${retained.join(' · ')}` : '',
+    retained.length
+      ? `${stats?.retentionDays ? `History (up to ${stats.retentionDays} days)` : 'History'}: ${retained.join(' · ')}`
+      : '',
   ]
     .filter(Boolean)
     .join(' · ');
@@ -81,7 +83,11 @@ export function TriggerRuns({
       <SectionTitle
         title="Recent runs"
         count={trigger.triggerCount || undefined}
-        hint="Events can start a chat, wait for capacity, or reach an existing chat."
+        hint={
+          trigger.sourceType === 'github'
+            ? 'Events can start a chat, wait for capacity, or reach an existing chat.'
+            : 'Each run is an ordinary chat: open it to read, reply or stop it.'
+        }
         action={
           canWrite && hasQueued ? (
             <Button
@@ -125,6 +131,9 @@ export function TriggerRuns({
                     <div className="flex min-w-0 flex-1 flex-col gap-0.5">
                       <span className="whitespace-pre-wrap text-sm font-semibold text-fg-primary [overflow-wrap:anywhere]">
                         {executionText(run)}
+                      </span>
+                      <span className="text-xs text-fg-muted">
+                        Event {run.sequenceNumber ?? run.id}
                       </span>
                       {run.subjectKey && (
                         <span className="text-xs text-fg-muted">

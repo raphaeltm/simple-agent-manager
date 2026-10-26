@@ -1,3 +1,5 @@
+import { GITHUB_TRIGGER_EVENT_TYPES } from '@simple-agent-manager/shared';
+
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parseJsonRecord } from '../lib/runtime-validation';
@@ -12,7 +14,7 @@ import { drainGitHubTriggerQueue } from './github-trigger-queue';
 import { githubTriggerRecoveryConfig } from './github-trigger-recovery-config';
 import { areGitHubTriggersConfigured } from './platform-config';
 
-const SUPPORTED_EVENTS = new Set(['issues', 'issue_comment', 'pull_request', 'push']);
+const SUPPORTED_EVENTS = new Set<string>(GITHUB_TRIGGER_EVENT_TYPES);
 interface InboxRow {
   id: string;
   event_type: string;

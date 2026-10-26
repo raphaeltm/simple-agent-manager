@@ -68,6 +68,51 @@ describe('GitHub REST/MCP configuration parity', () => {
   const parse = (response: Awaited<ReturnType<typeof handleCreateTrigger>>) =>
     JSON.parse((response.result as { content: { text: string }[] }).content[0].text);
 
+  it('roundtrips review events and complete structured filters through REST and MCP', async () => {
+    const githubConfig = {
+      eventType: 'pull_request_review',
+      filters: {
+        actions: ['submitted'],
+        actors: ['alice'],
+        ignoreBots: true,
+        authorAssociation: ['MEMBER'],
+        commentContains: '/sam',
+        isPullRequest: true,
+        reviewStates: ['changes_requested'],
+      },
+    };
+    const body = {
+      ...input,
+      githubConfig,
+      maxConcurrent: 3,
+      skipIfRunning: false,
+      description: 'Review burst',
+    };
+    const rest = await request('', 'POST', body);
+    expect(rest.status).toBe(201);
+    expect(await rest.json()).toMatchObject({
+      githubConfig,
+      maxConcurrent: 3,
+      skipIfRunning: false,
+      description: 'Review burst',
+    });
+    const mcp = parse(
+      await handleCreateTrigger('review', { ...body, name: 'MCP review' }, token, env)
+    );
+    expect(mcp).toMatchObject({ githubConfig, maxConcurrent: 3, skipIfRunning: false });
+    const invalid = {
+      ...body,
+      githubConfig: {
+        ...githubConfig,
+        filters: { ...githubConfig.filters, authorAssociation: ['ADMIN'] },
+      },
+    };
+    expect((await request('', 'POST', invalid)).status).toBe(400);
+    expect(
+      (await handleCreateTrigger('invalid-association', invalid, token, env)).error
+    ).toBeDefined();
+  });
+
   it('rejects incompatible actions through both REST and MCP without changing existing config', async () => {
     const invalid = {
       ...input,

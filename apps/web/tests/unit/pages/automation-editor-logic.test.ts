@@ -280,8 +280,14 @@ describe('editing triggers', () => {
     expect(state.github).toMatchObject({
       subjectAffinity: true,
       queueMaxPending: '7',
-      queueTtlSeconds: '120',
+      queueTtlHours: String(120 / 3600),
     });
+    expect(
+      triggerUpdateRequest(
+        { ...state, github: { ...state.github, queueTtlHours: '0.5' } },
+        original
+      ).githubConfig?.queueTtlSeconds
+    ).toBe(1800);
     expect(triggerUpdateRequest({ ...state, name: 'Renamed' }, original)).not.toHaveProperty(
       'githubConfig'
     );
@@ -292,9 +298,9 @@ describe('editing triggers', () => {
       ).githubConfig
     ).toEqual({ ...original.githubConfig, queueMaxPending: 9 });
     expect(
-      validateStep({ ...state, github: { ...state.github, queueTtlSeconds: '0' } }, 'when', CAN)
-        .github
-    ).toMatch(/positive whole/);
+      validateStep({ ...state, github: { ...state.github, queueTtlHours: '0' } }, 'review', CAN)
+        .queueTtlHours
+    ).toMatch(/one second/);
   });
   it('sends no GitHub config on an edit that did not touch it', () => {
     const original = trigger({

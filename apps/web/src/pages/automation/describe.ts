@@ -34,6 +34,8 @@ const GITHUB_SUBJECTS: Record<GitHubTriggerEventType, string> = {
   issue_comment: 'a comment',
   pull_request: 'a pull request',
   push: 'a push',
+  pull_request_review: 'a pull request review',
+  pull_request_review_comment: 'an inline review comment',
 };
 
 const ACTION_WORDS: Record<string, string> = {
@@ -57,9 +59,19 @@ export function githubTriggerWhen(
       ? `When someone comments ${filters.commandPrefix} on an issue or PR`
       : 'When someone comments on an issue or PR';
   }
-  // "labeled" with required labels reads as the label being added, not as a second condition.
-  if (filters.actions?.length === 1 && filters.actions[0] === 'labeled' && filters.labels?.length)
-    return `When ${GITHUB_SUBJECTS[eventType]} is labeled ${filters.labels.join(' + ')}${branches}`;
+  if (
+    ['issues', 'pull_request'].includes(eventType) &&
+    filters.actions?.length === 1 &&
+    ['labeled', 'unlabeled'].includes(filters.actions[0] ?? '') &&
+    filters.addedLabel
+  )
+    return `When ${filters.addedLabel} is ${filters.actions[0] === 'labeled' ? 'added to' : 'removed from'} ${GITHUB_SUBJECTS[eventType]}${branches}`;
+  if (
+    filters.actions?.length === 1 &&
+    ['labeled', 'unlabeled'].includes(filters.actions[0] ?? '') &&
+    filters.labels?.length
+  )
+    return `When a label is ${filters.actions[0] === 'labeled' ? 'added to' : 'removed from'} ${GITHUB_SUBJECTS[eventType]} with ${filters.labels.join(' + ')}`;
   const actions = filters.actions?.length ? orList(filters.actions.map(actionWord)) : 'changed';
   return `When ${GITHUB_SUBJECTS[eventType]}${labels} is ${actions}${branches}`;
 }

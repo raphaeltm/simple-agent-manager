@@ -1,4 +1,10 @@
-import type { GitHubWebhookEvent } from './github-trigger-filter';
+import { isGitHubCommentEvent } from '@simple-agent-manager/shared';
+
+import {
+  getGitHubEventContent,
+  type GitHubWebhookEvent,
+  isPullRequestSubject,
+} from './github-trigger-filter';
 
 interface GitHubContextTrigger {
   id: string;
@@ -23,6 +29,10 @@ export function buildGitHubContext(
       ? event.ref.replace(/^refs\/heads\//, '')
       : (event.pull_request?.head?.ref ?? '');
 
+  const content = getGitHubEventContent(event);
+  const comment = isGitHubCommentEvent(event.event)
+    ? (content as { id?: number; html_url?: string } | undefined)
+    : undefined;
   return {
     github: {
       event: event.event,
@@ -32,7 +42,26 @@ export function buildGitHubContext(
       number: String(event.issue?.number ?? event.pull_request?.number ?? ''),
       title: event.issue?.title ?? event.pull_request?.title ?? '',
       body: event.issue?.body ?? event.pull_request?.body ?? '',
-      comment: event.comment?.body ?? '',
+      comment: ['issue_comment', 'pull_request_review', 'pull_request_review_comment'].includes(
+        event.event
+      )
+        ? (content?.body ?? '')
+        : '',
+      commentId: String(comment?.id ?? ''),
+      commentUrl: comment?.html_url ?? '',
+      isPullRequest: String(isPullRequestSubject(event)),
+      authorAssociation: content?.author_association ?? '',
+      url:
+        event.issue?.pull_request?.html_url ??
+        event.issue?.html_url ??
+        event.pull_request?.html_url ??
+        '',
+      reviewState: event.event === 'pull_request_review' ? (event.review?.state ?? '') : '',
+      path: event.event === 'pull_request_review_comment' ? (event.comment?.path ?? '') : '',
+      line:
+        event.event === 'pull_request_review_comment'
+          ? String(event.comment?.line ?? event.comment?.original_line ?? '')
+          : '',
       labels: labels.join(', '),
       branch,
       sha: event.pull_request?.head?.sha ?? event.after ?? event.head_commit?.id ?? '',

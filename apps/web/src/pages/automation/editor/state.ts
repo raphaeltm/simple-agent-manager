@@ -34,7 +34,7 @@ import { canonicalCron, type ScheduleChoice, type SchedulePreset, toCron } from 
 export interface GitHubState {
   subjectAffinity: boolean;
   queueMaxPending: string;
-  queueTtlSeconds: string;
+  queueTtlHours: string;
   eventType: GitHubTriggerEventType;
   actions: string;
   labels: string;
@@ -43,6 +43,13 @@ export interface GitHubState {
   bodyContains: string;
   branches: string;
   ignoreDrafts: boolean;
+  actors: string;
+  addedLabel: string;
+  authorAssociation: string;
+  ignoreBots: boolean;
+  commentContains: string;
+  isPullRequest: string;
+  reviewStates: string;
 }
 
 export interface WebhookState {
@@ -159,7 +166,14 @@ const DEFAULT_GITHUB: GitHubState = {
   ignoreDrafts: true,
   subjectAffinity: false,
   queueMaxPending: String(DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING),
-  queueTtlSeconds: String(DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS),
+  queueTtlHours: String(DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS / 3600),
+  actors: '',
+  addedLabel: '',
+  authorAssociation: '',
+  ignoreBots: false,
+  commentContains: '',
+  isPullRequest: '',
+  reviewStates: '',
 };
 
 /** A fresh one-time due time: the next quarter hour at least an hour from now. */
@@ -277,8 +291,8 @@ export function editorStateFromTrigger(trigger: TriggerResponse): EditorState {
           queueMaxPending: String(
             github.queueMaxPending ?? DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING
           ),
-          queueTtlSeconds: String(
-            github.queueTtlSeconds ?? DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS
+          queueTtlHours: String(
+            (github.queueTtlSeconds ?? DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS) / 3600
           ),
           actions: joinList(github.filters.actions),
           labels: joinList(github.filters.labels),
@@ -287,6 +301,14 @@ export function editorStateFromTrigger(trigger: TriggerResponse): EditorState {
           bodyContains: github.filters.bodyContains ?? '',
           branches: joinList(github.filters.branches),
           ignoreDrafts: github.filters.ignoreDrafts ?? true,
+          actors: joinList(github.filters.actors),
+          addedLabel: github.filters.addedLabel ?? '',
+          authorAssociation: joinList(github.filters.authorAssociation),
+          ignoreBots: github.filters.ignoreBots ?? false,
+          commentContains: github.filters.commentContains ?? '',
+          isPullRequest:
+            github.filters.isPullRequest === undefined ? '' : String(github.filters.isPullRequest),
+          reviewStates: joinList(github.filters.reviewStates),
         }
       : base.github,
     webhook: trigger.webhookConfig

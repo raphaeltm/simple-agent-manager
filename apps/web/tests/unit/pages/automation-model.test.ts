@@ -209,7 +209,7 @@ describe('trigger presentation', () => {
     expect(githubTriggerWhen('push', { branches: ['main'] })).toBe('When code is pushed to main');
     expect(
       githubTriggerWhen('pull_request', { actions: ['labeled'], labels: ['needs-review'] })
-    ).toBe('When a pull request is labeled needs-review');
+    ).toBe('When a label is added to a pull request with needs-review');
     expect(githubTriggerWhen('issues', { actions: ['opened'], labels: ['bug'] })).toBe(
       'When an issue labeled bug is opened'
     );

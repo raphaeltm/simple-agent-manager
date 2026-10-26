@@ -3,6 +3,11 @@ import type {
   GitHubTriggerEventType,
   GitHubTriggerFilters,
 } from '@simple-agent-manager/shared';
+import {
+  GITHUB_TEMPLATE_KEYS,
+  isGitHubCommentEvent,
+  isGitHubPullRequestEvent,
+} from '@simple-agent-manager/shared';
 
 export const FOCUS_RING =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
@@ -23,6 +28,8 @@ export const GITHUB_EVENT_OPTIONS: Array<{
   { value: 'issue_comment', label: 'Issue comment' },
   { value: 'issues', label: 'Issue' },
   { value: 'pull_request', label: 'Pull request' },
+  { value: 'pull_request_review', label: 'Pull request review' },
+  { value: 'pull_request_review_comment', label: 'Inline review comment' },
   { value: 'push', label: 'Push' },
 ];
 
@@ -53,19 +60,7 @@ export const CRON_TEMPLATE_VARIABLES = [
 export const GITHUB_TEMPLATE_VARIABLES = [
   {
     group: 'github',
-    vars: [
-      'github.event',
-      'github.action',
-      'github.actor',
-      'github.repository',
-      'github.number',
-      'github.title',
-      'github.body',
-      'github.comment',
-      'github.labels',
-      'github.branch',
-      'github.sha',
-    ],
+    vars: GITHUB_TEMPLATE_KEYS.map((key) => `github.${key}`),
   },
   ...COMMON_TEMPLATE_VARIABLES,
 ];
@@ -158,6 +153,13 @@ export function buildGitHubFilters(input: {
   bodyContains: string;
   branches: string;
   ignoreDrafts: boolean;
+  actors?: string;
+  addedLabel?: string;
+  authorAssociation?: string;
+  ignoreBots?: boolean;
+  commentContains?: string;
+  isPullRequest?: string;
+  reviewStates?: string;
 }): GitHubTriggerFilters {
   const filters: GitHubTriggerFilters = {};
   const actions = splitList(input.actions);
@@ -167,14 +169,28 @@ export function buildGitHubFilters(input: {
   if (input.eventType !== 'push' && actions) filters.actions = actions;
   if (input.eventType !== 'push' && labels) filters.labels = labels;
   if (ignoreActors) filters.ignoreActors = ignoreActors;
-  if (input.eventType === 'issue_comment' && input.commandPrefix.trim()) {
+  if (isGitHubCommentEvent(input.eventType) && input.commandPrefix.trim()) {
     filters.commandPrefix = input.commandPrefix.trim();
   }
   if (input.eventType !== 'push' && input.bodyContains.trim())
     filters.bodyContains = input.bodyContains.trim();
-  if ((input.eventType === 'push' || input.eventType === 'pull_request') && branches)
+  if ((input.eventType === 'push' || isGitHubPullRequestEvent(input.eventType)) && branches)
     filters.branches = branches;
   if (input.eventType === 'pull_request') filters.ignoreDrafts = input.ignoreDrafts;
+  if (input.actors?.trim()) filters.actors = splitList(input.actors);
+  if (input.ignoreBots) filters.ignoreBots = true;
+  if (input.eventType !== 'push') {
+    if (input.authorAssociation?.trim())
+      filters.authorAssociation = splitList(input.authorAssociation);
+    if (input.isPullRequest === 'true' || input.isPullRequest === 'false')
+      filters.isPullRequest = input.isPullRequest === 'true';
+  }
+  if (['issues', 'pull_request'].includes(input.eventType) && input.addedLabel?.trim())
+    filters.addedLabel = input.addedLabel.trim();
+  if (isGitHubCommentEvent(input.eventType) && input.commentContains?.trim())
+    filters.commentContains = input.commentContains.trim();
+  if (input.eventType === 'pull_request_review' && input.reviewStates?.trim())
+    filters.reviewStates = splitList(input.reviewStates);
   return filters;
 }
 
@@ -193,10 +209,18 @@ export function buildGitHubConfigForForm(
     bodyContains: original.filters.bodyContains ?? '',
     branches: joinList(original.filters.branches),
     ignoreDrafts: original.filters.ignoreDrafts ?? true,
+    actors: joinList(original.filters.actors),
+    addedLabel: original.filters.addedLabel ?? '',
+    authorAssociation: joinList(original.filters.authorAssociation),
+    ignoreBots: original.filters.ignoreBots ?? false,
+    commentContains: original.filters.commentContains ?? '',
+    isPullRequest:
+      original.filters.isPullRequest === undefined ? '' : String(original.filters.isPullRequest),
+    reviewStates: joinList(original.filters.reviewStates),
   };
   if (
     (Object.keys(initial) as Array<keyof typeof initial>).every(
-      (key) => input[key] === initial[key]
+      (key) => (input[key] ?? (typeof initial[key] === 'boolean' ? false : '')) === initial[key]
     )
   )
     return undefined;
@@ -210,7 +234,7 @@ export function buildGitHubConfigForForm(
       delete filters[key];
       return;
     }
-    if (input[key] === initial[key]) return;
+    if ((input[key] ?? (typeof initial[key] === 'boolean' ? false : '')) === initial[key]) return;
     const value = applies ? splitList(input[key]) : undefined;
     if (value) filters[key] = value;
     else delete filters[key];
@@ -220,7 +244,7 @@ export function buildGitHubConfigForForm(
       delete filters[key];
       return;
     }
-    if (input[key] === initial[key]) return;
+    if ((input[key] ?? (typeof initial[key] === 'boolean' ? false : '')) === initial[key]) return;
     const value = applies ? input[key].trim() : '';
     if (value) filters[key] = value;
     else delete filters[key];
@@ -228,10 +252,25 @@ export function buildGitHubConfigForForm(
   updateList('actions', input.eventType !== 'push');
   updateList('labels', input.eventType !== 'push');
   updateList('ignoreActors', true);
-  updateList('branches', input.eventType === 'pull_request' || input.eventType === 'push');
-  updateText('commandPrefix', input.eventType === 'issue_comment');
+  updateList('branches', isGitHubPullRequestEvent(input.eventType) || input.eventType === 'push');
+  updateText('commandPrefix', isGitHubCommentEvent(input.eventType));
   updateText('bodyContains', input.eventType !== 'push');
   if (eventChanged && input.eventType !== 'pull_request') delete filters.ignoreDrafts;
   else if (input.ignoreDrafts !== initial.ignoreDrafts) filters.ignoreDrafts = input.ignoreDrafts;
+  const built = buildGitHubFilters(input);
+  for (const key of [
+    'actors',
+    'addedLabel',
+    'authorAssociation',
+    'ignoreBots',
+    'commentContains',
+    'isPullRequest',
+    'reviewStates',
+  ] as const) {
+    const unchanged = (input[key] ?? (key === 'ignoreBots' ? false : '')) === initial[key];
+    if (unchanged && !eventChanged) continue;
+    delete filters[key];
+    if (built[key] !== undefined) Object.assign(filters, { [key]: built[key] });
+  }
   return { eventType: input.eventType, filters };
 }

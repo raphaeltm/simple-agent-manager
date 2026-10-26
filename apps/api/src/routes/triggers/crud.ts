@@ -5,6 +5,7 @@ import type {
   ListTriggersResponse,
   TriggerResponse,
 } from '@simple-agent-manager/shared';
+import { DEFAULT_TRIGGER_EXECUTION_LOG_RETENTION_DAYS } from '@simple-agent-manager/shared';
 import {
   DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
   DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
@@ -455,6 +456,10 @@ async function readQueueStats(env: Env, projectId: string) {
         routed: row.routed,
         dropped: row.dropped,
         unconfirmed: row.unconfirmed,
+        retentionDays: parsePositiveInt(
+          env.TRIGGER_EXECUTION_LOG_RETENTION_DAYS,
+          DEFAULT_TRIGGER_EXECUTION_LOG_RETENTION_DAYS
+        ),
       },
     ])
   );

@@ -2,6 +2,10 @@
  * The exact configuration of each kind of automation, for the "Advanced" section of its page:
  * what power users and support need, out of the way of everyone else.
  */
+import {
+  DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
+  DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
+} from '@simple-agent-manager/shared';
 import type {
   ProjectSchedule,
   ProjectStandingWatch,
@@ -14,6 +18,7 @@ import {
   formatLegacyVmSize,
 } from '../../components/resource-requirements';
 import type { AutomationLookups } from './data';
+import { formatSpanWords } from '../../lib/time-utils';
 import { filterRows } from './describe';
 import { fullDate } from './time';
 
@@ -58,6 +63,25 @@ function sourceRows(trigger: TriggerResponse): Rows {
       if (eventType === 'pull_request')
         rows.push(['Draft pull requests', filters.ignoreDrafts === false ? 'Included' : 'Ignored']);
       rows.push(['Ignored accounts', listOr(filters.ignoreActors, 'None')]);
+      rows.push([
+        'Follow-up chat',
+        eventType === 'push'
+          ? 'Not applicable to push events'
+          : config.subjectAffinity
+            ? 'Reuse this automation’s issue or PR chat'
+            : 'Start a new chat',
+      ]);
+      rows.push([
+        'Pending event limit',
+        String(config.queueMaxPending ?? DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING),
+      ]);
+      const waitSeconds = config.queueTtlSeconds ?? DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS;
+      rows.push([
+        'Maximum wait',
+        waitSeconds % 60
+          ? `${waitSeconds} second${waitSeconds === 1 ? '' : 's'}`
+          : formatSpanWords(waitSeconds * 1000),
+      ]);
       return rows;
     }
     case 'webhook': {
@@ -116,7 +140,10 @@ export function triggerAdvancedRows(
         ? 'Conversation: stays open for replies'
         : 'Task: works, then finishes',
     ],
-    ['Most runs at once', String(trigger.maxConcurrent)],
+    [
+      'Most runs at once',
+      String(trigger.sourceType === 'github' && trigger.skipIfRunning ? 1 : trigger.maxConcurrent),
+    ],
     ['Machine', describeMachine(trigger)],
     ['Runs so far', String(trigger.triggerCount)],
     ...(trigger.description ? ([['Description', trigger.description]] as Rows) : []),

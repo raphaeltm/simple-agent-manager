@@ -161,24 +161,89 @@ describe('signed GitHub webhook → scoped trigger → actual admission', () => 
   }
   it('executes signed events for two different issues sequentially at concurrency one', async () => {
     vi.mocked(submitTriggeredTask).mockImplementation(async (_env, input) => {
-      const taskId=`task-${input.triggerExecutionId}`;
-      sqlite.prepare("INSERT OR IGNORE INTO tasks(id,project_id,user_id,status,chat_session_id,trigger_execution_id) VALUES(?,'project','user','in_progress',?,?)")
-        .run(taskId,`session-${taskId}`,input.triggerExecutionId);
-      return {taskId,sessionId:`session-${taskId}`,branchName:`sam/${taskId}`};
+      const taskId = `task-${input.triggerExecutionId}`;
+      sqlite
+        .prepare(
+          "INSERT OR IGNORE INTO tasks(id,project_id,user_id,status,chat_session_id,trigger_execution_id) VALUES(?,'project','user','in_progress',?,?)"
+        )
+        .run(taskId, `session-${taskId}`, input.triggerExecutionId);
+      return { taskId, sessionId: `session-${taskId}`, branchName: `sam/${taskId}` };
     });
-    await deliver(payload(),'issues','issue-one');
-    const next=payload();next.issue!.number=2321;next.issue!.title='Second issue';
-    await deliver(next,'issues','issue-two');
-    await deliver(next,'issues','issue-two');
+    await deliver(payload(), 'issues', 'issue-one');
+    const next = payload();
+    next.issue!.number = 2321;
+    next.issue!.title = 'Second issue';
+    await deliver(next, 'issues', 'issue-two');
+    await deliver(next, 'issues', 'issue-two');
     expect(submitTriggeredTask).toHaveBeenCalledTimes(1);
-    expect(sqlite.prepare("SELECT status FROM trigger_executions WHERE github_delivery_id='issue-two'").get()).toEqual({status:'waiting'});
+    expect(
+      sqlite
+        .prepare("SELECT status FROM trigger_executions WHERE github_delivery_id='issue-two'")
+        .get()
+    ).toEqual({ status: 'waiting' });
     sqlite.prepare("UPDATE tasks SET status='completed'").run();
-    sqlite.prepare("UPDATE trigger_executions SET status='completed' WHERE task_id IS NOT NULL").run();
+    sqlite
+      .prepare("UPDATE trigger_executions SET status='completed' WHERE task_id IS NOT NULL")
+      .run();
     await runGitHubTriggerRecovery(env);
     expect(submitTriggeredTask).toHaveBeenCalledTimes(2);
-    expect(vi.mocked(submitTriggeredTask).mock.calls[1]![1].renderedPrompt).toContain('Second issue');
-    expect(sqlite.prepare("SELECT decision FROM github_webhook_deliveries WHERE id='issue-two:trigger'").get()).toEqual({decision:'matched'});
+    expect(vi.mocked(submitTriggeredTask).mock.calls[1]![1].renderedPrompt).toContain(
+      'Second issue'
+    );
+    expect(
+      sqlite
+        .prepare("SELECT decision FROM github_webhook_deliveries WHERE id='issue-two:trigger'")
+        .get()
+    ).toEqual({ decision: 'matched' });
   });
+  it.each(['pull_request_review', 'pull_request_review_comment'])(
+    'admits signed %s through durable intake with exact context',
+    async (event) => {
+      sqlite.prepare('UPDATE github_trigger_configs SET event_type = ?, filters_json = ?').run(
+        event,
+        JSON.stringify({
+          actions: [event === 'pull_request_review' ? 'submitted' : 'created'],
+          actors: ['reviewer'],
+          ignoreBots: true,
+          commentContains: 'fix',
+        })
+      );
+      sqlite
+        .prepare(
+          "UPDATE triggers SET prompt_template = '{{github.number}} {{github.commentId}} {{github.commentUrl}} {{github.reviewState}} {{github.path}} {{github.line}}'"
+        )
+        .run();
+      const content = {
+        id: 901,
+        body: 'please fix',
+        html_url: 'https://github.com/org/repo/pull/42#review-901',
+        state: 'changes_requested',
+        path: 'src/a.ts',
+        line: 7,
+      };
+      const body = {
+        installation: { id: 12345 },
+        repository: { id: 9876, full_name: 'org/repo' },
+        sender: { login: 'reviewer', type: 'User' },
+        action: event === 'pull_request_review' ? 'submitted' : 'created',
+        pull_request: { number: 42, title: 'PR', labels: [] },
+        ...(event === 'pull_request_review' ? { review: content } : { comment: content }),
+      };
+      expect((await deliver(body, event, 'review-delivery')).status).toBe(200);
+      expect(submitTriggeredTask).toHaveBeenCalledOnce();
+      const execution = sqlite.prepare('SELECT rendered_prompt FROM trigger_executions').get() as {
+        rendered_prompt: string;
+      };
+      expect(execution.rendered_prompt).toContain(
+        '42 901 https://github.com/org/repo/pull/42#review-901'
+      );
+      expect(execution.rendered_prompt).toContain(
+        event === 'pull_request_review' ? 'changes_requested' : 'src/a.ts 7'
+      );
+      await deliver(body, event, 'review-delivery');
+      expect(submitTriggeredTask).toHaveBeenCalledOnce();
+    }
+  );
 
   it('recovers failure after claim through same-ID replay and scheduled retry', async () => {
     sqlite.prepare('ALTER TABLE projects RENAME TO projects_unavailable').run();
