@@ -227,8 +227,17 @@ describe('trigger presentation', () => {
       authorAssociation: ['MEMBER'],
       ignoreBots: true,
       commentContains: 'yes',
+      branches: ['feature/work'],
     });
-    for (const condition of ['/review', 'approved', 'alice', 'MEMBER', 'users only', 'yes'])
+    for (const condition of [
+      '/review',
+      'approved',
+      'alice',
+      'member',
+      'users only',
+      'yes',
+      'from feature/work',
+    ])
       expect(sentence).toContain(condition);
   });
 

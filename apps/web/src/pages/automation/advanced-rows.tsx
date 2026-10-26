@@ -50,7 +50,7 @@ function sourceRows(trigger: TriggerResponse): Rows {
       if (eventType !== 'push') rows.push(['Required labels', listOr(filters.labels, 'None')]);
       if (isGitHubCommentEvent(eventType))
         rows.push([
-          'Comment starts with',
+          'Body starts with',
           filters.commandPrefix ? mono(filters.commandPrefix) : 'Anything',
         ]);
       if (eventType !== 'push') rows.push(['Text contains', filters.bodyContains || 'Anything']);

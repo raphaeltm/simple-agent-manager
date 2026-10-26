@@ -5,7 +5,10 @@ import { StatusBadge } from '@simple-agent-manager/ui';
 import { EmailTriggerFields } from '../../../components/triggers/EmailTriggerFields';
 import { GitHubFilterPreview } from '../../../components/triggers/GitHubFilterPreview';
 import { GitHubTriggerFields } from '../../../components/triggers/GitHubTriggerFields';
-import { buildGitHubFilters } from '../../../components/triggers/trigger-form-support';
+import {
+  buildGitHubFilters,
+  githubFilterChoiceError,
+} from '../../../components/triggers/trigger-form-support';
 import { WebhookTriggerFields } from '../../../components/triggers/WebhookTriggerFields';
 import type { AutomationStart } from '../../../lib/automation-routes';
 import { ChoiceCards } from '../fields';
@@ -153,7 +156,7 @@ export function StepWhen({
             onLabelsChange={(labels) => set({ labels })}
           />
           <GitHubFilterPreview eventType={github.eventType} filters={buildGitHubFilters(github)} />
-          {errors.github && (
+          {errors.github && !githubFilterChoiceError(buildGitHubFilters(github)) && (
             <p role="alert" className="m-0 text-[13px] font-medium text-danger-fg">
               {errors.github}
             </p>

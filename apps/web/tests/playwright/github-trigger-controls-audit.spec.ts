@@ -21,6 +21,8 @@ function onlyOn(names: string[]) {
   };
 }
 test.beforeEach(onlyOn(['iPhone SE (375x667)', 'Desktop (1280x800)']));
+// Screenshot-heavy audit stays bounded when sharing CPU with typechecking.
+test.setTimeout(60_000);
 
 const LONG_NAME =
   'Nightly support inbox triage across every regional mailbox, including escalations, billing disputes and partner integration questions, summarized for the on-call rotation';
@@ -204,6 +206,11 @@ test('GitHub filters, reviews, recent-delivery snapshot and context variables', 
   await page.getByRole('button', { name: 'Continue' }).click();
   await page.getByLabel('GitHub event', { exact: true }).selectOption('pull_request_review');
   await expect(page.getByLabel('Command prefix', { exact: true })).toHaveValue('');
+  const more = page.getByTestId('github-more-conditions');
+  await expect(more).toHaveJSProperty('open', false);
+  await more.evaluate((element) => element.scrollIntoView({ block: 'center' }));
+  await audit(page, 'github-more-conditions-collapsed');
+  await more.locator('summary').click();
   await expect(page.getByLabel('Comments on', { exact: true })).toHaveCount(0);
   const styles = await page.getByLabel('Allowed actors', { exact: true }).evaluate((input) => {
     const own = getComputedStyle(input);
@@ -299,6 +306,9 @@ test('GitHub filters, reviews, recent-delivery snapshot and context variables', 
   await page.getByRole('button', { name: 'Back', exact: true }).click();
   await page.getByLabel('GitHub event', { exact: true }).selectOption('issues');
   await page.getByLabel('Actions', { exact: true }).fill('labeled');
+  const labelConditions = page.getByTestId('github-more-conditions');
+  await expect(labelConditions).toHaveJSProperty('open', false);
+  await labelConditions.locator('summary').click();
   await page.getByLabel('Changed label', { exact: true }).fill('sam');
   await expect(page.getByLabel('Comments on', { exact: true })).toHaveCount(0);
   await expect(page.getByLabel('Review states', { exact: true })).toHaveCount(0);
@@ -382,6 +392,22 @@ test('event scopes, issue-only sentence and review defaults are explicit', async
   await page.getByRole('button', { name: 'Back', exact: true }).click();
   await page.getByLabel('GitHub event', { exact: true }).selectOption('pull_request_review');
   await expect(page.getByLabel('Command prefix', { exact: true })).toHaveValue('');
+  const more = page.getByTestId('github-more-conditions');
+  if ((await more.getAttribute('open')) === null) await more.locator('summary').click();
+  await page.getByLabel('Review states', { exact: true }).fill('NOT_A_STATE');
+  await expect(page.getByLabel('Review states', { exact: true })).toHaveAttribute(
+    'aria-invalid',
+    'true'
+  );
+  await expect(
+    page.getByText('Choose a review state from the listed GitHub values.')
+  ).toBeVisible();
+  await page
+    .getByText('Choose a review state from the listed GitHub values.')
+    .evaluate((element) => element.scrollIntoView({ block: 'center' }));
+  await audit(page, 'github-review-field-error');
+  await page.getByLabel('Review states', { exact: true }).fill('');
+  await expect(more).toHaveJSProperty('open', true);
   await page.getByLabel('Review states', { exact: true }).fill('APPROVED');
   await page.getByLabel('Author association', { exact: true }).fill('member');
   await page.getByLabel('Allowed actors', { exact: true }).fill('alice');
@@ -390,7 +416,7 @@ test('event scopes, issue-only sentence and review defaults are explicit', async
   await expect(page.getByRole('button', { name: 'path', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'reviewState', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Continue' }).click();
-  for (const word of ['approved', 'MEMBER', 'alice'])
+  for (const word of ['approved', 'member', 'alice'])
     await expect(page.getByTestId('automation-sentence')).toContainText(word);
   await expect(page.getByTestId('automation-sentence')).not.toContainText('/sam');
   await page

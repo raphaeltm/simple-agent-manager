@@ -8,6 +8,7 @@ import {
   type GitHubTriggerEventType,
   type GitHubTriggerFilters,
   isGitHubCommentEvent,
+  isGitHubPullRequestEvent,
   PROJECT_EVENT_CHANNEL_SOURCE,
   PROJECT_LIFECYCLE_EVENT_SOURCE,
   PROJECT_LIFECYCLE_EVENT_TYPES,
@@ -52,7 +53,9 @@ function githubTriggerBase(
   eventType: GitHubTriggerEventType,
   filters: GitHubTriggerFilters = {}
 ): string {
-  const branches = filters.branches?.length ? ` on ${orList(filters.branches)}` : '';
+  const branches = filters.branches?.length
+    ? ` ${isGitHubPullRequestEvent(eventType) ? 'from' : 'on'} ${orList(filters.branches)}`
+    : '';
   const labels = filters.labels?.length ? ` labeled ${filters.labels.join(' + ')}` : '';
   if (eventType === 'push') return `When code is pushed${branches.replace(' on ', ' to ')}`;
   if (eventType === 'issue_comment') {
@@ -93,7 +96,9 @@ function githubTriggerClauses(
   if (filters.ignoreActors?.length) conditions.push(`except ${orList(filters.ignoreActors)}`);
   if (filters.ignoreBots) conditions.push('users only');
   if (eventType !== 'push' && filters.authorAssociation?.length)
-    conditions.push(`acting author is ${orList(filters.authorAssociation)}`);
+    conditions.push(
+      `acting author's role is ${orList(filters.authorAssociation.map((value) => actionWord(value.toLowerCase())))}`
+    );
   if (eventType !== 'push' && filters.bodyContains)
     conditions.push(`text contains “${filters.bodyContains}”`);
   if (isGitHubCommentEvent(eventType) && filters.commentContains)
@@ -101,7 +106,7 @@ function githubTriggerClauses(
   if (isGitHubCommentEvent(eventType) && eventType !== 'issue_comment' && filters.commandPrefix)
     conditions.push(`body starts with ${filters.commandPrefix}`);
   if (eventType === 'pull_request_review' && filters.reviewStates?.length)
-    conditions.push(`review is ${orList(filters.reviewStates.map(actionWord))}`);
+    conditions.push(`review state: ${orList(filters.reviewStates.map(actionWord))}`);
   if (
     eventType === 'issue_comment' &&
     filters.actions?.length &&

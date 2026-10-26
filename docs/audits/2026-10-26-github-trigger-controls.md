@@ -175,3 +175,31 @@ settings. This also covers configurations whose restrictions appear only in the 
 sentence. The browser assertion and desktop/mobile overview evidence are refreshed.
 Final actual Opus verification of the integrated correction remains required. A owns
 the separately identified push/affinity Then wording correction.
+
+## Remaining B low findings from the combined review
+
+The combined actual Opus report `01M5WPE4XVPAFCJ2D3PPS1M1H0` confirms all earlier
+B findings fixed. Its remaining B-owned findings are addressed as follows:
+
+| Finding | Correction                                                                                                                                                                                                                                                                |
+| ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| LOW-4   | PR-family summaries say **from** the source branch; pushes still say **to** the pushed branch. A unit assertion covers the source-branch wording.                                                                                                                         |
+| LOW-5   | Summary roles use plain lowercase words, review state uses a grammatical label, and Advanced consistently says **Body starts with**. Exact enum values remain available in Advanced settings.                                                                             |
+| LOW-6   | Shared choice validation returns per-field errors. Field links each error and hint, sets aria-invalid, and keeps the error beside its input; the distant duplicate step alert is omitted for these errors. Browser checks invalid review-state entry and its field error. |
+| LOW-9   | Use shared Disclosure. More conditions starts closed when empty, opens for applicable configured values, ignores stale hidden event values, and is absent for push events. Browser checks the initial state and event-switch behavior.                                    |
+
+No expression engine, queue/routing changes, new default filter behavior or parallel
+API/MCP validation was introduced. A owns the other combined-review findings and
+will obtain actual Opus verification on the integrated branch before release.
+
+Low-finding validation: 77 focused web tests pass; six desktop/mobile cases passed,
+then four editor/matrix cases passed again after preserving disclosure state while
+clearing the final value. The saved overview/detail cases are unchanged by that
+state-only refinement. Thirty PNGs are refreshed, including closed-disclosure and
+field-error captures; changed surfaces were inspected on desktop and mobile with
+no overflow/clipping failures. The screenshot-heavy spec has a bounded 60-second
+case timeout. The final typecheck is retried serially after a redundant narrowing
+check was fixed; interrupted parallel runs are not counted as passing.
+Disclosure has local toggle state, no effects: clearing the final value keeps it
+open, while selecting another event recalculates the initial open state from that
+event's applicable values. This interaction is covered in the browser audit.
