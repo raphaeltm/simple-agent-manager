@@ -130,8 +130,8 @@ Replacing the token also cancels the agent's unused link.
 
 - **Each run starts a chat** in the project's session list, labelled **Task** or **Chat** by the
   trigger's task mode (see [Chat or Task](/docs/guides/chat-features/#chat-or-task)).
-- **One run at a time, by default.** Schedules skip their turn while the previous run is still
-  going; GitHub events queue instead. This includes a run that has finished its turn but is still awake. A run that has gone to
+- **One run at a time, by default.** Schedules and generic webhooks skip while the previous run is still going; GitHub events queue
+  instead. This includes a run that has finished its turn but is still awake. A run that has gone to
   sleep doesn't count, so a quiet chat doesn't block the next run for long.
 - **Repeated failures pause it.** After three failed, stopped, or expired runs in a row, SAM pauses
   the trigger the next time it would run. Fix the cause, then select **Resume**, which starts the
@@ -216,6 +216,7 @@ handoff never starts another agent.
 
 All configured filters are AND-combined. Empty lists impose no restriction. Existing defaults stay
 unchanged: `maxConcurrent: 1`, `skipIfRunning: true`, and draft PRs ignored for `pull_request`.
+For GitHub, `skipIfRunning: true` now means one run at a time; busy events wait rather than skip.
 `create_trigger` accepts `description`, `maxConcurrent` and `skipIfRunning` in the same call, so choose
 them explicitly before enabling an event trigger. Admission and queue controls still apply.
 

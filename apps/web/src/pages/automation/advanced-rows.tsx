@@ -2,14 +2,14 @@
  * The exact configuration of each kind of automation, for the "Advanced" section of its page:
  * what power users and support need, out of the way of everyone else.
  */
-import {
-  DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
-  DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
-} from '@simple-agent-manager/shared';
 import type {
   ProjectSchedule,
   ProjectStandingWatch,
   TriggerResponse,
+} from '@simple-agent-manager/shared';
+import {
+  DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
+  DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
 } from '@simple-agent-manager/shared';
 import { isGitHubCommentEvent, isGitHubPullRequestEvent } from '@simple-agent-manager/shared';
 import type { ReactNode } from 'react';
@@ -18,8 +18,8 @@ import {
   deserializeResourceRequirements,
   formatLegacyVmSize,
 } from '../../components/resource-requirements';
-import type { AutomationLookups } from './data';
 import { formatSpanWords } from '../../lib/time-utils';
+import type { AutomationLookups } from './data';
 import { filterRows } from './describe';
 import { fullDate } from './time';
 

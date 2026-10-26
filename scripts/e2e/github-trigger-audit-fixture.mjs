@@ -140,16 +140,30 @@ export function auditSignedDeliveryIntents(fixture, targetEnvironment) {
   );
   return deliveries.map((item, index) => {
     assert(/^[a-f0-9-]{36}$/.test(item.deliveryId), 'Invalid fixture delivery ID');
-    assert(['issues', 'issue_comment'].includes(item.eventType), 'Unsupported audit event');
+    assert(
+      ['issues', 'issue_comment', 'pull_request_review', 'pull_request_review_comment'].includes(
+        item.eventType
+      ),
+      'Unsupported audit event'
+    );
     assert(
       Number.isSafeInteger(item.subjectNumber) && item.subjectNumber > 0,
       'Invalid audit subject'
     );
+    const reviewEvent = item.eventType.startsWith('pull_request_review');
+    const contentId = Number.parseInt(item.deliveryId.replaceAll('-', '').slice(0, 12), 16) + 1;
+    const user = { login: 'sam-staging-audit', type: 'User' };
+    const subjectUrl = `https://github.com/${fixture.repository}/pull/${item.subjectNumber}`;
     return {
       deliveryId: item.deliveryId,
       eventType: item.eventType,
       payload: JSON.stringify({
-        action: item.eventType === 'issues' ? 'opened' : 'created',
+        action:
+          item.eventType === 'issues'
+            ? 'opened'
+            : item.eventType === 'pull_request_review'
+              ? 'submitted'
+              : 'created',
         installation: { id: fixture.installationId },
         repository: { id: fixture.repositoryId, full_name: fixture.repository },
         sender: {
@@ -157,21 +171,60 @@ export function auditSignedDeliveryIntents(fixture, targetEnvironment) {
             targetEnvironment === 'production' ? 'simple-agent-manager[bot]' : 'sam-staging-audit',
           type: targetEnvironment === 'production' ? 'Bot' : 'User',
         },
-        issue: {
-          id: item.subjectNumber,
-          number: item.subjectNumber,
-          title: `${fixture.marker} Résumé 🐙`,
-          body: fixture.marker,
-          labels: [{ name: fixture.marker }],
-          state: 'open',
-          ...(item.eventType === 'issue_comment'
+        ...(!reviewEvent
+          ? {
+              issue: {
+                id: item.subjectNumber,
+                number: item.subjectNumber,
+                title: `${fixture.marker} Résumé 🐙`,
+                body: fixture.marker,
+                labels: [{ name: fixture.marker }],
+                state: 'open',
+                ...(item.eventType === 'issue_comment'
+                  ? {
+                      pull_request: {
+                        url: `https://api.github.com/repos/${fixture.repository}/pulls/${item.subjectNumber}`,
+                      },
+                    }
+                  : {}),
+              },
+            }
+          : {
+              pull_request: {
+                number: item.subjectNumber,
+                title: `${fixture.marker} review`,
+                html_url: subjectUrl,
+                labels: [{ name: fixture.marker }],
+                draft: false,
+                head: { ref: 'audit-fixture', sha: 'a'.repeat(40) },
+                base: { ref: 'main' },
+              },
+            }),
+        ...(reviewEvent
+          ? item.eventType === 'pull_request_review'
             ? {
-                pull_request: {
-                  url: `https://api.github.com/repos/${fixture.repository}/pulls/${item.subjectNumber}`,
+                review: {
+                  id: contentId,
+                  body: `/sam ${fixture.marker} feedback`,
+                  state: 'changes_requested',
+                  html_url: `${subjectUrl}#pullrequestreview-${contentId}`,
+                  author_association: 'MEMBER',
+                  user,
                 },
               }
-            : {}),
-        },
+            : {
+                comment: {
+                  id: contentId,
+                  body: `/sam ${fixture.marker} inline`,
+                  html_url: `${subjectUrl}#discussion_r${contentId}`,
+                  path: 'fixture.ts',
+                  line: 7,
+                  original_line: 7,
+                  author_association: 'MEMBER',
+                  user,
+                },
+              }
+          : {}),
         ...(item.eventType === 'issue_comment'
           ? {
               comment: {

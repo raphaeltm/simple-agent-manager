@@ -52,7 +52,15 @@ globalThis.fetch = async (url, options) => {
   assert(options.headers['X-GitHub-Event']===delivery.eventType);
   assert(options.headers['X-Hub-Signature-256'] === 'sha256=' + createHmac('sha256', process.env.GH_WEBHOOK_SECRET).update(options.body).digest('hex'));
   const body = JSON.parse(options.body);
-  assert(body.action === (delivery.eventType==='issues'?'opened':'created') && body.issue.body === fixture.marker && body.issue.number===delivery.subjectNumber);
+  if(delivery.eventType.startsWith('pull_request_review')) {
+    assert(!body.issue && body.pull_request.number===delivery.subjectNumber);
+    assert(body.pull_request.labels[0].name===fixture.marker);
+    const content=body.review || body.comment;
+    assert(content.user.login===body.sender.login && content.author_association==='MEMBER');
+    assert(content.body.startsWith('/sam '+fixture.marker) && Number.isSafeInteger(content.id));
+    if(body.review) assert(body.action==='submitted' && content.state==='changes_requested');
+    else assert(body.action==='created' && content.path==='fixture.ts' && content.line===7);
+  } else assert(body.action === (delivery.eventType==='issues'?'opened':'created') && body.issue.body === fixture.marker && body.issue.number===delivery.subjectNumber);
   if(delivery.eventType==='issue_comment') { assert(body.comment.body.startsWith('/sam '+fixture.marker)); assert(body.issue.pull_request.url.includes('/pulls/'+delivery.subjectNumber)); assert(Number.isSafeInteger(body.comment.id) && body.comment.id > 0); }
   assert(body.sender.login === (process.env.GITHUB_TRIGGER_AUDIT_ENVIRONMENT === 'production' ? 'simple-agent-manager[bot]' : 'sam-staging-audit'));
   sent++;
@@ -103,7 +111,7 @@ describe('bounded GitHub audit signer', () => {
     expect(output).toContain('syntheticSignedDelivery');
     assertRedacted(output);
   });
-  it.each(['issues', 'issue_comment'])(
+  it.each(['issues', 'issue_comment', 'pull_request_review', 'pull_request_review_comment'])(
     'signs at most two simultaneous %s fixtures, each with a stable duplicate replay',
     (eventType) => {
       const output = run({
