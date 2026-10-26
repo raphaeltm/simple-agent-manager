@@ -732,6 +732,15 @@ describe('explicit scoped controls and sender authorization', () => {
     const pr = { ...issue, issue: { ...issue.issue!, pull_request: {} } };
     expect(evaluateFilters(issue, { isPullRequest: true }).matched).toBe(false);
     expect(evaluateFilters(issue, { isPullRequest: false }).matched).toBe(true);
+    expect(
+      evaluateFilters(parseWebhookPayload('issue_comment', { issue: {} }), { isPullRequest: false })
+        .matched
+    ).toBe(false);
+    expect(
+      evaluateFilters(parseWebhookPayload('pull_request_review', { pull_request: {} }), {
+        isPullRequest: true,
+      }).matched
+    ).toBe(false);
     expect(evaluateFilters({ ...issue, issue: undefined }, { isPullRequest: false }).matched).toBe(
       false
     );
