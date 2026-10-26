@@ -7,6 +7,7 @@ import {
   AGENT_MESSAGE_CHANNEL_PREFIX,
   type GitHubTriggerEventType,
   type GitHubTriggerFilters,
+  isGitHubCommentEvent,
   PROJECT_EVENT_CHANNEL_SOURCE,
   PROJECT_LIFECYCLE_EVENT_SOURCE,
   PROJECT_LIFECYCLE_EVENT_TYPES,
@@ -47,7 +48,7 @@ const ACTION_WORDS: Record<string, string> = {
 const actionWord = (action: string) => ACTION_WORDS[action] ?? action.replaceAll('_', ' ');
 
 /** "When someone comments /sam on an issue or PR", "When a pull request is opened on main". */
-export function githubTriggerWhen(
+function githubTriggerBase(
   eventType: GitHubTriggerEventType,
   filters: GitHubTriggerFilters = {}
 ): string {
@@ -55,9 +56,15 @@ export function githubTriggerWhen(
   const labels = filters.labels?.length ? ` labeled ${filters.labels.join(' + ')}` : '';
   if (eventType === 'push') return `When code is pushed${branches.replace(' on ', ' to ')}`;
   if (eventType === 'issue_comment') {
+    const subject =
+      filters.isPullRequest === true
+        ? 'a pull request'
+        : filters.isPullRequest === false
+          ? 'an issue'
+          : 'an issue or PR';
     return filters.commandPrefix
-      ? `When someone comments ${filters.commandPrefix} on an issue or PR`
-      : 'When someone comments on an issue or PR';
+      ? `When someone comments ${filters.commandPrefix} on ${subject}`
+      : `When someone comments on ${subject}`;
   }
   if (
     ['issues', 'pull_request'].includes(eventType) &&
@@ -74,6 +81,53 @@ export function githubTriggerWhen(
     return `When a label is ${filters.actions[0] === 'labeled' ? 'added to' : 'removed from'} ${GITHUB_SUBJECTS[eventType]} with ${filters.labels.join(' + ')}`;
   const actions = filters.actions?.length ? orList(filters.actions.map(actionWord)) : 'changed';
   return `When ${GITHUB_SUBJECTS[eventType]}${labels} is ${actions}${branches}`;
+}
+
+/** Keep every active restriction visible, even when the main sentence is short. */
+export function githubTriggerClauses(
+  eventType: GitHubTriggerEventType,
+  filters: GitHubTriggerFilters = {}
+): string[] {
+  const conditions: string[] = [];
+  if (filters.actors?.length) conditions.push(`from ${orList(filters.actors)}`);
+  if (filters.ignoreActors?.length) conditions.push(`except ${orList(filters.ignoreActors)}`);
+  if (filters.ignoreBots) conditions.push('users only');
+  if (eventType !== 'push' && filters.authorAssociation?.length)
+    conditions.push(`acting author is ${orList(filters.authorAssociation)}`);
+  if (eventType !== 'push' && filters.bodyContains)
+    conditions.push(`text contains “${filters.bodyContains}”`);
+  if (isGitHubCommentEvent(eventType) && filters.commentContains)
+    conditions.push(`comment contains “${filters.commentContains}”`);
+  if (isGitHubCommentEvent(eventType) && eventType !== 'issue_comment' && filters.commandPrefix)
+    conditions.push(`body starts with ${filters.commandPrefix}`);
+  if (eventType === 'pull_request_review' && filters.reviewStates?.length)
+    conditions.push(`review is ${orList(filters.reviewStates.map(actionWord))}`);
+  if (
+    eventType === 'issue_comment' &&
+    filters.actions?.length &&
+    (filters.actions.length !== 1 || filters.actions[0] !== 'created')
+  )
+    conditions.push(`comment ${orList(filters.actions.map(actionWord))}`);
+  if ((eventType === 'issue_comment' || Boolean(filters.addedLabel)) && filters.labels?.length)
+    conditions.push(`with labels ${filters.labels.join(' + ')}`);
+  if (eventType === 'pull_request' && filters.ignoreDrafts !== false)
+    conditions.push('excluding drafts');
+  if (
+    ['issues', 'pull_request'].includes(eventType) &&
+    filters.addedLabel &&
+    !(filters.actions?.length === 1 && ['labeled', 'unlabeled'].includes(filters.actions[0] ?? ''))
+  )
+    conditions.push(`on label actions, changed label is ${filters.addedLabel}`);
+  if (eventType !== 'push' && eventType !== 'issue_comment' && filters.isPullRequest !== undefined)
+    conditions.push(filters.isPullRequest ? 'pull requests only' : 'issues only');
+  return [githubTriggerBase(eventType, filters), ...conditions];
+}
+
+export function githubTriggerWhen(
+  eventType: GitHubTriggerEventType,
+  filters: GitHubTriggerFilters = {}
+): string {
+  return githubTriggerClauses(eventType, filters).join(' · ');
 }
 
 export function webhookTriggerWhen(sourceLabel: string | null | undefined): string {

@@ -42,8 +42,9 @@ A fourth kind, **Email** (preview), gives an automation its own email address. S
      labels added later, or clear it to match every action; SAM refuses an action GitHub never
      sends for that event. **Ignore actors** (starts as `dependabot[bot]`) skips those accounts,
      **Required labels** (not for pushes; for a comment, the issue's or pull request's labels)
-     needs every listed label, **Command prefix** (comments and reviews; starts as `/sam`, so clear it to
-     react to every comment) only reacts to comments starting with it, **Branches** (pushes) or
+     needs every listed label, **Command prefix** requires the comment or review body to start with that text.
+     Issue comments start as `/sam`; switching to a review event clears it so approvals
+     do not require a command. Clear the prefix to accept any beginning. **Branches** (pushes) or
      **Source branches** (pull requests) limits the branch pushed to, or the branch a pull request
      comes from, and **Text contains** (not for pushes) looks for a keyword in the title, body, or
      comment. Draft pull requests are skipped unless you clear **Ignore draft pull requests**; to

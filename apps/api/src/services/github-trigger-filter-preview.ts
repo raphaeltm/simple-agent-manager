@@ -66,7 +66,7 @@ export async function previewRecentGitHubFilters(
   return {
     limit,
     warning:
-      'Audit rows do not retain payloads. Only unexpired recovery payloads can be evaluated; unavailable deliveries are not matches. This checks filters only, not admission, queueing or routing.',
+      'SAM keeps event details only briefly. Unavailable means a delivery cannot be checked, not that it failed your conditions. This tests conditions only; it does not start work or check whether a run is already busy.',
     deliveries: rows.map((row) => {
       const evidence = {
         id: row.id,
@@ -111,5 +111,18 @@ function safeFilterReason(reason?: string): string {
     return 'Branch does not match';
   if (reason.startsWith('comment does not start')) return 'Command prefix does not match';
   if (reason.startsWith('no title/body/comment')) return 'Text does not match';
-  return reason;
+  const words: Record<string, string> = {
+    'sender is not in actor allow-list': 'The person acting is not on your allowed list.',
+    'sender is a bot or has unknown type': 'GitHub did not mark the sender as a user.',
+    'sender does not have an allowed content author association':
+      'The person acting must have written it and have one of your selected roles.',
+    'changed label does not match addedLabel': 'A different label was added or removed.',
+    'issue or pull request subject is missing': 'The issue or pull request details are missing.',
+    'issue versus pull request does not match':
+      'This is a different kind of subject than you selected.',
+    'review state does not match': 'The review is not in a selected state.',
+    'comment does not contain required text': 'The comment or review does not contain your text.',
+    'pull request is a draft': 'The pull request is a draft.',
+  };
+  return words[reason] ?? 'A configured condition did not match.';
 }

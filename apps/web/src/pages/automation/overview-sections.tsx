@@ -12,6 +12,7 @@ import { formatTimeFromNow } from '../../lib/time-utils';
 import { useProjectContext } from '../ProjectContext';
 import type { ActivityEntry } from './activity';
 import type { AutomationLookups } from './data';
+import { githubTriggerClauses } from './describe';
 import { useAutomationAction } from './detail-parts';
 import {
   type Attention,
@@ -62,6 +63,10 @@ export function AutomationRow({
   const { projectId } = useProjectContext();
   const isMobile = useIsMobile();
   const when = `${item.when}${item.whenNote ? ` · ${item.whenNote}` : ''}`;
+  const github = item.kind === 'trigger' ? item.trigger.githubConfig : null;
+  const moreConditions = github
+    ? githubTriggerClauses(github.eventType, github.filters).length - 1
+    : 0;
   return (
     <RowLink
       to={automationPaths.detail(projectId, item.kind, item.id)}
@@ -76,7 +81,17 @@ export function AutomationRow({
           </>
         )
       }
-      meta={rowMeta(item)}
+      meta={
+        <>
+          {rowMeta(item)}
+          {moreConditions > 0 && (
+            <span className="block">
+              {moreConditions} more {moreConditions === 1 ? 'condition' : 'conditions'} · See
+              details
+            </span>
+          )}
+        </>
+      }
       badge={hasStatePill(item) ? <StatePill item={item} /> : undefined}
       muted={item.state === 'off'}
       testId="automation-row"

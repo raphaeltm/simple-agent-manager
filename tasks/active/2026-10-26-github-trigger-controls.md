@@ -38,3 +38,17 @@ Remaining #2420 scope: event type selection is singular and affinity per-trigger
 A submitted review plus inline-comment events on separate triggers cannot share one
 run. Tracked Idea `01M5WKCK7431DQ4FKBWENZV9QJ`; coordinator/A notified for scope
 reconciliation. Keep #2420 open unless the mixed-event acceptance is fulfilled.
+
+Coordinator sequencing decision (2026-10-26): foundations ships review events and
+per-trigger affinity. Combined submitted-review plus inline-comment single-owner
+acceptance moves to PR-watch #2421 using canonical PR ownership and shared delivery,
+with duplicate-wake suppression across watches/triggers. This remains unmet #2420
+scope, tracked by Idea `01M5WKCK7431DQ4FKBWENZV9QJ`; do not use Closes #2420.
+Combined staging must still prove supported same-trigger review bursts.
+
+Actual Opus first review CHANGES REQUESTED at930e8131a (task01M5WHY3EFHN326WD32KP7ACJT,
+Library report01M5WKHAKBM97RQVAYZCGMCFCH). Corrections and per-finding map are in the
+audit. All26 desktop/mobile screenshots inspected; focused browser cases pass after
+fixing test-only overview mocks. Web77unit and preview2tests pass. A will dispatch one
+final combined actual Opus review on the integrated branch; no B duplicate or approval
+claim. Queue-affinity-specific Then wording remains A's integration responsibility.

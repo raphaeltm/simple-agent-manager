@@ -60,7 +60,10 @@ function sourceRows(trigger: TriggerResponse): Rows {
         ]);
       if (eventType !== 'push') rows.push(['Text contains', filters.bodyContains || 'Anything']);
       if (eventType === 'push' || isGitHubPullRequestEvent(eventType))
-        rows.push(['Branches', listOr(filters.branches, 'Any')]);
+        rows.push([
+          isGitHubPullRequestEvent(eventType) ? 'Source branches' : 'Branches',
+          listOr(filters.branches, 'Any'),
+        ]);
       if (eventType === 'pull_request')
         rows.push(['Draft pull requests', filters.ignoreDrafts === false ? 'Included' : 'Ignored']);
       if (

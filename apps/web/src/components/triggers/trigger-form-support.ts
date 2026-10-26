@@ -4,6 +4,8 @@ import type {
   GitHubTriggerFilters,
 } from '@simple-agent-manager/shared';
 import {
+  GITHUB_AUTHOR_ASSOCIATIONS,
+  GITHUB_REVIEW_STATES,
   GITHUB_TEMPLATE_KEYS,
   isGitHubCommentEvent,
   isGitHubPullRequestEvent,
@@ -181,8 +183,11 @@ export function buildGitHubFilters(input: {
   if (input.ignoreBots) filters.ignoreBots = true;
   if (input.eventType !== 'push') {
     if (input.authorAssociation?.trim())
-      filters.authorAssociation = splitList(input.authorAssociation);
-    if (input.isPullRequest === 'true' || input.isPullRequest === 'false')
+      filters.authorAssociation = splitList(input.authorAssociation.toUpperCase());
+    if (
+      input.eventType === 'issue_comment' &&
+      (input.isPullRequest === 'true' || input.isPullRequest === 'false')
+    )
       filters.isPullRequest = input.isPullRequest === 'true';
   }
   if (['issues', 'pull_request'].includes(input.eventType) && input.addedLabel?.trim())
@@ -190,7 +195,7 @@ export function buildGitHubFilters(input: {
   if (isGitHubCommentEvent(input.eventType) && input.commentContains?.trim())
     filters.commentContains = input.commentContains.trim();
   if (input.eventType === 'pull_request_review' && input.reviewStates?.trim())
-    filters.reviewStates = splitList(input.reviewStates);
+    filters.reviewStates = splitList(input.reviewStates.toLowerCase());
   return filters;
 }
 
@@ -273,4 +278,21 @@ export function buildGitHubConfigForForm(
     if (built[key] !== undefined) Object.assign(filters, { [key]: built[key] });
   }
   return { eventType: input.eventType, filters };
+}
+
+/** The editor and read-only preview show the same fixed-choice validation. */
+export function githubFilterChoiceError(filters: GitHubTriggerFilters): string {
+  if (
+    filters.authorAssociation?.some(
+      (value) => !(GITHUB_AUTHOR_ASSOCIATIONS as readonly string[]).includes(value)
+    )
+  )
+    return 'Choose an author association from the listed GitHub values.';
+  if (
+    filters.reviewStates?.some(
+      (value) => !(GITHUB_REVIEW_STATES as readonly string[]).includes(value)
+    )
+  )
+    return 'Choose a review state from the listed GitHub values.';
+  return '';
 }
