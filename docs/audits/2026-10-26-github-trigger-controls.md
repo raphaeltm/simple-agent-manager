@@ -64,3 +64,25 @@ Refreshed audit:2/2PASS with normal/many30rows, empty and API500 error results,
 stale draft notice, and focused commentId context picker on both viewports. Ten
 screenshots inspected; no horizontal overflow or clipping assertions failed. The
 HTML/script-looking command text remains an input value, never rendered as markup.
+
+Opus inspection identified saved Advanced filter visibility and client enum validation
+as gaps. Added scoped rows for every new filter, comment/review prefix and branch
+scope, validation using shared association/state constants, and GitHub-specific hint.
+Unavailable payload reasons now use plain words in the UI. Follow-up Playwright4/4PASS,
+12 inspected screenshots including saved review details on desktop/mobile; web unit
+suite74PASS. Opus final verdict remains pending on pushed follow-up.
+
+Final visual refinement moves the sender-author caveat from the Advanced row label
+into its value so the desktop value column stays readable. Added explicit changed-label
+controls and event-switch scope screenshots; 4/4 PlaywrightPASS with 14 inspected
+screenshots. Saved-review mock now uses a GitHub prompt and honest zero-run state.
+
+## Remaining mixed-event review scope
+
+A trigger currently selects one GitHub event type, and affinity is deliberately
+per trigger. Several inline comments for one configured trigger can share a run,
+but a submitted review plus inline comments on separate triggers cannot all share
+one run. This is an unmet part of #2420's proposal, tracked as SAM Idea
+`01M5WKCK7431DQ4FKBWENZV9QJ`. Coordinator/A have the finding; no new cross-trigger
+or combined-event interface is implemented or silently authorized by this note.
+Do not close #2420 as fully resolved while this acceptance remains unmet.

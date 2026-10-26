@@ -159,10 +159,13 @@ export function evaluateFilters(
       return { matched: false, reason: 'changed label does not match addedLabel' };
   }
   if (filters.isPullRequest !== undefined && event.event !== 'push') {
-    const hasSubject =
+    const subject =
       event.event === 'issues' || event.event === 'issue_comment'
-        ? Boolean(event.issue)
-        : isGitHubPullRequestEvent(event.event) && Boolean(event.pull_request);
+        ? event.issue
+        : isGitHubPullRequestEvent(event.event)
+          ? event.pull_request
+          : undefined;
+    const hasSubject = subject && Number.isSafeInteger(subject.number) && subject.number > 0;
     if (!hasSubject) return { matched: false, reason: 'issue or pull request subject is missing' };
     if (isPullRequestSubject(event) !== filters.isPullRequest)
       return { matched: false, reason: 'issue versus pull request does not match' };

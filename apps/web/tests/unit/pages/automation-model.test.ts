@@ -9,6 +9,7 @@ import { describe, expect, it } from 'vitest';
 
 import { AUTOMATION_STARTS } from '../../../src/lib/automation-routes';
 import { buildActivity, runEntry, scheduleEntry } from '../../../src/pages/automation/activity';
+import { triggerAdvancedRows } from '../../../src/pages/automation/advanced-rows';
 import { triggersNeedingRuns } from '../../../src/pages/automation/data';
 import {
   describeEventFilter,
@@ -587,5 +588,52 @@ describe('which triggers get their runs read', () => {
     const history = triggersNeedingRuns(triggers, 'all', 2);
     expect(history.read.map((item) => item.id)).toEqual(['b', 'd']);
     expect(history.unread).toBe(2);
+  });
+});
+
+describe('saved structured GitHub filter presentation', () => {
+  const lookups = {
+    chats: [],
+    profiles: [],
+    skills: [],
+    chatTitle: () => 'Chat',
+    profileName: () => 'Agent',
+    skillName: () => null,
+    agentEmail: { enabled: false, domain: null },
+  };
+  it('shows only active comment/review/subject filters and keeps sender restrictions visible', () => {
+    const filters = {
+      actors: ['alice'],
+      ignoreBots: true,
+      authorAssociation: ['MEMBER'],
+      commentContains: '/sam',
+      commandPrefix: '/sam',
+      reviewStates: ['changes_requested'],
+      isPullRequest: true,
+      addedLabel: 'sam',
+      branches: ['feature'],
+    };
+    const review = trigger({
+      sourceType: 'github',
+      githubConfig: { eventType: 'pull_request_review', filters },
+    });
+    const rows = new Map(triggerAdvancedRows(review, lookups, () => 'Owner'));
+    expect(rows.get('Allowed actors')).toBe('alice');
+    expect(rows.get('Author association')).toContain('MEMBER');
+    expect(rows.get('Review states')).toBe('changes_requested');
+    expect(rows.get('Comment contains')).toBe('/sam');
+    expect(rows.has('Changed label')).toBe(false);
+    const pushed = new Map(
+      triggerAdvancedRows(
+        { ...review, githubConfig: { eventType: 'push', filters } },
+        lookups,
+        () => 'Owner'
+      )
+    );
+    expect(pushed.has('Review states')).toBe(false);
+    expect(pushed.has('Comment contains')).toBe(false);
+    expect(pushed.has('Author association')).toBe(false);
+    expect(pushed.has('Subject')).toBe(false);
+    expect(pushed.get('Allowed actors')).toBe('alice');
   });
 });

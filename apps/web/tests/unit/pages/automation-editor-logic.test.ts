@@ -729,3 +729,34 @@ describe('email start defaults (picked on Step 1, never from an effect)', () => 
     expect(withEmailDefaults(githubState, 'me@example.com')).toBe(githubState);
   });
 });
+
+describe('review filter validation before save', () => {
+  it('rejects unknown association and review-state values in the details step', () => {
+    const state = newEditorState({ start: 'github' }, NOW);
+    const github = {
+      ...state.github,
+      eventType: 'pull_request_review' as const,
+      actions: 'submitted',
+      authorAssociation: 'ADMIN',
+      reviewStates: '',
+    };
+    expect(validateStep({ ...state, github }, 'when', CAN).github).toContain('author association');
+    expect(
+      validateStep(
+        { ...state, github: { ...github, authorAssociation: 'MEMBER', reviewStates: 'accepted' } },
+        'when',
+        CAN
+      ).github
+    ).toContain('review state');
+    expect(
+      validateStep(
+        {
+          ...state,
+          github: { ...github, authorAssociation: 'MEMBER', reviewStates: 'changes_requested' },
+        },
+        'when',
+        CAN
+      ).github
+    ).toBeUndefined();
+  });
+});

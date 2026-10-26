@@ -78,7 +78,15 @@ export function GitHubFilterPreview({
                 {row.action ? ` / ${row.action}` : ''}
                 {' · '}
                 {row.receivedAt}
-                <p className="m-0 text-xs text-fg-muted">{row.reason}</p>
+                <p className="m-0 text-xs text-fg-muted">
+                  {row.reason === 'payload_unavailable'
+                    ? 'Payload was not retained or has expired.'
+                    : row.reason === 'payload_invalid'
+                      ? 'Stored payload could not be read.'
+                      : row.reason === 'matched'
+                        ? 'All configured filters passed.'
+                        : row.reason}
+                </p>
               </li>
             ))}
           </ul>

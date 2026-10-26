@@ -31,7 +31,7 @@ const STARTS: Array<{ id: AutomationStart; title: string; text: string; advanced
   {
     id: 'github',
     title: 'When something happens on GitHub',
-    text: 'New issues, comments, pull requests or pushes.',
+    text: 'Issues, comments, pull requests, reviews or pushes.',
   },
   {
     id: 'webhook',
