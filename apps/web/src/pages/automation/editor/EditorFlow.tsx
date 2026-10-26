@@ -56,6 +56,17 @@ const WHEN_HINTS: Partial<Record<NonNullable<EditorState['start']>, string>> = {
   email: 'Mail whose From address is on this list starts it.',
 };
 
+function revealFirstAlert() {
+  requestAnimationFrame(() => {
+    const alert = document.querySelector('[role="alert"]');
+    // Open collapsed ancestors before scrolling the field error into view.
+    for (let parent = alert?.parentElement; parent; parent = parent.parentElement) {
+      if (parent instanceof HTMLDetailsElement) parent.open = true;
+    }
+    alert?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+  });
+}
+
 export function EditorFlow({
   initial,
   steps,
@@ -129,6 +140,10 @@ export function EditorFlow({
     return () => window.removeEventListener('beforeunload', warn);
   }, [dirty]);
 
+  useEffect(() => {
+    if (saveError?.field) revealFirstAlert();
+  }, [saveError]);
+
   // A save error tied to a field shows on that field.
   const shownErrors = saveError?.field
     ? { ...errors, [saveError.field]: saveError.message }
@@ -145,14 +160,7 @@ export function EditorFlow({
     const found = validateStep(state, step, context);
     setErrors(found);
     if (Object.keys(found).length) {
-      requestAnimationFrame(() => {
-        const alert = document.querySelector('[role="alert"]');
-        // A field error inside a collapsed section must be visible before scrolling to it.
-        for (let parent = alert?.parentElement; parent; parent = parent.parentElement) {
-          if (parent instanceof HTMLDetailsElement) parent.open = true;
-        }
-        alert?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
-      });
+      revealFirstAlert();
       return;
     }
     const target = steps[index + 1];

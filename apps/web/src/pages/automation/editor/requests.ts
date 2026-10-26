@@ -43,6 +43,7 @@ import {
   splitEmailList,
   splitList,
 } from '../../../components/triggers/trigger-form-support';
+import { formatSpanWords } from '../../../lib/time-utils';
 import { isVersionConflict } from '../errors';
 import { resolveOnceTime } from '../schedule-time';
 import { cronError, toCron } from './cron';
@@ -438,11 +439,19 @@ export function friendlySaveError(error: unknown): { field?: string; message: st
       message: `Pending event limit must be between 1 and ${pendingLimit[1]}.`,
     };
   const waitLimit = /queueTtlSeconds must be between 1 and (\d+)/.exec(message);
-  if (waitLimit)
+  if (waitLimit) {
+    const seconds = Number(waitLimit[1]);
+    const minutes = Math.floor(seconds / 60);
+    const remainder = seconds % 60;
+    const secondsText = `${remainder} second${remainder === 1 ? '' : 's'}`;
+    const maximum = minutes
+      ? `${formatSpanWords(minutes * 60000)}${remainder ? ` ${secondsText}` : ''}`
+      : secondsText;
     return {
       field: 'queueTtlHours',
-      message: `Maximum wait must be at least one second and no more than ${Number(waitLimit[1]) / 3600} hours.`,
+      message: `Maximum wait must be at least one second and no more than ${maximum}.`,
     };
+  }
   if (isVersionConflict(error))
     return {
       message:

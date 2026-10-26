@@ -15,13 +15,13 @@ test('GitHub queue admin limits save and reset through runtime settings', async 
       name: 'operations.githubTriggerQueueMaxPendingLimit',
       defaultValue: 1000,
       description:
-        'Most pending events allowed when someone creates an automation or changes its queue limit. Saved automations and waiting events keep their settings.',
+        'Most pending events allowed when someone creates a GitHub trigger or changes its queue limit. Saved automations and waiting events keep their settings.',
     },
     {
       name: 'operations.githubTriggerQueueTtlSecondsLimit',
       defaultValue: 2592000,
       description:
-        'Longest wait allowed, in seconds (default: 30 days). Applies when someone creates an automation or changes its maximum wait. Saved automations and waiting events keep their settings.',
+        'Longest wait allowed for a GitHub trigger, in seconds (default: 30 days). Applies when someone creates a GitHub trigger or changes its maximum wait. Saved automations and waiting events keep their settings.',
     },
   ].map((setting) => ({
     ...setting,
@@ -89,7 +89,7 @@ test('GitHub queue admin limits save and reset through runtime settings', async 
         .locator('xpath=ancestor::article');
       await card.scrollIntoViewIfNeeded();
       await assertNoOverflow(page);
-      await screenshot(page, `opus-fix-admin-${index === 0 ? 'pending' : 'ttl'}-${state}`);
+      await screenshot(page, `reveal-fix-admin-${index === 0 ? 'pending' : 'ttl'}-${state}`);
     }
   };
   await captureCards('default');
@@ -118,7 +118,7 @@ test('GitHub queue admin limits save and reset through runtime settings', async 
       .click();
     await screenshot(
       page,
-      `opus-fix-admin-${setting.name.includes('MaxPending') ? 'pending' : 'ttl'}-reset-confirmation`
+      `reveal-fix-admin-${setting.name.includes('MaxPending') ? 'pending' : 'ttl'}-reset-confirmation`
     );
     await page.getByRole('button', { name: 'Apply change' }).click();
     await expect(page.getByRole('dialog')).toHaveCount(0);

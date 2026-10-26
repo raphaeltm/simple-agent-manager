@@ -82,3 +82,13 @@ apply lower defaults or preserve saved values. Server ceiling errors open Advanc
 identify the right field in its displayed unit. Admin range/copy concerns are corrected.
 Focused unit and desktop/mobile browser checks pass; actual Opus verification and the
 final coordinated staging/CI/release gates remain required.
+
+### Actual Opus viewport correction
+
+The follow-up actual review confirmed the previous four corrections, then found that
+server field errors could still be off-screen. Reuse the existing alert-reveal behavior
+when a new server field error arrives; keep ordinary edits free from repeated scrolling.
+Viewport rectangle and sticky-overlay checks cover both fields with Advanced collapsed
+and after scrolling to Machine, at desktop/mobile sizes. Human duration limits preserve
+exact seconds, and admin copy retains its GitHub scope. Final actual approval remains
+required; prior queue/admission acceptance is unchanged.

@@ -88,3 +88,18 @@ and 320px, successful server-clamped creation, preserved filter-only edits, and 
 error states. Mock browser validation passed 10 cases plus four persistence-fidelity
 checks. Root and the evidence reviewer inspected the changed controls; no unresolved
 clipping or overflow was found. Actual Opus re-verification remains a separate merge gate.
+
+## Server-error reveal correction
+
+The subsequent actual Opus re-verification confirmed the four prior fixes and found
+one remaining issue: a field error could be off-screen after Save. The editor now reuses
+its validation reveal behavior when a server field error arrives. The effect depends on
+the saved error object, so ordinary input edits do not repeatedly scroll the form.
+
+Twelve browser cases pass, including both fields with Advanced collapsed and with it
+open while scrolled to Machine, on desktop and mobile. These assertions measure the
+alert rectangle and check hit-testing at its top and bottom to catch sticky overlays;
+`toBeVisible()` alone is insufficient. The 26 `reveal-fix-*` captures show actual viewport
+positions and updated GitHub-scoped admin copy. Root and the evidence reviewer inspected
+the captures. Wait limits use readable duration words with exact remaining seconds.
+Actual Opus final verification is still required before merge.

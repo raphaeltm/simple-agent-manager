@@ -748,9 +748,21 @@ describe('templates and save errors', () => {
     });
     expect(friendlySaveError(new Error('queueTtlSeconds must be between 1 and 1800'))).toEqual({
       field: 'queueTtlHours',
-      message: 'Maximum wait must be at least one second and no more than 0.5 hours.',
+      message: 'Maximum wait must be at least one second and no more than 30 minutes.',
     });
   });
+  it.each([
+    [600, '10 minutes'],
+    [5000, '83 minutes 20 seconds'],
+    [1, '1 second'],
+    [2592000, '30 days'],
+  ])('explains a wait ceiling of %s seconds without float hours', (limit, text) => {
+    expect(friendlySaveError(new Error(`queueTtlSeconds must be between 1 and ${limit}`))).toEqual({
+      field: 'queueTtlHours',
+      message: `Maximum wait must be at least one second and no more than ${text}.`,
+    });
+  });
+
   it('fills the flow from a template', () => {
     const state = templateById('release-failed')?.apply(newEditorState({}, NOW));
     expect(state).toMatchObject({

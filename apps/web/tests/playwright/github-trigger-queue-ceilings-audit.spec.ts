@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 
+import { assertNoOverflow, screenshot } from './audit-helpers';
 import { audit } from './automation-audit-helpers';
 import { PROJECT_ID, setupAutomationMocks, TRIGGERS } from './automation-fixtures';
 
@@ -79,40 +80,64 @@ test('filter-only editing preserves a saved queue above the current ceiling', as
   await audit(page, 'opus-fix-queue-preserved-filter-edit');
 });
 
-for (const field of ['queueMaxPending', 'queueTtlSeconds'] as const) {
-  test(`server ${field} limit appears beside its editor field`, async ({ page }) => {
-    await setupAutomationMocks(page);
-    let submitted: Record<string, unknown> | undefined;
-    await page.route(`**/api/projects/${PROJECT_ID}/triggers/${TRIGGERS.github.id}`, (route) => {
-      if (route.request().method() !== 'PATCH') return route.fallback();
-      submitted = route.request().postDataJSON();
-      return route.fulfill({
-        status: 400,
-        json: {
-          error: 'BAD_REQUEST',
-          message: `${field} must be between 1 and ${field === 'queueMaxPending' ? 100 : 43200}`,
-        },
+for (const position of ['collapsed', 'open-machine'] as const) {
+  for (const field of ['queueMaxPending', 'queueTtlSeconds'] as const) {
+    test(`server ${field} limit reveals its field from ${position}`, async ({ page }) => {
+      await setupAutomationMocks(page);
+      let submitted: Record<string, unknown> | undefined;
+      await page.route(`**/api/projects/${PROJECT_ID}/triggers/${TRIGGERS.github.id}`, (route) => {
+        if (route.request().method() !== 'PATCH') return route.fallback();
+        submitted = route.request().postDataJSON();
+        return route.fulfill({
+          status: 400,
+          json: {
+            error: 'BAD_REQUEST',
+            message: `${field} must be between 1 and ${field === 'queueMaxPending' ? 100 : 43200}`,
+          },
+        });
       });
+      await page.goto(`/projects/${PROJECT_ID}/automation/trigger/${TRIGGERS.github.id}/edit`);
+      await page.getByTestId('automation-editor-next').click();
+      await page.getByTestId('automation-editor-next').click();
+      await page.getByText('Advanced options', { exact: true }).click();
+      const input = page.getByLabel(
+        field === 'queueMaxPending' ? 'Pending event limit' : 'Maximum wait (hours)',
+        { exact: true }
+      );
+      await input.fill(field === 'queueMaxPending' ? '500' : '48');
+      if (position === 'collapsed')
+        await page.getByText('Advanced options', { exact: true }).click();
+      else await page.getByText('Machine', { exact: true }).scrollIntoViewIfNeeded();
+      await page.getByTestId('automation-editor-next').click();
+      await expect.poll(() => submitted).toBeTruthy();
+      await expect(input).toBeVisible();
+      await expect(input).toHaveAttribute('aria-invalid', 'true');
+      await expect(input).toHaveAttribute('aria-describedby', /.+/);
+      const alert = page.getByRole('alert');
+      await expect(alert).not.toContainText(field);
+      await expect(alert).toContainText(field === 'queueMaxPending' ? '100' : '12');
+      if (field === 'queueTtlSeconds') await expect(alert).toContainText(/hours/);
+      await expect
+        .poll(() =>
+          alert.evaluate((element) => {
+            const bounds = element.getBoundingClientRect();
+            if (
+              bounds.top < 0 ||
+              bounds.bottom > innerHeight ||
+              bounds.left < 0 ||
+              bounds.right > innerWidth
+            )
+              return false;
+            const x = bounds.left + bounds.width / 2;
+            return [bounds.top + 1, bounds.bottom - 1].every((y) => {
+              const visible = document.elementFromPoint(x, y);
+              return visible === element || (visible !== null && element.contains(visible));
+            });
+          })
+        )
+        .toBe(true);
+      await assertNoOverflow(page);
+      await screenshot(page, `reveal-fix-${field}-${position}`);
     });
-    await page.goto(`/projects/${PROJECT_ID}/automation/trigger/${TRIGGERS.github.id}/edit`);
-    await page.getByTestId('automation-editor-next').click();
-    await page.getByTestId('automation-editor-next').click();
-    await page.getByText('Advanced options', { exact: true }).click();
-    const input = page.getByLabel(
-      field === 'queueMaxPending' ? 'Pending event limit' : 'Maximum wait (hours)',
-      { exact: true }
-    );
-    await input.fill(field === 'queueMaxPending' ? '500' : '48');
-    await page.getByText('Advanced options', { exact: true }).click();
-    await page.getByTestId('automation-editor-next').click();
-    await expect.poll(() => submitted).toBeTruthy();
-    await expect(input).toBeVisible();
-    await expect(input).toHaveAttribute('aria-invalid', 'true');
-    await expect(input).toHaveAttribute('aria-describedby', /.+/);
-    const alert = page.getByRole('alert');
-    await expect(alert).not.toContainText(field);
-    await expect(alert).toContainText(field === 'queueMaxPending' ? '100' : '12');
-    if (field === 'queueTtlSeconds') await expect(alert).toContainText(/hours/);
-    await audit(page, `opus-fix-queue-${field}-server-error`);
-  });
+  }
 }
