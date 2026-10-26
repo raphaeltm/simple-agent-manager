@@ -64,3 +64,12 @@ concurrency display for every trigger source. This file uses kebab-case naming.
 Platform ceilings apply to configuration writes. Lowering a ceiling preserves saved
 trigger values and accepted events; omitted queue fields on update preserve their values.
 No new delivery infrastructure, configuration endpoint or PR watch is introduced.
+
+Delta mock verification: 22 queue audit cases, two admin save/reset cases and four targeted
+concurrency cases passed on mobile/desktop. The 22 added captures cover each Operations
+control separately at default, override, reset and confirmation states, both concurrency
+sources, and both admin controls at 320px. Root and the evidence reviewer inspected these
+screenshots; no target-control clipping or overflow remained. Existing design-system
+settings cards were selected over a custom configuration screen or new API metadata
+surface to keep controls in the established operator workflow. Actual Opus delta review
+is tracked separately and must complete before merge.
