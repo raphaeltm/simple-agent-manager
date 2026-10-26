@@ -22,7 +22,7 @@ Busy GitHub triggers discard events. Same-subject comments need to reach one act
 - [x] Expose queued/routed/dropped counts and audit target in trigger API and page.
 - [x] Add real SQLite tests for sequential different issues, same-PR comments, expiry, concurrency and retries.
 - [x] Update docs/config references.
-- [ ] Validate lint/typecheck/test/build, independent specialist review, task completion.
+- [x] Validate lint/typecheck/test/build and independent implementation/specialist review (final release validation remains open).
 - [ ] Push branch; actual Opus 5.5 Chat review for any UI with desktop/mobile Playwright evidence.
 - [ ] Coordinate staging ownership and validate final candidate before PR.
 - [ ] PR, CI, CodeRabbit request/wait/findings, merge, basic production smoke.
@@ -51,3 +51,9 @@ No PR watches (#2421). Sister owns #2419/#2420/#2422 filters/review events/MCP c
 ## Recovery I/O budget
 
 The existing operations sweep additionally selects at most GITHUB_TRIGGER_RECOVERY_BATCH_SIZE pending executions (default25), ordered by attempted time for fairness. Expected new volume is bounded by per-trigger pending caps (default50); overflow is terminal audited immediately. Expiry cleanup is also bounded25. The drain's configurable20s default is a BETWEEN-candidate budget, not a hard wall-clock timeout: total cost is setup D1 work + approximately20s + one in-flight candidate. This is additional to the existing inbox recovery budget. Routing uses D1 and ProjectData durable acceptance/alarm work; VM waking runs through existing asynchronous operations. New admission reuses reserved submission: title generation (default5s timeout), repository authorization and ProjectData/TaskRunner RPCs, so one candidate has no newly asserted strict total bound. Do not abort an uncertain submission and retarget it. Waiting/tasklessqueued leave through submission, absolute TTL expiry or definite audited rejection; routing leaves through receipt reconciliation or TTL-bounded unconfirmed disposition for orphan targets. Task-bound admission keeps stable identity and follows existing task lifecycle rather than re-creating an agent.
+
+## Final integration checkpoint
+
+Current source9abcf9519 includes B3a2d77e2c and mainb73cfe50f. Full baseline47/47tasksPASS, API13929tests/web4769; later backend RPC-expiry regression17PASS and related63PASS, independent queue reviewPASS, APIlint/typecheckPASS. Final UI delta typecheck/lintPASS,80focusedwebtestsPASS and24desktop/mobilebrowsercasesPASS with60freshPNGs. Actual combined Opus report01M5WPE4XVPAFCJ2D3PPS1M1H0 verified all priorHIGH/MEDIUMfixed, then requested2MEDIUM9LOW changes. Those are fixed or explicitly justified in the evidence README; exactTTL display polish is Idea01M5WPPXJJ508RTDEW8NHZSC1F. Actual delta re-review required beforemerge. All four B original/recovered specialist reviewers completed; ledger in docs/audits/2026-10-26-github-trigger-controls.md.
+
+Staging preflight18:01UTC: migration0208, one enabled platform compute credential, no active deployment, same3sleeping+1error pre-existingnodes. No staging mutations yet. Live sequential/wake/expiry/inline/review acceptance, task archive validation, PR/CI/CodeRabbit, merge and basic production smoke remain open. Final Opus delta review may run alongside the coordinated staging deployment; merge still waits for its approval.

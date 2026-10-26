@@ -17,3 +17,20 @@ Follow-up review added manual cleanup/deletion fencing for durable startup reser
 Final combined follow-up evidence: all14 browser cases pass (10 queue +4 controls). Queue captures now total18, including saved queue settings in Advanced at both sizes. Queue controls share Review → Advanced with overlap controls, use shared CheckRow/Field semantics, and show a 24-hour default with fractional hours supported. Non-GitHub recent-run hints retain ordinary chat wording; visible Event numbers and the actual history retention window replace internal retention jargon. Routing, delivered and unconfirmed fixtures each include immutable audit target IDs. Screenshots were refreshed together after the full combined run; mobile enabled controls and desktop saved settings were visually inspected. Both actual Opus reviews requested changes; final approval remains pending on the integrated candidate.
 
 Final source candidate (B10297c0a1 integrated): combined16/16 Playwright cases pass. All18queue +26filter/context PNGs refreshed after the complete run. Affinity summaries explicitly describe continuing this automation’s active subject chat or starting a new one; browser assertions verify both editor and detail wording. Implementation agent inspected the updated mobile enabled controls, desktop review summary and mobile empty fields. Final typecheck passes after correcting the summary state reference;79focused web and2preview-service tests pass. Actual combined Opus approval is still pending.
+
+## Final combined delta after Opus report01M5WPE4XVPAFCJ2D3PPS1M1H0
+
+All earlier HIGH/MEDIUM findings were independently verified fixed by actual Opus at6cbc654. Its new2MEDIUM/9LOW findings have these dispositions:
+
+- M1: push excludes affinity in Review/detail, and create/update normalize it tofalse; regression preserves true for supported issue/PR subjects. Push detail+Review are captured at both sizes.
+- M2: overview says See all conditions, with no misleading numeric/more claim.
+- L1: cleanup copy is plain, GitHub-specific preservation copy appears only on GitHub; GitHub/webhook/schedule dialogs captured and asserted at both sizes.
+- L2: existing-chat hint appears only when affinity is enabled and the event has an issue/PR subject.
+- L3: overview action describes subject-chat reuse or a new chat, excludingpush; dedicated affinity overview captures/assertion.
+- L4/L5: PR source branches say from, role/state values read as words, review prefixes say Body starts with.
+- L6: enum errors are attached to the field with aria-invalid/describedby; error screenshots at both sizes.
+- L7: technical minimum hint removed. Repeating fractional hours for unusual existing integer-second TTLs is explicitly retained to preserve exact values. A unit-aware input is tracked/linked as SAM Idea01M5WPPXJJ508RTDEW8NHZSC1F; default24hours and saved human duration remain clear. This LOW polish item changes no functional TTL acceptance.
+- L8: run metadata is one wrapping line, EventN is GitHub-only and absent for unknown/zero sequence, and Chat accessible names use run for other sources.
+- L9: shared Disclosure starts closed when empty and retains user-open state when the final value is cleared; event switches do not open it for stale hidden values.
+
+Final integrated source9abcf9519:24/24 browser cases PASS,80focusedwebtestsPASS, webtypecheck/lintPASS. All60PNGs (30queue +30controls) refreshed together after the full run; new push/mobile, compact history/mobile, webhook cleanup/desktop and enum-error/mobile captures visually inspected. Actual Opus delta verification remains merge-blocking; no approval is claimed here.
