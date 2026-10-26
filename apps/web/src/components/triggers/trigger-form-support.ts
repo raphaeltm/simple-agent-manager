@@ -280,19 +280,26 @@ export function buildGitHubConfigForForm(
   return { eventType: input.eventType, filters };
 }
 
-/** The editor and read-only preview show the same fixed-choice validation. */
-export function githubFilterChoiceError(filters: GitHubTriggerFilters): string {
+/** Shared field errors for the editor and its read-only preview. */
+export function githubFilterChoiceErrors(filters: GitHubTriggerFilters): {
+  authorAssociation?: string;
+  reviewStates?: string;
+} {
+  const errors: { authorAssociation?: string; reviewStates?: string } = {};
   if (
     filters.authorAssociation?.some(
-      (value) => !(GITHUB_AUTHOR_ASSOCIATIONS as readonly string[]).includes(value)
+      (value) => !(GITHUB_AUTHOR_ASSOCIATIONS as readonly string[]).includes(value.toUpperCase())
     )
   )
-    return 'Choose an author association from the listed GitHub values.';
+    errors.authorAssociation = 'Choose an author association from the listed GitHub values.';
   if (
     filters.reviewStates?.some(
-      (value) => !(GITHUB_REVIEW_STATES as readonly string[]).includes(value)
+      (value) => !(GITHUB_REVIEW_STATES as readonly string[]).includes(value.toLowerCase())
     )
   )
-    return 'Choose a review state from the listed GitHub values.';
-  return '';
+    errors.reviewStates = 'Choose a review state from the listed GitHub values.';
+  return errors;
+}
+export function githubFilterChoiceError(filters: GitHubTriggerFilters): string {
+  return Object.values(githubFilterChoiceErrors(filters))[0] ?? '';
 }

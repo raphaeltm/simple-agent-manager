@@ -6,9 +6,16 @@ import {
   isGitHubCommentEvent,
   isGitHubPullRequestEvent,
 } from '@simple-agent-manager/shared';
+import { useState } from 'react';
 
 import { CheckRow, Field } from '../../pages/automation/fields';
-import { FOCUS_RING, GITHUB_EVENT_OPTIONS } from './trigger-form-support';
+import { Disclosure } from '../../pages/automation/ui';
+import {
+  FOCUS_RING,
+  GITHUB_EVENT_OPTIONS,
+  githubFilterChoiceErrors,
+  splitList,
+} from './trigger-form-support';
 
 interface ExtraFilters {
   actors?: string;
@@ -62,20 +69,36 @@ export function GitHubTriggerFields({
   onIgnoreDraftsChange,
   onLabelsChange,
 }: GitHubTriggerFieldsProps) {
+  const hasMoreConditions = (event: GitHubTriggerEventType) =>
+    Boolean(
+      (event !== 'push' && bodyContains) ||
+      (['issues', 'pull_request'].includes(event) && extraFilters.addedLabel) ||
+      (isGitHubCommentEvent(event) && extraFilters.commentContains) ||
+      (event === 'pull_request_review' && extraFilters.reviewStates)
+    );
+  const [moreOpen, setMoreOpen] = useState(() => hasMoreConditions(eventType));
+  const choiceErrors: Partial<Record<keyof ExtraFilters, string>> = githubFilterChoiceErrors({
+    authorAssociation:
+      eventType !== 'push' ? splitList(extraFilters.authorAssociation ?? '') : undefined,
+    reviewStates:
+      eventType === 'pull_request_review' ? splitList(extraFilters.reviewStates ?? '') : undefined,
+  });
   const text = (
     key: string,
     label: string,
     value: string,
     change: (value: string) => void,
     hint?: string,
-    inactive = false
+    inactive = false,
+    error?: string
   ) => (
-    <Field key={key} label={label} hint={hint}>
-      {({ id, describedBy }) => (
+    <Field key={key} label={label} hint={hint} error={error}>
+      {({ id, describedBy, invalid }) => (
         <input
           id={id}
           type="text"
           aria-describedby={describedBy}
+          aria-invalid={invalid}
           value={value}
           onChange={(event) => change(event.target.value)}
           disabled={disabled || inactive}
@@ -90,7 +113,9 @@ export function GitHubTriggerFields({
       label,
       String(extraFilters[key] ?? ''),
       (value) => onExtraFiltersChange?.({ [key]: value }),
-      hint
+      hint,
+      false,
+      choiceErrors[key]
     );
   return (
     <div className="flex flex-col gap-4">
@@ -99,7 +124,11 @@ export function GitHubTriggerFields({
           <select
             id={id}
             value={eventType}
-            onChange={(event) => onEventTypeChange(event.target.value as GitHubTriggerEventType)}
+            onChange={(event) => {
+              const next = event.target.value as GitHubTriggerEventType;
+              setMoreOpen(hasMoreConditions(next));
+              onEventTypeChange(next);
+            }}
             disabled={disabled}
             className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
           >
@@ -162,37 +191,42 @@ export function GitHubTriggerFields({
           onBranchesChange,
           'Comma-separated branch names.'
         )}
-      <details className="rounded-md border border-border-default p-3" open>
-        <summary className="cursor-pointer text-sm font-semibold">More conditions</summary>
-        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {eventType !== 'push' &&
-            text(
+      {eventType !== 'push' && (
+        <Disclosure
+          title="More conditions"
+          defaultOpen={moreOpen}
+          onToggle={setMoreOpen}
+          testId="github-more-conditions"
+        >
+          <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {text(
               'body',
               'Text contains',
               bodyContains,
               onBodyContainsChange,
               'Search the title, body or comment, ignoring case.'
             )}
-          {['issues', 'pull_request'].includes(eventType) &&
-            extra(
-              'addedLabel',
-              'Changed label',
-              'Matches the label added or removed, only on label actions.'
-            )}
-          {isGitHubCommentEvent(eventType) &&
-            extra(
-              'commentContains',
-              'Comment contains',
-              'Search only the comment or review body, ignoring case.'
-            )}
-          {eventType === 'pull_request_review' &&
-            extra(
-              'reviewStates',
-              'Review states',
-              `Comma-separated: ${GITHUB_REVIEW_STATES.join(', ')}. Letter case does not matter.`
-            )}
-        </div>
-      </details>
+            {['issues', 'pull_request'].includes(eventType) &&
+              extra(
+                'addedLabel',
+                'Changed label',
+                'Matches the label added or removed, only on label actions.'
+              )}
+            {isGitHubCommentEvent(eventType) &&
+              extra(
+                'commentContains',
+                'Comment contains',
+                'Search only the comment or review body, ignoring case.'
+              )}
+            {eventType === 'pull_request_review' &&
+              extra(
+                'reviewStates',
+                'Review states',
+                `Comma-separated: ${GITHUB_REVIEW_STATES.join(', ')}. Letter case does not matter.`
+              )}
+          </div>
+        </Disclosure>
+      )}
       <fieldset className="min-w-0 border-0 p-0 m-0">
         <legend className="mb-2 text-sm font-semibold">Who can start it</legend>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
