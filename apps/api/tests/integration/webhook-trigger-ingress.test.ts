@@ -47,7 +47,7 @@ CREATE TABLE trigger_executions (
   created_at TEXT NOT NULL
 );
 CREATE TABLE tasks (
-  id TEXT PRIMARY KEY, trigger_execution_id TEXT UNIQUE, status TEXT NOT NULL DEFAULT 'queued',
+  id TEXT PRIMARY KEY, project_id TEXT, recovery_source_task_id TEXT, superseded_by_task_id TEXT, triggered_by TEXT, trigger_execution_id TEXT UNIQUE, status TEXT NOT NULL DEFAULT 'queued',
   error_message TEXT, completed_at TEXT, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE webhook_trigger_configs (

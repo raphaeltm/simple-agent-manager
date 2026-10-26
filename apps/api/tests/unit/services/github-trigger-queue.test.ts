@@ -123,7 +123,7 @@ function setup() {
     const taskId = `task-${input.triggerExecutionId}`;
     sqlite
       .prepare(
-        `INSERT OR IGNORE INTO tasks (id,project_id,status,chat_session_id,trigger_execution_id) VALUES (?,'p','in_progress',?,?)`
+        `INSERT OR IGNORE INTO tasks (id,project_id,user_id,status,chat_session_id,trigger_execution_id) VALUES (?,'p','u','in_progress',?,?)`
       )
       .run(taskId, `session-${taskId}`, input.triggerExecutionId);
     return { taskId, sessionId: `session-${taskId}`, branchName: 'branch' };
@@ -417,7 +417,7 @@ describe('durable GitHub trigger queue', () => {
       .run();
     sqlite
       .prepare(
-        "INSERT INTO tasks(id,project_id,status,chat_session_id,recovery_source_task_id,triggered_by) VALUES('recovery-one','p','in_progress',?,?,'session-recovery')"
+        "INSERT INTO tasks(id,project_id,user_id,status,chat_session_id,recovery_source_task_id,triggered_by) VALUES('recovery-one','p','u','in_progress',?,?,'session-recovery')"
       )
       .run(first.sessionId, first.taskId);
     expect(
@@ -445,7 +445,7 @@ describe('durable GitHub trigger queue', () => {
       .run();
     sqlite
       .prepare(
-        "INSERT INTO tasks(id,project_id,status,chat_session_id,recovery_source_task_id,triggered_by) VALUES('recovery-two','p','in_progress',?,'recovery-one','session-recovery')"
+        "INSERT INTO tasks(id,project_id,user_id,status,chat_session_id,recovery_source_task_id,triggered_by) VALUES('recovery-two','p','u','in_progress',?,'recovery-one','session-recovery')"
       )
       .run(first.sessionId);
     expect(

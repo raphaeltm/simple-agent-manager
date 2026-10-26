@@ -124,12 +124,12 @@ CREATE TABLE webhook_deliveries (
 );
 CREATE TABLE github_trigger_configs (
   id TEXT PRIMARY KEY, trigger_id TEXT NOT NULL REFERENCES triggers(id) ON DELETE CASCADE,
-  event_type TEXT NOT NULL, filters_json TEXT NOT NULL DEFAULT '{}',
+  event_type TEXT NOT NULL, filters_json TEXT NOT NULL DEFAULT '{}', subject_affinity INTEGER NOT NULL DEFAULT 0, queue_max_pending INTEGER NOT NULL DEFAULT 50, queue_ttl_seconds INTEGER NOT NULL DEFAULT 86400,
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 );
 CREATE TABLE trigger_executions (
   id TEXT PRIMARY KEY, trigger_id TEXT NOT NULL REFERENCES triggers(id) ON DELETE CASCADE,
-  project_id TEXT NOT NULL, status TEXT NOT NULL, skip_reason TEXT, task_id TEXT,
+  project_id TEXT NOT NULL, status TEXT NOT NULL, skip_reason TEXT, task_id TEXT, subject_key TEXT, queue_expires_at TEXT, queue_attempted_at TEXT, routed_execution_id TEXT, routed_task_id TEXT, routed_session_id TEXT,
   event_type TEXT, rendered_prompt TEXT, error_message TEXT, scheduled_at TEXT,
   started_at TEXT, completed_at TEXT, sequence_number INTEGER, created_at TEXT NOT NULL
 );
@@ -460,16 +460,25 @@ describe('webhook trigger management vertical slice', () => {
       // Good rows keep their real filters.
       expect(byId.get('trigger-gh-good-1')?.githubConfig).toEqual({
         eventType: 'issues',
+        subjectAffinity: false,
+        queueMaxPending: 50,
+        queueTtlSeconds: 86400,
         filters: { actions: ['opened'] },
       });
       expect(byId.get('trigger-gh-good-2')?.githubConfig).toEqual({
         eventType: 'issues',
+        subjectAffinity: false,
+        queueMaxPending: 50,
+        queueTtlSeconds: 86400,
         filters: { labels: ['bug'] },
       });
       // The malformed row is NOT dropped from the list and does NOT 500 the
       // whole request — it degrades to a safe empty ("match everything") filter set.
       expect(byId.get('trigger-gh-bad')?.githubConfig).toEqual({
         eventType: 'issues',
+        subjectAffinity: false,
+        queueMaxPending: 50,
+        queueTtlSeconds: 86400,
         filters: {},
       });
       expect(log.warn).toHaveBeenCalledWith('trigger.github_filters_invalid', {
@@ -488,7 +497,13 @@ describe('webhook trigger management vertical slice', () => {
       const body = await response.json<{
         githubConfig?: { eventType: string; filters: Record<string, unknown> };
       }>();
-      expect(body.githubConfig).toEqual({ eventType: 'issues', filters: {} });
+      expect(body.githubConfig).toEqual({
+        eventType: 'issues',
+        filters: {},
+        subjectAffinity: false,
+        queueMaxPending: 50,
+        queueTtlSeconds: 86400,
+      });
       expect(log.warn).toHaveBeenCalledWith('trigger.github_filters_invalid', {
         triggerId: 'trigger-gh-bad',
       });
@@ -505,7 +520,13 @@ describe('webhook trigger management vertical slice', () => {
       const body = await response.json<{
         githubConfig?: { eventType: string; filters: Record<string, unknown> };
       }>();
-      expect(body.githubConfig).toEqual({ eventType: 'issues', filters: { actions: ['opened'] } });
+      expect(body.githubConfig).toEqual({
+        eventType: 'issues',
+        filters: { actions: ['opened'] },
+        subjectAffinity: false,
+        queueMaxPending: 50,
+        queueTtlSeconds: 86400,
+      });
     });
   });
 });

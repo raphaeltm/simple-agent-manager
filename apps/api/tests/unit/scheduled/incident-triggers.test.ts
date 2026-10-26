@@ -17,7 +17,7 @@ function setup(options: { withTrigger?: boolean } = {}) {
     CREATE TABLE platform_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT, updated_by TEXT);
     CREATE TABLE projects (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, max_triggers INTEGER);
     CREATE TABLE tasks (
-      id TEXT PRIMARY KEY, project_id TEXT NOT NULL, user_id TEXT NOT NULL,
+      id TEXT PRIMARY KEY, recovery_source_task_id TEXT, superseded_by_task_id TEXT, triggered_by TEXT, project_id TEXT NOT NULL, user_id TEXT NOT NULL,
       title TEXT NOT NULL, description TEXT, status TEXT NOT NULL, priority INTEGER NOT NULL,
       task_mode TEXT NOT NULL, dispatch_depth INTEGER NOT NULL, created_by TEXT NOT NULL,
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL);

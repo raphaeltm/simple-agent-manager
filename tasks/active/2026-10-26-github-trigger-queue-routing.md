@@ -15,9 +15,9 @@ Busy GitHub triggers discard events. Same-subject comments need to reach one act
 - [x] Agree schema ownership on feature.github-automation-2418 with sister/coordinator.
 - [x] Add configurable bounded FIFO queue/TTL, immutable prompt/snapshot, atomic admission and stable identities.
 - [x] Add opt-in repository+issue/PR affinity using existing durable prompt path, with persisted target audit.
-- [ ] Handle duplicate/concurrent intake, retries, missing/terminal targets, overflow, expiry and recovery fairness.
+- [x] Handle duplicate/concurrent intake, retries, missing/terminal targets, overflow, expiry and recovery fairness.
 - [x] Expose queued/routed/dropped counts and audit target in trigger API and page.
-- [ ] Add real SQLite tests for sequential different issues, same-PR comments, expiry, concurrency and retries.
+- [x] Add real SQLite tests for sequential different issues, same-PR comments, expiry, concurrency and retries.
 - [x] Update docs/config references.
 - [ ] Validate lint/typecheck/test/build, independent specialist review, task completion.
 - [ ] Push branch; actual Opus 5.5 Chat review for any UI with desktop/mobile Playwright evidence.
@@ -37,3 +37,7 @@ No PR watches (#2421). Sister owns #2419/#2420/#2422 filters/review events/MCP c
 - Desktop/mobile Playwright 8 passed; committed evidence under tasks/evidence/2026-10-26-github-trigger-queue.
 - Early Cloudflare reviewer findings addressed; independent final review, Opus review and coordinated staging still pending.
 - B owns MCP raw queue-setting persistence and editor preservation; must reconcile before merge.
+
+- Final local queue review PASS; security principal through wake fix PASS with13 independently rerun tests. Completion release gates pending.
+- Actual Opus review task01M5WFEVMVSEP76DCRBP7B7V1F started; findings being assessed, no approval yet.
+- Full suite legacy fixtures updated; failed files rerun105PASS. Serial final quality/full-suite rerun pending.

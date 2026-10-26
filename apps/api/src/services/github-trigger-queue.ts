@@ -277,6 +277,16 @@ async function routeToSession(
       return { outcome: 'dropped', executionId: row.id, reason: 'target_unavailable' };
     }
   }
+  const targetPrincipal = await env.DATABASE.prepare(
+    'SELECT user_id FROM tasks WHERE id=? AND project_id=?'
+  )
+    .bind(row.routedTaskId, row.projectId)
+    .first<{ user_id: string }>();
+  const creatorUserId =
+    typeof receipt?.metadata?.creatorUserId === 'string'
+      ? receipt.metadata.creatorUserId
+      : targetPrincipal?.user_id;
+  if (!creatorUserId) throw new Error('Routing target has no execution principal');
   const accepted = await projectData.acceptPromptDelivery(env, row.projectId, {
     deliveryId,
     targetSessionId: row.routedSessionId,
@@ -291,6 +301,7 @@ async function routeToSession(
       triggerExecutionId: row.id,
       githubDeliveryId: row.githubDeliveryId,
       subjectKey: row.subjectKey,
+      creatorUserId,
     },
   });
   const message = receipt ?? accepted.message;

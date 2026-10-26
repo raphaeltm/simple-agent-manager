@@ -93,6 +93,9 @@ describe('MCP create_trigger with canonical persistence', () => {
     expect(updated.error).toBeUndefined();
     expect(content(updated).githubConfig).toEqual({
       eventType: 'push',
+      subjectAffinity: false,
+      queueMaxPending: 50,
+      queueTtlSeconds: 86400,
       filters: { branches: ['main'] },
     });
     const cleared = await handleUpdateTrigger(

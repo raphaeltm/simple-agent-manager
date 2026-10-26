@@ -59,6 +59,8 @@ for (const scenario of ['normal', 'many-long', 'empty', 'error'] as const) {
       await expect(
         page.getByText('Nothing yet. Runs show up here with what happened and a link to the chat.')
       ).toBeVisible();
+    if (scenario === 'error')
+      await expect(page.getByRole('alert')).toContainText('Could not load runs.');
     await audit(page, `github-trigger-queue-${scenario}`);
   });
 }

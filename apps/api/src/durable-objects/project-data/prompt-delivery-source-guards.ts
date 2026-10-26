@@ -200,7 +200,9 @@ export function sourceTaskGuardForClaim(
     projectId,
     chatSessionId: claim.message.targetSessionId,
     ...(projectEventWake ? { projectEventWake } : {}),
-    ...(claim.message.sourceKind === 'scheduled_action' &&
+    ...(claim.message.sourceKind === 'github_trigger' ? { requireSourceProjectMember: true } : {}),
+    ...((claim.message.sourceKind === 'scheduled_action' ||
+      claim.message.sourceKind === 'github_trigger') &&
     typeof metadata.creatorUserId === 'string'
       ? { requiredProjectMemberId: metadata.creatorUserId }
       : {}),
@@ -212,7 +214,11 @@ export async function invalidProjectEventWakeSourceTaskResult(
   projectId: string | null,
   claim: PromptDeliveryClaim
 ): Promise<PromptDeliveryResult | null> {
-  if (claim.message.sourceKind !== 'project_event_wake' && claim.message.sourceKind !== 'github_trigger') return null;
+  if (
+    claim.message.sourceKind !== 'project_event_wake' &&
+    claim.message.sourceKind !== 'github_trigger'
+  )
+    return null;
   if (!claim.message.sourceTaskId || !projectId) {
     return {
       kind: 'failed',
@@ -220,6 +226,18 @@ export async function invalidProjectEventWakeSourceTaskResult(
       error: !projectId
         ? 'Project event wake has no project identity'
         : 'Project event wake has no source task authority',
+      runtimeIdentity: claim.message.runtimeIdentity,
+      capabilities: null,
+    };
+  }
+  if (
+    claim.message.sourceKind === 'github_trigger' &&
+    typeof claim.message.metadata?.creatorUserId !== 'string'
+  ) {
+    return {
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'GitHub trigger wake has no execution principal',
       runtimeIdentity: claim.message.runtimeIdentity,
       capabilities: null,
     };

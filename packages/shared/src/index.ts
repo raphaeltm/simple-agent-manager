@@ -63,6 +63,10 @@ export * from './resource-requirements';
 
 // Chat message pagination cursors (web client ↔ API contract)
 export { MERGED_MESSAGE_ROLES } from './chat-message-merge';
+export {
+  DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
+  DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
+} from './constants/triggers';
 export * from './github-trigger-contract';
 export type { MentionMatch } from './mentions';
 export { extractMentions, formatMentionName, getMentionQuery } from './mentions';
@@ -70,8 +74,3 @@ export * from './message-cursor';
 export { canonicalProjectPullRequestUrl } from './pull-requests';
 export * from './secret-exec';
 export * from './workload-identity';
-
-export {
-  DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
-  DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
-} from './constants/triggers';

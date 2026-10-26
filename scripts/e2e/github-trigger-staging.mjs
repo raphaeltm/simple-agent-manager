@@ -6,6 +6,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 
 import {
   auditPrompt,
+  validateAuditFixture,
+  auditSignedDeliveryIntents,
   hasAuditReply,
   readAuditMessages,
   findOwnedAuditTrigger,
@@ -52,23 +54,6 @@ const requestTimeoutMs = Number(process.env.GITHUB_TRIGGER_AUDIT_REQUEST_TIMEOUT
 assert(Number.isFinite(requestTimeoutMs) && requestTimeoutMs > 0, 'Invalid request timeout');
 const readFixture = async () =>
   JSON.parse(process.env.GITHUB_TRIGGER_AUDIT_FIXTURE || (await readFile(fixturePath, 'utf8')));
-function validateFixture(fixture) {
-  assert(/^github-trigger-audit-[a-f0-9-]{36}$/.test(fixture.marker), 'Invalid fixture marker');
-  assert(/^[a-f0-9-]{36}$/.test(fixture.deliveryId), 'Invalid fixture delivery ID');
-  assert(
-    /^[0-9A-Z]{26}$/.test(fixture.projectId) && /^[0-9A-Z]{26}$/.test(fixture.triggerId),
-    'Invalid fixture IDs'
-  );
-  assert(/^[\w.-]+\/[\w.-]+$/.test(fixture.repository), 'Invalid repository name');
-  assert(
-    Number.isSafeInteger(fixture.repositoryId) && fixture.repositoryId > 0,
-    'Invalid repository ID'
-  );
-  assert(
-    Number.isSafeInteger(fixture.installationId) && fixture.installationId > 0,
-    'Invalid installation ID'
-  );
-}
 async function readAppMetadata(fixture) {
   const appId = required('GH_APP_ID');
   const privateKey = required('GH_APP_PRIVATE_KEY');
@@ -135,63 +120,48 @@ async function readAppMetadata(fixture) {
 }
 if (phase === 'send') {
   const fixture = await readFixture();
-  validateFixture(fixture);
+  validateAuditFixture(fixture);
   try {
     await readAppMetadata(fixture);
   } catch {
     console.error('GitHub App metadata audit failed; key/token/request details suppressed');
     process.exitCode = 1;
   }
-  const payload = JSON.stringify({
-    action: 'opened',
-    installation: { id: fixture.installationId },
-    repository: { id: fixture.repositoryId, full_name: fixture.repository },
-    sender: {
-      login: targetEnvironment === 'production' ? 'simple-agent-manager[bot]' : 'sam-staging-audit',
-      type: targetEnvironment === 'production' ? 'Bot' : 'User',
-    },
-    issue: {
-      id: 1,
-      number: 1,
-      title: `${fixture.marker} Résumé 🐙`,
-      body: fixture.marker,
-      labels: [{ name: fixture.marker }],
-      state: 'open',
-    },
-  });
-  const signature = `sha256=${createHmac('sha256', required('GH_WEBHOOK_SECRET')).update(payload).digest('hex')}`;
+  const intents = auditSignedDeliveryIntents(fixture, targetEnvironment);
   let passed = !process.exitCode;
   for (let attempt = 0; passed && attempt < 2; attempt++) {
-    try {
-      const response = await fetch(`${apiUrl}/api/github/webhook`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Hub-Signature-256': signature,
-          'X-GitHub-Event': 'issues',
-          'X-GitHub-Delivery': fixture.deliveryId,
-        },
-        body: payload,
-        signal: AbortSignal.timeout(requestTimeoutMs),
-        redirect: 'error',
-      });
-      console.log(
-        JSON.stringify({
-          syntheticSignedDelivery: true,
-          deliveryId: fixture.deliveryId,
-          attempt,
-          status: response.status,
-        })
-      );
-      if (response.status !== 200) {
-        passed = false;
-        break;
-      }
-    } catch {
-      passed = false;
-      console.error('Signed staging send failed; request details suppressed');
-      break;
-    }
+    const results = await Promise.all(
+      intents.map(async (intent) => {
+        try {
+          const signature = `sha256=${createHmac('sha256', required('GH_WEBHOOK_SECRET')).update(intent.payload).digest('hex')}`;
+          const response = await fetch(`${apiUrl}/api/github/webhook`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Hub-Signature-256': signature,
+              'X-GitHub-Event': intent.eventType,
+              'X-GitHub-Delivery': intent.deliveryId,
+            },
+            body: intent.payload,
+            signal: AbortSignal.timeout(requestTimeoutMs),
+            redirect: 'error',
+          });
+          console.log(
+            JSON.stringify({
+              syntheticSignedDelivery: true,
+              deliveryId: intent.deliveryId,
+              attempt,
+              status: response.status,
+            })
+          );
+          return response.status === 200;
+        } catch {
+          console.error('Signed staging send failed; request details suppressed');
+          return false;
+        }
+      })
+    );
+    passed = results.every(Boolean);
   }
   // A 200 only proves ingress accepted; local verify must inspect actual admission.
   if (!passed) process.exitCode = 1;
@@ -210,7 +180,7 @@ if (phase === 'send') {
           installationId: Number(required('GITHUB_TRIGGER_AUDIT_INSTALLATION_ID')),
           agentProfileId: required('GITHUB_TRIGGER_AUDIT_PROFILE_ID'),
         };
-  if (phase === 'verify') validateFixture(fixture);
+  if (phase === 'verify') validateAuditFixture(fixture);
   const prefix = `/api/projects/${fixture.projectId}`;
   let step = 'login';
   let retain = false;
@@ -331,7 +301,7 @@ if (phase === 'send') {
       await page.getByRole('dialog').waitFor({ state: 'hidden' });
       await recoverTrigger();
       assert(fixture.triggerId, 'Form did not persist trigger');
-      validateFixture(fixture);
+      validateAuditFixture(fixture);
       const after = await request(`${prefix}/triggers`);
       const created = after.triggers.find((item) => item.id === fixture.triggerId);
       assert.deepEqual(created.githubConfig.filters.actions, ['opened']);

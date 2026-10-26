@@ -120,3 +120,73 @@ export async function readAuditMessages(fetchPage, maxPages = 10) {
   }
   throw new Error('Audit message inventory incomplete');
 }
+
+/** Bounded staging queue/affinity fixtures; no caller-supplied payload or prompt is signed. */
+export function auditSignedDeliveryIntents(fixture, targetEnvironment) {
+  assert(
+    targetEnvironment !== 'production' || !fixture.deliveries,
+    'Batch and comment fixtures are staging-only'
+  );
+  const deliveries = fixture.deliveries ?? [
+    { deliveryId: fixture.deliveryId, eventType: 'issues', subjectNumber: 1 },
+  ];
+  assert(
+    Array.isArray(deliveries) && deliveries.length > 0 && deliveries.length <= 2,
+    'Use one or two bounded audit deliveries'
+  );
+  assert(
+    new Set(deliveries.map((item) => item.deliveryId)).size === deliveries.length,
+    'Batch delivery IDs must be unique'
+  );
+  return deliveries.map((item, index) => {
+    assert(/^[a-f0-9-]{36}$/.test(item.deliveryId), 'Invalid fixture delivery ID');
+    assert(['issues', 'issue_comment'].includes(item.eventType), 'Unsupported audit event');
+    assert(
+      Number.isSafeInteger(item.subjectNumber) && item.subjectNumber > 0,
+      'Invalid audit subject'
+    );
+    return {
+      deliveryId: item.deliveryId,
+      eventType: item.eventType,
+      payload: JSON.stringify({
+        action: item.eventType === 'issues' ? 'opened' : 'created',
+        installation: { id: fixture.installationId },
+        repository: { id: fixture.repositoryId, full_name: fixture.repository },
+        sender: {
+          login:
+            targetEnvironment === 'production' ? 'simple-agent-manager[bot]' : 'sam-staging-audit',
+          type: targetEnvironment === 'production' ? 'Bot' : 'User',
+        },
+        issue: {
+          id: item.subjectNumber,
+          number: item.subjectNumber,
+          title: `${fixture.marker} Résumé 🐙`,
+          body: fixture.marker,
+          labels: [{ name: fixture.marker }],
+          state: 'open',
+        },
+        ...(item.eventType === 'issue_comment'
+          ? { comment: { id: index + 1, body: `/sam ${fixture.marker} comment ${index + 1}` } }
+          : {}),
+      }),
+    };
+  });
+}
+
+export function validateAuditFixture(fixture) {
+  assert(/^github-trigger-audit-[a-f0-9-]{36}$/.test(fixture.marker), 'Invalid fixture marker');
+  assert(/^[a-f0-9-]{36}$/.test(fixture.deliveryId), 'Invalid fixture delivery ID');
+  assert(
+    /^[0-9A-Z]{26}$/.test(fixture.projectId) && /^[0-9A-Z]{26}$/.test(fixture.triggerId),
+    'Invalid fixture IDs'
+  );
+  assert(/^[\w.-]+\/[\w.-]+$/.test(fixture.repository), 'Invalid repository name');
+  assert(
+    Number.isSafeInteger(fixture.repositoryId) && fixture.repositoryId > 0,
+    'Invalid repository ID'
+  );
+  assert(
+    Number.isSafeInteger(fixture.installationId) && fixture.installationId > 0,
+    'Invalid installation ID'
+  );
+}

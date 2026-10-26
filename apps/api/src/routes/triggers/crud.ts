@@ -211,7 +211,7 @@ crudRoutes.get('/', async (c) => {
   const githubById = new Map(githubConfigs.map((config) => [config.triggerId, config]));
   const webhookById = new Map(webhookConfigs.map((config) => [config.triggerId, config]));
   const emailById = new Map(emailConfigs.map((config) => [config.triggerId, config]));
-  const queueStats = await readQueueStats(c.env, projectId);
+  const queueStats = githubConfigs.length ? await readQueueStats(c.env, projectId) : new Map();
   const triggers = rows.map((row) => {
     const response = toTriggerResponse(row);
     response.credentialAttribution = attributionById.get(row.id);
