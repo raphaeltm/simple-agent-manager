@@ -141,3 +141,23 @@ A requested one final combined Opus review on the integrated branch, covering bo
 reports and evidence sets. B will not dispatch a duplicate reviewer. A also owns the
 affinity-specific Then wording in the integrated editor/detail, where its queue fields
 exist. No independent staging deployment or release by B.
+
+## Specialist review lineage (reconciled before release)
+
+The original local reviewers were interrupted during transport recovery at 16:41 UTC,
+before either returned final results. Recovery reviewers then completed the full scopes.
+To satisfy the merge gate without omitting the original rows, both original logical
+reviewers were resumed and completed against `10297c0a1c073356b836ae4a1d2c8ab5699106cf`.
+No interrupted review is represented as a completed review.
+
+| Reviewer                                              | Thread ID                            | Final status | Findings and resolution                                                                                                                                                                                                  |
+| ----------------------------------------------------- | ------------------------------------ | ------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| filter_security_review (original, resumed)            | 01a178e6-a5a6-7e80-9679-1c58affb0c7e | ADDRESSED    | Completed resumed security/Cloudflare/constitution review; no remaining findings at any severity. Earlier LOW non-comment commentUrl fixed in f8ae0aed2. Fresh 113 API tests pass.                                       |
+| completion_test_review (original, resumed)            | 01a178e6-cd8f-7c72-aaad-228c44868a2b | ADDRESSED    | Implementation scope PASS. MED missing subject and LOW commentUrl fixed in f8ae0aed2, malformed identity strengthened in 11e2fb1b8. Fresh 113 API and 42 web tests pass. Release gates remain pending.                   |
+| recovered_security_review (full replacement review)   | 01a17918-1512-76e2-a6dc-92678fd1f7a7 | ADDRESSED    | Completed full security/Cloudflare/constitution scope; no blockers. Same LOW commentUrl fixed with regression.                                                                                                           |
+| recovered_completion_review (full replacement review) | 01a17918-3331-7420-975a-0648fb4de0a1 | ADDRESSED    | Completed full completeness/tests/docs scope; same subject/context findings fixed. Combined same-trigger burst validation remains A's staging gate; mixed-event single-owner scope is explicitly tracked and stays open. |
+
+Both resumed originals confirmed shared REST/MCP validation and creation, fail-closed
+sender semantics, event scopes, safe bounded preview and documentation consistency.
+No critical or high finding remains from any local reviewer. These reviews do not
+substitute for the required final combined actual Opus UI review or release validation.
