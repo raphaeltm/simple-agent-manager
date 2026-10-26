@@ -70,6 +70,32 @@ describe('MCP create_trigger with canonical persistence', () => {
     expect(content(result).nextFireAt).toBeTruthy();
     expect(content(result).cronHumanReadable).toBeTruthy();
   });
+  it('updates queue controls and preserves them during later filter-only edits', async () => {
+    const created = content(await handleCreateTrigger('queue-create', github, token, env));
+    const settings = { subjectAffinity: true, queueMaxPending: 7, queueTtlSeconds: 120 };
+    const updated = await handleUpdateTrigger(
+      'queue-update',
+      { triggerId: created.triggerId, githubConfig: { ...github.githubConfig, ...settings } },
+      token,
+      env
+    );
+    expect(updated.error).toBeUndefined();
+    expect(content(updated).githubConfig).toMatchObject(settings);
+    const filtered = await handleUpdateTrigger(
+      'queue-filter',
+      {
+        triggerId: created.triggerId,
+        githubConfig: { eventType: 'issues', filters: { labels: ['bug'] } },
+      },
+      token,
+      env
+    );
+    expect(filtered.error).toBeUndefined();
+    expect(content(filtered).githubConfig).toMatchObject({
+      ...settings,
+      filters: { labels: ['bug'] },
+    });
+  });
   it('creates and replaces GitHub config without cron scheduling', async () => {
     const result = await handleCreateTrigger('1', github, token, env);
     expect(result.error).toBeUndefined();

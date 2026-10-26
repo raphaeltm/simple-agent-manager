@@ -202,8 +202,8 @@ and waiting lifetime. They must be positive integers. For example:
 }
 ```
 
-The trigger page shows pending, delivered-to-existing-run, and dropped totals for retained
-history. Recent runs distinguishes waiting for capacity from sending a follow-up. A routed
+The trigger page shows events waiting now and nonzero delivered, dropped, and unconfirmed
+counts from retained history. Unconfirmed delivery is never counted as a definite drop. Recent runs distinguishes waiting for capacity from sending a follow-up. A routed
 entry links to the chat that received it. A full queue or an expired event is recorded as a
 drop with its reason. Delivery failures also remain visible: SAM retries a different run only
 when the durable receipt proves no prompt was submitted to the first target. An uncertain

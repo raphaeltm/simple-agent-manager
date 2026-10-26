@@ -43,6 +43,7 @@ function HistoryRow({ entry, name }: { entry: ActivityEntry; name: string }) {
       {chatTo && (
         <Link
           to={chatTo}
+          aria-label={`Open chat for ${name}: ${entry.text}`}
           className="inline-flex min-h-11 shrink-0 items-center rounded-md border border-border-default px-3 text-sm font-semibold text-fg-primary no-underline hover:bg-surface-hover"
         >
           Chat
@@ -88,7 +89,7 @@ export function AutomationHistory() {
             : { label: 'Automation', to: automationPaths.overview(projectId) }
         }
         title={item ? `History of “${itemName ?? 'this automation'}”` : 'History'}
-        subtitle="What ran, when, and how it went. Each run links to its chat."
+        subtitle="Events and actions, when they occurred, and their outcomes. Open a linked chat to follow up."
       />
       {item && <TextLink to={automationPaths.history(projectId)}>Show every automation</TextLink>}
       <Chips

@@ -251,7 +251,7 @@ export const isManagedSubscription = (subscription: ProjectEventSubscriptionReco
 // Run outcomes
 // ---------------------------------------------------------------------------
 
-export type Outcome = 'ok' | 'failed' | 'skipped' | 'ignored' | 'running' | 'unknown';
+export type Outcome = 'ok' | 'failed' | 'skipped' | 'ignored' | 'running' | 'waiting' | 'unknown';
 
 const SKIP_REASONS: Record<string, string> = {
   still_running: 'the previous run was still going',
@@ -260,8 +260,14 @@ const SKIP_REASONS: Record<string, string> = {
   paused: 'it was paused',
 };
 
-export function executionOutcome(execution: Pick<TriggerExecution, 'status'>): Outcome {
+export function executionOutcome(
+  execution: Pick<TriggerExecution, 'status' | 'skipReason'>
+): Outcome {
+  if (execution.skipReason === 'delivery_uncertain') return 'unknown';
   switch (execution.status) {
+    case 'waiting':
+    case 'routing':
+      return 'waiting';
     case 'completed':
     case 'routed':
       return 'ok';
@@ -289,12 +295,12 @@ export function executionText(
     case 'waiting':
       return 'Queued until a run finishes';
     case 'routing':
-      return 'Sending to the existing run';
+      return 'Waiting for the running chat to take it';
     case 'routed':
-      return 'Sent to the existing run';
+      return 'Delivered to the running chat';
     case 'dropped':
       if (execution.skipReason === 'delivery_uncertain')
-        return 'Could not confirm delivery to the existing run';
+        return 'May have reached the chat, but SAM could not confirm it';
       return execution.skipReason === 'queue_expired'
         ? 'Dropped: waiting time expired'
         : execution.skipReason === 'queue_full'

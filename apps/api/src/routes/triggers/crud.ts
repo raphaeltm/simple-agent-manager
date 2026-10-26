@@ -435,15 +435,27 @@ async function readQueueStats(env: Env, projectId: string) {
     `SELECT trigger_id,
     SUM(CASE WHEN status IN ('waiting','routing') THEN 1 ELSE 0 END) AS queued,
     SUM(CASE WHEN status='routed' THEN 1 ELSE 0 END) AS routed,
-    SUM(CASE WHEN status='dropped' THEN 1 ELSE 0 END) AS dropped
+    SUM(CASE WHEN status='dropped' AND COALESCE(skip_reason,'')!='delivery_uncertain' THEN 1 ELSE 0 END) AS dropped,
+    SUM(CASE WHEN status='dropped' AND skip_reason='delivery_uncertain' THEN 1 ELSE 0 END) AS unconfirmed
     FROM trigger_executions WHERE project_id=? GROUP BY trigger_id`
   )
     .bind(projectId)
-    .all<{ trigger_id: string; queued: number; routed: number; dropped: number }>();
+    .all<{
+      trigger_id: string;
+      queued: number;
+      routed: number;
+      dropped: number;
+      unconfirmed: number;
+    }>();
   return new Map(
     result.results.map((row) => [
       row.trigger_id,
-      { queued: row.queued, routed: row.routed, dropped: row.dropped },
+      {
+        queued: row.queued,
+        routed: row.routed,
+        dropped: row.dropped,
+        unconfirmed: row.unconfirmed,
+      },
     ])
   );
 }

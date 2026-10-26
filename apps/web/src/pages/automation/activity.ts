@@ -34,8 +34,15 @@ export function runEntry(trigger: TriggerResponse, run: TriggerExecutionResponse
     outcome: executionOutcome(run),
     text: executionText(run),
     owner: { kind: 'trigger', id: trigger.id },
-    chat: run.taskId ? { taskId: run.taskId } : null,
+    chat: executionChat(run),
   };
+}
+
+/** Only link the current target; a rejected target is retained solely for audit. */
+export function executionChat(run: TriggerExecutionResponse): ActivityEntry['chat'] {
+  if (run.status === 'waiting' || run.skipReason === 'target_unavailable') return null;
+  const taskId = run.routedTaskId ?? run.taskId;
+  return run.routedSessionId ? { sessionId: run.routedSessionId } : taskId ? { taskId } : null;
 }
 
 const SCHEDULE_OUTCOMES: Partial<Record<ProjectSchedule['state'], Outcome>> = {

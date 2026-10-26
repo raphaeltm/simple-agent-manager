@@ -157,6 +157,9 @@ describe('creating triggers', () => {
     });
     expect(triggerCreateRequest(github).githubConfig).toEqual({
       eventType: 'issues',
+      subjectAffinity: false,
+      queueMaxPending: 50,
+      queueTtlSeconds: 86400,
       filters: {
         actions: ['opened', 'labeled'],
         labels: ['bug'],
@@ -261,6 +264,38 @@ describe('editing triggers', () => {
     });
   });
 
+  it('loads queue controls and changes them without losing stored filters', () => {
+    const original = trigger({
+      sourceType: 'github',
+      cronExpression: null,
+      githubConfig: {
+        eventType: 'issues',
+        filters: { labels: ['bug'] },
+        subjectAffinity: true,
+        queueMaxPending: 7,
+        queueTtlSeconds: 120,
+      },
+    });
+    const state = editorStateFromTrigger(original);
+    expect(state.github).toMatchObject({
+      subjectAffinity: true,
+      queueMaxPending: '7',
+      queueTtlSeconds: '120',
+    });
+    expect(triggerUpdateRequest({ ...state, name: 'Renamed' }, original)).not.toHaveProperty(
+      'githubConfig'
+    );
+    expect(
+      triggerUpdateRequest(
+        { ...state, github: { ...state.github, queueMaxPending: '9' } },
+        original
+      ).githubConfig
+    ).toEqual({ ...original.githubConfig, queueMaxPending: 9 });
+    expect(
+      validateStep({ ...state, github: { ...state.github, queueTtlSeconds: '0' } }, 'when', CAN)
+        .github
+    ).toMatch(/positive whole/);
+  });
   it('sends no GitHub config on an edit that did not touch it', () => {
     const original = trigger({
       sourceType: 'github',

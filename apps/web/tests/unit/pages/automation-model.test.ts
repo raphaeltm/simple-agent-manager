@@ -8,11 +8,12 @@ import type {
 import { describe, expect, it } from 'vitest';
 
 import { AUTOMATION_STARTS } from '../../../src/lib/automation-routes';
-import { buildActivity, scheduleEntry } from '../../../src/pages/automation/activity';
+import { buildActivity, runEntry, scheduleEntry } from '../../../src/pages/automation/activity';
 import { triggersNeedingRuns } from '../../../src/pages/automation/data';
 import {
   describeEventFilter,
   emailTriggerWhen,
+  executionOutcome,
   executionText,
   githubTriggerWhen,
   isSamRelay,
@@ -465,6 +466,30 @@ describe('activity', () => {
     ]);
     expect(entries[1]?.owner).toEqual({ kind: 'watch', id: 'wat-1' });
     expect(entries[2]?.text).toBe('Failed: boom');
+  });
+
+  it('preserves uncertain delivery and stable routed chat links in History', () => {
+    const routed = {
+      ...run('r', 'routed', '2026-10-20T10:00:00Z'),
+      taskId: null,
+      routedTaskId: 'old-task',
+      routedSessionId: 'stable-chat',
+    };
+    expect(runEntry(trigger(), routed).chat).toEqual({ sessionId: 'stable-chat' });
+    const uncertain = {
+      ...routed,
+      status: 'dropped' as const,
+      skipReason: 'delivery_uncertain' as const,
+    };
+    expect(executionOutcome(uncertain)).toBe('unknown');
+    expect(executionText(uncertain)).toBe(
+      'May have reached the chat, but SAM could not confirm it'
+    );
+    expect(runEntry(trigger(), { ...routed, status: 'waiting' }).chat).toBeNull();
+    expect(
+      runEntry(trigger(), { ...routed, status: 'dropped', skipReason: 'target_unavailable' }).chat
+    ).toBeNull();
+    expect(executionOutcome({ ...routed, status: 'routing' })).toBe('waiting');
   });
 
   it('says a skipped run was skipped and why', () => {

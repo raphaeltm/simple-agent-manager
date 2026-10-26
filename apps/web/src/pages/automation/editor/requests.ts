@@ -8,6 +8,8 @@ import {
   type CreateProjectStandingWatchRequest,
   type CreateTriggerRequest,
   DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
+  DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
+  DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
   DEFAULT_PROJECT_EVENT_SCHEDULE_PROMPT_MAX_BYTES,
   DEFAULT_PROJECT_EVENT_WATCH_COOLDOWN_MIN_MS,
   DEFAULT_PROJECT_EVENT_WATCH_MAX_CONCURRENT,
@@ -72,6 +74,14 @@ function emailConfig(state: EditorState): EmailTriggerConfigInput {
   return allowedSenders ? { allowedSenders } : {};
 }
 
+function githubQueueConfig(state: EditorState) {
+  return {
+    subjectAffinity: state.github.subjectAffinity,
+    queueMaxPending: Number(state.github.queueMaxPending),
+    queueTtlSeconds: Number(state.github.queueTtlSeconds),
+  };
+}
+
 function githubInput(state: EditorState) {
   return {
     eventType: state.github.eventType,
@@ -102,7 +112,12 @@ export function triggerCreateRequest(state: EditorState): CreateTriggerRequest {
       ? { cronExpression: toCron(state.schedule), cronTimezone: state.schedule.zone }
       : {}),
     ...(sourceType === 'github'
-      ? { githubConfig: buildGitHubConfigForForm(githubInput(state)) }
+      ? {
+          githubConfig: {
+            ...buildGitHubConfigForForm(githubInput(state)),
+            ...githubQueueConfig(state),
+          },
+        }
       : {}),
     ...(sourceType === 'webhook' ? { webhookConfig: webhookConfig(state) } : {}),
     ...(sourceType === 'email' ? { emailConfig: emailConfig(state) } : {}),
@@ -145,7 +160,19 @@ export function triggerUpdateRequest(
   }
   if (original.sourceType === 'github') {
     const githubConfig = buildGitHubConfigForForm(githubInput(state), original.githubConfig);
-    if (githubConfig) request.githubConfig = githubConfig;
+    const queue = githubQueueConfig(state);
+    const queueChanged =
+      queue.subjectAffinity !== (original.githubConfig?.subjectAffinity ?? false) ||
+      queue.queueMaxPending !==
+        (original.githubConfig?.queueMaxPending ?? DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING) ||
+      queue.queueTtlSeconds !==
+        (original.githubConfig?.queueTtlSeconds ?? DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS);
+    if (githubConfig || queueChanged)
+      request.githubConfig = {
+        ...(githubConfig ??
+          original.githubConfig ?? { eventType: state.github.eventType, filters: {} }),
+        ...queue,
+      };
   }
   if (original.sourceType === 'webhook') request.webhookConfig = webhookConfig(state);
   if (original.sourceType === 'email') request.emailConfig = emailConfig(state);
@@ -280,6 +307,18 @@ export function validateStep(
       const filters = buildGitHubFilters(githubInput(state));
       if (!areGitHubTriggerActionsValid(state.github.eventType, filters.actions))
         errors.github = 'Some actions do not exist for this GitHub event.';
+      const queue = githubQueueConfig(state);
+      if (
+        ![queue.queueMaxPending, queue.queueTtlSeconds].every(
+          (value) => Number.isSafeInteger(value) && value > 0
+        )
+      )
+        errors.github = 'Event limit and maximum wait must be positive whole numbers.';
+      else {
+        const expiry = new Date(Date.now() + queue.queueTtlSeconds * 1000);
+        if (!Number.isFinite(expiry.getTime()) || expiry.toISOString().length !== 24)
+          errors.github = 'Maximum wait is too large.';
+      }
     }
     if (state.start === 'webhook' && state.webhook.filters.some((filter) => !filter.path.trim()))
       errors.webhook = 'Every filter needs a path, like event.action.';

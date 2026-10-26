@@ -113,6 +113,7 @@ export const OUTCOME_META: Record<Outcome, { Icon: IconType; color: string; labe
   skipped: { Icon: SkipForward, color: 'var(--sam-color-fg-muted)', label: 'Skipped' },
   ignored: { Icon: Ban, color: 'var(--sam-color-fg-muted)', label: 'Ignored' },
   running: { Icon: LoaderCircle, color: 'var(--sam-color-info-fg)', label: 'In progress' },
+  waiting: { Icon: CalendarClock, color: 'var(--sam-color-fg-muted)', label: 'Waiting' },
   unknown: { Icon: CircleAlert, color: 'var(--sam-color-warning-fg)', label: 'Unconfirmed' },
 };
 

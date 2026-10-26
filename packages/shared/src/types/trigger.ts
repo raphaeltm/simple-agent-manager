@@ -165,7 +165,7 @@ export interface UpdateTriggerRequest {
 }
 
 export interface TriggerResponse extends Trigger {
-  queueStats?: { queued: number; routed: number; dropped: number };
+  queueStats?: { queued: number; routed: number; dropped: number; unconfirmed?: number };
   /** Human-readable description of the cron schedule (e.g., "Every weekday at 9:00 AM UTC"). */
   cronHumanReadable?: string;
   /** Effective credential attribution checks for this trigger. No secret material is included. */

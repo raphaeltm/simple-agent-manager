@@ -326,11 +326,19 @@ async function routeToSession(
   const delivered = message.deliveryState === 'acked';
   const terminal = ['failed', 'expired', 'ambiguous'].includes(message.deliveryState);
   const outcome = delivered ? 'routed' : terminal ? 'dropped' : 'routing';
-  const reason = terminal
-    ? message.deliveryState === 'expired'
-      ? 'queue_expired'
-      : 'target_unavailable'
-    : null;
+  const uncertain =
+    terminal &&
+    (message.deliveryState === 'ambiguous' ||
+      message.runtimeIdentity !== null ||
+      message.acceptedAt !== null ||
+      message.receiptState !== null);
+  const reason = uncertain
+    ? 'delivery_uncertain'
+    : terminal
+      ? message.deliveryState === 'expired'
+        ? 'queue_expired'
+        : 'target_unavailable'
+      : null;
   await env.DATABASE.prepare(
     `UPDATE trigger_executions SET status=?,skip_reason=?,completed_at=? WHERE id=? AND status='routing' AND routed_execution_id=?`
   )

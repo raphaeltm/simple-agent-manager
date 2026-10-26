@@ -1,9 +1,11 @@
 # GitHub trigger queue and subject routing (#2418)
 
 ## Problem
+
 Busy GitHub triggers discard events. Same-subject comments need to reach one active run durably.
 
 ## Research
+
 - Current main 88936885a retains busy events only as skipped executions.
 - github-trigger-recovery.ts already owns durable signed intake, leases, bounded operational sweep; reuse it to drain execution queue.
 - trigger_executions has stable delivery/trigger uniqueness and admission snapshot; waiting must not hold a run slot.
@@ -12,6 +14,7 @@ Busy GitHub triggers discard events. Same-subject comments need to reach one act
 - Migration safety requires additive SQL; reservation must atomically repeat capacity and affinity predicates.
 
 ## Checklist
+
 - [x] Agree schema ownership on feature.github-automation-2418 with sister/coordinator.
 - [x] Add configurable bounded FIFO queue/TTL, immutable prompt/snapshot, atomic admission and stable identities.
 - [x] Add opt-in repository+issue/PR affinity using existing durable prompt path, with persisted target audit.
@@ -25,19 +28,24 @@ Busy GitHub triggers discard events. Same-subject comments need to reach one act
 - [ ] PR, CI, CodeRabbit request/wait/findings, merge, basic production smoke.
 
 ## Acceptance
+
 Two different issues at concurrency 1 both execute sequentially. Same-PR comments with affinity reach one run and sleeping sessions wake. Expiry/overflow are visible; retries/duplicates/concurrent admission create no duplicate agents and lose no accepted event.
 
 ## Scope
+
 No PR watches (#2421). Sister owns #2419/#2420/#2422 filters/review events/MCP context. Optional cross-trigger PR ownership routing is excluded unless separately agreed. Never close #2418 with unmet agreed acceptance.
 
 ## Current evidence
+
 - Existing signed ingress/admission and queue tests pass; full related suite 187 tests. Queue/run-slot recovery-owner regression 36 tests.
 - Workerd prompt delivery regressions: 5 passed (absolute expiry, receipt checkpoint retention).
 - Full typecheck 19 tasks passed; build 9 passed. Serial full tests running after unchanged terminal timeout passed in isolation.
 - Desktop/mobile Playwright 8 passed; committed evidence under tasks/evidence/2026-10-26-github-trigger-queue.
 - Early Cloudflare reviewer findings addressed; independent final review, Opus review and coordinated staging still pending.
-- B owns MCP raw queue-setting persistence and editor preservation; must reconcile before merge.
+- A took queue controls in a separate editor component and raw MCP queue preservation after reading B ownership DM. Nondefault update + later filter-edit preservation tests pass; reconcile with B filter regions on integration.
 
 - Final local queue review PASS; security principal through wake fix PASS with13 independently rerun tests. Completion release gates pending.
 - Actual Opus review task01M5WFEVMVSEP76DCRBP7B7V1F started; findings being assessed, no approval yet.
 - Full suite legacy fixtures updated; failed files rerun105PASS. Serial final quality/full-suite rerun pending.
+
+- Actual Opus initial review4MEDIUM8LOW addressed: uncertainty classification/counts, stable History link, trueempty/errors, counters, copy/accessibility. Focused backend23PASS, MCP25PASS, webmodel/editor66PASS. Screenshots16 updated/inspected; actual follow-up pending.

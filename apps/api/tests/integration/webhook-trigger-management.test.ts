@@ -445,6 +445,33 @@ describe('webhook trigger management vertical slice', () => {
       insertGithubTrigger('trigger-gh-good-2', JSON.stringify({ labels: ['bug'] }));
     });
 
+    it('separates unconfirmed deliveries from drops in retained queue audit counts', async () => {
+      for (const [id, status, reason] of [
+        ['wait', 'waiting', null],
+        ['sent', 'routed', null],
+        ['drop', 'dropped', 'queue_expired'],
+        ['uncertain', 'dropped', 'delivery_uncertain'],
+      ]) {
+        sqlite
+          .prepare(
+            `INSERT INTO trigger_executions(id,trigger_id,project_id,status,skip_reason,created_at) VALUES(?,'trigger-gh-good-1','project-1',?,?, '2026-10-26T00:00:00.000Z')`
+          )
+          .run(id, status, reason);
+      }
+      const response = await app.request(
+        '/api/projects/project-1/triggers/trigger-gh-good-1',
+        undefined,
+        env
+      );
+      expect(response.status).toBe(200);
+      expect((await response.json<{ queueStats: unknown }>()).queueStats).toEqual({
+        queued: 1,
+        routed: 1,
+        dropped: 1,
+        unconfirmed: 1,
+      });
+    });
+
     it('does not let one malformed filters_json row break the trigger list (good/bad/good)', async () => {
       const response = await app.request('/api/projects/project-1/triggers', undefined, env);
 

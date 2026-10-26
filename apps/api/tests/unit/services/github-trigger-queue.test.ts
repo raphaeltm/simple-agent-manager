@@ -330,41 +330,46 @@ describe('durable GitHub trigger queue', () => {
       sqlite.prepare("SELECT status FROM trigger_executions WHERE github_delivery_id='two'").get()
     ).toEqual({ status: 'running' });
   });
-  it('keeps routing pending until a durable receipt and exposes terminal delivery failure', async () => {
-    const { sqlite, env, submit, input, stub, mailbox } = setup();
-    await acceptGitHubTriggerExecution(
-      env,
-      input('one', 'github:42:7', { subjectAffinity: true }),
-      submit
-    );
-    const original = stub.acceptPromptDelivery.getMockImplementation()!;
-    stub.acceptPromptDelivery.mockImplementation(async (...args) => {
-      const accepted = await original(...args);
-      if (accepted.message && accepted.message.deliveryState === 'acked')
-        accepted.message.deliveryState = 'queued';
-      return accepted;
-    });
-    expect(
-      (
-        await acceptGitHubTriggerExecution(
-          env,
-          input('two', 'github:42:7', { subjectAffinity: true }),
-          submit
-        )
-      ).outcome
-    ).toBe('routing');
-    const message = [...mailbox.values()][0];
-    message.deliveryState = 'failed';
-    message.terminalReason = 'terminal_target';
-    message.runtimeIdentity = 'possibly-submitted-runtime';
-    await drainGitHubTriggerQueue(env, submit);
-    expect(
-      sqlite
-        .prepare("SELECT status,skip_reason FROM trigger_executions WHERE github_delivery_id='two'")
-        .get()
-    ).toEqual({ status: 'dropped', skip_reason: 'target_unavailable' });
-    expect(submit).toHaveBeenCalledTimes(1);
-  });
+  it.each(['failed', 'ambiguous'] as const)(
+    'keeps routing pending and preserves uncertainty after %s with possible submission',
+    async (state) => {
+      const { sqlite, env, submit, input, stub, mailbox } = setup();
+      await acceptGitHubTriggerExecution(
+        env,
+        input('one', 'github:42:7', { subjectAffinity: true }),
+        submit
+      );
+      const original = stub.acceptPromptDelivery.getMockImplementation()!;
+      stub.acceptPromptDelivery.mockImplementation(async (...args) => {
+        const accepted = await original(...args);
+        if (accepted.message && accepted.message.deliveryState === 'acked')
+          accepted.message.deliveryState = 'queued';
+        return accepted;
+      });
+      expect(
+        (
+          await acceptGitHubTriggerExecution(
+            env,
+            input('two', 'github:42:7', { subjectAffinity: true }),
+            submit
+          )
+        ).outcome
+      ).toBe('routing');
+      const message = [...mailbox.values()][0];
+      message.deliveryState = state;
+      message.terminalReason = state === 'failed' ? 'terminal_target' : 'lost_response';
+      message.runtimeIdentity = state === 'failed' ? 'possibly-submitted-runtime' : null;
+      await drainGitHubTriggerQueue(env, submit);
+      expect(
+        sqlite
+          .prepare(
+            "SELECT status,skip_reason FROM trigger_executions WHERE github_delivery_id='two'"
+          )
+          .get()
+      ).toEqual({ status: 'dropped', skip_reason: 'delivery_uncertain' });
+      expect(submit).toHaveBeenCalledTimes(1);
+    }
+  );
 
   it('safely requeues a terminal target only when its receipt proves no prompt was submitted', async () => {
     const { sqlite, env, submit, input, stub, mailbox } = setup();

@@ -10,6 +10,7 @@ import { ChoiceCards } from '../fields';
 import { Notice } from '../page';
 import { OnceTimeFields } from '../schedule-time';
 import { KindIcon } from '../ui';
+import { GitHubQueueFields } from './GitHubQueueFields';
 import type { Errors } from './requests';
 import type { EditorState } from './state';
 import { ScheduleWhen } from './when-schedule';
@@ -145,6 +146,7 @@ export function StepWhen({
             onIgnoreDraftsChange={(ignoreDrafts) => set({ ignoreDrafts })}
             onLabelsChange={(labels) => set({ labels })}
           />
+          <GitHubQueueFields value={github} onChange={set} />
           {errors.github && (
             <p role="alert" className="m-0 text-[13px] font-medium text-danger-fg">
               {errors.github}

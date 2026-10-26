@@ -350,8 +350,16 @@ export async function handleUpdateTrigger(
     await env.DATABASE.batch([
       triggerUpdate,
       env.DATABASE.prepare(
-        'UPDATE github_trigger_configs SET event_type = ?, filters_json = ?, updated_at = ? WHERE trigger_id = ?'
-      ).bind(config.eventType, JSON.stringify(config.filters), values[0], triggerId),
+        'UPDATE github_trigger_configs SET event_type = ?, filters_json = ?, subject_affinity = COALESCE(?, subject_affinity), queue_max_pending = COALESCE(?, queue_max_pending), queue_ttl_seconds = COALESCE(?, queue_ttl_seconds), updated_at = ? WHERE trigger_id = ?'
+      ).bind(
+        config.eventType,
+        JSON.stringify(config.filters),
+        config.subjectAffinity === undefined ? null : Number(config.subjectAffinity),
+        config.queueMaxPending ?? null,
+        config.queueTtlSeconds ?? null,
+        values[0],
+        triggerId
+      ),
     ]);
   } else {
     await triggerUpdate.run();
