@@ -71,3 +71,8 @@ scope, validation using shared association/state constants, and GitHub-specific 
 Unavailable payload reasons now use plain words in the UI. Follow-up Playwright4/4PASS,
 12 inspected screenshots including saved review details on desktop/mobile; web unit
 suite74PASS. Opus final verdict remains pending on pushed follow-up.
+
+Final visual refinement moves the sender-author caveat from the Advanced row label
+into its value so the desktop value column stays readable. Added explicit changed-label
+controls and event-switch scope screenshots; 4/4 PlaywrightPASS with 14 inspected
+screenshots. Saved-review mock now uses a GitHub prompt and honest zero-run state.

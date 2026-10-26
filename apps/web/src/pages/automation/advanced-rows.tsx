@@ -64,7 +64,7 @@ function sourceRows(trigger: TriggerResponse): Rows {
           filters.actions.some((action) => ['labeled', 'unlabeled'].includes(action))) &&
         filters.addedLabel
       )
-        rows.push(['Changed label (label actions only)', filters.addedLabel]);
+        rows.push(['Changed label', `${filters.addedLabel} (label actions only)`]);
       if (isGitHubCommentEvent(eventType) && filters.commentContains)
         rows.push(['Comment contains', filters.commentContains]);
       if (eventType === 'pull_request_review' && filters.reviewStates?.length)
@@ -73,8 +73,8 @@ function sourceRows(trigger: TriggerResponse): Rows {
         rows.push(['Subject', filters.isPullRequest ? 'Pull requests only' : 'Issues only']);
       if (eventType !== 'push' && filters.authorAssociation?.length)
         rows.push([
-          'Author association (sender must be author)',
-          filters.authorAssociation.join(', '),
+          'Author association',
+          `${filters.authorAssociation.join(', ')} (sender must be author)`,
         ]);
       rows.push(['Allowed actors', listOr(filters.actors, 'Anyone')]);
       rows.push(['Ignore bot actors', filters.ignoreBots ? 'Yes' : 'No']);
