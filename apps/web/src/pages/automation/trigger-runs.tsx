@@ -23,7 +23,7 @@ import { fullDate } from './time';
 import { OutcomeIcon, Panel, SectionTitle } from './ui';
 
 /** Runs the API lets you delete: anything not running right now. */
-const DELETABLE = new Set(['queued', 'failed', 'skipped', 'completed']);
+const DELETABLE = new Set(['queued', 'failed', 'skipped', 'completed', 'routed', 'dropped']);
 
 const runTime = (run: TriggerExecutionResponse) =>
   run.completedAt ?? run.startedAt ?? run.scheduledAt;
@@ -80,6 +80,12 @@ export function TriggerRuns({
           ) : undefined
         }
       />
+      {trigger.sourceType === 'github' && trigger.queueStats && (
+        <p className="m-0 text-sm text-fg-muted" aria-label="GitHub event queue">
+          {trigger.queueStats.queued} queued · {trigger.queueStats.routed} sent to an existing run ·{' '}
+          {trigger.queueStats.dropped} dropped
+        </p>
+      )}
       {runs.isError && list.length === 0 ? (
         <LoadError what="runs" error={runs.error} onRetry={() => void runs.refetch()} />
       ) : runs.isPending ? (
@@ -116,9 +122,9 @@ export function TriggerRuns({
                     </span>
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
-                    {run.taskId && (
+                    {(run.routedTaskId ?? run.taskId) && (
                       <Link
-                        to={`/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(run.taskId)}`}
+                        to={`/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(run.routedTaskId ?? run.taskId ?? '')}`}
                         className="inline-flex min-h-11 items-center rounded-md border border-border-default px-3 text-sm font-semibold text-fg-primary no-underline hover:bg-surface-hover"
                       >
                         Chat

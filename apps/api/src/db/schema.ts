@@ -2985,6 +2985,12 @@ export const triggerExecutions = sqliteTable(
     githubDeliveryId: text('github_delivery_id'),
     submissionRecordedAt: text('submission_recorded_at'),
     admissionSnapshotJson: text('admission_snapshot_json'),
+    subjectKey: text('subject_key'),
+    queueExpiresAt: text('queue_expires_at'),
+    queueAttemptedAt: text('queue_attempted_at'),
+    routedExecutionId: text('routed_execution_id'),
+    routedTaskId: text('routed_task_id'),
+    routedSessionId: text('routed_session_id'),
     errorMessage: text('error_message'),
     scheduledAt: text('scheduled_at'),
     startedAt: text('started_at'),
@@ -3020,6 +3026,9 @@ export const githubTriggerConfigs = sqliteTable(
       .references(() => triggers.id, { onDelete: 'cascade' }),
     eventType: text('event_type').notNull(),
     filtersJson: text('filters_json').notNull().default('{}'),
+    subjectAffinity: integer('subject_affinity', { mode: 'boolean' }).notNull().default(false),
+    queueMaxPending: integer('queue_max_pending').notNull().default(50),
+    queueTtlSeconds: integer('queue_ttl_seconds').notNull().default(86400),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),

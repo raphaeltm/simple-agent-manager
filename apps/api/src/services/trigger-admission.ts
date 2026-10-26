@@ -1,6 +1,5 @@
 import {
   DEFAULT_TRIGGER_AUTO_PAUSE_AFTER_FAILURES,
-  TASK_TERMINAL_STATUSES,
   type TriggeredBy,
 } from '@simple-agent-manager/shared';
 
@@ -12,18 +11,18 @@ import { ulid } from '../lib/ulid';
 import { TERMINAL_STATUS_VALUES } from './task-status';
 import { readTriggerAdmissionSnapshot } from './trigger-admission-snapshot';
 import { resolveTriggerExecutionUserId } from './trigger-execution-principal';
+import { consecutiveFailureCount } from './trigger-failure-window';
 import {
   type AdmissionSkipReason,
   classifyReservationFailure,
   EXECUTION_HOLDS_RUN_SLOT_BINDINGS,
   EXECUTION_HOLDS_RUN_SLOT_SQL,
+  TRIGGER_RUN_TASK_ID_SQL,
 } from './trigger-run-slots';
 import { type SubmittedTriggerTask, TriggerTaskSubmissionPendingError } from './trigger-submission';
 import { submitTriggeredTask } from './trigger-submit';
 
 export type TriggerTaskSubmitter = typeof submitTriggeredTask;
-
-const TERMINAL_TASK_STATUSES = new Set<string>(TASK_TERMINAL_STATUSES);
 
 export type TriggerAdmissionResult =
   | {
@@ -50,6 +49,7 @@ export interface TriggerAdmissionInput {
   triggeredBy: Exclude<TriggeredBy, 'mcp'>;
   scheduledAt?: string;
   allowPaused?: boolean;
+  queueManaged?: boolean;
   githubDeliveryId?: string;
   githubProcessingToken?: string;
   renderPrompt: (
@@ -91,32 +91,6 @@ async function lostEmailLease(env: Env, lease: TriggerAdmissionInput['emailLease
     .bind(lease.rowId, lease.leaseToken)
     .first<{ held: number }>();
   return !held;
-}
-
-async function consecutiveFailureCount(
-  env: Env,
-  triggerId: string,
-  threshold: number
-): Promise<{ count: number; resetSequence: number | null }> {
-  const rows = await env.DATABASE.prepare(
-    `SELECT e.status, t.status AS taskStatus, tr.auto_pause_reset_sequence AS resetSequence
-       FROM trigger_executions e
-       LEFT JOIN tasks t ON t.id = e.task_id
-      JOIN triggers tr ON tr.id = e.trigger_id
-      WHERE e.trigger_id = ? AND e.status != 'skipped'
-        AND (tr.auto_pause_reset_sequence IS NULL OR e.sequence_number >= tr.auto_pause_reset_sequence)
-      ORDER BY e.sequence_number DESC, e.created_at DESC LIMIT ?`
-  )
-    .bind(triggerId, threshold)
-    .all<{ status: string; taskStatus: string | null; resetSequence: number | null }>();
-  let count = 0;
-  for (const row of rows.results) {
-    const linkedTaskStillLive =
-      row.taskStatus !== null && !TERMINAL_TASK_STATUSES.has(row.taskStatus);
-    if (row.status !== 'failed' || linkedTaskStillLive) break;
-    count += 1;
-  }
-  return { count, resetSequence: rows.results[0]?.resetSequence ?? null };
 }
 
 async function recordSkippedExecution(
@@ -259,8 +233,13 @@ export async function admitAndSubmitTriggerExecution(
     env.TRIGGER_AUTO_PAUSE_AFTER_FAILURES,
     DEFAULT_TRIGGER_AUTO_PAUSE_AFTER_FAILURES
   );
-  while (!input.allowPaused && !previous) {
-    const failures = await consecutiveFailureCount(env, trigger.id, autoPauseThreshold);
+  while (!input.allowPaused && (!previous || input.queueManaged)) {
+    const failures = await consecutiveFailureCount(
+      env,
+      trigger.id,
+      autoPauseThreshold,
+      input.queueManaged ? previous?.id : undefined
+    );
     if (failures.count < autoPauseThreshold) break;
     const paused = await env.DATABASE.prepare(
       `UPDATE triggers SET status = 'paused', next_fire_at = NULL, updated_at = ?
@@ -293,7 +272,7 @@ export async function admitAndSubmitTriggerExecution(
       WHERE id = ? AND project_id = ?
         AND (status = 'active' OR (? = 1 AND status = 'paused'))
         AND (SELECT COUNT(*) FROM trigger_executions e
-             LEFT JOIN tasks t ON t.id = e.task_id
+             LEFT JOIN tasks t ON t.id = ${TRIGGER_RUN_TASK_ID_SQL}
              WHERE e.trigger_id = triggers.id
                AND ${EXECUTION_HOLDS_RUN_SLOT_SQL})
             < CASE WHEN skip_if_running = 1 THEN 1 ELSE max_concurrent END
@@ -450,6 +429,12 @@ export async function admitAndSubmitTriggerExecution(
   } catch (error) {
     if (error instanceof TriggerTaskSubmissionPendingError) {
       await recordTaskBoundary(env, trigger, executionId, error.submission, now);
+      if (input.queueManaged)
+        await env.DATABASE.prepare(
+          "UPDATE trigger_executions SET status='queued' WHERE id=? AND status='running'"
+        )
+          .bind(executionId)
+          .run();
       log.warn('trigger_admission.submission_pending', {
         triggerId: trigger.id,
         executionId,
@@ -461,15 +446,16 @@ export async function admitAndSubmitTriggerExecution(
     }
     const message = error instanceof Error ? error.message : String(error);
     await env.DATABASE.prepare(
-      `UPDATE trigger_executions SET status = 'failed', error_message = ?, completed_at = ?
+      `UPDATE trigger_executions SET status = ?, error_message = ?, completed_at = ?
        WHERE id = ? AND trigger_id = ? AND project_id = ? AND task_id IS NULL
          AND (? IS NULL OR EXISTS (SELECT 1 FROM github_trigger_inbox g
            WHERE g.id = ? AND g.state = 'processing' AND g.lease_token = ?))
          AND ${HOLDS_EMAIL_LEASE_SQL}`
     )
       .bind(
+        input.queueManaged ? 'queued' : 'failed',
         message,
-        new Date().toISOString(),
+        input.queueManaged ? null : new Date().toISOString(),
         executionId,
         trigger.id,
         trigger.projectId,

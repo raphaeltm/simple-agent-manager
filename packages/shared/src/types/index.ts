@@ -665,6 +665,7 @@ export type {
   CronValidationResult,
   GitHubTemplateContext,
   GitHubTriggerConfig,
+  GitHubTriggerRoutingConfig,
   GitHubTriggerEventType,
   GitHubTriggerFilters,
   ListTriggerExecutionsResponse,

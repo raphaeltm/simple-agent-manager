@@ -36,6 +36,8 @@ export interface AcceptPromptDeliveryInput {
   metadata?: Record<string, unknown> | null;
   ackTimeoutMs?: number | null;
   ttlMs?: number | null;
+  /** Absolute source deadline; retries cannot extend it. */
+  expiresAt?: number | null;
   maxMessages?: number;
 }
 
@@ -106,6 +108,7 @@ export function acceptPromptDeliveryInTransaction(
     metadata: input.metadata ?? null,
     ackTimeoutMs: input.ackTimeoutMs ?? null,
     ttlMs: input.ttlMs ?? null,
+    expiresAt: input.expiresAt ?? null,
     maxMessages: input.maxMessages,
     sourceKind: input.sourceKind,
     promptMessageId: persisted.id,
@@ -193,7 +196,7 @@ function listExpiringWakeDeliveries(sql: SqlStorage, now: number): ExpiredWakeDe
         WHERE inbox.delivery_state IN ('queued', 'retry_wait', 'delivering')
           AND inbox.expires_at IS NOT NULL
           AND inbox.expires_at <= ?
-          AND inbox.source_kind IN ('user_followup', 'parent_wakeup', 'project_event_wake', 'scheduled_action', 'checkpoint_continuation')
+          AND inbox.source_kind IN ('user_followup', 'parent_wakeup', 'project_event_wake', 'github_trigger', 'scheduled_action', 'checkpoint_continuation')
           AND session.status = 'sleeping'`,
       now
     )

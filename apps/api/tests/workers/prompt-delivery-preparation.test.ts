@@ -1,3 +1,4 @@
+import type { PromptDeliverySource } from '@simple-agent-manager/shared';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
@@ -14,7 +15,7 @@ import { versionedPromptCapabilities } from '../helpers/vm-prompt-delivery-fixtu
 const config = resolveDurableExecutionConfig({});
 const capabilities = versionedPromptCapabilities('runtime-before-reset');
 
-async function createDelivery() {
+async function createDelivery(sourceKind: PromptDeliverySource = 'user_followup') {
   const stub = env.PROJECT_DATA.get(
     env.PROJECT_DATA.newUniqueId()
   ) as DurableObjectStub<ProjectData>;
@@ -29,7 +30,7 @@ async function createDelivery() {
         targetSessionId: sessionId,
         displayContent: 'Resume the existing work',
         senderType: 'human',
-        sourceKind: 'user_followup',
+        sourceKind,
         ttlMs: config.ttlMs,
       },
       now
@@ -98,4 +99,69 @@ describe('prompt preparation checkpoints in Workers SQLite', () => {
       });
     }
   );
+  it('preserves the submission checkpoint when a GitHub routing guard fails during reconciliation', async () => {
+    const { stub, original, now } = await createDelivery('github_trigger');
+    await runInDurableObject(stub, (_instance, state) => {
+      const sql = state.storage.sql;
+      expect(markPromptDeliverySubmitting(sql, original, capabilities)).toBe(true);
+      const claim = claimDuePromptDeliveries(sql, config, now + config.receiptTimeoutMs)[0]!;
+      expect(claim.mode).toBe('reconcile');
+      expect(
+        applyPromptDeliveryResult(
+          sql,
+          claim,
+          {
+            kind: 'failed',
+            reason: 'terminal_target',
+            error: 'Target ended while receipt lookup was pending',
+            runtimeIdentity: null,
+            capabilities: null,
+          },
+          config,
+          now + config.receiptTimeoutMs
+        )
+      ).toBe(true);
+      expect(
+        sql
+          .exec(
+            'SELECT delivery_state,runtime_identity,accepted_at,receipt_state FROM session_inbox WHERE id=?',
+            'delivery-1'
+          )
+          .one()
+      ).toMatchObject({
+        delivery_state: 'failed',
+        runtime_identity: capabilities.runtimeIdentity,
+        accepted_at: null,
+        receipt_state: null,
+      });
+    });
+  });
+  it('keeps an absolute GitHub routing deadline across duplicate acceptance', async () => {
+    const { stub, now } = await createDelivery();
+    await runInDurableObject(stub, (_instance, state) => {
+      const sql = state.storage.sql;
+      const sessionId = sql
+        .exec('SELECT target_session_id FROM session_inbox WHERE id=?', 'delivery-1')
+        .one().target_session_id as string;
+      const input = {
+        deliveryId: 'github-followup',
+        targetSessionId: sessionId,
+        displayContent: 'Follow up',
+        senderType: 'system' as const,
+        sourceKind: 'github_trigger' as const,
+        expiresAt: now + 10,
+        ttlMs: 60000,
+      };
+      acceptPromptDelivery(sql, {}, input, now);
+      acceptPromptDelivery(sql, {}, input, now + 100);
+      expect(
+        sql.exec('SELECT expires_at FROM session_inbox WHERE id=?', 'github-followup').one()
+      ).toMatchObject({ expires_at: now + 10 });
+      expect(
+        claimDuePromptDeliveries(sql, config, now + 100).some(
+          (claim) => claim.message.id === 'github-followup'
+        )
+      ).toBe(false);
+    });
+  });
 });

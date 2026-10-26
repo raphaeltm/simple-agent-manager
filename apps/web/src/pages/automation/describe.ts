@@ -263,10 +263,12 @@ const SKIP_REASONS: Record<string, string> = {
 export function executionOutcome(execution: Pick<TriggerExecution, 'status'>): Outcome {
   switch (execution.status) {
     case 'completed':
+    case 'routed':
       return 'ok';
     case 'failed':
       return 'failed';
     case 'skipped':
+    case 'dropped':
       return 'skipped';
     default:
       return 'running';
@@ -284,6 +286,20 @@ export function executionText(
       return execution.errorMessage ? `Failed: ${execution.errorMessage}` : 'Failed';
     case 'skipped':
       return `Skipped because ${SKIP_REASONS[execution.skipReason ?? ''] ?? 'it could not start'}`;
+    case 'waiting':
+      return 'Queued until a run finishes';
+    case 'routing':
+      return 'Sending to the existing run';
+    case 'routed':
+      return 'Sent to the existing run';
+    case 'dropped':
+      if (execution.skipReason === 'delivery_uncertain')
+        return 'Could not confirm delivery to the existing run';
+      return execution.skipReason === 'queue_expired'
+        ? 'Dropped: waiting time expired'
+        : execution.skipReason === 'queue_full'
+          ? 'Dropped: queue was full'
+          : 'Dropped: the target chat is unavailable';
     case 'queued':
       return 'Waiting to start';
     default:

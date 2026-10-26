@@ -38,6 +38,7 @@ export interface EnqueueOptions {
   metadata?: Record<string, unknown> | null;
   ackTimeoutMs?: number | null;
   ttlMs?: number | null;
+  expiresAt?: number | null;
   maxMessages?: number;
   sourceKind?: PromptDeliverySource;
   promptMessageId?: string;
@@ -59,7 +60,8 @@ export function enqueueMessage(sql: SqlStorage, opts: EnqueueOptions): AgentMail
     opts.ackRequired === undefined ? (isDurable ? 1 : 0) : opts.ackRequired ? 1 : 0;
   const ttlMs =
     typeof opts.ttlMs === 'number' && opts.ttlMs > 0 ? opts.ttlMs : MAILBOX_DEFAULTS.TTL_MS;
-  const expiresAt = now + ttlMs;
+  const expiresAt = typeof opts.expiresAt === 'number' && Number.isFinite(opts.expiresAt)
+    ? Math.min(now + ttlMs, opts.expiresAt) : now + ttlMs;
 
   // Enforce per-project message cap
   if (opts.maxMessages && isMailboxAtCapacity(sql, opts.maxMessages)) {

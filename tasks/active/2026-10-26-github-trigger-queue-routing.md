@@ -12,13 +12,13 @@ Busy GitHub triggers discard events. Same-subject comments need to reach one act
 - Migration safety requires additive SQL; reservation must atomically repeat capacity and affinity predicates.
 
 ## Checklist
-- [ ] Agree schema ownership on feature.github-automation-2418 with sister/coordinator.
-- [ ] Add configurable bounded FIFO queue/TTL, immutable prompt/snapshot, atomic admission and stable identities.
-- [ ] Add opt-in repository+issue/PR affinity using existing durable prompt path, with persisted target audit.
+- [x] Agree schema ownership on feature.github-automation-2418 with sister/coordinator.
+- [x] Add configurable bounded FIFO queue/TTL, immutable prompt/snapshot, atomic admission and stable identities.
+- [x] Add opt-in repository+issue/PR affinity using existing durable prompt path, with persisted target audit.
 - [ ] Handle duplicate/concurrent intake, retries, missing/terminal targets, overflow, expiry and recovery fairness.
-- [ ] Expose queued/routed/dropped counts and audit target in trigger API and page.
+- [x] Expose queued/routed/dropped counts and audit target in trigger API and page.
 - [ ] Add real SQLite tests for sequential different issues, same-PR comments, expiry, concurrency and retries.
-- [ ] Update docs/config references.
+- [x] Update docs/config references.
 - [ ] Validate lint/typecheck/test/build, independent specialist review, task completion.
 - [ ] Push branch; actual Opus 5.5 Chat review for any UI with desktop/mobile Playwright evidence.
 - [ ] Coordinate staging ownership and validate final candidate before PR.
@@ -29,3 +29,11 @@ Two different issues at concurrency 1 both execute sequentially. Same-PR comment
 
 ## Scope
 No PR watches (#2421). Sister owns #2419/#2420/#2422 filters/review events/MCP context. Optional cross-trigger PR ownership routing is excluded unless separately agreed. Never close #2418 with unmet agreed acceptance.
+
+## Current evidence
+- Existing signed ingress/admission and queue tests pass; full related suite 187 tests. Queue/run-slot recovery-owner regression 36 tests.
+- Workerd prompt delivery regressions: 5 passed (absolute expiry, receipt checkpoint retention).
+- Full typecheck 19 tasks passed; build 9 passed. Serial full tests running after unchanged terminal timeout passed in isolation.
+- Desktop/mobile Playwright 8 passed; committed evidence under tasks/evidence/2026-10-26-github-trigger-queue.
+- Early Cloudflare reviewer findings addressed; independent final review, Opus review and coordinated staging still pending.
+- B owns MCP raw queue-setting persistence and editor preservation; must reconcile before merge.

@@ -11,8 +11,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Mock trigger admission before importing the handler. Success-path tests invoke
 // the supplied renderPrompt callback so the production context/renderer wiring runs.
-vi.mock('../../../src/services/trigger-admission', () => ({
-  admitAndSubmitTriggerExecution: vi.fn().mockResolvedValue({
+vi.mock('../../../src/services/github-trigger-queue', async (original) => ({
+  ...await original<typeof import('../../../src/services/github-trigger-queue')>(),
+  acceptGitHubTriggerExecution: vi.fn().mockResolvedValue({
     outcome: 'submitted',
     executionId: 'execution-123',
     taskId: 'task-123',
@@ -22,7 +23,7 @@ vi.mock('../../../src/services/trigger-admission', () => ({
 }));
 
 import { handleGitHubEventForTriggers } from '../../../src/services/github-trigger-handler';
-import { admitAndSubmitTriggerExecution } from '../../../src/services/trigger-admission';
+import { acceptGitHubTriggerExecution } from '../../../src/services/github-trigger-queue';
 
 // ---------------------------------------------------------------------------
 // D1 Mock Infrastructure
@@ -109,7 +110,7 @@ describe('handleGitHubEventForTriggers', () => {
     });
     expect(result.processed).toBe(false);
     expect(result.reason).toBe('unsupported_event_type:star');
-    expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
+    expect(acceptGitHubTriggerExecution).not.toHaveBeenCalled();
   });
 
   it('returns feature_disabled when neither override nor webhook secret is configured', async () => {
@@ -125,7 +126,7 @@ describe('handleGitHubEventForTriggers', () => {
     expect(result.processed).toBe(false);
     expect(result.reason).toBe('feature_disabled');
     expect(result.matchedTriggers).toBe(0);
-    expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
+    expect(acceptGitHubTriggerExecution).not.toHaveBeenCalled();
   });
 
   it('returns feature_disabled when flag is explicitly "false"', async () => {
@@ -149,7 +150,7 @@ describe('handleGitHubEventForTriggers', () => {
     });
     expect(result.processed).toBe(false);
     expect(result.reason).toBe('unsupported_event_type:star');
-    expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
+    expect(acceptGitHubTriggerExecution).not.toHaveBeenCalled();
   });
 
   // --- No repository in payload ---
@@ -165,7 +166,7 @@ describe('handleGitHubEventForTriggers', () => {
     });
     expect(result.processed).toBe(false);
     expect(result.reason).toBe('invalid_scope');
-    expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
+    expect(acceptGitHubTriggerExecution).not.toHaveBeenCalled();
   });
 
   it('admits issues events with a stale stored commandPrefix and renders them as plain text', async () => {
@@ -220,7 +221,7 @@ describe('handleGitHubEventForTriggers', () => {
       ]);
 
     let renderedPrompt = '';
-    vi.mocked(admitAndSubmitTriggerExecution).mockImplementationOnce(async (_env, input) => {
+    vi.mocked(acceptGitHubTriggerExecution).mockImplementationOnce(async (_env, input) => {
       renderedPrompt = input.renderPrompt('execution-123', 1);
       return {
         outcome: 'submitted',
@@ -248,7 +249,7 @@ describe('handleGitHubEventForTriggers', () => {
       deliveryId: 'delivery-matched',
       matchedTriggers: 1,
     });
-    expect(admitAndSubmitTriggerExecution).toHaveBeenCalledOnce();
+    expect(acceptGitHubTriggerExecution).toHaveBeenCalledOnce();
     expect(renderedPrompt).toBe(`Body: ${issueBody}`);
     expect(renderedPrompt).not.toContain('&quot;');
     expect(renderedPrompt).not.toContain('[object Object]');
@@ -307,6 +308,6 @@ describe('handleGitHubEventForTriggers', () => {
       deliveryId: 'delivery-malformed-filters',
       matchedTriggers: 0,
     });
-    expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
+    expect(acceptGitHubTriggerExecution).not.toHaveBeenCalled();
   });
 });

@@ -1,6 +1,10 @@
 /** GitHub configuration replacement shared by REST and MCP updates. */
 import type { GitHubTriggerEventType } from '@simple-agent-manager/shared';
-import { eq } from 'drizzle-orm';
+import {
+  DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
+  DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
+} from '@simple-agent-manager/shared';
+import { eq, sql } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
 
@@ -15,7 +19,7 @@ type Database = ReturnType<typeof drizzle<typeof schema>>;
 export function parseGitHubTriggerConfig(input: unknown) {
   const parsed = v.safeParse(GitHubConfigValueSchema, input);
   if (!parsed.success) throw errors.badRequest(`Invalid githubConfig: ${parsed.issues[0].message}`);
-  return { eventType: parsed.output.eventType, filters: parsed.output.filters ?? {} };
+  return { ...parsed.output, filters: parsed.output.filters ?? {} };
 }
 
 export function githubTriggerConfigUpdate(
@@ -30,6 +34,9 @@ export function githubTriggerConfigUpdate(
     .set({
       eventType: config.eventType,
       filtersJson: JSON.stringify(config.filters),
+      subjectAffinity: config.subjectAffinity ?? sql`subject_affinity`,
+      queueMaxPending: config.queueMaxPending ?? sql`queue_max_pending`,
+      queueTtlSeconds: config.queueTtlSeconds ?? sql`queue_ttl_seconds`,
       updatedAt: now,
     })
     .where(eq(schema.githubTriggerConfigs.triggerId, triggerId));
@@ -44,7 +51,13 @@ export async function readGitHubTriggerConfig(db: Database, triggerId: string) {
   if (!config) return undefined;
   const parsedFilters = parseGitHubTriggerFiltersJson(config.filtersJson);
   if (!parsedFilters.valid) log.warn('trigger.github_filters_invalid', { triggerId });
-  return { eventType: config.eventType as GitHubTriggerEventType, filters: parsedFilters.filters };
+  return {
+    eventType: config.eventType as GitHubTriggerEventType,
+    filters: parsedFilters.filters,
+    subjectAffinity: config.subjectAffinity ?? false,
+    queueMaxPending: config.queueMaxPending ?? DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
+    queueTtlSeconds: config.queueTtlSeconds ?? DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
+  };
 }
 
 export async function assertGitHubTriggerConfigExists(db: Database, triggerId: string) {

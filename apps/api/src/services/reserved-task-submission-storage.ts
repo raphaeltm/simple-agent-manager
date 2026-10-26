@@ -119,6 +119,7 @@ export async function commitD1Submission(
                  AND trigger_id = ?
                  AND project_id = ?
                  AND (task_id IS NULL OR task_id = ?)
+                 AND (queue_expires_at IS NULL OR (status='queued' AND queue_expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')))
                  AND NOT EXISTS (
                    SELECT 1 FROM trigger_email_messages m
                     WHERE m.trigger_execution_id = trigger_executions.id

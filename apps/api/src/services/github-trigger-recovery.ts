@@ -8,6 +8,7 @@ import {
   handleGitHubEventForTriggers,
   type HandleGitHubEventInput,
 } from './github-trigger-handler';
+import { drainGitHubTriggerQueue } from './github-trigger-queue';
 import { githubTriggerRecoveryConfig } from './github-trigger-recovery-config';
 import { areGitHubTriggersConfigured } from './platform-config';
 
@@ -237,6 +238,7 @@ export async function runGitHubTriggerRecovery(
         log.warn('github_triggers.recovery_storage_error', { deliveryId: row.id });
       }
     }
+    if (await areGitHubTriggersConfigured(env)) await drainGitHubTriggerQueue(env);
     log.info('github_triggers.recovery_sweep', stats);
     return stats;
   };

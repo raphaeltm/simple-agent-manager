@@ -91,7 +91,7 @@ describe('GitHub REST/MCP configuration parity', () => {
     ).toBeDefined();
     expect(
       ((await (await request(`/${created.id}`)).json()) as { githubConfig: unknown }).githubConfig
-    ).toEqual(input.githubConfig);
+    ).toMatchObject(input.githubConfig);
     expect(
       (
         await request(`/${created.id}`, 'PATCH', {
@@ -139,31 +139,31 @@ describe('GitHub REST/MCP configuration parity', () => {
     const created = parse(await handleCreateTrigger('1', input, token, env));
     const read = await request(`/${created.id}`);
     expect(read.status).toBe(200);
-    expect(((await read.json()) as { githubConfig: unknown }).githubConfig).toEqual(
+    expect(((await read.json()) as { githubConfig: unknown }).githubConfig).toMatchObject(
       input.githubConfig
     );
     const config = { eventType: 'push', filters: { branches: ['main'] } };
     const updated = await request(`/${created.id}`, 'PATCH', { githubConfig: config });
     expect(updated.status).toBe(200);
-    expect(((await updated.json()) as { githubConfig: unknown }).githubConfig).toEqual(config);
+    expect(((await updated.json()) as { githubConfig: unknown }).githubConfig).toMatchObject(config);
     const mcp = parse(await handleUpdateTrigger('2', { triggerId: created.id }, token, env));
-    expect(mcp.githubConfig).toEqual(config);
+    expect(mcp.githubConfig).toMatchObject(config);
     expect(mcp.nextFireAt).toBeNull();
   });
   it('creates via REST and updates via MCP', async () => {
     const response = await request('', 'POST', input);
     expect(response.status).toBe(201);
     const created = (await response.json()) as { id: string; githubConfig: unknown };
-    expect(created.githubConfig).toEqual(input.githubConfig);
+    expect(created.githubConfig).toMatchObject(input.githubConfig);
     const config = { eventType: 'pull_request', filters: { ignoreDrafts: true } };
     expect(
       parse(
         await handleUpdateTrigger('2', { triggerId: created.id, githubConfig: config }, token, env)
       ).githubConfig
-    ).toEqual(config);
+    ).toMatchObject(config);
     expect(
       ((await (await request(`/${created.id}`)).json()) as { githubConfig: unknown }).githubConfig
-    ).toEqual(config);
+    ).toMatchObject(config);
   });
   it('allows metadata reads and updates without a stored config but rejects replacement', async () => {
     const created = parse(await handleCreateTrigger('1', input, token, env));
@@ -217,11 +217,11 @@ describe('GitHub REST/MCP configuration parity', () => {
             env
           )
         ).githubConfig
-      ).toEqual(config);
+      ).toMatchObject(config);
       corrupt();
       const repaired = await request(`/${created.id}`, 'PATCH', { githubConfig: config });
       expect(repaired.status).toBe(200);
-      expect(((await repaired.json()) as { githubConfig: unknown }).githubConfig).toEqual(config);
+      expect(((await repaired.json()) as { githubConfig: unknown }).githubConfig).toMatchObject(config);
     }
   );
   it('rejects source-mismatched and malformed REST updates without changing the config', async () => {
@@ -235,7 +235,7 @@ describe('GitHub REST/MCP configuration parity', () => {
     }
     expect(
       ((await (await request(`/${created.id}`)).json()) as { githubConfig: unknown }).githubConfig
-    ).toEqual(input.githubConfig);
+    ).toMatchObject(input.githubConfig);
     const cron = await request('', 'POST', {
       name: 'Cron',
       sourceType: 'cron',

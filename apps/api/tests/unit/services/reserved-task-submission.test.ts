@@ -808,6 +808,36 @@ From that information, derive the repository change request and append a short n
     expectNoSubmission(fixture);
   });
 
+  it('fences a managed queue reservation that expires while preparation is in flight', async () => {
+    const fixture = seedReservedFixture('queue-expiry-race');
+    fixture.sqlite
+      .prepare("UPDATE trigger_executions SET queue_expires_at=?,status='queued' WHERE id=?")
+      .run(new Date(Date.now() + 60000).toISOString(), fixture.input.source.sourceExecutionId);
+    const { deps } = createSubmissionDependencies();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let entered = false;
+    const generateTitle = deps.generateTitle;
+    deps.generateTitle = async (...args) => {
+      entered = true;
+      await gate;
+      if (!generateTitle) throw new Error('Missing title boundary');
+      return generateTitle(...args);
+    };
+    const work = submitReservedTask(fixture.env, fixture.input, deps);
+    await vi.waitFor(() => expect(entered).toBe(true));
+    fixture.sqlite
+      .prepare(
+        "UPDATE trigger_executions SET status='dropped',skip_reason='queue_expired',queue_expires_at='2000-01-01' WHERE id=?"
+      )
+      .run(fixture.input.source.sourceExecutionId);
+    release();
+    await expect(work).rejects.toThrow('can no longer start a task');
+    expectNoSubmission(fixture);
+  });
+
   it('rejects a trigger execution reserved for another task before creating effects', async () => {
     const fixture = seedReservedFixture('source-conflict');
     fixture.sqlite

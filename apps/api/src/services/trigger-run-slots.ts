@@ -12,6 +12,18 @@ import {
   TERMINAL_STATUS_VALUES,
 } from './task-status';
 
+/** Follow only verified recovery handoffs; UNION prevents malformed lineage cycles. */
+export const TRIGGER_RUN_TASK_ID_SQL = `COALESCE((WITH RECURSIVE owners(id) AS (
+  SELECT e.task_id
+  UNION
+  SELECT successor.id FROM owners JOIN tasks source ON source.id=owners.id
+    JOIN tasks successor ON successor.id=source.superseded_by_task_id
+    WHERE source.status='cancelled' AND successor.recovery_source_task_id=source.id
+      AND successor.triggered_by='session-recovery' AND successor.project_id=e.project_id
+) SELECT owner.id FROM owners JOIN tasks owner ON owner.id=owners.id
+  WHERE owner.status NOT IN (${TERMINAL_STATUS_VALUES.map((value) => "'" + value + "'").join(',')})
+  LIMIT 1),e.task_id)`;
+
 export type AdmissionSkipReason = Extract<TriggerSkipReason, 'still_running' | 'concurrent_limit'>;
 
 /**
@@ -53,7 +65,7 @@ export async function classifyReservationFailure(
   const state = await env.DATABASE.prepare(
     `SELECT status, skip_if_running AS skipIfRunning, max_concurrent AS maxConcurrent,
        (SELECT COUNT(*) FROM trigger_executions e
-          LEFT JOIN tasks t ON t.id = e.task_id
+          LEFT JOIN tasks t ON t.id = ${TRIGGER_RUN_TASK_ID_SQL}
          WHERE e.trigger_id = triggers.id
            AND ${EXECUTION_HOLDS_RUN_SLOT_SQL}) AS activeCount
      FROM triggers WHERE id = ? AND project_id = ?`

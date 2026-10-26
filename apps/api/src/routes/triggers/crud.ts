@@ -121,6 +121,12 @@ async function enrichTrigger(
 ): Promise<TriggerResponse> {
   const response = toTriggerResponse(row);
   response.credentialAttribution = credentialAttribution;
+  if (row.sourceType === 'github')
+    response.queueStats = (await readQueueStats(env, row.projectId)).get(row.id) ?? {
+      queued: 0,
+      routed: 0,
+      dropped: 0,
+    };
   if (row.sourceType === 'github') {
     const config = await db
       .select()
@@ -135,6 +141,9 @@ async function enrichTrigger(
       response.githubConfig = {
         eventType: config.eventType as GitHubTriggerEventType,
         filters: parsedFilters.filters,
+        subjectAffinity: config.subjectAffinity,
+        queueMaxPending: config.queueMaxPending,
+        queueTtlSeconds: config.queueTtlSeconds,
       };
     }
   }
@@ -202,10 +211,13 @@ crudRoutes.get('/', async (c) => {
   const githubById = new Map(githubConfigs.map((config) => [config.triggerId, config]));
   const webhookById = new Map(webhookConfigs.map((config) => [config.triggerId, config]));
   const emailById = new Map(emailConfigs.map((config) => [config.triggerId, config]));
+  const queueStats = await readQueueStats(c.env, projectId);
   const triggers = rows.map((row) => {
     const response = toTriggerResponse(row);
     response.credentialAttribution = attributionById.get(row.id);
     const github = githubById.get(row.id);
+    if (github)
+      response.queueStats = queueStats.get(row.id) ?? { queued: 0, routed: 0, dropped: 0 };
     if (github) {
       const parsedFilters = parseGitHubTriggerFiltersJson(github.filtersJson);
       if (!parsedFilters.valid) {
@@ -214,6 +226,9 @@ crudRoutes.get('/', async (c) => {
       response.githubConfig = {
         eventType: github.eventType as GitHubTriggerEventType,
         filters: parsedFilters.filters,
+        subjectAffinity: github.subjectAffinity,
+        queueMaxPending: github.queueMaxPending,
+        queueTtlSeconds: github.queueTtlSeconds,
       };
     }
     const webhook = webhookById.get(row.id);
@@ -414,3 +429,21 @@ crudRoutes.delete('/:triggerId', async (c) => {
 });
 
 export { crudRoutes };
+
+async function readQueueStats(env: Env, projectId: string) {
+  const result = await env.DATABASE.prepare(
+    `SELECT trigger_id,
+    SUM(CASE WHEN status IN ('waiting','routing') THEN 1 ELSE 0 END) AS queued,
+    SUM(CASE WHEN status='routed' THEN 1 ELSE 0 END) AS routed,
+    SUM(CASE WHEN status='dropped' THEN 1 ELSE 0 END) AS dropped
+    FROM trigger_executions WHERE project_id=? GROUP BY trigger_id`
+  )
+    .bind(projectId)
+    .all<{ trigger_id: string; queued: number; routed: number; dropped: number }>();
+  return new Map(
+    result.results.map((row) => [
+      row.trigger_id,
+      { queued: row.queued, routed: row.routed, dropped: row.dropped },
+    ])
+  );
+}

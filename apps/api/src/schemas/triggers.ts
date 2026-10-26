@@ -23,7 +23,23 @@ const GitHubFiltersSchema = v.optional(
 );
 
 export const GitHubConfigValueSchema = v.pipe(
-  v.strictObject({ eventType: GitHubEventTypeSchema, filters: GitHubFiltersSchema }),
+  v.strictObject({
+    eventType: GitHubEventTypeSchema,
+    filters: GitHubFiltersSchema,
+    subjectAffinity: v.optional(v.boolean()),
+    queueMaxPending: v.optional(v.pipe(v.number(), v.safeInteger(), v.minValue(1))),
+    queueTtlSeconds: v.optional(
+      v.pipe(
+        v.number(),
+        v.safeInteger(),
+        v.minValue(1),
+        v.check((seconds) => {
+          const deadline = new Date(Date.now() + seconds * 1000);
+          return Number.isFinite(deadline.getTime()) && deadline.toISOString().length === 24;
+        }, 'Queue lifetime is outside the supported date range')
+      )
+    ),
+  }),
   v.check(
     (config) => areGitHubTriggerActionsValid(config.eventType, config.filters?.actions),
     'Actions must be valid for the selected GitHub event; push has no actions'

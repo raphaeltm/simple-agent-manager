@@ -126,8 +126,8 @@ Replacing the token also cancels the agent's unused link.
 
 - **Each run starts a chat** in the project's session list, labelled **Task** or **Chat** by the
   trigger's task mode (see [Chat or Task](/docs/guides/chat-features/#chat-or-task)).
-- **One run at a time, by default.** A trigger skips its turn while its previous run is still
-  going, including a run that has finished its turn but is still awake. A run that has gone to
+- **One run at a time, by default.** Schedules skip their turn while the previous run is still
+  going; GitHub events queue instead. This includes a run that has finished its turn but is still awake. A run that has gone to
   sleep doesn't count, so a quiet chat doesn't block the next run for long.
 - **Repeated failures pause it.** After three failed, stopped, or expired runs in a row, SAM pauses
   the trigger the next time it would run. Fix the cause, then select **Resume**, which starts the
@@ -172,3 +172,39 @@ update and delete [email triggers](/docs/guides/email-triggers/), but not create
 in the app.
 `update_trigger` replaces a GitHub trigger's whole `githubConfig` when you send one, so include the
 `eventType` (`filters: {}` clears the filters); a trigger's source can't be changed.
+
+## Busy GitHub triggers and follow-up comments
+
+GitHub events wait when the trigger is at its run limit. By default, each trigger keeps up to
+50 pending events for 24 hours, then starts them in arrival order as capacity returns. Waiting
+through a busy period does not use up delivery retries. A paused trigger keeps its queue until
+you resume it or the events expire. Events already admitted to a task keep that task's identity
+when SAM retries startup.
+
+Set `githubConfig.subjectAffinity` to `true` to send a follow-up event to this trigger's active
+run for the same repository and issue or pull request number. It becomes a follow-up prompt in
+that run's chat, including when the chat needs to wake from sleep. This option is off by default;
+GitHub pushes have no issue or pull request subject. It applies within one trigger, rather than
+across different triggers or to every agent that owns a PR.
+
+`githubConfig.queueMaxPending` and `githubConfig.queueTtlSeconds` change the pending-event cap
+and waiting lifetime. They must be positive integers. For example:
+
+```json
+{
+  "githubConfig": {
+    "eventType": "issue_comment",
+    "filters": { "actions": ["created"], "commandPrefix": "/sam" },
+    "subjectAffinity": true,
+    "queueMaxPending": 50,
+    "queueTtlSeconds": 86400
+  }
+}
+```
+
+The trigger page shows pending, delivered-to-existing-run, and dropped totals for retained
+history. Recent runs distinguishes waiting for capacity from sending a follow-up. A routed
+entry links to the chat that received it. A full queue or an expired event is recorded as a
+drop with its reason. Delivery failures also remain visible: SAM retries a different run only
+when the durable receipt proves no prompt was submitted to the first target. An uncertain
+handoff never starts another agent.

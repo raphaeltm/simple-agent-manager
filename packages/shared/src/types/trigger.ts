@@ -14,6 +14,10 @@ export const TRIGGER_SOURCE_TYPES = ['cron', 'webhook', 'github', 'incident', 'e
 export type TriggerSourceType = (typeof TRIGGER_SOURCE_TYPES)[number];
 
 export const TRIGGER_EXECUTION_STATUSES = [
+  'waiting',
+  'routing',
+  'routed',
+  'dropped',
   'queued',
   'running',
   'completed',
@@ -27,6 +31,10 @@ export const TRIGGER_SKIP_REASONS = [
   'concurrent_limit',
   'rate_limited',
   'paused',
+  'queue_full',
+  'queue_expired',
+  'target_unavailable',
+  'delivery_uncertain',
 ] as const;
 export type TriggerSkipReason = (typeof TRIGGER_SKIP_REASONS)[number];
 
@@ -76,6 +84,15 @@ export interface Trigger {
 // Trigger Execution Entity
 // =============================================================================
 
+export interface GitHubTriggerRoutingConfig {
+  /** Follow-up events for a repository issue/PR reach the active run of this trigger. */
+  subjectAffinity?: boolean;
+  /** Maximum waiting events, excluding admitted runs. Default 50. */
+  queueMaxPending?: number;
+  /** Waiting lifetime from webhook receipt, in seconds. Default 86400. */
+  queueTtlSeconds?: number;
+}
+
 export interface TriggerExecution {
   id: string;
   triggerId: string;
@@ -90,6 +107,11 @@ export interface TriggerExecution {
   startedAt: string | null;
   completedAt: string | null;
   sequenceNumber: number;
+  subjectKey?: string | null;
+  queueExpiresAt?: string | null;
+  routedExecutionId?: string | null;
+  routedTaskId?: string | null;
+  routedSessionId?: string | null;
 }
 
 // =============================================================================
@@ -111,7 +133,7 @@ export interface CreateTriggerRequest {
   resourceRequirements?: ResourceRequirements | null;
   resourceRequirementsJson?: string | null;
   maxConcurrent?: number;
-  githubConfig?: {
+  githubConfig?: GitHubTriggerRoutingConfig & {
     eventType: GitHubTriggerEventType;
     filters?: GitHubTriggerFilters;
   };
@@ -134,7 +156,7 @@ export interface UpdateTriggerRequest {
   resourceRequirements?: ResourceRequirements | null;
   resourceRequirementsJson?: string | null;
   maxConcurrent?: number;
-  githubConfig?: {
+  githubConfig?: GitHubTriggerRoutingConfig & {
     eventType: GitHubTriggerEventType;
     filters?: GitHubTriggerFilters;
   };
@@ -143,6 +165,7 @@ export interface UpdateTriggerRequest {
 }
 
 export interface TriggerResponse extends Trigger {
+  queueStats?: { queued: number; routed: number; dropped: number };
   /** Human-readable description of the cron schedule (e.g., "Every weekday at 9:00 AM UTC"). */
   cronHumanReadable?: string;
   /** Effective credential attribution checks for this trigger. No secret material is included. */
@@ -152,7 +175,7 @@ export interface TriggerResponse extends Trigger {
     checks: CredentialAttributionCheck[];
   };
   /** GitHub trigger configuration, present when sourceType is 'github'. */
-  githubConfig?: {
+  githubConfig?: GitHubTriggerRoutingConfig & {
     eventType: GitHubTriggerEventType;
     filters: GitHubTriggerFilters;
   };
@@ -270,7 +293,7 @@ export interface GitHubTriggerFilters {
 }
 
 /** Configuration for a GitHub event trigger (stored in github_trigger_configs table). */
-export interface GitHubTriggerConfig {
+export interface GitHubTriggerConfig extends GitHubTriggerRoutingConfig {
   id: string;
   triggerId: string;
   eventType: GitHubTriggerEventType;

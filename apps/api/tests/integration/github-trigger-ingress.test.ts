@@ -159,6 +159,27 @@ describe('signed GitHub webhook → scoped trigger → actual admission', () => 
     pending = [];
     return response;
   }
+  it('executes signed events for two different issues sequentially at concurrency one', async () => {
+    vi.mocked(submitTriggeredTask).mockImplementation(async (_env, input) => {
+      const taskId=`task-${input.triggerExecutionId}`;
+      sqlite.prepare("INSERT OR IGNORE INTO tasks(id,project_id,user_id,status,chat_session_id,trigger_execution_id) VALUES(?,'project','user','in_progress',?,?)")
+        .run(taskId,`session-${taskId}`,input.triggerExecutionId);
+      return {taskId,sessionId:`session-${taskId}`,branchName:`sam/${taskId}`};
+    });
+    await deliver(payload(),'issues','issue-one');
+    const next=payload();next.issue!.number=2321;next.issue!.title='Second issue';
+    await deliver(next,'issues','issue-two');
+    await deliver(next,'issues','issue-two');
+    expect(submitTriggeredTask).toHaveBeenCalledTimes(1);
+    expect(sqlite.prepare("SELECT status FROM trigger_executions WHERE github_delivery_id='issue-two'").get()).toEqual({status:'waiting'});
+    sqlite.prepare("UPDATE tasks SET status='completed'").run();
+    sqlite.prepare("UPDATE trigger_executions SET status='completed' WHERE task_id IS NOT NULL").run();
+    await runGitHubTriggerRecovery(env);
+    expect(submitTriggeredTask).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(submitTriggeredTask).mock.calls[1]![1].renderedPrompt).toContain('Second issue');
+    expect(sqlite.prepare("SELECT decision FROM github_webhook_deliveries WHERE id='issue-two:trigger'").get()).toEqual({decision:'matched'});
+  });
+
   it('recovers failure after claim through same-ID replay and scheduled retry', async () => {
     sqlite.prepare('ALTER TABLE projects RENAME TO projects_unavailable').run();
     expect((await deliver(payload())).status).toBe(200);
@@ -478,7 +499,7 @@ describe('signed GitHub webhook → scoped trigger → actual admission', () => 
       sqlite
         .prepare("SELECT status,skip_reason FROM trigger_executions WHERE github_delivery_id='B'")
         .get()
-    ).toEqual({ status: 'skipped', skip_reason: 'still_running' });
+    ).toEqual({ status: 'waiting', skip_reason: null });
     sqlite.prepare("UPDATE github_trigger_inbox SET available_at='2000-01-01' WHERE id='A'").run();
     await runGitHubTriggerRecovery(env);
     expect(submitTriggeredTask).toHaveBeenCalledTimes(2);

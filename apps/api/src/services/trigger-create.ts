@@ -1,3 +1,4 @@
+import { DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING, DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS } from '@simple-agent-manager/shared';
 /** Canonical trigger creation shared by authenticated REST and project-scoped MCP. */
 import {
   DEFAULT_CRON_MIN_INTERVAL_MINUTES,
@@ -290,6 +291,9 @@ export async function createTrigger(
         triggerId: id,
         eventType: body.githubConfig.eventType,
         filtersJson: JSON.stringify(body.githubConfig.filters ?? {}),
+        subjectAffinity: body.githubConfig.subjectAffinity ?? false,
+        queueMaxPending: body.githubConfig.queueMaxPending ?? DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
+        queueTtlSeconds: body.githubConfig.queueTtlSeconds ?? DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
         createdAt: now,
         updatedAt: now,
       }),

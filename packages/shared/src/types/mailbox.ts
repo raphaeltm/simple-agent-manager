@@ -93,6 +93,7 @@ export const PROMPT_DELIVERY_SOURCES = [
   'checkpoint_continuation',
   'parent_wakeup',
   'project_event_wake',
+  'github_trigger',
   'scheduled_action',
 ] as const;
 

@@ -179,6 +179,7 @@ export function sourceTaskGuardForClaim(
   if (
     claim.message.sourceKind !== 'parent_wakeup' &&
     claim.message.sourceKind !== 'project_event_wake' &&
+    claim.message.sourceKind !== 'github_trigger' &&
     claim.message.sourceKind !== 'scheduled_action' &&
     // A continuation re-wakes the chat only while its own task is live: unguarded, the
     // recovery claim would reactivate even a terminal task.
@@ -211,7 +212,7 @@ export async function invalidProjectEventWakeSourceTaskResult(
   projectId: string | null,
   claim: PromptDeliveryClaim
 ): Promise<PromptDeliveryResult | null> {
-  if (claim.message.sourceKind !== 'project_event_wake') return null;
+  if (claim.message.sourceKind !== 'project_event_wake' && claim.message.sourceKind !== 'github_trigger') return null;
   if (!claim.message.sourceTaskId || !projectId) {
     return {
       kind: 'failed',

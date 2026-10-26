@@ -70,3 +70,8 @@ export * from './message-cursor';
 export { canonicalProjectPullRequestUrl } from './pull-requests';
 export * from './secret-exec';
 export * from './workload-identity';
+
+export {
+  DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
+  DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
+} from './constants/triggers';

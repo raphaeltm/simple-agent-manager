@@ -1,3 +1,7 @@
+import {
+  DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
+  DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
+} from '@simple-agent-manager/shared';
 /**
  * GitHub Trigger Handler
  *
@@ -25,8 +29,12 @@ import {
   parseGitHubTriggerFiltersJson,
   parseWebhookPayload,
 } from './github-trigger-filter';
+import {
+  acceptGitHubTriggerExecution,
+  githubSubjectKey,
+  syncGitHubExecutionAudit,
+} from './github-trigger-queue';
 import { areGitHubTriggersConfigured } from './platform-config';
-import { admitAndSubmitTriggerExecution } from './trigger-admission';
 import { renderTemplate } from './trigger-template';
 
 export interface HandleGitHubEventInput {
@@ -165,6 +173,7 @@ export async function handleGitHubEventForTriggers(
         event,
         deliveryId,
         installationId,
+        repositoryId,
         {
           scheduledAt: now,
           beforeSubmit: recovery.beforeSubmit,
@@ -212,6 +221,7 @@ async function processTriggersForProject(
   event: GitHubWebhookEvent,
   deliveryId: string,
   installationId: string | undefined,
+  repositoryId: number,
   recovery: {
     scheduledAt: string;
     beforeSubmit?: (executionId: string) => Promise<void>;
@@ -293,9 +303,13 @@ async function processTriggersForProject(
       continue;
     }
 
-    const result = await admitAndSubmitTriggerExecution(env, {
+    const result = await acceptGitHubTriggerExecution(env, {
       trigger,
       githubDeliveryId: deliveryId,
+      subjectKey: githubSubjectKey(repositoryId, event.issue?.number ?? event.pull_request?.number),
+      subjectAffinity: config.subjectAffinity,
+      queueMaxPending: config.queueMaxPending ?? DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
+      queueTtlSeconds: config.queueTtlSeconds ?? DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
       beforeSubmit,
       githubProcessingToken: processingToken,
       eventType: `github.${event.event}.${event.action ?? 'unknown'}`,
@@ -311,7 +325,11 @@ async function processTriggersForProject(
     if (result.outcome === 'pending') throw new Error('GitHub trigger startup requires recovery');
     if (result.outcome === 'failed') throw new Error('GitHub trigger submission requires recovery');
 
-    if (result.outcome === 'submitted') {
+    if (
+      ['submitted', 'waiting', 'routing', 'routed', 'dropped', 'running', 'completed'].includes(
+        result.outcome
+      )
+    ) {
       await recordDelivery(db, {
         id: `${deliveryId}:${trigger.id}`,
         eventType: event.event,
@@ -320,8 +338,15 @@ async function processTriggersForProject(
         repositoryFullName: event.repository?.full_name,
         senderLogin: event.sender?.login,
         matchedTriggerId: trigger.id,
-        decision: 'matched',
-        decisionReason: `task:${result.taskId}`,
+        decision:
+          result.outcome === 'waiting'
+            ? 'queued'
+            : result.outcome === 'submitted'
+              ? 'matched'
+              : result.outcome,
+        decisionReason: result.taskId
+          ? `task:${result.taskId};session:${result.sessionId ?? ''}`
+          : (result.reason ?? `execution:${result.executionId}`),
         createdAt: now,
       });
 
@@ -335,6 +360,7 @@ async function processTriggersForProject(
         action: event.action,
       });
 
+      await syncGitHubExecutionAudit(env, result.executionId);
       matched++;
     } else {
       const reason = result.reason;
@@ -404,7 +430,7 @@ async function recordDelivery(
   delivery: schema.NewGitHubWebhookDeliveryRow
 ): Promise<void> {
   try {
-    await db.insert(schema.githubWebhookDeliveries).values(delivery);
+    await db.insert(schema.githubWebhookDeliveries).values(delivery).onConflictDoNothing();
   } catch (err) {
     // Best-effort — don't fail the webhook response for audit failures
     log.warn('github_triggers.delivery_record_failed', {
