@@ -59,6 +59,28 @@ describe('MCP create_trigger with canonical persistence', () => {
     expect(sqlite.prepare('SELECT count(*) AS count FROM triggers').get()).toEqual({ count: 0 });
   });
 
+  it('sets concurrency, skip behavior and description atomically on create', async () => {
+    const result = await handleCreateTrigger(
+      'parity',
+      { ...github, description: 'Explicit controls', maxConcurrent: 3, skipIfRunning: false },
+      token,
+      env
+    );
+    expect(result.error).toBeUndefined();
+    expect(content(result)).toMatchObject({
+      description: 'Explicit controls',
+      maxConcurrent: 3,
+      skipIfRunning: false,
+    });
+    expect(
+      sqlite.prepare('SELECT description, max_concurrent, skip_if_running FROM triggers').get()
+    ).toEqual({ description: 'Explicit controls', max_concurrent: 3, skip_if_running: 0 });
+    const definition = TRIGGER_TOOLS.find((tool) => tool.name === 'create_trigger')!;
+    expect(definition.inputSchema.properties).toHaveProperty('maxConcurrent');
+    expect(definition.inputSchema.properties).toHaveProperty('skipIfRunning');
+    expect(definition.inputSchema.properties).toHaveProperty('description');
+  });
+
   it('preserves cron callers that omit sourceType and UTC default', async () => {
     const result = await handleCreateTrigger('1', cron, token, env);
     expect(result.error).toBeUndefined();

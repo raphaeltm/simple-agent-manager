@@ -759,3 +759,8 @@ remain unsupported. No raw runtime error body is returned through the Connector.
 ## Workload identity
 
 `GET /api/projects/:projectId/sessions/:sessionId/workload-identity` requires authenticated project membership and returns `{ issuer, jwks_uri, subject, ttl_seconds, claims }` for the current chat runtime, without signing a token. Missing chat is 404; missing workspace/runtime is 409. Claims are documented in the workload identity guide. Public discovery/JWKS live under `/oidc/.well-known/`. `exec_with_secrets` optionally accepts `oidc: { audience }` and injects `SAM_OIDC_TOKEN` only into its command.
+
+
+### GitHub draft filter preview
+
+`POST /api/projects/:projectId/triggers/github/filter-preview` requires authenticated project task-read access. Body is `{ eventType, filters? }` using the shared GitHub configuration schema. Returns `{ limit, warning, deliveries: [{ id, eventType, action, receivedAt, matched: boolean | null, reason }] }`. Results are bounded by the GitHub recovery batch limit, scoped to the project's installation and repository; null means retained payload unavailable/invalid. No raw external content, prompt rendering, admission or replay occurs.

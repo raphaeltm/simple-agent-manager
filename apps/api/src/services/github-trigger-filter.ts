@@ -7,8 +7,14 @@
  * All filters are AND-combined: every configured filter must pass for the event to match.
  * Empty/undefined filter fields mean "match all" for that dimension.
  */
-import type { GitHubTriggerFilters } from '@simple-agent-manager/shared';
+import {
+  type GitHubTriggerFilters,
+  isGitHubCommentEvent,
+  isGitHubPullRequestEvent,
+} from '@simple-agent-manager/shared';
 import * as v from 'valibot';
+
+import { GitHubFiltersValueSchema } from '../schemas/triggers';
 
 /** Parsed GitHub webhook event payload (the fields we care about for filtering). */
 export interface GitHubWebhookEvent {
@@ -18,10 +24,14 @@ export interface GitHubWebhookEvent {
   repository?: { full_name: string; default_branch?: string };
   issue?: {
     number: number;
+    pull_request?: { html_url?: string };
     title: string;
     body?: string;
     labels?: Array<{ name: string }>;
     draft?: boolean;
+    html_url?: string;
+    author_association?: string;
+    user?: { login: string };
   };
   pull_request?: {
     number: number;
@@ -29,15 +39,44 @@ export interface GitHubWebhookEvent {
     body?: string;
     labels?: Array<{ name: string }>;
     draft?: boolean;
+    html_url?: string;
+    author_association?: string;
+    user?: { login: string };
     head?: { ref: string; sha?: string };
     base?: { ref: string };
   };
-  comment?: { body?: string };
+  label?: { name: string };
+  comment?: GitHubEventContent;
+  review?: GitHubEventContent & { state?: string };
   after?: string;
   ref?: string; // for push events: 'refs/heads/main'
   head_commit?: { id: string; message?: string };
 }
 
+export interface GitHubEventContent {
+  id?: number;
+  body?: string;
+  html_url?: string;
+  author_association?: string;
+  user?: { login: string };
+  path?: string;
+  line?: number;
+  original_line?: number;
+}
+/** Select content by explicit event scope, never by incidental payload presence. */
+export function getGitHubEventContent(event: GitHubWebhookEvent) {
+  if (event.event === 'pull_request_review') return event.review;
+  if (isGitHubCommentEvent(event.event)) return event.comment;
+  if (event.event === 'issues') return event.issue;
+  if (event.event === 'pull_request') return event.pull_request;
+  return undefined;
+}
+export function isPullRequestSubject(event: GitHubWebhookEvent): boolean {
+  return (
+    isGitHubPullRequestEvent(event.event) ||
+    (event.event === 'issue_comment' && event.issue?.pull_request !== undefined)
+  );
+}
 export interface FilterResult {
   matched: boolean;
   reason?: string;
@@ -84,9 +123,65 @@ export function evaluateFilters(
     }
   }
 
-  // Command prefix filter (for issue_comment events)
-  if (event.event === 'issue_comment' && filters.commandPrefix) {
-    const commentBody = event.comment?.body?.trim() ?? '';
+  const sender = event.sender;
+  if (
+    filters.actors?.length &&
+    (!sender?.login ||
+      !filters.actors.some((actor) => actor.toLowerCase() === sender.login.toLowerCase()))
+  ) {
+    return { matched: false, reason: 'sender is not in actor allow-list' };
+  }
+  if (filters.ignoreBots && sender?.type !== 'User') {
+    return { matched: false, reason: 'sender is a bot or has unknown type' };
+  }
+  if (filters.authorAssociation?.length && event.event !== 'push') {
+    const content = getGitHubEventContent(event);
+    // Association is about the content author, never the editor/labeler/reviewer acting on someone else's content.
+    if (
+      !sender?.login ||
+      !content?.user?.login ||
+      sender.login.toLowerCase() !== content.user.login.toLowerCase() ||
+      !content.author_association ||
+      !filters.authorAssociation.includes(content.author_association)
+    ) {
+      return {
+        matched: false,
+        reason: 'sender does not have an allowed content author association',
+      };
+    }
+  }
+  if (
+    filters.addedLabel &&
+    ['issues', 'pull_request'].includes(event.event) &&
+    ['labeled', 'unlabeled'].includes(event.action ?? '')
+  ) {
+    if (event.label?.name?.toLowerCase() !== filters.addedLabel.toLowerCase())
+      return { matched: false, reason: 'changed label does not match addedLabel' };
+  }
+  if (filters.isPullRequest !== undefined && event.event !== 'push') {
+    const hasSubject =
+      event.event === 'issues' || event.event === 'issue_comment'
+        ? Boolean(event.issue)
+        : isGitHubPullRequestEvent(event.event) && Boolean(event.pull_request);
+    if (!hasSubject) return { matched: false, reason: 'issue or pull request subject is missing' };
+    if (isPullRequestSubject(event) !== filters.isPullRequest)
+      return { matched: false, reason: 'issue versus pull request does not match' };
+  }
+  if (filters.reviewStates?.length && event.event === 'pull_request_review') {
+    if (!event.review?.state || !filters.reviewStates.includes(event.review.state.toLowerCase()))
+      return { matched: false, reason: 'review state does not match' };
+  }
+  const content = getGitHubEventContent(event);
+  if (
+    isGitHubCommentEvent(event.event) &&
+    filters.commentContains &&
+    !content?.body?.toLowerCase().includes(filters.commentContains.toLowerCase())
+  ) {
+    return { matched: false, reason: 'comment does not contain required text' };
+  }
+  // Command prefix is inert outside the explicit comment/review event scope.
+  if (isGitHubCommentEvent(event.event) && filters.commandPrefix) {
+    const commentBody = content?.body?.trim() ?? '';
     if (!commentBody.startsWith(filters.commandPrefix)) {
       return { matched: false, reason: `comment does not start with '${filters.commandPrefix}'` };
     }
@@ -101,6 +196,7 @@ export function evaluateFilters(
       event.pull_request?.title,
       event.pull_request?.body,
       event.comment?.body,
+      event.review?.body,
     ];
     const found = searchTexts.some((text) => text?.toLowerCase().includes(needle));
     if (!found) {
@@ -145,7 +241,7 @@ function getEventBranch(event: GitHubWebhookEvent): string | undefined {
     // Push refs look like 'refs/heads/main'
     return event.ref.replace(/^refs\/heads\//, '');
   }
-  if (event.event === 'pull_request') {
+  if (isGitHubPullRequestEvent(event.event)) {
     return event.pull_request?.head?.ref;
   }
   return undefined;
@@ -184,12 +280,20 @@ const GitHubWebhookRepositorySchema = v.object({
   full_name: RequiredStringSchema,
   default_branch: OptionalStringSchema,
 });
+const UserFieldSchema = v.fallback(
+  v.optional(v.object({ login: RequiredStringSchema })),
+  undefined
+);
 const GitHubWebhookIssueSchema = v.object({
+  pull_request: v.fallback(v.optional(v.object({ html_url: OptionalStringSchema })), undefined),
   number: RequiredNumberSchema,
   title: RequiredStringSchema,
   body: OptionalStringSchema,
   labels: LabelsFieldSchema,
   draft: OptionalBooleanSchema,
+  html_url: OptionalStringSchema,
+  author_association: OptionalStringSchema,
+  user: UserFieldSchema,
 });
 const GitHubWebhookPullRequestSchema = v.object({
   number: RequiredNumberSchema,
@@ -197,10 +301,24 @@ const GitHubWebhookPullRequestSchema = v.object({
   body: OptionalStringSchema,
   labels: LabelsFieldSchema,
   draft: OptionalBooleanSchema,
+  html_url: OptionalStringSchema,
+  author_association: OptionalStringSchema,
+  user: UserFieldSchema,
   head: RefFieldSchema,
   base: RefFieldSchema,
 });
-const GitHubWebhookCommentSchema = v.object({ body: OptionalStringSchema });
+const ContentFields = {
+  body: OptionalStringSchema,
+  id: v.fallback(v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))), undefined),
+  html_url: OptionalStringSchema,
+  author_association: OptionalStringSchema,
+  user: UserFieldSchema,
+  path: OptionalStringSchema,
+  line: v.fallback(v.optional(v.number()), undefined),
+  original_line: v.fallback(v.optional(v.number()), undefined),
+};
+const GitHubWebhookCommentSchema = v.object(ContentFields);
+const GitHubWebhookReviewSchema = v.object({ ...ContentFields, state: OptionalStringSchema });
 const GitHubWebhookHeadCommitSchema = v.object({
   id: RequiredStringSchema,
   message: OptionalStringSchema,
@@ -219,6 +337,8 @@ const GitHubWebhookPayloadSchema = v.object({
   repository: v.fallback(v.optional(GitHubWebhookRepositorySchema), undefined),
   issue: v.fallback(v.optional(GitHubWebhookIssueSchema), undefined),
   pull_request: v.fallback(v.optional(GitHubWebhookPullRequestSchema), undefined),
+  label: v.fallback(v.optional(GitHubWebhookLabelSchema), undefined),
+  review: v.fallback(v.optional(GitHubWebhookReviewSchema), undefined),
   comment: v.fallback(v.optional(GitHubWebhookCommentSchema), undefined),
   ref: OptionalStringSchema,
   after: OptionalStringSchema,
@@ -248,15 +368,7 @@ export function parseWebhookPayload(
 
 /** Validated shape of a stored `filters_json` column value. Every field is
  * optional — an empty object is a valid, safe "match everything" default. */
-const GitHubTriggerFiltersSchema = v.object({
-  actions: v.optional(v.array(v.string())),
-  labels: v.optional(v.array(v.string())),
-  ignoreActors: v.optional(v.array(v.string())),
-  commandPrefix: v.optional(v.string()),
-  bodyContains: v.optional(v.string()),
-  branches: v.optional(v.array(v.string())),
-  ignoreDrafts: v.optional(v.boolean()),
-});
+const GitHubTriggerFiltersSchema = GitHubFiltersValueSchema;
 
 export interface ParsedGitHubTriggerFilters {
   filters: GitHubTriggerFilters;

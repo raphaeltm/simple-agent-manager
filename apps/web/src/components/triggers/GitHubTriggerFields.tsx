@@ -1,9 +1,24 @@
 import type { GitHubTriggerEventType } from '@simple-agent-manager/shared';
-import { GITHUB_TRIGGER_ACTIONS } from '@simple-agent-manager/shared';
+import {
+  GITHUB_TRIGGER_ACTIONS,
+  isGitHubCommentEvent,
+  isGitHubPullRequestEvent,
+} from '@simple-agent-manager/shared';
 
 import { FOCUS_RING, GITHUB_EVENT_OPTIONS } from './trigger-form-support';
 
+interface ExtraFilters {
+  actors?: string;
+  addedLabel?: string;
+  authorAssociation?: string;
+  ignoreBots?: boolean;
+  commentContains?: string;
+  isPullRequest?: string;
+  reviewStates?: string;
+}
 interface GitHubTriggerFieldsProps {
+  extraFilters?: ExtraFilters;
+  onExtraFiltersChange?: (patch: ExtraFilters) => void;
   actions: string;
   bodyContains: string;
   branches: string;
@@ -24,6 +39,8 @@ interface GitHubTriggerFieldsProps {
 }
 
 export function GitHubTriggerFields({
+  extraFilters = {},
+  onExtraFiltersChange,
   actions,
   bodyContains,
   branches,
@@ -125,7 +142,7 @@ export function GitHubTriggerFields({
         </div>
       )}
 
-      {eventType === 'issue_comment' && (
+      {isGitHubCommentEvent(eventType) && (
         <div>
           <label
             htmlFor="github-command-prefix"
@@ -145,7 +162,7 @@ export function GitHubTriggerFields({
         </div>
       )}
 
-      {(eventType === 'pull_request' || eventType === 'push') && (
+      {(isGitHubPullRequestEvent(eventType) || eventType === 'push') && (
         <div>
           <label
             htmlFor="github-branches"
@@ -184,6 +201,101 @@ export function GitHubTriggerFields({
           />
         </div>
       )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        {(
+          [
+            [
+              'actors',
+              'Allowed actors',
+              'Webhook sender logins, comma-separated. Empty allows anyone.',
+            ],
+            ...(eventType !== 'push'
+              ? [
+                  [
+                    'authorAssociation',
+                    'Author association',
+                    'OWNER, MEMBER, COLLABORATOR… Sender must be the content author; this does not look up editor or labeler permissions.',
+                  ],
+                ]
+              : []),
+            ...(['issues', 'pull_request'].includes(eventType)
+              ? [
+                  [
+                    'addedLabel',
+                    'Changed label',
+                    'Matches the label added or removed, only on labeled / unlabeled actions.',
+                  ],
+                ]
+              : []),
+            ...(isGitHubCommentEvent(eventType)
+              ? [
+                  [
+                    'commentContains',
+                    'Comment contains',
+                    'Search only the comment or review body, ignoring case.',
+                  ],
+                ]
+              : []),
+            ...(eventType === 'pull_request_review'
+              ? [
+                  [
+                    'reviewStates',
+                    'Review states',
+                    'approved, changes_requested, commented, dismissed, pending',
+                  ],
+                ]
+              : []),
+          ] as string[][]
+        ).map(([key, label, hint]) => (
+          <div key={key}>
+            <label
+              htmlFor={`github-${key}`}
+              className="block text-sm font-medium text-fg-primary mb-1"
+            >
+              {label}
+            </label>
+            <input
+              id={`github-${key}`}
+              value={String(extraFilters[key as keyof ExtraFilters] ?? '')}
+              onChange={(event) => onExtraFiltersChange?.({ [key]: event.target.value })}
+              disabled={disabled}
+              className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
+            />
+            <p className="text-xs text-fg-muted mt-1">{hint}</p>
+          </div>
+        ))}
+        {eventType !== 'push' && (
+          <div>
+            <label
+              htmlFor="github-subject"
+              className="block text-sm font-medium text-fg-primary mb-1"
+            >
+              Subject
+            </label>
+            <select
+              id="github-subject"
+              value={extraFilters.isPullRequest ?? ''}
+              disabled={disabled}
+              onChange={(event) => onExtraFiltersChange?.({ isPullRequest: event.target.value })}
+              className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
+            >
+              <option value="">Issues and pull requests</option>
+              <option value="false">Issues only</option>
+              <option value="true">Pull requests only</option>
+            </select>
+          </div>
+        )}
+      </div>
+      <label className="flex items-center gap-2 text-sm text-fg-primary">
+        <input
+          type="checkbox"
+          checked={extraFilters.ignoreBots ?? false}
+          disabled={disabled}
+          onChange={(event) => onExtraFiltersChange?.({ ignoreBots: event.target.checked })}
+        />
+        Ignore bot actors
+      </label>
 
       {eventType === 'pull_request' && (
         <label className="flex min-h-11 items-center gap-3 cursor-pointer">

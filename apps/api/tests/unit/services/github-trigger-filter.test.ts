@@ -629,3 +629,139 @@ describe('parseGitHubTriggerFiltersJson', () => {
     expect(() => parseGitHubTriggerFiltersJson('"just a string"')).not.toThrow();
   });
 });
+
+describe('explicit scoped controls and sender authorization', () => {
+  it('matches only the changed label, not another label already present', () => {
+    const event = makeEvent({
+      action: 'labeled',
+      label: { name: 'other' },
+      issue: { number: 1, title: '', labels: [{ name: 'sam' }, { name: 'other' }] },
+    });
+    expect(evaluateFilters(event, { addedLabel: 'sam' }).matched).toBe(false);
+    expect(
+      evaluateFilters({ ...event, label: { name: 'SAM' } }, { addedLabel: 'sam' }).matched
+    ).toBe(true);
+    expect(
+      evaluateFilters(
+        { ...event, action: 'unlabeled', label: { name: 'sam' } },
+        { addedLabel: 'sam' }
+      ).matched
+    ).toBe(true);
+    expect(evaluateFilters({ ...event, label: undefined }, { addedLabel: 'sam' }).matched).toBe(
+      false
+    );
+    expect(evaluateFilters({ ...event, action: 'opened' }, { addedLabel: 'sam' }).matched).toBe(
+      true
+    );
+    expect(
+      evaluateFilters(makeEvent({ event: 'issue_comment', action: 'created' }), {
+        addedLabel: 'sam',
+      }).matched
+    ).toBe(true);
+  });
+  it('uses sender for actors, never content author; ignore list still wins', () => {
+    const event = makeEvent({
+      sender: { login: 'outsider', type: 'User' },
+      issue: { number: 1, title: '', user: { login: 'owner' }, author_association: 'OWNER' },
+    });
+    expect(evaluateFilters(event, { actors: ['owner'] }).matched).toBe(false);
+    expect(evaluateFilters({ ...event, sender: undefined }, { actors: ['owner'] }).matched).toBe(
+      false
+    );
+    expect(evaluateFilters(event, { actors: ['OUTSIDER'] }).matched).toBe(true);
+    expect(
+      evaluateFilters(event, { actors: ['outsider'], ignoreActors: ['OUTSIDER'] }).matched
+    ).toBe(false);
+    expect(evaluateFilters(event, { authorAssociation: ['OWNER'] }).matched).toBe(false);
+  });
+  it('association requires sender to be the actual comment/review author', () => {
+    for (const type of ['issue_comment', 'pull_request_review', 'pull_request_review_comment']) {
+      const content = { body: '/sam', user: { login: 'octocat' }, author_association: 'MEMBER' };
+      const event = makeEvent({ event: type, action: 'edited', comment: content, review: content });
+      expect(evaluateFilters(event, { authorAssociation: ['MEMBER'] }).matched).toBe(true);
+      expect(
+        evaluateFilters(
+          { ...event, sender: { login: 'attacker', type: 'User' } },
+          { authorAssociation: ['MEMBER'] }
+        ).matched
+      ).toBe(false);
+      expect(
+        evaluateFilters({ ...event, comment: {}, review: {} }, { authorAssociation: ['MEMBER'] })
+          .matched
+      ).toBe(false);
+    }
+    expect(
+      evaluateFilters(makeEvent({ event: 'push' }), { authorAssociation: ['OWNER'] }).matched
+    ).toBe(true);
+  });
+  it('ignoreBots is explicit and fails closed for missing type', () => {
+    for (const sender of [undefined, { login: 'x' }, { login: 'x', type: 'Bot' }]) {
+      expect(evaluateFilters(makeEvent({ sender }), { ignoreBots: true }).matched).toBe(false);
+      expect(evaluateFilters(makeEvent({ sender }), {}).matched).toBe(true);
+    }
+    expect(evaluateFilters(makeEvent(), { ignoreBots: true }).matched).toBe(true);
+  });
+  it('comment-only contains cannot be satisfied by issue text or an unrelated payload field', () => {
+    for (const type of ['issue_comment', 'pull_request_review', 'pull_request_review_comment']) {
+      const event = makeEvent({
+        event: type,
+        comment: { body: 'hello' },
+        review: { body: 'hello' },
+        issue: { number: 1, title: '/sam', body: '/sam' },
+      });
+      expect(evaluateFilters(event, { commentContains: '/sam' }).matched).toBe(false);
+      expect(
+        evaluateFilters(
+          { ...event, comment: { body: 'Please /SAM help' }, review: { body: 'Please /SAM help' } },
+          { commentContains: '/sam' }
+        ).matched
+      ).toBe(true);
+      expect(
+        evaluateFilters(
+          { ...event, comment: undefined, review: undefined },
+          { commentContains: '/sam' }
+        ).matched
+      ).toBe(false);
+    }
+    expect(
+      evaluateFilters(makeEvent(), { commentContains: '/sam', reviewStates: ['approved'] }).matched
+    ).toBe(true);
+  });
+  it('discriminates issue_comment issue and PR subjects, inert on push', () => {
+    const issue = makeEvent({ event: 'issue_comment' });
+    const pr = { ...issue, issue: { ...issue.issue!, pull_request: {} } };
+    expect(evaluateFilters(issue, { isPullRequest: true }).matched).toBe(false);
+    expect(evaluateFilters(issue, { isPullRequest: false }).matched).toBe(true);
+    expect(evaluateFilters({ ...issue, issue: undefined }, { isPullRequest: false }).matched).toBe(
+      false
+    );
+    expect(evaluateFilters({ ...issue, issue: undefined }, { isPullRequest: true }).matched).toBe(
+      false
+    );
+    expect(evaluateFilters(pr, { isPullRequest: true }).matched).toBe(true);
+    expect(evaluateFilters(pr, { isPullRequest: false }).matched).toBe(false);
+    expect(evaluateFilters(makeEvent({ event: 'push' }), { isPullRequest: true }).matched).toBe(
+      true
+    );
+  });
+  it('review state/prefix/labels apply to reviews and prefix is inert elsewhere', () => {
+    const event = makeEvent({
+      event: 'pull_request_review',
+      review: { body: ' /sam fix', state: 'changes_requested' },
+      pull_request: { number: 1, title: '', labels: [{ name: 'bug' }] },
+      issue: undefined,
+    });
+    expect(
+      evaluateFilters(event, {
+        commandPrefix: '/sam',
+        reviewStates: ['changes_requested'],
+        labels: ['bug'],
+      }).matched
+    ).toBe(true);
+    expect(evaluateFilters(event, { reviewStates: ['approved'] }).matched).toBe(false);
+    expect(
+      evaluateFilters({ ...event, review: undefined }, { reviewStates: ['approved'] }).matched
+    ).toBe(false);
+    expect(evaluateFilters(makeEvent(), { commandPrefix: '/sam' }).matched).toBe(true);
+  });
+});

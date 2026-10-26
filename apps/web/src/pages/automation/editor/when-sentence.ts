@@ -1,5 +1,6 @@
 /** The one-line, plain-language summary of what starts an automation being edited. */
 import { describeCron } from '../../../components/triggers/schedule-cron';
+import { buildGitHubFilters } from '../../../components/triggers/trigger-form-support';
 import {
   describeEventFilter,
   emailTriggerWhen,
@@ -30,18 +31,7 @@ export function whenSentence(state: EditorState): string {
       return 'dueAt' in time ? `On ${fullDate(time.dueAt, state.once.zone)}` : 'Once';
     }
     case 'github':
-      return githubTriggerWhen(state.github.eventType, {
-        actions: state.github.actions
-          .split(',')
-          .map((item) => item.trim())
-          .filter(Boolean),
-        commandPrefix:
-          state.github.eventType === 'issue_comment' ? state.github.commandPrefix : undefined,
-        branches: state.github.branches
-          .split(',')
-          .map((item) => item.trim())
-          .filter(Boolean),
-      });
+      return githubTriggerWhen(state.github.eventType, buildGitHubFilters(state.github));
     case 'webhook':
       return webhookTriggerWhen(state.webhook.sourceLabel);
     case 'email':

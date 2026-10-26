@@ -230,6 +230,7 @@ Agent profile and skill create/update surfaces accept `resourceRequirements` as 
 - `GET /api/projects/:projectId/triggers/:triggerId` — Get trigger details and recent execution history.
 - `PATCH /api/projects/:projectId/triggers/:triggerId` — Update common trigger settings or source-specific GitHub/webhook configuration. Resuming starts a fresh auto-pause failure window while retaining execution history.
 - `DELETE /api/projects/:projectId/triggers/:triggerId` — Delete a trigger and cascading source configuration, delivery audit, and execution history.
+- `POST /api/projects/:projectId/triggers/github/filter-preview` — Read-only bounded draft-filter test against same-repository/installation/event deliveries. Accepts GitHub config; returns metadata and nullable match results (payload unavailable is distinct). Requires project task-read permission; no replay or execution.
 - `POST /api/projects/:projectId/triggers/:triggerId/test` — Preview the cron template context.
 - `POST /api/projects/:projectId/triggers/:triggerId/run` — Submit a manual trigger execution. Webhook triggers accept optional `{ payload, headers }` preview context.
 - `POST /api/projects/:projectId/triggers/:triggerId/webhook/preview` — Render a webhook template and evaluate configured filters without creating an execution.

@@ -38,6 +38,13 @@ export interface GitHubState {
   bodyContains: string;
   branches: string;
   ignoreDrafts: boolean;
+  actors: string;
+  addedLabel: string;
+  authorAssociation: string;
+  ignoreBots: boolean;
+  commentContains: string;
+  isPullRequest: string;
+  reviewStates: string;
 }
 
 export interface WebhookState {
@@ -152,6 +159,13 @@ const DEFAULT_GITHUB: GitHubState = {
   bodyContains: '',
   branches: '',
   ignoreDrafts: true,
+  actors: '',
+  addedLabel: '',
+  authorAssociation: '',
+  ignoreBots: false,
+  commentContains: '',
+  isPullRequest: '',
+  reviewStates: '',
 };
 
 /** A fresh one-time due time: the next quarter hour at least an hour from now. */
@@ -272,6 +286,14 @@ export function editorStateFromTrigger(trigger: TriggerResponse): EditorState {
           bodyContains: github.filters.bodyContains ?? '',
           branches: joinList(github.filters.branches),
           ignoreDrafts: github.filters.ignoreDrafts ?? true,
+          actors: joinList(github.filters.actors),
+          addedLabel: github.filters.addedLabel ?? '',
+          authorAssociation: joinList(github.filters.authorAssociation),
+          ignoreBots: github.filters.ignoreBots ?? false,
+          commentContains: github.filters.commentContains ?? '',
+          isPullRequest:
+            github.filters.isPullRequest === undefined ? '' : String(github.filters.isPullRequest),
+          reviewStates: joinList(github.filters.reviewStates),
         }
       : base.github,
     webhook: trigger.webhookConfig

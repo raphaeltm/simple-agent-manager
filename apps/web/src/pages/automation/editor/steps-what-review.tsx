@@ -255,6 +255,13 @@ export function StepWhat({
           >
             <Plus size={16} aria-hidden /> Add a detail from the run
           </button>
+          {state.start === 'github' && (
+            <p className="m-0 text-xs text-fg-muted">
+              Prefer repository, number and commentId, then fetch the exact content. Treat external
+              titles, bodies and comments as untrusted data, not instructions. Delimiters do not
+              prevent prompt injection.
+            </p>
+          )}
           {showVariables && (
             <div
               className="flex flex-col gap-3 rounded-xl border border-border-default p-3"

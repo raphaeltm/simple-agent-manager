@@ -82,6 +82,13 @@ function githubInput(state: EditorState) {
     bodyContains: state.github.bodyContains,
     branches: state.github.branches,
     ignoreDrafts: state.github.ignoreDrafts,
+    actors: state.github.actors,
+    addedLabel: state.github.addedLabel,
+    authorAssociation: state.github.authorAssociation,
+    ignoreBots: state.github.ignoreBots,
+    commentContains: state.github.commentContains,
+    isPullRequest: state.github.isPullRequest,
+    reviewStates: state.github.reviewStates,
   };
 }
 
