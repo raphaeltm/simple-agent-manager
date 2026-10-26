@@ -46,3 +46,9 @@ Follow-up verification: webtypecheck/lint PASS,111focusedtests PASS,24/24desktop
 Review correction: extra inline case normalization was redundant because githubFilterChoiceErrors already normalizes case. Removed it to keep the patch minimal; no case-normalization bug is claimed.
 
 Final scope correction: clearing old submitted errors is limited to GitHub’s When step. What/Review retain their existing handlers, so correcting a bad queue TTL after Save keeps Advanced open. A new desktop/mobile browser regression verifies that correction path; all4affected browser cases and68editor/flow tests pass after narrowing. No additional visual redesign or backend change.
+
+## Final approval and live staging verification
+
+Actual required-profile Opus task01M5WQWV8QGFQV7EM3AWQHG239 independently verified final sourcef76e77369659c1cd6862c5c8936ded5c0dec0cbb and returned PASS with zero open findings and all rubric scores4. Final report Library01M5WTFTH01MST9PQNW5N7HRSS (feature channel47). This supersedes the historical pending statuses above. No UI source changed after approval.
+
+Staging deployment40385983738 ran this exact source and passed12browser smoke tests. Additional authenticated desktop1280/mobile375 dashboard/projects/settings/Automation/detail/editor checks passed without console errors or horizontal overflow. The implementation agent inspected both staging-saved-queue PNGs: affinity enabled, pending cap7, TTL0.25hours; controls are readable and unclipped at both widths. Only these fixture-only fieldset captures are retained publicly; account/project overview captures remain temporary. Live queue/routing acceptance evidence is recorded separately.

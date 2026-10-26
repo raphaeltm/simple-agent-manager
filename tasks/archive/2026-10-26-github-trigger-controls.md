@@ -19,9 +19,10 @@ Issues #2419, #2420, #2422. Implement explicit structured controls without chang
 - [x] MCP create concurrency/skip/description and complete template guidance via shared services
 - [x] Filter/review/context UI and serializers; bounded recent delivery filter test with honest payload availability
 - [x] Docs: scopes/defaults/template variables/untrusted text guidance
-- [ ] Predicate/parser/context/API/MCP/UI tests and compatibility with A review bursts
-- [ ] Local validation + specialist reviews + actual Opus UI review on pushed branch
-- [ ] Shared staging verified without overwrite; Playwright desktop/mobile evidence posted
+- [x] Predicate/parser/context/API/MCP/UI tests and compatibility with A review bursts
+- [x] Local validation + specialist reviews + actual Opus UI review on pushed branch
+- [x] Shared staging verified without overwrite; Playwright desktop/mobile captures reviewed
+- [ ] Desktop/mobile evidence posted in combined PR
 - [ ] PR gates/CodeRabbit/merge/deployment/basic production smoke
 
 ## Acceptance
@@ -30,9 +31,13 @@ Actor means authenticated webhook sender, never issue author; author association
 
 ## Validation / release ownership
 
-B pushed f8ae0aed2, 37c7e9560, 2384a3638 on assigned branch. Local security/CF/constitution review no blocking findings; completion/tests/docs review missing-subject and commentUrl findings fixed. Backend137focusedPASS plus61postfixPASS, web73PASS, API/web typechecksPASS, shared buildPASS. Playwright2PASS with ten inspected desktop/mobile screenshots in tasks/evidence/2026-10-26-github-trigger-controls. Actual Opus task01M5WHY3EFHN326WD32KP7ACJT is in progress, no approval yet.
+A task01M5WD679VMV8R0MF24STHPRDC owns the single combined integration/staging/release PR. Final B3a2d77e2c is included in pushed integrated f76e77369659c1cd6862c5c8936ded5c0dec0cbb alongside mainb73. All four original/recovered local specialist reviewers completed; their findings and recovery lineage are recorded in docs/audits/2026-10-26-github-trigger-controls.md.
 
-A task01M5WD679VMV8R0MF24STHPRDC owns single combined integration/staging/release PR. Preserve queue fields during integration and prove a submitted review plus N inline events route compatibly. B will address Opus findings and provide pinned reviewed commit. Archive only after completeness verification of combined gates, before merge. Do not close #2419; expression/regex Idea01M5WE2TEWEBMCRF6YKCGE3EDT remains.
+Actual required-profile Opus task01M5WQWV8QGFQV7EM3AWQHG239 final PASS at exact f76: zero open findings, rubric all4. Independently80webtests,24desktop/mobilebrowsercases,17probes including320px and error correction; final Library report01M5WTFTH01MST9PQNW5N7HRSS/channel47. All previous H/M findings and final N1/N2 residues were fixed. No further UI change without re-verification.
+
+Integrated full baseline47/47qualitytasks PASS (API13929/web4769); subsequent focused UI111tests/24browser/typecheck/lintPASS, narrowed correction68tests/4browserPASS.60fresh committed captures cover both feature areas. Final PR CI remains required.
+
+Pinned staging40385983738 and12browser smoke tests PASS; Cloudflare verifies exact f76 API at100% and migration0209. Supported live review burst PASS: signer40397144489 sends two inline comments/replays into ONEtask01M5WYW7FMAWM5GV0F7EY5RPZH/two replies. Editing SAME trigger to submitted review roundtrips settings; signer40398575145 plus replay yields3rows/2routed/ONEtask/three replies with file/line and changes_requested context. All fixture triggers/tasks/workspaces cleaned; sole owned node removed20:52:47, four pre-existing nodes untouched. Source evidence and bounded observations are in tasks/evidence/2026-10-26-github-trigger-queue/staging-acceptance.json. Desktop/mobile captures inspected; PR screenshot comment, CI, CodeRabbit, merge and basic production smoke remain release gates. Archive only after final task-completion validation of BOTH combined task files. #2419 expressions/regex remains Idea01M5WE2TEWEBMCRF6YKCGE3EDT.
 
 Remaining #2420 scope: event type selection is singular and affinity per-trigger.
 A submitted review plus inline-comment events on separate triggers cannot share one
@@ -46,9 +51,4 @@ with duplicate-wake suppression across watches/triggers. This remains unmet #242
 scope, tracked by Idea `01M5WKCK7431DQ4FKBWENZV9QJ`; do not use Closes #2420.
 Combined staging must still prove supported same-trigger review bursts.
 
-Actual Opus first review CHANGES REQUESTED at930e8131a (task01M5WHY3EFHN326WD32KP7ACJT,
-Library report01M5WKHAKBM97RQVAYZCGMCFCH). Corrections and per-finding map are in the
-audit. All26 desktop/mobile screenshots inspected; focused browser cases pass after
-fixing test-only overview mocks. Web77unit and preview2tests pass. A will dispatch one
-final combined actual Opus review on the integrated branch; no B duplicate or approval
-claim. Queue-affinity-specific Then wording remains A's integration responsibility.
+Final pre-archive task-completion/doc-sync review: PASS for BOTH combined tasks at f76 after all live acceptance and cleanup; no missing implementation acceptance. Release checkboxes intentionally remain pending until the combined PR completes CI, CodeRabbit, merge/deploy and basic production smoke.
