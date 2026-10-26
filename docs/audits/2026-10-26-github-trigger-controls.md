@@ -64,3 +64,10 @@ Refreshed audit:2/2PASS with normal/many30rows, empty and API500 error results,
 stale draft notice, and focused commentId context picker on both viewports. Ten
 screenshots inspected; no horizontal overflow or clipping assertions failed. The
 HTML/script-looking command text remains an input value, never rendered as markup.
+
+Opus inspection identified saved Advanced filter visibility and client enum validation
+as gaps. Added scoped rows for every new filter, comment/review prefix and branch
+scope, validation using shared association/state constants, and GitHub-specific hint.
+Unavailable payload reasons now use plain words in the UI. Follow-up Playwright4/4PASS,
+12 inspected screenshots including saved review details on desktop/mobile; web unit
+suite74PASS. Opus final verdict remains pending on pushed follow-up.

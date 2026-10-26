@@ -226,7 +226,7 @@ test('GitHub filters, reviews, recent-delivery snapshot and context variables', 
   await page.getByLabel('GitHub event', { exact: true }).scrollIntoViewIfNeeded();
   await audit(page, 'github-review-filters-top');
   await page.getByRole('button', { name: 'Test against recent deliveries' }).click();
-  await expect(page.getByText('payload_unavailable').first()).toBeVisible();
+  await expect(page.getByText('Payload was not retained or has expired.').first()).toBeVisible();
   await page
     .getByRole('button', { name: 'Test against recent deliveries' })
     .scrollIntoViewIfNeeded();
@@ -254,4 +254,39 @@ test('GitHub filters, reviews, recent-delivery snapshot and context variables', 
   await expect(page.getByRole('button', { name: 'commentId', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'commentId', exact: true }).scrollIntoViewIfNeeded();
   await audit(page, 'github-template-context');
+});
+
+test('saved GitHub review filters stay inspectable under Advanced', async ({ page }) => {
+  await setupAgentEmailMocks(page, {
+    triggers: [
+      emailTrigger({
+        id: 'review',
+        sourceType: 'github',
+        name: 'Review ' + 'long title '.repeat(22),
+        githubConfig: {
+          eventType: 'pull_request_review',
+          filters: {
+            actions: ['submitted'],
+            actors: ['alice', 'bob'],
+            ignoreActors: [],
+            authorAssociation: ['MEMBER'],
+            ignoreBots: true,
+            commentContains: '/sam',
+            commandPrefix: '/sam',
+            reviewStates: ['changes_requested'],
+            isPullRequest: true,
+            branches: ['feature/very-long-branch-name'],
+          },
+        },
+      }),
+    ],
+  });
+  await page.goto(`${BASE}/trigger/review`);
+  await page.getByTestId('automation-advanced').locator('summary').click();
+  await expect(
+    page.getByText('Author association (sender must be author)', { exact: true })
+  ).toBeVisible();
+  await expect(page.getByText('Allowed actors', { exact: true })).toBeVisible();
+  await page.getByText('Review states', { exact: true }).scrollIntoViewIfNeeded();
+  await audit(page, 'github-saved-review-filters');
 });

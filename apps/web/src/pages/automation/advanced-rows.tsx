@@ -7,6 +7,7 @@ import type {
   ProjectStandingWatch,
   TriggerResponse,
 } from '@simple-agent-manager/shared';
+import { isGitHubCommentEvent, isGitHubPullRequestEvent } from '@simple-agent-manager/shared';
 import type { ReactNode } from 'react';
 
 import {
@@ -47,16 +48,36 @@ function sourceRows(trigger: TriggerResponse): Rows {
       const rows: Rows = [['GitHub event', mono(eventType)]];
       if (eventType !== 'push') rows.push(['Actions', listOr(filters.actions, 'Any')]);
       if (eventType !== 'push') rows.push(['Required labels', listOr(filters.labels, 'None')]);
-      if (eventType === 'issue_comment')
+      if (isGitHubCommentEvent(eventType))
         rows.push([
           'Comment starts with',
           filters.commandPrefix ? mono(filters.commandPrefix) : 'Anything',
         ]);
       if (eventType !== 'push') rows.push(['Text contains', filters.bodyContains || 'Anything']);
-      if (eventType === 'push' || eventType === 'pull_request')
+      if (eventType === 'push' || isGitHubPullRequestEvent(eventType))
         rows.push(['Branches', listOr(filters.branches, 'Any')]);
       if (eventType === 'pull_request')
         rows.push(['Draft pull requests', filters.ignoreDrafts === false ? 'Included' : 'Ignored']);
+      if (
+        ['issues', 'pull_request'].includes(eventType) &&
+        (!filters.actions?.length ||
+          filters.actions.some((action) => ['labeled', 'unlabeled'].includes(action))) &&
+        filters.addedLabel
+      )
+        rows.push(['Changed label (label actions only)', filters.addedLabel]);
+      if (isGitHubCommentEvent(eventType) && filters.commentContains)
+        rows.push(['Comment contains', filters.commentContains]);
+      if (eventType === 'pull_request_review' && filters.reviewStates?.length)
+        rows.push(['Review states', filters.reviewStates.join(', ')]);
+      if (eventType !== 'push' && filters.isPullRequest !== undefined)
+        rows.push(['Subject', filters.isPullRequest ? 'Pull requests only' : 'Issues only']);
+      if (eventType !== 'push' && filters.authorAssociation?.length)
+        rows.push([
+          'Author association (sender must be author)',
+          filters.authorAssociation.join(', '),
+        ]);
+      rows.push(['Allowed actors', listOr(filters.actors, 'Anyone')]);
+      rows.push(['Ignore bot actors', filters.ignoreBots ? 'Yes' : 'No']);
       rows.push(['Ignored accounts', listOr(filters.ignoreActors, 'None')]);
       return rows;
     }
