@@ -40,16 +40,18 @@ describe('model-catalog', () => {
       );
       expect(
         groups
-          .find((group) => group.label === 'GPT-5.5 / 5.2 (Previous)')
+          .find((group) => group.label === 'GPT-5.5 / 5.2 (Legacy)')
           ?.models.map((model) => model.id)
       ).toEqual(['gpt-5.5', 'gpt-5.2']);
       expect(
         groups
-          .find((group) => group.label === 'GPT-5.4 (Legacy, hidden upstream)')
+          .find((group) => group.label === 'GPT-5.4 (Legacy; API key only)')
           ?.models.map((model) => model.id)
       ).toEqual(['gpt-5.4', 'gpt-5.4-mini']);
-      expect(namesById.get('gpt-5.4')).toContain('Legacy');
-      expect(namesById.get('gpt-5.4-mini')).toContain('Legacy');
+      expect(namesById.get('gpt-5.4')).toContain('API key only');
+      expect(namesById.get('gpt-5.5')).toBe('GPT-5.5 (API key only)');
+      expect(namesById.get('gpt-5.2')).toContain('Deprecated for ChatGPT sign-in');
+      expect(namesById.get('gpt-5.4-mini')).toContain('API key only');
       expect(namesById.has('gpt-5.4-pro')).toBe(false);
       expect(namesById.has('gpt-5.4-nano')).toBe(false);
       expect(namesById.has('gpt-5.3-codex')).toBe(false);

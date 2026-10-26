@@ -125,13 +125,13 @@ const CODEX_MODELS: ModelGroup[] = [
     { id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra' },
     { id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna' },
   ]),
-  modelGroup('GPT-5.5 / 5.2 (Previous)', [
-    { id: 'gpt-5.5', name: 'GPT-5.5' },
-    { id: 'gpt-5.2', name: 'GPT-5.2' },
+  modelGroup('GPT-5.5 / 5.2 (Legacy)', [
+    { id: 'gpt-5.5', name: 'GPT-5.5 (API key only)' },
+    { id: 'gpt-5.2', name: 'GPT-5.2 (Deprecated for ChatGPT sign-in)' },
   ]),
-  modelGroup('GPT-5.4 (Legacy, hidden upstream)', [
-    { id: 'gpt-5.4', name: 'GPT-5.4 (Legacy)' },
-    { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini (Legacy)' },
+  modelGroup('GPT-5.4 (Legacy; API key only)', [
+    { id: 'gpt-5.4', name: 'GPT-5.4 (API key only)' },
+    { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini (API key only)' },
   ]),
 ];
 
