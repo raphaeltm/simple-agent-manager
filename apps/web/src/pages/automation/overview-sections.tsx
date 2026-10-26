@@ -17,7 +17,6 @@ import { useAutomationAction } from './detail-parts';
 import {
   type Attention,
   attentionItems,
-  type AutomationAction,
   type AutomationItem,
   comingUp,
   isFinished,
@@ -37,9 +36,15 @@ import {
   TextLink,
 } from './ui';
 
-export function actionText(action: AutomationAction, lookups: AutomationLookups) {
+export function actionText(item: AutomationItem, lookups: AutomationLookups) {
+  const { action } = item;
+  const followsSubject =
+    item.kind === 'trigger' &&
+    item.start === 'github' &&
+    item.trigger.githubConfig?.eventType !== 'push' &&
+    item.trigger.githubConfig?.subjectAffinity;
   return action.kind === 'start'
-    ? `Start a chat with ${lookups.profileName(action.agentProfileId)}`
+    ? `${followsSubject ? 'Continue its issue or PR chat, or start one with' : 'Start a chat with'} ${lookups.profileName(action.agentProfileId)}`
     : `Message “${lookups.chatTitle(action.sessionId)}”`;
 }
 
@@ -77,7 +82,7 @@ export function AutomationRow({
           when
         ) : (
           <>
-            {when} <span aria-hidden>→</span> {actionText(item.action, lookups)}
+            {when} <span aria-hidden>→</span> {actionText(item, lookups)}
           </>
         )
       }
@@ -249,7 +254,7 @@ export function ComingUp({
                       {item.name}
                     </span>
                     <span className="truncate text-[13px] text-fg-muted">
-                      {actionText(item.action, lookups)}
+                      {actionText(item, lookups)}
                     </span>
                   </span>
                 </Link>

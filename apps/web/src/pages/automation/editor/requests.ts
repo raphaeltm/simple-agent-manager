@@ -77,7 +77,7 @@ function emailConfig(state: EditorState): EmailTriggerConfigInput {
 
 function githubQueueConfig(state: EditorState) {
   return {
-    subjectAffinity: state.github.subjectAffinity,
+    subjectAffinity: state.github.eventType !== 'push' && state.github.subjectAffinity,
     queueMaxPending: Number(state.github.queueMaxPending),
     queueTtlSeconds: Math.round(Number(state.github.queueTtlHours) * 3600),
   };

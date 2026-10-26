@@ -131,6 +131,15 @@ for (const scenario of ['normal', 'many-long', 'empty', 'error'] as const) {
         page.getByRole('link', { name: /Open chat for .*Delivered to the running chat/ })
       ).toHaveAttribute('href', `/projects/${PROJECT_ID}/chat/active-session`);
       await audit(page, 'github-trigger-history');
+      await page.route(`**/api/projects/${PROJECT_ID}/triggers`, (route) =>
+        route.fulfill({ json: { triggers: [trigger] } })
+      );
+      await page.goto(`/projects/${PROJECT_ID}/automation`);
+      if (info.project.name === 'Desktop (1280x800)')
+        await expect(
+          page.getByText(/Continue its issue or PR chat, or start one with/)
+        ).toBeVisible();
+      await audit(page, 'github-trigger-affinity-overview');
     }
   });
 }
@@ -200,3 +209,48 @@ test('GitHub push never promises issue or PR affinity', async ({ page }) => {
   await expect(page.getByRole('checkbox', { name: /Keep issue and PR follow-ups/ })).toHaveCount(0);
   await audit(page, 'github-trigger-push-review');
 });
+
+for (const source of ['github', 'webhook', 'schedule'] as const) {
+  test(`${source} cleanup copy and run metadata stay scoped`, async ({ page }) => {
+    await setupAutomationMocks(page);
+    const trigger = source === 'schedule' ? TRIGGERS.morning : TRIGGERS[source];
+    await page.route(`**/api/projects/${PROJECT_ID}/triggers/${trigger.id}/executions*`, (route) =>
+      route.fulfill({
+        json: {
+          executions: [
+            {
+              id: 'legacy-startup',
+              triggerId: trigger.id,
+              projectId: PROJECT_ID,
+              status: 'queued',
+              taskId: null,
+              queueExpiresAt: null,
+              sequenceNumber: 0,
+              subjectKey: null,
+              eventType: source,
+              scheduledAt: new Date().toISOString(),
+              createdAt: new Date().toISOString(),
+              startedAt: null,
+              completedAt: null,
+            },
+          ],
+          nextCursor: null,
+        },
+      })
+    );
+    await page.goto(`/projects/${PROJECT_ID}/automation/trigger/${trigger.id}`);
+    await expect(page.getByText(/\bEvent 0\b/)).toHaveCount(0);
+    if (source === 'github')
+      await expect(
+        page.getByText('Events can start a chat or wait for capacity.', { exact: true })
+      ).toBeVisible();
+    else await expect(page.getByTestId('trigger-run')).not.toContainText('Event');
+    await page.getByRole('button', { name: 'Clear stuck runs', exact: true }).click();
+    const dialog = page.getByRole('dialog', { name: 'Clear stuck runs?', exact: true });
+    await expect(dialog).toContainText('Chats already running are not touched.');
+    if (source === 'github')
+      await expect(dialog).toContainText('GitHub events waiting their turn are kept.');
+    else await expect(dialog).not.toContainText('GitHub');
+    await audit(page, `github-trigger-cleanup-${source}`);
+  });
+}

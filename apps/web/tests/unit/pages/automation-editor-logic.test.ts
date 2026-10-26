@@ -264,6 +264,19 @@ describe('editing triggers', () => {
     });
   });
 
+  it('never sends issue/PR affinity for push even if the draft previously enabled it', () => {
+    const original = trigger({
+      sourceType: 'github',
+      cronExpression: null,
+      githubConfig: { eventType: 'issues', filters: {}, subjectAffinity: true },
+    });
+    const state = editorStateFromTrigger(original);
+    const push = { ...state, github: { ...state.github, eventType: 'push' as const } };
+    expect(triggerCreateRequest(push).githubConfig?.subjectAffinity).toBe(false);
+    expect(triggerUpdateRequest(push, original).githubConfig?.subjectAffinity).toBe(false);
+    expect(triggerCreateRequest(state).githubConfig?.subjectAffinity).toBe(true);
+  });
+
   it('loads queue controls and changes them without losing stored filters', () => {
     const original = trigger({
       sourceType: 'github',
