@@ -75,6 +75,11 @@ for (const scenario of ['normal', 'many-long', 'empty', 'error'] as const) {
         'GitHub events: 2 waiting now · History (up to 90 days): 3 delivered · 3 dropped · 1 unconfirmed'
       );
     if (scenario === 'normal') {
+      await expect(
+        page.getByText(
+          'Continue this automation’s active chat for the issue or PR, or start a new one with'
+        )
+      ).toBeVisible();
       await expect(page.getByText('Queued until a run finishes')).toBeVisible();
       await expect(page.getByText('Dropped: waiting time expired')).toBeVisible();
       await expect(page.getByText('Dropped: queue was full')).toBeVisible();
@@ -100,6 +105,11 @@ for (const scenario of ['normal', 'many-long', 'empty', 'error'] as const) {
       await expect(page.getByRole('alert')).toContainText('Could not load runs.');
     await audit(page, `github-trigger-queue-${scenario}`);
     if (scenario === 'normal') {
+      await expect(
+        page.getByText(
+          'Continue this automation’s active chat for the issue or PR, or start a new one with'
+        )
+      ).toBeVisible();
       await expect(
         page.getByText('May have reached the chat, but SAM could not confirm it')
       ).toBeVisible();
@@ -136,6 +146,9 @@ test('GitHub queue controls', async ({ page }, info) => {
   await expect(page.getByLabel('Maximum wait (hours)')).toHaveValue('24');
   await audit(page, 'github-trigger-queue-controls-default');
   await page.getByRole('checkbox', { name: /Keep issue and PR follow-ups/ }).check();
+  await expect(page.getByTestId('automation-sentence')).toContainText(
+    'continue this automation’s active chat'
+  );
   await page.getByLabel('Pending event limit').fill('7');
   await page.getByLabel('Maximum wait (hours)').fill('0.5');
   await audit(page, 'github-trigger-queue-controls-enabled');

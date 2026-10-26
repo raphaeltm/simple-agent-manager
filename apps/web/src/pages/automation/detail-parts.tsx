@@ -197,7 +197,13 @@ export function WhenAndThen({
       <div className="flex flex-col gap-2">
         <span className="text-xs font-medium uppercase tracking-wider text-fg-muted">Then</span>
         <div className="flex flex-wrap items-center gap-2 text-[15px] text-fg-primary">
-          {action.kind === 'start' ? 'Start a new chat with' : 'Send a message to'}
+          {action.kind === 'start'
+            ? item.kind === 'trigger' &&
+              item.start === 'github' &&
+              item.trigger.githubConfig?.subjectAffinity
+              ? 'Continue this automation’s active chat for the issue or PR, or start a new one with'
+              : 'Start a new chat with'
+            : 'Send a message to'}
           {action.kind === 'start' ? (
             <span className="inline-flex min-h-8 items-center gap-1.5 rounded-full border border-border-default px-3 text-sm">
               <Bot size={14} aria-hidden />
