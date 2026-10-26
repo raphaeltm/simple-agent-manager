@@ -336,7 +336,7 @@ test('saved GitHub review filters stay inspectable under Advanced', async ({ pag
   });
   await page.goto(BASE);
   await expect(page.getByText(/body starts with \/sam/).first()).toBeVisible();
-  await expect(page.getByText(/more conditions · See details/)).toBeVisible();
+  await expect(page.getByText('See all conditions', { exact: true })).toBeVisible();
   await audit(page, 'github-saved-review-overview');
   await page.goto(`${BASE}/trigger/review`);
   await page.getByTestId('automation-advanced').locator('summary').click();

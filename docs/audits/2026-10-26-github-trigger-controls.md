@@ -161,3 +161,17 @@ Both resumed originals confirmed shared REST/MCP validation and creation, fail-c
 sender semantics, event scopes, safe bounded preview and documentation consistency.
 No critical or high finding remains from any local reviewer. These reviews do not
 substitute for the required final combined actual Opus UI review or release validation.
+
+## Combined Opus follow-up: overview condition wording
+
+The final combined reviewer confirmed that the overview's numeric "more conditions"
+label was inaccurate: it counted extra sentence fragments rather than predicates
+hidden by truncation. Branches, labels and command prefixes can be embedded in the
+base sentence, and the visible portion depends on viewport width.
+
+The correction removes the numeric claim and shows **See all conditions** on every
+GitHub card. The full detail still shows the complete summary and exact Advanced
+settings. This also covers configurations whose restrictions appear only in the base
+sentence. The browser assertion and desktop/mobile overview evidence are refreshed.
+Final actual Opus verification of the integrated correction remains required. A owns
+the separately identified push/affinity Then wording correction.

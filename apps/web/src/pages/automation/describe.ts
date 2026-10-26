@@ -84,7 +84,7 @@ function githubTriggerBase(
 }
 
 /** Keep every active restriction visible, even when the main sentence is short. */
-export function githubTriggerClauses(
+function githubTriggerClauses(
   eventType: GitHubTriggerEventType,
   filters: GitHubTriggerFilters = {}
 ): string[] {
