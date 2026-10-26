@@ -8,8 +8,8 @@ import type {
 import { describe, expect, it } from 'vitest';
 
 import { AUTOMATION_STARTS } from '../../../src/lib/automation-routes';
-import { triggerAdvancedRows } from '../../../src/pages/automation/advanced-rows';
 import { buildActivity, scheduleEntry } from '../../../src/pages/automation/activity';
+import { triggerAdvancedRows } from '../../../src/pages/automation/advanced-rows';
 import { triggersNeedingRuns } from '../../../src/pages/automation/data';
 import {
   describeEventFilter,
