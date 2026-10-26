@@ -33,3 +33,8 @@ Actor means authenticated webhook sender, never issue author; author association
 B pushed f8ae0aed2, 37c7e9560, 2384a3638 on assigned branch. Local security/CF/constitution review no blocking findings; completion/tests/docs review missing-subject and commentUrl findings fixed. Backend137focusedPASS plus61postfixPASS, web73PASS, API/web typechecksPASS, shared buildPASS. Playwright2PASS with ten inspected desktop/mobile screenshots in tasks/evidence/2026-10-26-github-trigger-controls. Actual Opus task01M5WHY3EFHN326WD32KP7ACJT is in progress, no approval yet.
 
 A task01M5WD679VMV8R0MF24STHPRDC owns single combined integration/staging/release PR. Preserve queue fields during integration and prove a submitted review plus N inline events route compatibly. B will address Opus findings and provide pinned reviewed commit. Archive only after completeness verification of combined gates, before merge. Do not close #2419; expression/regex Idea01M5WE2TEWEBMCRF6YKCGE3EDT remains.
+
+Remaining #2420 scope: event type selection is singular and affinity per-trigger.
+A submitted review plus inline-comment events on separate triggers cannot share one
+run. Tracked Idea `01M5WKCK7431DQ4FKBWENZV9QJ`; coordinator/A notified for scope
+reconciliation. Keep #2420 open unless the mixed-event acceptance is fulfilled.

@@ -76,3 +76,13 @@ Final visual refinement moves the sender-author caveat from the Advanced row lab
 into its value so the desktop value column stays readable. Added explicit changed-label
 controls and event-switch scope screenshots; 4/4 PlaywrightPASS with 14 inspected
 screenshots. Saved-review mock now uses a GitHub prompt and honest zero-run state.
+
+## Remaining mixed-event review scope
+
+A trigger currently selects one GitHub event type, and affinity is deliberately
+per trigger. Several inline comments for one configured trigger can share a run,
+but a submitted review plus inline comments on separate triggers cannot all share
+one run. This is an unmet part of #2420's proposal, tracked as SAM Idea
+`01M5WKCK7431DQ4FKBWENZV9QJ`. Coordinator/A have the finding; no new cross-trigger
+or combined-event interface is implemented or silently authorized by this note.
+Do not close #2420 as fully resolved while this acceptance remains unmet.
