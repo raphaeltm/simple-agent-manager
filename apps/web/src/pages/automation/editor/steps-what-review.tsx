@@ -346,7 +346,7 @@ export function StepReview({
   const then =
     action.kind === 'message'
       ? `send a message to “${lookups.chatTitle(action.sessionId)}”`
-      : `${state.start === 'github' && state.trigger.subjectAffinity ? 'continue this automation’s active chat for the issue or PR, or start a new one with' : 'start a new chat with'} ${lookups.profileName(action.agentProfileId || null)}`;
+      : `${state.start === 'github' && state.github.subjectAffinity ? 'continue this automation’s active chat for the issue or PR, or start a new one with' : 'start a new chat with'} ${lookups.profileName(action.agentProfileId || null)}`;
   const first = state.start === 'schedule' ? nextRuns(state.schedule, Date.now(), 1)[0] : undefined;
   const set = (patch: Partial<EditorState['trigger']>) =>
     onChange({ ...state, trigger: { ...state.trigger, ...patch } });
