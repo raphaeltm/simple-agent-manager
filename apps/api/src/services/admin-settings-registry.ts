@@ -293,14 +293,14 @@ const definitions: AdminSettingDefinition[] = [
     'operations.githubTriggerQueueMaxPendingLimit',
     DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING_LIMIT,
     'Operations',
-    'Maximum pending events a GitHub trigger may configure on create or explicit update. Saved trigger values and accepted events are preserved.',
+    'Most pending events allowed when someone creates an automation or changes its queue limit. Saved automations and waiting events keep their settings.',
     { min: 1, max: Number.MAX_SAFE_INTEGER }
   ),
   integerDefinition(
     'operations.githubTriggerQueueTtlSecondsLimit',
     DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS_LIMIT,
     'Operations',
-    'Maximum event queue lifetime in seconds a GitHub trigger may configure on create or explicit update. Saved trigger values and accepted event deadlines are preserved.',
+    `Longest wait allowed, in seconds (default: ${DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS_LIMIT / 86400} days). Applies when someone creates an automation or changes its maximum wait. Saved automations and waiting events keep their settings.`,
     { min: 1, max: Number.MAX_SAFE_INTEGER }
   ),
   integerDefinition(

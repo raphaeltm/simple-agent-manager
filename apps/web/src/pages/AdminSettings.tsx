@@ -180,7 +180,11 @@ function SettingCard({
           ? 'Current secret is never returned.'
           : `Code default: ${displayValue(setting.defaultValue) || '(empty)'}`}
         {setting.type === 'string-list' ? ' · One entry per line.' : ''}
-        {setting.range ? ` · Range: ${setting.range.min}–${setting.range.max}` : ''}
+        {setting.range
+          ? setting.range.max === Number.MAX_SAFE_INTEGER
+            ? ` · Minimum: ${setting.range.min}`
+            : ` · Range: ${setting.range.min}–${setting.range.max}`
+          : ''}
       </p>
       <div className="flex flex-wrap gap-2">
         <Button disabled={disabled || conflict || !dirty} onClick={() => requestSave(setting)}>

@@ -73,3 +73,12 @@ CI test-only correction21:13UTC: Workerd MCP update response now asserts intende
 - [ ] Updated desktop/mobile captures and actual required-profile Opus delta review.
 - [ ] Coordinated staging delta, final-head CI and incremental CodeRabbit dispositions/wait.
 - [ ] Authorized merge and basic production smoke.
+
+### Actual Opus review correction
+
+Actual required-profile delta review on 9ca780 requested two medium and two low fixes.
+Untouched create defaults and unchanged edit fields are now omitted, letting the server
+apply lower defaults or preserve saved values. Server ceiling errors open Advanced and
+identify the right field in its displayed unit. Admin range/copy concerns are corrected.
+Focused unit and desktop/mobile browser checks pass; actual Opus verification and the
+final coordinated staging/CI/release gates remain required.

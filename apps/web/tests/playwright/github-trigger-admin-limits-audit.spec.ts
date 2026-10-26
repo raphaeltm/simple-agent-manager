@@ -15,13 +15,13 @@ test('GitHub queue admin limits save and reset through runtime settings', async 
       name: 'operations.githubTriggerQueueMaxPendingLimit',
       defaultValue: 1000,
       description:
-        'Maximum pending events a GitHub trigger may configure on create or explicit update. Saved trigger values and accepted events are preserved.',
+        'Most pending events allowed when someone creates an automation or changes its queue limit. Saved automations and waiting events keep their settings.',
     },
     {
       name: 'operations.githubTriggerQueueTtlSecondsLimit',
       defaultValue: 2592000,
       description:
-        'Maximum event queue lifetime in seconds a GitHub trigger may configure on create or explicit update. Saved trigger values and accepted event deadlines are preserved.',
+        'Longest wait allowed, in seconds (default: 30 days). Applies when someone creates an automation or changes its maximum wait. Saved automations and waiting events keep their settings.',
     },
   ].map((setting) => ({
     ...setting,
@@ -73,6 +73,10 @@ test('GitHub queue admin limits save and reset through runtime settings', async 
   await page.goto('/admin/settings');
   await expect(page.getByRole('heading', { name: 'Runtime settings' })).toBeVisible();
   await expect(page.locator('article')).toHaveCount(2);
+  for (const card of await page.locator('article').all())
+    await expect(card).not.toContainText('9007199254740991');
+  await expect(page.getByText(/Minimum: 1/)).toHaveCount(2);
+  await expect(page.getByText(/default: 30 days/)).toBeVisible();
   for (const setting of settings)
     await expect(page.locator(`[id="setting-${setting.name}"]`)).toHaveValue(
       String(setting.defaultValue)
@@ -85,7 +89,7 @@ test('GitHub queue admin limits save and reset through runtime settings', async 
         .locator('xpath=ancestor::article');
       await card.scrollIntoViewIfNeeded();
       await assertNoOverflow(page);
-      await screenshot(page, `github-trigger-admin-${index === 0 ? 'pending' : 'ttl'}-${state}`);
+      await screenshot(page, `opus-fix-admin-${index === 0 ? 'pending' : 'ttl'}-${state}`);
     }
   };
   await captureCards('default');
@@ -114,7 +118,7 @@ test('GitHub queue admin limits save and reset through runtime settings', async 
       .click();
     await screenshot(
       page,
-      `github-trigger-admin-${setting.name.includes('MaxPending') ? 'pending' : 'ttl'}-reset-confirmation`
+      `opus-fix-admin-${setting.name.includes('MaxPending') ? 'pending' : 'ttl'}-reset-confirmation`
     );
     await page.getByRole('button', { name: 'Apply change' }).click();
     await expect(page.getByRole('dialog')).toHaveCount(0);

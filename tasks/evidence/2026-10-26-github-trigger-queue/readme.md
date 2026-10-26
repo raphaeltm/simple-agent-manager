@@ -73,3 +73,18 @@ screenshots; no target-control clipping or overflow remained. Existing design-sy
 settings cards were selected over a custom configuration screen or new API metadata
 surface to keep controls in the established operator workflow. Actual Opus delta review
 is tracked separately and must complete before merge.
+
+## Actual Opus delta findings and fixes
+
+The actual required-profile review on 9ca780 requested changes for default/unchanged
+queue fields, server-error guidance, the admin range display, and operator copy.
+The editor now omits each unchanged queue control so creation uses effective server
+defaults and unrelated edits preserve saved values. Ceiling refusals identify the field,
+open Advanced, and use hours for the wait control. Admin cards hide the numeric storage
+ceiling, show the minimum, and explain the default wait in days.
+
+The `opus-fix-*` captures add 26 screenshots: separate admin card states at desktop/mobile
+and 320px, successful server-clamped creation, preserved filter-only edits, and both field
+error states. Mock browser validation passed 10 cases plus four persistence-fidelity
+checks. Root and the evidence reviewer inspected the changed controls; no unresolved
+clipping or overflow was found. Actual Opus re-verification remains a separate merge gate.

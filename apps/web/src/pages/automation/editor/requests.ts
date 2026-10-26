@@ -83,6 +83,24 @@ function githubQueueConfig(state: EditorState) {
   };
 }
 
+/** Omitted queue controls keep server defaults on create and saved values on update. */
+function githubQueueChanges(state: EditorState, original?: TriggerResponse['githubConfig']) {
+  const queue = githubQueueConfig(state);
+  return {
+    ...(queue.subjectAffinity !== (original?.subjectAffinity ?? false)
+      ? { subjectAffinity: queue.subjectAffinity }
+      : {}),
+    ...(queue.queueMaxPending !==
+    (original?.queueMaxPending ?? DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING)
+      ? { queueMaxPending: queue.queueMaxPending }
+      : {}),
+    ...(queue.queueTtlSeconds !==
+    (original?.queueTtlSeconds ?? DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS)
+      ? { queueTtlSeconds: queue.queueTtlSeconds }
+      : {}),
+  };
+}
+
 function githubInput(state: EditorState) {
   return {
     eventType: state.github.eventType,
@@ -124,7 +142,7 @@ export function triggerCreateRequest(state: EditorState): CreateTriggerRequest {
           githubConfig: {
             eventType: state.github.eventType,
             filters: buildGitHubFilters(githubInput(state)),
-            ...githubQueueConfig(state),
+            ...githubQueueChanges(state),
           },
         }
       : {}),
@@ -169,17 +187,13 @@ export function triggerUpdateRequest(
   }
   if (original.sourceType === 'github') {
     const githubConfig = buildGitHubConfigForForm(githubInput(state), original.githubConfig);
-    const queue = githubQueueConfig(state);
-    const queueChanged =
-      queue.subjectAffinity !== (original.githubConfig?.subjectAffinity ?? false) ||
-      queue.queueMaxPending !==
-        (original.githubConfig?.queueMaxPending ?? DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING) ||
-      queue.queueTtlSeconds !==
-        (original.githubConfig?.queueTtlSeconds ?? DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS);
-    if (githubConfig || queueChanged)
+    const queue = githubQueueChanges(state, original.githubConfig);
+    if (githubConfig || Object.keys(queue).length)
       request.githubConfig = {
-        ...(githubConfig ??
-          original.githubConfig ?? { eventType: state.github.eventType, filters: {} }),
+        ...(githubConfig ?? {
+          eventType: original.githubConfig?.eventType ?? state.github.eventType,
+          filters: original.githubConfig?.filters ?? {},
+        }),
         ...queue,
       };
   }
@@ -417,6 +431,18 @@ export function validateStep(
 /** API refusals the editor can explain, keyed to the field that should change. */
 export function friendlySaveError(error: unknown): { field?: string; message: string } {
   const message = error instanceof Error ? error.message : 'Could not save it';
+  const pendingLimit = /queueMaxPending must be between 1 and (\d+)/.exec(message);
+  if (pendingLimit)
+    return {
+      field: 'queueMaxPending',
+      message: `Pending event limit must be between 1 and ${pendingLimit[1]}.`,
+    };
+  const waitLimit = /queueTtlSeconds must be between 1 and (\d+)/.exec(message);
+  if (waitLimit)
+    return {
+      field: 'queueTtlHours',
+      message: `Maximum wait must be at least one second and no more than ${Number(waitLimit[1]) / 3600} hours.`,
+    };
   if (isVersionConflict(error))
     return {
       message:
