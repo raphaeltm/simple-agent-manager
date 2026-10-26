@@ -21,8 +21,11 @@ Refresh the hardcoded shared agent catalog from primary sources. SAM-managed tas
 - [x] Update focused regression tests for additions/removals and retirement label.
 - [x] Run shared lint/typecheck/tests/build and API catalog contract tests.
 - [x] Complete specialist review and archive this implementation record.
-- [ ] Deploy staging and verify catalog selector/API behavior.
-- [ ] Open PR, resolve CI/review, merge green and verify production deployment.
+- [x] Deploy staging and verify catalog selector/API behavior.
+
+Release continuation: PR/CI/CodeRabbit/merge and production deployment are owned by the same SAM task; completion is recorded in the PR and SAM evidence after release, not inferred from this archived implementation record.
 
 ## Validation
 Shared lint/typecheck/build passed; 48 files / 908 tests passed. API model-catalog service and route contracts: 2 files / 11 tests passed. Independent local review: task-completion-validator, test-engineer, constitution-validator PASS; doc-sync-validator LOW wording finding addressed. Source comparison: exactly 82 Zen + 30 Go ID/name pairs. Release gates below remain pending and are tracked in the PR and SAM task.
+
+Staging: [Deploy Staging 40297990013](https://github.com/raphaeltm/simple-agent-manager/actions/runs/40297990013) succeeded for 7d8cc60fb39b3f71c36aa4b4e269563510101015. Authenticated Playwright loaded dashboard/projects/settings, verified Codex/Mistral labels via API and selectors, and confirmed 112 OpenCode models with all six additions. Mobile overflow and browser page-error checks passed. No settings saved or resources provisioned. Web ModelSelect/profile-picker tests: 18 passed. Local browser dependencies were installed to enable this verification. The staging completion event successfully woke this chat; fallback was cancelled unused.
