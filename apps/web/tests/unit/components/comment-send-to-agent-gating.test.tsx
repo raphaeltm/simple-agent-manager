@@ -429,7 +429,7 @@ describe('opening a thread from a deep link', () => {
       .getAllByRole('article')
       .find((article) => article.getAttribute('data-comment-focused') === 'true');
     expect(focused).toHaveAttribute('data-comment-id', 'thread-2');
-    expect(scrollIntoView).toHaveBeenCalled();
+    await waitFor(() => expect(scrollIntoView).toHaveBeenCalled());
   });
 
   it('expands the thread under its message on smaller screens without opening the rail', async () => {

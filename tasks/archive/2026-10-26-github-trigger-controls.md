@@ -52,3 +52,5 @@ scope, tracked by Idea `01M5WKCK7431DQ4FKBWENZV9QJ`; do not use Closes #2420.
 Combined staging must still prove supported same-trigger review bursts.
 
 Final pre-archive task-completion/doc-sync review: PASS for BOTH combined tasks at f76 after all live acceptance and cleanup; no missing implementation acceptance. Release checkboxes intentionally remain pending until the combined PR completes CI, CodeRabbit, merge/deploy and basic production smoke.
+
+CI test-only correction21:13UTC: Workerd MCP update response now asserts intended normalized queue defaults via exported constants (8focused worker tests PASS). Existing unrelated comment deep-link scroll assertion awaits its React effect with waitFor (15focused tests PASS before and after); no assertion removed. Both files lint and diff checks PASS; independent completion review PASS. No runtime or UI source changes from actual Opus-approved/staging-proven f76. Final-head CI remains required.

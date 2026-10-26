@@ -60,3 +60,5 @@ The existing operations sweep additionally selects at most GITHUB_TRIGGER_RECOVE
 - Nonblocking receipt-only reconciliation robustness followup: Idea01M5WXKHJA7MMM9SSHFYE0DJR7. Existing acknowledged receipts currently pass through idempotent acceptance before classification; no staging event loss observed.
 
 Final pre-archive task-completion/doc-sync review: PASS for BOTH combined tasks at f76 after all live acceptance and cleanup; no missing implementation acceptance. Release checkboxes intentionally remain pending until the combined PR completes CI, CodeRabbit, merge/deploy and basic production smoke.
+
+CI test-only correction21:13UTC: Workerd MCP update response now asserts intended normalized queue defaults via exported constants (8focused worker tests PASS). Existing unrelated comment deep-link scroll assertion awaits its React effect with waitFor (15focused tests PASS before and after); no assertion removed. Both files lint and diff checks PASS; independent completion review PASS. No runtime or UI source changes from actual Opus-approved/staging-proven f76. Final-head CI remains required.

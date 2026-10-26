@@ -1,3 +1,7 @@
+import {
+  DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
+  DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
+} from '@simple-agent-manager/shared';
 import { env, SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
@@ -270,6 +274,9 @@ describe('MCP trigger management tools', () => {
     expect(updated.githubConfig).toEqual({
       eventType: 'pull_request',
       filters: { branches: ['main'], ignoreDrafts: true },
+      subjectAffinity: false,
+      queueMaxPending: DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
+      queueTtlSeconds: DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
     });
     expect(
       (await callMcpTool(token, 'update_trigger', { triggerId, cronExpression: '0 9 * * *' })).error
