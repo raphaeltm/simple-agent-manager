@@ -246,7 +246,7 @@ export function GitHubTriggerFields({
                   ],
                 ]
               : []),
-          ] as string[][]
+          ] as Array<[keyof ExtraFilters, string, string]>
         ).map(([key, label, hint]) => (
           <div key={key}>
             <label

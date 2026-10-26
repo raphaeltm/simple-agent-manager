@@ -233,6 +233,22 @@ test('GitHub filters, reviews, recent-delivery snapshot and context variables', 
   await audit(page, 'github-review-filter-preview');
   await page.getByLabel('Review states', { exact: true }).fill('changes_requested');
   await expect(page.getByText('Settings changed.', { exact: false })).toBeVisible();
+  await page.route('**/triggers/github/filter-preview', (route) =>
+    jsonResponse(route, 200, {
+      limit: 25,
+      warning: 'Only retained recovery payloads can be tested.',
+      deliveries: [],
+    })
+  );
+  await page.getByRole('button', { name: 'Test against recent deliveries' }).click();
+  await expect(page.getByText('No recent deliveries for this event and repository.')).toBeVisible();
+  await audit(page, 'github-review-filter-preview-empty');
+  await page.route('**/triggers/github/filter-preview', (route) =>
+    jsonResponse(route, 500, { error: 'INTERNAL_ERROR', message: 'Test error' })
+  );
+  await page.getByRole('button', { name: 'Test against recent deliveries' }).click();
+  await expect(page.getByText('Could not test recent deliveries. Try again.')).toBeVisible();
+  await audit(page, 'github-review-filter-preview-error');
   await page.getByRole('button', { name: 'Continue' }).click();
   await page.getByRole('button', { name: 'Add a detail from the run' }).click();
   await expect(page.getByRole('button', { name: 'commentId', exact: true })).toBeVisible();

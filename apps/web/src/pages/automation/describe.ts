@@ -62,13 +62,13 @@ export function githubTriggerWhen(
   if (
     ['issues', 'pull_request'].includes(eventType) &&
     filters.actions?.length === 1 &&
-    ['labeled', 'unlabeled'].includes(filters.actions[0]) &&
+    ['labeled', 'unlabeled'].includes(filters.actions[0] ?? '') &&
     filters.addedLabel
   )
     return `When ${filters.addedLabel} is ${filters.actions[0] === 'labeled' ? 'added to' : 'removed from'} ${GITHUB_SUBJECTS[eventType]}${branches}`;
   if (
     filters.actions?.length === 1 &&
-    ['labeled', 'unlabeled'].includes(filters.actions[0]) &&
+    ['labeled', 'unlabeled'].includes(filters.actions[0] ?? '') &&
     filters.labels?.length
   )
     return `When a label is ${filters.actions[0] === 'labeled' ? 'added to' : 'removed from'} ${GITHUB_SUBJECTS[eventType]} with ${filters.labels.join(' + ')}`;
