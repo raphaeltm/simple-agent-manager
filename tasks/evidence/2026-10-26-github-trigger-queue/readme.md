@@ -52,3 +52,15 @@ Final scope correction: clearing old submitted errors is limited to GitHub’s W
 Actual required-profile Opus task01M5WQWV8QGFQV7EM3AWQHG239 independently verified final sourcef76e77369659c1cd6862c5c8936ded5c0dec0cbb and returned PASS with zero open findings and all rubric scores4. Final report Library01M5WTFTH01MST9PQNW5N7HRSS (feature channel47). This supersedes the historical pending statuses above. No UI source changed after approval.
 
 Staging deployment40385983738 ran this exact source and passed12browser smoke tests. Additional authenticated desktop1280/mobile375 dashboard/projects/settings/Automation/detail/editor checks passed without console errors or horizontal overflow. The implementation agent inspected both staging-saved-queue PNGs: affinity enabled, pending cap7, TTL0.25hours; controls are readable and unclipped at both widths. Only these fixture-only fieldset captures are retained publicly; account/project overview captures remain temporary. Live queue/routing acceptance evidence is recorded separately.
+
+## CodeRabbit delta (in validation)
+
+Review 5659572194 requested six inline fixes and one response-parity fix outside the diff.
+The follow-up adds MCP queue fields and normalized create results, configurable queue
+configuration ceilings through existing Operations admin settings, submission-error
+failure-window accounting, strict fixture delivery UUID validation, and effective
+concurrency display for every trigger source. This file uses kebab-case naming.
+
+Platform ceilings apply to configuration writes. Lowering a ceiling preserves saved
+trigger values and accepted events; omitted queue fields on update preserve their values.
+No new delivery infrastructure, configuration endpoint or PR watch is introduced.

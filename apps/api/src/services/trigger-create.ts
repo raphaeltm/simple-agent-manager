@@ -1,8 +1,9 @@
-import { DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING, DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS } from '@simple-agent-manager/shared';
 /** Canonical trigger creation shared by authenticated REST and project-scoped MCP. */
 import {
   DEFAULT_CRON_MIN_INTERVAL_MINUTES,
   DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
+  DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
+  DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
   DEFAULT_TRIGGER_DEFAULT_MAX_CONCURRENT,
   DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
   DEFAULT_TRIGGER_NAME_MAX_LENGTH,
@@ -20,6 +21,7 @@ import type { CreateTriggerSchema } from '../schemas/triggers';
 import { generateAddressKey } from './agent-email/address';
 import { requireAgentEmailOn, resolveAllowedSenders } from './agent-email/trigger-config';
 import { cronToNextFire, validateCronExpression } from './cron-utils';
+import { validateGitHubTriggerQueueConfig } from './github-trigger-config';
 import type { McpTokenData } from './mcp-token';
 import {
   ResourceRequirementsValidationError,
@@ -182,6 +184,10 @@ export async function createTrigger(
 ) {
   const projectId = project.id;
   const { name, promptTemplate } = validateTriggerCreation(env, body);
+  const githubConfig =
+    body.sourceType === 'github'
+      ? await validateGitHubTriggerQueueConfig(env, body.githubConfig, { applyDefaults: true })
+      : undefined;
   if (body.sourceType === 'email') await requireAgentEmailOn(env);
   await validateReferences(db, projectId, body.agentProfileId, body.skillId);
   const allowedSenders =
@@ -283,17 +289,17 @@ export async function createTrigger(
         updatedAt: now,
       }),
     ]);
-  } else if (body.sourceType === 'github' && body.githubConfig) {
+  } else if (body.sourceType === 'github' && githubConfig) {
     await db.batch([
       db.insert(schema.triggers).values(values),
       db.insert(schema.githubTriggerConfigs).values({
         id: ulid(),
         triggerId: id,
-        eventType: body.githubConfig.eventType,
-        filtersJson: JSON.stringify(body.githubConfig.filters ?? {}),
-        subjectAffinity: body.githubConfig.subjectAffinity ?? false,
-        queueMaxPending: body.githubConfig.queueMaxPending ?? DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
-        queueTtlSeconds: body.githubConfig.queueTtlSeconds ?? DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
+        eventType: githubConfig.eventType,
+        filtersJson: JSON.stringify(githubConfig.filters),
+        subjectAffinity: githubConfig.subjectAffinity ?? false,
+        queueMaxPending: githubConfig.queueMaxPending ?? DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
+        queueTtlSeconds: githubConfig.queueTtlSeconds ?? DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
         createdAt: now,
         updatedAt: now,
       }),

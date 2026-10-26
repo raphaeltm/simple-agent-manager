@@ -164,10 +164,7 @@ export function triggerAdvancedRows(
         ? 'Conversation: stays open for replies'
         : 'Task: works, then finishes',
     ],
-    [
-      'Most runs at once',
-      String(trigger.sourceType === 'github' && trigger.skipIfRunning ? 1 : trigger.maxConcurrent),
-    ],
+    ['Most runs at once', String(trigger.skipIfRunning ? 1 : trigger.maxConcurrent)],
     ['Machine', describeMachine(trigger)],
     ['Runs so far', String(trigger.triggerCount)],
     ...(trigger.description ? ([['Description', trigger.description]] as Rows) : []),

@@ -9,6 +9,8 @@ import { parse } from 'yaml';
 
 import {
   auditPrompt,
+  auditSignedDeliveryIntents,
+  validateAuditFixture,
   findOwnedAuditTrigger,
   hasAuditReply,
   readAuditMessages,
@@ -105,6 +107,24 @@ function assertRedacted(output: string) {
   expect(output).not.toContain('Bearer ');
 }
 describe('bounded GitHub audit signer', () => {
+  it.each([
+    '------------------------------------',
+    '12345678123412341234123456789abc----',
+    'zzzzzzzz-1234-1234-1234-123456789abc',
+  ])('rejects malformed content identity %s in both fixture paths', (deliveryId) => {
+    expect(() => validateAuditFixture({ ...fixture, deliveryId })).toThrow(
+      'Invalid fixture delivery ID'
+    );
+    expect(() =>
+      auditSignedDeliveryIntents(
+        {
+          ...fixture,
+          deliveries: [{ deliveryId, eventType: 'pull_request_review', subjectNumber: 7 }],
+        },
+        'staging'
+      )
+    ).toThrow('Invalid fixture delivery ID');
+  });
   it('signs two fixed realistic deliveries and emits allowlisted App metadata without credentials', () => {
     const output = run();
     expect(output).toContain('githubAppMetadata');

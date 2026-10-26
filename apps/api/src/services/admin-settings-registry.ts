@@ -2,6 +2,8 @@
 /** Phase 1 only. Existing readers are wired here after the recovery wave releases integration. */
 import {
   DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS,
+  DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING_LIMIT,
+  DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS_LIMIT,
   DEFAULT_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
   MAX_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
 } from '@simple-agent-manager/shared';
@@ -83,6 +85,8 @@ export type AdminSettingName =
   | 'operations.samOperatorStreamFlushMs'
   | 'operations.samOperatorStreamHeartbeatMs'
   | 'operations.samOperatorStreamMaxSubscribers'
+  | 'operations.githubTriggerQueueMaxPendingLimit'
+  | 'operations.githubTriggerQueueTtlSecondsLimit'
   | 'operations.pullRequestRefreshCap'
   | 'operations.pullRequestRefreshTtlSeconds'
   | 'operations.pullRequestRefreshBudgetPerHour'
@@ -285,6 +289,20 @@ function validGitLabHost(value: unknown): boolean {
 }
 
 const definitions: AdminSettingDefinition[] = [
+  integerDefinition(
+    'operations.githubTriggerQueueMaxPendingLimit',
+    DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING_LIMIT,
+    'Operations',
+    'Maximum pending events a GitHub trigger may configure on create or explicit update. Saved trigger values and accepted events are preserved.',
+    { min: 1, max: Number.MAX_SAFE_INTEGER }
+  ),
+  integerDefinition(
+    'operations.githubTriggerQueueTtlSecondsLimit',
+    DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS_LIMIT,
+    'Operations',
+    'Maximum event queue lifetime in seconds a GitHub trigger may configure on create or explicit update. Saved trigger values and accepted event deadlines are preserved.',
+    { min: 1, max: Number.MAX_SAFE_INTEGER }
+  ),
   integerDefinition(
     'operations.resourceLinkTouchIntervalMs',
     300000,

@@ -257,3 +257,20 @@ for (const source of ['github', 'webhook', 'schedule'] as const) {
     await audit(page, `github-trigger-cleanup-${source}`);
   });
 }
+
+for (const source of ['morning', 'webhook'] as const) {
+  test(`effective concurrency for ${source}`, async ({ page }, info) => {
+    test.skip(!['iPhone SE (375x667)', 'Desktop (1280x800)'].includes(info.project.name));
+    await setupAutomationMocks(page);
+    const trigger = { ...TRIGGERS[source], skipIfRunning: true, maxConcurrent: 3 };
+    await page.route(`**/api/projects/${PROJECT_ID}/triggers/${trigger.id}`, (route) =>
+      route.fulfill({ json: trigger })
+    );
+    await page.goto(`/projects/${PROJECT_ID}/automation/trigger/${trigger.id}`);
+    await page.getByText('Advanced', { exact: true }).click();
+    await expect(page.getByText('Most runs at once', { exact: true }).locator('..')).toContainText(
+      '1'
+    );
+    await audit(page, `effective-concurrency-${source}`);
+  });
+}

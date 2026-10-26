@@ -32,6 +32,7 @@ import { cronToNextFire } from '../../services/cron-utils';
 import {
   assertGitHubTriggerConfigExists,
   githubTriggerConfigUpdate,
+  validateGitHubTriggerQueueConfig,
 } from '../../services/github-trigger-config';
 import { parseGitHubTriggerFiltersJson } from '../../services/github-trigger-filter';
 import { getProjectMultiplayerState } from '../../services/project-multiplayer';
@@ -380,10 +381,8 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
     .set(updates)
     .where(and(eq(schema.triggers.id, triggerId), eq(schema.triggers.projectId, projectId)));
   if (body.githubConfig) {
-    await db.batch([
-      triggerUpdate,
-      githubTriggerConfigUpdate(db, triggerId, body.githubConfig, now),
-    ]);
+    const config = await validateGitHubTriggerQueueConfig(c.env, body.githubConfig);
+    await db.batch([triggerUpdate, githubTriggerConfigUpdate(db, triggerId, config, now)]);
   } else if (emailAllowedSenders) {
     await db.batch([
       triggerUpdate,

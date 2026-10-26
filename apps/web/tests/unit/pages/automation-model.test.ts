@@ -627,6 +627,20 @@ describe('saved structured GitHub filter presentation', () => {
     skillName: () => null,
     agentEmail: { enabled: false, domain: null },
   };
+  it.each(['github', 'cron', 'webhook'] as const)(
+    'shows effective overlap limit for %s',
+    (sourceType) => {
+      const value = trigger({ sourceType, skipIfRunning: true, maxConcurrent: 3 });
+      expect(
+        new Map(triggerAdvancedRows(value, lookups, () => 'Owner')).get('Most runs at once')
+      ).toBe('1');
+      expect(
+        new Map(
+          triggerAdvancedRows({ ...value, skipIfRunning: false }, lookups, () => 'Owner')
+        ).get('Most runs at once')
+      ).toBe('3');
+    }
+  );
   it('shows only active comment/review/subject filters and keeps sender restrictions visible', () => {
     const filters = {
       actors: ['alice'],

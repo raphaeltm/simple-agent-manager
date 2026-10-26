@@ -9,9 +9,11 @@ import { type drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
 
 import * as schema from '../db/schema';
+import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 import { GitHubConfigValueSchema } from '../schemas/triggers';
+import { resolveAdminSettingDetailsMany } from './admin-settings';
 import { parseGitHubTriggerFiltersJson } from './github-trigger-filter';
 
 type Database = ReturnType<typeof drizzle<typeof schema>>;
@@ -20,6 +22,39 @@ export function parseGitHubTriggerConfig(input: unknown) {
   const parsed = v.safeParse(GitHubConfigValueSchema, input);
   if (!parsed.success) throw errors.badRequest(`Invalid githubConfig: ${parsed.issues[0].message}`);
   return { ...parsed.output, filters: parsed.output.filters ?? {} };
+}
+
+export async function getGitHubTriggerQueueLimits(env: Env) {
+  const [pending, ttl] = await resolveAdminSettingDetailsMany(env, [
+    'operations.githubTriggerQueueMaxPendingLimit',
+    'operations.githubTriggerQueueTtlSecondsLimit',
+  ]);
+  if (!pending || !ttl) throw errors.internal('GitHub queue limits are unavailable');
+  return { maxPending: Number(pending.value), ttlSeconds: Number(ttl.value) };
+}
+
+export async function validateGitHubTriggerQueueConfig(
+  env: Env,
+  input: unknown,
+  options: { applyDefaults?: boolean } = {}
+) {
+  const config = parseGitHubTriggerConfig(input);
+  const limits = await getGitHubTriggerQueueLimits(env);
+  if (options.applyDefaults) {
+    config.queueMaxPending ??= Math.min(
+      DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
+      limits.maxPending
+    );
+    config.queueTtlSeconds ??= Math.min(
+      DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
+      limits.ttlSeconds
+    );
+  }
+  if (config.queueMaxPending !== undefined && config.queueMaxPending > limits.maxPending)
+    throw errors.badRequest(`queueMaxPending must be between 1 and ${limits.maxPending}`);
+  if (config.queueTtlSeconds !== undefined && config.queueTtlSeconds > limits.ttlSeconds)
+    throw errors.badRequest(`queueTtlSeconds must be between 1 and ${limits.ttlSeconds}`);
+  return config;
 }
 
 export function githubTriggerConfigUpdate(

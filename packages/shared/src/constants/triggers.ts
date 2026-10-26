@@ -146,3 +146,6 @@ export const TRIGGER_DEFAULTS = {
 /** Per-trigger GitHub queue defaults, overridden by githubConfig. */
 export const DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING = 50;
 export const DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS = 86400;
+/** Default write-time queue ceilings; installation admins may override these at runtime. */
+export const DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING_LIMIT = 1000;
+export const DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS_LIMIT = 30 * 86400;

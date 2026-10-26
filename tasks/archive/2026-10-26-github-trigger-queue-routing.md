@@ -62,3 +62,14 @@ The existing operations sweep additionally selects at most GITHUB_TRIGGER_RECOVE
 Final pre-archive task-completion/doc-sync review: PASS for BOTH combined tasks at f76 after all live acceptance and cleanup; no missing implementation acceptance. Release checkboxes intentionally remain pending until the combined PR completes CI, CodeRabbit, merge/deploy and basic production smoke.
 
 CI test-only correction21:13UTC: Workerd MCP update response now asserts intended normalized queue defaults via exported constants (8focused worker tests PASS). Existing unrelated comment deep-link scroll assertion awaits its React effect with waitFor (15focused tests PASS before and after); no assertion removed. Both files lint and diff checks PASS; independent completion review PASS. No runtime or UI source changes from actual Opus-approved/staging-proven f76. Final-head CI remains required.
+
+### Binding CodeRabbit follow-up (release pending)
+
+- [x] MCP tools/list advertises queue settings and create returns persisted defaults.
+- [x] Practical queue ceilings use existing typed Operations settings and shared REST/MCP validation.
+- [x] Taskless submission errors remain visible to the auto-pause failure window.
+- [x] Fixture delivery IDs require canonical UUID grouping; evidence index uses kebab-case.
+- [x] Advanced concurrency display respects skip-if-running for every trigger source.
+- [ ] Updated desktop/mobile captures and actual required-profile Opus delta review.
+- [ ] Coordinated staging delta, final-head CI and incremental CodeRabbit dispositions/wait.
+- [ ] Authorized merge and basic production smoke.

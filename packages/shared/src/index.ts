@@ -66,6 +66,8 @@ export { MERGED_MESSAGE_ROLES } from './chat-message-merge';
 export {
   DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
   DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
+  DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING_LIMIT,
+  DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS_LIMIT,
 } from './constants/triggers';
 export * from './github-trigger-contract';
 export type { MentionMatch } from './mentions';

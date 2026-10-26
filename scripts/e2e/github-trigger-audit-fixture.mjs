@@ -1,5 +1,12 @@
 import assert from 'node:assert/strict';
 
+function isUuid(value) {
+  return (
+    typeof value === 'string' &&
+    /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(value)
+  );
+}
+
 export function auditPrompt(marker) {
   return `This is an authorized staging smoke test. Reply exactly ${marker}. Do not use tools, modify files, create tasks, or write to GitHub or external services. Input: {{github.title}}`;
 }
@@ -139,7 +146,7 @@ export function auditSignedDeliveryIntents(fixture, targetEnvironment) {
     'Batch delivery IDs must be unique'
   );
   return deliveries.map((item, index) => {
-    assert(/^[a-f0-9-]{36}$/.test(item.deliveryId), 'Invalid fixture delivery ID');
+    assert(isUuid(item.deliveryId), 'Invalid fixture delivery ID');
     assert(
       ['issues', 'issue_comment', 'pull_request_review', 'pull_request_review_comment'].includes(
         item.eventType
@@ -240,7 +247,7 @@ export function auditSignedDeliveryIntents(fixture, targetEnvironment) {
 
 export function validateAuditFixture(fixture) {
   assert(/^github-trigger-audit-[a-f0-9-]{36}$/.test(fixture.marker), 'Invalid fixture marker');
-  assert(/^[a-f0-9-]{36}$/.test(fixture.deliveryId), 'Invalid fixture delivery ID');
+  assert(isUuid(fixture.deliveryId), 'Invalid fixture delivery ID');
   assert(
     /^[0-9A-Z]{26}$/.test(fixture.projectId) && /^[0-9A-Z]{26}$/.test(fixture.triggerId),
     'Invalid fixture IDs'

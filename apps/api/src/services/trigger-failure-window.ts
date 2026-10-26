@@ -12,11 +12,14 @@ export async function consecutiveFailureCount(
   excludeExecutionId?: string
 ): Promise<{ count: number; resetSequence: number | null }> {
   const rows = await env.DATABASE.prepare(
-    `SELECT e.status, t.status AS taskStatus, tr.auto_pause_reset_sequence AS resetSequence
+    `SELECT CASE WHEN e.status IN ('queued','dropped') AND e.task_id IS NULL
+                   AND e.error_message IS NOT NULL THEN 'failed' ELSE e.status END AS status,
+            t.status AS taskStatus, tr.auto_pause_reset_sequence AS resetSequence
        FROM trigger_executions e
        LEFT JOIN tasks t ON t.id = ${TRIGGER_RUN_TASK_ID_SQL}
       JOIN triggers tr ON tr.id = e.trigger_id
-      WHERE e.trigger_id = ? AND e.status NOT IN ('skipped','waiting','routing','routed','dropped')
+      WHERE e.trigger_id = ? AND e.status NOT IN ('skipped','waiting','routing','routed')
+        AND NOT (e.status = 'dropped' AND (e.task_id IS NOT NULL OR e.error_message IS NULL))
         AND (? IS NULL OR e.id != ?)
         AND (tr.auto_pause_reset_sequence IS NULL OR e.sequence_number >= tr.auto_pause_reset_sequence)
       ORDER BY e.sequence_number DESC, e.created_at DESC LIMIT ?`

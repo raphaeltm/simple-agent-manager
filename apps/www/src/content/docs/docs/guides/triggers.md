@@ -192,7 +192,12 @@ GitHub pushes have no issue or pull request subject. It applies within one trigg
 across different triggers or to every agent that owns a PR.
 
 `githubConfig.queueMaxPending` and `githubConfig.queueTtlSeconds` change the pending-event cap
-and waiting lifetime. They must be positive integers. For example:
+and waiting lifetime. They must be positive integers within the platform limits configured
+under **Admin → Settings → Operations**. The default platform ceilings are 1,000 pending
+events and 2,592,000 seconds (30 days); REST and MCP enforce the effective settings.
+Per-trigger defaults are 50 events and 24 hours, reduced to the platform ceiling when needed.
+Existing triggers keep their saved values when a platform ceiling is lowered; explicit queue
+setting changes must meet the current ceiling. For example:
 
 ```json
 {

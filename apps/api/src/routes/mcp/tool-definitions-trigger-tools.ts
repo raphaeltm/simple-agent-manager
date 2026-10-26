@@ -2,6 +2,8 @@
  * MCP tool definitions — trigger management tools.
  */
 import {
+  DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING,
+  DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS,
   GITHUB_AUTHOR_ASSOCIATIONS,
   GITHUB_REVIEW_STATES,
   GITHUB_TEMPLATE_KEYS,
@@ -18,6 +20,21 @@ const githubConfigProperty = {
     'GitHub event configuration. Requires eventType; filters are replaced as a complete set on update. Use filters: {} to clear filters.',
   properties: {
     eventType: { type: 'string', enum: [...GITHUB_TRIGGER_EVENT_TYPES] },
+    subjectAffinity: {
+      type: 'boolean',
+      description:
+        'Continue the active run for this repository issue/PR. Default false; omitted on update preserves the stored value.',
+    },
+    queueMaxPending: {
+      type: 'integer',
+      minimum: 1,
+      description: `Maximum waiting events, bounded by deployment admin settings. Default ${DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING}; omitted on update preserves the stored value.`,
+    },
+    queueTtlSeconds: {
+      type: 'integer',
+      minimum: 1,
+      description: `Waiting lifetime in seconds, bounded by deployment admin settings. Default ${DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS}; omitted on update preserves the stored value.`,
+    },
     filters: {
       type: 'object',
       properties: {
