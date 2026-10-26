@@ -76,6 +76,9 @@ describe('model-catalog', () => {
           'ministral-3b-latest',
         ])
       );
+      expect(allModels.find((model) => model.id === 'zai-glm-5-2')?.name).toBe(
+        'Z.ai GLM 5.2 (Deprecated; retires 2026-10-31)'
+      );
       expect(allModels.some((model) => model.id === 'mistral-medium-3-5')).toBe(false);
       expect(allModels.some((model) => model.id === 'codestral-2508')).toBe(false);
       expect(allModels.some((model) => model.id === 'mistral-medium-3-5-2604')).toBe(false);
@@ -143,10 +146,10 @@ describe('model-catalog', () => {
       expect(allModels.some((m) => m.id === 'opencode/beam-free')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode/claude-haiku-5-5')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/claude-haiku-5-5')).toBe(true);
-      expect(allModels.some((m) => m.id === 'opencode-go/space-bunny')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode-go/kimi-k3.1-pro')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/space-bunny-free')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode/glm-5.3-flash-free')).toBe(true);
-      expect(allModels.some((m) => m.id === 'opencode/longcat-2.5-preview-free')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode/longcat-2.5-preview-free')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode/qwen3.8-max')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode/muse-spark-1.2-contributor-free')).toBe(
         false
@@ -157,12 +160,12 @@ describe('model-catalog', () => {
       expect(allModels.some((m) => m.id === 'opencode-go/glm-5.3')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/gpt-6-luna')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/grok-4.7')).toBe(true);
-      expect(allModels.some((m) => m.id === 'opencode-go/longcat-2.5-preview-free')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode-go/longcat-2.5-preview-free')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode-go/qwen3.7-max')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode-go/kimi-k2.6')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode-go/glm-5.1')).toBe(false);
       expect(allModels.some((m) => m.id === 'opencode-go/qwen3.6-plus')).toBe(false);
-      expect(allModels.some((m) => m.id === 'opencode-go/gemini-4-argon-contributor')).toBe(true);
+      expect(allModels.some((m) => m.id === 'opencode-go/gemini-4-argon')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/muse-spark-1.3-contributor')).toBe(true);
       expect(allModels.some((m) => m.id === 'opencode-go/ox-alpha-free')).toBe(false);
     });

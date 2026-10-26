@@ -13,6 +13,10 @@ const EXPECTED_OPENCODE_MODELS = [
   'opencode/claude-sonnet-5-5',
   'opencode/claude-haiku-5-5',
   'opencode/beam-free',
+  'opencode/muse-wonder-1.0',
+  'opencode/flint-40b-free',
+  'opencode-go/iceman-contributor-free',
+  'opencode-go/minimax-m3.1-flash',
   'opencode/deepseek-v4.1-flash-free',
   'opencode/mistral-large-4',
   'opencode/gemini-3.8-flash',
@@ -29,7 +33,7 @@ const EXPECTED_OPENCODE_MODELS = [
   'opencode/muse-spark-1.3',
   'opencode/gemini-4-argon',
   'opencode/glm-5.3-flash-free',
-  'opencode-go/gemini-4-argon-contributor',
+  'opencode-go/gemini-4-argon',
   'opencode-go/glm-5.2',
   'opencode-go/glm-5.3',
   'opencode-go/gpt-6-luna',
@@ -40,7 +44,7 @@ const EXPECTED_OPENCODE_MODELS = [
   'opencode-go/muse-spark-1.3-contributor',
   'opencode-go/qwen3.8-max',
   'opencode-go/claude-haiku-5-5',
-  'opencode-go/space-bunny',
+  'opencode-go/kimi-k3.1-pro',
   'opencode-go/step-5-preview',
 ] as const;
 
@@ -64,6 +68,11 @@ describe('OpenCode model catalog entries', () => {
   it('keeps changed Models.dev display names in sync', () => {
     const namesById = new Map(getModelsForAgent('opencode').map((model) => [model.id, model.name]));
 
+    expect(namesById.get('opencode/muse-wonder-1.0')).toBe('Muse Wonder');
+    expect(namesById.get('opencode/flint-40b-free')).toBe('Flint 40B Free');
+    expect(namesById.get('opencode-go/iceman-contributor-free')).toBe('Iceman Contributor Free');
+    expect(namesById.get('opencode-go/minimax-m3.1-flash')).toBe('MiniMax M3.1 Flash');
+    expect(namesById.get('opencode-go/gemini-4-argon')).toBe('Gemini 4 Argon');
     expect(namesById.get('opencode/deepseek-v4-flash')).toBe('DeepSeek V4 Flash');
     expect(namesById.get('opencode/claude-sonnet-5-5')).toBe('Claude Sonnet 5.5');
     expect(namesById.get('opencode/claude-haiku-5-5')).toBe('Claude Haiku 5.5');
@@ -79,7 +88,7 @@ describe('OpenCode model catalog entries', () => {
     expect(namesById.get('opencode-go/gpt-5.6-luna')).toBe('GPT-5.6 Luna');
     expect(namesById.get('opencode-go/hy3')).toBe('Hy3');
     expect(namesById.get('opencode-go/kimi-k3')).toBe('Kimi K3');
-    expect(namesById.get('opencode-go/space-bunny')).toBe('Space Bunny');
+    expect(namesById.get('opencode-go/kimi-k3.1-pro')).toBe('Kimi K3.1 Pro');
   });
 
   it('keeps OpenCode groups discoverable by provider label', () => {
@@ -111,6 +120,13 @@ describe('OpenCode model catalog entries', () => {
 
   it('excludes inactive Models.dev records from the static fallback', () => {
     for (const inactiveModelId of [
+      'opencode/longcat-2.5-preview-free',
+      'opencode/deepseek-v4-flash-vision-exp',
+      'opencode/space-bunny-free',
+      'opencode/claude-sonnet-4',
+      'opencode-go/longcat-2.5-preview-free',
+      'opencode-go/space-bunny',
+      'opencode-go/gemini-4-argon-contributor',
       'opencode/claude-opus-4-1',
       'opencode/fledge-alpha-free',
       'opencode/deepseek-v4-flash-free',
