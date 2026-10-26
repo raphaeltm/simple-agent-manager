@@ -140,6 +140,17 @@ export function fakeCloudflareEmail(options: FakeCloudflareEmailOptions = {}) {
         total_pages: Math.max(1, Math.ceil(matches.length / perPage)),
       });
     }
+    if (method === 'POST' && path === '/dns_records') {
+      const record = { id: id('dns'), ...(body as FakeRecordInput) };
+      state.dns.push(record);
+      return ok(record);
+    }
+    if (method === 'PATCH' && path.startsWith('/dns_records/')) {
+      const record = state.dns.find((record) => record.id === path.split('/').at(-1));
+      if (!record) return cloudflareError(404, 1000, 'Record not found');
+      Object.assign(record, body);
+      return ok(record);
+    }
     if (method === 'GET' && path === '/email/routing') {
       return ok({ name: zoneName, ...state.routing });
     }
@@ -151,7 +162,20 @@ export function fakeCloudflareEmail(options: FakeCloudflareEmailOptions = {}) {
       const name = (body as { name?: string } | null)?.name;
       if (!name || name === zoneName) return cloudflareError(400, 2007, 'Invalid subdomain');
       if (!state.usedRoutingBefore) {
-        addRecords((options.firstUseAdds ?? cloudflareRoutingFirstUse)(zoneName));
+        const firstRecords = (options.firstUseAdds ?? cloudflareRoutingFirstUse)(zoneName);
+        addRecords(
+          firstRecords.filter(
+            (record) =>
+              options.firstUseAdds ||
+              !record.content.includes('v=spf1') ||
+              !state.dns.some(
+                (existing) =>
+                  existing.type === 'TXT' &&
+                  existing.name === zoneName &&
+                  existing.content.includes('include:_spf.mx.cloudflare.net')
+              )
+          )
+        );
         state.usedRoutingBefore = true;
       }
       state.routing.enabled = true;
@@ -183,6 +207,11 @@ export function fakeCloudflareEmail(options: FakeCloudflareEmailOptions = {}) {
 
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input));
+    if (url.hostname === 'cloudflare-dns.com')
+      return new Response(
+        JSON.stringify({ Status: 0, Answer: [{ type: 16, data: 'v=spf1 ip4:192.0.2.0/24 ~all' }] }),
+        { headers: { 'Content-Type': 'application/json' } }
+      );
     if (!url.href.startsWith(ZONE_PREFIX)) throw new Error(`Unexpected fetch ${url.href}`);
     const call: FakeCall = {
       method: init?.method ?? 'GET',

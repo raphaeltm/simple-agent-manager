@@ -79,12 +79,15 @@ export function allowedAdditions(
  * Routing before gets none.
  */
 export function differencesFromBaseline(
-  attempt: Pick<AgentEmailSetupAttempt, 'baseline' | 'allowed'>,
+  attempt: Pick<AgentEmailSetupAttempt, 'baseline' | 'allowed'> & {
+    removed?: AgentEmailMailRecord[];
+  },
   mainDomain: string,
   current: MailDnsRecord[]
 ): AgentEmailMainDomainRecord[] {
+  const retained = mailRecordsMissingFrom(attempt.baseline, attempt.removed ?? []);
   const added = mailRecordsMissingFrom(current, [...attempt.baseline, ...attempt.allowed]);
-  const removed = mailRecordsMissingFrom(attempt.baseline, current);
+  const removed = mailRecordsMissingFrom(retained, current);
   const listed = (record: MailDnsRecord, change: 'add' | 'remove') => ({
     type: record.type,
     name: mainDomain,

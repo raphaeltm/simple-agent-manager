@@ -20,7 +20,7 @@ on:
         type: string
         default: ''
       agent_email:
-        # Preview, staging only: deploy-staging.yml exposes it; deploy.yml never sets it.
+        # Retained for compatibility with older callers; preparation is automatic.
         required: false
         type: boolean
         default: false
@@ -397,7 +397,7 @@ jobs:
       # the sync adds the AGENT_EMAIL binding and the Worker-name var only from that marker. A
       # superadmin then turns agent email on in Admin > Integrations > Agent email.
       - name: Configure Agent Email (preview)
-        if: ${{ inputs.dry_run != true && inputs.agent_email == true }}
+        if: ${{ inputs.dry_run != true }}
         run: pnpm tsx scripts/deploy/configure-agent-email.ts
         env:
           AGENT_EMAIL_ENABLED: 'true'

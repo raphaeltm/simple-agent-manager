@@ -10,9 +10,8 @@
  * - The first time a zone uses Email Routing, Cloudflare adds its SPF record and a DKIM key to
  *   the root domain, whichever subdomain is named (seen on staging, deploy run 39866499256;
  *   Cloudflare's domain configuration docs: "Email Routing DNS records are configured on the
- *   root domain"). A zone new to Email Routing whose root domain has its own MX or SPF records is
- *   refused: what Cloudflare does to an existing SPF record is untested, and a second one breaks
- *   SPF.
+ *   root domain"). Existing mail keeps its MX records. Supported SPF policies are merged in
+ *   place after consent and a recursive lookup-budget check; conflicting policies are refused.
  * - Subaddressing is a zone setting, so turning it on changes how every address in the zone is
  *   matched.
  *
@@ -33,9 +32,10 @@ import {
   type AgentEmailMainDomainRecord,
   type AgentEmailSetupPlan,
   type AgentEmailZoneChange,
-  describeMailRecord,
+  comparableDnsContent,
   isCloudflareRoutingMx,
   isSpfRecord,
+  mailRecordSignature,
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
@@ -49,8 +49,10 @@ import {
   getZoneName,
   listDnsRecords,
   listSendingSubdomains,
+  writeRoutingSpf,
 } from './cloudflare-email-api';
 import {
+  CLOUDFLARE_ROUTING_SPF,
   consentTokenFor,
   describeChanges,
   differencesFromBaseline,
@@ -60,6 +62,8 @@ import {
 import { AgentEmailMainDomainChangedError, AgentEmailSetupRefusedError } from './setup-errors';
 import { SetupLease } from './setup-lease';
 import { ensureRoutingRule } from './setup-routing-rule';
+import { planRoutingSpf } from './setup-spf';
+import { readPublicSpf, verifySpfLookupBudget } from './setup-spf-lookups';
 import {
   completeAgentEmailSetup,
   hasAgentEmailBinding,
@@ -70,6 +74,7 @@ import {
 
 /** What the plan read, so the run acts on the same facts the admin was shown. */
 interface SetupFacts {
+  replanAttempt?: boolean;
   mainDomain: string;
   subdomainRouting: boolean;
   /** The main domain's MX and SPF records, read before this run changes anything. */
@@ -130,7 +135,7 @@ function unavailable(reason: string, fields: PlanFields = {}): Inspection {
 async function inspect(env: Env): Promise<Inspection> {
   if (!hasAgentEmailBinding(env)) {
     return unavailable(
-      'This deployment has not prepared agent email. A staging deploy started with the agent_email input prepares it, once the deploy token has the Email Routing and Email Sending permissions.'
+      'This deployment has not prepared agent email. Deploy again with a token that has Email Routing and Email Sending permissions; deployment prepares it automatically.'
     );
   }
   const domain = agentEmailDomain(env.BASE_DOMAIN);
@@ -152,7 +157,7 @@ async function inspect(env: Env): Promise<Inspection> {
   const sending = sendingSubdomains.find((subdomain) => normalizeName(subdomain.name) === domain);
   if (!sending) {
     return unavailable(
-      `Email Sending is not set up for ${domain}. Deploy again with the agent_email input.`,
+      `Email Sending is not set up for ${domain}. Deploy again with Email Sending permission.`,
       { domain, mainDomain }
     );
   }
@@ -165,19 +170,42 @@ async function inspect(env: Env): Promise<Inspection> {
   };
   const base = { domain, mainDomain };
   const zoneUsesRouting = facts.subdomainRouting || settings.enabled === true;
-
-  if (!attempt && !zoneUsesRouting && mainDomainMail.length > 0) {
+  if (mainDomainMail.filter(isSpfRecord).length > 1) {
     return {
       plan: plan('refused', {
         ...base,
-        reason: `${mainDomain} has its own mail records (${mainDomainMail
-          .map(describeMailRecord)
-          .join(
-            ', '
-          )}). Turning Email Routing on would add Cloudflare's SPF record beside them, and SAM cannot do that safely yet.`,
+        reason:
+          'The main domain has multiple SPF records. Resolve the conflict before enabling agent email.',
       }),
       facts,
     };
+  }
+
+  const rootChanges = zoneUsesRouting ? [] : firstRoutingRecords(mainDomain);
+  const interruptedDifferences = attempt
+    ? differencesFromBaseline(attempt.attempt, mainDomain, mainDomainMail)
+    : [];
+  facts.replanAttempt = Boolean(attempt && !zoneUsesRouting && interruptedDifferences.length);
+  if ((!attempt || facts.replanAttempt) && !zoneUsesRouting) {
+    const spf = planRoutingSpf(mainDomainMail);
+    if ('reason' in spf) return { plan: plan('refused', { ...base, reason: spf.reason }), facts };
+    if (spf.after !== CLOUDFLARE_ROUTING_SPF && spf.after !== spf.before) {
+      try {
+        await verifySpfLookupBudget(spf.after, (domain) => readPublicSpf(env, domain));
+      } catch (error) {
+        return {
+          plan: plan('refused', {
+            ...base,
+            reason: error instanceof Error ? error.message : 'Could not verify SPF safety.',
+          }),
+          facts,
+        };
+      }
+    }
+    rootChanges[0] = { type: 'TXT', name: mainDomain, content: spf.after, change: 'add' };
+    if (spf.before === spf.after) rootChanges.shift();
+    else if (spf.before)
+      rootChanges.unshift({ type: 'TXT', name: mainDomain, content: spf.before, change: 'remove' });
   }
   if (sending.enabled !== true) {
     return {
@@ -199,6 +227,8 @@ async function inspect(env: Env): Promise<Inspection> {
           attempt?.attempt.zoneChanges.includes('subaddressing') ?? false
         ),
       ];
+  if (facts.replanAttempt)
+    return { plan: await consentPlan(base, rootChanges, zoneChanges), facts };
   if (attempt) {
     const differences = differencesFromBaseline(attempt.attempt, mainDomain, mainDomainMail);
     if (differences.length > 0) {
@@ -218,11 +248,7 @@ async function inspect(env: Env): Promise<Inspection> {
     return { plan: await consentPlan(base, [], zoneChanges), facts };
   }
   return {
-    plan: await consentPlan(
-      base,
-      zoneUsesRouting ? [] : firstRoutingRecords(mainDomain),
-      zoneChanges
-    ),
+    plan: await consentPlan(base, rootChanges, zoneChanges),
     facts,
   };
 }
@@ -239,7 +265,7 @@ async function consentPlan(
   const reasons = [
     ...(mainDomainChanges.length > 0
       ? [
-          `${base.mainDomain} has never used Email Routing, so turning it on lets Cloudflare add an SPF record and a DKIM key to ${base.mainDomain}.`,
+          `${base.mainDomain} has never used Email Routing, so turning it on prepares the SPF policy and a DKIM key shown below. Existing mail delivery (MX records) stays unchanged.`,
         ]
       : []),
     ...(newZoneChanges.length > 0 ? ['Agent email also needs subaddressing on for the zone.'] : []),
@@ -283,6 +309,7 @@ export async function runAgentEmailSetup(
     zoneChanges: current.zoneChanges,
     mainDomainMail: facts.mainDomainMail,
     existing: facts.attempt,
+    refreshBaseline: facts.replanAttempt,
     userId: options.userId,
   });
   let completed = false;
@@ -314,6 +341,34 @@ async function setUpWhileHoldingLease(
   const { mainDomain } = facts;
   const { attempt } = lease;
 
+  // Re-read after acquiring the lease: neither stale consent nor a concurrent DNS edit
+  // may authorize overwriting an operator's records.
+  const freshMail = await listMailRecords(env, mainDomain);
+  if (mailRecordSignature(freshMail) !== mailRecordSignature(facts.mainDomainMail)) {
+    throw new AgentEmailSetupRefusedError(
+      'Mail records changed while setup started. Review the plan again.'
+    );
+  }
+  const desiredSpf = attempt.allowed.find(
+    (record) => isSpfRecord(record) && comparableDnsContent(record) !== CLOUDFLARE_ROUTING_SPF
+  );
+  if (desiredSpf) {
+    const existingSpf = freshMail.filter(isSpfRecord);
+    if (existingSpf.length > 1)
+      throw new AgentEmailSetupRefusedError(
+        'Multiple SPF records must be resolved before setup can continue.'
+      );
+    const existing = existingSpf[0];
+    if (!existing || comparableDnsContent(existing) !== comparableDnsContent(desiredSpf)) {
+      if (existing && !existing.id)
+        throw new AgentEmailSetupRefusedError(
+          'Cloudflare did not identify the SPF record to update.'
+        );
+      await lease.renew();
+      await writeRoutingSpf(env, mainDomain, desiredSpf.content, existing?.id);
+    }
+  }
+
   if (!facts.subdomainRouting) {
     await lease.renew();
     await enableSubdomainRouting(env, domain);
@@ -323,6 +378,21 @@ async function setUpWhileHoldingLease(
     mainDomain,
     await listMailRecords(env, mainDomain)
   );
+  const finalSpf = (await listMailRecords(env, mainDomain)).filter(isSpfRecord);
+  if (finalSpf.length > 1)
+    throw new AgentEmailMainDomainChangedError(
+      'Multiple SPF records appeared during setup. Agent email remains off.'
+    );
+  if (
+    desiredSpf &&
+    (finalSpf.length !== 1 ||
+      comparableDnsContent(finalSpf[0] ?? { type: 'TXT', content: '' }) !==
+        comparableDnsContent(desiredSpf))
+  ) {
+    throw new AgentEmailMainDomainChangedError(
+      'Cloudflare did not preserve the approved SPF policy. Agent email remains off; review the current mail records.'
+    );
+  }
   if (differences.length > 0) {
     log.error('agent_email.setup_main_domain_changed', {
       mainDomain,

@@ -489,7 +489,13 @@ const CONSENT_PLAN: SetupPlanMock = {
     {
       type: 'TXT',
       name: LONG_MAIN_DOMAIN,
-      content: 'v=spf1 include:_spf.mx.cloudflare.net ~all',
+      content: 'v=spf1 include:_spf.google.com ~all',
+      change: 'remove',
+    },
+    {
+      type: 'TXT',
+      name: LONG_MAIN_DOMAIN,
+      content: 'v=spf1 include:_spf.google.com include:_spf.mx.cloudflare.net ~all',
       change: 'add',
     },
     {
@@ -507,7 +513,7 @@ const CONSENT_PLAN: SetupPlanMock = {
     },
   ],
   consentToken: CONSENT_TOKEN,
-  reason: `${LONG_MAIN_DOMAIN} has never used Email Routing, so turning it on lets Cloudflare add an SPF record and a DKIM key to ${LONG_MAIN_DOMAIN}. Agent email also needs subaddressing on for the zone.`,
+  reason: `${LONG_MAIN_DOMAIN} has never used Email Routing, so turning it on prepares the SPF policy and a DKIM key shown below. Existing mail delivery (MX records) stays unchanged. Agent email also needs subaddressing on for the zone.`,
 };
 
 /** The admin panel as a section image: on mobile it is taller than one screen. */
@@ -568,14 +574,16 @@ test.describe('Agent email — admin panel', () => {
     });
     await page.goto('/admin/integrations');
     const changes = page.getByTestId('agent-email-setup-changes');
-    await expect(changes).toContainText('v=spf1 include:_spf.mx.cloudflare.net ~all');
+    await expect(changes).toContainText(
+      'v=spf1 include:_spf.google.com include:_spf.mx.cloudflare.net ~all'
+    );
     await expect(changes).toContainText('a DKIM key Cloudflare generates');
     await expect(changes).toContainText('Turns on subaddressing for the whole zone');
     const turnOn = page.getByRole('button', { name: 'Turn on agent email' });
     await expect(turnOn).toBeDisabled();
     await auditSetup(page, 'agent-email-admin-needs-consent');
 
-    await page.getByLabel('Allow these changes').check();
+    await page.getByLabel('I have reviewed and approve these DNS and routing changes').check();
     await expect(turnOn).toBeEnabled();
     await turnOn.click();
 
@@ -664,11 +672,12 @@ test.describe('Agent email — admin panel', () => {
       setupPlan: {
         ...READY_PLAN,
         state: 'refused',
-        reason: `${LONG_MAIN_DOMAIN} has its own mail records (MX aspmx.l.google.com, MX alt1.aspmx.l.google.com, TXT v=spf1 include:_spf.google.com include:mailgun.org include:servers.mcsv.net ~all). Turning Email Routing on would add Cloudflare's SPF record beside them, and SAM cannot do that safely yet.`,
+        reason:
+          'The main domain has multiple SPF records. Resolve the conflict before enabling agent email.',
       },
     });
     await page.goto('/admin/integrations');
-    await expect(page.getByText('has its own mail records', { exact: false })).toBeVisible();
+    await expect(page.getByText('has multiple SPF records', { exact: false })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Turn on agent email' })).toHaveCount(0);
     await auditSetup(page, 'agent-email-admin-refused');
   });

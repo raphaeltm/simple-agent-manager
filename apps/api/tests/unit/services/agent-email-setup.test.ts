@@ -190,29 +190,106 @@ describe('agent email admin setup', () => {
       expect((await planAgentEmailSetup(env)).consentToken).not.toBe(first);
     });
 
-    it('refuses a zone new to Email Routing whose main domain has its own MX or SPF records', async () => {
-      for (const [label, records, named] of [
+    it('previews Google Workspace authorization and preserves its MX on first setup', async () => {
+      const mx = { type: 'MX', name: MAIN, content: 'smtp.google.com', priority: 1 };
+      const fake = cloudflare({ ...NEW_ZONE, dns: [mx] });
+      const shown = await planAgentEmailSetup(env);
+      expect(shown.state).toBe('needs_consent');
+      expect(shown.mainDomainChanges[0]?.content).toBe(
+        'v=spf1 include:_spf.google.com include:_spf.mx.cloudflare.net ~all'
+      );
+      await expect(run(false)).rejects.toBeInstanceOf(AgentEmailSetupRefusedError);
+      expect(fake.writes()).toEqual([]);
+      expect((await run(true)).state).toBe('on');
+      expect(fake.records('MX', MAIN)).toEqual([expect.objectContaining(mx)]);
+      expect(fake.records('TXT', MAIN)).toHaveLength(1);
+      expect((await run(true)).state).toBe('on');
+    });
+
+    it('updates an existing SPF in place without losing its senders or adding a second record', async () => {
+      const before = 'v=spf1 include:_spf.google.com -all';
+      const fake = cloudflare({ ...NEW_ZONE, dns: [{ type: 'TXT', name: MAIN, content: before }] });
+      const shown = await planAgentEmailSetup(env);
+      expect(shown.mainDomainChanges).toContainEqual({
+        type: 'TXT',
+        name: MAIN,
+        content: before,
+        change: 'remove',
+      });
+      expect((await run(true)).state).toBe('on');
+      expect(fake.records('TXT', MAIN)).toEqual([
+        expect.objectContaining({
+          content: 'v=spf1 include:_spf.google.com include:_spf.mx.cloudflare.net -all',
+        }),
+      ]);
+      expect(
+        fake
+          .writes()
+          .some((call) => call.method === 'PATCH' && call.path.startsWith('/dns_records/'))
+      ).toBe(true);
+    });
+
+    it('refuses unknown existing mail without SPF and conflicting SPF policies without writes', async () => {
+      for (const dns of [
+        [{ type: 'MX', name: MAIN, content: 'mail.other.example', priority: 1 }],
+        [{ type: 'TXT', name: MAIN, content: 'v=spf1 redirect=other.example' }],
         [
-          'Google Workspace MX',
-          [{ type: 'MX', name: MAIN, content: 'smtp.google.com', priority: 1 }],
-          'MX smtp.google.com',
+          { type: 'TXT', name: MAIN, content: 'v=spf1 ~all' },
+          { type: 'TXT', name: MAIN, content: 'v=spf1 -all' },
         ],
-        [
-          'an SPF record alone',
-          [{ type: 'TXT', name: MAIN, content: '"v=spf1 include:_spf.google.com ~all"' }],
-          'TXT v=spf1 include:_spf.google.com ~all',
-        ],
-      ] as const) {
-        const fake = cloudflare({ ...NEW_ZONE, dns: [...records] });
-        const plan = await planAgentEmailSetup(env);
-        expect(plan.state, label).toBe('refused');
-        expect(plan.reason, label).toContain(named);
-        expect(plan.consentToken, label).toBeNull();
-        await expect(run(true), label).rejects.toBeInstanceOf(AgentEmailSetupRefusedError);
-        expect(fake.writes(), label).toEqual([]);
+      ]) {
+        const fake = cloudflare({ ...NEW_ZONE, dns });
+        expect((await planAgentEmailSetup(env)).state).toBe('refused');
+        await expect(run(true)).rejects.toBeInstanceOf(AgentEmailSetupRefusedError);
+        expect(fake.writes()).toEqual([]);
       }
+    });
+
+    it('replans unfinished SPF preparation after a failed write and an external policy change', async () => {
+      let fail = true;
+      const fake = cloudflare({
+        ...NEW_ZONE,
+        dns: [{ type: 'MX', name: MAIN, content: 'smtp.google.com', priority: 1 }],
+        respond: (call) => {
+          if (fail && call.path === '/dns_records' && call.method === 'POST') {
+            fail = false;
+            return cloudflareError(503, 1000, 'temporary failure');
+          }
+          return undefined;
+        },
+      });
+      await expect(run(true)).rejects.toBeInstanceOf(CloudflareEmailApiError);
+      fake.state.dns.push({
+        id: 'operator-spf',
+        type: 'TXT',
+        name: MAIN,
+        content: 'v=spf1 include:_spf.google.com ip4:192.0.2.7 -all',
+      });
+      const next = await planAgentEmailSetup(env);
+      expect(next.state).toBe('needs_consent');
+      expect(next.mainDomainChanges).toContainEqual(
+        expect.objectContaining({
+          change: 'add',
+          content:
+            'v=spf1 include:_spf.google.com ip4:192.0.2.7 include:_spf.mx.cloudflare.net -all',
+        })
+      );
+      expect((await run(true)).state).toBe('on');
+      expect(fake.records('TXT', MAIN)).toHaveLength(1);
+      expect(fake.records('TXT', MAIN)[0]?.content).toContain('ip4:192.0.2.7');
+    });
+
+    it('cannot accept duplicate SPF as changed records after a provider-side conflict', async () => {
+      const fake = cloudflare({
+        ...NEW_ZONE,
+        dns: [{ type: 'MX', name: MAIN, content: 'smtp.google.com', priority: 1 }],
+        firstUseAdds: cloudflareRoutingFirstUse,
+      });
+      await expect(run(true)).rejects.toBeInstanceOf(AgentEmailMainDomainChangedError);
+      expect(fake.records('TXT', MAIN)).toHaveLength(2);
+      expect((await planAgentEmailSetup(env)).state).toBe('refused');
+      await expect(run(true)).rejects.toBeInstanceOf(AgentEmailSetupRefusedError);
       expect(stored(AGENT_EMAIL_SETUP_KEY)).toBeNull();
-      expect(stored(ATTEMPT_KEY)).toBeNull();
     });
 
     it('does not count a TXT record that is not SPF as mail', async () => {

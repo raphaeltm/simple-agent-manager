@@ -199,9 +199,9 @@ describe('admin agent email setup route', () => {
     const { consentToken } = (await (await getPlan(app)).json()) as { consentToken: string };
     const response = await postSetup(app, { consentToken });
     expect(response.status).toBe(409);
-    expect((await response.json()).message).toContain('added TXT v=spf1 include:example.net -all');
-    // Agent email stays off, and the plan now lists what changed.
-    expect(await (await getPlan(app)).json()).toMatchObject({ state: 'changed' });
+    expect((await response.json()).message).toContain('Multiple SPF records');
+    // Duplicate SPF cannot be accepted as a changed baseline.
+    expect(await (await getPlan(app)).json()).toMatchObject({ state: 'refused' });
   });
 
   it('answers 502 with Cloudflare’s code when a Cloudflare call fails', async () => {

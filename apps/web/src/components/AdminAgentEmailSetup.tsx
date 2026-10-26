@@ -135,7 +135,12 @@ export function AdminAgentEmailSetup({ onTurnedOn }: Props) {
           {consentToken !== null && (
             <div className="space-y-2 rounded-md border border-border-default p-3 min-w-0">
               <p className="text-sm font-medium text-fg-primary">
-                {plan.state === 'changed' ? 'What changed:' : 'Turning it on also changes:'}
+                {plan.state === 'changed' ? 'What changed:' : 'Review DNS and routing changes:'}
+              </p>
+              <p className="text-sm text-fg-secondary break-words">
+                {plan.state === 'changed'
+                  ? 'These records have already changed. Review their effect on your existing mail before accepting the current state.'
+                  : 'Existing mail delivery stays with your current provider. An SPF replacement is applied as one update, preserving the senders shown in the new policy.'}
               </p>
               <ul className="space-y-1" data-testid="agent-email-setup-changes">
                 {plan.mainDomainChanges.map((record) => (
@@ -168,7 +173,7 @@ export function AdminAgentEmailSetup({ onTurnedOn }: Props) {
                 <span id={consentLabelId} className="text-sm text-fg-secondary break-words">
                   {plan.state === 'changed'
                     ? `Turn agent email on with the records of ${plan.mainDomain} as they are now`
-                    : 'Allow these changes'}
+                    : 'I have reviewed and approve these DNS and routing changes'}
                 </span>
               </label>
             </div>

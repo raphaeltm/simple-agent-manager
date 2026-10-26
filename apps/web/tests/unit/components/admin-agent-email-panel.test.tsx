@@ -152,9 +152,13 @@ describe('AdminAgentEmailPanel', () => {
     const turnOn = screen.getByRole('button', { name: 'Turn on agent email' });
     expect(turnOn).toBeDisabled();
     // Assistive tech hears why the button is disabled.
-    expect(turnOn).toHaveAccessibleDescription('Allow these changes');
+    expect(turnOn).toHaveAccessibleDescription(
+      'I have reviewed and approve these DNS and routing changes'
+    );
 
-    await user.click(screen.getByLabelText('Allow these changes'));
+    await user.click(
+      screen.getByLabelText('I have reviewed and approve these DNS and routing changes')
+    );
     expect(turnOn).toBeEnabled();
     await user.click(turnOn);
     expect(mocks.runAgentEmailSetup).toHaveBeenCalledWith('token-1');

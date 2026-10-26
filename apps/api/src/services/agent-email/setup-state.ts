@@ -57,6 +57,7 @@ const setupAttemptSchema = v.object({
   baseline: v.array(mailRecordSchema),
   /** Records the admin allowed Cloudflare to add. */
   allowed: v.array(mailRecordSchema),
+  removed: v.optional(v.array(mailRecordSchema)),
   /** Zone settings the admin allowed the setup to change. */
   zoneChanges: v.array(v.picklist(['subaddressing'])),
   /** The run that holds the lease, and when it lapses. Absent in rows older than the lease. */

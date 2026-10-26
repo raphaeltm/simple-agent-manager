@@ -27,6 +27,7 @@ export class CloudflareEmailApiError extends Error {
 
 const dnsRecordsSchema = v.array(
   v.object({
+    id: v.optional(v.string()),
     type: v.string(),
     name: v.string(),
     content: v.string(),
@@ -194,4 +195,25 @@ export async function updateRoutingRule(
 
 export function listSendingSubdomains(env: Env) {
   return call(env, 'GET', '/email/sending/subdomains', sendingSubdomainsSchema);
+}
+
+/** Replace exactly the SPF record inspected by the consented setup; never touch MX. */
+export async function writeRoutingSpf(
+  env: Env,
+  name: string,
+  content: string,
+  id?: string
+): Promise<void> {
+  await call(
+    env,
+    id ? 'PATCH' : 'POST',
+    id ? `/dns_records/${encodeURIComponent(id)}` : '/dns_records',
+    v.unknown(),
+    {
+      type: 'TXT',
+      name,
+      content,
+      ...(id ? {} : { ttl: 1, proxied: false }),
+    }
+  );
 }

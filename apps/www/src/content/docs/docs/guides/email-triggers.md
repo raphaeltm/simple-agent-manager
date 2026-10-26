@@ -128,10 +128,9 @@ more permissions on the deploy token. See the agent email note in
 [Self-Hosting](/docs/guides/self-hosting/). Setup has two steps, and neither needs the Cloudflare
 dashboard:
 
-1. **A staging deploy with the agent_email input prepares it.** It sets up Email Sending for
+1. **Every production or staging deploy prepares it automatically.** It sets up Email Sending for
    `agents.<your-domain>`, writes DNS records only under that subdomain, and fails if your main
-   domain's mail records change. It does not touch Email Routing. The production deploy never
-   prepares agent email.
+   domain's mail records change. It does not touch Email Routing. No new GitHub variable is needed.
 2. **A superadmin turns it on in Admin → Integrations → Agent email.** This turns Email Routing on
    for `agents.<your-domain>`, turns on subaddressing, and routes `agent@agents.<your-domain>` to
    SAM. The panel says first what it will do, and asks you to allow anything that reaches past
@@ -141,20 +140,21 @@ dashboard:
      domain. The panel lists both.
    - Subaddressing is a setting for the whole zone. When it is off, turning it on also changes
      where mail to `name+anything@` addresses on your main domain goes, so the panel lists it.
-   - If your main domain has its own MX or SPF records in a zone that has never used Email
-     Routing, the panel refuses. Cloudflare may add a second SPF record, which breaks SPF for your
-     main domain's mail.
+   - Existing MX records stay unchanged. For a supported existing SPF policy, the panel shows
+     the old and proposed policy; setup updates that single record instead of adding a second one.
+     Google Workspace domains without SPF get a proposed policy authorizing both Google and
+     Cloudflare. Conflicting or unsupported policies are refused with an explanation.
 
    Your consent covers exactly the changes the panel showed: if they differ when you press the
    button, SAM asks again.
 
    Before it changes anything, SAM stores your main domain's MX and SPF records. After turning
    Email Routing on, it compares the main domain with them. If the main domain gained anything
-   other than the SPF record it showed, or lost a record, agent email stays off and the panel
+   other than the SPF changes it showed, or lost an unrelated record, agent email stays off and the panel
    lists what changed. Cloudflare has made that change by then. Fix the records in Cloudflare and
-   check again, or allow them as they are. Every later run compares against the same stored
+   check again, or allow them as they are. Duplicate SPF records cannot be accepted. Every later run compares against the same stored
    records, and only one run at a time changes Cloudflare.
 
 The panel can turn agent email on once Cloudflare has verified the new sending records, usually 5
-to 15 minutes after the deploy creates them; until then it says it is still verifying. A later
-deploy without the agent_email input turns agent email off again.
+to 15 minutes after the deploy creates them; until then it says it is still verifying. Later
+deployments keep email prepared; the admin activation record remains in place.

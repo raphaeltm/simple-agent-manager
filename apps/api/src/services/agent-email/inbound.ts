@@ -5,8 +5,8 @@
  * through the shared trigger admission path. Every refusal is an SMTP-time reject, so a
  * forged sender gets no backscatter. Workers cannot see SPF/DKIM/DMARC verdicts
  * (cloudflare/workerd#6740); the unguessable address plus the sender allowlist are the
- * prototype's controls, and aligned sender authentication is the production gate
- * (idea 01KS4X886T3NRKR3696H25A2AN).
+ * controls. The operator accepted reliance on Cloudflare's checks on 2026-10-23;
+ * the From allowlist is not independent sender authentication.
  *
  * An email that passes the checks is stored before SMTP is answered (inbound-delivery.ts).
  * After that the handler never throws: a failed or crashed attempt is retried by SAM from

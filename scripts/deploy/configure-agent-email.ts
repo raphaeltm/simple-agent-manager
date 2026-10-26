@@ -20,9 +20,7 @@
  * staging, deploy run 39866499256). That step belongs to the admin setup
  * (`apps/api/src/services/agent-email/setup.ts`), which shows the admin those records first.
  *
- * Preview: it runs only when AGENT_EMAIL_ENABLED=true, which only the staging dispatch input
- * `agent_email` sets. Production cannot activate it until inbound sender authentication exists
- * (idea 01KS4X886T3NRKR3696H25A2AN).
+ * Runs automatically for production and staging; activation remains an admin action.
  *
  * Fail closed: missing permissions leave the feature off without writing anything. DNS safety:
  * every DNS write must target `agents.<BASE_DOMAIN>` or a name under it, and the root domain's
