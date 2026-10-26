@@ -34,3 +34,9 @@ All earlier HIGH/MEDIUM findings were independently verified fixed by actual Opu
 - L9: shared Disclosure starts closed when empty and retains user-open state when the final value is cleared; event switches do not open it for stale hidden values.
 
 Final integrated source9abcf9519:24/24 browser cases PASS,80focusedwebtestsPASS, webtypecheck/lintPASS. All60PNGs (30queue +30controls) refreshed together after the full run; new push/mobile, compact history/mobile, webhook cleanup/desktop and enum-error/mobile captures visually inspected. Actual Opus delta verification remains merge-blocking; no approval is claimed here.
+
+## Actual final Opus delta and error-state follow-up
+
+Required-profile Opus task01M5WQWV8QGFQV7EM3AWQHG239 reviewed21e6bd0ab730561a1be30b8c855f0c92bf529f63: PASS, zero critical/high/medium findings, two nonblocking LOW findings (Library01M5WSB6453SGRP25B0YW3WKA1, coordination channel43). It independently ran80focusedwebtests,24desktop/mobilebrowsercases and17queue tests. Both prior MEDIUM findings were fixed; L7 exact TTL rationale accepted.
+
+The two LOW residues are addressed in the follow-up: enum validation has its own blocking key so it cannot overwrite action errors; local submitted validation clears when values change; failed Continue opens enclosing disclosures before scrolling to the field error. Inline enum checks use the same letter-case normalization as saving. Actor clauses say “by” to distinguish them from source branches. Browser regressions failed before fixes and pass after fixes on desktop/mobile, covering correction, collapsed invalid sections, simultaneous action+enum errors and valid mixed-case values. The same actual Opus session will verify the pushed follow-up SHA before merge. No approval of unseen changes is claimed.

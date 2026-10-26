@@ -233,7 +233,7 @@ describe('trigger presentation', () => {
     for (const condition of [
       '/review',
       'approved',
-      'alice',
+      'by alice',
       'member',
       'users only',
       'yes',

@@ -317,7 +317,7 @@ export function validateStep(
       if (!areGitHubTriggerActionsValid(state.github.eventType, filters.actions))
         errors.github = 'Some actions do not exist for this GitHub event.';
       const choiceError = githubFilterChoiceError(filters);
-      if (choiceError) errors.github = choiceError;
+      if (choiceError) errors.githubChoices = choiceError;
     }
     if (state.start === 'webhook' && state.webhook.filters.some((filter) => !filter.path.trim()))
       errors.webhook = 'Every filter needs a path, like event.action.';

@@ -92,7 +92,7 @@ function githubTriggerClauses(
   filters: GitHubTriggerFilters = {}
 ): string[] {
   const conditions: string[] = [];
-  if (filters.actors?.length) conditions.push(`from ${orList(filters.actors)}`);
+  if (filters.actors?.length) conditions.push(`by ${orList(filters.actors)}`);
   if (filters.ignoreActors?.length) conditions.push(`except ${orList(filters.ignoreActors)}`);
   if (filters.ignoreBots) conditions.push('users only');
   if (eventType !== 'push' && filters.authorAssociation?.length)

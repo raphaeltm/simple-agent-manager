@@ -753,13 +753,15 @@ describe('review filter validation before save', () => {
       authorAssociation: 'ADMIN',
       reviewStates: '',
     };
-    expect(validateStep({ ...state, github }, 'when', CAN).github).toContain('author association');
+    expect(validateStep({ ...state, github }, 'when', CAN).githubChoices).toContain(
+      'author association'
+    );
     expect(
       validateStep(
         { ...state, github: { ...github, authorAssociation: 'MEMBER', reviewStates: 'accepted' } },
         'when',
         CAN
-      ).github
+      ).githubChoices
     ).toContain('review state');
     expect(
       validateStep(

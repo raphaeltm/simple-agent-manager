@@ -406,10 +406,28 @@ test('event scopes, issue-only sentence and review defaults are explicit', async
     .getByText('Choose a review state from the listed GitHub values.')
     .evaluate((element) => element.scrollIntoView({ block: 'center' }));
   await audit(page, 'github-review-field-error');
-  await page.getByLabel('Review states', { exact: true }).fill('');
+  await page.getByLabel('Actions', { exact: true }).fill('bogus');
+  await more.locator('summary').click();
+  await expect(more).toHaveJSProperty('open', false);
+  await page.getByRole('button', { name: 'Continue' }).click();
   await expect(more).toHaveJSProperty('open', true);
+  await expect(page.getByText('Some actions do not exist for this GitHub event.')).toBeVisible();
+  await page.getByLabel('Review states', { exact: true }).fill('');
+  await expect(page.getByText('Choose a review state from the listed GitHub values.')).toHaveCount(
+    0
+  );
+  await expect(more).toHaveJSProperty('open', true);
+  await page.getByLabel('Actions', { exact: true }).fill('submitted');
   await page.getByLabel('Review states', { exact: true }).fill('APPROVED');
   await page.getByLabel('Author association', { exact: true }).fill('member');
+  await expect(page.getByLabel('Author association', { exact: true })).toHaveAttribute(
+    'aria-invalid',
+    'false'
+  );
+  await expect(page.getByLabel('Review states', { exact: true })).toHaveAttribute(
+    'aria-invalid',
+    'false'
+  );
   await page.getByLabel('Allowed actors', { exact: true }).fill('alice');
   await page.getByRole('button', { name: 'Continue' }).click();
   await page.getByRole('button', { name: 'Add a detail from the run' }).click();

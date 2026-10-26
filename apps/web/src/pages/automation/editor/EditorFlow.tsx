@@ -90,6 +90,11 @@ export function EditorFlow({
   const [params, setParams] = useSearchParams();
   const [state, setState] = useState(initial);
   const [errors, setErrors] = useState<Errors>({});
+  const changeState = (next: EditorState) => {
+    setState(next);
+    // Submitted validation belongs to the old values; fields validate the new values inline.
+    setErrors({});
+  };
   const [confirmLeave, setConfirmLeave] = useState(false);
   const initialRef = useRef(JSON.stringify(initial));
   const dirty = JSON.stringify(state) !== initialRef.current;
@@ -140,11 +145,14 @@ export function EditorFlow({
     const found = validateStep(state, step, context);
     setErrors(found);
     if (Object.keys(found).length) {
-      requestAnimationFrame(() =>
-        document
-          .querySelector('[role="alert"]')
-          ?.scrollIntoView?.({ block: 'center', behavior: 'smooth' })
-      );
+      requestAnimationFrame(() => {
+        const alert = document.querySelector('[role="alert"]');
+        // A field error inside a collapsed section must be visible before scrolling to it.
+        for (let parent = alert?.parentElement; parent; parent = parent.parentElement) {
+          if (parent instanceof HTMLDetailsElement) parent.open = true;
+        }
+        alert?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+      });
       return;
     }
     const target = steps[index + 1];
@@ -186,14 +194,14 @@ export function EditorFlow({
     ) : step === 'when' ? (
       <StepWhen
         state={state}
-        onChange={setState}
+        onChange={changeState}
         errors={shownErrors}
         creating={steps.includes('start')}
       />
     ) : step === 'what' ? (
       <StepWhat
         state={state}
-        onChange={setState}
+        onChange={changeState}
         errors={shownErrors}
         lookups={lookups}
         lockedNote={lockedNote}
@@ -201,7 +209,7 @@ export function EditorFlow({
     ) : (
       <StepReview
         state={state}
-        onChange={setState}
+        onChange={changeState}
         errors={shownErrors}
         lookups={lookups}
         saveError={saveError && !saveError.field ? saveError.message : null}
