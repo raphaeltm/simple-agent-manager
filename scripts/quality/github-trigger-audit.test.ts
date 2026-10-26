@@ -53,7 +53,7 @@ globalThis.fetch = async (url, options) => {
   assert(options.headers['X-Hub-Signature-256'] === 'sha256=' + createHmac('sha256', process.env.GH_WEBHOOK_SECRET).update(options.body).digest('hex'));
   const body = JSON.parse(options.body);
   assert(body.action === (delivery.eventType==='issues'?'opened':'created') && body.issue.body === fixture.marker && body.issue.number===delivery.subjectNumber);
-  if(delivery.eventType==='issue_comment') assert(body.comment.body.startsWith('/sam '+fixture.marker));
+  if(delivery.eventType==='issue_comment') { assert(body.comment.body.startsWith('/sam '+fixture.marker)); assert(body.issue.pull_request.url.includes('/pulls/'+delivery.subjectNumber)); assert(Number.isSafeInteger(body.comment.id) && body.comment.id > 0); }
   assert(body.sender.login === (process.env.GITHUB_TRIGGER_AUDIT_ENVIRONMENT === 'production' ? 'simple-agent-manager[bot]' : 'sam-staging-audit'));
   sent++;
   if (process.env.TEST_VARIANT === 'send-failure') throw new Error(options.headers['X-Hub-Signature-256']);

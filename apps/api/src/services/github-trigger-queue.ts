@@ -268,25 +268,22 @@ async function routeToSession(
   if (!receipt && row.queueExpiresAt <= new Date().toISOString()) {
     const session = await projectData.getSession(env, row.projectId, row.routedSessionId);
     if (!session || session.status === 'archived') {
-      await env.DATABASE.prepare(
-        "UPDATE trigger_executions SET status='dropped',skip_reason='target_unavailable',completed_at=? WHERE id=? AND status='routing' AND routed_execution_id=?"
-      )
-        .bind(new Date().toISOString(), row.id, row.routedExecutionId)
-        .run();
-      await updateQueueAudit(env, row, 'dropped', 'target_unavailable');
-      return { outcome: 'dropped', executionId: row.id, reason: 'target_unavailable' };
+      return dropUnconfirmedRouting(env, row);
     }
   }
-  const targetPrincipal = await env.DATABASE.prepare(
-    'SELECT user_id FROM tasks WHERE id=? AND project_id=?'
-  )
-    .bind(row.routedTaskId, row.projectId)
-    .first<{ user_id: string }>();
+  const receiptPrincipal = receipt?.metadata?.creatorUserId;
   const creatorUserId =
-    typeof receipt?.metadata?.creatorUserId === 'string'
-      ? receipt.metadata.creatorUserId
-      : targetPrincipal?.user_id;
-  if (!creatorUserId) throw new Error('Routing target has no execution principal');
+    typeof receiptPrincipal === 'string'
+      ? receiptPrincipal
+      : (
+          await env.DATABASE.prepare('SELECT user_id FROM tasks WHERE id=? AND project_id=?')
+            .bind(row.routedTaskId, row.projectId)
+            .first<{ user_id: string }>()
+        )?.user_id;
+  if (!creatorUserId) {
+    if (row.queueExpiresAt <= new Date().toISOString()) return dropUnconfirmedRouting(env, row);
+    throw new Error('Routing target has no execution principal');
+  }
   const accepted = await projectData.acceptPromptDelivery(env, row.projectId, {
     deliveryId,
     targetSessionId: row.routedSessionId,
@@ -372,6 +369,20 @@ async function updateQueueAudit(
   _reason: string
 ) {
   await syncGitHubExecutionAudit(env, row.id);
+}
+
+/** Missing target authority cannot renew an expired intent or prove a prior RPC failed. */
+async function dropUnconfirmedRouting(
+  env: Env,
+  row: schema.TriggerExecutionRow
+): Promise<GitHubQueueResult> {
+  await env.DATABASE.prepare(
+    `UPDATE trigger_executions SET status='dropped',skip_reason='delivery_uncertain',completed_at=? WHERE id=? AND status='routing' AND routed_execution_id=?`
+  )
+    .bind(new Date().toISOString(), row.id, row.routedExecutionId)
+    .run();
+  await syncGitHubExecutionAudit(env, row.id);
+  return { outcome: 'dropped', executionId: row.id, reason: 'delivery_uncertain' };
 }
 
 /** Derive audit state inside the write, so an old handler cannot overwrite newer routing evidence. */

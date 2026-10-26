@@ -164,9 +164,21 @@ export function auditSignedDeliveryIntents(fixture, targetEnvironment) {
           body: fixture.marker,
           labels: [{ name: fixture.marker }],
           state: 'open',
+          ...(item.eventType === 'issue_comment'
+            ? {
+                pull_request: {
+                  url: `https://api.github.com/repos/${fixture.repository}/pulls/${item.subjectNumber}`,
+                },
+              }
+            : {}),
         },
         ...(item.eventType === 'issue_comment'
-          ? { comment: { id: index + 1, body: `/sam ${fixture.marker} comment ${index + 1}` } }
+          ? {
+              comment: {
+                id: Number.parseInt(item.deliveryId.replaceAll('-', '').slice(0, 12), 16) + 1,
+                body: `/sam ${fixture.marker} comment ${index + 1}`,
+              },
+            }
           : {}),
       }),
     };

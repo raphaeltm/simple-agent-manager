@@ -330,6 +330,87 @@ describe('durable GitHub trigger queue', () => {
       sqlite.prepare("SELECT status FROM trigger_executions WHERE github_delivery_id='two'").get()
     ).toEqual({ status: 'running' });
   });
+  it('reconciles an existing receipt principal after the target task is deleted', async () => {
+    const { sqlite, env, submit, input, loseNextAcceptResponse } = setup();
+    await acceptGitHubTriggerExecution(
+      env,
+      input('one', 'github:42:7', { subjectAffinity: true }),
+      submit
+    );
+    loseNextAcceptResponse();
+    await expect(
+      acceptGitHubTriggerExecution(
+        env,
+        input('two', 'github:42:7', { subjectAffinity: true }),
+        submit
+      )
+    ).rejects.toThrow();
+    sqlite.prepare('DELETE FROM tasks').run();
+    await drainGitHubTriggerQueue(env, submit);
+    expect(
+      sqlite.prepare("SELECT status FROM trigger_executions WHERE github_delivery_id='two'").get()
+    ).toEqual({ status: 'routed' });
+    expect(submit).toHaveBeenCalledTimes(1);
+  });
+
+  it('bounds a missing task principal without retargeting an in-flight acceptance', async () => {
+    vi.useFakeTimers();
+    const { sqlite, env, submit, input, stub } = setup();
+    await acceptGitHubTriggerExecution(
+      env,
+      input('one', 'github:42:7', { subjectAffinity: true }),
+      submit
+    );
+    const original = stub.acceptPromptDelivery.getMockImplementation()!;
+    let lateAccept: (() => Promise<void>) | undefined;
+    let started!: () => void;
+    const accepting = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    stub.acceptPromptDelivery.mockImplementation(
+      (...args) =>
+        new Promise((resolve) => {
+          lateAccept = async () => {
+            resolve(await original(...args));
+          };
+          started();
+        })
+    );
+    const pending = acceptGitHubTriggerExecution(
+      env,
+      input('two', 'github:42:7', { subjectAffinity: true, queueTtlSeconds: 1 }),
+      submit
+    );
+    await accepting;
+    const before = sqlite
+      .prepare(
+        "SELECT routed_execution_id,routed_task_id,routed_session_id FROM trigger_executions WHERE github_delivery_id='two'"
+      )
+      .get();
+    sqlite.prepare('DELETE FROM tasks').run();
+    vi.setSystemTime(Date.now() + 2000);
+    await drainGitHubTriggerQueue(env, submit);
+    expect(
+      sqlite
+        .prepare("SELECT status,skip_reason FROM trigger_executions WHERE github_delivery_id='two'")
+        .get()
+    ).toEqual({ status: 'dropped', skip_reason: 'delivery_uncertain' });
+    expect(stub.acceptPromptDelivery).toHaveBeenCalledTimes(1);
+    expect(submit).toHaveBeenCalledTimes(1);
+    if (!lateAccept) throw new Error('Acceptance never started');
+    await lateAccept();
+    await pending;
+    await drainGitHubTriggerQueue(env, submit);
+    expect(
+      sqlite
+        .prepare(
+          "SELECT status,skip_reason,routed_execution_id,routed_task_id,routed_session_id FROM trigger_executions WHERE github_delivery_id='two'"
+        )
+        .get()
+    ).toEqual({ ...before, status: 'dropped', skip_reason: 'delivery_uncertain' });
+    expect(submit).toHaveBeenCalledTimes(1);
+  });
+
   it.each(['failed', 'ambiguous'] as const)(
     'keeps routing pending and preserves uncertainty after %s with possible submission',
     async (state) => {
