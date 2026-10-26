@@ -131,6 +131,9 @@ not a proxy: every rule reads the condition itself and carries its source), `76-
       primary action, "The idea" (markdown, the current plan), Work, Updates (T3 notes + composer +
       quote + derived lifecycle entries), Related. Desktop two columns; the conversations drawer and
       mobile FAB go away.
+  - **Correction (reconciled 2026-10-26):** the derived lifecycle entries are not on `main`.
+    `IdeaUpdates` renders authored notes only (`apps/web/src/pages/ideas/idea-activity.tsx:150-157`).
+    The fix (`79ac4f2a6`) is on the unmerged branch `sam/t8-pr2-review-followups`, with no PR.
 - [x] Keep Start work (T7) wired; whichever of T7/T8 merges second does the wiring. **T8 merged
       second, and the wiring was worse than missing — see the three findings below.**
 - [x] Tests: status-dependent primary action per state, Updates composer through the real POST,
@@ -295,10 +298,17 @@ covered, so nothing that was in anyone's Ideas list has left it.
 one to three minutes — is written with `is_idea = 0` by a writer that did not yet set the flag,
 and is invisible to every idea read afterwards. The backfill has already passed it.
 
-- [ ] After the STAGING deploy, run the read-only D1 SELECT below and post the count on
-      `feature.linked-work`.
-- [ ] After the PRODUCTION deploy, run it again against production and post the count.
+- [x] After the STAGING deploy, run the read-only D1 SELECT below and post the count on
+      `feature.linked-work`. (reconciled 2026-10-26: 0 rows, posted at channel seq 238 and
+      seq 261, window 08:43:39 → 12:52:58Z with the predicate shown able to match at 13:00Z;
+      recorded in "Run it, and the answer" below and in PR #2436's body)
+- [x] After the PRODUCTION deploy, run it again against production and post the count.
+      (reconciled 2026-10-26: 0 rows, posted at channel seq 271 after Deploy Production run
+      40104056792; window from migration 14:54:40 to Worker swap 15:12:24Z, 17m44s; the
+      coordinator accepted it at seq 272)
 - [ ] If either is above zero: post the ids, and backfill by id ONLY after the coordinator's OK.
+      — moot (reconciled 2026-10-26): both counts were 0, so there were no ids to post or
+      backfill.
 
 Run inside `exec_with_secrets` with `secretNames: ["CF_TOKEN"]` (program decision 13), against
 `/accounts/c4e4aebd980b626f6af43ac6b1edcede/d1/database/1cfaf5d4-8226-47d8-bf26-6ba727ce5718/query`
@@ -464,3 +474,23 @@ PR2 for Raphaël to veto; removing it is one case in `ideaSecondaryAction`.
 
 - Nothing merges until T1, T2 and T3 are on `main` and this code uses their real operations.
 - `.do-state.md` is the live tracker.
+
+## Reconciliation 2026-10-26
+
+- Shipped by #2436 (`e19aa30c1`, merged 2026-10-24; derived status and the Ideas list) and #2439
+  (`d41ff95d6`, merged 2026-10-24; the idea page). First successful production deploys: run
+  40104056792 (head `e19aa30c1`, 2026-10-24) and run 40120468463 (head `d41ff95d6`, 2026-10-24).
+- Unticked: 1 — the conditional backfill box, moot because both window counts were 0.
+- Not done on `main`, although its box is ticked: the coordinator's post-merge review of #2439
+  (`feature.linked-work` seq 282-283) found that the PR2 Updates item's "derived lifecycle
+  entries" never shipped (`IdeaUpdates` in `apps/web/src/pages/ideas/idea-activity.tsx` renders
+  authored notes only). It also found the page polling detail and updates every 30 s
+  (`apps/web/src/lib/query-options/ideas.ts:43,55`) and Related still called "not yet available"
+  in `apps/www/src/content/docs/docs/guides/idea-execution.md:119`. The fixes are on branch
+  `sam/t8-pr2-review-followups` (`e15594807`, 4 commits on `d41ff95d6`), pushed 2026-10-24 and
+  never opened as a PR; the T8c task 01M5P5YNDFEP91EC06P1DEXAGF and the coordinator task
+  01M5N1E7R68NYPRNGQ4F861QKE have been asleep since.
+- Idea 01M0JQBW9E0T5PJZXY0K72V9BX (markdown list markers) is still a draft, although its fix
+  shipped in #2436.
+- Verdict: ARCHIVE+FOLLOWUP. Both PRs are live; the follow-up branch is not tracked on `main`
+  and needs a backlog file so it gets opened, staged and merged.

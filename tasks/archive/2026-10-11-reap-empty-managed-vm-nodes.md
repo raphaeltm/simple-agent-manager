@@ -162,8 +162,13 @@ with a default and is not added to `wrangler.toml` (Worker text-binding headroom
       sleeping Instant container, no provenance, cleanup backoff, recent warm claim, already warm;
       two-sweep escape tests for a failed handoff and an unpersisted `warm_since`
 - [x] Proven discriminating (see below)
-- [ ] Staging: real VM through the real path, then clean up to zero VMs
-- [ ] Production read-only check after deploy
+- [x] Staging: real VM through the real path, then clean up to zero VMs (reconciled 2026-10-26:
+      #2305 body — staging 38950087674 at 9a768e8e7, then 38958057966 at 725f4f0ba; fixture node
+      01M532XK2ZEXJ50VK2N9ZAKR6Z, workspace DELETE set `warm_since` 19:35:15Z, provider
+      termination 20:05:57Z after the unchanged 30-min retention; zero owned test VMs remain)
+- [x] Production read-only check after deploy (reconciled 2026-10-26: #2305 body — production D1
+      read 2026-10-16 20:59:59Z found zero running managed workspace VMs with no live workspace
+      and NULL `warm_since` past the grace; health 200 at 20:59:35Z)
 
 ## Discrimination evidence (rule 62)
 
@@ -183,18 +188,31 @@ with a default and is not added to `wrangler.toml` (Worker text-binding headroom
 
 ## Acceptance criteria
 
-- [ ] A task failed by the runaway ceiling on a pack-placed pool node (no
+- [x] A task failed by the runaway ceiling on a pack-placed pool node (no
       `auto_provisioned_node_id`) leaves its node warm (`warm_since` set, NodeLifecycle `warm`).
-- [ ] A running managed workspace VM with no live workspace, NULL `warm_since`, pool provenance
+      (reconciled 2026-10-26: Worker test "runaway-cost ceiling on a pack-placed task warms its
+      node", `apps/api/tests/workers/empty-node-warm-handoff.test.ts:715` on main)
+- [x] A running managed workspace VM with no live workspace, NULL `warm_since`, pool provenance
       and no task link, idle past the grace, is handed to NodeLifecycle by the cron sweep and is
-      then torn down by the normal warm timeout + stopped handoff.
-- [ ] Nodes with a live workspace, deployment nodes, user-owned nodes and nodes within the grace
-      are untouched (both D1 and NodeLifecycle state).
-- [ ] Each backstop action records a specific structured reason.
-- [ ] Warm retention window unchanged.
-- [ ] Staging: real VM reaped through the real path; zero staging VMs at the end.
-- [ ] Production: no running managed workspace node with 0 live workspaces and NULL
-      `warm_since` beyond the grace after deploy.
+      then torn down by the normal warm timeout + stopped handoff. (reconciled 2026-10-26: Worker
+      test at `empty-node-warm-handoff.test.ts:227` drives sweep → warm → alarm → `stopped` →
+      provider DELETE → `deleted`)
+- [x] Nodes with a live workspace, deployment nodes, user-owned nodes and nodes within the grace
+      are untouched (both D1 and NodeLifecycle state). (reconciled 2026-10-26: Worker test at
+      `empty-node-warm-handoff.test.ts:378`; `expectUntouched` at :220 checks the D1 row,
+      NodeLifecycle state and handoff records)
+- [x] Each backstop action records a specific structured reason. (reconciled 2026-10-26: reason
+      union at `apps/api/src/scheduled/node-cleanup/empty-node-warm-handoff.ts:55`, recorded at
+      :158/:165/:183/:187; tests assert three of the four reasons at test lines 259/510/538)
+- [x] Warm retention window unchanged. (reconciled 2026-10-26: test at
+      `empty-node-warm-handoff.test.ts:227` asserts alarm = `warmSince` + `NODE_WARM_TIMEOUT_MS`;
+      staging kept the 30-min window, #2305 body)
+- [x] Staging: real VM reaped through the real path; zero staging VMs at the end. (reconciled
+      2026-10-26: #2305 body — delete handoff 19:35:15Z, provider termination 20:05:57Z, D1 node
+      DELETED; "Zero owned test VMs remain")
+- [x] Production: no running managed workspace node with 0 live workspaces and NULL
+      `warm_since` beyond the grace after deploy. (reconciled 2026-10-26: #2305 body — read-only
+      production D1 query at 2026-10-16 20:59:59Z returned zero)
 
 ## References
 
@@ -268,3 +286,13 @@ checks. Its coverage run passed 12,395 tests with one unrelated 15-second capaci
 fixture timeout; no timeout or gate was weakened. The new retention change requires a new
 complete exact-head CI run. Staging authentication with the managed smoke credential works
 when normal Origin/User-Agent headers are supplied; no credential change was needed.
+
+## Reconciliation 2026-10-26
+
+- Shipped by #2305 (`51a0acc90`, merged 2026-10-16); first successful production deploy:
+  run 38963983049 (head `51a0acc90`, 2026-10-16).
+- Unticked: 0 — none.
+- Verdict: ARCHIVE. Staging and read-only production evidence is in the #2305 body; owner task
+  01M52PF30AYFJN0YM8KPQ8ME45 completed.
+- Open PRs: none. Recovery branch `sam/ship-empty-vm-cleanup-q8me45` (`725f4f0ba`) is fully
+  merged.

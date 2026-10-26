@@ -14,12 +14,12 @@ Four secret RandomId resources annotate stack exports but not provider outputs. 
 - [x] Annotate all four regular encodings on all four generated secret resources.
 - [x] Preserve exact names, inputs, protection, exports and public installation ID.
 - [x] Test registration metadata and secret propagation using synthetic mocks only.
-- [ ] Run lint/typecheck/tests/build and specialist reviews.
-- [ ] Obtain safe redacted preview with no create/delete/replace of existing key resources.
-- [ ] Open draft PR; satisfy exact-head CI and best-effort CodeRabbit.
-- [ ] Report READY with head, PR, gates and safe preview evidence.
-- [ ] Wait for explicit coordinator release before merge or deployment.
-- [ ] Deploy and verify metadata safely after release.
+- [x] Run lint/typecheck/tests/build and specialist reviews. (reconciled 2026-10-26: #2334 Validation — infra lint/typecheck/72 tests, repo lint/typecheck/build PASS; exact-head CI 38543477625 success on `4e3b0f9c8`; Specialist Review table all PASS/ADDRESSED)
+- [x] Obtain safe redacted preview with no create/delete/replace of existing key resources. (reconciled 2026-10-26: Pulumi State Repair secret-metadata-preview run 38547185229 success on frozen head `4e3b0f9c8` — verified=true, same=24, four keys unchanged, no mutation)
+- [x] Open draft PR; satisfy exact-head CI and best-effort CodeRabbit. (reconciled 2026-10-26: #2334 draft until ready_for_review 2026-10-14 10:12 UTC; CI 38543477625 success on `4e3b0f9c8`; CodeRabbit APPROVED `f9fc6517c`, d7dc finding fixed in `4e3b0f9c8`, final-head request 38545493198 rate-limited after the wait)
+- [x] Report READY with head, PR, gates and safe preview evidence. (reconciled 2026-10-26: #2334 body section "Final READY evidence — production held" — frozen head `4e3b0f9c8`, CI 38543477625, Sonar, CodeRabbit, preview 38547185229)
+- [x] Wait for explicit coordinator release before merge or deployment. (reconciled 2026-10-26: SAM session da8b447b message `01M4WYAKVB7GDPE6TN6VKWCQGB` at 2026-10-14 10:11 UTC, "Root grants production lane to PR #2334 NOW"; merged 10:15 UTC)
+- [x] Deploy and verify metadata safely after release. (reconciled 2026-10-26: production run 38550040877 success on `e52a8b17a`; metadata run 38552108058 success — verified=true and persistedSecretMetadataVerified=true, all four encodings secret)
 
 ## Acceptance
 Regular generated key encodings are secret; resource identity and values preserved. Public installation ID stays public. Evidence prints only metadata/counts, never generated values. Any replacement or sensitive account change stops execution. Residual special-id limitation is disclosed.
@@ -53,7 +53,7 @@ Runtime limits are existing-environment variables `PULUMI_METADATA_PREVIEW_TIMEO
 - [x] Security/code review new workflow and failure/redaction behavior.
 - [x] Run synthetic regression tests and relevant quality checks.
 - [x] Run exact-head trusted metadata preview using existing staging environment and approvals.
-- [ ] Update CI and CodeRabbit evidence for expanded final diff.
+- [x] Update CI and CodeRabbit evidence for expanded final diff. (reconciled 2026-10-26: #2334 "Final READY evidence" — CI 38543477625 on final head `4e3b0f9c8`; CodeRabbit d7dc finding fixed; final-head request 38545493198 rate-limited, wait elapsed and recorded)
 
 ### Live preview contract correction
 First run38537591671 emitted only safe metadata:24same/fourkeys/unchangedinputs&protection, but verifier failed on new IDs/outputs. Public [preview digest source](https://github.com/pulumi/pulumi/blob/master/pkg/backend/display/json.go#L198) captures pre-step state and only substitutes completed outputs for refresh; [SameStep.Apply](https://github.com/pulumi/pulumi/blob/master/pkg/resource/deploy/step.go#L168) copies old ID/outputs later. Missing new identity/output fields do not imply rotation. Updated verifier accepts unknown pre-step IDs only when every operation is same/no-diff, old identity exists and target type/URN/provider/inputs/protection match. A supplied different new ID still fails. AdditionalSecretOutputs booleans prove declaration intent; persistedSecretMetadataVerified remainsfalse until authorized apply and post-deploy verification. Untargeted same resources, including installation-id, cannot count toward the four targets and are not misclassified as secret keys. Regression test covers this observed contract shape using synthetic IDs only.
@@ -65,3 +65,12 @@ Post-deployment acceptance requires both verified:true and persistedSecretMetada
 
 ### Sonar ordinary defects addressed
 Public Sonar issues reported verifier complexity, an implicit sort, two PATH-based CLI invocations and dependency lifecycle scripts. Refactored checks into focused functions; explicit locale comparator; the existing pinned installer-selected CLI is resolved once before credential mapping, canonicalized to an absolute executable outside the checkout, and passed to the metadata script without any PATH fallback. The pinned action may reuse a preinstalled CLI, so no home-directory assumption is made. Both workflow dependency installs disable lifecycle scripts; inspected Pulumi SDK packages require no runtime install scripts. No scanner/security exception, permission, credential audience or resource inputs changed. A fresh exact-head analysis and preview remain required after this validation-only change.
+
+## Reconciliation 2026-10-26
+
+- Shipped by #2334 (`e52a8b17a`, merged 2026-10-14); first successful production deploy:
+  run 38550040877 (head `e52a8b17a`, 2026-10-14). Post-deploy metadata run 38552108058 passed.
+- Unticked: 0 — none.
+- Verdict: ARCHIVE+FOLLOWUP. Annotation scope is shipped and verified; the disclosed residual
+  (reversible physical IDs, historical checkpoints, rotation decision) is unimplemented and only
+  tracked by SAM draft `01M4SRS8D3C7CNRMYG0Y46QXDR`, which still lists annotation as open.

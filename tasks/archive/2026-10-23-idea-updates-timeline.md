@@ -19,8 +19,16 @@ Appending progress to an idea's description obscures the current plan and can ex
 - [x] Complete real SQL and handler tests, including foreign project and deletion attack.
 - [x] Run specialist reviews and lint/typecheck/build; isolated web and focused API suites pass. The full API run exposed stale count assertions, each corrected and rerun, plus one unrelated timeout whose focused route test passed.
 - [x] Claim, deploy and verify staging; release claim. Run 40045283143 passed migration safety, deploy and smoke; live note CRUD preserved the draft description, and the test draft was deleted.
-- [ ] PR #2427 is open and CodeRabbit approved. Pass CI/coordinator review, merge and watch production deploy.
+- [x] PR #2427 is open and CodeRabbit approved. Pass CI/coordinator review, merge and watch production deploy. (reconciled 2026-10-26: CodeRabbit APPROVED 00:41Z; CI run 40050372548 green on final head 061be1207; coordinator window closed with no findings, `feature.linked-work` seq 99; merged 2026-10-24 01:55Z as a3404a848; Deploy Production run 40053282069 succeeded for that SHA, reported at seq 135)
 
 ## Acceptance
 
 A member can post and list notes without changing the current plan. An agent can post through `update_idea(note)` and list with `list_idea_updates`. Foreign project IDs fail. A non-author non-admin cannot delete; delete is soft. An agent cannot flood a single idea. Responses page newest first. Public docs reflect the feature.
+
+## Reconciliation 2026-10-26
+
+- Shipped by #2427 (`a3404a848`, merged 2026-10-24); first successful production deploy:
+  run 40053282069 (head `a3404a848`, 2026-10-24).
+- Unticked: 0 — none.
+- Verdict: ARCHIVE. Merged, deployed and verified on staging; the agent-note `edited` link handed
+  to T6 is written by T1's hook (`apps/api/src/routes/mcp/auto-link-tools.ts:9`).

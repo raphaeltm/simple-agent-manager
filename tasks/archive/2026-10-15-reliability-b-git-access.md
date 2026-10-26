@@ -98,3 +98,16 @@ Fresh independent Sol reviews: `REL-B-SONAR-20261016-01` (Go), `security-review-
 Runtime evidence correction: original Library artifact `01M509RVKRMYMYQ5B7ZEWAVAZM`, archive SHA256 `2eadbb79662cda0a787a2847bf55c41d4a75b619ab22d705e033af04194ca7ed`, proves successful private clone, explicit push, gh access and foreign-host credential denial. Its report explicitly records `curl_max_time_30: false`; it does not establish the new installed helper timeout. Standalone runtime proof is also missing from this artifact. Coordinator/A are locating later original evidence or must verify the actual installed 30-second helper through the approved runtime sweep. No new live work by B. Deterministic transient/slow/exhaustion/cancellation/auth/revocation paths remain covered through actual provisioning/generated helper/API tests.
 
 CodeRabbit trusted request at 2026-10-16 14:33:45 UTC received a rate-limit response at 14:34:06 UTC. Coordinator owns the wait/disposition and final exact-head CI/Sonar/security, staging, merge and production rollout. No gate waiver or independent deployment is claimed.
+
+## Reconciliation 2026-10-26
+
+- Shipped by #2358 (`8778abe1c`, merged 2026-10-16); first successful production deploy:
+  run 38954488477 (head `8778abe1c`, 2026-10-16).
+- Unticked: 0 — none.
+- Verdict: ARCHIVE. Release task 01M52KPD9FDR724Z371666KAHE closed the coordinator-owned gates:
+  exact-head CI 38924670817, staging 38939539049, devcontainer and standalone live checks, and
+  production health plus a VM heartbeat on `8778abe1c` (#2358 body). Existing devcontainers may
+  keep the 5 s helper until they are recreated.
+- Open PRs: draft #2352 holds only autosave commits; its product edits match #2358's head except
+  `github-app.ts`, which #2358 later refactored for Sonar. #2367 (release executor branch) holds
+  only `.agent-evidence/` files and autosaves. Nothing here depends on either.

@@ -24,7 +24,7 @@ Mission grouping exists but no submission path creates deferred steps. Implement
 - [x] Update relevant API documentation.
 - [x] Full quality checks and independent local specialist reviews.
 - [x] Staging real 3-step document handoff, failure and recovery evidence; bounded resource cleanup.
-- [ ] PR, CI, best-effort CodeRabbit, merge and production smoke.
+- [x] PR, CI, best-effort CodeRabbit, merge and production smoke. (reconciled 2026-10-26: #2404 final-head CI 39685539091 and E2E 39685539086 success on `4f6034efb`; CodeRabbit CHANGES_REQUESTED fixed in `a6ad98f83`/`07c1e5e8f`, all 3 threads resolved; merged as `2585626df`; main CI 39690107247 and production 39691992669 success; post-deploy `/health` 200 healthy, app 200)
 
 ## Acceptance
 An agent starts a three-step plan and ends its turn. SAM completes it without coordinator intervention, passing the document/result references between steps. Failed prerequisites never launch dependents or yield a successful run. Duplicate delivery/restarts never create duplicate tasks/sessions. Current authorization and admission controls remain enforced. No new UI, automatic agent-failure retries, templates or arbitrary event subscriptions in this slice.
@@ -45,3 +45,11 @@ An agent starts a three-step plan and ends its turn. SAM completes it without co
 - Existing user OAuth credentials and pool settings were used; no token-cap changes. At most two test VMs. Both VM DELETE requests returned200; final read-only cleanup check recorded in task state.
 - Bounded live failure test: staging workflow `b3054356-ef88-4f21-aceb-1b08bff65ffa` started with two steps. Authenticated task status API marked step1 task `01M5G524JENSF4Y96BEP8822P6` failed. D1 readback showed step1 `failed`, step2 `blocked` with `Blocked: step1 did not succeed`, no step2 task row, and mission `failed`. Fixture controller task `01M5G4T1AH7P33DB00ZMH8ESD2` completed. Workspace `01M5G501ZTTMAMQ049PQ0HJHCC` and nodes `01M5G4TC52MXVJZFPJ7NH8SBNP` / `01M5G53S40PVEZR1T213YZNFYS` were deleted by supported API (all HTTP 200); staging D1 readback at 21:17 UTC showed zero running/provisioning/starting nodes and workspaces.
 - After merging current main, final-head staging deployment `39677698937` succeeded at `ddf4b8f88dd33692ea1dbf45532e6aad083b37cb`, including deployment smoke tests. Authenticated Playwright navigation loaded dashboard and Projects with HTTP 200 and no page errors; the zero-workspace user's Projects page showed cloud onboarding as expected. API `/health` returned HTTP 200.
+
+## Reconciliation 2026-10-26
+
+- Shipped by #2404 (`2585626df`, merged 2026-10-21); first successful production deploy:
+  run 39691992669 (head `2585626df`, 2026-10-21).
+- Unticked: 0 — none.
+- Verdict: ARCHIVE. Phase 0 acceptance is met and deployed; later phases (visibility, steering,
+  templates) were out of scope and stay in design idea `01M59MBMZJVYHPHH1GJ7X8TZT1`.

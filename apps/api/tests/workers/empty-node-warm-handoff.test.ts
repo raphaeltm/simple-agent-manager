@@ -1,5 +1,5 @@
 /**
- * Empty managed VM nodes reach NodeLifecycle (tasks/active/2026-10-11-reap-empty-managed-vm-nodes.md).
+ * Empty managed VM nodes reach NodeLifecycle (tasks/archive/2026-10-11-reap-empty-managed-vm-nodes.md).
  *
  * Production incident 2026-10-09: a healthy pool node ran 34 h with no workspace. Its last
  * task was failed by the runaway-cost ceiling, `cleanupTaskRun` only handed a node to

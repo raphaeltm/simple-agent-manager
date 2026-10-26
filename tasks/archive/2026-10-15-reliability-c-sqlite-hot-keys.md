@@ -59,3 +59,16 @@ Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/2357. Implement
 ## Coordinator-assigned correction (Sol B integration owner)
 
 Original per-version cutovers permit a delayed env-unset bridge invocation to use KV after a configured version switches to DO. Correction uses an uncached primary D1 insert-once shared activation record, pins rate windows before the lookup, and routes every bridge boot-log operation through its workspace DO lock including awaited legacy KV operations. Real Worker regressions cover held request body and delayed legacy append versus activated clear. Initial prebridge retirement is explicitly unresolved and blocks activation, staging readiness, and release; no fixed wait or traffic percentage is a proof. No scanner/baseline waiver.
+
+## Reconciliation 2026-10-26
+
+- Shipped by #2371 (`8394efa14`, merged 2026-10-17); first successful production deploy:
+  run 39044559133 (attempt 2, head `8394efa14`, 2026-10-17). The immutable activation record was
+  published by run 39047889679; cutover 2026-10-17 16:15 UTC.
+- Unticked: 0 — none.
+- Verdict: ARCHIVE. The coordinator-owned release gates were completed under
+  `2026-10-16-reliability-c-production-release.md` and the #2371 body; owner task
+  01M54TW40EA2VTA54SJ34SRJX1 completed with a passing completion audit.
+- Open PRs: drafts #2357 and #2361 hold this file's original commits (`e6ca5acd5`, `3a90b30c9`,
+  `a890a46b3`); #2371 re-landed that code from preserved source `74d5b9486`, and #2361's
+  activation migration became 0197. Nothing here depends on them.

@@ -25,11 +25,11 @@ Full revised report is in SAM conversation 997b298c-547e-4502-ac69-69d965ec475b,
 - [x] Leave existing active/legacy sessions untouched and report legacy/stale state honestly; no forced restarts/recreation.
 - [x] Add scenario tests for auth negatives, selected/nonselected/default env, user/cwd/live uncommitted file, quoting/multiline, errors/redaction/cancel/idempotency and fresh/legacy compatibility.
 - [x] Update tool descriptions, API/public docs and environment references as applicable.
-- [ ] Run lint/typecheck/test/build and required security/quality checks.
-- [ ] Complete local specialist reviews (Go/security/API/env/docs/constitution/test/task completion), fix findings.
-- [ ] Draft PR then ready only after gates; request CodeRabbit and wait; resolve arrived findings.
-- [ ] Staging real VM, heartbeat/access and fresh-session sentinel verification; bounded cleanup.
-- [ ] Merge normal gates, monitor exact production deployment; verify fresh-session behavior with synthetic sentinels and report deployed commit/results.
+- [x] Run lint/typecheck/test/build and required security/quality checks. (reconciled 2026-10-26: #2332 body records full root lint/typecheck/test/build pass; PR CI run 38518266782 success on head `a39cde757` incl. Secret Scan; main CI 38520625396 success on `faaf861ba`)
+- [x] Complete local specialist reviews (Go/security/API/env/docs/constitution/test/task completion), fix findings. (reconciled 2026-10-26: #2332 Specialist Review Evidence table — Go, security, API/docs/env/constitution/test ADDRESSED; task-completion-validator PASS)
+- [x] Draft PR then ready only after gates; request CodeRabbit and wait; resolve arrived findings. (reconciled 2026-10-26: #2332 timeline — ready_for_review 2026-10-13 21:58 UTC, then coderabbit-review label; CodeRabbit CHANGES_REQUESTED 22:07 addressed in `d4d3df016`; review 5513724172 APPROVED head `a39cde757`)
+- [x] Staging real VM, heartbeat/access and fresh-session sentinel verification; bounded cleanup. (reconciled 2026-10-26: #2332 body — staging run 38468953890 success at `6065b7c42`; 16/16 sentinel checks on fresh VM; replacement node deleted via owner API, zero active staging nodes)
+- [x] Merge normal gates, monitor exact production deployment; verify fresh-session behavior with synthetic sentinels and report deployed commit/results. (reconciled 2026-10-26: merged as `faaf861ba`; production run 38522169513 success; #2332 comment 2026-10-14 07:08 UTC records 16/16 fresh production synthetic checks and deployed commit)
 
 ## Acceptance
 
@@ -66,3 +66,11 @@ Staging deployment `38468953890` at API commit `6065b7c42` passed. Its VM agent 
 Added explicit synthetic-only regressions: `TestEmptyInjectionDoesNotPrintInheritedEnvironment` requires an empty-injection `true` command to emit no stdout/stderr (the bare-export failure); `TestOrdinaryEnvironmentListingContainsOnlyManagedPlaceholders` runs an ordinary env-listing child with an explicitly synthetic environment and verifies only the protected placeholder survives. Minimal env-i focused Go regressions pass; independent security reviewer PASS. No test output includes real environment values; failure assertions report only status/byte counts.
 
 Production deployment/verification, final CI/review evidence reconciliation and CodeRabbit request/wait remain pending. Credential rotation is not a release blocker per user; no credential or security-policy changes are authorized by this evidence.
+
+## Reconciliation 2026-10-26
+
+- Shipped by #2332 (`faaf861ba`, merged 2026-10-14); first successful production deploy:
+  run 38522169513 (head `faaf861ba`, 2026-10-14).
+- Unticked: 0 — none.
+- Verdict: ARCHIVE. Merged, deployed and production-verified with 16/16 synthetic sentinels;
+  nothing material left.

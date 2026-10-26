@@ -18,8 +18,8 @@ Coordinators may own several release artifacts assigned after dispatch. `agent-a
 - [x] Support explicit continuation handoff while retaining prior owner history; never globally reopen completed tasks.
 - [x] Test multiple associations, handoff, held artifacts, inactive owners, unrelated URLs, current authorization and concurrent ownership changes with real SQL.
 - [x] Preserve ordinary task deletion while retaining holds/history; cascade associations only on explicit project deletion, tested with actual foreign keys.
-- [ ] Document contracts and report concrete design + draft PR for Astra review.
-- [ ] Complete specialist review, bounded staging under existing deployment lease, CI/CodeRabbit gates, merge and basic production smoke.
+- [x] Document contracts and report concrete design + draft PR for Astra review. (reconciled 2026-10-26: `apps/www/src/content/docs/docs/guides/mcp-servers.md:121` documents `associate_pull_request`; #2378 stayed draft until ready_for_review 2026-10-19 01:10 UTC; Astra checkpoint comment 2026-10-18 23:27 UTC on draft head `4cec7839e`; coordinating Astra source-approved `91270bec`)
+- [x] Complete specialist review, bounded staging under existing deployment lease, CI/CodeRabbit gates, merge and basic production smoke. (reconciled 2026-10-26: #2378 specialist table ADDRESSED; staging 39180740902 success on `40bca95f2`, cleanup receipts in comment 2026-10-19 01:14 UTC; CI 39180716885 and E2E 39180716889 success; CodeRabbit review 5566019628 APPROVED `40bca95f2`; merged as `0e603a055`; production 39186042249 success; 02:00 UTC smoke health 200, app 200, unauthenticated projects 401; lease released seq274)
 
 ## Acceptance
 
@@ -53,3 +53,12 @@ Practical regression: unrelated active output/workspace branches allow associati
 GitHub contract: https://docs.github.com/en/rest/pulls/pulls#get-a-pull-request
 
 Coordinator requested explicit changed-head/inaccessible proof: strengthened authenticated real-resolver test with HTTP403→no rows; current branch A owner conflict; GitHub head changes A→B; stale A hint refuses; B owner conflict refuses; unrelated parallel branch permits B and final owner row.57 testsPASS/targetedESLintPASS; implementation unchanged from91270bec. No schema or release dependency change. Coordinating HOLD remains.
+
+## Reconciliation 2026-10-26
+
+- Shipped by #2378 (`0e603a055`, merged 2026-10-19); first successful production deploy:
+  run 39186042249 (head `0e603a055`, 2026-10-19). Migration 0198 applied with integrity PASS.
+- Unticked: 0 — none.
+- Verdict: ARCHIVE+FOLLOWUP. Associations are live; the open Sonar S3776 finding on
+  `task-pr-association-tools.ts` (scanner CRITICAL, deferred without human approval) is tracked
+  in SAM idea `01M58VZPD9VS1SZQQ2DMHGZ5WZ`.

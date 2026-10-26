@@ -15,10 +15,10 @@ Current release checklist (historical checks below are source evidence only):
 - [x] Current focused/Worker/clean+upgrade migrations and full quality validation; API887files12483tests PASS, repository21tasks PASS, scripts741tests PASS.
 - [x] Independent Sol security/Cloudflare/constitution/docs/test/env/completion SOURCE review PASS/ADDRESSED; live acceptance pending.
 - [x] Parent-coordinated pinned staging sweep, max1 normal configured-pool VM, cleanup; immutable publication, exact burst/same-window restart, actual rebuild, compatible rollback, fixed data readback and strict node deletion verified. See release evidence.
-- [ ] Focused final PR; exact CI/Sonar/security/CodeRabbit trusted best-effort request/wait.
-- [ ] Main merge/canonical production SHA/run/CF100%/health and operations.
-- [ ] Natural quiet-window evidence incl release session, future aligned immutable publication/readback once.
-- [ ] Production counters/logs/no expected hot KV writes; compatible rollback evidence; report accepted old outliers separately.
+- [x] Focused final PR; exact CI/Sonar/security/CodeRabbit trusted best-effort request/wait. (reconciled 2026-10-26: #2371; merged head `8869d9fd2` passed CI 39041026981 and Sonar check 117422354012; CodeRabbit workflow 39040183095, review 5558224357's three findings fixed in `8869d9fd2`, zero unresolved threads)
+- [x] Main merge/canonical production SHA/run/CF100%/health and operations. (reconciled 2026-10-26: merged `8394efa14`; main CI 39043433946; production 39044559133 succeeded on attempt 2 after attempt 1 stopped on the outbox row-count guard; CF `6d95e0f3` at 100% with both DO bindings, health 200, per #2371 body)
+- [x] Natural quiet-window evidence incl release session, future aligned immutable publication/readback once. (reconciled 2026-10-26: quiet window observed 16:05:11 UTC incl. own release session; preflight 39047803877 and publication 39047889679 succeeded; primary readback publishedAt 1792253144, cutovers 1792253700 = 2026-10-17 16:15 UTC, window 60, per #2371 body)
+- [ ] Production counters/logs/no expected hot KV writes; compatible rollback evidence; report accepted old outliers separately. — not done (reconciled 2026-10-26): counters and no current-window rate KV were shown (read-only runs 39048702031/39048877682, scoped rate key 404) and the isolated 429 was reported, but production boot logs were never shown non-empty and rollback was proven only on staging (39031095066); the user's 2026-10-17 16:50:58 UTC policy dropped this as a completion gate (#2371 body)
 
 C immutable-guard migration renumbered0197 because shipped admin settings uses0196. Deployment bindings and protocol remain unchanged. Existing task retained rather than creating duplicate backlog/main task work.
 
@@ -40,13 +40,13 @@ Finish hot MCP counter/boot-log KV migration through verified production activat
 - [x] Reconcile C-only source/config/tests onto main51a0, excluding unrelated code.
 - [x] Independently analyze prebridge/in-flight writer boundary (local Sol C-PREBRIDGE-BOUNDARY-20261016-01).
 - [x] Historical global retirement prerequisite superseded by explicit 2026-10-17 quiet-window risk acceptance; see replacement checklist.
-- [ ] Complete meaningful adversarial old/new, clean/upgrade migration and rollback verification.
-- [ ] Current full lint/typecheck/tests/build and quality checks.
-- [ ] Required independent security/Cloudflare/constitution/docs/completion reviews.
-- [ ] Coordinated pinned staging verification; max1 normal-pool VM if needed; activation isolated.
-- [ ] Exact CI/Sonar/security and trusted CodeRabbit request/wait/findings resolution.
-- [ ] Normal main merge/canonical production; record SHA/run/CF version/health.
-- [ ] Safe immutable activation, quota/callback/rollback/old-writer proof; preserve evidence before cleanup.
+- [x] Complete meaningful adversarial old/new, clean/upgrade migration and rollback verification. (reconciled 2026-10-26: done by replacement owner in #2371 — real Worker/SQL tests cover delayed old writers and mixed-version quota, clean/upgrade DO migration and binding checks pass, staging compatible rollback 39031095066 attempt 2)
+- [x] Current full lint/typecheck/tests/build and quality checks. (reconciled 2026-10-26: #2371 body — lint 13, typecheck 19, build 9, test 21 tasks / 19,332 tests, quality scripts 741 tests; CI 39041026981)
+- [x] Required independent security/Cloudflare/constitution/docs/completion reviews. (reconciled 2026-10-26: #2371 table — security_review PASS, cloudflare_review/constitution ADDRESSED, lifecycle/docs/test/env/completion PASS)
+- [x] Coordinated pinned staging verification; max1 normal-pool VM if needed; activation isolated. (reconciled 2026-10-26: #2371 — pinned staging 39031095066 at `7939ff8b9`, one configured-pool VM created and deleted, staging-only publication 39033250142)
+- [x] Exact CI/Sonar/security and trusted CodeRabbit request/wait/findings resolution. (reconciled 2026-10-26: same evidence as the replacement checklist — CI 39041026981, Sonar check 117422354012, CodeRabbit review 5558224357 resolved)
+- [x] Normal main merge/canonical production; record SHA/run/CF version/health. (reconciled 2026-10-26: merged `8394efa14`; production 39044559133 attempt 2; CF `6d95e0f3` at 100%, health 200, per #2371 body)
+- [ ] Safe immutable activation, quota/callback/rollback/old-writer proof; preserve evidence before cleanup. — not done as written (reconciled 2026-10-26): activation (39047889679) and the MCP quota smoke passed, but production callback logs were never shown non-empty, rollback was exercised only on staging, and old-writer proof was replaced by the user's 2026-10-17 quiet-window risk acceptance
 
 ## Findings and limits
 
@@ -124,3 +124,17 @@ Include these official references as the factual basis of the draft above: [HTTP
 Old installed VM agents do not themselves write Cloudflare KV: their future requests through the canonical API hostname can be served by the new Worker with the existing callback authentication contract. This is distinct from already executing old Workers and old-version-specific entry points. No unrelated VM stop/recreation or credential change is required or justified as retirement evidence.
 
 Risk boundary: arbitrary deletion of the Worker can delete associated resources; version/deployment deletion has unverified interruption and rollback consequences. Those are not proposed trial operations. The inquiry asks for documented behavior only. Any identified operation still requires isolated verification, a concrete interruption/storage risk assessment, and separate action-time authorization before production use.
+
+## Reconciliation 2026-10-26
+
+- Shipped by #2371 (`8394efa14`, merged 2026-10-17); first successful production deploy:
+  run 39044559133 (attempt 2, head `8394efa14`, 2026-10-17). Immutable activation was published
+  by run 39047889679; cutover 2026-10-17 16:15 UTC.
+- Unticked: 2 — production boot-log, rollback and old-writer proof (one item in each checklist).
+  The user's 2026-10-17 16:50:58 UTC policy removed them as gates (#2371 body).
+- Verdict: ARCHIVE. Owner task 01M54TW40EA2VTA54SJ34SRJX1 completed with a passing completion
+  audit. The waived items are recorded as limits in #2371. The evidence file
+  `tasks/evidence/2026-10-17-reliability-c/release.md` still says production is pending, so the
+  #2371 body is the final record.
+- Open PRs: drafts #2357 and #2361 hold superseded C source; preserved source `74d5b9486` is on
+  main. Nothing here depends on them.

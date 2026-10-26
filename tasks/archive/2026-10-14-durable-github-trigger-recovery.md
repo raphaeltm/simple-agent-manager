@@ -25,9 +25,9 @@ Signed GitHub ingress ACKs asynchronously; handler permanently claims ID before 
 - [x] Real SQLite integration tests for retries/races/crashes and additive migration fresh/upgrade paths.
 - [x] Update docs/config references, run lint/typecheck/test/build and relevant quality checks.
 - [x] Local independent specialist reviews incl task-completion/security/Cloudflare/test/config/docs.
-- [ ] Coordinate and verify pinned staging using synthetic fixtures, cleanup.
-- [ ] PR exact SHA CI/Sonar/security and best-effort CodeRabbit evidence reported BEFORE merge.
-- [ ] Wait for coordinator merge clearance; then merge/deploy/readonly production migration/health/config verification.
+- [x] Coordinate and verify pinned staging using synthetic fixtures, cleanup. (reconciled 2026-10-26: #2335 body — staging runs 38553413721 and 38555135543 success on final head `81d193b79`; signed same-ID sends 200, one completed intake, payload erased; slot released 11:16 UTC, zero active staging nodes)
+- [x] PR exact SHA CI/Sonar/security and best-effort CodeRabbit evidence reported BEFORE merge. (reconciled 2026-10-26: #2335 comments 2026-10-14 11:16 and 11:26 UTC, before 11:35 merge — CI 38551778475 success on `81d193b79`, Sonar check 115818498598 pass, CodeRabbit review 5516635152 findings fixed and threads resolved)
+- [x] Wait for coordinator merge clearance; then merge/deploy/readonly production migration/health/config verification. (reconciled 2026-10-26: #2335 comment 2026-10-14 12:16 UTC — merged after coordinator clearance as `a6866fafa`; production run 38559400967 success; migration 0195 applied to sam-prod; `/health` 200; recovery overrides unset, defaults apply)
 
 ## Release constraints
 
@@ -49,3 +49,12 @@ No real external user event replay. No production synthetic canary without exist
 
 - Migration test now uses the established SQL asset import pattern, executes migrations and asserts database behavior; no scanner exception.
 - Read-only staging observability baseline passed persisted D1 noise checks; Workers telemetry unavailable with403, no credential expansion. Staging hold awaits Pulumi preview completion/explicit coordinator release.
+
+## Reconciliation 2026-10-26
+
+- Shipped by #2335 (`a6866fafa`, merged 2026-10-14); first successful production deploy:
+  run 38559400967 (head `a6866fafa`, 2026-10-14). Production acceptance was also recorded in
+  output-branch commit `b59915553`, which never landed on `main`.
+- Unticked: 0 — none.
+- Verdict: ARCHIVE. Audit item 1 is shipped and production-verified; out-of-scope audit items
+  2-4 stay in SAM draft `01M4TBZJTKH78R14RQNNKC837N`, which still lists item 1 as open.

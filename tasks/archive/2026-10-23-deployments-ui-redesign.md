@@ -161,14 +161,25 @@ Ship **Take A** (calm status page) as the structure, plus **Take B's live deploy
   regression test that replays the real sequence (7497e7f87)
 - [x] The staging deploy spec's page opened behind the first-run setup modal and was still
   loading at 5 s. It now dismisses the modal and waits 30 s (77905c791)
-- [ ] VM-backed spec (live page, pause from the page) on the final build
+- [x] VM-backed spec (live page, pause from the page) on the final build (reconciled 2026-10-26:
+  PR #2426 body, "Final round, on 62292fae9": `staging-app-deployment-path.spec.ts` passed in
+  5.4 min on a real deployment server, the page read "Live. Running version 1." and Pause from the
+  page worked; 62292fae9 is the PR's final head, built by Deploy Staging run 40074036183)
 
 ### Ship
 - [x] `pnpm lint`, `pnpm typecheck`, and the affected tests, all green locally
 - [x] Specialist reviews, recorded in the PR
-- [ ] Staging deploy and live verification as a user
-- [ ] PR with preflight evidence and UI screenshots; request CodeRabbit and wait
-- [ ] Merge, then monitor Deploy Production to success
+- [x] Staging deploy and live verification as a user (reconciled 2026-10-26: Deploy Staging run
+  40074036183 succeeded on final head 62292fae9; PR #2426 body records signed-in token-login
+  checks at 1280 and 375: 24/24 on 6c42217b1, and 13/13 existing pages on 62292fae9 with no
+  console errors or 5xx)
+- [x] PR with preflight evidence and UI screenshots; request CodeRabbit and wait (reconciled
+  2026-10-26: PR #2426 body carries the preflight block and per-surface screenshot evidence, also
+  posted as a PR comment; Preflight Evidence and UI Compliance checks pass; CodeRabbit was
+  requested at 01:54Z, replied "Review rate limited", and no review arrived before merge)
+- [x] Merge, then monitor Deploy Production to success (reconciled 2026-10-26: merged 2026-10-24
+  08:37Z as 833ebc366; Deploy Production run 40079745357 succeeded for that SHA at 09:13Z,
+  reported on `feature.linked-work` seq 231)
 
 ## Acceptance criteria
 
@@ -181,4 +192,15 @@ Ship **Take A** (calm status page) as the structure, plus **Take B's live deploy
 - [x] Delete requires typing the environment name
 - [x] "Ask an agent" opens a new chat whose composer holds a request naming the environment
 - [x] No horizontal overflow at 375 or 1280 with long names
-- [ ] Works on staging against real environments, with zero errors
+- [x] Works on staging against real environments, with zero errors (reconciled 2026-10-26: PR #2426
+  body, final round on 62292fae9: real-VM deploy, live page, pause and cleanup passed, and 13/13
+  page checks showed no console errors or 5xx)
+
+## Reconciliation 2026-10-26
+
+- Shipped by #2426 (`833ebc366`, merged 2026-10-24); first successful production deploy:
+  run 40079745357 (head `833ebc366`, 2026-10-24).
+- Unticked: 0 — none.
+- Verdict: ARCHIVE+FOLLOWUP. The descoped items (deploy activity feed, roll back, typed lifecycle
+  errors, crediting API-submitted releases and more) are tracked in idea
+  01M5NBRGEV68MMK65BV0BT06EP, and the manifest size cap in idea 01M5NGDCZ8SKEN4YW3Y6M67R6M.

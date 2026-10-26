@@ -23,3 +23,19 @@ Fresh read-only reviews at merge headf635e5643: `AB-MAIN-INTEGRATION-20261015-06
 B2358 shipped separately as production main8778. Raphaël transferred existing PR2363 to sole Sol A executor01M5344FTRACH9093B26A3M56C through production; historical draft/coordinator holds above are superseded. Normal merge b5394835 preserves B and incident2368; the speech factory was restored to main, so current release diff is A only. Fresh source reviews and bounded remaining runtime plan are in `2026-10-15-remove-platform-publication.md`. C remains separate/inactive. Final CI, shared staging slot, A runtime evidence, merge and canonical production checks remain required; no historical failed observer or download is called PASS.
 
 Current A-only evidence at21:30UTC is recorded in the linked A task and PR2363: exact470 CI/Sonar/security/staging green; fresh full Codex VM b539 heartbeat; source-bound historical publication/preservation acceptance reviewed PASS with failed Codex setup and historical observer limits explicit. No C activation or B/speech release delta. PR ready/trusted CodeRabbit requested and rate-limited, bounded wait in progress. PR2304 production sequence precedes A; actual production and owned warm-VM cleanup proofs remain pending.
+
+## Reconciliation 2026-10-26
+
+- This combined A/B option never merged as one release. B shipped by #2358 (`8778abe1c`, merged
+  2026-10-16); first successful production deploy: run 38954488477 (head `8778abe1c`,
+  2026-10-16). A shipped by #2363 (`bde4f9821`, merged 2026-10-16; source #2355 `3d45a2d1c`,
+  which GitHub records as merged via `b467f3898`) plus deploy repair #2370 (`d241cb05e`, merged
+  2026-10-16). Run 38973836161 for `bde4f9821` failed on R2 CORS; first successful production
+  deploy: run 38979561653 (head `d241cb05e`, 2026-10-16).
+- Unticked: 0 — the file has no checkboxes.
+- Verdict: ARCHIVE. A and B shipped separately; C shipped later by #2371. The lazy speech imports
+  already reached main through #2359, so only the shared-factory refactor (`29e9c1dc1`) was
+  dropped: branch merge `b5394835c` restored main's `tts.ts`.
+- Open PRs: draft #2361 still holds the pre-#2371 C commits, refactor `6f6dcf1da` and
+  `tasks/active/2026-10-15-reliability-integration.md`; #2351 holds only coordinator autosaves.
+  Nothing here depends on either.
