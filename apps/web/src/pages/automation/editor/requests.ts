@@ -15,8 +15,6 @@ import {
   DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
   DEFAULT_TRIGGER_NAME_MAX_LENGTH,
   type EmailTriggerConfigInput,
-  GITHUB_AUTHOR_ASSOCIATIONS,
-  GITHUB_REVIEW_STATES,
   PROJECT_EVENT_CHANNEL_SOURCE,
   PROJECT_EVENT_CHANNEL_TYPE,
   PROJECT_EVENT_SEVERITIES,
@@ -38,6 +36,7 @@ import {
 import {
   buildGitHubConfigForForm,
   buildGitHubFilters,
+  githubFilterChoiceError,
   looksLikeEmail,
   splitEmailList,
   splitList,
@@ -289,18 +288,8 @@ export function validateStep(
       const filters = buildGitHubFilters(githubInput(state));
       if (!areGitHubTriggerActionsValid(state.github.eventType, filters.actions))
         errors.github = 'Some actions do not exist for this GitHub event.';
-      if (
-        filters.authorAssociation?.some(
-          (value) => !(GITHUB_AUTHOR_ASSOCIATIONS as readonly string[]).includes(value)
-        )
-      )
-        errors.github = 'Choose an author association from the listed GitHub values.';
-      if (
-        filters.reviewStates?.some(
-          (value) => !(GITHUB_REVIEW_STATES as readonly string[]).includes(value)
-        )
-      )
-        errors.github = 'Choose a review state from the listed GitHub values.';
+      const choiceError = githubFilterChoiceError(filters);
+      if (choiceError) errors.github = choiceError;
     }
     if (state.start === 'webhook' && state.webhook.filters.some((filter) => !filter.path.trim()))
       errors.webhook = 'Every filter needs a path, like event.action.';

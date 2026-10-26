@@ -140,9 +140,12 @@ export function StepWhen({
               // A new event resets its actions and clears filters the event does not have.
               set({
                 eventType,
+                commandPrefix: eventType === 'issue_comment' ? '/sam' : '',
                 actions: GITHUB_TRIGGER_DEFAULT_ACTIONS[eventType],
                 ...(eventType === 'push' ? { labels: '', bodyContains: '' } : {}),
-                ...(eventType !== 'push' && eventType !== 'pull_request' ? { branches: '' } : {}),
+                ...(eventType === 'issues' || eventType === 'issue_comment'
+                  ? { branches: '' }
+                  : {}),
               })
             }
             onIgnoreActorsChange={(ignoreActors) => set({ ignoreActors })}

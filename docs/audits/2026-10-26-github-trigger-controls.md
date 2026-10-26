@@ -93,3 +93,51 @@ acceptance moves to PR-watch #2421 using canonical PR ownership and shared deliv
 with duplicate-wake suppression across watches/triggers. This remains unmet #2420
 scope, tracked by Idea `01M5WKCK7431DQ4FKBWENZV9QJ`; do not use Closes #2420.
 Combined staging must still prove supported same-trigger review bursts.
+
+## Actual Opus review and corrections
+
+Opus 5.5 Chat task `01M5WHY3EFHN326WD32KP7ACJT` reviewed `930e8131a` and
+returned **CHANGES REQUESTED**, rubric 2/2/3/3/3. Full report: Library
+`01M5WKHAKBM97RQVAYZCGMCFCH`, under
+`/engineering/reviews/2419-2420-2422-github-controls-opus-ui-review/`.
+This verdict supersedes the implementer's earlier visual scores. Re-review is required.
+
+Corrections prepared for independent re-review:
+
+| Findings   | Change                                                                                                                                                                                                       |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| H1, L2     | Use Automation Field with explicit text input type and linked hints; assert computed border/background against an existing field.                                                                            |
+| H2         | Include subject, review prefix/state, sender/association, text and bot restrictions in the common summary. Clear the prefix when switching to review events; retain the issue-comment `/sam` starting value. |
+| M1, L1, L8 | Summarize unavailable history as a count, list evaluated rows only, use plain warning/reasons/event words and shared time formatting. Clear previous results before a retry; keep the live region mounted.   |
+| M2         | Offer Comments on only for issue comments; omit it when serializing other new event configurations. Untouched stored settings remain preserved.                                                              |
+| M3         | Normalize role/state case, list every shared fixed choice, share validation between save and preview, and display validation errors before requesting preview.                                               |
+| M4         | Label review-family head branches Source branches in editor and Advanced.                                                                                                                                    |
+| M5         | Remove copied email mock content; add empty-field, all-unavailable and summary screenshots, event matrix assertions and truthful server-shaped evidence.                                                     |
+| L3, L4     | Use CheckRow for both bot/draft settings, explain unknown senders, group sender restrictions together, and keep extra text predicates in More conditions.                                                    |
+| L5         | Limit context chips to the selected event's available fields.                                                                                                                                                |
+| L6, L7     | Use plain instructions about external text and the acting author's roles. Security docs retain the explicit limitation that delimiters do not prevent injection.                                             |
+
+Two compact variants were considered: checkbox chips for all fixed choices, or existing
+text fields with complete choices and case normalization. The latter preserves the
+existing editor state and limits integration changes; shared validation catches unknown
+choices. Field/CheckRow reuse preserves the app's controls without changing sizing.
+No effect depends on these changed handlers: preview uses local request state and the
+editor event switch updates its draft directly.
+
+Screenshot inspection also caught card truncation hiding restrictions. The card now
+shows an additional-condition count outside the truncated sentence, linking to details.
+All 26 refreshed PNGs (13 surfaces × desktop/mobile) were opened and inspected: empty
+fields, filled controls, evaluated/empty/error/unavailable preview, context, label
+controls, saved Advanced, overview, issue-only summary and review summary. No overflow
+or clipping assertion failed; long input text stays inside native scrolling fields.
+A test-only overview mock gap (event-subscriptions and workflows) was corrected.
+Final browser validation: four editor/context/matrix cases passed; after the new overview
+count, the two saved overview/detail cases passed independently. Web unit tests 77/77,
+preview-service tests 2/2 pass. Web typecheck and delta lint are required before handoff.
+Implementer rubric after corrections: hierarchy4, clarity4, mobile4, accessibility4,
+consistency4; actual final Opus verdict remains pending.
+
+A requested one final combined Opus review on the integrated branch, covering both prior
+reports and evidence sets. B will not dispatch a duplicate reviewer. A also owns the
+affinity-specific Then wording in the integrated editor/detail, where its queue fields
+exist. No independent staging deployment or release by B.

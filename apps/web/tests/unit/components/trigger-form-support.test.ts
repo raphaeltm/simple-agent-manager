@@ -111,11 +111,19 @@ describe('new structured filter scopes', () => {
       authorAssociation: ['MEMBER'],
       ignoreBots: true,
       commentContains: 'fix',
-      isPullRequest: true,
       reviewStates: ['changes_requested'],
       commandPrefix: '/sam',
     });
     expect(buildGitHubFilters(input)).not.toHaveProperty('addedLabel');
+    expect(buildGitHubFilters(input)).not.toHaveProperty('isPullRequest');
+  });
+  it('normalizes fixed choices and limits subject selection to issue comments', () => {
+    expect(
+      buildGitHubFilters({ ...input, authorAssociation: 'member, owner', reviewStates: 'APPROVED' })
+    ).toMatchObject({ authorAssociation: ['MEMBER', 'OWNER'], reviewStates: ['approved'] });
+    expect(
+      buildGitHubFilters({ ...input, eventType: 'issue_comment', isPullRequest: 'false' })
+    ).toMatchObject({ isPullRequest: false });
   });
   it('omits scoped filters for push, preserving sender restrictions', () => {
     const filters = buildGitHubFilters({ ...input, eventType: 'push' });
@@ -126,7 +134,9 @@ describe('new structured filter scopes', () => {
       eventType: 'pull_request_review' as const,
       filters: buildGitHubFilters(input),
     };
-    expect(buildGitHubConfigForForm({ ...input, addedLabel: '' }, original)).toBeUndefined();
+    expect(
+      buildGitHubConfigForForm({ ...input, addedLabel: '', isPullRequest: '' }, original)
+    ).toBeUndefined();
     expect(
       buildGitHubConfigForForm({ ...input, eventType: 'push', actions: '' }, original)?.filters
     ).toEqual({ actors: ['alice'], ignoreBots: true });

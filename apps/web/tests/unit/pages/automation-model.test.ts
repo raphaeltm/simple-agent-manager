@@ -204,15 +204,32 @@ describe('trigger presentation', () => {
       'When someone comments /sam on an issue or PR'
     );
     expect(githubTriggerWhen('pull_request', { actions: ['opened', 'synchronize'] })).toBe(
-      'When a pull request is opened or updated with new commits'
+      'When a pull request is opened or updated with new commits · excluding drafts'
     );
     expect(githubTriggerWhen('push', { branches: ['main'] })).toBe('When code is pushed to main');
     expect(
       githubTriggerWhen('pull_request', { actions: ['labeled'], labels: ['needs-review'] })
-    ).toBe('When a label is added to a pull request with needs-review');
+    ).toBe('When a label is added to a pull request with needs-review · excluding drafts');
     expect(githubTriggerWhen('issues', { actions: ['opened'], labels: ['bug'] })).toBe(
       'When an issue labeled bug is opened'
     );
+  });
+
+  it('states comment subject and every configured review restriction', () => {
+    expect(
+      githubTriggerWhen('issue_comment', { isPullRequest: false, commandPrefix: '/sam' })
+    ).toBe('When someone comments /sam on an issue');
+    const sentence = githubTriggerWhen('pull_request_review', {
+      actions: ['submitted'],
+      commandPrefix: '/review',
+      reviewStates: ['approved'],
+      actors: ['alice'],
+      authorAssociation: ['MEMBER'],
+      ignoreBots: true,
+      commentContains: 'yes',
+    });
+    for (const condition of ['/review', 'approved', 'alice', 'MEMBER', 'users only', 'yes'])
+      expect(sentence).toContain(condition);
   });
 
   it('maps an email trigger to the email start kind, its real address, and the reacting group', () => {

@@ -42,8 +42,9 @@ A fourth kind, **Email** (preview), gives an automation its own email address. S
      labels added later, or clear it to match every action; SAM refuses an action GitHub never
      sends for that event. **Ignore actors** (starts as `dependabot[bot]`) skips those accounts,
      **Required labels** (not for pushes; for a comment, the issue's or pull request's labels)
-     needs every listed label, **Command prefix** (comments and reviews; starts as `/sam`, so clear it to
-     react to every comment) only reacts to comments starting with it, **Branches** (pushes) or
+     needs every listed label, **Command prefix** requires the comment or review body to start with that text.
+     Issue comments start as `/sam`; switching to a review event clears it so approvals
+     do not require a command. Clear the prefix to accept any beginning. **Branches** (pushes) or
      **Source branches** (pull requests) limits the branch pushed to, or the branch a pull request
      comes from, and **Text contains** (not for pushes) looks for a keyword in the title, body, or
      comment. Draft pull requests are skipped unless you clear **Ignore draft pull requests**; to
@@ -179,22 +180,22 @@ unchanged: `maxConcurrent: 1`, `skipIfRunning: true`, and draft PRs ignored for 
 `create_trigger` accepts `description`, `maxConcurrent` and `skipIfRunning` in the same call, so choose
 them explicitly before enabling an event trigger. Admission and queue controls still apply.
 
-| Filter | Meaning and scope |
-| --- | --- |
-| `actions` | Allowed actions for the selected event. Reviews: `submitted`, `edited`, `dismissed`; inline comments: `created`, `edited`, `deleted`. Push has no actions. |
-| `labels` | All required labels currently on the issue/PR, ignoring case. This does **not** identify the label just changed. |
-| `addedLabel` | Label just added **or removed**, ignoring case; only `issues` / `pull_request` with `labeled` / `unlabeled`. Inert on other actions/events. |
-| `actors` | Allowed webhook **sender** logins, ignoring case. Missing sender rejects. This never checks the issue author instead. |
-| `ignoreActors` | Denied sender logins, ignoring case; denial wins over the allow-list. |
+| Filter              | Meaning and scope                                                                                                                                                                                                                                                                                                                                             |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `actions`           | Allowed actions for the selected event. Reviews: `submitted`, `edited`, `dismissed`; inline comments: `created`, `edited`, `deleted`. Push has no actions.                                                                                                                                                                                                    |
+| `labels`            | All required labels currently on the issue/PR, ignoring case. This does **not** identify the label just changed.                                                                                                                                                                                                                                              |
+| `addedLabel`        | Label just added **or removed**, ignoring case; only `issues` / `pull_request` with `labeled` / `unlabeled`. Inert on other actions/events.                                                                                                                                                                                                                   |
+| `actors`            | Allowed webhook **sender** logins, ignoring case. Missing sender rejects. This never checks the issue author instead.                                                                                                                                                                                                                                         |
+| `ignoreActors`      | Denied sender logins, ignoring case; denial wins over the allow-list.                                                                                                                                                                                                                                                                                         |
 | `authorAssociation` | Allowed content-author associations: `OWNER`, `MEMBER`, `COLLABORATOR`, `CONTRIBUTOR`, `FIRST_TIMER`, `FIRST_TIME_CONTRIBUTOR`, `MANNEQUIN`, `NONE`. Sender must also be that content author. A labeler/editor does not inherit the original author's association. Missing metadata rejects; inert for push. Use `actors` for explicit editor/labeler access. |
-| `ignoreBots` | Explicitly require sender type `User`; bots and unknown types reject. Off unless enabled. |
-| `commandPrefix` | Trimmed comment/review body must start with this case-sensitive text. Only comment and review events. |
-| `commentContains` | Case-insensitive substring in the comment/review body only, never the issue title/body. Only `issue_comment`, `pull_request_review`, `pull_request_review_comment`. |
-| `bodyContains` | Case-insensitive substring across title/body/comment/review. Use `commentContains` for commands in comments. |
-| `isPullRequest` | `true` for PR subjects, `false` for issues. For `issue_comment`, uses the issue's PR marker. Inert for push. |
-| `reviewStates` | Allowed review states (`changes_requested`, `commented`, `approved`, `dismissed`, `pending`), only `pull_request_review`. Missing state rejects. |
-| `branches` | Exact source branch for PR/review events, or pushed branch. |
-| `ignoreDrafts` | Existing default applies only to `pull_request`; other event types are unaffected. |
+| `ignoreBots`        | Explicitly require sender type `User`; bots and unknown types reject. Off unless enabled.                                                                                                                                                                                                                                                                     |
+| `commandPrefix`     | Trimmed comment/review body must start with this case-sensitive text. Only comment and review events.                                                                                                                                                                                                                                                         |
+| `commentContains`   | Case-insensitive substring in the comment/review body only, never the issue title/body. Only `issue_comment`, `pull_request_review`, `pull_request_review_comment`.                                                                                                                                                                                           |
+| `bodyContains`      | Case-insensitive substring across title/body/comment/review. Use `commentContains` for commands in comments.                                                                                                                                                                                                                                                  |
+| `isPullRequest`     | `true` for PR subjects, `false` for issues. For `issue_comment`, uses the issue's PR marker. Inert for push.                                                                                                                                                                                                                                                  |
+| `reviewStates`      | Allowed review states (`changes_requested`, `commented`, `approved`, `dismissed`, `pending`), only `pull_request_review`. Missing state rejects.                                                                                                                                                                                                              |
+| `branches`          | Exact source branch for PR/review events, or pushed branch.                                                                                                                                                                                                                                                                                                   |
+| `ignoreDrafts`      | Existing default applies only to `pull_request`; other event types are unaffected.                                                                                                                                                                                                                                                                            |
 
 In Automation's GitHub details step, **Test against recent deliveries** evaluates your current draft
 without saving or running it. Results are bounded to recent deliveries for this repository,
@@ -211,19 +212,19 @@ explicitly; review templates retain the PR number and each event's own review/co
 All values below render as strings. Missing optional values render empty; `isPullRequest` renders
 `true` or `false`.
 
-| Variable | Value |
-| --- | --- |
-| `github.event`, `github.action` | Event and action |
-| `github.actor`, `github.repository` | Webhook sender login and owner/repository |
-| `github.number`, `github.url` | Issue/PR number and subject URL |
-| `github.title`, `github.body` | Issue/PR title and body (untrusted external text) |
-| `github.comment` | Comment or submitted review body (untrusted external text) |
-| `github.commentId`, `github.commentUrl` | Exact comment/review ID and URL; use these rather than searching for the newest comment |
-| `github.isPullRequest` | Whether the subject is a PR, including PR conversation comments |
-| `github.authorAssociation` | Acted-on content author's association; descriptive metadata, not the sender's permissions |
-| `github.reviewState` | Review state for `pull_request_review` |
-| `github.path`, `github.line` | Inline review comment file and line (original line fallback for outdated comments) |
-| `github.labels`, `github.branch`, `github.sha` | Comma-separated labels, source/push branch and commit SHA |
+| Variable                                       | Value                                                                                     |
+| ---------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `github.event`, `github.action`                | Event and action                                                                          |
+| `github.actor`, `github.repository`            | Webhook sender login and owner/repository                                                 |
+| `github.number`, `github.url`                  | Issue/PR number and subject URL                                                           |
+| `github.title`, `github.body`                  | Issue/PR title and body (untrusted external text)                                         |
+| `github.comment`                               | Comment or submitted review body (untrusted external text)                                |
+| `github.commentId`, `github.commentUrl`        | Exact comment/review ID and URL; use these rather than searching for the newest comment   |
+| `github.isPullRequest`                         | Whether the subject is a PR, including PR conversation comments                           |
+| `github.authorAssociation`                     | Acted-on content author's association; descriptive metadata, not the sender's permissions |
+| `github.reviewState`                           | Review state for `pull_request_review`                                                    |
+| `github.path`, `github.line`                   | Inline review comment file and line (original line fallback for outdated comments)        |
+| `github.labels`, `github.branch`, `github.sha` | Comma-separated labels, source/push branch and commit SHA                                 |
 
 Common variables: `trigger.id`, `trigger.name`, `trigger.description`, `trigger.fireCount`,
 `project.id`, `project.name`, `execution.id`, `execution.sequenceNumber`.

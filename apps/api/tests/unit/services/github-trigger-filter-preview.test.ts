@@ -87,12 +87,18 @@ describe('bounded read-only recent GitHub filter testing', () => {
     expect(result.deliveries).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ id: 'match', matched: true }),
-        expect.objectContaining({ id: 'no-match', matched: false }),
+        expect.objectContaining({
+          id: 'no-match',
+          matched: false,
+          reason: 'The person acting is not on your allowed list.',
+        }),
         expect.objectContaining({ id: 'unavailable', matched: null }),
         expect.objectContaining({ id: 'expired', matched: null }),
       ])
     );
     expect(JSON.stringify(result)).not.toContain('CANARY_SECRET');
+    expect(result.warning).toContain('not that it failed your conditions');
+    expect(JSON.stringify(result)).not.toContain('addedLabel');
     expect(result.deliveries).toHaveLength(4);
     expect(sqlite.prepare('SELECT count(*) as n FROM trigger_executions').get()).toEqual({ n: 0 });
   });

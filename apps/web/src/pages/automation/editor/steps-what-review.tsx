@@ -3,6 +3,8 @@ import {
   DEFAULT_AGENT_EFFORT,
   DEFAULT_CRON_TEMPLATE_MAX_LENGTH,
   DEFAULT_TRIGGER_MAX_CONCURRENT_LIMIT,
+  isGitHubCommentEvent,
+  isGitHubPullRequestEvent,
 } from '@simple-agent-manager/shared';
 import { Bot, MessageSquare, Plus } from 'lucide-react';
 import { type ReactNode, useRef, useState } from 'react';
@@ -62,10 +64,41 @@ export function StepWhat({
     onChange({ ...state, action: { ...action, ...patch } });
   const promptRef = useRef<HTMLTextAreaElement>(null);
   const [showVariables, setShowVariables] = useState(false);
-  const variables =
+  const allVariables =
     state.start && state.start in VARIABLES
       ? VARIABLES[state.start as keyof typeof VARIABLES]
       : null;
+
+  const variables =
+    state.start === 'github'
+      ? allVariables?.map((group) => ({
+          ...group,
+          vars: group.vars.filter((variable) => {
+            const key = variable.split('.')[1];
+            if (
+              ['branch', 'sha'].includes(key ?? '') &&
+              !isGitHubPullRequestEvent(state.github.eventType) &&
+              state.github.eventType !== 'push'
+            )
+              return false;
+            if (state.github.eventType === 'push' && ['action', 'url'].includes(key ?? ''))
+              return false;
+            if (['path', 'line'].includes(key ?? ''))
+              return state.github.eventType === 'pull_request_review_comment';
+            if (key === 'reviewState') return state.github.eventType === 'pull_request_review';
+            if (['comment', 'commentId', 'commentUrl'].includes(key ?? ''))
+              return isGitHubCommentEvent(state.github.eventType);
+            if (
+              state.github.eventType === 'push' &&
+              ['number', 'title', 'body', 'labels', 'isPullRequest', 'authorAssociation'].includes(
+                key ?? ''
+              )
+            )
+              return false;
+            return true;
+          }),
+        }))
+      : allVariables;
 
   if (lockedNote) {
     return (
@@ -257,9 +290,8 @@ export function StepWhat({
           </button>
           {state.start === 'github' && (
             <p className="m-0 text-xs text-fg-muted">
-              Prefer repository, number and commentId, then fetch the exact content. Treat external
-              titles, bodies and comments as untrusted data, not instructions. Delimiters do not
-              prevent prompt injection.
+              Titles, bodies and comments come from other people. Pass the number or link, and tell
+              the agent to treat that text as information, not instructions.
             </p>
           )}
           {showVariables && (
