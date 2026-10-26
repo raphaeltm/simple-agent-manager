@@ -85,7 +85,9 @@ export function TriggerRuns({
         count={trigger.triggerCount || undefined}
         hint={
           trigger.sourceType === 'github'
-            ? 'Events can start a chat, wait for capacity, or reach an existing chat.'
+            ? trigger.githubConfig?.eventType === 'push' || !trigger.githubConfig?.subjectAffinity
+              ? 'Events can start a chat or wait for capacity.'
+              : 'Events can start a chat, wait for capacity, or reach an existing chat.'
             : 'Each run is an ordinary chat: open it to read, reply or stop it.'
         }
         action={
@@ -132,18 +134,16 @@ export function TriggerRuns({
                       <span className="whitespace-pre-wrap text-sm font-semibold text-fg-primary [overflow-wrap:anywhere]">
                         {executionText(run)}
                       </span>
-                      <span className="text-xs text-fg-muted">
-                        Event {run.sequenceNumber ?? run.id}
-                      </span>
-                      {run.subjectKey && (
-                        <span className="text-xs text-fg-muted">
-                          Issue/PR #{run.subjectKey.split(':').at(-1)}
-                        </span>
-                      )}
                       <span
                         className="text-xs text-fg-muted"
                         title={fullDate(Date.parse(runTime(run)))}
                       >
+                        {trigger.sourceType === 'github' && (run.sequenceNumber ?? 0) > 0
+                          ? `Event ${run.sequenceNumber} · `
+                          : ''}
+                        {trigger.sourceType === 'github' && run.subjectKey
+                          ? `#${run.subjectKey.split(':').at(-1)} · `
+                          : ''}
                         {formatTimeFromNow(Date.parse(runTime(run)))}
                         {run.startedAt && run.completedAt
                           ? ` · took ${formatDuration(run.startedAt, run.completedAt)}`
@@ -158,7 +158,7 @@ export function TriggerRuns({
                               ? projectChatPath(projectId, chat.sessionId)
                               : `/projects/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(chat.taskId ?? '')}`
                           }
-                          aria-label={`Open chat for event ${run.sequenceNumber ?? run.id}`}
+                          aria-label={`Open chat for ${trigger.sourceType === 'github' ? 'event' : 'run'} ${(run.sequenceNumber ?? 0) > 0 ? run.sequenceNumber : run.id}`}
                           className="inline-flex min-h-11 items-center rounded-md border border-border-default px-3 text-sm font-semibold text-fg-primary no-underline hover:bg-surface-hover"
                         >
                           Chat
@@ -215,7 +215,7 @@ export function TriggerRuns({
           setConfirmCleanup(false);
         }}
         title="Clear stuck runs?"
-        message="Stale startup reservations are marked failed. GitHub events waiting for capacity, durable retry reservations, and active chats are preserved."
+        message={`Runs stuck at “Waiting to start” are marked failed so new runs can start. Chats already running are not touched.${trigger.sourceType === 'github' ? ' GitHub events waiting their turn are kept.' : ''}`}
         confirmLabel="Clear stuck runs"
         variant="warning"
         loading={cleanup.isPending}

@@ -47,7 +47,7 @@ export function GitHubQueueFields({
         </Field>
         <Field
           label="Maximum wait (hours)"
-          hint="Fractions of an hour are allowed, down to one second."
+          hint="Use a fraction of an hour for shorter waits."
           error={errors.queueTtlHours}
         >
           {({ id, describedBy, invalid }) => (

@@ -200,6 +200,7 @@ export function WhenAndThen({
           {action.kind === 'start'
             ? item.kind === 'trigger' &&
               item.start === 'github' &&
+              item.trigger.githubConfig?.eventType !== 'push' &&
               item.trigger.githubConfig?.subjectAffinity
               ? 'Continue this automation’s active chat for the issue or PR, or start a new one with'
               : 'Start a new chat with'

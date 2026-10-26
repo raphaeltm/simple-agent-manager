@@ -58,7 +58,7 @@ for (const scenario of ['normal', 'many-long', 'empty', 'error'] as const) {
       scheduledAt: new Date().toISOString(),
       startedAt: null,
       completedAt: null,
-      sequenceNumber: i + 1,
+      sequenceNumber: i % 8 === 6 ? 0 : i + 1,
       createdAt: new Date().toISOString(),
     }));
     await page.route(`**/api/projects/${PROJECT_ID}/triggers/${trigger.id}/executions*`, (route) =>
@@ -75,6 +75,7 @@ for (const scenario of ['normal', 'many-long', 'empty', 'error'] as const) {
         'GitHub events: 2 waiting now · History (up to 90 days): 3 delivered · 3 dropped · 1 unconfirmed'
       );
     if (scenario === 'normal') {
+      await expect(page.getByText(/\bEvent 0\b/)).toHaveCount(0);
       await expect(
         page.getByText(
           'Continue this automation’s active chat for the issue or PR, or start a new one with'
@@ -105,6 +106,7 @@ for (const scenario of ['normal', 'many-long', 'empty', 'error'] as const) {
       await expect(page.getByRole('alert')).toContainText('Could not load runs.');
     await audit(page, `github-trigger-queue-${scenario}`);
     if (scenario === 'normal') {
+      await expect(page.getByText(/\bEvent 0\b/)).toHaveCount(0);
       await expect(
         page.getByText(
           'Continue this automation’s active chat for the issue or PR, or start a new one with'
@@ -158,4 +160,43 @@ test('GitHub queue controls', async ({ page }, info) => {
   await expect(page.getByLabel('Maximum wait (hours)')).toHaveAttribute('aria-invalid', 'true');
   await expect(page.getByLabel('Maximum wait (hours)')).toHaveAttribute('aria-describedby', /.+/);
   await audit(page, 'github-trigger-queue-controls-invalid');
+});
+
+test('GitHub push never promises issue or PR affinity', async ({ page }) => {
+  await setupAutomationMocks(page);
+  const trigger = {
+    ...TRIGGERS.github,
+    name: 'Handle pushes',
+    promptTemplate: 'Review {{github.branch}} at {{github.sha}}.',
+    triggerCount: 0,
+    lastTriggeredAt: null,
+    githubConfig: {
+      ...TRIGGERS.github.githubConfig,
+      eventType: 'push',
+      filters: { branches: ['main'] },
+      subjectAffinity: true,
+    },
+  };
+  await page.route(`**/api/projects/${PROJECT_ID}/triggers/${trigger.id}`, (route) =>
+    route.fulfill({ json: trigger })
+  );
+  await page.route(`**/api/projects/${PROJECT_ID}/triggers/${trigger.id}/executions*`, (route) =>
+    route.fulfill({ json: { executions: [], nextCursor: null } })
+  );
+  await page.goto(`/projects/${PROJECT_ID}/automation/trigger/${trigger.id}`);
+  await expect(page.getByText('Start a new chat with')).toBeVisible();
+  await expect(
+    page.getByText('Events can start a chat or wait for capacity.', { exact: true })
+  ).toBeVisible();
+  await page.getByText('Advanced', { exact: true }).click();
+  await expect(page.getByText('Not applicable to push events', { exact: true })).toBeVisible();
+  await audit(page, 'github-trigger-push-detail');
+  await page.getByRole('link', { name: 'Edit', exact: true }).click();
+  await page.getByTestId('automation-editor-next').click();
+  await page.getByTestId('automation-editor-next').click();
+  await expect(page.getByTestId('automation-sentence')).toContainText('start a new chat with');
+  await expect(page.getByTestId('automation-sentence')).not.toContainText('active chat');
+  await page.getByText('Advanced options', { exact: true }).click();
+  await expect(page.getByRole('checkbox', { name: /Keep issue and PR follow-ups/ })).toHaveCount(0);
+  await audit(page, 'github-trigger-push-review');
 });
