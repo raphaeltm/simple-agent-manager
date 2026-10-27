@@ -231,8 +231,8 @@ notification (a plain comment notification doesn't add to the bell's count).
 The person who started a chat can let a teammate drive it for 5, 10, 30 or 60 minutes: send
 messages (with files), schedule messages, answer the agent's questions, use **Interrupt**,
 **Sleep**, and **Archive**, and look through the repository's files and changes. Only the owner can
-open the terminal, port previews and the workspace page, **Renew** the share, fork the chat once it
-has ended, or point a watch at it.
+open the terminal, port previews and the workspace page, **Renew** the share, use the **Fork** box
+on an ended chat, or point a watch at it.
 
 1. Open the chat and select **Share** in the
    [session tool rail](/docs/guides/chat-features/#the-session-tool-rail) (when the rail shows only
@@ -325,7 +325,9 @@ answer them, so a teammate driving the chat should keep it open.
 Without shared access, a teammate's chat shows _Only Prakash Rao can message this agent. You can
 leave comments on any message, or ask Prakash Rao to share this chat._ and a **Start your own chat** button.
 You can still [comment](#comment-on-a-chat), [@mention](#mention-a-teammate) people, and fork the
-chat from its tool rail while it's running or asleep; once it has ended, only its owner can fork it.
+chat from its tool rail, even after it has ended. (An ended chat says only its owner can fork it:
+that's the **Fork** box in place of the message box, which hands the new chat the old one's
+history.)
 Only the chat's owner, and people it's shared with, can answer the agent's
 questions and permission requests. The tool rail also shows **Complete**, which ends the owner's
 task: leave that to them.

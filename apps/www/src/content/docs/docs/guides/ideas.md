@@ -63,16 +63,16 @@ SAM works out an idea's state from the chats linked to it and their pull request
 that came from, such as "From GitHub, 2 minutes ago" or "From the linked chat". The first state
 that applies is the one you see:
 
-| State               | What it means                                                                        |
-| ------------------- | ------------------------------------------------------------------------------------ |
-| **Done**            | Someone marked it done                                                               |
-| **Parked**          | Someone set it aside                                                                 |
-| **Waiting for you** | An agent working on it asked something that nobody has answered                      |
-| **Stopped**         | The latest work on it failed, and nothing else is running                            |
-| **In progress**     | A chat is working on it (a sleeping chat counts, because it wakes when there's more) |
-| **In review**       | Its pull request is open, including a draft                                          |
-| **Merged**          | Its pull request merged, and nobody has said whether that finished the idea          |
-| **Not started**     | Nothing is working on it right now                                                   |
+| State               | What it means                                                                                                                         |
+| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
+| **Done**            | Someone marked it done                                                                                                                |
+| **Parked**          | Someone set it aside                                                                                                                  |
+| **Waiting for you** | An agent working on it asked something that nobody has answered                                                                       |
+| **Stopped**         | The latest work on it failed, and nothing else is running                                                                             |
+| **In progress**     | A chat is working on it (a chat asleep in the middle of its work counts, because it wakes when there's more; a finished Task doesn't) |
+| **In review**       | Its pull request is open, including a draft                                                                                           |
+| **Merged**          | Its pull request merged, and nobody has said whether that finished the idea                                                           |
+| **Not started**     | Nothing is working on it right now                                                                                                    |
 
 A few things follow from that:
 
@@ -83,14 +83,13 @@ A few things follow from that:
   agent filed the idea, edited it or posted an update on it, along with any pull request that chat
   reports. A chat that only read or mentioned the idea doesn't, and neither does a chat that
   [talks it through](#start-work-on-an-idea). So an idea an agent files from a chat shows **In
-  progress** while that chat is open or asleep, and can take that chat's own pull request as its
+  progress** while that chat's work is still going, and can take that chat's own pull request as its
   own. If it then asks whether a merge finished the idea and it didn't, answer **Keep open**.
 - **Pull request states come from GitHub**, for pull requests in the project's own GitHub
   repository. A GitLab merge request, or a pull request in another repository, doesn't move an
   idea.
-- **You can mark an idea done only after a pull request merges, and park it only before work
-  starts.** That's when the page offers **Mark done** and **Park**. To mark any other idea done, or
-  to park one that's in progress, ask an agent in the project to do it: agents can mark an idea
+- **The page offers Mark done only while an idea shows Merged, and Park only while it shows Not
+  started.** To mark any other idea done, or to park it, ask an agent in the project to do it: agents can mark an idea
   done or parked, or reopen it, with their tools. The status line of a done or parked idea reads
   **Your decision**, whoever made the change.
 
@@ -113,8 +112,9 @@ Select an idea to open its page. On a phone the sections stack, with **Status** 
   An agent's note shows its profile name and links to its chat, and a note can quote the line of
   the plan it's about. The page shows the 30 newest.
 - **Work**: every chat and pull request for the idea, and how each one is doing: **Working**,
-  **Finished**, **Stopped on purpose**, **Asleep, will wake**, or what went wrong. A chat that talks
-  the idea through shows **Talking it through**, then **Ended**. Pull requests show **Open**,
+  **Finished**, **Stopped on purpose**, **Asleep, will wake**, or what went wrong. A chat that only read
+  or discussed the idea shows **Talking it through** while it's awake, and **Ended** otherwise,
+  including while it's asleep. Pull requests show **Open**,
   **Draft**, **Merged** or **Closed**, with their checks while they're open.
 - **Related**: files and other ideas that were linked as agents worked, such as a file a chat
   uploaded while working on the idea.

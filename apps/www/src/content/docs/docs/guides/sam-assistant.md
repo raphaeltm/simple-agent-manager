@@ -31,10 +31,10 @@ those, you can ask it to:
 - **stop work** or **answer an agent** that's waiting, which it does only after you confirm.
 
 Name the project, and say which profile, branch or review you want, as you would in a project
-chat. Work it starts is recorded as started by you. It runs on a VM when the profile asks for one,
-or when you or the project has a cloud account connected; otherwise it runs in an
-[Instant](/docs/guides/instant-sessions/) container, which has no devcontainer and no Docker. For
-builds and tests, name a profile that uses a VM.
+chat. Work it starts is recorded as started by you. It runs where the profile's runtime says. With
+**Auto**, or no profile, it runs on a VM only when you or the project has a cloud account
+connected, and otherwise in an [Instant](/docs/guides/instant-sessions/) container, which has no
+devcontainer and no Docker. For builds and tests, name a **Cloud VM** profile.
 
 It can't change settings, connections, compute pools, automation or deployments, and it can't
 read schedules, channels or a team of agents, or interrupt an agent. Use the app for those.

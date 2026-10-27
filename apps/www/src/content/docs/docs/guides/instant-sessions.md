@@ -68,9 +68,9 @@ pushed or a pull request opened (see
 [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands)). What differs is whether
 the work gets a branch of its own:
 
-| How you started it                                                                                                                                        | Branch                                           |
-| --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
-| A message-box chat on an **Instant** profile, with no attachments or resource overrides, not started from an idea                                         | None: the workspace stays on your default branch |
+| How you started it                                                                                                                                       | Branch                                           |
+| -------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| A message-box chat on an **Instant** profile, with no attachments or resource overrides, not started from an idea                                        | None: the workspace stays on your default branch |
 | Anything else: an Instant chat with attachments or resource overrides or started from an idea, a submitted task, or `dispatch_task`, in either task mode | Its own `sam/…` output branch                    |
 
 A chat with no branch keeps whatever the agent changed in its container, until the agent pushes it

@@ -339,7 +339,7 @@ that setting if you want Bypass Permissions.
 An agent profile's **Workspace Profile** setting chooses how much environment its chats get:
 
 - **Full** (default): builds your project's `.devcontainer` so the agent can run your stack, tests, and services. Best when the work depends on your real environment.
-- **Lightweight**: starts faster with a minimal environment. Best for quick questions, planning, and code exploration. With **Task Mode** left at **Default**, a Lightweight profile's sessions are Chats, which stay open for back-and-forth instead of finishing on their own — see [Chat or Task](/docs/guides/chat-features/#chat-or-task).
+- **Lightweight**: starts faster with a minimal environment. Best for quick questions, planning, and code exploration. With **Task Mode** left at **Default**, a Lightweight profile's sessions are Chats, which stay open for back-and-forth instead of finishing on their own (see [Chat or Task](/docs/guides/chat-features/#chat-or-task)).
 
 ## Agent Session Features
 

@@ -40,9 +40,9 @@ open pull requests" or "remind this chat tomorrow morning to check the release".
    instead), the **Agent** profile and optional **Skill**, and **What should it do?**, the
    instructions for each run. **Add a detail from the run** inserts values such as a GitHub issue's
    title.
-5. **Review**: check the one-sentence summary and select **Create automation**. A repeating
-   automation also needs a **Name**, and has **Advanced options** (overlapping runs, chat type,
-   machine).
+5. **Review**: check the one-sentence summary and select **Create automation**. Schedules and
+   GitHub, webhook and email automations also need a **Name** and have **Advanced options**
+   (overlapping runs, chat type, machine); one-time runs and watches don't.
 
 The step-by-step details for each kind are in [Triggers](/docs/guides/triggers/#create-a-trigger-yourself),
 [Run something once](#run-something-once) and [React when SAM sees an event](#react-when-sam-sees-an-event).
@@ -141,7 +141,9 @@ Select **New automation**, then **Once, at a time you pick**:
 2. Choose what should happen:
    - **Message a chat** sends your message to a chat you pick. A busy agent gets it when its
      current turn ends. A sleeping chat wakes up for it, so an agent can schedule a message to
-     itself and be woken by it later. You can message a chat you started, or one
+     itself and be woken by it later, as long as the chat can still be woken: after seven days
+     asleep a chat [expires](/docs/guides/session-troubleshooting/#expired-saved-workspace), and
+     the message can't reach it. For a reminder further out, use **Start a new chat**. You can message a chat you started, or one
      [shared with you](/docs/guides/collaboration/#share-a-chat) while your access lasts. A message
      you schedule into a shared chat shows as yours, and is cancelled if your access ends before
      it's sent. An agent can schedule messages only into chats its user started.
@@ -202,7 +204,8 @@ events as information from someone else, not as instructions.
 If a webhook didn't start anything, open the automation and look at **Calls received**: it lists
 each call, and whether and why it was ignored. Each automation applies its own filters.
 
-Everyone in the project can see automations and change them. SAM checks access again when an
+Everyone in the project can see automations and change them, except what a watch does, which
+only its creator can change. SAM checks access again when an
 action runs, and again just before a message is sent. Schedules remember who created them, never
 an agent's credentials.
 

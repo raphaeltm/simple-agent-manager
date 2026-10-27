@@ -60,7 +60,7 @@ Two things happen server-side regardless of what you tick:
 
 ## After you submit
 
-You get a confirmation with a **report ID**, a status of `draft`, and the list of references that were actually attached. The report becomes a **draft [Idea](/docs/guides/idea-execution/)** in the platform's feedback project, where a maintainer picks it up.
+You get a confirmation with a **report ID**, a status of `draft`, and the list of references that were actually attached. The report becomes a **draft [Idea](/docs/guides/ideas/)** in the platform's feedback project, where a maintainer picks it up.
 
 Reports are rate-limited to **20 per hour** per account (`RATE_LIMIT_REPORT_ISSUE_POST`). Exceeding that returns a `429`. The window is a fixed clock hour rather than a rolling sixty minutes, so the allowance resets at the top of the next hour — which may be in five minutes or fifty-five.
 

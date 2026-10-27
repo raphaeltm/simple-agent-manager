@@ -179,6 +179,13 @@ Pushed back on two: the em-dash list in collaboration.md "What's shared" predate
 uses that style throughout, so kept; reviewer B's "view-only members see See what went wrong" was
 resolved by removing view-only mentions everywhere, since only owner and admin roles are assignable.
 
+Round 2 (same three reviewers, resumed): A confirmed fixes but one went the wrong way (the rail's
+Fork works for teammates even after a chat ends; only the Fork box is owner-only), plus 6 LOW; B
+found a lost caveat (a sleeping chat can't be woken after 7 days) plus 5 LOW (filters section reads
+as agent material, form labels added to the filter table); C found 4 LOW (confirmation list,
+assistant runtime for Instant profiles, "one click", card names). All fixed; three docs files whose
+tables my em-dash edits unaligned were reformatted.
+
 Product follow-ups from round 1 (added to ideas 01M5Q8Y33A7K9YZN5QKX5KG56N, 01M5XYTDMAC61NPS0B1HV8GAM1,
 01KQ720TE8Y8ZGVTZPBM8Y4NH0, 01M5XYTR9WBQEZ0SQK07EMZDZ1): Send to agent offered twice (duplicate dropped);
 skill without agent skips project default; Mark done/Park missing in most states; notes/filing

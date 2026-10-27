@@ -573,7 +573,7 @@ message box depends on how it ended:
 - **A Fork box** ("Fork into a new chat with retained history…") on a chat that was archived or
   that expired. Type what should happen next and select **Fork** to carry on in a new chat that is
   given this one's recent history (see
-  [Fork an archived or expired chat](/docs/guides/chat-features/#fork-an-archived-or-expired-chat).
+  [Fork an archived or expired chat](/docs/guides/chat-features/#fork-an-archived-or-expired-chat)).
 - **"This session has ended."** on a chat that failed and couldn't be kept.
 - **This chat has ended** and **Only … can fork it to continue.** on someone else's chat, with
   **"This session has ended."** under it if that chat failed. Select **Start your own chat**, or use

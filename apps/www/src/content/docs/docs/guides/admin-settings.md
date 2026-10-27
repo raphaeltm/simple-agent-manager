@@ -45,9 +45,10 @@ shows as **operations · cron Sweeps Enabled**), and shows:
 
 1. Find the setting and change its value.
 2. Select **Save**. A card marked **Requires confirmation** then asks you to confirm in **Confirm
-   runtime change**: select **Apply change**. That covers sign-in, every Connector setting, on/off
-   switches, and the AI-model defaults and spending limits; other number limits save straight away.
-   **Reset override** always asks.
+   runtime change**: select **Apply change**. That covers sign-in, the ten Connector settings that
+   are also on **Admin → Integrations → Connector**, on/off switches, and the AI-model groups,
+   budgets and unpriced-call charge. Other number limits, including the Connector read limits, save
+   straight away. **Reset override** always asks.
 3. The page says **Settings saved.** The server that saved it uses the new value at once, and the
    rest of SAM within a minute (within 30 seconds for trials, cron sweeps, and Durable Object alarms).
 
