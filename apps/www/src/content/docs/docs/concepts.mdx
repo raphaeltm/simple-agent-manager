@@ -109,11 +109,11 @@ SAM also has a private operator-only incident trigger source used by the configu
 
 ## Ideas
 
-An **idea** captures a piece of work you want done. Most work starts directly from the project chat — submitting a message both creates and executes the work in one step. The **Ideas** list is where an idea waits until someone starts work on it, collecting context as people and agents talk about it, and then follows that work: its state comes from the chats and pull requests linked to it rather than from a label anyone typed. See [Idea Execution](/docs/guides/idea-execution/#ideas).
+An **idea** is something you want done in a project. Most work starts directly from the project chat: sending a message both creates the work and starts it. **Ideas** is where you keep work for later. An idea holds the plan and waits until someone starts work on it with **Start work**. After that it follows the work: its state (**In progress**, **In review**, **Merged**, and so on) comes from the chats and pull requests linked to it, and only a person, or an agent asked to, marks it done. See [Ideas](/docs/guides/ideas/).
 
-You can also start a saved idea from its detail page with the **Start work** button — see [Starting work on an idea](/docs/guides/idea-execution/#starting-work-on-an-idea).
+As agents work, SAM links each chat to the ideas it creates, edits or works on, and to the library files it uploads or reads, and keeps the state of the pull requests it reports. You see those links under **Related** in a chat, and under **Work** and **Related** on an idea's page. See [How work gets linked](/docs/guides/ideas/#how-work-gets-linked).
 
-### How Execution Works
+## How Execution Works
 
 When you submit work from the chat:
 
@@ -125,17 +125,11 @@ When you submit work from the chat:
 
 SAM leaves commits, pushes and pull requests to the agent; turn end and task completion do not publish repository changes. See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands).
 
-### Linking Ideas to Conversations
-
-SAM records project-scoped relationships as agents create, edit, or read ideas and upload, replace, or view library files in a chat. Reading an idea or viewing a file creates a weaker relationship than creating or editing it. Explicit `link_idea` and `unlink_idea` tools manage chat-to-idea links. Agents can also use `link_to_idea` and `unlink_from_idea` to connect a file, pull request, or related idea when the work happened outside those automatic paths. Search and list tools do not create relationships.
-
-The idea, chat, and library file link endpoints return related work with totals and truncation flags. An idea includes files and pull requests explicitly linked to it and those belonging to chats strongly linked to it. A chat that only read an idea does not contribute its files or pull requests to that idea.
-
 ### Agent-to-Agent Dispatch
 
 Running agents can start follow-up tasks in the same project with SAM's `dispatch_task` tool, then message, check on, or stop them. This enables multi-step workflows where one agent delegates sub-work to others.
 
-See the [Idea Execution guide](/docs/guides/idea-execution/) for full details.
+See [What Happens When You Send Work](/docs/guides/idea-execution/#agent-to-agent-dispatch) for details.
 
 ## Agent Sessions
 

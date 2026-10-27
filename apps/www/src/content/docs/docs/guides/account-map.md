@@ -1,10 +1,9 @@
 ---
 title: Account Map
-sidebar:
-  order: 30
+description: See your recent projects, chats, tasks, workspaces, machines and ideas on one map, and how they connect.
 ---
 
-The Account Map shows your recent projects, chats, tasks, workspaces and nodes together. Ideas with links to chats shown on the map appear as yellow nodes. A line connects each idea to its project and to each linked chat. A stronger line marks a chat that is working on the idea.
+Select **Map** in the main navigation. The Account Map shows your recent projects, chats, tasks, workspaces and nodes together, for the projects you own. Projects you're a member of but don't own aren't on it. Ideas with links to chats shown on the map appear as yellow nodes. A line connects each idea to its project and to each linked chat. A stronger line marks a chat that is working on the idea.
 
 Use the **Ideas** filter to hide or restore idea nodes and their lines. Select an idea's title to open its idea page. **Active** limits the map to active chats and resources; switch to **All** to include older chats.
 

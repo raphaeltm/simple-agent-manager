@@ -1,9 +1,9 @@
 ---
-title: Idea Execution
-description: What happens after you send work to an agent — the execution lifecycle, where the work lands and how to get a pull request, agent dispatch, and warm reuse.
+title: What Happens When You Send Work
+description: What SAM does after you send work to an agent — the steps it goes through, where the work lands and how to get a pull request, agents starting other agents, and warm reuse.
 ---
 
-The main way to use SAM is the **project chat**: you describe what you want done, and SAM handles provisioning, agent execution, and cleanup. This page explains what happens after you hit send.
+The main way to use SAM is the **project chat**: you describe what you want done, and SAM handles provisioning, agent execution, and cleanup. This page explains what happens after you hit send. To keep a list of work you want done and start it later, use [Ideas](/docs/guides/ideas/).
 
 ## Executing from the Chat
 
@@ -15,26 +15,7 @@ Type your description in the project chat input and submit. Submitting a message
 4. **Start the agent** — runs the agent from your selected profile (Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, or Amp) with your description
 5. **Stream output** — watch the agent work in real time in the chat
 
-The **Ideas** list holds work you want done but have not started yet, and keeps following it after you do — see [Ideas](#ideas) below for how an idea's state is worked out. You can also start a saved idea from its detail page — see [Starting work on an idea](#starting-work-on-an-idea).
-
-## Starting work on an idea
-
-An open idea's detail page has a **Start work** button. It opens a sheet where you choose:
-
-- **Who works on it** — the same profile picker the chat composer uses. The badge beside the profile says what SAM will do with it: **Does the work** (SAM runs it as a task) or **Talks it through** (SAM runs it as a conversation).
-- **Skill** — optional, from your project's skills.
-- **Note for the agent** — optional. Your note is the only message sent. If you leave it blank SAM sends one short neutral line.
-- **What the agent starts with** — the idea itself, plus the chats, files and pull requests already linked to the idea, which the agent can look up with its SAM tools.
-
-One sentence above the buttons says exactly what will happen. Picking a conversation profile changes the sheet to **Talk it through** and the button to **Start chat**: the chat is recorded on the idea as a discussion rather than as work on it. SAM never swaps the runtime your profile asks for.
-
-Before the agent receives its first prompt, SAM links the new chat to the idea — `works_on` for task work, `discusses` for a conversation. If that link cannot be written the start fails and nothing is left queued. Done and parked ideas are rejected; reopen the idea first.
-
-The agent is given the idea itself through `get_instructions`, inside an explicit untrusted-data envelope, and is pointed at the `get_idea` and `get_related` tools for the rest. SAM does not put ids, tool names, slash commands or any workflow that only exists in one repository into the message you send. How the agent works is decided by the profile and skill you chose and by your repository's own instructions.
-
-### Keep the plan current with Updates
-
-An idea's text is its current plan. Post progress, findings, and decisions as updates through the API or agent tools so earlier notes do not obscure the plan. Agents can post an update with `update_idea` using `note` and an optional `quote`, then read updates with `list_idea_updates`. Post a note separately from editing the plan; a note by itself leaves the idea text unchanged. Updates carry the author's name and, for agent notes, the source chat. The author or a project owner or admin can remove an update.
+You can also start work from an idea you filed earlier, with **Start work** on its page. SAM then links the new chat to the idea, so the idea follows the work. See [Start work on an idea](/docs/guides/ideas/#start-work-on-an-idea).
 
 ### Execution Options
 
@@ -61,73 +42,7 @@ modern fields take precedence at the same configuration layer. See
 [Upgrading existing compute pools](/docs/reference/configuration/#upgrading-existing-compute-pools)
 for migration and rollback behavior.
 
-## Ideas
-
-An idea is something you want done, whether or not work has started. It collects context —
-chats, files, notes, pull requests — and once someone starts work on it, it keeps following
-that work rather than being replaced by it.
-
-### Where an idea stands is worked out, not typed
-
-Nobody sets an idea's state by hand. SAM derives it from the chats linked to the idea, those
-chats' tasks and their pull requests, and shows where each state came from ("From GitHub, a
-minute ago") so you can tell whether to trust it:
-
-The table is in precedence order — the first row that applies is the state you see
-(`operations/idea-status.ts`):
-
-| State               | What it means                                                            |
-| ------------------- | ------------------------------------------------------------------------ |
-| **Done**            | You marked it done                                                       |
-| **Parked**          | You parked it                                                            |
-| **Waiting for you** | An agent asked you something and nobody has answered                     |
-| **Stopped**         | The latest work failed and nothing else is running                       |
-| **In progress**     | A linked chat is working on it (a sleeping chat still counts — it wakes) |
-| **In review**       | A pull request for the work is open                                      |
-| **Merged**          | A pull request merged, and nobody has said whether that finished it      |
-| **Not started**     | Nothing is linked yet, or nothing is in flight                           |
-
-So your own decisions outrank everything, an unanswered question outranks failed or running
-work, and running work outranks an open pull request. Only chats that actually work on the
-idea move it; a chat that merely read or mentioned it never does.
-
-**An idea is never run in place.** Starting work creates a new task linked to the idea, so the
-idea keeps following that work rather than turning into it. That is why an idea moves only
-between open, done and parked.
-
-**Done and Parked stay your decision.** A merged pull request does not always finish an idea —
-the docs page may still be missing — so SAM asks once, with **Mark done** and **Keep open**,
-and does not ask again about that merge.
-
-### What needs you comes first
-
-The Ideas list opens on **Needs you**: the ideas with a question, a stopped run, or a merged
-pull request waiting on your call, each with its fix as a button (**Answer**, **Try again…**,
-**Mark done**). At most three are shown before the rest fold away, so a bad day cannot push the
-whole list off a phone screen. Below that come **In progress** and **Not started**; ideas you
-have finished and ideas an automation filed fold away at the bottom.
-
-### An idea's page
-
-The idea's own text is the **current plan**, and only that. What happened to it lives beside
-it:
-
-- **Work** — every chat and pull request for the idea, and what each one produced.
-- **Updates** — short notes from people and agents, newest first, with the line each one is
-  answering. Agents post here with `update_idea`'s `note` (and an optional `quote`) instead of
-  appending to the plan, which is what used to make an idea's text contradict itself.
-- **Related** _(intended, not yet available)_ — the files and other ideas that linked
-  themselves while agents worked. The link store this reads is not on `main` yet.
-
 ## While the work runs
-
-### Linked work
-
-SAM connects an idea to the chats that created, edited, read, or worked on it. When an agent uploads, replaces, downloads, or displays a library file in a chat, SAM records that relationship too. An idea can show files and pull requests linked directly to it and those produced by chats doing substantial work on it. A chat that only read an idea does not bring its files or pull requests into that idea.
-
-Agents can use `link_to_idea` for a file, pull request, or related idea created outside those automatic paths, and `unlink_from_idea` to remove an explicit link. The idea's Conversations list still shows its connected chats. Linked lists are capped; the API reports their totals and whether results were truncated. A pull request total may be shown as a lower bound when the associated chat list is too large to scan in one bounded read.
-
-Agent tools expose this context in one call. `get_idea` returns the idea's plan, related chats, files, pull requests with recorded state and checks, related ideas, and recent updates. By default, the complete maximum-length idea plan fits in one call when it uses ASCII text. If a longer encoded plan is paged, its content ends with a continuation notice naming `get_idea` and the next `contentOffset`; `contentTruncated` and `nextContentOffset` carry the same signal as fields. `get_linked_context` returns related work for an idea, chat or library file; in a workspace, calling it without an ID uses the current chat. These responses cap each list and disclose totals and truncation. Text written by people, agents or GitHub is enclosed as untrusted data, so a quoted instruction in a note or pull request title does not change the agent's instructions.
 
 ### Execution Steps
 
@@ -151,8 +66,10 @@ one; see [Chat or Task](/docs/guides/chat-features/#chat-or-task)):
 - **A Task** ends when its agent reports the work complete (SAM tells a Task's agent to push its
   branch first) or when you select **Complete** in the session tool rail. When the agent reports
   it, you get a **Task completed** notification, which links the pull request if the agent reported
-  one; completing it yourself sends no notification. An idea then shows **Done**, and the session
-  goes to sleep: its workspace is saved for seven days, and a follow-up message wakes it.
+  one; completing it yourself sends no notification. The session then goes to sleep: its workspace
+  is saved for seven days, and a follow-up message wakes it. If the task worked on an
+  [idea](/docs/guides/ideas/), the idea shows **In review** or **Merged** while its pull request
+  is open or merged, and is only **Done** once someone marks it done.
 - **A Chat** stays open for more messages until you put it to **Sleep** or **Archive** it.
 
 SAM itself never commits, pushes, or opens a pull request for either one; see
@@ -218,7 +135,7 @@ if agents shouldn't push to it directly.
 
 ## AI Title Generation
 
-SAM automatically generates concise titles for ideas using Workers AI:
+SAM automatically generates concise titles for the chats and tasks you send, using Workers AI. (An idea you file keeps the title you give it.)
 
 - Messages **at or below 100 characters** are used as the title directly (no AI needed)
 - Longer messages are summarized by a Workers AI model (default: `@cf/google/gemma-4-26b-a4b-it`)

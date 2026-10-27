@@ -172,7 +172,7 @@ permission, but not ask questions or send links. Which you get depends on what y
 
 - An [agent profile](/docs/guides/agents/#agent-profiles) whose runtime is
   [Instant](/docs/guides/instant-sessions/) gives a **Chat**, unless you attach a file and also pick
-  a skill set to **Task**. [Starting work on an idea](/docs/guides/idea-execution/#starting-work-on-an-idea)
+  a skill set to **Task**. [Starting work on an idea](/docs/guides/ideas/#start-work-on-an-idea)
   no longer forces a **Task**: the sheet runs the profile and skill you chose, and says which of the
   two you will get before you press the button.
 - On a VM, a profile whose **Task Mode** is **Conversation** gives a **Chat**; profiles you create
@@ -283,7 +283,8 @@ badge in the rail.
 
 Two of these also surface without opening the panel:
 
-- **The idea being worked on** appears as a chip in the chat header, next to the comment chip.
+- **The idea the chat is about** appears as a chip in the chat header, next to the comment chip:
+  **Working on** and the idea's title, or **Discussing** for a chat that talks an idea through.
   Tap it to open the idea.
 - **View PR**, in the session's **Details** panel, shows the pull request's number and its state
   — Open, Draft, Merged or Closed — with its checks when SAM knows them. The state comes from
@@ -292,7 +293,7 @@ Two of these also surface without opening the panel:
 
 Most links are recorded as the work happens, so there is nothing to maintain by hand. An agent
 can also connect something deliberately when the work happened elsewhere — see
-[Linking Ideas to Conversations](/docs/concepts/#linking-ideas-to-conversations).
+[How work gets linked](/docs/guides/ideas/#how-work-gets-linked).
 
 ## File Browsing
 
