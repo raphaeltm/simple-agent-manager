@@ -243,6 +243,7 @@ describe('workspace runtime recreation/deletion races — real SQL', () => {
         "last_heartbeat_at = '2020-01-01T00:00:00.000Z'",
         'last_metrics = NULL',
       ]) {
+        sqlite.prepare('UPDATE nodes SET last_heartbeat_at = ?').run(new Date().toISOString());
         sqlite.exec(`UPDATE nodes SET ${mutation}`);
         expect((await requestLifecycle(action)).status).toBe(409);
         expect(workspaceStatus()).toBe('error');
