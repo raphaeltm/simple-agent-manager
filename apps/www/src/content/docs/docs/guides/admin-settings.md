@@ -33,7 +33,7 @@ shows as **operations · cron Sweeps Enabled** — and shows:
   <source media="(max-width: 40em)" srcset="/images/docs/admin-settings-mobile.png 2x" />
   <img
     src="/images/docs/admin-settings.png"
-    alt="The Runtime settings page under Admin → Settings. On a desktop: a search box, a count of 26 settings, then the OAuth group, where the GitHub sign-in cards say &quot;Source: environment · Configured · Requires confirmation&quot;, the Google ones &quot;Source: database&quot;, client ID fields show their values, and secret fields say &quot;Current secret is never returned&quot;. On a phone: the Connector group, where &quot;connector · enabled&quot; says &quot;Source: default · Not configured&quot; and &quot;connector · write Enabled&quot; is set to Disabled with &quot;Source: database&quot; and an available Reset override button."
+    alt="The Runtime settings page under Admin → Settings. On a desktop: a search box, the number of settings, then the OAuth group, where the GitHub sign-in cards say &quot;Source: environment · Configured · Requires confirmation&quot;, the Google ones &quot;Source: database&quot;, client ID fields show their values, and secret fields say &quot;Current secret is never returned&quot;. On a phone: the Connector group, where &quot;connector · enabled&quot; says &quot;Source: default · Not configured&quot; and &quot;connector · write Enabled&quot; is set to Disabled with &quot;Source: database&quot; and an available Reset override button."
   />
 </picture>
 
