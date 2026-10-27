@@ -8,8 +8,8 @@ import { afterEach, describe, expect, it } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import {
   attachPrecreatedWorkspacePlacement,
-  reserveWorkspaceRestart,
   reserveWorkspacePlacement,
+  reserveWorkspaceRestart,
 } from '../../../src/services/workspace-placement';
 import {
   resolveWorkspaceAdmissionPolicy,
