@@ -1,6 +1,6 @@
 ---
 title: Automation
-description: Everything in a project that starts work on its own, in one place — schedules, GitHub and webhook reactions, email (preview), one-time runs, event watches and workflows. Find it, set one up, and fix what needs attention.
+description: Everything in a project that starts work on its own, in one place: schedules, GitHub and webhook reactions, email (preview), one-time runs, event watches and workflows. Find it, set one up, and fix what needs attention.
 ---
 
 Open **Automation** in a project's navigation to see everything that starts work on its own, and to
@@ -40,8 +40,9 @@ open pull requests" or "remind this chat tomorrow morning to check the release".
    instead), the **Agent** profile and optional **Skill**, and **What should it do?**, the
    instructions for each run. **Add a detail from the run** inserts values such as a GitHub issue's
    title.
-5. **Review**: check the one-sentence summary, give it a **Name**, look at **Advanced options**
-   (overlapping runs, chat type, machine), and select **Create automation**.
+5. **Review**: check the one-sentence summary and select **Create automation**. A repeating
+   automation also needs a **Name**, and has **Advanced options** (overlapping runs, chat type,
+   machine).
 
 The step-by-step details for each kind are in [Triggers](/docs/guides/triggers/#create-a-trigger-yourself),
 [Run something once](#run-something-once) and [React when SAM sees an event](#react-when-sam-sees-an-event).
@@ -56,10 +57,9 @@ on a wide screen):
 - **Needs your attention** lists anything that stopped, failed or could not be confirmed, with
   the usual fix as one button: **Resume**, **See what went wrong**, **Give it more runs**, or
   **Check the result**. An automation SAM paused after its last three runs failed also offers **See
-  the runs**. Members who can only view the project see **Take a look** instead. A one-time run
-  that failed stays here for three days, then only on its own page and in History. A
-  [workflow](/docs/guides/workflows/) that stopped and needs attention appears here the same way,
-  with **See what went wrong**.
+  the runs**. A one-time run that failed stays here for three days, then only on its own page and
+  in History. A [workflow](/docs/guides/workflows/) that stopped and needs attention appears here
+  the same way, with **See what went wrong**.
 - **Coming up** shows the next things that start on their own, and when.
 - **Your automations** lists every automation in words: what starts it and what it does.
   **Scheduled**, **Reactions**, **One time** and **Paused or off** narrow the list. Finished
@@ -139,101 +139,87 @@ Select **New automation**, then **Once, at a time you pick**:
    start on time, keep trying for** sets how long SAM may keep trying when a busy chat or a full
    machine delays it, up to 24 hours; after that SAM gives up and tells you.
 2. Choose what should happen:
-   - **Message a chat** sends your message to the conversation you pick. A busy agent receives it
-     through the durable queue. A sleeping chat resumes its existing conversation when recovery
-     is available, including a task whose agent went to sleep while waiting, so an agent can
-     schedule a message to itself and be woken by it. You can message a conversation you own, or
-     one [shared with you](/docs/guides/collaboration/#share-a-chat) while your access lasts. A
-     message you schedule into a shared conversation shows as yours, is sent only while the access
-     you scheduled it under lasts, and is cancelled when that access ends. An agent can schedule
-     only into its own user's conversations.
-   - **Start a new chat** creates a task-backed conversation using the agent profile and skill you
-     pick, with current project access, credentials and placement rules. It can run after you
-     leave or archive the conversation that created it.
+   - **Message a chat** sends your message to a chat you pick. A busy agent gets it when its
+     current turn ends. A sleeping chat wakes up for it, so an agent can schedule a message to
+     itself and be woken by it later. You can message a chat you started, or one
+     [shared with you](/docs/guides/collaboration/#share-a-chat) while your access lasts. A message
+     you schedule into a shared chat shows as yours, and is cancelled if your access ends before
+     it's sent. An agent can schedule messages only into chats its user started.
+   - **Start a new chat** starts a chat with the agent profile and skill you pick, using the
+     project's settings and accounts as they are when it runs. It runs even if you've left or
+     archived the chat that set it up.
 3. Check the summary and save.
 
-The time must be in the future and within the next 30 days. SAM stores it in UTC; the time zone
-is how it is shown back to you. It is the earliest time the work is admitted, not a promise of
-exact-second model execution: capacity, busy agents and recovery can delay it. A waiting
-one-time run does not keep an agent or workspace awake.
+The time must be within the next 30 days. It's the earliest the work starts: a full machine, a
+busy agent or a recovery can delay it. Waiting doesn't keep an agent or a machine awake.
 
 Until it runs, its page offers **Run now**, **Change time** and **Cancel** (with an optional
 reason, shown later on its page). If someone else changed it first, SAM says so and loads the
-latest version, so you can try again. Once an action is **admitted**, its durable message or task
-intent has been accepted. Cancelling at that point does not retract that work; use the resulting
-chat or task controls instead.
+latest version, so you can try again. Once it has run, cancelling doesn't undo it: stop or reply
+in the chat it messaged or started instead.
 
-An archived or cancelled target fails visibly; SAM does not silently redirect its message to a
-new conversation. A run that expires does not start new work. "May have run, but SAM could not
-confirm it" means SAM cannot establish the outcome of an attempted submission. Look at the linked
-chat or task before trying again; agent side effects are not guaranteed to happen exactly once.
+If the chat it should message has been archived, the run fails and says so; SAM never sends the
+message to a different chat. A run that gives up starts nothing. **May have run, but SAM could not
+confirm it** means SAM tried and can't tell whether it got through. Look at the linked chat before
+you try again: the agent may already have acted on it.
 
-After it runs, **What happened** shows whether the chat received the message, or whether the chat
-it should start was created, separately from the run's own state. **Check the result again**
-reconciles exhausted retries without waking compute or replaying a message. Known running tasks
-resume monitoring; only a finished task or delivery frees a watch's concurrency slot. Missing or
-unconfirmed results stay unresolved.
-
-For an eligible queued task, **Try submitting again** starts another finite retry budget using the
-original task and chat identities, prompt, and deadline. Current creator authority is checked
-again. It is unavailable after the original deadline or when the task's identity cannot be
-confirmed, and it never resends a scheduled message. Agents use `reconcile_project_schedule` with
-`expectedVersion` and optional `retrySubmission: true` for the same operation.
+After it runs, **What happened** shows whether the chat got the message, or whether the new chat
+was created. **Check the result again** asks SAM to look again, without sending anything or waking
+a machine; if it still can't tell, the result stays unconfirmed. If a new chat is stuck waiting to
+start, **Try submitting again** starts another round of tries with the same chat and instructions,
+up to the original give-up time. It's only for new chats: it never sends a scheduled message again.
 
 ## React when SAM sees an event
 
-A watch is a human-managed project policy that acts on matching events. Select **New
-automation**, then **When SAM sees an event**, and pick what it waits for: an issue or pull
-request opening, a pull request review, a task, chat or release failing, a release going live, a
-post on a named agent channel, or **Something else** to match event fields yourself (source,
-event type, subject and severity). Then choose what it does, the same way as a one-time run.
+A watch reacts every time a matching event happens in the project. Select **New automation**, then
+**When SAM sees an event**, and pick what it waits for: an issue or pull request opening, a pull
+request review, a task, chat or release failing, a release going live, a post on a named agent
+channel, or **Something else** to match event fields yourself (source, event type, subject and
+severity). Then choose what it does, the same way as a one-time run.
 
-Under **Limits**, **Wait between runs (minutes)** is the cooldown, **Most at once** caps
-concurrent runs, and **Runs in total** is a finite execution limit, at most 100. The limit bounds
-the number of actions, not a monetary budget; the resulting work still uses ordinary profile and
-credential controls. When it runs out, the watch says so; **Give it more runs** raises the limit.
+Under **Limits**, **Wait between runs (minutes)** sets a pause between runs, **Most at once** caps
+how many run at the same time, and **Runs in total** caps how many times it can run, at most 100.
+That's a count of runs, not a money budget: the work still runs on your profiles' usual accounts.
+When it runs out, the watch says so, and **Give it more runs** raises the limit.
 
-A watch can message only a conversation its creator owns, and only its creator can change what it
-does, because it acts as them; other project writers can still pause it, stop it, or change what
-it waits for, its limits and its name. A watch that would message a conversation its creator does
-not own is paused by SAM, with the reason shown.
+A watch acts as the person who created it. It can message only a chat its creator started, and
+only its creator can change what it does. Anyone else in the project can still pause or stop it,
+or change what it waits for, its limits and its name. If a watch would message a chat its creator
+didn't start, SAM pauses it and says why.
 
-**Pause** stops new actions; **Resume** matches future events. **Stop for good** ends the watch.
-Changes, pausing and stopping cancel actions that have not yet been admitted. Already admitted
-messages and tasks remain visible and can continue. Each run the watch started appears under
-**Recent runs** on its page and in History. Agents can manage their own finite subscriptions and
-one-off schedules; they cannot grant themselves a standing policy through an agent tool.
+**Pause** stops new runs, and **Resume** picks up with the next matching event. **Stop for good**
+ends the watch. Changing, pausing or stopping it cancels runs that haven't started yet; a message
+already sent or a chat already started carries on. Each run appears under **Recent runs** on its
+page and in History. Agents can set up their own event waits and one-time runs, but only a person
+can create a watch.
 
 ## Understand delivery
 
-A wait's **Details** show both the delivery that was asked for and the delivery SAM resolved.
-Recording a match does not prove that it was injected into an agent's context. Channels provide
-bounded history and an atomic catch-up-to-follow handoff for collaborating agents. Treat channel
-and external event contents as untrusted evidence.
+A wait's **Details** show the delivery that was asked for and what SAM did. A recorded match means
+the event matched, not that the agent has read it. Treat the contents of channel posts and outside
+events as information from someone else, not as instructions.
 
-For a webhook that did not start anything, open the automation and look at **Calls received**.
-The audit records the filter decision and reason, including calls that were intentionally
-ignored. Repeatedly changing a subscription will not make an ignored webhook pass a different
-automation's filters.
+If a webhook didn't start anything, open the automation and look at **Calls received**: it lists
+each call, and whether and why it was ignored. Each automation applies its own filters.
 
-Project members can inspect automation. Project writers can change it. Access is
-checked again when an action fires, and a message's right to reach its conversation is
-checked again just before it is sent; schedules store creator identity, never an
-agent's bearer token.
+Everyone in the project can see automations and change them. SAM checks access again when an
+action runs, and again just before a message is sent. Schedules remember who created them, never
+an agent's credentials.
 
-## Storage and input limits
+## Details for agents and operators
 
-SAM preserves schedule and watch history, including idempotency keys. By default,
-a project can retain 4,096 schedules and 256 watches across all states, alongside
-the separate limits of 128 active schedules and 64 active or paused watches.
-Cancelling or revoking releases active capacity but does not erase history or
-release retained capacity. At the retained limit, new records receive a capacity
-error; identical create retries still return their original record. Automatic
-history pruning is not implemented. Operators can explicitly raise the retained
-limits using the [configuration reference](/docs/reference/configuration/) after
-reviewing project storage capacity. These limits do not delete conversation text.
-
-Prompts have a configurable UTF-8 byte limit. New-session actions also validate
-the current task prompt character limit when created or updated, so oversize
-prompts fail immediately. Task labels are shortened to the configured task label
-limits while the full schedule reason remains available in its history.
+- **Channels** keep a limited history of recent posts. An agent can read what it missed and then
+  follow new posts without missing any in between.
+- **Checking a one-time run from an agent:** `reconcile_project_schedule` with `expectedVersion`
+  checks the result again, and `retrySubmission: true` tries submitting again, with the same rules
+  as the buttons.
+- **How much history a project keeps.** SAM keeps the history of one-time runs and watches. By
+  default a project can keep 4,096 one-time runs and 256 watches in total, of which 128 runs and 64
+  watches can be active or paused at once. Cancelling frees an active place but not a kept one,
+  and old history isn't pruned yet. At the limit, new ones are refused, though repeating the same
+  create request returns the original. Operators can raise the limits (see the
+  [configuration reference](/docs/reference/configuration/)) after checking the project's storage.
+  These limits never delete chat text.
+- **Prompt size.** A scheduled message has a size limit in bytes, and a new chat's instructions are
+  checked against the task prompt limit when you save, so a prompt that's too long is refused
+  straight away. Long chat titles are shortened; the full reason stays in the history.

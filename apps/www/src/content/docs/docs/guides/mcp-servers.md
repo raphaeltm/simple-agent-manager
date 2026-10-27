@@ -55,7 +55,7 @@ Use **Edit** to rename a server, switch its authentication, or add, replace and 
 | **Personal** | Settings → MCP Servers     | Every session _you_ start, in any project       |
 | **Project**  | Project Settings → Runtime | Every session any member starts in that project |
 
-If a project server and a personal server share a name, the project one wins. Adding or changing a project-scoped server requires the `secret:write` capability, so project owners and admins can manage them but maintainers and viewers cannot.
+If a project server and a personal server share a name, the project one wins. Adding or changing a project-scoped server requires the `secret:write` capability, which project owners and admins have.
 
 Use the **Disable** toggle to stop injecting a server without deleting it and losing the credential.
 

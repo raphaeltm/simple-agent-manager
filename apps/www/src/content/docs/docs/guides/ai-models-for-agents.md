@@ -38,9 +38,11 @@ Open **Project settings → Agents → AI Models**. Here you can:
   <img src="/images/docs/agent-models-settings.png" alt="The AI Models section of a project's Agents settings. It reads '$1.20 of $5.00 used this month', resets Nov 1, with a progress bar. Below are Monthly limit (USD) set to 5 with Save, and 'Up to $50.00 · Default: $5.00'. Used this month lists clef-flash, 61 calls · $0.84, and clairic, 25 calls · $0.36. The last line reads 'Recommended · 7 models (Decision 3 · Extraction 1 · Classification 3)' beside Choose models." />
 </picture>
 
-Project owners and admins can change these settings. Other members can see them. When this month's
-limit is used up, the section says so and offers **Raise limit**. If it says **Turned off by your
-SAM administrator.**, no project can call models until a superadmin turns them back on.
+Project owners and admins can change these settings. When this month's limit is used up, the
+section says so and offers them **Raise limit**. A call can be refused a little before that, when
+its estimated cost doesn't fit in what's left: raise **Monthly limit (USD)** and select **Save**.
+If the section says **Turned off by your SAM administrator.**, no project can call models until a
+superadmin turns them back on.
 
 ## Give a profile or skill its own models
 
@@ -87,13 +89,13 @@ SAM does not decide which model an agent should call. Put that guidance where yo
 
 The agent gets the reason, and usually tells you. What each means:
 
-| The agent reports                                             | What to do                                                                                                              |
-| ------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------- |
-| "…is not turned on for this agent…"                           | Turn the model on in **Project settings → Agents → AI Models**, or in the profile or skill if it chooses its own models |
-| "This project's monthly AI model budget is used up…"          | Wait for the date it gives, or select **Raise limit**                                                                   |
-| "…is not in Cloudflare's hosted model catalog…"               | The model ID is wrong, or the model isn't one Cloudflare runs itself. Ask the agent to pick one from `list_ai_models`   |
-| "…only works over a realtime (websocket) connection…"         | That model can't be called this way                                                                                     |
-| "Agent model calls are turned off by your SAM administrator." | Ask a superadmin to turn them back on in **Admin → Settings → AI models**                                               |
+| The agent reports                                             | What to do                                                                                                               |
+| ------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| "…is not turned on for this agent…"                           | Turn the model on in **Project settings → Agents → AI Models**, or in the profile or skill if it chooses its own models  |
+| "This project's monthly AI model budget is used up…"          | Wait for the date it gives, or have a project owner or admin raise **Monthly limit (USD)** in **AI Models** and **Save** |
+| "…is not in Cloudflare's hosted model catalog…"               | The model ID is wrong, or the model isn't one Cloudflare runs itself. Ask the agent to pick one from `list_ai_models`    |
+| "…only works over a realtime (websocket) connection…"         | That model can't be called this way                                                                                      |
+| "Agent model calls are turned off by your SAM administrator." | Ask a superadmin to turn them back on in **Admin → Settings → AI models**                                                |
 
 ## Budget and costs
 

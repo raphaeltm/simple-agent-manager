@@ -4,8 +4,8 @@ description: Why a variable you marked Secret shows up as a placeholder in your 
 ---
 
 A variable you mark **Secret** is kept out of the agent's environment, so the agent can't print,
-paste, or commit it by accident. When a command needs the value — a deploy, a database migration, a
-call to a paid API — the agent runs that command with `exec_with_secrets`, which fills in only the
+paste, or commit it by accident. When a command needs the value (a deploy, a database migration, a
+call to a paid API), the agent runs that command with `exec_with_secrets`, which fills in only the
 secrets it names, for that one command.
 
 ## What you'll see
@@ -21,8 +21,8 @@ That's what the agent sees in its shell, and what you see in the workspace termi
 command that reads the variable directly gets the placeholder and fails to authenticate.
 
 Nothing else changed: variables without **Secret** ticked keep their real values, and runtime files
-(including secret file content), agent sign-ins, Git access, and [MCP servers](/docs/guides/mcp-servers/)
-work as before. Chats that were already running when your instance updated keep their real values;
+(including secret file content), agent sign-ins, Git access, and the
+[MCP servers you add in SAM](/docs/guides/mcp-servers/) work as before. Chats that were already running when your instance updated keep their real values;
 a new chat, or one that wakes from sleep, gets placeholders.
 
 ## Mark a variable as Secret
@@ -43,7 +43,7 @@ Tell the agent which command needs which secret, for example:
 
 > Run `npm run deploy` with `exec_with_secrets`, using the secret `STRIPE_KEY`.
 
-The command runs in the same workspace, as the same user, with the same files and network — only the
+The command runs in the same workspace, as the same user, with the same files and network; only the
 named secrets are filled in. Any agent with SAM's tools can do this, on a VM or on
 [Instant](/docs/guides/instant-sessions/). The result comes back when the command finishes, and
 wherever a secret's exact value appears in the output, it's replaced with `[REDACTED]`. The chat

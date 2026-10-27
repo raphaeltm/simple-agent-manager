@@ -133,8 +133,8 @@ the agent, and sharing a chat come with v2026.10.20.
 Anyone in the project can comment on any message in any chat, including chats a teammate started.
 Select **Comment** under a message, or select some text in it and choose **Comment** (on a phone,
 **Comment on selection**). On a wide screen the comment opens in the **Comments** panel beside the
-chat; on a narrower one, under the message, and on a touch screen a comment on selected words opens
-in a sheet titled **Comment on selected text**. Type in **Add a comment…** and select **Comment**.
+chat. On a narrower screen it opens under the message, or, for selected words, in a sheet titled
+**Comment on selected text**. Type in **Add a comment…** and select **Comment**.
 
 Everyone in the project can read the comment, and so can agents in the project (they read comments
 with the `list_message_comment_threads` MCP tool). Each thread shows who wrote it and whether it is
@@ -159,7 +159,8 @@ the agent._
 The project's **Comments** page lists every comment thread in the project. Select a comment on a
 chat to read it where it was made: the conversation opens on the words the comment is about,
 highlighted, with the thread beside it on a desktop or in a sheet at the bottom of the screen on a
-phone. Reply, resolve or send the comment to the agent from there.
+phone. Reply, resolve or send the comment to the agent from there. On a self-hosted instance this
+view comes with v2026.10.24; before that, a comment opens in the chat itself.
 
 <picture>
   <source media="(max-width: 40em)" srcset="/images/docs/comment-reader-mobile.png 2x" />
@@ -205,8 +206,8 @@ both limits in [**Admin → Settings**](/docs/guides/admin-settings/#collaborati
 
 ### Send a comment to the agent
 
-**Send to agent** turns a comment into a message for the chat's agent. If you can drive the chat —
-you started it, or it's [shared with you](#share-a-chat) — the comment box offers **Add note** or
+**Send to agent** turns a comment into a message for the chat's agent. If you can drive the chat
+(you started it, or it's [shared with you](#share-a-chat)), the comment box offers **Add note** or
 **Send to agent**: choose **Send to agent** and select **Comment & send**. You can also select
 **Send to agent** on an open thread later, including a teammate's comment. Each thread can be sent
 once, and a resolved thread can't be sent.
@@ -229,8 +230,9 @@ notification (a plain comment notification doesn't add to the bell's count).
 
 The person who started a chat can let a teammate drive it for 5, 10, 30 or 60 minutes: send
 messages (with files), schedule messages, answer the agent's questions, use **Interrupt**,
-**Sleep**, and **Archive**, and look through the repository's files and changes. These are the same
-controls the owner has in that chat, apart from the terminal and port previews.
+**Sleep**, and **Archive**, and look through the repository's files and changes. Only the owner can
+open the terminal, port previews and the workspace page, **Renew** the share, fork the chat once it
+has ended, or point a watch at it.
 
 1. Open the chat and select **Share** in the
    [session tool rail](/docs/guides/chat-features/#the-session-tool-rail) (when the rail shows only
@@ -269,7 +271,7 @@ Before you share, know what it means:
 - **Ending access undoes nothing.** It doesn't reverse what the teammate did, and keys they copied
   keep working until you replace them. If the agent is already working on something they asked for,
   it finishes; SAM doesn't stop the agent or the chat.
-- **It covers that one chat.** It gives no access to the owner's other chats, settings or keys.
+- **It covers that one chat.** It gives no access to the owner's other chats or settings.
 
 ### What your teammate sees
 
@@ -323,7 +325,8 @@ answer them, so a teammate driving the chat should keep it open.
 Without shared access, a teammate's chat shows _Only Prakash Rao can message this agent. You can
 leave comments on any message, or ask Prakash Rao to share this chat._ and a **Start your own chat** button.
 You can still [comment](#comment-on-a-chat), [@mention](#mention-a-teammate) people, and fork the
-chat from its tool rail. Only the chat's owner, and people it's shared with, can answer the agent's
+chat from its tool rail while it's running or asleep; once it has ended, only its owner can fork it.
+Only the chat's owner, and people it's shared with, can answer the agent's
 questions and permission requests. The tool rail also shows **Complete**, which ends the owner's
 task: leave that to them.
 

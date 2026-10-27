@@ -1,6 +1,6 @@
 ---
 title: What Happens When You Send Work
-description: What SAM does after you send work to an agent — the steps it goes through, where the work lands and how to get a pull request, agents starting other agents, and warm reuse.
+description: What SAM does after you send work to an agent: the steps it goes through, where the work lands and how to get a pull request, agents starting other agents, and warm reuse.
 ---
 
 The main way to use SAM is the **project chat**: you describe what you want done, and SAM handles provisioning, agent execution, and cleanup. This page explains what happens after you hit send. To keep a list of work you want done and start it later, use [Ideas](/docs/guides/ideas/).

@@ -11,9 +11,10 @@ your work is safe and what to do next. Everything here applies to both
 - **Needs input** in the session list. The agent, or SAM, is waiting for an answer from the person
   who started the chat. → [Find what it's waiting for](#the-agent-is-waiting-for-you)
 - **"Waiting for provider limit reset at…"**, **Waiting** or **Blocked** on the task's Dashboard
-  card, or a red **BLOCKED** badge on the chat in the session list (on a subtask that shows
-  "Waiting on: …", that badge can instead mean it's waiting for another task). The agent hit a
-  usage limit; SAM carries on after the reset, unless it says **Blocked**.
+  card, or a red **BLOCKED** badge on the chat in the session list. The agent hit a usage limit;
+  SAM carries on after the reset, unless it says **Blocked**. (A subtask with that badge also reads
+  "Waiting on:" and its parent task's title, whether a usage limit or another task is holding it,
+  so open its chat to tell which.)
   → [Usually nothing to do](#waiting-for-a-provider-limit-reset)
 - **"SAM paused automatic check-ins…"** The agent kept stopping without finishing, or its model was
   rejected, so SAM stopped nudging it. → [Look, then reply](#sam-paused-automatic-check-ins)
@@ -130,10 +131,11 @@ If an agent keeps asking about every command when you don't want it to, see
 **What you see:** a system message such as **Waiting for provider limit reset at 14:00 UTC
 (2026-10-21).**, and on the Dashboard the task's card says **Waiting** with the same text.
 
-**What happened:** the agent's subscription or API key hit a usage limit — Claude Code's five-hour
-or weekly limit, a Codex plan limit, or an API rate limit that said when it resets — so SAM paused
+**What happened:** the agent's subscription or API key hit a usage limit (Claude Code's five-hour
+or weekly limit, a Codex plan limit, or an API rate limit that said when it resets), so SAM paused
 the work instead of failing it. This applies to your own subscriptions and keys and to project
-credentials. (In the **SAM** provider mode a limit still fails a **Task** and stops a **Chat**; see
+credentials. (In the **SAM** provider mode, or when the agent runs on the installation's platform
+credential, a limit still fails a **Task** and stops a **Chat**; see
 [Usage Limits](/docs/guides/agents/#usage-limits).)
 
 **What to do: nothing.** The chat rests, usually asleep with its workspace saved, and just after the
@@ -159,23 +161,23 @@ the chat doesn't restart it:
   waited.
 - Any other reason that starts with **Blocked:** means the same thing.
 
-To move on:
+**Don't reply in the blocked chat.** On a VM, a reply puts the task back in the queue, still
+**Blocked**, and SAM then refuses **Complete**, so the task can't be ended from the app. Instead:
 
 1. Look at what the agent got done: the chat, and anything it pushed. Work it didn't push stays in
    the chat's saved workspace, which can't be woken while the task is **Blocked**, so don't count on
    getting it back.
-2. Continue in a new chat once the limit has reset, or straight away with a profile for a different
-   agent (Codex instead of Claude Code, say): **Fork** or **Retry** in the tool rail starts one from
-   this chat (see [Conversation forking](/docs/guides/chat-features/#conversation-forking)). The new
-   chat starts from your default branch, so tell its agent which pushed branch to build on.
-3. End the blocked task without replying in its chat, before or after: on a VM, a reply puts the task
-   back in the queue, still **Blocked**, and SAM then refuses **Complete**.
+2. End the blocked task:
    - Select **Complete** in the session tool rail. For a **Chat** that's asleep you can instead
      **Archive** it, which, unlike **Complete**, deletes its saved workspace.
    - If SAM refuses **Complete** (the agent never started, or someone replied), SAM's own pages can't
      end the task. If you use [SAM from Claude or ChatGPT](/docs/guides/sam-connector/), ask it to
      stop that chat: that cancels the task and frees its machine. Otherwise leave it: it won't run by
      itself, but a machine already prepared for it keeps running until SAM's 24-hour limit stops it.
+3. Continue in a new chat once the limit has reset, or straight away with a profile for a different
+   agent (Codex instead of Claude Code, say): **Fork** or **Retry** in the tool rail starts one from
+   this chat (see [Conversation forking](/docs/guides/chat-features/#conversation-forking)). The new
+   chat starts from your default branch, so tell its agent which pushed branch to build on.
 
 The chat keeps its red **BLOCKED** badge in the session list even after the task has ended.
 
@@ -480,7 +482,7 @@ If a reason isn't in this list, or a fixable one keeps coming back after you fix
 
 ## When a task fails
 
-A task can fail for reasons that have nothing to do with its work — nobody answered a question the
+A task can fail for reasons that have nothing to do with its work: nobody answered a question the
 agent asked with its `request_human_input` tool, or a usage limit ran out in the **SAM** provider
 mode or, on your own subscription or key or a project credential, one SAM can't wait out (see
 [Usage Limits](/docs/guides/agents/#usage-limits)). (A card in the chat that nobody answers doesn't
@@ -565,12 +567,12 @@ If you delete a node yourself from the **Nodes** page, the tasks still running o
 
 There is nothing left to wake: the chat was archived, its saved workspace
 [expired](#expired-saved-workspace), or it failed in a way SAM could not preserve (the chat says so
-when that is the reason — see [When a task fails](#when-a-task-fails)). What you see instead of the
+when that is the reason; see [When a task fails](#when-a-task-fails)). What you see instead of the
 message box depends on how it ended:
 
 - **A Fork box** ("Fork into a new chat with retained history…") on a chat that was archived or
   that expired. Type what should happen next and select **Fork** to carry on in a new chat that is
-  given this one's recent history — see
+  given this one's recent history (see
   [Fork an archived or expired chat](/docs/guides/chat-features/#fork-an-archived-or-expired-chat).
 - **"This session has ended."** on a chat that failed and couldn't be kept.
 - **This chat has ended** and **Only … can fork it to continue.** on someone else's chat, with

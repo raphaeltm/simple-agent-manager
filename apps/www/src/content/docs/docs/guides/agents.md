@@ -129,7 +129,7 @@ whole account with that provider, so they include use outside SAM; a **Platform 
 numbers are SAM's shared limits.
 
 When a limit is nearly used up, wait for the reset time shown in the dialog, or start new work with a
-profile for a different agent — Codex instead of Claude Code, say.
+profile for a different agent (Codex instead of Claude Code, say).
 
 If Claude Code or Codex hits its plan's limit in the middle of work, or a provider's rate limit says
 when it resets, on your own subscription or key (or a project credential), **SAM waits for the reset
@@ -215,8 +215,8 @@ Type `@` in a chat message to choose a profile from the mention list. Mentions a
   <img src="/images/docs/new-chat-profiles.png" alt="A new chat asking 'Who should take this?', with 'Pick a profile, then describe the task below.' Under Recent are three profile cards, each with its description and what runs it: Brainstormer, selected and checked, 'Claude · Opus 5.5 · max effort'; Careful Builder; and Code Reviewer, 'Codex · GPT-6 Astra · high effort'. Under Builds and opens PRs is a Frontend Builder card. Below them is All 6 profiles. Above the message box, To shows Brainstormer, with the attach and Chat options buttons on the right." />
 </picture>
 
-- **The profile you used last is pre-selected.** A new chat starts with the profile you last picked yourself for a new chat in this project in the last 30 days, unless you've hidden it; chats that automations or agents started don't count. Otherwise it's the first profile in your list. Change it any time before you send. **Start work** on an [idea](/docs/guides/ideas/#start-work-on-an-idea) pre-selects the same way.
-- **Your recent profiles appear as cards.** With two or more profiles you haven't hidden, the empty chat asks **Who should take this?** and shows your most recent profiles as cards. When the chat area is wide enough, it also shows profiles that build and open pull requests. Each card shows the profile's description (change it with **Edit** in the profile list or on the **Profiles** page) and what runs it, such as **Claude · Opus 5.5 · max effort**. Tap a card to pick it, or select **All _N_ profiles** under the cards for the full list. Otherwise the starter prompts show instead.
+- **The profile you used last is pre-selected.** A new chat starts with the profile you last picked yourself for a new chat in this project in the last 30 days, unless you've hidden it. Chats the SAM assistant started for you count; chats that automations, the Connector or other agents started don't. Otherwise it's the first profile you haven't hidden, in alphabetical order. Change it any time before you send. **Start work** on an [idea](/docs/guides/ideas/#start-work-on-an-idea) pre-selects the same way.
+- **Your recent profiles appear as cards.** With two or more profiles you haven't hidden, the empty chat asks **Who should take this?** and shows your most recent profiles as cards under **Recent** (with no recent picks, your first profiles, under **Your profiles**). When the chat area is wide enough, it also shows profiles that build and open pull requests. Each card shows the profile's description (change it with **Edit** in the profile list or on the **Profiles** page) and what runs it, such as **Claude · Opus 5.5 · max effort**. Tap a card to pick it, or select **All _N_ profiles** under the cards for the full list. Otherwise the starter prompts show instead.
 - **To** above the message box names the chosen profile. Select it to see every profile: **Recent** first, then **Chat & explore** and **Build & open PRs**, with a search box once you have more than eight. **New**, **Edit** and **Manage** are at the bottom.
 
 ![The profile list opened from To, titled 'Start with…', with Edit list and a close button. Recent lists Brainstormer (checked), Careful Builder and Code Reviewer. Chat & explore lists Quick Questions and Release Notes. Build & open PRs lists Frontend Builder. Each row shows what runs it, such as 'Codex · GPT-6 Luna · medium effort'. New, Edit and Manage are at the bottom.](/images/docs/new-chat-profile-list.png)
@@ -338,8 +338,8 @@ that setting if you want Bypass Permissions.
 
 An agent profile's **Workspace Profile** setting chooses how much environment its chats get:
 
-- **Full** (default) — builds your project's `.devcontainer` so the agent can run your stack, tests, and services. Best when the work depends on your real environment.
-- **Lightweight** — starts faster with a minimal environment. Best for quick questions, planning, and code exploration. With **Task Mode** left at **Default**, a Lightweight profile's sessions are Chats, which stay open for back-and-forth instead of finishing on their own — see [Chat or Task](/docs/guides/chat-features/#chat-or-task).
+- **Full** (default): builds your project's `.devcontainer` so the agent can run your stack, tests, and services. Best when the work depends on your real environment.
+- **Lightweight**: starts faster with a minimal environment. Best for quick questions, planning, and code exploration. With **Task Mode** left at **Default**, a Lightweight profile's sessions are Chats, which stay open for back-and-forth instead of finishing on their own — see [Chat or Task](/docs/guides/chat-features/#chat-or-task).
 
 ## Agent Session Features
 
@@ -407,8 +407,8 @@ the recipient replies.
 
 ### Pull requests an agent takes over
 
-When you hand an agent a pull request it didn't open — a release PR it should shepherd to merge,
-say — it can record that it's responsible for it with `associate_pull_request`: as **owned**, or as
+When you hand an agent a pull request it didn't open (a release PR it should shepherd to merge,
+say), it can record that it's responsible for it with `associate_pull_request`: as **owned**, or as
 **held** for a PR other agents must leave alone. One task can take on several PRs. SAM first checks
 the PR's branch with your GitHub access, and refuses if:
 

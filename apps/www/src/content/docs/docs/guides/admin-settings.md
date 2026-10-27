@@ -21,8 +21,8 @@ can't.
 
 Settings are grouped into **OAuth**, **Connector**, **Operations**, **Trials**, **Collaboration**,
 **Chat**, **AI models**, and **Email**. Type in **Search settings** to filter by name, group, or
-description. Each card is named after the setting, split into words — `operations.cronSweepsEnabled`
-shows as **operations · cron Sweeps Enabled** — and shows:
+description. Each card is named after the setting, split into words (`operations.cronSweepsEnabled`
+shows as **operations · cron Sweeps Enabled**), and shows:
 
 - **Source**: where the value in effect comes from (see [Which value wins](#which-value-wins)), and
   whether the setting is **Configured**. **Not configured** means nothing has set it, so the code
@@ -69,7 +69,7 @@ Environment variable or older KV value, if there is one, and only otherwise to t
 reset doesn't always mean "default": to be sure of the default, save the default value instead.
 
 **Recent changes**, at the bottom of the page, lists which settings were set or reset, by whom (as a
-user ID), and when — but never the values. Note a value before you change it if you might want it
+user ID), and when, but never the values. Note a value before you change it if you might want it
 back.
 
 :::caution[Don't lock yourself out]
@@ -91,7 +91,7 @@ nobody can sign in:
 
 For each setting SAM uses the first of these that exists:
 
-1. A value saved in the app — here, or on the older **Admin → Integrations** and **Admin → Trials**
+1. A value saved in the app, here or on the older **Admin → Integrations** and **Admin → Trials**
    pages, which change the same settings (**Source: database**).
 2. The matching Worker variable, set through your GitHub Environment (**Source: environment**).
 3. An older KV value: `trials:enabled`, or the cron and alarm switches (**Source: kv**).

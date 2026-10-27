@@ -19,7 +19,7 @@ triggers, see [Triggers](/docs/guides/triggers/).
 ## Create one
 
 1. Open the project, select **Automation**, then **New automation**, and choose **By email**.
-2. Under **Who can start it?**, list the **Allowed senders**, one address per line (up to 20). It
+2. Under **Who can start it?**, list the **Allowed senders**, one address per line (up to 20 by default). It
    starts with your own account email. Mail whose `From:` address is not on the list is refused.
    SAM matches the `From:` address; it cannot yet verify who really sent the email (see
    [Security](#security)).
@@ -28,7 +28,7 @@ triggers, see [Triggers](/docs/guides/triggers/).
    reply with the `reply_to_email` tool when it is done.
 5. Save. The automation's page shows **Its email address**, with a copy button.
 
-Everyone in the project, including members who can only view it, can see the address on that page.
+Everyone in the project can see the address on that page.
 Email automations have no **Run now** (there would be no email to answer) and no sample preview:
 **Try it with a sample** is only for webhook automations. You can still change who may use one,
 pause it, or delete it.
@@ -157,7 +157,8 @@ Your approval covers exactly the changes the panel showed. If they differ when y
 SAM says "What turning agent email on would change is different from what you allowed. Review it and
 allow it again." If, after turning Email Routing on, your main domain gained or lost records other
 than those, agent email stays off and the panel shows **What changed**: fix the records in
-Cloudflare and select **Check again**, or tick the box to accept the records as they are now.
+Cloudflare and select **Check again**, or tick the box to accept the records as they are now, then
+select **Turn on agent email** again.
 
 | The panel says                                                                                                     | What to do                                                                                                                                                         |
 | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
