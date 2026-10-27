@@ -129,12 +129,24 @@ whole account with that provider, so they include use outside SAM; a **Platform 
 numbers are SAM's shared limits.
 
 When a limit is nearly used up, wait for the reset time shown in the dialog, or start new work with a
-profile for a different agent — Codex instead of Claude Code, say. If a limit runs out in the middle of work, a **Task** fails but
-SAM keeps its workspace (see [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails)),
-and a **Chat** just stops with the provider's error. Either way, reply in the same chat after the
-reset to carry on. By then the chat has usually gone to sleep; your reply wakes it with the same
-agent, model, and permission mode it started with (for chats started since 7 October 2026; see
-[After a chat wakes from sleep](#after-a-chat-wakes-from-sleep)).
+profile for a different agent — Codex instead of Claude Code, say.
+
+If Claude Code or Codex hits its plan's limit in the middle of work, or a provider's rate limit says
+when it resets, on your own subscription or key (or a project credential), **SAM waits for the reset
+and then carries on by itself.** The chat shows a message such as
+**Waiting for provider limit reset at 14:00 UTC (2026-10-21).** and rests, usually asleep; just after
+the reset SAM wakes it and tells the agent to continue where it left off. It never switches to
+another model, profile, or credential to get around the limit. Any other limit, such as one another
+agent reports without a reset time, still ends the work as in the **SAM** provider mode below: reply
+in the same chat after the reset. See
+[Waiting for a provider limit reset](/docs/guides/session-troubleshooting/#waiting-for-a-provider-limit-reset),
+including what **Blocked** means.
+
+In the **SAM** provider mode a limit still ends the work: a **Task** fails but SAM keeps its
+workspace (see [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails)), and a
+**Chat** stops with the provider's error. Reply in the same chat after the reset to carry on; your
+reply wakes it with the same agent, model, and permission mode it started with (for chats started
+since 7 October 2026; see [After a chat wakes from sleep](#after-a-chat-wakes-from-sleep)).
 
 The numbers are the last reading SAM took while an agent was using that credential, not live figures
 from the provider. A credential nobody has used for a while keeps its last reading for up to 30 days,
@@ -256,8 +268,8 @@ On a self-hosted instance, a chat started on v2026.10.08 or later but before the
 agent requests on still can't ask after a wake (its requests are refused), so start a new chat or
 fork it to get approval cards.
 
-A **Task** keeps its task completion and commit, push, and pull request behavior after waking;
-a **Chat** remains a Chat. On a VM, if SAM starts fresh from a degraded snapshot, it keeps these
+A **Task** stays a Task after waking (it still finishes when its agent reports it complete), and a
+**Chat** stays a Chat. On a VM, if SAM starts fresh from a degraded snapshot, it keeps these
 settings and reads the saved transcript before continuing. It still tells you which files could not be
 restored.
 
@@ -301,7 +313,7 @@ that setting if you want Bypass Permissions.
 An agent profile's **Workspace Profile** setting chooses how much environment its chats get:
 
 - **Full** (default) — builds your project's `.devcontainer` so the agent can run your stack, tests, and services. Best when the work depends on your real environment.
-- **Lightweight** — starts faster with a minimal environment. Best for quick questions, planning, and code exploration. With **Task Mode** left at **Default**, a Lightweight profile's sessions are Chats, so SAM doesn't commit, push, or open a pull request — see [Chat or Task](/docs/guides/chat-features/#chat-or-task).
+- **Lightweight** — starts faster with a minimal environment. Best for quick questions, planning, and code exploration. With **Task Mode** left at **Default**, a Lightweight profile's sessions are Chats, which stay open for back-and-forth instead of finishing on their own — see [Chat or Task](/docs/guides/chat-features/#chat-or-task).
 
 ## Agent Session Features
 
@@ -367,6 +379,26 @@ appear only in the recipient's chat.
 A sending agent learns that its message was accepted, not that it was read; it hears back only if
 the recipient replies.
 
+### Pull requests an agent takes over
+
+When you hand an agent a pull request it didn't open — a release PR it should shepherd to merge,
+say — it can record that it's responsible for it with `associate_pull_request`: as **owned**, or as
+**held** for a PR other agents must leave alone. One task can take on several PRs. SAM first checks
+the PR's branch with your GitHub access, and refuses if:
+
+- another active task is already on it: it opened the PR, mentions its URL in its task, works on its
+  branch, or recorded it;
+- any other task holds it; or
+- any other task, even a finished one, opened or recorded it. To take over from a finished task, the
+  agent names it as `previousTaskId`. Only your own finished tasks can be named, so an agent can't
+  take over a teammate's PR this way.
+
+Other agents find the owner with `list_project_agents` and the PR's URL (a takeover isn't found by
+branch alone), and the PR's recorded associations with `list_pull_request_associations`.
+
+A record only says who is responsible: it never merges, closes, or cleans up a PR, and nothing in the
+app shows it. It works on GitHub projects only.
+
 ### MCP Tools
 
 Running agents have SAM's project tools. These are the ones used most often; an agent can list
@@ -379,7 +411,9 @@ everything available in its session.
 | Tool                                | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | ----------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `dispatch_task`                     | Spawn follow-up work using the selected profile runtime, or an explicit `runtime` override; an optional `coordinationChannel` is inherited by every descendant                                                                                                                                                                                                                                                                                                                                                                      |
-| `list_project_agents`               | List the project's other active tasks (queued, delegated, in progress, sleeping) with output branch, workspace branch and output PR URL. Pass `prHeadBranch` and/or `prUrl` to list only the tasks that own a pull request                                                                                                                                                                                                                                                                                                          |
+| `list_project_agents`                                      | List the project's other active tasks (queued, delegated, in progress, sleeping) with output branch, workspace branch and output PR URL. Pass `prHeadBranch` and/or `prUrl` to list only the tasks that own a pull request; `prUrl` also finds ones that [took it over](#pull-requests-an-agent-takes-over)                                                                                                                                                                                                                         |
+| `associate_pull_request`, `list_pull_request_associations` | Record that this task is responsible for a pull request it didn't open, and look up who is ([Pull requests an agent takes over](#pull-requests-an-agent-takes-over))                                                                                                                                                                                                                                                                                                                                                                |
+| `exec_with_secrets`                                        | Run a command in this workspace with selected **Secret** variables filled in; `exec_with_secrets_status` returns the result and `exec_with_secrets_cancel` stops it ([Run commands with secrets](/docs/guides/secret-execution/))                                                                                                                                                                                                                                                                                                   |
 | `send_message_to_subtask`           | Send a message to another active agent in the project by task ID, usually a subtask; it arrives at the end of the recipient's turn, or wakes it                                                                                                                                                                                                                                                                                                                                                                                     |
 | `send_durable_message`              | Send a message to any active agent in the project, by task ID                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | `wait_for_subtasks`                 | End the turn and be woken when the tasks it names (usually ones this agent dispatched) finish, instead of polling                                                                                                                                                                                                                                                                                                                                                                                                                   |
@@ -409,7 +443,7 @@ everything available in its session.
 | `get_resource_history`              | Read a VM-backed workspace's retained CPU, memory, I/O and OOM history; defaults to the caller's own session                                                                                                                                                                                                                                                                                                                                                                                                                        |
 | `list_triggers`                     | List this project's automation triggers, optionally filtered by status or source type                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | `create_project_event_subscription` | Subscribe the current task agent to durable project events using bounded v1 exact/set filters for source, event type, subject, and severity; optional `minWakeIntervalSeconds` limits how often it wakes the chat                                                                                                                                                                                                                                                                                                                   |
-| `list_project_event_subscriptions`  | Recover active event subscription IDs owned by the current task agent                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| `list_project_event_subscriptions`                         | List the event subscriptions the current task agent owns (active ones by default; `state: "any"` also lists cancelled and expired ones, for recovering a wait)                                                                                                                                                                                                                                                                                                                                                                      |
 | `get_project_event_subscription`    | Inspect one owned event subscription, including filter and recorded delivery preference                                                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `cancel_project_event_subscription` | Idempotently cancel one owned event subscription                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `list_subscription_events`          | Replay missed or queued events for one visible subscription; returns payload-free summaries, delivery IDs, and an opaque subscription-bound cursor                                                                                                                                                                                                                                                                                                                                                                                  |
@@ -432,7 +466,7 @@ A chat has at most one event notification waiting to reach its agent. Once the a
 
 An agent can choose how often one subscription wakes it. Pass `minWakeIntervalSeconds` to `follow_event_channel` or `create_project_event_subscription`, for example `600` for at most once every 10 minutes. The first event after a quiet spell still wakes the agent; later events are bundled into the next wake, and the interval counts from when the agent received the previous wake. Without it, SAM waits only the platform cooldown (`PROJECT_EVENT_WAKE_SUBSCRIPTION_COOLDOWN_MS`, 30 seconds by default), which is also the smallest interval it accepts. The interval applies only to subscriptions that wake the chat and cannot exceed the wake subscription lifetime. Direct messages from other agents are unaffected. To change it, subscribe again with a new idempotency key and cancel the old subscription. Implementation: `normalizeSubscriptionInput` in `project-events-subscription-normalization.ts`, `recordQueueCheckpoint`, and `advanceProjectEventPromptAttemptCheckpoint`.
 
-To wait on a pull request without polling, subscribe and end the turn: use source `github` with subjectType `pull_request` and subjectId set to the PR number for reviews, review comments, PR comments and PR events. CI events (`check_run`, `check_suite`, `workflow_run`) are keyed by commit, so use subjectType `commit` with the head SHA. A PR comment waking an idle, live chat has been verified end to end; waking a sleeping chat and CI or review delivery have not, so keep one bounded fallback check and say when you relied on it.
+To wait on a pull request without polling, the agent calls `create_project_event_subscription` with `requestedDelivery: "existing_session_prompt"` and ends its turn (`record_only` only records events; it never wakes the chat). Use source `github` with subjectType `pull_request` and subjectId set to the PR number for reviews, review comments, PR comments and PR events. CI events are keyed by commit, so use subjectType `commit` with the PR's full 40-character head SHA (a short SHA matches nothing). Event types include the action and must match exactly: a finished CI run is `check_run.completed`, `check_suite.completed`, or `workflow_run.completed`, and a bare `check_run` matches nothing. Check the PR's current head and checks on GitHub before subscribing and again right after, in case CI already finished. An expired subscription wakes no one, so also schedule one follow-up message to the agent's own chat with `create_project_schedule` as a fallback. A PR comment waking an idle, live chat has been verified end to end; waking a sleeping chat, and CI or review delivery, have not. An agent that resumed from the fallback rather than from an event should say so in its report.
 
 To coordinate several agents on one feature, publish a short kickoff to a project channel and pass it as `coordinationChannel` to `dispatch_task`. Children and their descendants inherit it and are told to publish findings, decisions, blockers and completion evidence with `publish_channel_event`, and to read it with `get_channel_history` or follow it with `follow_event_channel`, adding `minWakeIntervalSeconds` so channel traffic wakes them at most that often. A publication never wakes its own author.
 

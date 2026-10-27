@@ -70,12 +70,13 @@ shortens IDs to their first seven characters, which `sam chat <session-id>` and 
 don't accept: copy the full ID from `sam chat --json`, or from the chat's address in SAM
 (`…/chat/<session-id>`).
 
-`sam chat new` always starts a **Chat**. For work you want delivered as a pull request, submit a
-**Task**, usually with a profile that runs on a VM so the agent can build and test (see
-[Chat or Task](/docs/guides/chat-features/#chat-or-task)), then wait for it:
+`sam chat new` always starts a **Chat**, which stays open for your replies. For work a script should
+wait on until it's finished, submit a **Task**, usually with a profile that runs on a VM so the agent
+can build and test (see [Chat or Task](/docs/guides/chat-features/#chat-or-task)), then wait for it.
+SAM doesn't open pull requests itself, so ask for one in the prompt:
 
 ```sh
-sam tasks submit --mode task --agent-profile "Build and test" --prompt "Add retries to the webhook sender"
+sam tasks submit --mode task --agent-profile "Build and test" --prompt "Add retries to the webhook sender, then open a pull request"
 sam tasks wait <task-id> --timeout 30m
 ```
 

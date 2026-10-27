@@ -1,11 +1,91 @@
 ---
 title: Run commands with secrets
-description: Give a command selected secret environment variables without placing them in the agent’s ordinary environment.
+description: Why a variable you marked Secret shows up as a placeholder in your agent's workspace, and how the agent runs commands that need it with exec_with_secrets.
 ---
 
-Mark sensitive project, agent profile, or skill environment variables as **Secret** in their runtime settings. In fresh workspaces, agents see a recognizable placeholder such as `__SAM_SECRET_REQUIRES_EXEC_WITH_SECRETS__SERVICE_TOKEN__` instead of the value. Nonsecret variables keep their normal values and precedence: project, then profile, then skill.
+A variable you mark **Secret** is kept out of the agent's environment, so the agent can't print,
+paste, or commit it by accident. When a command needs the value — a deploy, a database migration, a
+call to a paid API — the agent runs that command with `exec_with_secrets`, which fills in only the
+secrets it names, for that one command.
 
-Ask the agent to use `exec_with_secrets` for commands that need those variables:
+## What you'll see
+
+In a workspace started on or after 14 October 2026 (on a self-hosted instance, v2026.10.14 or later),
+a Secret variable holds a placeholder instead of its value, for example:
+
+```text
+__SAM_SECRET_REQUIRES_EXEC_WITH_SECRETS__STRIPE_KEY__
+```
+
+That's what the agent sees in its shell, and what you see in the workspace terminal on a VM. A
+command that reads the variable directly gets the placeholder and fails to authenticate.
+
+Nothing else changed: variables without **Secret** ticked keep their real values, and runtime files
+(including secret file content), agent sign-ins, Git access, and [MCP servers](/docs/guides/mcp-servers/)
+work as before. Chats that were already running when your instance updated keep their real values;
+a new chat, or one that wakes from sleep, gets placeholders.
+
+## Mark a variable as Secret
+
+- **For a project:** **Settings → Runtime**, under **Environment Variables**. Enter the key and value,
+  tick **Secret**, and add it. Project owners and admins can do this.
+- **For a profile:** open the project's **Profiles**, edit the profile, and use **Runtime
+  Environment**.
+- **For a skill:** open **Skills**, edit the skill (after you've created it), and use **Runtime
+  Environment**.
+
+If the same name is set in more than one place, the skill's value wins over the profile's, and the
+profile's over the project's. A name only counts as Secret if the value that wins is marked Secret.
+
+## Ask the agent to run the command
+
+Tell the agent which command needs which secret, for example:
+
+> Run `npm run deploy` with `exec_with_secrets`, using the secret `STRIPE_KEY`.
+
+The command runs in the same workspace, as the same user, with the same files and network — only the
+named secrets are filled in. Any agent with SAM's tools can do this, on a VM or on
+[Instant](/docs/guides/instant-sessions/). The result comes back when the command finishes, and
+wherever a secret's exact value appears in the output, it's replaced with `[REDACTED]`. The chat
+shows the command and the secret names, never the values.
+
+A command can run for up to an hour (10 minutes unless the agent asks for longer), and up to 8 can
+run at once on one machine. While one runs, the session counts as busy, so it won't go to sleep.
+
+## What it doesn't cover
+
+`exec_with_secrets` protects against accidents, not against the agent itself: the command can read
+the values it's given, and a value written to a file, encoded, or transformed isn't redacted.
+
+A program that reads the variable when it starts, outside `exec_with_secrets`, sees the
+placeholder. That includes a dev server you start in the terminal, an MCP server from the
+repository's own config, and hooks. Either start it through `exec_with_secrets` (its one-hour limit
+applies), save the variable again under the same name with **Secret** unticked (SAM never shows a
+secret's value, so enter it again; chats started after that can read it), or deliver the value as a
+runtime file instead.
+
+## Troubleshooting
+
+- **"Secret execution unavailable: verify the active session, selected names and VM
+  compatibility".** The name isn't a Secret variable for this project, profile, or skill; the chat
+  started before your instance updated (start a new chat); or 8 commands are already running on
+  that machine.
+- **The agent won't start, with "managed secret … conflicts with harness environment
+  authentication".** A Secret variable has the same name as the variable the agent's own connected
+  credential is passed in, such as `ANTHROPIC_API_KEY`. Rename the variable or delete it.
+- **"Managed environment contains an unsupported shell variable name".** A project, profile, or skill
+  variable, Secret or not, is named `ENV`, `BASH_ENV`, `UID`, `EUID`, `PPID`, `SHELLOPTS`,
+  `BASHOPTS`, or `BASH_VERSINFO`, so every `exec_with_secrets` call fails. Rename it.
+- **The output says `environmentMode: legacy`.** The workspace's environment predates the Secret
+  setting: it started before your instance updated, or the variable was added or marked Secret after
+  it started. Start a new chat, or, in a **Chat**, select **Sleep** and then send a message to wake
+  it, to get placeholders.
+
+## Details for agents
+
+`exec_with_secrets` takes either `argv` (a literal command, without shell expansion) or `command`
+with an explicit `shell` of `bash` or `sh`, plus `secretNames`, an optional absolute `cwd`, an
+optional `timeoutMs`, and an optional `idempotencyKey`:
 
 ```json
 {
@@ -17,20 +97,30 @@ Ask the agent to use `exec_with_secrets` for commands that need those variables:
 }
 ```
 
-The command runs as the session’s user in its existing workspace with its live files and network access. Only the selected secret names receive values. Other managed secrets remain placeholders. The tool returns a job ID; the agent polls `exec_with_secrets_status` until the command finishes. Reuse an idempotency key only for retries of the identical request. `exec_with_secrets_cancel` requests cancellation; poll until the result becomes terminal.
+The call returns a job ID; poll `exec_with_secrets_status` until the result is final, and use
+`exec_with_secrets_cancel` to stop a job (then poll until it reports the end). Reuse an idempotency
+key only to retry the identical request. Output is kept to 64 KiB per stream, from the beginning.
 
-For shell syntax, use `command` with an explicit `shell` of `bash` or `sh` instead of `argv`. Literal `argv` does not expand `$VARIABLE`, pipes, or redirects. This starts a new noninteractive process with no terminal or shell startup files. Terminal exports, aliases, functions, activation, and the terminal’s current directory do not carry over. Supply an absolute `cwd` or use the session worktree default, and explicitly source any setup your command needs. Environment overrides are for nonsecret values. `ENV` and `BASH_ENV` are reserved startup controls and cannot be selected or overridden. `UID`, `EUID`, `PPID`, `SHELLOPTS`, `BASHOPTS`, and `BASH_VERSINFO` are unsupported readonly Bash names and are rejected before execution, including in managed environment rows.
+Each job is a new non-interactive process: terminal exports, aliases, functions, activated
+environments, and the terminal's current directory don't carry over, so source any setup the command
+needs. Environment overrides are for non-secret values. `ENV`, `BASH_ENV`, `UID`, `EUID`, `PPID`,
+`SHELLOPTS`, `BASHOPTS`, and `BASH_VERSINFO` can't be selected or overridden, and a managed variable
+with one of these names makes every call fail. The container needs Bash and `setsid`; without them
+the job fails rather than SAM replacing the container.
 
-Output is bounded, and exact selected secret values are replaced with `[REDACTED]` before results are saved or returned. Encoded, transformed, or file-written values are outside that protection. Commands can still read their selected values and use the workspace’s network. This reduces accidental disclosure; it does not isolate secrets from agent-controlled code. The current container needs Bash and `setsid`; SAM fails the job if those are unavailable rather than replacing the container.
+Cancelling stops the command's process group, but anything it started outside that group, such as
+containers from `docker compose up -d`, keeps running. Stopping the session or workspace cancels its
+jobs. If the VM agent stops, unfinished jobs end (`cancelled` after a clean shutdown, `interrupted`
+after a crash) and are never re-run automatically.
 
-The tool requires an updated VM agent. Deployment publishes the new agent artifacts, but already running nodes may still use an older version without this endpoint. On those nodes, secret execution is unavailable; the request does not wake, recreate, or restart the container or agent session. Verify rollout on a fresh node before relying on the tool.
+Starting or restarting an agent fetches its environment from SAM each time. If that request fails,
+the start fails and can be retried, rather than falling back to cached values that might hold real
+secrets.
 
-Starting or restarting an agent also requires the control plane's runtime-assets endpoint, including in an existing container. If that request fails or times out, startup fails and must be retried after service recovers. SAM does not fall back to cached environment values: they may contain legacy secrets or omit the current profile's protected names. This dependency affects new process startup; it does not stop an already running agent.
+## Use a short-lived identity instead of a stored key
 
-Existing active sessions keep their original environment. Results identify `execution.environmentMode` as `legacy` when existing managed env files still differ from the placeholder environment. No automatic session restart or container replacement occurs. Agent provider authentication, SAM/MCP/Git credentials, and secret runtime **files** retain their existing delivery paths. Fresh session processes also apply their current profile/skill env overlay in existing containers without rewriting shared runtime files. If a protected managed name conflicts with an essential harness env credential, startup fails with a clear error. Use a distinct managed name or an existing auth-file credential; SAM does not silently replace the placeholder with the harness value.
-
-Cancellation stops the supervised command’s process group. Detached external effects, such as containers launched with `docker compose -d`, can persist. Accepted jobs retain a bounded activity lease even when the agent turn ends. Explicit session/workspace stop cancels their supervised processes. Results retain selected names, actor/session/workspace IDs, command mode/fingerprint and timestamps for private audit, without storing literal commands or injected values. A VM-agent restart marks unfinished jobs `interrupted`; SAM does not replay commands automatically.
-
-## Use temporary workload identity instead of a stored key
-
-Pass `oidc: { "audience": "your-service" }` to receive a short-lived `SAM_OIDC_TOKEN` inside the command. You can use an empty `secretNames` list. See [workload identity](/docs/guides/workload-identity/) for trust setup, available project/profile/session/automation claims, and examples.
+Some services can trust SAM itself instead of a key you store, for example a cloud provider or a
+vault that accepts OpenID Connect tokens. Ask the agent to run the command with
+`exec_with_secrets` and an `oidc` audience; the command gets a short-lived `SAM_OIDC_TOKEN` that
+says which project, profile and chat it comes from, and you don't store a secret at all. Setting up
+the trust on the other side is up to you: see [Workload identity](/docs/guides/workload-identity/).

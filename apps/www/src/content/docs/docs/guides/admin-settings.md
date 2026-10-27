@@ -1,15 +1,134 @@
 ---
-title: Dynamic admin settings
-description: Change Phase 1 platform controls without redeploying the Worker.
+title: Admin Settings
+description: Change SAM's sign-in providers, SAM Connector limits, anonymous trials, background jobs, and the limits for collaboration, workflows, AI models and agent email from the app, without redeploying.
 ---
 
-Active, approved superadmins can use **Admin → Settings** to search and edit platform settings from a phone or desktop. This page covers the Phase 1 controls: GitHub, Google login, Google infrastructure and GitLab OAuth configuration; the ten Connector settings and the Connector read limits; anonymous trials; cron sweeps; Durable Object alarms; stalled-task classification; the Collaboration limits for shared chats and comments; the Chat setting for the new-chat profile picker; the Operations limits for workflows; the AI models controls for agent model calls; and the Email limits for agent email (preview). Other deployment and resource settings remain in their existing interfaces.
+A superadmin can change a set of platform settings from **Admin → Settings**, on a phone or a
+desktop. A change applies within a minute, with no redeploy. On a self-hosted instance this page
+arrived in v2026.10.17, and each group added since arrives with the release that added its feature.
+Before v2026.10.17, sign-in providers and the SAM Connector were set in `/setup` and
+**Admin → Integrations**, trials on **Admin → Trials**, and the background-job switches only through
+GitHub Environment variables and KV.
 
-The editor shows each setting's effective value, code default and source. Secret fields show only whether a value is configured. Enter a replacement to change a secret; leaving a password field empty does not reveal or erase the current secret. Related OAuth client IDs and secrets must satisfy the existing provider validation together. Risky saves and resets require confirmation.
+## Open the settings
 
-**Reset** removes the D1 override. It can expose a legacy environment or KV value, so it does not necessarily restore the code default. To choose the code default explicitly, save that value where the setting supports it. Search and category grouping do not change which settings a save affects.
+Select **Admin** in the sidebar (only superadmins see it), then the **Settings** tab. The page is
+titled **Runtime settings**. An account must be an approved, active superadmin to use it; admins
+can't.
 
-Every mutation records the actor, time, affected setting and action in a value-free audit history. Saves use a revision: if another administrator or a legacy settings page changes configuration, refresh before retrying a conflicted edit. D1 configuration and audit updates are atomic. Operational re-enable also clears the existing emergency KV brake after the D1 commit. D1 and KV are not atomic: a timeout can leave re-enable propagation uncertain, and a multi-control enable can propagate only some KV updates. Reload and verify every effective control before retrying; an error does not imply rollback. A stale revision never clears a KV brake. A newer D1 disable remains effective even if an older enable finishes its KV update later.
+Settings are grouped into **OAuth**, **Connector**, **Operations**, **Trials**, **Collaboration**,
+**Chat**, **AI models**, and **Email**. Type in **Search settings** to filter by name, group, or
+description. Each card is named after the setting, split into words — `operations.cronSweepsEnabled`
+shows as **operations · cron Sweeps Enabled** — and shows:
+
+- **Source**: where the value in effect comes from (see [Which value wins](#which-value-wins)), and
+  whether the setting is **Configured**. **Not configured** means nothing has set it, so the code
+  default applies, which for a switch can still read **Enabled**. **Requires confirmation** marks
+  the settings that ask before they save.
+- A short description of what the setting does.
+- The value, as a field, an **Enabled**/**Disabled** choice, or a list with one entry per line.
+- **Code default** (SAM's built-in value) and, for numbers, the allowed **Range**.
+
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/admin-settings-mobile.png 2x" />
+  <img
+    src="/images/docs/admin-settings.png"
+    alt="The Runtime settings page under Admin → Settings. On a desktop: a search box, a count of 26 settings, then the OAuth group, where the GitHub sign-in cards say &quot;Source: environment · Configured · Requires confirmation&quot;, the Google ones &quot;Source: database&quot;, client ID fields show their values, and secret fields say &quot;Current secret is never returned&quot;. On a phone: the Connector group, where &quot;connector · enabled&quot; says &quot;Source: default · Not configured&quot; and &quot;connector · write Enabled&quot; is set to Disabled with &quot;Source: database&quot; and an available Reset override button."
+  />
+</picture>
+
+## Change a setting
+
+1. Find the setting and change its value.
+2. Select **Save**. Sign-in, Connector, and on/off settings then ask you to confirm in
+   **Confirm runtime change**: select **Apply change**. Number limits save straight away.
+3. The page says **Settings saved.** The server that saved it uses the new value at once, and the
+   rest of SAM within a minute (within 30 seconds for trials, cron sweeps, and Durable Object alarms).
+
+OAuth client secrets are write-only: their card says **Current secret is never returned**. To
+replace one, type the new value in **Enter replacement secret**; an empty field keeps the current
+secret. Enter a client ID and its secret together, and SAM checks them as a pair before saving.
+
+If someone else changed the settings since you opened the page, saving fails with **Settings changed
+since you loaded them.** Select **Reload current settings**, check your edits (the page keeps them),
+and save again. Any other failure shows **Save could not be confirmed**: reload before you retry,
+because the change may already have been saved. The same message appears when SAM refuses a value,
+for example a client secret that doesn't belong to its client ID. If the setting still shows its old
+value and **Source** after the reload, nothing was saved: check the value and try again.
+
+## Undo a change
+
+**Reset override** removes the value saved in the app. The setting then goes back to its GitHub
+Environment variable or older KV value, if there is one, and only otherwise to the code default. So a
+reset doesn't always mean "default": to be sure of the default, save the default value instead.
+
+**Recent changes**, at the bottom of the page, lists which settings were set or reset, by whom (as a
+user ID), and when — but never the values. Note a value before you change it if you might want it
+back.
+
+:::caution[Don't lock yourself out]
+SAM doesn't stop you from resetting or breaking the only sign-in provider your account uses. If
+nobody can sign in:
+
+1. Set the `SETUP_FORCE` GitHub Environment variable to `true` and run **Deploy Production**.
+2. Every deploy creates a new `SETUP_TOKEN`. In the deploy's log, the **Sync Wrangler Config** step
+   prints a Cloudflare dashboard link ("Setup token is available in Cloudflare dashboard
+   variables: …"). Copy the token there, and open `/setup` with it (as in
+   [Verification](/docs/guides/self-hosting/#verification)).
+3. Enter working sign-in credentials.
+4. Once you can sign in again, delete `SETUP_FORCE` and deploy again. While it's set, `/setup`
+   stays open.
+   :::
+
+## Which value wins
+
+For each setting SAM uses the first of these that exists:
+
+1. A value saved in the app — here, or on the older **Admin → Integrations** and **Admin → Trials**
+   pages, which change the same settings (**Source: database**).
+2. The matching Worker variable, set through your GitHub Environment (**Source: environment**).
+3. An older KV value: `trials:enabled`, or the cron and alarm switches (**Source: kv**).
+4. The code default (**Source: default**).
+
+So once a value is saved in the app, changing its GitHub Environment variable does nothing until you
+select **Reset override**; and a changed variable only reaches SAM when you redeploy. A variable set
+to a value SAM can't use is ignored, and the code default applies.
+
+One exception: the emergency KV switches for cron sweeps and Durable Object alarms still stop that
+work when set to `false` or `disabled`, even over a saved **Enabled**. The card then shows
+**Disabled** and **Source: kv** once Cloudflare KV serves the new value, usually within a minute.
+
+## The settings
+
+| Group         | Setting                                                        | Code default                                   | What it controls                                                                                                    | Falls back to                                                                     |
+| ------------- | -------------------------------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| OAuth         | `integration.github.clientId`, `.clientSecret`                 | —                                              | Sign in with GitHub                                                                                                 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` (`GH_*` in GitHub)                     |
+| OAuth         | `integration.google.clientId`, `.clientSecret`                 | —                                              | Sign in with Google                                                                                                 | `GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET`                            |
+| OAuth         | `integration.googleInfrastructure.clientId`, `.clientSecret`   | —                                              | Google Cloud access for workspaces (not sign-in)                                                                    | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`                                        |
+| OAuth         | `integration.gitlab.clientId`, `.clientSecret`, `.host`        | —                                              | Sign in with GitLab, and which GitLab server                                                                        | `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET`, `GITLAB_HOST`                         |
+| Connector     | `connector.enabled`, `.writeEnabled`                           | on, on                                         | Whether AI apps can connect, and whether they can change anything                                                   | `CONNECTOR_ENABLED`, `CONNECTOR_WRITE_ENABLED`                                    |
+| Connector     | `connector.clientRegistration`, `.allowedRedirectHosts`        | `open`; `claude.ai`, `chatgpt.com`, `loopback` | Which apps may register and where sign-in may return to                                                             | `CONNECTOR_CLIENT_REGISTRATION`, `CONNECTOR_ALLOWED_REDIRECT_HOSTS`               |
+| Connector     | `connector.accessTokenTtlSeconds`, `.refreshTokenTtlSeconds`   | 3600 (1 hour), 2592000 (30 days)               | How long a connection's tokens last                                                                                 | `CONNECTOR_ACCESS_TOKEN_TTL_SECONDS`, `CONNECTOR_REFRESH_TOKEN_TTL_SECONDS`       |
+| Connector     | `connector.readRateLimitPerMinute`, `.writeRateLimitPerMinute` | 120, 30                                        | Reads and writes per person per minute                                                                              | `CONNECTOR_READ_RATE_LIMIT_PER_MINUTE`, `CONNECTOR_WRITE_RATE_LIMIT_PER_MINUTE`   |
+| Connector     | `connector.maxStartsPerUserPerHour`, `.maxStartsPerUserPerDay` | 10, 50                                         | How much work one person can start from an AI app                                                                   | `CONNECTOR_MAX_STARTS_PER_USER_PER_HOUR`, `CONNECTOR_MAX_STARTS_PER_USER_PER_DAY` |
+| Operations    | `operations.cronSweepsEnabled`                                 | on                                             | SAM's scheduled recovery and cleanup jobs                                                                           | KV cron switch                                                                    |
+| Operations    | `operations.doAlarmsEnabled`                                   | on                                             | Durable Object alarm work (paused alarms run later)                                                                 | KV alarm switch                                                                   |
+| Operations    | `operations.stalledTaskClassifierEnabled`                      | on                                             | The check that [ends stalled turns](/docs/guides/session-troubleshooting/#sam-ended-a-stalled-turn)                 | `STALLED_TASK_CLASSIFIER_ENABLED`                                                 |
+| Trials        | `trials.enabled`                                               | off                                            | Anonymous trials (keep off; see [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access)) | KV `trials:enabled`                                                               |
+| Collaboration | `collaboration.*` (below)                                      | see below                                      | Shared chats, comments, and idea updates                                                                            | —                                                                                 |
+| Chat          | `chat.profileUsageWindowDays` (below)                          | 30                                             | How far back the new-chat profile picker looks                                                                      | —                                                                                 |
+| AI models     | `aiModels.*` (below)                                           | see below                                      | Which AI models agents may call, and the spending limits                                                            | —                                                                                 |
+| Email         | `agentEmail.*` (below)                                         | see below                                      | Limits for agent email (preview)                                                                                    | —                                                                                 |
+
+**Operations** also holds limits for [workflows](#workflows), [linked work](#linked-work), pull
+request tracking, the GitHub trigger queue, the Account Map, [workload identity](/docs/guides/workload-identity/)
+tokens, and the [SAM assistant](/docs/reference/configuration/#private-sam-assistant-runtime-controls).
+Every card shows its own description, default, and range, so the tables below cover the limits
+you're most likely to change rather than every one.
+
+The Connector's other limits, the GitHub App itself, and the private feedback project stay on their
+existing pages and variables; see [SAM Connector](/docs/reference/configuration/#sam-connector) and
+[Platform integrations after deploy](/docs/guides/self-hosting/#platform-integrations-after-deploy).
 
 ## Collaboration
 
@@ -136,16 +255,21 @@ These limit [email triggers](/docs/guides/email-triggers/) (preview). Every valu
 | `agentEmail.retryMaxSeconds`          | 900       | 60–86,400        | Longest wait between two retries of one email                                                                                      |
 | `agentEmail.recoveryBatchSize`        | 10        | 1–100            | Emails one 5-minute recovery sweep retries                                                                                         |
 
-## Storage and consistency
+## If the database can't be read
 
-D1 `platform_settings` stores non-secret overrides. Existing encrypted credential storage continues to hold OAuth secrets; the editor, audit records and errors never return secret values. Bootstrap encryption and signing roots are not settings in this editor.
+The page shows an error instead of guessing. Meanwhile SAM fails safe: the Connector and trials
+switch off, and cron sweeps, alarms, and the stalled-turn check stay switched off if they already
+were. Sign-in and security checks refuse rather than fall back. A single saved value that SAM can't
+read stops the whole page from loading.
 
-Resolution is D1 override first, then temporary legacy environment/KV compatibility, then the existing code default. Cron and alarm emergency KV disables are an independent veto: `false` or `disabled` still stops work even when D1 says enabled. Existing installations need no backfill and keep their effective configuration until an administrator changes it. Fresh installs retain their existing defaults, including anonymous trials disabled.
+## Updating and rolling back
 
-A save invalidates the saving Worker's caches immediately. Other Worker instances converge within at most one minute (operational/trial caches at most 30 seconds); shorter legacy OAuth, trial and operational cache settings, including zero to bypass caching, continue to apply; this is not globally instantaneous configuration. Admin reads request fresh data and report database failures instead of displaying defaults as authoritative state. Runtime controls apply their documented safe outage behavior; an observed disabled operational brake must not silently become enabled during an outage. Security and entitlement checks fail closed when authoritative configuration cannot be read safely.
+Updating to v2026.10.17 or later changes nothing by itself: no values are copied into the app, and
+each setting keeps the value it had (from its variable, KV, or default) until someone saves one here.
+New installations keep their defaults, with anonymous trials off.
 
-## Deployment and rollback
-
-The additive revision/audit migration does not change live setting values or copy environment/KV state into D1. Keep its tables when rolling back Worker code. Older code may read KV rather than the new D1 operational overrides: before promoting such code, deliberately reconcile and verify the current effective cron, alarm and trials values in their legacy KV keys. D1 and KV writes are not one atomic transaction. Do not assume a Worker rollback also rolls back configuration.
-
-Runtime settings should be added to the typed registry rather than introduced as new environment tunables. Domains, resource bindings, encryption roots and token-signing roots remain bootstrap configuration. CI preserves the historical environment compatibility surface and requires a documented bootstrap exception for new scalar Worker environment fields or vars.
+Releases before v2026.10.17 ignore values saved here: they read trials, cron sweeps, and alarms only
+from KV, and the stalled-turn check only from its variable. Those releases can no longer be deployed
+anyway ([Update forward, not back](/docs/guides/self-hosting/#option-a-update-self-hosted-instance-workflow-recommended)),
+but if you run one, set the KV switches to the values you want and check them. Rolling back the
+Worker doesn't roll back saved settings, and the tables that hold them must stay.

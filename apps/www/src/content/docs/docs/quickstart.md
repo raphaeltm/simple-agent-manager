@@ -31,17 +31,21 @@ From the **Dashboard**, click **Import Project** and pick a repository that has 
 
 ### 5. Chat
 
-Open your project and type what you want done in the chat — for example, "add input validation to the signup form and write tests." SAM automatically provisions a workspace, runs your chosen agent, streams its progress back to you in real time, while the agent works. Ask the agent to commit, push and open a pull request when you want the work published. If SAM first asks you to create a profile, choose **Build and open PRs**, then **Cloud VM**, for work like this: **Chat and explore** and **Instant container** profiles use a conversation workflow. In either workflow, ask the agent explicitly when you want commits, pushes or a pull request.
+Open your project and type what you want done in the chat — for example, "add input validation to the signup form, write tests, and open a pull request." SAM provisions a workspace, starts your chosen agent, and streams its progress to you as it works.
+
+**Say when you want a pull request.** SAM itself doesn't commit, push, or open pull requests, and the agent opens one only when asked: put it in your message, or ask once the work looks right. To make it the default for a profile, edit the profile on the project's **Profiles** page, expand **Execution**, and add the instruction to **System Prompt (append)**.
+
+If SAM first asks you to create a profile, choose **Build and open PRs**, then **Cloud VM**, for work like this. Despite its name, that choice doesn't tell the agent to open pull requests: it sets the profile up to work as a Task on a VM, so you still ask for the pull request. **Chat and explore** and **Instant container** profiles are for questions and back-and-forth: their chats stay open for your next message instead of finishing on their own.
 
 ### 6. Come Back Later
 
 You don't have to watch the chat while the agent works. The **Dashboard** keeps an **Active Tasks** list across all your projects: your six most recently active tasks — ranked by their latest message, or by when they started if they have none yet — refreshed automatically.
 
-Each card shows the task's status, the project it belongs to, when you submitted it, and when its last message arrived. A dot shows where the task stands: **Active** or **Working** means it is starting up or its machine is running (Active if there was a message in the last 15 minutes), **Sleeping** means it is asleep and can be woken, and **Idle** means nothing is running for it right now. A running task isn't necessarily busy — a line below the project name shows its current step, such as **Waiting for follow-up...** when it's your turn. Select a card to open its chat.
+Each card shows the task's status, the project it belongs to, when you submitted it, and when its last message arrived. A dot shows where the task stands: **Active** or **Working** means it is starting up or its machine is running (Active if there was a message in the last 15 minutes), **Sleeping** means it is asleep and can be woken, and **Idle** means nothing is running for it right now. **Waiting** or **Blocked** means the agent hit a usage limit; see [Waiting for a provider limit reset](/docs/guides/session-troubleshooting/#waiting-for-a-provider-limit-reset). A running task isn't necessarily busy — a line below the project name shows its current step, such as **Waiting for follow-up...** when it's your turn. Select a card to open its chat.
 
 A sleeping conversation still counts as active — you can wake it for up to a week — which is why the list is ranked by recent messages rather than by start time: whatever you touched most recently stays on top, and dormant work drops off. The list only includes your own tasks that are queued, in progress, or asleep: finished, cancelled, and failed tasks are left out (even a failed task whose chat you can still wake), and so are teammates' tasks in a shared project. Find those in the project's session list. To hear when a task finishes or needs you, see [Notifications](/docs/guides/notifications/). An agent that stops to ask permission or a question inside the chat doesn't send a notification and isn't flagged on these cards: its chat is marked **Needs input** in the project's session list instead — see [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you).
 
-That's the whole loop: **import → chat → review the PR.** No terminal or server setup required.
+That's the whole loop: **import → chat → ask for a pull request → review it.** No terminal or server setup required.
 
 ## Self-Hosting
 
@@ -75,6 +79,6 @@ For detailed step-by-step instructions, see the [Self-Hosting Guide](/docs/guide
 ## Next Steps
 
 - [AI Agents](/docs/guides/agents/) — choose and configure your coding agent
-- [Idea Execution](/docs/guides/idea-execution/) — how chatting turns into finished pull requests
+- [Idea Execution](/docs/guides/idea-execution/) — what happens after you send work, and where it lands
 - [Core Concepts](/docs/concepts/) — the vocabulary behind projects, agents, and workspaces
 - [Use SAM from Claude and ChatGPT](/docs/guides/sam-connector/) — check on your work and start chats from the AI app you already use

@@ -11,11 +11,21 @@ For private coordination across projects, enable the optional [SAM account assis
 
 ## Attach Files to a Message
 
-Use the paperclip, paste an image or file, or drag files onto the message input. Long pasted text becomes a text-file attachment; short text stays in the input.
+Use the paperclip, paste an image or file, or drag files onto the message input. Pasting 4,000
+characters of text or more turns it into a text-file attachment (`pasted-….txt`); shorter text stays
+in the input.
 
-Files upload while you compose. Review the attachment chips and remove any files you do not want to send. If an upload fails, remove it and attach it again before sending.
+Files upload while you compose, each as a chip showing its size or upload progress. Select **✕** on
+a chip to remove a file you don't want to send. A chip that says **Failed** blocks sending: remove
+it, then attach the file again. You can send files with no text; the agent is asked to read them.
 
-The agent receives the files only when you send your message, together with their exact workspace paths. You can also attach files to a sleeping conversation: SAM wakes the workspace before delivering your message and files.
+The agent receives the files only when you send the message, together with each file's exact path in
+its workspace. You can attach files to a sleeping chat without waking it; sending the message wakes
+it, and the files are delivered once it's up.
+
+Limits: up to 20 files and 200 MB per message, 50 MB per file, and file names made only of
+unaccented letters (A–Z, a–z), digits, spaces, `.`, `_`, and `-`. Someone a chat is [shared with](/docs/guides/collaboration/#share-a-chat)
+can't attach files to it.
 
 ## Real-Time Streaming
 
@@ -53,8 +63,7 @@ For every kind of request:
   nobody answers in
   time, the request ends — the card says it expired or was cancelled — and the agent is told no, so
   the action it asked about does not happen. Send a message to tell the agent how to carry on. (A
-  **Task** may have gone to sleep by then; your reply wakes it with its original task mode and
-  automatic Git delivery behavior.)
+  **Task** may have gone to sleep by then; your reply wakes it, still as a Task.)
 - **Answer on the card, not in the message box.** A message you type waits until the agent's turn
   ends, and the turn can't end until the card is answered or expires. To stop the agent instead,
   select **Interrupt** (the red button above the message box); the card then says **Request
@@ -172,12 +181,22 @@ permission, but not ask questions or send links. Which you get depends on what y
   skill, the skill's **Task Mode** decides instead, and new skills are set to **Task**.
 - Anything else gives a **Task**.
 
-A **Chat** doesn't commit, push, or open a pull request for you. For work you want delivered as a
-pull request, use a VM profile whose **Task Mode** is **Task**, such as one you create with **Build
-and open PRs** and **Cloud VM**. A **Task** retains its completion and git delivery behavior
-when a follow-up wakes it from sleep; a **Chat** remains a Chat.
-See
-[What happens to your work](/docs/guides/instant-sessions/#what-happens-to-your-work).
+The difference is how the session ends:
+
+- **A Task** works on its own until its agent reports the work complete (SAM tells it to push its
+  branch first), or until you select **Complete** in the tool rail. Then it goes to sleep, and when
+  the agent reported it complete, you're notified. A follow-up message wakes it again, still as a
+  Task.
+- **A Chat** stays open for your next message, and its agent never marks it complete. It goes to
+  sleep when idle (your next message wakes it), and you're done with it when you **Archive** it.
+
+SAM doesn't commit, push, or open a pull request for either one. Ask for a pull request in your
+message, or add the request to the profile's **System Prompt (append)**; see
+[Where the work lands](/docs/guides/idea-execution/#where-the-work-lands). For build-and-ship work,
+use a VM profile whose **Task Mode** is **Task**, such as one you create with **Build and open PRs**
+and **Cloud VM**: its agent works through to the end and pushes its branch before it finishes, and
+a script or another agent can wait for it to finish. Choosing **Build and open PRs** sets that up;
+it doesn't add an instruction to open pull requests, so ask for one.
 
 ## Message Actions
 
@@ -216,7 +235,7 @@ the conversation you are in rather than opening something beside it.)
 | **Complete**   | Mark the task complete                                                                                                                                             | When the session has a task that is not already finished                                                                                                                          |
 | **Details**    | Session identifiers and the infrastructure it ran on                                                                                                               | Always                                                                                                                                                                            |
 
-![The session tool rail in icons-and-labels mode, listing Files, Git, Timeline, Resources, Automation and Comments, then Retry and Fork after a divider, with Report, Complete and Details pinned at the bottom.](/images/docs/session-tool-rail.png)
+![The session tool rail in icons-and-labels mode, listing Files, Git, Timeline, Resources, Automation and Comments, then Share, Retry and Fork after a divider, with Report, Complete and Details pinned at the bottom.](/images/docs/session-tool-rail.png)
 
 **Files** and **Git** need a linked workspace and a live session, so they disappear once the
 session sleeps or stops. Someone the chat is shared with sees them too while their access lasts,
@@ -301,13 +320,13 @@ You can attach files to your chat messages and download files from workspace con
 
 ### Uploading Files
 
-Click the **paperclip** button in the chat input to attach files. Files are uploaded to the workspace container's `.private` directory.
+In a project chat, the paperclip attaches files to your next message; see
+[Attach Files to a Message](#attach-files-to-a-message).
 
-**Limits:**
-
-- Maximum per-file size: 50 MB (configurable via `FILE_UPLOAD_MAX_BYTES`)
-- Maximum batch size: 250 MB (configurable via `FILE_UPLOAD_BATCH_MAX_BYTES`)
-- Filenames must not contain shell metacharacters
+On a workspace's own page, the paperclip instead uploads files straight into the running workspace's
+`.private` directory, and the page shows "Uploaded N files: …" (the agent isn't told, so mention the
+files in your message). Those uploads allow up to 50 MB per file and 250 MB at a time, and file
+names may only use unaccented letters (A–Z, a–z), digits, spaces, `.`, `_`, and `-`.
 
 ### Downloading Files
 
@@ -464,13 +483,17 @@ Fork and Retry both start a new chat linked to the one you're in, and both open 
 Neither copies the original workspace's files: the new chat starts from your default branch in a
 new workspace, and gets a new `sam/…` branch of its own unless it's an Instant chat without
 attachments ([which chats get one](/docs/guides/instant-sessions/#what-happens-to-your-work)). Forking works for any chat, whether it started from an
-idea, a task, or a quick question, and SAM records the new chat's parent.
+idea, a task, or a quick question, and SAM records the new chat's parent. In a
+[shared project](/docs/guides/collaboration/) you can fork or retry a teammate's chat too: the new
+chat is yours, and runs on your own accounts.
+
+An archived or expired chat also has a **Fork** box of its own; see
+[Fork an archived or expired chat](#fork-an-archived-or-expired-chat).
 
 ### How to Fork
 
 1. Open the chat you want to branch from.
-2. Select **Fork** in the [session tool rail](#the-session-tool-rail), or **Fork conversation** on
-   an [expired](/docs/guides/session-troubleshooting/#expired-saved-workspace) chat.
+2. Select **Fork** in the [session tool rail](#the-session-tool-rail).
 3. The new-chat screen opens with the message box filled in: an instruction for the agent to read
    the previous chat with SAM's tools (`get_session_messages`, `search_messages`), then the previous
    chat's title and its project, session, and task IDs.
@@ -487,6 +510,29 @@ idea, a task, or a quick question, and SAM records the new chat's parent.
     alt="The new-chat screen after Fork. A banner reads &quot;Forking from: Add a CSV export to the orders page&quot;, with a close button. Below it, To names the profile, &quot;Build and test&quot;, and then comes the message box, scrolled to its end: the previous chat's IDs, then an instruction the user has added, &quot;Now add the same CSV export to the invoices page.&quot;"
   />
 </picture>
+
+### Fork an archived or expired chat
+
+A chat that was archived, or whose saved workspace
+[expired](/docs/guides/session-troubleshooting/#expired-saved-workspace), shows a **Fork** box where
+its message box was: _"Fork into a new chat with retained history. The archived chat stays
+unchanged. Prior workspace files are not restored."_ It's the quickest way to carry on:
+
+1. Type what should happen next. If the project has more than one profile, check the one under
+   **Agent**: it starts on the first profile in the list, not necessarily the one the original chat
+   used.
+2. Select **Fork**. SAM opens the new chat.
+
+The new chat is always a **Chat**, linked to the original. SAM gives its agent the original's most
+recent messages from you and the agent — up to 24,000 characters from the last 200 stored entries,
+leaving out tool calls, system messages, and approvals, with secrets redacted — plus the repository
+and branch, and the commit SAM last saved if it still has one. You can read what the agent was given in the system message at the top of the new chat. The
+original chat doesn't change, and its files aren't restored: the new chat starts from your default
+branch, so tell the agent which branch to continue from.
+
+Only the person who started the original chat gets the **Fork** box; anyone else in the project can
+use **Fork** in the tool rail instead. If forking fails, your prompt is kept and selecting **Fork**
+again repeats the same request, so it can't start two chats.
 
 ### Retrying a Session
 
@@ -569,10 +615,10 @@ Persistent chat sessions can sleep and recover on both [Instant and VM-backed ru
 
 - **Sleeping.** The session went idle or you manually chose **Sleep** for an awake idle conversation-mode session with a workspace. SAM writes a checkpoint, releases compute, and keeps the composer visible so sending a message wakes the same chat, with the same agent, model, and permission mode it started with (for chats started since 7 October 2026, and on a self-hosted instance only from v2026.10.08; older ones wake in Manual, see [After a chat wakes from sleep](/docs/guides/agents/#after-a-chat-wakes-from-sleep)). A message sent in the first minutes after it slept waits (up to an hour) until the old workspace has finished shutting down, then wakes it, usually within a minute or two of the shutdown. Your message, or a notification from another agent or a subscribed event, reaches the agent once the woken session has fully started.
 - **Archiving a sleeping conversation.** Choose **Archive** in the dock and confirm when you are finished with the chat. This also works for sleeping VM conversations. SAM immediately requests deletion of your linked workspace and discards its restore snapshots once runtime deletion is confirmed. If cleanup is interrupted, retry Archive; SAM keeps deletion retryable without completing the conversation twice. Archiving a shared conversation does not delete another member's workspace.
-- **Snapshots that keep failing.** If SAM cannot save a complete snapshot after a few tries (three, or 15 minutes, by default), it stops retrying. A VM session whose earlier snapshot saved its exact Git commit sleeps anyway, keeping the conversation and the repository but not every file, and the chat says what was kept. Otherwise the chat says SAM could not put the session to sleep, and the workspace keeps running. [SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot) explains both.
+- **Snapshots that keep failing.** If SAM cannot save a complete snapshot after a few tries (three, or 15 minutes, by default), it stops retrying and shuts the idle workspace down anyway, and the chat says what was kept. A VM session can fall back on an earlier snapshot: a complete one brings back everything it saved, and one that saved the repository's exact commit brings back the repository but not every other file. Otherwise SAM keeps only the conversation and any successful backups. Either way, changes made after the last successful snapshot can be lost, so push what you want to keep. [SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot) explains each case.
 - **Recovery.** SAM is rebuilding the session's runtime and restoring its saved state. Wait for it to finish instead of resending.
 - **Wake failed.** SAM could not safely wake the sleeping session or the queued wake prompt expired before delivery. The session is marked **Wake failed** in the list and a system message in the chat explains the reason, so the failure is visible instead of hidden in retry state. [Wake failed](/docs/guides/session-troubleshooting/#wake-failed) lists the reasons and what to do about each.
-- **Failed tasks.** When a task fails while its workspace is still running, SAM snapshots the workspace and puts the conversation to sleep instead of deleting it. That covers a provider usage limit, a question the agent sent with its `request_human_input` tool that nobody answered, and an agent that went quiet after a SAM check-in. If the agent is still working when the task fails, SAM waits for its turn to end first (up to 8 hours by default). The failure banner stays, and sending a message wakes the same chat with its files restored. If SAM could not save the workspace, or the snapshot is incomplete, the chat says so. If SAM cannot safely snapshot the failed runtime, uncommitted changes may be lost; the chat explains what could not be saved. **Archive** still deletes it right away. [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails) shows how to tell which happened.
+- **Failed tasks.** When a task fails while its workspace is still running, SAM snapshots the workspace and puts the conversation to sleep instead of deleting it. That covers a question the agent sent with its `request_human_input` tool that nobody answered, an agent that went quiet after a SAM check-in, and, in the **SAM** provider mode, a usage limit. (On your own subscription or key, or a project credential, SAM [waits out](/docs/guides/session-troubleshooting/#waiting-for-a-provider-limit-reset) a Claude Code or Codex plan limit, or a rate limit that says when it resets, instead of failing the task; other limits fail it as in **SAM** mode.) If the agent is still working when the task fails, SAM waits for its turn to end first (up to 8 hours by default). The failure banner stays, and sending a message wakes the same chat with its files restored. If SAM could not save the workspace, or the snapshot is incomplete, the chat says so. If SAM cannot safely snapshot the failed runtime, uncommitted changes may be lost; the chat explains what could not be saved. The saved workspace is kept for seven days, like any sleeping chat's. [When a task fails](/docs/guides/session-troubleshooting/#when-a-task-fails) shows how to tell which happened.
 
 You may also see a banner telling you a message was saved but its delivery was interrupted. **That one needs a decision from you** — SAM will not replay the message automatically, because replaying a prompt that already half-ran duplicates commits and pull requests. See [Your prompt may or may not have run](/docs/guides/session-troubleshooting/#your-prompt-may-or-may-not-have-run).
 
@@ -597,7 +643,7 @@ An unsent message in the composer stays with its chat when you switch to another
 
 ## Session Filters (Shared Projects)
 
-In a project shared with teammates, everyone's chat sessions appear in the same session list. A filter near the session search lets you switch between **my sessions** and **all sessions** so you can focus on your own work or see everything happening in the project.
+In a project shared with teammates, everyone's chat sessions appear in the same session list. A filter near the session search switches between **My sessions**, the chats you started, and **All sessions**, everything happening in the project. A chat a teammate [shared with you](/docs/guides/collaboration/#share-a-chat) isn't yours, so it's only under **All sessions**; its notification also opens it.
 
 For the full team workflow — inviting people, approving access, roles, and shared resources — see [Collaboration & Shared Projects](/docs/guides/collaboration/). To comment on a teammate's chat, mention someone, or drive a chat together, see [Work together in a chat](/docs/guides/collaboration/#work-together-in-a-chat).
 

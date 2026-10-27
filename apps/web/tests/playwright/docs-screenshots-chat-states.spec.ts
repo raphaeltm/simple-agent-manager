@@ -1,7 +1,8 @@
 /**
  * Documentation screenshots for chat states the docs teach a reader to recognise: a sleeping
  * chat whose wake failed, an agent reply containing a Mermaid diagram, and a chat whose saved
- * workspace expired, with the fork it offers.
+ * workspace expired (with its Fork box), plus the new-chat screen that Fork in the tool rail
+ * opens.
  *
  * Every capture drives the REAL production components with mocked API data, and asserts
  * on what rendered rather than on the fixture, so a component that stops rendering fails
@@ -428,9 +429,15 @@ const EXPIRED_LIST = [EXPIRED, ...OTHER_SESSIONS];
 
 async function openExpiredChat(page: Page, overrides: RouteOverrides = {}) {
   await openChat(page, EXPIRED.id, EXPIRED_LIST, overrides);
-  const footer = page.getByText(/The saved workspace has expired/);
-  await expect(footer).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Fork conversation' })).toBeVisible();
+  // The archived-chat Fork box (`ArchivedForkComposer`) replaces the message box, with the
+  // expiry explained above it.
+  await expect(
+    page.getByText(/The saved workspace has expired\. Your transcript is still available\./)
+  ).toBeVisible();
+  await expect(page.getByPlaceholder('Write a prompt to fork this archived chat...')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Fork', exact: true })).toBeVisible();
+  // The removed "Fork conversation" button must not come back alongside it.
+  await expect(page.getByRole('button', { name: 'Fork conversation' })).toHaveCount(0);
   // Liveness for the absence below: the transcript itself rendered.
   await expect(page.getByText(/ExportOrdersButton/)).toBeVisible();
   // The message box is replaced, not merely disabled.
@@ -470,10 +477,7 @@ function listPayload(fixtures: SessionFixture[]) {
 }
 
 async function forkExpiredChat(page: Page) {
-  // Fork from the session tool rail, the guide's first path. The expired footer's own fork
-  // control now depends on the session's stored status (`SessionFooter.tsx`), which this
-  // fixture no longer matches: tasks/backlog/2026-10-21-docs-expired-chat-spec-drift.md.
-  await openChat(page, EXPIRED.id, EXPIRED_LIST, {
+  await openExpiredChat(page, {
     [`/api/projects/${PROJECT_ID}/sessions`]: {
       sessions: listPayload(EXPIRED_LIST),
       total: EXPIRED_LIST.length,
@@ -483,8 +487,8 @@ async function forkExpiredChat(page: Page) {
       agents: [{ id: 'claude-code', name: 'Claude Code', configured: true, supportsAcp: true }],
     },
   });
-  await expect(page.getByText(/The saved workspace has expired/)).toBeVisible();
-  await page.getByRole('button', { name: /^Fork — start a new task/ }).click();
+  // Fork in the session tool rail opens the new-chat screen pre-filled with the IDs.
+  await page.getByTestId('session-tool-fork').click();
   await expect(page.getByText(`Forking from: ${EXPIRED.topic}`)).toBeVisible();
   const composer = page
     .getByRole('combobox')

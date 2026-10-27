@@ -70,11 +70,11 @@ Multiple cloud providers and UX improvements:
 
 Multi-agent coordination:
 
-- Missions with agent-to-agent dispatch.
+- Agents that start, message, and stop other agents, which can message back.
 - Task dependencies and durable messaging.
 - Structured idea capture with execution dispatch.
 - Recurring triggers (daily/weekly schedules).
-- Project knowledge base and policies injected into agent context.
+- A project knowledge base that agents can read and add to.
 
 ## Complete: CLI
 
@@ -94,8 +94,10 @@ Agent-first deployment environments:
 
 Threads that become agent context:
 
-- Comments on chat messages and project library files.
+- Comments on chat messages and project library files, by any project member.
+- @mentions that notify teammates.
 - Comment inboxes for project-wide and session-scoped follow-up.
+- **Send to agent**, which turns a comment into a message for the chat's agent.
 - Agent replies and resolution through MCP tools.
 
 ## Complete: Event Streams & Triggers
@@ -118,6 +120,7 @@ Shared project collaboration:
 - Maintainer and viewer role enforcement foundation.
 - Invite links and access requests.
 - Member removal and ownership transfer flows with credential impact handling.
+- Sharing a chat with a teammate for a set time, so they can drive it on the owner's accounts.
 
 ## Planned: Billing Integration
 

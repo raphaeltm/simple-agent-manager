@@ -37,7 +37,8 @@ sees only what you can see in SAM, and its answers link back to the pages in SAM
 
 It can't read repository files directly, create projects, change settings, delete ideas, post to
 agents' coordination channels, or delete recurring schedules. It can only reply to, answer, or stop
-chats that you started or that their owner shared with you.
+chats that you started, or that a teammate has [shared with you](/docs/guides/collaboration/#share-a-chat)
+while your access lasts.
 
 ## Connect Claude or ChatGPT
 
@@ -273,8 +274,10 @@ button, and **Seen clients** lists the apps that have registered, with **Block**
 ### Self-hosted installations
 
 - **It's on after you update.** The Connector shipped in v2026.10.10 and is enabled by default. To
-  turn it off, switch off **Enable Connector** here, or set the `CONNECTOR_ENABLED` GitHub
-  Environment variable to `false` before you deploy.
+  turn it off, switch off **Enable Connector** here. From v2026.10.17 the same switch, and the
+  Connector's other limits, are also in [**Admin → Settings**](/docs/guides/admin-settings/). The
+  `CONNECTOR_ENABLED` GitHub Environment variable set to `false` before you deploy only works while
+  no value has been saved in the app: a saved value wins.
 - **No setup is needed.** Your installation is its own sign-in (OAuth) provider, and the deploy
   creates the storage it needs.
 - **The apps' servers must reach your API.** Claude's and ChatGPT's servers connect to your API host

@@ -62,18 +62,19 @@ Note that the **Full** workspace profile does not override this: workspace profi
 
 ## What happens to your work
 
-**SAM does not commit or push an Instant chat's work for you.** Nothing is auto-committed when the agent finishes, and no pull request is opened. A chat you send from the message box with no attachments or explicit resource overrides, and not started from an idea, gets no branch either: its workspace sits on your project's default branch, and anything the agent changed stays in that container.
+**SAM doesn't commit, push, or open a pull request for you**, on Instant or anywhere else. A Task's
+agent is told to push its branch before it finishes; otherwise, ask the agent when you want the work
+pushed or a pull request opened (see
+[Where the work lands](/docs/guides/idea-execution/#where-the-work-lands)). What differs is whether
+the work gets a branch of its own:
 
-How work starts determines its initial branch; publication is always agent-directed:
+| How you started it                                                                                                                                    | Branch                                           |
+| ----------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------ |
+| A message-box chat on an **Instant** profile, with no attachments or resource overrides, not started from an idea | None: the workspace stays on your default branch |
+| Anything else — an Instant chat with attachments or resource overrides or started from an idea, a submitted task, or `dispatch_task`, in either task mode | Its own `sam/…` output branch |
 
-| How you started it                                                                                           | Branch                        | Auto-commit and push |
-| ------------------------------------------------------------------------------------------------------------ | ----------------------------- | -------------------- |
-| A message-box chat on an **Instant** profile, no attachments or resource overrides, not started from an idea | None — your default branch    | No                   |
-| A submitted task or `dispatch_task`, in **task** mode                                                        | Its own `sam/…` output branch | No                   |
-| The same, in **conversation** mode                                                                           | Its own `sam/…` output branch | No                   |
-
-- **The branch depends on how the work was started.** Only a composer chat on an Instant profile skips branch creation, and only when it has no attachments or explicit resource overrides and was not started from an idea. Otherwise it is submitted as a task and gets one. Anything submitted as a task — or dispatched with `dispatch_task`, on either runtime — gets an output branch, whichever mode it runs in.
-- **Commits, pushes and pull requests are agent-directed in every task mode.** Ending a turn or completing a task does not publish repository changes.
+A chat with no branch keeps whatever the agent changed in its container, until the agent pushes it
+somewhere.
 
 Instant clones the requested base branch before checking out a task's output branch. A new output branch starts at that base; an existing output branch keeps its remote commits.
 
@@ -128,7 +129,7 @@ A snapshot deliberately **excludes**:
 :::caution
 Four limits are worth planning around. None of them is shown in the UI ahead of time:
 
-- **Snapshots expire after 7 days of sleep** (`SESSION_SNAPSHOT_TTL_DAYS`). **The conversation ends as Expired.** Its transcript stays readable; choose **Fork conversation** to continue in a new session. SAM does not silently wake it without its saved workspace.
+- **Snapshots expire after 7 days of sleep** (`SESSION_SNAPSHOT_TTL_DAYS`). **The conversation ends as Expired.** Its transcript stays readable; type what's next in the **Fork** box where the message box was to continue in a new chat ([Fork an archived or expired chat](/docs/guides/chat-features/#fork-an-archived-or-expired-chat)). SAM does not silently wake it without its saved workspace.
 - **Size is capped** at 256 MiB, including a 256 MiB per-entry ceiling (`SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES`, `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES`). Snapshot artifacts use short-lived direct R2 uploads when configured (with exact checksum binding on current agents); busy legacy VM agents use a same-user current-agent relay, so this budget is not reduced by the Worker's request-body limit. The repository bundle is captured first. It holds the commits that are not on your default branch (including clean local-only commits) plus the worktree and index state. History already on the default branch (`origin/HEAD`) is left out and fetched from origin on wake (`snapshotWIPBundleBasis` in `packages/vm-agent/internal/server/session_snapshot_bundle.go`). Large local commits or changes can still crowd out the agent's HOME state. Skipped content is recorded server-side but you are not told about it. When many files are skipped, the record keeps diagnostics and the largest files, and summarizes the rest so the completion request stays under `SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES`.
 - **Final checkpoint waiting is progress-based** (`SESSION_SNAPSHOT_PROGRESS_IDLE_TIMEOUT_MS`). Large snapshots may run longer than the request-acceptance budget as long as the vm-agent keeps reporting durable progress. A capture that stops reporting progress is recorded as degraded, so that sleep attempt fails and counts toward the bounded retries described in [Sleep and wake](#sleep-and-wake).
 - **A repository mid-merge is skipped entirely.** If a merge, rebase, cherry-pick, or revert is in progress when the runtime goes away, none of the repository work in progress is captured.

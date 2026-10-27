@@ -66,6 +66,16 @@ const MOCK_SESSION = {
   lastMessageAt: NOW - 120_000,
   taskId: 'task-docs-1',
   agentType: 'claude-code',
+  // Session detail always carries the viewer's access (`enrichSessionWithAccess`), which is
+  // what puts Share in the rail; nobody else has access yet.
+  viewerAccess: 'owner',
+  access: {
+    sessionId: SESSION_ID,
+    viewerAccess: 'owner',
+    owner: { id: MOCK_USER.user.id, name: 'Docs User', avatarUrl: null },
+    grants: [],
+    serverTime: NOW,
+  },
   task: {
     id: 'task-docs-1',
     status: 'in_progress',
@@ -526,7 +536,17 @@ test('docs: session tool rail with labels', async ({ page }) => {
   const rail = page.getByTestId('session-tool-rail');
   // Assert through the rendered rail, not the fixture: if an action stops being built
   // the capture fails instead of shipping an image that no longer matches the docs table.
-  for (const id of ['timeline', 'resources', 'automation', 'comments', 'report', 'details']) {
+  for (const id of [
+    'timeline',
+    'resources',
+    'automation',
+    'comments',
+    'share',
+    'retry',
+    'fork',
+    'report',
+    'details',
+  ]) {
     await expect(page.getByTestId(`session-tool-${id}`)).toBeVisible();
   }
   await docsShot(page, 'session-tool-rail', rail);

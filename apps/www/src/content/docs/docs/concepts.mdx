@@ -24,7 +24,7 @@ A workspace runs in one of two places:
 | **Instant** | A container on Cloudflare's network | Starts in seconds, no cloud account needed — but no devcontainer and no Docker |
 | **VM**      | A cloud VM on your provider account | Your full environment, at the cost of a minute or two of provisioning          |
 
-Which one you get is an [agent profile](#agent-profiles) setting: a profile whose runtime is **Instant container** starts chats on Instant; everything else you start in SAM or with the CLI runs on a VM, as a **Task** or a **Chat** depending on the profile (see [Chat or Task](/docs/guides/chat-features/#chat-or-task)). Work an AI app starts through the [SAM Connector](/docs/guides/sam-connector/) with an **Auto** profile, or none, can run on Instant instead; see [Workspaces](/docs/guides/creating-workspaces/#two-kinds-of-workspace-instant-and-vm). A Task is tracked work; a Chat is back-and-forth. In either mode, the agent commits, pushes, and opens pull requests when instructed. Instant needs no cloud provider credential, so it's how you work before connecting a cloud account.
+Which one you get is an [agent profile](#agent-profiles) setting: a profile whose runtime is **Instant container** starts chats on Instant; everything else you start in SAM or with the CLI runs on a VM, as a **Task** or a **Chat** depending on the profile (see [Chat or Task](/docs/guides/chat-features/#chat-or-task)). Work an AI app starts through the [SAM Connector](/docs/guides/sam-connector/) with an **Auto** profile, or none, can run on Instant instead; see [Workspaces](/docs/guides/creating-workspaces/#two-kinds-of-workspace-instant-and-vm). A Task runs on its own until its agent reports the work complete (SAM tells it to push its branch first); a Chat stays open for back-and-forth. SAM itself doesn't commit, push, or open pull requests, and agents open one only when asked (see [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands)). Instant needs no cloud provider credential, so it's how you work before connecting a cloud account.
 
 Instant and VM sessions sleep when idle and restore from a runtime-neutral snapshot on wake. A VM wake provisions a replacement workspace after the original compute is removed. See [Instant Sessions and persistent sleep](/docs/guides/instant-sessions/).
 
@@ -32,10 +32,10 @@ Instant and VM sessions sleep when idle and restore from a runtime-neutral snaps
 
 An agent profile's **Workspace Profile** setting chooses how much environment a VM chat gets:
 
-| Profile            | Best for                                                                                                                                         |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| **Full** (default) | Work where the agent needs to run your stack — builds your `.devcontainer` on a VM workspace; no effect on Instant                               |
-| **Lightweight**    | Quick questions and code exploration — starts faster; with **Task Mode** left at **Default**, its sessions are Chats (no automatic pull request) |
+| Profile            | Best for                                                                                                                                                 |
+| ------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Full** (default) | Work where the agent needs to run your stack — builds your `.devcontainer` on a VM workspace; no effect on Instant                                       |
+| **Lightweight**    | Quick questions and code exploration — starts faster; with **Task Mode** left at **Default**, its sessions are Chats, which stay open for back-and-forth |
 
 ### Port Exposure
 
@@ -170,18 +170,17 @@ See the [AI Agents guide](/docs/guides/agents/) and [Chat Features guide](/docs/
 
 SAM includes an in-app notification system with real-time delivery via WebSocket:
 
-| Type             | Urgency | Trigger                                    |
-| ---------------- | ------- | ------------------------------------------ |
-| `task_complete`  | Medium  | A task finishes executing successfully     |
-| `needs_input`    | High    | Agent is blocked and needs your decision   |
-| `error`          | High    | Execution fails                            |
-| `progress`       | Low     | Agent reports incremental progress         |
-| `session_ended`  | Medium  | A conversation-mode session turn completes |
-| `pr_created`     | Medium  | Agent creates a pull request               |
-| `cron_failure`   | High    | An operational sweep fails (superadmins)   |
-| `mention`        | Medium  | A teammate @mentions you in a comment      |
-| `comment`        | Low     | New comments on your chat or your threads  |
-| `session_access` | Medium  | A chat is shared with you, or access ends  |
+| Type             | Urgency | Trigger                                                                |
+| ---------------- | ------- | ---------------------------------------------------------------------- |
+| `task_complete`  | Medium  | An agent reports its task complete                                     |
+| `needs_input`    | High    | Agent is blocked and needs your decision                               |
+| `error`          | High    | Execution fails                                                        |
+| `progress`       | Low     | Agent reports incremental progress                                     |
+| `session_ended`  | Medium  | A conversation-mode session turn completes                             |
+| `cron_failure`   | High    | An operational sweep fails (superadmins)                               |
+| `mention`        | Medium  | A teammate @mentions you in a comment                                  |
+| `comment`        | Low     | New comments on your chat or your threads                              |
+| `session_access` | Medium  | A chat is shared with you, or your access to it is extended or removed |
 
 See the [Notifications guide](/docs/guides/notifications/) for full details.
 
@@ -199,7 +198,8 @@ SAM uses a **GitHub App** for both OAuth login and repository access. The app ne
 - **OAuth** — for user sign-in (BetterAuth handles session management)
 - **Contents: Read and write** — for cloning repos and pushing changes
 - **Email addresses: Read-only** — for user profile information
-- **Pull requests, Checks, and Actions: Read-only** — for project event facts from pull request, review, check, and workflow webhooks
+- **Pull requests, Checks, Actions, and Issues: Read-only** — for project event facts from pull request, review, check, workflow, and issue webhooks
+- **Pull requests: Read and write**, instead of read-only, if agents should open pull requests. The hosted SAM App has it; a self-hosted App starts without it (see [Let agents open pull requests](/docs/guides/self-hosting/#let-agents-open-pull-requests))
 
 <Aside type="caution">
   User credentials (cloud provider credentials and agent credentials) are encrypted at rest using
