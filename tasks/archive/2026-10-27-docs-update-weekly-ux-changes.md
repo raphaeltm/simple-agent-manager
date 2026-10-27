@@ -193,3 +193,13 @@ Product follow-ups from round 1 (added to ideas 01M5Q8Y33A7K9YZN5QKX5KG56N, 01M5
 01KQ720TE8Y8ZGVTZPBM8Y4NH0, 01M5XYTR9WBQEZ0SQK07EMZDZ1): Send to agent offered twice (duplicate dropped);
 skill without agent skips project default; Mark done/Park missing in most states; notes/filing
 count as work and adopt the chat's PR; correct earlier note: no viewer role is assignable today.
+
+## Completion
+
+- task-completion-validator: **PASS** (no CRITICAL/HIGH). LOW notes: product bugs went to SAM ideas
+  rather than backlog files (the project's policy for follow-ups is SAM ideas); the notifications
+  marketing image is a documented deferral.
+- Resolved and archived `tasks/backlog/2026-10-21-docs-expired-chat-spec-drift.md`; archived last
+  week's task file with this one.
+- Remaining at archive time, tracked on the PR: CI green, CodeRabbit request and wait, merge, the
+  marketing-site deploy, and `complete_task` in SAM.

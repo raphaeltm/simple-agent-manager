@@ -97,8 +97,8 @@ Product bugs to file as SAM ideas (not docs work), each now filed:
       new ideas `01M5BRDZF2314EAE7S8HBD37NX` (publication leftovers, GitLab MR instruction),
       `01M5BRE4WHCKVF0DTAHDVTJDTC` (admin settings UX), `01M5BREXSE42RBT0BQMK3Z72FG` (provider-limit
       "Blocked" label); appended to `01M4SW64BE2CXX18F5TN2TMWR2` and `01M59MYE4GY91BWTE8TZF1ZB5D`
-- [ ] Local sub-agent review loop until no actionable feedback
-- [ ] www build, link check, browser tests; PR green and merged; task completed in SAM
+- [x] Local sub-agent review loop until no actionable feedback (rounds 1-7 on sam/docs-update-m27gbe; round 7 ended with 2 LOW, fixed)
+- [x] www build, link check, browser tests; PR green and merged; task completed in SAM: shipped with the 20–27 October pass on sam/docs-update-9wmr9f (see tasks/archive/2026-10-27-docs-update-weekly-ux-changes.md)
 
 ## Local environment notes
 

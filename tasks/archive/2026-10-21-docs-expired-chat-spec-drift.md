@@ -19,6 +19,14 @@ Found on 2026-10-21 while regenerating `chat-fork-composer*.png` for the new-cha
 
 ## Acceptance criteria
 
-- [ ] Decide which expired-chat footer each session state should show, and confirm `SessionFooter.tsx` matches.
-- [ ] Update `openExpiredChat` to assert the footer the fixture actually gets, and regenerate `chat-expired*.png`.
-- [ ] Update the four guides so they describe the archived fork composer and, where it still applies, **Fork conversation**.
+- [x] Decide which expired-chat footer each session state should show, and confirm `SessionFooter.tsx` matches.
+- [x] Update `openExpiredChat` to assert the footer the fixture actually gets, and regenerate `chat-expired*.png`.
+- [x] Update the four guides so they describe the archived fork composer and, where it still applies, **Fork conversation**.
+
+## Resolution
+
+Resolved on branch `sam/docs-update-9wmr9f` (2026-10-27). `SessionFooter.tsx` shows the archived fork composer
+(the **Fork** box) to the owner of a stopped, expired chat, and the old **Fork conversation** button otherwise.
+`openExpiredChat` asserts the Fork box and the absence of **Fork conversation**; `chat-expired*.png` were
+regenerated; chat-features, session-troubleshooting, instant-sessions and recent-product-changes describe the
+Fork box. Verified by the task-completion validator.
