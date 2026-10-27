@@ -92,8 +92,8 @@ in the first release after v2026.10.26.
 - **AI models for agents** are billed to your Cloudflare account, up to $5 per project a month by
   default ($50 at most); `aiModels.enabled` in **Admin → Settings** turns them off.
   → [AI models for agents](/docs/guides/ai-models-for-agents/)
-- **SAM assistant** is off until each person turns it on; `operations.samOperatorDisabled` turns it off
-  for everyone. It uses `SAM_MODEL` (GLM 5.3 Flash on Workers AI by default).
+- **SAM assistant** is off until each person turns it on; setting `operations.samOperatorDisabled` to
+  **Enabled** turns it off for everyone. It uses `SAM_MODEL` (GLM 5.3 Flash on Workers AI by default).
 - **Workload identity** tokens come from `https://api.<your-domain>/oidc`, which the services that
   trust them must be able to reach. Their lifetime is `operations.workloadIdentityTokenTtlSeconds`
   (5 minutes).

@@ -826,7 +826,10 @@ saved value (**Reset override**).
 ```
 
 `409` means `expectedRevision` is out of date: read the settings again, then retry. An invalid value
-returns `400`; an OAuth client ID and secret are checked together.
+returns `400`; an OAuth client ID and secret are checked together. Saving `true` for
+`operations.cronSweepsEnabled` or `operations.doAlarmsEnabled` also sets that switch's emergency KV
+key to `true`, lifting an emergency stop; if that write fails, the response is
+`503 SETTINGS_PROPAGATION_UNCERTAIN` (the change was saved, so read the settings before retrying).
 
 ## Admin Runtime Controls
 

@@ -35,6 +35,7 @@ export default defineConfig({
             { slug: 'docs/overview' },
             { slug: 'docs/quickstart' },
             { slug: 'docs/concepts' },
+            { slug: 'docs/guides/recent-product-changes' },
           ],
         },
         {
@@ -53,7 +54,6 @@ export default defineConfig({
             { slug: 'docs/guides/instant-sessions' },
             { slug: 'docs/guides/session-troubleshooting' },
             { slug: 'docs/guides/reporting-issues' },
-            { slug: 'docs/guides/recent-product-changes' },
             { slug: 'docs/guides/notifications' },
             { slug: 'docs/guides/scheduled-actions' },
             { slug: 'docs/guides/triggers' },

@@ -6,7 +6,7 @@ description: Change SAM's sign-in providers, SAM Connector limits, anonymous tri
 A superadmin can change a set of platform settings from **Admin → Settings**, on a phone or a
 desktop. A change applies within a minute, with no redeploy. On a self-hosted instance this page
 arrived in v2026.10.17. Later groups came with their features: Collaboration in v2026.10.20, Chat
-and Workflows in v2026.10.22, AI models in v2026.10.23, Email, linked work, pull request tracking
+and the Workflows settings (under Operations) in v2026.10.22, AI models in v2026.10.23, Email, linked work, pull request tracking
 and workload identity in v2026.10.24, the Connector read limits in v2026.10.26, and the GitHub
 trigger queue limits in the first release after v2026.10.26.
 Before v2026.10.17, sign-in providers and the SAM Connector were set in `/setup` and
@@ -45,9 +45,9 @@ shows as **operations · cron Sweeps Enabled**), and shows:
 
 1. Find the setting and change its value.
 2. Select **Save**. A card marked **Requires confirmation** then asks you to confirm in **Confirm
-   runtime change**: select **Apply change**. That covers sign-in, the Connector switches and
-   token settings, on/off switches, and the AI-model spending limits; other number limits save
-   straight away. **Reset override** always asks.
+   runtime change**: select **Apply change**. That covers sign-in, every Connector setting, on/off
+   switches, and the AI-model defaults and spending limits; other number limits save straight away.
+   **Reset override** always asks.
 3. The page says **Settings saved.** The server that saved it uses the new value at once, and the
    rest of SAM within a minute (within 30 seconds for trials, cron sweeps, and Durable Object alarms).
 
@@ -105,6 +105,10 @@ exception: any value in them is used as it is).
 One exception: the emergency KV switches for cron sweeps and Durable Object alarms still stop that
 work when set to `false` or `disabled`, even over a saved **Enabled**. The card then shows
 **Disabled** and **Source: kv** once Cloudflare KV serves the new value, usually within a minute.
+Saving **Enabled** on either of those two settings also turns its KV switch back on. That's how you
+lift an emergency stop, so don't save it during an incident unless you mean to. If SAM can't
+confirm that KV write, the page says the save could not be confirmed: reload and check the card
+before you try again.
 
 ## The settings
 
@@ -122,7 +126,7 @@ work when set to `false` or `disabled`, even over a saved **Enabled**. The card 
 | Operations    | `operations.cronSweepsEnabled`                                     | on                                             | SAM's scheduled recovery and cleanup jobs                                                                                                                                                                 | KV cron switch                                                                    |
 | Operations    | `operations.doAlarmsEnabled`                                       | on                                             | Durable Object alarm work (paused alarms run later)                                                                                                                                                       | KV alarm switch                                                                   |
 | Operations    | `operations.stalledTaskClassifierEnabled`                          | on                                             | The check that [ends stalled turns](/docs/guides/session-troubleshooting/#sam-ended-a-stalled-turn)                                                                                                       | `STALLED_TASK_CLASSIFIER_ENABLED`                                                 |
-| Operations    | `operations.samOperatorDisabled`                                   | off                                            | Turns the [SAM assistant](/docs/guides/sam-assistant/) off for everyone, keeping each person's own choice                                                                                                 | —                                                                                 |
+| Operations    | `operations.samOperatorDisabled`                                   | off                                            | Set to **Enabled**, turns the [SAM assistant](/docs/guides/sam-assistant/) off for everyone, keeping each person's own choice                                                                             | —                                                                                 |
 | Operations    | `operations.githubTriggerQueueMaxPendingLimit`, `…TtlSecondsLimit` | 1,000 events; 2,592,000 seconds (30 days)      | The most a [GitHub trigger](/docs/guides/triggers/#when-a-github-trigger-is-busy) can set for waiting events and how long they wait. Applies when someone creates a trigger or changes its queue settings | —                                                                                 |
 | Trials        | `trials.enabled`                                                   | off                                            | Anonymous trials (keep off; see [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access))                                                                                       | KV `trials:enabled`                                                               |
 | Collaboration | `collaboration.*` (below)                                          | see below                                      | Shared chats, comments, and idea updates                                                                                                                                                                  | —                                                                                 |
@@ -136,8 +140,9 @@ tokens, and the [SAM assistant](/docs/reference/configuration/#private-sam-assis
 Every card shows its own description, default, and range, so the tables below cover the limits
 you're most likely to change rather than every one.
 
-The Connector's other limits, the GitHub App itself, and the private feedback project stay on their
-existing pages and variables; see [SAM Connector](/docs/reference/configuration/#sam-connector) and
+The Connector's protocol limits (registration rates, request and response sizes, how long an unused
+client lasts) are set only by GitHub Environment variables, and the GitHub App itself and the private feedback project stay on
+their existing pages; see [SAM Connector](/docs/reference/configuration/#sam-connector) and
 [Platform integrations after deploy](/docs/guides/self-hosting/#platform-integrations-after-deploy).
 
 ## Collaboration
@@ -187,7 +192,7 @@ where it says so and the app continues from there.
 
 ## Linked work
 
-These **Operations** settings control automatic links between chats, ideas, library files and pull requests. Strong work links remain available when weak read or view links reach a cap.
+These **Operations** settings control automatic links between chats, ideas, library files and pull requests. Links that mean work (a chat working on, creating or editing something) are always kept; links that only record reading or viewing are capped.
 
 | Setting                                       | Default | Range          | What it controls                                                                                             |
 | --------------------------------------------- | ------- | -------------- | ------------------------------------------------------------------------------------------------------------ |
@@ -206,7 +211,7 @@ These **Operations** settings control automatic links between chats, ideas, libr
 | `operations.agentLinkedMaxBytes`              | 24,000  | 2,000–36,000   | Serialized bytes in the related context sent to an agent                                                     |
 | `operations.agentIdeaContentPageLength`       | 65,536  | 1,000–65,536   | Idea content read in one `get_idea` call; a continuation notice names the next offset when a page is shorter |
 
-If an administrator lowers the weak-link cap below an existing target's stored count, each subsequent new automatic weak link for that target removes at most one configured cleanup batch until the target reaches the new cap. Repeated touches of an existing link do not run cleanup.
+If you lower the cap on read and view links below what a target already has, nothing is removed straight away: each new read or view link to that target then removes at most one batch of them, until the target is back under the cap. Reading the same thing again doesn't count as a new link.
 
 ## Workflows
 

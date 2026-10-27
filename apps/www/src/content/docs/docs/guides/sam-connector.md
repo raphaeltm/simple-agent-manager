@@ -10,8 +10,8 @@ sees only what you can see in SAM, and its answers link back to the pages in SAM
 
 If you'd rather stay inside SAM, the [SAM assistant](/docs/guides/sam-assistant/) (preview) does
 some of this from a private conversation in SAM itself, on SAM's AI and your AI usage budget. The
-Connector uses the AI app you already pay for, and can do more: read whole replies, follow a team
-of agents, schedule work, read coordination channels, and interrupt an agent.
+Connector uses the AI app you already pay for, and can do more: read the rest of long replies,
+follow a team of agents, schedule work, read coordination channels, and interrupt an agent.
 
 ## What you can ask
 
@@ -282,7 +282,9 @@ button, and **Seen clients** lists the apps that have registered, with **Block**
 
 - **It's on after you update.** The Connector shipped in v2026.10.10 and is enabled by default. To
   turn it off, switch off **Enable Connector** here. From v2026.10.17 the same switch, and the
-  Connector's other limits, are also in [**Admin → Settings**](/docs/guides/admin-settings/). The
+  Connector's write switch, client registration and redirect hosts, token lifetimes, and rate and
+  start limits, are also in
+  [**Admin → Settings**](/docs/guides/admin-settings/). The
   `CONNECTOR_ENABLED` GitHub Environment variable set to `false` before you deploy only works while
   no value has been saved in the app: a saved value wins.
 - **No setup is needed.** Your installation is its own sign-in (OAuth) provider, and the deploy

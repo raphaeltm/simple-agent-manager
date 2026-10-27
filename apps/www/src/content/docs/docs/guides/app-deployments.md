@@ -182,7 +182,7 @@ From the user's perspective, **Pause** (stop) is the safe way to tear down compu
 
 If a release cannot be placed (for example, the cloud provider has no room for that server type in that region right now), the environment page says SAM couldn't get a server for that version, with the reason under **Show the error**. Either of these recovers it:
 
-- **Ask an agent to deploy again** (the button on that problem, or ask in any chat). The new version gets a server, and the page goes from **Down** to **Deploying vN**, then **Live**, clearing the old error. If there's still no server, the problem comes back with the new reason. (Since 22 October 2026; before that, every later version stayed stuck behind the old error.)
+- **Ask an agent to deploy again** (the button on that problem, or ask in any chat). The new version gets a server, and the page goes from **Down** to **Deploying vN**, then **Live**, clearing the old error. If there's still no server, the problem comes back with the new reason. (Since 22 October 2026, or v2026.10.23 on a self-hosted instance; before that, every later version stayed stuck behind the old error.)
 - **Pause, then Start.** Start finds a server for the latest version and shows **Starting** until the server reports it's running.
 
 If SAM has to give up before any server is created, for example because the person who deployed lost access to the project, the version is marked failed and **Show the error** reads "Deployment node placement stopped before a server was created: &lt;reason&gt;. Deploy again to retry." A placement replaced by a newer release, or by a Stop or delete of the environment, is left to that newer release or action instead.

@@ -102,11 +102,11 @@ Click **+ New Chat** to start an AI coding session directly in the workspace. If
 ## Managing Workspaces
 
 On a machine's page, each workspace has **Open** (or **Start**, when it's stopped) and a menu with
-**Stop**, **Restart** and **Delete**.
+**Stop** (while it's running), **Restart** (once it's stopped) and **Delete**.
 
 ### Stopping
 
-**Stop** a workspace to power down its environment while keeping the record so you can restart later. Stopped workspaces don't incur compute charges.
+**Stop** a workspace to power down its environment while keeping the record so you can restart later. A stopped workspace no longer uses its machine, but the machine keeps billing while other workspaces run on it, and for its warm period after the last one stops (see [Warm reuse](/docs/guides/compute-pools/#warm-reuse)).
 
 ### Restarting
 
