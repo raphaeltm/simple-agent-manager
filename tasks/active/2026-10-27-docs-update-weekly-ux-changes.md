@@ -126,4 +126,8 @@ Changelog: [x] This cycle 20–27 Oct (everyone, also changed, self-hosters, mod
 
 ## Review log
 
-_pending_
+Round 1 (2026-10-27, three local general-purpose reviewers in parallel, read-only; each does a
+user-journey critique plus a code fact-check of one area): A ideas/chats/agents/collaboration/
+troubleshooting · B automation/triggers/email/workflows/notifications/AI models/secrets/workload
+identity · C assistant/Connector/deployments/infrastructure/admin/self-hosting/reference/changelog/
+marketing. Status: running.

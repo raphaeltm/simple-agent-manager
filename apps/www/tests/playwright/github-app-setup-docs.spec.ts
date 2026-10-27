@@ -72,27 +72,24 @@ async function capture(page: Page, name: string) {
 
 test.describe('Embedded docs GitHub App setup', () => {
   test.use({ reducedMotion: 'reduce' });
-  test('scheduled actions guide is reachable from the real documentation sidebar', async ({
-    page,
-  }) => {
+  test('Automation guide is reachable from the real documentation sidebar', async ({ page }) => {
     await page.goto('/docs/guides/self-hosting/');
     if (page.viewportSize()!.width < 800)
       await page.locator('button[aria-controls="starlight__sidebar"]').click();
     const guide = page
       .locator('#starlight__sidebar')
-      .getByRole('link', { name: 'Scheduled actions and event watches', exact: true });
+      .getByRole('link', { name: 'Automation', exact: true });
     await guide.scrollIntoViewIfNeeded();
     await expect(guide).toBeInViewport();
     await expectNoHorizontalOverflow(page);
     await capture(page, 'scheduled-actions-docs-sidebar');
     await guide.click();
     await expect(page).toHaveURL(/\/docs\/guides\/scheduled-actions\/?$/);
-    const title = page.getByRole('heading', {
-      level: 1,
-      name: 'Scheduled actions and event watches',
-    });
+    const title = page.getByRole('heading', { level: 1, name: 'Automation', exact: true });
     await expect(title).toBeInViewport();
-    await expect(page.getByRole('heading', { name: 'Run something once', exact: true })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Run something once', exact: true })
+    ).toBeVisible();
     await expectNoHorizontalOverflow(page);
     await capture(page, 'scheduled-actions-docs-guide');
   });
