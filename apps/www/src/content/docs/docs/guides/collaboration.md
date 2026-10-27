@@ -276,7 +276,7 @@ Your access ends in 23 min (2:43 PM)._ Each of their messages is labelled, for e
   <source media="(max-width: 40em)" srcset="/images/docs/collaboration-shared-view-mobile.png 2x" />
   <img
     src="/images/docs/collaboration-shared-view.png"
-    alt="A chat as Ana Ruiz, the teammate it was shared with, sees it. The chat header (and, on a desktop, the session list) names Prakash Rao, who started it; her message in the conversation is labelled &quot;Ana Ruiz · shared access&quot;; and the tool rail includes Retry and Fork. Above the message box a notice reads &quot;You're chatting in Prakash Rao's session. It runs on Prakash Rao's accounts. Your access ends in 23 min (2:43 PM).&quot;"
+    alt="A chat as Ana Ruiz, the teammate it was shared with, sees it. The chat header (and, on a desktop, the session list) names Prakash Rao, who started it; her message in the conversation is labelled &quot;Ana Ruiz · shared access&quot;; and the tool rail includes Retry and Fork. Above the message box a notice reads &quot;You're chatting in Prakash Rao's session. It runs on Prakash Rao's accounts. Your access ends in 23 min (2:43 PM).&quot;, and the message box has a paperclip for attaching files."
   />
 </picture>
 
