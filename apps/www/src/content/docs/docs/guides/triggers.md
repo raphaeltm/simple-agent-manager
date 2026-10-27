@@ -223,7 +223,8 @@ the agent already working on it, instead of starting a second agent.
 
 A GitHub trigger's page sums up its events, for example "GitHub events: 2 waiting now · History (up
 to 90 days): 3 delivered · 3 dropped · 1 unconfirmed". Each entry under **Recent runs** says what
-happened to one event, with its event number and when it arrived. With **Keep issue and PR
+happened to one event, with its event number and the time of its latest step: when it was
+delivered or dropped, or when it arrived while it's still waiting. With **Keep issue and PR
 follow-ups in one chat** on, it also shows the issue or pull request number.
 
 <picture>

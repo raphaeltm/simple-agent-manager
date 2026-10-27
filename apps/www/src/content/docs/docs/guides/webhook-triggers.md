@@ -37,7 +37,7 @@ The request must use `Content-Type: application/json`, and the top-level value m
 
 Successful admission returns HTTP `202`. The response indicates whether the delivery created an execution, was filtered, was a duplicate, or was skipped by trigger policy. Invalid credentials return a uniform `404`; overload protection can return `429`, and a durable submission failure returns `503`.
 
-Each authenticated call is also recorded as a project event (source `webhook`, with types such as `webhook.accepted`, `webhook.filtered` and `webhook.still_running`, and the trigger ID as its subject), so agents can wait for it the same way they wait for GitHub events. The event carries the delivery ID, the source label, the selected headers, and a copy of the JSON body with secret-looking fields removed.
+A call that SAM accepts, filters out or skips by trigger policy is also recorded as a project event (source `webhook`, with types such as `webhook.accepted`, `webhook.filtered` and `webhook.still_running`, and the trigger ID as its subject), so agents can wait for it the same way they wait for GitHub events. A call refused for the rate limit (`429`) or recognised as a duplicate isn't recorded, so check the HTTP response rather than count on an event for every call. The event carries the delivery ID, the outcome, the trigger's name and source label, and the run it started, plus a summary of the request's shape: how many headers SAM kept, and how many keys and values the JSON body has. It doesn't include the body or header values; those reach the run's instructions through the [template context](#template-context).
 
 ## Template Context
 

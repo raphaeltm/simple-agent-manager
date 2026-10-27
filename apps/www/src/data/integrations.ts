@@ -91,7 +91,7 @@ export const integrations: Integration[] = [
       { title: 'Parallel Execution', description: 'Run dozens of Claude Code instances simultaneously, each tackling a different task or feature branch.' },
       { title: 'Dual Auth Support', description: 'Bring your Anthropic API key or use a Claude Max/Pro OAuth subscription — SAM handles both seamlessly.' },
       { title: 'Full Tool Access', description: 'Claude Code gets full Read, Edit, Bash, and other tool access inside the devcontainer, just like running it locally.' },
-      { title: 'Pull Requests When You Ask', description: 'The agent works on its own branch and pushes it when a task is done. Ask, and it opens a pull request on your repo for review.' },
+      { title: 'Pull Requests When You Ask', description: 'The agent works on its own branch and is told to push it when a task is done. Ask, and it opens a pull request on your repo for review.' },
     ],
     howItWorks: [
       { step: 'Create a Project', description: 'Link your GitHub repository and configure Claude Code as your agent.' },
@@ -137,7 +137,7 @@ export const integrations: Integration[] = [
       { step: 'Connect Your Account', description: 'Add your OpenAI API key or Codex OAuth credentials in project settings.' },
       { step: 'Choose Codex as Agent', description: 'Select OpenAI Codex from the agent dropdown when creating a project or submitting a task.' },
       { step: 'Submit Tasks', description: 'Describe your coding task in natural language. SAM provisions a VM and runs Codex.' },
-      { step: 'Get Results', description: 'Codex completes the work on its own branch and pushes it, and opens a pull request when you ask.' },
+      { step: 'Get Results', description: 'Codex works on its own branch, is told to push it when the task is done, and opens a pull request when you ask.' },
     ],
     useCases: [
       { title: 'Code generation at scale', description: 'Use Codex to generate boilerplate, API clients, or data models across multiple repositories simultaneously.' },
@@ -256,7 +256,7 @@ export const integrations: Integration[] = [
       { step: 'Configure Provider', description: 'Set your inference provider credentials — Scaleway API key, Google Vertex config, or a custom endpoint.' },
       { step: 'Select OpenCode', description: 'Choose OpenCode as the agent for your project.' },
       { step: 'Submit a Task', description: 'Describe your coding task. SAM provisions a VM and launches OpenCode.' },
-      { step: 'Agent Delivers', description: 'OpenCode completes the work on its own branch and pushes it, and opens a pull request when you ask.' },
+      { step: 'Agent Delivers', description: 'OpenCode works on its own branch, is told to push it when the task is done, and opens a pull request when you ask.' },
     ],
     useCases: [
       { title: 'Self-hosted AI stack', description: 'Pair OpenCode with a self-hosted inference endpoint for a fully private AI coding setup — no data leaves your infrastructure.' },
@@ -603,7 +603,7 @@ export const integrations: Integration[] = [
       'Connect your GitHub repos to SAM for automatic agent provisioning, branch management, and pull requests opened by your agents. GitHub App integration with proper permissions.',
     features: [
       { title: 'GitHub App Integration', description: 'Install the SAM GitHub App for secure repository access — proper permissions without sharing personal tokens.' },
-      { title: 'Pull Requests From Agents', description: 'Agents work on descriptive branches, push them when a task is done, and open pull requests when you ask.' },
+      { title: 'Pull Requests From Agents', description: 'Agents work on descriptive branches, are told to push them when a task is done, and open pull requests when you ask.' },
       { title: 'Repository Discovery', description: 'SAM discovers your repos via the GitHub App installation — select a repo when creating a project.' },
       { title: 'OAuth Login', description: 'Sign in to SAM with your GitHub account — no separate account needed.' },
     ],

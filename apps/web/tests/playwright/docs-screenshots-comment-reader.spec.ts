@@ -206,7 +206,6 @@ test('docs: a comment read in its conversation', async ({ page }) => {
   await setupMocks(page);
   await page.goto(`/projects/${PROJECT_ID}/comments/${SESSION_ID}/${MAIN_THREAD.id}`);
   await expect(page.getByTestId('comment-reader')).toBeVisible({ timeout: 20_000 });
-  await page.waitForTimeout(500);
   await expectQuoteOnScreen(page, 'the ledger write happens before');
   // The latest word in the thread: in the panel on a desktop, in the sheet's peek on a phone.
   await expect(page.getByText(/The unique index already exists/).first()).toBeVisible();

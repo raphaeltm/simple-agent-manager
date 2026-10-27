@@ -4,6 +4,9 @@
  */
 import { expect, type Page } from '@playwright/test';
 
+/** How long the reader gets to paint the quote highlight before the check fails. */
+const QUOTE_TIMEOUT_MS = 10_000;
+
 export interface MessageRow {
   id: string;
   sessionId: string;
@@ -45,22 +48,26 @@ export function messageRowsFor(sessionId: string) {
   return { row, streamed, startAt };
 }
 
-/** The open comment's words are painted and inside the visible part of the conversation. */
+/**
+ * The open comment's words are painted and inside the visible part of the conversation. Polls,
+ * because the highlight is painted after the reader renders and scrolls to the message.
+ */
 export async function expectQuoteOnScreen(page: Page, quoteStart: string) {
-  const result = await page.evaluate((needle) => {
-    const registry = (CSS as unknown as { highlights?: Map<string, Highlight> }).highlights;
-    const range = registry?.get('sam-comment-quote')?.values().next().value;
-    if (!(range instanceof Range)) return 'missing';
-    if (!range.toString().startsWith(needle)) return `wrong:${range.toString().slice(0, 40)}`;
-    const scroller = document.querySelector('[data-reader-scroller]');
-    if (!scroller) return 'no-scroller';
-    const view = scroller.getBoundingClientRect();
-    const box = range.getBoundingClientRect();
-    const sheet = document.querySelector('section[aria-label="Comment thread"]');
-    const bottom = sheet ? Math.min(view.bottom, sheet.getBoundingClientRect().top) : view.bottom;
-    return box.top >= view.top && box.bottom <= bottom
-      ? 'visible'
-      : `offscreen:${box.top}-${box.bottom}/${view.top}-${bottom}`;
-  }, quoteStart);
-  expect(result).toBe('visible');
+  const quoteState = () =>
+    page.evaluate((needle) => {
+      const registry = (CSS as unknown as { highlights?: Map<string, Highlight> }).highlights;
+      const range = registry?.get('sam-comment-quote')?.values().next().value;
+      if (!(range instanceof Range)) return 'missing';
+      if (!range.toString().startsWith(needle)) return `wrong:${range.toString().slice(0, 40)}`;
+      const scroller = document.querySelector('[data-reader-scroller]');
+      if (!scroller) return 'no-scroller';
+      const view = scroller.getBoundingClientRect();
+      const box = range.getBoundingClientRect();
+      const sheet = document.querySelector('section[aria-label="Comment thread"]');
+      const bottom = sheet ? Math.min(view.bottom, sheet.getBoundingClientRect().top) : view.bottom;
+      return box.top >= view.top && box.bottom <= bottom
+        ? 'visible'
+        : `offscreen:${box.top}-${box.bottom}/${view.top}-${bottom}`;
+    }, quoteStart);
+  await expect.poll(quoteState, { timeout: QUOTE_TIMEOUT_MS }).toBe('visible');
 }

@@ -49,8 +49,10 @@ named secrets are filled in. Any agent with SAM's tools can do this, on a VM or 
 wherever a secret's exact value appears in the output, it's replaced with `[REDACTED]`. The chat
 shows the command and the secret names, never the values.
 
-A command can run for up to an hour (10 minutes unless the agent asks for longer), and up to 8 can
-run at once on one machine. While one runs, the session counts as busy, so it won't go to sleep.
+By default a command can run for up to an hour (10 minutes unless the agent asks for longer), and up
+to 8 can run at once on one machine. An operator can change these with `SECRET_EXEC_TIMEOUT_MS`,
+`SECRET_EXEC_MAX_TIMEOUT_MS` and `SECRET_EXEC_MAX_ACTIVE` (see
+[VM agent configuration](/docs/reference/vm-agent/#configuration)). While one runs, the session counts as busy, so it won't go to sleep.
 
 ## What it doesn't cover
 
@@ -68,8 +70,8 @@ runtime file instead.
 
 - **"Secret execution unavailable: verify the active session, selected names and VM
   compatibility".** The name isn't a Secret variable for this project, profile, or skill; the chat
-  started before your instance updated (start a new chat); or 8 commands are already running on
-  that machine.
+  started before your instance updated (start a new chat); or the most commands allowed at once
+  (8 by default) are already running on that machine.
 - **The agent won't start, with "managed secret … conflicts with harness environment
   authentication".** A Secret variable has the same name as the variable the agent's own connected
   credential is passed in, such as `ANTHROPIC_API_KEY`. Rename the variable or delete it.
@@ -100,7 +102,7 @@ optional `timeoutMs`, and an optional `idempotencyKey`:
 
 The call returns a job ID; poll `exec_with_secrets_status` until the result is final, and use
 `exec_with_secrets_cancel` to stop a job (then poll until it reports the end). Reuse an idempotency
-key only to retry the identical request. Output is kept to 64 KiB per stream, from the beginning.
+key only to retry the identical request. Output is kept to 64 KiB per stream by default (`SECRET_EXEC_OUTPUT_BYTES`), from the beginning.
 
 Each job is a new non-interactive process: terminal exports, aliases, functions, activated
 environments, and the terminal's current directory don't carry over, so source any setup the command
