@@ -5,7 +5,10 @@ description: Change SAM's sign-in providers, SAM Connector limits, anonymous tri
 
 A superadmin can change a set of platform settings from **Admin → Settings**, on a phone or a
 desktop. A change applies within a minute, with no redeploy. On a self-hosted instance this page
-arrived in v2026.10.17, and each group added since arrives with the release that added its feature.
+arrived in v2026.10.17. Later groups came with their features: Collaboration in v2026.10.20, Chat
+and Workflows in v2026.10.22, AI models in v2026.10.23, Email, linked work, pull request tracking
+and workload identity in v2026.10.24, the Connector read limits in v2026.10.26, and the GitHub
+trigger queue limits in the first release after v2026.10.26.
 Before v2026.10.17, sign-in providers and the SAM Connector were set in `/setup` and
 **Admin → Integrations**, trials on **Admin → Trials**, and the background-job switches only through
 GitHub Environment variables and KV.
@@ -27,7 +30,8 @@ shows as **operations · cron Sweeps Enabled** — and shows:
   the settings that ask before they save.
 - A short description of what the setting does.
 - The value, as a field, an **Enabled**/**Disabled** choice, or a list with one entry per line.
-- **Code default** (SAM's built-in value) and, for numbers, the allowed **Range**.
+- **Code default** (SAM's built-in value) and, for numbers, the allowed **Range** (or just a
+  **Minimum** when there's no upper limit).
 
 <picture>
   <source media="(max-width: 40em)" srcset="/images/docs/admin-settings-mobile.png 2x" />
@@ -40,8 +44,10 @@ shows as **operations · cron Sweeps Enabled** — and shows:
 ## Change a setting
 
 1. Find the setting and change its value.
-2. Select **Save**. Sign-in, Connector, and on/off settings then ask you to confirm in
-   **Confirm runtime change**: select **Apply change**. Number limits save straight away.
+2. Select **Save**. A card marked **Requires confirmation** then asks you to confirm in **Confirm
+   runtime change**: select **Apply change**. That covers sign-in, the Connector switches and
+   token settings, on/off switches, and the AI-model spending limits; other number limits save
+   straight away. **Reset override** always asks.
 3. The page says **Settings saved.** The server that saved it uses the new value at once, and the
    rest of SAM within a minute (within 30 seconds for trials, cron sweeps, and Durable Object alarms).
 
@@ -71,8 +77,9 @@ SAM doesn't stop you from resetting or breaking the only sign-in provider your a
 nobody can sign in:
 
 1. Set the `SETUP_FORCE` GitHub Environment variable to `true` and run **Deploy Production**.
-2. Every deploy creates a new `SETUP_TOKEN`. In the deploy's log, the **Sync Wrangler Config** step
-   prints a Cloudflare dashboard link ("Setup token is available in Cloudflare dashboard
+2. Every deploy creates a new `SETUP_TOKEN`. In the deploy's log, the **Sync Wrangler Config (API +
+   Tail Worker)** step (on a first install, **Re-sync Wrangler Config (add tail_consumers)**) prints
+   a Cloudflare dashboard link ("Setup token is available in Cloudflare dashboard
    variables: …"). Copy the token there, and open `/setup` with it (as in
    [Verification](/docs/guides/self-hosting/#verification)).
 3. Enter working sign-in credentials.
@@ -92,7 +99,8 @@ For each setting SAM uses the first of these that exists:
 
 So once a value is saved in the app, changing its GitHub Environment variable does nothing until you
 select **Reset override**; and a changed variable only reaches SAM when you redeploy. A variable set
-to a value SAM can't use is ignored, and the code default applies.
+to a value SAM can't use is ignored, and the code default applies (sign-in variables are the
+exception: any value in them is used as it is).
 
 One exception: the emergency KV switches for cron sweeps and Durable Object alarms still stop that
 work when set to `false` or `disabled`, even over a saved **Enabled**. The card then shows
@@ -100,25 +108,27 @@ work when set to `false` or `disabled`, even over a saved **Enabled**. The card 
 
 ## The settings
 
-| Group         | Setting                                                        | Code default                                   | What it controls                                                                                                    | Falls back to                                                                     |
-| ------------- | -------------------------------------------------------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
-| OAuth         | `integration.github.clientId`, `.clientSecret`                 | —                                              | Sign in with GitHub                                                                                                 | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` (`GH_*` in GitHub)                     |
-| OAuth         | `integration.google.clientId`, `.clientSecret`                 | —                                              | Sign in with Google                                                                                                 | `GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET`                            |
-| OAuth         | `integration.googleInfrastructure.clientId`, `.clientSecret`   | —                                              | Google Cloud access for workspaces (not sign-in)                                                                    | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`                                        |
-| OAuth         | `integration.gitlab.clientId`, `.clientSecret`, `.host`        | —                                              | Sign in with GitLab, and which GitLab server                                                                        | `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET`, `GITLAB_HOST`                         |
-| Connector     | `connector.enabled`, `.writeEnabled`                           | on, on                                         | Whether AI apps can connect, and whether they can change anything                                                   | `CONNECTOR_ENABLED`, `CONNECTOR_WRITE_ENABLED`                                    |
-| Connector     | `connector.clientRegistration`, `.allowedRedirectHosts`        | `open`; `claude.ai`, `chatgpt.com`, `loopback` | Which apps may register and where sign-in may return to                                                             | `CONNECTOR_CLIENT_REGISTRATION`, `CONNECTOR_ALLOWED_REDIRECT_HOSTS`               |
-| Connector     | `connector.accessTokenTtlSeconds`, `.refreshTokenTtlSeconds`   | 3600 (1 hour), 2592000 (30 days)               | How long a connection's tokens last                                                                                 | `CONNECTOR_ACCESS_TOKEN_TTL_SECONDS`, `CONNECTOR_REFRESH_TOKEN_TTL_SECONDS`       |
-| Connector     | `connector.readRateLimitPerMinute`, `.writeRateLimitPerMinute` | 120, 30                                        | Reads and writes per person per minute                                                                              | `CONNECTOR_READ_RATE_LIMIT_PER_MINUTE`, `CONNECTOR_WRITE_RATE_LIMIT_PER_MINUTE`   |
-| Connector     | `connector.maxStartsPerUserPerHour`, `.maxStartsPerUserPerDay` | 10, 50                                         | How much work one person can start from an AI app                                                                   | `CONNECTOR_MAX_STARTS_PER_USER_PER_HOUR`, `CONNECTOR_MAX_STARTS_PER_USER_PER_DAY` |
-| Operations    | `operations.cronSweepsEnabled`                                 | on                                             | SAM's scheduled recovery and cleanup jobs                                                                           | KV cron switch                                                                    |
-| Operations    | `operations.doAlarmsEnabled`                                   | on                                             | Durable Object alarm work (paused alarms run later)                                                                 | KV alarm switch                                                                   |
-| Operations    | `operations.stalledTaskClassifierEnabled`                      | on                                             | The check that [ends stalled turns](/docs/guides/session-troubleshooting/#sam-ended-a-stalled-turn)                 | `STALLED_TASK_CLASSIFIER_ENABLED`                                                 |
-| Trials        | `trials.enabled`                                               | off                                            | Anonymous trials (keep off; see [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access)) | KV `trials:enabled`                                                               |
-| Collaboration | `collaboration.*` (below)                                      | see below                                      | Shared chats, comments, and idea updates                                                                            | —                                                                                 |
-| Chat          | `chat.profileUsageWindowDays` (below)                          | 30                                             | How far back the new-chat profile picker looks                                                                      | —                                                                                 |
-| AI models     | `aiModels.*` (below)                                           | see below                                      | Which AI models agents may call, and the spending limits                                                            | —                                                                                 |
-| Email         | `agentEmail.*` (below)                                         | see below                                      | Limits for agent email (preview)                                                                                    | —                                                                                 |
+| Group         | Setting                                                            | Code default                                   | What it controls                                                                                                                                                                                          | Falls back to                                                                     |
+| ------------- | ------------------------------------------------------------------ | ---------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------- |
+| OAuth         | `integration.github.clientId`, `.clientSecret`                     | —                                              | Sign in with GitHub                                                                                                                                                                                       | `GITHUB_CLIENT_ID`, `GITHUB_CLIENT_SECRET` (`GH_*` in GitHub)                     |
+| OAuth         | `integration.google.clientId`, `.clientSecret`                     | —                                              | Sign in with Google                                                                                                                                                                                       | `GOOGLE_LOGIN_CLIENT_ID`, `GOOGLE_LOGIN_CLIENT_SECRET`                            |
+| OAuth         | `integration.googleInfrastructure.clientId`, `.clientSecret`       | —                                              | Google Cloud access for workspaces (not sign-in)                                                                                                                                                          | `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`                                        |
+| OAuth         | `integration.gitlab.clientId`, `.clientSecret`, `.host`            | —                                              | Sign in with GitLab, and which GitLab server                                                                                                                                                              | `GITLAB_CLIENT_ID`, `GITLAB_CLIENT_SECRET`, `GITLAB_HOST`                         |
+| Connector     | `connector.enabled`, `.writeEnabled`                               | on, on                                         | Whether AI apps can connect, and whether they can change anything                                                                                                                                         | `CONNECTOR_ENABLED`, `CONNECTOR_WRITE_ENABLED`                                    |
+| Connector     | `connector.clientRegistration`, `.allowedRedirectHosts`            | `open`; `claude.ai`, `chatgpt.com`, `loopback` | Which apps may register and where sign-in may return to                                                                                                                                                   | `CONNECTOR_CLIENT_REGISTRATION`, `CONNECTOR_ALLOWED_REDIRECT_HOSTS`               |
+| Connector     | `connector.accessTokenTtlSeconds`, `.refreshTokenTtlSeconds`       | 3600 (1 hour), 2592000 (30 days)               | How long a connection's tokens last                                                                                                                                                                       | `CONNECTOR_ACCESS_TOKEN_TTL_SECONDS`, `CONNECTOR_REFRESH_TOKEN_TTL_SECONDS`       |
+| Connector     | `connector.readRateLimitPerMinute`, `.writeRateLimitPerMinute`     | 120, 30                                        | Reads and writes per person per minute                                                                                                                                                                    | `CONNECTOR_READ_RATE_LIMIT_PER_MINUTE`, `CONNECTOR_WRITE_RATE_LIMIT_PER_MINUTE`   |
+| Connector     | `connector.maxStartsPerUserPerHour`, `.maxStartsPerUserPerDay`     | 10, 50                                         | How much work one person can start from an AI app                                                                                                                                                         | `CONNECTOR_MAX_STARTS_PER_USER_PER_HOUR`, `CONNECTOR_MAX_STARTS_PER_USER_PER_DAY` |
+| Operations    | `operations.cronSweepsEnabled`                                     | on                                             | SAM's scheduled recovery and cleanup jobs                                                                                                                                                                 | KV cron switch                                                                    |
+| Operations    | `operations.doAlarmsEnabled`                                       | on                                             | Durable Object alarm work (paused alarms run later)                                                                                                                                                       | KV alarm switch                                                                   |
+| Operations    | `operations.stalledTaskClassifierEnabled`                          | on                                             | The check that [ends stalled turns](/docs/guides/session-troubleshooting/#sam-ended-a-stalled-turn)                                                                                                       | `STALLED_TASK_CLASSIFIER_ENABLED`                                                 |
+| Operations    | `operations.samOperatorDisabled`                                   | off                                            | Turns the [SAM assistant](/docs/guides/sam-assistant/) off for everyone, keeping each person's own choice                                                                                                 | —                                                                                 |
+| Operations    | `operations.githubTriggerQueueMaxPendingLimit`, `…TtlSecondsLimit` | 1,000 events; 2,592,000 seconds (30 days)      | The most a [GitHub trigger](/docs/guides/triggers/#when-a-github-trigger-is-busy) can set for waiting events and how long they wait. Applies when someone creates a trigger or changes its queue settings | —                                                                                 |
+| Trials        | `trials.enabled`                                                   | off                                            | Anonymous trials (keep off; see [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access))                                                                                       | KV `trials:enabled`                                                               |
+| Collaboration | `collaboration.*` (below)                                          | see below                                      | Shared chats, comments, and idea updates                                                                                                                                                                  | —                                                                                 |
+| Chat          | `chat.profileUsageWindowDays` (below)                              | 30                                             | How far back the new-chat profile picker looks                                                                                                                                                            | —                                                                                 |
+| AI models     | `aiModels.*` (below)                                               | see below                                      | Which AI models agents may call, and the spending limits                                                                                                                                                  | —                                                                                 |
+| Email         | `agentEmail.*` (below)                                             | see below                                      | Limits for agent email (preview)                                                                                                                                                                          | —                                                                                 |
 
 **Operations** also holds limits for [workflows](#workflows), [linked work](#linked-work), pull
 request tracking, the GitHub trigger queue, the Account Map, [workload identity](/docs/guides/workload-identity/)
@@ -259,8 +269,11 @@ These limit [email triggers](/docs/guides/email-triggers/) (preview). Every valu
 
 The page shows an error instead of guessing. Meanwhile SAM fails safe: the Connector and trials
 switch off, and cron sweeps, alarms, and the stalled-turn check stay switched off if they already
-were. Sign-in and security checks refuse rather than fall back. A single saved value that SAM can't
-read stops the whole page from loading.
+were. Sign-in and security checks refuse rather than fall back, and so does anything that needs the
+linked-work, Account Map, GitHub trigger queue or workload identity limits. The SAM assistant
+switches off. The collaboration, chat, workflow, email and Connector read limits, and the AI-model
+settings, fall back to their code defaults; that includes the AI-model monthly limits, even ones you
+lowered. A single saved value that SAM can't read stops the whole page from loading.
 
 ## Updating and rolling back
 

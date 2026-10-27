@@ -880,19 +880,21 @@ Superadmin only. Reads Cloudflare and returns what turning agent email on would 
 `{ state, domain, mainDomain, mainDomainChanges, zoneChanges, consentToken, reason }`. `state` is
 one of:
 
-| `state`         | Meaning                                                                                                 |
-| --------------- | ------------------------------------------------------------------------------------------------------- |
-| `unavailable`   | The deploy has not prepared agent email; `reason` says what is missing                                  |
-| `verifying`     | Cloudflare is still verifying the sending records                                                       |
-| `refused`       | The zone has never used Email Routing and the main domain has its own MX or SPF records                 |
-| `changed`       | An earlier run left the main domain's MX or SPF records different from what it listed                   |
-| `needs_consent` | Turning it on changes something outside `agents.<BASE_DOMAIN>`; the admin must allow the listed changes |
-| `ready`         | Setup can run and changes nothing on the main domain or in the zone's Email Routing settings            |
-| `on`            | Agent email is on                                                                                       |
+| `state`         | Meaning                                                                                                                                                                                                                                                                                                                |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `unavailable`   | The deploy has not prepared agent email; `reason` says what is missing                                                                                                                                                                                                                                                 |
+| `verifying`     | Cloudflare is still verifying the sending records                                                                                                                                                                                                                                                                      |
+| `refused`       | Setup can't safely change the main domain's SPF: more than one SPF record, mail (MX) without SPF other than Google's, or a policy it can't verify (`redirect=`, an ending other than `~all`/`-all`, mechanisms other than `include:`/`ip4:`/`ip6:`/`all`/`exp=`, more than 10 lookups, or a loop); `reason` says which |
+| `changed`       | An earlier run left the main domain's MX or SPF records different from what it listed                                                                                                                                                                                                                                  |
+| `needs_consent` | Turning it on changes something outside `agents.<BASE_DOMAIN>`; the admin must allow the listed changes                                                                                                                                                                                                                |
+| `ready`         | Setup can run and changes nothing on the main domain or in the zone's Email Routing settings                                                                                                                                                                                                                           |
+| `on`            | Agent email is on                                                                                                                                                                                                                                                                                                      |
 
 Each `mainDomainChanges` entry is `{ type, name, content, priority?, change }`; `priority` is set
 for MX records. In `needs_consent` they are the records Cloudflare adds the first time a zone uses
-Email Routing (`content` is `null` for the DKIM key, which Cloudflare generates). In `changed` they
+Email Routing (`content` is `null` for the DKIM key, which Cloudflare generates), and, when the main
+domain already has an SPF record, that record as `change: "remove"` and its merged replacement as
+`change: "add"`. In `changed` they
 are the differences from the records the earlier run started from, `change: "add"` or
 `"remove"`. `zoneChanges` lists zone settings the setup changes, today only
 `{ setting: "subaddressing", description, allowed }` while subaddressing is off; `allowed` is true

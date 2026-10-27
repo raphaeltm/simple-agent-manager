@@ -95,15 +95,16 @@ An **agent profile** is a saved, reusable configuration for running an agent: wh
 
 A **skill** is a reusable layer of instructions, environment, and files you can apply on top of a profile for a particular kind of work. A skill only overrides the settings it sets: anything it leaves empty, including the agent and model, comes from the profile you pick, following the resolution order **skill → profile → project → platform**. Pick a skill per chat with the sliders button above the message box.
 
-## Triggers
+## Automation
 
-A **trigger** starts agent work automatically, without you opening a chat. User-facing triggers run from three sources:
+**Automation** is everything in a project that starts work on its own, on one page in the project's navigation. See [Automation](/docs/guides/scheduled-actions/).
 
-- **Schedule** (cron) — run on a recurring basis
-- **GitHub event** — react to activity on the linked repository
-- **Webhook** — start work when an authenticated external request arrives (see [Webhook Triggers](/docs/guides/webhook-triggers/))
+- A **trigger** starts a chat whenever its source fires: a **schedule** (such as weekdays at 9:00), a **GitHub event** on the linked repository, a **webhook** from another service, or an **email** to the automation's own address (preview). See [Triggers](/docs/guides/triggers/).
+- A **one-time run** sends one message to a chat, or starts one new chat, at a time you pick.
+- A **watch** acts whenever SAM sees a matching project event, such as a release failing.
+- A **workflow** is multi-step work an agent planned and handed to SAM, which starts each step when the steps it needs have finished. See [Workflows](/docs/guides/workflows/).
 
-Each trigger runs with an agent profile (and optional skill), so triggered work behaves like a chat you started yourself. Schedule and GitHub triggers without a profile use the project's default; webhook triggers always name one. You can create triggers yourself on the project's **Automation** page, or ask an agent to create one for you. See [Triggers](/docs/guides/triggers/).
+Each run uses an agent profile (and optional skill), so it behaves like a chat you started yourself. Schedule and GitHub triggers without a profile use the project's default agent; webhook and email triggers always name a profile. You can set these up yourself, or ask an agent to.
 
 SAM also has a private operator-only incident trigger source used by the configured platform feedback project. It dispatches agents from grouped private incident backlog summaries rather than from external user/project events.
 
