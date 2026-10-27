@@ -192,7 +192,8 @@ Agents manage triggers with `list_triggers`, `create_trigger`, `update_trigger`,
 - **GitHub** (`"github"`): `githubConfig` with an `eventType` (`issues`, `issue_comment`,
   `pull_request`, `pull_request_review`, `pull_request_review_comment`, or `push`) and optional structured filters described below. SAM rejects `actions` that GitHub
   never sends for the event, and any `actions` on `push`. Unlike the form, which fills in one action
-  (`opened` for issues and pull requests, `created` for comments), a trigger created without
+  (`opened` for issues and pull requests, `created` for comments, `submitted` for reviews), a
+  trigger created without
   `actions` runs on every action of the event — for `issues`, that includes `edited`, `labeled`, and
   `closed`.
 

@@ -75,7 +75,8 @@ runtime file instead.
   credential is passed in, such as `ANTHROPIC_API_KEY`. Rename the variable or delete it.
 - **"Managed environment contains an unsupported shell variable name".** A project, profile, or skill
   variable, Secret or not, is named `ENV`, `BASH_ENV`, `UID`, `EUID`, `PPID`, `SHELLOPTS`,
-  `BASHOPTS`, or `BASH_VERSINFO`, so every `exec_with_secrets` call fails. Rename it.
+  `BASHOPTS`, `BASH_VERSINFO` or `SAM_OIDC_TOKEN`, so every `exec_with_secrets` call fails. Rename
+  it.
 - **The output says `environmentMode: legacy`.** The workspace's environment predates the Secret
   setting: it started before your instance updated, or the variable was added or marked Secret after
   it started. Start a new chat, or, in a **Chat**, select **Sleep** and then send a message to wake
@@ -104,7 +105,7 @@ key only to retry the identical request. Output is kept to 64 KiB per stream, fr
 Each job is a new non-interactive process: terminal exports, aliases, functions, activated
 environments, and the terminal's current directory don't carry over, so source any setup the command
 needs. Environment overrides are for non-secret values. `ENV`, `BASH_ENV`, `UID`, `EUID`, `PPID`,
-`SHELLOPTS`, `BASHOPTS`, and `BASH_VERSINFO` can't be selected or overridden, and a managed variable
+`SHELLOPTS`, `BASHOPTS`, `BASH_VERSINFO` and `SAM_OIDC_TOKEN` can't be selected or overridden, and a managed variable
 with one of these names makes every call fail. The container needs Bash and `setsid`; without them
 the job fails rather than SAM replacing the container.
 

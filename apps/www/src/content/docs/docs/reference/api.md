@@ -843,7 +843,8 @@ disabled-alarm retry interval.
 ### `PATCH /api/admin/runtime-controls`
 
 Update either or both switches. At least one field is required and every provided value must be
-boolean. Saving `true` also clears that switch's emergency KV key. An emergency KV key set to `false`
+boolean. Saving `true` also sets that switch's emergency KV key to `true`; if that write fails, the
+response is `503 SETTINGS_PROPAGATION_UNCERTAIN`. An emergency KV key set to `false`
 or `disabled` stops the work whatever the setting says.
 
 ```json

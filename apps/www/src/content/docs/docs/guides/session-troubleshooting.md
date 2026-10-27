@@ -142,10 +142,10 @@ never switches to another model, profile, or credential to get around a limit.
 - **If Claude Code or Codex didn't say when its limit resets**, the message reads **Waiting for provider
   limit reset (time unknown); bounded retry 1/3 at 14:05 UTC.** SAM tries again after 5 minutes,
   then 10, then 20. If the limit still hasn't lifted, the task is **Blocked**.
-- **A new task that uses the same credential waits too**, before its agent starts. If its workspace
-  was already being prepared, its card says **Waiting**, with the reason **Blocked before provider
-  prompt:** followed by the reset time, and its machine stays up meanwhile; despite the word
-  "Blocked", it starts by itself after the reset.
+- **A new VM task that uses the same credential waits too**, before its agent starts (a new Instant
+  chat isn't held). Its card says **Waiting**; once its workspace is ready, the reason reads
+  **Blocked before provider prompt:** followed by the reset time, and its machine stays up
+  meanwhile. Despite the word "Blocked", it starts by itself after the reset.
 
 **Blocked** on its own means SAM stopped waiting. The task won't carry on by itself, and a reply in
 the chat doesn't restart it:

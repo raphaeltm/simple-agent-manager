@@ -11,7 +11,7 @@ This reference covers the most important configuration variables. For the comple
 
 ## Dynamic admin controls
 
-Superadmins change OAuth sign-in, the SAM Connector, anonymous trials, operational switches, and the limits for collaboration, workflows, linked work, [AI models for agents](/docs/guides/ai-models-for-agents/) and agent email in [Admin → Settings](/docs/guides/admin-settings/) (on a self-hosted instance, from v2026.10.17). A value saved there wins over the matching variable on this page, which in turn wins over older KV values and the code default; **Reset override** removes the saved value, so the variable (if set) applies again. Encryption/signing roots, domains and Cloudflare resource bindings remain bootstrap configuration. New runtime tunables belong in the typed settings registry; the environment tables below retain migration compatibility.
+Superadmins change OAuth sign-in, the SAM Connector, anonymous trials, operational switches, and the limits for collaboration, workflows, linked work, [AI models for agents](/docs/guides/ai-models-for-agents/) and agent email in [Admin → Settings](/docs/guides/admin-settings/) (on a self-hosted instance, the page arrived in v2026.10.17 and later groups with their features; see that guide). A value saved there wins over the matching variable on this page, which in turn wins over older KV values and the code default; **Reset override** removes the saved value, so the variable (if set) applies again. Encryption/signing roots, domains and Cloudflare resource bindings remain bootstrap configuration. New runtime tunables belong in the typed settings registry; the environment tables below retain migration compatibility.
 
 ## Private SAM assistant runtime controls
 
@@ -1679,105 +1679,109 @@ the VM agent's 250 MB.
 
 ## MCP Tool Limits
 
-| Variable                                 | Default | Description                                                                                                                                              |
-| ---------------------------------------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `MCP_IDEA_CONTEXT_MAX_LENGTH`            | `500`   | Max characters of idea context shown to agents                                                                                                           |
-| `MCP_IDEA_LIST_LIMIT`                    | `20`    | Default page size for `list_ideas`                                                                                                                       |
-| `MCP_IDEA_LIST_MAX`                      | `100`   | Max page size for `list_ideas`                                                                                                                           |
-| `MCP_IDEA_SEARCH_MAX`                    | `20`    | Max results from `search_ideas`                                                                                                                          |
-| `MCP_RELATED_IDEA_SEARCH_LIMIT`          | `10`    | Default results from `find_related_ideas`                                                                                                                |
-| `MCP_TASK_LIST_LIMIT`                    | `10`    | Default page size for `list_tasks`                                                                                                                       |
-| `MCP_TASK_LIST_MAX`                      | `50`    | Max page size for `list_tasks`                                                                                                                           |
-| `MCP_TASK_SEARCH_LIMIT`                  | `10`    | Default page size for `search_tasks`                                                                                                                     |
-| `MCP_TASK_SEARCH_MAX`                    | `20`    | Max results from `search_tasks`                                                                                                                          |
-| `MCP_TASK_DETAIL_RECENT_MESSAGE_LIMIT`   | `5`     | Recent assistant messages returned by `get_task_details`                                                                                                 |
-| `MCP_TASK_DETAIL_MESSAGE_SNIPPET_LENGTH` | `2000`  | Max characters per assistant message snippet in `get_task_details`                                                                                       |
-| `MCP_MESSAGE_SEARCH_LIMIT`               | `10`    | Default page size for `search_messages`                                                                                                                  |
-| `MCP_MESSAGE_SEARCH_MAX`                 | `20`    | Max results from `search_messages`                                                                                                                       |
-| `SEARCH_QUERY_MAX_LENGTH`                | `4096`  | Max total UTF-8 bytes retained by idea, task, knowledge, and message search as a DoS guard; responses disclose truncation                                |
-| `SEARCH_QUERY_MAX_TERM_LENGTH`           | `48`    | Max LIKE-safe UTF-8 bytes retained per search term; higher values clamp to SQLite's safe pattern ceiling                                                 |
-| `SEARCH_QUERY_MAX_TERMS`                 | `40`    | Max whitespace-delimited terms retained by those search surfaces; higher values clamp to the safe D1 parameter ceiling and responses disclose truncation |
-| `MCP_MESSAGE_LIST_LIMIT`                 | `50`    | Default page size for `get_session_messages`                                                                                                             |
-| `MCP_MESSAGE_LIST_MAX`                   | `200`   | Max messages per `get_session_messages` request                                                                                                          |
-| `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT`   | `10`    | Default page size for `get_archived_tool_payloads`                                                                                                       |
-| `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX`     | `50`    | Max archived payloads per `get_archived_tool_payloads`                                                                                                   |
-| `MCP_COMMENT_LIST_LIMIT`                 | `10`    | Default page size for `list_message_comment_threads`                                                                                                     |
-| `MCP_COMMENT_LIST_MAX`                   | `25`    | Max threads per `list_message_comment_threads` request                                                                                                   |
-| `MCP_COMMENT_BODY_MAX_LENGTH`            | `4000`  | Max comment/reply body characters accepted through MCP                                                                                                   |
-| `MCP_COMMENT_QUOTE_MAX_LENGTH`           | `1000`  | Max quoted source-message characters returned to agents                                                                                                  |
-| `COMMENT_DIRECTIVE_CONTEXT_MAX_LENGTH`   | `6000`  | Max send-to-agent comment directive prompt length                                                                                                        |
-| `MCP_TRIGGER_LIST_LIMIT`                 | `20`    | Default page size for `list_triggers`                                                                                                                    |
-| `MCP_TRIGGER_LIST_MAX`                   | `100`   | Max triggers per `list_triggers` request                                                                                                                 |
-| `MCP_INCIDENT_LIST_LIMIT`                | `10`    | Default page size for private `list_incident_queue`                                                                                                      |
-| `MCP_INCIDENT_LIST_MAX`                  | `50`    | Max private incidents per `list_incident_queue` request                                                                                                  |
+| Variable                                 | Default | Description                                                                                                                                                                                           |
+| ---------------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MCP_IDEA_CONTEXT_MAX_LENGTH`            | `500`   | Max characters of the reason an agent gives when it links its chat to an idea (`link_idea`). The idea an agent gets at start-up is capped by the `operations.agentIdeaContextMaxLength` admin setting |
+| `MCP_IDEA_LIST_LIMIT`                    | `20`    | Default page size for `list_ideas`                                                                                                                                                                    |
+| `MCP_IDEA_LIST_MAX`                      | `100`   | Max page size for `list_ideas`                                                                                                                                                                        |
+| `MCP_IDEA_SEARCH_MAX`                    | `20`    | Max results from `search_ideas`                                                                                                                                                                       |
+| `MCP_RELATED_IDEA_SEARCH_LIMIT`          | `10`    | Default results from `find_related_ideas`                                                                                                                                                             |
+| `MCP_TASK_LIST_LIMIT`                    | `10`    | Default page size for `list_tasks`                                                                                                                                                                    |
+| `MCP_TASK_LIST_MAX`                      | `50`    | Max page size for `list_tasks`                                                                                                                                                                        |
+| `MCP_TASK_SEARCH_LIMIT`                  | `10`    | Default page size for `search_tasks`                                                                                                                                                                  |
+| `MCP_TASK_SEARCH_MAX`                    | `20`    | Max results from `search_tasks`                                                                                                                                                                       |
+| `MCP_TASK_DETAIL_RECENT_MESSAGE_LIMIT`   | `5`     | Recent assistant messages returned by `get_task_details`                                                                                                                                              |
+| `MCP_TASK_DETAIL_MESSAGE_SNIPPET_LENGTH` | `2000`  | Max characters per assistant message snippet in `get_task_details`                                                                                                                                    |
+| `MCP_MESSAGE_SEARCH_LIMIT`               | `10`    | Default page size for `search_messages`                                                                                                                                                               |
+| `MCP_MESSAGE_SEARCH_MAX`                 | `20`    | Max results from `search_messages`                                                                                                                                                                    |
+| `SEARCH_QUERY_MAX_LENGTH`                | `4096`  | Max total UTF-8 bytes retained by idea, task, knowledge, and message search as a DoS guard; responses disclose truncation                                                                             |
+| `SEARCH_QUERY_MAX_TERM_LENGTH`           | `48`    | Max LIKE-safe UTF-8 bytes retained per search term; higher values clamp to SQLite's safe pattern ceiling                                                                                              |
+| `SEARCH_QUERY_MAX_TERMS`                 | `40`    | Max whitespace-delimited terms retained by those search surfaces; higher values clamp to the safe D1 parameter ceiling and responses disclose truncation                                              |
+| `MCP_MESSAGE_LIST_LIMIT`                 | `50`    | Default page size for `get_session_messages`                                                                                                                                                          |
+| `MCP_MESSAGE_LIST_MAX`                   | `200`   | Max messages per `get_session_messages` request                                                                                                                                                       |
+| `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT`   | `10`    | Default page size for `get_archived_tool_payloads`                                                                                                                                                    |
+| `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX`     | `50`    | Max archived payloads per `get_archived_tool_payloads`                                                                                                                                                |
+| `MCP_COMMENT_LIST_LIMIT`                 | `10`    | Default page size for `list_message_comment_threads`                                                                                                                                                  |
+| `MCP_COMMENT_LIST_MAX`                   | `25`    | Max threads per `list_message_comment_threads` request                                                                                                                                                |
+| `MCP_COMMENT_BODY_MAX_LENGTH`            | `4000`  | Max comment/reply body characters accepted through MCP                                                                                                                                                |
+| `MCP_COMMENT_QUOTE_MAX_LENGTH`           | `1000`  | Max quoted source-message characters returned to agents                                                                                                                                               |
+| `COMMENT_DIRECTIVE_CONTEXT_MAX_LENGTH`   | `6000`  | Max send-to-agent comment directive prompt length                                                                                                                                                     |
+| `MCP_TRIGGER_LIST_LIMIT`                 | `20`    | Default page size for `list_triggers`                                                                                                                                                                 |
+| `MCP_TRIGGER_LIST_MAX`                   | `100`   | Max triggers per `list_triggers` request                                                                                                                                                              |
+| `MCP_INCIDENT_LIST_LIMIT`                | `10`    | Default page size for private `list_incident_queue`                                                                                                                                                   |
+| `MCP_INCIDENT_LIST_MAX`                  | `50`    | Max private incidents per `list_incident_queue` request                                                                                                                                               |
 
 Project event MCP tools use the ProjectData event limits above: `PROJECT_EVENT_LIST_LIMIT`, `PROJECT_EVENT_LIST_MAX`, and `PROJECT_EVENT_SUBSCRIPTION_EVENT_CURSOR_MAX_LENGTH`.
 
 ## Web UI (Build-Time)
 
-| Variable                                     | Default            | Description                                                                                           |
-| -------------------------------------------- | ------------------ | ----------------------------------------------------------------------------------------------------- |
-| `VITE_FILE_PREVIEW_INLINE_MAX_BYTES`         | `10485760` (10 MB) | Images below this size render inline automatically                                                    |
-| `VITE_FILE_PREVIEW_LOAD_MAX_BYTES`           | `52428800` (50 MB) | Images below this size show click-to-load; above shows download link                                  |
+| Variable                                     | Default            | Description                                                                                                                                      |
+| -------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `VITE_FILE_PREVIEW_INLINE_MAX_BYTES`         | `10485760` (10 MB) | Images below this size render inline automatically                                                                                               |
+| `VITE_FILE_PREVIEW_LOAD_MAX_BYTES`           | `52428800` (50 MB) | Images below this size show click-to-load; above shows download link                                                                             |
 | `VITE_PASTED_TEXT_ATTACHMENT_THRESHOLD`      | `4000`             | Pasted text at least this long becomes a text-file attachment. The deploy doesn't pass it through, so set it when you build the web app yourself |
-| `VITE_ANALYTICS_MAX_QUEUE_SIZE`              | `100`              | Max client-side analytics events retained before oldest events drop                                   |
-| `VITE_ANALYTICS_FLUSH_THRESHOLD`             | `10`               | Client event count that triggers an immediate analytics flush                                         |
-| `VITE_ANALYTICS_FLUSH_INTERVAL_MS`           | `5000`             | Client analytics background flush interval in milliseconds                                            |
-| `VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES`       | `100`              | Max paginated diagnosis-event pages loaded per browser request                                        |
-| `VITE_CHAT_DELTA_MAX_PAGES`                  | `50`               | Max newer-message pages one chat refresh drains before failing visibly                                |
-| `VITE_CHAT_TIMELINE_MAX_PAGES`               | `200`              | Max pages fetched per loop when the chat timeline drawer opens                                        |
-| `VITE_CHAT_LOAD_UNTIL_MAX_PAGES`             | `400`              | Max older-message pages chased while resolving a timeline jump                                        |
-| `VITE_PROJECT_LIST_LIMIT`                    | `50`               | Projects loaded into each shared list-cache entry                                                     |
-| `VITE_PROJECT_POLL_INTERVAL_MS`              | `30000`            | Project-list page refresh cadence in milliseconds; `0` disables                                       |
-| `VITE_SIDEBAR_PROJECT_POLL_INTERVAL_MS`      | `60000`            | App-shell project-list refresh cadence in milliseconds; `0` disables                                  |
-| `VITE_WORKSPACE_PORTS_POLL_MS`               | `10000`            | Workspace forwarded-port base refresh cadence in milliseconds                                         |
-| `VITE_WORKSPACE_PORTS_BACKOFF_MAX_MS`        | `120000`           | Maximum backoff between forwarded-port readiness polls                                                |
-| `VITE_WORKSPACE_PORTS_FAILURE_BUDGET`        | `6`                | Consecutive unavailable port-list responses before circuit cooldown                                   |
-| `VITE_WORKSPACE_PORTS_BACKOFF_JITTER_RATIO`  | `0.2`              | +/- jitter ratio applied to forwarded-port readiness backoff delays                                   |
-| `VITE_WORKSPACE_PORTS_CIRCUIT_RESET_MS`      | `300000`           | Open-circuit cooldown before probing forwarded-port readiness again                                   |
-| `VITE_SESSION_INFRA_RETRY_DELAYS_MS`         | `2000,5000,10000`  | Comma-separated retry delays for chat Details workspace/node fetches                                  |
-| `VITE_PROJECT_PREFETCH_DELAY_MS`             | `120`              | Mouse dwell before project-detail prefetch; focus/touch are immediate                                 |
-| `VITE_BACKGROUND_FETCH_DELAY_MS`             | `150`              | Delay before background query activity is shown and announced                                         |
-| `VITE_ACP_PERMISSION_POLL_MS`                | `2000`             | Pending ACP permission snapshot refresh cadence                                                       |
-| `VITE_ACP_PERMISSION_RECOVERY_POLL_MS`       | `30000`            | Empty-snapshot recovery cadence after a missed realtime attention event                               |
-| `VITE_ACP_PERMISSION_QUERY_RETRY_COUNT`      | `3`                | Transient ACP permission snapshot retries; `0` disables retries                                       |
-| `VITE_CHUNK_LOAD_RETRY_DELAY_MS`             | `350`              | Wait before retrying a failed lazy route-chunk import                                                 |
-| `VITE_CHUNK_RELOAD_COOLDOWN_MS`              | `15000`            | Minimum gap between chunk-recovery reloads; guards against a reload loop                              |
-| `VITE_ROUTE_FALLBACK_REVEAL_DELAY_MS`        | `180`              | Delay before the route loading spinner fades in, avoiding a flash                                     |
-| `VITE_QUERY_PERSIST_MAX_AGE_MS`              | `86400000` (24 h)  | How long a persisted query-cache record may be restored after writing                                 |
-| `VITE_QUERY_PERSIST_THROTTLE_MS`             | `1000`             | Minimum gap between IndexedDB writes of the query cache                                               |
-| `VITE_QUERY_PERSIST_RESTORE_TIMEOUT_MS`      | `250`              | Budget for the initial cache restore before failing open to no cache                                  |
-| `VITE_CHAT_TRANSCRIPT_CACHE_TTL_MS`          | `86400000` (24 h)  | How long a chat transcript stays cached after it was last used                                        |
-| `VITE_CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS`    | `20`               | Most chat transcripts cached at once; older ones are evicted                                          |
-| `VITE_CHAT_TRANSCRIPT_PERSIST_MAX_ROWS`      | `500`              | Newest rows of each chat transcript written to IndexedDB                                              |
-| `VITE_AGENT_CATALOG_STALE_TIME_MS`           | `300000`           | Freshness window for the installable agent catalog query                                              |
-| `VITE_PROVIDER_CATALOG_STALE_TIME_MS`        | `300000`           | Freshness window for provider catalog size/location/price metadata                                    |
-| `VITE_TRIAL_STATUS_STALE_TIME_MS`            | `60000`            | Freshness window for trial availability status                                                        |
-| `VITE_CACHED_COMMANDS_STALE_TIME_MS`         | `300000`           | Freshness window for cached slash-command registries                                                  |
-| `VITE_REPORT_ISSUE_CONFIG_STALE_TIME_MS`     | `300000`           | Freshness window for the report-issue availability flag                                               |
-| `VITE_PROJECT_CREATE_CONFIG_STALE_TIME_MS`   | `300000`           | Freshness window for project-creation config flags                                                    |
-| `VITE_CREDENTIAL_LIMITS_STALE_TIME_MS`       | `30000`            | Freshness window for credential usage-limit windows shown in the chat header and Settings → Advanced  |
-| `VITE_CREDENTIAL_LIMITS_REFETCH_INTERVAL_MS` | `60000`            | Poll cadence for credential usage-limit windows while the tab is visible (paused in the background)   |
-| `VITE_AUTOMATION_POLL_MS`                    | `30000`            | Automation page refresh cadence for schedules and watches while the tab is visible                    |
-| `VITE_DEPLOYMENTS_ACTIVE_POLL_MS`            | `5000`             | Deployments refresh cadence while a deploy, start or pause is in progress or a domain is turning on   |
-| `VITE_DEPLOYMENTS_IDLE_POLL_MS`              | `30000`            | Deployments refresh cadence otherwise; both cadences pause while the tab is hidden                    |
-| `VITE_DEPLOY_HELP_FIX_PROMPT_TEMPLATE`       | built-in text      | Request a Deployments **Ask an agent** puts in a new chat for a problem; `{environment}` is the name  |
-| `VITE_DEPLOY_HELP_DEPLOY_PROMPT_TEMPLATE`    | built-in text      | Request **Ask an agent** puts in a new chat to deploy; `{environment}` is the name                    |
-| `VITE_AUTOMATION_ATTENTION_WINDOW_MS`        | `259200000` (3 d)  | How long a failed one-time automation or workflow stays under **Needs your attention**                |
-| `VITE_AUTOMATION_RECENT_RUNS_PER_TRIGGER`    | `10`               | Runs read per trigger for the Automation overview, and shown on a watch's page                        |
-| `VITE_AUTOMATION_MAX_RUN_READS`              | `25`               | Most triggers whose runs the Automation overview or History reads, one request each                   |
-| `VITE_AUTOMATION_MAX_LIST_PAGES`             | `2`                | Pages of schedules and watches the Automation overview reads                                          |
-| `VITE_AUTOMATION_PREVIEW_ROWS`               | `5`                | Rows shown in the Automation overview's **Coming up**, **Recently** and **Workflows**                 |
-| `VITE_AUTOMATION_RUNS_PAGE_SIZE`             | `20`               | Runs per page on a trigger's Automation page                                                          |
-| `VITE_AUTOMATION_CHAT_PICKER_LIMIT`          | `100`              | Chats offered when an automation messages a chat; capped at the API's 100                             |
-| `VITE_AUTOMATION_MAX_CHANNEL_PAGES`          | `5`                | Channel catalog pages read on **Behind the scenes → Channels**                                        |
-| `VITE_WORKFLOW_RUN_POLL_MS`                  | `10000`            | An open running workflow's refresh cadence while the tab is visible; finished runs are not polled     |
-| `VITE_WORKFLOW_RUNS_PAGE_SIZE`               | `20`               | Workflow runs per page on **Automation → Workflows**; capped at the API's 50                          |
-| `VITE_SAM_SETTINGS_POLL_MS`                  | `10000`            | Private SAM preference/availability polling in milliseconds; pauses in hidden tabs                    |
-| `VITE_SAM_ACTIVE_POLL_MS`                    | `2000`             | Private SAM polling while turns, actions or tracked project work remain active; pauses in hidden tabs |
-| `VITE_SAM_STREAMING_POLL_MS`                 | `15000`            | Private SAM safety-net polling while the running turn's live stream is connected                      |
-| `VITE_SAM_STREAM_RECONNECT_MS`               | `1500`             | Delay step before reopening a dropped live SAM stream (grows with each attempt)                       |
-| `VITE_SAM_STREAM_MAX_RECONNECTS`             | `5`                | Live SAM stream reconnect attempts per turn before relying on polling alone                           |
+| `VITE_ANALYTICS_MAX_QUEUE_SIZE`              | `100`              | Max client-side analytics events retained before oldest events drop                                                                              |
+| `VITE_ANALYTICS_FLUSH_THRESHOLD`             | `10`               | Client event count that triggers an immediate analytics flush                                                                                    |
+| `VITE_ANALYTICS_FLUSH_INTERVAL_MS`           | `5000`             | Client analytics background flush interval in milliseconds                                                                                       |
+| `VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES`       | `100`              | Max paginated diagnosis-event pages loaded per browser request                                                                                   |
+| `VITE_CHAT_DELTA_MAX_PAGES`                  | `50`               | Max newer-message pages one chat refresh drains before failing visibly                                                                           |
+| `VITE_CHAT_TIMELINE_MAX_PAGES`               | `200`              | Max pages fetched per loop when the chat timeline drawer opens                                                                                   |
+| `VITE_CHAT_LOAD_UNTIL_MAX_PAGES`             | `400`              | Max older-message pages chased while resolving a timeline jump                                                                                   |
+| `VITE_PROJECT_LIST_LIMIT`                    | `50`               | Projects loaded into each shared list-cache entry                                                                                                |
+| `VITE_PROJECT_POLL_INTERVAL_MS`              | `30000`            | Project-list page refresh cadence in milliseconds; `0` disables                                                                                  |
+| `VITE_SIDEBAR_PROJECT_POLL_INTERVAL_MS`      | `60000`            | App-shell project-list refresh cadence in milliseconds; `0` disables                                                                             |
+| `VITE_WORKSPACE_PORTS_POLL_MS`               | `10000`            | Workspace forwarded-port base refresh cadence in milliseconds                                                                                    |
+| `VITE_WORKSPACE_PORTS_BACKOFF_MAX_MS`        | `120000`           | Maximum backoff between forwarded-port readiness polls                                                                                           |
+| `VITE_WORKSPACE_PORTS_FAILURE_BUDGET`        | `6`                | Consecutive unavailable port-list responses before circuit cooldown                                                                              |
+| `VITE_WORKSPACE_PORTS_BACKOFF_JITTER_RATIO`  | `0.2`              | +/- jitter ratio applied to forwarded-port readiness backoff delays                                                                              |
+| `VITE_WORKSPACE_PORTS_CIRCUIT_RESET_MS`      | `300000`           | Open-circuit cooldown before probing forwarded-port readiness again                                                                              |
+| `VITE_SESSION_INFRA_RETRY_DELAYS_MS`         | `2000,5000,10000`  | Comma-separated retry delays for chat Details workspace/node fetches                                                                             |
+| `VITE_PROJECT_PREFETCH_DELAY_MS`             | `120`              | Mouse dwell before project-detail prefetch; focus/touch are immediate                                                                            |
+| `VITE_BACKGROUND_FETCH_DELAY_MS`             | `150`              | Delay before background query activity is shown and announced                                                                                    |
+| `VITE_ACP_PERMISSION_POLL_MS`                | `2000`             | Pending ACP permission snapshot refresh cadence                                                                                                  |
+| `VITE_ACP_PERMISSION_RECOVERY_POLL_MS`       | `30000`            | Empty-snapshot recovery cadence after a missed realtime attention event                                                                          |
+| `VITE_ACP_PERMISSION_QUERY_RETRY_COUNT`      | `3`                | Transient ACP permission snapshot retries; `0` disables retries                                                                                  |
+| `VITE_CHUNK_LOAD_RETRY_DELAY_MS`             | `350`              | Wait before retrying a failed lazy route-chunk import                                                                                            |
+| `VITE_CHUNK_RELOAD_COOLDOWN_MS`              | `15000`            | Minimum gap between chunk-recovery reloads; guards against a reload loop                                                                         |
+| `VITE_ROUTE_FALLBACK_REVEAL_DELAY_MS`        | `180`              | Delay before the route loading spinner fades in, avoiding a flash                                                                                |
+| `VITE_QUERY_PERSIST_MAX_AGE_MS`              | `86400000` (24 h)  | How long a persisted query-cache record may be restored after writing                                                                            |
+| `VITE_QUERY_PERSIST_THROTTLE_MS`             | `1000`             | Minimum gap between IndexedDB writes of the query cache                                                                                          |
+| `VITE_QUERY_PERSIST_RESTORE_TIMEOUT_MS`      | `250`              | Budget for the initial cache restore before failing open to no cache                                                                             |
+| `VITE_CHAT_TRANSCRIPT_CACHE_TTL_MS`          | `86400000` (24 h)  | How long a chat transcript stays cached after it was last used                                                                                   |
+| `VITE_CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS`    | `20`               | Most chat transcripts cached at once; older ones are evicted                                                                                     |
+| `VITE_CHAT_TRANSCRIPT_PERSIST_MAX_ROWS`      | `500`              | Newest rows of each chat transcript written to IndexedDB                                                                                         |
+| `VITE_AGENT_CATALOG_STALE_TIME_MS`           | `300000`           | Freshness window for the installable agent catalog query                                                                                         |
+| `VITE_PROVIDER_CATALOG_STALE_TIME_MS`        | `300000`           | Freshness window for provider catalog size/location/price metadata                                                                               |
+| `VITE_TRIAL_STATUS_STALE_TIME_MS`            | `60000`            | Freshness window for trial availability status                                                                                                   |
+| `VITE_CACHED_COMMANDS_STALE_TIME_MS`         | `300000`           | Freshness window for cached slash-command registries                                                                                             |
+| `VITE_REPORT_ISSUE_CONFIG_STALE_TIME_MS`     | `300000`           | Freshness window for the report-issue availability flag                                                                                          |
+| `VITE_PROJECT_CREATE_CONFIG_STALE_TIME_MS`   | `300000`           | Freshness window for project-creation config flags                                                                                               |
+| `VITE_CREDENTIAL_LIMITS_STALE_TIME_MS`       | `30000`            | Freshness window for credential usage-limit windows shown in the chat header and Settings → Advanced                                             |
+| `VITE_CREDENTIAL_LIMITS_REFETCH_INTERVAL_MS` | `60000`            | Poll cadence for credential usage-limit windows while the tab is visible (paused in the background)                                              |
+| `VITE_IDEAS_POLL_MS`                         | `30000`            | Ideas list refresh cadence while the tab is visible                                                                                              |
+| `VITE_IDEA_DETAIL_POLL_MS`                   | `30000`            | An idea page's refresh cadence (its state and updates) while the tab is visible                                                                  |
+| `VITE_IDEA_NEEDS_YOU_VISIBLE`                | `3`                | **Needs you** cards shown on the Ideas list before the rest fold under "N more need you"                                                         |
+| `VITE_IDEA_UPDATE_MAX_LENGTH`                | `4000`             | Characters the idea page's **Add an update…** box accepts (the server allows up to the `collaboration.ideaUpdateBodyMaxLength` admin setting)    |
+| `VITE_AUTOMATION_POLL_MS`                    | `30000`            | Automation page refresh cadence for schedules and watches while the tab is visible                                                               |
+| `VITE_DEPLOYMENTS_ACTIVE_POLL_MS`            | `5000`             | Deployments refresh cadence while a deploy, start or pause is in progress or a domain is turning on                                              |
+| `VITE_DEPLOYMENTS_IDLE_POLL_MS`              | `30000`            | Deployments refresh cadence otherwise; both cadences pause while the tab is hidden                                                               |
+| `VITE_DEPLOY_HELP_FIX_PROMPT_TEMPLATE`       | built-in text      | Request a Deployments **Ask an agent** puts in a new chat for a problem; `{environment}` is the name                                             |
+| `VITE_DEPLOY_HELP_DEPLOY_PROMPT_TEMPLATE`    | built-in text      | Request **Ask an agent** puts in a new chat to deploy; `{environment}` is the name                                                               |
+| `VITE_AUTOMATION_ATTENTION_WINDOW_MS`        | `259200000` (3 d)  | How long a failed one-time automation or workflow stays under **Needs your attention**                                                           |
+| `VITE_AUTOMATION_RECENT_RUNS_PER_TRIGGER`    | `10`               | Runs read per trigger for the Automation overview, and shown on a watch's page                                                                   |
+| `VITE_AUTOMATION_MAX_RUN_READS`              | `25`               | Most triggers whose runs the Automation overview or History reads, one request each                                                              |
+| `VITE_AUTOMATION_MAX_LIST_PAGES`             | `2`                | Pages of schedules and watches the Automation overview reads                                                                                     |
+| `VITE_AUTOMATION_PREVIEW_ROWS`               | `5`                | Rows shown in the Automation overview's **Coming up**, **Recently** and **Workflows**                                                            |
+| `VITE_AUTOMATION_RUNS_PAGE_SIZE`             | `20`               | Runs per page on a trigger's Automation page                                                                                                     |
+| `VITE_AUTOMATION_CHAT_PICKER_LIMIT`          | `100`              | Chats offered when an automation messages a chat; capped at the API's 100                                                                        |
+| `VITE_AUTOMATION_MAX_CHANNEL_PAGES`          | `5`                | Channel catalog pages read on **Behind the scenes → Channels**                                                                                   |
+| `VITE_WORKFLOW_RUN_POLL_MS`                  | `10000`            | An open running workflow's refresh cadence while the tab is visible; finished runs are not polled                                                |
+| `VITE_WORKFLOW_RUNS_PAGE_SIZE`               | `20`               | Workflow runs per page on **Automation → Workflows**; capped at the API's 50                                                                     |
+| `VITE_SAM_SETTINGS_POLL_MS`                  | `10000`            | Private SAM preference/availability polling in milliseconds; pauses in hidden tabs                                                               |
+| `VITE_SAM_ACTIVE_POLL_MS`                    | `2000`             | Private SAM polling while turns, actions or tracked project work remain active; pauses in hidden tabs                                            |
+| `VITE_SAM_STREAMING_POLL_MS`                 | `15000`            | Private SAM safety-net polling while the running turn's live stream is connected                                                                 |
+| `VITE_SAM_STREAM_RECONNECT_MS`               | `1500`             | Delay step before reopening a dropped live SAM stream (grows with each attempt)                                                                  |
+| `VITE_SAM_STREAM_MAX_RECONNECTS`             | `5`                | Live SAM stream reconnect attempts per turn before relying on polling alone                                                                      |
 
 ### Query cache persistence
 

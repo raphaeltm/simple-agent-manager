@@ -133,13 +133,15 @@ the agent, and sharing a chat come with v2026.10.20.
 Anyone in the project can comment on any message in any chat, including chats a teammate started.
 Select **Comment** under a message, or select some text in it and choose **Comment** (on a phone,
 **Comment on selection**). On a wide screen the comment opens in the **Comments** panel beside the
-chat; on a narrower one, under the message. Type in **Add a comment…** and select **Comment**.
+chat; on a narrower one, under the message, and on a touch screen a comment on selected words opens
+in a sheet titled **Comment on selected text**. Type in **Add a comment…** and select **Comment**.
 
 Everyone in the project can read the comment, and so can agents in the project (they read comments
 with the `list_message_comment_threads` MCP tool). Each thread shows who wrote it and whether it is
 **Open**, **Sent to agent**, or **Resolved**, and anyone can **Reply** to it, **Resolve** it, or
 **Reopen** it. **Comments** in the [session tool rail](/docs/guides/chat-features/#the-session-tool-rail)
-opens all of a chat's threads, with resolved ones collapsed; its badge counts the unresolved ones.
+opens all of a chat's threads, with resolved ones collapsed; it shows a dot while threads are
+unresolved, or their count when the rail shows labels.
 On a narrow screen, such as a phone, it opens as a list instead, filtered to **Needs you** when
 something is waiting for you.
 
@@ -334,7 +336,8 @@ task: leave that to them.
   the agent when their time runs out are cancelled and marked **Not delivered — access expired**,
   on every open page as well as after a reload.
 - People a chat is shared with can share it onward, but never for longer than their own access lasts,
-  and can remove anyone's access. Removing someone also removes anyone they added.
+  and can remove anyone's access. Removing someone also removes anyone they added, unless the owner
+  has since renewed that person's access.
 - **Share** shows when each person's access ends, for example _added by you · ends in 23 min (2:43 PM)_.
 - A chat can be shared with up to 10 people at a time by default (a superadmin can change this in
   **Admin → Settings**).
