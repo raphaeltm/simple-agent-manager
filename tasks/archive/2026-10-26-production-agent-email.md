@@ -57,3 +57,7 @@ https://github.com/cloudflare/workerd/issues/6740
 Implementation and staging are complete; PR/CI/CodeRabbit/merge/production evidence is tracked in the PR and local .do-state.md. Production activation remains the admin's explicit DNS consent action.
 
 - Cleanup confirmed: trigger, workspace and node DELETE each returned 200; workspace deletionStatus confirmed. Node list excludes the owned node and preserves all four preexisting nodes. Final task-completion specialist review PASS for implementation/staging.
+
+### CodeRabbit follow-up
+
+Addressed both review findings: use one approved-record derivation for setup leases, and validate existing SPF policies even when they already include Cloudflare. Five regression cases reproduced the previous gap (redirect, permissive all, ptr, macros, and excessive lookups); the fix rejects them before writes. A sixth verifies safe unchanged SPF is not rewritten. Focused setup/SPF/admin tests: 60 passed. Safety reviewer rechecked the narrow delta: PASS. Production release remains tracked in PR #2448.

@@ -189,7 +189,7 @@ async function inspect(env: Env): Promise<Inspection> {
   if ((!attempt || facts.replanAttempt) && !zoneUsesRouting) {
     const spf = planRoutingSpf(mainDomainMail);
     if ('reason' in spf) return { plan: plan('refused', { ...base, reason: spf.reason }), facts };
-    if (spf.after !== CLOUDFLARE_ROUTING_SPF && spf.after !== spf.before) {
+    if (spf.after !== CLOUDFLARE_ROUTING_SPF) {
       try {
         await verifySpfLookupBudget(spf.after, (domain) => readPublicSpf(env, domain));
       } catch (error) {

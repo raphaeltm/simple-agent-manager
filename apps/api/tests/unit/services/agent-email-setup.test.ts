@@ -245,6 +245,29 @@ describe('agent email admin setup', () => {
       }
     });
 
+    it('enables routing with a verified unchanged SPF without rewriting it', async () => {
+      const content = 'v=spf1 include:_spf.google.com include:_spf.mx.cloudflare.net -all';
+      const fake = cloudflare({ ...NEW_ZONE, dns: [{ type: 'TXT', name: MAIN, content }] });
+      expect((await run(true)).state).toBe('on');
+      expect(
+        fake.records('TXT', MAIN).filter((record) => record.content.startsWith('v=spf1'))
+      ).toEqual([expect.objectContaining({ content })]);
+      expect(fake.writes().some((call) => call.path.startsWith('/dns_records'))).toBe(false);
+    });
+
+    it.each([
+      'v=spf1 include:_spf.mx.cloudflare.net +all',
+      'v=spf1 include:_spf.mx.cloudflare.net redirect=other.example ~all',
+      'v=spf1 include:_spf.mx.cloudflare.net ptr ~all',
+      'v=spf1 include:_spf.mx.cloudflare.net include:%{i}.example ~all',
+      `v=spf1 include:_spf.mx.cloudflare.net ${Array.from({ length: 10 }, (_, n) => `include:sender${n}.example`).join(' ')} ~all`,
+    ])('refuses unsafe unchanged SPF before routing or DNS writes: %s', async (content) => {
+      const fake = cloudflare({ ...NEW_ZONE, dns: [{ type: 'TXT', name: MAIN, content }] });
+      expect((await planAgentEmailSetup(env)).state).toBe('refused');
+      await expect(run(true)).rejects.toBeInstanceOf(AgentEmailSetupRefusedError);
+      expect(fake.writes()).toEqual([]);
+    });
+
     it('replans unfinished SPF preparation after a failed write and an external policy change', async () => {
       let fail = true;
       const fake = cloudflare({

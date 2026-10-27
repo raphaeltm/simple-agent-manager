@@ -56,6 +56,18 @@ export interface SetupClaim {
   userId: string;
 }
 
+function approvedRecords(claim: SetupClaim) {
+  return {
+    allowed: allowedAdditions(claim.mainDomainChanges, claim.mainDomain),
+    removed: allowedAdditions(
+      claim.mainDomainChanges
+        .filter((change) => change.change === 'remove')
+        .map((change) => ({ ...change, change: 'add' as const })),
+      claim.mainDomain
+    ),
+  };
+}
+
 export class SetupLease {
   private constructor(
     private readonly env: Env,
@@ -89,13 +101,7 @@ export class SetupLease {
         startedAt: new Date(now).toISOString(),
         startedBy: claim.userId,
         baseline: claim.mainDomainMail.map(toMailRecord),
-        allowed: allowedAdditions(claim.mainDomainChanges, claim.mainDomain),
-        removed: allowedAdditions(
-          claim.mainDomainChanges
-            .filter((change) => change.change === 'remove')
-            .map((change) => ({ ...change, change: 'add' as const })),
-          claim.mainDomain
-        ),
+        ...approvedRecords(claim),
         zoneChanges: acceptedZoneChanges,
         ...lease,
       };
@@ -121,13 +127,7 @@ export class SetupLease {
       ...(claim.refreshBaseline
         ? {
             baseline: claim.mainDomainMail.map(toMailRecord),
-            allowed: allowedAdditions(claim.mainDomainChanges, claim.mainDomain),
-            removed: allowedAdditions(
-              claim.mainDomainChanges
-                .filter((change) => change.change === 'remove')
-                .map((change) => ({ ...change, change: 'add' as const })),
-              claim.mainDomain
-            ),
+            ...approvedRecords(claim),
           }
         : {}),
       zoneChanges: [...new Set([...previous.zoneChanges, ...acceptedZoneChanges])],

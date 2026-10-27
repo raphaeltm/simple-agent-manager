@@ -26,24 +26,22 @@ export function planRoutingSpf(
           'The main domain receives mail but has no SPF record. Add an SPF record authorizing your existing mail provider before enabling agent email.',
       };
     }
-    return {
-      before: null,
-      after: `v=spf1 ${mx.length ? `${GOOGLE_INCLUDE} ` : ''}${ROUTING_INCLUDE} ~all`,
-    };
+    const senders = mx.length ? [GOOGLE_INCLUDE, ROUTING_INCLUDE] : [ROUTING_INCLUDE];
+    return { before: null, after: ['v=spf1', ...senders, '~all'].join(' ') };
   }
   const existing = spf[0];
   if (!existing) throw new Error('Missing inspected SPF record');
   const before = comparableDnsContent(existing);
   const terms = before.split(/\s+/);
-  if (terms.some((term) => term.toLowerCase() === ROUTING_INCLUDE))
-    return { before, after: before };
   // Redirects and permissive all mechanisms need an explicit operator decision; never
   // rewrite their meaning while trying to add another sender.
   if (!/^[~-]all$/i.test(terms.at(-1) ?? '') || terms.some((term) => /^redirect=/i.test(term))) {
     return {
       reason:
-        'The existing SPF policy cannot be safely merged automatically. Add include:_spf.mx.cloudflare.net to that policy before enabling agent email.',
+        'The existing SPF policy cannot be safely verified automatically. Review its redirect and terminal all mechanism before enabling agent email.',
     };
   }
+  if (terms.some((term) => term.toLowerCase() === ROUTING_INCLUDE))
+    return { before, after: before };
   return { before, after: [...terms.slice(0, -1), ROUTING_INCLUDE, terms.at(-1)].join(' ') };
 }
