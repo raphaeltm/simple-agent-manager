@@ -2,39 +2,39 @@
   "slug": "automation",
   "label": "Idea to Execution",
   "title": "From idea to\nagent-ready task.",
-  "subtitle": "Capture ideas with a problem statement and plan. Link the conversation that shaped them. When you are ready, dispatch an agent with one click.",
-  "summary": "Capture an idea with a plan, link the conversation that shaped it, and dispatch an agent with one click.",
+  "subtitle": "Capture an idea with its problem and plan. When you are ready, start work and choose who takes it. The idea keeps track of the chats and pull requests working on it.",
+  "summary": "Capture an idea with a plan, start work on it in one click, and see where it stands from the work linked to it.",
   "highlights": [
-    "Capture a problem statement and a phased plan before dispatching an agent",
-    "Link related chat conversations so the agent starts with the discussion that shaped the plan",
+    "Capture a problem statement and a phased plan before an agent starts",
+    "Chats, pull requests and files that work on the idea are linked to it as agents work",
     "Hand the idea to an agent when it is ready, choosing who works on it"
   ],
-  "docsHref": "/docs/guides/idea-execution/",
+  "docsHref": "/docs/guides/ideas/",
   "group": "automate",
   "screenshots": [
     {
       "src": "/images/features/sam-ideas-detail.png",
-      "alt": "Idea detail page for rate-limiting the payouts endpoint showing a Ready badge, a problem statement, a three-phase plan with bullets, a green primary action button, and a Conversations sidebar listing three linked sessions",
-      "caption": "Structured ideas with problem, plan, and a Start work button to hand the idea to an agent"
+      "alt": "Idea page for rate-limiting the payouts endpoint. The plan has a problem statement and three phases. Beside it, a status card reads In review, PR #214 is open, checks passed, with Review PR #214 and Open the chat. Work lists two chats, one working and one finished, and the pull request. Related lists a research file and a related idea.",
+      "caption": "Each idea shows its plan, where it stands, and the work linked to it"
     }
   ],
   "details": [
     {
       "headline": "Structured idea capture",
-      "body": "Write down the problem, sketch a plan, and link related chat conversations for context. When you are ready, hit Start work: you choose who works on it, add a note, and SAM hands the agent the idea and everything already linked to it.",
+      "body": "Write down the problem and sketch a plan. When you are ready, select Start work: you choose who works on it and add a note. The agent starts with the idea and can look up the chats, files and pull requests already linked to it.",
       "screenshot": {
         "src": "/images/features/sam-ideas-detail.png",
-        "alt": "Idea detail page for rate-limiting the payouts endpoint showing a Ready badge, a problem statement, a three-phase plan with bullets, a green primary action button, and a Conversations sidebar listing three linked sessions",
-        "caption": "Each idea has a problem statement, a plan, and a button that hands it to an agent"
+        "alt": "Idea page for rate-limiting the payouts endpoint. The plan has a problem statement and three phases. Beside it, a status card reads In review, PR #214 is open, checks passed, with Review PR #214 and Open the chat. Work lists two chats, one working and one finished, and the pull request. Related lists a research file and a related idea.",
+        "caption": "The idea keeps one current plan, with where it stands beside it"
       }
     },
     {
-      "headline": "Link chat context",
-      "body": "Attach related conversations to an idea before you start work on it, so the agent that picks it up starts with the discussion that shaped the plan instead of a bare problem statement.",
+      "headline": "Where it stands, at a glance",
+      "body": "An idea's status comes from its work: In progress while an agent works on it, In review while its pull request is open, and Waiting for you when an agent asks something. Chats, pull requests and files are linked as agents work, so there is nothing to keep up to date by hand.",
       "screenshot": {
         "src": "/images/features/sam-ideas-detail.png",
-        "alt": "Idea detail page for rate-limiting the payouts endpoint showing a Ready badge, a problem statement, a three-phase plan with bullets, a green primary action button, and a Conversations sidebar listing three linked sessions",
-        "caption": "Linked conversations sit beside the plan, so context travels with the idea"
+        "alt": "Idea page for rate-limiting the payouts endpoint. The plan has a problem statement and three phases. Beside it, a status card reads In review, PR #214 is open, checks passed, with Review PR #214 and Open the chat. Work lists two chats, one working and one finished, and the pull request. Related lists a research file and a related idea.",
+        "caption": "Status, work and related files sit beside the plan"
       }
     }
   ]

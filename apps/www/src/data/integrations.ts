@@ -43,12 +43,12 @@ function faqItem(question: string, answer: string): { question: string; answer: 
 }
 
 const workersAiMarketingFields = {
-  tagline: 'Built-in edge AI for platform features',
+  tagline: 'Built-in edge AI for SAM and your agents',
   description:
-    "SAM runs on Cloudflare Workers, and Workers AI provides edge inference for platform features. SAM uses Workers AI for task title generation, text-to-speech, and context summarization without requiring a separate model API key.",
+    "SAM runs on Cloudflare Workers, and Workers AI provides edge inference without a separate model API key. SAM uses it for task titles, text-to-speech, voice input and the SAM assistant, and your agents can call Workers AI models while they work.",
   seoTitle: 'Built-in AI with Cloudflare Workers AI | SAM',
   seoDescription:
-    'SAM includes Cloudflare Workers AI for task titles, text-to-speech, and summarization. Built into the platform with no separate model key.',
+    'SAM includes Cloudflare Workers AI for task titles, text-to-speech, the SAM assistant and models your agents can call. No separate model key.',
 } satisfies Pick<Integration, 'tagline' | 'description' | 'seoTitle' | 'seoDescription'>;
 
 const workersAiNoSeparateModelKeyFeature = titleDescriptionItem(
@@ -105,13 +105,13 @@ export const integrations: Integration[] = [
       { title: 'Run test generation at scale', description: 'Generate comprehensive test suites for existing code — Claude Code understands your codebase context and writes meaningful tests.' },
     ],
     faq: [
-      { question: 'What models does Claude Code use?', answer: 'Claude Code uses Anthropic\'s Claude models. SAM supports configuring the model per project — including Claude Opus, Sonnet, and Haiku variants.' },
+      { question: 'What models does Claude Code use?', answer: 'Claude Code uses Anthropic\'s Claude models. SAM lists the Claude 5 models, such as Fable 5.1, Opus 5.5, Sonnet 5.5 and Haiku 5.5, and the Claude 4 models. Choose one in Settings → Agents or in an agent profile.' },
       { question: 'Do I need an Anthropic API key?', answer: 'You can use either an Anthropic API key (pay-per-use) or a Claude Max/Pro OAuth token (subscription-based). Configure your preferred method in project settings.' },
       { question: 'Can I run Claude Code in a devcontainer?', answer: 'Yes — SAM builds your repo\'s devcontainer on the VM. Claude Code runs inside it with the same toolchains, language runtimes, and test runners your team uses.' },
     ],
     relatedSlugs: ['codex', 'hetzner', 'scaleway'],
     externalUrl: 'https://docs.anthropic.com/en/docs/claude-code/overview',
-    models: ['Claude Opus 4', 'Claude Sonnet 4', 'Claude Haiku 4.5'],
+    models: ['Claude Fable 5.1', 'Claude Opus 5.5', 'Claude Sonnet 5.5', 'Claude Haiku 5.5'],
   },
   {
     slug: 'codex',
@@ -130,7 +130,7 @@ export const integrations: Integration[] = [
     features: [
       { title: 'Your Infrastructure', description: 'Codex runs on your cloud VMs instead of OpenAI\'s sandbox — giving you full control over compute, data residency, and costs.' },
       { title: 'OAuth Token Management', description: 'SAM manages Codex OAuth token refresh automatically — including concurrent session handling to prevent token race conditions.' },
-      { title: 'Full GPT Model Access', description: 'Use the latest GPT models including GPT-5, o3, and o4-mini for different coding tasks.' },
+      { title: 'Full GPT Model Access', description: 'Use the GPT-6 models, such as GPT-6 Astra, GPT-6.1 Sol and GPT-6 Luna, for different coding tasks.' },
       { title: 'Devcontainer Integration', description: 'Codex works inside your repo\'s devcontainer — no separate Docker setup needed.' },
     ],
     howItWorks: [
@@ -147,11 +147,11 @@ export const integrations: Integration[] = [
     faq: [
       { question: 'Do I need a ChatGPT Pro subscription?', answer: 'You can use either an OpenAI API key or a ChatGPT Pro/Plus OAuth token. SAM supports both authentication methods.' },
       { question: 'How does SAM handle Codex token refresh?', answer: 'SAM includes a centralized refresh proxy that serializes token rotation per user, preventing race conditions when multiple Codex instances run concurrently.' },
-      { question: 'What models can Codex use?', answer: 'Codex supports GPT-5 variants (5.4, 5.3, 5.2, 5.1), GPT-4.1, o3, and o4-mini. You can configure the model per project.' },
+      { question: 'What models can Codex use?', answer: 'SAM lists GPT-6 Astra, GPT-6.1 Sol, GPT-6 Sol and GPT-6 Luna, the earlier GPT-5.6 models, and a few legacy ones that work only with an OpenAI API key. Choose one in Settings → Agents or in an agent profile.' },
     ],
     relatedSlugs: ['claude-code', 'gemini-cli', 'hetzner'],
     externalUrl: 'https://openai.com/index/introducing-codex/',
-    models: ['GPT-5', 'GPT-4.1', 'o3', 'o4-mini'],
+    models: ['GPT-6 Astra', 'GPT-6.1 Sol', 'GPT-6 Sol', 'GPT-6 Luna'],
   },
   {
     slug: 'gemini-cli',
@@ -169,7 +169,7 @@ export const integrations: Integration[] = [
       'Run Google Gemini CLI coding agents on your own infrastructure. SAM provisions VMs, builds devcontainers, and manages agent lifecycles for Gemini CLI.',
     features: [
       { title: 'Multimodal Coding', description: 'Gemini CLI can understand images, diagrams, and screenshots alongside code — useful for UI implementation tasks.' },
-      { title: 'Gemini 2.5 Models', description: 'Access Gemini 2.5 Pro and Flash models for different cost/performance tradeoffs.' },
+      { title: 'Gemini 3 Models', description: 'Choose Gemini 3.8 Flash, Gemini 3.1 Pro Preview or another Gemini 3 model for different cost and performance tradeoffs.' },
       { title: 'Large Context Windows', description: 'Gemini models support massive context windows, ideal for understanding large codebases.' },
       { title: 'Google API Key Auth', description: 'Simple API key authentication — add your Gemini API key and start running agents.' },
     ],
@@ -185,13 +185,13 @@ export const integrations: Integration[] = [
       { title: 'Cross-language projects', description: 'Gemini handles polyglot codebases well — ideal for projects mixing TypeScript, Python, Go, and other languages.' },
     ],
     faq: [
-      { question: 'Which Gemini models are supported?', answer: 'SAM supports Gemini 2.5 Pro, Gemini 2.5 Flash, and Gemini 2.0 Flash. Configure the model in your project settings.' },
+      { question: 'Which Gemini models are supported?', answer: 'SAM lists the Gemini 3 models, such as Gemini 3.8 Flash and Gemini 3.1 Pro Preview, and keeps Gemini 2.5 for existing users. Choose one in Settings → Agents or in an agent profile.' },
       { question: 'Is Gemini CLI free to use?', answer: 'Gemini CLI requires a Google Gemini API key. Google offers free tier usage with rate limits. SAM itself doesn\'t charge extra for using Gemini CLI.' },
       { question: 'Can Gemini CLI work with devcontainers?', answer: 'Yes — Gemini CLI runs inside your repo\'s devcontainer on the provisioned VM, with full access to your project\'s tools and dependencies.' },
     ],
     relatedSlugs: ['claude-code', 'mistral-vibe', 'gcp'],
     externalUrl: 'https://github.com/google-gemini/gemini-cli',
-    models: ['Gemini 2.5 Pro', 'Gemini 2.5 Flash', 'Gemini 2.0 Flash'],
+    models: ['Gemini 3.8 Flash', 'Gemini 3.1 Pro Preview', 'Gemini 3.5 Flash-Lite'],
   },
   {
     slug: 'mistral-vibe',
@@ -566,12 +566,12 @@ export const integrations: Integration[] = [
     features: [
       workersAiNoSeparateModelKeyFeature,
       { title: 'Edge Inference', description: 'Models run at Cloudflare\'s edge — low latency for platform features, no cold starts.' },
-      { title: 'Multiple Models', description: 'Llama 4, Gemma 4, GLM-4.7, Qwen 3, and Deepgram for different tasks — SAM picks the right model automatically.' },
+      { title: 'Models for Your Agents', description: 'Agents can call Workers AI models while they work, such as a decision model for a yes-or-no check or Whisper to transcribe a recording, within a monthly budget per project.' },
       { title: 'AI Gateway', description: 'All inference is routed through Cloudflare AI Gateway for rate limiting, analytics, and reliability.' },
     ],
     howItWorks: [
       { step: 'Already Built In', description: 'Workers AI is part of SAM\'s Cloudflare infrastructure — no setup required.' },
-      { step: 'Automatic Model Selection', description: 'SAM uses the right model for each task: GLM for titles, Deepgram for TTS, Gemma for summarization.' },
+      { step: 'Automatic Model Selection', description: 'SAM uses the right model for each job: Gemma for task titles, Deepgram for text-to-speech, Whisper for voice input, GLM for the SAM assistant.' },
       { step: 'AI Proxy (Optional)', description: 'Enable the AI proxy to route custom inference through Workers AI with rate limiting and token budgets.' },
       { step: 'Monitor Usage', description: 'Track AI usage, costs, and model distribution via the admin analytics dashboard.' },
     ],
@@ -582,8 +582,8 @@ export const integrations: Integration[] = [
     ],
     faq: [
       workersAiApiKeyFaq,
-      { question: 'Can I use Workers AI for my coding agents?', answer: 'Workers AI powers platform features, not the coding agents themselves. Agents use their own models (Claude, GPT, Gemini, Devstral) via their respective API keys.' },
-      { question: 'What models does SAM use?', answer: 'Llama 4 Scout 17B for general inference, GLM-4.7 Flash for task titles, Gemma 4 26B for context summarization, Qwen 3 30B for complex tasks, and Deepgram Aura 2 for text-to-speech.' },
+      { question: 'Can I use Workers AI for my coding agents?', answer: 'Yes, in two ways. Agents can call Workers AI models while they work, within a monthly budget you set per project. And OpenCode can use Workers AI as its own model through SAM platform inference, without an API key of yours. The other agents use their own providers\' models.' },
+      { question: 'What models does SAM use?', answer: 'Gemma 4 26B for task titles and for preparing messages to be read aloud, Deepgram Aura 2 for text-to-speech, Whisper for voice input, GLM 5.3 Flash for the SAM assistant, and Qwen 3 30B as the AI proxy\'s default model.' },
     ],
     relatedSlugs: ['claude-code', 'codex', 'gemini-cli'],
     externalUrl: 'https://ai.cloudflare.com/',

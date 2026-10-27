@@ -477,96 +477,181 @@ test('sam-notifications-feed', async ({ page }) => {
 });
 
 // ---------------------------------------------------------------------------
-// C. Idea detail — problem statement, phased plan, Execute button, sessions
+// C. Idea page — the plan, where it stands, and the work linked to it
 // ---------------------------------------------------------------------------
 
-const IDEA_TASK_ID = 'task-rate-limit-payouts';
+const IDEA_ID = 'idea-rate-limit-payouts';
 
 const IDEA_DESCRIPTION = [
   '## Problem',
   '',
   "Occasionally a single merchant's retry storm on `/v1/payouts` saturates the",
   'shared payments API pool, degrading latency for every other merchant. There is',
-  'currently no per-merchant rate limit — only a global one.',
+  'currently no per-merchant rate limit, only a global one.',
   '',
   '## Plan',
   '',
-  '### Phase 1 — Instrumentation',
+  '### Phase 1: Instrumentation',
   '- Add a per-merchant request counter to the payouts route',
-  "- Emit a `payouts.rate.exceeded` metric",
   '- Ship a dashboard panel so we can see the shape of real traffic before enforcing anything',
   '',
-  '### Phase 2 — Enforcement',
+  '### Phase 2: Enforcement',
   '- Add a token-bucket limiter keyed by `merchantId`',
   '- Return `429` with `Retry-After` once a merchant exceeds its budget',
   '- Default budget: 60 requests/minute, configurable per merchant tier',
   '',
-  '### Phase 3 — Merchant-facing controls',
+  '### Phase 3: Merchant-facing controls',
   '- Expose the current limit and remaining budget via the merchant dashboard',
-  '- Let enterprise merchants request a higher limit',
   '- Document the new headers in the public API reference',
 ].join('\n');
 
-const IDEA_TASK = {
-  id: IDEA_TASK_ID,
-  projectId: PROJECT_ID,
-  userId: NORTHWIND.owner.id,
-  parentTaskId: null,
-  workspaceId: null,
-  title: 'Rate-limit the payouts endpoint per merchant',
-  description: IDEA_DESCRIPTION,
-  status: 'ready',
-  executionStep: null,
-  priority: 1,
-  taskMode: 'task',
-  dispatchDepth: 0,
-  agentProfileHint: null,
-  skillId: null,
-  skillHint: null,
-  blocked: false,
-  triggeredBy: 'user',
-  triggerId: null,
-  triggerExecutionId: null,
-  requestedVmSize: null,
-  requestedVmSizeSource: null,
-  errorMessage: null,
-  outputSummary: null,
-  outputBranch: null,
-  outputPrUrl: null,
-  finalizedAt: null,
-  createdAt: iso(-2 * 86_400_000),
-  updatedAt: iso(-3 * 3_600_000),
-  dependencies: [],
+const IDEA_PR = {
+  url: `https://github.com/${NORTHWIND.repository}/pull/214`,
+  number: 214,
+  state: 'open',
+  isDraft: false,
+  title: 'Rate-limit /v1/payouts per merchant with a token bucket',
+  checksState: 'success',
+  mergedAt: null,
+  updatedAt: iso(-20 * 60_000),
+  stale: false,
 };
 
-const IDEA_SESSIONS = [
-  {
-    sessionId: 'session-payouts-design',
-    topic: 'Design the per-merchant token bucket',
-    status: 'stopped',
-    context: 'Explored token-bucket vs sliding window; picked token-bucket for burst tolerance.',
-    linkedAt: NOW - 2 * 86_400_000,
+/** `GET /api/projects/:id/ideas/:ideaId`: the plan, in review on an open pull request. */
+const IDEA = {
+  ideaId: IDEA_ID,
+  title: 'Rate-limit the payouts endpoint per merchant',
+  content: IDEA_DESCRIPTION,
+  summary: "Stop one merchant's retry storm from slowing payouts for everyone else.",
+  status: 'draft',
+  createdAt: iso(-5 * 86_400_000),
+  updatedAt: iso(-3 * 3_600_000),
+  derived: {
+    state: 'review',
+    needsYou: null,
+    source: { origin: 'github', observedAt: iso(-20 * 60_000), stale: false },
+    session: {
+      sessionId: 'session-payouts-enforce',
+      topic: 'Implement rate limiter enforcement',
+      sessionStatus: 'active',
+      taskId: 'task-payouts-enforce',
+      taskStatus: 'in_progress',
+      agentLabel: 'Careful Builder',
+      lastActivityAt: iso(-25 * 60_000),
+    },
+    pullRequest: IDEA_PR,
+    note: null,
   },
+  counts: { updates: 3, chats: 2, files: 1, pullRequests: 1 },
+  filedByAgent: false,
+  filedBy: null,
+  sessions: [
+    {
+      sessionId: 'session-payouts-enforce',
+      topic: 'Implement rate limiter enforcement',
+      strong: true,
+      sessionStatus: 'active',
+      taskId: 'task-payouts-enforce',
+      taskStatus: 'in_progress',
+      taskErrorMessage: null,
+      agentLabel: 'Careful Builder',
+      lastActivityAt: NOW - 25 * 60_000,
+      needsInput: null,
+    },
+    {
+      sessionId: 'session-payouts-design',
+      topic: 'Design the per-merchant token bucket',
+      strong: true,
+      sessionStatus: 'stopped',
+      taskId: 'task-payouts-design',
+      taskStatus: 'completed',
+      taskErrorMessage: null,
+      agentLabel: 'Brainstormer',
+      lastActivityAt: NOW - 2 * 86_400_000,
+      needsInput: null,
+    },
+  ],
+  pullRequests: [IDEA_PR],
+};
+
+const IDEA_UPDATES = [
   {
+    id: 'update-pr',
+    ideaId: IDEA_ID,
+    authorKind: 'agent',
+    authorUserId: null,
+    authorName: 'Careful Builder',
     sessionId: 'session-payouts-enforce',
-    topic: 'Implement rate limiter enforcement',
-    status: 'active',
-    context: 'Wiring the limiter into the payouts route handler.',
-    linkedAt: NOW - 3_600_000,
+    sessionTopic: 'Implement rate limiter enforcement',
+    body: 'Opened #214. Merchants over 60 requests a minute now get a 429 with Retry-After; the limit is per tier and the counter is on the payouts dashboard.',
+    quote: null,
+    createdAt: iso(-40 * 60_000),
+    editedAt: null,
   },
   {
-    sessionId: 'session-payouts-dashboard',
-    topic: 'Merchant dashboard: expose remaining budget',
-    status: 'stopped',
-    context: 'Adding a "Rate limit" card to the merchant-facing usage page.',
-    linkedAt: NOW - 5 * 86_400_000,
+    id: 'update-marcus',
+    ideaId: IDEA_ID,
+    authorKind: 'user',
+    authorUserId: NORTHWIND.members[0].id,
+    authorName: NORTHWIND.members[0].name,
+    sessionId: null,
+    sessionTopic: null,
+    body: 'Enterprise merchants should start at 300 a minute, not 60.',
+    quote: 'Default budget: 60 requests/minute, configurable per merchant tier',
+    createdAt: iso(-26 * 3_600_000),
+    editedAt: null,
+  },
+  {
+    id: 'update-design',
+    ideaId: IDEA_ID,
+    authorKind: 'agent',
+    authorUserId: null,
+    authorName: 'Brainstormer',
+    sessionId: 'session-payouts-design',
+    sessionTopic: 'Design the per-merchant token bucket',
+    body: 'Compared a token bucket with a sliding window. The bucket tolerates short bursts from batch payouts, so I recommend it. Notes in token-bucket-vs-window.md.',
+    quote: null,
+    createdAt: iso(-2 * 86_400_000),
+    editedAt: null,
   },
 ];
 
+const IDEA_LINKS = {
+  sessions: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+  files: {
+    items: [
+      {
+        fileId: 'file-token-bucket',
+        filename: 'token-bucket-vs-window.md',
+        directory: '/research/payouts/',
+        relations: ['uploaded'],
+        bySessionId: 'session-payouts-design',
+      },
+    ],
+    total: 1,
+    truncated: false,
+    totalIsLowerBound: false,
+  },
+  pullRequests: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+  relatedIdeas: {
+    items: [
+      {
+        ideaId: 'idea-merchant-budget',
+        title: 'Show each merchant its remaining payout budget',
+        status: 'draft',
+        relations: ['related'],
+      },
+    ],
+    total: 1,
+    truncated: false,
+  },
+};
+
 function ideaHandler(path: string, respond: AuditResponder): Promise<void> | undefined {
-  if (path === `${BASE}/tasks/${IDEA_TASK_ID}`) return respond(200, IDEA_TASK);
-  if (path === `${BASE}/tasks/${IDEA_TASK_ID}/sessions`)
-    return respond(200, { sessions: IDEA_SESSIONS, count: IDEA_SESSIONS.length });
+  if (path === `${BASE}/ideas/${IDEA_ID}`) return respond(200, IDEA);
+  if (path === `${BASE}/ideas/${IDEA_ID}/updates`)
+    return respond(200, { updates: IDEA_UPDATES, nextCursor: null });
+  if (path === `${BASE}/ideas/${IDEA_ID}/links`) return respond(200, IDEA_LINKS);
   return undefined;
 }
 
@@ -574,15 +659,15 @@ test('sam-ideas-detail', async ({ page }) => {
   logPageErrors(page);
   await setupMocks(page, ideaHandler);
 
-  await page.goto(`/projects/${PROJECT_ID}/ideas/${IDEA_TASK_ID}`);
-  await expect(page.getByRole('heading', { name: 'Rate-limit the payouts endpoint per merchant' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Execute this idea' })).toBeVisible();
-  await expect(page.getByText('Phase 1 — Instrumentation')).toBeVisible();
-  await expect(page.getByText('Phase 2 — Enforcement')).toBeVisible();
-  await expect(page.getByText('Phase 3 — Merchant-facing controls')).toBeVisible();
-  await expect(page.getByText('Conversations (3)')).toBeVisible();
-  await expect(page.getByText('Design the per-merchant token bucket')).toBeVisible();
-  await expect(page.getByText('Implement rate limiter enforcement')).toBeVisible();
+  await page.goto(`/projects/${PROJECT_ID}/ideas/${IDEA_ID}`);
+  await expect(
+    page.getByRole('heading', { name: 'Rate-limit the payouts endpoint per merchant' })
+  ).toBeVisible();
+  const status = page.getByRole('region', { name: 'Status' });
+  await expect(status.getByText('In review')).toBeVisible();
+  await expect(status.getByRole('link', { name: 'Review PR #214' })).toBeVisible();
+  await expect(page.getByText('Phase 1: Instrumentation')).toBeVisible();
+  await expect(page.getByText('Opened #214.', { exact: false })).toBeVisible();
   await assertNoCrash(page);
   await assertNoOverflow(page);
 
