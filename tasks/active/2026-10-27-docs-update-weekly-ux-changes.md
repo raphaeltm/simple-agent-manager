@@ -38,7 +38,24 @@ Production (Deploy Production 2026-10-27 01:45Z) is at `469a83285` (#2448), so e
 
 ## Research (local research agents; reports in `.tmp/docs-update/research-*.md`)
 
-_pending_
+- **A, Ideas and linked work** (#2425–#2439): no task-first Ideas guide (how to file one, the list's
+  sections, the idea page, Start work, Updates, Related); `idea-execution.md` mixes "what happens
+  when you send work" with ideas and has stale claims (an idea becomes Done when its task finishes,
+  Related "not yet available", a Conversations list that was removed, `get_related`); Account Map
+  guide is not in the sidebar; concepts/API/agents tool table need user-first fixes; idea updates
+  endpoints missing from the API reference. Product bugs: Start follow-up work on a done idea
+  always fails (409), `sam ideas` CLI diverged from Ideas, bootstrap names `get_related`, Work lists
+  read-only chats, viewers see write controls, wrong "Settings → Agent profiles" path.
+- **B, Automation** (#2389, #2404–#2408, #2413/#2416/#2448, #2441, #2447): no single Automation
+  entry point (sidebar lists five pages); busy GitHub triggers now queue (up to 50 for 24 h) instead
+  of skipping, and "Keep issue and PR follow-ups in one chat" routes follow-ups to the running chat,
+  both undocumented for users; automations always run on a VM even with an Instant profile; agent
+  email admin setup needs task-ordered steps and a refusal table; email guide wrongly says "Try it
+  with a sample" works and "today: staging"; workflows never notify the chat that planned them;
+  `automation-page.png` stale. Product bugs: Instant ignored (tracked in backlog), no workflow
+  completion wake, give-up alerts read as infra failures, queue drains only every 5 min, pausing
+  drops new events silently, follow-ups unattributed, SPF refusal doesn't name the term.
+- C, D, E: _pending_
 
 ## Implementation checklist
 
