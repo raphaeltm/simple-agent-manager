@@ -50,7 +50,7 @@ catalog:
 
   # === Shared Libraries ===
   better-auth: 1.7.5
-  zod: 3.25.76
+  zod: 4.6.7
   valibot: 1.5.0
   execa: 9.6.1
   prism-react-renderer: 2.4.1
