@@ -62,16 +62,16 @@ SAM works out an idea's state from the chats linked to it and their pull request
 that came from, such as "From GitHub, 2 minutes ago" or "From the linked chat". The first state
 that applies is the one you see:
 
-| State               | What it means                                                                       |
-| ------------------- | ----------------------------------------------------------------------------------- |
-| **Done**            | Someone marked it done                                                              |
-| **Parked**          | Someone set it aside                                                                |
-| **Waiting for you** | An agent working on it asked something that nobody has answered                     |
-| **Stopped**         | The latest work on it failed, and nothing else is running                           |
+| State               | What it means                                                                        |
+| ------------------- | ------------------------------------------------------------------------------------ |
+| **Done**            | Someone marked it done                                                               |
+| **Parked**          | Someone set it aside                                                                 |
+| **Waiting for you** | An agent working on it asked something that nobody has answered                      |
+| **Stopped**         | The latest work on it failed, and nothing else is running                            |
 | **In progress**     | A chat is working on it (a sleeping chat counts, because it wakes when there's more) |
-| **In review**       | Its pull request is open, including a draft                                         |
-| **Merged**          | Its pull request merged, and nobody has said whether that finished the idea         |
-| **Not started**     | Nothing is working on it right now                                                  |
+| **In review**       | Its pull request is open, including a draft                                          |
+| **Merged**          | Its pull request merged, and nobody has said whether that finished the idea          |
+| **Not started**     | Nothing is working on it right now                                                   |
 
 A few things follow from that:
 
@@ -113,16 +113,16 @@ Select an idea to open its page. On a phone the sections stack, with **Status** 
 
 The **Status** buttons follow the state:
 
-| When the idea is | Main button                     | Second button |
-| ---------------- | ------------------------------- | ------------- |
-| Not started      | **Start work**                  | **Park**      |
-| In progress      | **Open the chat**               |               |
-| Waiting for you  | **Answer**                      |               |
-| Stopped          | **See what happened**           | **Try again…** |
+| When the idea is | Main button                     | Second button     |
+| ---------------- | ------------------------------- | ----------------- |
+| Not started      | **Start work**                  | **Park**          |
+| In progress      | **Open the chat**               |                   |
+| Waiting for you  | **Answer**                      |                   |
+| Stopped          | **See what happened**           | **Try again…**    |
 | In review        | **Review PR #N** (opens GitHub) | **Open the chat** |
-| Merged           | **Mark done**                   | **Keep open** |
-| Done             | **Start follow-up work**        | **Reopen**    |
-| Parked           | **Reopen**                      |               |
+| Merged           | **Mark done**                   | **Keep open**     |
+| Done             | **Start follow-up work**        | **Reopen**        |
+| Parked           | **Reopen**                      |                   |
 
 :::caution[Start follow-up work on a done idea]
 **Start follow-up work** doesn't work yet: SAM refuses with "That idea is done. Reopen it before

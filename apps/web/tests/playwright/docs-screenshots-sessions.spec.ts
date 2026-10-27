@@ -17,6 +17,7 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
 import { makeMockUser, seedTheme } from './audit-helpers';
+import { expandScrollContainers } from './automation-audit-helpers';
 import { docsShot, opaqueBackdrop } from './docs-shot';
 import { buildResourceScenario } from './resource-timeline-scenarios';
 
@@ -213,6 +214,71 @@ const AUTOMATION_TRIGGERS = [
       eventType: 'issue_comment',
       filters: { actions: ['created'], commandPrefix: '/sam' },
     },
+  },
+];
+
+/**
+ * Two workflow runs for the Automation overview, timed against NOW: one that needs attention
+ * after a failed step, and one still running.
+ */
+const WORKFLOW_RUNS = [
+  {
+    id: 'run-docs-flaky',
+    title: 'Fix the flaky checkout test and ship it',
+    status: 'needs_attention',
+    startedByUserId: 'user-docs-1',
+    createdAt: new Date(NOW - 5 * 3_600_000).toISOString(),
+    updatedAt: new Date(NOW - 3 * 3_600_000).toISOString(),
+    deadlineAt: new Date(NOW + 67 * 3_600_000).toISOString(),
+    steps: [
+      {
+        key: 'investigate',
+        title: 'Find the cause',
+        kind: 'agent',
+        status: 'completed',
+        reason: null,
+      },
+      {
+        key: 'fix',
+        title: 'Fix and test it',
+        kind: 'agent',
+        status: 'failed',
+        reason: 'The agent finished without a summary',
+      },
+      {
+        key: 'ship',
+        title: 'Open the pull request',
+        kind: 'agent',
+        status: 'blocked',
+        reason: 'Blocked: fix did not succeed',
+      },
+    ],
+  },
+  {
+    id: 'run-docs-release',
+    title: 'Write and review the release notes',
+    status: 'active',
+    startedByUserId: 'user-docs-1',
+    createdAt: new Date(NOW - 2 * 3_600_000).toISOString(),
+    updatedAt: new Date(NOW - 20 * 60_000).toISOString(),
+    deadlineAt: new Date(NOW + 70 * 3_600_000).toISOString(),
+    steps: [
+      {
+        key: 'draft',
+        title: 'Draft the release notes',
+        kind: 'agent',
+        status: 'completed',
+        reason: null,
+      },
+      {
+        key: 'review',
+        title: 'Review tone and wording',
+        kind: 'agent',
+        status: 'running',
+        reason: null,
+      },
+      { key: 'apply', title: 'Apply the review', kind: 'agent', status: 'waiting', reason: null },
+    ],
   },
 ];
 
@@ -447,9 +513,13 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
       return json({ sessions: [MOCK_SESSION], total: 1 });
     }
 
-    // The Automation overview also lists workflow runs (#2405); this project has none.
-    if (pathname === `/api/projects/${PROJECT_ID}/workflows`)
-      return json({ runs: [], nextCursor: null });
+    // The Automation overview lists workflow runs (#2405), and asks separately for the ones
+    // that need attention.
+    if (pathname === `/api/projects/${PROJECT_ID}/workflows`) {
+      const status = new URL(url).searchParams.get('status');
+      const runs = status ? WORKFLOW_RUNS.filter((run) => run.status === status) : WORKFLOW_RUNS;
+      return json({ runs, nextCursor: null });
+    }
     if (pathname === `/api/projects/${PROJECT_ID}/triggers`)
       return json({ triggers: AUTOMATION_TRIGGERS });
     if (/\/triggers\/[^/]+\/executions$/.test(pathname))
@@ -626,7 +696,11 @@ test('docs: project automation page', async ({ page }) => {
   });
   await expect(page.getByRole('heading', { name: 'Your automations' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Coming up' })).toBeVisible();
+  await expect(page.getByText('Write and review the release notes').first()).toBeVisible();
+  await expect(page.getByRole('link', { name: /See what went wrong/ }).first()).toBeVisible();
 
+  // The app scrolls inside its own containers: let them grow so neither column is cut off.
+  await expandScrollContainers(page);
   await docsShot(page, 'automation-page', page.getByTestId('automation-root'));
 });
 

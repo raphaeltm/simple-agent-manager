@@ -8,7 +8,9 @@ opens an issue labelled `bug`, or when another service reports a failed deploy. 
 ordinary chat in the project's session list, using the trigger's agent profile, so you can read
 it, reply to it, or stop it like any other.
 
-You can create triggers yourself, or ask an agent in the project to create them for you.
+You can create triggers yourself, or ask an agent in the project to create them for you. They live
+on the project's [Automation](/docs/guides/scheduled-actions/) page, next to one-time runs, event
+watches and workflows.
 
 ## The three kinds
 
@@ -21,34 +23,52 @@ You can create triggers yourself, or ask an agent in the project to create them 
 A fourth kind, **Email** (preview), gives an automation its own email address. See
 [Email Triggers](/docs/guides/email-triggers/).
 
+Each run starts on a VM, even when the agent profile you pick is an
+[Instant](/docs/guides/instant-sessions/) profile. That's a current limitation, not a choice you can
+change, so expect the start-up time and cost of a VM.
+
 ## Create a trigger yourself
 
 1. Open the project, select **Automation** in the project navigation, then **New automation**.
 2. **What should start it?** Choose **On a schedule**, **When something happens on GitHub**, or
    **When another service calls SAM**. (**Once, at a time you pick** and **When SAM sees an
    event** create a one-time run or a watch instead; see
-   [Scheduled actions and event watches](/docs/guides/scheduled-actions/).) If you start from one
+   [Automation](/docs/guides/scheduled-actions/#run-something-once).) If you start from one
    of the examples on an empty Automation page, this step is already filled in.
-3. **When should it run?**
-   - **On a schedule**: under **How often?**, pick **Every day**, **Weekdays**, **Weekends**,
+3. **Details.** The step's title depends on what starts it.
+   - **On a schedule** ("When should it run?"): under **How often?**, pick **Every day**, **Weekdays**, **Weekends**,
      **Weekly** (then the days), **Monthly** (then the day), or **Every few hours** (every hour, or
      every 2, 3, 4, 6, 8 or 12 hours, at a minute you choose), then the time and **Time zone**,
      which starts as your browser's. **Custom** takes a cron expression such as `0 9 * * 1-5`. The
      next few runs are shown as you choose. A schedule runs at most every 15 minutes.
-   - **When something happens on GitHub**: pick the **GitHub event** (**Issue**, **Issue
-     comment**, **Pull request**, **Pull request review**, **Inline review comment**, or **Push**), then narrow it down. **Actions** starts at the
-     event's usual action (`opened` for issues and pull requests, `created` for comments, `submitted` for reviews;
-     pushes have none). Add others separated by commas, such as `opened, labeled` to also catch
-     labels added later, or clear it to match every action; SAM refuses an action GitHub never
-     sends for that event. **Ignore actors** (starts as `dependabot[bot]`) skips those accounts,
-     **Required labels** (not for pushes; for a comment, the issue's or pull request's labels)
-     needs every listed label, **Command prefix** requires the comment or review body to start with that text.
-     Issue comments start as `/sam`; switching to a review event clears it so approvals
-     do not require a command. Clear the prefix to accept any beginning. **Branches** (pushes) or
-     **Source branches** (pull requests) limits the branch pushed to, or the branch a pull request
-     comes from, and **Text contains** (not for pushes) looks for a keyword in the title, body, or
-     comment. Draft pull requests are skipped unless you clear **Ignore draft pull requests**; to
-     start when a draft is marked ready, add `ready_for_review` to **Actions**.
+   - **When something happens on GitHub** ("Which GitHub activity?"): pick the **GitHub event**
+     (**Issue**, **Issue comment**, **Pull request**, **Pull request review**, **Inline review
+     comment**, or **Push**), then narrow it down:
+     - **Actions** starts at the event's usual action (`opened` for issues and pull requests,
+       `created` for comments, `submitted` for reviews; pushes have none). Add others separated by
+       commas, such as `opened, labeled` to also catch labels added later, or clear it to match every
+       action. SAM refuses an action GitHub never sends for that event.
+     - **Comments on** (issue comments only) picks **Issues and pull requests**, **Issues only** or
+       **Pull requests only**.
+     - **Required labels** (not for pushes; for a comment, the issue's or pull request's labels)
+       needs every listed label.
+     - **Command prefix** requires the comment or review to start with that text. Issue comments
+       start as `/sam`; switching to a review event clears it, so approvals don't need a command.
+       Clear it to accept any beginning.
+     - **Branches** (pushes) or **Source branches** (pull requests) limits the branch pushed to, or
+       the branch a pull request comes from.
+     - **More conditions** opens **Text contains** (a keyword in the title, body or comment),
+       **Changed label**, **Comment contains** (the comment or review only) and **Review states**.
+     - **Who can start it**: **Allowed actors** and **Ignore actors** (starts as
+       `dependabot[bot]`) list GitHub accounts, **Author association** limits it to, say, members
+       of your organization, and **Ignore bot actors** skips bots.
+     - Draft pull requests are skipped unless you clear **Ignore draft pull requests**; to start
+       when a draft is marked ready, add `ready_for_review` to **Actions**.
+     - **Test against recent deliveries** checks these settings, before you save, against the
+       repository's recent GitHub events of that kind, and says which would have started a run and
+       why the others wouldn't. It starts nothing. SAM keeps the contents of an event for about a
+       day, so older ones show as **cannot be checked**. Change a setting and the results say to
+       test again.
 
      :::caution[GitHub triggers made before 13 October, 15:05 UTC]
      The form used to keep `created` in **Actions** whatever the event, which issues, pull requests,
@@ -59,24 +79,32 @@ A fourth kind, **Email** (preview), gives an automation its own email address. S
      agent to update the trigger, or delete it and create it again.
      :::
 
-   - **When another service calls SAM**: optionally a **Source label**, **Included headers**,
+   - **When another service calls SAM** ("Which calls should start it?"): optionally a **Source
+     label**, **Included headers**,
      and **Payload filters** on the JSON the service sends. See
      [Webhook Triggers](/docs/guides/webhook-triggers/).
 
-4. **What should happen?** Pick the **Agent** (agent profile) that does the work, which starts as
-   **Project default** (a webhook trigger has to name one), and an optional **Skill**. Then write
+4. **What should happen?** Every run is an ordinary chat you can open later. Pick the **Agent**
+   (agent profile) that does the work, which starts as **Project default** (a webhook trigger has to
+   name one), and an optional **Skill**. Then write
    **What should it do?**: the instructions the agent gets on every run. **Add a detail from the
    run** inserts what you can use, such as the GitHub issue's title and body.
-5. **Check and save.** Give it a **Name** and, if you like, a **Description** for your team.
-   **Advanced options** controls overlapping runs. For GitHub, **One run at a time** makes other
-   events wait their turn; **Most runs at once** applies when that option is off. In the same
-   section, **Keep issue and PR follow-ups in one chat** opts into subject routing, **Pending
-   event limit** bounds waiting events, and **Maximum wait (hours)** sets their lifetime.
-   Other trigger kinds offer **Skip a run if the last one is still going** instead. **Chat type**
-   is **Task: finishes on its own** by default, or **Conversation: stays open** for runs you
-   want to steer. **Machine** controls what the
-   runs ask for. Select **Create automation**. For a webhook trigger, SAM shows its endpoint and
-   bearer token once: copy them into the service that will send the webhooks, not into a chat.
+5. **Check and save.** SAM sums up the automation in one sentence. Give it a **Name** and, if you
+   like, a **Description** for your team. **Advanced options** has:
+   - **Chat type**: **Task: finishes on its own** (the default), or **Conversation: stays open** for
+     runs you want to steer.
+   - **Machine**: what each run asks for.
+   - For a schedule or webhook, **Skip a run if the last one is still going**, and **Most runs at
+     once** when that's off.
+   - For GitHub, **One run at a time** ("Other GitHub events wait their turn"), or **Most runs at
+     once** when that's off, and **When GitHub events overlap**: see
+     [When a GitHub trigger is busy](#when-a-github-trigger-is-busy).
+
+   Select **Create automation**. On a desktop, the preview beside the form shows what you're about
+   to save; nothing is saved before that. For a webhook trigger, SAM shows its endpoint and bearer
+   token once: copy them into the service that will send the webhooks, not into a chat.
+
+Editing goes through the same steps, except the first: what starts a trigger can't be changed.
 
 The trigger's page says in words what starts it and what it does, and has **Run now**, **Pause**
 (or **Resume**, or **Turn on** for one that is off), and **Edit**. **Recent runs** lists each run
@@ -131,9 +159,14 @@ Replacing the token also cancels the agent's unused link.
 
 - **Each run starts a chat** in the project's session list, labelled **Task** or **Chat** by the
   trigger's task mode (see [Chat or Task](/docs/guides/chat-features/#chat-or-task)).
-- **One run at a time, by default.** Schedules and generic webhooks skip while the previous run is still going; GitHub events queue
-  instead. This includes a run that has finished its turn but is still awake. A run that has gone to
-  sleep doesn't count, so a quiet chat doesn't block the next run for long.
+- **One run at a time, by default.** A schedule or webhook skips a run while the previous one is
+  still going; a GitHub event waits its turn instead (see
+  [When a GitHub trigger is busy](#when-a-github-trigger-is-busy)). A run that has finished its turn
+  but is still awake counts as going. A run that has gone to sleep doesn't, so a quiet chat doesn't
+  block the next run for long.
+- **The chat says which automation started it.** Expand the chat header to see **Triggered by**
+  with the automation's name, its schedule, and **Run #N**, with **View automation** and **All
+  runs**. On the automation's page, each run under **Recent runs** links to its chat.
 - **Repeated failures pause it.** After three failed, stopped, or expired runs in a row, SAM pauses
   the trigger the next time it would run. Fix the cause, then select **Resume**, which starts the
   count again.
@@ -187,27 +220,62 @@ in the app.
 `update_trigger` replaces a GitHub trigger's whole `githubConfig` when you send one, so include the
 `eventType` (`filters: {}` clears the filters); a trigger's source can't be changed.
 
-## Busy GitHub triggers and follow-up comments
+## When a GitHub trigger is busy
 
-GitHub events wait when the trigger is at its run limit. By default, each trigger keeps up to
-50 pending events for 24 hours, then starts them in arrival order as capacity returns. Waiting
-through a busy period does not use up delivery retries. A paused trigger keeps its queue until
-you resume it or the events expire. Events already admitted to a task keep that task's identity
-when SAM retries startup.
+Since 27 October 2026, a GitHub event that arrives while its trigger is already at its run limit
+waits instead of being skipped. This applies to existing triggers too.
 
-Set `githubConfig.subjectAffinity` to `true` to send a follow-up event to this trigger's active
-run for the same repository and issue or pull request number. It becomes a follow-up prompt in
-that run's chat, including when the chat needs to wake from sleep. This option is off by default;
-GitHub pushes have no issue or pull request subject. It applies within one trigger, rather than
-across different triggers or to every agent that owns a PR.
+- **How many wait, and for how long.** By default up to 50 events wait, each for at most 24 hours.
+  Change both under **Advanced options → When GitHub events overlap**: **Pending event limit** and
+  **Maximum wait (hours)** (a fraction of an hour works).
+- **When they start.** Waiting events start oldest first once a run finishes. SAM checks every few
+  minutes, so the next one can take up to about five minutes to start.
+- **What gets dropped.** An event that arrives when the limit is full, or that waits longer than
+  the maximum, is dropped, and the run list says so. Events that arrive while the trigger is paused
+  or off aren't kept at all; events that were already waiting stay until you resume it or they
+  expire.
+- **Edits don't reach waiting events.** A waiting event keeps the instructions as they were when it
+  arrived.
+- **Clear stuck runs** doesn't remove events that are waiting their turn.
 
-`githubConfig.queueMaxPending` and `githubConfig.queueTtlSeconds` change the pending-event cap
-and waiting lifetime. They must be positive integers within the platform limits configured
-under **Admin → Settings → Operations**. The default platform ceilings are 1,000 pending
-events and 2,592,000 seconds (30 days); REST and MCP enforce the effective settings.
-Per-trigger defaults are 50 events and 24 hours, reduced to the platform ceiling when needed.
-Existing triggers keep their saved values when a platform ceiling is lowered; explicit queue
-setting changes must meet the current ceiling. For example:
+### Keep follow-ups in the chat that's working
+
+Turn on **Keep issue and PR follow-ups in one chat** (in **When GitHub events overlap**; off by
+default, and not offered for pushes) when a new comment on an issue or pull request should reach
+the agent already working on it, instead of starting a second agent.
+
+- A follow-up event for the same issue or pull request goes into the chat that's still working on
+  it, waking the chat if it's asleep. It shows there as a new message containing your automation's
+  instructions, filled in for the new event. A busy agent gets it when its current turn ends.
+- A **Task** run that has finished doesn't receive follow-ups: the next event starts a new chat.
+  For one chat per issue, set **Chat type** to **Conversation: stays open**.
+- It works within one automation only.
+- Tip: write the instructions so they make sense as a follow-up, for example by pointing at the
+  new comment with `{{github.commentUrl}}`.
+
+### What the run list shows
+
+A GitHub trigger's page sums up its events, for example "GitHub events: 2 waiting now · History (up
+to 90 days): 3 delivered · 3 dropped · 1 unconfirmed". Each entry under **Recent runs** says what
+happened to one event:
+
+| Entry                                                       | Meaning                                                                  |
+| ----------------------------------------------------------- | ------------------------------------------------------------------------ |
+| **Queued until a run finishes**                             | Waiting its turn                                                         |
+| **Waiting for the running chat to take it**                 | A follow-up on its way to the chat working on that issue or pull request |
+| **Delivered to the running chat**                           | The follow-up reached that chat; **Chat** opens it                       |
+| **Dropped: waiting time expired**                           | It waited longer than **Maximum wait**                                   |
+| **Dropped: queue was full**                                 | **Pending event limit** was reached                                      |
+| **Dropped: the target chat is unavailable**                 | The chat it was meant for had ended                                      |
+| **May have reached the chat, but SAM could not confirm it** | Check the chat before doing anything about it; SAM doesn't send it again |
+
+### For agents: queue settings
+
+Agents set the same options in `githubConfig`: `subjectAffinity` (`true` keeps follow-ups in one
+chat), `queueMaxPending` and `queueTtlSeconds`. Both must be positive whole numbers within the
+platform ceilings a superadmin sets in **Admin → Settings → Operations** (by default 1,000 events
+and 30 days). The per-trigger defaults are 50 events and 24 hours, lowered to a ceiling when needed.
+Existing triggers keep their saved values when a ceiling is lowered.
 
 ```json
 {
@@ -220,13 +288,6 @@ setting changes must meet the current ceiling. For example:
   }
 }
 ```
-
-The trigger page shows events waiting now and nonzero delivered, dropped, and unconfirmed
-counts from retained history. Unconfirmed delivery is never counted as a definite drop. Recent runs distinguishes waiting for capacity from sending a follow-up. A routed
-entry links to the chat that received it. A full queue or an expired event is recorded as a
-drop with its reason. Delivery failures also remain visible: SAM retries a different run only
-when the durable receipt proves no prompt was submitted to the first target. An uncertain
-handoff never starts another agent.
 
 ### GitHub filters and reviews
 
@@ -253,12 +314,9 @@ them explicitly before enabling an event trigger. Admission and queue controls s
 | `branches`          | Exact source branch for PR/review events, or pushed branch.                                                                                                                                                                                                                                                                                                   |
 | `ignoreDrafts`      | Existing default applies only to `pull_request`; other event types are unaffected.                                                                                                                                                                                                                                                                            |
 
-In Automation's GitHub details step, **Test against recent deliveries** evaluates your current draft
-without saving or running it. Results are bounded to recent deliveries for this repository,
-installation and event type. Audit records have no payload; only unexpired recovery payloads can be
-evaluated. **Unavailable** means evidence is missing, not that the filter would reject. Results show
-metadata and filter reasons, without returning external title/body/comment text. This tests filters,
-not whether admission, queueing or routing would accept a run. Changing the draft marks results stale.
+**Test against recent deliveries** (in the GitHub details step) checks these filters only: whether
+an event would pass them, not whether a run would then start, wait or be dropped. An event whose
+contents SAM no longer keeps can't be checked, which doesn't mean the filters would reject it.
 
 A submitted review and each inline comment are separate GitHub events. Select their actions
 explicitly; review templates retain the PR number and each event's own review/comment ID.

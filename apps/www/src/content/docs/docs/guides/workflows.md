@@ -8,6 +8,10 @@ what it needs before it can start. An agent step names a profile and becomes an 
 a wait step listens for a matching project event without starting a chat or VM. SAM advances the
 plan while the agent that submitted it sleeps.
 
+SAM doesn't message the chat that started a workflow when it finishes or needs attention, and it
+sends no notification for it. Follow it in **Automation**, under **Workflows** and **Needs your
+attention**, or open each step's chat.
+
 Use a workflow for work that splits into parts that depend on each other, such as "draft the
 release notes, have two agents review them at the same time, then apply both reviews".
 
@@ -68,6 +72,18 @@ change, so it is not refreshed.
 
 ![A running workflow on a wide screen: five steps in a graph, with the third step selected. Beside the graph, the step's details: done in 58 minutes by Opus 5.5 Chat, an "Open the chat" button, what it was asked to do, and what it got from the earlier step.](/images/docs/workflow-run-graph.png)
 
+## What the step words mean
+
+| Word                                       | Means                                                                              |
+| ------------------------------------------ | ---------------------------------------------------------------------------------- |
+| **Waiting**                                | It needs earlier steps to finish first                                             |
+| **Starting**                               | SAM is starting its chat                                                           |
+| **Running**                                | Its agent is working                                                               |
+| **Done**                                   | Its agent finished with a summary                                                  |
+| **Failed**                                 | It didn't succeed; the reason is in its details                                    |
+| **Blocked**                                | It will never start, because a step it needs failed                                |
+| **Listening**, **Heard it**, **Timed out** | A wait step is listening for its event, heard it, or gave up when its time ran out |
+
 ## What each step shows
 
 Select a step in any view to see its details:
@@ -81,6 +97,8 @@ Select a step in any view to see its details:
 - **What it produced**: the summary the agent finished with, its branch and pull request, links
   to Library files it referenced, and any test or check results it reported. These are reported
   by the step's agent, not checked by SAM.
+- **What it waits for** (wait steps only): what it's listening for, the event and what it's about,
+  when it started listening, when it gives up, and the event it heard.
 - **Advanced**: the step key and the IDs of its task, chat and attempt.
 
 Steps do not share files. A step hands work to the next one through the project Library, a

@@ -4,9 +4,10 @@ description: Give an automation its own email address. Mail from people you allo
 ---
 
 :::caution[Preview]
-Email triggers are a preview. They run only on deployments where agent email is turned on (today:
-staging). The address is the main protection, so treat it like a password. See
-[Security](#security) for the details and what is still missing.
+Email triggers are a preview. They only appear once a superadmin has turned agent email on for your
+SAM installation (see [Turn on agent email](#turn-on-agent-email-admins)); until then, **By email**
+isn't offered in **New automation**. The address is the main protection, so treat it like a
+password. See [Security](#security) for the details and what is still missing.
 :::
 
 An email trigger gives an automation its own address, such as
@@ -18,16 +19,19 @@ triggers, see [Triggers](/docs/guides/triggers/).
 ## Create one
 
 1. Open the project, select **Automation**, then **New automation**, and choose **By email**.
-2. Under **Allowed senders**, list the addresses that may start it. It starts with your own
-   account email. Mail whose `From:` address is not on the list is refused. SAM matches the
-   `From:` address; it cannot yet verify who really sent the email (see [Security](#security)).
+2. Under **Who can start it?**, list the **Allowed senders**, one address per line (up to 20). It
+   starts with your own account email. Mail whose `From:` address is not on the list is refused.
+   SAM matches the `From:` address; it cannot yet verify who really sent the email (see
+   [Security](#security)).
 3. Pick the **Agent**. Email automations always need an explicit agent profile.
 4. Write what it should do. The starting prompt passes the email to the agent and asks it to
-   reply when it is done.
-5. Save. The automation's page shows its address with a **Copy** button.
+   reply with the `reply_to_email` tool when it is done.
+5. Save. The automation's page shows **Its email address**, with a copy button.
 
-Email triggers cannot be started with **Run now**: there would be no email to answer.
-**Try it with a sample** still previews the prompt with an example email.
+Everyone in the project, including members who can only view it, can see the address on that page.
+Email automations have no **Run now** (there would be no email to answer) and no sample preview:
+**Try it with a sample** is only for webhook automations. You can still change who may use one,
+pause it, or delete it.
 
 ## What the agent sees
 
@@ -87,7 +91,8 @@ background, with the same run each time, so an email never starts two runs:
   time, at most **agentEmail.retryMaxSeconds** apart (900 by default).
 
 On a retry, an automation that is still busy counts as a failed attempt rather than a refusal. If
-every attempt fails, SAM gives up on that email and alerts admins straight away. Before giving up,
+every attempt fails, SAM gives up on that email, and superadmins get a notification titled
+"Operational sweep failed: agent_email_delivery_gave_up" (at most one an hour). Before giving up,
 SAM checks whether the run started after all, for example when an attempt timed out after creating
 it. If it did, the email counts as delivered. Once SAM has given up on an email, a late attempt can
 no longer start a run for it. The background retry waits for one attempt at most
@@ -110,6 +115,58 @@ The sender's mail server sees a temporary failure only if SAM could not store th
 - **An email can ask the agent to do anything the automation's agent can do.** Give email
   automations a profile with only the access they need.
 
+## Turn on agent email (admins)
+
+Agent email needs Cloudflare Email Routing and Email Sending (Workers Paid) on the zone SAM uses,
+and it uses the subdomain `agents.<your-domain>`. Turning it on takes two steps, and neither needs
+the Cloudflare dashboard.
+
+1. **Deploy with the right token permissions.** The deployment's Cloudflare token needs **Zone →
+   Zone Settings → Edit**, **Zone → Email Routing Rules → Edit** and **Email Sending → Edit**. With
+   them, every deploy prepares email: it sets up Email Sending for `agents.<your-domain>` and writes
+   DNS records only under that subdomain. Without them, email stays off and the deploy log says so.
+   No GitHub variable is needed. See [Self-Hosting](/docs/guides/self-hosting/).
+2. **A superadmin turns it on.** Open **Admin → Integrations**. The **Agent email** section says
+   **Off** and what's next:
+   - "This deployment has not prepared agent email…", "Email Sending is not set up…" or "Deploy
+     again: this deployment predates the agent email setup.": go back to step 1.
+   - "Cloudflare is still verifying the sending records…": wait, usually 5 to 15 minutes after the
+     deploy, and select **Check again**.
+   - A refusal: fix your DNS as the table below says, then select **Check again**.
+   - "Turning it on sets up Email Routing for agents.&lt;your-domain&gt;…": select **Turn on agent
+     email**.
+   - **Review DNS and routing changes**: when your main domain's records also need to change, the
+     panel lists each change, such as "Removes TXT example.com — v=spf1 …" and "Adds TXT
+     example.com — v=spf1 … include:_spf.mx.cloudflare.net ~all". Tick **I have reviewed and approve
+     these DNS and routing changes**, then select **Turn on agent email**.
+
+   The section then reads **On — agents.&lt;your-domain&gt;**. Send a loopback test to check it (see
+   [Check that it works](#check-that-it-works-admins)).
+
+What can change on your main domain:
+
+- Mail delivery doesn't move: your MX records stay as they are.
+- In a zone that has never used Email Routing, Cloudflare needs an SPF entry and a DKIM key on the
+  main domain. If you already have an SPF record, setup replaces it with one record that keeps all
+  your senders and adds Cloudflare's; it never adds a second SPF record. A Google Workspace domain
+  without SPF gets a policy that authorizes both Google and Cloudflare.
+- Subaddressing is a setting for the whole zone. Turning it on means mail to `name+anything@` your
+  main domain goes where mail to `name@` goes, so the panel lists it when it's off.
+
+Your approval covers exactly the changes the panel showed. If they differ when you press the button,
+SAM says "What turning agent email on would change is different from what you allowed. Review it and
+allow it again." If, after turning Email Routing on, your main domain gained or lost records other
+than those, agent email stays off and the panel shows **What changed**: fix the records in
+Cloudflare and select **Check again**, or tick the box to accept the records as they are now.
+
+| The panel says                                                                                                     | What to do                                                                                                                                                         |
+| ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| "The main domain has multiple SPF records…"                                                                        | Keep one SPF record on the main domain, merging the others into it                                                                                                 |
+| "The main domain receives mail but has no SPF record…"                                                             | Add an SPF record that authorizes your current mail provider (not needed for Google Workspace)                                                                     |
+| "The existing SPF policy cannot be safely verified automatically. Review its redirect and terminal all mechanism…" | Setup handles SPF records that end in `~all` or `-all` and don't use `redirect=`. Rewrite the record that way                                                      |
+| "This SPF policy uses mechanisms that automatic setup cannot safely verify."                                       | Setup understands only `include:`, `ip4:`, `ip6:`, `all` and `exp=`. Replace `a`, `mx` or other mechanisms with the equivalent `ip4:`/`ip6:` addresses or includes |
+| "The proposed SPF policy exceeds the 10 DNS lookup limit."                                                         | Remove includes you no longer need, so that your senders plus Cloudflare's stay within SPF's limit of 10 lookups                                                   |
+
 ## Check that it works (admins)
 
 **Admin → Integrations → Agent email** shows whether agent email is on and its domain. Once it is
@@ -120,41 +177,3 @@ available through [`/api/admin/agent-email`](/docs/reference/api/#agent-email-pr
 
 Cloudflare's Email Routing summary lists every reply an agent sends as **dropped**, even when it was
 delivered. Check Email Sending's metrics and logs for replies instead.
-
-## Set it up (self-hosting)
-
-Agent email needs Cloudflare Email Routing and Email Sending (Workers Paid) on your zone, and three
-more permissions on the deploy token. See the agent email note in
-[Self-Hosting](/docs/guides/self-hosting/). Setup has two steps, and neither needs the Cloudflare
-dashboard:
-
-1. **Every production or staging deploy prepares it automatically.** It sets up Email Sending for
-   `agents.<your-domain>`, writes DNS records only under that subdomain, and fails if your main
-   domain's mail records change. It does not touch Email Routing. No new GitHub variable is needed.
-2. **A superadmin turns it on in Admin → Integrations → Agent email.** This turns Email Routing on
-   for `agents.<your-domain>`, turns on subaddressing, and routes `agent@agents.<your-domain>` to
-   SAM. The panel says first what it will do, and asks you to allow anything that reaches past
-   `agents.<your-domain>`:
-   - In a zone that already uses Email Routing, nothing changes on your main domain.
-   - In a zone that has never used it, Cloudflare adds an SPF record and a DKIM key to your main
-     domain. The panel lists both.
-   - Subaddressing is a setting for the whole zone. When it is off, turning it on also changes
-     where mail to `name+anything@` addresses on your main domain goes, so the panel lists it.
-   - Existing MX records stay unchanged. For a supported existing SPF policy, the panel shows
-     the old and proposed policy; setup updates that single record instead of adding a second one.
-     Google Workspace domains without SPF get a proposed policy authorizing both Google and
-     Cloudflare. Conflicting or unsupported policies are refused with an explanation.
-
-   Your consent covers exactly the changes the panel showed: if they differ when you press the
-   button, SAM asks again.
-
-   Before it changes anything, SAM stores your main domain's MX and SPF records. After turning
-   Email Routing on, it compares the main domain with them. If the main domain gained anything
-   other than the SPF changes it showed, or lost an unrelated record, agent email stays off and the panel
-   lists what changed. Cloudflare has made that change by then. Fix the records in Cloudflare and
-   check again, or allow them as they are. Duplicate SPF records cannot be accepted. Every later run compares against the same stored
-   records, and only one run at a time changes Cloudflare.
-
-The panel can turn agent email on once Cloudflare has verified the new sending records, usually 5
-to 15 minutes after the deploy creates them; until then it says it is still verifying. Later
-deployments keep email prepared; the admin activation record remains in place.

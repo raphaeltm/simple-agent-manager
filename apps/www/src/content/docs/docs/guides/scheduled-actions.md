@@ -1,14 +1,50 @@
 ---
-title: Scheduled actions and event watches
-description: Run something once at a set time, react to project events, and see what agents are waiting for.
+title: Automation
+description: Everything in a project that starts work on its own, in one place — schedules, GitHub and webhook reactions, email (preview), one-time runs, event watches and workflows. Find it, set one up, and fix what needs attention.
 ---
 
-Open **Automation** in a project to see everything that starts on its own and to set up more.
-Every chat carries a version of the same view, narrowed to that conversation.
+Open **Automation** in a project's navigation to see everything that starts work on its own, and to
+set up more. It replaced the separate **Events** and **Triggers** pages on 20 October 2026; old links
+to them open the matching part of Automation. The command palette has **Go to Automation** and
+**Create Automation**, and every chat carries a version of the same view, narrowed to that
+conversation.
 
-Recurring work that starts new chats, such as a nightly schedule, a reaction to GitHub issues, or
-a webhook from another service, is covered in [Triggers](/docs/guides/triggers/). This page covers
-one-time runs, watches that react to events, and what agents set up for themselves.
+## What can start work
+
+| Start it…                            | What it does                                                                                | Guide                                                         |
+| ------------------------------------ | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------- |
+| **On a schedule**                    | Starts a chat on a repeating schedule, such as weekdays at 9:00                             | [Triggers](/docs/guides/triggers/)                            |
+| **When something happens on GitHub** | Reacts to issues, comments, pull requests, reviews or pushes in the project's repository    | [Triggers](/docs/guides/triggers/)                            |
+| **When another service calls SAM**   | Reacts to a webhook from your own tools, such as a failed deploy                            | [Webhook Triggers](/docs/guides/webhook-triggers/)            |
+| **By email** (preview)               | Reacts to an email sent to the automation's own address                                     | [Email Triggers](/docs/guides/email-triggers/)                |
+| **Once, at a time you pick**         | Sends one message to a chat, or starts one new chat, at a set time                          | [Run something once](#run-something-once)                     |
+| **When SAM sees an event**           | A standing watch that acts when something happens in the project, such as a release failing | [React when SAM sees an event](#react-when-sam-sees-an-event) |
+| A workflow                           | Multi-step work an agent planned; agents start these, not this page                         | [Workflows](/docs/guides/workflows/)                          |
+
+**By email** only appears once a superadmin has turned agent email on. Every run is an ordinary
+chat you can open later. Chats an automation starts run on a VM, even when the profile you pick is
+an [Instant](/docs/guides/instant-sessions/) profile.
+
+Agents can set these up for you too: ask in a chat, for example "every weekday at 9, summarize the
+open pull requests" or "remind this chat tomorrow morning to check the release".
+
+## Set one up
+
+1. Select **New automation** (on a phone, **New**). On a project with no automations yet, you can
+   start from an example instead (**Morning pull request summary**, **Triage new issues** or **Look
+   into failed releases**) with **Use this**.
+2. **Start**: choose **What should start it?** from the table above.
+3. **Details**: when it runs, which GitHub activity, which calls, who may email it, or which event
+   to wait for, depending on step 2.
+4. **What happens**: **Start a new chat** (one-time runs and watches can **Message a chat**
+   instead), the **Agent** profile and optional **Skill**, and **What should it do?**, the
+   instructions for each run. **Add a detail from the run** inserts values such as a GitHub issue's
+   title.
+5. **Review**: check the one-sentence summary, give it a **Name**, look at **Advanced options**
+   (overlapping runs, chat type, machine), and select **Create automation**.
+
+The step-by-step details for each kind are in [Triggers](/docs/guides/triggers/#create-a-trigger-yourself),
+[Run something once](#run-something-once) and [React when SAM sees an event](#react-when-sam-sees-an-event).
 
 ## Where to find it
 
@@ -19,23 +55,26 @@ on a wide screen):
 
 - **Needs your attention** lists anything that stopped, failed or could not be confirmed, with
   the usual fix as one button: **Resume**, **See what went wrong**, **Give it more runs**, or
-  **Check the result**. A one-time run that failed stays here for three days, then only on its
-  own page and in History. A [workflow](/docs/guides/workflows/) that stopped and needs attention
-  appears here the same way, with **See what went wrong**.
+  **Check the result**. An automation SAM paused after its last three runs failed also offers **See
+  the runs**. Members who can only view the project see **Take a look** instead. A one-time run
+  that failed stays here for three days, then only on its own page and in History. A
+  [workflow](/docs/guides/workflows/) that stopped and needs attention appears here the same way,
+  with **See what went wrong**.
 - **Coming up** shows the next things that start on their own, and when.
 - **Your automations** lists every automation in words: what starts it and what it does.
   **Scheduled**, **Reactions**, **One time** and **Paused or off** narrow the list. Finished
   one-time runs fold away under **Show finished automations**.
 - **Workflows** shows the newest multi-step plans agents handed to SAM, with **All** to see every
   run. See [Workflows](/docs/guides/workflows/).
-- **Recently** shows the latest runs. **History** opens all of them, with a **Problems** filter;
-  each run links to its chat.
+- **Recently** shows the latest runs. **History** shows each automation's most recent runs (up to 10
+  each), grouped by day, with a **Problems** filter; open an automation for all of its runs. Each run
+  links to its chat. Workflow runs aren't in History.
 - **Behind the scenes** sums up what agents are waiting for and the channels they post on.
 
 Schedules and watches refresh every 30 seconds while the tab is in front, and stop while it is in
 the background, so a page left open does not poll forever.
 
-![The project Automation page: "Your automations" with All, Scheduled, Reactions, One time and Paused or off filters, and rows grouped under On a schedule, When something happens and One time, each saying what starts it and what it does; beside them, "Coming up" with the next two runs and their times, "Recently" with a run that started a chat, and "Behind the scenes" with what agents are waiting on and the agent channels.](/images/docs/automation-page.png)
+![The project Automation page. On the left, "Needs your attention" holds one card: the workflow "Fix the flaky checkout test and ship it", where "Fix and test it" failed and one step did not start, with a See what went wrong button; below it, "Your automations" with All, Scheduled, Reactions, One time and Paused or off filters, and rows under On a schedule, When something happens and One time, each saying what starts it and what it does. On the right: "Coming up" with the next two runs, "Workflows" with that failed run and a running one ("Working on “Review tone and wording” · 1 of 3 done"), "Recently", and "Behind the scenes" with what agents are waiting on and the agent channels.](/images/docs/automation-page.png)
 
 Select an automation to open its page: what starts it, what it does, its recent runs, and the
 actions it offers. The exact values behind the words, such as the cron expression, the event
