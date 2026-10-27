@@ -247,7 +247,7 @@ controls the owner has in that chat, apart from the terminal and port previews.
   <source media="(max-width: 40em)" srcset="/images/docs/collaboration-share-confirm-mobile.png 2x" />
   <img
     src="/images/docs/collaboration-share-confirm.png"
-    alt="The &quot;Share chat access&quot; dialog at its confirmation step, &quot;Share with Dana Scully?&quot;. Four points say that Dana can send messages, stop or archive the chat, and answer the agent; that everything runs on your accounts and is billed to you; that the agent can read your keys, so Dana may be able to see them; and that ending access doesn't undo what Dana did. Under &quot;How long?&quot;, 30 min is chosen from 5 min, 10 min, 30 min, and 1 hour, with &quot;Ends at 2:50 PM.&quot; below. &quot;I understand this runs on my accounts&quot; is ticked, and the Share button is enabled next to Back."
+    alt="The &quot;Share chat access&quot; dialog at its confirmation step, &quot;Share with Dana Scully?&quot;. Five points say that Dana can message and answer the agent, send files, schedule messages, and stop or archive the chat; that Dana can also look through the repository&#39;s files and changes, while the terminal, open ports and the workspace page stay yours; that everything runs on your accounts and is billed to you; that the agent can read your keys, so Dana may be able to see them, along with files like .env; and that access ends on its own, cancels Dana&#39;s scheduled messages, and doesn&#39;t undo what Dana did. Under &quot;How long?&quot;, 30 min is chosen from 5 min, 10 min, 30 min, and 1 hour, with &quot;Ends at 2:50 PM.&quot; below. &quot;I understand this runs on my accounts&quot; is ticked, and the Share button is enabled next to Back."
   />
 </picture>
 

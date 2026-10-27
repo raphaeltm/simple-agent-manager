@@ -314,8 +314,10 @@ async function expectClearOfChatHeader(page: Page, target: ReturnType<Page['getB
 }
 
 test('docs: share a chat, confirmation step', async ({ page }) => {
-  // Tall enough for the whole confirmation step to fit in the phone's bottom sheet.
+  // Tall enough for the whole confirmation step to fit: the phone's bottom sheet, and the
+  // desktop dialog, which scrolls inside itself once its five points outgrow an 800 px window.
   await usePhoneHeight(page, 1000);
+  if (!isMobile(page)) await page.setViewportSize({ width: 1280, height: 1000 });
   await openChat(page, 'owner');
   await page.getByTestId('session-tool-share').click();
   const dialog = page.getByRole('dialog', { name: 'Share chat access' });
@@ -334,6 +336,17 @@ test('docs: share a chat, confirmation step', async ({ page }) => {
   await dialog.getByRole('checkbox', { name: 'I understand this runs on my accounts' }).check();
   await expect(dialog.getByText('Ends at 2:50 PM.')).toBeVisible();
   await expect(share).toBeEnabled();
+  if (!isMobile(page)) {
+    // On a desktop the dialog is capped at 44rem and scrolls inside itself, which would cut
+    // the step's buttons off the capture. Let it grow so the image shows the whole step.
+    await dialog.evaluate((element) => {
+      element.style.maxHeight = 'none';
+      for (const child of element.querySelectorAll<HTMLElement>('*')) {
+        if (getComputedStyle(child).overflowY === 'auto') child.style.overflowY = 'visible';
+      }
+    });
+  }
+  await expect(share).toBeInViewport({ ratio: 1 });
 
   await opaqueBackdrop(page);
   await docsShot(

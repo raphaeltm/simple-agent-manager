@@ -63,6 +63,8 @@ const RESPONSES: Record<string, unknown> = {
     loopback: false,
     scopes: SCOPES,
   },
+  // Settings shows the SAM assistant card above its tabs (#2386); off, as it is by default.
+  '/api/sam/settings': { enabled: false, available: true },
   '/api/auth/api-tokens': [],
   '/api/projects': { projects: [], nextCursor: null },
   '/api/notifications/unread-count': { count: 0 },
