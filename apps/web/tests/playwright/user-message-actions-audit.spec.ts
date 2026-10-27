@@ -138,6 +138,21 @@ async function expectPopoverUsable(page: Page, popover: Locator, scroller: Locat
   expect(pop.x).toBeGreaterThanOrEqual(0);
   expect(pop.x + pop.width).toBeLessThanOrEqual(page.viewportSize()!.width);
 
+  // Virtuoso can settle the surrounding rows after the dialog is attached.
+  // Wait for its actual paint order; a persistent obstruction still fails.
+  await expect
+    .poll(() =>
+      popover.evaluate((el) => {
+        const rect = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.bottom - 4);
+        return {
+          onTop: hit !== null && el.contains(hit),
+          coveringElement: hit && !el.contains(hit) ? `${hit.tagName}.${hit.className}` : null,
+        };
+      })
+    )
+    .toMatchObject({ onTop: true });
+
   const layout = await popover.evaluate((el) => {
     const rect = el.getBoundingClientRect();
     const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.bottom - 4);
