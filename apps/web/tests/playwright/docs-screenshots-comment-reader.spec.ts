@@ -114,7 +114,12 @@ function thread(fixture: {
   author: typeof ANA | typeof BEN;
   body: string;
   createdAt: number;
-  replies?: Array<{ id: string; author: typeof ANA | typeof AGENT; body: string; createdAt: number }>;
+  replies?: Array<{
+    id: string;
+    author: typeof ANA | typeof AGENT;
+    body: string;
+    createdAt: number;
+  }>;
 }) {
   return {
     id: fixture.id,
