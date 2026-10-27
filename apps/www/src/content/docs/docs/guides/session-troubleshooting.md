@@ -73,6 +73,8 @@ your work is safe and what to do next. Everything here applies to both
 - **"Agent profile not found" when you send a message** (self-hosted v2026.10.10 to v2026.10.14).
   Your message has `@` followed by a word, such as an email address.
   → [Rephrase it, or update](#agent-profile-not-found-when-you-send-a-message)
+- **The chat runs another agent than the profile you picked**, such as OpenCode instead of Claude
+  Code. A skill may be choosing the agent. → [Check the skill](#the-chat-runs-a-different-agent-than-its-profile)
 - **A message on your side of the chat that you didn't write, starting "SAM notice
   (system-generated, not a human message)".** Another agent sent this chat a message; SAM wrote the
   notice for the agent. You don't need to reply.
@@ -619,6 +621,16 @@ than a letter a–z or A–Z, a digit, or `_` (such as `-`, `.`, `é`, or `д`):
 Update to v2026.10.15 or later. Until then, write the `@` so a word doesn't directly follow it, for
 example `bob at example.com` or `@ dataclass`. The hosted service was fixed on 14 October.
 :::
+
+## The chat runs a different agent than its profile
+
+If a chat runs another agent than the profile you picked, for example OpenCode instead of Claude
+Code, look at the skill. A skill that sets an agent replaces the profile's agent and keeps the
+profile's model. Skills created from the **Skills** page before 21 October 2026 (v2026.10.22 on a
+self-hosted instance) all set the platform default agent, usually OpenCode, and the **Skills** page
+doesn't show it. Ask an agent in the project to list the project's skills and clear the agent on
+any that set one (`update_skill` with `agentType: ""`), or start the chat without that skill. See
+[the order SAM picks the agent in](/docs/guides/agents/#agent-profiles).
 
 ## SAM moved the session to another machine
 

@@ -75,46 +75,54 @@ Production (Deploy Production 2026-10-27 01:45Z) is at `469a83285` (#2448), so e
 
 ## Fix checklist (tick as done)
 
+Verified against `git diff origin/main...HEAD` on 2026-10-27 (grep per item), not from memory.
+
 Ideas: [x] new `guides/ideas.md` + screenshots · [x] idea-execution restructure + Done fix ·
 [x] sidebar (ideas, account-map, sam-assistant, ADR) · [x] concepts Ideas · [x] anchors re-pointed ·
 [x] API idea updates/session-idea endpoints · [x] agents.md find_related_ideas, PR takeover, "started
-from an idea" · [ ] configuration VITE idea vars + MCP_IDEA_CONTEXT_MAX_LENGTH · [ ] overview bullet
+from an idea" · [x] configuration VITE idea vars + MCP_IDEA_CONTEXT_MAX_LENGTH · [x] overview bullet
 
-Automation: [ ] scheduled-actions → Automation hub · [ ] triggers queue/follow-ups/create flow/stale
-lines · [ ] email-triggers fixes + admin steps · [ ] self-hosting agent email · [ ] workflows no-wake +
-step words · [ ] notifications (email give-ups, reader) · [ ] webhook-triggers GitHub dedupe ·
-[ ] concepts Automation · [ ] admin-settings queue/SAM rows + confirm rule + outage + releases ·
-[ ] agents.md wake tip + tool rows · [ ] api.md email setup states · [ ] old changelog "(now Automation)"
+Automation: [x] scheduled-actions → Automation hub · [x] triggers queue/follow-ups/create flow/stale
+lines · [x] email-triggers fixes + admin steps · [x] self-hosting agent email · [x] workflows no-wake +
+step words · [x] notifications (email give-ups, reader) · [x] webhook-triggers GitHub dedupe ·
+[x] concepts Automation · [x] admin-settings queue/SAM rows + confirm rule + outage + releases ·
+[x] agents.md wake tip + tool rows · [x] api.md email setup states · [x] old changelog "(now Automation)"
 
-Chats/agents: [ ] chat-features attach files (H1) · [ ] collaboration archived fork (H3), onward
-checkbox, workload identity note · [ ] skills caveat + troubleshooting · [ ] default agent wording ·
-[ ] model labels (#2445) · [ ] AI models refusals + controls · [ ] workload identity reorder ·
-[ ] picker text (preselection, superadmin window, Chat options) · [ ] message actions Comment ·
-[ ] troubleshooting index sleep notice
+Chats/agents: [x] chat-features attach files (H1) · [x] collaboration archived fork (H3), onward
+checkbox, workload identity note · [x] skills caveat + troubleshooting (troubleshooting entry added
+27 Oct) · [x] default agent wording · [x] model labels (#2445) · [x] AI models refusals + controls ·
+[x] workload identity reorder · [x] picker text (preselection, superadmin window, Chat options) ·
+[x] message actions Comment · [x] troubleshooting index sleep notice
 
-Account/infra: [ ] creating-workspaces Infrastructure · [ ] Nodes page path mentions · [ ] compute-pools
-Settings → Infrastructure disambiguation · [ ] sam-assistant rewrite (limits, can't do, statuses,
-release) · [ ] ADR status · [ ] app-deployments walkthrough + problems table + recovery ·
-[ ] sam-connector abilities, refresh, plain recovery section · [ ] overview/index/concepts lines
+Account/infra: [x] creating-workspaces Infrastructure · [x] Nodes page path mentions · [x] compute-pools
+Settings → Infrastructure disambiguation · [x] sam-assistant rewrite (limits, can't do, statuses,
+release) · [x] ADR status · [x] app-deployments walkthrough + problems table + recovery ·
+[x] sam-connector abilities, refresh, plain recovery section · [x] overview/index/concepts lines
 
 Screenshots: [x] ideas ×3 · [x] comment reader · [x] automation page · [x] tool rail · [x] teammate
-view · [x] admin settings (desktop) · [ ] share-confirm · [ ] mention/send-to-agent (element shots) ·
-[ ] connector-access-mobile · [ ] profile picker · [ ] AI models section · [ ] GitHub queue runs ·
-[ ] SAM assistant · [ ] admin settings fixture groups + phone
+view · [x] admin settings (desktop) · [x] share-confirm · [x] mention/send-to-agent (element shots) ·
+[x] connector-access-mobile · [x] profile picker (cards + list) · [x] AI models section ·
+[x] GitHub queue runs · [x] SAM assistant · [x] admin settings fixture groups + phone
 
-Changelog: [ ] This cycle 20–27 Oct (everyone, also changed, self-hosters, model changes)
+Marketing (apps/www/src/data): [x] Idea to Execution page: new idea-page screenshot (dark + light,
+marketing spec rewritten for the redesigned page), copy, docsHref → /docs/guides/ideas/ ·
+[x] integrations: Claude/Codex/Gemini model lists match the catalog; Workers AI page (agents can
+call models, correct models) · [-] notifications marketing image predates Mention/Comment chips
+(#2381); left as is, still representative
 
-## Implementation checklist
+Changelog: [x] This cycle 20–27 Oct (everyone, also changed, self-hosters, model changes)
 
-- [x] Merge last week's unshipped pass and resolve conflicts against main
-- [ ] Research: verify each 20–27 Oct change in code; audit docs (incl. merged 13–20 content) for gaps
-- [ ] Write/update guides, user-task first
-- [ ] Recent Product Changes: 20–27 October cycle (users, self-hosters/admins, models)
-- [ ] Playwright screenshots (real components, mock data), desktop + phone, reviewed
-- [ ] Regenerate screenshots the merge made stale (tool rail, admin settings) and re-run merged specs
-- [ ] File product bugs found as SAM ideas
-- [ ] Local sub-agent review loop until no actionable feedback
-- [ ] www build, link check, browser tests; PR green and merged; archive both task files; complete task in SAM
+## Product issues filed (SAM ideas)
+
+- Ideas: note on 01M5Q8Y33A7K9YZN5QKX5KG56N (done idea's Start follow-up work → 409; bootstrap
+  names `get_related`; StartWorkSheet path; viewers see write controls; CLI bypasses Start work)
+- SAM assistant: note on 01KQ720TE8Y8ZGVTZPBM8Y4NH0 (raw RATE_LIMITED, budget exhaustion
+  unexplained, raw option IDs)
+- New 01M5XYTDMAC61NPS0B1HV8GAM1: chat/profile/navigation (picker grouping of unset task mode,
+  sidebar project label squashed, share confirm below fold, fork wording, old skills forcing OpenCode)
+- New 01M5XYTR9WBQEZ0SQK07EMZDZ1: automation/admin (queue drains on sweep only, give-up alert
+  reuses sweep failure, paused events dropped, follow-ups unattributed, SPF refusal, AI-model kill
+  switch fails open, deployment controls, wake interval invisible)
 
 ## Review log
 
