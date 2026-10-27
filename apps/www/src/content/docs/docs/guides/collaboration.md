@@ -159,6 +159,14 @@ chat to read it where it was made: the conversation opens on the words the comme
 highlighted, with the thread beside it on a desktop or in a sheet at the bottom of the screen on a
 phone. Reply, resolve or send the comment to the agent from there.
 
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/comment-reader-mobile.png 2x" />
+  <img
+    src="/images/docs/comment-reader.png"
+    alt="A comment opened from the Comments page. The agent's reply in the chat has the words &quot;the ledger write happens before the idempotency check&quot; highlighted. On a desktop the thread sits beside the chat: Ben Okafor asks whether a unique index is also needed, the SAM agent replies, and Reply, Send to agent and Resolve sit below, with the chat's other comment under &quot;Also in this chat&quot;. The header shows the chat's name, &quot;1 of 2&quot; with up and down arrows, and Open in chat. On a phone the thread is a sheet at the bottom showing the latest reply and a Reply box."
+  />
+</picture>
+
 Scroll up or down to read more of the chat; earlier and later messages load as you reach them.
 **Back to the comment** takes you back to the highlighted words. The arrows at the top step to the
 previous or next comment in the order the Comments page shows them, and **Open in chat** opens the
