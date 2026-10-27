@@ -57,6 +57,13 @@ project work it already started.
 
 Each action SAM took, or wants to take, gets a card with a link to its target (**Open chat**,
 **Open task**, **Open idea** or **Open project**) and **Exact request**, the input SAM recorded.
+On a card that waits for you, **Exact request** is already open, so you can check what you're
+confirming.
+
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/sam-assistant-mobile.png 2x" />
+  <img src="/images/docs/sam-assistant.png" alt="The SAM page, with Project work at the top showing 1 new update. Asked to start a fix for the flaky checkout test in Payments API with Careful Builder, SAM replied that it started, under 'Checked agent profiles' and a Start project work card marked Done with Open chat. Asked to stop the React upgrade in Website redesign, SAM replied that the chat is still running, under 'Checked chats' and a Stop work card marked Needs your confirmation. That card says 'This cancels the running work and shuts down its workspace.' and has Open chat, Confirm stop, Keep running, and the exact request open below." />
+</picture>
 
 | Card says                   | Meaning                                                                                                                    |
 | --------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
