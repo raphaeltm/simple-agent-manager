@@ -1,6 +1,6 @@
 ---
 title: Automation
-description: Everything in a project that starts work on its own, in one place: schedules, GitHub and webhook reactions, email (preview), one-time runs, event watches and workflows. Find it, set one up, and fix what needs attention.
+description: Everything in a project that starts work on its own, in one place, including schedules, GitHub and webhook reactions, email (preview), one-time runs, event watches and workflows. Find it, set one up, and fix what needs attention.
 ---
 
 Open **Automation** in a project's navigation to see everything that starts work on its own, and to
