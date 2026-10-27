@@ -36,8 +36,11 @@ Pools exist at three **scopes**, each edited in a different place:
 | Scope               | Where to edit it                                                                 |
 | ------------------- | -------------------------------------------------------------------------------- |
 | **Project**         | Project → Settings → Infrastructure. The project's owner and admins can edit it. |
-| **User** (personal) | Settings → Infrastructure. Yours alone.                                          |
+| **User** (personal) | The **Infrastructure** tab in Settings. Yours alone.                             |
 | **Installation**    | Admin → Infrastructure. Platform superadmins only.                               |
+
+These are settings tabs. **Infrastructure** in the main navigation is something else: it opens the
+**Nodes** page, which lists your machines.
 
 Each panel sums the pool up in one sentence (which provider, which regions, the smallest and
 largest machine), lists its settings in plain words, and shows the machine types it allows with the
@@ -463,7 +466,7 @@ When the last workspace leaves a machine SAM manages for you, the machine stays 
 minutes by default. Follow-up work in that window reuses it, turning a two-minute provisioning
 wait into a few seconds. After that, idle machines are cleaned up automatically, so you are not
 paying for capacity you stopped using. This covers machines SAM provisioned for a task and
-machines you created on the Nodes page; machines you enrolled yourself and deployment nodes are
+machines you created on the **Nodes** page (**Infrastructure** in the main navigation); machines you enrolled yourself and deployment nodes are
 never cleaned up this way.
 
 If a machine is ever left empty without starting its warm window, the cleanup sweep starts it

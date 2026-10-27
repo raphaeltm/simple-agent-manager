@@ -261,7 +261,7 @@ On Instant this finishes within two minutes. On a VM, the strip names the step i
 **Finding a server...**, **Provisioning a server...**, **Restoring your session...**, **Starting
 the agent...** — because a VM wake often provisions a replacement machine, which takes a few
 minutes. The composer reads **Waking the agent — your message will be delivered...** while it
-works, and the **Nodes** page may briefly show the chat's old workspace deleted and a new one being
+works, and the **Nodes** page (**Infrastructure** in the main navigation) may briefly show the chat's old workspace deleted and a new one being
 created. That is normal.
 
 If a VM wake sits on **Waiting for server capacity...**, SAM can't get a machine for it yet. Your

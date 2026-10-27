@@ -8,6 +8,11 @@ you. From a conversation in that app you can ask what needs your attention, star
 reply to a chat, answer an agent that is waiting for you, and stop work. The app acts as you: it
 sees only what you can see in SAM, and its answers link back to the pages in SAM.
 
+If you'd rather stay inside SAM, the [SAM assistant](/docs/guides/sam-assistant/) (preview) does
+some of this from a private conversation in SAM itself, on SAM's AI and your AI usage budget. The
+Connector uses the AI app you already pay for, and can do more: read whole replies, follow a team
+of agents, schedule work, read coordination channels, and interrupt an agent.
+
 ## What you can ask
 
 - **"What needs my attention in SAM?"** Agents waiting for your answer, recent failures, finished
@@ -30,7 +35,12 @@ sees only what you can see in SAM, and its answers link back to the pages in SAM
   so ask for a chat if you want to keep steering it.
   Anything that needs the repository's code goes this way: the Connector doesn't read files itself,
   the agent in that chat does.
-- **Steer or stop it.** _"Tell that chat to leave the database migration alone"_, or _"Stop it."_
+- **Steer, interrupt or stop it.** _"Tell that chat to leave the database migration alone"_;
+  _"Interrupt the agent in the checkout chat"_, which ends what it's doing now but keeps the chat
+  and its workspace; or _"Stop it"_, which ends the work and needs your confirmation.
+- **Check that things happened.** _"Did my last message get through?"_, _"Is the agent still
+  working?"_ or _"Did the deploy command that needed secrets finish?"_ See
+  [Follow work and recover safely](#follow-work-and-recover-safely).
 - **Answer your agents.** Approve or refuse a permission request, answer an agent's question, or
   open a link it sent. See [Answering your agents](#answering-your-agents).
 - **Keep ideas.** Create an idea, or update one.
@@ -191,34 +201,30 @@ terminal yourself, use the [SAM CLI](/docs/guides/cli/).
 
 ## Follow work and recover safely
 
-Ask your connected app to check a chat's operational status, delivery receipt or recent changes.
-These reads do not wake sleeping agents. Status keeps task completion, the current prompt,
-background work, sleeping resources and confirmed runtime cleanup separate. Observations include
-source timestamps; unknown or last-reported state is not proof that a runtime is idle.
+These questions read without waking a sleeping agent:
 
-- **Interrupt** cancels the current prompt and keeps the chat and workspace. Ask explicitly.
-  Interrupt uses the runtime/turn returned by status and fails safely on older runtimes that
-  do not support guarded cancellation. **Stop work** remains destructive and requires confirmation.
-- **Delivery lookup** uses the delivery ID returned when a reply is queued. It shows retries and
-  runtime receipts. Queued or visible in the transcript does not mean read or acted on.
-- **Changes** returns a cursor for bounded checks of current status and agent requests. It can
-  coalesce intermediate changes; it is not a lossless event history or a push notification.
-- **Agent requests** shows pending options/forms and retained settled answer outcomes for a chat
-  you own or currently control through sharing. Every answer still needs your confirmation.
-- **Diagnostics** shows safe error categories, without raw logs, command output or credentials.
-- **Jobs** shows retained observations of managed secret-execution jobs. Jobs are recorded when
-  their internal start/status/cancel responses are observed; a running record may be stale and a
-  missing outcome is unknown. Generic harness job history is not supported. The list is capped
-  by the installation's MCP message-list maximum, matching retention. By default it returns that
-  full retained window; if you request a smaller limit and see `hasMore`, increase the limit up
-  to that maximum to retrieve the window. Child SAM tasks have their own task status.
-- **Operation lookup** inspects your own write receipt using its operation name and request key.
-  It never repeats the write. A saved response does not prove delivery or cleanup finished; a
-  pending receipt means the outcome is uncertain. Do not try a new request key to bypass it.
+- **"Is it still working?"** The app can check a chat's status: whether its task is finished,
+  whether a prompt is running, whether it's asleep, and when each of those was last seen. A status
+  SAM last heard a while ago isn't proof the agent is idle.
+- **"Did my message get through?"** A reply the app sends returns a delivery ID, and the app can
+  look it up: queued, delivered to the agent, retried. Delivered doesn't mean the agent has read it
+  or acted on it yet.
+- **"What changed since I last asked?"** The app can ask for what changed since its last check,
+  including new questions from agents. It gets the latest state, not every step in between.
+- **"Did the command finish?"** The app can see commands the agent ran with secrets
+  (`exec_with_secrets`): when they started, and how they ended if SAM saw it, but not their output.
+- **"Did that go through?"** When the app isn't sure whether something it asked for happened, it can
+  look up its own request without repeating it.
 
-Operational evidence and request details require current control of the session. Shared control
-does not grant node-wide log access. Ordinary replies already wake sleeping chats; standalone
-Sleep/Resume and model switching are not part of these controls.
+**Interrupt** stops the agent's current turn and keeps the chat and workspace; ask for it
+explicitly. **Stop work** ends the work and always asks for your confirmation. Interrupt works only
+on a chat whose machine runs a recent enough SAM; on an older one the app reports "Guarded
+interruption unsupported or runtime unavailable; no fallback was attempted", and nothing was
+interrupted. "Prompt turn changed; no interruption was applied" means the agent had already moved
+on, so check its status and ask again if you still need to.
+
+These reads need you to control the chat (your own, or one shared with you), and they never return
+raw logs, command output or credentials.
 
 ## Disconnect an app
 
@@ -238,6 +244,7 @@ remove SAM from the app's own list of connectors.
 | "Redirect host is not allowed by the administrator"                            | Your installation only allows certain apps                                                           | Ask your administrator                                           |
 | "Reconnect with sam.write permission."                                         | You connected while your installation only allowed reading, so this connection can only read         | Connect again                                                    |
 | The app asks you to connect again                                              | The connection was revoked or expired, or SAM cut it off because the app reused an old sign-in token | Connect again                                                    |
+| The app doesn't offer something this guide describes                           | The app is still using an older list of SAM's tools                                                  | Refresh SAM in the app's connector settings, or connect it again |
 
 ## For administrators
 

@@ -80,7 +80,12 @@ Claude Code, Codex, Gemini CLI, OpenCode, and Amp are installed with npm and nee
 
 ## Using a Workspace Directly
 
-Most work happens through chat, but every workspace also has a direct view for hands-on control. You'll find running workspaces under **Nodes / Workspaces** in the navigation.
+Most work happens through chat, but every workspace also has a direct view for hands-on control.
+To find one, select **Infrastructure** in the main navigation (between **Tools** and **Settings**;
+on a phone, in the menu). It opens the **Nodes** page: each machine lists up to three of its
+workspaces with **Open**, and selecting the machine shows all of them under **Workspaces**. There's
+no longer a single list of every workspace; old links to the Workspaces page open Nodes. **Create
+Workspace** is on a machine's page.
 
 ### Terminal
 
@@ -95,6 +100,9 @@ Open a workspace to get a browser-based terminal — a full interactive shell th
 Click **+ New Chat** to start an AI coding session directly in the workspace. If you've connected more than one agent, you can choose which one to use. Each chat runs in its own tab alongside your shells.
 
 ## Managing Workspaces
+
+On a machine's page, each workspace has **Open** (or **Start**, when it's stopped) and a menu with
+**Stop**, **Restart** and **Delete**.
 
 ### Stopping
 

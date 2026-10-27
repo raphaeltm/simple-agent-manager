@@ -1,46 +1,112 @@
 ---
-title: Private SAM Assistant
-description: Enable your private account assistant, coordinate project work, and review its action receipts.
+title: SAM Assistant (preview)
+description: A private conversation inside SAM that checks your projects and starts or follows up on work. Turn it on, ask it things, confirm what it does, and know why an answer can stop.
 ---
 
-The optional SAM assistant gives you one private account conversation for checking projects and coordinating work. It starts **off**. In **Settings**, turn on **SAM assistant**, then select **Open SAM**. The SAM destination also appears in desktop and mobile navigation while enabled. An installation administrator can make the assistant unavailable independently of your preference.
+The SAM assistant is one private conversation for your whole account. Ask it what needs your
+attention or what's running across your projects, and have it start work in a project, reply in a
+project chat, or stop work. Anything that touches a repository still happens in an ordinary project
+chat you can open. It's a preview, and it's off until you turn it on.
 
-## What you can do
+## Turn it on
 
-Ask for project and inbox status, find or refine ideas, inspect available profiles, start project work, read task reports, or send a follow-up to an existing project session. Name the project and preserve any profile, branch, review, or deployment constraints in your request. SAM should clarify an ambiguous target before changing project state.
+1. Open **Settings**. The **SAM assistant** card sits at the top, above the tabs.
+2. Turn the switch to **On**.
+3. Select **Open SAM →**. **SAM** also appears in the main navigation, right after **Home**, while
+   it's on.
 
-Requests that require reading or changing repository files run in a visible project task/session. Follow the **Open chat** (or **Open task**) link on an action or project work card to inspect the actual conversation and results. A request being accepted, an agent reporting completion, and independently verified results are different states.
+Turning it off stops new actions and keeps your history and any work it started. If the card says
+"SAM is temporarily unavailable on this installation.", an administrator has turned it off for
+everyone.
 
-Use the microphone button to transcribe a message into the composer. You still review and send that text yourself. On desktop, Ctrl+Enter (Cmd+Enter on a Mac) sends; Enter adds a new line.
+## What you can ask
 
-## Follow an answer as it is written
+An empty conversation offers a few starters: **What needs my attention?**, **What is running across
+my projects?** and **Show my recent ideas**. Selecting one only fills in the message box. Beyond
+those, you can ask it to:
 
-While SAM works, its reply shows what it is doing right now: **Starting**, **Thinking**, **Working** or **Writing**, with the time elapsed. Each step appears as a plain line when it starts and is updated when it finishes, for example _Looking through your 20 most recent tasks…_ becoming _Read 20 recent tasks_. If the model shares its reasoning, the latest sentence is shown in italics while it thinks. The answer then appears word by word.
+- read your projects, your inbox, chats (list, read, search), tasks, ideas and agent profiles;
+- **start work** in a project, or **reply in a project chat**, which it does straight away;
+- **file or update an idea**;
+- **stop work** or **answer an agent** that's waiting, which it does only after you confirm.
 
-The live view is a preview of the stored reply. Text that refers to a project, task or chat appears only once a completed step in the same turn returned that item, so a guessed identifier or link is never shown while SAM is still writing. When the turn ends, the stored answer and its receipts replace the live view.
+Name the project, and say which profile, branch or review you want, as you would in a project
+chat. Work it starts is recorded as started by you.
 
-For questions about current work, such as what shipped or changed recently, SAM is told today's date and instructed to read live project data in that turn. Each read shows as a step in the reply, such as _Checked your inbox_. If an answer about current work shows no step, ask SAM to check again. Earlier messages in your SAM history carry their dates and count as past context, not current status.
+It can't change settings, connections, compute pools, automation or deployments, and it can't
+read schedules, channels or a team of agents, or interrupt an agent. Use the app for those, or
+[your AI app through the Connector](/docs/guides/sam-connector/), which can do more. Requests that
+need repository files read, searched or changed always become a project chat or task: follow its
+**Open chat** link to see the actual work.
 
-## Review actions and recover safely
+## Watch it answer
 
-Actions that require confirmation say what will happen and in which project, and link to the target so you can review it first. Confirm with the action's own button, such as **Confirm stop**, or decline it, such as **Keep running**. **Exact request** shows the exact recorded input. Agent forms containing sensitive values must be completed directly in the linked project session. Do not paste secrets into the account conversation.
+While SAM works, the reply shows **Starting**, **Thinking**, **Working** or **Writing**, with the
+time elapsed, and each check as a line that updates when it finishes, such as _Looking through
+your 20 most recent tasks in Website redesign…_ becoming _Read 20 recent tasks in Website
+redesign_. The answer then appears as it's written. You can leave the page and come back.
 
-A failed send keeps the pending message in the same browser tab so **Retry** can reuse its request identity, including after refresh. If a dispatch outcome is uncertain, **Check outcome** looks for the already-reserved work; it does not create a replacement task. An unresolved outcome is not evidence that nothing happened.
+SAM links only to projects, tasks and chats it actually looked up while answering. For questions
+about what's running or what shipped, it reads live data and the reply lists what it checked, such
+as _Checked your inbox_. If an answer about current work lists nothing, ask it to check again.
 
-If SAM cannot substantiate a draft answer before attempting any tool, it can make one bounded correction before replying. An interrupted answer can mean it still could not substantiate its response. Review the recorded actions before asking it to continue; interruption does not undo an action that already completed.
+**Stop** replaces **Send** while it works. Stopping ends SAM's turn ("SAM · cancelled") but not
+project work it already started.
 
-While SAM is working, **Stop** replaces **Send** and stops the account assistant's current turn. Project work already dispatched continues until stopped through its own controls. Turning SAM off prevents new assistant actions and keeps your history and existing project work.
+## What the cards under an answer mean
 
-## History and updates
+Each action SAM took, or wants to take, gets a card with a link to its target (**Open chat**,
+**Open task**, **Open idea** or **Open project**) and **Exact request**, the input SAM recorded.
 
-The conversation initially loads a recent window. **Load older messages** retrieves more turns. **Earlier SAM history**, when present, opens retained messages from the earlier assistant as read-only history.
+| Card says                   | Meaning                                                                                                                    |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| **Done**                    | It happened                                                                                                                |
+| **Needs your confirmation** | Stopping work or answering an agent waits for you: **Confirm stop** or **Keep running**, **Send answer** or **Don’t send** |
+| **In progress**             | It's still happening                                                                                                       |
+| **Outcome unknown**         | SAM couldn't confirm whether it happened. **Check outcome** looks for it; it never starts it twice                         |
+| **Declined**                | You chose not to                                                                                                           |
+| **Not run**                 | It didn't run                                                                                                              |
+| **No longer available**     | Its target is gone                                                                                                         |
 
-**Project work**, above the conversation, summarizes work SAM started and counts items that need attention or have new updates. Expand it for status cards with links and observation times. Background updates stay there instead of taking over the conversation. **Mark seen** clears their unseen indication; it does not answer a question or grant an agent permission.
+An agent form with values, such as a secret, has to be filled in the project chat itself: don't
+paste secrets into the SAM conversation.
 
-Your account conversation is private. A project task is visible according to that project's access rules. SAM should pass only the brief needed for the project request, without copying unrelated account history, personal preferences, or other-project details.
+**Project work**, above the conversation, follows the work SAM started for 24 hours, and counts
+items that need attention or have new updates. Expand it for a card per task with **Open chat**.
+**Mark seen** clears the "new" marker; it doesn't answer anything. After 24 hours the card says
+"Automatic updates expired. Open project work for current status."
 
-## Current limits
+## When SAM stops before answering
 
-Settings, connections, compute pools, automation, and deployments remain in their existing pages. The assistant exposes a reviewed subset of platform operations, not every operation available through the UI or connector. Watches of dispatched work expire and do not imply indefinite monitoring. The launch interface has no conversation-fork control; a private fork API exists for clients, without copying project actions or granting additional access.
+A reply marked **SAM · interrupted** reads "SAM could not finish this turn. Review recorded actions
+before continuing; uncertain actions are not automatically repeated." It happens when:
 
-These instructions describe the implemented interface and contract; they do not certify that a particular installation has deployed or live-verified this version. See [configuration](/docs/reference/configuration/#private-sam-assistant-runtime-controls) and the [API contract](/docs/reference/api/#private-sam-account-assistant) for operator details.
+- **your AI usage budget ran out.** Every answer counts toward your daily token limit and monthly
+  cost cap. A short status question uses about 30,000 to 40,000 input tokens, so with the default
+  limit of 500,000 input tokens a day you can run out after a dozen or so questions. See and change
+  your limits in **Settings → Usage**, under **Budget Controls**;
+- the turn took longer than 2 minutes or 20 steps; or
+- SAM couldn't back its answer with data it read.
+
+Check the cards for anything it already did, then ask again. Other limits: 30 messages a minute, and
+16,000 characters a message.
+
+If a message doesn't get through, it stays in the box, and **Retry** sends the same request again,
+even after a refresh, so it's never sent twice.
+
+## History and privacy
+
+The conversation opens on its most recent messages; **Load older messages** fetches more.
+**Earlier SAM history**, when present, holds messages from the earlier assistant, read-only.
+
+The SAM conversation is private to you. Project chats and tasks it starts are visible to that
+project's members, as usual, and SAM is told to pass them only what the request needs.
+
+## For self-hosters
+
+The assistant arrived in v2026.10.21, and live answers in v2026.10.22. Each person turns it on for
+themselves. A superadmin can turn it off for everyone with `operations.samOperatorDisabled` in
+**Admin → Settings**. It runs on the `SAM_MODEL` model (GLM 5.3 Flash on Workers AI unless you
+change it), billed to your Cloudflare account. See
+[configuration](/docs/reference/configuration/#private-sam-assistant-runtime-controls) and the
+[API contract](/docs/reference/api/#private-sam-account-assistant).

@@ -49,7 +49,7 @@ For example, if your dev server starts on port 3000 in workspace `abc123`, you c
 
 ## Nodes
 
-A **node** is a cloud VM that hosts one or more workspaces. You normally never think about nodes — SAM assigns your workspace to a healthy node or provisions a new one for you, from the machine types your [compute pool](#compute-pools) permits.
+A **node** is a cloud VM that hosts one or more workspaces. You normally never think about nodes — SAM assigns your workspace to a healthy node or provisions a new one for you, from the machine types your [compute pool](#compute-pools) permits. To see them, select **Infrastructure** in the main navigation, which opens the **Nodes** page; each machine lists its workspaces.
 
 Several workspaces can share one node when the node's CPU, memory, and disk reservations all still fit and nothing on it asked for exclusive use. Work can also ask for a node to itself; see [Compute Pools](/docs/guides/compute-pools/#resource-requirements-how-much-machine-work-asks-for).
 
@@ -93,7 +93,7 @@ An **agent profile** is a saved, reusable configuration for running an agent: wh
 
 ## Skills
 
-A **skill** is a reusable layer of instructions, environment, and files you can apply on top of a profile for a particular kind of work. A skill only overrides the settings it sets: anything it leaves empty, including the agent and model, comes from the profile you pick, following the resolution order **skill → profile → project → platform**. Pick a skill per chat with the sliders button above the message box.
+A **skill** is a reusable layer of instructions, environment, and files you can apply on top of a profile for a particular kind of work. A skill only overrides the settings it sets: anything it leaves empty, including the agent and model, comes from the profile you pick, following the resolution order **skill → profile → project → platform**. Pick a skill per chat under **Chat options**, the sliders button above the message box. A skill saved before 21 October 2026 may still set an agent; see [AI Agents](/docs/guides/agents/#agent-profiles).
 
 ## Automation
 
@@ -182,9 +182,12 @@ See the [Notifications guide](/docs/guides/notifications/) for full details.
 ## SAM Connector
 
 The **SAM Connector** lets an AI app you already use, such as Claude or ChatGPT, act as you in SAM:
-it can tell you what needs your attention, start and steer project chats, and answer your agents.
-It reaches the code only through the agents in those chats. See
-[Use SAM from Claude and ChatGPT](/docs/guides/sam-connector/).
+it can tell you what needs your attention, read whole replies, follow a team of agents, schedule
+work, start, steer or interrupt project chats, and answer your agents. It reaches the code only
+through the agents in those chats. See [Use SAM from Claude and ChatGPT](/docs/guides/sam-connector/).
+
+The **SAM assistant** (preview) does some of the same from a private conversation inside SAM, once
+you turn it on in **Settings**. See [SAM Assistant](/docs/guides/sam-assistant/).
 
 ## Authentication
 

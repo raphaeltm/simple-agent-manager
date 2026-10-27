@@ -3,7 +3,7 @@ title: SAM Account Assistant Decision
 description: Private account ownership, canonical history, bounded model context, and project execution boundaries.
 ---
 
-**Decision date:** 2026-10-20. **Status:** Implemented in the launch change; deployment validation is tracked separately.
+**Decision date:** 2026-10-20. **Status:** Shipped (self-hosted releases from v2026.10.21; live answers from v2026.10.22). User guide: [SAM Assistant](/docs/guides/sam-assistant/).
 
 ## Context
 

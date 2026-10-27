@@ -638,7 +638,7 @@ UpCloud billing is usage-based. SAM verifies the configured simple plan and zone
 
 ### Unresponsive machines are released automatically
 
-A workspace VM that stops sending heartbeats is released rather than left running up a bill and holding provider quota. That covers every cloud VM SAM manages for workspaces — the ones it provisioned automatically and the ones users created from the **Nodes** page:
+A workspace VM that stops sending heartbeats is released rather than left running up a bill and holding provider quota. That covers every cloud VM SAM manages for workspaces — the ones it provisioned automatically and the ones users created from the **Nodes** page (**Infrastructure** in the main navigation):
 
 1. After `NODE_UNHEALTHY_DRAIN_AFTER_MS` (10 minutes) of silence, SAM posts a notice in each chat on the VM and asks those sessions to sleep, so idle ones can be woken on another machine later. Once every session on the VM is asleep, or if it had none, SAM deletes the VM right away.
 2. Otherwise, after `NODE_UNHEALTHY_RELEASE_AFTER_MS` (30 minutes), SAM deletes the VM through the provider and fails any task still running on it, with a message naming the lost node.

@@ -1,22 +1,72 @@
 ---
 title: App Deployments
-description: Author and submit SAM app deployment releases with Docker Compose.
+description: Put your app on the internet. Create an environment, let agents deploy to it, see what's running, and fix what goes wrong. Also covers the Docker Compose format agents publish.
 ---
 
-SAM app deployments are agent-first. A user creates a deployment environment and enables agent deployment for that environment. An agent then targets that named environment when it publishes a release.
+SAM app deployments are agent-first: you create an environment and decide which agents may deploy
+to it, and an agent ships your app there when you ask. You don't run Docker or touch a server.
+
+## Put your app online
+
+1. Open the project and select **Deployments**, then **New environment** (or **New** once you have
+   one).
+2. Name it, for example `staging` (lowercase letters, numbers and dashes). Nothing runs, and nothing
+   costs money, until an agent deploys to it.
+3. Under **Which agents can deploy here?**, choose **Any agent in this project** (good for previews
+   and staging), **Only some agent profiles** (good for production; then pick at least one), or
+   **Nobody yet** (turn it on later from the environment). Select **Create environment**.
+4. On the environment's page, select **Ask an agent to deploy**. A new chat opens with the request
+   already written; pick the profile and send it. You can also just ask in any chat, for example
+   "deploy this to staging".
+5. Watch **Recent deploys**: the newest version lists the steps the server reports as it goes. When
+   it's **Live**, select **Open app**.
+
+Owners and admins create environments, choose who can deploy, and pause, start or delete them.
+Everyone in the project sees the same buttons, but for other members SAM refuses those changes with
+"Project capability is required".
 
 ## The Deployments page
 
-A project's **Deployments** page lists its environments grouped by what they need from you: **Needs your attention**, **Running**, and **Not running**. Each row shows the address people visit (your own domain when one is working) and who shipped the running version. **New** creates an environment and asks which agents may deploy there; there is no default answer.
+A project's **Deployments** page lists its environments grouped by what they need from you: **Needs your attention**, **Running**, and **Not running**. Each row shows the address people visit (your own domain when one is working) and who shipped the newest version, with **Open** for an app that's up or **Ask an agent** for a problem an agent can fix.
 
 Opening an environment shows one page, top to bottom:
 
 - **Status in one sentence**, the address with **Open app** and **Logs**, and who shipped the running version from which chat. A deploy in progress says the app is offline until the new version is up, because the server stops the old version before starting the new one.
-- **Needs your attention**: each problem in plain words, the raw error under **Show the error**, and its fix. **Ask an agent** opens a new chat with a request about this environment already written; you choose the agent and send it.
-- **Recent deploys**: every version, who sent it, and the chat it came from. While the newest version deploys, or after it fails, it lists the steps the server reported, including which step broke and whether the previous version came back.
+- **Needs your attention**: each problem in plain words, the raw error under **Show the error**, and its fix (see the table below). **Ask an agent** opens a new chat with a request about this environment already written; you choose the agent and send it.
+- **Recent deploys**: every version, who sent it, and the chat it came from (four at first, **Show all** for the rest). While the newest version deploys, or after it fails, it lists the steps the server reported, including which step broke and whether the previous version came back.
 - **Who can deploy**: turning agent deploys on asks you to choose **Any agent in this project** or named agent profiles. Nothing changes until you choose, and an **Only these** list with nobody picked shows a warning, because an empty list means any agent may deploy.
 - **Settings your app reads** (variables and secrets), **Addresses** (public routes and your own domains), **Saved data** (volumes), and **Behind the scenes** (the server, its hardware, containers and raw signals).
 - **Pause or delete** at the bottom. Delete lists what it removes and asks you to type the environment name.
+
+The page refreshes every few seconds while something is changing.
+
+### Problems and their fixes
+
+| Problem                                    | Fix buttons                              |
+| ------------------------------------------ | ---------------------------------------- |
+| "Version N didn't start"                   | **Ask an agent to fix it**, **See logs** |
+| "SAM couldn't get a server for version N"  | **Ask an agent to deploy again**         |
+| "Starting didn't finish"                   | **Start again**                          |
+| "Pausing didn't finish"                    | **Pause again**, **See the server**      |
+| "The server hasn't checked in for N hours" | **See the server**                       |
+| A part of the app isn't running properly   | **See logs**, **Ask an agent to fix it** |
+| "&lt;your domain&gt; doesn't point here"   | **Check domains**                        |
+
+When agent deploys are off for the environment, each **Ask an agent…** button reads **Let agents deploy here…** instead.
+
+### What the deploy labels mean
+
+| Label                    | Meaning                                                         |
+| ------------------------ | --------------------------------------------------------------- |
+| **Live**                 | The version that's running now                                  |
+| **Deploying**            | On its way; the app is offline until it's up                    |
+| **Didn't start**         | It failed; the steps show where                                 |
+| **Skipped**              | A newer version arrived before a server picked this one up      |
+| **Comes back on start**  | The version that runs again when you start a paused environment |
+| **May still be running** | Pausing didn't finish, so it might still be up                  |
+| (no label)               | An older version that was replaced                              |
+
+## For agents: publishing a release
 
 Agents can discover this whole flow at runtime by calling the `get_deployment_guide` MCP tool, which returns a briefing on the agent-first model and the order in which to call the deployment tools. It takes no arguments and is the recommended starting point whenever a user asks to deploy, launch, publish, ship, or release an app.
 
@@ -132,10 +182,10 @@ From the user's perspective, **Pause** (stop) is the safe way to tear down compu
 
 If a release cannot be placed (for example, the cloud provider has no room for that server type in that region right now), the environment page says SAM couldn't get a server for that version, with the reason under **Show the error**. Either of these recovers it:
 
-- **Deploy again.** The new release places a node for the environment and moves it back to **active**, clearing the old error. The node then applies the release and reports its progress like any other deploy. If the placement fails again, the environment returns to **error** with the new reason.
-- **Pause, then Start.** Start places a node for the latest release and shows **Starting** until the node reports it applied.
+- **Ask an agent to deploy again** (the button on that problem, or ask in any chat). The new version gets a server, and the page goes from **Down** to **Deploying vN**, then **Live**, clearing the old error. If there's still no server, the problem comes back with the new reason. (Since 22 October 2026; before that, every later version stayed stuck behind the old error.)
+- **Pause, then Start.** Start finds a server for the latest version and shows **Starting** until the server reports it's running.
 
-If SAM has to abandon a placement before any server is created, for example because the deploying user lost access to the project, the release is marked **failed** and the environment shows `Deployment node placement stopped before a server was created: <reason>`. A placement replaced by a newer release, or by a Stop or delete of the environment, is left to that newer release or action instead.
+If SAM has to give up before any server is created, for example because the person who deployed lost access to the project, the version is marked failed and **Show the error** reads "Deployment node placement stopped before a server was created: &lt;reason&gt;. Deploy again to retry." A placement replaced by a newer release, or by a Stop or delete of the environment, is left to that newer release or action instead.
 
 ## Custom domains
 
