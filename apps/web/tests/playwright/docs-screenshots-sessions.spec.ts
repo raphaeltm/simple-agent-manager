@@ -447,6 +447,9 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
       return json({ sessions: [MOCK_SESSION], total: 1 });
     }
 
+    // The Automation overview also lists workflow runs (#2405); this project has none.
+    if (pathname === `/api/projects/${PROJECT_ID}/workflows`)
+      return json({ runs: [], nextCursor: null });
     if (pathname === `/api/projects/${PROJECT_ID}/triggers`)
       return json({ triggers: AUTOMATION_TRIGGERS });
     if (/\/triggers\/[^/]+\/executions$/.test(pathname))
@@ -538,6 +541,7 @@ test('docs: session tool rail with labels', async ({ page }) => {
   // the capture fails instead of shipping an image that no longer matches the docs table.
   for (const id of [
     'timeline',
+    'related',
     'resources',
     'automation',
     'comments',

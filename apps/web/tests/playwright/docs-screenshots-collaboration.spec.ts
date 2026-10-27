@@ -360,9 +360,9 @@ test('docs: a chat as the teammate it is shared with sees it', async ({ page }) 
   // Bring Ana's labelled message into the middle of the chat, clear of the floating header.
   await label.evaluate((element) => element.scrollIntoView({ block: 'center' }));
   await expectClearOfChatHeader(page, label);
-  // The teammate can write, but has no paperclip: attachments stay with the owner.
+  // The teammate can write and attach files, like the owner (#2383).
   await expect(page.getByPlaceholder(/Send a message/)).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Attach files' })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Attach files' })).toBeVisible();
   // Fork and Retry start a chat of the teammate's own, so the rail offers them too.
   await expect(page.getByTestId('session-tool-fork')).toBeVisible();
   await expect(page.getByTestId('session-tool-retry')).toBeVisible();
