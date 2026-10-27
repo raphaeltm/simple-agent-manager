@@ -24,8 +24,9 @@ its workspace. You can attach files to a sleeping chat without waking it; sendin
 it, and the files are delivered once it's up.
 
 Limits: up to 20 files and 200 MB per message, 50 MB per file, and file names made only of
-unaccented letters (A–Z, a–z), digits, spaces, `.`, `_`, and `-`. Someone a chat is [shared with](/docs/guides/collaboration/#share-a-chat)
-can't attach files to it.
+unaccented letters (A–Z, a–z), digits, spaces, `.`, `_`, and `-`. Someone a chat is
+[shared with](/docs/guides/collaboration/#share-a-chat) can attach files too, while their access
+lasts; the files are their own uploads and go only into that chat's workspace.
 
 ## Real-Time Streaming
 
@@ -207,6 +208,9 @@ Once a message has finished arriving, small icon buttons appear under it:
 - **Read aloud** (a speaker) plays an agent reply as audio — see
   [Text-to-Speech Playback](#text-to-speech-playback).
 - **Copy** (two overlapping squares) copies the message as written, Markdown included.
+- **Comment** starts a comment on the message that everyone in the project can read; select some
+  text first to comment on just those words. See
+  [Comment on a chat](/docs/guides/collaboration/#comment-on-a-chat).
 
 Your own messages have **Info** and **Copy** too, so you can pick up a prompt you wrote earlier and
 reuse it.

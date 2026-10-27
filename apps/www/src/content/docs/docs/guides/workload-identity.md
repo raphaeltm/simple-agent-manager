@@ -9,15 +9,13 @@ You configure the trust relationship **in the receiving service**. SAM proves th
 
 ## 1. Find your identity
 
-Open a running chat, choose **Details**, then expand **Workload identity (OIDC)**. Copy the issuer, subject, and relevant IDs. The panel also shows readable names and automation origin when available. Viewing it does not mint a token.
+Open a running chat, choose **Details**, then expand **Workload identity (OIDC)**. Copy the issuer, subject, and relevant IDs. The panel also shows readable names and automation origin when available. Viewing it does not mint a token. The chat has to be awake: on a sleeping chat the panel says "Identity details are unavailable. Reopen this section to retry. If this chat is asleep, wake it first."
 
 For an installation at `example.com`:
 
 - Issuer: `https://api.example.com/oidc`
 - Discovery: `https://api.example.com/oidc/.well-known/openid-configuration`
 - Public keys: `https://api.example.com/oidc/.well-known/jwks.json`
-
-The issuer must be reachable by the receiving service. Configure an exact audience appropriate to that service and an exact subject, or carefully constrained ID claims. Do not trust every token from the issuer without checking the workload identity.
 
 The subject has this format (each ID is independently URL-encoded):
 
@@ -27,9 +25,19 @@ project:PROJECT_ID:user:USER_ID:profile:PROFILE_ID
 
 A session without a profile uses `profile:none`. The subject is stable across executions using the same project, user and profile. Changing the profile changes the subject. Runtime/session IDs are separate claims so you can choose whether access survives a new chat or a wake into another runtime.
 
-## 2. Request a token inside a command
+## 2. Set up trust in the service
 
-Example MCP call:
+In the service the command will call, trust SAM's issuer for an exact audience you choose (it need not be a URL) and an exact subject, or carefully constrained ID claims. Do not trust every token from the issuer without checking the workload identity. The issuer must be reachable from that service. Step-by-step examples for [Vault](#example-vault), [AWS, Google Cloud and your own service](#other-services) are below.
+
+## 3. Ask the agent to use it
+
+Tell the agent which command needs a token and for which audience, for example:
+
+> Run `python3 scripts/call-service.py` with `exec_with_secrets` and an OIDC token for audience `vault`.
+
+The command finds the token in `SAM_OIDC_TOKEN` and sends it to the service or its token-exchange endpoint. The token is created just before the command runs and normally expires after five minutes, so the command must use or exchange it straight away. Long-running commands get no refresh; a later run gets a fresh token. Existing **Secret** variables can be used alongside it.
+
+The call the agent makes looks like this:
 
 ```json
 {
@@ -37,42 +45,46 @@ Example MCP call:
   "shell": "bash",
   "cwd": "/workspaces/my-repository",
   "secretNames": [],
-  "oidc": { "audience": "my-service" },
+  "oidc": { "audience": "vault" },
   "idempotencyKey": "call-service-1"
 }
 ```
 
-The script reads `os.environ["SAM_OIDC_TOKEN"]` and sends it to the configured service or its token-exchange endpoint. Use the exact audience registered there; it need not be a URL. Poll `exec_with_secrets_status` with the returned job ID until the command finishes. Existing selected secrets can be used alongside OIDC.
-
-The token is created immediately before execution and normally expires after five minutes. The command must authenticate or exchange it before expiry. Long-running commands do not receive automatic refresh. A later execution gets a fresh token; reuse an idempotency key only to retry the _same_ execution request. Changing the audience changes that request.
+It polls `exec_with_secrets_status` with the returned job ID until the command finishes. Reuse an idempotency key only to retry the _same_ request; changing the audience changes the request.
 
 `SAM_OIDC_TOKEN` is reserved. Do not add it to `env`, `secretNames`, project/profile/skill environment configuration, or shell startup files.
+
+### If it fails
+
+- **"OIDC audience must be a nonempty external audience without whitespace"**: the audience is empty, has spaces, or is one of SAM's own internal audiences. Use the exact audience the service is set up to accept.
+- **The service rejects the token**: compare its issuer, audience and subject rules with the panel in step 1, and check the token hadn't expired before the command used it.
+- **"Secret execution unavailable…"**: see [Run commands with secrets](/docs/guides/secret-execution/#troubleshooting).
 
 ## Claims you can use
 
 All IDs come from SAM's authenticated session and stored records, not from command arguments or prompts. Optional claims are absent when the corresponding context is unavailable.
 
-| Claim                                      | Meaning                                                                                               |
-| ------------------------------------------ | ----------------------------------------------------------------------------------------------------- |
-| `iss`, `aud`, `sub`                        | Issuer, requested external audience, and stable project/user/profile subject                          |
-| `iat`, `exp`, `jti`                        | Issue time, expiry (Unix seconds), and unique token ID                                                |
-| `type`                                     | Always `workload-identity`                                                                            |
-| `project_id`, `project_name`               | Project running the workload                                                                          |
-| `user_id`, `user_name`                     | Execution owner; a shared-chat collaborator does not become this identity merely by sending a message |
-| `agent_profile_id`, `agent_profile_name`   | Profile attached to the current agent runtime, not a project default or original task hint            |
-| `chat_session_id`, `session_name`          | Persistent chat ID and current topic                                                                  |
-| `agent_session_id`                         | Agent runtime ID; distinct from the chat ID and may change after recovery                             |
-| `workspace_id`                             | Current execution workspace; may change after recovery                                                |
-| `agent_type`                               | Runtime agent type, when recorded                                                                     |
-| `skill_id`                                 | Attached skill, when present                                                                          |
-| `task_id`, `task_name`                     | Task associated with this execution                                                                   |
-| `parent_task_id`                           | Direct parent task, when recorded; does not confer the parent's permissions                           |
-| `triggered_by`                             | Recorded task creation source, such as `user`, `cron`, `webhook` or `mcp`                             |
-| `trigger_id`, `trigger_execution_id`       | Trigger and run that created this task, when recorded                                                 |
-| `trigger_name`                             | Current trigger label, omitted if the trigger was deleted                                             |
-| `automation_type`                          | Canonical origin: `trigger`, `schedule`, `standing_watch` or `workflow`                               |
-| `automation_id`, `automation_execution_id` | Origin and execution IDs from the task's accepted submission                                          |
-| `automation_name`                          | Descriptive origin label captured when the task was submitted                                         |
+| Claim                                      | Meaning                                                                                                                    |
+| ------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| `iss`, `aud`, `sub`                        | Issuer, requested external audience, and stable project/user/profile subject                                               |
+| `iat`, `exp`, `jti`                        | Issue time, expiry (Unix seconds), and unique token ID                                                                     |
+| `type`                                     | Always `workload-identity`                                                                                                 |
+| `project_id`, `project_name`               | Project running the workload                                                                                               |
+| `user_id`, `user_name`                     | The chat's owner, even when a teammate it is [shared with](/docs/guides/collaboration/#share-a-chat) asked for the command |
+| `agent_profile_id`, `agent_profile_name`   | Profile attached to the current agent runtime, not a project default or original task hint                                 |
+| `chat_session_id`, `session_name`          | Persistent chat ID and current topic                                                                                       |
+| `agent_session_id`                         | Agent runtime ID; distinct from the chat ID and may change after recovery                                                  |
+| `workspace_id`                             | Current execution workspace; may change after recovery                                                                     |
+| `agent_type`                               | Runtime agent type, when recorded                                                                                          |
+| `skill_id`                                 | Attached skill, when present                                                                                               |
+| `task_id`, `task_name`                     | Task associated with this execution                                                                                        |
+| `parent_task_id`                           | Direct parent task, when recorded; does not confer the parent's permissions                                                |
+| `triggered_by`                             | Recorded task creation source, such as `user`, `cron`, `webhook` or `mcp`                                                  |
+| `trigger_id`, `trigger_execution_id`       | Trigger and run that created this task, when recorded                                                                      |
+| `trigger_name`                             | Current trigger label, omitted if the trigger was deleted                                                                  |
+| `automation_type`                          | Canonical origin: `trigger`, `schedule`, `standing_watch` or `workflow`                                                    |
+| `automation_id`, `automation_execution_id` | Origin and execution IDs from the task's accepted submission                                                               |
+| `automation_name`                          | Descriptive origin label captured when the task was submitted                                                              |
 
 **Use IDs for authorization.** Names/topics are mutable, non-unique, user-controlled descriptions, limited to 160 characters. They are useful in logs, not access rules. Tokens are signed, not encrypted: the receiving service can read these labels. SAM does not include email addresses, prompts, webhook payloads, credential values or repository contents.
 

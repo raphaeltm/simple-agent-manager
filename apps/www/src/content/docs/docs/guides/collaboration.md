@@ -172,7 +172,12 @@ Scroll up or down to read more of the chat; earlier and later messages load as y
 previous or next comment in the order the Comments page shows them, and **Open in chat** opens the
 chat itself at that message. Comment and Mention notifications open the same view.
 
-If the words a comment quotes are no longer in the message, the whole message is marked instead.
+On a phone, **Open in chat** is the arrow at the top right, and the thread is a sheet at the bottom:
+tap or drag it up to see the whole thread. **Send to agent** shows only if you can drive the chat.
+
+If the words a comment quotes are no longer in the message, the whole message is marked instead. If
+the message itself is gone, the reader shows the quote with **Open the chat**; if the comment was
+deleted, or you can no longer see its chat, it says the comment is no longer available.
 On a self-hosted instance, a superadmin can change how much of the chat loads around a comment in
 [**Admin → Settings**](/docs/guides/admin-settings/#collaboration).
 
@@ -234,6 +239,7 @@ controls the owner has in that chat, apart from the terminal and port previews.
 3. Under **How long?**, choose **5 min**, **10 min**, **30 min**, or **1 hour**. Nothing is chosen for
    you, and there is no "until removed" option.
 4. Read what sharing means, tick **I understand this runs on my accounts**, and select **Share**.
+   (Sharing onward a chat someone shared with you, the box names the owner's accounts instead.)
 
 <picture>
   <source media="(max-width: 40em)" srcset="/images/docs/collaboration-share-confirm-mobile.png 2x" />
@@ -253,8 +259,9 @@ Before you share, know what it means:
   on GitLab projects the owner's GitLab sign-in, which reaches all of the owner's GitLab projects.
   On GitHub projects the agent only has a one-hour token for the project's repository and any
   repositories added under the project's **Repository Access**. A teammate can also open files
-  such as `.env` in the **Files** panel. Share only with people you trust. SAM asks you to confirm
-  before it shares.
+  such as `.env` in the **Files** panel, and ask the agent to run commands with your
+  [workload identity](/docs/guides/workload-identity/), which any service that trusts that identity
+  will accept as you. Share only with people you trust. SAM asks you to confirm before it shares.
 - **Access lasts the time you choose.** When the time is up, access ends on its own. Only the owner
   can extend it, with **Renew**, which starts a new period from now.
 - **Ending access undoes nothing.** It doesn't reverse what the teammate did, and keys they copied
@@ -294,11 +301,12 @@ While their access lasts, a teammate can also:
   read anything in the workspace. If the workspace runs an older agent that can't enforce the limit,
   the panel says so and shows nothing until the workspace restarts with a newer one.
 - **Schedule a one-off message** into the chat (see
-  [Scheduled actions](/docs/guides/scheduled-actions/)). It shows as theirs, marked **scheduled**, is
+  [Automation](/docs/guides/scheduled-actions/#run-something-once)). It shows as theirs, marked **scheduled**, is
   sent only while their access lasts, and is cancelled when their access ends. Their own agents
   can't schedule into the chat for them, and only the owner can point a watch at the chat.
 - **Fork** and **Retry** from the tool rail, which start a chat of their own, on their own accounts.
-  Forking an archived chat, which restores the owner's saved files, stays with the owner.
+  The **Fork** box that replaces the message box on an archived or expired chat stays with the
+  owner.
 
 The terminal, port previews and the workspace page stay with the owner: they reach the whole
 workspace, and SAM can't cut off a live terminal or port connection when access ends.

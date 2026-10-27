@@ -27,11 +27,11 @@ Go to **Settings → GitHub** and click **Install GitHub App** on the repositori
 
 ### 4. Import a Project
 
-From the **Dashboard**, click **Import Project** and pick a repository that has the GitHub App installed. A project links that repo to its chats, agents, and activity. During setup, your conversation agent becomes the project default. If you also configure a task agent, that agent becomes the default instead. Tasks and automations without a selected profile use this default; change it later in **Project Settings**.
+From the **Dashboard**, click **Import Project** and pick a repository that has the GitHub App installed. A project links that repo to its chats, agents, and activity. During setup, your conversation agent becomes the project's default agent. If you also configure a task agent, that agent becomes the default instead. Tasks and automations without a selected profile use this default; change it later in **Project Settings → Agents → Default Agent Type**.
 
 ### 5. Chat
 
-Open your project and type what you want done in the chat — for example, "add input validation to the signup form, write tests, and open a pull request." SAM provisions a workspace, starts your chosen agent, and streams its progress to you as it works.
+Open your project and type what you want done in the chat — for example, "add input validation to the signup form, write tests, and open a pull request." Pick who does it first: with two or more profiles, the empty chat asks **Who should take this?** and shows your recent profiles as cards, and **To** above the message box shows the one you've chosen (see [Choosing a profile for a new chat](/docs/guides/agents/#choosing-a-profile-for-a-new-chat)). SAM provisions a workspace, starts that agent, and streams its progress to you as it works.
 
 **Say when you want a pull request.** SAM itself doesn't commit, push, or open pull requests, and the agent opens one only when asked: put it in your message, or ask once the work looks right. To make it the default for a profile, edit the profile on the project's **Profiles** page, expand **Execution**, and add the instruction to **System Prompt (append)**.
 
@@ -79,6 +79,7 @@ For detailed step-by-step instructions, see the [Self-Hosting Guide](/docs/guide
 ## Next Steps
 
 - [AI Agents](/docs/guides/agents/) — choose and configure your coding agent
-- [Idea Execution](/docs/guides/idea-execution/) — what happens after you send work, and where it lands
+- [What Happens When You Send Work](/docs/guides/idea-execution/) — what happens after you send work, and where it lands
+- [Ideas](/docs/guides/ideas/) — keep a list of work for later, and start an agent on it
 - [Core Concepts](/docs/concepts/) — the vocabulary behind projects, agents, and workspaces
 - [Use SAM from Claude and ChatGPT](/docs/guides/sam-connector/) — check on your work and start chats from the AI app you already use

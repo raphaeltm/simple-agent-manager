@@ -61,7 +61,7 @@ Mistral Vibe is installed via `uv` (Python package manager) and requires Python 
 | **API Key**                      | `OPENCODE_API_KEY` for OpenCode Zen and OpenCode Go                                                   |
 | **Get a Key**                    | [OpenCode auth](https://opencode.ai/auth)                                                             |
 
-OpenCode defaults to OpenCode Zen. SAM loads the Zen and Go model dropdowns from Models.dev through its authenticated model-catalog API, with a static fallback if that upstream catalog is unavailable. Select OpenCode Go in agent settings to use Go-only models such as `opencode-go/glm-5.2`. Advanced configurations can use SAM Platform inference without a user API key, or another user-selected inference provider. If you explicitly select Scaleway and already have a Scaleway cloud provider credential configured, OpenCode can reuse that credential — no separate API key required.
+OpenCode defaults to OpenCode Zen. SAM loads the Zen and Go model dropdowns from Models.dev through its authenticated model-catalog API, with a static fallback if that upstream catalog is unavailable. Select OpenCode Go in agent settings to use Go-only models such as `opencode-go/kimi-k3.1-pro`. Advanced configurations can use SAM Platform inference without a user API key, or another user-selected inference provider. If you explicitly select Scaleway and already have a Scaleway cloud provider credential configured, OpenCode can reuse that credential — no separate API key required.
 
 ### Amp
 
@@ -193,18 +193,28 @@ When work starts, the agent is resolved in this order:
 
 1. The skill you picked, if it sets an agent (a skill can leave the agent empty, and then the profile's runs)
 2. The profile you selected (or the trigger's profile)
-3. The project's default profile
+3. The project's default agent: **Project Settings → Agents → Default Agent Type**. The project
+   setup wizard sets it to the agent you chose for tasks, or for conversations if you skipped the
+   task step. Select the chosen card again to clear it.
 4. The platform default (`DEFAULT_TASK_AGENT_TYPE`, `opencode` in the checked-in Worker config)
+
+:::caution[Skills saved before 21 October 2026 can still choose the agent]
+Until 21 October 2026 (v2026.10.22 on a self-hosted instance), SAM saved the platform default agent,
+usually OpenCode, on every skill created from the **Skills** page. Those skills still replace the
+profile's agent while keeping its model, so a Claude profile used with one can run as OpenCode. The
+**Skills** page doesn't show a skill's agent. To fix it, ask an agent in the project to list the
+project's skills and clear the agent on any that set one (`update_skill` with `agentType: ""`).
+:::
 
 Type `@` in a chat message to choose a profile from the mention list. Mentions are optional hints to the receiving agent: unknown names leave your message unchanged. Names such as `@gcp-deployer`, `@release.bot`, and `@部署` are supported; names with spaces use quotes, such as `@"Code Reviewer"`. The mention list handles quoting and escaping for you. Email addresses and npm scopes such as `@types/node` stay ordinary text. Selecting the profile that runs a chat remains strict: an invalid selection is rejected.
 
 ### Choosing a profile for a new chat
 
-- **The profile you used last is pre-selected.** A new chat starts with the profile you most recently started a chat with in this project. Change it any time before you send.
+- **The profile you used last is pre-selected.** A new chat starts with the profile you last picked yourself for a new chat in this project in the last 30 days, unless you've hidden it; chats that automations or agents started don't count. Otherwise it's the first profile in your list. Change it any time before you send. **Start work** on an [idea](/docs/guides/ideas/#start-work-on-an-idea) pre-selects the same way.
 - **Your recent profiles appear as cards.** With two or more profiles you haven't hidden, the empty chat asks **Who should take this?** and shows your most recent profiles as cards. When the chat area is wide enough, it also shows profiles that build and open pull requests. Each card shows the profile's description (change it with **Edit** in the profile list or on the **Profiles** page) and what runs it, such as **Claude · Opus 5.5 · max effort**. Tap a card to pick it. Otherwise the starter prompts show instead.
 - **To** above the message box names the chosen profile. Select it to see every profile: **Recent** first, then **Chat & explore** and **Build & open PRs**, with a search box once you have more than eight. **New**, **Edit** and **Manage** are at the bottom.
-- **Hide profiles you don't pick by hand.** In that list, select **Edit list**, then the eye next to a profile. Or accept the suggestion to hide every profile you haven't picked in the last 30 days (admins can change the window with [`chat.profileUsageWindowDays`](/docs/guides/admin-settings/#chat)). Hiding only changes your own list in this project: triggers, agents that dispatch work, @mentions and other members still use the profile. Hidden profiles stay at the end of the list, and you can show them again there.
-- **Skill and resources are under the sliders button** at the end of the **To** row, after the attach button. A number on the button shows how many you've set for this chat.
+- **Hide profiles you don't pick by hand.** In that list, select **Edit list**, then the eye next to a profile. Or accept the suggestion to hide every profile you haven't picked in the last 30 days (a superadmin can change the 30 days with [`chat.profileUsageWindowDays`](/docs/guides/admin-settings/#chat)). Hiding only changes your own list in this project: triggers, agents that dispatch work, @mentions and other members still use the profile. Hidden profiles stay at the end of the list, and you can show them again there.
+- **Skill and resources are under Chat options**, the sliders button at the end of the **To** row, after the attach button. A number on the button shows how many you've set for this chat; anything left blank comes from the profile.
 
 ### Choosing a model
 
@@ -215,6 +225,14 @@ want isn't listed yet, type its exact ID and press **Enter** to use it as a cust
 has to be a model your provider accepts and your agent's version can run. The exception is the
 **SAM** provider mode: the platform proxy only serves models in its catalog, so there an unlisted
 ID is refused.
+
+Some names carry a note. **(API key only)** works only when Codex uses an OpenAI API key, not a
+ChatGPT subscription connected with **Connect with Codex**. **Deprecated for ChatGPT sign-in** is
+being withdrawn for ChatGPT subscriptions. **Deprecated; retires 2026-10-31** stops working on that
+date. When a model leaves the list, a profile that used it keeps its ID as a custom model; if the
+provider stops offering it, chats fail with
+[Model unavailable for this account](/docs/guides/session-troubleshooting/#the-agent-or-a-tool-cant-sign-in),
+so choose a listed model.
 
 ### Models the agent can call
 

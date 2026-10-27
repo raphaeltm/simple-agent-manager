@@ -40,6 +40,9 @@ your work is safe and what to do next. Everything here applies to both
   successful backups remain; exact recovery was not verified. → [Continue from the transcript](#sam-could-not-save-a-complete-snapshot)
 - **“SAM could not finish putting this session to sleep.”** Runtime cleanup is still being retried.
   → [Check cleanup status](#sam-could-not-finish-putting-the-session-to-sleep)
+- **“An earlier sleep attempt could not retain an exact recovery point.”** Snapshots kept failing;
+  SAM is shutting the idle workspace down without an exact recovery point.
+  → [Continue from the transcript](#sam-could-not-save-a-complete-snapshot)
 - **Expired** in the session list, and a **Fork** box reading "The saved workspace has expired…"
   where the message box was. The chat slept for longer than its saved workspace is kept.
   → [Fork it](#expired-saved-workspace)

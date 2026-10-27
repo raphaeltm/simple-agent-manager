@@ -15,7 +15,7 @@ You don't start with a workspace — you start with a conversation:
 
 Provisioning takes a couple of minutes the first time, or seconds when SAM reuses a recently active ("warm") environment. You never have to pick a server or wait at a terminal — the workspace exists to serve the chat.
 
-See [Idea Execution](/docs/guides/idea-execution/) for what happens after you send work, and how to get a pull request.
+See [What Happens When You Send Work](/docs/guides/idea-execution/) for what happens after you send work, and how to get a pull request.
 
 ## Two kinds of workspace: Instant and VM
 
