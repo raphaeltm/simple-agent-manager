@@ -118,7 +118,7 @@ Everyone in a project can read every chat in it. Use the session list's filter t
 **All sessions** and **My sessions**, the chats you started.
 
 On a self-hosted instance, commenting on teammates' chats, @mentions, sending a teammate's comment to
-the agent, and sharing a chat come with the first release after v2026.10.19.
+the agent, and sharing a chat come with v2026.10.20.
 
 | You want to…                                    | Do this                                                                                                                            |
 | ----------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------- |

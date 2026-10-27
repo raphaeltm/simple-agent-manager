@@ -90,15 +90,15 @@ Also changed this week:
 up to v2026.10.16 send, so their deploys stop at **Configure R2 CORS**
 ([Troubleshooting](/docs/guides/self-hosting/#deploy-fails-at-configure-r2-cors-http-400-code-10029)).
 Shared chats, comments on teammates' chats, and the shut-down of workspaces whose snapshots keep
-failing come in the first release after v2026.10.19.
+failing come in v2026.10.20.
 
 - **Plan to update forward, not roll back.** Once v2026.10.18 or later has deployed, deploying an
   older release fails with "Deployed Durable Object migration tag "v22" is not present…". If a
   release misbehaves, update to a newer one.
   → [Update forward, not back](/docs/guides/self-hosting/#option-a-update-self-hosted-instance-workflow-recommended)
 - **Admin → Settings** (from v2026.10.17) lets superadmins change sign-in providers, Connector
-  limits, trials, and background jobs without redeploying, and collaboration limits from the first
-  release after v2026.10.19. A value saved
+  limits, trials, and background jobs without redeploying, and collaboration limits from
+  v2026.10.20. A value saved
   there wins over its GitHub Environment variable, so once someone saves, for example, the Connector
   switch, `CONNECTOR_ENABLED` no longer applies, and the `trials:enabled` KV switch only counts while
   no trials value is saved. → [Admin Settings](/docs/guides/admin-settings/)
