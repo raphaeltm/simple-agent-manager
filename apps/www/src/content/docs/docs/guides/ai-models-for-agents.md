@@ -33,6 +33,11 @@ Open **Project settings → Agents → AI Models**. Here you can:
 - change **Monthly limit (USD)** and **Save**, or **Use default** to go back to the default. The
   most you can set is shown under it, $50 a month unless your SAM administrator changed it.
 
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/agent-models-settings-mobile.png 2x" />
+  <img src="/images/docs/agent-models-settings.png" alt="The AI Models section of a project's Agents settings. It reads '$1.20 of $5.00 used this month', resets Nov 1, with a progress bar. Below are Monthly limit (USD) set to 5 with Save, and 'Up to $50.00 · Default: $5.00'. Used this month lists clef-flash, 61 calls · $0.84, and clairic, 25 calls · $0.36. The last line reads 'Recommended · 7 models (Decision 3 · Extraction 1 · Classification 3)' beside Choose models." />
+</picture>
+
 Project owners and admins can change these settings. Other members can see them. When this month's
 limit is used up, the section says so and offers **Raise limit**. If it says **Turned off by your
 SAM administrator.**, no project can call models until a superadmin turns them back on.
