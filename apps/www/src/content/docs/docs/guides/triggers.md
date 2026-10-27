@@ -258,7 +258,12 @@ the agent already working on it, instead of starting a second agent.
 
 A GitHub trigger's page sums up its events, for example "GitHub events: 2 waiting now · History (up
 to 90 days): 3 delivered · 3 dropped · 1 unconfirmed". Each entry under **Recent runs** says what
-happened to one event:
+happened to one event, with its event number, the issue or pull request it's about, and when.
+
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/github-queue-runs-mobile.png 2x" />
+  <img src="/images/docs/github-queue-runs.png" alt="Recent runs of a GitHub automation, under the line 'GitHub events: 2 waiting now · History (up to 90 days): 3 delivered · 3 dropped · 1 unconfirmed'. Events 23 and 22 (issues #118 and #121) say 'Queued until a run finishes'. Event 21 says 'Waiting for the running chat to take it' and event 20 'Delivered to the running chat', each with a Chat button. Event 16 says 'May have reached the chat, but SAM could not confirm it'. Event 12 says 'Dropped: waiting time expired' and event 9 'Dropped: queue was full'. Show older runs is below the list." />
+</picture>
 
 | Entry                                                       | Meaning                                                                  |
 | ----------------------------------------------------------- | ------------------------------------------------------------------------ |
