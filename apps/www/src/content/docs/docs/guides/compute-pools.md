@@ -399,9 +399,10 @@ A node accepts additional work only if **all** of these hold:
   against the whole disk, unless the deployment configures otherwise.
 - Nothing on the node asked for an exclusive machine, and this work is not asking for one.
 - A node that is **already hosting work** is reporting fresh health telemetry, and its disk
-  pressure is below its threshold (90% by default). Live memory percentage is used for ranking;
+  pressure is below its threshold (80% by default). Live memory percentage is used for ranking;
   explicit reserved memory and the host reserve control admission. A brand-new machine that has
-  not reported yet is not held back by this.
+  not reported yet is not held back by this. Restarting a stopped, errored, or evicted workspace
+  also requires admission; rebuilding an already active workspace retains its reservation.
 - Live CPU is treated differently from memory and disk. CPU is shared out by the kernel, so a busy
   machine runs work more slowly rather than breaking, and each workspace's CPU is already reserved
   from the machine's budget above. Measured CPU therefore only blocks placement once the machine is

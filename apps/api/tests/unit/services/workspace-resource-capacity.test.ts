@@ -778,3 +778,69 @@ describe('live CPU is a saturation ceiling, not an admission authority', () => {
     expect(result.reasons).toContain('CPU saturation ceiling reached');
   });
 });
+
+describe('default disk admission threshold', () => {
+  it('defaults to 80 with existing environment and scaling overrides', () => {
+    expect(resolveWorkspaceAdmissionPolicy({}).diskPressureThresholdPercent).toBe(80);
+    expect(
+      resolveWorkspaceAdmissionPolicy({
+        TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT: '85',
+      }).diskPressureThresholdPercent
+    ).toBe(85);
+    expect(
+      resolveWorkspaceAdmissionPolicy(
+        {
+          TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT: '85',
+        },
+        { nodeDiskPressureThresholdPercent: 75 }
+      ).diskPressureThresholdPercent
+    ).toBe(75);
+  });
+
+  it.each([0, 1])('checks disk boundaries with %i existing reservations', (activeCount) => {
+    for (const [diskPercent, admitted] of [
+      [79.99, true],
+      [80, false],
+      [92, false],
+    ] as const) {
+      const result = evaluateWorkspaceReservationCapacity(
+        {
+          ...CX23,
+          lastHeartbeatAt: new Date().toISOString(),
+          lastMetrics: JSON.stringify({ cpuLoadAvg1: 0.1, memoryPercent: 10, diskPercent }),
+        },
+        usage({ activeCount }),
+        reservation(),
+        resolveWorkspaceAdmissionPolicy({})
+      );
+      expect(result.admitted, `disk ${diskPercent}`).toBe(admitted);
+    }
+  });
+
+  it.each([0, 1])('handles unknown telemetry with %i existing reservations', (activeCount) => {
+    const admission = resolveWorkspaceAdmissionPolicy({});
+    for (const [lastMetrics, lastHeartbeatAt, admitted] of [
+      [null, null, activeCount === 0],
+      [JSON.stringify({ cpuLoadAvg1: 0.1, memoryPercent: 10 }), new Date().toISOString(), false],
+      [
+        JSON.stringify({ cpuLoadAvg1: 0.1, memoryPercent: 10, diskPercent: 10 }),
+        '2020-01-01T00:00:00.000Z',
+        false,
+      ],
+      ['{broken', new Date().toISOString(), false],
+    ] as const) {
+      expect(
+        evaluateWorkspaceReservationCapacity(
+          {
+            ...CX23,
+            lastMetrics,
+            lastHeartbeatAt,
+          },
+          usage({ activeCount }),
+          reservation(),
+          admission
+        ).admitted
+      ).toBe(admitted);
+    }
+  });
+});

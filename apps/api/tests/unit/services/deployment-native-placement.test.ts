@@ -887,3 +887,73 @@ describe('deployment native placement SQL', () => {
     ).toEqual({ node_id: 'node', resolved_reservation_json: previousReservation });
   });
 });
+
+describe('deployment disk admission default', () => {
+  it.each([false, true])(
+    'checks selection and final binding on occupied=%s hosts',
+    async (occupied) => {
+      for (const [diskPercent, admitted] of [
+        [79.99, true],
+        [80, false],
+        [92, false],
+      ] as const) {
+        const { sqlite, env, placement, link } = fixture();
+        setFreshTelemetry(sqlite);
+        if (occupied) {
+          sqlite
+            .prepare(
+              `INSERT INTO deployment_environments
+          (id, project_id, status, node_id, resolved_reservation_json)
+          VALUES ('other', 'project', 'active', 'node', ?)`
+            )
+            .run(reservationJson());
+        }
+        sqlite
+          .prepare(`UPDATE nodes SET last_metrics = json_set(last_metrics, '$.diskPercent', ?)`)
+          .run(diskPercent);
+        expect((await findDeploymentNodeWithCapacity(env, 'user', placement, false)) !== null).toBe(
+          admitted
+        );
+        expect(await link()).toBe(admitted);
+        if (occupied) {
+          expect(
+            sqlite
+              .prepare("SELECT status, node_id FROM deployment_environments WHERE id = 'other'")
+              .get()
+          ).toEqual({ status: 'active', node_id: 'node' });
+        }
+      }
+    }
+  );
+
+  it.each([false, true])(
+    'rechecks stale and missing telemetry on occupied=%s hosts',
+    async (occupied) => {
+      for (const kind of ['absent', 'stale', 'missing-disk', 'malformed'] as const) {
+        const { sqlite, env, placement, link } = fixture();
+        setFreshTelemetry(sqlite);
+        if (occupied) {
+          sqlite
+            .prepare(
+              `INSERT INTO deployment_environments
+          (id, project_id, status, node_id, resolved_reservation_json)
+          VALUES ('other', 'project', 'active', 'node', ?)`
+            )
+            .run(reservationJson());
+        }
+        expect(await findDeploymentNodeWithCapacity(env, 'user', placement, false)).not.toBeNull();
+        if (kind === 'absent') sqlite.exec('UPDATE nodes SET last_metrics = NULL');
+        if (kind === 'stale')
+          sqlite.exec("UPDATE nodes SET last_heartbeat_at = '2020-01-01T00:00:00.000Z'");
+        if (kind === 'missing-disk')
+          sqlite.exec("UPDATE nodes SET last_metrics = json_remove(last_metrics, '$.diskPercent')");
+        if (kind === 'malformed') sqlite.exec("UPDATE nodes SET last_metrics = '{broken'");
+        const admitted = kind === 'absent' && !occupied;
+        expect((await findDeploymentNodeWithCapacity(env, 'user', placement, false)) !== null).toBe(
+          admitted
+        );
+        expect(await link()).toBe(admitted);
+      }
+    }
+  );
+});

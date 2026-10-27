@@ -16,6 +16,7 @@ import {
 } from '../../src/services/workspace-placement';
 import {
   aggregateWorkspaceReservationRows,
+  resolveWorkspaceAdmissionPolicy,
   type WorkspaceAdmissionPolicy,
 } from '../../src/services/workspace-resource-capacity';
 import {
@@ -1092,5 +1093,44 @@ describe('native exclusive reservation admission', () => {
         admissionPolicy()
       )
     ).resolves.toBe(true);
+  });
+});
+
+describe('default disk admission in real D1', () => {
+  it.each([79.99, 80, 92])('enforces disk=%s on empty and occupied hosts', async (diskPercent) => {
+    for (const occupied of [false, true]) {
+      const nodeId = `node-disk80-${diskPercent}-${occupied}`;
+      const sibling = `sibling-disk80-${diskPercent}-${occupied}`;
+      await makeReadyNode(nodeId, USER_ID, 'medium', {
+        lastMetrics: JSON.stringify({ cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent }),
+      });
+      const snapshot = await seedCurrentAuthorityForNode({
+        nodeId,
+        userId: USER_ID,
+        projectId: PROJECT_ID,
+        label: `disk80-${diskPercent}-${occupied}`,
+      });
+      if (occupied)
+        await seedWorkspace(sibling, nodeId, USER_ID, {
+          projectId: PROJECT_ID,
+          status: 'running',
+          resolvedReservationJson: JSON.stringify(reservation()),
+        });
+      expect(
+        await reserveWorkspacePlacement(
+          env.DATABASE,
+          placement(`new-disk80-${diskPercent}-${occupied}`, nodeId, {
+            capacityPlacementSnapshot: snapshot,
+          }),
+          resolveWorkspaceAdmissionPolicy({})
+        )
+      ).toBe(diskPercent < 80);
+      if (occupied)
+        expect(
+          await env.DATABASE.prepare('SELECT status FROM workspaces WHERE id = ?')
+            .bind(sibling)
+            .first()
+        ).toEqual({ status: 'running' });
+    }
   });
 });

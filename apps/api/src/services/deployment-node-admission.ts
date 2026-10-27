@@ -328,6 +328,7 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
           env.MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE,
           DEFAULT_MAX_ENVIRONMENTS_PER_DEPLOYMENT_NODE
         );
+  // Empty hosts may lack initial telemetry; reported pressure must still veto admission.
   const runningCapacitySql = `
        AND n.provider_instance_id IS NOT NULL
        AND n.observed_hardware_source = 'observed'
@@ -355,7 +356,8 @@ export async function linkEnvironmentToNode(opts: LinkEnvironmentToNodeOptions):
          FROM (${otherReservationsSql}) existing
        ), 0) + ? <= (n.observed_provider_instance_disk_gb * 1024)
        AND (
-         NOT EXISTS (SELECT 1 FROM (${otherReservationsSql}) existing)
+         (NOT EXISTS (SELECT 1 FROM (${otherReservationsSql}) existing)
+           AND n.last_metrics IS NULL)
          OR (
            n.last_metrics IS NOT NULL
            AND json_valid(n.last_metrics)

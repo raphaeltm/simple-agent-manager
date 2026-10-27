@@ -208,10 +208,11 @@ export type WorkspaceRestartPlacementInput = Pick<
   chatSessionId: string | null;
   evictionGeneration: string;
   expectedEvictionGeneration: string | null;
+  expectedStatus?: 'evicted' | 'stopped' | 'error';
 };
 
-/** An eviction released its reservation; restarting must atomically reacquire it. */
-export async function reserveEvictedWorkspaceRestart(
+/** Inactive workspaces released their reservation; restarting must reacquire it. */
+export async function reserveWorkspaceRestart(
   database: D1Database,
   input: WorkspaceRestartPlacementInput,
   policy: WorkspaceAdmissionPolicy
@@ -228,8 +229,9 @@ export async function reserveEvictedWorkspaceRestart(
      UPDATE workspaces SET status = 'creating', error_message = NULL, updated_at = ?,
        eviction_generation = ?, eviction_finalized_at = NULL, stop_runtime_confirmed_at = NULL
      WHERE id = ? AND node_id = ? AND user_id = ? AND project_id = ?
-       AND chat_session_id IS ? AND status = 'evicted'
-       AND eviction_generation IS ? AND eviction_finalized_at IS NOT NULL
+       AND chat_session_id IS ? AND status = ?
+       AND eviction_generation IS ?
+       AND (status != 'evicted' OR eviction_finalized_at IS NOT NULL)
        AND resolved_reservation_json = ? AND runtime_deletion_confirmed_at IS NULL
        AND EXISTS (SELECT 1 FROM eligible)`
     )
@@ -242,6 +244,7 @@ export async function reserveEvictedWorkspaceRestart(
       input.userId,
       input.projectId,
       input.chatSessionId,
+      input.expectedStatus ?? 'evicted',
       input.expectedEvictionGeneration,
       admission.requestedReservationJson
     )

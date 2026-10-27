@@ -15,6 +15,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import {
   findNodeWithCapacity,
+  hasReusableNodeReservationCapacity,
   nodeSatisfiesTaskResources,
 } from '../../../src/durable-objects/task-runner/node-selection';
 import type {
@@ -287,4 +288,35 @@ describe('nodeSatisfiesTaskResources fails closed without trusted hardware', () 
       )
     ).toBe(true);
   });
+});
+
+describe('disk admission on node reuse', () => {
+  it.each([79.99, 80, 92])(
+    'checks occupied selection and warm reuse at disk=%s',
+    async (diskPercent) => {
+      insertNode(sqlite, { id: 'disk-node' });
+      sqlite
+        .prepare("UPDATE nodes SET last_metrics = json_set(last_metrics, '$.diskPercent', ?)")
+        .run(diskPercent);
+      const state = createState();
+      const rc = createContext(database);
+      expect((await findNodeWithCapacity(state, rc)) !== null).toBe(diskPercent < 80);
+      // This is the same post-claim capacity guard used for both fresh and persisted warm claims.
+      expect(
+        await hasReusableNodeReservationCapacity(rc, state, {
+          id: 'disk-node',
+          vmSize: 'large',
+          vmLocation: 'nbg1',
+          cloudProvider: 'hetzner',
+          providerInstanceId: 'pi-disk-node',
+          observedHardwareSource: 'observed',
+          observedProviderInstanceVcpuCount: 8,
+          observedProviderInstanceMemoryMb: 16384,
+          observedProviderInstanceDiskGb: 160,
+          lastHeartbeatAt: new Date().toISOString(),
+          lastMetrics: JSON.stringify({ cpuLoadAvg1: 0, memoryPercent: 5, diskPercent }),
+        })
+      ).toBe(diskPercent < 80);
+    }
+  );
 });

@@ -8,10 +8,13 @@ import { afterEach, describe, expect, it } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import {
   attachPrecreatedWorkspacePlacement,
-  reserveEvictedWorkspaceRestart,
+  reserveWorkspaceRestart,
   reserveWorkspacePlacement,
 } from '../../../src/services/workspace-placement';
-import type { WorkspaceAdmissionPolicy } from '../../../src/services/workspace-resource-capacity';
+import {
+  resolveWorkspaceAdmissionPolicy,
+  type WorkspaceAdmissionPolicy,
+} from '../../../src/services/workspace-resource-capacity';
 import {
   createAllSchemaTables,
   createSqliteD1,
@@ -997,7 +1000,7 @@ describe('attachPrecreatedWorkspacePlacement', () => {
   });
 });
 
-describe('reserveEvictedWorkspaceRestart', () => {
+describe('reserveWorkspaceRestart', () => {
   function seedEvicted(id = 'workspace-1') {
     seedActiveWorkspace(id);
     sqlite
@@ -1021,14 +1024,14 @@ describe('reserveEvictedWorkspaceRestart', () => {
     sqlite?.exec(
       "INSERT INTO session_snapshots (id, workspace_id) VALUES ('snapshot', 'workspace-1')"
     );
-    expect(await reserveEvictedWorkspaceRestart(database, input, admissionPolicy())).toBe(true);
+    expect(await reserveWorkspaceRestart(database, input, admissionPolicy())).toBe(true);
     expect(
       sqlite
         ?.prepare("SELECT status, chat_session_id FROM workspaces WHERE id = 'workspace-1'")
         .get()
     ).toEqual({ status: 'creating', chat_session_id: 'chat-1' });
     expect(sqlite?.prepare('SELECT id FROM session_snapshots').all()).toEqual([{ id: 'snapshot' }]);
-    expect(await reserveEvictedWorkspaceRestart(database, input, admissionPolicy())).toBe(false);
+    expect(await reserveWorkspaceRestart(database, input, admissionPolicy())).toBe(false);
   });
 
   it('allows only one restart to take the last reservation slot', async () => {
@@ -1044,7 +1047,7 @@ describe('reserveEvictedWorkspaceRestart', () => {
       .run(JSON.stringify(lastSlotReservation));
     const results = await Promise.all(
       [first, second].map((input) =>
-        reserveEvictedWorkspaceRestart(
+        reserveWorkspaceRestart(
           database,
           { ...input, resolvedReservation: lastSlotReservation },
           admissionPolicy()
@@ -1074,7 +1077,7 @@ describe('reserveEvictedWorkspaceRestart', () => {
       const input = seedEvicted();
       sqlite?.exec(mutation);
       expect(
-        await reserveEvictedWorkspaceRestart(
+        await reserveWorkspaceRestart(
           database,
           input,
           admissionPolicy({ hostMemoryReserveMb: 768 })
@@ -1083,6 +1086,58 @@ describe('reserveEvictedWorkspaceRestart', () => {
       expect(
         sqlite?.prepare("SELECT status FROM workspaces WHERE id = 'workspace-1'").get()
       ).toEqual({ status: 'evicted' });
+    }
+  );
+});
+
+describe('80 percent disk default at every workspace atomic admission', () => {
+  it.each(['insert', 'attach', 'restart'] as const)(
+    'checks %s without changing running siblings',
+    async (path) => {
+      const database = createDb();
+      seedNode();
+      seedActiveWorkspace('sibling');
+      const before = sqlite?.prepare("SELECT * FROM workspaces WHERE id = 'sibling'").get();
+      const input = reserveInput(capacitySnapshot());
+      if (path === 'attach') seedPlaceholderWorkspace(input.id);
+      if (path === 'restart') {
+        seedActiveWorkspace(input.id);
+        sqlite?.exec(
+          "UPDATE workspaces SET status = 'evicted', chat_session_id = 'chat-1', eviction_finalized_at = '2026-09-13T00:00:00.000Z' WHERE id = 'workspace-1'"
+        );
+      }
+      const admit = () =>
+        path === 'insert'
+          ? reserveWorkspacePlacement(database, input, resolveWorkspaceAdmissionPolicy({}))
+          : path === 'attach'
+            ? attachPrecreatedWorkspacePlacement(
+                database,
+                input,
+                resolveWorkspaceAdmissionPolicy({})
+              )
+            : reserveWorkspaceRestart(
+                database,
+                {
+                  ...input,
+                  chatSessionId: 'chat-1',
+                  evictionGeneration: 'next',
+                  expectedEvictionGeneration: null,
+                },
+                resolveWorkspaceAdmissionPolicy({})
+              );
+      for (const diskPercent of [80, 92]) {
+        sqlite
+          ?.prepare("UPDATE nodes SET last_metrics = json_set(last_metrics, '$.diskPercent', ?)")
+          .run(diskPercent);
+        expect(await admit()).toBe(false);
+        expect(sqlite?.prepare("SELECT * FROM workspaces WHERE id = 'sibling'").get()).toEqual(
+          before
+        );
+      }
+      sqlite
+        ?.prepare("UPDATE nodes SET last_metrics = json_set(last_metrics, '$.diskPercent', ?)")
+        .run(79.99);
+      expect(await admit()).toBe(true);
     }
   );
 });
