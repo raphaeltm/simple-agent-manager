@@ -14,7 +14,7 @@
   "screenshots": [
     {
       "src": "/images/features/sam-ideas-detail.png",
-      "alt": "Idea page for rate-limiting the payouts endpoint. The plan has a problem statement and three phases. Beside it, a status card reads In review, PR #214 is open, checks passed, with Review PR #214 and Open the chat. Work lists two chats, one working and one finished, and the pull request. Related lists a research file and a related idea.",
+      "alt": "Idea page for rate-limiting the payouts endpoint. The plan has a problem statement and three phases. Beside it, a status card reads In review, PR #214 is open, checks passed, with Review PR #214. Work lists two finished chats and the pull request. Related lists a research file and a related idea.",
       "caption": "Each idea shows its plan, where it stands, and the work linked to it"
     }
   ],
@@ -24,7 +24,7 @@
       "body": "Write down the problem and sketch a plan. When you are ready, select Start work: you choose who works on it and add a note. The agent starts with the idea and can look up the chats, files and pull requests already linked to it.",
       "screenshot": {
         "src": "/images/features/sam-ideas-detail.png",
-        "alt": "Idea page for rate-limiting the payouts endpoint. The plan has a problem statement and three phases. Beside it, a status card reads In review, PR #214 is open, checks passed, with Review PR #214 and Open the chat. Work lists two chats, one working and one finished, and the pull request. Related lists a research file and a related idea.",
+        "alt": "Idea page for rate-limiting the payouts endpoint. The plan has a problem statement and three phases. Beside it, a status card reads In review, PR #214 is open, checks passed, with Review PR #214. Work lists two finished chats and the pull request. Related lists a research file and a related idea.",
         "caption": "The idea keeps one current plan, with where it stands beside it"
       }
     },
@@ -33,7 +33,7 @@
       "body": "An idea's status comes from its work: In progress while an agent works on it, In review while its pull request is open, and Waiting for you when an agent asks something. Chats, pull requests and files are linked as agents work, so there is nothing to keep up to date by hand.",
       "screenshot": {
         "src": "/images/features/sam-ideas-detail.png",
-        "alt": "Idea page for rate-limiting the payouts endpoint. The plan has a problem statement and three phases. Beside it, a status card reads In review, PR #214 is open, checks passed, with Review PR #214 and Open the chat. Work lists two chats, one working and one finished, and the pull request. Related lists a research file and a related idea.",
+        "alt": "Idea page for rate-limiting the payouts endpoint. The plan has a problem statement and three phases. Beside it, a status card reads In review, PR #214 is open, checks passed, with Review PR #214. Work lists two finished chats and the pull request. Related lists a research file and a related idea.",
         "caption": "Status, work and related files sit beside the plan"
       }
     }

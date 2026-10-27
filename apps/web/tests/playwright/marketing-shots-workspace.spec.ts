@@ -530,15 +530,9 @@ const IDEA = {
     state: 'review',
     needsYou: null,
     source: { origin: 'github', observedAt: iso(-20 * 60_000), stale: false },
-    session: {
-      sessionId: 'session-payouts-enforce',
-      topic: 'Implement rate limiter enforcement',
-      sessionStatus: 'active',
-      taskId: 'task-payouts-enforce',
-      taskStatus: 'in_progress',
-      agentLabel: 'Careful Builder',
-      lastActivityAt: iso(-25 * 60_000),
-    },
+    // The server attaches no chat to In review, and a chat still working on the idea would
+    // outrank its pull request (`idea-status.ts`), so the enforcement chat has finished.
+    session: null,
     pullRequest: IDEA_PR,
     note: null,
   },
@@ -550,12 +544,12 @@ const IDEA = {
       sessionId: 'session-payouts-enforce',
       topic: 'Implement rate limiter enforcement',
       strong: true,
-      sessionStatus: 'active',
+      sessionStatus: 'stopped',
       taskId: 'task-payouts-enforce',
-      taskStatus: 'in_progress',
+      taskStatus: 'completed',
       taskErrorMessage: null,
       agentLabel: 'Careful Builder',
-      lastActivityAt: NOW - 25 * 60_000,
+      lastActivityAt: NOW - 35 * 60_000,
       needsInput: null,
     },
     {
@@ -666,6 +660,7 @@ test('sam-ideas-detail', async ({ page }) => {
   const status = page.getByRole('region', { name: 'Status' });
   await expect(status.getByText('In review')).toBeVisible();
   await expect(status.getByRole('link', { name: 'Review PR #214' })).toBeVisible();
+  await expect(status.getByText('Open the chat')).toHaveCount(0);
   await expect(page.getByText('Phase 1: Instrumentation')).toBeVisible();
   await expect(page.getByText('Opened #214.', { exact: false })).toBeVisible();
   await assertNoCrash(page);

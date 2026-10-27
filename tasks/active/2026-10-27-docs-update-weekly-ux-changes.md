@@ -130,7 +130,7 @@ Round 1 (2026-10-27, three local general-purpose reviewers in parallel, read-onl
 user-journey critique plus a code fact-check of one area): A ideas/chats/agents/collaboration/
 troubleshooting · B automation/triggers/email/workflows/notifications/AI models/secrets/workload
 identity · C assistant/Connector/deployments/infrastructure/admin/self-hosting/reference/changelog/
-marketing. A and B returned; C running.
+marketing. All three returned.
 
 Round 1 fix list (verify each in code before changing; tick when done):
 
@@ -160,6 +160,19 @@ queue fields · [ ] L queue self-host release · [ ] L email "up to 20 by defaul
 email step · [ ] L notifications unread count + internal name · [ ] L secret-execution MCP wording
 · [ ] L em dashes (scheduled-actions 3, secret-execution 7-8/46, triggers 177/197) · [ ] L trigger
 vs automation bridge · [ ] L recapture automation-page with padding
+
+C (account/infra/reference): [ ] M1 samOperatorDisabled: "Enabled" turns SAM off (assistant,
+admin-settings, changelog) · [ ] M2 assistant-started work can run Instant (sam-assistant 33-34,
+concepts 27; verify decideWorkspaceRuntime) · [ ] M3 saving Enabled on cron/DO alarm switches lifts
+the KV stop (admin-settings 105-107, api.md 816-829; verify) · [ ] M4 What's new findable (sidebar +
+docs home card) · [ ] L Connector "can do more" wording · [ ] L more interrupt reasons + platform
+model list · [ ] L raw RATE_LIMITED / 16k messages · [ ] L Check outcome only on Start project work;
+ideas linked; No longer available = lost access · [ ] L Connector "rest of long replies" · [ ] L
+connector.* and aiModels.defaultCategories confirm · [ ] L Connector other limits = GitHub env only
+· [ ] L app-deployments v2026.10.23 · [ ] L recapture compute-pools image (stale nav) · [ ] L
+Stop/Restart conditions + stopped-workspace billing · [ ] L account-map wording, admin-settings
+terms · [ ] L em dashes (admin-settings 24-25/72/94, api 606) · [ ] L Workflows settings under
+Operations
 
 Product follow-ups from round 1 (add to ideas): Send to agent offered twice (duplicate dropped);
 skill without agent skips project default; Mark done/Park missing in most states; notes/filing

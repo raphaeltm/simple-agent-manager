@@ -21,8 +21,9 @@ of, start later, or follow across several chats.
    Markdown works.
 4. Select **File it**. The new idea opens, ready for someone to start work on it.
 
-Agents file ideas too, for example when a chat turns up follow-up work. An idea filed from an AI
-app connected through the [SAM Connector](/docs/guides/sam-connector/) is marked with the app's
+Agents file ideas too, for example when a chat turns up follow-up work. The chat that files an idea
+counts as working on it (see [Where an idea stands](#where-an-idea-stands)). An idea filed from an
+AI app connected through the [SAM Connector](/docs/guides/sam-connector/) is marked with the app's
 name, such as **via Claude**.
 
 ## The Ideas list
@@ -49,8 +50,8 @@ The list puts what needs you first:
 - **Not started**: newest first.
 - **Done recently**: finished and parked ideas. On a desktop it's a column on the right; on a
   phone it's folded at the bottom.
-- **Filed by agents**: errors and findings agents noticed, folded away so they don't crowd your
-  own ideas.
+- **Filed by agents**: problems SAM's own error reporting found, folded away so they don't crowd
+  your ideas. An idea an agent files from a chat is listed with everyone else's.
 
 Each row counts the idea's updates, chats, files and pull requests. **Search ideas** matches titles
 and the first line of the plan. The list shows the 100 most recent open ideas and the 20 most
@@ -78,14 +79,20 @@ A few things follow from that:
 - **An idea is never marked done for you.** A merged pull request asks the question once. Work that
   finishes without a pull request doesn't ask, and the idea goes back to **Not started**, as it
   does when you answer **Keep open**. The work it had stays listed on its page.
-- **Only work moves an idea.** A chat started with **Start work**, or one that created or edited the
-  idea, counts. A chat that only read or mentioned the idea doesn't, and neither does a chat that
-  [talks it through](#start-work-on-an-idea).
+- **Only work moves an idea.** A chat started with **Start work** counts, and so does a chat whose
+  agent filed the idea, edited it or posted an update on it, along with any pull request that chat
+  reports. A chat that only read or mentioned the idea doesn't, and neither does a chat that
+  [talks it through](#start-work-on-an-idea). So an idea an agent files from a chat shows **In
+  progress** while that chat is open or asleep, and can take that chat's own pull request as its
+  own. If it then asks whether a merge finished the idea and it didn't, answer **Keep open**.
 - **Pull request states come from GitHub**, for pull requests in the project's own GitHub
   repository. A GitLab merge request, or a pull request in another repository, doesn't move an
-  idea: mark it done yourself.
-- Agents can also mark an idea done or parked, or reopen it, with their tools. The page then shows
-  it as a decision, the same as yours.
+  idea.
+- **You can mark an idea done only after a pull request merges, and park it only before work
+  starts.** That's when the page offers **Mark done** and **Park**. To mark any other idea done, or
+  to park one that's in progress, ask an agent in the project to do it: agents can mark an idea
+  done or parked, or reopen it, with their tools. The status line of a done or parked idea reads
+  **Your decision**, whoever made the change.
 
 ## An idea's page
 
@@ -93,7 +100,7 @@ A few things follow from that:
   <source media="(max-width: 40em)" srcset="/images/docs/idea-page-mobile.png 2x" />
   <img
     src="/images/docs/idea-page.png"
-    alt="The page for &quot;Retry failed webhook deliveries&quot;. On the left, The idea (the current plan, with an Edit button and &quot;Last changed 20 hours ago&quot;), then Updates: an agent note from Careful Builder about opening #482, a note from Marcus Chen quoting a line of the plan, and an earlier agent note. On the right, the Status card reads &quot;In review: PR #482 is open, checks passed, From GitHub, 2 minutes ago&quot; with Review PR #482 and Open the chat; Work lists two chats and the pull request with Open and Checks passed; Related lists the file retry-schedules.md and a related idea."
+    alt="The page for &quot;Retry failed webhook deliveries&quot;. On the left, The idea (the current plan, with an Edit button and &quot;Last changed 20 hours ago&quot;), then Updates: an agent note from Careful Builder about opening #482, a note from Marcus Chen quoting a line of the plan, and an earlier agent note. On the right, the Status card reads &quot;In review: PR #482 is open, checks passed, From GitHub, 2 minutes ago&quot; with Review PR #482; Work lists two finished chats and the pull request with Open and Checks passed; Related lists the file retry-schedules.md and a related idea."
   />
 </picture>
 
@@ -106,23 +113,24 @@ Select an idea to open its page. On a phone the sections stack, with **Status** 
   An agent's note shows its profile name and links to its chat, and a note can quote the line of
   the plan it's about. The page shows the 30 newest.
 - **Work**: every chat and pull request for the idea, and how each one is doing: **Working**,
-  **Finished**, **Stopped on purpose**, **Asleep, will wake**, or what went wrong. Pull requests show
-  **Open**, **Draft**, **Merged** or **Closed**, with their checks while they're open.
+  **Finished**, **Stopped on purpose**, **Asleep, will wake**, or what went wrong. A chat that talks
+  the idea through shows **Talking it through**, then **Ended**. Pull requests show **Open**,
+  **Draft**, **Merged** or **Closed**, with their checks while they're open.
 - **Related**: files and other ideas that were linked as agents worked, such as a file a chat
   uploaded while working on the idea.
 
 The **Status** buttons follow the state:
 
-| When the idea is | Main button                     | Second button     |
-| ---------------- | ------------------------------- | ----------------- |
-| Not started      | **Start work**                  | **Park**          |
-| In progress      | **Open the chat**               |                   |
-| Waiting for you  | **Answer**                      |                   |
-| Stopped          | **See what happened**           | **Try again…**    |
-| In review        | **Review PR #N** (opens GitHub) | **Open the chat** |
-| Merged           | **Mark done**                   | **Keep open**     |
-| Done             | **Start follow-up work**        | **Reopen**        |
-| Parked           | **Reopen**                      |                   |
+| When the idea is | Main button                     | Second button                     |
+| ---------------- | ------------------------------- | --------------------------------- |
+| Not started      | **Start work**                  | **Park**                          |
+| In progress      | **Open the chat**               |                                   |
+| Waiting for you  | **Answer**                      |                                   |
+| Stopped          | **See what happened**           | **Try again…**                    |
+| In review        | **Review PR #N** (opens GitHub) | none: open the chat from **Work** |
+| Merged           | **Mark done**                   | **Keep open**                     |
+| Done             | **Start follow-up work**        | **Reopen**                        |
+| Parked           | **Reopen**                      |                                   |
 
 :::caution[Start follow-up work on a done idea]
 **Start follow-up work** doesn't work yet: SAM refuses with "That idea is done. Reopen it before
@@ -194,9 +202,8 @@ You see these links in several places:
 
 ## Who can do what
 
-Everyone in the project can read ideas, their pages and their links. Anyone who can edit the
-project can file and edit ideas, post updates, start work, and mark ideas done, parked or open
-again. Members with view-only access see the same buttons, but SAM refuses the change.
+Everyone in the project can read ideas and their links, file and edit ideas, post updates, start
+work, and mark ideas done, parked or open again, where the page offers the button.
 
 ## For agents
 

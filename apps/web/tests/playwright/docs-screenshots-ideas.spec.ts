@@ -195,16 +195,18 @@ const OPEN_PR = {
 };
 
 const IDEA_SESSIONS = [
+  // Finished: a chat still working on the idea would outrank its open pull request, and the
+  // page would say In progress instead of In review.
   {
     sessionId: 'sess-build',
     topic: 'Wiring the retry schedule',
     strong: true,
-    sessionStatus: 'active',
+    sessionStatus: 'stopped',
     taskId: 'task-build',
-    taskStatus: 'in_progress',
+    taskStatus: 'completed',
     taskErrorMessage: null,
     agentLabel: 'Careful Builder',
-    lastActivityAt: Date.parse('2026-10-23T11:50:00Z'),
+    lastActivityAt: Date.parse('2026-10-23T11:45:00Z'),
     needsInput: null,
   },
   {
@@ -234,15 +236,8 @@ const IDEA_IN_REVIEW = {
     state: 'review',
     needsYou: null,
     source: { origin: 'github', observedAt: '2026-10-23T11:58:00Z', stale: false },
-    session: {
-      sessionId: 'sess-build',
-      topic: 'Wiring the retry schedule',
-      sessionStatus: 'active',
-      taskId: 'task-build',
-      taskStatus: 'in_progress',
-      agentLabel: 'Careful Builder',
-      lastActivityAt: '2026-10-23T11:50:00Z',
-    },
+    // The server attaches no chat to In review (`idea-status.ts`), so there's no Open the chat.
+    session: null,
     pullRequest: OPEN_PR,
     note: null,
   },
@@ -438,6 +433,14 @@ test('docs: the Ideas list', async ({ page }) => {
   await expect(page.getByRole('heading', { name: /Not started/ })).toBeVisible();
   await expect(page.getByText('Retry failed webhook deliveries').first()).toBeVisible();
   await expect(page.getByText('Something went wrong')).toHaveCount(0);
+  if (isMobile(page)) {
+    // Make the first screen tall enough to end below the third Needs you card's buttons.
+    const keepOpen = (await page.getByRole('button', { name: 'Keep open' }).first().boundingBox())!;
+    await page.setViewportSize({
+      width: 375,
+      height: Math.ceil(keepOpen.y + keepOpen.height + 40),
+    });
+  }
   await capturePage(page, isMobile(page) ? 'ideas-list-mobile' : 'ideas-list');
 });
 
@@ -448,6 +451,7 @@ test("docs: an idea's page", async ({ page }) => {
   const status = page.getByRole('region', { name: 'Status' });
   await expect(status.getByText('In review')).toBeVisible();
   await expect(status.getByRole('link', { name: 'Review PR #482' })).toBeVisible();
+  await expect(status.getByText('Open the chat')).toHaveCount(0);
   await expect(page.getByText('Opened #482.', { exact: false })).toBeVisible();
   await expect(page.getByText('retry-schedules.md').first()).toBeVisible();
   await expect(page.getByText('Something went wrong')).toHaveCount(0);
