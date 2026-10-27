@@ -701,7 +701,22 @@ test('docs: project automation page', async ({ page }) => {
 
   // The app scrolls inside its own containers: let them grow so neither column is cut off.
   await expandScrollContainers(page);
-  await docsShot(page, 'automation-page', page.getByTestId('automation-root'));
+  // A margin around the page, so the New automation button at the top isn't cut by the edge. A clip
+  // only covers the viewport, so make the viewport as tall as the page first.
+  const margin = 16;
+  const full = (await page.getByTestId('automation-root').boundingBox())!;
+  await page.setViewportSize({ width: 1280, height: Math.ceil(full.y + full.height + margin) });
+  const root = (await page.getByTestId('automation-root').boundingBox())!;
+  const x = Math.max(0, root.x - margin);
+  const y = Math.max(0, root.y - margin);
+  await docsShot(page, 'automation-page', {
+    clip: {
+      x,
+      y,
+      width: root.x + root.width + margin - x,
+      height: root.y + root.height + margin - y,
+    },
+  });
 });
 
 // ---------------------------------------------------------------------------
