@@ -31,7 +31,15 @@ type Source = 'database' | 'environment' | 'kv' | 'default';
 interface SettingFixture {
   name: string;
   type: 'boolean' | 'integer' | 'string' | 'string-list' | 'enum';
-  category: 'OAuth' | 'Connector' | 'Operations' | 'Trials' | 'Collaboration';
+  category:
+    | 'OAuth'
+    | 'Connector'
+    | 'Operations'
+    | 'Trials'
+    | 'Collaboration'
+    | 'Chat'
+    | 'AI models'
+    | 'Email';
   description: string;
   defaultValue: boolean | number | string | string[] | null;
   value: boolean | number | string | string[] | null;
@@ -71,7 +79,12 @@ function oauth(name: string, description: string, value: string | null, source: 
   });
 }
 
-/** Every registry entry, in registry order, with the values a typical self-host would show. */
+/**
+ * A representative subset of the registry (`admin-settings-registry.ts`), at least one setting
+ * from every group, with the values a typical self-host would show. The page renders whatever the
+ * API returns, so the captures show the groups and cards a reader meets; the setting count is the
+ * fixture's, not the registry's.
+ */
 const SETTINGS = [
   setting({
     name: 'connector.enabled',
@@ -263,6 +276,46 @@ const SETTINGS = [
     description: 'Allow stalled-task classification; existing liveness checks remain active.',
     defaultValue: true,
     value: true,
+  }),
+  setting({
+    name: 'workflow.maxParallelSteps',
+    type: 'integer',
+    category: 'Operations',
+    description: 'Steps of one workflow running at once.',
+    defaultValue: 2,
+    value: 2,
+    risky: false,
+    range: { min: 1, max: 10 },
+  }),
+  setting({
+    name: 'chat.profileUsageWindowDays',
+    type: 'integer',
+    category: 'Chat',
+    description: "Days of each person's own new chats used to order their new-chat profile picker.",
+    defaultValue: 30,
+    value: 30,
+    risky: false,
+    range: { min: 1, max: 365 },
+  }),
+  setting({
+    name: 'aiModels.defaultMonthlyBudgetCents',
+    type: 'integer',
+    category: 'AI models',
+    description:
+      'Monthly spending limit per project, in US cents, when the project has not set one.',
+    defaultValue: 500,
+    value: 500,
+    range: { min: 0, max: 10000000 },
+  }),
+  setting({
+    name: 'agentEmail.maxRepliesPerRun',
+    type: 'integer',
+    category: 'Email',
+    description: 'Replies one email-started run can send. Failed attempts count.',
+    defaultValue: 5,
+    value: 5,
+    risky: false,
+    range: { min: 1, max: 50 },
   }),
 ];
 
