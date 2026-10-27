@@ -130,4 +130,37 @@ Round 1 (2026-10-27, three local general-purpose reviewers in parallel, read-onl
 user-journey critique plus a code fact-check of one area): A ideas/chats/agents/collaboration/
 troubleshooting · B automation/triggers/email/workflows/notifications/AI models/secrets/workload
 identity · C assistant/Connector/deployments/infrastructure/admin/self-hosting/reference/changelog/
-marketing. Status: running.
+marketing. A and B returned; C running.
+
+Round 1 fix list (verify each in code before changing; tick when done):
+
+A (ideas/chats): [ ] H1 Mark done only on Merged, Park only on Not started (ideas.md 78-88, 197-199)
+· [ ] M2 In review has no "Open the chat"; fixture impossible (working chat outranks review) →
+table cell, recapture idea-page(-mobile) with chat finished, alt; SAME fix for marketing
+sam-ideas-detail (dark+light+webp) · [ ] M3 filing/noting counts as work (+ PR attribution, Keep
+open) · [ ] M4 no view-only members (ideas.md 199; also workflows.md 52, email-triggers.md 31,
+mcp-servers.md 58, scheduled-actions.md 59) · [ ] M5 comment reader self-host version (verify tag)
+· [ ] M6 collaboration.md 272 keys contradiction · [ ] M7 troubleshooting Blocked: lead with
+"don't reply" · [ ] M8 agents.md picker details (SAM-started chats count, alphabetical fallback,
+"Your profiles") · [ ] L narrower-screen comment sheet · [ ] L owner-only controls list (233) ·
+[ ] L ended-chat fork text vs rail (verify) · [ ] L Filed by agents = error reports · [ ] L Work
+statuses Talking it through/Ended · [ ] L "Your decision" wording · [ ] L Waiting-on hint ·
+[ ] L platform-credential fallback limits (troubleshooting 136, chat-features 626) · [ ] L "200
+messages" · [ ] L recapture chat-expired(-mobile) · [ ] L ideas-list-mobile cut card · [ ] L em
+dashes (chat-features 532, collaboration 208, troubleshooting 133/568/573, agents 410,
+instant-sessions 74, idea-execution 3)
+
+B (automation): [ ] M1 Test against recent deliveries contradiction · [ ] M2 triggers.md outline
+(filters/variables/untrusted as H2s, agent sections last) · [ ] M3 queue recovery steps · [ ] M4
+workflows notifications wording · [ ] M5 AI models Raise limit (owners/admins, refused before
+button) · [ ] M6 scheduled-actions lower half in plain language, details under agents/operators ·
+[ ] L view-only sentence (59) · [ ] L Advanced options/Name only for repeating · [ ] L issue number
+only with follow-ups on · [ ] L "can't be changed" + push tag refs · [ ] L update_trigger keeps
+queue fields · [ ] L queue self-host release · [ ] L email "up to 20 by default" + Turn on agent
+email step · [ ] L notifications unread count + internal name · [ ] L secret-execution MCP wording
+· [ ] L em dashes (scheduled-actions 3, secret-execution 7-8/46, triggers 177/197) · [ ] L trigger
+vs automation bridge · [ ] L recapture automation-page with padding
+
+Product follow-ups from round 1 (add to ideas): Send to agent offered twice (duplicate dropped);
+skill without agent skips project default; Mark done/Park missing in most states; notes/filing
+count as work and adopt the chat's PR; correct earlier note: no viewer role is assignable today.
