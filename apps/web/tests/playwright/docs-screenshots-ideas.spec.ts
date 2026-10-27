@@ -19,6 +19,7 @@ import type { IdeaDerivedState } from '@simple-agent-manager/shared';
 import { makeMockProject, makeMockUser, seedTheme, setupProjectAuditRoutes } from './audit-helpers';
 import { expandScrollContainers } from './automation-audit-helpers';
 import { docsShot, opaqueBackdrop } from './docs-shot';
+import { ideaUpdate, linkedItems } from './idea-fixtures';
 
 const PROJECT_ID = 'proj-docs-ideas';
 const IDEA_ID = 'idea-webhook-retries';
@@ -265,76 +266,58 @@ const IDEA_NOT_STARTED = {
 };
 
 const UPDATES = [
-  {
+  ideaUpdate({
     id: 'u-agent',
     ideaId: IDEA_ID,
     authorKind: 'agent',
-    authorUserId: null,
     authorName: 'Careful Builder',
     sessionId: 'sess-build',
     sessionTopic: 'Wiring the retry schedule',
     body: 'Opened #482. Retries now back off from 1 minute to 12 hours over 3 days; the delivery log shows each attempt.',
-    quote: null,
     createdAt: '2026-10-23T11:40:00Z',
-    editedAt: null,
-  },
-  {
+  }),
+  ideaUpdate({
     id: 'u-marcus',
     ideaId: IDEA_ID,
     authorKind: 'user',
     authorUserId: 'user-marcus',
     authorName: 'Marcus Chen',
-    sessionId: null,
-    sessionTopic: null,
     body: 'Match the 3-day window rather than a fixed number of attempts, so merchants see the same behaviour everywhere.',
     quote: 'Retry failed deliveries with exponential backoff for up to 3 days.',
     createdAt: '2026-10-21T10:00:00Z',
-    editedAt: null,
-  },
-  {
+  }),
+  ideaUpdate({
     id: 'u-research',
     ideaId: IDEA_ID,
     authorKind: 'agent',
-    authorUserId: null,
     authorName: 'Brainstormer',
     sessionId: 'sess-research',
     sessionTopic: 'Comparing how payment providers retry webhooks',
     body: 'Compared three providers. Recommendation: exponential backoff over 3 days, then park the event for a manual replay. Details in retry-schedules.md.',
-    quote: null,
     createdAt: '2026-10-18T09:00:00Z',
-    editedAt: null,
-  },
+  }),
 ];
 
 const LINKS = {
-  sessions: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
-  files: {
-    items: [
-      {
-        fileId: 'file-retry-schedules',
-        filename: 'retry-schedules.md',
-        directory: '/research/webhooks/',
-        relations: ['uploaded'],
-        bySessionId: 'sess-research',
-      },
-    ],
-    total: 1,
-    truncated: false,
-    totalIsLowerBound: false,
-  },
-  pullRequests: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
-  relatedIdeas: {
-    items: [
-      {
-        ideaId: 'idea-replay',
-        title: 'Let merchants replay a parked event',
-        status: 'draft',
-        relations: ['related'],
-      },
-    ],
-    total: 1,
-    truncated: false,
-  },
+  sessions: linkedItems([]),
+  files: linkedItems([
+    {
+      fileId: 'file-retry-schedules',
+      filename: 'retry-schedules.md',
+      directory: '/research/webhooks/',
+      relations: ['uploaded'],
+      bySessionId: 'sess-research',
+    },
+  ]),
+  pullRequests: linkedItems([]),
+  relatedIdeas: linkedItems([
+    {
+      ideaId: 'idea-replay',
+      title: 'Let merchants replay a parked event',
+      status: 'draft',
+      relations: ['related'],
+    },
+  ]),
 };
 
 /** Two profiles for Start work: one that does the work, one that talks it through. */

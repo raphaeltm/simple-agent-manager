@@ -16,6 +16,7 @@ import {
   makeMockUser,
   screenshot,
 } from './audit-helpers';
+import { expectQuoteOnScreen, type MessageRow, messageRowsFor } from './comment-reader-helpers';
 
 const PROJECT_ID = 'proj-reader-1';
 const SESSION_ID = 'cs-reader-1';
@@ -47,37 +48,7 @@ const VIEWER = { id: VIEWER_ID, kind: 'human' as const, name: 'Raphaël Titswort
 const AGENT = { id: 'agent-sam', kind: 'agent' as const, name: 'SAM' };
 const DANA = { id: 'user-dana', kind: 'human' as const, name: 'Dana Okonkwo' };
 
-type Row = {
-  id: string;
-  sessionId: string;
-  role: string;
-  content: string;
-  toolMetadata: Record<string, unknown> | null;
-  createdAt: number;
-  sequence: number;
-};
-
-let seq = 0;
-function row(
-  id: string,
-  role: string,
-  content: string,
-  at: number,
-  toolMetadata: Record<string, unknown> | null = null
-): Row {
-  seq += 1;
-  return { id, sessionId: SESSION_ID, role, content, toolMetadata, createdAt: at, sequence: seq };
-}
-
-/** An agent reply stored the way the VM agent stores it: one row per streamed chunk. */
-function streamed(prefix: string, text: string, at: number): Row[] {
-  const words = text.split(/(?<= )/);
-  const chunks: string[] = [];
-  for (let i = 0; i < words.length; i += 4) chunks.push(words.slice(i, i + 4).join(''));
-  return chunks.map((chunk, index) =>
-    row(`${prefix}-${index + 1}`, 'assistant', chunk, at + index)
-  );
-}
+const { row, streamed, startAt } = messageRowsFor(SESSION_ID);
 
 const REPLY_TEXT = [
   'I traced the retry storm to the webhook handler. ',
@@ -88,8 +59,8 @@ const REPLY_TEXT = [
   'That keeps the sender happy and makes the handler safe to call twice.',
 ].join('');
 
-function conversation(): Row[] {
-  seq = 0;
+function conversation(): MessageRow[] {
+  startAt(0);
   return [
     row('u-1', 'user', 'Why is the payments webhook retrying so much?', NOW - 3 * HOUR),
     row('t-1', 'tool', '', NOW - 3 * HOUR + MIN, {
@@ -168,13 +139,13 @@ const SECOND_THREAD = thread({
 
 interface Scenario {
   topic?: string;
-  rows?: Row[];
+  rows?: MessageRow[];
   threads?: ReturnType<typeof thread>[];
   active?: ReturnType<typeof thread>;
   hasMoreBefore?: boolean;
   hasMoreAfter?: boolean;
-  earlierRows?: Row[];
-  laterRows?: Row[];
+  earlierRows?: MessageRow[];
+  laterRows?: MessageRow[];
   anchorFound?: boolean;
   contextStatus?: number;
   inboxThreads?: ReturnType<typeof thread>[];
@@ -291,26 +262,6 @@ async function openReader(page: Page, threadId = 'ct-main') {
   await page.waitForTimeout(500);
 }
 
-/** The open comment's words are painted and inside the visible conversation. */
-async function expectQuoteOnScreen(page: Page, quoteStart: string) {
-  const result = await page.evaluate((needle) => {
-    const registry = (CSS as unknown as { highlights?: Map<string, Highlight> }).highlights;
-    const range = registry?.get('sam-comment-quote')?.values().next().value;
-    if (!(range instanceof Range)) return 'missing';
-    if (!range.toString().startsWith(needle)) return `wrong:${range.toString().slice(0, 40)}`;
-    const scroller = document.querySelector('[data-reader-scroller]');
-    if (!scroller) return 'no-scroller';
-    const view = scroller.getBoundingClientRect();
-    const box = range.getBoundingClientRect();
-    const sheet = document.querySelector('section[aria-label="Comment thread"]');
-    const bottom = sheet ? Math.min(view.bottom, sheet.getBoundingClientRect().top) : view.bottom;
-    return box.top >= view.top && box.bottom <= bottom
-      ? 'visible'
-      : `offscreen:${box.top}-${box.bottom}/${view.top}-${bottom}`;
-  }, quoteStart);
-  expect(result).toBe('visible');
-}
-
 async function checkLayout(page: Page) {
   await assertNoOverflow(page);
   await assertNoClippedOverflow(page);
@@ -363,7 +314,7 @@ test.describe('Comment reader', () => {
 
   test('loads earlier messages above without moving what is in view', async ({ page }) => {
     const rows = conversation();
-    seq = 100;
+    startAt(100);
     const earlier = [
       row('u-0', 'user', 'Earlier: can you look at the payments service?', NOW - 5 * HOUR),
       ...streamed(
@@ -408,7 +359,7 @@ test.describe('Comment reader', () => {
 
   test('loads later messages below without moving what is in view', async ({ page }) => {
     const rows = conversation();
-    seq = 200;
+    startAt(200);
     const later = [
       row('u-9', 'user', 'Later: did the deploy go out?', NOW - 20 * MIN),
       ...streamed('a-9', 'Yes. The deploy finished and the retries stopped.', NOW - 19 * MIN),

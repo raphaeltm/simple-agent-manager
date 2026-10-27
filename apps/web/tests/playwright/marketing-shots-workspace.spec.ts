@@ -19,6 +19,7 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
 import { assertNoOverflow, type AuditResponder, setupAuditRoutes } from './audit-helpers';
+import { ideaUpdate, linkedItems } from './idea-fixtures';
 import {
   dismissOnboarding,
   MARKETING_USER,
@@ -568,77 +569,60 @@ const IDEA = {
   pullRequests: [IDEA_PR],
 };
 
+// Newest first. The capture ends at the Updates heading, so these mostly set its count.
 const IDEA_UPDATES = [
-  {
-    id: 'update-pr',
+  ideaUpdate({
     ideaId: IDEA_ID,
+    id: 'update-pr',
+    createdAt: iso(-40 * 60_000),
     authorKind: 'agent',
-    authorUserId: null,
     authorName: 'Careful Builder',
     sessionId: 'session-payouts-enforce',
     sessionTopic: 'Implement rate limiter enforcement',
     body: 'Opened #214. Merchants over 60 requests a minute now get a 429 with Retry-After; the limit is per tier and the counter is on the payouts dashboard.',
-    quote: null,
-    createdAt: iso(-40 * 60_000),
-    editedAt: null,
-  },
-  {
+  }),
+  ideaUpdate({
+    ideaId: IDEA_ID,
     id: 'update-marcus',
-    ideaId: IDEA_ID,
-    authorKind: 'user',
-    authorUserId: NORTHWIND.members[0].id,
-    authorName: NORTHWIND.members[0].name,
-    sessionId: null,
-    sessionTopic: null,
-    body: 'Enterprise merchants should start at 300 a minute, not 60.',
-    quote: 'Default budget: 60 requests/minute, configurable per merchant tier',
     createdAt: iso(-26 * 3_600_000),
-    editedAt: null,
-  },
-  {
-    id: 'update-design',
+    authorKind: 'user',
+    authorName: NORTHWIND.members[0].name,
+    authorUserId: NORTHWIND.members[0].id,
+    quote: 'Default budget: 60 requests/minute, configurable per merchant tier',
+    body: 'Enterprise merchants should start at 300 a minute, not 60.',
+  }),
+  ideaUpdate({
     ideaId: IDEA_ID,
+    id: 'update-design',
+    createdAt: iso(-2 * 86_400_000),
     authorKind: 'agent',
-    authorUserId: null,
     authorName: 'Brainstormer',
     sessionId: 'session-payouts-design',
     sessionTopic: 'Design the per-merchant token bucket',
     body: 'Compared a token bucket with a sliding window. The bucket tolerates short bursts from batch payouts, so I recommend it. Notes in token-bucket-vs-window.md.',
-    quote: null,
-    createdAt: iso(-2 * 86_400_000),
-    editedAt: null,
-  },
+  }),
 ];
 
 const IDEA_LINKS = {
-  sessions: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
-  files: {
-    items: [
-      {
-        fileId: 'file-token-bucket',
-        filename: 'token-bucket-vs-window.md',
-        directory: '/research/payouts/',
-        relations: ['uploaded'],
-        bySessionId: 'session-payouts-design',
-      },
-    ],
-    total: 1,
-    truncated: false,
-    totalIsLowerBound: false,
-  },
-  pullRequests: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
-  relatedIdeas: {
-    items: [
-      {
-        ideaId: 'idea-merchant-budget',
-        title: 'Show each merchant its remaining payout budget',
-        status: 'draft',
-        relations: ['related'],
-      },
-    ],
-    total: 1,
-    truncated: false,
-  },
+  relatedIdeas: linkedItems([
+    {
+      ideaId: 'idea-merchant-budget',
+      title: 'Show each merchant its remaining payout budget',
+      status: 'draft',
+      relations: ['related'],
+    },
+  ]),
+  files: linkedItems([
+    {
+      fileId: 'file-token-bucket',
+      filename: 'token-bucket-vs-window.md',
+      directory: '/research/payouts/',
+      relations: ['uploaded'],
+      bySessionId: 'session-payouts-design',
+    },
+  ]),
+  sessions: linkedItems([]),
+  pullRequests: linkedItems([]),
 };
 
 function ideaHandler(path: string, respond: AuditResponder): Promise<void> | undefined {
