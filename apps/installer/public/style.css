@@ -575,7 +575,8 @@ label {
   font-size: 12px;
   margin: 16px 0 8px;
 }
-select {
+select,
+#deployment-settings input {
   width: 100%;
   min-width: 0;
   min-height: 44px;
@@ -1087,4 +1088,27 @@ footer a {
     width: 27px;
     height: 27px;
   }
+}
+
+#deployment-settings {
+  border: 0;
+  padding: 0;
+  margin: 22px 0 0;
+  min-width: 0;
+}
+#deployment-settings legend {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+#plan-summary:not(:empty) {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  overflow-wrap: anywhere;
+}
+#plan-summary[data-tone='warning'] {
+  border-color: light-dark(#c68f31, #9b7537);
+  color: light-dark(#795015, #f2ce91);
+  background: light-dark(#fff6e5, #2d2416);
 }

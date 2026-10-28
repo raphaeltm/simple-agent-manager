@@ -5,6 +5,18 @@ description: How SAM handles authentication, encryption, and credential manageme
 
 SAM's security model separates **platform secrets** (managed by operators) from **user credentials** (encrypted per-user in the database).
 
+## Installer preview trust boundaries
+
+The isolated installer has its own origin, Worker, and session storage; it does not share marketing analytics, SAM login sessions, or SAM data bindings. The hosted operator can still replace its code. Source visibility and separation do not make a hosted bootstrap trustless.
+
+Default mode creates a user-owned maintenance service. This preview branch adds a one-use bootstrap claim, browser-generated recovery saved before submission, and independent maintenance sessions (24 hours by default). For maintenance authentication, the user-owned coordinator stores recovery and session hashes rather than credential values. Recovery replacement is prepared, saved, then confirmed, preserving access if a response is lost. The hosted deployment may still run an earlier prototype; check its source revision.
+
+Handoff removes hosted OAuth and deployment-credential copies while retaining the bounded claim record until its original expiry for retry. Access expiry is enforced separately from cleanup; failed provider operations can delay deletion or revocation. No central refresh token is retained. Disconnect does not delete resources already transferred to the user.
+
+Experimental full installation is disabled by default and has not completed authenticated end-to-end validation. Its design separates temporary bootstrap OAuth, user-owned maintenance deployment authority, storage access, and narrower normal SAM runtime authority. Credential values pass through hosted bootstrap before transfer. Continued operation after OAuth revocation must be verified before claiming independence. Updates select an explicit immutable source version; they are not a promise of automatic conflict merging, transactional deployment, or database rollback.
+
+For installer-bound instances, `BOOTSTRAP_OWNER_EMAIL` restricts initial administration to the matching provider-verified email. Other initial identities are denied; an atomic election handles concurrent callbacks. The separate `SETUP_TOKEN` authorizes provider configuration, not user login. Ordinary installations without this optional binding retain their existing first-user policy.
+
 ## Cloud Credential Model (BYOC + Platform Fallback)
 
 SAM supports **Bring-Your-Own-Cloud (BYOC)**: users and self-hosters may store their own Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, or GCP credentials, encrypted per-user in D1. This is the model for self-hosted deployments and BYO-key users.

@@ -12,7 +12,9 @@ export async function cloudflare<T>(
   const response = await fetch(`${API}${path}`, {
     ...init,
     headers: { ...Object.fromEntries(new Headers(init.headers)), Authorization: `Bearer ${token}` },
-    signal: AbortSignal.timeout(30_000),
+    signal: init.signal
+      ? AbortSignal.any([init.signal, AbortSignal.timeout(30_000)])
+      : AbortSignal.timeout(30_000),
   });
   const data = (await response.json()) as { success: boolean; result: T };
   if (!response.ok || !data.success) throw new CloudflareError(response.status);

@@ -1,0 +1,74 @@
+import { cloudflare } from './cloudflare';
+import { digest } from './security';
+
+export interface InstallationConfig {
+  accountId: string;
+  zoneId: string;
+  zoneName: string;
+  baseDomain: string;
+  ownerEmail: string;
+  sourceCommit: string;
+}
+export interface InstallationPlan extends InstallationConfig {
+  fingerprint: string;
+  hostnames: string[];
+  conflicts: { name: string; type: string }[];
+}
+export function validateInstallationConfig(value: unknown): InstallationConfig {
+  if (!value || typeof value !== 'object') throw new Error('Installation settings required');
+  const c = value as InstallationConfig;
+  for (const key of ['accountId', 'zoneId'] as const)
+    if (!/^[a-f0-9]{32}$/.test(c[key])) throw new Error('Invalid account or zone');
+  const domain = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+  if (
+    !domain.test(c.zoneName) ||
+    !domain.test(c.baseDomain) ||
+    !(c.baseDomain === c.zoneName || c.baseDomain.endsWith(`.${c.zoneName}`))
+  )
+    throw new Error('Choose an installation domain inside the selected zone');
+  if (
+    typeof c.ownerEmail !== 'string' ||
+    c.ownerEmail.length > 254 ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.ownerEmail)
+  )
+    throw new Error('Owner email required');
+  if (!/^[a-f0-9]{40}$/.test(c.sourceCommit)) throw new Error('Approve an immutable source commit');
+  return {
+    accountId: c.accountId,
+    zoneId: c.zoneId,
+    zoneName: c.zoneName,
+    baseDomain: c.baseDomain,
+    ownerEmail: c.ownerEmail.trim().toLowerCase(),
+    sourceCommit: c.sourceCommit,
+  };
+}
+export async function previewInstallation(
+  token: string,
+  input: unknown
+): Promise<InstallationPlan> {
+  const c = validateInstallationConfig(input);
+  const zone = await cloudflare<{
+    id: string;
+    name: string;
+    account: { id: string };
+    status: string;
+  }>(token, `/zones/${c.zoneId}`);
+  if (
+    zone.id !== c.zoneId ||
+    zone.name !== c.zoneName ||
+    zone.account.id !== c.accountId ||
+    zone.status !== 'active'
+  )
+    throw new Error('The selected active zone must belong to the authorized account');
+  const hostnames = ['api', 'app', 'preview', '*'].map((name) => `${name}.${c.baseDomain}`);
+  const conflicts: InstallationPlan['conflicts'] = [];
+  // Query each exact hostname instead of silently truncating a large DNS zone.
+  for (const name of hostnames) {
+    const records = await cloudflare<{ name: string; type: string }[]>(
+      token,
+      `/zones/${c.zoneId}/dns_records?name=${encodeURIComponent(name)}&per_page=100`
+    );
+    conflicts.push(...records.map(({ name, type }) => ({ name, type })));
+  }
+  return { ...c, hostnames, conflicts, fingerprint: await digest(JSON.stringify(c)) };
+}

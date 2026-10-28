@@ -15,6 +15,7 @@ export default {
           sourceUrl: env.SOURCE_URL,
           docsUrl: env.DOCS_URL,
           sha: env.BUILD_SHA,
+          fullInstaller: !!env.INSTALL_SOURCE_COMMIT,
         });
       else if (url.pathname === '/health')
         response = json({
@@ -62,7 +63,18 @@ export default {
               : request.method !== 'POST' || request.headers.get('Origin') !== env.APP_ORIGIN)
           )
             return json({ error: 'Forbidden' }, 403);
-          if (!['/callback', '/status', '/install', '/finish', '/handoff'].includes(path))
+          if (
+            ![
+              '/callback',
+              '/status',
+              '/zones',
+            '/preview',
+            '/reconcile-cleanup',
+              '/install',
+              '/finish',
+              '/handoff',
+            ].includes(path)
+          )
             return json({ error: 'Not found' }, 404);
           if (Number(request.headers.get('content-length') || 0) > 4096)
             return json({ error: 'Request too large' }, 413);
@@ -88,7 +100,7 @@ export default {
               status: 303,
               headers: { Location: response.ok ? '/' : '/?error=authorization' },
             });
-          if (path === '/finish' || (path === '/handoff' && response.ok)) {
+          if (path === '/finish') {
             response = new Response(response.body, response);
             response.headers.set('Set-Cookie', sessionCookie(env.APP_ORIGIN, '', 0));
           }
@@ -102,7 +114,9 @@ export default {
     }
     response = new Response(response.body, response);
     response.headers.set('Cache-Control', 'no-store');
-    response.headers.set('Referrer-Policy', 'no-referrer');
+    // HTML form POSTs under no-referrer send Origin:null, defeating exact-origin CSRF checks.
+    // strict-origin preserves the origin while withholding paths and callback queries.
+    response.headers.set('Referrer-Policy', 'strict-origin');
     response.headers.set('X-Content-Type-Options', 'nosniff');
     if (!response.headers.has('Content-Security-Policy'))
       response.headers.set(

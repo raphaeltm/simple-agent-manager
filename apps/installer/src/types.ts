@@ -9,6 +9,10 @@ export interface Env {
   SOURCE_URL: string;
   DOCS_URL: string;
   BUILD_SHA: string;
+  INSTALL_SOURCE_COMMIT?: string;
+  OAUTH_CLEANUP_RESERVE_SECONDS?: string;
+  MIN_PROVISION_SECONDS?: string;
+  PROVISION_TIMEOUT_SECONDS?: string;
 }
 export interface Account {
   id: string;
@@ -21,5 +25,28 @@ export interface Session {
   token?: string;
   tokenExpires?: number;
   accounts?: Account[];
-  job?: { accountId: string; name: string; url?: string; key: string; status: 'pending' | 'ready' };
+  zones?: { id: string; name: string; account: { id: string } }[];
+  plan?: import('./installation-plan').InstallationPlan;
+  credentials?: import('./credentials').InstallationCredentials;
+  credentialTokenIds?: string[];
+  job?: {
+    accountId: string;
+    name: string;
+    url?: string;
+    key: string;
+    status: 'pending' | 'ready';
+    fingerprint?: string;
+    authorityTransferred?: boolean;
+    authorityTransferStarted?: boolean;
+  };
+}
+
+/** Non-secret evidence retained only when cleanup needs a fresh authorized grant. */
+export interface CleanupJournal {
+  accountId: string;
+  installationId: string;
+  bootstrapIdentity: string;
+  tokenIds: string[];
+  authorityTransferStarted: boolean;
+  authorityTransferred: boolean;
 }

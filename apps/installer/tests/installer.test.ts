@@ -14,8 +14,11 @@ function fixture() {
         values.set(key, structuredClone(value));
       }),
       deleteAll: vi.fn(async () => values.clear()),
+      delete: vi.fn(async (key: string) => values.delete(key)),
+      deleteAlarm: vi.fn(async () => {}),
       setAlarm: vi.fn(),
     },
+    id: { toString: () => 'e'.repeat(64) },
     blockConcurrencyWhile: async (fn: () => Promise<unknown>) => fn(),
   } as unknown as DurableObjectState;
   const env = {
@@ -103,6 +106,20 @@ describe('authorization and boundaries', () => {
     expect(sessionCookie(env.APP_ORIGIN, 'x', 900)).toContain('__Host-sam-installer=');
     expect(sessionCookie(env.APP_ORIGIN, 'x', 900)).toContain('HttpOnly');
   });
+  it('never exposes fresh-grant cleanup internals through the public session router', async () => {
+    const { env } = fixture();
+    const response = await worker.fetch(
+      new Request(`${env.APP_ORIGIN}/api/session/cleanup-with-grant`, {
+        method: 'POST',
+        headers: { Origin: env.APP_ORIGIN, Cookie: `__Host-sam-installer=${'d'.repeat(64)}` },
+        body: '{}',
+      }),
+      env
+    );
+    expect(response.status).toBe(404);
+    const page = await worker.fetch(new Request(env.APP_ORIGIN), env);
+    expect(page.headers.get('Referrer-Policy')).toBe('strict-origin');
+  });
   it('refuses an arbitrary unapproved account even with a valid session', async () => {
     const { call, values } = fixture();
     authorized(values);
@@ -123,6 +140,7 @@ describe('provisioning and handoff', () => {
       'fetch',
       vi.fn(async (url: string, init?: RequestInit) => {
         requests.push({ url, init });
+        if (url.endsWith('/settings')) return Response.json({ success: false }, { status: 404 });
         return Response.json({
           success: true,
           result: url.endsWith('/workers/subdomain') ? { subdomain: 'my-account' } : {},
@@ -147,9 +165,9 @@ describe('provisioning and handoff', () => {
     const handoff = await call('/handoff');
     expect(handoff.status).toBe(200);
     expect(await handoff.text()).not.toContain('TOKEN');
-    expect(values.size).toBe(0);
+    expect((values.get('session') as Session).token).toBeUndefined();
     expect(requests.some((r) => r.url.endsWith('/oauth2/revoke'))).toBe(true);
-    expect((await call('/handoff')).status).toBe(401);
+    expect((await call('/handoff')).status).toBe(200);
   });
   it('preserves a stable job when deployment fails and redacts upstream errors', async () => {
     const { call, values } = fixture();
@@ -195,3 +213,237 @@ describe('public router body limits', () => {
     expect(get).not.toHaveBeenCalled();
   });
 });
+
+describe('durable approval and credential transfer journal', () => {
+  it('cannot replace an approved plan once a job has started', async () => {
+    const { call, values } = fixture();
+    authorized(values);
+    const session = values.get('session') as Session;
+    session.job = {
+      accountId,
+      name: 'sam-maintenance-existing',
+      key: 'private',
+      status: 'pending',
+      fingerprint: 'approved',
+    };
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    expect((await call('/preview', { accountId })).status).toBe(409);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it('cleans unused child principals before revoking the parent and clearing the session', async () => {
+    const { call, values } = fixture();
+    authorized(values);
+    const session = values.get('session') as Session;
+    session.job = {
+      accountId,
+      name: 'sam-maintenance-existing',
+      key: 'private',
+      status: 'pending',
+    };
+    session.credentialTokenIds = ['b'.repeat(32), 'c'.repeat(32)];
+    const calls: { url: string; method?: string }[] = [];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string, init?: RequestInit) => {
+        calls.push({ url, method: init?.method });
+        return Response.json({ success: true, result: {} });
+      })
+    );
+    expect((await call('/finish', {})).status).toBe(200);
+    expect(
+      calls.slice(0, 2).every((call) => call.method === 'DELETE' && call.url.includes('/tokens/'))
+    ).toBe(true);
+    expect(calls[2]?.url).toContain('/oauth2/revoke');
+    expect(values.size).toBe(0);
+  });
+  it('retains its cleanup journal and grant when a child deletion cannot be confirmed', async () => {
+    const { call, values } = fixture();
+    authorized(values);
+    const session = values.get('session') as Session;
+    session.job = {
+      accountId,
+      name: 'sam-maintenance-existing',
+      key: 'private',
+      status: 'pending',
+    };
+    session.credentialTokenIds = ['b'.repeat(32)];
+    const fetch = vi.fn(async () => Response.json({ success: false }, { status: 403 }));
+    vi.stubGlobal('fetch', fetch);
+    expect((await call('/finish', {})).status).toBe(502);
+    expect((values.get('session') as Session).credentialTokenIds).toEqual(['b'.repeat(32)]);
+    expect(fetch).toHaveBeenCalledOnce();
+  });
+  it('reconciles an uploaded service before cleanup rather than revoking credentials it now owns', async () => {
+    const { call, values } = fixture();
+    authorized(values);
+    const session = values.get('session') as Session;
+    session.job = {
+      accountId,
+      name: 'sam-maintenance-existing',
+      key: 'private',
+      status: 'pending',
+      authorityTransferStarted: true,
+    };
+    session.credentialTokenIds = ['b'.repeat(32)];
+    const fetch = vi.fn(async (url: string) =>
+      Response.json({
+        success: true,
+        result: url.endsWith('/settings')
+          ? { bindings: [{ name: 'BOOTSTRAP_IDENTITY', text: await digest('private') }] }
+          : {},
+      })
+    );
+    vi.stubGlobal('fetch', fetch);
+    expect((await call('/finish', {})).status).toBe(200);
+    expect(fetch.mock.calls.some(([url]) => url.includes('/tokens/'))).toBe(false);
+  });
+});
+
+describe('bounded bootstrap authority and fresh-grant cleanup', () => {
+  it('reserves cleanup time before token expiry and rejects too-short OAuth grants', async () => {
+    const f = fixture();
+    const start = (await (await f.call('/start')).json()) as { url: string };
+    const state = new URL(start.url).searchParams.get('state');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        url.endsWith('/token')
+          ? Response.json({ access_token: 'short-secret', expires_in: 600 })
+          : new Response('')
+      )
+    );
+    expect((await f.call('/callback', { state, code: 'approved' })).status).toBe(200);
+    const stored = f.values.get('session') as Session;
+    expect(stored.tokenExpires! - stored.expires).toBeGreaterThanOrEqual(180000);
+    expect(f.ctx.storage.setAlarm).toHaveBeenLastCalledWith(stored.expires);
+    const g = fixture();
+    const second = (await (await g.call('/start')).json()) as { url: string };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        url.endsWith('/token')
+          ? Response.json({ access_token: 'short-secret', expires_in: 60 })
+          : new Response('')
+      )
+    );
+    expect(
+      (
+        await g.call('/callback', {
+          state: new URL(second.url).searchParams.get('state'),
+          code: 'approved',
+        })
+      ).status
+    ).toBe(401);
+    expect((g.values.get('session') as Session).token).toBeUndefined();
+  });
+  it('does not start provisioning when remaining authority cannot cover the work window', async () => {
+    const f = fixture();
+    authorized(f.values);
+    const stored = f.values.get('session') as Session;
+    stored.tokenExpires = Date.now() + 90000;
+    const fetch = vi.fn();
+    vi.stubGlobal('fetch', fetch);
+    expect((await f.call('/install', { accountId, confirmed: true })).status).toBe(409);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it('wipes expired secrets, retains only owned cleanup evidence, and accepts a fresh same-account cleanup grant', async () => {
+    const f = fixture();
+    authorized(f.values);
+    const stored = f.values.get('session') as Session;
+    stored.expires = Date.now() - 1;
+    stored.tokenExpires = Date.now() - 1;
+    stored.job = { accountId, name: 'sam-maintenance-old', key: 'claim-secret', status: 'pending' };
+    stored.credentialTokenIds = ['b'.repeat(32)];
+    const fetch = vi.fn(async () => Response.json({ success: true, result: {} }));
+    vi.stubGlobal('fetch', fetch);
+    const expired = await f.call('/status');
+    expect(expired.status).toBe(401);
+    expect(f.values.has('session')).toBe(false);
+    const receipt = (await expired.json()) as { cleanupReceipt: string };
+    expect(receipt.cleanupReceipt).toBe('e'.repeat(64));
+    expect(JSON.stringify([...f.values])).not.toMatch(/TOKEN|claim-secret/);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(
+      (await f.call('/cleanup-with-grant', { accountId: 'c'.repeat(32), token: 'fresh-secret' }))
+        .status
+    ).toBe(403);
+    expect(fetch).not.toHaveBeenCalled();
+    expect((await f.call('/cleanup-with-grant', { accountId, token: 'fresh-secret' })).status).toBe(
+      200
+    );
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch.mock.calls[0][0]).toContain('/tokens/' + 'b'.repeat(32));
+    expect(f.values.size).toBe(0);
+  });
+  it('fresh-grant reconciliation preserves credentials already transferred to the verified Worker', async () => {
+    const f = fixture();
+    authorized(f.values);
+    const stored = f.values.get('session') as Session;
+    stored.expires = Date.now() - 1;
+    stored.tokenExpires = Date.now() - 1;
+    stored.job = {
+      accountId,
+      name: 'sam-maintenance-old',
+      key: 'claim-secret',
+      status: 'pending',
+      authorityTransferStarted: true,
+    };
+    stored.credentialTokenIds = ['b'.repeat(32)];
+    await f.call('/status');
+    const fetch = vi.fn(async () =>
+      Response.json({
+        success: true,
+        result: { bindings: [{ name: 'BOOTSTRAP_IDENTITY', text: await digest('claim-secret') }] },
+      })
+    );
+    vi.stubGlobal('fetch', fetch);
+    const result = await f.call('/cleanup-with-grant', { accountId, token: 'fresh-secret' });
+    expect(await result.json()).toEqual({ ok: true, authorityPreserved: true });
+    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch.mock.calls[0][0]).toContain('/settings');
+  });
+});
+it('fresh-session cleanup requires account authorization before accessing another journal', async () => {
+  const f = fixture();
+  authorized(f.values);
+  const get = vi.fn();
+  f.env.SESSIONS = { idFromString: vi.fn((id) => id), get } as unknown as DurableObjectNamespace;
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () =>
+      Response.json({ success: true, result: [{ id: accountId, name: 'Owned account' }] })
+    )
+  );
+  expect(
+    (await f.call('/reconcile-cleanup', { receipt: 'd'.repeat(64), accountId: 'c'.repeat(32) }))
+      .status
+  ).toBe(403);
+  expect(get).not.toHaveBeenCalled();
+});
+it.each([false, true])(
+  'fresh-grant cleanup revokes a distinct old grant only (same=%s)',
+  async (same) => {
+    const f = fixture();
+    authorized(f.values);
+    f.values.set('cleanupJournal', {
+      accountId,
+      installationId: 'sam-maintenance-old',
+      bootstrapIdentity: await digest('old-claim'),
+      tokenIds: [],
+      authorityTransferStarted: false,
+      authorityTransferred: false,
+    });
+    const fetch = vi.fn(async () => new Response(''));
+    vi.stubGlobal('fetch', fetch);
+    expect(
+      (await f.call('/cleanup-with-grant', { accountId, token: same ? 'TOKEN' : 'FRESH' })).status
+    ).toBe(200);
+    expect(fetch).toHaveBeenCalledTimes(same ? 0 : 1);
+    if (!same) {
+      expect(fetch.mock.calls[0][0]).toContain('/oauth2/revoke');
+      expect(String(fetch.mock.calls[0][1]?.body)).toBe('token=TOKEN');
+    }
+    expect(f.values.has('session')).toBe(false);
+  }
+);

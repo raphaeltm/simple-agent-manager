@@ -7,11 +7,11 @@
     "dev": "node scripts/build-scene.mjs && wrangler dev",
     "build": "node scripts/build-scene.mjs && wrangler deploy --dry-run --outdir dist",
     "deploy": "node scripts/build-scene.mjs && node scripts/deploy.mjs",
-    "typecheck": "tsc --noEmit",
-    "lint": "eslint src tests",
-    "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
-    "test:browser": "tsx tests/browser-audit.ts"
+    "typecheck": "node scripts/build-scene.mjs && tsc --noEmit",
+    "lint": "node scripts/build-scene.mjs && eslint src tests",
+    "test": "node scripts/build-scene.mjs && vitest run",
+    "test:coverage": "node scripts/build-scene.mjs && vitest run --coverage",
+    "test:browser": "node scripts/build-scene.mjs && tsx tests/browser-audit.ts"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",
