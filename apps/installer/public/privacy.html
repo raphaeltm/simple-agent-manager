@@ -139,6 +139,14 @@
           identities and backups before removing a test installation; automatic uninstall is not
           provided.
         </p>
+        <p>
+          Experimental full-mode builders preserve approved SAM source and Git history, build
+          artifacts and deployment checkpoints in your account's R2 storage. Saved source is
+          verified against its commit, tree and content digest before reuse. Toolchain and
+          dependency downloads can still require network access. The approved code and its build
+          dependencies are trusted deployment code running with your installation's authority;
+          nested build containers are not a security boundary against malicious build scripts.
+        </p>
         <h2>Your choice</h2>
         <p>
           You can deploy this same installer yourself and register your own OAuth client. Source

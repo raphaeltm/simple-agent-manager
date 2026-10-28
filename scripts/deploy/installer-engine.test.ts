@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   type EngineCheckpoint,
+  EngineCommandFailure,
   engineFingerprint,
   type EngineRunner,
   type InstallerEngineConfig,
@@ -20,8 +21,12 @@ import {
 } from './installer-engine-ci.js';
 import { verifyInstallationAgentIdentity } from './installer-engine-runtime.js';
 
+// @ts-expect-error Shared runtime identity helper is JavaScript without declarations.
+import { runtimeAgentAssociation } from './installer-runtime-identity.mjs';
+
 const config: InstallerEngineConfig = {
   ownerEmail: 'owner@example.org',
+  workersDev: { action: 'preserve', subdomain: 'install-test' },
   schemaVersion: 1,
   sourceCommit: 'a'.repeat(40),
   accountId: 'b'.repeat(32),
@@ -56,19 +61,17 @@ function stageRuntimeIdentity(
     installerSHA256 = archiveSHA256;
   const baseRelease = 'd'.repeat(40),
     buildDate = '2026-10-28T00:00:00Z';
-  const release = createHash('sha1')
-    .update(
-      JSON.stringify({
-        format: 'sam-installation-agent-v1',
-        baseRelease,
-        inputs,
-        archive: archiveSHA256,
-        bytes: artifact.length,
-        catalog: catalogSHA256,
-        installer: installerSHA256,
-      })
-    )
-    .digest('hex');
+  const { release } = runtimeAgentAssociation(
+    baseRelease,
+    buildDate,
+    {
+      archiveSHA256,
+      archiveBytes: artifact.length,
+      catalogSHA256,
+      installerSHA256,
+    },
+    inputs
+  );
   for (const [file, content] of [
     ['packages/vm-agent/internal/acp/codex_runtime_installer.sh', 'local build'],
     ['packages/vm-agent/internal/acp/codex_runtime_distribution.go', archiveSHA256],
@@ -121,8 +124,7 @@ function fixture(failOn?: string) {
   const runner: EngineRunner = {
     async run(command, options) {
       commands.push({ ...command, cwd: options.cwd, env: structuredClone(options.env) });
-      if (command.args.includes(failOn ?? '__never__'))
-        throw new Error('secret-deploy secret-state private stderr');
+      if (command.args.includes(failOn ?? '__never__')) throw new EngineCommandFailure(23, null);
       if (command.args[0] === 'build-local-codex') {
         stageRuntimeIdentity(root);
         for (const file of ['codex-runtime-linux-amd64.tar.gz', 'install-codex-runtime.sh'])
@@ -142,6 +144,36 @@ function fixture(failOn?: string) {
     async request(url) {
       if (url.endsWith('/workers/subdomain'))
         return Response.json({ result: { subdomain: config.prefix } });
+      if (url.endsWith('/deployments'))
+        return Response.json({
+          success: true,
+          result: { deployments: [{ versions: [{ version_id: 'v1', percentage: 100 }] }] },
+        });
+      if (url.endsWith('/versions/v1'))
+        return Response.json({
+          success: true,
+          result: { annotations: { 'workers/tag': config.sourceCommit } },
+        });
+      if (url.endsWith('/pages/projects/web-project'))
+        return Response.json({
+          success: true,
+          result: {
+            canonical_deployment: {
+              deployment_trigger: { metadata: { commit_hash: config.sourceCommit } },
+              latest_stage: { name: 'deploy', status: 'success' },
+            },
+          },
+        });
+      if (url.endsWith('/assets/app.js'))
+        return new Response('application', {
+          headers: { 'content-type': 'application/javascript' },
+        });
+      if (url.startsWith(`https://app.${config.baseDomain}`))
+        return new Response('<div id="root"></div><script src="/assets/app.js"></script>', {
+          headers: { 'content-type': 'text/html' },
+        });
+      if (url.endsWith('/api/setup/status'))
+        return Response.json({ open: true, tokenConfigured: true });
       if (url.endsWith('/health')) return Response.json({ status: 'healthy' });
       return Response.json({ result: {} });
     },
@@ -222,6 +254,13 @@ describe('installation engine', () => {
         },
       })
     ).rejects.toThrow('phase migrations failed');
+    expect(events).toContainEqual({
+      phase: 'migrations',
+      status: 'failed',
+      operation: 'pnpm',
+      exitCode: 23,
+      signal: null,
+    });
     expect(checkpoint?.status).toBe('failed');
     expect(checkpoint?.activePhase).toBe('migrations');
     expect(f.commands.some((entry) => entry.args.includes('deploy'))).toBe(false);
@@ -356,6 +395,16 @@ describe('installation engine', () => {
         workflow.jobs.deploy.steps.find((step) => step.name === entry.name)?.env
       );
     }
+  });
+
+  it('preserves the legacy shared state bucket when CI has no override', () => {
+    const invocation = legacyCiInvocation(process.cwd(), {
+      sourceCommit: config.sourceCommit,
+      environment: 'staging',
+      variables: { BASE_DOMAIN: config.baseDomain, RESOURCE_PREFIX: 'sam' },
+      secrets: { CF_ACCOUNT_ID: config.accountId, CF_ZONE_ID: config.zoneId },
+    });
+    expect(invocation.config.stateBucket).toBe('sam-pulumi-state');
   });
 
   it('maps the complete current CI Worker/VITE/secrets environment without weakening installer credentials', () => {
@@ -495,11 +544,31 @@ describe('installation engine', () => {
       url.endsWith('/workers/subdomain')
         ? Response.json({ result: { subdomain: 'existing-account' } })
         : originalRequest(url);
-    await runInstallerEngine(config, { ...f, environment: privateEnv, emit() {}, save() {} });
+    await runInstallerEngine(
+      { ...config, workersDev: { action: 'preserve', subdomain: 'existing-account' } },
+      { ...f, environment: privateEnv, emit() {}, save() {} }
+    );
     expect(
       f.commands.some(
         (entry) => entry.args.join(' ') === 'config set workersDevSubdomain existing-account'
       )
     ).toBe(true);
+  });
+  it('rejects a missing or changed approved address without silently initializing it', async () => {
+    for (const subdomain of ['', 'different']) {
+      const f = fixture();
+      const calls: RequestInit[] = [];
+      const original = f.runner.request;
+      f.runner.request = async (url, init) => {
+        calls.push(init || {});
+        return url.endsWith('/workers/subdomain')
+          ? Response.json({ result: { subdomain } })
+          : original(url, init);
+      };
+      await expect(
+        runInstallerEngine(config, { ...f, environment: privateEnv, emit() {}, save() {} })
+      ).rejects.toThrow('state-backend');
+      expect(calls.some((init) => init.method === 'PUT')).toBe(false);
+    }
   });
 });

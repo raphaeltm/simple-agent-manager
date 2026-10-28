@@ -7,6 +7,7 @@ test('approved source chooses only fixed source-build commands and owner config'
     {
       sourceCommit: approved,
       ownerEmail: 'owner@example.com',
+      workersDev: { action: 'preserve', subdomain: 'approved-account' },
       accountId: 'b'.repeat(32),
       zoneId: 'c'.repeat(32),
       zoneName: 'example.com',
@@ -22,6 +23,7 @@ test('approved source chooses only fixed source-build commands and owner config'
   assert.equal(config.codexBuild.executable, 'bash');
   assert.deepEqual(config.codexBuild.args, ['scripts/deploy/installer-builder-bootstrap-codex.sh']);
   assert.equal(config.ownerEmail, 'owner@example.com');
+  assert.deepEqual(config.workersDev, { action: 'preserve', subdomain: 'approved-account' });
   assert.equal(config.cloudflareApiUrl, undefined);
   assert.equal(config.secrets, undefined);
   assert.throws(() => builderEngineConfig({ sourceCommit: 'main' }, approved), /approval mismatch/);
@@ -97,4 +99,14 @@ test('pinned Wrangler passes host networking to its actual Docker build command'
     if (old === undefined) delete process.env.WRANGLER_CI_OVERRIDE_NETWORK_MODE_HOST;
     else process.env.WRANGLER_CI_OVERRIDE_NETWORK_MODE_HOST = old;
   }
+});
+
+test('engine launcher uses the running Node and repository-local tsx without PATH resolution', async () => {
+  const source = readFileSync(
+    new URL('./installer-builder-bootstrap-engine.mjs', import.meta.url),
+    'utf8'
+  );
+  assert.ok(source.includes('process.execPath'));
+  assert.ok(source.includes("new URL('../../node_modules/tsx/dist/cli.mjs', import.meta.url)"));
+  assert.ok(!source.includes("spawn(\n    'pnpm'"));
 });

@@ -1,6 +1,9 @@
+import { sourcePolicyFactory } from './source-policy';
+
 // Appended to the dependency-free owner-account module. All entrypoints are
 // reached only after MaintenanceCoordinator's owner/session and origin checks.
 export const maintenanceJobsSource = String.raw`
+const maintenanceSourcePolicy=${sourcePolicyFactory};
 async function maintenanceBuilder(service,path,body){
  const stub=service.env.BUILDER.get(service.env.BUILDER.idFromName('installation'));
  const response=await stub.fetch(new Request('https://builder'+path,{method:body?'POST':'GET',headers:{Authorization:'Bearer '+service.env.BUILDER_CONTROL_SECRET,'Content-Type':'application/json'},body:body?JSON.stringify(body):undefined}));
@@ -77,6 +80,8 @@ async function maintenanceJobAction(service,path,body){
   const response=await fetch('https://api.github.com/repos/raphaeltm/simple-agent-manager/commits/'+encodeURIComponent(release.tag_name),{headers,signal:AbortSignal.timeout(10000)});
   if(!response.ok)throw new Error('Release source unavailable');const commit=await response.json();if(!/^[a-f0-9]{40}$/.test(commit.sha))throw new Error('Invalid release source');
   if(commit.sha===manifest.lastSuccessfulCommit)return page('<h1>You are up to date</h1><p><a href="/">Return to maintenance</a></p>');
+  const verified=await maintenanceSourcePolicy.verify(commit.sha,manifest.lastSuccessfulCommit);
+  if(!verified.ok)return page('<h1>Update unavailable</h1><p>'+(verified.reason==='not-forward'?'This release is older than or diverges from your installed source. Your installation is unchanged.':verified.reason==='unsupported-source'?'This release does not support this installer protocol. Your installation is unchanged.':'Source compatibility could not be checked. Retry later; your installation is unchanged.')+'</p><p><a href="/">Return to maintenance</a></p>',verified.reason==='source-unavailable'?502:409);
   const approval=random();manifest.pendingUpdate={sourceCommit:commit.sha,approvalHash:await hash(approval),expires:Date.now()+900000};await service.state.storage.put('installation',manifest);
   return page('<h1>Review your update</h1><p>Release '+escape(release.tag_name)+'<code>'+escape(commit.sha)+'</code> will be built in your account. Databases pass the same migration safety checks. This is a code update, not a database rollback.</p><form method="post" action="/update"><input type="hidden" name="approval" value="'+approval+'"><button>Approve and deploy this version</button></form><p><a href="/">Keep current version</a></p>');
  }
@@ -86,6 +91,8 @@ async function maintenanceJobAction(service,path,body){
   if(path==='/deploy'&&(body.get('confirmed')!=='yes'||manifest.lastSuccessfulCommit))return page('<h1>Confirm the first installation</h1>',409);
   if(path==='/update'){
    const pending=manifest.pendingUpdate;if(!pending||pending.expires<=Date.now()||await hash(body.get('approval')||'')!==pending.approvalHash||manifest.sourceMode!=='upstream'||manifest.customSource)return page('<h1>Review the update again</h1>',409);
+   const verified=await maintenanceSourcePolicy.verify(pending.sourceCommit,manifest.lastSuccessfulCommit);
+   if(!verified.ok)return page('<h1>Update validation failed</h1><p>The release must be newer than your installation and support this installer protocol. Retry when source verification is available. Your approval and installation are unchanged.</p>',verified.reason==='source-unavailable'?502:409);
    source=pending.sourceCommit;delete manifest.pendingUpdate;
   }
   const prefix='s'+(await hash(manifest.config.baseDomain)).slice(0,6),jobId=random().slice(0,32);

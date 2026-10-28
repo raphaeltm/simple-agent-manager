@@ -23,7 +23,7 @@ export const runtimeInputPaths = [
 export function runtimeInputIdentity(repo, commit) {
   if (!/^[a-f0-9]{40}$/.test(commit)) throw new Error('Immutable source required');
   const objects = runtimeInputPaths.map((path) => {
-    const object = execFileSync('git', ['rev-parse', `${commit}:${path}`], {
+    const object = execFileSync('/usr/bin/git', ['rev-parse', `${commit}:${path}`], {
       cwd: repo,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
@@ -49,7 +49,7 @@ export function runtimeAgentAssociation(baseRelease, buildDate, trust, inputs) {
     throw new Error('Invalid runtime/agent association');
   // Installer bytes are embedded in Go too. Including their exact digest covers
   // pinned predecessors, not just the selected executable's catalog.
-  const release = createHash('sha1')
+  const release = createHash('sha256')
     .update(
       JSON.stringify({
         format: 'sam-installation-agent-v1',
@@ -61,7 +61,8 @@ export function runtimeAgentAssociation(baseRelease, buildDate, trust, inputs) {
         installer: trust.installerSHA256,
       })
     )
-    .digest('hex');
+    .digest('hex')
+    .slice(0, 40);
   return {
     schemaVersion: 1,
     baseRelease,
@@ -77,10 +78,14 @@ export function runtimeAgentAssociation(baseRelease, buildDate, trust, inputs) {
 export function writeRuntimeAssociation(repo, commit, artifacts, output) {
   const inputs = runtimeInputIdentity(repo, commit);
   const trust = JSON.parse(readFileSync(join(artifacts, 'installation-codex-trust.json'), 'utf8'));
-  const resolved = execFileSync('bash', ['scripts/deploy/resolve-vm-agent-release.sh', commit], {
-    cwd: repo,
-    encoding: 'utf8',
-  });
+  const resolved = execFileSync(
+    '/usr/bin/bash',
+    ['scripts/deploy/resolve-vm-agent-release.sh', commit],
+    {
+      cwd: repo,
+      encoding: 'utf8',
+    }
+  );
   const base = /^release=([a-f0-9]{40})$/m.exec(resolved)?.[1];
   const date = /^build_date=(.+)$/m.exec(resolved)?.[1];
   const association = {

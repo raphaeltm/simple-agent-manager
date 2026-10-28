@@ -12,6 +12,9 @@ import {
   validateEngineConfig,
 } from './installer-engine-contract.js';
 
+// @ts-expect-error Shared workflow naming resolver is JavaScript without declarations.
+import { resolveResourceNames } from './workflow-resource-names.mjs';
+
 interface WorkflowStep {
   name?: string;
   env?: Record<string, string>;
@@ -79,7 +82,8 @@ export function resolveLegacyCiEnvironment(
   if (
     !initial ||
     !repeat ||
-    JSON.stringify(Object.entries(initial).sort()) !== JSON.stringify(Object.entries(repeat).sort())
+    JSON.stringify(Object.entries(initial).sort(([a], [b]) => a.localeCompare(b))) !==
+      JSON.stringify(Object.entries(repeat).sort(([a], [b]) => a.localeCompare(b)))
   ) {
     throw new Error('CI Wrangler environment mappings diverged');
   }
@@ -128,6 +132,10 @@ export function legacyCiInvocation(
     )
       throw new Error('Invalid CI environment inputs');
   }
+  const names = resolveResourceNames(
+    { ...input.variables, DEPLOY_ENVIRONMENT: input.environment },
+    'deploy'
+  );
   const config = validateEngineConfig({
     schemaVersion: 1,
     profile: 'legacy-ci',
@@ -137,8 +145,8 @@ export function legacyCiInvocation(
     baseDomain: input.variables.BASE_DOMAIN,
     zoneName: input.variables.CF_ZONE_NAME || input.variables.BASE_DOMAIN,
     environment: input.environment,
-    prefix: input.variables.RESOURCE_PREFIX || undefined,
-    stateBucket: input.variables.PULUMI_STATE_BUCKET || undefined,
+    prefix: names.prefix,
+    stateBucket: names.pulumi_state_bucket,
     dryRun: input.dryRun ?? false,
     skipAgent: input.skipAgent ?? false,
     codexBuild: {

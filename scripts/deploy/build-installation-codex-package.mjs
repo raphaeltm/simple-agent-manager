@@ -181,10 +181,30 @@ export function packageRuntime(review, output, repo, previous) {
       .join('');
     writeFileSync(join(work, 'catalog', `${identity}.notices.sha256`), noticeManifest);
     // Explicit modes remove dependence on the builder's umask.
-    execFileSync('find', [work, '-type', 'd', '-exec', 'chmod', '755', '--', '{}', '+']);
-    execFileSync('find', [work, '-type', 'f', '-exec', 'chmod', 'a+r,go-w', '--', '{}', '+']);
+    execFileSync('/usr/bin/find', [
+      work,
+      '-type',
+      'd',
+      '-exec',
+      '/usr/bin/chmod',
+      '755',
+      '--',
+      '{}',
+      '+',
+    ]);
+    execFileSync('/usr/bin/find', [
+      work,
+      '-type',
+      'f',
+      '-exec',
+      '/usr/bin/chmod',
+      'a+r,go-w',
+      '--',
+      '{}',
+      '+',
+    ]);
     const tar = join(output, 'runtime.tar');
-    execFileSync('tar', [
+    execFileSync('/usr/bin/tar', [
       '--sort=name',
       '--format=gnu',
       '--mtime=@0',
@@ -197,7 +217,7 @@ export function packageRuntime(review, output, repo, previous) {
       work,
       '.',
     ]);
-    execFileSync('gzip', ['-n', tar]);
+    execFileSync('/usr/bin/gzip', ['-n', tar]);
     const archiveBytes = readFileSync(`${tar}.gz`);
     writeFileSync(archive, archiveBytes, { flag: 'wx', mode: 0o644 });
     rmSync(`${tar}.gz`);

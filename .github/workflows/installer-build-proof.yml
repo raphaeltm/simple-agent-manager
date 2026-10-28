@@ -39,7 +39,7 @@ jobs:
         with:
           node-version: '22'
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --ignore-scripts
       - name: One credential-free in-account cold build with durable deadline and cleanup
         run: pnpm exec tsx scripts/deploy/installer-builder-proof.ts
         env:

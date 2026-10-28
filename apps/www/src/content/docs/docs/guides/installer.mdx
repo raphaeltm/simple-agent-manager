@@ -61,11 +61,13 @@ If initial client creation succeeds but saving its secret fails, rotate the secr
 
 ### Experimental installation support
 
-The branch also contains source-pinned build, deployment, and explicit update orchestration in the user's account. This is not an enabled or verified public installation path yet. The standard deployment command above keeps bootstrap-only mode. Full mode needs broader OAuth permissions, separate installation-owned credentials, paid-service prerequisites, and successful live validation of bootstrap revocation and a complete in-account build. No working enablement recipe is provided until those checks pass.
+The branch also contains source-pinned build, deployment, and explicit update orchestration in the user's account. This is not an enabled or verified public installation path yet. Fresh deployments start in bootstrap mode; normal redeployment preserves the existing mode and consent scopes. Full mode needs broader OAuth permissions, separate installation-owned credentials, paid-service prerequisites, and successful live validation of bootstrap revocation and a complete in-account build. No working enablement recipe is provided until those checks pass.
 
 A full installation can be deployed before configuring GitHub. Initial SAM setup uses `SETUP_TOKEN` to configure a supported login provider; the intended administrator must then sign in with the configured provider-verified owner email. Recovery access to the maintenance service remains separate from SAM login.
 
 Update review selects an immutable release commit; it is not a preview of every infrastructure mutation. Code rollback is not database rollback. Automatic conflict merging, automatic uninstall, and verified recovery from every failure are not promised.
+
+Experimental full-mode source preservation stores the approved SAM checkout and full Git history in the installation's R2 storage, with an immutable commit/tree/content-digest manifest. Same-source recovery verifies and restores those saved bytes; toolchain and dependency downloads can still require network access. Updates must be ahead of the installed source and implement the supported installer protocol before approval or paid build admission. These paths remain unverified end to end.
 
 ### Remove a test deployment
 

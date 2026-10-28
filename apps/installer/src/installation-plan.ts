@@ -32,12 +32,7 @@ export function validateInstallationConfig(value: unknown): InstallationConfig {
     !(c.baseDomain === c.zoneName || c.baseDomain.endsWith(`.${c.zoneName}`))
   )
     throw new Error('Choose an installation domain inside the selected zone');
-  if (
-    typeof c.ownerEmail !== 'string' ||
-    c.ownerEmail.length > 254 ||
-    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(c.ownerEmail)
-  )
-    throw new Error('Owner email required');
+  if (!isValidOwnerEmail(c.ownerEmail)) throw new Error('Owner email required');
   if (!/^[a-f0-9]{40}$/.test(c.sourceCommit)) throw new Error('Approve an immutable source commit');
   return {
     accountId: c.accountId,
@@ -87,13 +82,17 @@ export async function previewInstallation(
   const hostnames = ['api', 'app', 'preview', '*'].map((name) => `${name}.${c.baseDomain}`);
   const conflicts: InstallationPlan['conflicts'] = [];
   // Query each exact hostname instead of silently truncating a large DNS zone.
-  for (const name of hostnames) {
-    const records = await cloudflare<{ name: string; type: string }[]>(
-      token,
-      `/zones/${c.zoneId}/dns_records?name=${encodeURIComponent(name)}&per_page=100`
-    );
+  const recordSets = await Promise.all(
+    hostnames.map((name) =>
+      cloudflare<{ name: string; type: string }[]>(
+        token,
+        `/zones/${c.zoneId}/dns_records?name=${encodeURIComponent(name)}&per_page=100`
+      )
+    )
+  );
+  for (const records of recordSets)
     conflicts.push(...records.map(({ name, type }) => ({ name, type })));
-  }
+
   // Fingerprint the approved target, not its observed existence: an interrupted
   // creation may have committed before retry, and that same target is idempotent.
   return {
@@ -103,4 +102,20 @@ export async function previewInstallation(
     conflicts,
     fingerprint: await digest(JSON.stringify({ ...c, workersDevSubdomain: workersDev.subdomain })),
   };
+}
+
+/** Bounded linear syntax check, retaining the existing permissive email contract. */
+export function isValidOwnerEmail(value: unknown): value is string {
+  if (typeof value !== 'string' || value.length > 254) return false;
+  let at = -1;
+  for (let index = 0; index < value.length; index++) {
+    const character = value.charAt(index);
+    if (/\s/.test(character)) return false;
+    if (character === '@') {
+      if (at !== -1) return false;
+      at = index;
+    }
+  }
+  const dot = value.indexOf('.', at + 2);
+  return at > 0 && dot > at + 1 && dot < value.length - 1;
 }

@@ -198,63 +198,33 @@ export async function createInstallationCredentials(
     journal.delete(id);
     await persist();
   };
-  const reconcile = async (plan: TokenPlan) => {
-    const matches: string[] = [];
-    for (let page = 1; page <= maxPages; page++) {
-      const tokens = await cloudflare<AccountToken[]>(
-        bootstrapToken,
-        `${base}?page=${page}&per_page=${TOKEN_PAGE_SIZE}`,
-        { signal: options.signal }
-      );
-      if (!Array.isArray(tokens)) throw new Error('Invalid account-token listing');
-      for (const token of tokens) {
-        if (token.name !== plan.name) continue;
-        if (
-          !validId(token.id) ||
-          !token.policies ||
-          canonicalPolicies(token.policies) !== canonicalPolicies(plan.policies)
-        )
-          throw new Error('Existing principal does not match installation policy');
-        await remember(token.id);
-        matches.push(token.id);
-      }
-      if (tokens.length < TOKEN_PAGE_SIZE) {
-        // Never mutate a paginated collection while still scanning its pages.
-        for (const id of matches) await remove(id);
-        return;
-      }
-    }
-    throw new Error('Account-token reconciliation exceeded bounded listing');
-  };
+  const reconcile = (plan: TokenPlan) =>
+    reconcilePrincipal({
+      bootstrapToken,
+      base,
+      plan,
+      maxPages,
+      signal: options.signal,
+      remember,
+      remove,
+    });
   const created: Required<Pick<AccountToken, 'id' | 'value'>>[] = [];
   try {
-    for (const plan of plans) {
+    await plans.reduce(async (previous, plan) => {
+      await previous;
       await reconcile(plan);
-      let result: AccountToken | undefined;
-      for (let attempt = 0; attempt < attempts; attempt++) {
-        try {
-          result = await cloudflare<AccountToken>(bootstrapToken, base, {
-            method: 'POST',
-            signal: options.signal,
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(plan),
-          });
-        } catch {
-          // POST may have committed before timeout. Reconcile only this exact
-          // installation principal before attempting another creation.
-          await reconcile(plan);
-          if (attempt + 1 === attempts) throw new Error('Account-token creation did not complete');
-          continue;
-        }
-        if (validId(result?.id)) await remember(result.id);
-        if (!validId(result?.id) || typeof result.value !== 'string' || !result.value) {
-          await reconcile(plan);
-          throw new Error('Invalid account-token response');
-        }
-        created.push({ id: result.id, value: result.value });
-        break;
-      }
-    }
+      created.push(
+        await createPrincipal(
+          bootstrapToken,
+          base,
+          plan,
+          attempts,
+          options.signal,
+          reconcile,
+          remember
+        )
+      );
+    }, Promise.resolve());
     const [deployment, runtime, storage] = created;
     if (!deployment || !runtime || !storage) throw new Error('Incomplete installation credentials');
     return {
@@ -277,9 +247,81 @@ export async function createInstallationCredentials(
     );
     // Known IDs are installation-owned. Keep failures in the durable journal so
     // expiration/cancel can retry cleanup rather than dropping live authority.
-    for (const id of [...journal]) await remove(id, true).catch(() => undefined);
+    await [...journal].reduce(
+      (previous, id) => previous.then(() => remove(id, true).catch(() => undefined)),
+      Promise.resolve()
+    );
     throw new Error(
       'Could not provision installation credentials; inspect the persisted token journal and required permissions'
     );
   }
+}
+
+interface ReconcilePrincipalOptions {
+  bootstrapToken: string;
+  base: string;
+  plan: TokenPlan;
+  maxPages: number;
+  signal?: AbortSignal;
+  remember(id: string): Promise<void>;
+  remove(id: string): Promise<void>;
+}
+async function reconcilePrincipal(options: ReconcilePrincipalOptions): Promise<void> {
+  const { bootstrapToken, base, plan, maxPages, signal, remember, remove } = options;
+  const matches: string[] = [];
+  async function scan(page: number): Promise<void> {
+    if (page > maxPages) throw new Error('Account-token reconciliation exceeded bounded listing');
+    const tokens = await cloudflare<AccountToken[]>(
+      bootstrapToken,
+      `${base}?page=${page}&per_page=${TOKEN_PAGE_SIZE}`,
+      { signal }
+    );
+    if (!Array.isArray(tokens)) throw new Error('Invalid account-token listing');
+    const owned = tokens.filter((token) => token.name === plan.name);
+    await owned.reduce(async (previous, token) => {
+      await previous;
+      if (
+        !validId(token.id) ||
+        !token.policies ||
+        canonicalPolicies(token.policies) !== canonicalPolicies(plan.policies)
+      )
+        throw new Error('Existing principal does not match installation policy');
+      await remember(token.id);
+      matches.push(token.id);
+    }, Promise.resolve());
+    if (tokens.length >= TOKEN_PAGE_SIZE) return scan(page + 1);
+    // Finish listing before deleting: mutation would otherwise shift pagination.
+    await matches.reduce((previous, id) => previous.then(() => remove(id)), Promise.resolve());
+  }
+  await scan(1);
+}
+async function createPrincipal(
+  bootstrapToken: string,
+  base: string,
+  plan: TokenPlan,
+  attempts: number,
+  signal: AbortSignal | undefined,
+  reconcile: (plan: TokenPlan) => Promise<void>,
+  remember: (id: string) => Promise<void>
+): Promise<Required<Pick<AccountToken, 'id' | 'value'>>> {
+  let result: AccountToken;
+  try {
+    result = await cloudflare<AccountToken>(bootstrapToken, base, {
+      method: 'POST',
+      signal,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(plan),
+    });
+  } catch {
+    // A timed-out POST may have committed. Reconcile the exact owned principal.
+    await reconcile(plan);
+    if (attempts === 1) throw new Error('Account-token creation did not complete');
+    return createPrincipal(bootstrapToken, base, plan, attempts - 1, signal, reconcile, remember);
+  }
+  if (validId(result?.id)) await remember(result.id);
+  if (!validId(result?.id) || typeof result.value !== 'string' || !result.value) {
+    await reconcile(plan);
+    throw new Error('Invalid account-token response');
+  }
+  return { id: result.id, value: result.value };
 }

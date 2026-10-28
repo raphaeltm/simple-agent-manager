@@ -3,6 +3,7 @@ import {
   PROOF_COMPUTE_UPPER_USD,
   proofWorkerSource,
   ownsProofWorker,
+  runProofWithCleanup,
 } from './installer-builder-proof';
 
 describe('bounded cold build proof', () => {
@@ -96,4 +97,39 @@ it('cleanup requires this proof ownership marker and exact source', () => {
   expect(ownsProofWorker(settings, 'c'.repeat(64), commit)).toBe(false);
   expect(ownsProofWorker(settings, ownership, 'd'.repeat(40))).toBe(false);
   expect(ownsProofWorker({ bindings: [] }, ownership, commit)).toBe(false);
+});
+
+describe('proof failure cleanup', () => {
+  it('preserves the original failure while still attempting cleanup', async () => {
+    const original = new Error('original');
+    const cleanup = vi.fn(async () => new Error('cleanup'));
+    await expect(
+      runProofWithCleanup(async () => {
+        throw original;
+      }, cleanup)
+    ).rejects.toBe(original);
+    expect(cleanup).toHaveBeenCalledOnce();
+  });
+  it('fails a successful proof when cleanup remains incomplete', async () => {
+    const cleanup = new Error('cleanup');
+    await expect(
+      runProofWithCleanup(
+        async () => {},
+        async () => cleanup
+      )
+    ).rejects.toBe(cleanup);
+  });
+  it('preserves original failure when cleanup unexpectedly throws', async () => {
+    const original = new Error('original');
+    await expect(
+      runProofWithCleanup(
+        async () => {
+          throw original;
+        },
+        async () => {
+          throw new Error('cleanup');
+        }
+      )
+    ).rejects.toBe(original);
+  });
 });

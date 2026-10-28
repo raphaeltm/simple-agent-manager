@@ -37,6 +37,7 @@ export type InstallerEngineConfig = EngineConfigBase &
     | {
         profile?: 'installation';
         ownerEmail: string;
+        workersDev: { action: 'create' | 'preserve'; subdomain: string };
         dryRun?: never;
         skipAgent?: never;
         stateBucket?: never;
@@ -52,6 +53,9 @@ export type InstallerEngineConfig = EngineConfigBase &
 export interface EngineEvent {
   phase: string;
   status: 'started' | 'completed' | 'failed';
+  operation?: string;
+  exitCode?: number | null;
+  signal?: string | null;
 }
 export interface EngineCheckpoint {
   schemaVersion: 1;
@@ -95,10 +99,17 @@ export const DEFAULT_HEALTH_INTERVAL_MS = 10_000;
 export const DEFAULT_CLOUDFLARE_API_URL = 'https://api.cloudflare.com/client/v4';
 const MAX_CAPTURE_BYTES = 8 * 1024 * 1024;
 
-export function validateEngineConfig(input: unknown): InstallerEngineConfig {
-  if (!input || typeof input !== 'object')
-    throw new Error('Installation configuration is required');
-  const c = input as InstallerEngineConfig;
+function validateLegacyCiSettings(c: InstallerEngineConfig): void {
+  if (
+    c.profile === 'legacy-ci' &&
+    (c.ownerEmail !== undefined ||
+      (c.dryRun !== undefined && typeof c.dryRun !== 'boolean') ||
+      (c.skipAgent !== undefined && typeof c.skipAgent !== 'boolean'))
+  )
+    throw new Error('Invalid legacy CI settings');
+}
+
+function validateRunnerProfile(c: InstallerEngineConfig): void {
   if (c.profile !== undefined && c.profile !== 'installation' && c.profile !== 'legacy-ci')
     throw new Error('Unsupported runner profile');
   if (
@@ -110,30 +121,17 @@ export function validateEngineConfig(input: unknown): InstallerEngineConfig {
     throw new Error('Approved ownerEmail is required');
   if (c.profile !== 'legacy-ci' && ('dryRun' in c || 'skipAgent' in c || 'stateBucket' in c))
     throw new Error('Legacy CI options cannot change installation safety');
+  validateLegacyCiSettings(c);
   if (
-    c.profile === 'legacy-ci' &&
-    (c.ownerEmail !== undefined ||
-      (c.dryRun !== undefined && typeof c.dryRun !== 'boolean') ||
-      (c.skipAgent !== undefined && typeof c.skipAgent !== 'boolean'))
+    c.profile !== 'legacy-ci' &&
+    (!c.workersDev ||
+      !['create', 'preserve'].includes(c.workersDev.action) ||
+      !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(c.workersDev.subdomain))
   )
-    throw new Error('Invalid legacy CI settings');
-  if (c.schemaVersion !== 1) throw new Error('Unsupported installation configuration version');
-  if (!/^[0-9a-f]{40}$/.test(c.sourceCommit))
-    throw new Error('sourceCommit must be an immutable commit');
-  for (const key of ['accountId', 'zoneId'] as const) {
-    if (!/^[0-9a-f]{32}$/.test(c[key])) throw new Error(`${key} must be a Cloudflare identifier`);
-  }
-  validateBaseDomain(c.baseDomain);
-  validateBaseDomain(c.zoneName);
-  if (c.baseDomain !== c.zoneName && !c.baseDomain.endsWith(`.${c.zoneName}`)) {
-    throw new Error('Installation domain must belong to selected zone');
-  }
-  const stack = stackNameForEnvironment(c.environment);
-  const prefix =
-    c.prefix ?? `s${createHash('sha256').update(c.baseDomain).digest('hex').slice(0, 6)}`;
-  validateResourcePrefix(prefix);
-  validateBucketName(c.stateBucket ?? `${prefix}-pulumi-state-${c.environment}`);
-  validateBucketName(`${prefix}-${stack}-assets`);
+    throw new Error('Approved workers.dev target is required');
+}
+
+function validateExecutionSettings(c: InstallerEngineConfig): void {
   for (const key of ['codexBuild', 'codexPublish'] as const) {
     const command = c[key];
     if (
@@ -153,6 +151,31 @@ export function validateEngineConfig(input: unknown): InstallerEngineConfig {
     )
       throw new Error(`Invalid ${key}`);
   }
+}
+
+export function validateEngineConfig(input: unknown): InstallerEngineConfig {
+  if (!input || typeof input !== 'object')
+    throw new Error('Installation configuration is required');
+  const c = input as InstallerEngineConfig;
+  validateRunnerProfile(c);
+  if (c.schemaVersion !== 1) throw new Error('Unsupported installation configuration version');
+  if (!/^[0-9a-f]{40}$/.test(c.sourceCommit))
+    throw new Error('sourceCommit must be an immutable commit');
+  for (const key of ['accountId', 'zoneId'] as const) {
+    if (!/^[0-9a-f]{32}$/.test(c[key])) throw new Error(`${key} must be a Cloudflare identifier`);
+  }
+  validateBaseDomain(c.baseDomain);
+  validateBaseDomain(c.zoneName);
+  if (c.baseDomain !== c.zoneName && !c.baseDomain.endsWith(`.${c.zoneName}`)) {
+    throw new Error('Installation domain must belong to selected zone');
+  }
+  const stack = stackNameForEnvironment(c.environment);
+  const prefix =
+    c.prefix ?? `s${createHash('sha256').update(c.baseDomain).digest('hex').slice(0, 6)}`;
+  validateResourcePrefix(prefix);
+  validateBucketName(c.stateBucket ?? `${prefix}-pulumi-state-${c.environment}`);
+  validateBucketName(`${prefix}-${stack}-assets`);
+  validateExecutionSettings(c);
   const api = new URL(c.cloudflareApiUrl ?? DEFAULT_CLOUDFLARE_API_URL);
   if (api.protocol !== 'https:' || api.username || api.password || api.search || api.hash)
     throw new Error('Invalid Cloudflare API URL');
@@ -161,6 +184,15 @@ export function validateEngineConfig(input: unknown): InstallerEngineConfig {
 export function engineFingerprint(config: InstallerEngineConfig): string {
   return createHash('sha256').update(JSON.stringify(config)).digest('hex');
 }
+export class EngineCommandFailure extends Error {
+  constructor(
+    public readonly exitCode: number | null,
+    public readonly signal: string | null
+  ) {
+    super('Deployment command failed');
+  }
+}
+
 export const processRunner: EngineRunner = {
   async run(command, options) {
     return new Promise((accept, reject) => {
@@ -193,8 +225,8 @@ export const processRunner: EngineRunner = {
       // Drain stderr, but do not return or expose it: tools may print credentials.
       child.stderr.on('data', options.includeStderr ? collect : () => {});
       child.once('error', () => reject(new Error('Deployment command could not start')));
-      child.once('close', (code) =>
-        code === 0 && !failed ? accept(output) : reject(new Error('Deployment command failed'))
+      child.once('close', (code, signal) =>
+        code === 0 && !failed ? accept(output) : reject(new EngineCommandFailure(code, signal))
       );
     });
   },

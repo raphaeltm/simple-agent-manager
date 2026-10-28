@@ -15,7 +15,7 @@ Handoff removes hosted OAuth and deployment-credential copies while retaining th
 
 Experimental full installation is disabled by default and has not completed authenticated end-to-end validation. Its design separates temporary bootstrap OAuth, user-owned maintenance deployment authority, storage access, and narrower normal SAM runtime authority. Credential values pass through hosted bootstrap before transfer. Continued operation after OAuth revocation must be verified before claiming independence. Updates select an explicit immutable source version; they are not a promise of automatic conflict merging, transactional deployment, or database rollback.
 
-For installer-bound instances, `BOOTSTRAP_OWNER_EMAIL` restricts initial administration to the matching provider-verified email. Other initial identities are denied; an atomic election handles concurrent callbacks. The separate `SETUP_TOKEN` authorizes provider configuration, not user login. Ordinary installations without this optional binding retain their existing first-user policy.
+For installer-bound instances, `BOOTSTRAP_OWNER_EMAIL` restricts initial administration to the matching provider-verified email. Other initial identities are denied; an atomic election handles concurrent callbacks and durably records completion. Later changes to the elected owner's email, role or status do not reopen that election or lock out other authorized users; normal suspension checks still apply. The separate `SETUP_TOKEN` authorizes provider configuration, not user login. Ordinary installations without this optional binding retain their existing first-user policy.
 
 ## Cloud Credential Model (BYOC + Platform Fallback)
 

@@ -92,6 +92,40 @@ async function deploy(options: Options = {}) {
       }
     : undefined;
   const secretNames = ready ? ['OAUTH_CLIENT_ID', 'OAUTH_CLIENT_SECRET'] : [];
+  const oauthResult = (path: string, method: string, body: Record<string, unknown>) => {
+    let result: unknown;
+    if (path === '/client/v4/oauth/scopes')
+      result = [...fullScopes, ...bootstrapScopes]
+        .filter((scope) => !(options.missingScope && scope === 'account-api-tokens.write'))
+        .map((id) => ({ id }));
+    else if (path.endsWith('/oauth_clients')) {
+      if (method === 'GET') result = client ? [client] : [];
+      else {
+        client = { ...body, client_id: 'new', client_secret: 'SECRET' };
+        result = client;
+      }
+    } else if (path.includes('/oauth_clients/')) {
+      if (method === 'PATCH') client = { ...client, ...body };
+      result = client;
+    }
+    return result;
+  };
+  const workerSettings = () => {
+    if (!options.existing) return Response.json({ success: false }, { status: 404 });
+    return {
+      bindings: [
+        {
+          name: 'OAUTH_SCOPES',
+          type: 'plain_text',
+          text: (options.existing === 'full' ? fullScopes : bootstrapScopes).join(' '),
+        },
+        ...(options.existing === 'full'
+          ? [{ name: 'INSTALL_SOURCE_COMMIT', type: 'plain_text', text: 'c'.repeat(40) }]
+          : []),
+        ...secretNames.map((name) => ({ name, type: 'secret_text' })),
+      ],
+    };
+  };
   vi.stubGlobal(
     'fetch',
     vi.fn(async (url: string, init: RequestInit) => {
@@ -111,33 +145,11 @@ async function deploy(options: Options = {}) {
         );
       let result: unknown;
       if (path.endsWith('/settings')) {
-        if (!options.existing) return Response.json({ success: false }, { status: 404 });
-        result = {
-          bindings: [
-            {
-              name: 'OAUTH_SCOPES',
-              type: 'plain_text',
-              text: (options.existing === 'full' ? fullScopes : bootstrapScopes).join(' '),
-            },
-            ...(options.existing === 'full'
-              ? [{ name: 'INSTALL_SOURCE_COMMIT', type: 'plain_text', text: 'c'.repeat(40) }]
-              : []),
-            ...secretNames.map((name) => ({ name, type: 'secret_text' })),
-          ],
-        };
-      } else if (path === '/client/v4/oauth/scopes')
-        result = [...fullScopes, ...bootstrapScopes]
-          .filter((scope) => !(options.missingScope && scope === 'account-api-tokens.write'))
-          .map((id) => ({ id }));
-      else if (path.endsWith('/oauth_clients')) {
-        if (method === 'GET') result = client ? [client] : [];
-        else {
-          client = { ...body, client_id: 'new', client_secret: 'SECRET' };
-          result = client;
-        }
-      } else if (path.includes('/oauth_clients/')) {
-        if (method === 'PATCH') client = { ...client, ...body };
-        result = client;
+        const settings = workerSettings();
+        if (settings instanceof Response) return settings;
+        result = settings;
+      } else if (path.includes('/oauth_clients') || path === '/client/v4/oauth/scopes') {
+        result = oauthResult(path, method, body);
       } else if (path.endsWith('/secrets')) {
         if (method === 'PUT') {
           if (!secretNames.includes(String(body.name))) secretNames.push(String(body.name));
@@ -170,6 +182,10 @@ describe('publisher-controlled installer deployment', () => {
       token_endpoint_auth_method: 'client_secret_post',
     });
     expect(capture.calls.some((call) => call.body.visibility === 'public')).toBe(false);
+    expect(capture.run.mock.calls[0]?.[0]).toBe(process.execPath);
+    expect(capture.run.mock.calls[0]?.[1]?.[0]).toMatch(
+      /\/apps\/installer\/node_modules\/wrangler\/bin\/wrangler\.js$/
+    );
     expect(capture.writes.join('')).not.toMatch(/DEPLOY_TOKEN|SECRET/);
     expect(JSON.stringify(capture.run.mock.calls.map((call) => call[1]))).not.toMatch(
       /DEPLOY_TOKEN|SECRET/
