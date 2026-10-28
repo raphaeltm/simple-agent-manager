@@ -634,7 +634,9 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
           beforeExternalMutation: expect.any(Function),
         })
       );
-      expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('node-1', 'ws-a', 'user-1');
+      expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('node-1', 'ws-a', 'user-1', {
+        retryAfterMs: 0,
+      });
       // The only workspace on the node: it turns warm, keeping warm retention.
       expect(mocks.markIdle).toHaveBeenCalledWith('node-1', 'user-1', 2700000);
 
@@ -674,7 +676,9 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       expect(row()).toMatchObject({ sleep_status: 'sleeping', degradation: 'transcript-only' });
       expect(fallbackRecord()).toMatchObject({ outcome: 'slept', recoveryPoint: null });
       expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
-      expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('node-1', 'ws-a', 'user-1');
+      expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('node-1', 'ws-a', 'user-1', {
+        retryAfterMs: 0,
+      });
       expect(mocks.markIdle).toHaveBeenCalledWith('node-1', 'user-1', 2700000);
       expect(workspaceStatus()).toBe('sleeping');
       expect(projectData.get('chat-a')?.status).toBe('sleeping');
@@ -755,13 +759,15 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       expect(workspaceStatus()).toBe('sleeping');
       expect(projectData.get('chat-a')?.status).toBe('stopped');
       expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
-      expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('node-1', 'ws-a', 'user-1');
+      expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('node-1', 'ws-a', 'user-1', {
+        retryAfterMs: 0,
+      });
       expect([...r2Objects.keys()]).toEqual(retained);
       expect(fallbackRecord()).toMatchObject({ outcome: 'slept', recoveryPoint: null });
       expect(notices.some((notice) => /unpublished/i.test(notice.content))).toBe(true);
     });
 
-    it('removes the empty provider node after no-Git termination, retrying failed deletion', async () => {
+    it('preserves the last local copy after no-Git fallback across repeated node cleanup sweeps', async () => {
       seedSession({ id: 'a', taskStatus: 'completed' });
       capture = 'old-agent-rejected';
       await spendFullBudget();
@@ -770,11 +776,9 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       expect(workspaceStatus()).toBe('sleeping');
       expect(mocks.markIdle).toHaveBeenCalledWith('node-1', 'user-1', 2700000);
 
-      // The NodeLifecycle alarm hands off only after intentional warm retention.
-      // Its clock is covered by the NodeLifecycle tests; continue with the real
-      // scheduled cleanup/claim/proof SQL rather than mocking node cleanup itself.
+      // Warm retention and a stopped logical state do not preserve unpublished
+      // local bytes. An incomplete snapshot cannot authorize whole-node deletion.
       const afterWarm = tick(30);
-      vi.setSystemTime(afterWarm);
       sqlite
         .prepare(
           "UPDATE nodes SET status = 'stopped', created_at = ?, updated_at = ? WHERE id = 'node-1'"
@@ -782,42 +786,22 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
         .run(START.toISOString(), afterWarm.toISOString());
       const db = drizzle(env.DATABASE, { schema });
       const config = resolveCleanupConfig(env);
-      mocks.deleteNodeResourcesStrict.mockRejectedValueOnce(new Error('provider unavailable'));
-      const first = emptyResult();
-      await sweepStoppedHandoffNodes(db, env, afterWarm, config, first);
-      expect(first.errors).toBe(1);
-      expect(sqlite.prepare("SELECT status FROM nodes WHERE id = 'node-1'").get()).toEqual({
-        status: 'stopped',
-      });
-      expect(projectData.get('chat-a')?.status).toBe('sleeping');
-
-      const retryAt = new Date(afterWarm.getTime() + config.failureBackoffMs + 1);
-      vi.setSystemTime(retryAt);
-      // Only the provider-confirmed boundary supplies immutable runtime proof.
-      mocks.deleteNodeResourcesStrict.mockImplementationOnce(async () => {
-        const proof = retryAt.toISOString();
+      for (const now of [afterWarm, new Date(afterWarm.getTime() + config.failureBackoffMs + 1)]) {
+        vi.setSystemTime(now);
+        const result = emptyResult();
+        await sweepStoppedHandoffNodes(db, env, now, config, result);
+        expect(result.errors).toBe(0);
+        expect(result.lifetimeDestroyed).toBe(0);
+        expect(sqlite.prepare("SELECT status FROM nodes WHERE id = 'node-1'").get()).toEqual({
+          status: 'stopped',
+        });
+      }
+      expect(mocks.deleteNodeResourcesStrict).not.toHaveBeenCalled();
+      expect(
         sqlite
-          .prepare("UPDATE nodes SET runtime_termination_confirmed_at = ? WHERE id = 'node-1'")
-          .run(proof);
-        sqlite
-          .prepare(
-            "UPDATE workspaces SET status = 'deleted', runtime_deletion_confirmed_at = ? WHERE node_id = 'node-1'"
-          )
-          .run(proof);
-        return {
-          providerVm: 'deleted',
-          runtimeTerminationConfirmedAt: proof,
-          runtimeIncarnationId: null,
-          providerInstanceId: null,
-        };
-      });
-      const second = emptyResult();
-      await sweepStoppedHandoffNodes(db, env, retryAt, config, second);
-      expect(second.lifetimeDestroyed).toBe(1);
-      expect(sqlite.prepare("SELECT status FROM nodes WHERE id = 'node-1'").get()).toEqual({
-        status: 'deleted',
-      });
-      expect(mocks.deleteNodeResourcesStrict).toHaveBeenCalledTimes(2);
+          .prepare("SELECT runtime_deletion_confirmed_at FROM workspaces WHERE id = 'ws-a'")
+          .get()
+      ).toEqual({ runtime_deletion_confirmed_at: null });
       expect(projectData.get('chat-a')?.status).toBe('sleeping');
       expect([...r2Objects.keys()]).toEqual(retained);
       expect(notices.some((notice) => /transcript/i.test(notice.content))).toBe(true);

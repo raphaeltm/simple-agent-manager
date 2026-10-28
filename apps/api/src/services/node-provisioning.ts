@@ -363,6 +363,8 @@ export async function provisionNode(
 
     const cloudInit = generateCloudInit({
       nodeId: node.id,
+      nodeUserId: node.userId,
+      nodeRuntimeIncarnationId: provisioningRuntimeIncarnationId ?? undefined,
       hostname: `node-${node.id.toLowerCase()}`,
       controlPlaneUrl: `https://api.${env.BASE_DOMAIN}`,
       jwksUrl: `https://api.${env.BASE_DOMAIN}/.well-known/jwks.json`,

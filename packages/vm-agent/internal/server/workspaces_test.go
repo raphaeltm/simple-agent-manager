@@ -693,7 +693,7 @@ func signWorkspaceCreateNodeToken(t *testing.T, key *rsa.PrivateKey, nodeID, wor
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, auth.Claims{
 		RegisteredClaims: jwt.RegisteredClaims{
 			Issuer:    "test-issuer",
-			Subject:   nodeID,
+			Subject:   "user-1",
 			Audience:  jwt.ClaimStrings{"node-management"},
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 		},

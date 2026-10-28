@@ -169,7 +169,7 @@ func Run(ctx context.Context, cfg *config.Config, reporter *bootlog.Reporter) er
 	if cfg.ContainerMode {
 		reporter.Log("volume_create", "started", "Creating workspace volume")
 		var volErr error
-		volumeName, volErr = ensureVolumeReady(ctx, cfg.WorkspaceID)
+		volumeName, volErr = ensureVolumeReady(ctx, cfg.WorkspaceID, cfg)
 		if volErr != nil {
 			reporter.Log("volume_create", "failed", "Volume creation failed", volErr.Error())
 			return volErr
@@ -323,7 +323,7 @@ func PrepareWorkspace(ctx context.Context, cfg *config.Config, state ProvisionSt
 	if cfg.ContainerMode {
 		reporter.Log("volume_create", "started", "Creating workspace volume")
 		var volErr error
-		volumeName, volErr = ensureVolumeReady(ctx, cfg.WorkspaceID)
+		volumeName, volErr = ensureVolumeReady(ctx, cfg.WorkspaceID, cfg)
 		if volErr != nil {
 			reporter.Log("volume_create", "failed", "Volume creation failed", volErr.Error())
 			return false, volErr
@@ -507,11 +507,23 @@ func prepareDevcontainerCache(ctx context.Context, cfg *config.Config, githubTok
 // ensureVolumeReady creates a Docker named volume for the workspace if it doesn't
 // already exist. The volume persists across container rebuilds and is deleted when
 // the workspace is deleted.
-func ensureVolumeReady(ctx context.Context, workspaceID string) (string, error) {
+func ensureVolumeReady(ctx context.Context, workspaceID string, configs ...*config.Config) (string, error) {
 	volumeName := VolumeNameForWorkspace(workspaceID)
 
 	// docker volume create is idempotent — returns the volume name if it already exists.
-	cmd := exec.CommandContext(ctx, "docker", "volume", "create", volumeName)
+	args := []string{"volume", "create"}
+	if len(configs) > 0 && configs[0] != nil {
+		cfg := configs[0]
+		if cfg.NodeID != "" && cfg.NodeUserID != "" && cfg.NodeRuntimeIncarnationID != "" {
+			for _, label := range []string{"sam.workspace.id=" + workspaceID, "sam.node.id=" + cfg.NodeID, "sam.node.incarnation=" + cfg.NodeRuntimeIncarnationID, "sam.owner.id=" + cfg.NodeUserID} {
+				args = append(args, "--label", label)
+			}
+		}
+	}
+	// Docker does not update labels on an existing volume: unknown legacy volumes
+	// remain unowned and deletion refuses them rather than retroactively adopting.
+	args = append(args, volumeName)
+	cmd := exec.CommandContext(ctx, "docker", args...)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
 		return "", fmt.Errorf("failed to create Docker volume %s: %w: %s", volumeName, err, strings.TrimSpace(string(output)))
@@ -2445,11 +2457,12 @@ func writeCredentialHelperScriptAtomically(hostPath, script string) error {
 
 // RemoveCredentialHelperFromHost removes the host-side credential helper script.
 // This is called during workspace deletion to clean up.
-func RemoveCredentialHelperFromHost(workspaceID string) {
+func RemoveCredentialHelperFromHost(workspaceID string) error {
 	hostPath := credentialHelperHostPath(workspaceID)
 	if err := os.Remove(hostPath); err != nil && !os.IsNotExist(err) {
-		slog.Warn("Failed to remove credential helper from host", "path", hostPath, "error", err)
+		return fmt.Errorf("failed to remove workspace credential helper: %w", err)
 	}
+	return nil
 }
 
 // credentialHelperMountEntry returns the Docker bind mount string for mounting

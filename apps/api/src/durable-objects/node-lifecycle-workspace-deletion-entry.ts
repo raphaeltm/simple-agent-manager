@@ -9,7 +9,8 @@ export function deletionEntryClaimedWithoutNodeIncarnation(
     (entry.nodeUserId === undefined ||
       entry.nodeRuntime === undefined ||
       entry.nodeProviderInstanceId === undefined ||
-      entry.nodeRuntimeIncarnationId === undefined)
+      entry.nodeRuntimeIncarnationId === undefined ||
+      entry.workspaceGeneration === undefined)
   );
 }
 
@@ -21,6 +22,7 @@ export function deletionEntryMatchesScheduledIdentity(
     entry &&
     !deletionEntryClaimedWithoutNodeIncarnation(entry) &&
     entry.nodeId === identity.nodeId &&
+    (entry.workspaceGeneration ?? null) === (identity.workspaceGeneration ?? null) &&
     (entry.nodeUserId === undefined || entry.nodeUserId === identity.nodeUserId) &&
     (entry.nodeRuntime === undefined || entry.nodeRuntime === identity.nodeRuntime) &&
     (entry.nodeProviderInstanceId === undefined ||
@@ -43,6 +45,7 @@ export function scheduledDeletionIdentity(input: {
   return (
     input.supplied ??
     input.current ?? {
+      workspaceGeneration: null,
       workspaceId: input.workspaceId,
       nodeId: input.nodeId,
       nodeUserId: null,
@@ -74,6 +77,8 @@ export function scheduledDeletionEntry(input: {
     nodeRuntime: identity.nodeRuntime,
     nodeProviderInstanceId: identity.nodeProviderInstanceId,
     nodeRuntimeIncarnationId: identity.nodeRuntimeIncarnationId,
+    workspaceGeneration: identity.workspaceGeneration,
+    mode: preserved?.mode ?? 'automatic',
     workspaceId: input.workspaceId,
     userId: identity.userId,
     projectId: identity.projectId,
@@ -98,6 +103,7 @@ export function deletionEntryMatchesClaimIdentity(input: {
   const { entry, expected } = input;
   if (!entry) return true;
   return (
+    (entry.workspaceGeneration ?? null) === (expected.workspaceGeneration ?? null) &&
     (entry.nodeId ?? input.nodeId) === (expected.nodeId ?? input.nodeId) &&
     (entry.nodeUserId === undefined ? expected.nodeUserId : entry.nodeUserId) ===
       expected.nodeUserId &&
@@ -121,6 +127,7 @@ export function deletionIdentityFromEntry(
   if (!entry) return null;
   return {
     workspaceId: entry.workspaceId,
+    workspaceGeneration: entry.workspaceGeneration,
     nodeId: entry.nodeId ?? null,
     nodeUserId: entry.nodeUserId ?? null,
     nodeRuntime: entry.nodeRuntime ?? null,
@@ -140,6 +147,7 @@ export function deletionIdentityForAttempt(input: {
   const { entry, current } = input;
   return {
     workspaceId: entry.workspaceId,
+    workspaceGeneration: entry.workspaceGeneration,
     nodeId: entry.nodeId ?? input.storedNodeId ?? current?.nodeId ?? null,
     nodeUserId: entry.nodeUserId === undefined ? (current?.nodeUserId ?? null) : entry.nodeUserId,
     nodeRuntime:
@@ -170,6 +178,7 @@ export function claimedDeletionEntry(input: {
   const { entry, expected } = input;
   return {
     ...entry,
+    workspaceGeneration: expected.workspaceGeneration,
     nodeId: expected.nodeId ?? undefined,
     nodeUserId: expected.nodeUserId,
     nodeRuntime: expected.nodeRuntime,

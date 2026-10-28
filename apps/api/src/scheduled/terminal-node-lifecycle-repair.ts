@@ -18,6 +18,7 @@ interface TerminalNodeWorkspaceRow {
   node_id: string;
   project_id: string | null;
   chat_session_id: string | null;
+  eviction_generation: string | null;
   user_id: string;
   status: string;
 }
@@ -136,6 +137,8 @@ async function repairTerminalNodeWorkspace(
       return;
     }
     const outcome = await cleanupWorkspaceForDeletion({
+      mode: 'automatic',
+      requireRuntimeTerminationProof: true,
       db: drizzle(env.DATABASE, { schema }),
       env,
       workspace: {
@@ -144,6 +147,7 @@ async function repairTerminalNodeWorkspace(
         userId: row.user_id,
         projectId: row.project_id,
         chatSessionId: row.chat_session_id,
+        evictionGeneration: row.eviction_generation,
         status: row.status,
       } as schema.Workspace,
       userId: row.user_id,
@@ -169,11 +173,12 @@ export async function runTerminalNodeLifecycleRepair(
   const limit = repairBatchSize(env);
   const rows = await env.DATABASE.prepare(
     `SELECT w.id AS workspace_id, w.node_id AS node_id, w.user_id AS user_id,
-            w.project_id AS project_id, w.chat_session_id AS chat_session_id,
+            w.project_id AS project_id, w.chat_session_id AS chat_session_id, w.eviction_generation,
             w.status AS status
       FROM workspaces w
       INNER JOIN nodes n ON n.id = w.node_id
       WHERE n.status IN ('stopped', 'deleted', 'destroyed', 'error')
+        AND n.runtime_termination_confirmed_at IS NOT NULL
         AND w.status IN (${ACTIVE_WORKSPACE_STATUSES.map(() => '?').join(', ')})
       ORDER BY w.updated_at ASC
       LIMIT ?`

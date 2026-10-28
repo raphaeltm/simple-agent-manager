@@ -28,7 +28,12 @@ describe('unhealthy node cleanup from lost heartbeat', () => {
 
   beforeEach(() => {
     sqlite = new Database(':memory:');
-    createSchemaTables(sqlite, [schema.nodes, schema.workspaces, schema.tasks]);
+    createSchemaTables(sqlite, [
+      schema.nodes,
+      schema.workspaces,
+      schema.tasks,
+      schema.sessionSnapshots,
+    ]);
     sqlite.exec(
       readFileSync(
         new URL('../../../src/db/migrations/0172_node_health_events.sql', import.meta.url),
@@ -101,19 +106,19 @@ describe('unhealthy node cleanup from lost heartbeat', () => {
     );
   }
 
-  it('posts a notice and asks a mid-turn session to sleep before deleting at the bound', async () => {
+  it('posts notice and requests sleep but preserves unconfirmed work after the deadline', async () => {
     seedNode('lost-node', 31);
     await sweep();
 
     expect(order).toEqual(['notice', 'sleep', 'release']);
-    expect(sqlite.prepare(`SELECT id FROM nodes WHERE id = 'lost-node'`).get()).toBeUndefined();
+    expect(sqlite.prepare(`SELECT id FROM nodes WHERE id = 'lost-node'`).get()).toBeDefined();
     const events = await listNodeHealthEvents(env, 'lost-node');
     expect(events.map((event) => event.event)).toEqual([
       'unhealthy',
       'session_notice',
       'sleep_requested',
       'draining',
-      'released',
+      'held',
     ]);
   });
 
@@ -130,7 +135,7 @@ describe('unhealthy node cleanup from lost heartbeat', () => {
   });
 
   it('selects only managed workspace VMs from a mixed silent-node fleet', async () => {
-    seedNode('eligible-managed-vm', 31);
+    seedNode('eligible-managed-vm', 31, false);
     seedNode('excluded-deployment', 31);
     seedNode('excluded-user-owned', 31);
     seedNode('excluded-cf-container', 31);
@@ -146,7 +151,7 @@ describe('unhealthy node cleanup from lost heartbeat', () => {
 
     await sweep();
 
-    expect(order).toEqual(['notice', 'sleep', 'release']);
+    expect(order).toEqual(['release']);
     expect(
       sqlite.prepare(`SELECT id FROM nodes WHERE id = 'eligible-managed-vm'`).get()
     ).toBeUndefined();
@@ -169,12 +174,14 @@ describe('unhealthy node cleanup from lost heartbeat', () => {
     expect(events.filter((event) => event.event === 'sleep_requested')).toHaveLength(1);
   });
 
-  it('releases once the session has slept, before the release deadline', async () => {
+  it('releases only after the workspace has exact physical deletion proof', async () => {
     seedNode('slept-node', 12);
     boundaries.sleep = vi.fn(async () => {
       order.push('sleep');
       sqlite
-        .prepare(`UPDATE workspaces SET status = 'sleeping' WHERE node_id = ?`)
+        .prepare(
+          `UPDATE workspaces SET status = 'sleeping', runtime_deletion_confirmed_at = '${NOW.toISOString()}', runtime_deletion_proof = 'vm_agent_confirmed' WHERE node_id = ?`
+        )
         .run('slept-node');
     }) as UnhealthyNodeBoundaries['sleep'];
 
@@ -215,7 +222,7 @@ describe('unhealthy node cleanup from lost heartbeat', () => {
     );
   });
 
-  it('releases at the deadline even when health-event writes fail', async () => {
+  it('keeps unconfirmed work after the deadline when health-event writes fail', async () => {
     seedNode('event-store-down', 31);
     const database = env.DATABASE;
     env = {
@@ -236,10 +243,10 @@ describe('unhealthy node cleanup from lost heartbeat', () => {
     expect(order).toEqual(['notice', 'sleep', 'release']);
     expect(
       sqlite.prepare(`SELECT id FROM nodes WHERE id = 'event-store-down'`).get()
-    ).toBeUndefined();
+    ).toBeDefined();
   });
 
-  it('releases when a preservation RPC never answers', async () => {
+  it('preserves unconfirmed work when a preservation RPC never answers', async () => {
     seedNode('sleep-rpc-hung', 31);
     env.NODE_UNHEALTHY_PRESERVATION_TIMEOUT_MS = '20';
     let rejectLateSleep: ((error: Error) => void) | undefined;
@@ -255,14 +262,12 @@ describe('unhealthy node cleanup from lost heartbeat', () => {
     await sweep();
 
     expect(order).toEqual(['notice', 'sleep', 'release']);
-    expect(
-      sqlite.prepare(`SELECT id FROM nodes WHERE id = 'sleep-rpc-hung'`).get()
-    ).toBeUndefined();
+    expect(sqlite.prepare(`SELECT id FROM nodes WHERE id = 'sleep-rpc-hung'`).get()).toBeDefined();
     expect((await listNodeHealthEvents(env, 'sleep-rpc-hung')).map((e) => e.event)).toContain(
       'sleep_unavailable'
     );
     expect(sleepSignal?.aborted).toBe(true);
-    rejectLateSleep?.(new Error('late sleep rejection after node release'));
+    rejectLateSleep?.(new Error('late sleep rejection after cleanup refusal'));
     await new Promise<void>((resolve) => setTimeout(resolve, 0));
   });
 
@@ -270,6 +275,11 @@ describe('unhealthy node cleanup from lost heartbeat', () => {
     seedNode('recovered-race', 31);
     boundaries.sleep = vi.fn(async () => {
       order.push('sleep');
+      sqlite
+        .prepare(
+          `UPDATE workspaces SET status='sleeping', runtime_deletion_confirmed_at=?,runtime_deletion_proof='vm_agent_confirmed' WHERE node_id='recovered-race'`
+        )
+        .run(NOW.toISOString());
       sqlite
         .prepare(`UPDATE nodes SET last_heartbeat_at = ? WHERE id = 'recovered-race'`)
         .run(NOW.toISOString());

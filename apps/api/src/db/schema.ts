@@ -2093,6 +2093,7 @@ export const sessionSnapshots = sqliteTable(
     sleepEpisodeFailures: integer('sleep_episode_failures').notNull().default(0),
     /** The bounded-failure decision record (`SessionSleepFallbackRecord`), or NULL. */
     sleepFallbackJson: text('sleep_fallback_json'),
+    cleanupIdentityJson: text('cleanup_identity_json'),
     snapshotGeneration: text('snapshot_generation'),
     captureGeneration: text('capture_generation'),
     captureError: text('capture_error'),

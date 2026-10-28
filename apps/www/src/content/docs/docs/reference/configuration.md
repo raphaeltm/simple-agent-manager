@@ -1614,6 +1614,29 @@ VM workspace admission uses persisted `workspaces.resolved_reservation_json` sna
 
 For managed VM nodes, the effective host-memory reserve contract is shared by admission and cloud-init: project scaling overrides win, then `TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB`, then `VM_AGENT_MEMORY_RESERVE_MB`, then the 512 MB default. Cloud-init applies the cgroup hierarchy only on newly provisioned nodes. Existing nodes need a drain/recreate, a VM-agent/bootstrap upgrade flow, or a manual in-place systemd/Docker reconfiguration before they can be treated as protected by the workload-slice cap; SAM does not destructively evict existing workspaces to retrofit this.
 
+## Workspace Cleanup (VM)
+
+SAM keeps workspace deletion pending until the node verifies that its exact container, owned volume and host clone are absent. A failed removal retains its deletion record for bounded retries after an agent restart. Automatic cleanup requires a verified full snapshot of the exact runtime; failed snapshots, uncertain ownership and unpreserved eviction sources remain protected. Explicit permanent deletion follows the user's deletion request.
+
+New nodes receive `NODE_USER_ID` and `NODE_RUNTIME_INCARNATION_ID` from provisioning. Nodes without these identities cannot report strict physical deletion proof. Configured standalone/user roots without a SAM ownership record are preserved rather than recursively deleted.
+
+The VM-agent service accepts `WORKSPACE_DELETION_RETRY_INTERVAL` (default `1m`), `WORKSPACE_DELETION_ATTEMPT_TIMEOUT` (`30s`), `WORKSPACE_DELETION_BATCH_SIZE` (`32`), `WORKSPACE_DELETION_MAX_ENTRIES` (`512`) and `WORKSPACE_DELETION_TOMBSTONE_RETENTION` (`168h`). Completed local deletion receipts are pruned in bounded batches; unfinished intents are retained. Automatic local retries stop when their verified snapshot authority expires. A new permanent deletion request can explicitly authorize the same exact target.
+
+Image-transfer housekeeping runs with the same bounded periodic backstop and uses the following service environment variables:
+
+| Variable                                       | Default                                           | Purpose                                                                       |
+| ---------------------------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `SAM_IMAGE_TRANSFER_SCRATCH_DIR`               | OS temporary directory plus `sam-image-transfers` | Private directory for SAM-owned publish/deploy archive transfers              |
+| `SAM_IMAGE_TRANSFER_SCRATCH_DRY_RUN`           | `true`                                            | Report abandoned candidates without deleting them                             |
+| `SAM_IMAGE_TRANSFER_SCRATCH_RETENTION`         | `24h`                                             | Minimum age of an abandoned operation; active leases always protect transfers |
+| `SAM_IMAGE_TRANSFER_SCRATCH_MAX_ENTRIES`       | `64`                                              | Directory entries inspected per sweep                                         |
+| `SAM_IMAGE_TRANSFER_SCRATCH_MAX_FILES`         | `128`                                             | Maximum files inspected in one operation                                      |
+| `SAM_IMAGE_TRANSFER_SCRATCH_MAX_RECLAIM_BYTES` | `1073741824`                                      | Maximum candidate/reclaimed bytes per sweep                                   |
+
+The scratch root must be private and owned by the VM-agent user. Every parent directory must be owned by that user or root and must prevent other users from replacing its children; trusted sticky directories such as `/tmp` are supported. Unsafe custom roots or `TMPDIR` paths are rejected before transfer files are created.
+
+Successful transfers still remove their own temporary archives. Housekeeping excludes unmarked legacy files, workspace and snapshot data, user caches, nested Docker volumes, build caches, and current or rollback images. Unknown files, links, mounts and directories remain protected. Disk pressure never authorizes deleting user work.
+
 ## Journald Configuration (VM)
 
 Applied via cloud-init on each node:

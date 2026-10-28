@@ -670,12 +670,34 @@ func (s *Server) handleCreateWorkspace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// A replay only observes an admitted provision; it must not queue behind the
+	// long-running bootstrap that owns lifecycle effects.
+	if !s.config.IsStandaloneMode() {
+		s.workspaceMu.RLock()
+		current := s.workspaces[body.WorkspaceID]
+		active := current != nil && current.ProvisioningActive
+		s.workspaceMu.RUnlock()
+		if active {
+			if err := s.requireNoWorkspaceDeletion(body.WorkspaceID); err != nil {
+				writeError(w, 409, err.Error())
+				return
+			}
+			if s.maybeHandleDuplicateWorkspaceCreate(w, body.WorkspaceID, strings.TrimSpace(body.Repository), createWorkspaceBranch(body.Branch), strings.TrimSpace(body.DevcontainerConfigName), body.Lightweight) {
+				return
+			}
+		}
+	}
+
 	lock := s.workspaceLifecycleLock(body.WorkspaceID)
 	if err := lock.Lock(r.Context()); err != nil {
 		writeError(w, http.StatusRequestTimeout, "workspace lifecycle operation canceled")
 		return
 	}
 	defer lock.Unlock()
+	if err := s.requireNoWorkspaceDeletion(body.WorkspaceID); err != nil {
+		writeError(w, 409, err.Error())
+		return
+	}
 	if !s.requireWorkspaceCreateEvictionState(w, body.WorkspaceID) {
 		return
 	}
@@ -958,57 +980,7 @@ func (s *Server) handleRebuildWorkspace(w http.ResponseWriter, r *http.Request) 
 }
 
 func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
-	workspaceID := r.PathValue("workspaceId")
-	if workspaceID == "" {
-		writeError(w, http.StatusBadRequest, workspaceIDRequiredMessage)
-		return
-	}
-
-	if !s.requireNodeManagementAuth(w, r, workspaceID) {
-		return
-	}
-
-	lock := s.workspaceLifecycleLock(workspaceID)
-	if err := lock.Lock(r.Context()); err != nil {
-		writeError(w, http.StatusRequestTimeout, "workspace lifecycle operation canceled")
-		return
-	}
-	defer lock.Unlock()
-
-	s.stopSessionHostsForWorkspace(workspaceID)
-
-	// Stop port scanner for this workspace.
-	s.stopPortScanner(workspaceID)
-
-	// Shut down per-workspace message reporter and telemetry collectors (final best-effort flush before cleanup).
-	s.shutdownReporter(workspaceID)
-	s.stopResourceHistoryForWorkspace(workspaceID, context.Background())
-
-	// Remove the devcontainer and its Docker volume.
-	// The container must be removed before the volume (Docker won't remove a volume in use).
-	s.removeWorkspaceContainer(workspaceID)
-	bootstrap.RemoveCredentialHelperFromHost(workspaceID)
-	if err := bootstrap.RemoveVolume(context.Background(), workspaceID); err != nil {
-		slog.Warn("Failed to remove Docker volume for workspace", "workspace", workspaceID, "error", err)
-	}
-
-	s.removeWorkspaceRuntime(workspaceID)
-
-	// Remove all persisted tabs and MCP server configs for this workspace
-	if s.store != nil {
-		if err := s.store.DeleteWorkspaceTabs(workspaceID); err != nil {
-			slog.Warn("Failed to delete persisted tabs for workspace", "workspace", workspaceID, "error", err)
-		}
-		if err := s.store.DeleteWorkspaceMcpServers(workspaceID); err != nil {
-			slog.Warn("Failed to delete persisted MCP servers for workspace", "workspace", workspaceID, "error", err)
-		}
-		if err := s.store.DeleteWorkspaceExecutionProtocol(workspaceID); err != nil {
-			slog.Warn("Failed to delete durable execution ledgers for workspace", "workspace", workspaceID, "error", err)
-		}
-	}
-
-	s.appendNodeEvent(workspaceID, "info", "workspace.deleted", "Workspace deleted", nil)
-	writeJSON(w, http.StatusOK, map[string]interface{}{"success": true})
+	s.handleSafeDeleteWorkspace(w, r)
 }
 
 func (s *Server) handleListTabs(w http.ResponseWriter, r *http.Request) {

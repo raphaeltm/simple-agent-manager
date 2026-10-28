@@ -199,6 +199,17 @@ async function markSessionSnapshotSleepingWithConfig(
             degradation: sql`CASE WHEN json_extract(${schema.sessionSnapshots.sleepFallbackJson}, '$.recoveryPoint') IS NULL THEN 'transcript-only' ELSE ${schema.sessionSnapshots.degradation} END`,
           }
         : {}),
+      // Only a verified full sleep grants preservation authority. Eviction and
+      // degraded fallback writers must never turn an old checkpoint into proof
+      // that the source runtime's latest dirty/untracked data was captured.
+      ...(!fallback && expectedGeneration
+        ? {
+            cleanupIdentityJson: sql`CASE WHEN json_valid(${schema.sessionSnapshots.cleanupIdentityJson})
+          AND json_extract(${schema.sessionSnapshots.cleanupIdentityJson}, '$.snapshotGeneration') = ${expectedGeneration}
+          THEN json_set(${schema.sessionSnapshots.cleanupIdentityJson}, '$.preserved', 1)
+          ELSE NULL END`,
+          }
+        : {}),
       sleepingAt: now.toISOString(),
       expiresAt: snapshotExpiry(now, ttlDays),
       recoveryStatus: null,

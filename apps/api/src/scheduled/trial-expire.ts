@@ -47,6 +47,7 @@ interface TrialWorkspaceCleanupRow {
   user_id: string;
   project_id: string | null;
   chat_session_id: string | null;
+  eviction_generation: string | null;
   status: string;
 }
 
@@ -195,7 +196,7 @@ async function cleanupExpiredTrialResources(
       result.projectsLinked += getRunChanges(linkResult);
 
       const workspaces = await env.DATABASE.prepare(
-        `SELECT id, node_id, user_id, project_id, chat_session_id, status
+        `SELECT id, node_id, user_id, project_id, chat_session_id, eviction_generation, status
          FROM workspaces
          WHERE project_id = ?
            AND user_id = ?
@@ -216,6 +217,7 @@ async function cleanupExpiredTrialResources(
       for (const workspace of workspaces.results) {
         if (!workspace.node_id) {
           const outcome = await cleanupWorkspaceForDeletion({
+            mode: 'automatic',
             db: drizzle(env.DATABASE, { schema }),
             env,
             workspace: {
@@ -224,6 +226,7 @@ async function cleanupExpiredTrialResources(
               userId: workspace.user_id,
               projectId: workspace.project_id,
               chatSessionId: workspace.chat_session_id,
+              evictionGeneration: workspace.eviction_generation,
               status: workspace.status,
             } as schema.Workspace,
             userId: workspace.user_id,
@@ -451,6 +454,7 @@ async function cleanupWorkspacesOnLiveNode(
 
     try {
       const outcome = await cleanupWorkspaceForDeletion({
+        mode: 'automatic',
         db,
         env,
         workspace: {
@@ -459,6 +463,7 @@ async function cleanupWorkspacesOnLiveNode(
           userId: workspace.user_id,
           projectId: workspace.project_id,
           chatSessionId: workspace.chat_session_id,
+          evictionGeneration: workspace.eviction_generation,
         } as schema.Workspace,
         userId: workspace.user_id,
         logContext: { closePath: 'trial_expire' },
