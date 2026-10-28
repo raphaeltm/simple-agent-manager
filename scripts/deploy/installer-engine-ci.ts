@@ -15,6 +15,17 @@ import {
 // @ts-expect-error Shared workflow naming resolver is JavaScript without declarations.
 import { resolveResourceNames } from './workflow-resource-names.mjs';
 
+/** Private inputs consumed directly by the CI adapter/engine outside expression mappings. */
+export const LEGACY_CI_DIRECT_SECRETS = [
+  'CF_ACCOUNT_ID',
+  'CF_ZONE_ID',
+  'CF_API_TOKEN',
+  'R2_ACCESS_KEY_ID',
+  'R2_SECRET_ACCESS_KEY',
+  'PULUMI_CONFIG_PASSPHRASE',
+  'ENCRYPTION_KEY',
+] as const;
+
 interface WorkflowStep {
   name?: string;
   env?: Record<string, string>;
