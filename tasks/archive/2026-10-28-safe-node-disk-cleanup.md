@@ -106,7 +106,7 @@ Independent defensive review also identified raw-vs-cleaned root inconsistency; 
 
 ### Post-merge deterministic alarm test follow-up
 
-PR2463 merged as0c9fe1aae46f9578240649a857bea3ff5cb1eaed after all PR gates passed. Main CI40698456243 then exposed one test observation race: an immediate real platform alarm ran before the test inspected its initial queue entry, so correct first-attempt retry backoff violated the test's initial timestamp assertion. Actual scheduling logged delay0; no runtime defect or deployment failure was demonstrated. Production remained on its prior release behind the CI gate.
+PR2463 merged as0c9fe1aae46f9578240649a857bea3ff5cb1eaed after all PR gates passed. Main CI40698456243 then exposed one test observation race: an immediate real platform alarm ran before the test inspected its initial queue entry, so correct first-attempt retry backoff violated the test's initial timestamp assertion. Actual scheduling logged delay 0; no runtime defect or deployment failure was demonstrated. Production remained on its prior release behind the CI gate.
 
 The follow-up changes only the test, using existing `pauseNodeAlarms` before enqueue, restoring spies after tests, and asserting no network call before the explicit alarm step. Real DO/D1 transactions and deletion/wake logic remain intact. Existing immediate enqueue timestamp/attempt0, legacy receipt rejection, wake block and strict physical-proof release assertions are unchanged. Full NodeLifecycle Workers81/81 passed75.18s; API typecheck and scoped lint passed. Independent source/evidence review passed. Runtime/build inputs remain identical to the fully staged original PR; no new runtime deployment or VM fixtures are required for this test-only delta.
 
