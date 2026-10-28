@@ -634,7 +634,9 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
           beforeExternalMutation: expect.any(Function),
         })
       );
-      expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('node-1', 'ws-a', 'user-1');
+      expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('node-1', 'ws-a', 'user-1', {
+        retryAfterMs: 0,
+      });
       // The only workspace on the node: it turns warm, keeping warm retention.
       expect(mocks.markIdle).toHaveBeenCalledWith('node-1', 'user-1', 2700000);
 
@@ -674,7 +676,9 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       expect(row()).toMatchObject({ sleep_status: 'sleeping', degradation: 'transcript-only' });
       expect(fallbackRecord()).toMatchObject({ outcome: 'slept', recoveryPoint: null });
       expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
-      expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('node-1', 'ws-a', 'user-1');
+      expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('node-1', 'ws-a', 'user-1', {
+        retryAfterMs: 0,
+      });
       expect(mocks.markIdle).toHaveBeenCalledWith('node-1', 'user-1', 2700000);
       expect(workspaceStatus()).toBe('sleeping');
       expect(projectData.get('chat-a')?.status).toBe('sleeping');
@@ -755,7 +759,9 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
       expect(workspaceStatus()).toBe('sleeping');
       expect(projectData.get('chat-a')?.status).toBe('stopped');
       expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
-      expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('node-1', 'ws-a', 'user-1');
+      expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('node-1', 'ws-a', 'user-1', {
+        retryAfterMs: 0,
+      });
       expect([...r2Objects.keys()]).toEqual(retained);
       expect(fallbackRecord()).toMatchObject({ outcome: 'slept', recoveryPoint: null });
       expect(notices.some((notice) => /unpublished/i.test(notice.content))).toBe(true);

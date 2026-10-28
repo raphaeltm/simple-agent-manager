@@ -13,7 +13,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { workspaceDeletionDueIndexKey } from '../../src/durable-objects/node-lifecycle-workspace-deletion';
 import type { PendingWorkspaceDeletion } from '../../src/durable-objects/node-lifecycle-workspace-deletion-support';
 import type { Env } from '../../src/env';
+import { assertReplacementDeletionConfirmed } from '../../src/services/replacement-deletion-fence';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
+import {
+  loadSleepWorkspace,
+  scheduleSleepingWorkspaceDeletion,
+} from '../../src/services/session-sleep-teardown';
 import { buildSessionSnapshotR2Key } from '../../src/services/session-snapshot-artifacts';
 import {
   attemptWorkspaceDeletion,
@@ -1140,6 +1145,73 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     ).toBeUndefined();
   });
 
+  it('queues verified sleep immediately and releases wake only after strict physical proof', async () => {
+    const nodeId = 'nl-immediate-sleep';
+    const wsId = 'ws-immediate-sleep';
+    const taskId = 'task-immediate-sleep';
+    await seedTestNode(nodeId);
+    await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'sleeping' });
+    const workspace = await loadSleepWorkspace(env as Env, wsId, TEST_USER_ID);
+    await seedTask(taskId, workspace.projectId, TEST_USER_ID, {
+      status: 'awaiting_followup',
+      workspaceId: wsId,
+    });
+    const stub = getStub(nodeId);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ success: true }))
+    );
+    const before = Date.now();
+    await scheduleSleepingWorkspaceDeletion(env as Env, workspace, 'test.sleep_schedule_failed');
+    const entry = await runInDurableObject(stub, async (instance) =>
+      instance.ctx.storage.get<PendingWorkspaceDeletion>(`ws-delete:${wsId}`)
+    );
+    expect(entry?.deleteAt).toBeGreaterThanOrEqual(before);
+    expect(entry?.deleteAt).toBeLessThanOrEqual(Date.now());
+    expect(entry?.attemptCount).toBe(0);
+    const wakeGate = () =>
+      assertReplacementDeletionConfirmed(env as Env, {
+        sourceTaskId: taskId,
+        projectId: workspace.projectId,
+        userId: TEST_USER_ID,
+      });
+    await expect(wakeGate()).rejects.toThrow('deletion is unconfirmed');
+
+    // An old agent's HTTP success must not release the wake fence.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ success: true }))
+    );
+    await runInDurableObject(stub, async (instance) => instance.alarm());
+    await vi.waitFor(async () => {
+      const pending = await runInDurableObject(stub, async (instance) =>
+        instance.ctx.storage.get<PendingWorkspaceDeletion>(`ws-delete:${wsId}`)
+      );
+      expect(pending?.attemptCount).toBe(1);
+      expect(pending?.lastError).toContain('VM attempt 1');
+    });
+    await expect(wakeGate()).rejects.toThrow('deletion is unconfirmed');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => deletionResponse(wsId))
+    );
+    await runInDurableObject(stub, async (instance) => {
+      const pending = await instance.ctx.storage.get<PendingWorkspaceDeletion>(`ws-delete:${wsId}`);
+      await putIndexedWorkspaceDeletion(instance.ctx.storage, {
+        ...pending!,
+        deleteAt: Date.now() - 1,
+      });
+      await instance.alarm();
+    });
+    await vi.waitFor(async () => {
+      expect(await stub.getWorkspaceDeletionAttemptState(wsId)).toEqual({
+        pending: false,
+        attemptStarted: false,
+      });
+    });
+    await expect(wakeGate()).resolves.toBeUndefined();
+  });
+
   it('does not schedule physical cleanup for unpreserved or expired source data', async () => {
     const nodeId = 'nl-protected-no-snapshot';
     const wsId = 'ws-protected-no-snapshot';
@@ -1160,6 +1232,61 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     expect(await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID)).toBe(false);
     expect(await getWorkspaceStatusFromD1(wsId)).toBe('stopped');
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each(['failed', 'degraded', 'unpreserved'])(
+    'immediate sleep scheduling preserves %s snapshots',
+    async (state) => {
+      const nodeId = `nl-immediate-protected-${state}`;
+      const wsId = `ws-immediate-protected-${state}`;
+      await seedTestNode(nodeId);
+      await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'sleeping' });
+      const workspace = await loadSleepWorkspace(env as Env, wsId, TEST_USER_ID);
+      await env.DATABASE.prepare(
+        `UPDATE session_snapshots SET status=?, degradation=?,
+       cleanup_identity_json=CASE WHEN ?='unpreserved' THEN json_set(cleanup_identity_json,'$.preserved',0) ELSE cleanup_identity_json END
+       WHERE workspace_id=?`
+      )
+        .bind(
+          state === 'unpreserved' ? 'available' : state,
+          state === 'degraded' ? 'home_missing' : 'none',
+          state,
+          wsId
+        )
+        .run();
+      const fetchMock = vi.fn();
+      vi.stubGlobal('fetch', fetchMock);
+      await scheduleSleepingWorkspaceDeletion(env as Env, workspace, 'test.sleep_schedule_failed');
+      const stub = getStub(nodeId);
+      expect(await stub.getWorkspaceDeletionAttemptState(wsId)).toEqual({
+        pending: false,
+        attemptStarted: false,
+      });
+      await runInDurableObject(stub, async (instance) => instance.alarm());
+      expect(await getWorkspaceStatusFromD1(wsId)).toBe('sleeping');
+      expect(fetchMock).not.toHaveBeenCalled();
+    }
+  );
+
+  it('retains the ordinary stopped-workspace TTL', async () => {
+    const nodeId = 'nl-ordinary-stopped-ttl';
+    const wsId = 'ws-ordinary-stopped-ttl';
+    await seedTestNode(nodeId);
+    await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'stopped' });
+    const stub = getStub(nodeId);
+    const previousTtl = (env as Env).WORKSPACE_STOPPED_TTL_MS;
+    await setNodeLifecycleDeletionEnv(stub, { WORKSPACE_STOPPED_TTL_MS: '60000' });
+    try {
+      const before = Date.now();
+      await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID);
+      const entry = await runInDurableObject(stub, async (instance) =>
+        instance.ctx.storage.get<PendingWorkspaceDeletion>(`ws-delete:${wsId}`)
+      );
+      expect(entry?.deleteAt).toBeGreaterThanOrEqual(before + 60000);
+      expect(entry?.deleteAt).toBeLessThanOrEqual(Date.now() + 60000);
+    } finally {
+      await setNodeLifecycleDeletionEnv(stub, { WORKSPACE_STOPPED_TTL_MS: previousTtl });
+    }
   });
 
   it('allows a current explicit user claim to supersede automatic authority without periodic downgrade', async () => {

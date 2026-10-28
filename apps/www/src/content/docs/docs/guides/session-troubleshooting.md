@@ -380,6 +380,10 @@ remain retained. Active agent work delays cleanup, and a replacement runtime is 
 older sleep attempt. If cleanup remains stuck, [report it](/docs/guides/reporting-issues/) or contact
 your administrator.
 
+After a VM session saves a verified complete snapshot, SAM queues physical cleanup immediately.
+A new message waits for confirmed removal of the old workspace before starting its replacement.
+Failed or incomplete snapshots do not authorize physical deletion.
+
 A related notice, **"SAM blocked the old sleep attempt because this workspace runtime changed."**,
 means the workspace's runtime was replaced (after a restart or rebuild, for example) while an older
 sleep attempt was finishing. SAM left the replacement alone and kept the previous checkpoint, and the
