@@ -300,12 +300,16 @@ func TestOwnedStandaloneSubrootPhysicalDeletion(t *testing.T) {
 	if err := os.RemoveAll(f.root); err != nil {
 		t.Fatal(err)
 	}
-	existing := filepath.Join(f.server.config.WorkspaceDir, "preexisting")
-	if err := os.Mkdir(existing, 0755); err != nil {
+	// This fixture deliberately replaces the root; remove only its synthetic old
+	// ownership record so the test cannot pass through incidental inode reuse.
+	if err := f.server.store.DeleteOwnedWorkspaceRoot("workspace-1"); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.server.createOwnedWorkspaceRoot(&WorkspaceRuntime{ID: "preexisting"}, existing); err != nil {
+	if err := f.server.createOwnedWorkspaceRoot(&WorkspaceRuntime{ID: "workspace-1"}, f.root); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Stat(f.root); err != nil {
+		t.Fatal("owned standalone root was not recreated", err)
 	}
 	if rec := f.request(t.Context(), f.identity); rec.Code != 200 {
 		t.Fatalf("owned subroot deletion failed: %d %s", rec.Code, rec.Body.String())

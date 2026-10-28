@@ -69,18 +69,15 @@ func (s *Server) createOwnedWorkspaceRoot(runtime *WorkspaceRuntime, root string
 	if s.store == nil || s.config.NodeUserID == "" || s.config.NodeRuntimeIncarnationID == "" || root != filepath.Join(s.config.WorkspaceDir, runtime.ID) || root == s.config.WorkspaceDir {
 		return nil
 	}
+	if err := validateDeletionRoot(root); err != nil {
+		return err
+	}
 	if _, err := os.Lstat(root); err == nil {
 		return nil
 	} else if !os.IsNotExist(err) {
 		return err
 	}
-	if err := validateDeletionRoot(root); err != nil {
-		return err
-	}
-	if err := os.Mkdir(root, 0755); err != nil {
-		return err
-	}
-	dev, ino, err := deletionRootIdentity(root)
+	dev, ino, err := createOwnedWorkspaceDirectory(s.config.WorkspaceDir, runtime.ID)
 	if err != nil {
 		return err
 	}
