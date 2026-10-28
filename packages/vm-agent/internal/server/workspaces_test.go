@@ -698,6 +698,7 @@ func signWorkspaceCreateNodeToken(t *testing.T, key *rsa.PrivateKey, nodeID, wor
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
 		},
 		Node:      nodeID,
+		UserID:    "user-1",
 		Workspace: workspaceID,
 	})
 	token.Header["kid"] = "test-key-1"

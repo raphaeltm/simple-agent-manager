@@ -109,6 +109,28 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 		return false, err
 	}
 
+	lock := s.workspaceLifecycleLock(runtime.ID)
+	if err := lock.Lock(ctx); err != nil {
+		return false, err
+	}
+	defer lock.Unlock()
+	if err := s.requireNoWorkspaceDeletion(runtime.ID); err != nil {
+		return false, err
+	}
+	if s.store != nil {
+		meta, err := s.store.GetWorkspaceMetadata(runtime.ID)
+		if err != nil {
+			return false, err
+		}
+		if meta != nil && meta.EvictionGeneration != runtime.EvictionGeneration {
+			return false, fmt.Errorf("workspace generation changed before provisioning")
+		}
+	}
+
+	if err := s.createOwnedWorkspaceRoot(runtime, runtime.WorkspaceDir); err != nil {
+		return false, err
+	}
+
 	callbackToken := s.runtimeCallbackToken(runtime)
 	if callbackToken == "" {
 		callbackToken = strings.TrimSpace(s.config.CallbackToken)

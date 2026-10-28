@@ -71,6 +71,14 @@ func (s *Server) captureSessionSnapshot(ctx context.Context, input *sessionSnaps
 		return nil, err
 	}
 	defer lock.Unlock()
+	lifecycle := s.workspaceLifecycleLock(input.workspaceID)
+	if err := lifecycle.Lock(ctx); err != nil {
+		return nil, err
+	}
+	defer lifecycle.Unlock()
+	if err := s.requireNoWorkspaceDeletion(input.workspaceID); err != nil {
+		return nil, err
+	}
 	return s.runSessionSnapshot(ctx, input)
 }
 
@@ -90,6 +98,14 @@ func (s *Server) startBackgroundSessionSnapshot(input *sessionSnapshotHandlerInp
 		defer lock.Unlock()
 		ctx, cancel := context.WithTimeout(context.Background(), s.sessionSnapshotOperationTimeout())
 		defer cancel()
+		lifecycle := s.workspaceLifecycleLock(input.workspaceID)
+		if err := lifecycle.Lock(ctx); err != nil {
+			return
+		}
+		defer lifecycle.Unlock()
+		if err := s.requireNoWorkspaceDeletion(input.workspaceID); err != nil {
+			return
+		}
 		result, err := s.runSessionSnapshot(ctx, input)
 		if err != nil {
 			slog.Warn("Background session snapshot failed", "chatSessionId", input.chatSessionID, "workspaceId", input.workspaceID, "error", err)

@@ -98,7 +98,7 @@ func TestWorkspaceRestartPersistenceFailureDoesNotClaimRuntime(t *testing.T) {
 		t.Fatal(err)
 	}
 	rec := postWorkspaceReprovision(t, s, token, "restart", `{"evictionGeneration":"`+restartTestGeneration+`","expectedEvictionGeneration":""}`)
-	if rec.Code != http.StatusInternalServerError {
+	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("got %d: %s", rec.Code, rec.Body.String())
 	}
 	runtime := s.snapshotWorkspaceRuntime(s.workspaces["ws-restart"])
