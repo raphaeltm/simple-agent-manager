@@ -1,42 +1,75 @@
 <!doctype html>
 <html lang="en">
-  <meta charset="utf-8" /><meta
-    name="viewport"
-    content="width=device-width,initial-scale=1"
-  /><title>Installer permissions & privacy</title
-  ><link rel="stylesheet" href="/style.css" />
-  <main>
-    <a href="/">← Installer</a>
-    <h1>Permissions & privacy</h1>
-    <p>
-      This prototype requests account read access and permission to deploy Workers. Cloudflare’s
-      permissions may cover existing Workers in the selected account. Only approve accounts you
-      intend to use.
-    </p>
-    <h2>Temporary access</h2>
-    <p>
-      The installer handles OAuth tokens server-side. Tokens are stored in an isolated session for
-      up to 15 minutes by default, bounded by token expiry. Completing handoff or disconnecting
-      deletes the session and attempts to revoke the token. Expired sessions are rejected
-      immediately; an alarm removes stored data and attempts revocation. Revocation can fail during
-      an outage: use Cloudflare’s authorized-applications screen to revoke access yourself.
-    </p>
-    <p>
-      Your password is entered only on Cloudflare. This app does not use analytics, third-party
-      scripts, or application request logging. Hosting and network providers may still process
-      request metadata.
-    </p>
-    <h2>What stays in your account</h2>
-    <p>
-      The prototype creates one named Worker with an expiring owner-access credential. It does not
-      install SAM or retain a Cloudflare deployment token in that Worker. Disconnecting does not
-      delete that Worker. You can remove it through Cloudflare’s Workers dashboard.
-    </p>
-    <h2>Your choice</h2>
-    <p>
-      You can deploy this same installer yourself and register your own OAuth client. Source
-      availability helps you review the app; it does not guarantee that a hosted operator cannot
-      modify its deployment.
-    </p>
-  </main>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Permissions & privacy · SAM installer</title>
+    <link rel="icon" href="/sam-head.png" />
+    <link
+      rel="preload"
+      href="/fonts/Chillax-Variable.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <script src="/theme.js"></script>
+    <link rel="stylesheet" href="/glass.css" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="site-header sam-glass sam-glass--chrome sam-glass-rim">
+      <a class="brand" href="/" aria-label="SAM installer home"
+        ><img src="/sam-head.png" width="42" height="42" alt="" /><span class="wordmark"
+          >SAM<span>simple agent manager</span></span
+        ></a
+      >
+      <nav class="header-actions" aria-label="Installer navigation">
+        <select id="theme" class="theme-picker" aria-label="Color theme">
+          <option value="auto">System</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option></select
+        ><a href="/">← Back to setup</a>
+      </nav>
+    </header>
+    <main class="privacy-main">
+      <span class="badge">Your access. Your choice.</span>
+      <h1>Permissions<br />& <span class="gradient-text">privacy.</span></h1>
+      <p class="intro">Know what you’re sharing, what we create, and what stays yours.</p>
+      <div class="privacy-content sam-glass sam-glass-rim">
+        <h2>What you authorize</h2>
+        <p>
+          This prototype requests account read access and permission to deploy Workers. Cloudflare’s
+          permissions may cover existing Workers in the selected account. Only approve accounts you
+          intend to use.
+        </p>
+        <h2>Temporary access</h2>
+        <p>
+          The installer handles OAuth tokens server-side. Tokens are stored in an isolated session
+          for up to 15 minutes by default, bounded by token expiry. Completing handoff or
+          disconnecting deletes the session and attempts to revoke the token. Expired sessions are
+          rejected immediately; an alarm removes stored data and attempts revocation. Revocation can
+          fail during an outage: use Cloudflare’s authorized-applications screen to revoke access
+          yourself.
+        </p>
+        <p>
+          Your password is entered only on Cloudflare. This app does not use analytics, third-party
+          scripts, or application request logging. Hosting and network providers may still process
+          request metadata.
+        </p>
+        <h2>What stays in your account</h2>
+        <p>
+          The prototype creates one named Worker with an expiring owner-access credential. It does
+          not install SAM or retain a Cloudflare deployment token in that Worker. Disconnecting does
+          not delete that Worker. You can remove it through Cloudflare’s Workers dashboard.
+        </p>
+        <h2>Your choice</h2>
+        <p>
+          You can deploy this same installer yourself and register your own OAuth client. Source
+          availability helps you review the app; it does not guarantee that a hosted operator cannot
+          modify its deployment.
+        </p>
+      </div>
+    </main>
+    <footer><a href="/">← Back to setup</a><span>SAM · simple agent manager</span></footer>
+  </body>
 </html>

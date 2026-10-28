@@ -1,6 +1,7 @@
 const $ = (id) => document.getElementById(id);
 let busy = false;
-function message(text) {
+function message(text, tone = 'notice') {
+  $('message').dataset.tone = tone;
   $('message').textContent = text;
 }
 async function api(path, body) {
@@ -18,15 +19,22 @@ async function api(path, body) {
   if (!response.ok) throw new Error(data.error || 'The request failed. Please retry.');
   return data;
 }
+function progress(current) {
+  const steps = ['step-connect', 'step-account', 'step-handoff'];
+  steps.forEach((id, index) => {
+    $(id).removeAttribute('aria-current');
+    $(id).classList.toggle('completed', index < current);
+    $(id).querySelector('.step-number').textContent = index < current ? '✓' : String(index + 1);
+  });
+  $(steps[current]).setAttribute('aria-current', 'step');
+}
 function render(data) {
   const ready = data.job?.status === 'ready';
   $('connect').hidden = true;
   $('account').hidden = ready;
   $('ready').hidden = !ready;
   $('disconnect').hidden = false;
-  for (const id of ['step-connect', 'step-account', 'step-handoff'])
-    $(id).removeAttribute('aria-current');
-  $(ready ? 'step-handoff' : 'step-account').setAttribute('aria-current', 'step');
+  progress(ready ? 2 : 1);
   $('account-id').replaceChildren(
     ...data.accounts.map((account) => {
       const option = document.createElement('option');
@@ -55,7 +63,7 @@ $('install-form').addEventListener('submit', async (event) => {
   try {
     await api('install', { accountId: $('account-id').value, confirmed: $('confirm').checked });
     render(await api('status'));
-    message('Your installation service is ready.');
+    message('Your installation service is ready.', 'success');
   } catch (error) {
     message(error.message);
   } finally {
@@ -71,6 +79,8 @@ $('disconnect').addEventListener('click', async () => {
     $('account').hidden = true;
     $('ready').hidden = true;
     $('disconnect').hidden = true;
+    $('confirm').checked = false;
+    progress(0);
     message(
       result.revoked
         ? 'Session cleared. Created Workers remain in your Cloudflare account.'
