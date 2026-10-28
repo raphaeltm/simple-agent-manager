@@ -24,6 +24,7 @@ import {
   attemptWorkspaceDeletion,
   loadWorkspaceDeletionIdentity,
 } from '../../src/services/workspace-deletion';
+import { pauseNodeAlarms } from './helpers/durable-alarm-control';
 import {
   seedAgentSession,
   seedInstallation,
@@ -312,6 +313,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
   // Each test uses a unique nodeId to avoid cross-test DO state leakage
 
   afterEach(() => {
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
@@ -1157,6 +1159,10 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
       workspaceId: wsId,
     });
     const stub = getStub(nodeId);
+    // Own timer delivery before enqueue: an immediate platform alarm can otherwise
+    // finish its first retry before the test observes the initial durable entry.
+    // The real DO, transactions, deletion operation and wake fence stay intact.
+    await pauseNodeAlarms(nodeId);
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => Response.json({ success: true }))
@@ -1169,6 +1175,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     expect(entry?.deleteAt).toBeGreaterThanOrEqual(before);
     expect(entry?.deleteAt).toBeLessThanOrEqual(Date.now());
     expect(entry?.attemptCount).toBe(0);
+    expect(fetch).not.toHaveBeenCalled();
     const wakeGate = () =>
       assertReplacementDeletionConfirmed(env as Env, {
         sourceTaskId: taskId,
