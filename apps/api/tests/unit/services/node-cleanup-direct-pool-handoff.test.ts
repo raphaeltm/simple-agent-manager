@@ -274,6 +274,14 @@ async function handoffFixture(scope: 'user' | 'installation' = 'user') {
       'available', 'none', 'manifest-key', '2026-09-09T12:00:00.000Z', ?, 'sleeping', 0, ?, ?)`
     )
     .run(OLD, OLD, OLD);
+  // Whole-node retirement is allowed only after the durable workspace deletion
+  // operation confirmed the source bytes are gone; a restorable snapshot alone is insufficient.
+  f.sqlite
+    .prepare(
+      `UPDATE workspaces SET status = 'deleted',
+    runtime_deletion_confirmed_at = ?, runtime_deletion_proof = 'vm_agent_confirmed'`
+    )
+    .run(OLD);
   const projectStub = f.env.PROJECT_DATA.get(f.env.PROJECT_DATA.idFromName('project-1'));
   const stopSession = vi.fn(async () => undefined);
   const cleanupWorkspaceActivity = vi.fn(async () => undefined);
@@ -313,6 +321,24 @@ async function handoffFixture(scope: 'user' | 'installation' = 'user') {
 }
 
 describe('direct managed pool VM stopped handoff cleanup', () => {
+  it.each(['available', 'failed'] as const)(
+    'preserves uncleaned %s snapshot sources during automatic retirement',
+    async (status) => {
+      const f = await handoffFixture();
+      f.sqlite
+        .prepare(
+          `UPDATE workspaces SET status = 'sleeping',
+      runtime_deletion_confirmed_at = NULL, runtime_deletion_proof = NULL`
+        )
+        .run();
+      f.sqlite.prepare('UPDATE session_snapshots SET status = ?').run(status);
+      await f.sweep();
+      expect(f.providerDeletes).toHaveLength(0);
+      expect(f.sqlite.prepare('SELECT status FROM nodes').get()).toEqual({ status: 'stopped' });
+      expect(f.result.lifetimeDestroyed).toBe(0);
+    }
+  );
+
   it.each(['user', 'installation'] as const)(
     'deletes a %s pool VM without task provenance and preserves the restorable workspace/session',
     async (scope) => {

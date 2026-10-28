@@ -19,6 +19,7 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { cleanupNodeProvenanceSql } from '../../services/node-teardown-provenance';
+import { workspaceArtifactsRetirementGuardSql } from '../../services/node-workspace-retirement-guard';
 import { deleteNodeResourcesStrict } from '../../services/nodes';
 import { persistError } from '../../services/observability';
 import { boundedWarmPlacementClaimGuardSql } from '../../services/warm-placement-claims';
@@ -115,6 +116,8 @@ export async function claimNodeForCleanup(
        AND (cleanup_backoff_until IS NULL OR cleanup_backoff_until <= ?)
        ${options.expectedLastHeartbeatAt === undefined ? '' : 'AND last_heartbeat_at IS ?'}
        AND ${cleanupNodeProvenanceSql('nodes', options.allowManagedRunningProvenance)}
+       AND (runtime_termination_confirmed_at IS NOT NULL OR (1=1
+         ${workspaceArtifactsRetirementGuardSql('nodes')}))
        ${activeWorkspaceGuard}
        ${sleepingContainerRetentionGuardSql('nodes')}
        ${boundedWarmPlacementClaimGuardSql('nodes.id')}

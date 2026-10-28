@@ -95,6 +95,15 @@ function seedWorkspace(row: {
        VALUES (?, ?, 'user-1', ?, ?, ?)`
     )
     .run(row.id, row.nodeId, row.status, row.updatedAt, row.updatedAt);
+  // These tests exercise idle clocks after the source cleanup has completed.
+  if (row.status === 'stopped') {
+    sqlite
+      ?.prepare(
+        `UPDATE workspaces SET runtime_deletion_confirmed_at = ?,
+      runtime_deletion_proof = 'vm_agent_confirmed' WHERE id = ?`
+      )
+      .run(row.updatedAt, row.id);
+  }
 }
 
 function makeEnv(): Env {
@@ -171,6 +180,7 @@ beforeEach(() => {
     -- Read by the terminal-task ownership predicate
     -- (sleepLifecycleOwnsTerminalTaskWorkspaceSql).
     CREATE TABLE session_snapshots (
+      node_id TEXT, user_id TEXT, cleanup_identity_json TEXT,
       workspace_id TEXT, project_id TEXT, sleep_claim_id TEXT, sleep_claimed_at TEXT, sleep_stopping_since TEXT,
       chat_session_id TEXT PRIMARY KEY, status TEXT NOT NULL DEFAULT 'pending',
       sleeping_at TEXT, sleep_status TEXT, sleep_after TEXT, capture_generation TEXT,

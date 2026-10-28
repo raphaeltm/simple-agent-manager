@@ -18,6 +18,7 @@ import {
   resolveEnvironmentLabel,
   resolveInstallationId,
 } from './node-provider-labels';
+import { requireNodeWorkspaceArtifactsDeleted } from './node-workspace-retirement-guard';
 import { persistError } from './observability';
 import {
   hasExactProviderCredentialGenerationProof,
@@ -279,7 +280,8 @@ async function deleteStrictProviderInstance(
   node: NodeRow,
   userId: string,
   env: Env,
-  requestContext?: ProviderRequestContext
+  requestContext?: ProviderRequestContext,
+  beforeDestroy?: () => Promise<void>
 ): Promise<StrictNodeDeletionResult['providerVm']> {
   if (!node.providerInstanceId) {
     throw new Error(
@@ -290,6 +292,7 @@ async function deleteStrictProviderInstance(
   const providerResult = await resolveStrictNodeProvider(db, node, userId, env);
 
   await requireSameNodeIncarnation(db, node, 'provider delete');
+  await beforeDestroy?.();
   if (requestContext)
     await providerResult.provider.deleteVM(node.providerInstanceId, requestContext);
   else await providerResult.provider.deleteVM(node.providerInstanceId);
@@ -331,7 +334,8 @@ async function reconcileStrictProviderlessVm(
   node: NodeRow,
   userId: string,
   env: Env,
-  requestContext?: ProviderRequestContext
+  requestContext?: ProviderRequestContext,
+  beforeDestroy?: () => Promise<void>
 ): Promise<StrictNodeDeletionResult['providerVm']> {
   if (node.status !== 'destroying' || !hasManagedWorkspaceVmPlacementProof(node)) {
     throw new Error(
@@ -415,6 +419,7 @@ async function reconcileStrictProviderlessVm(
     );
   }
   await requireSameNodeIncarnation(db, node, 'providerless inventory delete');
+  await beforeDestroy?.();
   if (requestContext) await providerResult.provider.deleteVM(current.id, requestContext);
   else await providerResult.provider.deleteVM(current.id);
   return 'deleted';
@@ -583,6 +588,8 @@ export async function deleteNodeResourcesStrict(
   env: Env,
   options: {
     cleanupDns?: boolean;
+    /** Only the explicit permanent operator deletion adapter may discard local workspace data. */
+    explicitPermanentDeletion?: boolean;
     expectedRuntime?: StrictNodeRuntimeIdentity;
     providerRequestContext?: ProviderRequestContext;
     requestDeadlineMs?: number;
@@ -607,6 +614,10 @@ export async function deleteNodeResourcesStrict(
     };
   }
 
+  const beforeDestroy = options.explicitPermanentDeletion
+    ? undefined
+    : () => requireNodeWorkspaceArtifactsDeleted(env, nodeId, userId, initialNode);
+  if (!initialNode.runtimeTerminationConfirmedAt) await beforeDestroy?.();
   const node = await claimManagedNodeDeletion(db, initialNode);
 
   if (node.runtimeTerminationConfirmedAt) {
@@ -639,6 +650,7 @@ export async function deleteNodeResourcesStrict(
 
   if (node.runtime === 'cf-container') {
     await requireSameNodeIncarnation(db, node, 'container teardown');
+    await beforeDestroy?.();
     await destroyVmAgentContainer(env, node.id);
     const runtimeTerminationConfirmedAt = await markRuntimeTerminationConfirmed(db, node);
     if (options.cleanupDns !== false) {
@@ -660,8 +672,22 @@ export async function deleteNodeResourcesStrict(
 
   const providerVm =
     initialNode.status === 'destroying' && node.runtime === 'vm' && !node.providerInstanceId
-      ? await reconcileStrictProviderlessVm(db, node, userId, env, options.providerRequestContext)
-      : await deleteStrictProviderInstance(db, node, userId, env, options.providerRequestContext);
+      ? await reconcileStrictProviderlessVm(
+          db,
+          node,
+          userId,
+          env,
+          options.providerRequestContext,
+          beforeDestroy
+        )
+      : await deleteStrictProviderInstance(
+          db,
+          node,
+          userId,
+          env,
+          options.providerRequestContext,
+          beforeDestroy
+        );
   const runtimeTerminationConfirmedAt = await markRuntimeTerminationConfirmed(db, node);
   if (options.cleanupDns !== false) {
     await deleteStrictNodeDnsRecord(

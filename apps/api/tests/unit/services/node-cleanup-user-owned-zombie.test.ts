@@ -156,6 +156,7 @@ beforeEach(() => {
     -- The sleep columns and agent_sessions are read by the terminal-task
     -- ownership predicate (sleepLifecycleOwnsTerminalTaskWorkspaceSql).
     CREATE TABLE session_snapshots (
+      node_id TEXT, user_id TEXT, cleanup_identity_json TEXT,
       workspace_id TEXT, project_id TEXT, sleep_claim_id TEXT, sleep_claimed_at TEXT, sleep_stopping_since TEXT,
       chat_session_id TEXT PRIMARY KEY, status TEXT NOT NULL,
       degradation TEXT NOT NULL, expires_at TEXT NOT NULL,

@@ -9,6 +9,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { deleteDNSRecord } from './dns';
+import { requireNodeWorkspaceArtifactsDeleted } from './node-workspace-retirement-guard';
 import { deleteNodeResourcesStrict, type StrictNodeRuntimeIdentity } from './strict-node-deletion';
 import { WORKSPACE_DELETION_DIAGNOSTIC_PREFIX } from './workspace-deletion';
 import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
@@ -82,6 +83,10 @@ export async function stopNodeResources(
       .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)));
     log.info('node_stop.user_owned_offline', { nodeId, action: 'marked_offline' });
     return;
+  }
+
+  if (!node.runtimeTerminationConfirmedAt) {
+    await requireNodeWorkspaceArtifactsDeleted(env, nodeId, userId, node);
   }
 
   // A managed stop is terminal only after the strict provider/container boundary
