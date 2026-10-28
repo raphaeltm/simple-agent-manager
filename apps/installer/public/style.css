@@ -747,3 +747,12 @@ footer a {
   border-color: rgb(21 128 61 / 0.3);
   background: rgb(21 128 61 / 0.04);
 }
+.privacy-content pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--panel);
+  font-size: 12px;
+}

@@ -51,3 +51,12 @@ by 12 attempts and a60s readiness deadline. Unexpected200 fails immediately.
 Three regression tests verify eventual401, public200 fail-closed, and bounded
 exhaustion; each checks cleanup. 15 tests, lint/typecheck pass. Cloudflare/security
 skill checklist reviewed this testing-only change; no token/permission relaxation.
+
+Run40721329924 passed the real bootstrap smoke and deleted its temporary Worker;
+installer assets deployed at ab396d163beef6cc88517c7664abe85ee4a105f4. OAuth client
+GET403/code10000 remains the sole configuration failure after deploy. Design is
+live on staging; no real OAuth success claimed. Link checks additionally found
+main/apps/installer404 and installer public guide URL returning the homepage.
+Fix: source pinned to deployed SHA; local branded public self-host guide provides
+usable instructions during the unmerged preview, with deployed revision checkout.
+DOCS_URL remains overridable. Guide included in mobile/desktop/light/dark audit.

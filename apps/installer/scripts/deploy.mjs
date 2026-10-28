@@ -48,6 +48,11 @@ config.routes = [
 config.vars.APP_ORIGIN = origin;
 config.vars.BUILD_SHA = process.env.GITHUB_SHA || 'self-hosted';
 if (process.env.SOURCE_URL) config.vars.SOURCE_URL = process.env.SOURCE_URL;
+else if (/^[a-f0-9]{40}$/.test(process.env.GITHUB_SHA || ''))
+  config.vars.SOURCE_URL = config.vars.SOURCE_URL.replace(
+    '/tree/main/',
+    `/tree/${process.env.GITHUB_SHA}/`
+  );
 if (process.env.DOCS_URL) config.vars.DOCS_URL = process.env.DOCS_URL;
 const generated = '.wrangler-deploy.json';
 await writeFile(generated, JSON.stringify(config, null, 2));

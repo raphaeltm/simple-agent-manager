@@ -30,7 +30,7 @@
     "SESSION_TTL_SECONDS": "900",
     "OAUTH_SCOPES": "account-settings.read workers-scripts.edit",
     "SOURCE_URL": "https://github.com/raphaeltm/simple-agent-manager/tree/main/apps/installer",
-    "DOCS_URL": "https://www.simple-agent-manager.org/docs/guides/installer/",
+    "DOCS_URL": "/self-host.html",
     "BUILD_SHA": "local"
   }
 }
