@@ -99,3 +99,14 @@ reduced-motion scene mount, no JS errors. 15 unit tests, lint/typecheck/build pa
 Iteration artifacts: .codex/tmp/playwright-screenshots/iteration-{1,2}/.
 Next: one final staging deployment and live screenshot review by the same reviewer.
 Known inherited OAuth GET403 still prevents real consent and merge; unchanged scope.
+
+Second pass final live verification: run40729553497 passed package checks, all15
+unit tests,62 screenshot fixtures and real bootstrap smoke/cleanup. Deployed app
+c5adfb9ae9436b653af6c1618536c15f10cb4edf, then hit unchanged OAuth GET403/code10000.
+18 additional unmocked live captures passed version/source200/guide/renderer mount,
+no overflow or JS errors. Reviewer inspected all4 live desktop/mobile/light/dark
+landing captures, including actual unavailable state, and gave final verdict:
+"They look consistent and show the same quality of design execution." No remaining
+design blockers or visible regression. Screenshot artifact12833588308. Review and
+validation recorded in PR2465. Live Browser Back check retained both floor canvases.
+Design work complete; real OAuth and aggregate PR merge remain blocked as before.
