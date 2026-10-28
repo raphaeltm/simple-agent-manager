@@ -32,3 +32,9 @@ No previous agent implementation recovered; rebuilt from original transcript per
 - Staging candidate a893cd2e7e1cf0e52b722ee7b66ca1b5a090f621 is deploying in run40653426846; no PR/CI/CodeRabbit or production release yet. Staging preflight authenticated successfully; no active staging deployment observed. No production resources mutated.
 
 Final independent review: API/Cloudflare/security PASS after source/capture/handoff snapshot CAS, caller fences, strict Stop behavior and same-operation CF retirement retry. Scratch/Go/process-test reviews PASS; whole VM Agent `go test ./...` PASS. Completion release evidence remains pending.
+
+## First staging pass and correction
+
+Deployment40653426846 and smoke tests passed for a893cd2e7. Direct Cloudflare metadata confirmed candidate100% and D1 migration0210 applied. Own cx23 VM01M60SPNFG0AAD0DJ4W0SDEGFW reported the exact required agent6b5ffd23a through authenticated system-info and subsequently heartbeats. First workspace provisioning exposed an absent `/workspace` base on a fresh node. Deletion returned202 pending honestly. No user data had been written; normal own-node deletion returned200 and subsequent GET404.
+
+Fix90c83db1f initializes missing trusted base components through pinned dirFDs, refuses symlinks, exclusively creates the workspace leaf, and records exact inode/device provenance. Fresh-base/ancestor tests and corrected standalone coverage passed with race detection; whole VM Agent suite and vet passed; independent Go/security review passed. Second staging deployment is in progress; no concurrent test VM and no production mutation. Own empty project01M60SP3Z08FY0B8TJEZP3BQ4B retained for bounded rerun.
