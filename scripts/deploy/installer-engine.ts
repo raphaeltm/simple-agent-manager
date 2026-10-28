@@ -1,24 +1,23 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-
 import * as TOML from '@iarna/toml';
-
 import {
-  assertWorkerDeployDiagnostics,
   DEFAULT_CLOUDFLARE_API_URL,
   DEFAULT_COMMAND_TIMEOUT_MS,
   DEFAULT_HEALTH_ATTEMPTS,
   DEFAULT_HEALTH_INTERVAL_MS,
   type EngineCheckpoint,
+  EngineCommandFailure,
   engineFingerprint,
   type EngineOptions,
   processRunner,
   stackNameForEnvironment,
   validateEngineConfig,
 } from './installer-engine-contract.js';
+import { deployEngineApi } from './installer-engine-deploy.js';
+import { verifyEngineReadiness } from './installer-engine-readiness.js';
 import { verifyInstallationAgentIdentity } from './installer-engine-runtime.js';
 export * from './installer-engine-contract.js';
-
 export async function runInstallerEngine(
   input: unknown,
   options: EngineOptions
@@ -78,8 +77,15 @@ export async function runInstallerEngine(
   if (c.profile !== 'legacy-ci' && !options.environment.CF_RUNTIME_API_TOKEN)
     throw new Error('Required private environment variable CF_RUNTIME_API_TOKEN is missing');
   mkdirSync(join(root, '.wrangler', 'installer-engine'), { recursive: true, mode: 0o700 });
-  const execute = (executable: string, args: string[], cwd = root) =>
-    runner.run(
+  let operation = 'phase-validation';
+  const execute = (executable: string, args: string[], cwd = root) => {
+    operation =
+      executable === 'pulumi'
+        ? `pulumi.${args[0]}`
+        : executable === 'bash'
+          ? `script.${args[0]?.split('/').pop()}`
+          : executable;
+    return runner.run(
       { executable, args },
       {
         cwd,
@@ -87,6 +93,7 @@ export async function runInstallerEngine(
         timeoutMs: c.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS,
       }
     );
+  };
   const pnpm = (...args: string[]) => execute('pnpm', args);
   const script = (name: string, ...args: string[]) =>
     execute('bash', [`scripts/deploy/${name}`, ...args]);
@@ -99,35 +106,15 @@ export async function runInstallerEngine(
       signal: AbortSignal.timeout(c.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS),
     });
   const sync = () => pnpm('exec', 'tsx', 'scripts/deploy/sync-wrangler-config.ts');
-  const deployApi = async () => {
-    const diagnostics = await runner.run(
-      {
-        executable: 'pnpm',
-        args: [
-          '--filter',
-          '@simple-agent-manager/api',
-          'exec',
-          'wrangler',
-          'deploy',
-          '--env',
-          c.environment,
-          '--message',
-          `commit:${c.sourceCommit}`,
-        ],
-      },
-      {
-        cwd: root,
-        env,
-        timeoutMs: c.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS,
-        includeStderr: true,
-      }
-    );
-    assertWorkerDeployDiagnostics(diagnostics, env.ARTIFACTS_BINDING_ENABLED === 'true');
+  const deployApi = () => {
+    operation = 'worker.deploy';
+    return deployEngineApi(c, runner, root, env);
   };
   const phase = async (name: string, action: () => Promise<unknown>) => {
     state.status = 'running';
     state.activePhase = name;
     await options.save(state);
+    operation = 'phase-validation';
     options.emit({ phase: name, status: 'started' });
     try {
       await action();
@@ -135,24 +122,28 @@ export async function runInstallerEngine(
       delete state.activePhase;
       await options.save(state);
       options.emit({ phase: name, status: 'completed' });
-    } catch {
+    } catch (error) {
       state.status = 'failed';
       await options.save(state);
-      options.emit({ phase: name, status: 'failed' });
+      options.emit({
+        phase: name,
+        status: 'failed',
+        operation,
+        ...(error instanceof EngineCommandFailure
+          ? { exitCode: error.exitCode, signal: error.signal }
+          : {}),
+      });
       throw new Error(`Installation phase ${name} failed; private tool output was withheld`);
     }
   };
-  // Resume deliberately reconciles every phase. Build disks are ephemeral; skipping
-  // prior builds or generated configs after recovery could publish stale artifacts.
   await phase('preflight', async () => {
     if ((await execute('git', ['rev-parse', 'HEAD'])).trim() !== c.sourceCommit)
       throw new Error('Source mismatch');
     if ((await execute('git', ['rev-parse', '--is-shallow-repository'])).trim() !== 'false')
       throw new Error('Shallow source');
-    // Fail before provisioning if any required toolchain/container dependency is absent.
     if (!c.dryRun) {
       const version = await execute('go', ['version']);
-      if (!/^go version go1\.26\.10 /.test(version)) throw new Error('Unsupported Go toolchain');
+      if (!version.startsWith('go version go1.26.10 ')) throw new Error('Unsupported Go toolchain');
       if (c.profile !== 'legacy-ci') await execute('rustc', ['+1.95.0', '--version']);
       await execute('docker', ['info']);
     }
@@ -202,8 +193,37 @@ export async function runInstallerEngine(
         }
       }
     );
+  const configureWorkersDev = async () => {
+    if (c.dryRun) return;
+    const subdomainUrl = `${c.cloudflareApiUrl ?? DEFAULT_CLOUDFLARE_API_URL}/accounts/${c.accountId}/workers/subdomain`;
+    const response = await request(subdomainUrl, {
+      headers: { Authorization: `Bearer ${env.CF_API_TOKEN}` },
+    });
+    if (!response.ok && response.status !== 404) throw new Error('workers.dev inspection failed');
+    const body = response.ok
+      ? ((await response.json()) as { result?: { subdomain?: string } })
+      : {};
+    if (c.profile !== 'legacy-ci' && body.result?.subdomain !== c.workersDev.subdomain)
+      throw new Error(
+        'Account workers.dev target changed or disappeared; review installation approval'
+      );
+    const workersDevSubdomain = body.result?.subdomain ?? prefix;
+    if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(workersDevSubdomain))
+      throw new Error('Invalid workers.dev subdomain');
+    if (!body.result?.subdomain) {
+      const created = await request(subdomainUrl, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${env.CF_API_TOKEN}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ subdomain: prefix }),
+      });
+      if (!created.ok) throw new Error('workers.dev initialization failed');
+    }
+    await pulumi('config', 'set', 'workersDevSubdomain', workersDevSubdomain);
+  };
   await phase('state-backend', async () => {
-    // List then create only on confirmed absence; do not reinterpret auth failures.
     const bucketResponse = await request(
       `${c.cloudflareApiUrl ?? DEFAULT_CLOUDFLARE_API_URL}/accounts/${c.accountId}/r2/buckets/${stateBucket}`,
       {
@@ -233,36 +253,7 @@ export async function runInstallerEngine(
     if (stacks.some((entry) => entry.name === stack || entry.name.endsWith(`/${stack}`)))
       await pulumi('stack', 'select', stack);
     else await pulumi('stack', 'init', stack);
-    if (!c.dryRun) {
-      const response = await request(
-        `${c.cloudflareApiUrl ?? DEFAULT_CLOUDFLARE_API_URL}/accounts/${c.accountId}/workers/subdomain`,
-        {
-          headers: { Authorization: `Bearer ${env.CF_API_TOKEN}` },
-        }
-      );
-      if (!response.ok && response.status !== 404) throw new Error('workers.dev inspection failed');
-      const body = response.ok
-        ? ((await response.json()) as { result?: { subdomain?: string } })
-        : {};
-      const workersDevSubdomain = body.result?.subdomain ?? prefix;
-      if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(workersDevSubdomain))
-        throw new Error('Invalid workers.dev subdomain');
-      if (!body.result?.subdomain) {
-        const created = await request(
-          `${c.cloudflareApiUrl ?? DEFAULT_CLOUDFLARE_API_URL}/accounts/${c.accountId}/workers/subdomain`,
-          {
-            method: 'PUT',
-            headers: {
-              Authorization: `Bearer ${env.CF_API_TOKEN}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ subdomain: prefix }),
-          }
-        );
-        if (!created.ok) throw new Error('workers.dev initialization failed');
-      }
-      await pulumi('config', 'set', 'workersDevSubdomain', workersDevSubdomain);
-    }
+    await configureWorkersDev();
     for (const [key, value] of Object.entries({
       cloudflareAccountId: c.accountId,
       cloudflareZoneId: c.zoneId,
@@ -301,7 +292,6 @@ export async function runInstallerEngine(
       throw new Error('Required infrastructure output missing');
     return value;
   };
-  // Prevent accidentally publishing to an unrelated bucket through a corrupt state.
   if (output('r2Name') !== bucket || output('cloudflareAccountId') !== c.accountId)
     throw new Error('Infrastructure identity mismatch');
   await phase('configure-services', async () => {
@@ -406,7 +396,9 @@ export async function runInstallerEngine(
       '--project-name',
       output('pagesName'),
       '--branch',
-      'main'
+      'main',
+      '--commit-hash',
+      c.sourceCommit
     );
     if (c.profile === 'legacy-ci' && c.environment === 'staging')
       await wrangler(
@@ -422,6 +414,7 @@ export async function runInstallerEngine(
         'staging',
         '--remote'
       );
+    operation = 'script.configure-secrets.sh';
     await runner.run(
       { executable: 'bash', args: ['scripts/deploy/configure-secrets.sh', c.environment] },
       {
@@ -461,11 +454,20 @@ export async function runInstallerEngine(
     }
   });
   await phase('health', async () => {
+    operation = 'deployment-readiness';
     for (let attempt = 0; attempt < (c.healthAttempts ?? DEFAULT_HEALTH_ATTEMPTS); attempt++) {
       try {
-        const response = await request(`https://api.${c.baseDomain}/health`);
-        if (response.ok && ((await response.json()) as { status?: string }).status === 'healthy')
-          return;
+        await verifyEngineReadiness({
+          request,
+          apiBase: c.cloudflareApiUrl ?? DEFAULT_CLOUDFLARE_API_URL,
+          accountId: c.accountId,
+          token: env.CF_API_TOKEN!,
+          worker: `${prefix}-api-${stack}`,
+          pages: output('pagesName'),
+          domain: c.baseDomain,
+          commit: c.sourceCommit,
+        });
+        return;
       } catch {
         /* bounded retries; never expose response data */
       }

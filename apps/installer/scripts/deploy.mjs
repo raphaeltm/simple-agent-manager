@@ -74,10 +74,14 @@ async function api(path, method = 'GET', body) {
 function wrangler(args) {
   const childEnvironment = { ...process.env };
   for (const key of ['OAUTH_REGISTRATION_TOKEN', ...SECRET_NAMES]) delete childEnvironment[key];
-  const result = spawnSync('pnpm', ['exec', 'wrangler', ...args], {
-    stdio: 'inherit',
-    env: childEnvironment,
-  });
+  const result = spawnSync(
+    process.execPath,
+    [fileURLToPath(new URL('../node_modules/wrangler/bin/wrangler.js', import.meta.url)), ...args],
+    {
+      stdio: 'inherit',
+      env: childEnvironment,
+    }
+  );
   if (result.status !== 0) throw new Error('Wrangler deployment failed');
 }
 const template = JSON.parse(await readFile('wrangler.json', 'utf8'));
@@ -110,7 +114,8 @@ const scopes =
       ? FULL_SCOPES
       : template.vars.OAUTH_SCOPES.split(/\s+/);
 const sameScopes = (left, right) =>
-  JSON.stringify([...new Set(left)].sort()) === JSON.stringify([...new Set(right)].sort());
+  JSON.stringify([...new Set(left)].sort((a, b) => a.localeCompare(b))) ===
+  JSON.stringify([...new Set(right)].sort((a, b) => a.localeCompare(b)));
 const scopesChanged = !sameScopes(
   scopes,
   (currentVars.OAUTH_SCOPES || '').split(/\s+/).filter(Boolean)
@@ -147,15 +152,7 @@ config.vars.SOURCE_URL =
 config.vars.DOCS_URL = process.env.DOCS_URL || template.vars.DOCS_URL;
 const explicitCredentials = !!(process.env.OAUTH_CLIENT_ID || process.env.OAUTH_CLIENT_SECRET);
 const reuseReadyConfiguration = !!existing && ready && !scopesChanged && !explicitCredentials;
-async function prepareOAuth() {
-  const catalog = await api('/oauth/scopes');
-  if (
-    !Array.isArray(catalog) ||
-    scopes.some((scope) => !catalog.some((entry) => entry.id === scope))
-  )
-    throw new Error('Requested OAuth scopes are not in the current Cloudflare catalog');
-  let clientId = process.env.OAUTH_CLIENT_ID,
-    clientSecret = process.env.OAUTH_CLIENT_SECRET;
+async function findOAuthClient(clientId) {
   let client;
   if (clientId) client = await api(`${base}/oauth_clients/${encodeURIComponent(clientId)}`);
   else {
@@ -170,6 +167,27 @@ async function prepareOAuth() {
     clientId = client?.client_id;
     if (clientId) client = await api(`${base}/oauth_clients/${encodeURIComponent(clientId)}`);
   }
+  return client;
+}
+function matchesOAuthClient(client, desired) {
+  return (
+    sameScopes(client.scopes || [], desired.scopes) &&
+    ['token_endpoint_auth_method', 'redirect_uris', 'grant_types', 'response_types'].every(
+      (key) => JSON.stringify(client[key]) === JSON.stringify(desired[key])
+    )
+  );
+}
+async function prepareOAuth() {
+  const catalog = await api('/oauth/scopes');
+  if (
+    !Array.isArray(catalog) ||
+    scopes.some((scope) => !catalog.some((entry) => entry.id === scope))
+  )
+    throw new Error('Requested OAuth scopes are not in the current Cloudflare catalog');
+  let clientId = process.env.OAUTH_CLIENT_ID,
+    clientSecret = process.env.OAUTH_CLIENT_SECRET;
+  let client = await findOAuthClient(clientId);
+  clientId = client?.client_id ?? clientId;
   const desired = {
     client_name: name,
     client_uri: origin,
@@ -191,25 +209,13 @@ async function prepareOAuth() {
   } else {
     if (client.client_uri !== origin || client.client_name !== name)
       throw new Error('OAuth client does not belong to this installer origin');
-    const matches =
-      sameScopes(client.scopes || [], scopes) &&
-      client.token_endpoint_auth_method === desired.token_endpoint_auth_method &&
-      JSON.stringify(client.redirect_uris) === JSON.stringify(desired.redirect_uris) &&
-      JSON.stringify(client.grant_types) === JSON.stringify(desired.grant_types) &&
-      JSON.stringify(client.response_types) === JSON.stringify(desired.response_types);
+    const matches = matchesOAuthClient(client, desired);
     if (!matches) {
       await api(`${base}/oauth_clients/${encodeURIComponent(clientId)}`, 'PATCH', desired);
       client = await api(`${base}/oauth_clients/${encodeURIComponent(clientId)}`);
     }
   }
-  if (
-    !clientId ||
-    !sameScopes(client.scopes || [], scopes) ||
-    client.token_endpoint_auth_method !== 'client_secret_post' ||
-    JSON.stringify(client.redirect_uris) !== JSON.stringify(desired.redirect_uris) ||
-    JSON.stringify(client.grant_types) !== JSON.stringify(desired.grant_types) ||
-    JSON.stringify(client.response_types) !== JSON.stringify(desired.response_types)
-  )
+  if (!clientId || !matchesOAuthClient(client, desired))
     throw new Error('OAuth client scope/callback configuration was not confirmed');
   if (!clientSecret && !ready)
     throw new Error(

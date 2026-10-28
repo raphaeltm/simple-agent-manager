@@ -435,7 +435,7 @@ export async function createAuth(env: Env) {
               .limit(1)
               .all();
 
-            if (existing.length === 0) {
+            if (existing.length === 0 && bootstrapOwnerEmail(env) === undefined) {
               return {
                 data: { ...user, role: 'superadmin', status: 'active' },
               };

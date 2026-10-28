@@ -380,7 +380,7 @@ describe('installer bootstrap owner hooks', () => {
       ...fakeEnv(),
       BOOTSTRAP_OWNER_EMAIL: 'owner@example.com',
       DATABASE: {
-        prepare: () => ({ bind: () => ({ first }) }),
+        prepare: () => ({ bind: () => ({ first, run: async () => ({ meta: { changes: 0 } }) }) }),
       },
     } as never);
     const hook = capturedOptions!.databaseHooks!.user!.create!.before!;
@@ -433,5 +433,25 @@ describe('installer bootstrap owner hooks', () => {
       const result = await github.getUserInfo({ accessToken: 'test-access-token' });
       expect(result.user.emailVerified).toBe(verified);
     }
+  );
+});
+
+it('does not repeat first-user administration on an installer instance after its elected user rows are deleted', async () => {
+  const { createAuth } = await import('../../src/auth');
+  installExistingUsersQuery([]);
+  await createAuth({
+    ...fakeEnv(),
+    BOOTSTRAP_OWNER_EMAIL: 'owner@example.com',
+    DATABASE: {
+      prepare: () => ({
+        bind: () => ({
+          first: async () => ({ value: JSON.stringify({ version: 1, ownerId: 'deleted-owner' }) }),
+        }),
+      }),
+    },
+  } as never);
+  const hook = capturedOptions!.databaseHooks!.user!.create!.before!;
+  expect(await hook({ ...newUser, email: 'other@example.com', emailVerified: true })).toMatchObject(
+    { data: { role: 'user', status: 'pending' } }
   );
 });

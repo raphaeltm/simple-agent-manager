@@ -1,13 +1,24 @@
 // Fixed adapter: only the trusted source checkout chooses executable hooks.
 import { writeFileSync } from 'node:fs';
 import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 export function builderEngineConfig(supplied, approvedCommit) {
-  const { sourceCommit, accountId, zoneId, zoneName, baseDomain, environment, prefix, ownerEmail } =
-    supplied;
+  const {
+    sourceCommit,
+    accountId,
+    zoneId,
+    zoneName,
+    baseDomain,
+    environment,
+    prefix,
+    ownerEmail,
+    workersDev,
+  } = supplied;
   if (sourceCommit !== approvedCommit) throw new Error('Source approval mismatch');
   return {
     schemaVersion: 1,
     ownerEmail,
+    workersDev,
     sourceCommit,
     accountId,
     zoneId,
@@ -37,10 +48,9 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
   const configPath = '/sam/job/engine-config.json';
   writeFileSync(configPath, JSON.stringify(config), { mode: 0o600 });
   const child = spawn(
-    'pnpm',
+    process.execPath,
     [
-      'exec',
-      'tsx',
+      fileURLToPath(new URL('../../node_modules/tsx/dist/cli.mjs', import.meta.url)),
       'scripts/deploy/installer-engine-cli.ts',
       '--config',
       configPath,

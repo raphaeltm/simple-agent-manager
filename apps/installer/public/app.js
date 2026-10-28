@@ -231,7 +231,7 @@ $('cleanup-resume').addEventListener('click', async () => {
     $('cleanup-resume').disabled = false;
   }
 });
-(async () => {
+void (async () => {
   try {
     const config = await (await fetch('/api/config')).json();
     fullInstaller = config.fullInstaller === true;

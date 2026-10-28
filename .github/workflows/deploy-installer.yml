@@ -39,7 +39,7 @@ jobs:
         with:
           node-version: '22'
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
+      - run: pnpm install --frozen-lockfile --ignore-scripts
       - run: pnpm --filter @simple-agent-manager/installer typecheck
       - run: pnpm --filter @simple-agent-manager/installer lint
       - run: pnpm --filter @simple-agent-manager/installer test

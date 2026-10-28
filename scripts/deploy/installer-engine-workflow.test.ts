@@ -99,7 +99,24 @@ describe('shared deployment workflow routing', () => {
       '${{ steps.shared_engine.outputs.app_url || steps.output.outputs.app_url }}'
     );
     const engine = steps.find((step) => step.id === 'shared_engine');
-    expect(engine?.env?.SAM_CI_SECRETS_JSON).toBe('${{ toJSON(secrets) }}');
+    const privateJson = engine?.env?.SAM_CI_SECRETS_JSON ?? '';
+    expect(privateJson).not.toContain('toJSON(secrets)');
+    const manifest = readFileSync('scripts/deploy/installer-engine-ci-env.json', 'utf8');
+    const required = [
+      ...new Set([...manifest.matchAll(/secrets\.([A-Z_0-9]+)/g)].map((match) => match[1])),
+    ].sort();
+    const supplied = [...privateJson.matchAll(/toJSON\(secrets\.([A-Z_0-9]+)\)/g)]
+      .map((match) => match[1])
+      .sort();
+    expect(supplied).toEqual(required);
+    expect(
+      JSON.parse(
+        privateJson.replace(
+          /\$\{\{ toJSON\(secrets\.[A-Z_0-9]+\) \}\}/g,
+          JSON.stringify('quote"\nsecret')
+        )
+      )
+    ).toHaveProperty('CF_API_TOKEN', 'quote"\nsecret');
     expect(engine?.run).toContain('installer-engine-ci-cli.ts');
     expect(engine?.run).not.toContain('SAM_CI_SECRETS_JSON');
     expect(engine?.run).not.toMatch(/echo.*secrets|upload-artifact/);

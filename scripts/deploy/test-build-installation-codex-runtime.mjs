@@ -97,7 +97,7 @@ test('installation packaging compiles new trust anchors and installs verified ru
       );
     assert.ok(readFileSync(join(repo, paths[1]), 'utf8').includes(publisher.archive));
     chmodSync(f.work, 0o755);
-    execFileSync('bash', [
+    execFileSync('/usr/bin/bash', [
       join(f.output, 'install-codex-runtime.sh'),
       join(f.output, 'codex-runtime-linux-amd64.tar.gz'),
       join(f.work, 'installed'),
@@ -152,22 +152,26 @@ test('update explicitly pins and retains previous installation runtime', () => {
     assert.ok(route.includes(previous.archiveSHA256));
     chmodSync(f.work, 0o755);
     const destination = join(f.work, 'installed');
-    execFileSync('bash', [
+    execFileSync('/usr/bin/bash', [
       join(f.output, 'install-codex-runtime.sh'),
       join(f.output, 'codex-runtime-linux-amd64.tar.gz'),
       destination,
     ]);
-    execFileSync('bash', [
+    execFileSync('/usr/bin/bash', [
       join(g.output, 'install-codex-runtime.sh'),
       join(g.output, 'codex-runtime-linux-amd64.tar.gz'),
       destination,
     ]);
     assert.equal(
-      execFileSync('readlink', [join(destination, 'current')], { encoding: 'utf8' }).trim(),
+      execFileSync('/usr/bin/readlink', [join(destination, 'current')], {
+        encoding: 'utf8',
+      }).trim(),
       `releases/${next.identity}`
     );
     assert.equal(
-      execFileSync('readlink', [join(destination, 'previous')], { encoding: 'utf8' }).trim(),
+      execFileSync('/usr/bin/readlink', [join(destination, 'previous')], {
+        encoding: 'utf8',
+      }).trim(),
       `releases/${previous.identity}`
     );
     const h = fixture();
@@ -183,17 +187,21 @@ test('update explicitly pins and retains previous installation runtime', () => {
       );
       const third = packageRuntime(h.review, h.output, h.source, next);
       materializeTrust(h.output, h.source);
-      execFileSync('bash', [
+      execFileSync('/usr/bin/bash', [
         join(h.output, 'install-codex-runtime.sh'),
         join(h.output, 'codex-runtime-linux-amd64.tar.gz'),
         destination,
       ]);
       assert.equal(
-        execFileSync('readlink', [join(destination, 'current')], { encoding: 'utf8' }).trim(),
+        execFileSync('/usr/bin/readlink', [join(destination, 'current')], {
+          encoding: 'utf8',
+        }).trim(),
         `releases/${third.identity}`
       );
       assert.equal(
-        execFileSync('readlink', [join(destination, 'previous')], { encoding: 'utf8' }).trim(),
+        execFileSync('/usr/bin/readlink', [join(destination, 'previous')], {
+          encoding: 'utf8',
+        }).trim(),
         `releases/${next.identity}`
       );
     } finally {

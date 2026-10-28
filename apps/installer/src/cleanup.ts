@@ -31,46 +31,58 @@ export class BootstrapCleanup {
     await this.ctx.storage.put('cleanupJournal', journal);
     return journal;
   }
-  async reconcile(journal: CleanupJournal, token: string, signal?: AbortSignal): Promise<boolean> {
-    if (journal.authorityTransferStarted && !journal.authorityTransferred) {
-      try {
-        const settings = await cloudflare<{ bindings: { name: string; text?: string }[] }>(
-          token,
-          `/accounts/${journal.accountId}/workers/scripts/${journal.installationId}/settings`,
-          { signal }
-        );
-        if (
-          !settings.bindings.some(
-            (binding) =>
-              binding.name === 'BOOTSTRAP_IDENTITY' && binding.text === journal.bootstrapIdentity
-          )
+  private async confirmTransfer(
+    journal: CleanupJournal,
+    token: string,
+    signal?: AbortSignal
+  ): Promise<void> {
+    if (!journal.authorityTransferStarted || journal.authorityTransferred) return;
+    try {
+      const settings = await cloudflare<{ bindings: { name: string; text?: string }[] }>(
+        token,
+        `/accounts/${journal.accountId}/workers/scripts/${journal.installationId}/settings`,
+        { signal }
+      );
+      if (
+        !settings.bindings.some(
+          (binding) =>
+            binding.name === 'BOOTSTRAP_IDENTITY' && binding.text === journal.bootstrapIdentity
         )
-          throw new Error('Bootstrap identity mismatch');
-        journal.authorityTransferred = true;
-        await this.ctx.storage.put('cleanupJournal', journal);
-      } catch (error) {
-        if (!(error instanceof CloudflareError) || error.status !== 404) throw error;
-      }
+      )
+        throw new Error('Bootstrap identity mismatch');
+      journal.authorityTransferred = true;
+      await this.ctx.storage.put('cleanupJournal', journal);
+    } catch (error) {
+      if (!(error instanceof CloudflareError) || error.status !== 404) throw error;
     }
+  }
+  private async removePrincipal(
+    journal: CleanupJournal,
+    id: string,
+    token: string,
+    signal?: AbortSignal
+  ): Promise<void> {
+    try {
+      await cloudflare(token, `/accounts/${journal.accountId}/tokens/${id}`, {
+        method: 'DELETE',
+        signal,
+      });
+    } catch (error) {
+      if (!(error instanceof CloudflareError) || error.status !== 404) throw error;
+    }
+    journal.tokenIds = journal.tokenIds.filter((value) => value !== id);
+    await this.ctx.storage.put('cleanupJournal', journal);
+    const session = await this.ctx.storage.get<Session>('session');
+    if (!session) return;
+    session.credentialTokenIds = journal.tokenIds;
+    if (session.credentials) session.credentials.tokenIds = journal.tokenIds;
+    await this.ctx.storage.put('session', session);
+  }
+  async reconcile(journal: CleanupJournal, token: string, signal?: AbortSignal): Promise<boolean> {
+    await this.confirmTransfer(journal, token, signal);
     if (!journal.authorityTransferred) {
-      for (const id of [...journal.tokenIds]) {
-        try {
-          await cloudflare(token, `/accounts/${journal.accountId}/tokens/${id}`, {
-            method: 'DELETE',
-            signal,
-          });
-        } catch (error) {
-          if (!(error instanceof CloudflareError) || error.status !== 404) throw error;
-        }
-        journal.tokenIds = journal.tokenIds.filter((value) => value !== id);
-        await this.ctx.storage.put('cleanupJournal', journal);
-        const session = await this.ctx.storage.get<Session>('session');
-        if (session) {
-          session.credentialTokenIds = journal.tokenIds;
-          if (session.credentials) session.credentials.tokenIds = journal.tokenIds;
-          await this.ctx.storage.put('session', session);
-        }
-      }
+      for (const id of [...journal.tokenIds])
+        await this.removePrincipal(journal, id, token, signal);
     }
     await this.ctx.storage.delete('cleanupJournal');
     return journal.authorityTransferred;

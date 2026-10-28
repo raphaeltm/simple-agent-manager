@@ -62,6 +62,28 @@ export function ownsProofWorker(settings: unknown, ownership: string, commit: st
     bindings.some((binding) => binding.name === 'SOURCE_COMMIT' && binding.text === commit)
   );
 }
+export async function runProofWithCleanup(
+  execute: () => Promise<void>,
+  cleanup: () => Promise<Error | undefined>
+): Promise<void> {
+  let originalFailure: unknown;
+  let failed = false;
+  try {
+    await execute();
+  } catch (error) {
+    failed = true;
+    originalFailure = error;
+  }
+  let cleanupFailure: unknown;
+  try {
+    cleanupFailure = await cleanup();
+  } catch (error) {
+    cleanupFailure = error;
+  }
+  if (failed) throw originalFailure;
+  if (cleanupFailure) throw cleanupFailure;
+}
+
 export async function runProof(): Promise<void> {
   if (process.env.INSTALLER_ENVIRONMENT !== 'staging') throw new Error('Staging proof only');
   if (process.env.SAM_INSTALLER_PAID_PROOF !== 'one-cold-build-60-minutes')
@@ -118,7 +140,26 @@ export async function runProof(): Promise<void> {
       conservativeIncrementalBudgetUsd: 2,
     })
   );
-  try {
+  const pollProof = async () => {
+    const deadline = Date.now() + (PROOF_SECONDS + 60) * 1000;
+    let last = '';
+    while (Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 15000));
+      const state = await control('/status');
+      const line = JSON.stringify(state);
+      if (line !== last) {
+        console.log(line);
+        last = line;
+      }
+      if (state.status !== 'running') {
+        if (state.status !== 'completed' || state.fit?.phase !== 'completed')
+          throw new Error(`Cold build proof ${state.status}; see last bounded phase evidence`);
+        return;
+      }
+    }
+    throw new Error('Launcher deadline reached; cancelling proof');
+  };
+  const executeProof = async () => {
     const subdomain = (await api(`${base}/workers/subdomain`)) as { subdomain?: string };
     if (!subdomain.subdomain) throw new Error('Staging workers.dev subdomain required');
     endpoint = `https://${name}.${subdomain.subdomain}.workers.dev`;
@@ -182,25 +223,9 @@ export async function runProof(): Promise<void> {
     if (!ready) throw new Error('Proof Worker did not propagate');
     startAttempted = true;
     await control('/start', 'POST');
-    const deadline = Date.now() + (PROOF_SECONDS + 60) * 1000;
-    let last = '';
-    while (Date.now() < deadline) {
-      await new Promise((resolve) => setTimeout(resolve, 15000));
-      const state = await control('/status');
-      const line = JSON.stringify(state);
-      if (line !== last) {
-        console.log(line);
-        last = line;
-      }
-      if (state.status !== 'running') {
-        if (state.status !== 'completed' || state.fit?.phase !== 'completed')
-          throw new Error(`Cold build proof ${state.status}; see last bounded phase evidence`);
-        return;
-      }
-    }
-    throw new Error('Launcher deadline reached; cancelling proof');
-  } finally {
-    const errors: string[] = [];
+    await pollProof();
+  };
+  const verifyOwnership = async () => {
     let ownershipVerified = !workerCreated;
     if (workerCreated) {
       try {
@@ -212,26 +237,43 @@ export async function runProof(): Promise<void> {
       } catch (error) {
         ownershipVerified = (error as { status?: number }).status === 404;
       }
-      if (!ownershipVerified) errors.push(`ownership:${name}`);
     }
 
-    if (endpoint && startAttempted && ownershipVerified) {
-      try {
-        await control('/cancel', 'POST');
-      } catch {
-        errors.push('cancel');
-      }
+    return ownershipVerified;
+  };
+  const deleteProofWorker = async (errors: string[]) => {
+    try {
+      await api(`${base}/workers/scripts/${name}?force=true`, 'DELETE');
+    } catch (error) {
+      if ((error as { status?: number }).status !== 404) errors.push(`worker:${name}`);
     }
+  };
+  const cancelProof = async (errors: string[]) => {
+    try {
+      await control('/cancel', 'POST');
+    } catch {
+      errors.push('cancel');
+    }
+  };
+  const reconcileProofApplication = async (errors: string[]) => {
+    try {
+      const applications = (await api(`${base}/containers/applications`)) as {
+        id: string;
+        name: string;
+      }[];
+      applicationId = applications.find((application) => application.name === name)?.id;
+    } catch {
+      errors.push(`reconcile-application:${name}`);
+    }
+  };
+  const cleanupProof = async (): Promise<Error | undefined> => {
+    const errors: string[] = [];
+    const ownershipVerified = await verifyOwnership();
+    if (!ownershipVerified) errors.push(`ownership:${name}`);
+
+    if (endpoint && startAttempted && ownershipVerified) await cancelProof(errors);
     if (applicationAttempted && !applicationId && ownershipVerified) {
-      try {
-        const applications = (await api(`${base}/containers/applications`)) as {
-          id: string;
-          name: string;
-        }[];
-        applicationId = applications.find((application) => application.name === name)?.id;
-      } catch {
-        errors.push(`reconcile-application:${name}`);
-      }
+      await reconcileProofApplication(errors);
     }
     if (applicationId && ownershipVerified) {
       try {
@@ -240,19 +282,15 @@ export async function runProof(): Promise<void> {
         errors.push(`application:${applicationId}`);
       }
     }
-    if (workerCreated && ownershipVerified) {
-      try {
-        await api(`${base}/workers/scripts/${name}?force=true`, 'DELETE');
-      } catch (error) {
-        if ((error as { status?: number }).status !== 404) errors.push(`worker:${name}`);
-      }
-    }
+    if (workerCreated && ownershipVerified) await deleteProofWorker(errors);
     if (errors.length) {
       console.error(`Proof cleanup needs attention: ${errors.join(', ')}`);
-      throw new Error('Proof cleanup incomplete');
+      return new Error('Proof cleanup incomplete');
     }
     console.log(`Deleted only proof resources ${name}`);
-  }
+    return undefined;
+  };
+  await runProofWithCleanup(executeProof, cleanupProof);
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
   runProof().catch(() => {

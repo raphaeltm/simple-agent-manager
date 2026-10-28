@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { maintenanceSource } from '../src/maintenance';
 import { digest } from '../src/security';
+import { supportedProtocol, supportedSourceFetch } from './source-policy-fixture';
 
 const Coordinator = new Function(
   maintenanceSource
@@ -158,10 +159,12 @@ describe('authenticated maintenance deployment jobs', () => {
     await f.request('/');
     vi.stubGlobal(
       'fetch',
-      vi
-        .fn()
-        .mockResolvedValueOnce(Response.json({ tag_name: 'v-next' }))
-        .mockResolvedValueOnce(Response.json({ sha: updated }))
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/releases/latest')) return Response.json({ tag_name: 'v-next' });
+        if (url.endsWith('/commits/v-next')) return Response.json({ sha: updated });
+        return supportedSourceFetch(input, init);
+      })
     );
     const preview = await f.request('/update-preview', {});
     const approval = /name="approval" value="([a-f0-9]{64})"/.exec(await preview.text())![1]!;
@@ -310,4 +313,73 @@ it('never cancels an unrelated active builder while cancelling an unaccepted que
   expect(f.calls.filter((call) => ['/cancel', '/start'].includes(call.path))).toHaveLength(0);
   await f.request('/');
   expect(f.calls.filter((call) => ['/cancel', '/start'].includes(call.path))).toHaveLength(0);
+});
+
+it.each(['behind', 'diverged', 'manifest', 'protocol', 'capability', 'engine', 'unavailable'])(
+  'rejects %s release candidates before approval without changing the installed manifest',
+  async (problem) => {
+    const f = await fixture();
+    await f.request('/deploy', { confirmed: 'yes' });
+    const id = f.calls.find((call) => call.path === '/start')!.body!.jobId;
+    f.setJob({ status: 'completed', sourceCommit: original, jobId: id });
+    await f.request('/');
+    const before = structuredClone(f.values.get('installation'));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+        const url = String(input);
+        if (url.endsWith('/releases/latest')) return Response.json({ tag_name: 'next' });
+        if (url.endsWith('/commits/next')) return Response.json({ sha: updated });
+        if (url.includes('/compare/') && ['behind', 'diverged'].includes(problem))
+          return Response.json({ status: problem, ahead_by: 1, behind_by: 1 });
+        if (problem === 'unavailable') throw new Error('network unavailable');
+        if (problem === 'manifest' && url.endsWith('/installer-protocol.json'))
+          return new Response(null, { status: 404 });
+        if (url.endsWith('/installer-protocol.json'))
+          return Response.json({
+            ...supportedProtocol,
+            ...(problem === 'protocol'
+              ? { protocolVersion: 999 }
+              : problem === 'capability'
+                ? { capabilities: [] }
+                : {}),
+          });
+        if (problem === 'engine' && url.endsWith('/installer-engine-cli.ts'))
+          return new Response(null, { status: 404 });
+        return supportedSourceFetch(input, init);
+      })
+    );
+    expect((await f.request('/update-preview', {})).status).toBe(
+      problem === 'unavailable' ? 502 : 409
+    );
+    expect(f.values.get('installation')).toEqual(before);
+    expect(f.calls.filter((call) => call.path === '/start')).toHaveLength(1);
+  }
+);
+
+it('revalidates immutable update source before consuming approval and preserves it on rejection', async () => {
+  const f = await fixture();
+  await f.request('/deploy', { confirmed: 'yes' });
+  const id = f.calls.find((call) => call.path === '/start')!.body!.jobId;
+  f.setJob({ status: 'completed', sourceCommit: original, jobId: id });
+  await f.request('/');
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/releases/latest')) return Response.json({ tag_name: 'next' });
+      if (url.endsWith('/commits/next')) return Response.json({ sha: updated });
+      return supportedSourceFetch(input, init);
+    })
+  );
+  const preview = await f.request('/update-preview', {});
+  const approval = /name="approval" value="([a-f0-9]{64})"/.exec(await preview.text())![1]!;
+  const before = structuredClone(f.values.get('installation'));
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => Response.json({ status: 'diverged', ahead_by: 2, behind_by: 2 }))
+  );
+  expect((await f.request('/update', { approval })).status).toBe(409);
+  expect(f.values.get('installation')).toEqual(before);
+  expect(f.calls.filter((call) => call.path === '/start')).toHaveLength(1);
 });

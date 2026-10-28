@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { previewInstallation, validateInstallationConfig } from '../src/installation-plan';
+import {
+  isValidOwnerEmail,
+  previewInstallation,
+  validateInstallationConfig,
+} from '../src/installation-plan';
 const config = {
   accountId: 'a'.repeat(32),
   zoneId: 'b'.repeat(32),
@@ -116,4 +120,32 @@ describe('installation approval', () => {
     status = 403;
     await expect(previewInstallation('private', config)).rejects.toThrow();
   });
+});
+
+it('checks email syntax with bounded linear scanning and preserves the existing accepted forms', () => {
+  for (const value of ['owner@example.com', 'a+b@example.com', 'a@.example.com', 'a@b..com'])
+    expect(isValidOwnerEmail(value)).toBe(true);
+  for (const value of [
+    '',
+    null,
+    42,
+    'a@@b.com',
+    'a@b',
+    'a@b.',
+    '@b.com',
+    'a @b.com',
+    'a@' + '.'.repeat(10000),
+  ])
+    expect(isValidOwnerEmail(value)).toBe(false);
+  const previous = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  const alphabet = ['a', '@', '.', ' '];
+  for (let number = 0; number < 4096; number++) {
+    let value = '',
+      bits = number;
+    for (let index = 0; index < 6; index++) {
+      value += alphabet[bits % 4];
+      bits = Math.floor(bits / 4);
+    }
+    expect(isValidOwnerEmail(value), value).toBe(previous.test(value));
+  }
 });
