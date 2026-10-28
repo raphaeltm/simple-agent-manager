@@ -18,7 +18,7 @@ Older VM agents cannot confirm workspace physical deletion through the new endpo
 - [x] Fence claim against active/new siblings, placement, owner/incarnation/generation changes.
 - [x] Reverify R2 artifacts immediately before provider deletion; retain wake fence until termination proof.
 - [x] Regression tests exercise real SQL and snapshot verification, including failures and races.
-- [ ] Local specialist/completion review and appropriate validation.
+- [x] Local specialist/completion review and focused validation; full repository results tracked in PR.
 - [x] Staging explicitly waived by user.
 - [ ] Green PR, best-effort CodeRabbit request/wait, merge, production deploy and basic smoke.
 
@@ -43,3 +43,5 @@ The independent silent Codex continuation remains unproven and is captured priva
 
 What broke: #2463 required physical workspace deletion proof before both wake and automatic node retirement, which old VM agents cannot produce. Failed cleanup timestamps also postponed idle retirement indefinitely.
 Process fix: real-SQL vertical-slice regression covers old-agent cleanup state, actual R2 verification, provider-proof ordering and saturated/partially-spent sweep budgets. Existing control-loop and vertical-slice rules already cover these requirements; no additional standing guidance added.
+
+Implementation archived after completion-validator PASS. Release remains in progress; the PR and local workflow state track CI, CodeRabbit, merge and deployment outcomes.
