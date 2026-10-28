@@ -12,9 +12,11 @@ import {
   attemptWorkspaceDeletion,
   loadWorkspaceDeletionSnapshot,
   workspaceDeletionIdentityLogContext,
+  type WorkspaceDeletionMode,
   type WorkspaceDeletionOutcome,
   type WorkspaceDeletionSnapshot,
 } from './workspace-deletion';
+import { automaticDeletionPreservationAvailable } from './workspace-deletion-preservation';
 import { deleteWorkspaceResourceHistoryObjectsForWorkspace } from './workspace-resource-history';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
@@ -27,6 +29,7 @@ export interface WorkspaceDeletionCleanupOptions {
   logContext?: Record<string, unknown>;
   /** Preserve the proof-bearing D1 tombstone after lifecycle closure. */
   deleteConfirmedRow?: boolean;
+  mode?: WorkspaceDeletionMode;
 }
 
 function workspaceDeletionRetryBaseMs(env: Env): number {
@@ -45,6 +48,7 @@ function workspaceDeletionLogSource(logContext: Record<string, unknown>): string
 function requestedWorkspaceDeletionIdentity(workspace: schema.Workspace, userId: string) {
   return {
     workspaceId: workspace.id,
+    workspaceGeneration: workspace.evictionGeneration,
     nodeId: workspace.nodeId,
     nodeUserId: null,
     nodeRuntime: null,
@@ -63,6 +67,7 @@ function deletionSnapshotMatchesRequest(
 ): expected is NonNullable<typeof expected> {
   return (
     expected?.userId === userId &&
+    (expected.workspaceGeneration ?? null) === (workspace.evictionGeneration ?? null) &&
     expected.nodeId === workspace.nodeId &&
     expected.projectId === workspace.projectId &&
     expected.chatSessionId === workspace.chatSessionId
@@ -79,7 +84,8 @@ async function claimExplicitWorkspaceDeletion(
   workspace: schema.Workspace,
   userId: string,
   expected: WorkspaceDeletionSnapshot,
-  logContext: Record<string, unknown>
+  logContext: Record<string, unknown>,
+  mode: WorkspaceDeletionMode
 ): Promise<WorkspaceDeletionOutcome | null> {
   const deletionAlreadyProven = Boolean(
     expected.runtimeDeletionConfirmedAt && expected.runtimeDeletionProof
@@ -91,7 +97,7 @@ async function claimExplicitWorkspaceDeletion(
     workspace.id,
     userId,
     expected,
-    'explicit'
+    mode
   );
   if (claim === 'already_claimed_same_identity') {
     const diagnostic = 'Workspace deletion unconfirmed: durable attempt already in progress';
@@ -186,7 +192,15 @@ async function schedulePendingWorkspaceDeletion(
 export async function cleanupWorkspaceForDeletion(
   options: WorkspaceDeletionCleanupOptions
 ): Promise<WorkspaceDeletionOutcome> {
-  const { db, env, workspace, userId, logContext = {}, deleteConfirmedRow = true } = options;
+  const {
+    db,
+    env,
+    workspace,
+    userId,
+    logContext = {},
+    deleteConfirmedRow = true,
+    mode = 'explicit',
+  } = options;
   const expected = await loadWorkspaceDeletionSnapshot(env.DATABASE, workspace.id);
   const requestedIdentity = requestedWorkspaceDeletionIdentity(workspace, userId);
   if (!deletionSnapshotMatchesRequest(expected, workspace, userId)) {
@@ -198,13 +212,25 @@ export async function cleanupWorkspaceForDeletion(
     });
     return { status: 'fenced', reason: 'workspace_assignment_changed' };
   }
+  if (
+    mode === 'automatic' &&
+    !expected.runtimeDeletionConfirmedAt &&
+    !(await automaticDeletionPreservationAvailable(env, expected).catch(() => false))
+  ) {
+    return {
+      status: 'retry',
+      reason: 'preservation_unconfirmed',
+      diagnostic: 'Workspace deletion unconfirmed: exact runtime preservation unavailable',
+    };
+  }
   const lifecycleStub = nodeLifecycleStub(env, workspace.nodeId);
   const claimOutcome = await claimExplicitWorkspaceDeletion(
     lifecycleStub,
     workspace,
     userId,
     expected,
-    logContext
+    logContext,
+    mode
   );
   if (claimOutcome) return claimOutcome;
 
@@ -213,10 +239,10 @@ export async function cleanupWorkspaceForDeletion(
     expected,
     attempt: 1,
     source: workspaceDeletionLogSource(logContext),
-    mode: 'explicit',
+    mode,
     allowWorkspaceNeverStartedProof: workspace.status === 'pending',
     beforeFinalize:
-      workspace.chatSessionId && workspace.projectId
+      mode === 'explicit' && workspace.chatSessionId && workspace.projectId
         ? async () => {
             const chatSessionId = workspace.chatSessionId as string;
             const projectId = workspace.projectId as string;

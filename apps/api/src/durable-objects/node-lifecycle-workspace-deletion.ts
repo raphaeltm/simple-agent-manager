@@ -10,6 +10,7 @@ import {
   workspaceDeletionIdentityLogContext,
   type WorkspaceDeletionMode,
 } from '../services/workspace-deletion';
+import { automaticDeletionPreservationAvailable } from '../services/workspace-deletion-preservation';
 import {
   claimedDeletionEntry,
   deletionEntryClaimedWithoutNodeIncarnation,
@@ -50,6 +51,7 @@ export type {
 
 const WORKSPACE_DELETION_ELIGIBLE_STATUSES = new Set([
   'stopped',
+  'evicted',
   'sleeping',
   'stopping',
   'deleted',
@@ -66,6 +68,7 @@ function sameDeletionIdentity(
 ): boolean {
   return (
     left.workspaceId === right.workspaceId &&
+    (left.workspaceGeneration ?? null) === (right.workspaceGeneration ?? null) &&
     left.nodeId === right.nodeId &&
     left.nodeUserId === right.nodeUserId &&
     left.nodeRuntime === right.nodeRuntime &&
@@ -121,6 +124,21 @@ export class NodeLifecycleWorkspaceDeletionQueue {
       nodeId,
       userId,
     });
+    if (
+      existing?.mode !== 'explicit' &&
+      identity &&
+      !identity.runtimeDeletionConfirmedAt &&
+      !(await automaticDeletionPreservationAvailable(this.env as Env, scheduledIdentity).catch(
+        () => false
+      ))
+    ) {
+      log.info('node_lifecycle.workspace_deletion_preservation_required', {
+        workspaceId,
+        nodeId,
+        action: 'not_scheduled',
+      });
+      return false;
+    }
     const existingMatches = deletionEntryMatchesScheduledIdentity(existing, scheduledIdentity);
     if (existing && !existingMatches) {
       log.warn('node_lifecycle.workspace_deletion_schedule_fenced', {
@@ -204,6 +222,8 @@ export class NodeLifecycleWorkspaceDeletionQueue {
         nodeProviderInstanceId: expected.nodeProviderInstanceId,
         nodeRuntimeIncarnationId: expected.nodeRuntimeIncarnationId,
         workspaceId,
+        workspaceGeneration: expected.workspaceGeneration,
+        mode,
         userId,
         projectId: expected.projectId,
         chatSessionId: expected.chatSessionId,
@@ -397,6 +417,20 @@ export class NodeLifecycleWorkspaceDeletionQueue {
     }
 
     const expected = deletionIdentityForAttempt({ entry, current: currentIdentity, storedNodeId });
+    if (
+      entry.mode !== 'explicit' &&
+      currentIdentity &&
+      !currentIdentity.runtimeDeletionConfirmedAt &&
+      !(await automaticDeletionPreservationAvailable(this.env as Env, expected).catch(() => false))
+    ) {
+      await this.putEntryWithAlarm(key, {
+        ...entry,
+        deleteAt:
+          now + workspaceDeletionRetryDelayMs(this.env, Math.max(1, entry.attemptCount ?? 0)),
+        lastError: 'Automatic deletion requires verified preservation',
+      });
+      return;
+    }
     const attempt = (entry.attemptCount ?? 0) + 1;
     const claimId = crypto.randomUUID();
     const claimedEntry = claimedDeletionEntry({
@@ -436,7 +470,7 @@ export class NodeLifecycleWorkspaceDeletionQueue {
         expected,
         attempt,
         `${WORKSPACE_DELETION_DIAGNOSTIC_PREFIX}: durable attempt ${attempt} claimed`,
-        'automatic'
+        entry.mode ?? 'automatic'
       );
       if (!d1Claimed) {
         await this.handleRejectedD1Claim(key, claimId, entry, expected, dispatch);
@@ -509,7 +543,7 @@ export class NodeLifecycleWorkspaceDeletionQueue {
         expected,
         attempt,
         source: 'node_lifecycle',
-        mode: 'automatic',
+        mode: entry.mode ?? 'automatic',
         requestTimeoutMs: getNodeAgentBackgroundRequestTimeoutMs(this.env),
       });
       if (outcome.status === 'confirmed') {

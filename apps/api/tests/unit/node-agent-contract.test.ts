@@ -52,6 +52,16 @@ vi.doMock('../../src/services/fetch-timeout', () => ({
 const { createAgentSessionOnNode, createWorkspaceOnNode, deleteWorkspaceOnNode } =
   await import('../../src/services/node-agent');
 
+function deletionIdentity(workspaceId: string) {
+  return {
+    workspaceId,
+    nodeId: 'node-abc',
+    userId: 'user-123',
+    nodeRuntimeIncarnationId: 'incarnation',
+    workspaceGeneration: 'generation',
+  };
+}
+
 function makeNodeAgentTestEnv() {
   return {
     BASE_DOMAIN: 'example.com',
@@ -177,7 +187,7 @@ describe('Contract schemas: Control Plane -> VM Agent', () => {
 
   describe('DELETE /workspaces/:id response', () => {
     it('validates a correct delete response', () => {
-      const response = { success: true };
+      const response = { success: true, physicalDeleted: true, ...deletionIdentity('ws') };
       const result = DeleteWorkspaceAgentResponseSchema.safeParse(response);
       expect(result.success).toBe(true);
     });
@@ -920,17 +930,40 @@ describe('Node Agent client functions send correct payloads', () => {
 
   it('deleteWorkspaceOnNode sends DELETE with correct path', async () => {
     fetchWithTimeoutMock.mockResolvedValue(
-      new Response(JSON.stringify({ success: true }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      })
+      new Response(
+        JSON.stringify({
+          success: true,
+          physicalDeleted: true,
+          ...deletionIdentity('ws-delete-me'),
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      )
     );
 
-    await deleteWorkspaceOnNode('node-abc', 'ws-delete-me', makeNodeAgentTestEnv(), 'user-123');
+    await deleteWorkspaceOnNode('node-abc', 'ws-delete-me', makeNodeAgentTestEnv(), 'user-123', {
+      identity: deletionIdentity('ws-delete-me'),
+    });
 
     const [capturedUrl, capturedInit] = fetchWithTimeoutMock.mock.calls[0] as [string, RequestInit];
     expect(capturedInit.method).toBe('DELETE');
     expect(capturedUrl).toContain('/workspaces/ws-delete-me');
+  });
+
+  it.each([
+    { success: true },
+    { physicalDeleted: false, ...deletionIdentity('ws-test') },
+    { physicalDeleted: true, ...deletionIdentity('ws-test'), workspaceGeneration: 'old' },
+    { physicalDeleted: true, ...deletionIdentity('ws-test'), nodeRuntimeIncarnationId: 'old' },
+  ])('rejects legacy or mismatched physical deletion proof: %j', async (body) => {
+    fetchWithTimeoutMock.mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
+    await expect(
+      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123', {
+        identity: deletionIdentity('ws-test'),
+      })
+    ).rejects.toThrow('exact workspace incarnation');
   });
 
   it('createAgentSessionOnNode sends correct JSON body', async () => {
@@ -1127,7 +1160,9 @@ describe('Node Agent client functions send correct payloads', () => {
     );
 
     await expect(
-      deleteWorkspaceOnNode('node-abc', 'ws-missing', makeNodeAgentTestEnv(), 'user-123')
+      deleteWorkspaceOnNode('node-abc', 'ws-missing', makeNodeAgentTestEnv(), 'user-123', {
+        identity: deletionIdentity('ws-missing'),
+      })
     ).rejects.toThrow('Node Agent request failed: 404');
   });
 
@@ -1141,7 +1176,9 @@ describe('Node Agent client functions send correct payloads', () => {
     );
 
     await expect(
-      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123')
+      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123', {
+        identity: deletionIdentity('ws-test'),
+      })
     ).rejects.toThrow('Node Agent unreachable: DNS record for node-abc.vm may be missing');
   });
 
@@ -1153,7 +1190,9 @@ describe('Node Agent client functions send correct payloads', () => {
     );
 
     await expect(
-      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123')
+      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123', {
+        identity: deletionIdentity('ws-test'),
+      })
     ).rejects.toThrow('Request timed out');
   });
 
@@ -1166,7 +1205,9 @@ describe('Node Agent client functions send correct payloads', () => {
     );
 
     await expect(
-      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123')
+      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123', {
+        identity: deletionIdentity('ws-test'),
+      })
     ).rejects.toMatchObject({
       statusCode: 503,
       error: 'RUNTIME_RECOVERING',
@@ -1187,7 +1228,9 @@ describe('Node Agent client functions send correct payloads', () => {
     );
 
     await expect(
-      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123')
+      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123', {
+        identity: deletionIdentity('ws-test'),
+      })
     ).rejects.toThrow('Node Agent request failed: 502');
   });
 
@@ -1202,7 +1245,9 @@ describe('Node Agent client functions send correct payloads', () => {
     );
 
     await expect(
-      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123')
+      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123', {
+        identity: deletionIdentity('ws-test'),
+      })
     ).rejects.toThrow('Node Agent request failed: 500');
   });
 });

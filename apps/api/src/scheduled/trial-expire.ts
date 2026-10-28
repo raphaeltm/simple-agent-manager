@@ -216,6 +216,7 @@ async function cleanupExpiredTrialResources(
       for (const workspace of workspaces.results) {
         if (!workspace.node_id) {
           const outcome = await cleanupWorkspaceForDeletion({
+            mode: 'automatic',
             db: drizzle(env.DATABASE, { schema }),
             env,
             workspace: {
@@ -451,6 +452,7 @@ async function cleanupWorkspacesOnLiveNode(
 
     try {
       const outcome = await cleanupWorkspaceForDeletion({
+        mode: 'automatic',
         db,
         env,
         workspace: {

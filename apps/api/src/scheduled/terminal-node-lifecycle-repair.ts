@@ -136,6 +136,7 @@ async function repairTerminalNodeWorkspace(
       return;
     }
     const outcome = await cleanupWorkspaceForDeletion({
+      mode: 'automatic',
       db: drizzle(env.DATABASE, { schema }),
       env,
       workspace: {
