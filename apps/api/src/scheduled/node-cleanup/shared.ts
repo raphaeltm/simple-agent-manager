@@ -1,3 +1,9 @@
+import {
+  preparePreservedVmRetirement,
+  preservedVmRetirementActivitySql,
+  type PreservedVmRetirement,
+  type PreservedVmRetirementBudget,
+} from '../../services/preserved-vm-retirement';
 /**
  * Shared types, config resolution, and destroy helpers for the node cleanup sweep.
  *
@@ -46,6 +52,7 @@ interface DestroyNodeForCleanupOptions {
   failureRecoveryType: string;
   level?: 'info' | 'warn';
   failureBackoffMs: number;
+  preservedVmBudget?: PreservedVmRetirementBudget;
   allowActiveWorkspaces?: boolean;
   allowManagedRunningProvenance?: boolean;
   expectedLastHeartbeatAt?: string | null;
@@ -73,6 +80,7 @@ export async function claimNodeForCleanup(
   node: CleanupNode,
   nowIso: string,
   options: {
+    preservedVm?: PreservedVmRetirement;
     allowActiveWorkspaces?: boolean;
     allowManagedRunningProvenance?: boolean;
     expectedLastHeartbeatAt?: string | null;
@@ -101,7 +109,7 @@ export async function claimNodeForCleanup(
     options.requireWorkspaceIdle === false
       ? ''
       : `AND (
-         SELECT COALESCE(MAX(workspace_activity.updated_at), nodes.created_at)
+         SELECT COALESCE(MAX(${options.preservedVm ? preservedVmRetirementActivitySql('workspace_activity') : 'workspace_activity.updated_at'}), nodes.created_at)
          FROM workspaces workspace_activity
          WHERE workspace_activity.node_id = nodes.id
        ) < ?`;
@@ -117,7 +125,7 @@ export async function claimNodeForCleanup(
        ${options.expectedLastHeartbeatAt === undefined ? '' : 'AND last_heartbeat_at IS ?'}
        AND ${cleanupNodeProvenanceSql('nodes', options.allowManagedRunningProvenance)}
        AND (runtime_termination_confirmed_at IS NOT NULL OR (1=1
-         ${workspaceArtifactsRetirementGuardSql('nodes')}))
+         ${workspaceArtifactsRetirementGuardSql('nodes', false, !!options.preservedVm)}))
        ${activeWorkspaceGuard}
        ${sleepingContainerRetentionGuardSql('nodes')}
        ${boundedWarmPlacementClaimGuardSql('nodes.id')}
@@ -130,6 +138,9 @@ export async function claimNodeForCleanup(
       node.status,
       nowIso,
       ...(options.expectedLastHeartbeatAt === undefined ? [] : [options.expectedLastHeartbeatAt]),
+      ...(options.preservedVm
+        ? [options.preservedVm.sourcesJson, options.preservedVm.sourcesJson]
+        : []),
       workspaceIdleThresholdIso,
       ...(options.requireWorkspaceIdle === false ? [] : [workspaceIdleThresholdIso])
     )
@@ -309,7 +320,30 @@ export async function destroyNodeForCleanup(
   node: CleanupNode,
   options: DestroyNodeForCleanupOptions
 ): Promise<NodeCleanupDestroyResult> {
+  let preservedVm: PreservedVmRetirement | undefined;
+  if (options.preservedVmBudget) {
+    try {
+      preservedVm = await preparePreservedVmRetirement(
+        env,
+        node.id,
+        node.user_id,
+        options.preservedVmBudget
+      );
+    } catch (error) {
+      log.warn('node_cleanup.preservation_check_failed', {
+        nodeId: node.id,
+        error: errorMessage(error),
+      });
+      await markNodeCleanupBackoff(
+        env,
+        node.id,
+        new Date(Date.parse(nowIso) + options.failureBackoffMs).toISOString()
+      );
+      return 'failed';
+    }
+  }
   const claimed = await claimNodeForCleanup(env, node, nowIso, {
+    preservedVm,
     allowActiveWorkspaces: options.allowActiveWorkspaces,
     allowManagedRunningProvenance: options.allowManagedRunningProvenance,
     expectedLastHeartbeatAt: options.expectedLastHeartbeatAt,
@@ -317,6 +351,19 @@ export async function destroyNodeForCleanup(
     workspaceIdleThresholdIso: options.workspaceIdleThresholdIso,
   });
   if (!claimed) {
+    if (options.preservedVmBudget) {
+      // An unsafe oldest candidate must not monopolize the bounded retirement page.
+      await env.DATABASE.prepare(
+        'UPDATE nodes SET cleanup_backoff_until = ? WHERE id = ? AND user_id = ? AND status = ?'
+      )
+        .bind(
+          new Date(Date.parse(nowIso) + options.failureBackoffMs).toISOString(),
+          node.id,
+          node.user_id,
+          node.status
+        )
+        .run();
+    }
     log.info('node_cleanup.candidate_claim_lost', {
       nodeId: node.id,
       userId: node.user_id,
@@ -343,10 +390,16 @@ export async function destroyNodeForCleanup(
 
     const strictDeletion = controller
       ? await deleteNodeResourcesStrict(node.id, node.user_id, env, {
+          preservedVm,
           providerRequestContext: { signal: controller.signal },
           requestDeadlineMs: options.requestDeadlineMs,
         })
-      : await deleteNodeResourcesStrict(node.id, node.user_id, env);
+      : await deleteNodeResourcesStrict(
+          node.id,
+          node.user_id,
+          env,
+          ...(preservedVm ? [{ preservedVm }] : [])
+        );
     if (!strictDeletion.runtimeTerminationConfirmedAt) {
       throw new Error('Strict cleanup returned no managed-runtime termination proof');
     }

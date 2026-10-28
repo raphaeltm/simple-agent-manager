@@ -1,3 +1,4 @@
+import type { PreservedVmRetirement } from './preserved-vm-retirement';
 import {
   hasAmbiguousLabel,
   type ProviderRequestContext,
@@ -595,6 +596,7 @@ export async function deleteNodeResourcesStrict(
     explicitPermanentDeletion?: boolean;
     expectedRuntime?: StrictNodeRuntimeIdentity;
     workspaceDeletion?: ContainerWorkspaceDeletionAuthority;
+    preservedVm?: PreservedVmRetirement;
     providerRequestContext?: ProviderRequestContext;
     requestDeadlineMs?: number;
   } = {}
@@ -629,7 +631,8 @@ export async function deleteNodeResourcesStrict(
           nodeId,
           userId,
           initialNode,
-          options.workspaceDeletion
+          options.workspaceDeletion,
+          options.preservedVm
         );
   if (!initialNode.runtimeTerminationConfirmedAt) await beforeDestroy?.();
   const node = await claimManagedNodeDeletion(db, initialNode);
