@@ -180,7 +180,7 @@ $('preview').addEventListener('click', async () => {
     $('plan-summary').setAttribute('role', plan.conflicts.length ? 'alert' : 'status');
     $('plan-summary').textContent = plan.conflicts.length
       ? `Existing DNS records block installation: ${plan.conflicts.map((record) => record.name).join(', ')}. Choose a fresh subdomain.`
-      : `Create ${plan.hostnames.join(', ')}. Build source ${plan.sourceCommit.slice(0, 12)} in your account. Cloudflare Workers Paid and usage charges apply.`;
+      : `Create ${plan.hostnames.join(', ')}. ${plan.workersDev.action === 'create' ? 'Initialize account address' : 'Preserve account address'} ${plan.workersDev.subdomain}.workers.dev. Build source ${plan.sourceCommit.slice(0, 12)} in your account. Cloudflare Workers Paid and usage charges apply.`;
     if (!plan.conflicts.length) {
       approvedPlan = plan;
       $('install').disabled = false;

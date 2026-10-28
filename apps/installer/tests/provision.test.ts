@@ -94,4 +94,38 @@ describe('owner-account service provisioning', () => {
     await provision('private', account, name, key, origin, Date.now() + 60000);
     expect(fetch.mock.calls.some(([, init]) => init?.method === 'PUT')).toBe(false);
   });
+  it('initializes only the explicitly approved absent account address and verifies it', async () => {
+    const ordinary = fake();
+    const delegate = ordinary.getMockImplementation()!;
+    let current = '';
+    ordinary.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/workers/subdomain')) {
+        if (init?.method === 'PUT') current = JSON.parse(String(init.body)).subdomain;
+        return Response.json({ success: true, result: { subdomain: current } });
+      }
+      return delegate(url, init);
+    });
+    const target = `sam-${account}`;
+    await expect(
+      provision('private', account, name, key, origin, Date.now() + 60000, {
+        config: { ...config, workersDev: { action: 'create', subdomain: target } },
+        credentials,
+      })
+    ).resolves.toBe(`https://${name}.${target}.workers.dev`);
+    expect(
+      ordinary.mock.calls.filter(
+        ([url, init]) => url.endsWith('/workers/subdomain') && init?.method === 'PUT'
+      )
+    ).toHaveLength(1);
+  });
+  it('refuses to rename an existing account address even with create approval', async () => {
+    const fetch = fake();
+    await expect(
+      provision('private', account, name, key, origin, Date.now() + 60000, {
+        config: { ...config, workersDev: { action: 'create', subdomain: 'different' } },
+        credentials,
+      })
+    ).rejects.toThrow('changed');
+    expect(fetch.mock.calls.some(([, init]) => !!init?.method)).toBe(false);
+  });
 });

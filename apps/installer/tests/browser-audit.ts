@@ -68,6 +68,7 @@ const output = '../../.codex/tmp/playwright-screenshots';
               plan: {
                 sourceCommit: 'c'.repeat(40),
                 fingerprint: 'd'.repeat(64),
+                workersDev: { action: 'create', subdomain: 'sam-account' },
                 hostnames: [
                   'api.sam.example.com',
                   'app.sam.example.com',
@@ -141,7 +142,12 @@ const output = '../../.codex/tmp/playwright-screenshots';
               );
               if (scenario === 'full-conflict')
                 await expect(page.locator('#install')).toBeDisabled();
-              else await expect(page.locator('#install')).toBeEnabled();
+              else {
+                await expect(page.locator('#plan-summary')).toContainText(
+                  'Initialize account address sam-account.workers.dev'
+                );
+                await expect(page.locator('#install')).toBeEnabled();
+              }
             }
           }
           if (scenario === 'empty' || scenario === 'unconfigured')

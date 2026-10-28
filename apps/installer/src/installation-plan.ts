@@ -1,6 +1,10 @@
-import { cloudflare } from './cloudflare';
+import { cloudflare, CloudflareError } from './cloudflare';
 import { digest } from './security';
 
+export interface WorkersDevPlan {
+  action: 'preserve' | 'create';
+  subdomain: string;
+}
 export interface InstallationConfig {
   accountId: string;
   zoneId: string;
@@ -8,8 +12,10 @@ export interface InstallationConfig {
   baseDomain: string;
   ownerEmail: string;
   sourceCommit: string;
+  workersDev?: WorkersDevPlan;
 }
 export interface InstallationPlan extends InstallationConfig {
+  workersDev: WorkersDevPlan;
   fingerprint: string;
   hostnames: string[];
   conflicts: { name: string; type: string }[];
@@ -60,6 +66,24 @@ export async function previewInstallation(
     zone.status !== 'active'
   )
     throw new Error('The selected active zone must belong to the authorized account');
+  let current: string | undefined;
+  try {
+    const result = await cloudflare<{ subdomain: string }>(
+      token,
+      `/accounts/${c.accountId}/workers/subdomain`
+    );
+    if (typeof result.subdomain !== 'string')
+      throw new Error('Invalid account workers.dev response');
+    current = result.subdomain || undefined;
+  } catch (error) {
+    if (!(error instanceof CloudflareError) || error.status !== 404) throw error;
+  }
+  if (current && !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(current))
+    throw new Error('Invalid account workers.dev address');
+  const workersDev: WorkersDevPlan = {
+    action: current ? 'preserve' : 'create',
+    subdomain: current || `sam-${c.accountId}`,
+  };
   const hostnames = ['api', 'app', 'preview', '*'].map((name) => `${name}.${c.baseDomain}`);
   const conflicts: InstallationPlan['conflicts'] = [];
   // Query each exact hostname instead of silently truncating a large DNS zone.
@@ -70,5 +94,13 @@ export async function previewInstallation(
     );
     conflicts.push(...records.map(({ name, type }) => ({ name, type })));
   }
-  return { ...c, hostnames, conflicts, fingerprint: await digest(JSON.stringify(c)) };
+  // Fingerprint the approved target, not its observed existence: an interrupted
+  // creation may have committed before retry, and that same target is idempotent.
+  return {
+    ...c,
+    workersDev,
+    hostnames,
+    conflicts,
+    fingerprint: await digest(JSON.stringify({ ...c, workersDevSubdomain: workersDev.subdomain })),
+  };
 }

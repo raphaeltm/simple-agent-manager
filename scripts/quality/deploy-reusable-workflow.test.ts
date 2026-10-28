@@ -760,7 +760,11 @@ describe('deploy reusable workflow', () => {
       'Sync Wrangler Config \\(API \\+ Tail Worker\\)',
       'Deploy API Worker',
     ]) {
-      expect(stepBlock(name)).toContain('if: ${{ inputs.dry_run != true }}');
+      // Legacy mutations require both normal execution and the legacy route.
+      // Shared-engine runs must never fall through into a second deployment.
+      expect(stepBlock(name)).toContain(
+        'if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}'
+      );
     }
   });
 
