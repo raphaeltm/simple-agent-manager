@@ -1,0 +1,535 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<!--
+  Deterministic 1920x1080 product-video scene. window.setTime(seconds) draws one frame.
+  ENGINE (keep): at() word cues, spring/presence motion, screenshot camera + highlights,
+  headline sequencer, captions, background. SCENES (replace): everything under "per-scene drawing".
+-->
+<style>
+@font-face { font-family: Chillax; src: url('assets/Chillax-Variable.woff2'); font-weight: 200 700; }
+* { box-sizing: border-box; }
+html, body { margin: 0; background: #070d0b; }
+#film { width: 1920px; height: 1080px; position: relative; overflow: hidden; color: #e6f2ee;
+  font-family: 'Liberation Sans', Arial, sans-serif; }
+#bg { position: absolute; inset: 0; }
+.layer { position: absolute; inset: 0; will-change: transform, opacity; }
+.headline { position: absolute; left: 0; right: 0; top: 64px; text-align: center; z-index: 20;
+  font: 600 60px/1.1 Chillax; letter-spacing: -1px; }
+.headline em { font-style: normal; color: #4ade80; }
+.glass { position: absolute; border-radius: 28px; padding: 14px;
+  background: linear-gradient(135deg, rgba(40, 78, 60, .55), rgba(10, 22, 17, .82) 70%);
+  border: 1.5px solid rgba(133, 213, 166, .22);
+  box-shadow: 0 40px 90px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(213, 255, 232, .14);
+  backdrop-filter: blur(18px); transform-style: preserve-3d; }
+.view { position: relative; overflow: hidden; border-radius: 18px; background: #0b1110; }
+.view::after { content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: 18px;
+  box-shadow: inset 0 0 36px 12px rgba(9, 15, 13, .92); }
+.view .cam { position: absolute; left: 0; top: 0; transform-origin: 0 0; }
+.view .cam img { display: block; }
+.hl { position: absolute; border-radius: 16px; border: 3px solid #4ade80;
+  box-shadow: 0 0 0 9999px rgba(4, 9, 7, .5), 0 0 40px rgba(74, 222, 128, .35), inset 0 0 30px rgba(74, 222, 128, .12); }
+.chip { position: absolute; display: flex; align-items: center; gap: 16px; padding: 20px 26px;
+  border-radius: 20px; font: 500 30px Chillax; white-space: nowrap;
+  background: linear-gradient(135deg, rgba(36, 72, 55, .82), rgba(12, 26, 20, .94));
+  border: 1.5px solid rgba(133, 213, 166, .26); box-shadow: 0 24px 60px rgba(0, 0, 0, .5); }
+.chip small { display: block; font: 400 23px 'Liberation Sans', Arial; color: #a9c4b8; margin-top: 6px; }
+.dot { width: 14px; height: 14px; border-radius: 50%; background: #22c55e; box-shadow: 0 0 16px #22c55e; flex: none; }
+.icon { width: 54px; height: 54px; border-radius: 14px; display: grid; place-items: center; flex: none;
+  background: rgba(22, 163, 74, .16); border: 1px solid rgba(74, 222, 128, .3); color: #86efac; font: 600 27px Chillax; }
+.you { position: absolute; width: 150px; height: 150px; margin: -75px 0 0 -75px; border-radius: 50%;
+  display: grid; place-items: center; font: 600 34px Chillax; color: #fde68a;
+  background: radial-gradient(circle at 35% 30%, rgba(250, 204, 21, .32), rgba(120, 80, 10, .25) 70%);
+  border: 2px solid rgba(250, 204, 21, .5); box-shadow: 0 0 60px rgba(250, 204, 21, .2); }
+svg.wires { position: absolute; inset: 0; overflow: visible; }
+.caption { position: absolute; left: 50%; bottom: 40px; transform: translateX(-50%); z-index: 30;
+  padding: 12px 28px; border-radius: 18px; background: rgba(4, 10, 8, .62); backdrop-filter: blur(8px);
+  font: 500 42px/1.25 Chillax; text-align: center; white-space: nowrap; }
+.caption span { color: rgba(230, 242, 238, .42); }
+.caption span.on { color: #f0faf5; }
+.step { position: absolute; top: 500px; width: 300px; padding: 26px 24px; border-radius: 20px; text-align: center;
+  font: 500 29px/1.25 Chillax; background: linear-gradient(135deg, rgba(36, 72, 55, .82), rgba(12, 26, 20, .94));
+  border: 1.5px solid rgba(133, 213, 166, .26); box-shadow: 0 24px 60px rgba(0, 0, 0, .5); }
+.toggle { display: inline-block; width: 64px; height: 36px; border-radius: 20px; background: #24372f; position: relative; flex: none; }
+.toggle i { position: absolute; top: 4px; left: 4px; width: 28px; height: 28px; border-radius: 50%; background: #e6f2ee; }
+.flipnum { position: absolute; top: 134px; width: 24px; height: 34px; background: rgb(10,22,20); font: 400 28px/34px 'Liberation Sans'; color: #9fb7ae; text-align: center; opacity: 0; }
+.big { position: absolute; left: 0; right: 0; text-align: center; font: 600 120px/1 Chillax; letter-spacing: -3px; }
+.thumb { position: absolute; top: 330px; width: 460px; height: 290px; padding: 10px; }
+.thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top center; border-radius: 16px; display: block; }
+.row { display: flex; align-items: center; gap: 26px; margin: 34px 0; font: 500 40px Chillax; }
+.row b { width: 62px; height: 62px; border-radius: 16px; display: grid; place-items: center; flex: none;
+  background: rgba(22, 163, 74, .18); border: 1px solid rgba(74, 222, 128, .35); color: #86efac; font: 600 32px Chillax; }
+</style>
+</head>
+<body>
+<div id="film">
+  <canvas id="bg" width="1920" height="1080"></canvas>
+
+  <!-- headlines live above the layers and hand off one at a time -->
+  <div class="headline" id="h1">You shouldn't have to be <em>the glue</em></div>
+  <div class="headline" id="h2">One idea, scattered everywhere</div>
+  <div class="headline" id="h3">Open the idea. <em>Everything's there.</em></div>
+  <div class="headline" id="h4">Some jobs take more than one prompt</div>
+  <div class="headline" id="h5">Ask once. <em>Watch it run.</em></div>
+  <div class="headline" id="h6">Your agent is busy. Then someone comments.</div>
+  <div class="headline" id="h7">Now it <em>waits its turn</em></div>
+  <div class="headline" id="h9">More models <em>for your agents</em></div>
+  <div class="headline" id="h10">Deploys you can read <em>at a glance</em></div>
+  <div class="headline" id="h11">Check in from <em>anywhere</em></div>
+  <div class="headline" id="h12">That's the week</div>
+
+  <!-- 0 Hook -->
+  <div class="layer" id="s0">
+    <svg class="wires" id="s0wires" width="1920" height="1080"></svg>
+    <div class="you" id="s0you" style="left:960px;top:560px">You</div>
+    <div class="chip" id="s0a1"><div class="icon">C</div><div>Careful Builder<small>wants a decision</small></div></div>
+    <div class="chip" id="s0a2"><div class="icon">R</div><div>Reviewer<small>needs the latest notes</small></div></div>
+    <div class="chip" id="s0a3"><div class="icon">B</div><div>Brainstormer<small>found something useful</small></div></div>
+  </div>
+
+  <!-- 1a Ideas: the problem -->
+  <div class="layer" id="s1a">
+    <div class="chip" id="s1idea"><div class="icon">&#9679;</div><div>Retry failed webhook deliveries<small>your idea, Monday</small></div></div>
+    <div class="chip" id="s1c1"><div class="icon">&#9673;</div><div>Comparing how providers retry<small>chat</small></div></div>
+    <div class="chip" id="s1c2"><div class="icon">&#9673;</div><div>Wiring the retry schedule<small>chat</small></div></div>
+    <div class="chip" id="s1c3"><div class="icon">&#9673;</div><div>Asking about the 3-day window<small>chat</small></div></div>
+    <div class="chip" id="s1pr"><div class="icon">&#8645;</div><div>PR #482<small>pull request</small></div></div>
+    <div class="chip" id="s1doc"><div class="icon">&#9636;</div><div>retry-schedules.md<small>somewhere...</small></div></div>
+  </div>
+
+  <!-- 1b Ideas: the idea page -->
+  <div class="layer" id="s1b">
+    <div class="glass" id="s1bframe" style="left:286px;top:168px"><div class="view" id="v_idea"></div></div>
+    <div class="glass" id="s1cframe" style="left:1060px;top:236px"><div class="view" id="v_start"></div></div>
+    <div class="chip" id="s1new" style="left:1010px;top:420px"><div class="icon">C</div><div>Careful Builder started a new chat<small>It begins with the idea and its linked file</small></div><div class="dot" style="margin-left:14px"></div></div>
+  </div>
+
+  <!-- 2a Workflows: the problem -->
+  <div class="layer" id="s2a">
+    <svg class="wires" id="s2wires" width="1920" height="1080"></svg>
+    <div class="chip" id="s2prompt" style="left:0;top:0"><div class="icon">&#8250;</div><div>Write the release notes, get them reviewed,<br>apply the feedback and publish them</div></div>
+    <div class="step" id="st1" style="left:150px">Draft the release notes</div>
+    <div class="step" id="st2" style="left:570px">Review the tone</div>
+    <div class="step" id="st2b" style="left:570px">Check every claim</div>
+    <div class="step" id="st3" style="left:990px">Apply both reviews</div>
+    <div class="step" id="st4" style="left:1410px">Publish</div>
+    <div class="you" id="s2you" style="width:104px;height:104px;margin:-52px 0 0 -52px;font-size:27px">You</div>
+    <div class="chip" id="s2timer" style="left:730px;top:810px"><div class="dot" style="background:#facc15;box-shadow:0 0 16px #facc15"></div><div>Checking in every 20 minutes</div></div>
+  </div>
+
+  <!-- 2b Workflows: the graph -->
+  <div class="layer" id="s2b">
+    <div class="glass" id="s2bframe" style="left:286px;top:168px"><div class="view" id="v_graph"></div></div>
+    <div class="chip" id="s2wait" style="left:1190px;top:700px"><div class="icon">&#8987;</div><div>A wait step can hold<small>until a GitHub check finishes</small></div></div>
+  </div>
+
+  <!-- 3a GitHub: the problem -->
+  <div class="layer" id="s3a">
+    <div class="chip" id="s3agent" style="left:480px;top:420px"><div class="icon">C</div><div>Careful Builder<small>fixing issue #118, started by a GitHub automation</small></div><div class="dot" style="margin-left:20px"></div></div>
+    <div class="chip" id="s3comment" style="left:1010px;top:610px"><div class="icon">&#8220;</div><div>New comment on #118<small>“Can we keep the old header too?”</small></div></div>
+  </div>
+
+  <!-- 3b GitHub: the queue -->
+  <div class="layer" id="s3b">
+    <div class="glass" id="s3bframe" style="left:190px;top:168px"><div class="view" id="v_queue"></div></div>
+    <div class="chip" id="s3toggle" style="left:1190px;top:470px"><div class="toggle" id="s3tog"><i id="s3knob"></i></div><div>Keep issue and PR<br>follow-ups in one chat</div></div>
+  </div>
+
+  <!-- 4 More: one item at a time, full size -->
+  <div class="layer" id="s4">
+    <div class="glass" id="s4c1" style="left:406px;top:220px"><div class="view" id="v_models"></div></div>
+    <div class="glass" id="s4c2" style="left:406px;top:250px"><div class="view" id="v_deploy" style="width:1080px;height:470px"></div></div>
+    <div class="glass" id="s4c3" style="left:406px;top:220px"><div class="view" id="v_conn"></div></div>
+  </div>
+
+  <!-- 5 Close -->
+  <div class="layer" id="s5">
+    <div class="glass thumb" id="th1" style="left:180px"><img src="assets/idea-page.png"></div>
+    <div class="glass thumb" id="th2" style="left:730px"><img src="assets/workflow-run-graph.png" style="object-position:30% 30%"></div>
+    <div class="glass thumb" id="th3" style="left:1280px"><img src="assets/github-queue-runs.png"></div>
+    <div class="big" id="s5a" style="top:320px">Less babysitting.</div>
+    <div class="big" id="s5b" style="top:470px;color:#4ade80">More shipping.</div>
+    <div id="s5url" style="position:absolute;left:0;right:0;top:700px;display:flex;justify-content:center;align-items:center;gap:26px;font:500 54px Chillax;color:#dff3ea">
+      <img src="assets/sam-head.png" style="width:92px;height:92px;border-radius:22px"> simple-agent-manager.org
+    </div>
+  </div>
+
+  <div class="caption" id="cap"></div>
+</div>
+
+<script src="assets/words.js"></script>
+<script>
+// ======================= ENGINE =======================
+const VO = 0.5;                       // voiceover starts 0.5 s into the film
+const END = 90.0;
+const norm = s => s.toLowerCase().replace(/[^a-z0-9#'-]/g, '');
+// at('word', n) -> film time of the nth spoken occurrence of that word (punctuation ignored)
+function at(word, n = 1) {
+  const k = norm(word); let seen = 0;
+  for (const w of WORDS) if (norm(w.w) === k && ++seen === n) return w.s + VO;
+  throw new Error('cue not found: ' + word + ' #' + n);
+}
+
+// Damped spring step response (mass 1). 0 before dt=0, overshoots, settles at 1.
+function spring(dt, k = 170, c = 20) {
+  if (dt <= 0) return 0;
+  const w0 = Math.sqrt(k), z = c / (2 * w0);
+  if (z >= 1) return 1 - Math.exp(-w0 * dt) * (1 + w0 * dt);
+  const wd = w0 * Math.sqrt(1 - z * z);
+  return 1 - Math.exp(-z * w0 * dt) * (Math.cos(wd * dt) + (z * w0 / wd) * Math.sin(wd * dt));
+}
+const clamp = (v, a = 0, b = 1) => Math.min(b, Math.max(a, v));
+const lerp = (a, b, p) => a + (b - a) * p;
+const easeIn = p => p * p * p;
+// springs in at t0, eases out over `out` seconds ending at t1
+function presence(t, t0, t1, out = 0.45, k = 150, c = 18) {
+  const inn = spring(t - t0, k, c);
+  const o = t1 == null ? 0 : easeIn(clamp((t - (t1 - out)) / out));
+  return { s: inn, o, a: clamp(inn) * (1 - o) };
+}
+const $ = id => document.getElementById(id);
+function put(el, { x = 0, y = 0, s = 1, r = 0, ry = 0, rx = 0, a = 1, blur = 0 }) {
+  el.style.transform = `translate(${x}px,${y}px) perspective(1600px) rotateX(${rx}deg) rotateY(${ry}deg) rotate(${r}deg) scale(${s})`;
+  el.style.opacity = a;
+  el.style.filter = blur ? `blur(${blur}px)` : '';
+  el.style.visibility = a <= 0.001 ? 'hidden' : 'visible';
+}
+function layer(id, t, t0, t1) {
+  const p = presence(t, t0, t1, 0.4, 140, 22);
+  put($(id), { a: clamp(p.s) * (1 - p.o), y: (1 - clamp(p.s)) * 40 - p.o * 30, blur: p.o * 6 });
+  return p;
+}
+const float = (t, seed, amp = 6) => ({ x: Math.sin(t * 0.6 + seed) * amp, y: Math.cos(t * 0.5 + seed * 1.7) * amp });
+
+// Headline sequencer: each headline leaves completely before the next springs in.
+let HEADS = [];
+function drawHeadlines(t) {
+  HEADS.forEach(([id, tin], i) => {
+    const next = HEADS[i + 1] ? HEADS[i + 1][1] - 0.04 : null;
+    const p = presence(t, tin, next, 0.28, 190, 18);
+    const leaving = next != null && t > next - 0.28;
+    put($(id), { y: leaving ? -p.o * 24 : (1 - p.s) * 36, a: p.a });
+  });
+}
+
+// Screenshot camera. kfs: [{t, x, y, s}] focal point in image px, s = scale or 'fit'.
+// hls: [{t0, t1, r:[x1,y1,x2,y2]}] in image px; each dims everything outside it.
+const shots = {};
+function makeShot(id, src, iw, ih, vw, vh, kfs, hls = [], extra = '') {
+  const v = $(id); v.style.width = vw + 'px'; v.style.height = vh + 'px';
+  const cam = document.createElement('div'); cam.className = 'cam';
+  cam.innerHTML = `<img src="${src}" width="${iw}" height="${ih}">` + extra;
+  v.appendChild(cam);
+  const fit = Math.min(vw / iw, vh / ih);
+  kfs = kfs.map(k => ({ ...k, s: k.s === 'fit' ? fit : k.s, x: k.x ?? iw / 2, y: k.y ?? ih / 2 }));
+  hls = hls.map(h => { const d = document.createElement('div'); d.className = 'hl'; cam.appendChild(d); return { ...h, el: d }; });
+  shots[id] = { cam, kfs, hls, vw, vh };
+}
+function camAt(t, kfs) {
+  let st = { ...kfs[0] };
+  for (let i = 1; i < kfs.length; i++) {
+    if (t < kfs[i].t) break;
+    const p = spring(t - kfs[i].t, 60, 14.5);
+    st = { x: lerp(st.x, kfs[i].x, p), y: lerp(st.y, kfs[i].y, p), s: lerp(st.s, kfs[i].s, p) };
+  }
+  return st;
+}
+function drawShot(id, t) {
+  const sh = shots[id]; const c = camAt(t, sh.kfs);
+  sh.cam.style.transform = `translate(${sh.vw / 2 - c.x * c.s}px,${sh.vh / 2 - c.y * c.s}px) scale(${c.s})`;
+  for (const h of sh.hls) {
+    const p = presence(t, h.t0, h.t1, 0.3, 220, 16);
+    const [x1, y1, x2, y2] = h.r, pad = 10 / c.s;
+    Object.assign(h.el.style, {
+      left: (x1 - pad) + 'px', top: (y1 - pad) + 'px', width: (x2 - x1 + 2 * pad) + 'px', height: (y2 - y1 + 2 * pad) + 'px',
+      borderWidth: (3 / c.s) + 'px', borderRadius: (16 / c.s) + 'px', opacity: p.a,
+      transform: `scale(${lerp(1.06, 1, clamp(p.s))})`, visibility: p.a > 0.001 ? 'visible' : 'hidden'
+    });
+  }
+}
+
+// Captions: short phrases, words light up as they are spoken.
+const chunks = [];
+(function buildChunks() {
+  let cur = [];
+  WORDS.forEach((w, i) => {
+    cur.push(w);
+    const brk = /[.?!:]$|\.\.\.$/.test(w.w) || (/,$/.test(w.w) && cur.length >= 4) || cur.length >= 7;
+    if (brk || i === WORDS.length - 1) { chunks.push(cur); cur = []; }
+  });
+})();
+let lastCap = -1;
+function drawCaption(t, hideAfter) {
+  const tv = t - VO; let idx = -1;
+  for (let i = 0; i < chunks.length; i++) if (tv >= chunks[i][0].s - 0.05) idx = i;
+  const cap = $('cap');
+  if (idx < 0 || t > hideAfter) { cap.style.opacity = 0; return; }
+  if (idx !== lastCap) { cap.innerHTML = chunks[idx].map(w => `<span>${w.w.replace(/"/g, '&quot;')}</span>`).join(' '); lastCap = idx; }
+  [...cap.children].forEach((s, i) => s.classList.toggle('on', tv >= chunks[idx][i].s - 0.02));
+  const p = spring(tv - chunks[idx][0].s + 0.05, 260, 24);
+  cap.style.opacity = clamp(p * 1.4);
+  cap.style.transform = `translateX(-50%) translateY(${(1 - clamp(p)) * 10}px)`;
+}
+
+// Background: drifting aurora, a slow swirl of motes, a faint floor grid.
+const bg = $('bg').getContext('2d');
+const P = Array.from({ length: 170 }, (_, i) => ({ a: i * 2.399, r: 120 + ((i * 97) % 820), sp: 0.03 + ((i * 13) % 7) / 260, z: 0.4 + ((i * 7) % 10) / 14 }));
+function drawBg(t) {
+  bg.fillStyle = '#070d0b'; bg.fillRect(0, 0, 1920, 1080);
+  const blobs = [[0.32, 0.30, 640, '22,163,74', 0.20], [0.72, 0.62, 720, '20,120,110', 0.16], [0.55, 0.20, 520, '74,222,128', 0.08], [0.18, 0.80, 600, '16,90,60', 0.14]];
+  blobs.forEach(([bx, by, rad, col, al], i) => {
+    const x = 1920 * (bx + 0.08 * Math.sin(t * 0.11 + i * 1.7)), y = 1080 * (by + 0.08 * Math.cos(t * 0.09 + i));
+    const g = bg.createRadialGradient(x, y, 0, x, y, rad);
+    g.addColorStop(0, `rgba(${col},${al})`); g.addColorStop(1, `rgba(${col},0)`);
+    bg.fillStyle = g; bg.fillRect(0, 0, 1920, 1080);
+  });
+  for (const p of P) {
+    const ang = p.a + t * p.sp * (600 / p.r);
+    const r = p.r + 30 * Math.sin(t * 0.3 + p.a);
+    const x = 960 + Math.cos(ang) * r * 1.25, y = 540 + Math.sin(ang) * r * 0.62;
+    bg.fillStyle = `rgba(160,240,200,${0.10 + 0.18 * p.z * (0.6 + 0.4 * Math.sin(t * 1.3 + p.a))})`;
+    bg.beginPath(); bg.arc(x, y, 1.1 + p.z * 1.4, 0, 6.283); bg.fill();
+  }
+  bg.save(); bg.globalAlpha = 0.09; bg.strokeStyle = '#69d69a'; bg.lineWidth = 1;
+  for (let i = -14; i <= 14; i++) { bg.beginPath(); bg.moveTo(960 + i * 40, 760); bg.lineTo(960 + i * 260, 1080); bg.stroke(); }
+  for (let j = 0; j < 9; j++) { const yy = 760 + Math.pow(j / 8, 1.8) * 320 + ((t * 12) % 40) * (j / 8); bg.beginPath(); bg.moveTo(0, yy); bg.lineTo(1920, yy); bg.stroke(); }
+  bg.restore();
+  const vg = bg.createRadialGradient(960, 540, 300, 960, 540, 1150);
+  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,0.55)');
+  bg.fillStyle = vg; bg.fillRect(0, 0, 1920, 1080);
+}
+
+// ======================= SCENES =======================
+const T = {};
+function cues() {
+  T.most = at('Most'); T.shouldnt = at("shouldn't"); T.glue = at('glue'); T.agents0 = at('agents.');
+  T.s1 = at('Say') - 0.35; T.say = at('Say'); T.three = at('three'); T.chats = at('chats,'); T.pull = at('pull'); T.doc = at('doc');
+  T.find = at('find.'); T.now1 = at('Now'); T.every = at('Every'); T.status = at('status');
+  T.inreview = at('says'); T.ready = at('Ready'); T.start = at('Start'); T.plan1 = at('plan'); T.s2 = at('Some') - 0.3; T.some = at('Some');
+  T.draft = at('Draft'); T.two = at('two'); T.apply = at('apply'); T.publish = at('publish.'); T.you2 = at('mean') + 0.24;
+  T.twenty = at('twenty'); T.now2 = at('Now', 2); T.steps = at('Steps'); T.side = at('side');
+  T.wait = at('wait'); T.even = at('even'); T.watch = at('watch'); T.s3 = at('halfway') - 0.75; T.someone = at('someone'); T.skipped = at('skipped.');
+  T.now3 = at('Now', 3); T.waits = at('waits'); T.followups = at('follow-ups,'); T.straight = at('straight'); T.s4 = at('few') - 0.3;
+  T.item1 = at('few') + 0.1; T.deploy = at('Deployments'); T.claude = at('Claude'); T.s5 = at("That's", 2) - 0.2;
+  T.less = at('Less'); T.more = at('more', 2); T.see = at('See');
+  HEADS = [['h1', T.shouldnt - 0.15], ['h2', T.say], ['h3', T.now1 + 0.1], ['h4', T.s2 + 0.1], ['h5', T.now2 + 0.1],
+    ['h6', T.s3 + 0.1], ['h7', T.now3 + 0.1], ['h9', T.s4 + 0.05], ['h10', T.deploy - 0.15], ['h11', T.claude - 0.15],
+    ['h12', T.s5 + 0.1], ['h_end', T.less - 0.25]];
+}
+
+function setupShots() {
+  // idea page 2056x2028
+  makeShot('v_idea', 'assets/idea-page.png', 2056, 2028, 1320, 720, [
+    { t: 0, s: 'fit' }, { t: T.now1 + 0.2, s: 0.62, x: 1028, y: 640 },
+    { t: T.every - 0.15, s: 0.88, x: 1306, y: 975 },
+    { t: T.status - 0.2, s: 1.6, x: 1650, y: 320 },
+    { t: T.ready, s: 0.62, x: 1028, y: 700 }
+  ], [
+    { t0: T.every, t1: T.status - 0.1, r: [1253, 575, 2050, 1373] },
+    { t0: T.inreview - 0.1, t1: T.ready, r: [1253, 118, 2050, 415] }
+  ]);
+  makeShot('v_start', 'assets/idea-start-work.png', 1080, 1020, 760, 718, [{ t: 0, s: 760 / 1080, x: 540, y: 510 }],
+    [{ t0: T.start - 0.05, t1: T.start + 0.75, r: [822, 898, 1038, 986] }]);
+  // workflow graph 2560x1600: keep the camera inside the graph panel when zoomed
+  makeShot('v_graph', 'assets/workflow-run-graph.png', 2560, 1600, 1320, 720, [
+    { t: 0, s: 'fit' }, { t: T.steps - 0.15, s: 1.0, x: 1100, y: 1000 }, { t: T.watch - 0.1, s: 'fit' }
+  ], [
+    { t0: T.side - 0.05, t1: T.wait - 0.05, r: [626, 864, 1540, 1018] },
+    { t0: T.wait, t1: T.even + 0.1, r: [866, 1112, 1297, 1263] },
+    { t0: T.watch + 0.3, t1: T.s3 + 0.4, r: [472, 342, 2528, 372] }
+  ]);
+  // github queue 1232x1258; the #118 row flips to delivered when follow-ups are on
+  const flip = `<div id="flip118" style="position:absolute;left:52px;top:200px;width:820px;height:100px;background:rgb(7,17,14);display:flex;align-items:center;gap:26px;padding-left:6px">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#22c55e" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M8 12.5l2.6 2.6L16 9.5"/></svg>
+      <div><div style="font:700 29px 'Liberation Sans';color:#f3f7f5">Delivered to the running chat</div>
+      <div style="font:400 24px 'Liberation Sans';color:#9fb7ae;margin-top:8px">Event 23 · #118 · just now</div></div></div>
+    <div class="flipnum" style="left:214px">1</div><div class="flipnum" style="left:704px">4</div>`;
+  makeShot('v_queue', 'assets/github-queue-runs.png', 1232, 1258, 900, 720, [{ t: 0, s: 900 / 1232, x: 616, y: 500 }], [
+    { t0: T.waits, t1: T.followups, r: [26, 188, 1206, 440] },
+    { t0: T.straight - 0.1, t1: T.s4 + 0.4, r: [26, 188, 1206, 313] }
+  ], flip);
+  makeShot('v_models', 'assets/agent-models-settings.png', 1544, 782, 1080, 547, [{ t: 0, s: 1080 / 1544, x: 772, y: 391 }]);
+  makeShot('v_conn', 'assets/connector-access.png', 2120, 1176, 1080, 513, [{ t: 0, s: 0.509, x: 1060, y: 640 }], [],
+    `<div style="position:absolute;left:46px;top:280px;width:1000px;height:60px;background:rgb(11,17,16);font:400 27px/60px 'Liberation Mono',monospace;color:#e6f2ee;padding-left:4px">https://api.simple-agent-manager.org/connect/mcp</div>`);
+  // no committed screenshot of the deployments page: say what it does, plainly, without faking UI
+  $('v_deploy').innerHTML = `<div style="padding:62px 80px">
+     <div class="row"><b>1</b>One sentence says what's running</div>
+     <div class="row"><b>2</b>Problems come with a fix button</div>
+     <div class="row"><b>3</b>Each deploy shows its live steps</div></div>`;
+}
+
+function drawS0(t) {
+  layer('s0', t, 0, T.s1 + 0.35);
+  const pos = [[520, 330], [1400, 330], [960, 850]];
+  const glue = spring(t - T.agents0 + 0.15, 90, 14);  // agents start talking to each other
+  ['s0a1', 's0a2', 's0a3'].forEach((id, i) => {
+    const p = presence(t, 0.1 + i * 0.18, null, 0.4, 150, 13), f = float(t, i * 2);
+    const el = $(id); const [x, y] = pos[i];
+    put(el, { x: x - el.offsetWidth / 2 + f.x + (1 - p.s) * (x - 960) * 0.5, y: y - el.offsetHeight / 2 + f.y + (1 - p.s) * 60, a: p.a, s: lerp(0.7, 1, clamp(p.s)) });
+  });
+  // every agent keeps pinging You until the glue line
+  const yp = presence(t, 0.3, null, 0.4, 200, 12);
+  const wob = t > T.glue ? Math.sin((t - T.glue) * 22) * Math.exp(-(t - T.glue) * 3) * 0.12 : 0;
+  const ping = t < T.agents0 ? Math.max(0, Math.sin(t * 5.5)) * 0.05 : 0;
+  put($('s0you'), { a: yp.a * lerp(1, 0.22, clamp(glue)), s: lerp(0.6, 1, clamp(yp.s)) + wob + ping - 0.25 * clamp(glue) });
+  let svg = ''; const tt = t * 0.9;
+  const toYou = clamp(yp.s) * (1 - clamp(glue));
+  pos.forEach(([x, y], i) => {
+    if (toYou > 0.01) {
+      svg += `<path d="M${x},${y} Q${(x + 960) / 2 + 60},${(y + 560) / 2 - 40} 960,560" stroke="rgba(250,204,21,${0.5 * toYou})" stroke-width="2.5" fill="none" stroke-dasharray="8 10" stroke-dashoffset="${-tt * 50}"/>`;
+      const q = (tt * 0.8 + i / 3) % 1;
+      svg += `<circle cx="${lerp(x, 960, q)}" cy="${lerp(y, 560, q)}" r="${5 * toYou}" fill="#facc15"/>`;
+    }
+    const [x2, y2] = pos[(i + 1) % 3];
+    if (glue > 0.01) {
+      const g = clamp(glue);
+      svg += `<path d="M${x},${y} L${lerp(x, x2, g)},${lerp(y, y2, g)}" stroke="rgba(74,222,128,${0.7 * g})" stroke-width="3" fill="none"/>`;
+      svg += `<circle cx="${lerp(x, x2, (tt * 0.5 + i / 3) % 1)}" cy="${lerp(y, y2, (tt * 0.5 + i / 3) % 1)}" r="${5 * g}" fill="#86efac"/>`;
+    }
+  });
+  $('s0wires').innerHTML = svg;
+}
+
+function drawS1a(t) {
+  layer('s1a', t, T.s1, T.now1 + 0.45);
+  const idea = presence(t, T.say + 0.1, null, 0.4, 170, 15);
+  const split = spring(t - T.three + 0.4, 120, 15);
+  const f0 = float(t, 0.3), ie = $('s1idea');
+  put(ie, { x: 960 - ie.offsetWidth / 2 + f0.x, y: lerp(470, 280, clamp(split)) + f0.y, a: idea.a * lerp(1, 0.55, clamp(split)), s: lerp(0.85, 1, clamp(idea.s)) });
+  const items = [['s1c1', T.three, 300, 500, -4], ['s1c2', T.chats - 0.15, 1180, 450, 3], ['s1c3', T.chats + 0.2, 620, 700, 2], ['s1pr', T.pull, 1270, 680, -3], ['s1doc', T.doc, 170, 320, 5]];
+  items.forEach(([id, t0, x, y, r], i) => {
+    const p = presence(t, t0, null, 0.4, 150, 11), f = float(t, i * 1.3, 9);
+    const lost = id === 's1doc' ? spring(t - T.find - 0.1, 50, 12) : 0;
+    put($(id), { x: lerp(760, x, clamp(p.s)) + f.x - lost * 260, y: lerp(300, y, clamp(p.s)) + f.y + lost * 40, r: r * clamp(p.s) - lost * 12, a: p.a * (1 - 0.85 * clamp(lost)), s: lerp(0.6, 1, clamp(p.s)), blur: lost * 6 });
+  });
+}
+
+function drawS1b(t) {
+  layer('s1b', t, T.now1, T.s2 + 0.4);
+  const p = presence(t, T.now1 + 0.05, null, 0.4, 120, 15);
+  const back = spring(t - T.ready + 0.1, 120, 18);
+  put($('s1bframe'), { y: (1 - p.s) * 120 + Math.sin(t * 0.5) * 4, s: lerp(0.86, 1, clamp(p.s)) - 0.06 * clamp(back), ry: lerp(-14, -3, clamp(p.s)) + Math.sin(t * 0.33) * 1.2, rx: lerp(10, 2, clamp(p.s)), a: clamp(p.s * 1.3) * (1 - 0.45 * clamp(back)), blur: 2.5 * clamp(back) });
+  drawShot('v_idea', t);
+  // Start work: dialog arrives, the button is pressed, the dialog leaves, a new chat appears
+  const d = presence(t, T.ready - 0.1, T.start + 0.95, 0.4, 170, 14);
+  const press = t > T.start + 0.15 ? Math.sin(clamp((t - T.start - 0.15) / 0.25) * Math.PI) * 0.025 : 0;
+  put($('s1cframe'), { x: (1 - d.s) * 300 - 190 - d.o * 200, y: (1 - d.s) * 60 - 40 + Math.sin(t * 0.6) * 5 - d.o * 80, s: lerp(0.8, 1.04, clamp(d.s)) - press - d.o * 0.25, ry: lerp(18, 4, clamp(d.s)), a: d.a, blur: d.o * 8 });
+  drawShot('v_start', t);
+  const n = presence(t, T.start + 0.75, null, 0.4, 170, 13), f = float(t, 4, 4);
+  put($('s1new'), { x: -200 + (1 - n.s) * 160 + f.x, y: (1 - n.s) * 40 + f.y, a: n.a, s: lerp(0.8, 1, clamp(n.s)) });
+}
+
+function drawS2a(t) {
+  layer('s2a', t, T.s2, T.now2 + 0.45);
+  // the one big prompt, which turns out to be several steps
+  const pr = presence(t, T.some + 0.05, T.draft + 0.35, 0.35, 170, 15), pe = $('s2prompt');
+  put(pe, { x: 960 - pe.offsetWidth / 2, y: 420 - pr.o * 120 + (1 - pr.s) * 40, a: pr.a, s: lerp(0.85, 1, clamp(pr.s)) - pr.o * 0.2 });
+  const steps = [['st1', T.draft, 0], ['st2', T.two - 0.05, -100], ['st2b', T.two + 0.15, 100], ['st3', T.apply, 0], ['st4', T.publish, 0]];
+  const ps = {};
+  steps.forEach(([id, t0, dy], i) => {
+    const p = presence(t, t0, null, 0.4, 190, 13), f = float(t, i, 4);
+    ps[id] = p;
+    put($(id), { x: f.x, y: dy + (1 - p.s) * 70 + f.y, a: p.a, s: lerp(0.7, 1, clamp(p.s)) });
+  });
+  // edges between steps, drawn as each pair appears
+  const C = { st1: [300, 555], st2: [720, 455], st2b: [720, 655], st3: [1140, 555], st4: [1560, 555] };
+  const E = [['st1', 'st2'], ['st1', 'st2b'], ['st2', 'st3'], ['st2b', 'st3'], ['st3', 'st4']];
+  let svg = '';
+  E.forEach(([a, b]) => {
+    const g = clamp(Math.min(ps[a].a, ps[b].a));
+    if (g < 0.01) return;
+    const [x1, y1] = C[a], [x2, y2] = C[b];
+    svg += `<path d="M${x1 + 150},${y1} C${x1 + 210},${y1} ${x2 - 210},${y2} ${x2 - 150},${y2}" stroke="rgba(110,231,160,${0.55 * g})" stroke-width="2.5" fill="none"/>`;
+  });
+  $('s2wires').innerHTML = svg;
+  // You visit each step in turn and poke it: this is the babysitting
+  const order = ['st1', 'st2', 'st3', 'st4'], above = { st1: [300, 420], st2: [720, 300], st3: [1140, 420], st4: [1560, 420] };
+  const yp = presence(t, T.you2 - 0.05, null, 0.4, 220, 12);
+  const hop = Math.max(0, t - T.you2) / 0.8, i0 = Math.floor(hop) % 4, i1 = (i0 + 1) % 4, f = hop % 1;
+  const k = spring(f * 0.8, 260, 22);
+  const [x0, y0] = above[order[i0]], [x1, y1] = above[order[i1]];
+  put($('s2you'), { x: lerp(x0, x1, clamp(k)), y: lerp(y0, y1, clamp(k)) - Math.sin(Math.PI * clamp(f * 1.6)) * 60, a: yp.a, s: lerp(0.5, 1, clamp(yp.s)) });
+  steps.forEach(([id]) => { $(id).style.borderColor = 'rgba(133,213,166,.26)'; $(id).style.boxShadow = '0 24px 60px rgba(0,0,0,.5)'; });
+  if (yp.a > 0.5) {
+    const landed = order[i1], pulse = Math.max(0, 1 - Math.abs(f - 0.62) * 4);
+    const el = $(landed);
+    el.style.borderColor = `rgba(250,204,21,${0.26 + 0.6 * pulse})`;
+    el.style.boxShadow = `0 24px 60px rgba(0,0,0,.5), 0 0 ${40 * pulse}px rgba(250,204,21,${0.45 * pulse})`;
+  }
+  const tm = presence(t, T.twenty - 0.25, null, 0.4, 200, 14);
+  put($('s2timer'), { y: (1 - tm.s) * 40, a: tm.a });
+}
+
+function drawS2b(t) {
+  layer('s2b', t, T.now2, T.s3 + 0.4);
+  const p = presence(t, T.now2 + 0.15, null, 0.4, 120, 15);
+  put($('s2bframe'), { y: (1 - p.s) * 120 + Math.sin(t * 0.5) * 4, s: lerp(0.86, 1, clamp(p.s)), ry: lerp(14, 2, clamp(p.s)) + Math.sin(t * 0.33) * 1.2, rx: lerp(10, 2, clamp(p.s)), a: clamp(p.s * 1.3) });
+  drawShot('v_graph', t);
+  const w = presence(t, T.even - 0.1, T.watch + 0.2, 0.35, 170, 13), f = float(t, 2, 4);
+  put($('s2wait'), { x: (1 - w.s) * 160 + f.x, y: f.y, a: w.a, s: lerp(0.85, 1, clamp(w.s)) });
+}
+
+function drawS3a(t) {
+  layer('s3a', t, T.s3, T.now3 + 0.45);
+  const ag = presence(t, T.s3 + 0.3, null, 0.4, 160, 14), f = float(t, 1);
+  put($('s3agent'), { x: f.x, y: (1 - ag.s) * 60 + f.y, a: ag.a, s: lerp(0.8, 1, clamp(ag.s)) });
+  const cm = presence(t, T.someone - 0.1, null, 0.4, 170, 12);
+  const drop = spring(t - T.skipped, 40, 9);
+  put($('s3comment'), { x: (1 - cm.s) * 300 + drop * 80, y: drop * 260, r: drop * 14, a: cm.a * (1 - clamp(drop) * 0.9), s: lerp(0.8, 1, clamp(cm.s)) - 0.15 * clamp(drop), blur: 4 * clamp(drop) });
+}
+
+function drawS3b(t) {
+  layer('s3b', t, T.now3, T.s4 + 0.4);
+  const p = presence(t, T.now3 + 0.1, null, 0.4, 120, 15);
+  put($('s3bframe'), { y: (1 - p.s) * 120 + Math.sin(t * 0.5) * 4, s: lerp(0.86, 1, clamp(p.s)), ry: lerp(-16, -5, clamp(p.s)) + Math.sin(t * 0.33) * 1.2, rx: lerp(10, 2, clamp(p.s)), a: clamp(p.s * 1.3) });
+  drawShot('v_queue', t);
+  const fl = spring(t - T.straight + 0.15, 200, 18), fe = $('flip118');
+  fe.style.opacity = clamp(fl); fe.style.transform = `translateY(${(1 - clamp(fl)) * 14}px)`;
+  document.querySelectorAll('.flipnum').forEach(n => { n.style.opacity = clamp(fl); });
+  const tg = presence(t, T.followups - 0.35, null, 0.4, 170, 13);
+  put($('s3toggle'), { x: (1 - tg.s) * 140 + 40, y: Math.sin(t * 0.7) * 5, a: tg.a, s: lerp(0.85, 1, clamp(tg.s)) });
+  const on = spring(t - T.followups - 0.05, 260, 16);
+  $('s3knob').style.transform = `translateX(${clamp(on, 0, 1.1) * 28}px)`;
+  $('s3tog').style.background = on > 0.5 ? '#16a34a' : '#24372f';
+}
+
+function drawS4(t) {
+  layer('s4', t, T.s4, T.s5 + 0.35);
+  const items = [['s4c1', T.item1, T.deploy - 0.1], ['s4c2', T.deploy - 0.1, T.claude - 0.1], ['s4c3', T.claude - 0.1, null]];
+  items.forEach(([id, t0, t1], i) => {
+    const p = presence(t, t0, t1, 0.35, 150, 15), f = float(t, i * 1.9, 5);
+    put($(id), { x: (1 - clamp(p.s)) * 380 - p.o * 380 + f.x, y: 40 + f.y, ry: (1 - clamp(p.s)) * -18 + p.o * 18, a: p.a, s: lerp(0.88, 1, clamp(p.s)) - p.o * 0.08, blur: p.o * 5 });
+  });
+  drawShot('v_models', t); drawShot('v_conn', t);
+}
+
+function drawS5(t) {
+  layer('s5', t, T.s5, null);
+  ['th1', 'th2', 'th3'].forEach((id, i) => {
+    const p = presence(t, T.s5 + 0.15 + i * 0.12, null, 0.4, 150, 14), back = spring(t - T.less + 0.3, 90, 16), f = float(t, i, 5);
+    put($(id), { x: f.x, y: (1 - p.s) * 80 + f.y + back * 40, ry: (i - 1) * -10, a: p.a * lerp(1, 0.16, clamp(back)), s: lerp(0.8, 1, clamp(p.s)) - 0.08 * clamp(back), blur: 5 * clamp(back) });
+  });
+  const a = presence(t, T.less - 0.05, null, 0.4, 170, 14), b = presence(t, T.more - 0.05, null, 0.4, 170, 14), u = presence(t, T.see - 0.1, null, 0.4, 150, 16);
+  put($('s5a'), { y: (1 - a.s) * 50, a: a.a, s: lerp(0.9, 1, clamp(a.s)) });
+  put($('s5b'), { y: (1 - b.s) * 50, a: b.a, s: lerp(0.9, 1, clamp(b.s)) });
+  put($('s5url'), { y: (1 - u.s) * 30, a: u.a });
+  $('film').style.opacity = 1 - clamp((t - (END - 1.0)) / 1.0);
+}
+
+let ready = false;
+function setTime(t) {
+  if (!ready) {
+    cues(); setupShots(); ready = true;
+    const end = document.createElement('div'); end.id = 'h_end'; end.className = 'headline'; $('film').appendChild(end);
+  }
+  drawBg(t);
+  drawS0(t); drawS1a(t); drawS1b(t); drawS2a(t); drawS2b(t); drawS3a(t); drawS3b(t); drawS4(t); drawS5(t);
+  drawHeadlines(t);
+  drawCaption(t, T.less - 0.1);
+}
+window.setTime = setTime;
+window.cueSheet = () => { if (!ready) cues(); return T; };
+</script>
+</body>
+</html>
