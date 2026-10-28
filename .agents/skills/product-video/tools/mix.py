@@ -31,6 +31,11 @@ MDELAY = int(float(cfg.get("music_delay", 0)) * 1000)
 
 ROOT = W.resolve()
 
+# The scene owns timing: mix.json must agree with it, and the render must match the film length.
+for key, scene_key in (("vo_delay", "VO"), ("duration", "END")):
+    if scene_key in cues and abs(float(cfg.get(key, 0)) - float(cues[scene_key])) > 1e-3:
+        sys.exit(f"mix.json {key}={cfg.get(key)} disagrees with scene {scene_key}={cues[scene_key]}; re-export cues.json or fix mix.json")
+
 
 def inside(rel):
     # Config paths must stay inside the work dir.
@@ -80,6 +85,10 @@ subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(pre), "-af", ln,
 print("premix", m["input_i"], "LUFS -> -14 LUFS")
 
 if "--no-mux" not in sys.argv:
+    probe_dur = subprocess.run(["ffprobe", "-v", "error", "-show_entries", "format=duration", "-of", "csv=p=0",
+                                str(W / "silent.mp4")], capture_output=True, text=True, check=True).stdout.strip()
+    if abs(float(probe_dur) - DUR) > 0.05:
+        sys.exit(f"silent.mp4 is {probe_dur}s but the mix is {DUR}s; re-render with --duration {DUR}")
     subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(W / "silent.mp4"), "-i", str(mix),
                     "-map", "0:v", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
                     "-shortest", "-movflags", "+faststart", str(W / "final.mp4")], check=True)

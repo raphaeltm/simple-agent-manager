@@ -529,7 +529,7 @@ function setTime(t) {
   drawCaption(t, T.less - 0.1);
 }
 window.setTime = setTime;
-window.cueSheet = () => { if (!ready) cues(); return T; };
+window.cueSheet = () => { if (!ready) cues(); return { ...T, VO, END }; };
 </script>
 </body>
 </html>

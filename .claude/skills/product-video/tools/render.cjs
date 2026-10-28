@@ -29,15 +29,21 @@ const opt = (name, def) => {
   });
   await page.goto('file://' + scene);
   await page.evaluate(() => document.fonts.ready);
+  // setTime creates the screenshot <img> elements, so build the scene before waiting on images.
+  await page.evaluate(() => setTime(0));
   await page.evaluate(() =>
     Promise.all(
-      [...document.images].map((i) =>
-        i.complete
-          ? 1
-          : new Promise((r) => {
-              i.onload = r;
-              i.onerror = r;
-            })
+      [...document.images].map(
+        (i) =>
+          new Promise((resolve, reject) => {
+            const done = () =>
+              i.naturalWidth > 0 ? resolve() : reject(new Error('image failed to load: ' + i.src));
+            if (i.complete) done();
+            else {
+              i.onload = done;
+              i.onerror = done;
+            }
+          })
       )
     )
   );

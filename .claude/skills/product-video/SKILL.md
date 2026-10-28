@@ -71,7 +71,7 @@ ElevenLabs is reached through Composio. In `COMPOSIO_REMOTE_WORKBENCH`, `proxy_e
 
 ### 6. Mix
 
-`tools/mix.py <dir>` reads `mix.json` (voice, music, `music_delay`, `music_fade_out`, events keyed to cue names; see `templates/mix.example.json`) and does the mix: voice high-pass, compression and presence, music sidechain-ducked under the voice, swooshes about 0.55 s before each cut, quiet ticks on highlights, two-pass loudness to -14 LUFS / -1.5 dBTP, then muxes `final.mp4`. Check balance with clef-omni (music level, voice clarity, SFX level, pumping).
+`tools/mix.py <dir>` reads `mix.json` (voice, music, `music_delay`, `music_fade_out`, events keyed to cue names; see `templates/mix.example.json`) and does the mix: voice high-pass, compression and presence, music sidechain-ducked under the voice, swooshes about 0.55 s before each cut, quiet ticks on highlights, two-pass loudness to -14 LUFS / -1.5 dBTP, then muxes `final.mp4`. It refuses to run when `mix.json` disagrees with the scene's `VO` and `END` (exported by `cues.cjs`) or when `silent.mp4` has a different length, so re-export `cues.json` after any timing change. Check balance with clef-omni (music level, voice clarity, SFX level, pumping).
 
 ### 7. Review, revise, deliver
 

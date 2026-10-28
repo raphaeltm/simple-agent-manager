@@ -9,6 +9,7 @@ Usage: prosody_report.py take1.mp3 [take2.mp3 ...]
 A sibling <take>.json with ElevenLabs character alignment is optional.
 """
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -25,22 +26,16 @@ def to_wav(path: Path) -> str:
 
 
 def words_from_alignment(alignment):
-    chars = alignment["characters"]
+    """Word timings from character alignment, skipping [audio tags] such as [warmly]."""
+    text = "".join(alignment["characters"])
     starts = alignment["character_start_times_seconds"]
     ends = alignment["character_end_times_seconds"]
-    words, cur, s = [], "", None
-    for ch, st, en in zip(chars, starts, ends):
-        if ch.isspace():
-            if cur:
-                words.append((cur, s, prev_end))
-            cur, s = "", None
+    words = []
+    for m in re.finditer(r"\[[^\]]*\]|\S+", text):
+        tok = m.group(0)
+        if tok.startswith("[") and tok.endswith("]"):
             continue
-        if s is None:
-            s = st
-        cur += ch
-        prev_end = en
-    if cur:
-        words.append((cur, s, prev_end))
+        words.append((tok, starts[m.start()], ends[m.end() - 1]))
     return words
 
 
