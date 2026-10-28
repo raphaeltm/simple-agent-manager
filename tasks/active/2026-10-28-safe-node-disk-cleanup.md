@@ -8,15 +8,25 @@ Node workspace deletion drops runtime metadata despite swallowed container/volum
 
 ## Implementation and acceptance
 
-- [ ] Durable local deletion intent records exact owned artifacts before removal; propagate partial failures; retain identity/state until absence verified; delete validated owned host clones.
-- [ ] Same operation on bounded periodic/restart reconciliation; unknown/legacy artifacts report-only; configurable budgets/backoff and fail closed.
-- [ ] Control plane transmits node incarnation/workspace generation/owner fences; central preservation authority for automatic lifecycle cleanup; explicit deletion remains distinct.
-- [ ] Preserve failed snapshot and unpreserved provisioning/wake/eviction sources; retire only after verified preservation/handoff.
-- [ ] Narrow owned image-transfer scratch cleanup with active protection and dry-run default, configurable limits; exclude user/nested Docker volumes/caches and deployment/rollback images.
-- [ ] Meaningful tests: partial deletion/retry/restart/duplicates; wake/rebuild/snapshot races; stale identities; preservation failures and eviction handoff; standalone; symlink/mount escapes; nested/user volumes and rollback preservation.
-- [ ] Docs/env references match code; no new admin routes unless matching phone UI supplied.
+- [x] Durable local deletion intent records exact owned artifacts before removal; propagate partial failures; retain identity/state until absence verified; delete validated owned host clones.
+- [x] Same operation on bounded periodic/restart reconciliation; unknown/legacy artifacts report-only; configurable budgets/backoff and fail closed.
+- [x] Control plane transmits node incarnation/workspace generation/owner fences; central preservation authority for automatic lifecycle cleanup; explicit deletion remains distinct.
+- [x] Preserve failed snapshot and unpreserved provisioning/wake/eviction sources; retire only after verified preservation/handoff.
+- [x] Narrow owned image-transfer scratch cleanup with active protection and dry-run default, configurable limits; exclude user/nested Docker volumes/caches and deployment/rollback images.
+- [x] Meaningful tests: partial deletion/retry/restart/duplicates; wake/rebuild/snapshot races; stale identities; preservation failures and eviction handoff; standalone; symlink/mount escapes; nested/user volumes and rollback preservation.
+- [x] Docs/env references match code; no new admin routes unless matching phone UI supplied.
 - [ ] Local suite and independent Go/Cloudflare/security/constitution/completion reviews pass.
 - [ ] Bounded coordinated staging lifecycle sweep with dirty/untracked data, failure injection/restart and repeated no-leak cycles; real VM heartbeat/access; promptly clean own staging resources.
 - [ ] DraftPR, greenCI, best-effort CodeRabbit request+wait; normal authorized release/basic production smoke.
 
 No cutoff changes (#2450 shipped). No manual production deletion, blanket prune, forced retirement, automatic platform Git publication, or age/status/pressure-only workspace deletion.
+
+## Validation evidence (Oct 28, before staging)
+
+No previous agent implementation recovered; rebuilt from original transcript per human direction. Original branch checkpoints through 4aa91533b pushed. Physical deletion capability route intentionally differs from old DELETE so old agents fail closed.
+
+- Go server/persistence/config/bootstrap suites passed (1,600 cases including subtests); focused deletion race suites passed; `go vet ./...` passed. Transfer scratch/deploy/publish race suites passed, including actual subprocess termination/retry. Actual bind-mount test skipped locally because mount denied (EPERM); privileged staging proof remains required.
+- Root build passed 9 tasks, lint passed 13 tasks (three existing web warnings), typecheck passed 19 tasks (Astro baseline diagnostic accepted by existing validator). Migration ordering, runtime tunable ratchet, file size checks and agent context measurement passed.
+- Worker lifecycle suite passed 74/74. Full API run: 978 files, 14,026 tests passed, 25 failed; affected archive/retirement fixtures are being updated to require physical proof and preserve unconfirmed data. Final full rerun pending. Prior root full suite aborted on web comment-reader timing failure; isolated rerun passed 16/16.
+- Independent Go/security review passed after fixes; Cloudflare/security review found caller ownership and successor snapshot races, fixed and reverified with 71 tests passed. Scratch review passed; constitution/env review passed. Completion review remains open until remaining validation and release gates.
+- No staging candidate deployed, PR/CI/CodeRabbit evidence, or production release yet. Staging preflight authenticated successfully; no active staging deployment observed. No production resources mutated.
