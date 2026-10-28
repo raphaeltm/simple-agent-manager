@@ -5,6 +5,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
+import type { WorkspaceDeletionIdentity } from './workspace-deletion';
 import { automaticDeletionPreservationExpiresAt } from './workspace-deletion-preservation';
 
 export interface PreservedVmRetirementBudget {
@@ -89,7 +90,14 @@ export async function preparePreservedVmRetirement(
     return undefined;
   }
   if (budget) budget.remainingSources -= workspaces.length;
-  const sources = [];
+  const sources: Array<
+    WorkspaceDeletionIdentity & {
+      runtimeIncarnationId: string;
+      providerInstanceId: string;
+      snapshotGeneration: string | null;
+      expiresAt: string;
+    }
+  > = [];
   for (const workspace of workspaces) {
     if (
       workspace.userId !== userId ||
