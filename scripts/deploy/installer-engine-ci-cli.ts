@@ -1,5 +1,6 @@
 #!/usr/bin/env -S pnpm exec tsx
 import { appendFileSync, readFileSync } from 'node:fs';
+import { pathToFileURL } from 'node:url';
 
 import {
   type EngineCheckpoint,
@@ -21,17 +22,23 @@ function writeDeploymentSummary(input: LegacyCiInput, domain: string, success: b
     );
 }
 
-async function main(): Promise<void> {
-  const [inputPath, statePath] = process.argv.slice(2);
+let startupStage = 'arguments';
+export async function main(args = process.argv.slice(2)): Promise<void> {
+  const [inputPath, statePath] = args;
   if (!inputPath || !statePath)
     throw new Error(
       'Usage: installer-engine-ci-cli.ts <non-secret-input-json> <private-state-json>'
     );
+  startupStage = 'public-input-json';
   const parsed: unknown = JSON.parse(readFileSync(inputPath, 'utf8'));
+  startupStage = 'private-input-json';
   const privateInput: unknown = JSON.parse(process.env.SAM_CI_SECRETS_JSON ?? '');
+  startupStage = 'input-validation';
   const input = parseLegacyCiInput(parsed, privateInput);
   const secrets = input.secrets;
+  startupStage = 'environment-adapter';
   const invocation = legacyCiInvocation(process.cwd(), { ...input, secrets });
+  startupStage = 'checkpoint';
   let checkpoint: EngineCheckpoint | undefined;
   try {
     const parsed: unknown = JSON.parse(readFileSync(statePath, 'utf8'));
@@ -45,6 +52,7 @@ async function main(): Promise<void> {
   delete environment.SAM_CI_SECRETS_JSON;
   let success = false;
   try {
+    startupStage = 'engine';
     await runInstallerEngine(invocation.config, {
       root: process.cwd(),
       environment,
@@ -69,9 +77,10 @@ async function main(): Promise<void> {
     writeDeploymentSummary(input, invocation.config.baseDomain, success);
   }
 }
-main().catch(() => {
-  process.stderr.write(
-    'CI deployment stopped; inspect the last phase and private prerequisites.\n'
-  );
-  process.exitCode = 1;
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href)
+  main().catch(() => {
+    process.stderr.write(
+      `${JSON.stringify({ status: 'failed', stage: startupStage, code: 'CI_DEPLOYMENT_STOPPED' })}\n`
+    );
+    process.exitCode = 1;
+  });
