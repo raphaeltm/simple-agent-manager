@@ -29,12 +29,23 @@ delay_ms = int(float(cfg.get("vo_delay", 0)) * 1000)
 FADE = float(cfg.get("music_fade_out", 2.5))
 MDELAY = int(float(cfg.get("music_delay", 0)) * 1000)
 
+ROOT = W.resolve()
+
+
+def inside(rel):
+    # Config paths must stay inside the work dir.
+    path = (W / rel).resolve()
+    if not path.is_relative_to(ROOT):
+        sys.exit(f"mix.json path escapes the work dir: {rel}")
+    return path
+
+
 events = []
 for e in cfg.get("events", []):
     t = e["at"] if "at" in e else cues[e["cue"]] + e.get("offset", 0)
-    events.append((W / e["file"], max(0.0, t), e.get("gain_db", -15)))
+    events.append((inside(e["file"]), max(0.0, t), e.get("gain_db", -15)))
 
-inputs = ["-i", str(W / cfg["vo"]), "-i", str(W / cfg["music"])]
+inputs = ["-i", str(inside(cfg["vo"])), "-i", str(inside(cfg["music"]))]
 for path, _, _ in events:
     inputs += ["-i", str(path)]
 

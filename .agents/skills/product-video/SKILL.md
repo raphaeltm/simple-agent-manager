@@ -81,7 +81,15 @@ ElevenLabs is reached through Composio. In `COMPOSIO_REMOTE_WORKBENCH`, `proxy_e
 
 ### 8. Posting to X (only after explicit approval)
 
-The Composio workbench can't read workspace files, and X needs an `s3key`. Copy only the MP4 into an empty temp dir, serve that dir with `python3 -m http.server`, `expose_port` it, download the file inside `COMPOSIO_REMOTE_WORKBENCH` with the `port_token` URL, and write it to `/home/user/` (the `/mnt/files` mount fails on large writes). Check its SHA-256, then `upload_local_file()` it for an `s3key`. Stop the server and delete the temp dir straight away. Then call `TWITTER_UPLOAD_LARGE_MEDIA` (`media_category: tweet_video`; videos up to 140 s and 512 MB), wait for `processing_info.state == succeeded`, and post with `TWITTER_CREATION_OF_A_POST` and `media_media_ids`. Reply with the post URL.
+The Composio workbench can't read workspace files, and X needs an `s3key`, so the file goes through a short-lived, single-file HTTP handoff:
+
+1. `mkdir` a fresh temp dir outside the repo, copy only the MP4 into it, and run `ls -A` to confirm the MP4 is the only entry. Never serve the repo, `.tmp/` or any existing directory.
+2. Start `python3 -m http.server <port>` from that dir in the background and record its PID (`$!`). Stop it later with `kill <PID>`. Don't use `pkill -f`: the pattern also matches your own shell command.
+3. `expose_port` the port. Treat the returned URL as a secret: its `port_token` grants access while it lasts. Pass it only to the workbench download call. Never print it in chat, commit messages, PR text, notes or the final report.
+4. In `COMPOSIO_REMOTE_WORKBENCH`, download the file, write it to `/home/user/` (the `/mnt/files` mount fails on large writes), confirm the SHA-256 matches, and run `upload_local_file()` to get an `s3key`.
+5. Clean up whether or not step 4 worked: `kill <PID>`, delete the temp dir, and confirm nothing is listening on the port. If anything fails partway, clean up before you retry or report.
+
+Then call `TWITTER_UPLOAD_LARGE_MEDIA` (`media_category: tweet_video`; videos up to 140 s and 512 MB), wait for `processing_info.state == succeeded`, and post with `TWITTER_CREATION_OF_A_POST` and `media_media_ids`. Reply with the post URL.
 
 ## Prerequisites
 
