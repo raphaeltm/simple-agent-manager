@@ -57,7 +57,7 @@ jobs:
           path: .codex/tmp/playwright-screenshots/installer-*.png
           retention-days: 14
       - name: Deploy isolated installer and configure OAuth
-        run: pnpm --filter @simple-agent-manager/installer deploy
+        run: pnpm --filter @simple-agent-manager/installer run deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
