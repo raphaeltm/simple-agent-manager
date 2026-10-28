@@ -11,6 +11,7 @@ import {
   IncidentResolutionValidationError,
   listIncidentQueue,
   markIncidentPending,
+  reclaimExpiredIncidentClaims,
   reclaimExpiredIncidentDispatches,
   reserveIncidentDispatch,
   resolveIncident,
@@ -320,6 +321,7 @@ describe('platform feedback incidents', () => {
     expect(first).toEqual({ claimToken: expect.any(String), leaseExpiresAt: 11_000 });
     expect(second).toBeNull();
 
+    await reclaimExpiredIncidentClaims(env, 11_001);
     const reclaimed = await claimIncident(env, signature, 'task-2', 11_001);
     expect(reclaimed).toEqual({ claimToken: expect.any(String), leaseExpiresAt: 12_001 });
     expect(
@@ -804,7 +806,7 @@ describe('platform feedback incidents', () => {
     ).toEqual({
       queue_state: 'rejected',
       rejected_at: 1000,
-      resolution_note: 'incident dispatch attempts exhausted after lease expiry',
+      resolution_note: 'incident dispatch attempts exhausted without resolution after lease expiry',
     });
     const rejected = await listIncidentQueue(env, ['rejected'], 10);
     expect(rejected).toHaveLength(1);
@@ -858,7 +860,7 @@ describe('platform feedback incidents', () => {
 
     const result = await reclaimExpiredIncidentDispatches(env, 1000);
 
-    expect(result).toEqual({ requeued: 1, rejected: 0 });
+    expect(result).toEqual({ requeued: 0, rejected: 1 });
     expect(
       sqlite
         .prepare(
@@ -879,7 +881,7 @@ describe('platform feedback incidents', () => {
         )
         .get('incident-terminal-dispatch')
     ).toEqual({
-      queue_state: 'pending',
+      queue_state: 'rejected',
       dispatch_lease_expires_at: null,
       dispatched_task_id: null,
     });
@@ -1025,4 +1027,246 @@ describe('platform feedback incidents', () => {
       dispatched_task_id: null,
     });
   });
+  it('uses a prompt incident ID unchanged for evidence lookup and claiming', async () => {
+    const { sqlite, env } = setup();
+    const signature = '8f721c70c16aa98a8c398b29708f0ada71d473b24abd7b5b39d6d4c1a9b9a0ef';
+    seedIncident(sqlite, { signature });
+    const summary = await buildIncidentBacklogSummary(env, 10, 5000);
+    const promptId = summary.rendered.match(/— id ([^,]+),/)?.[1] ?? '';
+    expect(promptId).toBe(signature);
+    expect(await getIncidentDetail(env, promptId)).toMatchObject({ id: signature });
+    expect(await claimIncident(env, promptId, 'task-1', 5000)).not.toBeNull();
+  });
+
+  it('bounds successive unfinished claims and prevents direct expired-claim takeover', async () => {
+    const { sqlite, env } = setup();
+    const signature = seedIncident(sqlite);
+    const first = await claimIncident(env, signature, 'task-1', 5000);
+    expect(first).not.toBeNull();
+    expect(await claimIncident(env, signature, 'task-2', 6001)).toBeNull();
+    expect(await reclaimExpiredIncidentClaims(env, 6001)).toBe(1);
+    expect(await reclaimExpiredIncidentClaims(env, 6001)).toBe(0);
+    const second = await claimIncident(env, signature, 'task-2', 6001);
+    expect(second).not.toBeNull();
+    await reclaimExpiredIncidentClaims(env, 7002);
+    expect(await getIncidentDetail(env, signature)).toMatchObject({
+      queueState: 'rejected',
+      dispatchAttempts: 2,
+    });
+    expect(await claimIncident(env, signature, 'task-1', 7003)).toBeNull();
+    expect((await buildIncidentBacklogSummary(env, 10, 7003)).pendingCount).toBe(0);
+  });
+
+  it.each(['claimed', 'dispatched'])(
+    'retries sleeping unfinished %s owners without changing their task',
+    async (state) => {
+      const { sqlite, env } = setup();
+      seedFailedDispatchTask(sqlite, {
+        taskId: 'sleeper',
+        executionId: 'exec-sleeper',
+        actorType: 'system',
+        reason: 'fixture',
+      });
+      sqlite.prepare("UPDATE tasks SET status = 'sleeping' WHERE id = 'sleeper'").run();
+      const signature = seedIncident(sqlite, {
+        queue_state: state,
+        dispatch_attempts: 0,
+        dispatched_task_id: 'sleeper',
+        dispatched_execution_id: 'exec-sleeper',
+        dispatch_lease_expires_at: 5000,
+        incident_claimed_by_task_id: state === 'claimed' ? 'sleeper' : null,
+        incident_claim_token: state === 'claimed' ? 'claim-sleeper' : null,
+        incident_claim_expires_at: state === 'claimed' ? 5000 : null,
+      });
+      await reclaimExpiredIncidentClaims(env, 5001);
+      await reclaimExpiredIncidentDispatches(env, 5001);
+      expect(await getIncidentDetail(env, signature)).toMatchObject({
+        queueState: 'pending',
+        dispatchAttempts: 1,
+        dispatchedTaskId: null,
+      });
+      expect(sqlite.prepare("SELECT status FROM tasks WHERE id = 'sleeper'").get()).toEqual({
+        status: 'sleeping',
+      });
+      expect(await reclaimExpiredIncidentClaims(env, 5002)).toBe(0);
+      expect(await reclaimExpiredIncidentDispatches(env, 5002)).toEqual({
+        requeued: 0,
+        rejected: 0,
+      });
+    }
+  );
+
+  it('preserves an expired claim while its owner is actively investigating', async () => {
+    const { sqlite, env } = setup();
+    seedFailedDispatchTask(sqlite, {
+      taskId: 'busy',
+      executionId: 'exec-busy',
+      actorType: 'system',
+      reason: 'fixture',
+    });
+    sqlite.prepare("UPDATE tasks SET status = 'in_progress' WHERE id = 'busy'").run();
+    const signature = seedIncident(sqlite, {
+      queue_state: 'claimed',
+      incident_claim_token: 'claim-busy',
+      incident_claimed_by_task_id: 'busy',
+      incident_claim_expires_at: 5000,
+    });
+    expect(await reclaimExpiredIncidentClaims(env, 5001)).toBe(0);
+    expect(await getIncidentDetail(env, signature)).toMatchObject({
+      queueState: 'claimed',
+      dispatchAttempts: 0,
+    });
+  });
+
+  it('bounds claim reclamation to the configured batch', async () => {
+    const { sqlite, env } = setup();
+    for (let i = 0; i < 3; i++)
+      seedIncident(sqlite, {
+        signature: `claim-${i}`,
+        queue_state: 'claimed',
+        incident_claim_token: `token-${i}`,
+        incident_claim_expires_at: 4000 + i,
+      });
+    expect(
+      await reclaimExpiredIncidentClaims(
+        { ...env, PLATFORM_FEEDBACK_INCIDENT_RECLAIM_LIMIT: '2' },
+        5000
+      )
+    ).toBe(2);
+    expect(
+      sqlite
+        .prepare(
+          "SELECT count(*) AS count FROM platform_feedback_triages WHERE queue_state = 'claimed'"
+        )
+        .get()
+    ).toEqual({ count: 1 });
+  });
+  it('renews an active claim with the same token so the owner can resolve after original expiry', async () => {
+    const { sqlite, env } = setup();
+    seedFailedDispatchTask(sqlite, {
+      taskId: 'busy',
+      executionId: 'exec-busy',
+      actorType: 'system',
+      reason: 'fixture',
+    });
+    sqlite.prepare("UPDATE tasks SET status = 'in_progress' WHERE id = 'busy'").run();
+    const signature = seedIncident(sqlite);
+    const claim = await claimIncident(env, signature, 'busy', 5000);
+    await reclaimExpiredIncidentClaims(env, 6001);
+    expect(
+      await resolveIncident(
+        env,
+        signature,
+        claim!.claimToken,
+        'rejected',
+        'busy',
+        'Verified expected behavior',
+        6002
+      )
+    ).toBe(true);
+  });
+
+  it('does not renew active claims past the original incident age ceiling', async () => {
+    const { sqlite, env } = setup();
+    seedFailedDispatchTask(sqlite, {
+      taskId: 'busy',
+      executionId: 'exec-busy',
+      actorType: 'system',
+      reason: 'fixture',
+    });
+    sqlite.prepare("UPDATE tasks SET status = 'in_progress' WHERE id = 'busy'").run();
+    const signature = seedIncident(sqlite, {
+      queue_state: 'claimed',
+      incident_claim_token: 'token',
+      incident_claimed_by_task_id: 'busy',
+      incident_claim_expires_at: 60000,
+    });
+    await reclaimExpiredIncidentClaims(env, 60001);
+    expect(
+      sqlite.prepare('SELECT incident_claim_expires_at FROM platform_feedback_triages').get()
+    ).toEqual({ incident_claim_expires_at: 61000 });
+    await buildIncidentBacklogSummary(env, 10, 61001);
+    expect(await getIncidentDetail(env, signature)).toMatchObject({ queueState: 'expired' });
+  });
+
+  it('counts unfinished sleeping dispatches linked only through trigger execution', async () => {
+    const { sqlite, env } = setup();
+    seedFailedDispatchTask(sqlite, {
+      taskId: 'sleeper',
+      executionId: 'exec-sleeper',
+      actorType: 'system',
+      reason: 'fixture',
+    });
+    sqlite.prepare("UPDATE tasks SET status = 'sleeping' WHERE id = 'sleeper'").run();
+    const signature = seedIncident(sqlite, {
+      queue_state: 'dispatched',
+      dispatched_execution_id: 'exec-sleeper',
+      dispatch_lease_expires_at: 5000,
+      dispatch_attempts: 1,
+    });
+    expect(await reclaimExpiredIncidentDispatches(env, 5001)).toEqual({ requeued: 0, rejected: 1 });
+    expect(await getIncidentDetail(env, signature)).toMatchObject({
+      queueState: 'rejected',
+      dispatchAttempts: 2,
+    });
+  });
+
+  it.each(['claimed', 'dispatched'])(
+    'does not reclaim a replaced %s lease after the candidate read',
+    async (state) => {
+      const { sqlite, env } = setup();
+      const prefix = state === 'claimed' ? 'incident_claim' : 'dispatch_lease';
+      const signature = seedIncident(sqlite, {
+        queue_state: state,
+        [`${prefix}_token`]: 'old-token',
+        [`${prefix}_expires_at`]: 4000,
+      });
+      const originalPrepare = env.DATABASE.prepare.bind(env.DATABASE);
+      let replaced = false;
+      env.DATABASE.prepare = ((sql: string) => {
+        const statement = originalPrepare(sql);
+        if (!sql.includes('ORDER BY') || !sql.includes(`queue_state = '${state}'`))
+          return statement;
+        return new Proxy(statement, {
+          get(target, property) {
+            if (property !== 'bind') return Reflect.get(target, property);
+            return (...args: unknown[]) => {
+              const bound = target.bind(...args);
+              return new Proxy(bound, {
+                get(boundTarget, key) {
+                  if (key !== 'all') return Reflect.get(boundTarget, key);
+                  return async () => {
+                    const rows = await boundTarget.all();
+                    if (!replaced) {
+                      replaced = true;
+                      // Even an already-expired replacement must be fenced by token.
+                      sqlite
+                        .prepare(
+                          `UPDATE platform_feedback_triages SET ${prefix}_token = 'new-token' WHERE signature = ?`
+                        )
+                        .run(signature);
+                    }
+                    return rows;
+                  };
+                },
+              });
+            };
+          },
+        });
+      }) as D1Database['prepare'];
+      if (state === 'claimed') expect(await reclaimExpiredIncidentClaims(env, 5000)).toBe(0);
+      else
+        expect(await reclaimExpiredIncidentDispatches(env, 5000)).toEqual({
+          requeued: 0,
+          rejected: 0,
+        });
+      expect(
+        sqlite
+          .prepare(
+            `SELECT queue_state, dispatch_attempts, ${prefix}_token AS token FROM platform_feedback_triages`
+          )
+          .get()
+      ).toEqual({ queue_state: state, dispatch_attempts: 0, token: 'new-token' });
+    }
+  );
 });
