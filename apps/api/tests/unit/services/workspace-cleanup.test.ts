@@ -158,6 +158,32 @@ describe('cleanupWorkspaceForDeletion', () => {
     });
   });
 
+  it('preserves successor chat interactions when only the old workspace source is deleted', async () => {
+    const { db } = buildDb();
+    const env = buildEnv();
+    const purge = vi.fn();
+    env.INTERACTION_STORE = {
+      idFromName: vi.fn(),
+      get: () => ({ purge }),
+    } as unknown as Env['INTERACTION_STORE'];
+    mocks.deleteSessionSnapshotState.mockResolvedValueOnce(false);
+    mocks.attemptWorkspaceDeletion.mockImplementationOnce(
+      async (options: { beforeFinalize?: () => Promise<void> }) => {
+        await options.beforeFinalize?.();
+        return { status: 'confirmed', proof: 'vm_agent_confirmed', workspaceFinalized: true };
+      }
+    );
+    expect(
+      await cleanupWorkspaceForDeletion({
+        db: db as never,
+        env,
+        workspace: workspace(),
+        userId: 'user-cleanup-1',
+      })
+    ).toMatchObject({ status: 'confirmed' });
+    expect(purge).not.toHaveBeenCalled();
+  });
+
   it('hard-deletes local state only after confirmed runtime deletion and lifecycle finalization', async () => {
     const { db, deletedTables } = buildDb();
     const env = buildEnv();
@@ -176,7 +202,12 @@ describe('cleanupWorkspaceForDeletion', () => {
     });
 
     expect(outcome).toMatchObject({ status: 'confirmed', proof: 'vm_agent_confirmed' });
-    expect(mocks.deleteSessionSnapshotState).toHaveBeenCalledWith(db, env, 'session-cleanup-1');
+    expect(mocks.deleteSessionSnapshotState).toHaveBeenCalledWith(
+      db,
+      env,
+      'session-cleanup-1',
+      expect.objectContaining({ workspaceId: workspace().id })
+    );
     expect(mocks.claimWorkspaceDeletionAttempt).toHaveBeenCalledWith(
       'node-cleanup-1',
       'ws-cleanup-1',

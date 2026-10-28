@@ -201,6 +201,13 @@ class ContainerVmAgent {
     if (!this.running) throw new TypeError('Network connection lost.');
     const { pathname } = new URL(request.url);
     this.requests.push({ method: request.method, path: pathname });
+    if (
+      pathname === `/workspaces/${WORKSPACE_ID}/physical-deletion` &&
+      request.method === 'DELETE'
+    ) {
+      const identity = await request.json();
+      return Response.json({ ...identity, success: true, physicalDeleted: true });
+    }
     if (pathname === '/workspaces' && request.method === 'POST') {
       if (
         request.headers.get('Authorization') !== 'Bearer node-management-token' ||
@@ -391,8 +398,8 @@ describe('Instant session wake after idle sleep', () => {
     ).run(NODE_ID, USER_ID, now, now);
     d1.prepare(
       `INSERT INTO workspaces (id, user_id, node_id, project_id, chat_session_id, name,
-                               repository, branch, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'instant', 'owner/repo', 'main', 'running', ?, ?)`
+                               repository, branch, status, eviction_generation, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'instant', 'owner/repo', 'main', 'running', 'generation-1', ?, ?)`
     ).run(WORKSPACE_ID, USER_ID, NODE_ID, PROJECT_ID, CHAT_SESSION_ID, now, now);
     d1.prepare(
       `INSERT INTO agent_sessions (id, workspace_id, user_id, status, agent_type, created_at, updated_at)
@@ -662,6 +669,27 @@ describe('Instant session wake after idle sleep', () => {
     } as unknown as Env;
     background = [];
     Object.assign(env, {
+      // NodeLifecycle is an external scheduling boundary in this vertical slice.
+      // The real workspace deletion identity/proof SQL and container teardown execute.
+      NODE_LIFECYCLE: {
+        idFromName: (name: string) => name,
+        get: () => ({
+          claimWorkspaceDeletionAttempt: async (
+            _node: string,
+            _workspace: string,
+            _user: string,
+            expected: { nodeRuntimeIncarnationId: string; workspaceGeneration: string }
+          ) => {
+            expect(expected).toMatchObject({
+              nodeRuntimeIncarnationId: 'incarnation-1',
+              workspaceGeneration: 'generation-1',
+            });
+            return 'claimed';
+          },
+          confirmWorkspaceDeletion: async () => {},
+          scheduleWorkspaceDeletion: async () => {},
+        }),
+      },
       PROJECT_DATA: {
         idFromName: (name: string) => name,
         get: () => ({
@@ -1087,7 +1115,7 @@ describe('Instant session wake after idle sleep', () => {
     /** What the stop route's teardown leaves; the snapshot row goes with the session. */
     const ARCHIVED_ROWS = {
       node: { status: 'deleted', health_status: 'stale' },
-      workspace: { status: 'deleted' },
+      workspace: undefined,
       agentSession: { status: 'stopped' },
       snapshot: undefined,
     };
@@ -1098,15 +1126,39 @@ describe('Instant session wake after idle sleep', () => {
 
       const response = await postChatAction('stop');
 
-      expect(response.status).toBe(200);
+      expect(response.status, await response.clone().text()).toBe(200);
       expect(await response.json()).toEqual({ status: 'stopped', workspaceDeleted: true });
       expect(vmAgent.starts).toBe(0);
       expect(vmAgent.signals).toEqual([]);
       // Liveness: the real teardown ran to the end.
-      expect(runtimeRows()).toEqual(ARCHIVED_ROWS);
+      expect(runtimeRows(), JSON.stringify(runtimeRows())).toEqual(ARCHIVED_ROWS);
       expect(getSession(projectDataSql(), CHAT_SESSION_ID)).toMatchObject({
         status: 'stopped',
       });
+    });
+
+    it('archives the conversation without destroying another project member’s compute or backups', async () => {
+      await sleepOnContainerIdleTimeout();
+      d1.prepare(
+        `INSERT INTO users(id, name, email) VALUES ('other-owner', 'Other', 'other@example.test')`
+      ).run();
+      d1.prepare(`UPDATE nodes SET user_id='other-owner' WHERE id=?`).run(NODE_ID);
+      d1.prepare(`UPDATE workspaces SET user_id='other-owner' WHERE id=?`).run(WORKSPACE_ID);
+      d1.prepare(`UPDATE tasks SET user_id='other-owner' WHERE id=?`).run(TASK_ID);
+      d1.prepare(`UPDATE session_snapshots SET user_id='other-owner' WHERE chat_session_id=?`).run(
+        CHAT_SESSION_ID
+      );
+      const before = runtimeRows();
+      const backup = d1.prepare('SELECT * FROM session_snapshots').get();
+      const removeBackup = vi.spyOn(env.R2, 'delete');
+      const response = await postChatAction('stop');
+      expect(response.status, await response.clone().text()).toBe(200);
+      expect(getSession(projectDataSql(), CHAT_SESSION_ID)).toMatchObject({ status: 'stopped' });
+      expect(runtimeRows()).toEqual(before);
+      expect(d1.prepare('SELECT * FROM session_snapshots').get()).toEqual(backup);
+      expect(removeBackup).not.toHaveBeenCalled();
+      expect(vmAgent.starts).toBe(0);
+      expect(vmAgent.signals).toEqual([]);
     });
 
     it('answers a cancel with nothing in flight without waking its container', async () => {
@@ -1128,9 +1180,9 @@ describe('Instant session wake after idle sleep', () => {
     it('still signals a live agent before archiving it', async () => {
       const response = await postChatAction('stop');
 
-      expect(response.status).toBe(200);
+      expect(response.status, await response.clone().text()).toBe(200);
       expect(vmAgent.signals).toEqual([`${AGENT_PATH}/cancel`, `${AGENT_PATH}/stop`]);
-      expect(runtimeRows()).toEqual(ARCHIVED_ROWS);
+      expect(runtimeRows(), JSON.stringify(runtimeRows())).toEqual(ARCHIVED_ROWS);
     });
 
     it('still forwards a cancel to a live agent', async () => {

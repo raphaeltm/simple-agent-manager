@@ -5,12 +5,13 @@ import { type drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { purgeInteractionStore } from './acp-interaction-store';
+import { stopNodeResources } from './node-resource-lifecycle';
 import { handOffEmptyWorkspaceNode } from './node-warm-handoff';
 import { deleteSessionSnapshotState } from './session-snapshots';
 import {
   attemptWorkspaceDeletion,
   loadWorkspaceDeletionSnapshot,
+  terminalNodeProof,
   workspaceDeletionIdentityLogContext,
   type WorkspaceDeletionMode,
   type WorkspaceDeletionOutcome,
@@ -30,6 +31,7 @@ export interface WorkspaceDeletionCleanupOptions {
   /** Preserve the proof-bearing D1 tombstone after lifecycle closure. */
   deleteConfirmedRow?: boolean;
   mode?: WorkspaceDeletionMode;
+  requireRuntimeTerminationProof?: boolean;
 }
 
 function workspaceDeletionRetryBaseMs(env: Env): number {
@@ -212,8 +214,18 @@ export async function cleanupWorkspaceForDeletion(
     });
     return { status: 'fenced', reason: 'workspace_assignment_changed' };
   }
+  const runtimeAlreadyTerminated =
+    mode === 'automatic' ? await terminalNodeProof(env.DATABASE, expected) : null;
+  if (options.requireRuntimeTerminationProof && !runtimeAlreadyTerminated) {
+    return {
+      status: 'retry',
+      reason: 'runtime_deletion_unconfirmed',
+      diagnostic: 'Workspace deletion unconfirmed: strict node termination proof required',
+    };
+  }
   if (
     mode === 'automatic' &&
+    !runtimeAlreadyTerminated &&
     !expected.runtimeDeletionConfirmedAt &&
     !(await automaticDeletionPreservationAvailable(env, expected).catch(() => false))
   ) {
@@ -224,14 +236,16 @@ export async function cleanupWorkspaceForDeletion(
     };
   }
   const lifecycleStub = nodeLifecycleStub(env, workspace.nodeId);
-  const claimOutcome = await claimExplicitWorkspaceDeletion(
-    lifecycleStub,
-    workspace,
-    userId,
-    expected,
-    logContext,
-    mode
-  );
+  const claimOutcome = runtimeAlreadyTerminated
+    ? null
+    : await claimExplicitWorkspaceDeletion(
+        lifecycleStub,
+        workspace,
+        userId,
+        expected,
+        logContext,
+        mode
+      );
   if (claimOutcome) return claimOutcome;
 
   const outcome = await attemptWorkspaceDeletion({
@@ -245,11 +259,7 @@ export async function cleanupWorkspaceForDeletion(
       mode === 'explicit' && workspace.chatSessionId && workspace.projectId
         ? async () => {
             const chatSessionId = workspace.chatSessionId as string;
-            const projectId = workspace.projectId as string;
-            await Promise.all([
-              deleteSessionSnapshotState(db, env, chatSessionId),
-              purgeInteractionStore(env, projectId, chatSessionId),
-            ]);
+            await deleteSessionSnapshotState(db, env, chatSessionId, expected);
           }
         : undefined,
   });
@@ -263,6 +273,26 @@ export async function cleanupWorkspaceForDeletion(
       userId,
       deleteConfirmedRow
     );
+    if (workspace.nodeId && expected.nodeRuntime === 'cf-container' && !runtimeAlreadyTerminated) {
+      try {
+        await stopNodeResources(workspace.nodeId, userId, env, {
+          expectedRuntime: {
+            userId: expected.nodeUserId ?? userId,
+            runtime: expected.nodeRuntime,
+            providerInstanceId: expected.nodeProviderInstanceId,
+            runtimeIncarnationId: expected.nodeRuntimeIncarnationId,
+          },
+        });
+      } catch (error) {
+        // A sibling/placement still owns compute, or teardown must be retried by
+        // the normal node reconciler. Source physical deletion remains confirmed.
+        log.warn('workspace.confirmed_container_retirement_deferred', {
+          workspaceId: workspace.id,
+          nodeId: workspace.nodeId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
     if (workspace.nodeId) {
       // Archive and delete end most conversations; the node they leave empty must reach
       // NodeLifecycle now rather than wait for the cleanup sweep's backstop.

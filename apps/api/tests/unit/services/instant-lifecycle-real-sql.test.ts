@@ -50,7 +50,7 @@ describe('Instant lifecycle with real SQL and ordered container callbacks', () =
       .run(old, old);
     sqlite
       .prepare(
-        `INSERT INTO workspaces (id,node_id,user_id,status,created_at,updated_at) VALUES ('workspace','node','user','sleeping',?,?)`
+        `INSERT INTO workspaces (id,node_id,user_id,status,created_at,updated_at,eviction_generation) VALUES ('workspace','node','user','sleeping',?,?,'generation')`
       )
       .run(old, old);
     sqlite
@@ -87,12 +87,18 @@ describe('Instant lifecycle with real SQL and ordered container callbacks', () =
     expect(
       await claimNodeForCleanup(env, candidate, now.toISOString(), { requireWorkspaceIdle: false })
     ).toBe(false);
+    sqlite.exec(
+      "UPDATE workspaces SET runtime_deletion_confirmed_at='2026-10-01T01:00:00.000Z',runtime_deletion_proof='vm_agent_confirmed'"
+    );
     sqlite.prepare("UPDATE nodes SET runtime = 'vm'").run();
     expect(
       await claimNodeForCleanup(env, candidate, now.toISOString(), { requireWorkspaceIdle: false })
     ).toBe(true);
   });
   it('does not let onStop steal strict teardown claims before proof is written', async () => {
+    sqlite.exec(
+      "UPDATE workspaces SET runtime_deletion_confirmed_at='2026-10-01T01:00:00.000Z',runtime_deletion_proof='vm_agent_confirmed'"
+    );
     destroy.mockImplementation(async () => {
       expect(row('nodes').status).toBe('destroying');
       expect(row('workspaces').status).toBe('stopping');
@@ -116,6 +122,7 @@ describe('Instant lifecycle with real SQL and ordered container callbacks', () =
       env,
       expected: {
         workspaceId: 'workspace',
+        workspaceGeneration: 'generation',
         nodeId: 'node',
         nodeUserId: 'user',
         nodeRuntime: 'cf-container',
@@ -133,17 +140,20 @@ describe('Instant lifecycle with real SQL and ordered container callbacks', () =
     expect(destroy).toHaveBeenCalledTimes(1);
     expect(row('workspaces').status).toBe('deleted');
   });
-  it('reconciles a failed archive even when the completed chat once owned sleep', async () => {
+  it('preserves unconfirmed source data despite terminal task labels', async () => {
     sqlite.prepare("UPDATE workspaces SET status = 'stopping', chat_session_id = 'chat'").run();
     sqlite
       .prepare("UPDATE tasks SET status = 'completed', workspace_id = 'workspace', updated_at = ?")
       .run(old);
     const result = emptyResult();
     await sweepTerminalCfContainers(env, now, resolveCleanupConfig(env), result);
-    expect(destroy).toHaveBeenCalledTimes(1);
-    expect(row('nodes').status).toBe('deleted');
+    expect(destroy).not.toHaveBeenCalled();
+    expect(row('nodes').runtime_termination_confirmed_at).toBeNull();
   });
   it('ignores a late runtime callback after deletion', async () => {
+    sqlite.exec(
+      "UPDATE workspaces SET runtime_deletion_confirmed_at='2026-10-01T01:00:00.000Z',runtime_deletion_proof='vm_agent_confirmed'"
+    );
     await stopNodeResources('node', 'user', env);
     await persistRuntimeEnded(
       env,
@@ -170,7 +180,7 @@ describe('Instant lifecycle with real SQL and ordered container callbacks', () =
     expect(destroy).not.toHaveBeenCalled();
   });
 
-  it('accepts Stop on an already stopped Instant and accepts its repeat', async () => {
+  it('keeps reversible Stop protected without destructive I/O on an unpreserved Instant', async () => {
     sqlite.prepare("UPDATE nodes SET status = 'stopped'").run();
     sqlite.prepare("UPDATE workspaces SET status = 'stopped'").run();
     const app = new Hono<{ Bindings: Env }>();
@@ -188,13 +198,13 @@ describe('Instant lifecycle with real SQL and ordered container callbacks', () =
       new Error('transient closure failure')
     );
     const first = await request();
-    expect(first.status).toBe(200);
+    expect(first.status).toBe(409);
     await Promise.all(pending);
-    expect(row('nodes').status).toBe('deleted');
+    expect(row('nodes').status).toBe('stopped');
+    expect(row('workspaces').status).toBe('stopped');
     const repeat = await request();
-    expect(repeat.status).toBe(200);
-    expect(await repeat.json()).toEqual({ status: 'stopped' });
-    expect(finalizeWorkspaceLifecycleClosure).toHaveBeenCalledTimes(2);
-    expect(destroy).toHaveBeenCalledTimes(1);
+    expect(repeat.status).toBe(409);
+    expect(finalizeWorkspaceLifecycleClosure).not.toHaveBeenCalled();
+    expect(destroy).not.toHaveBeenCalled();
   });
 });
