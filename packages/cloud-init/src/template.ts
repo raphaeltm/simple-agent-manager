@@ -196,6 +196,8 @@ write_files:
       Type=simple
       User=root
       Environment=NODE_ID={{ node_id }}
+      Environment=NODE_USER_ID={{ node_user_id }}
+      Environment=NODE_RUNTIME_INCARNATION_ID={{ node_runtime_incarnation_id }}
       Environment=CONTROL_PLANE_URL={{ control_plane_url }}
       Environment=JWKS_ENDPOINT={{ jwks_url }}
       Environment=CALLBACK_TOKEN_FILE=/etc/sam/callback-token

@@ -625,6 +625,29 @@ describe('slice CPU shares', () => {
 });
 
 describe('generateCloudInit', () => {
+  it('preserves physical-cleanup owner and incarnation fences in parsed systemd config', () => {
+    const parsed = YAML.parse(
+      generateCloudInit(
+        baseVariables({
+          nodeUserId: 'user-123',
+          nodeRuntimeIncarnationId: 'boot-456',
+        })
+      )
+    ) as { write_files: CloudInitWriteFile[] };
+    const unit = parsed.write_files.find((file) => file.path.endsWith('/vm-agent.service'));
+    expect(unit?.content).toContain('Environment=NODE_USER_ID=user-123');
+    expect(unit?.content).toContain('Environment=NODE_RUNTIME_INCARNATION_ID=boot-456');
+  });
+
+  it.each(['nodeUserId', 'nodeRuntimeIncarnationId'] as const)(
+    'rejects unsafe %s before YAML generation',
+    (field) => {
+      expect(() =>
+        generateCloudInit(baseVariables({ [field]: 'bad\nEnvironment=OTHER=value' }))
+      ).toThrow(field);
+    }
+  );
+
   describe('existing variable substitution (regression)', () => {
     it('substitutes all required variables', () => {
       const config = generateCloudInit(baseVariables());
