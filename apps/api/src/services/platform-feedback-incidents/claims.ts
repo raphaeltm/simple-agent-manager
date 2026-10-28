@@ -37,6 +37,26 @@ const activeClaimOwner = (table: string) => `EXISTS (
     AND owner.status NOT IN (${TERMINAL_TASK_STATUS_SQL}, 'sleeping')
 )`;
 
+async function renewActiveClaim(
+  env: Env,
+  ageOrigin: number,
+  fence: string,
+  identity: (string | number | null)[],
+  now: number,
+  config: IncidentConfig
+): Promise<void> {
+  // Keep the existing CAS token usable for resolveIncident, without moving
+  // the incident's original age ceiling on every renewal.
+  const expiry = Math.min(now + config.agentLeaseTtlMs, ageOrigin + config.maxAgeMs);
+  if (expiry <= now) return; // expireStaleIncidents owns the age ceiling.
+  await env.DATABASE.prepare(
+    `UPDATE platform_feedback_triages SET incident_claim_expires_at = ?, updated_at = CURRENT_TIMESTAMP
+     WHERE ${fence} AND ${activeClaimOwner('platform_feedback_triages')}`
+  )
+    .bind(expiry, ...identity)
+    .run();
+}
+
 export async function reclaimExpiredIncidentClaims(
   env: Env,
   now: number = Date.now(),
@@ -71,16 +91,7 @@ export async function reclaimExpiredIncidentClaims(
       row.dispatch_attempts,
     ];
     if (row.owner_active) {
-      // Keep the existing CAS token usable for resolveIncident, without moving
-      // the incident's original age ceiling on every renewal.
-      const expiry = Math.min(now + config.agentLeaseTtlMs, row.age_origin + config.maxAgeMs);
-      if (expiry <= now) continue; // expireStaleIncidents owns the age ceiling.
-      await env.DATABASE.prepare(
-        `UPDATE platform_feedback_triages SET incident_claim_expires_at = ?, updated_at = CURRENT_TIMESTAMP
-         WHERE ${fence} AND ${activeClaimOwner('platform_feedback_triages')}`
-      )
-        .bind(expiry, ...identity)
-        .run();
+      await renewActiveClaim(env, row.age_origin, fence, identity, now, config);
       continue;
     }
     const attempts = row.dispatch_attempts + 1;
