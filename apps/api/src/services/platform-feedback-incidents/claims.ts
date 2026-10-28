@@ -6,7 +6,7 @@ import {
   requireIncidentResolutionContract,
   serializeIncidentResolutionReferences,
 } from '../platform-feedback-incident-resolution-references';
-import { type IncidentQueueState,TERMINAL_TASK_STATUS_SQL } from './constants';
+import { type IncidentQueueState, TERMINAL_TASK_STATUS_SQL } from './constants';
 import { sanitizeText } from './text';
 import type { ResolveIncidentOptions } from './types';
 
