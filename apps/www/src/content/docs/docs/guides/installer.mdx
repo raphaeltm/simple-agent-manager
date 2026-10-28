@@ -1,0 +1,66 @@
+---
+title: Cloudflare installer prototype
+description: Try the hosted SAM installer or deploy the same installer in your own Cloudflare account.
+---
+
+The installer offers a guided start in your own Cloudflare account, without setting up GitHub first. You can use the hosted version or run the same open-source installer yourself.
+
+:::caution[Prototype]
+The current prototype creates a protected installation-service Worker and verifies that you can access it. It **does not install the full SAM application, build its containers, or provide version updates yet**. To install SAM today, follow the [self-hosting guide](/docs/guides/self-hosting/).
+:::
+
+## Use the hosted installer
+
+The staging prototype is at [install.sammy.party](https://install.sammy.party). Access initially requires membership in the staging Cloudflare account while its OAuth client is private. The production address is reserved at `install.simple-agent-manager.org`; it is not a promise of public availability.
+
+1. Open the installer and select **Sign in with Cloudflare**.
+2. On Cloudflare, select the account you want to authorize and review the requested permissions.
+3. Back in the installer, choose your account and confirm creation of one installation-service Worker.
+4. Select **Continue to my service**, then open the service to verify ownership.
+
+Your Cloudflare password stays with Cloudflare. The hosted installer temporarily receives an OAuth token with the permissions you approve. Worker deployment permissions can cover existing Workers in that account, not only the newly created service.
+
+Completing the handoff or disconnecting clears the installer session and attempts token revocation. The default session lifetime is 15 minutes. You can also revoke authorization from your Cloudflare profile. The created Worker stays in your account until you delete it; disconnecting does not remove it. The prototype owner session is temporary.
+
+## Host the installer yourself
+
+Self-hosting lets you review and pin the installer source, then run it in an account you control. You do not need to deploy the main SAM application to host the installer.
+
+### Before you start
+
+You need:
+
+- A Cloudflare account with Workers Paid enabled, and a domain active in that account.
+- Node.js 22 or newer and pnpm 9.15.9.
+- The [SAM repository](https://github.com/raphaeltm/simple-agent-manager), checked out at the version you want to trust.
+- A Cloudflare API token scoped to that account and zone, with Account Settings Read, Workers Scripts Edit, OAuth Client Read/Write, and permissions for Workers Custom Domains and Workers Routes. Review Cloudflare's current permission names before granting access.
+
+### Deploy
+
+Install the repository dependencies, then supply your account credentials through your shell or secret manager. Do not commit the token or paste it into an issue or chat.
+
+```sh
+pnpm install --frozen-lockfile
+export CLOUDFLARE_API_TOKEN
+export CLOUDFLARE_ACCOUNT_ID
+export BASE_DOMAIN=example.com
+pnpm --filter @simple-agent-manager/installer run deploy
+```
+
+The deployment creates the installer at `https://install.example.com`, provisions its private OAuth client, and stores the client credentials as Worker secrets. It uses its own session storage and does not share marketing analytics or SAM login sessions.
+
+Open that address and sign in with Cloudflare. Private clients work for members of the account that hosts the installer. To let other Cloudflare users authorize it, complete Cloudflare's [domain verification and public-client setup](https://developers.cloudflare.com/fundamentals/oauth/create-an-oauth-client/). Public promotion cannot be reversed.
+
+### Use an existing OAuth client
+
+Set `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET` before running the deployment command. The client must use Authorization Code with `client_secret_post`, the callback `https://install.example.com/oauth/callback`, and scopes `account-settings.read workers-scripts.edit`. Refresh tokens are not requested.
+
+If initial client creation succeeds but saving its secret fails, rotate the secret in Cloudflare and supply it through these variables before retrying. Rerunning deployment normally preserves the existing client and secrets.
+
+### Remove the prototype
+
+Delete the `sam-installer-self-hosted` Worker and its OAuth client in your Cloudflare dashboard. Also remove any `sam-maintenance-…` Workers you created while testing. Revoke outstanding installer authorizations from your Cloudflare profile.
+
+## Inspect the code
+
+The standalone app, deployment configuration, tests, and developer README live in [`apps/installer`](https://github.com/raphaeltm/simple-agent-manager/tree/main/apps/installer). The hosted and self-hosted versions use this same app. Source visibility helps you audit it; it does not prevent a hosted operator from changing the running code.

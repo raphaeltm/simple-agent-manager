@@ -1,0 +1,36 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sam-installer-local",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-01",
+  "assets": {
+    "directory": "public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "SESSIONS",
+        "class_name": "InstallerSession"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["InstallerSession"]
+    }
+  ],
+  "observability": {
+    "enabled": false
+  },
+  "vars": {
+    "APP_ORIGIN": "http://localhost:8787",
+    "SESSION_TTL_SECONDS": "900",
+    "OAUTH_SCOPES": "account-settings.read workers-scripts.edit",
+    "SOURCE_URL": "https://github.com/raphaeltm/simple-agent-manager/tree/main/apps/installer",
+    "DOCS_URL": "https://www.simple-agent-manager.org/docs/guides/installer/",
+    "BUILD_SHA": "local"
+  }
+}
