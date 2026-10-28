@@ -20,8 +20,8 @@ Raphaël: “Fix it. Ship the fix. Skip staging.” (2026-10-28). Staging waived
 - [x] Full IDs in generated prompts and usable evidence references; behavioral round trip regression.
 - [x] Bound unfinished claims and sleeping unclaimed dispatches with existing attempt budget, preserve active owners and fencing.
 - [x] Regression tests with real SQLite for expired claims, dispatches, concurrent/stale ownership, retry exhaustion and live-owner preservation.
-- [ ] Update affected documentation and postmortem; validate lint/typecheck/tests/build.
-- [ ] Local specialist reviews and task-completion validation.
+- [x] Update affected documentation and postmortem; validate lint/typecheck/tests/build.
+- [x] Local specialist reviews and task-completion validation.
 - [ ] PR, CI, best-effort CodeRabbit, merge, deploy, production smoke.
 
 ## Acceptance
@@ -35,3 +35,5 @@ Process fix: cross-boundary round-trip and multi-cycle lease regression tests in
 
 ## Validation evidence
 Six regression cases failed on original implementation (23 existing passed). After implementation, 76 tests across incident handling, triage and scheduled trigger pass. Active claim renewal preserves CAS tokens and original max-age bound. Claim reclamation is bounded by existing reclaimLimit and runs once per scheduled pass (not once per trigger); each candidate uses at most one update after one bounded SELECT. Dispatch candidates remain bounded by existing reclaimLimit; new sleeping-owner checks are indexed task lookups, no remote I/O.
+
+Final local validation: root lint (13 tasks), typecheck (19 tasks), tests (21 tasks; API 13,996 passed), and build (9 tasks) passed. Focused regression suites: 86 tests passed. All three local specialist reviews completed; findings addressed. Staging explicitly waived. PR/CI/review/deployment remain release gates.
