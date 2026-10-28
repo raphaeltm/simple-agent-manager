@@ -4,7 +4,7 @@ import { createServer } from 'node:https';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { chromium } from '@playwright/test';
+import { chromium, expect } from '@playwright/test';
 
 import { maintenanceSource } from '../src/maintenance';
 import { digest } from '../src/security';
@@ -12,58 +12,122 @@ const output = '../../.codex/tmp/playwright-screenshots';
 (async () => {
   await mkdir(output, { recursive: true });
   const browser = await chromium.launch({ headless: true });
-  for (const [label, width, height] of [
-    ['mobile', 375, 667],
-    ['desktop', 1280, 800],
-  ]) {
-    const page = await browser.newPage({ viewport: { width, height } });
-    let state = 'connect';
-    await page.route('**/api/config', (r) =>
-      r.fulfill({
-        json: {
-          configured: true,
-          sourceUrl: 'https://github.com/raphaeltm/simple-agent-manager/tree/main/apps/installer',
-          docsUrl: '/privacy.html',
-          sha: 'audit-fixture',
-        },
-      })
-    );
-    await page.route('**/api/session/status', (r) =>
-      state === 'connect'
-        ? r.fulfill({ status: 401, json: { error: 'Sign in' } })
-        : r.fulfill({
-            json: {
-              accounts:
-                state === 'empty'
-                  ? []
-                  : Array.from({ length: 35 }, (_, i) => ({
-                      id: String(i).padStart(32, 'a'),
-                      name:
-                        i === 0
-                          ? 'A very long organization name with <special> & characters '.repeat(5)
-                          : `Account ${i}`,
-                    })),
-              job:
-                state === 'ready'
-                  ? { status: 'ready', name: 'sam-maintenance-1234567890123456' }
-                  : null,
-            },
-          })
-    );
-    for (const scenario of ['connect', 'account', 'empty', 'ready']) {
-      state = scenario;
-      await page.goto('http://localhost:8787');
-      await page.waitForTimeout(250);
-      if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth))
-        throw new Error(`Overflow ${label} ${scenario}`);
-      await page.screenshot({
-        path: `${output}/installer-${scenario}-${label}.png`,
-        fullPage: true,
+  const baseUrl = process.env.INSTALLER_AUDIT_URL || 'http://localhost:8787';
+  let screenshots = 0;
+  for (const theme of ['light', 'dark'] as const) {
+    for (const [device, width, height] of [
+      ['mobile', 375, 667],
+      ['desktop', 1280, 800],
+      ['narrow', 320, 700],
+    ] as const) {
+      const label = `${device}-${theme}`;
+      const page = await browser.newPage({ viewport: { width, height }, colorScheme: theme });
+      let state = 'connect';
+      await page.route('**/api/config', (r) =>
+        r.fulfill({
+          json: {
+            configured: state !== 'unconfigured',
+            sourceUrl: 'https://github.com/raphaeltm/simple-agent-manager/tree/main/apps/installer',
+            docsUrl: '/privacy.html',
+            sha: 'audit-fixture',
+          },
+        })
+      );
+      await page.route('**/api/session/status', (r) =>
+        ['connect', 'unconfigured', 'authorization'].includes(state)
+          ? r.fulfill({ status: 401, json: { error: 'Sign in' } })
+          : r.fulfill({
+              json: {
+                accounts:
+                  state === 'empty'
+                    ? []
+                    : Array.from({ length: 35 }, (_, i) => ({
+                        id: String(i).padStart(32, 'a'),
+                        name:
+                          i === 0
+                            ? 'Organization <script>alert(1)</script> & équipe 🧑‍💻 '.repeat(6)
+                            : `Account ${i}`,
+                      })),
+                job:
+                  state === 'ready' || state === 'pending'
+                    ? { status: state, name: 'sam-maintenance-1234567890123456' }
+                    : null,
+              },
+            })
+      );
+      await page.route('**/api/session/install', (r) => {
+        if (state === 'error')
+          return r.fulfill({
+            status: 500,
+            json: { error: 'Cloudflare could not create the service. Please retry.' },
+          });
+        state = 'ready';
+        return r.fulfill({ json: { ok: true } });
       });
+      await page.route('**/api/session/finish', (r) => r.fulfill({ json: { revoked: true } }));
+      for (const scenario of [
+        'connect',
+        'account',
+        'empty',
+        'ready',
+        'pending',
+        'unconfigured',
+        'authorization',
+        'error',
+      ]) {
+        state = scenario;
+        await page.goto(baseUrl + (scenario === 'authorization' ? '/?error=authorization' : '/'));
+        await page.evaluate(() => document.fonts.ready);
+        await expect(page.locator('#version')).toHaveText('Build audit-fixtur');
+        if (scenario === 'connect') {
+          await expect(page.locator('#login')).toBeEnabled();
+          await page.getByText('What access am I granting?').click();
+          await expect(page.getByText(/These may allow changes to existing Workers/)).toBeVisible();
+          await page.getByText('What access am I granting?').click();
+        }
+        if (scenario === 'empty' || scenario === 'unconfigured')
+          await expect(page.locator(scenario === 'empty' ? '#install' : '#login')).toBeDisabled();
+        if (scenario === 'authorization')
+          await expect(page.locator('#message')).toContainText('cancelled');
+        if (scenario === 'error') {
+          await page.locator('#confirm').check();
+          await page.locator('#install').click();
+          await expect(page.locator('#message')).toContainText('Please retry');
+          await expect(page.locator('#install')).toBeEnabled();
+        }
+        if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth))
+          throw new Error(`Overflow ${label} ${scenario}`);
+        await page.screenshot({
+          path: `${output}/installer-${scenario}-${label}.png`,
+          fullPage: true,
+        });
+        screenshots++;
+      }
+      // Exercise the real UI handlers across create -> ready -> disconnect.
+      state = 'account';
+      await page.goto(baseUrl);
+      await page.locator('#confirm').check();
+      await page.locator('#install').click();
+      await expect(page.locator('#ready')).toBeVisible();
+      await expect(page.locator('#step-handoff')).toHaveAttribute('aria-current', 'step');
+      await page.locator('#disconnect').click();
+      await expect(page.locator('#connect')).toBeVisible();
+      await expect(page.locator('#step-connect')).toHaveAttribute('aria-current', 'step');
+      await expect(page.locator('.steps .completed')).toHaveCount(0);
+      await page.locator('#theme').selectOption(theme === 'light' ? 'dark' : 'light');
+      await page.reload();
+      await expect(page.locator('html')).toHaveAttribute(
+        'data-theme',
+        theme === 'light' ? 'dark' : 'light'
+      );
+      await page.locator('#theme').selectOption('auto');
+      await page.goto(baseUrl + '/privacy.html');
+      if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth))
+        throw new Error(`Privacy overflow ${label}`);
+      await page.screenshot({ path: `${output}/installer-privacy-${label}.png`, fullPage: true });
+      screenshots++;
+      await page.close();
     }
-    await page.goto('http://localhost:8787/privacy.html');
-    await page.screenshot({ path: `${output}/installer-privacy-${label}.png`, fullPage: true });
-    await page.close();
   }
   const temp = await mkdtemp(join(tmpdir(), 'sam-installer-browser-'));
   execFileSync(
@@ -141,7 +205,7 @@ const output = '../../.codex/tmp/playwright-screenshots';
   await rm(temp, { recursive: true, force: true });
   await browser.close();
   console.log(
-    '12 screenshots captured; actual cross-site POST/redirect/cookie verified; no overflow across installer scenarios.'
+    `${screenshots + 2} screenshots captured; themes, create/disconnect, errors, cross-site POST/redirect/cookie verified; no overflow.`
   );
 })().catch((e) => {
   console.error(e);

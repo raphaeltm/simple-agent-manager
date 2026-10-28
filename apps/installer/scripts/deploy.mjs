@@ -64,7 +64,7 @@ try {
       const client = await api(`${base}/oauth_clients`, 'POST', {
         client_name: name,
         client_uri: origin,
-        logo_uri: `${origin}/logo.svg`,
+        logo_uri: `${origin}/sam-head.png`,
         policy_uri: `${origin}/privacy.html`,
         tos_uri: `${origin}/privacy.html`,
         grant_types: ['authorization_code'],

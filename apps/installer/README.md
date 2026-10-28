@@ -40,3 +40,11 @@ Authorization codes use state and PKCE. The server stores tokens in an isolated 
 The bootstrap Worker accepts a short-lived owner credential by POST from the installer origin. Its secret stores only the credential hash. This is temporary prototype access, not a durable admin identity. Created Workers are deliberately retained; users delete them in Cloudflare. No claim of automatic rollback or zero provider logging is made. Application observability is disabled to avoid persisting callback URLs. A hosted operator can change code; separate deployment is not trustlessness.
 
 Deployment adds a hostname-specific `install.${BASE_DOMAIN}/*` Worker route alongside the custom domain, so SAM’s wildcard API route cannot intercept installer traffic. The staging workflow also provisions a temporary bootstrap Worker, checks anonymous rejection and authenticated ownership handoff, and deletes it in a finally block. This check uses the deployment token; it does not substitute for real OAuth consent verification.
+
+## Brand assets
+
+The installer uses the homepage's Chillax display font, green palette, mascot, and
+shared glass material. Static copies keep the installer independently deployable:
+`public/fonts/Chillax-Variable.woff2` and `public/sam-head.png` come from
+`apps/www/public/`, and `public/glass.css` comes from `packages/ui/src/glass/glass.css`.
+When those source assets change, refresh the copies and visually compare both sites.
