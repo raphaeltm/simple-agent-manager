@@ -15,7 +15,7 @@ Node workspace deletion drops runtime metadata despite swallowed container/volum
 - [x] Narrow owned image-transfer scratch cleanup with active protection and dry-run default, configurable limits; exclude user/nested Docker volumes/caches and deployment/rollback images.
 - [x] Meaningful tests: partial deletion/retry/restart/duplicates; wake/rebuild/snapshot races; stale identities; preservation failures and eviction handoff; standalone; symlink/mount escapes; nested/user volumes and rollback preservation.
 - [x] Docs/env references match code; no new admin routes unless matching phone UI supplied.
-- [ ] Local suite and independent Go/Cloudflare/security/constitution/completion reviews pass.
+- [x] Local suite and independent Go/Cloudflare/security/constitution/completion reviews pass.
 - [ ] Bounded coordinated staging lifecycle sweep with dirty/untracked data, failure injection/restart and repeated no-leak cycles; real VM heartbeat/access; promptly clean own staging resources.
 - [ ] DraftPR, greenCI, best-effort CodeRabbit request+wait; normal authorized release/basic production smoke.
 
@@ -27,6 +27,8 @@ No previous agent implementation recovered; rebuilt from original transcript per
 
 - Go server/persistence/config/bootstrap suites passed (1,600 cases including subtests); focused deletion race suites passed; `go vet ./...` passed. Transfer scratch/deploy/publish race suites passed, including actual subprocess termination/retry. Actual bind-mount test skipped locally because mount denied (EPERM); privileged staging proof remains required.
 - Root build passed 9 tasks, lint passed 13 tasks (three existing web warnings), typecheck passed 19 tasks (Astro baseline diagnostic accepted by existing validator). Migration ordering, runtime tunable ratchet, file size checks and agent context measurement passed.
-- Worker lifecycle suite passed 74/74. Full API run: 978 files, 14,026 tests passed, 25 failed; affected archive/retirement fixtures are being updated to require physical proof and preserve unconfirmed data. Final full rerun pending. Prior root full suite aborted on web comment-reader timing failure; isolated rerun passed 16/16.
+- Worker lifecycle suite passed 76/76, including same-operation transient CF retirement retry and successor incarnation protection. Final full API rerun: 978 files (977 passed, one skipped), 14,055 tests passed, two skipped. Archive/retirement fixtures now require physical proof and preserve unconfirmed data. Prior root full suite aborted on web comment-reader timing failure; isolated rerun passed 16/16.
 - Independent Go/security review passed after fixes; Cloudflare/security review found caller ownership and successor snapshot races, fixed and reverified with 71 tests passed. Scratch review passed; constitution/env review passed. Completion review remains open until remaining validation and release gates.
-- No staging candidate deployed, PR/CI/CodeRabbit evidence, or production release yet. Staging preflight authenticated successfully; no active staging deployment observed. No production resources mutated.
+- Staging candidate a893cd2e7e1cf0e52b722ee7b66ca1b5a090f621 is deploying in run40653426846; no PR/CI/CodeRabbit or production release yet. Staging preflight authenticated successfully; no active staging deployment observed. No production resources mutated.
+
+Final independent review: API/Cloudflare/security PASS after source/capture/handoff snapshot CAS, caller fences, strict Stop behavior and same-operation CF retirement retry. Scratch/Go/process-test reviews PASS; whole VM Agent `go test ./...` PASS. Completion release evidence remains pending.
