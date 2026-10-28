@@ -10,7 +10,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { deleteWorkspaceOnNode } from './node-agent';
 import { stopNodeResources } from './node-resource-lifecycle';
-import { automaticDeletionPreservationAvailable } from './workspace-deletion-preservation';
+import { automaticDeletionPreservationExpiresAt } from './workspace-deletion-preservation';
 import type { FinalizeWorkspaceLifecycleClosureResult } from './workspace-lifecycle-finalizer';
 import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
 
@@ -187,7 +187,7 @@ async function loadWorkspaceDeletionRow(
   return row ?? null;
 }
 
-async function terminalNodeProof(
+export async function terminalNodeProof(
   database: D1Database,
   expected: WorkspaceDeletionIdentity
 ): Promise<WorkspaceDeletionProof | null> {
@@ -562,13 +562,12 @@ function deletionTargetIsReady(
 
 async function requireAutomaticPreservation(
   options: AttemptWorkspaceDeletionOptions
-): Promise<void> {
-  if (
-    options.mode === 'automatic' &&
-    !(await automaticDeletionPreservationAvailable(options.env, options.expected))
-  ) {
+): Promise<string | undefined> {
+  if (options.mode === 'explicit') return undefined;
+  const expiresAt = await automaticDeletionPreservationExpiresAt(options.env, options.expected);
+  if (!expiresAt)
     throw new Error('Automatic deletion requires verified preservation of the exact runtime');
-  }
+  return expiresAt;
 }
 
 async function automaticPreservationFailure(
@@ -612,7 +611,17 @@ async function requestWorkspaceDeletion(
       // stopping workspace we just claimed. Destroy through the container DO.
       await requireDeletionTargetAtBoundary(env, expected);
       await requireAutomaticPreservation(options);
+      if (!expected.workspaceGeneration)
+        throw new Error('Container deletion requires workspace generation');
       await stopNodeResources(expected.nodeId, expected.userId, env, {
+        workspaceDeletion: {
+          workspaceId: expected.workspaceId,
+          workspaceGeneration: expected.workspaceGeneration,
+          beforeDestroy: async () => {
+            await requireDeletionTargetAtBoundary(env, expected);
+            await requireAutomaticPreservation(options);
+          },
+        },
         expectedRuntime: {
           userId: expected.nodeUserId ?? expected.userId,
           runtime: expected.nodeRuntime,
@@ -626,7 +635,10 @@ async function requestWorkspaceDeletion(
     }
   }
 
+  const preservationExpiresAt = await requireAutomaticPreservation(options);
   await deleteWorkspaceOnNode(expected.nodeId, expected.workspaceId, env, expected.userId, {
+    deletionMode: options.mode,
+    preservationExpiresAt,
     identity: {
       workspaceId: expected.workspaceId,
       nodeId: expected.nodeId,

@@ -14,6 +14,7 @@ import { workspaceDeletionDueIndexKey } from '../../src/durable-objects/node-lif
 import type { PendingWorkspaceDeletion } from '../../src/durable-objects/node-lifecycle-workspace-deletion-support';
 import type { Env } from '../../src/env';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
+import { buildSessionSnapshotR2Key } from '../../src/services/session-snapshot-artifacts';
 import {
   attemptWorkspaceDeletion,
   loadWorkspaceDeletionIdentity,
@@ -25,7 +26,7 @@ import {
   seedProject,
   seedTask,
   seedUser,
-  seedWorkspace,
+  seedWorkspace as seedWorkspaceBase,
 } from './helpers/seed-d1';
 import {
   captureNodeLifecycleExpectedError,
@@ -122,25 +123,7 @@ async function seedSleepingSnapshot(input: {
   workspaceId: string;
   chatSessionId: string;
 }): Promise<void> {
-  await env.DATABASE.prepare(
-    `INSERT INTO session_snapshots
-       (id, project_id, workspace_id, node_id, user_id, chat_session_id, runtime, status,
-        degradation, manifest_r2_key, home_r2_key, expires_at, sleeping_at, sleep_status,
-        recovery_attempts, sleep_attempts, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, 'vm', 'available', 'none', ?, ?, '2099-01-01T00:00:00.000Z',
-             '2026-08-26T20:56:54.000Z', 'sleeping', 0, 0, datetime('now'), datetime('now'))`
-  )
-    .bind(
-      `snapshot-${input.workspaceId}`,
-      TEST_PROJECT_ID,
-      input.workspaceId,
-      input.nodeId,
-      TEST_USER_ID,
-      input.chatSessionId,
-      `snapshots/${input.chatSessionId}/manifest.json`,
-      `snapshots/${input.chatSessionId}/home.tar.zst`
-    )
-    .run();
+  await seedPreservation(input.workspaceId, input.nodeId, TEST_USER_ID);
 }
 
 interface StoredNodeLifecycleState {
@@ -156,6 +139,114 @@ interface StoredNodeLifecycleState {
 async function seedTestNode(nodeId: string, userId: string = TEST_USER_ID): Promise<void> {
   await seedUser(userId);
   await seedNode(nodeId, userId);
+}
+
+const deletionProofIdentities = new Map<
+  string,
+  NonNullable<Awaited<ReturnType<typeof loadWorkspaceDeletionIdentity>>>
+>();
+
+async function seedWorkspace(...args: Parameters<typeof seedWorkspaceBase>): Promise<void> {
+  await seedWorkspaceBase(...args);
+  const [workspaceId, nodeId, userId, opts] = args;
+  if (
+    !nodeId ||
+    !['stopped', 'sleeping', 'stopping', 'evicted', 'deleted'].includes(opts?.status ?? 'running')
+  )
+    return;
+  await seedPreservation(workspaceId, nodeId, userId);
+}
+
+async function seedPreservation(
+  workspaceId: string,
+  nodeId: string,
+  userId: string
+): Promise<void> {
+  await env.DATABASE.prepare(
+    'UPDATE nodes SET runtime_incarnation_id = COALESCE(runtime_incarnation_id, ?) WHERE id=?'
+  )
+    .bind(`incarnation-${nodeId}`, nodeId)
+    .run();
+  const workspace = await env.DATABASE.prepare(
+    'SELECT project_id,chat_session_id,eviction_generation FROM workspaces WHERE id=?'
+  )
+    .bind(workspaceId)
+    .first<{
+      project_id: string | null;
+      chat_session_id: string | null;
+      eviction_generation: string | null;
+    }>();
+  if (!workspace) return;
+  const projectId = workspace.project_id ?? `${workspaceId}-project`;
+  const chatSessionId = workspace.chat_session_id ?? `${workspaceId}-chat`;
+  if (!workspace.project_id) {
+    const installationId = `${workspaceId}-installation`;
+    await seedInstallation(installationId, userId);
+    await seedProject(projectId, userId, installationId);
+  }
+  await env.DATABASE.prepare('UPDATE workspaces SET project_id=?,chat_session_id=? WHERE id=?')
+    .bind(projectId, chatSessionId, workspaceId)
+    .run();
+  const node = await env.DATABASE.prepare('SELECT runtime_incarnation_id FROM nodes WHERE id=?')
+    .bind(nodeId)
+    .first<{ runtime_incarnation_id: string }>();
+  const generation = `capture-${workspaceId}`;
+  const home = buildSessionSnapshotR2Key(env as Env, chatSessionId, generation, 'home');
+  const manifest = buildSessionSnapshotR2Key(env as Env, chatSessionId, generation, 'manifest');
+  const sha = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+  const manifestJson = JSON.stringify({
+    version: 1,
+    chatSessionId,
+    workspaceId,
+    status: 'available',
+    degradation: 'none',
+    artifacts: { home: { sizeBytes: 0, sha256: sha } },
+  });
+  await env.DATABASE.prepare('DELETE FROM session_snapshots WHERE id=? AND chat_session_id !=?')
+    .bind(`snapshot-${workspaceId}`, chatSessionId)
+    .run();
+  await env.R2.put(home, '');
+  await env.R2.put(manifest, manifestJson);
+  await env.DATABASE.prepare(
+    `INSERT INTO session_snapshots(id,project_id,workspace_id,node_id,user_id,chat_session_id,runtime,status,degradation,manifest_r2_key,home_r2_key,home_sha256,manifest_json,snapshot_generation,cleanup_identity_json,expires_at,sleeping_at,sleep_status)
+    VALUES (?,?,?,?,?,?,'vm','available','none',?,?,?,?,?,?,'2099-01-01T00:00:00.000Z','2026-01-01T00:00:00.000Z','sleeping')
+    ON CONFLICT(chat_session_id) DO UPDATE SET home_r2_key=excluded.home_r2_key,manifest_r2_key=excluded.manifest_r2_key,home_sha256=excluded.home_sha256,manifest_json=excluded.manifest_json,snapshot_generation=excluded.snapshot_generation,cleanup_identity_json=excluded.cleanup_identity_json`
+  )
+    .bind(
+      `snapshot-${workspaceId}`,
+      projectId,
+      workspaceId,
+      nodeId,
+      userId,
+      chatSessionId,
+      manifest,
+      home,
+      sha,
+      manifestJson,
+      generation,
+      JSON.stringify({
+        workspaceId,
+        nodeId,
+        userId,
+        nodeRuntimeIncarnationId: node?.runtime_incarnation_id,
+        workspaceGeneration: workspace.eviction_generation ?? '',
+        snapshotGeneration: generation,
+        preserved: 1,
+      })
+    )
+    .run();
+  const identity = await loadWorkspaceDeletionIdentity(env.DATABASE, workspaceId);
+  if (identity) deletionProofIdentities.set(workspaceId, identity);
+}
+
+async function deletionResponse(workspaceId: string): Promise<Response> {
+  const identity = deletionProofIdentities.get(workspaceId);
+  return Response.json({
+    ...identity,
+    workspaceGeneration: identity?.workspaceGeneration ?? '',
+    success: true,
+    physicalDeleted: true,
+  });
 }
 
 async function getNodeFromD1(
@@ -1022,10 +1113,10 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
       nodeUserId: TEST_USER_ID,
       nodeRuntime: 'vm',
       nodeProviderInstanceId: null,
-      nodeRuntimeIncarnationId: null,
+      nodeRuntimeIncarnationId: `incarnation-${nodeId}`,
       userId: TEST_USER_ID,
-      projectId: null,
-      chatSessionId: null,
+      projectId: `${wsId}-project`,
+      chatSessionId: `${wsId}-chat`,
     };
 
     // Restart completes before the scan reaches NodeLifecycle.claimAttempt().
@@ -1047,6 +1138,66 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
         instance.ctx.storage.get(`ws-delete:${wsId}`)
       )
     ).toBeUndefined();
+  });
+
+  it('does not schedule physical cleanup for unpreserved or expired source data', async () => {
+    const nodeId = 'nl-protected-no-snapshot';
+    const wsId = 'ws-protected-no-snapshot';
+    await seedTestNode(nodeId);
+    await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'stopped' });
+    await env.DATABASE.prepare(
+      "UPDATE session_snapshots SET expires_at='2000-01-01T00:00:00.000Z' WHERE workspace_id=?"
+    )
+      .bind(wsId)
+      .run();
+    const stub = getStub(nodeId);
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    expect(await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID)).toBe(false);
+    await env.DATABASE.prepare('DELETE FROM session_snapshots WHERE workspace_id=?')
+      .bind(wsId)
+      .run();
+    expect(await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID)).toBe(false);
+    expect(await getWorkspaceStatusFromD1(wsId)).toBe('stopped');
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('allows a current explicit user claim to supersede automatic authority without periodic downgrade', async () => {
+    const nodeId = 'nl-explicit-promotion';
+    const wsId = 'ws-explicit-promotion';
+    await seedTestNode(nodeId);
+    await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'stopped' });
+    const expected = await loadWorkspaceDeletionIdentity(env.DATABASE, wsId);
+    const stub = getStub(nodeId);
+    await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID);
+    await runInDurableObject(stub, async (instance) => {
+      const entry = await instance.ctx.storage.get<PendingWorkspaceDeletion>(`ws-delete:${wsId}`);
+      await putIndexedWorkspaceDeletion(instance.ctx.storage, {
+        ...entry!,
+        attemptCount: 1,
+        lastAttemptAt: Date.now() - 100,
+        claimId: 'old-auto-claim',
+        mode: 'automatic',
+      });
+    });
+    expect(
+      await stub.claimWorkspaceDeletionAttempt(nodeId, wsId, TEST_USER_ID, expected!, 'explicit')
+    ).toBe('claimed');
+    const promoted = await runInDurableObject(stub, async (instance) =>
+      instance.ctx.storage.get<PendingWorkspaceDeletion>(`ws-delete:${wsId}`)
+    );
+    expect(promoted?.mode).toBe('explicit');
+    expect(promoted?.claimId).not.toBe('old-auto-claim');
+    expect(
+      await stub.claimWorkspaceDeletionAttempt(nodeId, wsId, TEST_USER_ID, expected!, 'automatic')
+    ).toBe('already_claimed_same_identity');
+    expect(
+      (
+        await runInDurableObject(stub, async (instance) =>
+          instance.ctx.storage.get<PendingWorkspaceDeletion>(`ws-delete:${wsId}`)
+        )
+      )?.mode
+    ).toBe('explicit');
   });
 
   it('reports an exact duplicate deletion claim as the same retained attempt', async () => {
@@ -1137,7 +1288,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
           )?.status ?? null;
         fetchEntered = true;
         while (!releaseFetch) await new Promise((resolve) => setTimeout(resolve, 1));
-        return new Response(null, { status: 204 });
+        return await deletionResponse(wsId);
       })
     );
 
@@ -1208,7 +1359,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
           const url =
             typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
           requestedWorkspaceId = url.includes(wsId) ? wsId : null;
-          return new Response(null, { status: 204 });
+          return await deletionResponse(wsId);
         })
       );
 
@@ -1244,7 +1395,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
       await instance.ctx.storage.put(key, { ...pending, deleteAt: Date.now() - 1 });
     });
 
-    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const fetchMock = vi.fn(async () => await deletionResponse(wsId));
     vi.stubGlobal('fetch', fetchMock);
     let injectedClaimFailures = 0;
 
@@ -1257,7 +1408,9 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
             return (query: string): D1PreparedStatement => {
               const isExactDeletionClaim =
                 query.includes("SET status = 'stopping'") &&
-                query.includes("status IN ('stopped', 'sleeping', 'stopping', 'deleted')");
+                query.includes(
+                  "status IN ('stopped', 'sleeping', 'stopping', 'deleted', 'evicted')"
+                );
               if (isExactDeletionClaim && injectedClaimFailures === 0) {
                 return {
                   bind: () => ({
@@ -1368,7 +1521,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
       vi.fn(async () => {
         fetchEntered = true;
         while (!releaseFetch) await new Promise((resolve) => setTimeout(resolve, 1));
-        return new Response(null, { status: 204 });
+        return await deletionResponse(wsId);
       })
     );
 
@@ -1523,7 +1676,10 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
 
     const stub = getStub(nodeId);
     await setNodeLifecycleDeletionEnv(stub, { WORKSPACE_DELETION_ALARM_BATCH_SIZE: '2' });
-    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const fetchMock = vi.fn(
+      async (_input: RequestInfo | URL, init?: RequestInit) =>
+        await deletionResponse(JSON.parse(String(init?.body)).workspaceId)
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     try {
@@ -1638,7 +1794,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'stopped' });
     const stub = getStub(nodeId);
     await setNodeLifecycleDeletionEnv(stub, { WORKSPACE_DELETION_ALARM_BATCH_SIZE: '5' });
-    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const fetchMock = vi.fn(async () => await deletionResponse(wsId));
     vi.stubGlobal('fetch', fetchMock);
 
     try {
@@ -1675,11 +1831,13 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
             .first<{ status: string }>()
         ).toMatchObject({ status: 'deleted' });
       });
-      expect(
-        await runInDurableObject(stub, async (instance) =>
-          instance.ctx.storage.list({ prefix: 'ws-delete-due:' })
-        )
-      ).toHaveProperty('size', 0);
+      await vi.waitFor(async () => {
+        expect(
+          await runInDurableObject(stub, async (instance) =>
+            instance.ctx.storage.list({ prefix: 'ws-delete-due:' })
+          )
+        ).toHaveProperty('size', 0);
+      });
     } finally {
       await setNodeLifecycleDeletionEnv(stub, {
         WORKSPACE_DELETION_ALARM_BATCH_SIZE: undefined,
@@ -1844,7 +2002,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     });
     expect(await stub.cancelWorkspaceDeletion(wsId)).toBe(false);
 
-    const successFetch = vi.fn(async () => new Response(null, { status: 204 }));
+    const successFetch = vi.fn(async () => await deletionResponse(wsId));
     vi.stubGlobal('fetch', successFetch);
     await runInDurableObject(stub, async (instance) => {
       const key = `ws-delete:${wsId}`;
@@ -1882,7 +2040,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'stopped' });
     await seedAgentSession(agentSessionId, wsId, TEST_USER_ID, { status: 'running' });
 
-    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const fetchMock = vi.fn(async () => await deletionResponse(wsId));
     vi.stubGlobal('fetch', fetchMock);
     const stub = getStub(nodeId);
     await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID);
@@ -1969,7 +2127,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
-  it('treats a workspace-specific VM 404 as idempotent absence proof', async () => {
+  it('keeps a legacy or missing physical-deletion route retryable without absence proof', async () => {
     const nodeId = 'nl-test-delete-404-proof-001';
     const wsId = 'ws-delete-404-proof-001';
     const agentSessionId = 'agent-delete-404-proof-001';
@@ -1988,24 +2146,17 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
       await instance.alarm();
     });
 
-    let workspace: { status: string } | null = null;
     await vi.waitFor(async () => {
-      workspace = await env.DATABASE.prepare('SELECT status FROM workspaces WHERE id = ?')
-        .bind(wsId)
-        .first<{ status: string }>();
-      expect(workspace?.status).toBe('deleted');
+      const pending = await runInDurableObject(stub, async (instance) =>
+        instance.ctx.storage.get<PendingWorkspaceDeletion>(`ws-delete:${wsId}`)
+      );
+      expect(pending?.lastError).toContain('VM attempt 1');
+      expect(await getWorkspaceStatusFromD1(wsId)).toBe('stopping');
       expect(await getAgentSessionStatus(agentSessionId)).toMatchObject({
-        status: 'completed',
-        stopped_at: expect.any(String),
+        status: 'running',
+        stopped_at: null,
       });
-      expect(
-        await runInDurableObject(stub, async (instance) =>
-          instance.ctx.storage.get(`ws-delete:${wsId}`)
-        )
-      ).toBeUndefined();
-      expect(await getAlarm(stub)).toBeNull();
     });
-    expect(workspace?.status).toBe('deleted');
     expect(fetchMock).toHaveBeenCalledOnce();
   });
 
@@ -2172,7 +2323,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
                     newChatSessionId,
                   ];
         await env.DATABASE.prepare(mutation[0]).bind(mutation[1], wsId).run();
-        return new Response(null, { status: 204 });
+        return await deletionResponse(wsId);
       });
       vi.stubGlobal('fetch', fetchMock);
 
@@ -2215,9 +2366,11 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
       expect(workspace?.status).toBe('running');
       expect(workspace?.node_id).toBe(dimension === 'node' ? newNodeId : oldNodeId);
       expect(workspace?.user_id).toBe(dimension === 'user' ? newUserId : TEST_USER_ID);
-      expect(workspace?.project_id).toBe(dimension === 'project' ? newProjectId : null);
+      expect(workspace?.project_id).toBe(
+        dimension === 'project' ? newProjectId : `${wsId}-project`
+      );
       expect(workspace?.chat_session_id).toBe(
-        dimension === 'chat-session' ? newChatSessionId : null
+        dimension === 'chat-session' ? newChatSessionId : `${wsId}-chat`
       );
       expect(fetchMock).toHaveBeenCalledOnce();
     }
@@ -2235,7 +2388,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
       await env.DATABASE.prepare("UPDATE workspaces SET status = 'running' WHERE id = ?")
         .bind(wsId)
         .run();
-      return new Response(null, { status: 204 });
+      return await deletionResponse(wsId);
     });
     vi.stubGlobal('fetch', fetchMock);
 
@@ -2293,7 +2446,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
       stub.claimWorkspaceDeletionAttempt(nodeId, wsId, TEST_USER_ID, expected!, 'explicit')
     ).resolves.toBe('claimed');
 
-    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const fetchMock = vi.fn(async () => await deletionResponse(wsId));
     vi.stubGlobal('fetch', fetchMock);
     const outcome = await runInDurableObject(stub, async (instance) => {
       const mutableEnv = instance.env as unknown as { DATABASE: D1Database };
@@ -2431,7 +2584,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'stopped' });
     await seedAgentSession(agentSessionId, wsId, TEST_USER_ID, { status: 'running' });
 
-    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const fetchMock = vi.fn(async () => await deletionResponse(wsId));
     vi.stubGlobal('fetch', fetchMock);
 
     const stub = getStub(nodeId);
@@ -2487,7 +2640,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'sleeping' });
     await seedAgentSession(agentSessionId, wsId, TEST_USER_ID, { status: 'running' });
 
-    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const fetchMock = vi.fn(async () => await deletionResponse(wsId));
     vi.stubGlobal('fetch', fetchMock);
 
     const stub = getStub(nodeId);
@@ -2572,7 +2725,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
       .run();
     await seedSleepingSnapshot({ nodeId, workspaceId: wsId, chatSessionId });
 
-    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    const fetchMock = vi.fn(async () => await deletionResponse(wsId));
     vi.stubGlobal('fetch', fetchMock);
 
     const stub = getStub(nodeId);

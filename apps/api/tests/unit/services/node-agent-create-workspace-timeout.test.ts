@@ -228,6 +228,7 @@ describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
     mocks.container.fetchVmAgentContainer.mockImplementation(() => pendingResponse(60_000));
 
     const deletionPromise = deleteWorkspaceOnNode('node-1', 'ws-1', cfContainerEnv, 'user-1', {
+      deletionMode: 'explicit',
       identity: {
         workspaceId: 'ws-1',
         nodeId: 'node-1',

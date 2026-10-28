@@ -209,10 +209,14 @@ export class NodeLifecycleWorkspaceDeletionQueue {
         userId,
         expected,
       });
-      if (!existingMatches || existing?.deadLetteredAt) {
+      const explicitPromotion = mode === 'explicit' && existing?.mode === 'automatic';
+      if (!existingMatches || (existing?.deadLetteredAt && !explicitPromotion)) {
         return { result: 'fenced' as const, entry: existing ?? null };
       }
-      if ((existing?.attemptCount ?? 0) > 0 || existing?.lastAttemptAt != null) {
+      if (
+        !explicitPromotion &&
+        ((existing?.attemptCount ?? 0) > 0 || existing?.lastAttemptAt != null)
+      ) {
         return { result: 'already_claimed_same_identity' as const, entry: existing };
       }
       const claimed = {
@@ -228,7 +232,7 @@ export class NodeLifecycleWorkspaceDeletionQueue {
         projectId: expected.projectId,
         chatSessionId: expected.chatSessionId,
         deleteAt: now + workspaceDeletionRetryDelayMs(this.env, 1),
-        firstScheduledAt: existing?.firstScheduledAt ?? now,
+        firstScheduledAt: explicitPromotion ? now : (existing?.firstScheduledAt ?? now),
         attemptCount: 1,
         lastAttemptAt: now,
         lastError: existing?.lastError ?? null,

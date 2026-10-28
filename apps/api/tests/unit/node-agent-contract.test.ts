@@ -944,12 +944,13 @@ describe('Node Agent client functions send correct payloads', () => {
     );
 
     await deleteWorkspaceOnNode('node-abc', 'ws-delete-me', makeNodeAgentTestEnv(), 'user-123', {
+      deletionMode: 'explicit',
       identity: deletionIdentity('ws-delete-me'),
     });
 
     const [capturedUrl, capturedInit] = fetchWithTimeoutMock.mock.calls[0] as [string, RequestInit];
     expect(capturedInit.method).toBe('DELETE');
-    expect(capturedUrl).toContain('/workspaces/ws-delete-me');
+    expect(capturedUrl).toContain('/workspaces/ws-delete-me/physical-deletion');
   });
 
   it.each([
@@ -961,6 +962,7 @@ describe('Node Agent client functions send correct payloads', () => {
     fetchWithTimeoutMock.mockResolvedValue(new Response(JSON.stringify(body), { status: 200 }));
     await expect(
       deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123', {
+        deletionMode: 'explicit',
         identity: deletionIdentity('ws-test'),
       })
     ).rejects.toThrow('exact workspace incarnation');
@@ -1161,6 +1163,7 @@ describe('Node Agent client functions send correct payloads', () => {
 
     await expect(
       deleteWorkspaceOnNode('node-abc', 'ws-missing', makeNodeAgentTestEnv(), 'user-123', {
+        deletionMode: 'explicit',
         identity: deletionIdentity('ws-missing'),
       })
     ).rejects.toThrow('Node Agent request failed: 404');
@@ -1177,6 +1180,7 @@ describe('Node Agent client functions send correct payloads', () => {
 
     await expect(
       deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123', {
+        deletionMode: 'explicit',
         identity: deletionIdentity('ws-test'),
       })
     ).rejects.toThrow('Node Agent unreachable: DNS record for node-abc.vm may be missing');
@@ -1191,6 +1195,7 @@ describe('Node Agent client functions send correct payloads', () => {
 
     await expect(
       deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123', {
+        deletionMode: 'explicit',
         identity: deletionIdentity('ws-test'),
       })
     ).rejects.toThrow('Request timed out');
@@ -1206,6 +1211,7 @@ describe('Node Agent client functions send correct payloads', () => {
 
     await expect(
       deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123', {
+        deletionMode: 'explicit',
         identity: deletionIdentity('ws-test'),
       })
     ).rejects.toMatchObject({
@@ -1229,6 +1235,7 @@ describe('Node Agent client functions send correct payloads', () => {
 
     await expect(
       deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123', {
+        deletionMode: 'explicit',
         identity: deletionIdentity('ws-test'),
       })
     ).rejects.toThrow('Node Agent request failed: 502');
@@ -1246,6 +1253,7 @@ describe('Node Agent client functions send correct payloads', () => {
 
     await expect(
       deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123', {
+        deletionMode: 'explicit',
         identity: deletionIdentity('ws-test'),
       })
     ).rejects.toThrow('Node Agent request failed: 500');

@@ -7,10 +7,10 @@ import { verifySessionSnapshotArtifactsForSleep } from './session-snapshot-artif
 import type { WorkspaceDeletionIdentity } from './workspace-deletion';
 
 /** Status/age/pressure are scheduling hints, never authority to discard user data. */
-export async function automaticDeletionPreservationAvailable(
+export async function automaticDeletionPreservationExpiresAt(
   env: Env,
   expected: WorkspaceDeletionIdentity
-): Promise<boolean> {
+): Promise<string | null> {
   if (
     !expected.chatSessionId ||
     !expected.projectId ||
@@ -18,7 +18,7 @@ export async function automaticDeletionPreservationAvailable(
     !expected.nodeRuntimeIncarnationId ||
     expected.nodeUserId !== expected.userId
   )
-    return false;
+    return null;
   const snapshot = await drizzle(env.DATABASE, { schema })
     .select()
     .from(schema.sessionSnapshots)
@@ -38,9 +38,10 @@ export async function automaticDeletionPreservationAvailable(
     snapshot.degradation !== 'none' ||
     !snapshot.cleanupIdentityJson ||
     snapshot.captureGeneration ||
-    snapshot.expiresAt <= new Date().toISOString()
+    !Number.isFinite(Date.parse(snapshot.expiresAt)) ||
+    Date.parse(snapshot.expiresAt) <= Date.now()
   )
-    return false;
+    return null;
   const completedSleep = snapshot.sleepStatus === 'sleeping' && Boolean(snapshot.sleepingAt);
   if (!completedSleep) {
     if (
@@ -49,7 +50,7 @@ export async function automaticDeletionPreservationAvailable(
       snapshot.recoveryWorkspaceId === expected.workspaceId ||
       !snapshot.restoredAt
     )
-      return false;
+      return null;
     const target = await drizzle(env.DATABASE, { schema })
       .select({
         userId: schema.workspaces.userId,
@@ -67,13 +68,13 @@ export async function automaticDeletionPreservationAvailable(
       target.chatSessionId !== expected.chatSessionId ||
       !['running', 'recovery', 'sleeping'].includes(target.status)
     )
-      return false;
+      return null;
   }
   let identity: Record<string, unknown>;
   try {
     identity = JSON.parse(snapshot.cleanupIdentityJson);
   } catch {
-    return false;
+    return null;
   }
   if (
     !identity ||
@@ -85,6 +86,18 @@ export async function automaticDeletionPreservationAvailable(
     identity.nodeRuntimeIncarnationId !== expected.nodeRuntimeIncarnationId ||
     identity.workspaceGeneration !== (expected.workspaceGeneration ?? '')
   )
-    return false;
-  return verifySessionSnapshotArtifactsForSleep(env, snapshot);
+    return null;
+  if (
+    !(await verifySessionSnapshotArtifactsForSleep(env, snapshot)) ||
+    Date.parse(snapshot.expiresAt) <= Date.now()
+  )
+    return null;
+  return snapshot.expiresAt;
+}
+
+export async function automaticDeletionPreservationAvailable(
+  env: Env,
+  expected: WorkspaceDeletionIdentity
+): Promise<boolean> {
+  return (await automaticDeletionPreservationExpiresAt(env, expected)) !== null;
 }

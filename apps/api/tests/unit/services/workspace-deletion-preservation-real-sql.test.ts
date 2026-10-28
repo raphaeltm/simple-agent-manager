@@ -9,13 +9,19 @@ import {
   attemptWorkspaceDeletion,
   loadWorkspaceDeletionIdentity,
 } from '../../../src/services/workspace-deletion';
-import { automaticDeletionPreservationAvailable } from '../../../src/services/workspace-deletion-preservation';
+import {
+  automaticDeletionPreservationAvailable,
+  automaticDeletionPreservationExpiresAt,
+} from '../../../src/services/workspace-deletion-preservation';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
-const network = vi.hoisted(() => ({ remove: vi.fn(), verify: vi.fn() }));
+const network = vi.hoisted(() => ({ remove: vi.fn(), verify: vi.fn(), stopNode: vi.fn() }));
+vi.mock('../../../src/services/node-resource-lifecycle', () => ({
+  stopNodeResources: network.stopNode,
+}));
 vi.mock('../../../src/services/node-agent', () => ({ deleteWorkspaceOnNode: network.remove }));
 vi.mock('../../../src/services/session-snapshot-artifacts', async (importActual) => ({
-  ...await importActual<typeof import('../../../src/services/session-snapshot-artifacts')>(),
+  ...(await importActual<typeof import('../../../src/services/session-snapshot-artifacts')>()),
   verifySessionSnapshotArtifactsForSleep: network.verify,
 }));
 vi.mock('../../../src/services/workspace-lifecycle-finalizer', () => ({
@@ -40,6 +46,8 @@ describe('automatic deletion preservation and generation fences — real SQL', (
   let env: Env;
   beforeEach(() => {
     vi.clearAllMocks();
+    network.remove.mockReset();
+    network.stopNode.mockReset();
     network.verify.mockResolvedValue(true);
     sqlite = new Database(':memory:');
     createAllSchemaTables(sqlite, schema);
@@ -83,12 +91,16 @@ describe('automatic deletion preservation and generation fences — real SQL', (
     expect(network.verify).not.toHaveBeenCalled();
   });
   it('grants preservation authority only to the completed snapshot generation', async () => {
-    sqlite.exec("UPDATE session_snapshots SET cleanup_identity_json=json_remove(cleanup_identity_json,'$.preserved'),sleep_status='stopping',sleeping_at=NULL");
-    const db = drizzle(env.DATABASE,{schema});
-    expect(await markSessionSnapshotSleeping(db,env,'chat',new Date(),'stale-capture')).toBe(false);
-    expect(await automaticDeletionPreservationAvailable(env,identity)).toBe(false);
-    expect(await markSessionSnapshotSleeping(db,env,'chat',new Date(),'capture')).toBe(true);
-    expect(await automaticDeletionPreservationAvailable(env,identity)).toBe(true);
+    sqlite.exec(
+      "UPDATE session_snapshots SET cleanup_identity_json=json_remove(cleanup_identity_json,'$.preserved'),sleep_status='stopping',sleeping_at=NULL"
+    );
+    const db = drizzle(env.DATABASE, { schema });
+    expect(await markSessionSnapshotSleeping(db, env, 'chat', new Date(), 'stale-capture')).toBe(
+      false
+    );
+    expect(await automaticDeletionPreservationAvailable(env, identity)).toBe(false);
+    expect(await markSessionSnapshotSleeping(db, env, 'chat', new Date(), 'capture')).toBe(true);
+    expect(await automaticDeletionPreservationAvailable(env, identity)).toBe(true);
   });
   it('permits a verified restored handoff while protecting missing or foreign targets', async () => {
     sqlite.exec(
@@ -103,7 +115,12 @@ describe('automatic deletion preservation and generation fences — real SQL', (
     expect(await automaticDeletionPreservationAvailable(env, identity)).toBe(true);
   });
   it('allows the same durable operation to physically delete a verified preserved source', async () => {
-    network.remove.mockResolvedValueOnce(undefined);
+    network.remove.mockImplementationOnce(async (_node, _workspace, _env, _owner, options) => {
+      expect(options).toMatchObject({
+        deletionMode: 'automatic',
+        preservationExpiresAt: '2099-01-01T00:00:00Z',
+      });
+    });
     expect(
       await attemptWorkspaceDeletion({
         env,
@@ -118,6 +135,23 @@ describe('automatic deletion preservation and generation fences — real SQL', (
       runtime_deletion_proof: 'vm_agent_confirmed',
     });
   });
+  it.each(['2000-01-01T00:00:00Z', 'invalid', ''])(
+    'protects expired or malformed preservation grant %s',
+    async (expiresAt) => {
+      sqlite.prepare('UPDATE session_snapshots SET expires_at=?').run(expiresAt);
+      expect(await automaticDeletionPreservationExpiresAt(env, identity)).toBeNull();
+      expect(
+        await attemptWorkspaceDeletion({
+          env,
+          expected: identity,
+          attempt: 1,
+          source: 'test',
+          mode: 'automatic',
+        })
+      ).toMatchObject({ status: 'retry', reason: 'preservation_unconfirmed' });
+      expect(network.remove).not.toHaveBeenCalled();
+    }
+  );
   it('retains failed artifacts and makes no network deletion or stopping claim', async () => {
     network.verify.mockResolvedValue(false);
     const result = await attemptWorkspaceDeletion({
@@ -130,6 +164,29 @@ describe('automatic deletion preservation and generation fences — real SQL', (
     expect(result).toMatchObject({ status: 'retry', reason: 'preservation_unconfirmed' });
     expect(network.remove).not.toHaveBeenCalled();
     expect(sqlite.prepare('SELECT status FROM workspaces').get()).toEqual({ status: 'sleeping' });
+  });
+  it('rechecks generation and preservation at the sleeping container physical destroy boundary', async () => {
+    sqlite.exec("UPDATE nodes SET runtime='cf-container',status='stopped'");
+    network.stopNode.mockImplementationOnce(async (_node, _user, _env, options) => {
+      expect(options.workspaceDeletion).toMatchObject({
+        workspaceId: 'ws',
+        workspaceGeneration: 'generation',
+      });
+      sqlite.exec("UPDATE workspaces SET eviction_generation='successor',status='running'");
+      await options.workspaceDeletion.beforeDestroy();
+    });
+    const result = await attemptWorkspaceDeletion({
+      env,
+      expected: { ...identity, nodeRuntime: 'cf-container' },
+      attempt: 1,
+      source: 'test',
+      mode: 'automatic',
+    });
+    expect(result).toMatchObject({ status: 'fenced' });
+    expect(network.remove).not.toHaveBeenCalled();
+    expect(
+      sqlite.prepare('SELECT status,runtime_deletion_confirmed_at FROM workspaces').get()
+    ).toEqual({ status: 'running', runtime_deletion_confirmed_at: null });
   });
   it('fences a restart on the same node and workspace ID before deletion', async () => {
     sqlite.exec("UPDATE workspaces SET eviction_generation = 'successor'");

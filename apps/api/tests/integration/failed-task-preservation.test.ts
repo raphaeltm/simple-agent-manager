@@ -370,6 +370,7 @@ describe('failed-task work preservation vertical slice', () => {
       NODE_LIFECYCLE: {
         idFromName: vi.fn(() => 'node-do-id'),
         get: vi.fn(() => ({
+          claimWorkspaceDeletionAttempt: async () => 'claimed',
           markIdle: mocks.markIdle,
           scheduleWorkspaceDeletion: mocks.scheduleWorkspaceDeletion,
         })),
@@ -988,18 +989,24 @@ describe('failed-task work preservation vertical slice', () => {
     expect(projectDataStatus).toBe('sleeping');
   });
 
-  it('keeps Archive of a failed task destructive: no sleep, immediate teardown', async () => {
-    // Control (policy e8897480): explicit archive / Complete & Delete.
+  it('retains failed-task resources when Archive cannot establish exact deletion identity', async () => {
+    // Legacy nodes without incarnation/generation cannot authorize physical teardown.
     seedFailedTask('vm');
 
-    await cleanupTerminalTaskResources(env, 'task-1', {
-      status: 'failed',
-      destructiveSessionEnd: true,
-    });
+    await expect(
+      cleanupTerminalTaskResources(env, 'task-1', {
+        status: 'failed',
+        destructiveSessionEnd: true,
+        requiredUserId: 'user-1',
+      })
+    ).rejects.toThrow('Session archive cleanup is pending');
 
     expect(snapshotRow()).toBeUndefined();
-    expect(mocks.failSession).toHaveBeenCalledOnce();
-    expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-1', env, undefined, undefined);
-    expect(order).toEqual(['project-data-fail', 'task-cleanup']);
+    expect(mocks.failSession).not.toHaveBeenCalled();
+    expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
+    expect(sqlite.prepare("SELECT status FROM nodes WHERE id = 'node-1'").pluck().get()).toBe(
+      'running'
+    );
+    expect(order).toEqual([]);
   });
 });
