@@ -103,7 +103,9 @@ function canonicalPolicies(policies: Policy[]): string {
     policies
       .map((policy) => ({
         effect: policy.effect,
-        permission_groups: policy.permission_groups.map(({ id }) => id).sort(),
+        permission_groups: policy.permission_groups
+          .map(({ id }) => id)
+          .sort((a, b) => a.localeCompare(b)),
         resources: Object.entries(policy.resources).sort(([a], [b]) => a.localeCompare(b)),
       }))
       .sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)))
