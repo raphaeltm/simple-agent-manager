@@ -55,6 +55,9 @@ export async function agentOnVm(taskMode: TaskMode, agentType = 'claude-code') {
   await seedInstallation(id, userId, { installationIdValue: id, accountName: userId });
   await seedProject(projectId, userId, id);
   await seedNode(nodeId, userId);
+  await env.DATABASE.prepare('UPDATE nodes SET runtime_incarnation_id=? WHERE id=?')
+    .bind(`incarnation-${nodeId}`, nodeId)
+    .run();
   await pauseNodeAlarms(nodeId);
   const stub = projectStub(projectId);
   await stub.ensureProjectId(projectId);
@@ -65,6 +68,9 @@ export async function agentOnVm(taskMode: TaskMode, agentType = 'claude-code') {
 
   const chatSessionId = await stub.createSession(workspaceId, 'Task', taskId, userId);
   await seedWorkspace(workspaceId, nodeId, userId, { projectId, chatSessionId });
+  await env.DATABASE.prepare('UPDATE workspaces SET eviction_generation=? WHERE id=?')
+    .bind(`generation-${workspaceId}`, workspaceId)
+    .run();
   await seedTask(taskId, projectId, userId, {
     workspaceId,
     chatSessionId,
@@ -321,7 +327,9 @@ export async function deleteSleptWorkspace(nodeId: string, taskId: string): Prom
   const stub = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(nodeId));
   await runInDurableObject(stub, async (instance, ctx) => {
     const entry = await ctx.storage.get<{ deleteAt: number }>(`ws-delete:${row!.workspace_id}`);
-    expect(entry).toBeDefined();
+    // Immediate verified-sleep cleanup may already have completed. A missing
+    // queue entry alone is never evidence of physical deletion.
+    if (!entry) return;
     const clock = vi.spyOn(Date, 'now').mockReturnValue(entry!.deleteAt + 1);
     const pending: Promise<unknown>[] = [];
     const waitUntil = vi.spyOn(ctx, 'waitUntil').mockImplementation((promise) => {
@@ -334,5 +342,17 @@ export async function deleteSleptWorkspace(nodeId: string, taskId: string): Prom
       waitUntil.mockRestore();
       clock.mockRestore();
     }
+  });
+  const proof = await env.DATABASE.prepare(
+    `SELECT node_id, eviction_generation, runtime_deletion_confirmed_at, runtime_deletion_proof
+     FROM workspaces WHERE id=?`
+  )
+    .bind(row!.workspace_id)
+    .first();
+  expect(proof, 'sleep cleanup requires durable strict physical deletion proof').toMatchObject({
+    node_id: nodeId,
+    eviction_generation: `generation-${row!.workspace_id}`,
+    runtime_deletion_confirmed_at: expect.any(String),
+    runtime_deletion_proof: 'vm_agent_confirmed',
   });
 }
