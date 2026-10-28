@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>SAM · Install in your Cloudflare account</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <header>
+      <a class="brand" href="/">SAM <span>INSTALLER</span></a
+      ><span class="badge">Prototype</span>
+    </header>
+    <main>
+      <p class="eyebrow">YOUR CLOUDFLARE ACCOUNT</p>
+      <h1>A simpler start.<br />Your infrastructure.</h1>
+      <p class="intro">
+        Connect Cloudflare and create your own installation service. No GitHub setup required.
+      </p>
+      <aside>
+        <strong>What this prototype does</strong>
+        <p>
+          Creates a small, protected Worker in your account and hands control to you. Full SAM
+          installation, builds and updates are not connected yet.
+        </p>
+      </aside>
+      <ol class="steps" aria-label="Installation progress">
+        <li id="step-connect" aria-current="step">01 <span>Connect</span></li>
+        <li id="step-account">02 <span>Choose account</span></li>
+        <li id="step-handoff">03 <span>Take control</span></li>
+      </ol>
+      <div id="message" role="status" aria-live="polite"></div>
+      <section id="connect">
+        <h2>Start with Cloudflare</h2>
+        <p>
+          Our installer temporarily receives the permissions you approve. Your Cloudflare password
+          stays with Cloudflare.
+        </p>
+        <form method="post" action="/oauth/start">
+          <button id="login" disabled>
+            Sign in with Cloudflare <span aria-hidden="true">↗</span>
+          </button>
+        </form>
+        <p class="small">
+          You’ll approve account read access and Worker deployment access. This may permit changes
+          to existing Workers in the selected account, not only SAM resources.
+        </p>
+      </section>
+      <section id="account" hidden>
+        <h2>Where should we create it?</h2>
+        <form id="install-form">
+          <label for="account-id">Cloudflare account</label
+          ><select id="account-id" required></select>
+          <p class="small">
+            Missing an account? The list shows up to 50 authorized accounts. Reconnect and select
+            the account you want on Cloudflare’s consent screen.
+          </p>
+          <label class="check"
+            ><input id="confirm" type="checkbox" required /><span
+              >Create one new <code>sam-maintenance-…</code> Worker and enable its workers.dev
+              address. Cloudflare usage charges may apply.</span
+            ></label
+          ><button id="install" type="submit">Create my installation service</button>
+        </form>
+      </section>
+      <section id="ready" hidden>
+        <h2>Your installation service is ready</h2>
+        <p>
+          It runs in your Cloudflare account. Continue to verify ownership and end this installer
+          session.
+        </p>
+        <p id="worker-name" class="resource"></p>
+        <form method="post" action="/handoff">
+          <button>Continue to my service <span aria-hidden="true">→</span></button>
+        </form>
+        <p class="small">
+          This temporary owner session expires with your installer session. The Worker remains in
+          your account until you delete it.
+        </p>
+      </section>
+      <button id="disconnect" class="secondary" hidden>Disconnect and clear session</button>
+      <div class="trust">
+        <h2>Choose who you trust</h2>
+        <p>
+          Use this hosted installer, or deploy the same open-source app yourself. The installer is
+          separate from SAM and the marketing website.
+        </p>
+        <nav>
+          <a id="source" href="#">Inspect the source ↗</a
+          ><a id="docs" href="#">Self-host the installer ↗</a
+          ><a href="/privacy.html">Permissions & privacy</a>
+        </nav>
+      </div>
+    </main>
+    <footer>No analytics. No SAM account. <span id="version"></span></footer>
+  </body>
+</html>
