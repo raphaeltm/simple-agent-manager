@@ -2,7 +2,7 @@ module github.com/workspace/vm-agent
 
 go 1.26.0
 
-toolchain go1.26.6
+toolchain go1.26.10
 
 require (
 	github.com/MicahParks/keyfunc/v3 v3.8.2
