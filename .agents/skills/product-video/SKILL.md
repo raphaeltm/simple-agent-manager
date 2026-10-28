@@ -79,6 +79,10 @@ ElevenLabs is reached through Composio. In `COMPOSIO_REMOTE_WORKBENCH`, `proxy_e
 - Upload `final.mp4`, a poster frame, `script.md`, a short post draft, and a zipped source folder to `/marketing/videos/<date>-<name>/` in the Library. Download it again and compare SHA-256 before reporting.
 - Report what changed and the measured evidence, and say plainly which judgments are machine proxies for listening.
 
+### 8. Posting to X (only after explicit approval)
+
+The Composio workbench can't read workspace files, and X needs an `s3key`. Copy only the MP4 into an empty temp dir, serve that dir with `python3 -m http.server`, `expose_port` it, download the file inside `COMPOSIO_REMOTE_WORKBENCH` with the `port_token` URL, and write it to `/home/user/` (the `/mnt/files` mount fails on large writes). Check its SHA-256, then `upload_local_file()` it for an `s3key`. Stop the server and delete the temp dir straight away. Then call `TWITTER_UPLOAD_LARGE_MEDIA` (`media_category: tweet_video`; videos up to 140 s and 512 MB), wait for `processing_info.state == succeeded`, and post with `TWITTER_CREATION_OF_A_POST` and `media_media_ids`. Reply with the post URL.
+
 ## Prerequisites
 
 - Composio ElevenLabs connection (check with `COMPOSIO_SEARCH_TOOLS`).
