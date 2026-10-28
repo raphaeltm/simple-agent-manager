@@ -93,7 +93,7 @@ describe('warm node pooling lifecycle integration', () => {
     });
 
     it('cron sweep finds stale warm nodes and calls strict resource deletion', () => {
-      expect(cleanupFile).toContain('deleteNodeResourcesStrict(node.id, node.user_id, env)');
+      expect(cleanupFile).toMatch(/deleteNodeResourcesStrict\(\s*node\.id,\s*node\.user_id,\s*env[,)\s]/);
     });
 
     it('cron sweep also enforces max auto-provisioned node lifetime', () => {

@@ -15,6 +15,7 @@ import { eq } from 'drizzle-orm';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { preservedVmRetirementActivitySql } from '../../services/preserved-vm-retirement';
 import { prepareAbsoluteLifetimeRelease } from './absolute-lifetime-preservation';
 import {
   boundedWarmPlacementClaimGuardSql,
@@ -452,7 +453,7 @@ export async function sweepIncompatibleVmAgentNodes(
   const candidates = await env.DATABASE.prepare(
     `SELECT n.id, n.user_id, n.status, n.created_at, n.agent_version,
             COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count,
-            ${LAST_WORKSPACE_ACTIVITY_SQL} as last_activity
+            COALESCE(MAX(${preservedVmRetirementActivitySql('w')}), n.created_at) as last_activity
      FROM nodes n
      LEFT JOIN workspaces w ON w.node_id = n.id
      WHERE n.status = 'running'
@@ -472,7 +473,7 @@ export async function sweepIncompatibleVmAgentNodes(
            AND aw.status IN ('running', 'creating', 'recovery')
        )
      GROUP BY n.id, n.user_id, n.status, n.created_at, n.agent_version
-     HAVING ${LAST_WORKSPACE_ACTIVITY_SQL} < ?
+     HAVING COALESCE(MAX(${preservedVmRetirementActivitySql('w')}), n.created_at) < ?
      ORDER BY last_activity ASC
      LIMIT ?`
   )
@@ -493,7 +494,9 @@ export async function sweepIncompatibleVmAgentNodes(
       last_activity: string;
     }>();
 
+  const preservedVmBudget = { remainingSources: config.workspaceSweepLimit };
   for (const node of candidates.results) {
+    if (preservedVmBudget.remainingSources <= 0) break;
     if (node.active_ws_count > 0) {
       log.info('node_cleanup.incompatible_vm_agent_skipped_active_workspaces', {
         nodeId: node.id,
@@ -507,6 +510,7 @@ export async function sweepIncompatibleVmAgentNodes(
     }
 
     const destroyed = await destroyNodeForCleanup(db, env, now.toISOString(), node, {
+      preservedVmBudget,
       logEvent: 'node_cleanup.destroying_incompatible_vm_agent',
       failureLogEvent: 'node_cleanup.incompatible_vm_agent_destroy_failed',
       successMessage: 'Destroyed idle node running incompatible VM agent build',

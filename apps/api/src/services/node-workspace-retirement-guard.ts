@@ -1,6 +1,7 @@
 import { DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
+import { type PreservedVmRetirement,preservedVmSourceSql } from './preserved-vm-retirement';
 import { boundedWarmPlacementClaimGuardSql } from './warm-placement-claims';
 
 /** Authority from the SAME durable deletion operation, never a generic retirement waiver. */
@@ -13,14 +14,17 @@ export interface ContainerWorkspaceDeletionAuthority {
 /** Logical deletion, eviction, or snapshot success never proves local bytes are gone. */
 export function workspaceArtifactsRetirementGuardSql(
   nodeAlias: string,
-  allowExactTarget = false
+  allowExactTarget = false,
+  allowPreservedVm = false
 ): string {
   const targetGuard = (alias: string) =>
-    allowExactTarget
-      ? `AND NOT (${alias}.id IS ? AND ${alias}.eviction_generation IS ?
+    allowPreservedVm
+      ? `AND NOT (${preservedVmSourceSql(alias, nodeAlias)})`
+      : allowExactTarget
+        ? `AND NOT (${alias}.id IS ? AND ${alias}.eviction_generation IS ?
         AND ${alias}.status IS 'stopping' AND ${alias}.user_id IS ${nodeAlias}.user_id
         AND ${alias}.node_id IS ${nodeAlias}.id)`
-      : '';
+        : '';
   return `AND NOT EXISTS (
     SELECT 1 FROM workspaces artifact_workspace
     WHERE artifact_workspace.node_id = ${nodeAlias}.id
@@ -36,12 +40,17 @@ export function workspaceArtifactsRetirementGuardSql(
     LEFT JOIN workspaces source_workspace ON source_workspace.id = artifact_snapshot.workspace_id
     WHERE artifact_snapshot.node_id = ${nodeAlias}.id
       ${
-        allowExactTarget
+        allowPreservedVm
           ? `AND NOT (artifact_snapshot.user_id IS ${nodeAlias}.user_id
+            AND artifact_snapshot.chat_session_id IS source_workspace.chat_session_id
+            AND artifact_snapshot.project_id IS source_workspace.project_id
+            AND ${preservedVmSourceSql('source_workspace', nodeAlias)})`
+          : allowExactTarget
+            ? `AND NOT (artifact_snapshot.user_id IS ${nodeAlias}.user_id
         AND source_workspace.id IS ? AND source_workspace.eviction_generation IS ?
         AND source_workspace.status IS 'stopping' AND source_workspace.user_id IS ${nodeAlias}.user_id
         AND source_workspace.node_id IS ${nodeAlias}.id)`
-          : ''
+            : ''
       }
       AND (artifact_snapshot.user_id IS NOT ${nodeAlias}.user_id
         OR source_workspace.id IS NULL
@@ -63,7 +72,8 @@ export async function requireNodeWorkspaceArtifactsDeleted(
     providerInstanceId: string | null;
     runtimeIncarnationId: string | null;
   },
-  workspaceDeletion?: ContainerWorkspaceDeletionAuthority
+  workspaceDeletion?: ContainerWorkspaceDeletionAuthority,
+  preservedVm?: PreservedVmRetirement
 ): Promise<void> {
   if (workspaceDeletion) {
     if (
@@ -75,6 +85,16 @@ export async function requireNodeWorkspaceArtifactsDeleted(
       throw new Error('Exact container deletion authority is incomplete');
     }
     await workspaceDeletion.beforeDestroy();
+  }
+  if (preservedVm) {
+    if (
+      workspaceDeletion ||
+      expectedRuntime?.runtime !== 'vm' ||
+      expectedRuntime.runtimeIncarnationId !== preservedVm.runtimeIncarnationId ||
+      expectedRuntime.providerInstanceId !== preservedVm.providerInstanceId
+    )
+      throw new Error('Preserved VM retirement authority does not match runtime');
+    await preservedVm.beforeDestroy();
   }
   const configured = Number.parseInt(
     env.NODE_WORKSPACE_IDLE_TIMEOUT_MS ?? env.NODE_ORPHAN_IDLE_TIMEOUT_MS ?? '',
@@ -91,7 +111,7 @@ export async function requireNodeWorkspaceArtifactsDeleted(
     SELECT id FROM nodes
     WHERE id = ? AND user_id = ?
       ${expectedRuntime ? 'AND runtime IS ? AND provider_instance_id IS ? AND runtime_incarnation_id IS ?' : ''}
-      ${workspaceArtifactsRetirementGuardSql('nodes', !!workspaceDeletion)}
+      ${workspaceArtifactsRetirementGuardSql('nodes', !!workspaceDeletion, !!preservedVm)}
       ${boundedWarmPlacementClaimGuardSql('nodes.id')}
   `
   )
@@ -113,6 +133,7 @@ export async function requireNodeWorkspaceArtifactsDeleted(
             workspaceDeletion.workspaceGeneration,
           ]
         : []),
+      ...(preservedVm ? [preservedVm.sourcesJson, preservedVm.sourcesJson] : []),
       threshold
     )
     .first<{ id: string }>();

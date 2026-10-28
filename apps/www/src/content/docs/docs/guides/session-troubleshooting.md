@@ -384,6 +384,11 @@ After a VM session saves a verified complete snapshot, SAM queues physical clean
 A new message waits for confirmed removal of the old workspace before starting its replacement.
 Failed or incomplete snapshots do not authorize physical deletion.
 
+An older VM agent may be unable to confirm workspace cleanup after a SAM update. In that case,
+SAM can retire the outdated VM once every remaining workspace has finished sleeping and its saved
+files are verified. Other active workspaces keep the VM protected. The sleeping session can wake
+on a replacement VM after the old VM's removal is confirmed.
+
 A related notice, **"SAM blocked the old sleep attempt because this workspace runtime changed."**,
 means the workspace's runtime was replaced (after a restart or rebuild, for example) while an older
 sleep attempt was finishing. SAM left the replacement alone and kept the previous checkpoint, and the

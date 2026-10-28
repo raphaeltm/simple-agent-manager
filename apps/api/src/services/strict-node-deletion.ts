@@ -23,6 +23,7 @@ import {
   requireNodeWorkspaceArtifactsDeleted,
 } from './node-workspace-retirement-guard';
 import { persistError } from './observability';
+import type { PreservedVmRetirement } from './preserved-vm-retirement';
 import {
   hasExactProviderCredentialGenerationProof,
   isExactCredentialSource,
@@ -595,6 +596,7 @@ export async function deleteNodeResourcesStrict(
     explicitPermanentDeletion?: boolean;
     expectedRuntime?: StrictNodeRuntimeIdentity;
     workspaceDeletion?: ContainerWorkspaceDeletionAuthority;
+    preservedVm?: PreservedVmRetirement;
     providerRequestContext?: ProviderRequestContext;
     requestDeadlineMs?: number;
   } = {}
@@ -629,7 +631,8 @@ export async function deleteNodeResourcesStrict(
           nodeId,
           userId,
           initialNode,
-          options.workspaceDeletion
+          options.workspaceDeletion,
+          options.preservedVm
         );
   if (!initialNode.runtimeTerminationConfirmedAt) await beforeDestroy?.();
   const node = await claimManagedNodeDeletion(db, initialNode);
