@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { NodeAgentHttpError } from '../../../src/services/node-agent';
 import { markSessionSnapshotSleeping } from '../../../src/services/session-snapshot-sleep-lifecycle';
 import {
   attemptWorkspaceDeletion,
@@ -19,7 +20,10 @@ const network = vi.hoisted(() => ({ remove: vi.fn(), verify: vi.fn(), stopNode: 
 vi.mock('../../../src/services/node-resource-lifecycle', () => ({
   stopNodeResources: network.stopNode,
 }));
-vi.mock('../../../src/services/node-agent', () => ({ deleteWorkspaceOnNode: network.remove }));
+vi.mock('../../../src/services/node-agent', async (importActual) => ({
+  ...(await importActual<typeof import('../../../src/services/node-agent')>()),
+  deleteWorkspaceOnNode: network.remove,
+}));
 vi.mock('../../../src/services/session-snapshot-artifacts', async (importActual) => ({
   ...(await importActual<typeof import('../../../src/services/session-snapshot-artifacts')>()),
   verifySessionSnapshotArtifactsForSleep: network.verify,
@@ -188,6 +192,28 @@ describe('automatic deletion preservation and generation fences — real SQL', (
       sqlite.prepare('SELECT status,runtime_deletion_confirmed_at FROM workspaces').get()
     ).toEqual({ status: 'running', runtime_deletion_confirmed_at: null });
   });
+  it('records typed HTTP409 safely without persisting or classifying the response body', async () => {
+    const body = 'Bearer response-secret password=private timeout token=do-not-log';
+    network.remove.mockRejectedValueOnce(new NodeAgentHttpError(409, body));
+    const outcome = await attemptWorkspaceDeletion({
+      env,
+      expected: identity,
+      attempt: 1,
+      source: 'test',
+      mode: 'explicit',
+    });
+    expect(outcome).toMatchObject({
+      status: 'retry',
+      diagnostic: expect.stringContaining('http_status_409'),
+    });
+    const diagnostic = (
+      sqlite.prepare('SELECT error_message FROM workspaces').get() as { error_message: string }
+    ).error_message;
+    expect(diagnostic).toContain('http_status_409');
+    for (const secret of ['response-secret', 'private', 'do-not-log', 'request_timeout'])
+      expect(diagnostic).not.toContain(secret);
+  });
+
   it('fences a restart on the same node and workspace ID before deletion', async () => {
     sqlite.exec("UPDATE workspaces SET eviction_generation = 'successor'");
     expect(

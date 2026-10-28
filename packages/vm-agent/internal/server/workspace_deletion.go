@@ -81,9 +81,10 @@ func (s *Server) handleSafeDeleteWorkspace(w http.ResponseWriter, r *http.Reques
 		writeError(w, 409, err.Error())
 		return
 	}
+	// Node-management JWTs identify the owner through their validated subject.
 	token := strings.TrimSpace(strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "))
 	claims, err := s.jwtValidator.ValidateNodeManagementToken(token, id)
-	if err != nil || identity.UserID == "" || identity.UserID != claims.UserID || identity.UserID != s.config.NodeUserID || identity.NodeID == "" || identity.NodeID != s.config.NodeID || identity.NodeRuntimeIncarnationID == "" || identity.NodeRuntimeIncarnationID != s.config.NodeRuntimeIncarnationID {
+	if err != nil || identity.UserID == "" || identity.UserID != claims.Subject || identity.UserID != s.config.NodeUserID || identity.NodeID == "" || identity.NodeID != s.config.NodeID || identity.NodeRuntimeIncarnationID == "" || identity.NodeRuntimeIncarnationID != s.config.NodeRuntimeIncarnationID {
 		writeError(w, 409, "node deletion ownership or incarnation mismatch")
 		return
 	}

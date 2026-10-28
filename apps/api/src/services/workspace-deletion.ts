@@ -8,7 +8,7 @@ import { DEFAULT_WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH } from '@simple-agent-
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { deleteWorkspaceOnNode } from './node-agent';
+import { deleteWorkspaceOnNode, NodeAgentHttpError } from './node-agent';
 import { stopNodeResources } from './node-resource-lifecycle';
 import { automaticDeletionPreservationExpiresAt } from './workspace-deletion-preservation';
 import type { FinalizeWorkspaceLifecycleClosureResult } from './workspace-lifecycle-finalizer';
@@ -147,7 +147,16 @@ function deletionFailureDiagnostic(env: Env, attempt: number, error: unknown): s
   const message = error instanceof Error ? error.message : String(error);
   const statusMatch = /(?:HTTP|status)\s+(\d{3})/i.exec(message);
   let category = 'request_failed';
-  if (/timeout|timed out|abort/i.test(`${errorName} ${message}`)) {
+  if (
+    error instanceof NodeAgentHttpError &&
+    Number.isInteger(error.statusCode) &&
+    error.statusCode >= 100 &&
+    error.statusCode <= 599
+  ) {
+    // The typed boundary supplies the status; never inspect or persist its raw
+    // response body (which may contain credentials or misleading timeout text).
+    category = `http_status_${error.statusCode}`;
+  } else if (/timeout|timed out|abort/i.test(`${errorName} ${message}`)) {
     category = 'request_timeout';
   } else if (statusMatch?.[1]) {
     category = `http_status_${statusMatch[1]}`;
