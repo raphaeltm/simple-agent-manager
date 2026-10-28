@@ -16,7 +16,7 @@ pnpm install --frozen-lockfile
 export CLOUDFLARE_API_TOKEN
 export CLOUDFLARE_ACCOUNT_ID
 export BASE_DOMAIN=example.com
-pnpm --filter @simple-agent-manager/installer deploy
+pnpm --filter @simple-agent-manager/installer run deploy
 ```
 
 The script deploys `sam-installer-self-hosted` at `https://install.example.com`, creates a private OAuth client if none exists, and uploads its client ID/secret directly as Worker secrets. Reruns preserve the client and secret. `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET` can override an existing client; configure its callback as `https://install.example.com/oauth/callback`. A failed secret write after client creation requires supplying/rotating the client secret before rerunning. Secrets are never printed or written to disk by the script.

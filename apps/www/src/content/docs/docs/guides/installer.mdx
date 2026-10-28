@@ -44,7 +44,7 @@ pnpm install --frozen-lockfile
 export CLOUDFLARE_API_TOKEN
 export CLOUDFLARE_ACCOUNT_ID
 export BASE_DOMAIN=example.com
-pnpm --filter @simple-agent-manager/installer deploy
+pnpm --filter @simple-agent-manager/installer run deploy
 ```
 
 The deployment creates the installer at `https://install.example.com`, provisions its private OAuth client, and stores the client credentials as Worker secrets. It uses its own session storage and does not share marketing analytics or SAM login sessions.
