@@ -756,3 +756,19 @@ footer a {
   background: var(--panel);
   font-size: 12px;
 }
+@media (max-width: 360px) {
+  .site-header .brand {
+    flex-shrink: 0;
+  }
+  .header-actions {
+    gap: 6px;
+  }
+  .theme-picker {
+    width: 64px;
+    font-size: 10px;
+    padding-inline: 4px;
+  }
+  .wordmark span {
+    white-space: nowrap;
+  }
+}
