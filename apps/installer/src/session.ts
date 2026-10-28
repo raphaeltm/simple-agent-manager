@@ -1,6 +1,6 @@
 import { cloudflare, revoke } from './cloudflare';
-import { maintenanceSource } from './maintenance';
-import { challenge, digest, escapeHtml, json, randomSecret } from './security';
+import { provision } from './provision';
+import { challenge, escapeHtml, json, randomSecret } from './security';
 import type { Account, Env, Session } from './types';
 
 export class InstallerSession {
@@ -155,46 +155,20 @@ export class InstallerSession {
       }
       const job = session.job;
       if (job.status === 'ready') return json({ ok: true });
-      const prefix = `/accounts/${accountId}/workers`;
-      const subdomain = await cloudflare<{ subdomain: string }>(
+      const url = await provision(
         session.token,
-        `${prefix}/subdomain`
+        accountId,
+        job.name,
+        job.key,
+        this.env.APP_ORIGIN,
+        session.expires
       );
-      if (!subdomain.subdomain || !/^[a-z0-9-]+$/.test(subdomain.subdomain))
+      if (!url)
         return json(
           { error: 'Enable your account’s workers.dev subdomain in Cloudflare, then retry.' },
           400
         );
-      const body = new FormData();
-      body.set(
-        'metadata',
-        new Blob(
-          [
-            JSON.stringify({
-              main_module: 'worker.js',
-              compatibility_date: '2026-10-01',
-              bindings: [
-                { type: 'secret_text', name: 'OWNER_KEY_HASH', text: await digest(job.key) },
-                { type: 'plain_text', name: 'INSTALLER_ORIGIN', text: this.env.APP_ORIGIN },
-                { type: 'plain_text', name: 'CLAIM_EXPIRES', text: String(session.expires) },
-              ],
-            }),
-          ],
-          { type: 'application/json' }
-        )
-      );
-      body.set(
-        'worker.js',
-        new Blob([maintenanceSource], { type: 'application/javascript+module' }),
-        'worker.js'
-      );
-      await cloudflare(session.token, `${prefix}/scripts/${job.name}`, { method: 'PUT', body });
-      await cloudflare(session.token, `${prefix}/scripts/${job.name}/subdomain`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled: true }),
-      });
-      job.url = `https://${job.name}.${subdomain.subdomain}.workers.dev`;
+      job.url = url;
       job.status = 'ready';
       await this.ctx.storage.put('session', session);
       return json({ ok: true });

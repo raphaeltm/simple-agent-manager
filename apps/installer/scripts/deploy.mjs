@@ -40,7 +40,11 @@ const config = JSON.parse(await readFile('wrangler.json', 'utf8'));
 config.name = name;
 config.account_id = account;
 config.workers_dev = false;
-config.routes = [{ pattern: `install.${domain}`, custom_domain: true }];
+// A hostname-specific route takes precedence over SAM's existing wildcard API route.
+config.routes = [
+  { pattern: `install.${domain}`, custom_domain: true },
+  { pattern: `install.${domain}/*`, zone_name: domain },
+];
 config.vars.APP_ORIGIN = origin;
 config.vars.BUILD_SHA = process.env.GITHUB_SHA || 'self-hosted';
 if (process.env.SOURCE_URL) config.vars.SOURCE_URL = process.env.SOURCE_URL;

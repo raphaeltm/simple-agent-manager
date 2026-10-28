@@ -8,7 +8,7 @@ Public user instructions: [Installer guide](https://www.simple-agent-manager.org
 
 ## Deploy your own installer
 
-Requires Node 22+, pnpm 9.15.9, a Cloudflare account with Workers Paid (SQLite Durable Objects), an active domain in that account, and an API token with Account Settings Read, Workers Scripts Edit, OAuth Client Write, and the zone permissions needed for Workers Custom Domains. Use the smallest account/zone scope possible. Consult Cloudflare's current permission names when creating the token.
+Requires Node 22+, pnpm 9.15.9, a Cloudflare account with Workers Paid (SQLite Durable Objects), an active domain in that account, and an API token with Account Settings Read, Workers Scripts Edit, OAuth Client Read/Write, and the zone permissions needed for Workers Custom Domains and Workers Routes. Use the smallest account/zone scope possible. Consult Cloudflare's current permission names when creating the token.
 
 ```sh
 pnpm install --frozen-lockfile
@@ -38,3 +38,5 @@ Variables: `APP_ORIGIN` (exact origin), `SESSION_TTL_SECONDS` (60–3600, defaul
 Authorization codes use state and PKCE. The server stores tokens in an isolated expiring DO session, never localStorage. Browser gets a random HttpOnly session cookie. Account IDs are constrained to the provider's authorized account list; jobs bind to one account and use stable generated resource names. No arbitrary API proxy or arbitrary callback destination exists. Callback consumption precedes exchange. Sessions expire on access and via alarm, with best-effort token revocation on disconnect/handoff/expiry. Cloudflare authorization can also be revoked in the owner's profile.
 
 The bootstrap Worker accepts a short-lived owner credential by POST from the installer origin. Its secret stores only the credential hash. This is temporary prototype access, not a durable admin identity. Created Workers are deliberately retained; users delete them in Cloudflare. No claim of automatic rollback or zero provider logging is made. Application observability is disabled to avoid persisting callback URLs. A hosted operator can change code; separate deployment is not trustlessness.
+
+Deployment adds a hostname-specific `install.${BASE_DOMAIN}/*` Worker route alongside the custom domain, so SAM’s wildcard API route cannot intercept installer traffic. The staging workflow also provisions a temporary bootstrap Worker, checks anonymous rejection and authenticated ownership handoff, and deletes it in a finally block. This check uses the deployment token; it does not substitute for real OAuth consent verification.

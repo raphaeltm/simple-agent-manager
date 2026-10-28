@@ -56,6 +56,14 @@ jobs:
           name: installer-browser-evidence
           path: .codex/tmp/playwright-screenshots/installer-*.png
           retention-days: 14
+      - name: Verify and clean up staging bootstrap
+        if: (github.event_name == 'workflow_dispatch' && inputs.environment == 'staging') || (github.event_name != 'workflow_dispatch' && github.ref != 'refs/heads/main')
+        run: pnpm --filter @simple-agent-manager/installer exec tsx scripts/staging-smoke.ts
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          INSTALLER_ENVIRONMENT: staging
       - name: Deploy isolated installer and configure OAuth
         run: pnpm --filter @simple-agent-manager/installer run deploy
         env:
