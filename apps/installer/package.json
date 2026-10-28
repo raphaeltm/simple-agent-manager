@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "build": "wrangler deploy --dry-run --outdir dist",
-    "deploy": "node scripts/deploy.mjs",
+    "dev": "node scripts/build-scene.mjs && wrangler dev",
+    "build": "node scripts/build-scene.mjs && wrangler deploy --dry-run --outdir dist",
+    "deploy": "node scripts/build-scene.mjs && node scripts/deploy.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src tests",
     "test": "vitest run",

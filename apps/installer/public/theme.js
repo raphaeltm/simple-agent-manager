@@ -15,16 +15,23 @@
   apply();
   system.addEventListener('change', apply);
   document.addEventListener('DOMContentLoaded', () => {
-    const picker = document.getElementById('theme');
-    picker.value = preference;
-    picker.addEventListener('change', () => {
-      preference = picker.value;
-      apply();
-      try {
-        localStorage.setItem('starlight-theme', preference);
-      } catch {
-        /* Theme still works. */
-      }
-    });
+    const buttons = document.querySelectorAll('[data-theme-value]');
+    const refresh = () =>
+      buttons.forEach((button) =>
+        button.setAttribute('aria-pressed', String(button.dataset.themeValue === preference))
+      );
+    refresh();
+    buttons.forEach((button) =>
+      button.addEventListener('click', () => {
+        preference = button.dataset.themeValue;
+        apply();
+        refresh();
+        try {
+          localStorage.setItem('starlight-theme', preference);
+        } catch {
+          /* Theme still works. */
+        }
+      })
+    );
   });
 })();

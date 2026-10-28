@@ -87,6 +87,14 @@ const output = '../../.codex/tmp/playwright-screenshots';
         }
         if (scenario === 'empty' || scenario === 'unconfigured')
           await expect(page.locator(scenario === 'empty' ? '#install' : '#login')).toBeDisabled();
+        if (scenario === 'unconfigured') {
+          await expect(page.locator('#message')).toContainText('not available');
+          await expect(page.getByRole('link', { name: 'See setup options →' })).toHaveAttribute(
+            'href',
+            '/self-host.html'
+          );
+          await expect(page.locator('#explore')).toHaveAttribute('href', '/self-host.html');
+        }
         if (scenario === 'authorization')
           await expect(page.locator('#message')).toContainText('cancelled');
         if (scenario === 'error') {
@@ -114,13 +122,15 @@ const output = '../../.codex/tmp/playwright-screenshots';
       await expect(page.locator('#connect')).toBeVisible();
       await expect(page.locator('#step-connect')).toHaveAttribute('aria-current', 'step');
       await expect(page.locator('.steps .completed')).toHaveCount(0);
-      await page.locator('#theme').selectOption(theme === 'light' ? 'dark' : 'light');
+      await page
+        .getByRole('button', { name: theme === 'light' ? 'Dark theme' : 'Light theme' })
+        .click();
       await page.reload();
       await expect(page.locator('html')).toHaveAttribute(
         'data-theme',
         theme === 'light' ? 'dark' : 'light'
       );
-      await page.locator('#theme').selectOption('auto');
+      await page.getByRole('button', { name: 'System theme' }).click();
       await page.goto(baseUrl + '/privacy.html');
       if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth))
         throw new Error(`Privacy overflow ${label}`);

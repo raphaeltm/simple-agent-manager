@@ -72,3 +72,30 @@ PR preflight formatting fixed and locally passes. Root dependency-evidence entry
 added for the inherited @cloudflare/workers-types dev dependency; check passes.
 CodeRabbit remains not requested because OAuth staging gate is not ready. PR has
 needs-human-review for that credential blocker, not for CodeRabbit silence.
+
+## Second design pass — independent critique, 2026-10-28
+
+User rejected the first branded revision as a cheap knockoff and explicitly asked
+for repeated design iterations plus a separate screenshot reviewer. Local reviewer
+`/root/design_critique` compared homepage and installer desktop/mobile/light/dark.
+Baseline failed: borrowed colors/type without the homepage's composition/depth.
+
+Considered deployment studio, cloud blueprint, and focused portal. Selected studio
+with architectural preview: actual shared homepage floor renderer (compiled locally,
+no new dependency or runtime website coupling), precise header/icon/theme chrome,
+restrained lighting, account→protected Worker preview behind an upright setup panel.
+Iteration1 critique: mobile CTA too low, floor too bright, preview plane oversized,
+illegible rotated label, unavailable-state alternative unclear. All addressed in
+iteration2: CTA fully visible600–650px in375×667, quiet mask beneath copy, shortened
+preview, removed rotated label, proximal unavailable notice with guide action.
+
+Independent reviewer final verdict after all8 configured/unconfigured desktop/mobile
+light/dark screenshots: "The final installer and homepage look consistent and show
+the same level of design care." Scores hierarchy4, interaction4, mobile4, consistency5.
+No remaining visual blocker. Explicitly not claiming an external award.
+62-screenshot browser audit passes320/375/1280px, both themes. Keyboard audit passes
+skip→setup→sign-in, disclosure Enter, theme keyboard selection/aria-pressed/persistence,
+reduced-motion scene mount, no JS errors. 15 unit tests, lint/typecheck/build pass.
+Iteration artifacts: .codex/tmp/playwright-screenshots/iteration-{1,2}/.
+Next: one final staging deployment and live screenshot review by the same reviewer.
+Known inherited OAuth GET403 still prevents real consent and merge; unchanged scope.

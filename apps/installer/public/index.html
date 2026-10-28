@@ -20,8 +20,14 @@
     <link rel="stylesheet" href="/glass.css" />
     <link rel="stylesheet" href="/style.css" />
     <script src="/app.js" defer></script>
+    <script type="module" src="/scene.js"></script>
   </head>
-  <body>
+  <body class="installer-page">
+    <div class="installer-environment" aria-hidden="true">
+      <div class="ambient-light"></div>
+      <div class="installer-floor" data-installer-field></div>
+      <div class="floor-haze"></div>
+    </div>
     <a class="skip-link" href="#setup">Skip to setup</a>
     <header class="site-header sam-glass sam-glass--chrome sam-glass-rim">
       <a
@@ -29,15 +35,72 @@
         href="https://www.simple-agent-manager.org/"
         aria-label="SAM — simple agent manager home"
       >
-        <img src="/sam-head.png" width="42" height="42" alt="" />
+        <img src="/brand-icon.png" width="30" height="30" alt="" />
         <span class="wordmark">SAM<span>simple agent manager</span></span>
       </a>
       <nav class="header-actions" aria-label="Installer navigation">
-        <select id="theme" class="theme-picker" aria-label="Color theme">
-          <option value="auto">System</option>
-          <option value="light">Light</option>
-          <option value="dark">Dark</option></select
-        ><a class="header-privacy" href="/privacy.html"
+        <div class="theme-controls" role="group" aria-label="Color theme">
+          <button
+            type="button"
+            class="theme-option"
+            data-theme-value="auto"
+            aria-label="System theme"
+            title="System"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              aria-hidden="true"
+            >
+              <rect x="2" y="3" width="20" height="14" rx="2" />
+              <path d="M8 21h8m-4-4v4" />
+            </svg></button
+          ><button
+            type="button"
+            class="theme-option"
+            data-theme-value="light"
+            aria-label="Light theme"
+            title="Light"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="4" />
+              <path
+                d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.4 1.4m11.2 11.2L19 19M5 19l1.4-1.4M17.6 6.4L19 5"
+              />
+            </svg></button
+          ><button
+            type="button"
+            class="theme-option"
+            data-theme-value="dark"
+            aria-label="Dark theme"
+            title="Dark"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              aria-hidden="true"
+            >
+              <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" />
+            </svg>
+          </button>
+        </div>
+        <a class="header-privacy" href="/privacy.html"
           >Permissions & privacy <span aria-hidden="true">↗</span></a
         >
       </nav>
@@ -46,41 +109,63 @@
       <div class="intro-layout">
         <div class="hero-copy">
           <span class="badge"
-            ><span class="status-dot" aria-hidden="true"></span>Open source. Your cloud.</span
+            ><span class="status-dot" aria-hidden="true"></span>Open Source & Self-Hosted</span
           >
-          <h1>Your agents.<br />Your cloud.<br /><span class="gradient-text">Your call.</span></h1>
+          <h1>Your cloud.<br /><span class="gradient-text">Ready for SAM.</span></h1>
           <p class="intro">
-            A home for your AI coding agents, on infrastructure you control. Let’s start with
-            Cloudflare.
+            <span class="desktop-intro">Give your agents a place of their own. </span>Start with an
+            installation service in your Cloudflare account.
           </p>
-          <div class="ownership" aria-hidden="true">
-            <div class="node-field">
-              <i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          <a id="explore" class="hero-start" href="#setup"
+            ><span id="explore-label">Set up your cloud</span> <span aria-hidden="true">↗</span></a
+          >
+          <div class="ownership-facts">
+            <div>
+              <span class="fact-number">01</span>
+              <p>
+                Your infrastructure.<small>The service lives in your Cloudflare account.</small>
+              </p>
             </div>
-            <div class="cloud-node sam-glass sam-glass-rim">
-              <svg
-                viewBox="0 0 24 24"
-                width="24"
-                height="24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="1.5"
-              >
-                <path d="M7 18a5 5 0 1 1 1-9.9A6 6 0 0 1 20 10a4 4 0 0 1-1 8Z" /></svg
-              ><span>Your Cloudflare account</span>
+            <div>
+              <span class="fact-number">02</span>
+              <p>Your access.<small>Approve permissions, then take ownership.</small></p>
             </div>
-            <div class="service-node sam-glass sam-glass-rim">
-              <img src="/sam-head.png" width="34" height="34" alt="" /><span
-                >Installation service<small>Created in your account</small></span
-              ><span class="status-dot"></span>
-            </div>
-            <span class="ownership-note">Built on your infrastructure. Handed over to you.</span>
           </div>
+          <p class="hero-meta">No GitHub setup <span>·</span> No SAM account</p>
         </div>
         <div class="setup-column" id="setup" tabindex="-1">
+          <div class="installation-plane sam-glass sam-glass-rim" aria-hidden="true">
+            <div class="plane-chrome">
+              <span class="window-dots"><i></i><i></i><i></i></span
+              ><span>Your installation · a preview</span><span>↗</span>
+            </div>
+            <div class="account-route">
+              <div class="cloud-account">
+                <svg width="34" height="34" viewBox="0 0 48 48" fill="none">
+                  <path
+                    d="M12 34a9 9 0 1 1 2-17.8A12 12 0 0 1 38 20a7 7 0 0 1-2 14Z"
+                    stroke="currentColor"
+                    stroke-width="2"
+                  /></svg
+                ><span>Your Cloudflare<small>ACCOUNT</small></span>
+              </div>
+              <div class="route-line"><i></i><span>→</span></div>
+              <div class="service-object">
+                <img src="/brand-icon.png" width="38" height="38" alt="" /><span
+                  >Installation service<small>PROTECTED WORKER</small></span
+                >
+              </div>
+            </div>
+            <div class="plane-spec">
+              <span>sam-maintenance-…</span><span>Hosted in your account</span>
+            </div>
+          </div>
           <div class="setup-card sam-glass sam-glass-rim">
             <div class="card-heading">
-              <span>Set up your cloud</span><span class="badge prototype">Prototype</span>
+              <span class="console-title"
+                ><span class="window-dots" aria-hidden="true"><i></i><i></i><i></i></span> SAM /
+                SETUP</span
+              ><span class="badge prototype">Prototype</span>
             </div>
             <ol class="steps" aria-label="Setup progress">
               <li id="step-connect" aria-current="step">
@@ -90,12 +175,11 @@
               <li id="step-handoff"><span class="step-number">3</span><span>Handoff</span></li>
             </ol>
             <div class="setup-content">
-              <div id="message" role="status" aria-live="polite"></div>
               <section id="connect" aria-labelledby="connect-title">
                 <h2 id="connect-title">Start with Cloudflare</h2>
                 <p>
-                  Sign in, choose your account, and create your installation service. No GitHub
-                  setup needed.
+                  Connect Cloudflare to create a protected installation service. No GitHub setup
+                  needed.
                 </p>
                 <form method="post" action="/oauth/start">
                   <button id="login" disabled>
@@ -126,16 +210,6 @@
                     <path d="M5 7V4a3 3 0 0 1 6 0v3" /></svg
                   >Your password stays with Cloudflare.
                 </p>
-                <details class="permission-details">
-                  <summary>What access am I granting?</summary>
-                  <p>
-                    Our installer temporarily receives account read and Worker deployment
-                    permissions. These may allow changes to existing Workers in the selected
-                    account, not only SAM resources. You approve access on Cloudflare before
-                    continuing.
-                  </p>
-                  <a href="/privacy.html">Read the permissions & privacy details →</a>
-                </details>
               </section>
               <section id="account" hidden aria-labelledby="account-title">
                 <h2 id="account-title">Choose your account</h2>
@@ -175,6 +249,16 @@
                 </p>
               </section>
               <button id="disconnect" class="secondary" hidden>Disconnect and clear session</button>
+              <div id="message" role="status" aria-live="polite"></div>
+              <details class="permission-details">
+                <summary>What access am I granting?</summary>
+                <p>
+                  Our installer temporarily receives account read and Worker deployment permissions.
+                  These may allow changes to existing Workers in the selected account, not only SAM
+                  resources. You approve access on Cloudflare before continuing.
+                </p>
+                <a href="/privacy.html">Read the permissions & privacy details →</a>
+              </details>
               <noscript
                 ><p class="notice">
                   Enable JavaScript to connect your account and use the guided setup.
@@ -182,10 +266,10 @@
               >
             </div>
             <aside class="prototype-note">
-              <strong>A first step, not the full install.</strong>
+              <strong>A small first step. You keep the keys.</strong>
               <p>
-                This prototype creates a protected installation service and hands it over to you.
-                Full SAM installation, builds, and updates aren’t connected yet.
+                Creates a protected installation service. Full SAM installation, builds, and updates
+                aren’t connected yet.
               </p>
             </aside>
           </div>
@@ -196,11 +280,8 @@
       </div>
       <div class="trust">
         <div>
-          <h2>Open source. Open to inspection.</h2>
-          <p>
-            Use this hosted installer, or run the same app yourself. You choose who handles your
-            temporary Cloudflare access.
-          </p>
+          <h2>Nothing behind the curtain.</h2>
+          <p>Public source. Temporary access. Host it here, or host it yourself.</p>
         </div>
         <nav aria-label="Source and self-hosting">
           <a id="source" href="https://github.com/raphaeltm/simple-agent-manager"
