@@ -18,7 +18,10 @@ import {
   resolveEnvironmentLabel,
   resolveInstallationId,
 } from './node-provider-labels';
-import { requireNodeWorkspaceArtifactsDeleted } from './node-workspace-retirement-guard';
+import {
+  type ContainerWorkspaceDeletionAuthority,
+  requireNodeWorkspaceArtifactsDeleted,
+} from './node-workspace-retirement-guard';
 import { persistError } from './observability';
 import {
   hasExactProviderCredentialGenerationProof,
@@ -591,6 +594,7 @@ export async function deleteNodeResourcesStrict(
     /** Only the explicit permanent operator deletion adapter may discard local workspace data. */
     explicitPermanentDeletion?: boolean;
     expectedRuntime?: StrictNodeRuntimeIdentity;
+    workspaceDeletion?: ContainerWorkspaceDeletionAuthority;
     providerRequestContext?: ProviderRequestContext;
     requestDeadlineMs?: number;
   } = {}
@@ -614,9 +618,19 @@ export async function deleteNodeResourcesStrict(
     };
   }
 
+  if (options.workspaceDeletion && !options.expectedRuntime) {
+    throw new Error('Exact container deletion requires expected runtime identity');
+  }
   const beforeDestroy = options.explicitPermanentDeletion
     ? undefined
-    : () => requireNodeWorkspaceArtifactsDeleted(env, nodeId, userId, initialNode);
+    : () =>
+        requireNodeWorkspaceArtifactsDeleted(
+          env,
+          nodeId,
+          userId,
+          initialNode,
+          options.workspaceDeletion
+        );
   if (!initialNode.runtimeTerminationConfirmedAt) await beforeDestroy?.();
   const node = await claimManagedNodeDeletion(db, initialNode);
 

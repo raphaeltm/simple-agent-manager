@@ -9,7 +9,10 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { deleteDNSRecord } from './dns';
-import { requireNodeWorkspaceArtifactsDeleted } from './node-workspace-retirement-guard';
+import {
+  type ContainerWorkspaceDeletionAuthority,
+  requireNodeWorkspaceArtifactsDeleted,
+} from './node-workspace-retirement-guard';
 import { deleteNodeResourcesStrict, type StrictNodeRuntimeIdentity } from './strict-node-deletion';
 import { WORKSPACE_DELETION_DIAGNOSTIC_PREFIX } from './workspace-deletion';
 import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
@@ -33,7 +36,10 @@ export async function stopNodeResources(
   nodeId: string,
   userId: string,
   env: Env,
-  options: { expectedRuntime?: StrictNodeRuntimeIdentity } = {}
+  options: {
+    expectedRuntime?: StrictNodeRuntimeIdentity;
+    workspaceDeletion?: ContainerWorkspaceDeletionAuthority;
+  } = {}
 ): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
   const now = new Date().toISOString();
@@ -86,7 +92,13 @@ export async function stopNodeResources(
   }
 
   if (!node.runtimeTerminationConfirmedAt) {
-    await requireNodeWorkspaceArtifactsDeleted(env, nodeId, userId, node);
+    await requireNodeWorkspaceArtifactsDeleted(
+      env,
+      nodeId,
+      userId,
+      node,
+      options.workspaceDeletion
+    );
   }
 
   // A managed stop is terminal only after the strict provider/container boundary
@@ -118,6 +130,7 @@ export async function stopNodeResources(
   try {
     strictDeletion = await deleteNodeResourcesStrict(nodeId, userId, env, {
       cleanupDns: false,
+      workspaceDeletion: options.workspaceDeletion,
       expectedRuntime: {
         userId: node.userId,
         runtime: node.runtime,

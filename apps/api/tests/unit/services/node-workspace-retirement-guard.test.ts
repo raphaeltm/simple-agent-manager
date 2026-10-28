@@ -168,6 +168,95 @@ describe('automatic node retirement physical artifact gate — real SQL', () => 
     ).rejects.toThrow('reincarnated');
     expect(destroyContainer).not.toHaveBeenCalled();
   });
+  function exactContainerAuthority() {
+    return {
+      cleanupDns: false,
+      expectedRuntime: {
+        userId: 'owner',
+        runtime: 'cf-container',
+        providerInstanceId: null,
+        runtimeIncarnationId: 'incarnation',
+      },
+      workspaceDeletion: {
+        workspaceId: 'ws',
+        workspaceGeneration: 'generation',
+        beforeDestroy: vi.fn().mockResolvedValue(undefined),
+      },
+    };
+  }
+  function stoppingSource() {
+    workspace('stopping');
+    sqlite.prepare("UPDATE workspaces SET eviction_generation = 'generation'").run();
+    sqlite
+      .prepare(
+        `INSERT INTO session_snapshots (id, workspace_id, node_id, user_id, status)
+      VALUES ('snapshot', 'ws', 'node', 'owner', 'available')`
+      )
+      .run();
+  }
+  it('allows exact sleeping-container source deletion with preservation authority rechecked', async () => {
+    stoppingSource();
+    const authority = exactContainerAuthority();
+    await deleteNodeResourcesStrict('node', 'owner', env, authority);
+    expect(authority.workspaceDeletion.beforeDestroy).toHaveBeenCalledTimes(2);
+    expect(destroyContainer).toHaveBeenCalledExactlyOnceWith(env, 'node');
+  });
+  it.each(['generation', 'owner', 'extra-workspace', 'unknown-snapshot', 'placement'])(
+    'rejects %s mismatch beside an authorized container target',
+    async (mismatch) => {
+      stoppingSource();
+      if (mismatch === 'generation')
+        sqlite.prepare("UPDATE workspaces SET eviction_generation = 'successor'").run();
+      if (mismatch === 'owner') sqlite.prepare("UPDATE workspaces SET user_id = 'unknown'").run();
+      if (mismatch === 'extra-workspace')
+        sqlite
+          .prepare(
+            `INSERT INTO workspaces
+      (id, node_id, user_id, status) VALUES ('other', 'node', 'owner', 'deleted')`
+          )
+          .run();
+      if (mismatch === 'unknown-snapshot')
+        sqlite
+          .prepare(
+            `INSERT INTO session_snapshots
+      (id, workspace_id, node_id, user_id) VALUES ('other-snapshot', 'unknown', 'node', 'owner')`
+          )
+          .run();
+      if (mismatch === 'placement')
+        sqlite
+          .prepare(
+            `INSERT INTO tasks
+      (id, status, claimed_warm_node_id, claimed_warm_node_at)
+      VALUES ('claim', 'in_progress', 'node', ?)`
+          )
+          .run(new Date().toISOString());
+      await expect(
+        deleteNodeResourcesStrict('node', 'owner', env, exactContainerAuthority())
+      ).rejects.toThrow('unconfirmed workspace artifacts');
+      expect(destroyContainer).not.toHaveBeenCalled();
+    }
+  );
+  it('refuses loss of preservation authority immediately before container destruction', async () => {
+    stoppingSource();
+    const authority = exactContainerAuthority();
+    authority.workspaceDeletion.beforeDestroy
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('preservation no longer available'));
+    await expect(deleteNodeResourcesStrict('node', 'owner', env, authority)).rejects.toThrow(
+      'preservation no longer available'
+    );
+    expect(destroyContainer).not.toHaveBeenCalled();
+  });
+  it('never uses exact container authority to force VM retirement', async () => {
+    stoppingSource();
+    sqlite.prepare("UPDATE nodes SET runtime = 'vm'").run();
+    const authority = exactContainerAuthority();
+    authority.expectedRuntime.runtime = 'vm';
+    await expect(deleteNodeResourcesStrict('node', 'owner', env, authority)).rejects.toThrow(
+      'container deletion authority is incomplete'
+    );
+    expect(destroyContainer).not.toHaveBeenCalled();
+  });
   it('explicit permanent operator deletion retains its destructive authority', async () => {
     workspace('running');
     await deleteNodeResourcesStrict('node', 'owner', env, {
