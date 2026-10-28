@@ -26,8 +26,11 @@ try {
     await new Promise((resolve) => setTimeout(resolve, 2000));
   }
   if (!ready) throw new Error('Bootstrap health check timed out');
-  if ((await fetch(url, { signal: AbortSignal.timeout(5000) })).status !== 401)
-    throw new Error('Unauthenticated bootstrap access was not rejected');
+  const anonymous = await fetch(url, { signal: AbortSignal.timeout(5000), redirect: 'manual' });
+  if (anonymous.status !== 401)
+    throw new Error(
+      `Unauthenticated bootstrap expected401, received${anonymous.status}; content-type=${anonymous.headers.get('content-type')}; cf-ray=${anonymous.headers.get('cf-ray')}`
+    );
   const claim = await fetch(`${url}/claim`, {
     signal: AbortSignal.timeout(10000),
     method: 'POST',
