@@ -715,4 +715,48 @@ describe('incident trigger sweep', () => {
       queue_state: 'pending',
     });
   });
+  it.each(['claimed', 'dispatched'])(
+    'resubmits an unfinished sleeping %s owner through the real sweep',
+    async (state) => {
+      const { sqlite, env } = setup();
+      env.PLATFORM_FEEDBACK_INCIDENT_AGENT_LEASE_TTL_MS = '1000';
+      seedIncident(sqlite);
+      const submitter = vi.fn(async () => ({
+        taskId: 'replacement',
+        sessionId: 'replacement-session',
+        branchName: 'sam/replacement',
+      }));
+      sqlite.exec(`INSERT INTO tasks (id, project_id, user_id, title, status, priority, task_mode, dispatch_depth, created_by, created_at, updated_at)
+      VALUES ('sleeper', 'feedback-project', 'owner-1', 'unfinished triage', 'sleeping', 0, 'task', 0, 'owner-1', '2026-08-21T00:00:00Z', '2026-08-21T00:00:00Z')`);
+      sqlite
+        .prepare(
+          `UPDATE platform_feedback_triages SET queue_state = ?, dispatched_task_id = 'sleeper',
+      dispatch_lease_token = 'old-dispatch', dispatch_lease_expires_at = 4000,
+      incident_claimed_by_task_id = ?, incident_claim_token = ?, incident_claim_expires_at = ?`
+        )
+        .run(
+          state,
+          state === 'claimed' ? 'sleeper' : null,
+          state === 'claimed' ? 'old-claim' : null,
+          state === 'claimed' ? 4000 : null
+        );
+      const result = await runIncidentTriggerSweep(env, { now: () => 5000, submitter });
+      expect(result.fired).toBe(1);
+      expect(submitter).toHaveBeenCalledTimes(1);
+      expect(
+        sqlite
+          .prepare(
+            'SELECT queue_state, dispatched_task_id, dispatch_attempts FROM platform_feedback_triages'
+          )
+          .get()
+      ).toEqual({
+        queue_state: 'dispatched',
+        dispatched_task_id: 'replacement',
+        dispatch_attempts: 1,
+      });
+      expect(sqlite.prepare("SELECT status FROM tasks WHERE id = 'sleeper'").get()).toEqual({
+        status: 'sleeping',
+      });
+    }
+  );
 });
