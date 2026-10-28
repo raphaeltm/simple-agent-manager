@@ -17,9 +17,9 @@ Raphaël: “Fix it. Ship the fix. Skip staging.” (2026-10-28). Staging waived
 - Data flow: backlog summary -> incident MCP exact lookup/claim -> claim/dispatch lease -> scheduled reclamation -> selection/reservation.
 
 ## Checklist
-- [ ] Full IDs in generated prompts and usable evidence references; behavioral round trip regression.
-- [ ] Bound unfinished claims and sleeping unclaimed dispatches with existing attempt budget, preserve active owners and fencing.
-- [ ] Regression tests with real SQLite for expired claims, dispatches, concurrent/stale ownership, retry exhaustion and live-owner preservation.
+- [x] Full IDs in generated prompts and usable evidence references; behavioral round trip regression.
+- [x] Bound unfinished claims and sleeping unclaimed dispatches with existing attempt budget, preserve active owners and fencing.
+- [x] Regression tests with real SQLite for expired claims, dispatches, concurrent/stale ownership, retry exhaustion and live-owner preservation.
 - [ ] Update affected documentation and postmortem; validate lint/typecheck/tests/build.
 - [ ] Local specialist reviews and task-completion validation.
 - [ ] PR, CI, best-effort CodeRabbit, merge, deploy, production smoke.
@@ -32,3 +32,6 @@ What broke: automated triage repeated or stalled without classification.
 Root cause: display-only signature abbreviation used as a tool identifier; claim and dispatch expiry used inconsistent retry/liveness rules.
 Why missed: tests did not consume prompt IDs through real lookup/claim or exercise repeated unfinished handoffs.
 Process fix: cross-boundary round-trip and multi-cycle lease regression tests in this PR, following existing rules23/47/58/62.
+
+## Validation evidence
+Six regression cases failed on original implementation (23 existing passed). After implementation, 76 tests across incident handling, triage and scheduled trigger pass. Active claim renewal preserves CAS tokens and original max-age bound. Claim reclamation is bounded by existing reclaimLimit and runs once per scheduled pass (not once per trigger); each candidate uses at most one update after one bounded SELECT. Dispatch candidates remain bounded by existing reclaimLimit; new sleeping-owner checks are indexed task lookups, no remote I/O.
