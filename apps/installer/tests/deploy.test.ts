@@ -71,6 +71,7 @@ describe('deployment configuration and reruns', () => {
     const config = JSON.parse(capture.writes[0]!);
     expect(config.vars.APP_ORIGIN).toBe('https://install.sammy.party');
     expect(config.routes[0].pattern).toBe('install.sammy.party');
+    expect(config.routes[1]).toEqual({ pattern: 'install.sammy.party/*', zone_name: 'sammy.party' });
     expect(capture.writes.join('')).not.toContain('SECRET');
     expect(capture.writes.join('')).not.toContain('DEPLOY_TOKEN');
     expect(
