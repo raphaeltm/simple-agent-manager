@@ -1,4 +1,3 @@
-import { preservedVmRetirementActivitySql } from '../../services/preserved-vm-retirement';
 /**
  * Node-destroying phases of the cleanup sweep.
  *
@@ -16,6 +15,7 @@ import { eq } from 'drizzle-orm';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { preservedVmRetirementActivitySql } from '../../services/preserved-vm-retirement';
 import { prepareAbsoluteLifetimeRelease } from './absolute-lifetime-preservation';
 import {
   boundedWarmPlacementClaimGuardSql,

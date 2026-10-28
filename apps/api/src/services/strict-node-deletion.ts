@@ -1,4 +1,3 @@
-import type { PreservedVmRetirement } from './preserved-vm-retirement';
 import {
   hasAmbiguousLabel,
   type ProviderRequestContext,
@@ -24,6 +23,7 @@ import {
   requireNodeWorkspaceArtifactsDeleted,
 } from './node-workspace-retirement-guard';
 import { persistError } from './observability';
+import type { PreservedVmRetirement } from './preserved-vm-retirement';
 import {
   hasExactProviderCredentialGenerationProof,
   isExactCredentialSource,

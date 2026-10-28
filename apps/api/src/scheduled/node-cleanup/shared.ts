@@ -1,9 +1,3 @@
-import {
-  preparePreservedVmRetirement,
-  preservedVmRetirementActivitySql,
-  type PreservedVmRetirement,
-  type PreservedVmRetirementBudget,
-} from '../../services/preserved-vm-retirement';
 /**
  * Shared types, config resolution, and destroy helpers for the node cleanup sweep.
  *
@@ -28,6 +22,12 @@ import { cleanupNodeProvenanceSql } from '../../services/node-teardown-provenanc
 import { workspaceArtifactsRetirementGuardSql } from '../../services/node-workspace-retirement-guard';
 import { deleteNodeResourcesStrict } from '../../services/nodes';
 import { persistError } from '../../services/observability';
+import {
+  preparePreservedVmRetirement,
+  type PreservedVmRetirement,
+  preservedVmRetirementActivitySql,
+  type PreservedVmRetirementBudget,
+} from '../../services/preserved-vm-retirement';
 import { boundedWarmPlacementClaimGuardSql } from '../../services/warm-placement-claims';
 import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
 import { type CleanupConfig, parseMs } from './config';
@@ -342,6 +342,9 @@ export async function destroyNodeForCleanup(
       return 'failed';
     }
   }
+  // A partially spent sweep budget is not a defect in this candidate. Keep it due
+  // for the next tick rather than synchronizing its backoff with unsafe predecessors.
+  if (options.preservedVmBudget?.exhausted) return 'skipped';
   const claimed = await claimNodeForCleanup(env, node, nowIso, {
     preservedVm,
     allowActiveWorkspaces: options.allowActiveWorkspaces,

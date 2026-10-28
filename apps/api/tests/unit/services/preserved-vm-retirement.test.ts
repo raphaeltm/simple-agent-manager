@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { sweepIncompatibleVmAgentNodes } from '../../../src/scheduled/node-cleanup/node-phases';
@@ -10,8 +11,8 @@ import {
   resolveCleanupConfig,
 } from '../../../src/scheduled/node-cleanup/shared';
 import { preparePreservedVmRetirement } from '../../../src/services/preserved-vm-retirement';
-import { deleteNodeResourcesStrict } from '../../../src/services/strict-node-deletion';
 import { buildSessionSnapshotR2Key } from '../../../src/services/session-snapshot-artifacts';
+import { deleteNodeResourcesStrict } from '../../../src/services/strict-node-deletion';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const boundary = vi.hoisted(() => ({ remove: vi.fn(), resolve: vi.fn(), finalize: vi.fn() }));
@@ -260,5 +261,21 @@ describe('legacy VM retirement: real SQL, snapshot verifier and strict provider 
       cleanup_backoff_until: expect.any(String),
     });
     expect(boundary.remove).not.toHaveBeenCalled();
+  });
+  it('leaves a valid larger candidate due when earlier invalid work partially spends the budget', async () => {
+    secondNode();
+    source('extra');
+    sqlite.exec("UPDATE workspaces SET node_id='next-node' WHERE id='extra'");
+    sqlite.exec(
+      "UPDATE session_snapshots SET node_id='next-node',sleeping_at='2001-01-01T00:00:00.000Z',cleanup_identity_json=json_set(cleanup_identity_json,'$.nodeId','next-node') WHERE workspace_id='extra'"
+    );
+    env.WORKSPACE_CLEANUP_SWEEP_LIMIT = '2';
+    sqlite.exec("UPDATE session_snapshots SET status='failed' WHERE workspace_id='ws'");
+    expect((await sweep()).incompatibleDestroyed).toBe(0);
+    expect(
+      sqlite.prepare("SELECT cleanup_backoff_until FROM nodes WHERE id='next-node'").get()
+    ).toEqual({ cleanup_backoff_until: null });
+    expect((await sweep()).incompatibleDestroyed).toBe(1);
+    expect(boundary.remove).toHaveBeenCalledExactlyOnceWith('next-server');
   });
 });

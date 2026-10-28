@@ -9,6 +9,7 @@ import { automaticDeletionPreservationExpiresAt } from './workspace-deletion-pre
 
 export interface PreservedVmRetirementBudget {
   remainingSources: number;
+  exhausted?: boolean;
 }
 
 export interface PreservedVmRetirement {
@@ -80,7 +81,13 @@ export async function preparePreservedVmRetirement(
     .from(schema.workspaces)
     .where(eq(schema.workspaces.nodeId, nodeId))
     .limit(limit + 1);
-  if (workspaces.length > limit) return undefined;
+  if (workspaces.length > limit) {
+    if (budget && limit < configuredLimit) {
+      budget.exhausted = true;
+      budget.remainingSources = 0;
+    }
+    return undefined;
+  }
   if (budget) budget.remainingSources -= workspaces.length;
   const sources = [];
   for (const workspace of workspaces) {

@@ -1,7 +1,7 @@
 import { DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
-import { preservedVmSourceSql, type PreservedVmRetirement } from './preserved-vm-retirement';
+import { type PreservedVmRetirement,preservedVmSourceSql } from './preserved-vm-retirement';
 import { boundedWarmPlacementClaimGuardSql } from './warm-placement-claims';
 
 /** Authority from the SAME durable deletion operation, never a generic retirement waiver. */
