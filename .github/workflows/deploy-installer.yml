@@ -12,6 +12,11 @@ on:
         type: choice
         options: [staging, production]
         default: staging
+      mode:
+        description: 'Installer capability mode (preserve keeps the currently deployed mode and consent scopes)'
+        type: choice
+        options: [preserve, bootstrap, full]
+        default: preserve
 
 permissions:
   contents: read
@@ -71,6 +76,8 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
           INSTALLER_ENVIRONMENT: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
+          INSTALLER_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'preserve' }}
+          OAUTH_REGISTRATION_TOKEN: ${{ secrets.OAUTH_REGISTRATION_TOKEN }}
       - name: Verify deployed version
         env:
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}

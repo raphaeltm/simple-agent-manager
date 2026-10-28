@@ -257,13 +257,36 @@ export class InstallerSession {
       if (!accounts.some((account) => account.id === accountId))
         return json({ error: 'Choose the original authorized account' }, 403);
       const stub = this.env.SESSIONS.get(this.env.SESSIONS.idFromString(receipt));
-      return stub.fetch(
-        new Request('https://session/cleanup-with-grant', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ accountId, token: session.token }),
-        })
+      // Do not let cross-session cleanup hold this actor's queue indefinitely:
+      // simultaneous A→B and B→A requests can otherwise form a circular wait.
+      const timeoutMs = Math.min(
+        this.limits().reserve,
+        session.expires - Date.now(),
+        session.tokenExpires - Date.now()
       );
+      if (timeoutMs <= 0) return json({ error: 'Sign in again to finish cleanup.' }, 401);
+      const controller = new AbortController();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        return await Promise.race([
+          stub.fetch(
+            new Request('https://session/cleanup-with-grant', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ accountId, token: session.token }),
+              signal: controller.signal,
+            })
+          ),
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(() => {
+              controller.abort();
+              reject(new Error('Cleanup transport deadline exceeded'));
+            }, timeoutMs);
+          }),
+        ]);
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+      }
     }
     if (path === '/status') {
       if (!session.accounts) {

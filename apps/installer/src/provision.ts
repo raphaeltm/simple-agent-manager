@@ -22,8 +22,42 @@ export async function provision(
   const cloudflare = <T>(token: string, path: string, init: RequestInit = {}) =>
     cloudflareRequest<T>(token, path, { ...init, signal });
   const prefix = `/accounts/${accountId}/workers`;
-  const subdomain = await cloudflare<{ subdomain: string }>(token, `${prefix}/subdomain`);
-  if (!subdomain.subdomain || !/^[a-z0-9-]+$/.test(subdomain.subdomain)) return null;
+  let subdomain: { subdomain: string };
+  try {
+    subdomain = await cloudflare<{ subdomain: string }>(token, `${prefix}/subdomain`);
+  } catch (error) {
+    if (!(error instanceof CloudflareError) || error.status !== 404) throw error;
+    subdomain = { subdomain: '' };
+  }
+  if (typeof subdomain.subdomain !== 'string')
+    throw new Error('Invalid account workers.dev response');
+  const approved = installation?.config.workersDev;
+  if (
+    approved &&
+    (!['create', 'preserve'].includes(approved.action) ||
+      !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(approved.subdomain))
+  )
+    throw new Error('Invalid approved workers.dev target');
+  if (subdomain.subdomain) {
+    if (!/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(subdomain.subdomain))
+      throw new Error('Invalid account workers.dev response');
+    if (approved && subdomain.subdomain !== approved.subdomain)
+      throw new Error('Account workers.dev changed; review the installation again');
+  } else {
+    if (!installation) return null; // Existing bootstrap-only mode remains bounded.
+    if (!approved || approved.action !== 'create')
+      throw new Error('Review and approve workers.dev initialization first');
+    // PUT can rename account addresses. Execute only on confirmed absence and
+    // only for the exact previewed target; never rename an existing address.
+    await cloudflare(token, `${prefix}/subdomain`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subdomain: approved.subdomain }),
+    });
+    subdomain = await cloudflare<{ subdomain: string }>(token, `${prefix}/subdomain`);
+    if (subdomain.subdomain !== approved.subdomain)
+      throw new Error('Account workers.dev initialization not confirmed');
+  }
   const identity = await digest(key);
   let exists = false;
   try {

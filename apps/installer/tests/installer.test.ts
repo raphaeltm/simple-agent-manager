@@ -57,7 +57,10 @@ function authorized(values: Map<string, unknown>) {
     accounts: [{ id: accountId, name: 'My account' }],
   } satisfies Session);
 }
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
 describe('authorization and boundaries', () => {
   it('uses PKCE, consumes the callback before exchange and rejects replay', async () => {
     const { call } = fixture();
@@ -447,3 +450,82 @@ it.each([false, true])(
     expect(f.values.has('session')).toBe(false);
   }
 );
+
+it('bounds cross-session cleanup and releases the queue for status and a successful retry', async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  authorized(f.values);
+  f.env.OAUTH_CLEANUP_RESERVE_SECONDS = '30';
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => Response.json({ success: true, result: [{ id: accountId }] }))
+  );
+  let request: Request | undefined;
+  const transport = vi.fn((incoming: Request) => {
+    request = incoming;
+    return new Promise<Response>(() => {});
+  });
+  f.env.SESSIONS = {
+    idFromString: (id: string) => id,
+    get: () => ({ fetch: transport }),
+  } as unknown as DurableObjectNamespace;
+  const stalled = f.call('/reconcile-cleanup', { receipt: 'd'.repeat(64), accountId });
+  const queuedStatus = f.call('/status');
+  await vi.advanceTimersByTimeAsync(30000);
+  expect((await stalled).status).toBe(502);
+  expect(request?.signal.aborted).toBe(true);
+  expect((await queuedStatus).status).toBe(200);
+  transport.mockImplementation(async () => Response.json({ ok: true }));
+  expect((await f.call('/reconcile-cleanup', { receipt: 'd'.repeat(64), accountId })).status).toBe(
+    200
+  );
+});
+
+it('breaks circular cross-session cleanup waits without blocking either actor indefinitely', async () => {
+  vi.useFakeTimers();
+  const a = fixture(),
+    b = fixture();
+  Object.assign(b.ctx, { id: { toString: () => 'd'.repeat(64) } });
+  authorized(a.values);
+  authorized(b.values);
+  a.env.OAUTH_CLEANUP_RESERVE_SECONDS = b.env.OAUTH_CLEANUP_RESERVE_SECONDS = '30';
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => Response.json({ success: true, result: [{ id: accountId }] }))
+  );
+  a.env.SESSIONS = b.env.SESSIONS = {
+    idFromString: (id: string) => id,
+    get: (id: string) => ({
+      fetch: (request: Request) => (id === 'd'.repeat(64) ? b.session : a.session).fetch(request),
+    }),
+  } as unknown as DurableObjectNamespace;
+  const requests = [
+    a.call('/reconcile-cleanup', { receipt: 'd'.repeat(64), accountId }),
+    b.call('/reconcile-cleanup', { receipt: 'e'.repeat(64), accountId }),
+  ];
+  await vi.advanceTimersByTimeAsync(30000);
+  const responses = await Promise.all(requests);
+  expect(responses.some((response) => response.status === 502)).toBe(true);
+  expect((await a.call('/status')).status).toBe(200);
+  expect((await b.call('/status')).status).toBe(200);
+});
+
+it('ends cross-session forwarding at grant expiry even when the cleanup reserve is longer', async () => {
+  vi.useFakeTimers();
+  const f = fixture();
+  authorized(f.values);
+  const stored = f.values.get('session') as Session;
+  stored.tokenExpires = Date.now() + 5000;
+  f.env.OAUTH_CLEANUP_RESERVE_SECONDS = '30';
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async () => Response.json({ success: true, result: [{ id: accountId }] }))
+  );
+  f.env.SESSIONS = {
+    idFromString: (id: string) => id,
+    get: () => ({ fetch: () => new Promise<Response>(() => {}) }),
+  } as unknown as DurableObjectNamespace;
+  const stalled = f.call('/reconcile-cleanup', { receipt: 'd'.repeat(64), accountId });
+  await vi.advanceTimersByTimeAsync(5000);
+  expect((await stalled).status).toBe(502);
+});

@@ -12,10 +12,12 @@ inputs=$(node scripts/deploy/installer-runtime-identity.mjs inputs . "$SAM_SOURC
 base="$root/runtime-inputs/$inputs"
 # Keep S3 credentials out of subprocess argv and provider/tool output.
 [[ "$R2_ACCESS_KEY_ID" =~ ^[a-f0-9]{32}$ && "$R2_SECRET_ACCESS_KEY" =~ ^[a-f0-9]{64}$ ]]
-install -m 0600 /dev/null /sam/job/r2-curl.conf
-printf 'user = "%s:%s"\n' "$R2_ACCESS_KEY_ID" "$R2_SECRET_ACCESS_KEY" > /sam/job/r2-curl.conf
-trap 'rm -f /sam/job/r2-curl.conf /sam/job/r2-put-response' EXIT
-transport=(curl --config /sam/job/r2-curl.conf --silent --show-error --proto '=https' --max-time 600 --aws-sigv4 'aws:amz:auto:s3')
+mkdir -p /sam/private
+chmod 700 /sam/private
+install -m 0600 /dev/null /sam/private/r2-curl.conf
+printf 'user = "%s:%s"\n' "$R2_ACCESS_KEY_ID" "$R2_SECRET_ACCESS_KEY" > /sam/private/r2-curl.conf
+trap 'rm -f /sam/private/r2-curl.conf /sam/job/r2-put-response' EXIT
+transport=(curl --config /sam/private/r2-curl.conf --silent --show-error --proto '=https' --max-time 600 --aws-sigv4 'aws:amz:auto:s3')
 # Compare-and-create every cache/association object; never replace accepted bytes.
 immutable_put() {
   local file=$1 url=$2 status
