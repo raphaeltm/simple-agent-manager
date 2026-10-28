@@ -5,9 +5,9 @@ import { type drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { stopNodeResources } from './node-resource-lifecycle';
 import { handOffEmptyWorkspaceNode } from './node-warm-handoff';
 import { deleteSessionSnapshotState } from './session-snapshots';
+import { retireConfirmedContainerWorkspaceNode } from './workspace-confirmed-container-retirement';
 import {
   attemptWorkspaceDeletion,
   loadWorkspaceDeletionSnapshot,
@@ -265,6 +265,26 @@ export async function cleanupWorkspaceForDeletion(
   });
 
   if (outcome.status === 'confirmed') {
+    if (workspace.nodeId && expected.nodeRuntime === 'cf-container' && !runtimeAlreadyTerminated) {
+      try {
+        await retireConfirmedContainerWorkspaceNode(env, expected);
+      } catch (error) {
+        // Retain both the physical-proof tombstone and the SAME durable attempt.
+        // The bounded queue retries retirement using this captured incarnation,
+        // including for direct CF nodes that have no task-provenance sweep.
+        await lifecycleStub?.scheduleWorkspaceDeletion(workspace.nodeId, workspace.id, userId, {
+          retryAfterMs: workspaceDeletionRetryBaseMs(env),
+          expected,
+          lastError: 'Workspace physical deletion confirmed; container retirement pending',
+        });
+        log.warn('workspace.confirmed_container_retirement_deferred', {
+          workspaceId: workspace.id,
+          nodeId: workspace.nodeId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return outcome;
+      }
+    }
     await finishConfirmedWorkspaceCleanup(
       db,
       env,
@@ -273,26 +293,6 @@ export async function cleanupWorkspaceForDeletion(
       userId,
       deleteConfirmedRow
     );
-    if (workspace.nodeId && expected.nodeRuntime === 'cf-container' && !runtimeAlreadyTerminated) {
-      try {
-        await stopNodeResources(workspace.nodeId, userId, env, {
-          expectedRuntime: {
-            userId: expected.nodeUserId ?? userId,
-            runtime: expected.nodeRuntime,
-            providerInstanceId: expected.nodeProviderInstanceId,
-            runtimeIncarnationId: expected.nodeRuntimeIncarnationId,
-          },
-        });
-      } catch (error) {
-        // A sibling/placement still owns compute, or teardown must be retried by
-        // the normal node reconciler. Source physical deletion remains confirmed.
-        log.warn('workspace.confirmed_container_retirement_deferred', {
-          workspaceId: workspace.id,
-          nodeId: workspace.nodeId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      }
-    }
     if (workspace.nodeId) {
       // Archive and delete end most conversations; the node they leave empty must reach
       // NodeLifecycle now rather than wait for the cleanup sweep's backstop.

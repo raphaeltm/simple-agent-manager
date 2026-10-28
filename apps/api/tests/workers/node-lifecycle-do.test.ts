@@ -1200,6 +1200,102 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     ).toBe('explicit');
   });
 
+  it.each([false, true])(
+    'retries confirmed source retirement after failure with reincarnation=%s',
+    async (reincarnated) => {
+      const nodeId = `nl-cf-retirement-retry-${reincarnated}`;
+      const wsId = `ws-cf-retirement-retry-${reincarnated}`;
+      await seedTestNode(nodeId);
+      await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'stopped' });
+      await env.DATABASE.prepare(
+        "UPDATE nodes SET runtime='cf-container',status='running' WHERE id=?"
+      )
+        .bind(nodeId)
+        .run();
+      const expected = await loadWorkspaceDeletionIdentity(env.DATABASE, wsId);
+      const stub = getStub(nodeId);
+      expect(
+        await stub.claimWorkspaceDeletionAttempt(nodeId, wsId, TEST_USER_ID, expected!, 'explicit')
+      ).toBe('claimed');
+      await env.DATABASE.prepare(
+        "UPDATE workspaces SET status='deleted',runtime_deletion_confirmed_at=?,runtime_deletion_proof='vm_agent_confirmed' WHERE id=?"
+      )
+        .bind(new Date().toISOString(), wsId)
+        .run();
+      let destroys = 0;
+      await runInDurableObject(stub, async (instance) => {
+        const mutableEnv = instance.env as unknown as Env;
+        mutableEnv.CF_CONTAINER_ENABLED = 'true';
+        mutableEnv.VM_AGENT_CONTAINER = {
+          idFromName: () => nodeId,
+          get: () => ({
+            destroyForUser: async () => {
+              destroys++;
+              if (destroys === 1) throw new Error('transient container destroy');
+            },
+          }),
+        } as unknown as Env['VM_AGENT_CONTAINER'];
+        const entry = await instance.ctx.storage.get<PendingWorkspaceDeletion>(`ws-delete:${wsId}`);
+        await putIndexedWorkspaceDeletion(instance.ctx.storage, {
+          ...entry!,
+          deleteAt: Date.now() - 1,
+        });
+        await instance.alarm();
+      });
+      await vi.waitFor(async () => {
+        expect(destroys).toBe(1);
+        const pending = await runInDurableObject(stub, async (instance) =>
+          instance.ctx.storage.get<PendingWorkspaceDeletion>(`ws-delete:${wsId}`)
+        );
+        expect(pending?.lastError).toContain('retirement pending');
+        expect(
+          await env.DATABASE.prepare(
+            'SELECT runtime_deletion_confirmed_at FROM workspaces WHERE id=?'
+          )
+            .bind(wsId)
+            .first()
+        ).not.toBeNull();
+      });
+      if (reincarnated)
+        await env.DATABASE.prepare(
+          "UPDATE nodes SET runtime_incarnation_id='successor-incarnation',status='running' WHERE id=?"
+        )
+          .bind(nodeId)
+          .run();
+      await runInDurableObject(stub, async (instance) => {
+        const entry = await instance.ctx.storage.get<PendingWorkspaceDeletion>(`ws-delete:${wsId}`);
+        await putIndexedWorkspaceDeletion(instance.ctx.storage, {
+          ...entry!,
+          deleteAt: Date.now() - 1,
+        });
+        await instance.alarm();
+      });
+      if (reincarnated) {
+        await vi.waitFor(async () => {
+          expect(destroys).toBe(1);
+          expect((await getNodeFromD1(nodeId))?.status).toBe('running');
+          expect(
+            (
+              await runInDurableObject(stub, async (instance) =>
+                instance.ctx.storage.get<PendingWorkspaceDeletion>(`ws-delete:${wsId}`)
+              )
+            )?.deadLetteredAt
+          ).toEqual(expect.any(Number));
+        });
+        return;
+      }
+      await vi.waitFor(async () => {
+        expect(destroys).toBe(2);
+        expect((await getNodeFromD1(nodeId))?.status).toBe('deleted');
+        expect(
+          await runInDurableObject(stub, async (instance) =>
+            instance.ctx.storage.get(`ws-delete:${wsId}`)
+          )
+        ).toBeUndefined();
+      });
+    }
+  );
+
   it('reports an exact duplicate deletion claim as the same retained attempt', async () => {
     const nodeId = 'nl-test-duplicate-delete-claim-001';
     const wsId = 'ws-duplicate-delete-claim-001';

@@ -2,6 +2,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { getNodeAgentBackgroundRequestTimeoutMs } from '../services/node-agent';
 import { persistError } from '../services/observability';
+import { retireConfirmedContainerWorkspaceNode } from '../services/workspace-confirmed-container-retirement';
 import {
   attemptWorkspaceDeletion,
   loadWorkspaceDeletionSnapshot,
@@ -541,6 +542,7 @@ export class NodeLifecycleWorkspaceDeletionQueue {
     expected: WorkspaceDeletionIdentity,
     attempt: number
   ): Promise<void> {
+    let physicalDeletionConfirmed = false;
     try {
       const outcome = await attemptWorkspaceDeletion({
         env: this.env as unknown as Env,
@@ -551,6 +553,8 @@ export class NodeLifecycleWorkspaceDeletionQueue {
         requestTimeoutMs: getNodeAgentBackgroundRequestTimeoutMs(this.env),
       });
       if (outcome.status === 'confirmed') {
+        physicalDeletionConfirmed = true;
+        await retireConfirmedContainerWorkspaceNode(this.env as unknown as Env, expected);
         await this.deleteExact(key, claimId);
         log.info('node_lifecycle.workspace_auto_deleted', {
           workspaceId: entry.workspaceId,
@@ -595,7 +599,9 @@ export class NodeLifecycleWorkspaceDeletionQueue {
       });
     } catch (error) {
       await this.updateExactClaim(key, claimId, {
-        lastError: 'workspace deletion attempt failed before classification',
+        lastError: physicalDeletionConfirmed
+          ? 'Workspace physical deletion confirmed; container retirement pending'
+          : 'workspace deletion attempt failed before classification',
         deleteAt: Date.now() + workspaceDeletionRetryDelayMs(this.env, attempt),
       });
       log.error('node_lifecycle.workspace_deletion_failed', {
