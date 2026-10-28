@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
-	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 // Initialize the configured base one directory at a time. Every open is
@@ -15,37 +16,37 @@ func createOwnedWorkspaceDirectory(base, id string) (uint64, uint64, error) {
 	if !filepath.IsAbs(base) || filepath.Clean(base) != base || base == "/" || id == "" || id == "." || id == ".." || strings.ContainsAny(id, "/\\") {
 		return 0, 0, errors.New("unsafe workspace base or identifier")
 	}
-	flags := syscall.O_RDONLY | syscall.O_DIRECTORY | syscall.O_NOFOLLOW | syscall.O_CLOEXEC
-	parent, err := syscall.Open("/", flags, 0)
+	flags := unix.O_RDONLY | unix.O_DIRECTORY | unix.O_NOFOLLOW | unix.O_CLOEXEC
+	parent, err := unix.Open("/", flags, 0)
 	if err != nil {
 		return 0, 0, err
 	}
-	defer func() { _ = syscall.Close(parent) }()
+	defer func() { _ = unix.Close(parent) }()
 	for _, part := range strings.Split(strings.TrimPrefix(base, "/"), "/") {
-		next, err := syscall.Openat(parent, part, flags, 0)
-		if errors.Is(err, syscall.ENOENT) {
-			if err := syscall.Mkdirat(parent, part, 0755); err != nil && !errors.Is(err, syscall.EEXIST) {
+		next, err := unix.Openat(parent, part, flags, 0)
+		if errors.Is(err, unix.ENOENT) {
+			if err := unix.Mkdirat(parent, part, 0755); err != nil && !errors.Is(err, unix.EEXIST) {
 				return 0, 0, fmt.Errorf("initialize workspace base: %w", err)
 			}
-			next, err = syscall.Openat(parent, part, flags, 0)
+			next, err = unix.Openat(parent, part, flags, 0)
 		}
 		if err != nil {
 			return 0, 0, fmt.Errorf("open workspace base without symlinks: %w", err)
 		}
-		_ = syscall.Close(parent)
+		_ = unix.Close(parent)
 		parent = next
 	}
 	// Exclusive creation distinguishes SAM-created roots from unknown directories.
-	if err := syscall.Mkdirat(parent, id, 0755); err != nil {
+	if err := unix.Mkdirat(parent, id, 0755); err != nil {
 		return 0, 0, err
 	}
-	child, err := syscall.Openat(parent, id, flags, 0)
+	child, err := unix.Openat(parent, id, flags, 0)
 	if err != nil {
 		return 0, 0, err
 	}
-	defer syscall.Close(child)
-	var identity syscall.Stat_t
-	if err := syscall.Fstat(child, &identity); err != nil {
+	defer unix.Close(child)
+	var identity unix.Stat_t
+	if err := unix.Fstat(child, &identity); err != nil {
 		return 0, 0, err
 	}
 	root := filepath.Join(base, id)
