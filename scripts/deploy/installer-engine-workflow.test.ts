@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
+import { LEGACY_CI_DIRECT_SECRETS } from './installer-engine-ci';
 
 interface Step {
   name?: string;
@@ -105,14 +106,14 @@ describe('shared deployment workflow routing', () => {
     const required = [
       ...new Set([...manifest.matchAll(/secrets\.([A-Z_0-9]+)/g)].map((match) => match[1])),
     ].sort();
-    const supplied = [...privateJson.matchAll(/toJSON\(secrets\.([A-Z_0-9]+)\)/g)]
+    const supplied = [...privateJson.matchAll(/toJSON\(secrets\.([A-Z_0-9]+) \|\| ''\)/g)]
       .map((match) => match[1])
       .sort();
-    expect(supplied).toEqual(required);
+    expect(supplied).toEqual([...new Set([...required, ...LEGACY_CI_DIRECT_SECRETS])].sort());
     expect(
       JSON.parse(
         privateJson.replace(
-          /\$\{\{ toJSON\(secrets\.[A-Z_0-9]+\) \}\}/g,
+          /\$\{\{ toJSON\(secrets\.[A-Z_0-9]+ \|\| ''\) \}\}/g,
           JSON.stringify('quote"\nsecret')
         )
       )
