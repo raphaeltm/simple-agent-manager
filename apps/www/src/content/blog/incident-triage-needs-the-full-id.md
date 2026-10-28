@@ -7,7 +7,7 @@ tags: ["ai-agents", "cloudflare-workers", "d1", "typescript", "reliability"]
 excerpt: "An incident reference is only useful if an agent can use it. We fixed a broken ID handoff and made unfinished triage recover without looping forever."
 ---
 
-SAM routes reports about software problems to coding agents for investigation. This week we found two ways that workflow could get stuck: an incident ID shown in an agent's prompt was shortened so the tools could not find it, and expired work could be retried forever or left owned by a session that had gone to sleep. We fixed both in the same recovery path.
+SAM routes reports about software problems to coding agents for investigation. This week we found two ways that workflow could get stuck: an incident ID shown in an agent's prompt was shortened so the tools could not find it, and expired work could be retried forever or left owned by a task that had gone to sleep. We fixed both in the same recovery path.
 
 The useful lesson is simple: identifiers and ownership rules have to survive every handoff in an automated workflow.
 
@@ -63,6 +63,8 @@ This incident queue is an internal SAM example, but the design applies to task r
 4. Bound the amount of recovery work in a single scheduled pass.
 
 The fix is in [PR #2462](https://github.com/raphaeltm/simple-agent-manager/pull/2462). It adds regression coverage that takes the ID from the rendered prompt through lookup and claim, and exercises repeated unfinished attempts against real SQLite-backed tests.
+
+If you build an agent workflow, trace one identifier from the first prompt all the way to the tool call, then test what happens when the owner sleeps before finishing. Those two checks catch a surprising number of handoff bugs.
 
 ---
 
