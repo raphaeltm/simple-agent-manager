@@ -97,10 +97,15 @@ $('disconnect').addEventListener('click', async () => {
     $('docs').href = config.docsUrl;
     $('version').textContent = `Build ${config.sha.slice(0, 12)}`;
     $('login').disabled = !config.configured;
-    if (!config.configured)
-      message(
-        'Cloudflare sign-in is not configured on this installer yet. See the self-hosting guide for setup.'
-      );
+    if (!config.configured) {
+      message('Cloudflare sign-in is not available on this preview yet.');
+      const guide = document.createElement('a');
+      guide.href = config.docsUrl;
+      guide.textContent = 'See setup options →';
+      $('message').append(' ', guide);
+      $('explore').href = config.docsUrl;
+      $('explore-label').textContent = 'Explore setup options';
+    }
     if (new URLSearchParams(location.search).has('error')) {
       message(
         'Cloudflare authorization was cancelled or could not be completed. Please sign in again.'

@@ -19,16 +19,73 @@
   <body>
     <header class="site-header sam-glass sam-glass--chrome sam-glass-rim">
       <a class="brand" href="/" aria-label="SAM installer home"
-        ><img src="/sam-head.png" width="42" height="42" alt="" /><span class="wordmark"
+        ><img src="/brand-icon.png" width="30" height="30" alt="" /><span class="wordmark"
           >SAM<span>simple agent manager</span></span
         ></a
       >
       <nav class="header-actions" aria-label="Installer navigation">
-        <select id="theme" class="theme-picker" aria-label="Color theme">
-          <option value="auto">System</option>
-          <option value="light">Light</option>
-          <option value="dark">Dark</option></select
-        ><a href="/">← Setup</a>
+        <div class="theme-controls" role="group" aria-label="Color theme">
+          <button
+            type="button"
+            class="theme-option"
+            data-theme-value="auto"
+            aria-label="System theme"
+            title="System"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              aria-hidden="true"
+            >
+              <rect x="2" y="3" width="20" height="14" rx="2" />
+              <path d="M8 21h8m-4-4v4" />
+            </svg></button
+          ><button
+            type="button"
+            class="theme-option"
+            data-theme-value="light"
+            aria-label="Light theme"
+            title="Light"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="4" />
+              <path
+                d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.4 1.4m11.2 11.2L19 19M5 19l1.4-1.4M17.6 6.4L19 5"
+              />
+            </svg></button
+          ><button
+            type="button"
+            class="theme-option"
+            data-theme-value="dark"
+            aria-label="Dark theme"
+            title="Dark"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              aria-hidden="true"
+            >
+              <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" />
+            </svg>
+          </button>
+        </div>
+        <a href="/">← Setup</a>
       </nav>
     </header>
     <main class="privacy-main">

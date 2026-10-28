@@ -96,3 +96,6 @@ apps/web/test-results/
 # Standalone installer deployment state
 apps/installer/.wrangler-deploy.json
 apps/installer/.dev.vars
+
+# Compiled shared installer scene (generated before dev/build/deploy)
+apps/installer/public/scene/

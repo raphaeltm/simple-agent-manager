@@ -48,3 +48,9 @@ shared glass material. Static copies keep the installer independently deployable
 `public/fonts/Chillax-Variable.woff2` and `public/sam-head.png` come from
 `apps/www/public/`, and `public/glass.css` comes from `packages/ui/src/glass/glass.css`.
 When those source assets change, refresh the copies and visually compare both sites.
+
+The installer scene uses the **actual** shared glass node renderer from
+`packages/ui/src/glass/`, compiled by `scripts/build-scene.mjs` before dev/build/deploy.
+Generated browser modules live in gitignored `public/scene/`; no runtime request goes
+to the marketing site. The floor is a still composition (including reduced motion),
+and the tilted account-to-service panel is explicitly labelled as a preview.
