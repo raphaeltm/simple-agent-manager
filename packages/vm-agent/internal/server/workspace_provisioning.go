@@ -97,6 +97,8 @@ func workspaceRuntimeRequiresGitToken(runtime *WorkspaceRuntime) bool {
 	}
 }
 
+// Ordinary provisioning acquires lifecycle ownership after host readiness. A
+// restore already holds this ownership for its complete filesystem lifetime.
 func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *WorkspaceRuntime) (recovery bool, resultErr error) {
 	if runtime == nil {
 		return false, fmt.Errorf("workspace runtime is required")
@@ -105,15 +107,28 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 	defer func() {
 		s.finishLifecycleTimings(timings, "workspace", runtime.ID, s.runtimeCallbackToken(runtime), resultErr)
 	}()
+
 	if err := s.waitForSystemProvisioning(ctx); err != nil {
 		return false, err
 	}
-
 	lock := s.workspaceLifecycleLock(runtime.ID)
 	if err := lock.Lock(ctx); err != nil {
 		return false, err
 	}
 	defer lock.Unlock()
+	return s.provisionWorkspaceRuntimeWithLifecycleLockHeld(ctx, runtime, timings)
+}
+
+// Caller MUST hold workspaceLifecycleLock(runtime.ID) until this returns. The
+// restore entry point retains that same lock through HOME/WIP and agent restore.
+func (s *Server) provisionWorkspaceRuntimeWithLifecycleLockHeld(ctx context.Context, runtime *WorkspaceRuntime, timings *lifecycleTimings) (recovery bool, resultErr error) {
+	if runtime == nil {
+		return false, fmt.Errorf("workspace runtime is required")
+	}
+	if err := s.waitForSystemProvisioning(ctx); err != nil {
+		return false, err
+	}
+
 	if err := s.requireNoWorkspaceDeletion(runtime.ID); err != nil {
 		return false, err
 	}
