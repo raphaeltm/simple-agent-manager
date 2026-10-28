@@ -22,8 +22,8 @@ independent deployment. Supports system/light/dark; prototype outcome stays expl
       interrupted setup, unavailable OAuth, errors, create/disconnect, theme persistence
 - [x] Local typecheck, lint, 12 unit tests, dry-run build
 - [x] 56 browser screenshots and actual cross-origin handoff fixture
-- [ ] Final screenshot review and staging UI deployment check
-- [ ] PR with screenshot/review evidence
+- [x] Final screenshot review and staging UI deployment check
+- [x] PR with screenshot/review evidence
 
 Local screenshot evidence: .codex/tmp/playwright-screenshots/installer-*.png.
 Initial screenshot review found mobile headline/CTA placement and missing light
@@ -60,3 +60,15 @@ main/apps/installer404 and installer public guide URL returning the homepage.
 Fix: source pinned to deployed SHA; local branded public self-host guide provides
 usable instructions during the unmerged preview, with deployed revision checkout.
 DOCS_URL remains overridable. Guide included in mobile/desktop/light/dark audit.
+
+Final staged application revision: aeb7a018d4a2890ec700de2a894f05311c70032b;
+run40722497098 passed all15 unit tests, typecheck/lint,62 browser fixture captures,
+and real bootstrap provisioning/anonymous401/handoff/cleanup. It deployed assets,
+then failed on the known OAuth GET403 (code10000). Final live Playwright audit:
+18 captures,320/375/1280px in both themes for connect/privacy/self-host; no JS errors
+or overflow. Source link HTTP200, guide includes correct revision checkout. Live
+screenshots reviewed; sign-in correctly disabled. No production deployment/merge.
+PR preflight formatting fixed and locally passes. Root dependency-evidence entry
+added for the inherited @cloudflare/workers-types dev dependency; check passes.
+CodeRabbit remains not requested because OAuth staging gate is not ready. PR has
+needs-human-review for that credential blocker, not for CodeRabbit silence.
