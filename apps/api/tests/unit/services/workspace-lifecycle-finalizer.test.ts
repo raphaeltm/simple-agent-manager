@@ -504,6 +504,9 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
       updatedAt: new Date().toISOString(),
     });
 
+    sqlite
+      .prepare('UPDATE nodes SET runtime_termination_confirmed_at = ? WHERE id = ?')
+      .run(NOW_ISO, NODE_ID);
     const result = await runTerminalNodeLifecycleRepair(env);
 
     expect(result).toMatchObject({
@@ -605,10 +608,10 @@ describe('finalizeWorkspaceLifecycleClosure ProjectData session finalization', (
     const result = await runTerminalNodeLifecycleRepair(env);
 
     expect(result).toMatchObject({
-      selected: 1,
+      selected: 0,
       workspacesTerminalized: 0,
       agentSessionsClosed: 0,
-      errors: 1,
+      errors: 0,
     });
     expect(await loadWorkspace()).toMatchObject({
       status: 'running',

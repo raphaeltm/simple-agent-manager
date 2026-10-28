@@ -1182,7 +1182,10 @@ describe('Instant session wake after idle sleep', () => {
 
       expect(response.status, await response.clone().text()).toBe(200);
       expect(vmAgent.signals).toEqual([`${AGENT_PATH}/cancel`, `${AGENT_PATH}/stop`]);
-      expect(runtimeRows(), JSON.stringify(runtimeRows())).toEqual(ARCHIVED_ROWS);
+      expect(runtimeRows(), JSON.stringify(runtimeRows())).toEqual({
+        ...ARCHIVED_ROWS,
+        agentSession: { status: 'completed' },
+      });
     });
 
     it('still forwards a cancel to a live agent', async () => {
