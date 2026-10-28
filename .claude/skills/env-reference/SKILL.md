@@ -767,6 +767,21 @@ Trial configuration is currently sourced from `apps/api/.env.example` and `apps/
 
 - `WORKSPACE_BUILD_QUEUE_DEPTH` — Concurrent devcontainer build slots per workspace VM (default: `1`, supported range: `1` through `16`). Generated cloud-init passes this from the Worker env to newly provisioned VM Agent systemd services. Invalid values do not enable additional build slots and fall back to the default one-slot behavior.
 
+### Physical Workspace Deletion and Image-transfer Scratch
+
+- `NODE_USER_ID` / `NODE_RUNTIME_INCARNATION_ID` — Generated node owner and boot identity. Strict physical workspace deletion fails closed when either is missing; legacy nodes do not supply physical deletion proof.
+- `WORKSPACE_DELETION_RETRY_INTERVAL` — Go duration between bounded local retries of persisted deletion intents (default: `1m`). Retries resume the same exact operation under the workspace lifecycle lock. Unknown resources are never adopted based on age or status.
+- `WORKSPACE_DELETION_ATTEMPT_TIMEOUT` — Maximum Go duration for one local retry attempt (default: `30s`).
+- `WORKSPACE_DELETION_BATCH_SIZE` / `WORKSPACE_DELETION_MAX_ENTRIES` — Retry-intent batch and per-attempt filesystem walk bounds (defaults: `32` / `512`). Partial cleanup remains pending and resumes through the same intent.
+- `WORKSPACE_DELETION_TOMBSTONE_RETENTION` — Retention for finalized local deletion receipts (default: `168h`). Bounded pruning never removes unfinished deletion intents. Ownership records are removed only after verified completion.
+- `SAM_IMAGE_TRANSFER_SCRATCH_DIR` — Dedicated private image archive directory (default: `$TMPDIR/sam-image-transfers`, using the OS temporary directory when `TMPDIR` is unset). Only marked operations created by SAM's publish/deploy image transfers are candidates; previous unmarked temporary directories are preserved.
+- `SAM_IMAGE_TRANSFER_SCRATCH_DRY_RUN` — Report candidates without deleting crash leftovers (default: `true`). Normal successful operations still remove their own scratch files while holding their lease.
+- `SAM_IMAGE_TRANSFER_SCRATCH_RETENTION` — Minimum Go duration before an abandoned marked transfer becomes a candidate (default: `24h`). A held operation lease always protects active exports, uploads, downloads and image loads regardless of age.
+- `SAM_IMAGE_TRANSFER_SCRATCH_MAX_ENTRIES` / `SAM_IMAGE_TRANSFER_SCRATCH_MAX_FILES` — Directory and per-operation file inspection bounds (defaults: `64` / `128`). The directory iterator continues across cycles.
+- `SAM_IMAGE_TRANSFER_SCRATCH_MAX_RECLAIM_BYTES` — Per-sweep candidate/reclaim byte budget (default: `1073741824`). An operation larger than the remaining budget is preserved in full.
+
+Scratch variables are read by the VM agent process; malformed values disable its scratch sweep. Workspace data, snapshot archives, user caches, nested Docker volumes, Docker build cache and deployment/rollback images are outside this sweep. Symlinks, hard links, mounts, nested directories and unknown files are protected.
+
 ### Git Operations
 
 - `GIT_TOKEN_TIMEOUT` — total control-plane Git credential exchange budget, including retries (default: `25s`); caller cancellation/deadlines take precedence.

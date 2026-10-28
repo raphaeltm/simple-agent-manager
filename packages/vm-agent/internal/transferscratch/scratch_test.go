@@ -1,13 +1,89 @@
 package transferscratch
 
 import (
+	"bufio"
 	"context"
+	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
+
+func TestScratchLeaseProcessHelper(t *testing.T) {
+	root := os.Getenv("SAM_SCRATCH_TEST_ROOT")
+	if root == "" {
+		t.Skip("subprocess fixture")
+	}
+	c := Config{Root: root, Retention: time.Hour, MaxEntries: 64, MaxFiles: 128, MaxReclaimBytes: 1 << 20}
+	op, err := New(c, "publish")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(op.Path, "web.tar"), []byte("in flight"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	fmt.Println(op.Path)
+	for {
+		time.Sleep(time.Hour)
+	} // parent kills the process to model a crash
+}
+
+func TestRealProcessCrashReleasesTransferLease(t *testing.T) {
+	c := testConfig(t)
+	c.DryRun = false
+	cmd := exec.Command(os.Args[0], "-test.run=^TestScratchLeaseProcessHelper$")
+	cmd.Env = append(os.Environ(), "SAM_SCRATCH_TEST_ROOT="+c.Root)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = cmd.Process.Kill(); _ = cmd.Wait() }()
+	ready := bufio.NewScanner(stdout)
+	if !ready.Scan() || !strings.HasPrefix(ready.Text(), c.Root) {
+		t.Fatal("subprocess failed to create transfer")
+	}
+	r, err := Sweep(context.Background(), c, time.Now().Add(48*time.Hour))
+	if err != nil || r.Protected != 1 || r.Removed != 0 {
+		t.Fatalf("process lease lost %+v %v", r, err)
+	}
+	if err := cmd.Process.Kill(); err != nil {
+		t.Fatal(err)
+	}
+	_ = cmd.Wait()
+	r, err = Sweep(context.Background(), c, time.Now().Add(48*time.Hour))
+	if err != nil || r.Removed != 1 {
+		t.Fatalf("crash recovery %+v %v", r, err)
+	}
+}
+
+func TestMountedArchiveProtected(t *testing.T) {
+	c := testConfig(t)
+	c.DryRun = false
+	path := abandoned(t, c)
+	outside := filepath.Join(t.TempDir(), "outside.tar")
+	if err := os.WriteFile(outside, []byte("user data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	mount := filepath.Join(path, "api.tar")
+	if err := syscall.Mount(outside, mount, "", syscall.MS_BIND, ""); err != nil {
+		t.Skipf("bind mounts unavailable: %v", err)
+	}
+	defer syscall.Unmount(mount, 0)
+	r, err := Sweep(context.Background(), c, time.Now().Add(48*time.Hour))
+	if err != nil || r.Protected != 1 || r.Removed != 0 {
+		t.Fatalf("mounted archive %+v %v", r, err)
+	}
+	if bytes, err := os.ReadFile(outside); err != nil || string(bytes) != "user data" {
+		t.Fatalf("mounted source changed %q %v", bytes, err)
+	}
+}
 
 func testConfig(t *testing.T) Config {
 	t.Helper()

@@ -54,6 +54,8 @@ The old `POST /api/sam/chat` inference path is closed: enabled clients receive `
 - `POST /api/workspaces/:id/rebuild` — Rebuild a running, recovering, or errored workspace. Returns `202`; uses the same claimed-deletion and final VM-request identity fences as restart.
 - `DELETE /api/workspaces/:id` — Request permanent workspace deletion. Returns confirmed success only after VM absence/success proof or an explicit strict provider/container termination marker and terminal finalization; returns `202` with `deletionStatus: "pending"` when durable retry is armed, the same exact attempt is already in flight, or proof-bearing finalization must converge after a concurrent state write. An identity/status fence without retained retry returns `409` with `deletionStatus: "rejected"`. Retained snapshot/session state is removed only after confirmation.
 
+The control plane uses the VM-agent capability path `DELETE /workspaces/:id/physical-deletion`, with exact workspace generation, owner, node ID and runtime incarnation plus explicit/automatic deletion authority. Automatic authority includes the verified snapshot expiry. Confirmation requires an exact identity echo and both `success: true` and `physicalDeleted: true`; a legacy agent's `404` or generic `2xx` is pending, never physical proof. The older destructive path is not sent to legacy agents.
+
 ## Project Management
 
 - `POST /api/projects` — Create project
