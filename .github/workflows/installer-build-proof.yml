@@ -1,0 +1,50 @@
+name: Installer Cold Build Proof
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_commit:
+        description: 'Exact 40-character SHA of this selected branch head to build in one isolated staging Container'
+        type: string
+        required: true
+      approval:
+        description: 'After explicit cost approval, enter one-cold-build-60-minutes (one standard-3, 60 min, conservative $2 incremental estimate)'
+        type: string
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: installer-cold-build-proof-staging
+  cancel-in-progress: false
+
+jobs:
+  cold-build:
+    if: >-
+      github.repository == 'raphaeltm/simple-agent-manager' &&
+      github.ref != 'refs/heads/main' &&
+      github.sha == inputs.source_commit &&
+      inputs.approval == 'one-cold-build-60-minutes'
+    environment: staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.source_commit }}
+          fetch-depth: 0
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '22'
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: One credential-free in-account cold build with durable deadline and cleanup
+        run: pnpm exec tsx scripts/deploy/installer-builder-proof.ts
+        env:
+          INSTALLER_ENVIRONMENT: staging
+          SAM_INSTALLER_PAID_PROOF: one-cold-build-60-minutes
+          SAM_PROOF_SOURCE_COMMIT: ${{ inputs.source_commit }}
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}

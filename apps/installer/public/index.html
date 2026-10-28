@@ -221,10 +221,38 @@
                     Missing an account? Reconnect and select it on Cloudflare’s consent screen. Up
                     to 50 authorized accounts are shown.
                   </p>
+                  <fieldset id="deployment-settings" hidden>
+                    <legend>Your SAM installation</legend>
+                    <label for="zone-id">Cloudflare domain</label
+                    ><select id="zone-id"></select>
+                    <label for="base-domain">Install under</label
+                    ><input
+                      id="base-domain"
+                      type="text"
+                      placeholder="sam.example.com"
+                      autocomplete="off"
+                    />
+                    <p class="small">
+                      SAM uses app, api, preview and wildcard addresses below this domain. Existing
+                      records are checked before you approve.
+                    </p>
+                    <label for="owner-email">Your administrator email</label
+                    ><input id="owner-email" type="email" autocomplete="email" />
+                    <p class="small">
+                      Use this verified email when you configure sign-in in your new instance. No
+                      GitHub setup is needed to install.
+                    </p>
+                    <button id="preview" type="button" class="secondary">
+                      Review installation
+                    </button>
+                    <div id="plan-summary" class="small" role="status"></div>
+                  </fieldset>
                   <label class="check"
                     ><input id="confirm" type="checkbox" required /><span
-                      >Create one new <code>sam-maintenance-…</code> Worker and enable its
-                      workers.dev address. Cloudflare usage charges may apply.</span
+                      ><span id="approval-copy"
+                        >Create one new <code>sam-maintenance-…</code> Worker and enable its
+                        workers.dev address. Cloudflare usage charges may apply.</span
+                      ></span
                     ></label
                   >
                   <button id="install" type="submit">
@@ -244,18 +272,37 @@
                   <button>Continue to my service <span aria-hidden="true">→</span></button>
                 </form>
                 <p class="small">
-                  This temporary owner session expires with your installer session. The Worker stays
-                  in your account until you delete it.
+                  Save the recovery credential shown by your service. It keeps your access
+                  independent of this temporary installer session.
                 </p>
               </section>
               <button id="disconnect" class="secondary" hidden>Disconnect and clear session</button>
               <div id="message" role="status" aria-live="polite"></div>
+              <section id="cleanup-panel" hidden aria-labelledby="cleanup-title">
+                <h3 id="cleanup-title">Finish an interrupted setup</h3>
+                <p class="small" id="cleanup-description">
+                  Reconnect to remove unused setup credentials safely. Credentials already owned by
+                  your installation service are preserved.
+                </p>
+                <form id="cleanup-reconnect-form" method="post" action="/oauth/start">
+                  <button id="cleanup-reconnect" class="secondary">Reconnect for cleanup</button>
+                </form>
+                <button id="cleanup-resume" class="secondary" type="button" hidden>
+                  Finish cleanup
+                </button>
+              </section>
               <details class="permission-details">
                 <summary>What access am I granting?</summary>
                 <p>
                   Our installer temporarily receives account read and Worker deployment permissions.
                   These may allow changes to existing Workers in the selected account, not only SAM
                   resources. You approve access on Cloudflare before continuing.
+                </p>
+                <p id="full-permissions" hidden>
+                  Full installation also requests account-token provisioning and access to the
+                  Cloudflare services SAM uses. It creates separate deployment, runtime and storage
+                  credentials in your account. These permissions can affect existing resources;
+                  review Cloudflare’s consent screen carefully.
                 </p>
                 <a href="/privacy.html">Read the permissions & privacy details →</a>
               </details>
@@ -267,7 +314,7 @@
             </div>
             <aside class="prototype-note">
               <strong>A small first step. You keep the keys.</strong>
-              <p>
+              <p id="installer-mode-note">
                 Creates a protected installation service. Full SAM installation, builds, and updates
                 aren’t connected yet.
               </p>

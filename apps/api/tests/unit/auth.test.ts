@@ -1,5 +1,5 @@
 import { TRIAL_ANONYMOUS_USER_ID } from '@simple-agent-manager/shared';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { selectPrimaryGitHubEmail } from '../../src/auth';
 
@@ -7,6 +7,7 @@ interface AuthTestUser {
   id: string;
   email: string;
   name: string;
+  emailVerified?: boolean;
   role?: string;
   status?: string;
 }
@@ -368,4 +369,69 @@ describe('GitHub auth email selection', () => {
 
     expect(selected).toBe('public@profile.com');
   });
+});
+
+describe('installer bootstrap owner hooks', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  it('denies unverified or wrong initial identities and reserves promotion for the session election', async () => {
+    const { createAuth } = await import('../../src/auth');
+    const first = vi.fn(async () => null);
+    await createAuth({
+      ...fakeEnv(),
+      BOOTSTRAP_OWNER_EMAIL: 'owner@example.com',
+      DATABASE: {
+        prepare: () => ({ bind: () => ({ first }) }),
+      },
+    } as never);
+    const hook = capturedOptions!.databaseHooks!.user!.create!.before!;
+    expect(
+      await hook({ ...newUser, email: 'other@example.com', emailVerified: true } as AuthTestUser)
+    ).toBe(false);
+    expect(
+      await hook({ ...newUser, email: 'owner@example.com', emailVerified: false } as AuthTestUser)
+    ).toBe(false);
+    expect(
+      await hook({ ...newUser, email: 'OWNER@example.com', emailVerified: true } as AuthTestUser)
+    ).toMatchObject({ data: { email: 'owner@example.com', role: 'user', status: 'active' } });
+  });
+  it('restricts login-time self-heal to the configured verified owner', async () => {
+    const { db, prepare, bind } = makeSelfHealDb();
+    const hook = await getSessionAfterHook({
+      ...fakeEnv(),
+      DATABASE: db,
+      BOOTSTRAP_OWNER_EMAIL: ' Owner@Example.com ',
+    });
+    await hook({ userId: 'github-user-1' });
+    expect(prepare).toHaveBeenCalledWith(
+      expect.stringContaining('AND lower(trim(email)) = ?3 AND email_verified = 1')
+    );
+    expect(bind).toHaveBeenCalledWith(
+      'github-user-1',
+      TRIAL_ANONYMOUS_USER_ID,
+      'owner@example.com'
+    );
+  });
+  it.each([true, false])(
+    'takes GitHub email verification from the selected email entry: %s',
+    async (verified) => {
+      const { createAuth } = await import('../../src/auth');
+      vi.stubGlobal(
+        'fetch',
+        vi
+          .fn()
+          .mockResolvedValueOnce(
+            Response.json({ id: 42, login: 'owner', email: 'owner@example.com' })
+          )
+          .mockResolvedValueOnce(
+            Response.json([{ email: 'owner@example.com', primary: true, verified }])
+          )
+      );
+      await createAuth(fakeEnv() as never);
+      const github = capturedOptions!.socialProviders!.github as {
+        getUserInfo(token: { accessToken: string }): Promise<{ user: { emailVerified: boolean } }>;
+      };
+      const result = await github.getUserInfo({ accessToken: 'test-access-token' });
+      expect(result.user.emailVerified).toBe(verified);
+    }
+  );
 });

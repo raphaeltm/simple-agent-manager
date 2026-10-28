@@ -12,6 +12,11 @@ import { createModuleLogger } from './lib/logger';
 import { readResponseJson } from './lib/runtime-validation';
 import { getBetterAuthSecret } from './lib/secrets';
 import {
+  bootstrapOwnerEmail,
+  bootstrapSessionAllowed,
+  bootstrapUserDecision,
+} from './services/bootstrap-owner';
+import {
   getGitHubOAuthConfig,
   resolvePlatformConfig,
   selectGitHubOAuthConfig,
@@ -251,6 +256,7 @@ export async function createAuth(env: Env) {
 
         const user = await readResponseJson(userRes, githubUserSchema, 'github.user');
         let email = normalizeEmail(user.email);
+        let emailVerified = false;
 
         // Resolve the user's primary email from /user/emails.
         // OAuth apps need user:email scope. GitHub Apps need "Email addresses" user permission.
@@ -265,6 +271,9 @@ export async function createAuth(env: Env) {
               'github.user_emails'
             );
             email = selectPrimaryGitHubEmail(email, emailsData);
+            emailVerified = emailsData.some(
+              (entry) => normalizeEmail(entry.email) === email && entry.verified
+            );
           } else {
             const errorBody = await emailsRes.text();
             if (emailsRes.status === 403 || emailsRes.status === 404) {
@@ -300,7 +309,7 @@ export async function createAuth(env: Env) {
             email,
             name: (user.name || user.login || '').trim(),
             image: user.avatar_url || undefined,
-            emailVerified: true,
+            emailVerified,
           },
           // better-auth keys the linked account on `data.id` (its GitHub provider declares
           // `accountSubject: ({ profile }) => profile.id`); without it every sign-in fails
@@ -400,6 +409,18 @@ export async function createAuth(env: Env) {
       user: {
         create: {
           before: async (user) => {
+            const bootstrap = await bootstrapUserDecision(env, user);
+            if (bootstrap === 'deny') return false;
+            if (bootstrap === 'owner') {
+              return {
+                data: {
+                  ...user,
+                  email: bootstrapOwnerEmail(env) ?? user.email,
+                  role: 'user',
+                  status: 'active',
+                },
+              };
+            }
             if (!(await isSignupApprovalRequired(env))) {
               // Open registration — defaults are fine (role='user', status='active')
               return { data: user };
@@ -429,6 +450,10 @@ export async function createAuth(env: Env) {
       },
       session: {
         create: {
+          before: async (session) => {
+            if (!(await bootstrapSessionAllowed(env, session.userId))) return false;
+            return { data: session };
+          },
           // Login-time superadmin self-heal. Fires on EVERY session creation —
           // OAuth (GitHub), token-login, and device-flow all route through
           // internalAdapter.createSession -> createWithHooks, which runs this
@@ -447,9 +472,17 @@ export async function createAuth(env: Env) {
               return;
             }
             try {
-              const result = await env.DATABASE.prepare(LOGIN_SELF_HEAL_SQL)
-                .bind(userId, sentinelId)
-                .run();
+              const expectedOwner = bootstrapOwnerEmail(env);
+              const sql =
+                expectedOwner === undefined
+                  ? LOGIN_SELF_HEAL_SQL
+                  : LOGIN_SELF_HEAL_SQL + ' AND lower(trim(email)) = ?3 AND email_verified = 1';
+              const statement = env.DATABASE.prepare(sql);
+              const result = await (
+                expectedOwner === undefined
+                  ? statement.bind(userId, sentinelId)
+                  : statement.bind(userId, sentinelId, expectedOwner)
+              ).run();
               if (result.meta.changes > 0) {
                 log.info('login_self_heal.promoted', { userId });
               }

@@ -1,6 +1,6 @@
 import { cloudflare } from '../src/cloudflare';
 import { provision } from '../src/provision';
-import { randomSecret } from '../src/security';
+import { digest, randomSecret } from '../src/security';
 
 // Pipeline-only test. Never revokes the deployment token, and never runs in production.
 if (process.env.INSTALLER_ENVIRONMENT !== 'staging') throw new Error('Staging only');
@@ -36,8 +36,7 @@ try {
       throw new Error(`Unauthenticated bootstrap expected401; ${lastStatus}`);
     if (health.ok && anonymous.status === 401) {
       const data = (await health.json()) as { kind?: string };
-      if (data.kind !== 'sam-maintenance-prototype')
-        throw new Error('Unexpected bootstrap health payload');
+      if (data.kind !== 'sam-maintenance') throw new Error('Unexpected bootstrap health payload');
       ready = true;
       break;
     }
@@ -48,10 +47,10 @@ try {
     signal: AbortSignal.timeout(10000),
     method: 'POST',
     headers: { Origin: origin },
-    body: new URLSearchParams({ key }),
+    body: new URLSearchParams({ key, recovery: await digest(randomSecret()) }),
     redirect: 'manual',
   });
-  if (claim.status !== 303 || !claim.headers.get('set-cookie'))
+  if (claim.status !== 200 || !claim.headers.get('set-cookie'))
     throw new Error('Owner handoff failed');
   const landing = await fetch(url, {
     signal: AbortSignal.timeout(10000),
@@ -63,6 +62,8 @@ try {
     'Staging bootstrap upload, health, unauthenticated rejection and owner handoff verified. OAuth consent is a separate browser check.'
   );
 } finally {
-  await cloudflare(token, `/accounts/${accountId}/workers/scripts/${name}`, { method: 'DELETE' });
+  await cloudflare(token, `/accounts/${accountId}/workers/scripts/${name}?force=true`, {
+    method: 'DELETE',
+  });
   console.log('Temporary staging bootstrap Worker deleted.');
 }

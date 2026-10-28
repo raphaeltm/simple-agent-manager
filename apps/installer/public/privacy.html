@@ -95,29 +95,49 @@
       <div class="privacy-content sam-glass sam-glass-rim">
         <h2>What you authorize</h2>
         <p>
-          This prototype requests account read access and permission to deploy Workers. Cloudflare’s
-          permissions may cover existing Workers in the selected account. Only approve accounts you
-          intend to use.
+          Default bootstrap mode requests account read access and permission to deploy Workers.
+          Cloudflare’s permissions may cover existing Workers in the selected account. Only approve
+          accounts you intend to use. Experimental full installation requires broader resource and
+          token-provisioning permissions; it is not enabled or verified for general use.
         </p>
         <h2>Temporary access</h2>
         <p>
-          The installer handles OAuth tokens server-side. Tokens are stored in an isolated session
-          for up to 15 minutes by default, bounded by token expiry. Completing handoff or
-          disconnecting deletes the session and attempts to revoke the token. Expired sessions are
-          rejected immediately; an alarm removes stored data and attempts revocation. Revocation can
-          fail during an outage: use Cloudflare’s authorized-applications screen to revoke access
-          yourself.
+          The installer handles OAuth tokens server-side in an isolated session. Hosted access
+          expires after 15 minutes by default, bounded by token expiry. In this preview branch,
+          handoff removes hosted OAuth and deployment-credential copies but retains a bounded claim
+          record until the original expiry so interrupted handoff can be retried. Disconnect and
+          expiry attempt cleanup and revocation; provider failures can delay deletion or revocation.
+          Use Cloudflare’s authorized-applications screen to revoke access yourself if needed. No
+          central refresh token is retained.
         </p>
         <p>
           Your password is entered only on Cloudflare. This app does not use analytics, third-party
           scripts, or application request logging. Hosting and network providers may still process
           request metadata.
         </p>
+        <p>
+          If cleanup is interrupted after a grant expires, this tab can keep a nonsecret cleanup
+          reference. Reconnect with Cloudflare and choose “Finish cleanup” to remove unused setup
+          credentials. The reference grants no access by itself; credentials already owned by your
+          installation service are preserved.
+        </p>
         <h2>What stays in your account</h2>
         <p>
-          The prototype creates one named Worker with an expiring owner-access credential. It does
-          not install SAM or retain a Cloudflare deployment token in that Worker. Disconnecting does
-          not delete that Worker. You can remove it through Cloudflare’s Workers dashboard.
+          Default mode creates a maintenance Worker without an ongoing Cloudflare deployment token.
+          This preview branch adds durable recovery: save the browser-generated credential before
+          claiming ownership. Its hash stays in your account; maintenance sessions last 24 hours by
+          default. Recovery login replaces the previous active session. Replacement credentials
+          become active only after you save and confirm them. Earlier hosted revisions may still
+          have temporary owner access; check the displayed source version.
+        </p>
+        <p>
+          Experimental full mode temporarily handles installation credentials during bootstrap, then
+          transfers deployment and storage authority to your maintenance service and narrower
+          runtime authority to SAM. This lifecycle still needs live validation, including the effect
+          of OAuth revocation on derived credentials. It is not a claim that credentials never reach
+          our service. Disconnecting does not delete transferred resources. Review resource
+          identities and backups before removing a test installation; automatic uninstall is not
+          provided.
         </p>
         <h2>Your choice</h2>
         <p>

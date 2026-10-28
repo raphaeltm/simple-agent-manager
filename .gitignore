@@ -99,3 +99,4 @@ apps/installer/.dev.vars
 
 # Compiled shared installer scene (generated before dev/build/deploy)
 apps/installer/public/scene/
+apps/installer/src/maintenance-brand.generated.ts

@@ -28,10 +28,10 @@ function setup(statuses: number[]) {
     'fetch',
     vi.fn(async (input: string, init?: RequestInit) => {
       if (input.endsWith('/health'))
-        return Response.json({ ok: true, kind: 'sam-maintenance-prototype' });
+        return Response.json({ ok: true, kind: 'sam-maintenance' });
       if (input.endsWith('/claim'))
         return new Response(null, {
-          status: 303,
+          status: 200,
           headers: { 'set-cookie': '__Host-test=synthetic; Path=/' },
         });
       if (init?.headers && 'Cookie' in init.headers)
