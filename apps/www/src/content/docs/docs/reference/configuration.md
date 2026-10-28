@@ -1633,6 +1633,8 @@ Image-transfer housekeeping runs with the same bounded periodic backstop and use
 | `SAM_IMAGE_TRANSFER_SCRATCH_MAX_FILES`         | `128`                                             | Maximum files inspected in one operation                                      |
 | `SAM_IMAGE_TRANSFER_SCRATCH_MAX_RECLAIM_BYTES` | `1073741824`                                      | Maximum candidate/reclaimed bytes per sweep                                   |
 
+The scratch root must be private and owned by the VM-agent user. Every parent directory must be owned by that user or root and must prevent other users from replacing its children; trusted sticky directories such as `/tmp` are supported. Unsafe custom roots or `TMPDIR` paths are rejected before transfer files are created.
+
 Successful transfers still remove their own temporary archives. Housekeeping excludes unmarked legacy files, workspace and snapshot data, user caches, nested Docker volumes, build caches, and current or rollback images. Unknown files, links, mounts and directories remain protected. Disk pressure never authorizes deleting user work.
 
 ## Journald Configuration (VM)

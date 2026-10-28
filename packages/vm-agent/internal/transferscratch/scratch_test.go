@@ -296,3 +296,143 @@ func TestSymlinkRootRejectedAndNormalCloseCleansOwnFiles(t *testing.T) {
 		t.Fatalf("symlink root accepted: %v", err)
 	}
 }
+
+func TestScratchRejectsRenameableAncestorBeforeCreatingRoot(t *testing.T) {
+	for _, mode := range []os.FileMode{0777, 0770} {
+		t.Run(fmt.Sprintf("mode-%o", mode), func(t *testing.T) {
+			ancestor := filepath.Join(t.TempDir(), "shared")
+			if err := os.Mkdir(ancestor, 0700); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Chmod(ancestor, mode); err != nil {
+				t.Fatal(err)
+			}
+			c := testConfig(t)
+			c.Root = filepath.Join(ancestor, "private", "transfers")
+			if op, err := New(c, "deploy"); err == nil {
+				op.Close()
+				t.Fatal("renameable ancestor accepted")
+			}
+			if _, err := os.Stat(filepath.Join(ancestor, "private")); !os.IsNotExist(err) {
+				t.Fatalf("unsafe ancestor was mutated before validation: %v", err)
+			}
+		})
+	}
+}
+
+func TestScratchAcceptsTrustedStickyAncestor(t *testing.T) {
+	ancestor := filepath.Join(t.TempDir(), "sticky")
+	if err := os.Mkdir(ancestor, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(ancestor, 0777|os.ModeSticky); err != nil {
+		t.Fatal(err)
+	}
+	c := testConfig(t)
+	c.Root = filepath.Join(ancestor, "private", "transfers")
+	op, err := New(c, "publish")
+	if err != nil {
+		t.Fatalf("trusted sticky ancestor rejected: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(op.Path, "archive.tar"), []byte("archive"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := op.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(op.Path); !os.IsNotExist(err) {
+		t.Fatalf("operation remains: %v", err)
+	}
+}
+
+func TestScratchRejectsForeignOwnedStickyAncestor(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("requires root to construct foreign-owned directory")
+	}
+	ancestor := filepath.Join(t.TempDir(), "foreign")
+	if err := os.Mkdir(ancestor, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(ancestor, 65534, 65534); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(ancestor, 0777|os.ModeSticky); err != nil {
+		t.Fatal(err)
+	}
+	c := testConfig(t)
+	c.Root = filepath.Join(ancestor, "transfers")
+	if op, err := New(c, "deploy"); err == nil {
+		op.Close()
+		t.Fatal("foreign-owned sticky ancestor accepted")
+	}
+	if _, err := os.Stat(c.Root); !os.IsNotExist(err) {
+		t.Fatalf("foreign-owned ancestor mutated: %v", err)
+	}
+}
+
+func TestScratchRejectsExistingPrivateRootUnderRenameableAncestor(t *testing.T) {
+	ancestor := filepath.Join(t.TempDir(), "shared")
+	root := filepath.Join(ancestor, "private", "transfers")
+	if err := os.MkdirAll(root, 0700); err != nil {
+		t.Fatal(err)
+	}
+	sentinel := filepath.Join(root, "user-cache.tar")
+	if err := os.WriteFile(sentinel, []byte("preserve"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(ancestor, 0777); err != nil {
+		t.Fatal(err)
+	}
+	c := testConfig(t)
+	c.Root = root
+	if op, err := New(c, "deploy"); err == nil {
+		op.Close()
+		t.Fatal("private leaf beneath renameable ancestor accepted")
+	}
+	c.DryRun = false
+	if _, err := Sweep(context.Background(), c, time.Now()); err == nil {
+		t.Fatal("sweep accepted renameable ancestor")
+	}
+	got, err := os.ReadFile(sentinel)
+	if err != nil || string(got) != "preserve" {
+		t.Fatalf("unknown cache changed: %q, %v", got, err)
+	}
+	entries, err := os.ReadDir(root)
+	if err != nil || len(entries) != 1 {
+		t.Fatalf("unsafe root mutated: %v, %v", entries, err)
+	}
+}
+
+func TestScratchUsesValidatedCanonicalRootForArchivePath(t *testing.T) {
+	base := t.TempDir()
+	validated := filepath.Join(base, "transfers")
+	outside := t.TempDir()
+	linkedChild := filepath.Join(outside, "child")
+	if err := os.Mkdir(linkedChild, 0700); err != nil {
+		t.Fatal(err)
+	}
+	alias := filepath.Join(base, "alias")
+	if err := os.Symlink(linkedChild, alias); err != nil {
+		t.Fatal(err)
+	}
+	c := testConfig(t)
+	// Deliberately preserve the raw spelling: filepath.Join would clean it.
+	c.Root = alias + string(filepath.Separator) + ".." + string(filepath.Separator) + "transfers"
+	op, err := New(c, "deploy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer op.Close()
+	if filepath.Dir(op.Path) != validated || !filepath.IsAbs(op.Path) {
+		t.Fatalf("archive path %q differs from validated root %q", op.Path, validated)
+	}
+	if err := os.WriteFile(filepath.Join(op.Path, "archive.tar"), []byte("archive"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(filepath.Join(outside, "transfers")); !os.IsNotExist(err) {
+		t.Fatalf("raw symlink/dotdot target was mutated: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(op.Path, "archive.tar")); err != nil {
+		t.Fatal(err)
+	}
+}

@@ -100,31 +100,62 @@ func ownedDirectory(info os.FileInfo) bool {
 	return ok && info.IsDir() && info.Mode()&os.ModeSymlink == 0 && info.Mode().Perm()&0077 == 0 && stat.Uid == uint32(os.Geteuid())
 }
 
+// Trusted sticky parents (notably /tmp) protect root/euid-owned children from
+// replacement by other users. Every other ancestor must be non-writable by them:
+// Operation.Path is also used by Docker's archive writer, outside our pinned FDs.
+func trustedScratchAncestor(info os.FileInfo) bool {
+	stat, ok := info.Sys().(*syscall.Stat_t)
+	return ok && info.IsDir() && info.Mode()&os.ModeSymlink == 0 &&
+		(stat.Uid == 0 || stat.Uid == uint32(os.Geteuid())) &&
+		(info.Mode().Perm()&0022 == 0 || info.Mode()&os.ModeSticky != 0)
+}
+
 func openParent(path string, create bool) (*os.Root, error) {
 	abs, err := filepath.Abs(path)
 	if err != nil || filepath.Clean(abs) == string(filepath.Separator) {
 		return nil, fmt.Errorf("unsafe scratch root")
 	}
-	if create {
-		if err := os.MkdirAll(abs, 0700); err != nil {
-			return nil, err
-		}
-	}
-	canonical, err := filepath.EvalSymlinks(abs)
+	root, err := os.OpenRoot(string(filepath.Separator))
 	if err != nil {
 		return nil, err
 	}
-	if canonical != abs {
-		return nil, fmt.Errorf("scratch root contains symlink")
-	}
-	root, err := os.OpenRoot(abs)
-	if err != nil {
-		return nil, err
-	}
+	fail := func(err error) (*os.Root, error) { root.Close(); return nil, err }
 	info, err := root.Stat(".")
-	if err != nil || !ownedDirectory(info) {
+	if err != nil || !trustedScratchAncestor(info) {
+		return fail(fmt.Errorf("scratch ancestor ownership or permissions unknown"))
+	}
+	for _, part := range strings.Split(strings.TrimPrefix(abs, string(filepath.Separator)), string(filepath.Separator)) {
+		info, err = root.Lstat(part)
+		if errors.Is(err, os.ErrNotExist) && create {
+			if err = root.Mkdir(part, 0700); err != nil && !errors.Is(err, os.ErrExist) {
+				return fail(err)
+			}
+			info, err = root.Lstat(part)
+		}
+		if err != nil {
+			return fail(err)
+		}
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fail(fmt.Errorf("scratch root contains symlink"))
+		}
+		if !trustedScratchAncestor(info) {
+			return fail(fmt.Errorf("scratch ancestor ownership or permissions unknown"))
+		}
+		next, err := root.OpenRoot(part)
+		if err != nil {
+			return fail(err)
+		}
+		opened, err := next.Stat(".")
+		if err != nil || !os.SameFile(info, opened) {
+			next.Close()
+			return fail(fmt.Errorf("scratch ancestor changed while opening"))
+		}
 		root.Close()
-		return nil, fmt.Errorf("scratch root ownership or permissions unknown")
+		root = next
+	}
+	info, err = root.Stat(".")
+	if err != nil || !ownedDirectory(info) {
+		return fail(fmt.Errorf("scratch root ownership or permissions unknown"))
 	}
 	return root, nil
 }
@@ -143,6 +174,13 @@ func New(c Config, category string) (*Operation, error) {
 	if category != "publish" && category != "deploy" {
 		return nil, fmt.Errorf("unknown transfer category")
 	}
+	// Use the same absolute, cleaned pathname for validation and archive writers.
+	// A raw symlink/.. path can resolve differently when passed to the OS.
+	absoluteRoot, err := filepath.Abs(c.Root)
+	if err != nil {
+		return nil, err
+	}
+	c.Root = absoluteRoot
 	parent, err := openParent(c.Root, true)
 	if err != nil {
 		return nil, err
