@@ -28,7 +28,7 @@ const output = '../../.codex/tmp/playwright-screenshots';
           json: {
             configured: state !== 'unconfigured',
             sourceUrl: 'https://github.com/raphaeltm/simple-agent-manager/tree/main/apps/installer',
-            docsUrl: '/privacy.html',
+            docsUrl: '/self-host.html',
             sha: 'audit-fixture',
           },
         })
@@ -125,6 +125,12 @@ const output = '../../.codex/tmp/playwright-screenshots';
       if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth))
         throw new Error(`Privacy overflow ${label}`);
       await page.screenshot({ path: `${output}/installer-privacy-${label}.png`, fullPage: true });
+      screenshots++;
+      await page.goto(baseUrl + '/self-host.html');
+      await expect(page.getByRole('heading', { name: '1. Get the source' })).toBeVisible();
+      if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth))
+        throw new Error(`Self-host guide overflow ${label}`);
+      await page.screenshot({ path: `${output}/installer-self-host-${label}.png`, fullPage: true });
       screenshots++;
       await page.close();
     }

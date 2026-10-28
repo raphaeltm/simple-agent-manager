@@ -67,11 +67,17 @@ describe('deployment configuration and reruns', () => {
     expect(
       JSON.parse(await readFile('wrangler.json', 'utf8')).durable_objects.bindings[0].name
     ).toBe('SESSIONS');
+    vi.stubEnv('GITHUB_SHA', 'b'.repeat(40));
     await deploy(false);
     const config = JSON.parse(capture.writes[0]!);
+    expect(config.vars.SOURCE_URL).toContain(`/tree/${'b'.repeat(40)}/apps/installer`);
+    expect(config.vars.DOCS_URL).toBe('/self-host.html');
     expect(config.vars.APP_ORIGIN).toBe('https://install.sammy.party');
     expect(config.routes[0].pattern).toBe('install.sammy.party');
-    expect(config.routes[1]).toEqual({ pattern: 'install.sammy.party/*', zone_name: 'sammy.party' });
+    expect(config.routes[1]).toEqual({
+      pattern: 'install.sammy.party/*',
+      zone_name: 'sammy.party',
+    });
     expect(capture.writes.join('')).not.toContain('SECRET');
     expect(capture.writes.join('')).not.toContain('DEPLOY_TOKEN');
     expect(
