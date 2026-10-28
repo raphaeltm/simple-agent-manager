@@ -34,3 +34,20 @@ Parent blocker: OAuth-client setup returned Cloudflare403 with deployment token.
 Do not claim real sign-in/install works or merge around the existing credential gate.
 This task can deliver/review staging design independently of real OAuth consent.
 No full SAM deployment/build/update behavior added.
+
+PR: https://github.com/raphaeltm/simple-agent-manager/pull/2465 . Screenshot comment:
+https://github.com/raphaeltm/simple-agent-manager/pull/2465#issuecomment-6473818195 .
+56-screenshot audit passed; reviewed all light/dark mobile/desktop/narrow contact
+sheets and full-size primary/privacy/handoff captures. Added green self-contained
+ownership page styling (no font/asset request to installer after handoff).
+First redesign staging run40719839606 passed code and browser checks; bootstrap
+anonymous check failed before deployment and cleaned up its Worker. Next run
+40720592740 includes safe response status/content-type/cf-ray diagnostics.
+
+Run40720592740 diagnosed anonymous404 from Cloudflare workers.dev (HTML, SJC),
+after health already returned200. Readiness now requires the known health payload
+and anonymous401 together; retries only propagation404/503/network errors, bounded
+by 12 attempts and a60s readiness deadline. Unexpected200 fails immediately.
+Three regression tests verify eventual401, public200 fail-closed, and bounded
+exhaustion; each checks cleanup. 15 tests, lint/typecheck pass. Cloudflare/security
+skill checklist reviewed this testing-only change; no token/permission relaxation.
