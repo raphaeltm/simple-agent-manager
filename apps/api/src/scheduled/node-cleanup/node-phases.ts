@@ -295,10 +295,12 @@ async function sweepManagedHandoffNodes(
 ): Promise<void> {
   const sweepDeadlineMs = Date.now() + config.stoppedHandoffSweepBudgetMs;
   const workspaceIdleThreshold = getNodeWorkspaceIdleThresholdIso(now, config);
+  const preservedVmBudget = { remainingSources: config.workspaceSweepLimit };
+  const activitySql = `COALESCE(MAX(${preservedVmRetirementActivitySql('w')}), n.created_at)`;
   const candidates = await env.DATABASE.prepare(
     `SELECT n.id, n.user_id, n.status, n.created_at,
             COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count,
-            ${LAST_WORKSPACE_ACTIVITY_SQL} as last_activity
+            ${activitySql} as last_activity
      FROM nodes n
      LEFT JOIN workspaces w ON w.node_id = n.id
      WHERE n.status = ?
@@ -313,7 +315,7 @@ async function sweepManagedHandoffNodes(
        )
        ${boundedWarmPlacementClaimGuardSql('n.id')}
      GROUP BY n.id, n.user_id, n.status, n.created_at
-     HAVING ${LAST_WORKSPACE_ACTIVITY_SQL} < ?
+     HAVING ${activitySql} < ?
      ORDER BY last_activity ASC
      LIMIT ?`
   )
@@ -334,7 +336,7 @@ async function sweepManagedHandoffNodes(
     }>();
 
   for (const node of candidates.results) {
-    if (Date.now() >= sweepDeadlineMs) break;
+    if (Date.now() >= sweepDeadlineMs || preservedVmBudget.remainingSources <= 0) break;
     if (node.active_ws_count > 0) {
       log.warn(options.skippedActiveLogEvent, {
         nodeId: node.id,
@@ -347,6 +349,7 @@ async function sweepManagedHandoffNodes(
     }
 
     const destroyed = await destroyNodeForCleanup(db, env, now.toISOString(), node, {
+      preservedVmBudget,
       logEvent: options.logEvent,
       requestDeadlineMs: Math.min(
         sweepDeadlineMs,

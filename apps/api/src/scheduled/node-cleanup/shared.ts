@@ -28,6 +28,7 @@ import {
   preservedVmRetirementActivitySql,
   type PreservedVmRetirementBudget,
 } from '../../services/preserved-vm-retirement';
+import { repairRetiredVmSleepSnapshots } from '../../services/retired-vm-sleep-repair';
 import { boundedWarmPlacementClaimGuardSql } from '../../services/warm-placement-claims';
 import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
 import { type CleanupConfig, parseMs } from './config';
@@ -109,7 +110,7 @@ export async function claimNodeForCleanup(
     options.requireWorkspaceIdle === false
       ? ''
       : `AND (
-         SELECT COALESCE(MAX(${options.preservedVm ? preservedVmRetirementActivitySql('workspace_activity') : 'workspace_activity.updated_at'}), nodes.created_at)
+         SELECT COALESCE(MAX(${options.preservedVm || ['stopped', 'destroying'].includes(node.status) ? preservedVmRetirementActivitySql('workspace_activity') : 'workspace_activity.updated_at'}), nodes.created_at)
          FROM workspaces workspace_activity
          WHERE workspace_activity.node_id = nodes.id
        ) < ?`;
@@ -323,6 +324,8 @@ export async function destroyNodeForCleanup(
   let preservedVm: PreservedVmRetirement | undefined;
   if (options.preservedVmBudget) {
     try {
+      // Retry a repair interrupted after proof was persisted.
+      await repairRetiredVmSleepSnapshots(env, node.id, node.user_id);
       preservedVm = await preparePreservedVmRetirement(
         env,
         node.id,
@@ -406,6 +409,9 @@ export async function destroyNodeForCleanup(
     if (!strictDeletion.runtimeTerminationConfirmedAt) {
       throw new Error('Strict cleanup returned no managed-runtime termination proof');
     }
+
+    if (options.preservedVmBudget)
+      await repairRetiredVmSleepSnapshots(env, node.id, node.user_id);
 
     const terminalNode = await db
       .update(schema.nodes)

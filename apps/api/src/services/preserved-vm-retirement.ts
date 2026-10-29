@@ -5,6 +5,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
+import { verifyVmFallbackRetirement } from './preserved-vm-fallback';
 import type { WorkspaceDeletionIdentity } from './workspace-deletion';
 import { automaticDeletionPreservationExpiresAt } from './workspace-deletion-preservation';
 
@@ -37,17 +38,27 @@ export function preservedVmSourceSql(workspace: string, node: string): string {
       AND ${node}.runtime_incarnation_id IS json_extract(approved.value, '$.runtimeIncarnationId')
       AND ${node}.provider_instance_id IS json_extract(approved.value, '$.providerInstanceId')
       AND saved.snapshot_generation IS json_extract(approved.value, '$.snapshotGeneration')
-      AND saved.status = 'available' AND saved.degradation = 'none'
-      AND saved.sleep_status = 'sleeping' AND saved.sleeping_at IS NOT NULL
       AND saved.capture_generation IS NULL
       AND saved.expires_at IS json_extract(approved.value, '$.expiresAt')
-      AND julianday(saved.expires_at) > julianday('now')
+      AND saved.cleanup_identity_json IS json_extract(approved.value, '$.cleanupIdentityJson')
+      AND ((json_extract(approved.value, '$.kind') = 'snapshot'
+        AND saved.status = 'available' AND saved.degradation = 'none'
+        AND saved.sleep_status = 'sleeping'
+        AND julianday(saved.expires_at) > julianday('now'))
+      OR (json_extract(approved.value, '$.kind') = 'fallback'
+        AND saved.sleep_status IS json_extract(approved.value, '$.sleepStatus')
+        AND saved.sleep_claim_id IS json_extract(approved.value, '$.sleepClaimId')
+        AND saved.sleep_fallback_json IS json_extract(approved.value, '$.fallbackJson')
+        AND saved.recovery_status IS json_extract(approved.value, '$.recoveryStatus')
+        AND saved.recovery_attempt_id IS json_extract(approved.value, '$.recoveryAttemptId')
+        AND saved.recovery_workspace_id IS json_extract(approved.value, '$.recoveryWorkspaceId')))
   )`;
 }
 
 /**
  * A legacy VM agent may lack physical-deletion confirmation. Whole-VM retirement is
- * safe only for exact, completed sleep sources whose R2 artifacts remain verifiable.
+ * safe only for exact saved sleep sources or durable bounded-fallback decisions.
+ * Complete sources verify R2; fallback sources verify the retained transcript.
  * This is preservation authority, never proof that the old runtime has disappeared.
  */
 export async function preparePreservedVmRetirement(
@@ -96,6 +107,14 @@ export async function preparePreservedVmRetirement(
       providerInstanceId: string;
       snapshotGeneration: string | null;
       expiresAt: string;
+      kind: 'snapshot' | 'fallback';
+      cleanupIdentityJson: string | null;
+      sleepStatus: string | null;
+      sleepClaimId: string | null;
+      fallbackJson: string | null;
+      recoveryStatus: string | null;
+      recoveryAttemptId: string | null;
+      recoveryWorkspaceId: string | null;
     }
   > = [];
   for (const workspace of workspaces) {
@@ -118,7 +137,7 @@ export async function preparePreservedVmRetirement(
       .from(schema.sessionSnapshots)
       .where(eq(schema.sessionSnapshots.workspaceId, workspace.id))
       .get();
-    if (!snapshot || snapshot.sleepStatus !== 'sleeping' || !snapshot.sleepingAt) return undefined;
+    if (!snapshot) return undefined;
     const identity = {
       workspaceId: workspace.id,
       workspaceGeneration: workspace.evictionGeneration,
@@ -131,14 +150,24 @@ export async function preparePreservedVmRetirement(
       projectId: workspace.projectId,
       chatSessionId: workspace.chatSessionId,
     };
-    const expiresAt = await automaticDeletionPreservationExpiresAt(env, identity);
-    if (!expiresAt) return undefined;
+    const expiresAt = await automaticDeletionPreservationExpiresAt(env, identity, 'vm_retirement');
+    const kind = expiresAt ? 'snapshot' : 'fallback';
+    if (!expiresAt && !(await verifyVmFallbackRetirement(env, identity, snapshot)))
+      return undefined;
     sources.push({
       ...identity,
       runtimeIncarnationId: node.runtimeIncarnationId,
       providerInstanceId: node.providerInstanceId,
       snapshotGeneration: snapshot.snapshotGeneration,
-      expiresAt,
+      expiresAt: expiresAt ?? snapshot.expiresAt,
+      kind,
+      cleanupIdentityJson: snapshot.cleanupIdentityJson,
+      sleepStatus: snapshot.sleepStatus,
+      sleepClaimId: snapshot.sleepClaimId,
+      fallbackJson: snapshot.sleepFallbackJson,
+      recoveryStatus: snapshot.recoveryStatus,
+      recoveryAttemptId: snapshot.recoveryAttemptId,
+      recoveryWorkspaceId: snapshot.recoveryWorkspaceId,
     });
   }
   if (!sources.length) return undefined;
@@ -149,8 +178,26 @@ export async function preparePreservedVmRetirement(
     providerInstanceId: node.providerInstanceId,
     async beforeDestroy() {
       for (const source of sources) {
-        if ((await automaticDeletionPreservationExpiresAt(env, source)) !== source.expiresAt)
-          throw new Error('VM retirement preservation is no longer available');
+        if (source.kind === 'snapshot') {
+          if (
+            (await automaticDeletionPreservationExpiresAt(env, source, 'vm_retirement')) !==
+            source.expiresAt
+          )
+            throw new Error('VM retirement preservation is no longer available');
+        } else {
+          const snapshot = await db
+            .select()
+            .from(schema.sessionSnapshots)
+            .where(eq(schema.sessionSnapshots.workspaceId, source.workspaceId))
+            .get();
+          if (
+            !snapshot ||
+            snapshot.sleepFallbackJson !== source.fallbackJson ||
+            snapshot.cleanupIdentityJson !== source.cleanupIdentityJson ||
+            !(await verifyVmFallbackRetirement(env, source, snapshot))
+          )
+            throw new Error('VM retirement fallback is no longer available');
+        }
       }
     },
   };
@@ -158,10 +205,12 @@ export async function preparePreservedVmRetirement(
 
 /** Cleanup retry bookkeeping is not user activity; completed sleep owns this clock. */
 export function preservedVmRetirementActivitySql(workspace: string): string {
-  return `COALESCE((SELECT slept.sleeping_at FROM session_snapshots slept
+  return `COALESCE((SELECT COALESCE(slept.sleeping_at, slept.sleep_stopping_since, slept.updated_at) FROM session_snapshots slept
     WHERE slept.workspace_id = ${workspace}.id AND slept.node_id IS ${workspace}.node_id
       AND slept.user_id IS ${workspace}.user_id AND slept.chat_session_id IS ${workspace}.chat_session_id
-      AND slept.project_id IS ${workspace}.project_id AND slept.sleep_status = 'sleeping'
+      AND slept.project_id IS ${workspace}.project_id AND slept.sleep_status IN ('sleeping', 'stopping')
       AND ${workspace}.status IN ('stopping', 'stopped', 'sleeping', 'evicted')
-    LIMIT 1), ${workspace}.updated_at)`;
+    LIMIT 1), CASE WHEN ${workspace}.status IN ('stopping', 'stopped', 'sleeping', 'evicted')
+      THEN COALESCE(${workspace}.stop_runtime_confirmed_at, ${workspace}.last_activity_at, ${workspace}.created_at)
+      ELSE ${workspace}.updated_at END)`;
 }
