@@ -11,7 +11,6 @@ import { isOperationalLoopEnabled } from '../services/operational-kill-switch';
 import { checkProvisioningTimeouts } from '../services/timeout';
 import { migrateOrphanedWorkspaces } from '../services/workspace-migration';
 import { runWorkspaceResourceHistoryCleanup } from '../services/workspace-resource-history';
-import { runWorkspaceEvictionRecovery } from './workspace-eviction-recovery';
 import { runAnalyticsForwardJob } from './analytics-forward';
 import { runScheduledCapacityPoolReconciliation } from './capacity-pool-reconciliation';
 import { runScheduledComposeImageArtifactCleanup } from './compose-image-artifact-cleanup';
@@ -42,6 +41,7 @@ import { runTrialExpireSweep } from './trial-expire';
 import { runTrialRolloverAudit } from './trial-rollover';
 import { runTrialWaitlistCleanup } from './trial-waitlist-cleanup';
 import { runTriggerExecutionCleanup } from './trigger-execution-cleanup';
+import { runWorkspaceEvictionRecovery } from './workspace-eviction-recovery';
 
 /** Cloudflare scheduled entry point. Special cron jobs are not part of the operational sweep brake. */
 export async function scheduled(

@@ -699,6 +699,18 @@ describe('live CPU is a saturation ceiling, not an admission authority', () => {
     );
   });
 
+  it('keeps deployment admission separate while unknown node roles stay guarded', () => {
+    for (const nodeRole of ['deployment', 'workspace', null, undefined]) {
+      const result = evaluateWorkspaceReservationCapacity(
+        { ...hostAt(10, { memoryPercent: 99 }), nodeRole },
+        oneCoTenant(),
+        reservation({ cpuMillis: 1000 }),
+        resolveWorkspaceAdmissionPolicy(productionEnv)
+      );
+      expect(result.admitted, `role ${nodeRole}`).toBe(nodeRole === 'deployment');
+    }
+  });
+
   it('is the only backstop when a co-tenant under-declares, and it holds', () => {
     // `cpuMillis` is admission-time bookkeeping: nothing in packages/vm-agent
     // turns it into a cgroup quota or `docker run --cpus`. So a co-tenant that

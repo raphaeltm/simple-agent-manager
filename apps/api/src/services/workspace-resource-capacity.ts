@@ -62,6 +62,7 @@ export interface WorkspaceReservationCapacityResult {
 
 export interface WorkspaceResourceNode {
   id: string;
+  nodeRole?: string | null;
   nodeClass?: string | null;
   providerInstanceId?: string | null;
   providerInstanceVcpuCount?: number | null;
@@ -300,6 +301,7 @@ export function trustedWorkspaceNodeCapacityColumnsSql(alias = ''): string {
   }
   const prefix = alias ? `${alias}.` : '';
   return `${prefix}node_class AS nodeClass,
+       ${prefix}node_role AS nodeRole,
        ${prefix}provider_instance_id AS providerInstanceId,
        ${prefix}observed_provider_instance_type AS observedProviderInstanceType,
        ${prefix}observed_provider_instance_vcpu_count AS observedProviderInstanceVcpuCount,
@@ -310,6 +312,7 @@ export function trustedWorkspaceNodeCapacityColumnsSql(alias = ''): string {
 
 /** Row shape produced by `trustedWorkspaceNodeCapacityColumnsSql`. */
 export interface TrustedWorkspaceNodeCapacityRow {
+  nodeRole?: string | null;
   nodeClass: string | null;
   providerInstanceId: string | null;
   observedProviderInstanceType: string | null;
@@ -547,6 +550,9 @@ export function evaluateWorkspaceReservationCapacity(
       ? (memoryMb * metrics.memoryPercent) / 100
       : null;
   if (
+    // Deployments use separate atomic admission and lack workspace observations.
+    // Keep this new workspace-only headroom guard aligned with its SQL claim.
+    node.nodeRole !== 'deployment' &&
     memoryMb !== null &&
     measuredMemoryMb !== null &&
     measuredMemoryMb +
