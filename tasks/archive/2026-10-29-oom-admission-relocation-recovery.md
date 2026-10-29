@@ -19,8 +19,8 @@ Complete measured-memory admission and eviction startup retry recovery, preservi
 - [x] Startup failure retains conversation and replay retries using exact ownership/generation; stale callbacks cannot steal successor.
 - [x] Recovery retry budget remains bounded with visible terminal exhaustion.
 - [x] Fallback diagnostics distinguish recovered capacity attempt from task terminal failure; reconcile production evidence.
-- [ ] Meaningful regression tests and appropriate quality checks pass.
-- [ ] Specialist reviews and task-completion validation complete before archive.
+- [x] Meaningful regression tests and appropriate quality checks pass.
+- [x] Specialist reviews and task-completion validation complete before archive.
 - [ ] Green PR, best-effort CodeRabbit, merge, deployment and basic smoke evidenced.
 
 ## Coordination
@@ -52,3 +52,9 @@ Both sources declared1536MiB/400mCPU(project configuration); observed node4CPU/8
 ### Broad-suite scope correction
 
 The full API run found the shared evaluator also served deployments, whose per-service admission and atomic SQL do not use workspace observation credits. Scope the new measured predicate to workspace roles; the existing trusted-capacity projection carries nodeRole, and only the exact deployment role retains its existing contract. Missing/null/unknown roles remain guarded. The original deployment boundary test is unchanged; workspace/deployment suites passed128 tests, plus29 evaluator tests including explicit role controls. Independent Cloudflare review passed this domain scoping correction. Repository lint import sorting corrected without behavior change.
+
+## Final implementation validation
+
+Repository lint/typecheck/build passed35 tasks; final-head API typecheck passed. Full API run completed980 files:14142 passing tests,2 skipped,5 failures isolated to the deployment boundary and four declared-budget simulations. Both issues were corrected without weakening workspace admission; exact formerly-failing files reran51/51 green, including the added pressure-rise scenario. Final evaluator role controls29/29 passed. Workers D1 admission19/19 passed. Runtime settings, migration safety/order, source-contract, AST(error-free warnings), file size, format and instruction-budget checks passed. Local security, Cloudflare, constitution, task-completion, documentation and settings reviewers all PASS/ADDRESSED; final completeness approved implementation archive after51+typecheck results.
+
+This is the /do implementation archive; release checkbox remains pending until CI, CodeRabbit, merge and production verification are recorded in the PR body and SAM completion evidence. No task completion is claimed merely by archiving implementation notes.
