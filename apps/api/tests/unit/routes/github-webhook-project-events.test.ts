@@ -7,7 +7,7 @@ import { AppError } from '../../../src/middleware/error';
 const mocks = vi.hoisted(() => ({
   verifyWebhookSignature: vi.fn(),
   getGitHubWebhookSecret: vi.fn(),
-  handleGitHubProjectEventAdmission: vi.fn(),
+  admitGitHubWebhookProjectEvents: vi.fn(),
   persistGitHubTriggerIntake: vi.fn(),
   recoverGitHubTriggerDelivery: vi.fn(),
   ingestPullRequestWebhook: vi.fn(),
@@ -26,7 +26,7 @@ vi.mock('../../../src/services/platform-config', () => ({
   getGitHubWebhookSecret: mocks.getGitHubWebhookSecret,
 }));
 vi.mock('../../../src/services/github-project-event-producer', () => ({
-  handleGitHubProjectEventAdmission: mocks.handleGitHubProjectEventAdmission,
+  admitGitHubWebhookProjectEvents: mocks.admitGitHubWebhookProjectEvents,
 }));
 vi.mock('../../../src/services/github-trigger-recovery', () => ({
   persistGitHubTriggerIntake: mocks.persistGitHubTriggerIntake,
@@ -48,7 +48,7 @@ describe('GitHub webhook ProjectData event admission ingress', () => {
     waitUntilPromises = [];
     mocks.verifyWebhookSignature.mockResolvedValue(true);
     mocks.getGitHubWebhookSecret.mockResolvedValue('secret');
-    mocks.handleGitHubProjectEventAdmission.mockResolvedValue(undefined);
+    mocks.admitGitHubWebhookProjectEvents.mockResolvedValue(undefined);
     mocks.persistGitHubTriggerIntake.mockResolvedValue(true);
     mocks.recoverGitHubTriggerDelivery.mockResolvedValue(undefined);
     mocks.ingestPullRequestWebhook.mockResolvedValue(undefined);
@@ -62,7 +62,7 @@ describe('GitHub webhook ProjectData event admission ingress', () => {
     app.post('/api/github/webhook', handleGitHubWebhook);
   });
 
-  it('schedules ProjectData admission separately from existing trigger routing', async () => {
+  it('persists independent ProjectData and PR input before scheduling trigger recovery', async () => {
     const payload = {
       action: 'opened',
       sender: { login: 'octocat' },
@@ -90,14 +90,10 @@ describe('GitHub webhook ProjectData event admission ingress', () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ received: true });
-    expect(waitUntilPromises).toHaveLength(3);
-    await expect(Promise.all(waitUntilPromises)).resolves.toEqual([
-      undefined,
-      undefined,
-      undefined,
-    ]);
+    expect(waitUntilPromises).toHaveLength(1);
+    await expect(Promise.all(waitUntilPromises)).resolves.toEqual([undefined]);
     expect(mocks.ingestPullRequestWebhook).toHaveBeenCalledWith(env, 'pull_request', payload);
-    expect(mocks.handleGitHubProjectEventAdmission).toHaveBeenCalledWith(env, {
+    expect(mocks.admitGitHubWebhookProjectEvents).toHaveBeenCalledWith(env, {
       deliveryId: 'delivery-1',
       eventType: 'pull_request',
       payload,
@@ -108,6 +104,56 @@ describe('GitHub webhook ProjectData event admission ingress', () => {
       payload,
     });
     expect(mocks.recoverGitHubTriggerDelivery).toHaveBeenCalledWith(env, 'delivery-1');
+  });
+
+  async function deliver() {
+    return app.fetch(
+      new Request('https://api.example.com/api/github/webhook', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-github-delivery': 'retry-delivery',
+          'x-github-event': 'pull_request',
+          'x-hub-signature-256': 'sha256=test',
+        },
+        body: JSON.stringify({ action: 'opened', repository: { id: 9001 } }),
+      }),
+      env,
+      {
+        waitUntil: (promise: Promise<unknown>) => waitUntilPromises.push(promise),
+        passThroughOnException: vi.fn(),
+      } as unknown as ExecutionContext
+    );
+  }
+
+  it.each(['admitGitHubWebhookProjectEvents', 'ingestPullRequestWebhook'] as const)(
+    'does not ACK failed %s and accepts a successful redelivery',
+    async (boundary) => {
+      mocks[boundary].mockRejectedValueOnce(new Error('D1_OVERLOADED'));
+      expect((await deliver()).status).toBe(500);
+      expect(mocks.persistGitHubTriggerIntake).not.toHaveBeenCalled();
+      expect(waitUntilPromises).toHaveLength(0);
+      expect((await deliver()).status).toBe(200);
+      expect(mocks.persistGitHubTriggerIntake).toHaveBeenCalledTimes(1);
+      expect(mocks.recoverGitHubTriggerDelivery).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('completes independent event admission even when trigger intake fails', async () => {
+    mocks.persistGitHubTriggerIntake.mockRejectedValueOnce(new Error('D1_OVERLOADED'));
+    expect((await deliver()).status).toBe(500);
+    expect(mocks.admitGitHubWebhookProjectEvents).toHaveBeenCalledTimes(1);
+    expect(mocks.ingestPullRequestWebhook).toHaveBeenCalledTimes(1);
+    expect(waitUntilPromises).toHaveLength(0);
+    expect(mocks.recoverGitHubTriggerDelivery).not.toHaveBeenCalled();
+  });
+
+  it('does not accept or persist an invalidly signed delivery', async () => {
+    mocks.verifyWebhookSignature.mockResolvedValueOnce(false);
+    expect((await deliver()).status).toBe(401);
+    expect(mocks.admitGitHubWebhookProjectEvents).not.toHaveBeenCalled();
+    expect(mocks.ingestPullRequestWebhook).not.toHaveBeenCalled();
+    expect(mocks.persistGitHubTriggerIntake).not.toHaveBeenCalled();
   });
 
   it('rejects a delivery without its ID before asynchronous routing', async () => {
@@ -133,7 +179,7 @@ describe('GitHub webhook ProjectData event admission ingress', () => {
 
     expect(response.status).toBe(400);
     expect(waitUntilPromises).toHaveLength(0);
-    expect(mocks.handleGitHubProjectEventAdmission).not.toHaveBeenCalled();
+    expect(mocks.admitGitHubWebhookProjectEvents).not.toHaveBeenCalled();
     expect(mocks.persistGitHubTriggerIntake).not.toHaveBeenCalled();
   });
 });

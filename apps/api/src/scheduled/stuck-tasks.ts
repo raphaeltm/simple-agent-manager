@@ -46,7 +46,10 @@ import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
 import { preserveProviderLimitWait } from '../services/provider-limit-reconciliation';
 import { expireSleepingConversation } from '../services/session-expiry';
-import { convergeStaleTaskSleep, DEFAULT_TASK_SLEEP_CONVERGENCE_LIMIT } from '../services/session-sleep-task-convergence';
+import {
+  convergeStaleTaskSleep,
+  DEFAULT_TASK_SLEEP_CONVERGENCE_LIMIT,
+} from '../services/session-sleep-task-convergence';
 import {
   sessionRecoveryAttemptDecayMs,
   sessionRecoveryMaxAttempts,
@@ -313,11 +316,11 @@ export async function selectStuckTaskCandidates(
       `SELECT ${STUCK_TASK_CANDIDATE_COLUMNS}
        FROM tasks
        WHERE status IN ('queued', 'delegated', 'in_progress')
-         AND (updated_at > ? OR (updated_at = ? AND id > ?))
+         AND (updated_at, id) > (?, ?)
        ORDER BY updated_at ASC, id ASC
        LIMIT ?`
     )
-      .bind(cursor.updatedAt, cursor.updatedAt, cursor.taskId, maxCandidates)
+      .bind(cursor.updatedAt, cursor.taskId, maxCandidates)
       .all<StuckTaskCandidate>();
     tasks = forward.results;
   } else {
@@ -347,11 +350,11 @@ export async function selectStuckTaskCandidates(
       `SELECT ${STUCK_TASK_CANDIDATE_COLUMNS}
        FROM tasks
        WHERE status IN ('queued', 'delegated', 'in_progress')
-         AND (updated_at < ? OR (updated_at = ? AND id <= ?))
+         AND (updated_at, id) <= (?, ?)
        ORDER BY updated_at ASC, id ASC
        LIMIT ?`
     )
-      .bind(cursor.updatedAt, cursor.updatedAt, cursor.taskId, remaining)
+      .bind(cursor.updatedAt, cursor.taskId, remaining)
       .all<StuckTaskCandidate>();
     if (wrap.results.length > 0) {
       wrapped = true;
@@ -1334,7 +1337,8 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
                 now,
                 sleepConvergenceBudget
               )) !== 'none'
-            ) break;
+            )
+              break;
             const ceiling = await evaluateRunawayCostCeiling(
               env,
               {
@@ -1444,11 +1448,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         const doStatus = doProbe.status;
         const liveness = task.status === 'in_progress' ? await probeLiveness() : null;
 
-        if (
-          task.status === 'in_progress' &&
-          timeForCheck > maxExecutionMs &&
-          liveness?.live
-        ) {
+        if (task.status === 'in_progress' && timeForCheck > maxExecutionMs && liveness?.live) {
           const startedAt = task.started_at ? new Date(task.started_at).getTime() : updatedAt;
           const stall = await probeStall(liveness);
           if (stall?.decision === 'stalled') {
@@ -1489,7 +1489,14 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         }
 
         if (doStatus?.completed && !isStuck) {
-          await recordTaskRunnerMismatch(env, task.id, doStatus, doProbe.outcome, timeForCheck, liveness);
+          await recordTaskRunnerMismatch(
+            env,
+            task.id,
+            doStatus,
+            doProbe.outcome,
+            timeForCheck,
+            liveness
+          );
         }
       }
       if (!isStuck) continue;
