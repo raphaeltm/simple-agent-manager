@@ -11,6 +11,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
+import { recoverLegacyDeploymentBinding } from './deployment-legacy-binding';
 import { deleteDNSRecord } from './dns';
 import { getTimeoutMs } from './fetch-timeout';
 import {
@@ -33,6 +34,7 @@ import {
   type ExactProviderCredentialBinding,
   exactProviderCredentialBindingFromPlacementSnapshot,
 } from './provider-credentials';
+import { getProvisioningTimeoutMs } from './timeout';
 import { destroyVmAgentContainer } from './vm-agent-container';
 
 type NodeDb = ReturnType<typeof drizzle<typeof schema>>;
@@ -141,13 +143,13 @@ function getStrictNodeCredentialContext(node: NodeRow, userId: string) {
   const exactCredential = exactProviderCredentialBindingFromPlacementSnapshot(node);
   return { targetProvider, attributionUserId, attributionProjectId, exactCredential };
 }
-function hasManagedWorkspaceVmPlacementProof(node: NodeRow): boolean {
+function hasManagedVmPlacementProof(node: NodeRow): boolean {
   const hasText = (value: string | null): boolean => !!value?.trim();
   return (
-    node.nodeRole === 'workspace' &&
+    ['workspace', 'deployment'].includes(node.nodeRole) &&
     node.nodeClass === 'managed' &&
     node.runtime === 'vm' &&
-    node.workloadRole === 'workspace' &&
+    node.workloadRole === node.nodeRole &&
     ['user', 'project', 'installation'].includes(node.capacityPoolScope ?? '') &&
     (node.capacityPoolScope !== 'project' || hasText(node.capacityPoolProjectId)) &&
     (node.capacityPoolScope === 'project' || !node.capacityPoolProjectId) &&
@@ -341,10 +343,20 @@ async function reconcileStrictProviderlessVm(
   requestContext?: ProviderRequestContext,
   beforeDestroy?: () => Promise<void>
 ): Promise<StrictNodeDeletionResult['providerVm']> {
-  if (node.status !== 'destroying' || !hasManagedWorkspaceVmPlacementProof(node)) {
+  if (node.status !== 'destroying' || !hasManagedVmPlacementProof(node)) {
     throw new Error(
       `Cannot confirm managed VM termination for node ${node.id}: instance identity is missing`
     );
+  }
+  // A fresh createVM may still be in flight. Keep every deployment entry
+  // point (including direct node Stop) quarantined until the existing recovery
+  // window passes; a temporarily empty inventory cannot prove its termination.
+  if (
+    node.nodeRole === 'deployment' &&
+    (!Number.isFinite(Date.parse(node.createdAt)) ||
+      Date.now() - Date.parse(node.createdAt) < getProvisioningTimeoutMs(env))
+  ) {
+    throw new Error('Deployment allocation is still within its provisioning recovery window');
   }
   // Only Hetzner currently guarantees that a successful filtered inventory read is
   // complete. Other adapters may deliberately return partial multi-region inventory,
@@ -364,7 +376,7 @@ async function reconcileStrictProviderlessVm(
 
   const labels = buildNodeProviderLabels({
     nodeId: node.id,
-    isDeploymentNode: false,
+    isDeploymentNode: node.nodeRole === 'deployment',
     environmentLabel,
     installationId,
     runtimeIncarnationId: node.runtimeIncarnationId,
@@ -602,7 +614,13 @@ export async function deleteNodeResourcesStrict(
   } = {}
 ): Promise<StrictNodeDeletionResult> {
   const db = drizzle(env.DATABASE, { schema });
-  const initialNode = await requireStrictNode(db, nodeId, userId);
+  let initialNode = await requireStrictNode(db, nodeId, userId);
+  if (
+    matchesExpectedRuntime(initialNode, options.expectedRuntime) &&
+    (await recoverLegacyDeploymentBinding(env, initialNode, options.providerRequestContext?.signal))
+  ) {
+    initialNode = await requireStrictNode(db, nodeId, userId);
+  }
   if (!matchesExpectedRuntime(initialNode, options.expectedRuntime)) {
     throw new Error(`Strict node deletion target was reincarnated before claim: node=${nodeId}`);
   }
@@ -642,7 +660,7 @@ export async function deleteNodeResourcesStrict(
       initialNode.status === 'destroying' &&
       node.runtime === 'vm' &&
       !node.providerInstanceId &&
-      !hasManagedWorkspaceVmPlacementProof(initialNode)
+      !hasManagedVmPlacementProof(initialNode)
     ) {
       throw new Error(`Providerless VM termination proof lacks managed placement: node=${nodeId}`);
     }

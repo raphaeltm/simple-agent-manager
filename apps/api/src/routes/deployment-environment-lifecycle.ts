@@ -8,7 +8,7 @@
  */
 
 import type { CredentialProvider } from '@simple-agent-manager/shared';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Hono } from 'hono';
 
@@ -18,14 +18,15 @@ import { log } from '../lib/logger';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
+import { resolveCleanupConfig } from '../scheduled/node-cleanup/config';
 import { buildDeploymentEnvironmentResponse } from '../services/deployment-environment-summary';
+import { cleanupDeploymentNode } from '../services/deployment-node-cleanup';
 import { provisionDeploymentNode } from '../services/deployment-provisioning';
 import {
   attachEnvironmentVolumesToLinkedNode,
   detachEnvironmentVolumes,
   listEnvironmentVolumes,
 } from '../services/deployment-volumes';
-import { deleteNodeResources, retireDeletedDeploymentNodeRecord } from '../services/nodes';
 import { recordDeploymentEnvironmentLifecycleEventBestEffort } from '../services/project-lifecycle-events';
 import {
   parseStoredResolvedReservationJson,
@@ -40,11 +41,6 @@ import {
   markEnvironmentStopped,
   teardownLinkedDeploymentNode,
 } from './deployment-environment-stop';
-
-interface LastNodeCleanupResult {
-  nodeDeleted: boolean;
-  warnings: string[];
-}
 
 interface VolumePlacementConstraint {
   provider: CredentialProvider;
@@ -75,52 +71,17 @@ async function requireDeploymentEnvironment(
 }
 
 async function cleanupDeploymentNodeIfUnassigned(
-  db: DeploymentDb,
+  _db: DeploymentDb,
   env: Env,
   userId: string,
   nodeId: string | null
-): Promise<LastNodeCleanupResult> {
-  if (!nodeId) {
-    return { nodeDeleted: false, warnings: [] };
-  }
-  if (typeof env.DATABASE.prepare !== 'function') {
-    return { nodeDeleted: false, warnings: [] };
-  }
-
-  const claim = await env.DATABASE.prepare(
-    `UPDATE nodes
-     SET status = 'deleting', updated_at = ?
-     WHERE id = ?
-       AND user_id = ?
-       AND node_role = 'deployment'
-       AND node_class != 'user-owned'
-       AND status NOT IN ('deleting', 'deleted')
-       AND NOT EXISTS (
-         SELECT 1 FROM deployment_environments WHERE node_id = ?
-       )`
-  )
-    .bind(new Date().toISOString(), nodeId, userId, nodeId)
-    .run();
-
-  if ((claim.meta?.changes ?? 0) === 0) {
-    return { nodeDeleted: false, warnings: [] };
-  }
-
-  const cleanup = await deleteNodeResources(nodeId, userId, env);
-  if (cleanup.errors.length > 0) {
-    await db
-      .update(schema.nodes)
-      .set({
-        status: 'error',
-        errorMessage: `Deployment node could not be fully deprovisioned: ${cleanup.errors.join('; ')}`,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)));
-    return { nodeDeleted: false, warnings: cleanup.errors };
-  }
-
-  await retireDeletedDeploymentNodeRecord(db, env, nodeId, userId, cleanup);
-  return { nodeDeleted: cleanup.nodeFound, warnings: [] };
+) {
+  if (!nodeId) return { nodeDeleted: false, warnings: [] };
+  const config = resolveCleanupConfig(env);
+  return cleanupDeploymentNode(env, nodeId, userId, {
+    retryAfterMs: config.failureBackoffMs,
+    requestTimeoutMs: config.stoppedHandoffRequestTimeoutMs,
+  });
 }
 
 export function resolveVolumePlacementConstraint(
@@ -269,7 +230,7 @@ async function finishEnvironmentStart(
   }
 }
 
-async function stopDeploymentEnvironment(params: {
+export async function stopDeploymentEnvironment(params: {
   db: DeploymentDb;
   env: Env;
   userId: string;
@@ -279,7 +240,7 @@ async function stopDeploymentEnvironment(params: {
 }) {
   const { db, env, userId, projectId, envId } = params;
   const environment = await requireDeploymentEnvironment(db, projectId, envId);
-  if (environment.status === 'stopped') {
+  if (environment.status === 'stopped' && !environment.nodeId) {
     return {
       environment: await buildDeploymentEnvironmentResponse(db, env, environment),
       lifecycle: {
@@ -292,7 +253,13 @@ async function stopDeploymentEnvironment(params: {
       },
     };
   }
-  if (environment.status === 'stopping' || environment.status === 'starting') {
+  const config = resolveCleanupConfig(env);
+  if (
+    environment.status === 'starting' ||
+    (environment.status === 'stopping' &&
+      (!environment.updatedAt ||
+        Date.parse(environment.updatedAt) > Date.now() - config.orphanGracePeriodMs))
+  ) {
     throw errors.conflict(
       `Deployment environment is already ${environment.status}; wait for that lifecycle operation to finish.`
     );
@@ -303,10 +270,24 @@ async function stopDeploymentEnvironment(params: {
   const previousStatus = environment.status;
   const previousNodeId = environment.nodeId;
 
-  await db
+  const stopClaim = await db
     .update(schema.deploymentEnvironments)
     .set({ status: 'stopping', updatedAt: new Date().toISOString() })
-    .where(eq(schema.deploymentEnvironments.id, envId));
+    .where(
+      and(
+        eq(schema.deploymentEnvironments.id, envId),
+        eq(schema.deploymentEnvironments.status, previousStatus),
+        previousNodeId
+          ? eq(schema.deploymentEnvironments.nodeId, previousNodeId)
+          : isNull(schema.deploymentEnvironments.nodeId),
+        environment.updatedAt
+          ? eq(schema.deploymentEnvironments.updatedAt, environment.updatedAt)
+          : isNull(schema.deploymentEnvironments.updatedAt)
+      )
+    )
+    .run();
+  if (stopClaim.meta.changes !== 1)
+    throw errors.conflict('Deployment environment changed before stop could be claimed');
 
   const teardown = await teardownLinkedDeploymentNode(db, env, userId, envId, previousNodeId, {
     requireLiveTeardownBeforeDetach: attachedVolumes,
@@ -316,13 +297,16 @@ async function stopDeploymentEnvironment(params: {
     env,
     userId,
     envId,
-    collectAttachedServerIds(volumes, teardown.providerInstanceId)
+    collectAttachedServerIds(volumes, teardown.providerInstanceId),
+    previousNodeId
   );
 
-  await markEnvironmentStopped(db, envId);
-
   const nodeCleanup = await cleanupDeploymentNodeIfUnassigned(db, env, userId, previousNodeId);
-  const warnings = [...teardown.warnings, ...nodeCleanup.warnings];
+  if (nodeCleanup.warnings.length > 0) {
+    throw errors.conflict(nodeCleanup.warnings.join('; '));
+  }
+  await markEnvironmentStopped(db, envId, previousNodeId);
+  const warnings = teardown.warnings;
   const updated = await requireDeploymentEnvironment(db, projectId, envId);
   log.info('deployment_environment.stopped', {
     projectId,
