@@ -55,6 +55,7 @@ describe('owner-account service provisioning', () => {
       ([url, init]) => url.endsWith(`/scripts/${name}`) && init?.method === 'PUT'
     )?.[1]?.body as FormData;
     const metadata = JSON.parse(await (upload.get('metadata') as Blob).text());
+    expect(metadata.containers).toEqual([{ class_name: 'InstallationBuilder' }]);
     expect(metadata.migrations.new_sqlite_classes).toEqual([
       'MaintenanceCoordinator',
       'InstallationBuilder',

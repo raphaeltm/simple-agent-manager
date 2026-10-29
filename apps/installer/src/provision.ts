@@ -188,6 +188,7 @@ async function uploadMaintenance(
         JSON.stringify({
           main_module: 'worker.js',
           compatibility_date: '2026-10-01',
+          containers: [{ class_name: 'InstallationBuilder' }],
           migrations: {
             new_tag: 'v1',
             new_sqlite_classes: ['MaintenanceCoordinator', 'InstallationBuilder'],
