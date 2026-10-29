@@ -48,7 +48,10 @@ export function preservedVmSourceSql(workspace: string, node: string): string {
       OR (json_extract(approved.value, '$.kind') = 'fallback'
         AND saved.sleep_status IS json_extract(approved.value, '$.sleepStatus')
         AND saved.sleep_claim_id IS json_extract(approved.value, '$.sleepClaimId')
-        AND saved.sleep_fallback_json IS json_extract(approved.value, '$.fallbackJson')))
+        AND saved.sleep_fallback_json IS json_extract(approved.value, '$.fallbackJson')
+        AND saved.recovery_status IS json_extract(approved.value, '$.recoveryStatus')
+        AND saved.recovery_attempt_id IS json_extract(approved.value, '$.recoveryAttemptId')
+        AND saved.recovery_workspace_id IS json_extract(approved.value, '$.recoveryWorkspaceId')))
   )`;
 }
 
@@ -109,6 +112,9 @@ export async function preparePreservedVmRetirement(
       sleepStatus: string | null;
       sleepClaimId: string | null;
       fallbackJson: string | null;
+      recoveryStatus: string | null;
+      recoveryAttemptId: string | null;
+      recoveryWorkspaceId: string | null;
     }
   > = [];
   for (const workspace of workspaces) {
@@ -159,6 +165,9 @@ export async function preparePreservedVmRetirement(
       sleepStatus: snapshot.sleepStatus,
       sleepClaimId: snapshot.sleepClaimId,
       fallbackJson: snapshot.sleepFallbackJson,
+      recoveryStatus: snapshot.recoveryStatus,
+      recoveryAttemptId: snapshot.recoveryAttemptId,
+      recoveryWorkspaceId: snapshot.recoveryWorkspaceId,
     });
   }
   if (!sources.length) return undefined;

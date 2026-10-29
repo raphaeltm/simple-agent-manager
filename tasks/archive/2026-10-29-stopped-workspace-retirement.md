@@ -50,3 +50,5 @@ The two evictions on01M61JA31QX4TXBCJ5GKP1JCZF did recover onto successors: move
 Final recovery repair: `retired-vm-sleep-repair.ts` confirms wakeability only from exact matching durable VM/workspace termination proof, retried before source preparation after interruption. No pre-proof timestamp fabrication; backup keys and expiry retained. Both specialists re-reviewed PASS; 132 combined focused tests pass.
 
 Implementation archived after completion validation. Remaining PR/CodeRabbit/merge/deployment evidence is maintained in the PR body and parent SAM completion report; staging explicitly waived. Final fixture re-review independently10/10 guard tests PASS.
+
+Final adversarial wake-race review: fallback refuses waking/restored/foreign recovery workspace; downgrade CAS and saved claim/final-boundary authority fence recovery status/attempt/workspace. Three asynchronous/atomic wake races added. Four affected suites90/90 PASS; final security re-review PASS.

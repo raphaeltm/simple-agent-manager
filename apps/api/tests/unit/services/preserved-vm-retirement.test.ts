@@ -427,6 +427,71 @@ describe('legacy VM retirement: real SQL, snapshot verifier and strict provider 
       expect.any(String)
     );
   });
+  it('does not downgrade a recovery point when a wake claims it during artifact assessment', async () => {
+    fallback();
+    const point = {
+      generation: 'capture-ws',
+      commit: 'a'.repeat(40),
+      branch: 'main',
+      detached: false,
+      upstream: null,
+      capturedAt: null,
+      snapshotStatus: 'available',
+      degradation: 'none',
+      workingTreeSaved: true,
+      homeSaved: true,
+    };
+    sqlite
+      .prepare(
+        "UPDATE session_snapshots SET sleep_fallback_json=json_set(sleep_fallback_json,'$.recoveryPoint',json(?)),manifest_json=json_set(manifest_json,'$.git',json(?)),base_commit=?"
+      )
+      .run(
+        JSON.stringify(point),
+        JSON.stringify({ branch: 'main', detached: false }),
+        'a'.repeat(40)
+      );
+    const original = sqlite.prepare('SELECT sleep_fallback_json FROM session_snapshots').get();
+    head.mockImplementation(async () => {
+      sqlite.exec(
+        "UPDATE session_snapshots SET recovery_status='waking',recovery_attempt_id='new-wake'"
+      );
+      return null;
+    });
+    expect((await handoff()).lifetimeDestroyed).toBe(0);
+    expect(sqlite.prepare('SELECT sleep_fallback_json FROM session_snapshots').get()).toEqual(
+      original
+    );
+    expect(boundary.remove).not.toHaveBeenCalled();
+  });
+  it('fences a wake between fallback preparation and the atomic node claim', async () => {
+    fallback();
+    const preservedVm = await preparePreservedVmRetirement(env, 'node', 'owner');
+    expect(preservedVm).toBeDefined();
+    sqlite.exec(
+      "UPDATE session_snapshots SET recovery_status='waking',recovery_attempt_id='new-wake'"
+    );
+    expect(
+      await claimNodeForCleanup(
+        env,
+        { id: 'node', user_id: 'owner', status: 'running' },
+        now().toISOString(),
+        { preservedVm }
+      )
+    ).toBe(false);
+    expect(boundary.remove).not.toHaveBeenCalled();
+  });
+  it('fences a wake claimed during the final transcript notice before provider deletion', async () => {
+    fallback();
+    let notices = 0;
+    boundary.message.mockImplementation(async () => {
+      if (++notices === 2)
+        sqlite.exec(
+          "UPDATE session_snapshots SET recovery_status='waking',recovery_attempt_id='new-wake'"
+        );
+    });
+    expect((await handoff()).lifetimeDestroyed).toBe(0);
+    expect(boundary.remove).not.toHaveBeenCalled();
+  });
   it('blocks fallback retirement when the transcript notice cannot be retained', async () => {
     fallback();
     boundary.message.mockRejectedValue(new Error('ProjectData unavailable'));

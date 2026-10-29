@@ -29,6 +29,9 @@ export async function verifyVmFallbackRetirement(
     snapshot.userId !== expected.userId ||
     snapshot.projectId !== expected.projectId ||
     snapshot.chatSessionId !== expected.chatSessionId ||
+    ['waking', 'restored'].includes(snapshot.recoveryStatus ?? '') ||
+    (snapshot.recoveryWorkspaceId != null &&
+      snapshot.recoveryWorkspaceId !== expected.workspaceId) ||
     snapshot.captureGeneration ||
     !['sleeping', 'stopping'].includes(snapshot.sleepStatus ?? '') ||
     (snapshot.sleepStatus === 'stopping' && !snapshot.sleepClaimId)
@@ -76,6 +79,9 @@ export async function verifyVmFallbackRetirement(
             sql`${schema.sessionSnapshots.snapshotGeneration} IS ${snapshot.snapshotGeneration}`,
             sql`${schema.sessionSnapshots.sleepStatus} IS ${snapshot.sleepStatus}`,
             sql`${schema.sessionSnapshots.sleepClaimId} IS ${snapshot.sleepClaimId}`,
+            sql`${schema.sessionSnapshots.recoveryStatus} IS ${snapshot.recoveryStatus}`,
+            sql`${schema.sessionSnapshots.recoveryAttemptId} IS ${snapshot.recoveryAttemptId}`,
+            sql`${schema.sessionSnapshots.recoveryWorkspaceId} IS ${snapshot.recoveryWorkspaceId}`,
             isNull(schema.sessionSnapshots.captureGeneration)
           )
         );
