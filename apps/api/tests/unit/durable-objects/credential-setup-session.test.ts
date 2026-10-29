@@ -877,7 +877,7 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
     });
   });
 
-  it('fails fast with a sanitized error when Claude rejects the submitted code', async () => {
+  it('does not label an unclassified driver failure as a rejected code', async () => {
     const created = createDO();
     await Promise.resolve();
     let driverStatus = 'waiting_for_user';
@@ -908,7 +908,7 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
     await created.instance.alarm();
 
     const state = await created.instance.getState();
-    expect(state).toMatchObject({ status: 'failed', errorCode: 'code_rejected' });
+    expect(state).toMatchObject({ status: 'failed', errorCode: 'setup_failed' });
     expect(state?.errorMessage).not.toContain('secret provider detail');
     expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), 'lease-abc');
   });
@@ -962,7 +962,7 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
         },
         expectCode: 'code_incomplete',
         expectMessage: 'entire code',
-        expectDetail: '[CLI: Invalidcode. Please makesure the fullcde wascopied]',
+        expectDetail: '',
       },
       {
         id: 'setup-network',
@@ -974,7 +974,7 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
         },
         expectCode: 'exchange_network_error',
         expectMessage: 'network error',
-        expectDetail: '[CLI: connctECONNREFUSED 10.0.0.1:443 [redacted] junk]',
+        expectDetail: '',
       },
       {
         id: 'setup-network-openai-keys',
@@ -986,7 +986,7 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
         },
         expectCode: 'exchange_network_error',
         expectMessage: 'network error',
-        expectDetail: '[CLI: retry with [redacted] or [redacted]]',
+        expectDetail: '',
       },
     ] as const;
 
@@ -1020,7 +1020,7 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
       const state = await created.instance.getState();
       expect(state).toMatchObject({ status: 'failed', errorCode: scenario.expectCode });
       expect(state?.errorMessage).toContain(scenario.expectMessage);
-      expect(state?.errorMessage).toContain(scenario.expectDetail);
+      expect(state?.errorMessage).not.toContain('[CLI:');
       expect(state?.errorMessage).not.toContain('sk-ant');
       expectCredentialTokensAbsent(state?.errorMessage ?? '');
     }

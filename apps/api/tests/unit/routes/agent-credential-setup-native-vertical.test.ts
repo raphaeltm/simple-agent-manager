@@ -1,7 +1,11 @@
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
+
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { runClaudeSetupToken } from '../../../scripts/claude-setup-token.mjs';
 import type { Env } from '../../../src/env';
 import { agentCredentialSetupSessionsRoutes } from '../../../src/routes/agent-credential-setup-sessions';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -43,6 +47,8 @@ vi.mock('../../../src/middleware/auth', () => ({
   requireApproved: () => vi.fn((_c: unknown, next: () => unknown) => next()),
   getUserId: () => 'owner-user',
 }));
+
+afterEach(() => vi.unstubAllEnvs());
 
 function setupDatabase(): Database.Database {
   const sqlite = new Database(':memory:');
@@ -245,125 +251,181 @@ describe('native Codex setup route vertical slice', () => {
     expect(getState).not.toHaveBeenCalled();
   });
 
-  it('submits an owned Claude browser verification code through the DO boundary without persisting the secret in D1', async () => {
-    const sqlite = setupDatabase();
-    const now = new Date().toISOString();
-    sqlite
-      .prepare(
-        `INSERT INTO agent_credential_setup_sessions
+  it.each(['completed', 'process_exited', 'code_rejected'])(
+    'runs route → DO → driver → %s without leaking credentials',
+    async (outcome) => {
+      const sqlite = setupDatabase();
+      const now = new Date().toISOString();
+      sqlite
+        .prepare(
+          `INSERT INTO agent_credential_setup_sessions
          (id, user_id, project_id, scope, agent_type, credential_kind, status,
           sandbox_id, pool_lease_id, expires_at, created_at, updated_at)
          VALUES (?, ?, NULL, 'user', 'claude-code', 'oauth-token',
           'waiting_for_user', ?, 'lease-claude', ?, ?, ?)`
-      )
-      .run(
-        'session-claude',
-        'owner-user',
-        'session-claude',
-        new Date(Date.now() + 60_000).toISOString(),
-        now,
-        now
+        )
+        .run(
+          'session-claude',
+          'owner-user',
+          'session-claude',
+          new Date(Date.now() + 60_000).toISOString(),
+          now,
+          now
+        );
+
+      const code = 'abc123#state456';
+      const token = `sk-ant-oat${'V'.repeat(48)}`;
+      const home = '/tmp/claude-route-vertical';
+      vi.stubEnv('CLAUDE_CONFIG_DIR', home);
+      const files = new Map<string, string>();
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+        stdin: new PassThrough(),
+        kill: vi.fn(),
+      });
+      const writes: string[] = [];
+      child.stdin.on('data', (chunk) => writes.push(chunk.toString()));
+      const ready = runClaudeSetupToken({
+        statePath: `${home}/device-auth-state.json`,
+        credentialPath: `${home}/claude-oauth-token.txt`,
+        verificationCodePath: `${home}/verification-code.txt`,
+        spawnProcess: () => child,
+        writeState: async (state) => {
+          files.set(`${home}/device-auth-state.json`, JSON.stringify(state));
+        },
+        writeCredential: async (value) => {
+          files.set(`${home}/claude-oauth-token.txt`, value);
+        },
+        readVerificationCode: async (path) => {
+          if (!files.has(path)) throw Object.assign(new Error('absent'), { code: 'ENOENT' });
+          return files.get(path)!;
+        },
+        deleteVerificationCode: async (path) => {
+          files.delete(path);
+        },
+        verificationCodePollMs: 1,
+        verificationEnterDelayMs: 1,
+      });
+      child.stdout.write(
+        'Open https://claude.com/cai/oauth/authorize?client_id=test&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&code_challenge=challenge&code_challenge_method=S256&state=state456\n'
+      );
+      await ready;
+      const sandbox = {
+        exec: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
+        writeFile: vi.fn(async (path: string, value: string) => {
+          files.set(path, value);
+        }),
+        exists: vi.fn(async (path: string) => ({ exists: files.has(path) })),
+        readFile: vi.fn(async (path: string) => ({ content: files.get(path) ?? '' })),
+      };
+      vi.mocked(saveAgentCredentialForUser).mockClear();
+      vi.mocked(getSandboxInstance).mockResolvedValue(sandbox as never);
+      vi.mocked(saveAgentCredentialForUser).mockResolvedValue({
+        created: true,
+        createdAt: now,
+        updatedAt: now,
+      });
+      const env = {
+        DATABASE: createSqliteD1(sqlite),
+        KV: { get: vi.fn().mockResolvedValue(null) },
+      } as unknown as Env;
+      const setupSession = new CredentialSetupSession(createDoContext() as never, env);
+      await Promise.resolve();
+      await setupSession.create({
+        id: 'session-claude',
+        userId: 'owner-user',
+        projectId: null,
+        scope: 'user',
+        agentType: 'claude-code',
+        credentialKind: 'oauth-token',
+        provider: 'anthropic',
+        agentName: 'Claude Code',
+        poolLeaseId: 'lease-claude',
+        setupHome: '/tmp/claude-route-vertical',
+        ttlMs: 60_000,
+        capturePollMs: 10,
+      });
+      await setupSession.alarm();
+      await setupSession.alarm();
+      Object.assign(env, {
+        CREDENTIAL_SETUP_SESSION: {
+          idFromName: vi.fn(() => ({ toString: () => 'do-session-claude' })),
+          get: vi.fn(() => setupSession),
+        },
+      });
+      const app = new Hono<{ Bindings: Env }>();
+      app.onError((error, c) => {
+        const status = 'statusCode' in error ? Number(error.statusCode) : 500;
+        return c.json({ error: error.message }, status as 400 | 404 | 409 | 500);
+      });
+      app.route('/api/agent-credential-setup-sessions', agentCredentialSetupSessionsRoutes);
+
+      const response = await app.request(
+        '/api/agent-credential-setup-sessions/session-claude/verification-code',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: ` abc123 #state456\n` }),
+        },
+        env
       );
 
-    const code = 'abc123#state456';
-    const token = `sk-ant-oat${'V'.repeat(48)}`;
-    const sandbox = {
-      exec: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
-      writeFile: vi.fn().mockResolvedValue(undefined),
-      exists: vi.fn().mockImplementation(async (path: string) => ({
-        exists: path.endsWith('device-auth-state.json') || path.endsWith('claude-oauth-token.txt'),
-      })),
-      readFile: vi.fn().mockImplementation(async (path: string) => ({
-        content: path.endsWith('device-auth-state.json')
-          ? JSON.stringify({
-              status: 'waiting_for_user',
-              verificationUrl: 'https://claude.ai/oauth/device',
-            })
-          : `${token}\n`,
-      })),
-    };
-    vi.mocked(getSandboxInstance).mockResolvedValue(sandbox as never);
-    vi.mocked(saveAgentCredentialForUser).mockResolvedValue({
-      created: true,
-      createdAt: now,
-      updatedAt: now,
-    });
-    const env = {
-      DATABASE: createSqliteD1(sqlite),
-      KV: { get: vi.fn().mockResolvedValue(null) },
-    } as unknown as Env;
-    const setupSession = new CredentialSetupSession(createDoContext() as never, env);
-    await Promise.resolve();
-    await setupSession.create({
-      id: 'session-claude',
-      userId: 'owner-user',
-      projectId: null,
-      scope: 'user',
-      agentType: 'claude-code',
-      credentialKind: 'oauth-token',
-      provider: 'anthropic',
-      agentName: 'Claude Code',
-      poolLeaseId: 'lease-claude',
-      setupHome: '/tmp/claude-route-vertical',
-      ttlMs: 60_000,
-      capturePollMs: 10,
-    });
-    await setupSession.alarm();
-    await setupSession.alarm();
-    Object.assign(env, {
-      CREDENTIAL_SETUP_SESSION: {
-        idFromName: vi.fn(() => ({ toString: () => 'do-session-claude' })),
-        get: vi.fn(() => setupSession),
-      },
-    });
-    const app = new Hono<{ Bindings: Env }>();
-    app.onError((error, c) => {
-      const status = 'statusCode' in error ? Number(error.statusCode) : 500;
-      return c.json({ error: error.message }, status as 400 | 404 | 409 | 500);
-    });
-    app.route('/api/agent-credential-setup-sessions', agentCredentialSetupSessionsRoutes);
-
-    const response = await app.request(
-      '/api/agent-credential-setup-sessions/session-claude/verification-code',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ code: ` abc123 #state456\n` }),
-      },
-      env
-    );
-
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({
-      id: 'session-claude',
-      status: 'exchanging',
-      agentType: 'claude-code',
-    });
-    expect(sandbox.writeFile).toHaveBeenCalledWith(
-      '/tmp/claude-route-vertical/verification-code.txt',
-      code
-    );
-    const persisted = sqlite
-      .prepare('SELECT * FROM agent_credential_setup_sessions WHERE id = ?')
-      .get('session-claude') as Record<string, unknown>;
-    expect(JSON.stringify(persisted)).not.toContain(code);
-
-    await setupSession.alarm();
-    expect(saveAgentCredentialForUser).toHaveBeenCalledWith(
-      expect.objectContaining({
-        userId: 'owner-user',
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        id: 'session-claude',
+        status: 'exchanging',
         agentType: 'claude-code',
-        credential: token,
-      })
-    );
-    const completedResponse = await app.request(
-      '/api/agent-credential-setup-sessions/session-claude',
-      {},
-      env
-    );
-    expect(completedResponse.status).toBe(200);
-    expect(await completedResponse.json()).toMatchObject({ status: 'completed' });
-  });
+      });
+      expect(sandbox.writeFile).toHaveBeenCalledWith(
+        '/tmp/claude-route-vertical/verification-code.txt',
+        code
+      );
+      const persisted = sqlite
+        .prepare('SELECT * FROM agent_credential_setup_sessions WHERE id = ?')
+        .get('session-claude') as Record<string, unknown>;
+      expect(JSON.stringify(persisted)).not.toContain(code);
+
+      await vi.waitFor(() => expect(writes).toEqual([code, '\r']));
+      if (outcome === 'code_rejected')
+        child.stdout.write('OAuth error: Request failed with status code 400\n');
+      child.emit('exit', outcome === 'completed' ? 0 : 1, null);
+      if (outcome === 'completed') child.stdout.write(`Your token: ${token}`);
+      child.emit('close');
+      await vi.waitFor(() =>
+        expect(JSON.parse(files.get(`${home}/device-auth-state.json`)!).status).toBe(
+          outcome === 'completed' ? 'completed' : 'failed'
+        )
+      );
+      await setupSession.alarm();
+      if (outcome === 'completed') {
+        expect(saveAgentCredentialForUser).toHaveBeenCalledWith(
+          expect.objectContaining({
+            userId: 'owner-user',
+            agentType: 'claude-code',
+            credential: token,
+          })
+        );
+      } else expect(saveAgentCredentialForUser).not.toHaveBeenCalled();
+      const completedResponse = await app.request(
+        '/api/agent-credential-setup-sessions/session-claude',
+        {},
+        env
+      );
+      expect(completedResponse.status).toBe(200);
+      const result = await completedResponse.json();
+      expect(result).toMatchObject(
+        outcome === 'completed' ? { status: 'completed' } : { status: 'failed', errorCode: outcome }
+      );
+      expect(JSON.stringify(result)).not.toContain(code);
+      expect(JSON.stringify(result)).not.toContain(token);
+      const finalRow = sqlite
+        .prepare('SELECT * FROM agent_credential_setup_sessions WHERE id = ?')
+        .get('session-claude');
+      expect(JSON.stringify(finalRow)).not.toContain(code);
+      expect(JSON.stringify(finalRow)).not.toContain(token);
+    }
+  );
 
   it('passes code shape validation to the DO boundary for authoritative validation', async () => {
     const sqlite = setupDatabase();

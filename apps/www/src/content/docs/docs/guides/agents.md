@@ -99,6 +99,8 @@ A few things worth knowing:
 - **User-scoped.** Guided sign-in saves the credential for your account, so it applies across your projects. To set a subscription credential for a single [shared project](/docs/guides/collaboration/), use the manual paste fallback in that project's connections.
 - **Availability.** Guided sign-in is available on the hosted platform and on self-hosted deployments running on Cloudflare Containers (SAM's default runtime). If the button isn't shown, use the manual API key or token fields in the same panel.
 
+If Claude sign-in fails, SAM distinguishes a mismatched sign-in attempt from a rejected code, a connection problem, or a stopped login process. Use **Try again** to start a fresh attempt and paste the entire code from that newly opened Claude page. When reporting a failure, include the message and approximate time; never share the code or token.
+
 ## Usage Limits
 
 A subscription only lets you use so much in a stretch of time — Claude Max has a five-hour and a

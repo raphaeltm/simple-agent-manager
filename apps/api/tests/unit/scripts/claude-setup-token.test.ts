@@ -28,6 +28,8 @@ function fakeClaudeProcess() {
   return process;
 }
 
+const authUrl = (state = 'state') =>
+  `https://claude.com/cai/oauth/authorize?client_id=test&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&code_challenge=challenge&code_challenge_method=S256&state=${state}`;
 const CLAUDE_TOKEN = `sk-ant-oat${'A'.repeat(48)}`;
 const CLAUDE_SETUP_HOME = '/tmp/sam-claude-setup-test';
 const CLAUDE_STATE_PATH = `${CLAUDE_SETUP_HOME}/device-auth-state.json`;
@@ -50,11 +52,11 @@ afterEach(() => {
 describe('Claude setup-token driver', () => {
   it('extracts a trusted Claude URL, optional verification code, and OAuth token', () => {
     const output = extractClaudeSetupOutput(
-      `\u001b[32mOpen https://claude.com/cai/oauth/authorize?code=abc.\u001b[0m\nVerification code: ABCD-EFGH\nToken: ${CLAUDE_TOKEN}`
+      `\u001b[32mOpen ${authUrl()}.\u001b[0m\nVerification code: ABCD-EFGH\nToken: ${CLAUDE_TOKEN}`
     );
 
     expect(output).toEqual({
-      verificationUrl: 'https://claude.com/cai/oauth/authorize?code=abc',
+      verificationUrl: authUrl(),
       userCode: 'ABCD-EFGH',
       token: CLAUDE_TOKEN,
     });
@@ -90,36 +92,29 @@ describe('Claude setup-token driver', () => {
 
   it('extracts URLs from Claude terminal hyperlink output', () => {
     const output = extractClaudeSetupOutput(
-      '\u001b]8;id=abc;https://claude.com/cai/oauth/authorize?code=abc&state=def\u0007' +
-        'https://claude.com/cai/oauth/authorize?code=abc&state=def' +
+      `\u001b]8;id=abc;${authUrl()}\u0007` +
+        authUrl() +
         '\u001b]8;;\u0007\nPaste code here if prompted >'
     );
 
-    expect(output.verificationUrl).toBe(
-      'https://claude.com/cai/oauth/authorize?code=abc&state=def'
-    );
+    expect(output.verificationUrl).toBe(authUrl());
     expect(output.userCode).toBeUndefined();
   });
 
   it('does not treat URL query parameters or Claude prompt prose as a user code', () => {
     const output = extractClaudeSetupOutput(
-      'Open https://claude.com/cai/oauth/authorize?code=true&state=def\n' +
-        'Paste code here if prompted >'
+      `Open ${authUrl()}\n` + 'Paste code here if prompted >'
     );
 
-    expect(output.verificationUrl).toBe(
-      'https://claude.com/cai/oauth/authorize?code=true&state=def'
-    );
+    expect(output.verificationUrl).toBe(authUrl());
     expect(output.userCode).toBeUndefined();
   });
 
   it('accepts Anthropic-owned auth hosts and rejects untrusted hosts', () => {
-    expect(validateClaudeVerificationUrl('https://claude.com/cai/oauth/authorize')).toBe(
-      'https://claude.com/cai/oauth/authorize'
-    );
-    expect(validateClaudeVerificationUrl('https://console.anthropic.com/oauth')).toBe(
-      'https://console.anthropic.com/oauth'
-    );
+    expect(validateClaudeVerificationUrl(authUrl())).toBe(authUrl());
+    expect(
+      validateClaudeVerificationUrl(authUrl().replace('claude.com/cai', 'console.anthropic.com'))
+    ).toBe(authUrl().replace('claude.com/cai', 'console.anthropic.com'));
     expect(() => validateClaudeVerificationUrl('https://example.com/oauth')).toThrow(
       /untrusted verification URL/
     );
@@ -155,7 +150,9 @@ describe('Claude setup-token driver', () => {
       'code_incomplete'
     );
     expect(classifyOauthError('Requstfailed withstatus code 400').code).toBe('code_rejected');
-    expect(classifyOauthError('Request failed with status code 429').code).toBe('code_rejected');
+    expect(classifyOauthError('Request failed with status code 429').code).toBe(
+      'exchange_provider_error'
+    );
     expect(classifyOauthError('connctECONNREFUSED 127.0.0.1:9').code).toBe(
       'exchange_network_error'
     );
@@ -166,7 +163,7 @@ describe('Claude setup-token driver', () => {
     expect(classifyOauthError('Authentication failed: Invalid authorization code').code).toBe(
       'code_rejected'
     );
-    expect(classifyOauthError(null).code).toBe('code_rejected');
+    expect(classifyOauthError(null).code).toBe('exchange_failed');
   });
 
   it('derives setup file paths from CLAUDE_CONFIG_DIR and rejects path escapes', async () => {
@@ -262,14 +259,14 @@ describe('Claude setup-token driver', () => {
       '/dev/null',
     ]);
 
-    fake.stderr.write('Open https://claude.com/cai/oauth/authorize\n');
+    fake.stderr.write(`Open ${authUrl('state')}\n`);
     await ready;
 
     expect(states).toEqual([
       { status: 'starting' },
       {
         status: 'waiting_for_user',
-        verificationUrl: 'https://claude.com/cai/oauth/authorize',
+        verificationUrl: authUrl(),
         userCode: null,
       },
     ]);
@@ -304,7 +301,7 @@ describe('Claude setup-token driver', () => {
       rejectionSettleMs: 1,
     });
 
-    fake.stdout.write('Open https://claude.com/cai/oauth/authorize\n');
+    fake.stdout.write(`Open ${authUrl('rejected-code')}\n`);
     await ready;
     const stdinWrites: string[] = [];
     fake.stdin.on('data', (chunk) => stdinWrites.push(chunk.toString()));
@@ -312,11 +309,11 @@ describe('Claude setup-token driver', () => {
     fake.stdout.write('OAuth error: Request failed with status code 400\nPress Enter to retry.');
 
     await vi.waitFor(() =>
-      expect(states.at(-1)).toEqual({
+      expect(states.at(-1)).toMatchObject({
         status: 'failed',
         error: 'Claude rejected the verification code',
         code: 'code_rejected',
-        detail: 'Request failed with status code 400',
+        detail: 'HTTP 400',
       })
     );
     expect(JSON.stringify(states)).not.toContain('garbage#rejected-code');
@@ -340,7 +337,7 @@ describe('Claude setup-token driver', () => {
       verificationCodeMaxLength: 8,
     });
 
-    fake.stdout.write('Open https://claude.com/cai/oauth/authorize\n');
+    fake.stdout.write(`Open ${authUrl('state')}\n`);
     await ready;
     await vi.waitFor(() => expect(states.at(-1)).toMatchObject({ status: 'failed' }));
     expect(stdinWrites).toEqual([]);
@@ -385,15 +382,15 @@ describe('Claude setup-token driver', () => {
       rejectionSettleMs: 1,
     });
 
-    fake.stdout.write('Open https://claude.com/cai/oauth/authorize\n');
+    fake.stdout.write(`Open ${authUrl('B'.repeat(43))}\n`);
     await ready;
 
     await vi.waitFor(() =>
-      expect(states.at(-1)).toEqual({
+      expect(states.at(-1)).toMatchObject({
         status: 'failed',
         error: 'Claude rejected the verification code',
         code: 'code_rejected',
-        detail: 'Request failed with status code 400',
+        detail: 'HTTP 400',
       })
     );
     expect(pastedBuffer).toBe(realisticCode);
@@ -417,7 +414,7 @@ describe('Claude setup-token driver', () => {
       rejectionSettleMs: 1,
     });
 
-    fake.stdout.write('Open https://claude.com/cai/oauth/authorize\n');
+    fake.stdout.write(`Open ${authUrl('code')}\n`);
     await ready;
     const stdinWrites: string[] = [];
     fake.stdin.on('data', (chunk) => stdinWrites.push(chunk.toString()));
@@ -431,11 +428,10 @@ describe('Claude setup-token driver', () => {
     );
 
     await vi.waitFor(() =>
-      expect(states.at(-1)).toEqual({
+      expect(states.at(-1)).toMatchObject({
         status: 'failed',
         error: 'Claude rejected the verification code',
         code: 'code_rejected',
-        detail: 'Authentication failed: Invalid authorization code',
       })
     );
     expect(fake.kill).toHaveBeenCalledWith('SIGTERM');
@@ -462,21 +458,21 @@ describe('Claude setup-token driver', () => {
       rejectionSettleMs: 1,
     });
 
-    fake.stdout.write('Open https://claude.com/cai/oauth/authorize\n');
+    fake.stdout.write(`Open ${authUrl('state')}\n`);
     await ready;
     const stdinWrites: string[] = [];
     fake.stdin.on('data', (chunk) => stdinWrites.push(chunk.toString()));
-    await vi.waitFor(() => expect(stdinWrites).toEqual(['A'.repeat(64), '\r']));
+    await vi.waitFor(() => expect(states.at(-1)).toMatchObject({ code: 'code_incomplete' }));
+    expect(stdinWrites).toEqual([]);
     fake.stdout.write(
       'OAuth error: Invalidcode. Please makesure the fullcde wascopiedPressEntertoretry.'
     );
 
     await vi.waitFor(() =>
-      expect(states.at(-1)).toEqual({
+      expect(states.at(-1)).toMatchObject({
         status: 'failed',
-        error: 'Claude reported the pasted verification code was incomplete',
+        error: 'Copy the complete Claude verification code',
         code: 'code_incomplete',
-        detail: 'Invalidcode. Please makesure the fullcde wascopied',
       })
     );
     expect(fake.kill).toHaveBeenCalledWith('SIGTERM');
@@ -498,7 +494,7 @@ describe('Claude setup-token driver', () => {
       rejectionSettleMs: 1,
     });
 
-    fake.stdout.write('Open https://claude.com/cai/oauth/authorize\n');
+    fake.stdout.write(`Open ${authUrl('code')}\n`);
     await ready;
     const stdinWrites: string[] = [];
     fake.stdin.on('data', (chunk) => stdinWrites.push(chunk.toString()));
@@ -507,11 +503,10 @@ describe('Claude setup-token driver', () => {
     fake.stdout.write('OAuth error: connctECONNREFUSED 10.0.0.1:443PressEntertoretry.');
 
     await vi.waitFor(() =>
-      expect(states.at(-1)).toEqual({
+      expect(states.at(-1)).toMatchObject({
         status: 'failed',
         error: 'Claude sign-in failed with a network error during the code exchange',
         code: 'exchange_network_error',
-        detail: 'connctECONNREFUSED 10.0.0.1:443',
       })
     );
     expect(fake.kill).toHaveBeenCalledWith('SIGTERM');
@@ -533,12 +528,12 @@ describe('Claude setup-token driver', () => {
       exchangeTimeoutMs: 25,
     });
 
-    fake.stdout.write('Open https://claude.com/cai/oauth/authorize\n');
+    fake.stdout.write(`Open ${authUrl('exchange')}\n`);
     // The CLI accepts the code + Enter and then goes silent (hung request,
     // unknown error wording, dead spinner): the driver must not stall until the
     // session TTL.
     await vi.waitFor(() =>
-      expect(states.at(-1)).toEqual({
+      expect(states.at(-1)).toMatchObject({
         status: 'failed',
         error: 'Claude did not finish the verification code exchange in time',
         code: 'exchange_timeout',
@@ -559,6 +554,7 @@ describe('Claude setup-token driver', () => {
     });
 
     fake.emit('exit', 1, null);
+    fake.emit('close', 1, null);
 
     await expect(ready).rejects.toThrow(/exited before returning a token/);
     expect(states.at(-1)).toMatchObject({ status: 'failed' });

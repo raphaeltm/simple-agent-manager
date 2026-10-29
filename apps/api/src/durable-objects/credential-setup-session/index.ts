@@ -31,12 +31,10 @@ import { DurableObject } from 'cloudflare:workers';
 import * as v from 'valibot';
 
 import type { Env } from '../../env';
-import { redactCredentialTokens } from '../../lib/credential-token-redaction';
 import { log } from '../../lib/logger';
 import { saveAgentCredentialForUser } from '../../services/agent-credential-save';
 import {
   getClaudeOauthTokenMaxLength,
-  getClaudeSetupErrorDetailMaxLength,
   getClaudeVerificationCodeMaxLength,
   isTerminalSetupStatus,
   type SetupSessionStatus,
@@ -50,6 +48,7 @@ import {
 } from '../../services/sandbox';
 import { releaseSetupSlot } from '../../services/setup-session-pool';
 import { CredentialValidator } from '../../services/validation';
+import { type DeviceAuthState,DeviceAuthStateSchema, driverFailure } from './driver-state';
 
 export interface CreateSetupSessionParams {
   id: string;
@@ -120,48 +119,6 @@ function requiresUserCode(agentType: string): boolean {
 function credentialFileName(agentType: string): string {
   return agentType === 'claude-code' ? CLAUDE_OAUTH_TOKEN_FILE : CODEX_AUTH_FILE;
 }
-
-interface DeviceAuthState {
-  status: 'starting' | 'waiting_for_user' | 'completed' | 'failed';
-  verificationUrl?: string;
-  userCode?: string | null;
-  error?: string | null;
-  /** Optional machine-readable failure class from the driver (e.g. `exchange_timeout`). */
-  code?: string;
-  /** Optional short diagnostic extracted from the provider CLI's error screen. */
-  detail?: string | null;
-}
-
-/**
- * The driver state file is written inside the sandbox, so treat its diagnostic
- * text as untrusted: printable ASCII only, secrets redacted, hard length cap.
- * The driver's free-form `error` field is never surfaced — only this bounded
- * detail — mirroring the sanitized-failure posture of the existing mapping.
- */
-function sanitizeDriverDetail(detail: string | null | undefined, maxLength: number): string | null {
-  if (typeof detail !== 'string') return null;
-  const cleaned = redactCredentialTokens(detail, '[redacted]')
-    .replace(/[^\x20-\x7e]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, maxLength);
-  return cleaned.length > 0 ? cleaned : null;
-}
-
-/**
- * Validates the on-disk device-auth-state.json shape written by
- * scripts/claude-setup-token.mjs and scripts/codex-device-auth.mjs. `userCode`
- * is nullable because claude-setup-token.mjs writes `userCode: details.userCode
- * ?? null` (Claude Code sign-in never requires a user code).
- */
-const DeviceAuthStateSchema = v.object({
-  status: v.picklist(['starting', 'waiting_for_user', 'completed', 'failed']),
-  verificationUrl: v.optional(v.string()),
-  userCode: v.optional(v.nullable(v.string())),
-  error: v.optional(v.nullable(v.string())),
-  code: v.optional(v.string()),
-  detail: v.optional(v.nullable(v.string())),
-});
 
 export class CredentialSetupSession extends DurableObject<Env> {
   private readonly sql: SqlStorage;
@@ -374,41 +331,14 @@ export class CredentialSetupSession extends DurableObject<Env> {
       // waiting_for_user | exchanging | capturing — observe driver failure and capture output.
       const driverState = await this.readDeviceAuthState(row);
       if (driverState?.status === 'failed') {
-        let errorCode = 'setup_failed';
-        let errorMessage = 'Claude Code could not complete sign-in';
-        if (row.status === 'exchanging') {
-          switch (driverState.code) {
-            case 'exchange_timeout':
-              errorCode = 'exchange_timeout';
-              errorMessage =
-                'Claude sign-in did not complete in time. Start again and paste a fresh code.';
-              break;
-            case 'code_incomplete':
-              errorCode = 'code_incomplete';
-              errorMessage =
-                'The pasted code was incomplete. Copy the entire code Claude shows — it has a # in the middle — then start again.';
-              break;
-            case 'exchange_network_error':
-              errorCode = 'exchange_network_error';
-              errorMessage =
-                'The sign-in sandbox hit a network error talking to Claude. Start again in a moment.';
-              break;
-            default:
-              errorCode = 'code_rejected';
-              errorMessage =
-                'Claude rejected the verification code. Start again and use a fresh code.';
-          }
-        }
-        const detail = sanitizeDriverDetail(
-          driverState.detail,
-          getClaudeSetupErrorDetailMaxLength(this.env)
-        );
-        await this.teardown(
-          row,
-          'failed',
-          errorCode,
-          detail ? `${errorMessage} [CLI: ${detail}]` : errorMessage
-        );
+        const failure = driverFailure(driverState);
+        log.warn('credential_setup.driver_failed', {
+          sessionId: row.id,
+          phase: row.status,
+          errorCode: failure.code,
+          diagnostics: driverState.diagnostics ?? {},
+        });
+        await this.teardown(row, 'failed', failure.code, failure.message);
         return;
       }
       await this.attemptCapture(row);
@@ -533,6 +463,8 @@ export class CredentialSetupSession extends DurableObject<Env> {
       log.warn('credential_setup.device_auth_failed', {
         sessionId: row.id,
         agentType: row.agent_type,
+        errorCode: driverFailure(state).code,
+        diagnostics: state.diagnostics ?? {},
       });
       await this.teardown(
         current,
