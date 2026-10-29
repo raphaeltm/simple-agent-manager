@@ -9,7 +9,11 @@ export async function repairRetiredVmSleepSnapshots(
   nodeId: string,
   userId: string
 ): Promise<void> {
-  await env.DATABASE.prepare(
+  const limit = parsePositiveInt(
+    env.WORKSPACE_CLEANUP_SWEEP_LIMIT,
+    DEFAULT_WORKSPACE_CLEANUP_SWEEP_LIMIT
+  );
+  const repaired = await env.DATABASE.prepare(
     `UPDATE session_snapshots
     SET sleeping_at = COALESCE(sleeping_at, (
           SELECT n.runtime_termination_confirmed_at FROM nodes n WHERE n.id = ?)),
@@ -52,11 +56,9 @@ export async function repairRetiredVmSleepSnapshots(
       LIMIT ?
     )`
   )
-    .bind(
-      nodeId,
-      nodeId,
-      userId,
-      parsePositiveInt(env.WORKSPACE_CLEANUP_SWEEP_LIMIT, DEFAULT_WORKSPACE_CLEANUP_SWEEP_LIMIT)
-    )
+    .bind(nodeId, nodeId, userId, limit)
     .run();
+  // Keep a proof-bearing node in the retry path until every repair page drained.
+  if ((repaired.meta.changes ?? 0) >= limit)
+    throw new Error('Retired VM sleep repair reached its source budget; retry required');
 }

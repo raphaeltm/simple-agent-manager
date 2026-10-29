@@ -31,13 +31,13 @@ Staging explicitly waived by user; no production lifecycle/stress fixtures. Pres
 References: .claude/rules/47-control-loop-io-budget.md (API scoped copy), .claude/rules/25-review-merge-gate.md, Constitution X/XI.
 
 ## Validation / review evidence
-- Focused real-SQL retirement suite: 52 passed, independently repeated by completion reviewer.
+- Focused real-SQL retirement suite: 53 passed (52 independently repeated before final bounded-page regression) by completion reviewer.
 - Broader lifecycle unit suites: 146 passed before final additions.
 - Root lint: 13 tasks passed; root typecheck: 19 passed; root build: 9 passed.
 - Workers scheduled cleanup: 28 passed. NodeLifecycle: 81 passed; isolated retry-finalizer regression also passes after original concurrent-load timeout.
 - Root tests running with turbo concurrency1 and maxWorkers2; default parallel attempt hit local fork timeouts, not an assertion in changed behavior.
 - Security/Cloudflare: PASS after recovery-point claim downgraded by exact CAS when unavailable.
-- Completion/test/constitution/doc: PASS, independent 52/52 and diff check.
+- Completion/test/constitution/doc: PASS, independent52/52 plus final53/53 bounded-page regression and diff check.
 - Explicit staging waiver honored; production verification limited to basic smoke/read-only state.
 
 ## Production recovery limits

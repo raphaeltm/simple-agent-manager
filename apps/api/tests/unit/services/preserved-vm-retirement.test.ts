@@ -299,6 +299,26 @@ describe('legacy VM retirement: real SQL, snapshot verifier and strict provider 
       sleeping_at: '2001-01-01',
     });
   });
+  it('drains bounded post-termination repairs across retries before terminal node closure', async () => {
+    source('second');
+    env.WORKSPACE_CLEANUP_SWEEP_LIMIT = '1';
+    sqlite.exec(
+      "UPDATE session_snapshots SET sleeping_at=NULL; UPDATE nodes SET runtime_termination_confirmed_at='2001-01-01'; UPDATE workspaces SET status='deleted',runtime_deletion_proof='node_runtime_terminated',runtime_deletion_confirmed_at='2001-01-01'"
+    );
+    await expect(repairRetiredVmSleepSnapshots(env, 'node', 'owner')).rejects.toThrow(
+      'source budget'
+    );
+    expect(
+      sqlite.prepare('SELECT count(*) count FROM session_snapshots WHERE sleeping_at IS NULL').get()
+    ).toEqual({ count: 1 });
+    await expect(repairRetiredVmSleepSnapshots(env, 'node', 'owner')).rejects.toThrow(
+      'source budget'
+    );
+    await expect(repairRetiredVmSleepSnapshots(env, 'node', 'owner')).resolves.toBeUndefined();
+    expect(
+      sqlite.prepare('SELECT count(*) count FROM session_snapshots WHERE sleeping_at IS NULL').get()
+    ).toEqual({ count: 0 });
+  });
   function fallback() {
     const record = JSON.stringify({
       version: 1,
