@@ -31,6 +31,10 @@ export function evictedWorkspaceSnapshotSleepStatement(
             recovery_attempts = CASE WHEN sleeping_at IS NULL THEN 0 ELSE recovery_attempts END,
             recovery_failed_at = CASE WHEN sleeping_at IS NULL THEN NULL ELSE recovery_failed_at END,
             eviction_recovery_workspace_id = ?, eviction_recovery_node_id = ?,
+            eviction_recovery_interrupted_work = CASE
+              WHEN sleeping_at IS NULL OR eviction_recovery_workspace_id IS NOT ?
+                OR eviction_recovery_node_id IS NOT ? OR eviction_recovery_generation IS NOT ?
+              THEN ? ELSE eviction_recovery_interrupted_work END,
             eviction_recovery_generation = ?,
             sleep_status = 'sleeping', sleep_after = NULL, sleep_error = NULL,
             sleep_claim_id = NULL, sleep_claimed_at = NULL, updated_at = ?
@@ -59,6 +63,10 @@ export function evictedWorkspaceSnapshotSleepStatement(
       now,
       identity.workspaceId,
       identity.nodeId,
+      identity.workspaceId,
+      identity.nodeId,
+      identity.generation,
+      identity.interruptedWork === undefined ? null : identity.interruptedWork ? 1 : 0,
       identity.generation,
       now,
       identity.chatSessionId,
@@ -126,6 +134,23 @@ export async function recoverWorkspaceAfterEviction(
     return { status: 'unavailable', reason: 'eviction_snapshot_missing_or_stale' };
   }
 
+  const evidence = await env.DATABASE.prepare(
+    `SELECT eviction_recovery_interrupted_work AS interruptedWork FROM session_snapshots
+      WHERE chat_session_id = ? AND project_id = ? AND workspace_id = ?
+        AND eviction_recovery_workspace_id = ? AND eviction_recovery_node_id = ?
+        AND eviction_recovery_generation IS ?`
+  )
+    .bind(
+      identity.chatSessionId,
+      identity.projectId,
+      identity.workspaceId,
+      identity.workspaceId,
+      identity.nodeId,
+      identity.generation
+    )
+    .first<{ interruptedWork: number | null }>();
+  if (!evidence) return { status: 'unavailable', reason: 'eviction_snapshot_missing_or_stale' };
+
   return ensureSessionRecovery(env, identity.projectId, identity.chatSessionId, undefined, {
     excludedNodeId: identity.nodeId,
     evictionFence: {
@@ -135,6 +160,6 @@ export async function recoverWorkspaceAfterEviction(
     },
     // Eviction kills the runtime mid-work; no message is queued for the agent.
     wakeCause: 'runtime_lost',
-    interruptedWork: identity.interruptedWork,
+    interruptedWork: evidence.interruptedWork === null ? undefined : evidence.interruptedWork === 1,
   });
 }

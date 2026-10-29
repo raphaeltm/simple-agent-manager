@@ -2065,6 +2065,10 @@ export const sessionSnapshots = sqliteTable(
     evictionRecoveryWorkspaceId: text('eviction_recovery_workspace_id'),
     evictionRecoveryNodeId: text('eviction_recovery_node_id'),
     evictionRecoveryGeneration: text('eviction_recovery_generation'),
+    /** Pre-eviction activity evidence; null retains legacy reconciliation behavior. */
+    evictionRecoveryInterruptedWork: integer('eviction_recovery_interrupted_work', {
+      mode: 'boolean',
+    }),
     /**
      * When a wake attempt last reported failure, as a canonical
      * `toISOString()` value — the decay predicate compares it lexicographically
@@ -2111,6 +2115,9 @@ export const sessionSnapshots = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
+    failedEvictionRetryIdx: index('idx_session_snapshots_failed_eviction_retry')
+      .on(table.updatedAt)
+      .where(sql`recovery_status = 'failed' AND eviction_recovery_workspace_id IS NOT NULL`),
     chatSessionIdUnique: uniqueIndex('idx_session_snapshots_chat_session_id').on(
       table.chatSessionId
     ),

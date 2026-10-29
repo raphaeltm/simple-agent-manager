@@ -17,6 +17,14 @@ export interface SessionRecoverySourceTaskGuard {
   projectId: string;
   chatSessionId: string;
   projectEventWake?: ProjectEventWakeRecoveryGuard | null;
+  /** Cron retry authority: exact failed eviction attempt, with a non-decaying budget. */
+  evictionRecoveryRetry?: {
+    workspaceId: string;
+    nodeId: string;
+    generation: string | null;
+    recoveryAttemptId: string;
+    maxAttempts: number;
+  };
   /** Pre-materialization event guard; after admission projectEventWake supplies this requirement. */
   requireSourceProjectMember?: boolean;
   requiredProjectMemberId?: string | null;

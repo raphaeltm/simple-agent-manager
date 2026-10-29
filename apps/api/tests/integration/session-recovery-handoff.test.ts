@@ -11,6 +11,7 @@ import type {
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { crudRoutes } from '../../src/routes/tasks/crud';
+import { runWorkspaceEvictionRecovery } from '../../src/scheduled/workspace-eviction-recovery';
 import { ensureSessionRecovery } from '../../src/services/session-recovery';
 import { cancelVmTaskAdmission } from '../../src/services/vm-admission-control';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
@@ -200,6 +201,42 @@ describe('session recovery stable task identity', () => {
     getUserIdMock.mockReturnValue('user-1');
     ensureTaskRunnerStartedMock.mockResolvedValue(false);
     startTaskRunnerDOMock.mockResolvedValue(undefined);
+  });
+
+  it('automatically retries a failed accepted eviction wake through the durable runner boundary', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedStableRecoveryFixture(sqlite);
+      sqlite.exec(`UPDATE workspaces SET status = 'evicted', eviction_generation = 'oom-generation', chat_session_id = NULL;
+        UPDATE session_snapshots SET recovery_status = 'failed', recovery_task_id = 'task-1',
+          recovery_attempt_id = 'failed-accepted-attempt', recovery_attempts = 1,
+          recovery_failed_at = '2026-08-15T00:00:00.000Z',
+          eviction_recovery_workspace_id = 'workspace-1', eviction_recovery_node_id = 'node-1',
+          eviction_recovery_generation = 'oom-generation', eviction_recovery_interrupted_work = 1;`);
+      const database = createSqliteD1(sqlite);
+      const pending: Promise<unknown>[] = [];
+      expect(
+        await runWorkspaceEvictionRecovery({ DATABASE: database } as Env, (promise) => {
+          pending.push(promise);
+        })
+      ).toEqual({ selected: 1 });
+      await Promise.all(pending);
+      expect(startTaskRunnerDOMock).toHaveBeenCalledTimes(1);
+      expect(startTaskRunnerDOMock.mock.calls[0]?.[1]).toMatchObject({
+        taskId: 'task-1',
+        chatSessionId: 'chat-1',
+        excludedNodeId: 'node-1',
+        resumeSnapshotChatSessionId: 'chat-1',
+        restoredSessionPrompt: expect.any(String),
+      });
+      expect(taskRow(sqlite)).toMatchObject({ status: 'queued', workspace_id: null });
+      expect(
+        sqlite.prepare('SELECT recovery_status,recovery_attempts FROM session_snapshots').get()
+      ).toEqual({ recovery_status: 'waking', recovery_attempts: 2 });
+      expect(recoveryTaskCount(sqlite)).toBe(0);
+    } finally {
+      sqlite.close();
+    }
   });
 
   it('reactivates the sleeping task without creating a recovery task row', async () => {

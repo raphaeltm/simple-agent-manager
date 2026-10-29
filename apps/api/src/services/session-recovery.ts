@@ -297,6 +297,7 @@ export async function ensureSessionRecovery(
     taskId: recoveryTaskId,
     recoveryAttemptId,
     sourceTaskGuard,
+    automaticEvictionRecovery: Boolean(options.evictionFence),
   });
   if (claim.status === 'unavailable') return refuse(claim.reason);
   if (claim.status === 'waking') return claim;
@@ -366,7 +367,7 @@ export async function ensureSessionRecovery(
       return { status: 'waking', taskId: claimedTaskId };
     }
     const failure = sessionLifecycleError(env, `Session recovery failed: ${message}`);
-    await returnFailedWakeToSleep(env.DATABASE, {
+    const retained = await returnFailedWakeToSleep(env.DATABASE, {
       taskId: claimedTaskId,
       projectId,
       chatSessionId,
@@ -387,6 +388,9 @@ export async function ensureSessionRecovery(
       taskId: claimedTaskId,
       error: message,
     });
-    return refuse(`recovery_start_failed:${message}`, message);
+    return refuse(
+      retained ? 'session_recovery_start_failed_retryable' : `recovery_start_failed:${message}`,
+      message
+    );
   }
 }

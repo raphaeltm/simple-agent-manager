@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { type Context, Hono } from 'hono';
 import * as v from 'valibot';
@@ -82,7 +82,7 @@ async function loadWorkspaceEvictionResource(
   db: AppDb,
   workspaceId: string
 ): Promise<WorkspaceEvictionResource | null> {
-  return (
+  const workspace =
     (await db
       .select({
         workspaceId: schema.workspaces.id,
@@ -98,8 +98,26 @@ async function loadWorkspaceEvictionResource(
       .from(schema.workspaces)
       .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
       .where(eq(schema.workspaces.id, workspaceId))
-      .get()) ?? null
-  );
+      .get()) ?? null;
+  if (!workspace || workspace.chatSessionId || workspace.status !== 'evicted') return workspace;
+  // A wake relinquishes the source's UNIQUE chat binding before starting its
+  // replacement. If startup fails, callback replay must still find that exact
+  // retained snapshot, without borrowing a successor's conversation.
+  const snapshot = await db
+    .select({ chatSessionId: schema.sessionSnapshots.chatSessionId })
+    .from(schema.sessionSnapshots)
+    .where(
+      and(
+        eq(schema.sessionSnapshots.workspaceId, workspace.workspaceId),
+        eq(schema.sessionSnapshots.userId, workspace.userId),
+        sql`${schema.sessionSnapshots.projectId} IS ${workspace.projectId}`,
+        sql`${schema.sessionSnapshots.evictionRecoveryWorkspaceId} IS ${workspace.workspaceId}`,
+        sql`${schema.sessionSnapshots.evictionRecoveryNodeId} IS ${workspace.nodeId}`,
+        sql`${schema.sessionSnapshots.evictionRecoveryGeneration} IS ${workspace.evictionGeneration}`
+      )
+    )
+    .get();
+  return snapshot ? { ...workspace, chatSessionId: snapshot.chatSessionId } : workspace;
 }
 
 function tokenMatchesEvictionResource(
@@ -156,6 +174,7 @@ async function prepareEvictedWorkspaceRecovery(
       chatSessionId: workspace.chatSessionId,
       nodeId: body.nodeId,
       generation: body.evictionGeneration ?? null,
+      interruptedWork: body.interruptedWork,
     }));
   if (!marked) return;
   const session = await projectDataService.getSession(env, projectId, workspace.chatSessionId);
@@ -387,6 +406,7 @@ workspaceEvictionCallbackRoute.post(
                 chatSessionId: workspace.chatSessionId,
                 nodeId: body.nodeId,
                 generation: workspace.evictionGeneration,
+                interruptedWork: body.interruptedWork,
               },
               now,
               now

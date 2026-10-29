@@ -11,6 +11,7 @@ import { isOperationalLoopEnabled } from '../services/operational-kill-switch';
 import { checkProvisioningTimeouts } from '../services/timeout';
 import { migrateOrphanedWorkspaces } from '../services/workspace-migration';
 import { runWorkspaceResourceHistoryCleanup } from '../services/workspace-resource-history';
+import { runWorkspaceEvictionRecovery } from './workspace-eviction-recovery';
 import { runAnalyticsForwardJob } from './analytics-forward';
 import { runScheduledCapacityPoolReconciliation } from './capacity-pool-reconciliation';
 import { runScheduledComposeImageArtifactCleanup } from './compose-image-artifact-cleanup';
@@ -147,6 +148,9 @@ export async function scheduled(
   );
   const sessionSleepLifecycleRepair = await sweeps.isolate('session_sleep_lifecycle_repair', () =>
     runSessionSleepLifecycleRepair(env, new Date())
+  );
+  const evictionRecovery = await sweeps.isolate('workspace_eviction_recovery', () =>
+    runWorkspaceEvictionRecovery(env, ctx.waitUntil.bind(ctx))
   );
   const nodeCleanup = await sweeps.isolate('node_cleanup', () => runNodeCleanupSweep(env));
   const terminalNodeLifecycleRepair = await sweeps.isolate('terminal_node_lifecycle_repair', () =>
@@ -290,6 +294,7 @@ export async function scheduled(
     stuckTaskDoHealthChecked: stuckTasks?.doHealthChecked,
     observabilityPurgedByAge: observabilityPurge?.deletedByAge,
     observabilityPurgedByCount: observabilityPurge?.deletedByCount,
+    evictionRecovery,
     githubTriggerRecovery,
     agentEmailRecovery,
     cronTriggersChecked: cronTriggers?.checked,

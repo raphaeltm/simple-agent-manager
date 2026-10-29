@@ -515,8 +515,11 @@ the last capacity.
 `apps/api/src/services/workspace-resource-capacity.ts` makes legacy capacity intentionally
 conservative: both empty and occupied nodes require verified observed CPU, memory, and disk
 capacity. An occupied node also requires valid active reservations and fresh resource telemetry.
-The host memory reserve constrains admission; live memory percentage affects ranking only. CPU
-saturation and disk pressure remain live overload vetoes. Exclusive requests require an empty
+Admission keeps the full declared memory budget and separately checks fresh measured host usage
+plus outstanding reservations and the new request against physical memory minus the host reserve.
+Only unique, fresh observations for the same running workspace lifecycle credit usage already
+represented in the host sample; unobserved or starting work keeps its full reservation outstanding.
+The final atomic claim repeats both checks. CPU saturation and disk pressure remain live overload vetoes. Exclusive requests require an empty
 node, and an active exclusive workspace prevents any additional placement. Legacy workspace-count
 and co-tenant settings remain compatible audit data but do not block placement.
 
