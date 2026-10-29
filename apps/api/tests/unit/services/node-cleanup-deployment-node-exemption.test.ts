@@ -22,10 +22,11 @@
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { runNodeCleanupSweep } from '../../../src/scheduled/node-cleanup';
 import { deleteNodeResourcesStrict } from '../../../src/services/nodes';
-import { createSqliteD1 } from '../../helpers/sqlite-d1';
+import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const deleteCalls: string[] = [];
 const stopCalls: string[] = [];
@@ -107,45 +108,8 @@ beforeEach(() => {
   deleteCalls.length = 0;
   stopCalls.length = 0;
   sqlite = new Database(':memory:');
-  sqlite.exec(`
-    CREATE TABLE projects (id TEXT PRIMARY KEY, warm_node_timeout_ms INTEGER);
-    CREATE TABLE nodes (
-      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, status TEXT NOT NULL,
-      warm_since TEXT, node_role TEXT NOT NULL DEFAULT 'workspace',
-      node_class TEXT NOT NULL DEFAULT 'managed', runtime TEXT NOT NULL DEFAULT 'vm',
-      health_status TEXT NOT NULL DEFAULT 'unhealthy',
-      created_at TEXT NOT NULL, updated_at TEXT NOT NULL, cleanup_backoff_until TEXT,
-      runtime_termination_confirmed_at TEXT, runtime_incarnation_id TEXT,
-      capacity_pool_id TEXT, capacity_source_id TEXT, capacity_pool_candidate_id TEXT,
-      capacity_pool_scope TEXT, capacity_pool_project_id TEXT, capacity_pool_revision INTEGER,
-      capacity_source_generation INTEGER, placement_credential_source TEXT,
-      placement_credential_reference TEXT, placement_credential_fingerprint TEXT,
-      placement_credential_version INTEGER, workload_role TEXT, cloud_provider TEXT,
-      provider_instance_id TEXT, provider_instance_type TEXT,
-      provider_instance_vcpu_count INTEGER, provider_instance_memory_mb INTEGER
-    );
-    CREATE TABLE workspaces (
-      id TEXT PRIMARY KEY, node_id TEXT, user_id TEXT, status TEXT NOT NULL,
-      project_id TEXT, chat_session_id TEXT, created_at TEXT, updated_at TEXT,
-      runtime_deletion_confirmed_at TEXT, runtime_deletion_proof TEXT
-    );
-    CREATE TABLE tasks (
-      id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT,
-      auto_provisioned_node_id TEXT, claimed_warm_node_id TEXT,
-      claimed_warm_node_at TEXT, updated_at TEXT
-    );
-    -- The sleep columns and agent_sessions are read by the terminal-task
-    -- ownership predicate (sleepLifecycleOwnsTerminalTaskWorkspaceSql).
-    CREATE TABLE session_snapshots (
-      node_id TEXT, user_id TEXT, cleanup_identity_json TEXT,
-      workspace_id TEXT, project_id TEXT, sleep_claim_id TEXT, sleep_claimed_at TEXT, sleep_stopping_since TEXT,
-      chat_session_id TEXT PRIMARY KEY, status TEXT NOT NULL,
-      degradation TEXT NOT NULL, expires_at TEXT NOT NULL,
-      sleeping_at TEXT, sleep_status TEXT, sleep_after TEXT, capture_generation TEXT,
-      sleep_attempts INTEGER NOT NULL DEFAULT 0, sleep_fallback_json TEXT
-    );
-    CREATE TABLE agent_sessions (id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT);
-  `);
+  // Keep this real-SQL guard fixture aligned with the full retirement/repair schema.
+  createAllSchemaTables(sqlite, schema);
   vi.mocked(deleteNodeResourcesStrict).mockImplementation(async (nodeId: string) => {
     deleteCalls.push(nodeId);
     sqlite
