@@ -74,29 +74,52 @@ OpenCode defaults to OpenCode Zen. SAM loads the Zen and Go model dropdowns from
 
 Amp requires an Amp API key and may require paid Amp credits.
 
-## Connecting Agent Credentials
+## Connecting Agent Accounts
 
-1. Go to **Settings → Connections** in the SAM web UI
-2. Start the **Connect** flow for the agent you want to use
-3. Provide your API key (or OAuth token). Your credentials are encrypted at rest.
+Your agent accounts live in **Settings → Agents**, under **Agent accounts**. Each agent has one row, with a coverage bar showing which account each of your projects uses. An agent with no account shows as **Not connected**, with a **Connect** button.
+
+To connect an account:
+
+1. Go to **Settings → Agents** and click **Connect account**.
+2. Pick the agent.
+3. Connect it: [guided sign-in](#connecting-a-subscription-with-guided-sign-in) for a Claude Code or Codex subscription, or paste an API key. OpenCode uses an OpenCode Zen or Go key. Your credentials are encrypted at rest.
+4. Name the account (for example, Work or Personal) so you can tell it apart later.
+
+The account you connect becomes your default for that agent. If you already had a default, it stays connected and shows as **Unattached**.
+
+Expand an agent's row to see its accounts in three lanes:
+
+- **Default** — used by every project that hasn't pinned an account.
+- **Pinned** — used only by specific projects (see [Using another account in one project](#using-another-account-in-one-project)).
+- **Unattached** — connected, but nothing uses it.
+
+Each account card has its own actions: **Rename**, **Replace…** (connect a new account in its place) and **Disconnect** on your default; **Use default in** _project_ on a pinned account, which moves that project back to your default; and **Remove** on an unattached account. The **By provider / By project** switch shows a table of your projects by agent instead.
 
 You can connect multiple agents and switch between them per chat by choosing a different profile.
+
+### Using another account in one project
+
+A project's **Accounts** tab (in its settings) shows, for each agent, whether the project uses **your default** or an account pinned to that project. Select **Use another account here** to connect an account only that project uses; your other projects keep your default. **Use my default** removes the pin. In a [shared project](/docs/guides/collaboration/), this is how you attach a shared project credential. On the project's **Agents** tab, each agent card shows which account it uses, with a **Manage in Accounts** link.
+
+### Agent defaults
+
+Under **Settings → Agents → Defaults**, each agent you can run has one card: **Model**, **Permissions** (see [Permission mode](#permission-mode)), **Billing** (Claude Code and Codex only; see [AI Provider Modes](#ai-provider-modes)), and, for OpenCode, the **OpenCode provider** (Zen, Go, or custom). Defaults belong to the agent, not to an account: they apply whichever account a project uses, and project profiles can override them.
 
 ## Connecting a subscription with guided sign-in
 
 If you pay for **Claude Max/Pro** or a **ChatGPT** plan, you can connect that subscription instead of an API key — without leaving the browser or touching a terminal. This is the recommended way to use Claude Code or OpenAI Codex on a subscription.
 
-1. Go to **Settings → Connections** (or **Settings → Agents**) and start the connect flow for Claude Code or OpenAI Codex.
-2. Choose the OAuth / subscription authentication method (rather than API key), then click **Connect with Claude Code** or **Connect with Codex**.
+1. Go to **Settings → Agents**, click **Connect account**, and pick Claude Code or OpenAI Codex.
+2. Choose the subscription method (**Claude subscription** or **ChatGPT sign-in**) rather than API key, then click **Connect with Claude Code** or **Connect with Codex**.
 3. Click the **Open sign-in** link and approve access on the provider's page. For Codex, enter the short code SAM displays when the provider asks. For Claude Code, copy the `code#state` value Claude displays, return to SAM, paste the complete value into the dialog, and click **Continue sign-in**.
-4. Leave the SAM window open — it updates on its own. When the provider confirms, the panel shows **Connected** and your subscription credential is saved, encrypted at rest.
+4. Leave the SAM window open — it updates on its own. When the provider confirms, your subscription credential is saved, encrypted at rest. Name the account to finish.
 
 ![The guided sign-in dialog for Claude Code: a status line reading "Waiting for sign-in", an "Open Claude sign-in" button, and a protected field for the complete browser-displayed code. No terminal is shown.](/images/docs/agent-guided-login.png)
 
 A few things worth knowing:
 
 - **No terminal, no file paste.** The old flow asked you to run `claude setup-token` or paste `~/.codex/auth.json`. Those still work as a manual fallback (in the same panel), but the guided flow removes them from the happy path.
-- **User-scoped.** Guided sign-in saves the credential for your account, so it applies across your projects. To set a subscription credential for a single [shared project](/docs/guides/collaboration/), use the manual paste fallback in that project's connections.
+- **User-scoped.** Guided sign-in saves the credential for your account, so it applies across your projects. To set a subscription credential for a single [shared project](/docs/guides/collaboration/), use **Use another account here** in that project's **Accounts** tab and the manual paste fallback.
 - **Availability.** Guided sign-in is available on the hosted platform and on self-hosted deployments running on Cloudflare Containers (SAM's default runtime). If the button isn't shown, use the manual API key or token fields in the same panel.
 
 ## Usage Limits
@@ -114,8 +137,9 @@ coming before an agent stops on it.
   for example `Claude · 5h 78% · Week 31%`, shortest limit first. Select it to see every limit, how
   much of it is used, and when it resets. It appears once SAM has a reading (for Claude Code, after
   a few model calls); credentials that report nothing (see the list below) never show one.
-- **In Settings → Advanced**, each of your personal credentials in the **Credentials** list shows the
-  same chip once an agent has used it.
+- **In Settings → Agents**, each account card shows the same chip once an agent has used that
+  account. The raw credential list (**Advanced: raw credential records**, at the bottom of the
+  accounts section) shows it too.
 - **Agents** can read the same numbers with the `get_credential_limits` tool, so an agent
   coordinating others can pause before a limit and schedule itself to wake after the reset.
 
@@ -179,7 +203,7 @@ Each agent runs in one of three provider modes, which control where LLM traffic 
 | **OAuth**   | A token from your provider subscription (for example Claude Max/Pro)             |
 | **SAM**     | The platform's managed AI proxy, with billing and budget handled by SAM (opt-in) |
 
-You pick the mode when you connect an agent. The **SAM** platform proxy is never selected automatically — you have to opt in.
+Connecting an account with an API key or a subscription sets which of the first two you use. For Claude Code and Codex, **Billing** in **Settings → Agents → Defaults** can pick one explicitly: **Automatic — your connected account**, **Your API key**, **Your subscription**, or **SAM platform**. The **SAM** platform proxy is never selected automatically — you have to opt in.
 
 In **SAM** mode the proxy serves the models in the platform catalog, which an operator can narrow, and an administrator can limit your account to certain model tiers (low-cost, standard, premium). A model outside either is refused with an error naming the model and what you can use; your own API keys and subscriptions are not affected.
 
@@ -506,6 +530,6 @@ To see who subscribes to a project channel, use `list_channel_subscribers` with 
 
 Claude Code and Codex get these tools on both the VM and [Instant](/docs/guides/instant-sessions/) runtimes. If a Codex session is handed an MCP server without a usable token, it fails to start with an explicit error rather than launching a tool-less agent.
 
-If a chat reports that its **agent connection is missing or rejected**, the session creator can open **Settings → Connections**. Claude Code and Codex offer guided sign-in; other agents may require a supported key method. A provider error saying the **model is unsupported or unavailable for the account** is different: a working sign-in does not grant model access. Check that model's availability with the provider.
+If a chat reports that its **agent connection is missing or rejected**, the session creator can open **Settings → Agents** (or the project's **Accounts** tab, if the project uses its own account). Claude Code and Codex offer guided sign-in; other agents may require a supported key method. A provider error saying the **model is unsupported or unavailable for the account** is different: a working sign-in does not grant model access. Check that model's availability with the provider.
 
 An agent that reports it has no SAM tools is worth [reporting](/docs/guides/reporting-issues/) — it is not expected behavior on either runtime.

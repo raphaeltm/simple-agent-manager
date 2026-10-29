@@ -473,7 +473,7 @@ describe('DefaultCapacityPoolsPanel', () => {
     );
     expect(
       screen.getByRole('link', { name: 'connect a cloud account to the project' })
-    ).toHaveAttribute('href', '/projects/project-1/settings/connections');
+    ).toHaveAttribute('href', '/projects/project-1/settings/accounts?connect=cloud:any');
     expect(screen.getByText('Allowed machines (2)')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Edit' })).not.toBeInTheDocument();
   });
@@ -756,7 +756,7 @@ describe('DefaultCapacityPoolsPanel', () => {
     expect(screen.getAllByRole('link', { name: /^Hetzner · Project credentials/ })).toHaveLength(2);
     expect(screen.getByRole('link', { name: 'Hetzner · Project credentials' })).toHaveAttribute(
       'href',
-      '/projects/project-1/settings/connections'
+      '/projects/project-1/settings/accounts'
     );
 
     fireEvent.click(screen.getByRole('button', { name: 'Edit' }));
@@ -884,14 +884,14 @@ describe('DefaultCapacityPoolsPanel', () => {
       fetchMock: () => mocks.fetchProjectDefaultCapacityPools,
       title: 'No machines for this project yet',
       action: 'Connect a cloud account to this project',
-      href: '/projects/project-1/settings/connections',
+      href: '/projects/project-1/settings/accounts?connect=cloud:any',
     },
     {
       props: { scope: 'user' } as const,
       fetchMock: () => mocks.fetchUserDefaultCapacityPools,
       title: 'No machines yet',
       action: 'Connect a cloud account',
-      href: '/settings/cloud-provider',
+      href: '/settings/infrastructure?connect=any',
     },
     {
       props: { scope: 'installation' } as const,
@@ -943,7 +943,7 @@ describe('DefaultCapacityPoolsPanel', () => {
     expect(screen.queryByText(/required/i)).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Connect a cloud account' })).toHaveAttribute(
       'href',
-      '/settings/cloud-provider'
+      '/settings/infrastructure?connect=any'
     );
   });
 

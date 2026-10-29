@@ -283,8 +283,15 @@ test('off by default gates direct entry and the navigation; settings toggle enab
   await expect(toggle.locator('..').getByText('On', { exact: true })).toBeVisible();
   const openSam = page.getByRole('link', { name: 'Open SAM', exact: true });
   await checkTouchTarget(openSam);
-  // The opt-in stays compact so the settings tabs remain on the first screen.
-  await expect(page.getByRole('tab', { name: 'Cloud Provider' })).toBeInViewport({ ratio: 1 });
+  // The opt-in stays compact so the settings sections remain on the first screen:
+  // a tab strip on phones, a sidebar from the md breakpoint.
+  const firstSection =
+    page.viewportSize()!.width < 768
+      ? page.getByRole('tab', { name: 'Agents' })
+      : page.getByRole('navigation', { name: 'Settings sections' }).getByRole('link', {
+          name: 'Agents',
+        });
+  await expect(firstSection).toBeInViewport({ ratio: 1 });
   await checkLayout(page, 'sam-settings-on');
   await page.setViewportSize({ width: 320, height: 667 });
   await checkTouchTarget(toggle);

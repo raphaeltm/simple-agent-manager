@@ -455,12 +455,16 @@ export function SettingsCredentials() {
   return (
     <div className="flex flex-col gap-6">
       <Alert variant="info">
-        This is the advanced view showing the raw composable-credentials primitives. Most users
-        should use the{' '}
-        <a href="/settings/connections" className="text-accent font-medium">
-          Connections
+        This is the advanced view showing the raw composable-credentials primitives. Most people
+        should manage accounts in{' '}
+        <a href="/settings/agents" className="text-accent font-medium">
+          Agents
         </a>{' '}
-        tab to manage agent and cloud provider credentials through the guided flow.
+        and{' '}
+        <a href="/settings/infrastructure" className="text-accent font-medium">
+          Infrastructure
+        </a>
+        .
       </Alert>
 
       {error && (

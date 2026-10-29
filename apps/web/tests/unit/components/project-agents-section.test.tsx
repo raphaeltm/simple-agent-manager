@@ -1,13 +1,13 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import type { ReactElement } from 'react';
+import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   listAgents: vi.fn(),
   listAgentCredentials: vi.fn(),
   listProjectAgentCredentials: vi.fn(),
-  saveProjectAgentCredential: vi.fn(),
-  deleteProjectAgentCredential: vi.fn(),
   updateProject: vi.fn(),
 }));
 
@@ -16,16 +16,25 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   listAgents: mocks.listAgents,
   listAgentCredentials: mocks.listAgentCredentials,
   listProjectAgentCredentials: mocks.listProjectAgentCredentials,
-  saveProjectAgentCredential: mocks.saveProjectAgentCredential,
-  deleteProjectAgentCredential: mocks.deleteProjectAgentCredential,
   updateProject: mocks.updateProject,
 }));
 
 vi.mock('../../../src/hooks/useToast', () => ({
-  useToast: () => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn(), addToast: vi.fn() }),
+  useToast: () => ({
+    success: vi.fn(),
+    error: vi.fn(),
+    warning: vi.fn(),
+    info: vi.fn(),
+    addToast: vi.fn(),
+  }),
 }));
 
 import { ProjectAgentsSection } from '../../../src/components/ProjectAgentsSection';
+
+// The account summary links to Project settings → Accounts, so render in a router.
+function renderSection(ui: ReactElement) {
+  return render(<MemoryRouter>{ui}</MemoryRouter>);
+}
 
 const AGENT_LIST = {
   agents: [
@@ -71,12 +80,8 @@ describe('ProjectAgentsSection', () => {
   });
 
   it('renders one card per agent', async () => {
-    render(
-      <ProjectAgentsSection
-        projectId="proj-1"
-        initialAgentDefaults={null}
-        onUpdated={vi.fn()}
-      />,
+    renderSection(
+      <ProjectAgentsSection projectId="proj-1" initialAgentDefaults={null} onUpdated={vi.fn()} />
     );
     await waitFor(() => {
       expect(screen.getByTestId('project-agent-card-claude-code')).toBeInTheDocument();
@@ -84,17 +89,47 @@ describe('ProjectAgentsSection', () => {
     });
   });
 
-  it('shows "Inheriting user credential" when there is a user cred but no project override', async () => {
-    render(
-      <ProjectAgentsSection
-        projectId="proj-1"
-        initialAgentDefaults={null}
-        onUpdated={vi.fn()}
-      />,
+  it('summarises which account the project uses and links to Accounts', async () => {
+    renderSection(
+      <ProjectAgentsSection projectId="proj-1" initialAgentDefaults={null} onUpdated={vi.fn()} />
     );
-    await waitFor(() => {
-      expect(screen.getAllByText(/Inheriting user credential/i).length).toBeGreaterThan(0);
+
+    const claude = await screen.findByTestId('project-agent-card-claude-code');
+    expect(within(claude).getByText('Your default account')).toBeInTheDocument();
+    expect(within(claude).getByText(/This project uses your default account/)).toBeInTheDocument();
+    expect(within(claude).getByRole('link', { name: 'Manage in Accounts' })).toHaveAttribute(
+      'href',
+      '/projects/proj-1/settings/accounts'
+    );
+
+    const codex = screen.getByTestId('project-agent-card-openai-codex');
+    expect(within(codex).getByText('No account')).toBeInTheDocument();
+    // Connecting and removing accounts moved to Accounts: no credential editor here.
+    expect(within(claude).queryByRole('textbox')).toBeNull();
+    expect(within(claude).queryByRole('button', { name: /remove/i })).toBeNull();
+  });
+
+  it('shows a pinned account when the project has its own', async () => {
+    mocks.listProjectAgentCredentials.mockResolvedValue({
+      credentials: [
+        {
+          id: 'proj-cred-claude',
+          agentType: 'claude-code',
+          credentialKind: 'api-key',
+          maskedKey: 'sk-****proj',
+          isActive: true,
+          createdAt: '2026-04-01T00:00:00Z',
+          updatedAt: '2026-04-01T00:00:00Z',
+        },
+      ],
     });
+    renderSection(
+      <ProjectAgentsSection projectId="proj-1" initialAgentDefaults={null} onUpdated={vi.fn()} />
+    );
+
+    const claude = await screen.findByTestId('project-agent-card-claude-code');
+    await waitFor(() => expect(within(claude).getByText('Pinned account')).toBeInTheDocument());
+    expect(within(claude).getByText(/uses an account pinned to it/)).toBeInTheDocument();
   });
 
   it('calls updateProject when Save Override is clicked in Configuration', async () => {
@@ -107,12 +142,8 @@ describe('ProjectAgentsSection', () => {
     });
     const onUpdated = vi.fn();
 
-    render(
-      <ProjectAgentsSection
-        projectId="proj-1"
-        initialAgentDefaults={null}
-        onUpdated={onUpdated}
-      />,
+    renderSection(
+      <ProjectAgentsSection projectId="proj-1" initialAgentDefaults={null} onUpdated={onUpdated} />
     );
 
     await waitFor(() => {
@@ -121,7 +152,7 @@ describe('ProjectAgentsSection', () => {
 
     await user.selectOptions(
       screen.getByTestId('project-agent-permission-select-claude-code'),
-      'acceptEdits',
+      'acceptEdits'
     );
 
     const saveButton = screen.getByTestId('project-agent-save-claude-code');
@@ -144,14 +175,14 @@ describe('ProjectAgentsSection', () => {
     const onUpdated = vi.fn();
     mocks.updateProject.mockResolvedValue({ id: 'proj-1', agentDefaults: null });
 
-    render(
+    renderSection(
       <ProjectAgentsSection
         projectId="proj-1"
         initialAgentDefaults={{
           'claude-code': { model: 'claude-opus-4-6', permissionMode: 'acceptEdits' },
         }}
         onUpdated={onUpdated}
-      />,
+      />
     );
 
     await waitFor(() => {
@@ -170,78 +201,20 @@ describe('ProjectAgentsSection', () => {
 
   it('displays an error state when listing fails', async () => {
     mocks.listAgents.mockRejectedValue(new Error('Boom'));
-    render(
-      <ProjectAgentsSection
-        projectId="proj-1"
-        initialAgentDefaults={null}
-        onUpdated={vi.fn()}
-      />,
+    renderSection(
+      <ProjectAgentsSection projectId="proj-1" initialAgentDefaults={null} onUpdated={vi.fn()} />
     );
     await waitFor(() => {
       expect(screen.getByText('Boom')).toBeInTheDocument();
     });
   });
 
-  it('calls deleteProjectAgentCredential when the Remove button is clicked on a project override', async () => {
-    mocks.listProjectAgentCredentials.mockResolvedValue({
-      credentials: [
-        {
-          id: 'proj-cred-claude',
-          agentType: 'claude-code',
-          credentialKind: 'api-key',
-          maskedKey: 'sk-****proj',
-          isActive: true,
-          createdAt: '2026-04-01T00:00:00Z',
-          updatedAt: '2026-04-01T00:00:00Z',
-        },
-      ],
-    });
-    mocks.deleteProjectAgentCredential.mockResolvedValue(undefined);
-    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
-
-    try {
-      render(
-        <ProjectAgentsSection
-          projectId="proj-1"
-          initialAgentDefaults={null}
-          onUpdated={vi.fn()}
-        />,
-      );
-      await waitFor(() => {
-        expect(screen.getByTestId('project-agent-card-claude-code')).toBeInTheDocument();
-      });
-
-      const card = screen.getByTestId('project-agent-card-claude-code');
-      const removeButton = await waitFor(() => {
-        const btn = card.querySelector('button.text-danger') as HTMLButtonElement | null;
-        expect(btn).not.toBeNull();
-        return btn!;
-      });
-
-      fireEvent.click(removeButton);
-
-      await waitFor(() => {
-        expect(mocks.deleteProjectAgentCredential).toHaveBeenCalledWith(
-          'proj-1',
-          'claude-code',
-          'api-key',
-        );
-      });
-    } finally {
-      confirmSpy.mockRestore();
-    }
-  });
-
   it('displays an error alert when Save Override fails', async () => {
     const user = userEvent.setup();
     mocks.updateProject.mockRejectedValue(new Error('Network save failed'));
 
-    render(
-      <ProjectAgentsSection
-        projectId="proj-1"
-        initialAgentDefaults={null}
-        onUpdated={vi.fn()}
-      />,
+    renderSection(
+      <ProjectAgentsSection projectId="proj-1" initialAgentDefaults={null} onUpdated={vi.fn()} />
     );
 
     await waitFor(() => {
@@ -250,7 +223,7 @@ describe('ProjectAgentsSection', () => {
 
     await user.selectOptions(
       screen.getByTestId('project-agent-permission-select-claude-code'),
-      'acceptEdits',
+      'acceptEdits'
     );
 
     const saveButton = screen.getByTestId('project-agent-save-claude-code');

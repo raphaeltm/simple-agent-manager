@@ -122,7 +122,7 @@ async function setupApiMocks(
  * in the DOM and still "visible" to Playwright, so assertions pass — but every
  * screenshot captures the wizard and the overflow check measures the wizard's
  * layout instead of the chat's. Established pattern, e.g.
- * `agent-settings-audit.spec.ts`.
+ * `credential-limits-audit.spec.ts`.
  */
 async function dismissOnboarding(page: Page) {
   await page.addInitScript(() => {

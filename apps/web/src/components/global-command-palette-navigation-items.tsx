@@ -45,9 +45,15 @@ export function buildNavigationItems(isSuperadmin: boolean): NavItem[] {
     { id: 'nav-settings', label: 'Settings', path: '/settings', icon: <Settings size={14} /> },
     // Settings deep-links (always available)
     {
-      id: 'nav-settings-cloud-provider',
-      label: 'Settings: Cloud Provider',
-      path: '/settings/cloud-provider',
+      id: 'nav-settings-agents',
+      label: 'Settings: Agents',
+      path: '/settings/agents',
+      icon: <Bot size={14} />,
+    },
+    {
+      id: 'nav-settings-infrastructure',
+      label: 'Settings: Infrastructure',
+      path: '/settings/infrastructure',
       icon: <Cloud size={14} />,
     },
     {
@@ -55,12 +61,6 @@ export function buildNavigationItems(isSuperadmin: boolean): NavItem[] {
       label: 'Settings: GitHub',
       path: '/settings/github',
       icon: <Github size={14} />,
-    },
-    {
-      id: 'nav-settings-agents',
-      label: 'Settings: Agents',
-      path: '/settings/agents',
-      icon: <Bot size={14} />,
     },
     {
       id: 'nav-settings-notifications',

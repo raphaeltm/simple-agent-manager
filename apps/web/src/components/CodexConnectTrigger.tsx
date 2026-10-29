@@ -26,9 +26,9 @@ interface AgentCredentialConnectTriggerProps {
    * user default (the manual credential paste stays available there).
    */
   scope?: 'user' | 'project';
+  /** Reports whether the guided button is shown, so callers can word their manual fallback. */
+  onAvailabilityChange?: (available: boolean) => void;
 }
-
-type CodexConnectTriggerProps = Omit<AgentCredentialConnectTriggerProps, 'agentType'>;
 
 const TRIGGER_COPY: Record<GuidedSetupAgentType, { button: string; description: string }> = {
   'openai-codex': {
@@ -46,6 +46,7 @@ export function AgentCredentialConnectTrigger({
   agentType,
   onConnected,
   scope = 'user',
+  onAvailabilityChange,
 }: AgentCredentialConnectTriggerProps) {
   const [enabled, setEnabled] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
@@ -69,7 +70,12 @@ export function AgentCredentialConnectTrigger({
     };
   }, [agentType]);
 
-  if (!enabled || scope !== 'user') {
+  const available = enabled && scope === 'user';
+  useEffect(() => {
+    onAvailabilityChange?.(available);
+  }, [available, onAvailabilityChange]);
+
+  if (!available) {
     return null;
   }
 
@@ -98,8 +104,4 @@ export function AgentCredentialConnectTrigger({
       />
     </div>
   );
-}
-
-export function CodexConnectTrigger(props: CodexConnectTriggerProps) {
-  return <AgentCredentialConnectTrigger agentType="openai-codex" {...props} />;
 }

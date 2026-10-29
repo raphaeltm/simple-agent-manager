@@ -1,28 +1,22 @@
 /**
- * Project-scope unified agents section. Replaces the former
- * ProjectAgentDefaultsSection + ProjectAgentCredentialsSection split with a
- * single ProjectAgentCard per agent covering both credential overrides and
- * model/permission overrides.
+ * Project-scope agents section: one ProjectAgentCard per agent with the
+ * project's model/permission overrides. Which account the project uses lives in
+ * Project settings → Accounts; the cards only summarise it.
  */
 import type {
   AgentCredentialInfo,
   AgentInfo,
   AgentPermissionMode,
   AgentType,
-  CredentialKind,
   ProjectAgentDefaults,
-  SaveAgentCredentialRequest,
 } from '@simple-agent-manager/shared';
 import { Alert, Spinner } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useState } from 'react';
 
-import { useToast } from '../hooks/useToast';
 import {
-  deleteProjectAgentCredential,
   listAgentCredentials,
   listAgents,
   listProjectAgentCredentials,
-  saveProjectAgentCredential,
   updateProject,
 } from '../lib/api';
 import { ProjectAgentCard } from './ProjectAgentCard';
@@ -38,7 +32,6 @@ export function ProjectAgentsSection({
   initialAgentDefaults,
   onUpdated,
 }: ProjectAgentsSectionProps) {
-  const toast = useToast();
   const [agents, setAgents] = useState<AgentInfo[]>([]);
   const [projectCreds, setProjectCreds] = useState<AgentCredentialInfo[]>([]);
   const [userCreds, setUserCreds] = useState<AgentCredentialInfo[]>([]);
@@ -72,33 +65,9 @@ export function ProjectAgentsSection({
     void loadData();
   }, [loadData]);
 
-  const handleSaveCredential = async (req: SaveAgentCredentialRequest) => {
-    const result = await saveProjectAgentCredential(projectId, req);
-    if (result.validation?.valid === false) {
-      toast.warning('Project credential override saved with a validation warning');
-    } else {
-      toast.success('Project credential override saved');
-    }
-    setProjectCreds((prev) => {
-      const filtered = prev.filter(
-        (c) => !(c.agentType === req.agentType && c.credentialKind === req.credentialKind),
-      );
-      return [...filtered, result];
-    });
-    return result;
-  };
-
-  const handleDeleteCredential = async (agentType: AgentType, credentialKind: CredentialKind) => {
-    await deleteProjectAgentCredential(projectId, agentType, credentialKind);
-    toast.success('Project override cleared — falling back to user credential');
-    setProjectCreds((prev) =>
-      prev.filter((c) => !(c.agentType === agentType && c.credentialKind === credentialKind)),
-    );
-  };
-
   const handleSaveDefault = async (
     agentType: AgentType,
-    entry: { model: string | null; permissionMode: AgentPermissionMode | null },
+    entry: { model: string | null; permissionMode: AgentPermissionMode | null }
   ) => {
     const next: ProjectAgentDefaults = { ...defaults };
     if (entry.model === null && entry.permissionMode === null) {
@@ -149,8 +118,8 @@ export function ProjectAgentsSection({
   return (
     <div className="flex flex-col gap-4" data-testid="project-agents-section">
       <Alert variant="info">
-        Project overrides apply only to this project. Clear an override to fall back to your
-        user-level setting. Credentials and configuration fall through independently.
+        Overrides apply only to this project. Clear one to fall back to your defaults in Settings →
+        Agents.
       </Alert>
 
       {agents.map((agent) => {
@@ -160,14 +129,12 @@ export function ProjectAgentsSection({
           <ProjectAgentCard
             key={agent.id}
             agent={agent}
+            projectId={projectId}
             projectCredentials={projectAgentCreds.length > 0 ? projectAgentCreds : null}
             userCredentials={userAgentCreds}
             defaultValue={defaults[agent.id]}
-            onSaveCredential={handleSaveCredential}
-            onDeleteCredential={handleDeleteCredential}
             onSaveDefault={handleSaveDefault}
             onClearDefault={handleClearDefault}
-            onCredentialConnected={loadData}
           />
         );
       })}

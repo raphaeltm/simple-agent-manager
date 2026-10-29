@@ -215,14 +215,15 @@ When the agent can't use its provider account, the chat says so — in a strip a
 or in the failure card under the chat header (expand the card for the next step):
 
 - **A strip: "Agent connection missing."** The agent has no credential it can use for this chat. If
-  you started the chat, select **Open agent connections** and connect the agent under
-  **Settings → Connections**; otherwise ask the person who started it. Then start the work again —
+  you started the chat, select **Open agent accounts** and connect the agent under
+  **Settings → Agents**; otherwise ask the person who started it. Then start the work again —
   **Retry** in the [session tool rail](/docs/guides/chat-features/#the-session-tool-rail), or a new
   chat.
 - **A failure card: "Agent connection rejected."** The provider refused the credential — usually an
-  expired subscription sign-in or a revoked API key. Reconnect it under **Settings → Connections**
-  (the card's **Open agent connections** button, for the person who started the chat). The agent
-  picks up the new connection only when it starts again: in a **Task**, wait for the chat to go to
+  expired subscription sign-in or a revoked API key. Reconnect it under **Settings → Agents** (the
+  card's **Open agent accounts** button, for the person who started the chat), or in the project's
+  **Accounts** tab if the project uses its own account. The agent picks up the new connection only
+  when it starts again: in a **Task**, wait for the chat to go to
   sleep, then reply to wake it; in a **Chat**, select **Sleep** (the moon button above the message
   box), then send a message. The woken session keeps its recorded settings and task behavior.
 - **A failure card: "Model unavailable for this account."** The credential works, but your plan or
@@ -454,7 +455,8 @@ whether the cause is something you can fix first:
 
 - **Cloud provider credentials are missing for this wake.** No cloud credential is available to pay
   for a replacement machine — for example, the one the session used was removed. Connect one (yours
-  under **Settings → Connections**, or the project's), then send your message again.
+  under **Settings → Infrastructure**, or the project's in its **Accounts** tab), then send your
+  message again.
 - **No configured compute option can satisfy the stored requirements for this wake.** The machine
   the session was saved with can't be provisioned under your current compute settings — for
   example, an instance type, provider, or region it relied on is no longer in its

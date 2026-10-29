@@ -9,6 +9,11 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 ### For everyone
 
+- **Accounts, organized by agent and by cloud.** **Settings → Agents** shows each agent's accounts
+  (your default, pinned to a project, or unattached) above its defaults, and **Settings →
+  Infrastructure** does the same for cloud accounts. The **Cloud Provider**, **Connections** and
+  **Advanced** tabs are gone (old links redirect); a project's **Connections** tab is now **Accounts**.
+  → [Connecting Agent Accounts](/docs/guides/agents/#connecting-agent-accounts)
 - **One Automation page.** **Automation** in the project navigation replaced the separate **Events**
   and **Triggers** pages. It shows what needs your attention first, what's coming up, every
   automation in plain words ("When X → do Y"), workflows, recent runs, and what agents are waiting

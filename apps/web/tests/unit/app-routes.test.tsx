@@ -180,8 +180,8 @@ vi.mock('../../src/pages/ProjectSessions', () => ({
 vi.mock('../../src/pages/ProjectSettings', () => ({
   ProjectSettings: () => <div data-testid="project-settings-page" />,
   ProjectSettingsAccess: () => <div data-testid="project-settings-access-page" />,
+  ProjectSettingsAccounts: () => <div data-testid="project-settings-accounts-page" />,
   ProjectSettingsAgents: () => <div data-testid="project-settings-agents-page" />,
-  ProjectSettingsConnections: () => <div data-testid="project-settings-connections-page" />,
   ProjectSettingsDeploy: () => <div data-testid="project-settings-deploy-page" />,
   ProjectSettingsGeneral: () => <div data-testid="project-settings-general-page" />,
   ProjectSettingsIndexRedirect: () => <div data-testid="project-settings-index-redirect" />,
@@ -400,7 +400,6 @@ describe('App routes', () => {
     vi.stubEnv('MODE', 'production');
 
     expect(DEV_ONLY_ROUTE_PATHS).toEqual([
-      '/prototype/accounts',
       '/__test/trial-chat-gate',
       '/__test/error-boundary',
       '/ui-standards',

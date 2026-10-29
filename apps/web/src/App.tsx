@@ -18,12 +18,9 @@ import { queryClient } from './lib/query-client';
 // Every other page below is code-split via lazyNamed(). Do NOT add static page imports here.
 import { Dashboard } from './pages/Dashboard';
 import { Landing } from './pages/Landing';
+import { LegacyCloudProviderRedirect, SettingsRedirect } from './pages/settings-redirects';
 
 const AccountMap = lazyNamed(() => import('./pages/AccountMap'), 'AccountMap');
-const AccountsPrototype = lazyNamed(
-  () => import('./pages/accounts-prototype'),
-  'AccountsPrototype'
-);
 const Admin = lazyNamed(() => import('./pages/Admin'), 'Admin');
 const AdminAIProxy = lazyNamed(() => import('./pages/AdminAIProxy'), 'AdminAIProxy');
 const AdminAnalytics = lazyNamed(() => import('./pages/AdminAnalytics'), 'AdminAnalytics');
@@ -123,9 +120,9 @@ const ProjectSettingsAgents = lazyNamed(
   () => import('./pages/ProjectSettings'),
   'ProjectSettingsAgents'
 );
-const ProjectSettingsConnections = lazyNamed(
+const ProjectSettingsAccounts = lazyNamed(
   () => import('./pages/ProjectSettings'),
-  'ProjectSettingsConnections'
+  'ProjectSettingsAccounts'
 );
 const ProjectSettingsDeploy = lazyNamed(
   () => import('./pages/ProjectSettings'),
@@ -193,17 +190,9 @@ const Settings = lazyNamed(() => import('./pages/Settings'), 'Settings');
 const SettingsAgents = lazyNamed(() => import('./pages/SettingsAgents'), 'SettingsAgents');
 const ConnectorConsent = lazyNamed(() => import('./pages/ConnectorConsent'), 'ConnectorConsent');
 const SettingsApiTokens = lazyNamed(() => import('./pages/SettingsApiTokens'), 'SettingsApiTokens');
-const SettingsCloudProvider = lazyNamed(
-  () => import('./pages/SettingsCloudProvider'),
-  'SettingsCloudProvider'
-);
 const SettingsComputeUsage = lazyNamed(
   () => import('./pages/SettingsComputeUsage'),
   'SettingsComputeUsage'
-);
-const SettingsConnections = lazyNamed(
-  () => import('./pages/SettingsConnections'),
-  'SettingsConnections'
 );
 const SettingsMcpServers = lazyNamed(
   () => import('./pages/SettingsMcpServers'),
@@ -271,7 +260,6 @@ function SuperadminRoute({ children }: { children: ReactNode }) {
 }
 
 export const DEV_ONLY_ROUTE_PATHS = [
-  '/prototype/accounts',
   '/__test/trial-chat-gate',
   '/__test/error-boundary',
   '/ui-standards',
@@ -320,8 +308,6 @@ export default function App() {
                           path="/__test/error-boundary"
                           element={<ErrorBoundaryAuditHarness />}
                         />
-                        {/* PROTOTYPE — unified accounts + defaults. Remove before merge to main. */}
-                        <Route path="/prototype/accounts" element={page(<AccountsPrototype />)} />
                       </>
                     )}
                     {/* Protected routes with AppShell (persistent navigation) */}
@@ -364,9 +350,10 @@ export default function App() {
                           <Route index element={page(<ProjectSettingsIndexRedirect />)} />
                           <Route path="general" element={page(<ProjectSettingsGeneral />)} />
                           <Route path="access" element={page(<ProjectSettingsAccess />)} />
+                          <Route path="accounts" element={page(<ProjectSettingsAccounts />)} />
                           <Route
                             path="connections"
-                            element={page(<ProjectSettingsConnections />)}
+                            element={<SettingsRedirect to="../accounts" />}
                           />
                           <Route path="agents" element={page(<ProjectSettingsAgents />)} />
                           <Route
@@ -412,20 +399,24 @@ export default function App() {
                       <Route path="/workspaces" element={<Navigate to="/nodes" replace />} />
                       <Route path="/workspaces/new" element={page(<CreateWorkspace />)} />
                       <Route path="/settings" element={page(<Settings />)}>
-                        <Route index element={<Navigate to="cloud-provider" replace />} />
-                        <Route path="cloud-provider" element={page(<SettingsCloudProvider />)} />
+                        <Route index element={<Navigate to="agents" replace />} />
+                        <Route path="agents" element={page(<SettingsAgents />)} />
                         <Route path="infrastructure" element={page(<SettingsInfrastructure />)} />
                         <Route path="github" element={page(<SettingsGitHub />)} />
-                        <Route path="connections" element={page(<SettingsConnections />)} />
-                        <Route path="agents" element={page(<SettingsAgents />)} />
                         <Route path="mcp-servers" element={page(<SettingsMcpServers />)} />
+                        {/* Former tabs, folded into Agents and Infrastructure. */}
+                        <Route path="cloud-provider" element={<LegacyCloudProviderRedirect />} />
+                        <Route
+                          path="connections"
+                          element={<SettingsRedirect to="/settings/agents" />}
+                        />
                         <Route
                           path="agent-keys"
-                          element={<Navigate to="../connections" replace />}
+                          element={<SettingsRedirect to="/settings/agents" />}
                         />
                         <Route
                           path="agent-config"
-                          element={<Navigate to="../connections" replace />}
+                          element={<SettingsRedirect to="/settings/agents" />}
                         />
                         <Route path="notifications" element={page(<SettingsNotifications />)} />
                         <Route path="usage" element={page(<SettingsComputeUsage />)} />
