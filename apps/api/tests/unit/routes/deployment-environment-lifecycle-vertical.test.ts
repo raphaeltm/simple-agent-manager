@@ -9,8 +9,8 @@ import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { registerDeploymentEnvironmentLifecycleRoutes } from '../../../src/routes/deployment-environment-lifecycle';
 import { runDeploymentNodeCleanup } from '../../../src/scheduled/deployment-node-cleanup';
-import { provisionDeploymentNode } from '../../../src/services/deployment-provisioning';
 import { cleanupDeploymentNode } from '../../../src/services/deployment-node-cleanup';
+import { provisionDeploymentNode } from '../../../src/services/deployment-provisioning';
 import { teardownDeploymentEnvironmentOnNode } from '../../../src/services/node-agent';
 import { stopNodeResources } from '../../../src/services/node-resource-lifecycle';
 import { exactProviderCredentialBindingFromPlacementSnapshot } from '../../../src/services/provider-credential-exact';
@@ -376,6 +376,44 @@ describe('deployment teardown with real SQL and strict provider boundary', () =>
     expect(provider.deleteVM).not.toHaveBeenCalled();
     expect(row().runtime_termination_confirmed_at).toEqual(expect.any(String));
   });
+
+  it.each(['exact', 'foreign', 'duplicate'])(
+    'revalidates discovered providerless deployment ownership: %s',
+    async (kind) => {
+      await seedNode({ status: 'destroying', providerInstanceId: null });
+      const vm = {
+        id: 'discovered',
+        location: 'fsn1',
+        serverType: 'cx23',
+        createdAt: '2026-10-22T08:53:44.000Z',
+        labels: {
+          node: 'node',
+          role: 'deployment',
+          managed: 'simple-agent-manager',
+          env: 'production',
+          installation: '0123456789abcdef0123456789abcdef',
+          incarnation: kind === 'foreign' ? 'foreign' : 'incarnation',
+        },
+      };
+      provider.listVMs.mockResolvedValue(kind === 'duplicate' ? [vm, vm] : [vm]);
+      provider.getVM.mockResolvedValue(vm);
+      const cleanup = await cleanupDeploymentNode(env, 'node', 'user', options);
+      expect(cleanup.nodeDeleted).toBe(kind === 'exact');
+      if (kind === 'exact') {
+        expect(provider.getVM).toHaveBeenCalledWith(
+          'discovered',
+          expect.objectContaining({ signal: expect.any(AbortSignal) })
+        );
+        expect(provider.deleteVM).toHaveBeenCalledWith(
+          'discovered',
+          expect.objectContaining({ signal: expect.any(AbortSignal) })
+        );
+      } else {
+        expect(provider.deleteVM).not.toHaveBeenCalled();
+        expect(row().runtime_termination_confirmed_at).toBeNull();
+      }
+    }
+  );
 
   it('confirms externally deleted VMs through the real provider adapter 404 path', async () => {
     await seedNode({ status: 'destroying' });
