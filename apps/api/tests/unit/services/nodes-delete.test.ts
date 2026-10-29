@@ -13,6 +13,7 @@ let beforeSelectReturn: ((call: number) => void) | null = null;
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
+    batch: (queries: PromiseLike<unknown>[]) => Promise.all(queries),
     select: () => {
       const selectRows = async () => {
         selectCallCount += 1;

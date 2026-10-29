@@ -17,6 +17,7 @@ import { runScheduledComposeImageArtifactCleanup } from './compose-image-artifac
 import { runComputeUsageCleanup } from './compute-usage-cleanup';
 import { runCronTriggerSweep } from './cron-triggers';
 import { runScheduledDeploymentReleaseRetention } from './d1-retention';
+import { runDeploymentNodeCleanup } from './deployment-node-cleanup';
 import { notifyFailedSweeps } from './failed-sweep-notifications';
 import { runIncidentTriggerSweep } from './incident-triggers';
 import { runNodeCleanupSweep } from './node-cleanup';
@@ -149,6 +150,9 @@ export async function scheduled(
     runSessionSleepLifecycleRepair(env, new Date())
   );
   const nodeCleanup = await sweeps.isolate('node_cleanup', () => runNodeCleanupSweep(env));
+  await sweeps.isolate('deployment_node_cleanup', () =>
+    runDeploymentNodeCleanup(env, ctx.waitUntil.bind(ctx))
+  );
   const terminalNodeLifecycleRepair = await sweeps.isolate('terminal_node_lifecycle_repair', () =>
     runTerminalNodeLifecycleRepair(env)
   );
