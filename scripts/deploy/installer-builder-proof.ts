@@ -181,6 +181,7 @@ export async function runProof(): Promise<void> {
           JSON.stringify({
             main_module: 'proof.js',
             compatibility_date: '2026-10-01',
+            containers: [{ class_name: 'BuildProof' }],
             migrations: { new_tag: 'v1', new_sqlite_classes: ['BuildProof'] },
             bindings: [
               { type: 'durable_object_namespace', name: 'PROOF', class_name: 'BuildProof' },
