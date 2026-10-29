@@ -13,15 +13,27 @@ User authorizes green non-draft PR, merge and production deployment. Explicit st
 
 ## Implementation and acceptance
 
-- [ ] Keep failed stop placement linked and visibly failed; retry converges with strict proof.
-- [ ] Dedicated bounded/backoff deployment cleanup backstop; protect healthy/shared/user-owned/foreign nodes and workspace artifacts.
-- [ ] Exact deployment providerless inventory reconciliation retains every ownership/incarnation/account fence.
-- [ ] Positive live legacy binding recovery; never treat wrong-account 404 as proof.
-- [ ] Extend orphan inventory coverage to user/project credentials, preserving live claims and bounded global destruction.
-- [ ] Real SQL regression tests for failure/retry/interruption/external absence/providerless/legacy/protection; preserve deployment volumes/releases/config.
+- [x] Keep failed stop placement linked and visibly failed; retry converges with strict proof.
+- [x] Dedicated bounded/backoff deployment cleanup backstop; protect healthy/shared/user-owned/foreign nodes and workspace artifacts.
+- [x] Exact deployment providerless inventory reconciliation retains every ownership/incarnation/account fence.
+- [x] Positive live legacy binding recovery; never treat wrong-account 404 as proof.
+- [x] Extend orphan inventory coverage to user/project credentials, preserving live claims and bounded global destruction.
+- [x] Real SQL regression tests for failure/retry/interruption/external absence/providerless/legacy/protection; preserve deployment volumes/releases/config.
 - [ ] Specialist reviews, complete relevant quality checks, green PR, best-effort CodeRabbit.
 - [ ] Merge, successful production deployment/basic smoke, safely recover existing state and report residual blockers to parent/channel.
 
 ## Workflow adaptation
 
 SAM supplied an existing dedicated output branch/workspace; use it directly rather than creating a redundant worktree. Task artifact stays with this scoped PR to avoid unreviewed main changes during concurrent reliability work.
+
+## Review and verification evidence
+
+- Authority research: original failure fixed by #2409; no speculative provisioning change.
+- Security audit: PASS independent re-review; positive-only account recovery, exact incarnation and preservation guards.
+- Cloudflare: ADDRESSED stale stop interruption, atomic retirement and KV cursor write frequency; final re-review PASS.
+- Test-engineer: 39 legacy real-SQL and 11 account-inventory regressions passed; actual lifecycle suite21 tests passed, including real provider404 and same-volume stop/start.
+- Completion/constitution/doc-sync: implementation PASS; final repository quality and release gates remain below.
+- Repository lint and typecheck PASS. Repository test/build in progress with bounded concurrency.
+- Fresh providerless allocations remain quarantined through the existing provisioning recovery window; no in-flight create can be mistaken for empty inventory. Final security re-review PASS.
+- No staging per explicit user waiver. No production resources or records manually mutated.
+- Residual: missing historical original-account proof can keep manually deleted legacy node150100869 quarantined; current unique credentials or a guessed-account404 cannot create proof.

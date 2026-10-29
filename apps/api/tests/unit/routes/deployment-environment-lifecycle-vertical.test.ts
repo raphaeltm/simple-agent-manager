@@ -377,6 +377,16 @@ describe('deployment teardown with real SQL and strict provider boundary', () =>
     expect(row().runtime_termination_confirmed_at).toEqual(expect.any(String));
   });
 
+  it('never treats an empty inventory during a fresh in-flight allocation as termination proof', async () => {
+    await seedNode({ providerInstanceId: null, createdAt: new Date().toISOString() });
+    await seedEnvironment();
+    expect((await stop()).status).toBe(409);
+    expect(environment()).toMatchObject({ status: 'error', node_id: 'node' });
+    expect(row().runtime_termination_confirmed_at).toBeNull();
+    expect(provider.listVMs).not.toHaveBeenCalled();
+    expect(provider.deleteVM).not.toHaveBeenCalled();
+  });
+
   it.each(['exact', 'foreign', 'duplicate'])(
     'revalidates discovered providerless deployment ownership: %s',
     async (kind) => {
