@@ -48,7 +48,7 @@ import {
 } from '../../services/sandbox';
 import { releaseSetupSlot } from '../../services/setup-session-pool';
 import { CredentialValidator } from '../../services/validation';
-import { type DeviceAuthState,DeviceAuthStateSchema, driverFailure } from './driver-state';
+import { type DeviceAuthState, DeviceAuthStateSchema, driverFailure } from './driver-state';
 
 export interface CreateSetupSessionParams {
   id: string;
@@ -331,7 +331,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
       // waiting_for_user | exchanging | capturing — observe driver failure and capture output.
       const driverState = await this.readDeviceAuthState(row);
       if (driverState?.status === 'failed') {
-        const failure = driverFailure(driverState);
+        const failure = driverFailure(driverState, setupDisplayName(row.agent_type));
         log.warn('credential_setup.driver_failed', {
           sessionId: row.id,
           phase: row.status,
@@ -463,7 +463,7 @@ export class CredentialSetupSession extends DurableObject<Env> {
       log.warn('credential_setup.device_auth_failed', {
         sessionId: row.id,
         agentType: row.agent_type,
-        errorCode: driverFailure(state).code,
+        errorCode: driverFailure(state, setupDisplayName(row.agent_type)).code,
         diagnostics: state.diagnostics ?? {},
       });
       await this.teardown(

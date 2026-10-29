@@ -62,9 +62,12 @@ const failures: Record<string, string> = {
   credential_write_failed: 'SAM could not capture the Claude token. Please start again.',
 };
 
-export function driverFailure(state: DeviceAuthState): { code: string; message: string } {
+export function driverFailure(
+  state: DeviceAuthState,
+  displayName: string
+): { code: string; message: string } {
   const code = state.code && Object.hasOwn(failures, state.code) ? state.code : 'setup_failed';
-  let message = failures[code] ?? 'Claude Code could not complete sign-in. Please start again.';
+  let message = failures[code] ?? `${displayName} could not complete sign-in. Please start again.`;
   // Compatibility with older driver images, without echoing arbitrary text.
   const status = /^(?:HTTP ([1-5]\d{2})|.*status\s*code\s*([1-5]\d{2}).*)$/i.exec(
     state.detail ?? ''

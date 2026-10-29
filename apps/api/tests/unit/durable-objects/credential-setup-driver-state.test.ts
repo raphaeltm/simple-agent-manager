@@ -7,6 +7,12 @@ import {
 } from '../../../src/durable-objects/credential-setup-session/driver-state';
 
 describe('setup driver boundary', () => {
+  it('names Codex for an unmapped Codex driver failure', () => {
+    expect(driverFailure({ status: 'failed', error: 'private diagnostic' }, 'Codex')).toEqual({
+      code: 'setup_failed',
+      message: 'Codex could not complete sign-in. Please start again.',
+    });
+  });
   it.each([
     'process_exited',
     'stdin_write_failed',
@@ -17,7 +23,7 @@ describe('setup driver boundary', () => {
     'exchange_provider_error',
     'exchange_failed',
   ])('retains %s instead of blaming the code', (code) => {
-    expect(driverFailure({ status: 'failed', code }).code).toBe(code);
+    expect(driverFailure({ status: 'failed', code }, 'Claude Code').code).toBe(code);
   });
   it('drops unknown metadata and never echoes free-form diagnostics', () => {
     const parsed = v.parse(DeviceAuthStateSchema, {
@@ -34,7 +40,7 @@ describe('setup driver boundary', () => {
       },
     });
     expect(parsed.diagnostics).toEqual({ cliVersion: '2.1.281', exitCode: 1, codeReadAt: 123 });
-    expect(driverFailure(parsed)).toEqual({
+    expect(driverFailure(parsed, 'Claude Code')).toEqual({
       code: 'process_exited',
       message: 'The Claude sign-in process stopped before returning a token. Please try again.',
     });
@@ -46,15 +52,18 @@ describe('setup driver boundary', () => {
       diagnostics: { cliVersion: 'secret-token' },
     });
     expect(state.diagnostics).toEqual({});
-    expect(driverFailure(state).code).toBe('stdin_write_failed');
+    expect(driverFailure(state, 'Claude Code').code).toBe('stdin_write_failed');
   });
   it('unknown failure codes are not reflected and safe numeric status is retained', () => {
     expect(
-      driverFailure({
-        status: 'failed',
-        code: 'secret-token',
-        detail: 'Request failed with status code 503 secret-code#state',
-      })
+      driverFailure(
+        {
+          status: 'failed',
+          code: 'secret-token',
+          detail: 'Request failed with status code 503 secret-code#state',
+        },
+        'Claude Code'
+      )
     ).toEqual({
       code: 'setup_failed',
       message: 'Claude Code could not complete sign-in. Please start again. [CLI: HTTP 503]',

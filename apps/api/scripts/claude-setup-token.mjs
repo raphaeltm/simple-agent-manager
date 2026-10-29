@@ -5,6 +5,7 @@ import { readFile, rename, unlink, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 
 import {
+  utf8Tail,
   positiveIntFromEnv,
   resolveClaudeSetupPaths,
   extractClaudeSetupOutput,
@@ -273,7 +274,7 @@ export async function runClaudeSetupToken({
   }
   function processOutput(chunk, streamClosed = false) {
     if (terminalStatePublished || tokenCaptured) return;
-    outputBuffer = `${outputBuffer}${chunk}`.slice(-outputBufferBytes);
+    outputBuffer = utf8Tail(`${outputBuffer}${chunk}`, outputBufferBytes);
     const version = /SAM_CLAUDE_VERSION:(\d+\.\d+\.\d+)/.exec(stripAnsi(outputBuffer))?.[1];
     if (version) diagnostics.cliVersion = version;
     let details;

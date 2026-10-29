@@ -331,3 +331,11 @@ export function safeOauthDetail(detail) {
     return network;
   return undefined;
 }
+
+export function utf8Tail(value, maxBytes) {
+  const bytes = Buffer.from(value, 'utf8');
+  let start = Math.max(0, bytes.length - maxBytes);
+  // Drop a partial leading code point instead of introducing a replacement character.
+  while (start < bytes.length && (bytes[start] & 0xc0) === 0x80) start++;
+  return bytes.subarray(start).toString('utf8');
+}

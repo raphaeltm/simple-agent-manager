@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   extractClaudeSetupOutput,
   runClaudeSetupToken,
+  utf8Tail,
 } from '../../../scripts/claude-setup-token.mjs';
 
 const url =
@@ -44,6 +45,15 @@ function harness(code = 'synthetic#expected', overrides: Record<string, unknown>
 }
 afterEach(() => vi.unstubAllEnvs());
 describe('Claude setup-token real-boundary regressions', () => {
+  it('bounds multilingual output by UTF-8 bytes without corrupting the suffix', () => {
+    const text = '漢😀é'.repeat(100) + 'OAuth error: status code 400';
+    for (let limit = 30; limit < 45; limit++) {
+      const tail = utf8Tail(text, limit);
+      expect(Buffer.byteLength(tail)).toBeLessThanOrEqual(limit);
+      expect(tail).not.toContain('�');
+      expect(tail).toContain('OAuth error: status code 400');
+    }
+  });
   it('never accepts a partial token at any split of wrapped CRLF output', () => {
     const output = `${token.slice(0, 32)}\r\n${token.slice(32)}\r\n`;
     for (let split = 1; split < output.length; split++) {
