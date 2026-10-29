@@ -20,6 +20,10 @@ import { Dashboard } from './pages/Dashboard';
 import { Landing } from './pages/Landing';
 
 const AccountMap = lazyNamed(() => import('./pages/AccountMap'), 'AccountMap');
+const AccountsPrototype = lazyNamed(
+  () => import('./pages/accounts-prototype'),
+  'AccountsPrototype'
+);
 const Admin = lazyNamed(() => import('./pages/Admin'), 'Admin');
 const AdminAIProxy = lazyNamed(() => import('./pages/AdminAIProxy'), 'AdminAIProxy');
 const AdminAnalytics = lazyNamed(() => import('./pages/AdminAnalytics'), 'AdminAnalytics');
@@ -267,6 +271,7 @@ function SuperadminRoute({ children }: { children: ReactNode }) {
 }
 
 export const DEV_ONLY_ROUTE_PATHS = [
+  '/prototype/accounts',
   '/__test/trial-chat-gate',
   '/__test/error-boundary',
   '/ui-standards',
@@ -315,6 +320,8 @@ export default function App() {
                           path="/__test/error-boundary"
                           element={<ErrorBoundaryAuditHarness />}
                         />
+                        {/* PROTOTYPE — unified accounts + defaults. Remove before merge to main. */}
+                        <Route path="/prototype/accounts" element={page(<AccountsPrototype />)} />
                       </>
                     )}
                     {/* Protected routes with AppShell (persistent navigation) */}

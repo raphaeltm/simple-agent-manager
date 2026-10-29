@@ -400,6 +400,7 @@ describe('App routes', () => {
     vi.stubEnv('MODE', 'production');
 
     expect(DEV_ONLY_ROUTE_PATHS).toEqual([
+      '/prototype/accounts',
       '/__test/trial-chat-gate',
       '/__test/error-boundary',
       '/ui-standards',
