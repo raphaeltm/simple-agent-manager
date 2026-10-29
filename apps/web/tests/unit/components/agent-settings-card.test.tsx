@@ -174,7 +174,7 @@ describe('AgentSettingsCard permission mode default', () => {
     expect(radio('bypassPermissions').checked).toBe(true);
     expect(radio('default').checked).toBe(false);
     expect(screen.getByRole('radio', { name: 'Manual' })).toBe(radio('default'));
-    expect(screen.getByRole('alert')).toHaveTextContent('disables all safety prompts');
+    expect(screen.getByRole('note')).toHaveTextContent('disables all safety prompts');
     expect(screen.getByTestId('save-settings-claude-code')).toBeDisabled();
   });
 
@@ -214,7 +214,7 @@ describe('AgentSettingsCard permission mode default', () => {
 
     expect(radio('default').checked).toBe(true);
     expect(radio('bypassPermissions').checked).toBe(false);
-    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('note')).not.toBeInTheDocument();
   });
 
   it('returns the selection to Bypass Permissions on reset', async () => {
@@ -234,5 +234,30 @@ describe('AgentSettingsCard permission mode default', () => {
 
     await waitFor(() => expect(radio('bypassPermissions').checked).toBe(true));
     expect(onReset).toHaveBeenCalledWith('claude-code');
+    expect(screen.getByRole('status')).toHaveTextContent('Back to SAM’s settings');
+  });
+
+  it('reports a save next to the buttons, and a failure there too', async () => {
+    const user = userEvent.setup();
+    const onSave = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('Settings service unavailable'));
+    render(
+      <AgentSettingsCard
+        agent={makeClaudeAgent()}
+        settings={makeOpenCodeSettings({ agentType: 'claude-code', permissionMode: 'plan' })}
+        onSave={onSave}
+        onReset={vi.fn()}
+      />
+    );
+
+    await user.click(radio('acceptEdits'));
+    await user.click(screen.getByTestId('save-settings-claude-code'));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('Saved'));
+
+    await user.click(radio('default'));
+    await user.click(screen.getByTestId('save-settings-claude-code'));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Settings service unavailable');
   });
 });

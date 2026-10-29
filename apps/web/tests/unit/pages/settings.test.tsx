@@ -1,8 +1,18 @@
-import { render, screen, waitFor } from '@testing-library/react';
-import { MemoryRouter, Navigate, Route, Routes } from 'react-router';
+import { render, screen, waitFor, within } from '@testing-library/react';
+import { MemoryRouter, Navigate, Route, Routes, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { accountRows, mergeRows } from '../components/accounts/fixtures';
+
 const mocks = vi.hoisted(() => ({
+  getResolutionStatus: vi.fn(),
+  listCCCredentials: vi.fn(),
+  listCCConfigurations: vi.fn(),
+  listCCAttachments: vi.fn(),
+  listProjects: vi.fn(),
+  getMyCredentialLimits: vi.fn(),
+  listAgents: vi.fn(),
+  getAgentSettings: vi.fn(),
   listCredentials: vi.fn(),
 }));
 
@@ -14,45 +24,25 @@ vi.mock('../../../src/components/AuthProvider', () => ({
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
-  listCredentials: mocks.listCredentials,
+  ...mocks,
 }));
 
-vi.mock('../../../src/components/HetznerTokenForm', () => ({
-  HetznerTokenForm: ({ credential }: { credential: unknown }) => (
-    <div data-testid="hetzner-token-form">{credential ? 'connected' : 'not-connected'}</div>
-  ),
+vi.mock('../../../src/components/SamSettingsCard', () => ({
+  SamSettingsCard: () => <div data-testid="sam-settings-card" />,
 }));
 
-vi.mock('../../../src/components/ScalewayCredentialForm', () => ({
-  ScalewayCredentialForm: ({ credential }: { credential: unknown }) => (
-    <div data-testid="scaleway-credential-form">{credential ? 'connected' : 'not-connected'}</div>
+vi.mock('../../../src/components/AgentSettingsCard', () => ({
+  AgentSettingsCard: ({ agent }: { agent: { id: string } }) => (
+    <div data-testid={`agent-defaults-${agent.id}`} />
   ),
 }));
 
 vi.mock('../../../src/components/GcpCredentialForm', () => ({
-  GcpCredentialForm: ({ credential }: { credential: unknown }) => (
-    <div data-testid="gcp-credential-form">{credential ? 'connected' : 'not-connected'}</div>
-  ),
+  GcpCredentialForm: () => <div data-testid="gcp-credential-form" />,
 }));
 
 vi.mock('../../../src/components/GitHubAppSection', () => ({
   GitHubAppSection: () => <div data-testid="github-app-section">github-app</div>,
-}));
-
-vi.mock('../../../src/components/AgentsSection', () => ({
-  AgentsSection: () => <div data-testid="agents-section">agents</div>,
-}));
-
-vi.mock('../../../src/components/ConnectionsOverview', () => ({
-  ConnectionsOverview: () => <div data-testid="connections-overview">connections-overview</div>,
-}));
-
-vi.mock('../../../src/components/ConnectFlow', () => ({
-  ConnectFlow: () => <div data-testid="connect-flow">connect-flow</div>,
-}));
-
-vi.mock('../../../src/components/UserMenu', () => ({
-  UserMenu: () => <div data-testid="user-menu">user-menu</div>,
 }));
 
 vi.mock('../../../src/components/project-settings/DefaultCapacityPoolsPanel', () => ({
@@ -61,25 +51,33 @@ vi.mock('../../../src/components/project-settings/DefaultCapacityPoolsPanel', ()
 
 import { ToastProvider } from '../../../src/hooks/useToast';
 import { Settings } from '../../../src/pages/Settings';
+import {
+  LegacyCloudProviderRedirect,
+  SettingsRedirect,
+} from '../../../src/pages/settings-redirects';
 import { SettingsAgents } from '../../../src/pages/SettingsAgents';
-import { SettingsCloudProvider } from '../../../src/pages/SettingsCloudProvider';
-import { SettingsConnections } from '../../../src/pages/SettingsConnections';
 import { SettingsGitHub } from '../../../src/pages/SettingsGitHub';
 import { SettingsInfrastructure } from '../../../src/pages/SettingsInfrastructure';
 import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
-function renderSettings(path = '/settings/cloud-provider') {
+function LocationProbe() {
+  const location = useLocation();
+  return <output data-testid="location">{`${location.pathname}${location.search}`}</output>;
+}
+
+function renderSettings(path: string) {
   return render(
     <ToastProvider>
       <MemoryRouter initialEntries={[path]}>
+        <LocationProbe />
         <Routes>
           <Route path="/settings" element={<Settings />}>
-            <Route index element={<Navigate to="cloud-provider" replace />} />
-            <Route path="cloud-provider" element={<SettingsCloudProvider />} />
+            <Route index element={<Navigate to="agents" replace />} />
+            <Route path="agents" element={<SettingsAgents />} />
             <Route path="infrastructure" element={<SettingsInfrastructure />} />
             <Route path="github" element={<SettingsGitHub />} />
-            <Route path="connections" element={<SettingsConnections />} />
-            <Route path="agents" element={<SettingsAgents />} />
+            <Route path="cloud-provider" element={<LegacyCloudProviderRedirect />} />
+            <Route path="connections" element={<SettingsRedirect to="/settings/agents" />} />
           </Route>
         </Routes>
       </MemoryRouter>
@@ -88,144 +86,176 @@ function renderSettings(path = '/settings/cloud-provider') {
   );
 }
 
-describe('Settings shell', () => {
+const PROJECTS = [
+  { id: 'p-web', name: 'Marketing site' },
+  { id: 'p-client', name: 'Acme client portal' },
+];
+
+const ROWS = mergeRows(
+  accountRows({
+    id: 'work',
+    name: 'Work Max plan',
+    kind: 'agent',
+    target: 'claude-code',
+    credentialKind: 'oauth-token',
+    isDefault: true,
+  }),
+  accountRows({
+    id: 'acme',
+    name: 'Acme API key',
+    kind: 'agent',
+    target: 'claude-code',
+    pins: ['p-client'],
+  }),
+  accountRows({
+    id: 'hz',
+    name: 'Hetzner — Personal',
+    kind: 'compute',
+    target: 'hetzner',
+    isDefault: true,
+  })
+);
+
+describe('Settings', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.listCredentials.mockResolvedValue([
-      {
-        id: 'cred_01',
-        provider: 'hetzner',
-        connected: true,
-        createdAt: '2026-02-07T00:00:00.000Z',
-      },
-    ]);
-  });
-
-  it('renders tabs in the settings shell', async () => {
-    renderSettings();
-
-    await waitFor(() => {
-      expect(mocks.listCredentials).toHaveBeenCalled();
+    mocks.getResolutionStatus.mockResolvedValue({ consumers: [] });
+    mocks.listCCCredentials.mockResolvedValue(ROWS.credentials);
+    mocks.listCCConfigurations.mockResolvedValue(ROWS.configurations);
+    mocks.listCCAttachments.mockResolvedValue(ROWS.attachments);
+    mocks.listProjects.mockResolvedValue({ projects: PROJECTS, nextCursor: null });
+    mocks.getMyCredentialLimits.mockResolvedValue({ credentials: [] });
+    mocks.listAgents.mockResolvedValue({
+      agents: [
+        { id: 'claude-code', name: 'Claude Code', configured: true },
+        { id: 'openai-codex', name: 'Codex', configured: false },
+      ],
     });
-
-    expect(screen.getByRole('tab', { name: 'Cloud Provider' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Infrastructure' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'GitHub' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Connections' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Agents' })).toBeInTheDocument();
-    expect(screen.getByRole('tab', { name: 'Access' })).toBeInTheDocument();
+    mocks.getAgentSettings.mockResolvedValue(null);
+    mocks.listCredentials.mockResolvedValue([]);
   });
 
-  it('renders breadcrumb with Home link', async () => {
-    renderSettings();
+  it('lists every section in the sidebar and the mobile tab strip', async () => {
+    renderSettings('/settings/agents');
 
-    await waitFor(() => {
-      expect(mocks.listCredentials).toHaveBeenCalled();
-    });
-
-    expect(screen.getByRole('link', { name: 'Home' })).toHaveAttribute('href', '/dashboard');
-    expect(screen.getByRole('heading', { name: 'Settings' })).toBeInTheDocument();
+    const nav = screen.getByRole('navigation', { name: 'Settings sections' });
+    const labels = ['Agents', 'Infrastructure', 'GitHub', 'MCP servers', 'Notifications'];
+    for (const label of [...labels, 'Usage', 'Access']) {
+      expect(within(nav).getByRole('link', { name: label })).toBeInTheDocument();
+      expect(screen.getByRole('tab', { name: label })).toBeInTheDocument();
+    }
+    expect(within(nav).getByRole('link', { name: 'Agents' })).toHaveAttribute(
+      'href',
+      '/settings/agents'
+    );
+    expect(screen.queryByRole('tab', { name: 'Cloud Provider' })).toBeNull();
+    expect(screen.queryByRole('tab', { name: 'Connections' })).toBeNull();
+    expect(await screen.findByRole('heading', { name: 'Agent accounts' })).toBeInTheDocument();
   });
 
-  it('renders cloud-provider sub-route with hetzner form', async () => {
+  it('opens Agents from /settings', async () => {
+    renderSettings('/settings');
+
+    expect(await screen.findByRole('heading', { name: 'Agent accounts' })).toBeInTheDocument();
+    expect(screen.getByTestId('location')).toHaveTextContent('/settings/agents');
+  });
+
+  it('redirects the former Connections tab to Agents', async () => {
+    renderSettings('/settings/connections');
+
+    expect(await screen.findByRole('heading', { name: 'Agent accounts' })).toBeInTheDocument();
+    expect(screen.getByTestId('location')).toHaveTextContent(/^\/settings\/agents$/);
+  });
+
+  it('redirects the former Cloud Provider tab to Infrastructure', async () => {
     renderSettings('/settings/cloud-provider');
 
-    await waitFor(() => {
-      expect(screen.getByTestId('hetzner-token-form')).toHaveTextContent('connected');
-    });
-    expect(screen.queryByTestId('default-capacity-pools-panel')).not.toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Cloud accounts' })).toBeInTheDocument();
+    expect(screen.getByTestId('location')).toHaveTextContent(/^\/settings\/infrastructure$/);
+    expect(screen.queryByRole('dialog')).toBeNull();
   });
 
-  it('renders infrastructure sub-route with the compute-pool panel', async () => {
+  it('reopens the Google Cloud connect step when the OAuth flow returns', async () => {
+    renderSettings('/settings/cloud-provider?gcp_setup=ready');
+
+    const dialog = await screen.findByRole('dialog', { name: 'Connect Google Cloud' });
+    expect(screen.getByTestId('location')).toHaveTextContent(
+      '/settings/infrastructure?gcp_setup=ready&connect=gcp'
+    );
+    expect(await within(dialog).findByTestId('gcp-credential-form')).toBeInTheDocument();
+  });
+
+  it('shows agent accounts by role with their projects, and per-agent defaults', async () => {
+    renderSettings('/settings/agents');
+
+    const row = await screen.findByTestId('provider-row-claude-code');
+    // Each lane is headed by its role; the cards inside it carry no badge of their own.
+    const lane = (role: string) =>
+      within(row).getByRole('heading', { name: role }).parentElement!.parentElement!;
+    const work = within(lane('Default')).getByTestId('account-card-cfg-work');
+    expect(within(work).getByText('Work Max plan')).toBeInTheDocument();
+    expect(within(work).queryByText('Default')).toBeNull();
+    const acme = within(lane('Pinned')).getByTestId('account-card-cfg-acme');
+    expect(within(acme).getByText('Acme API key')).toBeInTheDocument();
+    // Nothing is unattached, so that lane is not shown at all.
+    expect(within(row).queryByRole('heading', { name: 'Unattached' })).toBeNull();
+    // The bar is decorative; its legend carries the same counts as text.
+    expect(within(row).getByRole('button', { expanded: true })).toHaveTextContent(
+      /Work Max plan\s*1.*Acme API key\s*1/
+    );
+    expect(within(row).getByRole('link', { name: 'Acme client portal' })).toHaveAttribute(
+      'href',
+      '/projects/p-client/settings/accounts'
+    );
+    // Codex has no account yet: a quick-connect chip, not a row.
+    expect(screen.queryByTestId('provider-row-openai-codex')).toBeNull();
+    expect(screen.getAllByRole('button', { name: /Codex/ }).length).toBeGreaterThan(0);
+
+    expect(await screen.findByTestId('agent-defaults-claude-code')).toBeInTheDocument();
+    expect(screen.queryByTestId('agent-defaults-openai-codex')).toBeNull();
+    expect(screen.queryByTestId('provider-row-hetzner')).toBeNull();
+  });
+
+  it('shows cloud accounts and the node pool defaults on Infrastructure', async () => {
     renderSettings('/settings/infrastructure');
 
-    await waitFor(() => {
-      expect(mocks.listCredentials).toHaveBeenCalled();
-    });
-
-    expect(screen.getByRole('tab', { name: 'Infrastructure' })).toBeInTheDocument();
+    const row = await screen.findByTestId('provider-row-hetzner');
+    expect(within(row).getByTestId('account-card-cfg-hz')).toHaveAccessibleName(
+      'Hetzner account Hetzner — Personal'
+    );
     expect(screen.getByTestId('default-capacity-pools-panel')).toBeInTheDocument();
+    expect(screen.queryByTestId('provider-row-claude-code')).toBeNull();
   });
 
-  it('renders github sub-route', async () => {
+  it('waits for the resolution-status backfill before listing accounts', async () => {
+    let finishBackfill: (value: { consumers: [] }) => void = () => undefined;
+    mocks.getResolutionStatus.mockReturnValue(
+      new Promise((resolve) => {
+        finishBackfill = resolve;
+      })
+    );
+    renderSettings('/settings/agents');
+
+    expect(await screen.findByRole('status', { name: 'Loading accounts' })).toBeInTheDocument();
+    expect(mocks.listCCCredentials).not.toHaveBeenCalled();
+
+    finishBackfill({ consumers: [] });
+    expect(await screen.findByTestId('provider-row-claude-code')).toBeInTheDocument();
+    expect(mocks.listCCCredentials).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows a retryable error when the accounts cannot load', async () => {
+    mocks.listCCCredentials.mockRejectedValueOnce(new Error('Accounts unavailable'));
+    renderSettings('/settings/agents');
+
+    expect(await screen.findByText('Accounts unavailable')).toBeInTheDocument();
+    screen.getByRole('button', { name: 'Retry' }).click();
+    await waitFor(() => expect(screen.getByTestId('provider-row-claude-code')).toBeVisible());
+  });
+
+  it('renders the GitHub section', async () => {
     renderSettings('/settings/github');
 
-    await waitFor(() => {
-      expect(mocks.listCredentials).toHaveBeenCalled();
-    });
-
-    expect(screen.getByTestId('github-app-section')).toBeInTheDocument();
-  });
-
-  it.each([
-    ['/settings/infrastructure', 'default-capacity-pools-panel'],
-    ['/settings/connections', 'connections-overview'],
-    ['/settings/agents', 'agents-section'],
-  ])('renders %s sub-route', async (path, testId) => {
-    renderSettings(path);
-
-    await waitFor(() => {
-      expect(mocks.listCredentials).toHaveBeenCalled();
-    });
-
-    expect(screen.getByTestId(testId)).toBeInTheDocument();
-  });
-
-  it('renders cloud-provider sub-route with scaleway form', async () => {
-    mocks.listCredentials.mockResolvedValue([
-      {
-        id: 'cred_02',
-        provider: 'scaleway',
-        connected: true,
-        createdAt: '2026-03-13T00:00:00.000Z',
-      },
-    ]);
-    renderSettings('/settings/cloud-provider');
-
-    await waitFor(() => {
-      expect(screen.getByTestId('scaleway-credential-form')).toHaveTextContent('connected');
-    });
-  });
-
-  it('renders both provider forms on cloud-provider page', async () => {
-    mocks.listCredentials.mockResolvedValue([
-      {
-        id: 'cred_01',
-        provider: 'hetzner',
-        connected: true,
-        createdAt: '2026-02-07T00:00:00.000Z',
-      },
-      {
-        id: 'cred_02',
-        provider: 'scaleway',
-        connected: true,
-        createdAt: '2026-03-13T00:00:00.000Z',
-      },
-    ]);
-    renderSettings('/settings/cloud-provider');
-
-    await waitFor(() => {
-      expect(screen.getByTestId('hetzner-token-form')).toHaveTextContent('connected');
-      expect(screen.getByTestId('scaleway-credential-form')).toHaveTextContent('connected');
-    });
-  });
-
-  it('shows both providers as not connected when no credentials', async () => {
-    mocks.listCredentials.mockResolvedValue([]);
-    renderSettings('/settings/cloud-provider');
-
-    await waitFor(() => {
-      expect(screen.getByTestId('hetzner-token-form')).toHaveTextContent('not-connected');
-      expect(screen.getByTestId('scaleway-credential-form')).toHaveTextContent('not-connected');
-    });
-  });
-
-  it('shows error alert on credentials load failure', async () => {
-    mocks.listCredentials.mockRejectedValue(new Error('Load failed'));
-    renderSettings();
-
-    await waitFor(() => {
-      expect(screen.getByText('Load failed')).toBeInTheDocument();
-    });
+    expect(await screen.findByTestId('github-app-section')).toBeInTheDocument();
   });
 });

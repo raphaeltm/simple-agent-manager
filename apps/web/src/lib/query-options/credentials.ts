@@ -5,14 +5,12 @@ import { listCredentials } from '../api';
 /**
  * The user's cloud-provider credential list (`GET /api/credentials`).
  *
- * Seven surfaces read this endpoint. Five now route through the shared query key:
- * the settings shell, scaling settings, the project-chat state hook, and the two
- * onboarding components (`OnboardingProvider` + `ChoosePathWizard`, both of which
- * `AppShell` mounts on EVERY authenticated page — they were the largest source of
- * duplication in the app).
+ * Surfaces reading this endpoint through the shared query key: the cloud-account
+ * connect step (`CloudAccountForm`), scaling settings, the project-chat state hook,
+ * and the two onboarding components (`OnboardingProvider` + `ChoosePathWizard`, both
+ * of which `AppShell` mounts on EVERY authenticated page).
  *
- * Still issuing their own requests, tracked as follow-up: `CreateWorkspace.tsx` and
- * `OnboardingChecklist.tsx` (the latter is currently unreferenced in production).
+ * Still issuing its own request, tracked as follow-up: `CreateWorkspace.tsx`.
  *
  * NOT persistable. `CredentialResponse` is connection configuration, which
  * `query-persist-config.ts` places on the never-persist-without-security-review

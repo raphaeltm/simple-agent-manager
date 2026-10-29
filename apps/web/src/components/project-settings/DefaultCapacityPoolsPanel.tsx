@@ -80,7 +80,10 @@ function FallbackNotice({
       {projectId && (
         <p className="m-0 text-xs text-fg-muted">
           To give this project machines of its own,{' '}
-          <Link to={`/projects/${projectId}/settings/connections`} className={TEXT_LINK_CLASS}>
+          <Link
+            to={`/projects/${projectId}/settings/accounts?connect=cloud:any`}
+            className={TEXT_LINK_CLASS}
+          >
             connect a cloud account to the project
           </Link>
           .

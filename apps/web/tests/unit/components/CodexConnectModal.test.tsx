@@ -22,10 +22,7 @@ import {
   AgentCredentialConnectModal,
   CodexConnectModal,
 } from '../../../src/components/CodexConnectModal';
-import {
-  AgentCredentialConnectTrigger,
-  CodexConnectTrigger,
-} from '../../../src/components/CodexConnectTrigger';
+import { AgentCredentialConnectTrigger } from '../../../src/components/CodexConnectTrigger';
 import type { AgentCredentialSetupSession, AgentCredentialSetupStatus } from '../../../src/lib/api';
 
 const SESSION_ID = 'sess_setup_01';
@@ -343,7 +340,13 @@ describe('AgentCredentialConnectModal', () => {
       agentType: 'openai-codex',
       agentTypes: ['openai-codex', 'claude-code'],
     });
-    render(<CodexConnectTrigger scope="project" onConnected={vi.fn()} />);
+    render(
+      <AgentCredentialConnectTrigger
+        agentType="openai-codex"
+        scope="project"
+        onConnected={vi.fn()}
+      />
+    );
     await waitFor(() => expect(h.getAgentCredentialSetupConfig).toHaveBeenCalled());
     expect(screen.queryByRole('button', { name: /connect with codex/i })).toBeNull();
 

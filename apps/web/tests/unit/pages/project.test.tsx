@@ -91,8 +91,8 @@ import { ProjectActivity } from '../../../src/pages/ProjectActivity';
 import {
   ProjectSettings,
   ProjectSettingsAccess,
+  ProjectSettingsAccounts,
   ProjectSettingsAgents,
-  ProjectSettingsConnections,
   ProjectSettingsDeploy,
   ProjectSettingsGeneral,
   ProjectSettingsIndexRedirect,
@@ -113,7 +113,7 @@ function renderProjectPage(path = '/projects/proj-1/tasks') {
               <Route index element={<ProjectSettingsIndexRedirect />} />
               <Route path="general" element={<ProjectSettingsGeneral />} />
               <Route path="access" element={<ProjectSettingsAccess />} />
-              <Route path="connections" element={<ProjectSettingsConnections />} />
+              <Route path="accounts" element={<ProjectSettingsAccounts />} />
               <Route path="agents" element={<ProjectSettingsAgents />} />
               <Route path="infrastructure" element={<ProjectSettingsInfrastructure />} />
               <Route path="runtime" element={<ProjectSettingsRuntime />} />

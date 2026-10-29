@@ -1,7 +1,8 @@
 /**
- * Per-agent settings body — model selection, permission mode, and (for OpenCode)
- * provider / base URL fields. Supports both the standalone "card" layout and an
- * `embedded` mode used by the unified AgentCard.
+ * An agent's defaults — model, permission mode and (where it applies) the AI
+ * provider and OpenCode provider. Defaults belong to the agent, never to an
+ * account: they apply whichever account a project resolves to, and project
+ * profiles can override them.
  */
 import type {
   AgentInfo,
@@ -17,13 +18,17 @@ import {
   DEFAULT_AGENT_PERMISSION_MODE,
   DEFAULT_OPENCODE_PROVIDER,
   DEFAULT_OPENCODE_ZEN_MODEL,
+  getModelsForAgent,
   OPENCODE_PROVIDER_OPTIONS,
   OPENCODE_PROVIDERS,
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
-import { Alert, Card } from '@simple-agent-manager/ui';
+import { Button } from '@simple-agent-manager/ui';
+import { Check, Layers } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
+import { ProviderMark } from './accounts/AccountBits';
+import { getAccountProvider } from './accounts/provider-meta';
 import { ModelSelect } from './ModelSelect';
 
 const DEFAULT_SUCCESS_BANNER_MS = 3000;
@@ -31,32 +36,32 @@ const SUCCESS_BANNER_MS = Number(
   import.meta.env.VITE_SUCCESS_BANNER_MS ?? DEFAULT_SUCCESS_BANNER_MS
 );
 
+/** OpenCode's own console, the only place Zen credit balance is visible. */
+const OPENCODE_CONSOLE_URL = 'https://opencode.ai/zen';
+
+const PROVIDER_MODE_LABELS: Record<AgentProviderMode | '', string> = {
+  '': 'Automatic — your connected account',
+  'user-api-key': 'Your API key',
+  oauth: 'Your subscription',
+  sam: 'SAM platform',
+};
+
 export interface AgentSettingsCardProps {
   agent: AgentInfo;
   settings: AgentSettingsResponse | null;
   onSave: (agentType: AgentType, data: SaveAgentSettingsRequest) => Promise<void>;
   onReset: (agentType: AgentType) => Promise<void>;
-  /**
-   * When true, render only the configuration body (no outer border, no agent name
-   * header). Used when the card is embedded inside a larger unified AgentCard that
-   * already shows the agent name and status.
-   */
-  embedded?: boolean;
 }
 
-/**
- * Per-agent settings card for model selection and permission mode.
- */
-/** OpenCode's own console, the only place Zen credit balance is visible. */
-const OPENCODE_CONSOLE_URL = 'https://opencode.ai/zen';
+const fieldClass =
+  'w-full min-h-11 py-2 px-3 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring box-border';
 
-export function AgentSettingsCard({
-  agent,
-  settings,
-  onSave,
-  onReset,
-  embedded = false,
-}: AgentSettingsCardProps) {
+function modelName(agentType: string, modelId: string): string {
+  if (!modelId) return 'its default model';
+  return getModelsForAgent(agentType).find((model) => model.id === modelId)?.name ?? modelId;
+}
+
+export function AgentSettingsCard({ agent, settings, onSave, onReset }: AgentSettingsCardProps) {
   const [model, setModel] = useState(settings?.model ?? '');
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode>(
     settings?.permissionMode ?? DEFAULT_AGENT_PERMISSION_MODE
@@ -71,24 +76,21 @@ export function AgentSettingsCard({
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
 
+  const provider = getAccountProvider('agent', agent.id);
   const isOpenCode = agent.id === 'opencode';
   const supportsSamProvider = agent.id === 'claude-code' || agent.id === 'openai-codex';
   const supportsOAuthProvider = agent.id === 'claude-code';
-  const selectedProvider = opencodeProvider;
-  const providerMeta = OPENCODE_PROVIDERS[selectedProvider];
-  const showBaseUrl = selectedProvider === 'custom';
+  const providerMeta = OPENCODE_PROVIDERS[opencodeProvider];
+  const showBaseUrl = opencodeProvider === 'custom';
   const openCodeModelProviderFilter: readonly string[] | undefined = (() => {
     if (!isOpenCode) return undefined;
-    if (selectedProvider === 'opencode-zen') return ['opencode'];
-    if (selectedProvider === 'opencode-go') return ['opencode-go'];
+    if (opencodeProvider === 'opencode-zen') return ['opencode'];
+    if (opencodeProvider === 'opencode-go') return ['opencode-go'];
     return undefined;
   })();
   const useOpenCodeModelCatalog = isOpenCode && openCodeModelProviderFilter !== undefined;
-
-  const formControlClass =
-    'w-full min-h-11 py-2 px-3 rounded-sm border border-border-default bg-inset text-fg-primary text-sm outline-none focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring box-border';
 
   // Sync state when settings prop changes
   useEffect(() => {
@@ -102,26 +104,22 @@ export function AgentSettingsCard({
   const handleSave = async () => {
     try {
       setError(null);
-      setSuccess(false);
+      setSuccess(null);
       setSaving(true);
-
       const data: SaveAgentSettingsRequest = {
         model: model.trim() || null,
         permissionMode,
       };
-
       if (isOpenCode) {
         data.opencodeProvider = opencodeProvider;
         data.opencodeBaseUrl = opencodeBaseUrl.trim() || null;
       }
-
       if (supportsSamProvider) {
         data.providerMode = providerMode || null;
       }
-
       await onSave(agent.id, data);
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), SUCCESS_BANNER_MS);
+      setSuccess('Saved');
+      setTimeout(() => setSuccess(null), SUCCESS_BANNER_MS);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings');
     } finally {
@@ -132,7 +130,7 @@ export function AgentSettingsCard({
   const handleReset = async () => {
     try {
       setError(null);
-      setSuccess(false);
+      setSuccess(null);
       setResetting(true);
       await onReset(agent.id);
       setModel('');
@@ -140,8 +138,8 @@ export function AgentSettingsCard({
       setOpencodeProvider(DEFAULT_OPENCODE_PROVIDER);
       setOpencodeBaseUrl('');
       setProviderMode('');
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), SUCCESS_BANNER_MS);
+      setSuccess('Back to SAM’s settings');
+      setTimeout(() => setSuccess(null), SUCCESS_BANNER_MS);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reset settings');
     } finally {
@@ -150,9 +148,7 @@ export function AgentSettingsCard({
   };
 
   const modelPlaceholder = (() => {
-    if (isOpenCode && providerMeta) {
-      return providerMeta.modelPlaceholder;
-    }
+    if (isOpenCode && providerMeta) return providerMeta.modelPlaceholder;
     switch (agent.id) {
       case 'claude-code':
         return 'e.g. claude-opus-5, claude-sonnet-5';
@@ -181,45 +177,51 @@ export function AgentSettingsCard({
     return false;
   })();
 
-  const body = (
-    <>
-      {error && (
-        <div className="mb-3">
-          <Alert variant="error" onDismiss={() => setError(null)}>
-            {error}
-          </Alert>
-        </div>
-      )}
+  const permissionLabel = AGENT_PERMISSION_MODE_LABELS[permissionMode] ?? permissionMode;
 
-      {success && (
-        <div className="mb-3">
-          <Alert variant="success">Settings saved</Alert>
+  return (
+    <article
+      className="flex min-w-0 flex-col gap-4 rounded-lg border border-border-default bg-surface p-4"
+      data-testid={`agent-settings-${agent.id}`}
+    >
+      <header className="flex min-w-0 items-center gap-2.5">
+        <ProviderMark provider={provider} size={32} />
+        <div className="min-w-0">
+          <h3 className="m-0 truncate text-sm font-semibold text-fg-primary">{agent.name}</h3>
+          <p className="m-0 text-[11px] text-fg-muted">Any {provider.company} account</p>
         </div>
-      )}
+      </header>
 
-      {/* OpenCode provider selection */}
+      <p className="m-0 rounded-md bg-inset px-3 py-2 text-[13px] leading-relaxed text-fg-muted">
+        When you use <strong className="text-fg-primary">{agent.name}</strong>, SAM runs{' '}
+        <strong className="text-fg-primary">{modelName(agent.id, model.trim())}</strong> with{' '}
+        <strong className="text-fg-primary">{permissionLabel.toLowerCase()}</strong>
+        {supportsSamProvider && providerMode === 'sam' ? (
+          <>
+            {' '}
+            through the <strong className="text-fg-primary">SAM platform</strong>
+          </>
+        ) : null}
+        .
+      </p>
+
       {isOpenCode && (
-        <div className="mb-4">
+        <div className="flex flex-col gap-1.5">
           <label
             htmlFor={`opencode-provider-${agent.id}`}
-            className="text-sm font-medium text-fg-primary mb-1 block"
+            className="text-[11px] font-semibold uppercase tracking-wide text-fg-muted"
           >
-            Inference Provider
+            OpenCode provider
           </label>
-          <div className="text-xs text-fg-muted mb-2">
-            Select the AI provider for OpenCode inference. Default uses OpenCode Zen.
-          </div>
           <select
             id={`opencode-provider-${agent.id}`}
             value={opencodeProvider}
             onChange={(e) => {
               const val = e.target.value as OpenCodeProvider;
               setOpencodeProvider(val);
-              if (val !== 'custom') {
-                setOpencodeBaseUrl('');
-              }
+              if (val !== 'custom') setOpencodeBaseUrl('');
             }}
-            className={formControlClass}
+            className={fieldClass}
             data-testid="opencode-provider-select"
           >
             {OPENCODE_PROVIDER_OPTIONS.map((p) => (
@@ -229,9 +231,9 @@ export function AgentSettingsCard({
             ))}
           </select>
           {opencodeProvider === 'opencode-zen' && (
-            <p className="text-xs text-fg-muted mt-2 mb-0" data-testid="opencode-zen-balance-note">
-              Zen bills per request from a credit balance that OpenCode only shows in its own
-              console, so SAM cannot display remaining Zen credit.{' '}
+            <p className="m-0 text-xs text-fg-muted" data-testid="opencode-zen-balance-note">
+              Zen bills per request from a credit balance that only OpenCode&apos;s console shows,
+              so SAM cannot display remaining Zen credit.{' '}
               <a
                 href={OPENCODE_CONSOLE_URL}
                 target="_blank"
@@ -249,75 +251,32 @@ export function AgentSettingsCard({
       )}
 
       {isOpenCode && showBaseUrl && (
-        <div className="mb-4">
+        <div className="flex flex-col gap-1.5">
           <label
             htmlFor={`opencode-base-url-${agent.id}`}
-            className="text-sm font-medium text-fg-primary mb-1 block"
+            className="text-[11px] font-semibold uppercase tracking-wide text-fg-muted"
           >
             Base URL
           </label>
-          <div className="text-xs text-fg-muted mb-2">
-            The HTTPS endpoint for your provider&apos;s API.
-          </div>
           <input
             id={`opencode-base-url-${agent.id}`}
             type="url"
             value={opencodeBaseUrl}
             onChange={(e) => setOpencodeBaseUrl(e.target.value)}
             placeholder="https://api.example.com/v1"
-            className={formControlClass}
+            className={fieldClass}
             data-testid="opencode-base-url-input"
           />
         </div>
       )}
 
-      {/* Provider mode for Claude Code / Codex */}
-      {supportsSamProvider && (
-        <div className="mb-4">
-          <label
-            htmlFor={`provider-mode-${agent.id}`}
-            className="text-sm font-medium text-fg-primary mb-1 block"
-          >
-            AI Provider
-          </label>
-          <div className="text-xs text-fg-muted mb-2">
-            Choose how this agent connects to its AI model. &quot;SAM Platform&quot; uses your SAM
-            AI allowance (no API key needed). &quot;Own API Key&quot; uses your personal key.
-            {supportsOAuthProvider ? ' "OAuth Token" uses your subscription token.' : ''}
-          </div>
-          <select
-            id={`provider-mode-${agent.id}`}
-            value={providerMode}
-            onChange={(e) => setProviderMode(e.target.value as AgentProviderMode | '')}
-            className={formControlClass}
-            data-testid={`provider-mode-${agent.id}`}
-          >
-            <option value="">Not configured</option>
-            <option value="sam">SAM Platform</option>
-            <option value="user-api-key">Own API Key</option>
-            {supportsOAuthProvider && <option value="oauth">OAuth Token</option>}
-          </select>
-          {providerMode === 'sam' && (
-            <div className="text-xs text-fg-muted py-2 px-3 rounded-md bg-inset mt-2 border border-border-default">
-              AI requests will be routed through the SAM platform proxy. Usage counts against your
-              daily token budget and monthly cost cap. An admin may set allowance ceilings for your
-              account.
-            </div>
-          )}
-        </div>
-      )}
-
-      <div className="mb-4">
+      <div className="flex flex-col gap-1.5">
         <label
           htmlFor={`model-input-${agent.id}`}
-          className="text-sm font-medium text-fg-primary mb-1 block"
+          className="text-[11px] font-semibold uppercase tracking-wide text-fg-muted"
         >
           Model
         </label>
-        <div className="text-xs text-fg-muted mb-2">
-          Leave empty to use the default model. Model availability depends on your API key or
-          subscription.
-        </div>
         <ModelSelect
           id={`model-input-${agent.id}`}
           agentType={agent.id}
@@ -329,80 +288,116 @@ export function AgentSettingsCard({
           allowStaticCatalog={!isOpenCode || useOpenCodeModelCatalog}
           data-testid={`model-input-${agent.id}`}
         />
+        <p className="m-0 text-[11px] text-fg-muted">
+          Leave empty for the agent&apos;s default. Availability depends on the account&apos;s plan.
+        </p>
       </div>
 
-      <div className="mb-4" role="group" aria-labelledby={`permission-mode-label-${agent.id}`}>
-        <div
-          id={`permission-mode-label-${agent.id}`}
-          className="text-sm font-medium text-fg-primary mb-1"
-        >
-          Permission Mode
-        </div>
-        <div className="text-xs text-fg-muted mb-2">
-          Controls how the agent handles file edits and tool execution.
-        </div>
-        <div className="flex flex-col gap-2">
-          {VALID_PERMISSION_MODES.map((mode) => (
-            <label
-              key={mode}
-              className="flex items-center gap-2 text-sm text-fg-primary cursor-pointer"
-            >
-              <input
-                type="radio"
-                name={`permission-mode-${agent.id}`}
-                value={mode}
-                checked={permissionMode === mode}
-                onChange={() => setPermissionMode(mode as AgentPermissionMode)}
-                data-testid={`permission-mode-${agent.id}-${mode}`}
-              />
-              {AGENT_PERMISSION_MODE_LABELS[mode] || mode}
-            </label>
-          ))}
+      <fieldset className="m-0 flex min-w-0 flex-col gap-1.5 border-none p-0">
+        <legend className="mb-1.5 p-0 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
+          Permissions
+        </legend>
+        <div className="flex flex-wrap gap-1.5">
+          {VALID_PERMISSION_MODES.map((mode) => {
+            const checked = permissionMode === mode;
+            return (
+              <label
+                key={mode}
+                className={`inline-flex min-h-9 cursor-pointer items-center rounded-full border px-3 text-xs font-medium transition-colors has-[:focus-visible]:outline has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-focus-ring ${
+                  checked
+                    ? 'border-accent bg-accent-tint text-fg-primary'
+                    : 'border-border-default text-fg-muted hover:text-fg-primary'
+                }`}
+              >
+                <input
+                  type="radio"
+                  className="sr-only"
+                  name={`permission-mode-${agent.id}`}
+                  value={mode}
+                  checked={checked}
+                  onChange={() => setPermissionMode(mode as AgentPermissionMode)}
+                  data-testid={`permission-mode-${agent.id}-${mode}`}
+                />
+                {checked && <Check size={12} aria-hidden="true" className="-ml-0.5 mr-1" />}
+                {AGENT_PERMISSION_MODE_LABELS[mode] || mode}
+              </label>
+            );
+          })}
         </div>
         {permissionMode === 'bypassPermissions' && (
-          <div
-            role="alert"
-            className="text-xs text-danger-fg py-2 px-3 rounded-md bg-danger-tint mt-1"
+          <p
+            role="note"
+            className="m-0 rounded-md bg-warning-tint px-3 py-2 text-xs text-warning-fg"
           >
-            ⚠ Warning: This disables all safety prompts. The agent will execute commands and edit
-            files without confirmation.
-          </div>
+            Bypass disables all safety prompts: the agent runs commands and edits files without
+            asking. Workspaces are isolated VMs or containers.
+          </p>
         )}
-      </div>
+      </fieldset>
 
-      <div className="flex gap-3 flex-wrap">
-        <button
-          onClick={handleSave}
+      {supportsSamProvider && (
+        <div className="flex flex-col gap-1.5">
+          <label
+            htmlFor={`provider-mode-${agent.id}`}
+            className="text-[11px] font-semibold uppercase tracking-wide text-fg-muted"
+          >
+            Billing
+          </label>
+          <select
+            id={`provider-mode-${agent.id}`}
+            value={providerMode}
+            onChange={(e) => setProviderMode(e.target.value as AgentProviderMode | '')}
+            className={fieldClass}
+            data-testid={`provider-mode-${agent.id}`}
+          >
+            <option value="">{PROVIDER_MODE_LABELS['']}</option>
+            <option value="user-api-key">{PROVIDER_MODE_LABELS['user-api-key']}</option>
+            {supportsOAuthProvider && <option value="oauth">{PROVIDER_MODE_LABELS.oauth}</option>}
+            <option value="sam">{PROVIDER_MODE_LABELS.sam}</option>
+          </select>
+          {providerMode === 'sam' && (
+            <p className="m-0 rounded-md border border-border-default bg-inset px-3 py-2 text-xs text-fg-muted">
+              Requests go through the SAM platform proxy and count against your daily token budget
+              and monthly cost cap instead of your own account.
+            </p>
+          )}
+        </div>
+      )}
+
+      <footer className="flex flex-wrap items-center gap-2 border-t border-border-default pt-3">
+        <Button
+          size="sm"
+          onClick={() => void handleSave()}
           disabled={saving || resetting || !hasChanges}
-          className={`py-2 px-4 rounded-md border-none bg-accent text-fg-on-accent text-sm font-medium cursor-pointer min-h-[44px] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring ${
-            saving || resetting || !hasChanges ? 'opacity-50' : 'opacity-100'
-          }`}
+          loading={saving}
           data-testid={`save-settings-${agent.id}`}
         >
-          {saving ? 'Saving...' : 'Save Settings'}
-        </button>
-        <button
-          onClick={handleReset}
+          Save changes
+        </Button>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => void handleReset()}
           disabled={saving || resetting}
-          className={`py-2 px-4 rounded-md border border-border-default bg-transparent text-fg-muted text-sm font-medium cursor-pointer min-h-[44px] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring ${
-            saving || resetting ? 'opacity-60' : 'opacity-100'
-          }`}
+          loading={resetting}
           data-testid={`reset-settings-${agent.id}`}
         >
-          {resetting ? 'Resetting...' : 'Reset to Defaults'}
-        </button>
-      </div>
-    </>
-  );
-
-  if (embedded) {
-    return body;
-  }
-
-  return (
-    <Card variant="glass" className="p-4" data-testid={`agent-settings-${agent.id}`}>
-      <div className="mb-2 font-semibold text-base text-fg-primary">{agent.name}</div>
-      {body}
-    </Card>
+          Reset
+        </Button>
+        {/* Feedback sits beside the buttons: the top of a tall card is off-screen on phones. */}
+        <span role="status" className="text-xs text-success-fg">
+          {success}
+        </span>
+        {error && (
+          <p role="alert" className="m-0 w-full text-xs text-danger-fg">
+            {error}
+          </p>
+        )}
+        <span className="inline-flex min-w-0 items-center gap-1 text-[11px] text-fg-muted sm:ml-auto">
+          <Layers size={12} aria-hidden="true" className="shrink-0" />
+          Project profiles can override these.
+        </span>
+      </footer>
+    </article>
   );
 }

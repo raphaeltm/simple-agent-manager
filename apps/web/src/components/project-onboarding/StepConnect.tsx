@@ -159,7 +159,7 @@ export function StepConnect(props: Readonly<StepConnectProps>) {
       return (
         <Alert variant="warning">
           Install the GitHub App in{' '}
-          <Link to="/settings" className="underline">
+          <Link to="/settings/github" className="underline">
             Settings
           </Link>{' '}
           before connecting a repository — or go back and choose SAM-hosted to start without GitHub.
