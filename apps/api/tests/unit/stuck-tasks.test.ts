@@ -79,11 +79,16 @@ vi.mock('../../src/services/node-agent', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/services/node-agent')>()),
   listAgentSessionsOnNode: vi.fn(async (_nodeId: string, workspaceId: string) => {
     const probe = await projectDataMocks.getTaskAcpLivenessSignals.mock.results.at(-1)?.value;
-    return { sessions: (probe?.sessions ?? []).filter((session: { workspaceId: string }) => session.workspaceId === workspaceId)
-      .map((session: { id: string; workspaceId: string; status: string }) => ({ ...session, hostStatus: 'ready' })) };
+    return {
+      sessions: (probe?.sessions ?? [])
+        .filter((session: { workspaceId: string }) => session.workspaceId === workspaceId)
+        .map((session: { id: string; workspaceId: string; status: string }) => ({
+          ...session,
+          hostStatus: 'ready',
+        })),
+    };
   }),
 }));
-
 
 // Mock trigger execution sync
 const { syncTriggerExecutionMock } = vi.hoisted(() => ({
@@ -210,8 +215,12 @@ function createMockEnv(
   const mockDb = {
     prepare: vi.fn((sql: string) => {
       if (sql === 'SELECT * FROM tasks WHERE id = ?') {
-        const candidates = prepareResponses.get("status IN ('queued', 'delegated', 'in_progress')")?.results ?? [];
-        return { bind: (id: string) => mockPreparedStatement(candidates.filter((row) => (row as { id: string }).id === id)) };
+        const candidates =
+          prepareResponses.get("status IN ('queued', 'delegated', 'in_progress')")?.results ?? [];
+        return {
+          bind: (id: string) =>
+            mockPreparedStatement(candidates.filter((row) => (row as { id: string }).id === id)),
+        };
       }
       if (
         sql.includes('SELECT node_id') &&
@@ -2074,7 +2083,7 @@ describe('recoverStuckTasks', () => {
         tasks: [{ id: 'task-next-page' }],
       });
       expect(String(vi.mocked(env.DATABASE.prepare).mock.calls[1]?.[0])).toContain(
-        '(updated_at > ? OR (updated_at = ? AND id > ?))'
+        '(updated_at, id) > (?, ?)'
       );
     });
 
@@ -2095,7 +2104,7 @@ describe('recoverStuckTasks', () => {
         auto_provisioned_node_id: null,
       };
       const prepare = vi.fn((sql: string) =>
-        mockPreparedStatement(sql.includes('updated_at > ?') ? [] : [wrappedTask])
+        mockPreparedStatement(sql.includes('(updated_at, id) >') ? [] : [wrappedTask])
       );
       const env = {
         DATABASE: { prepare } as unknown as D1Database,
@@ -2117,9 +2126,7 @@ describe('recoverStuckTasks', () => {
         },
       });
       expect(prepare).toHaveBeenCalledTimes(2);
-      expect(String(prepare.mock.calls[1]?.[0])).toContain(
-        '(updated_at < ? OR (updated_at = ? AND id <= ?))'
-      );
+      expect(String(prepare.mock.calls[1]?.[0])).toContain('(updated_at, id) <= (?, ?)');
     });
   });
 

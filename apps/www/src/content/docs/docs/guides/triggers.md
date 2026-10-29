@@ -180,6 +180,11 @@ Replacing the token also cancels the agent's unused link.
   so **Redeliver** in GitHub's webhook log never starts a second one, and it doesn't restart a run
   SAM gave up on (a superadmin is notified when that happens). To run it again, start the work yourself.
   (Since 14 October 2026; on a self-hosted instance, from v2026.10.15.)
+- **A failed webhook needs redelivery.** SAM acknowledges a GitHub webhook only after its project
+  event, applicable pull request/check state, and trigger intake have been persisted. If that fails
+  during a control-plane outage, the delivery fails instead of reporting acceptance. After recovery,
+  use **Redeliver** in the GitHub App's webhook log; [GitHub does not automatically retry failed webhook deliveries](https://docs.github.com/en/webhooks/using-webhooks/handling-failed-webhook-deliveries). Already acknowledged deliveries whose event data was lost before this fix
+  also need redelivery where GitHub still retains them. This does not restart a terminal task.
 - **Limits.** A project can have 10 triggers unless that's changed in the project's **Settings →
   Infrastructure**, under **Scaling & Scheduling**, **Max Triggers**. GitHub triggers need your SAM
   installation to receive the GitHub App's webhooks, which is the default; an operator can turn

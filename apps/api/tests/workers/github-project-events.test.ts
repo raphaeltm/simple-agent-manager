@@ -130,13 +130,34 @@ describe('GitHub ProjectData event producer', () => {
 
       expect(response.status).toBe(200);
       await expect(response.json()).resolves.toEqual({ received: true });
-      expect(waitUntilPromises).toHaveLength(3);
-      await expect(Promise.all(waitUntilPromises)).resolves.toEqual([undefined, undefined, true]);
+      expect(waitUntilPromises).toHaveLength(1);
+      await expect(Promise.all(waitUntilPromises)).resolves.toEqual([true]);
       await expect(
         env.DATABASE.prepare('SELECT state, payload_json FROM github_trigger_inbox WHERE id = ?')
           .bind('delivery-signed-route')
           .first()
       ).resolves.toEqual({ state: 'completed', payload_json: null });
+
+      // A redelivery after all background work completed must retain one canonical event.
+      const redelivery = await app.fetch(
+        new Request('https://api.test.local/api/github/webhook', {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            'x-github-delivery': 'delivery-signed-route',
+            'x-github-event': 'pull_request',
+            'x-hub-signature-256': await githubWebhookSignature(webhookSecret, body),
+          },
+          body,
+        }),
+        mutableEnv,
+        {
+          waitUntil: (promise) => waitUntilPromises.push(promise),
+          passThroughOnException: () => undefined,
+        } as ExecutionContext
+      );
+      expect(redelivery.status).toBe(200);
+      await Promise.all(waitUntilPromises);
 
       const status = await projectDataService.getProjectEventRecentStatus(testEnv, projectId);
       expect(status.events).toEqual([

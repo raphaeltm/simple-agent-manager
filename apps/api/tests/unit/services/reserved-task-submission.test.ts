@@ -950,9 +950,13 @@ From that information, derive the repository change request and append a short n
     const accessSpy = vi
       .spyOn(repository, 'requireRepositoryOwnerAccess')
       .mockResolvedValue(undefined);
-    const producerSpy = vi
-      .spyOn(producer, 'handleGitHubProjectEventAdmission')
-      .mockResolvedValue(undefined);
+    const producerSpy = vi.spyOn(producer, 'admitGitHubWebhookProjectEvents').mockResolvedValue({
+      processed: false,
+      deliveryId: 'signed-overlap',
+      eventType: 'issues',
+      admittedEvents: [],
+      reason: 'test_boundary',
+    });
     const app = new Hono<{ Bindings: Env }>();
     app.post('/api/github/webhook', handleGitHubWebhook);
     const payload = JSON.stringify({

@@ -1102,6 +1102,12 @@ export const tasks = sqliteTable(
       table.priority,
       table.updatedAt
     ),
+    activeUpdatedIdIdx: index('idx_tasks_active_updated_id')
+      .on(table.updatedAt, table.id)
+      .where(sql`status IN ('queued', 'delegated', 'in_progress')`),
+    projectChatSessionIdx: index('idx_tasks_project_chat_session')
+      .on(table.projectId, table.chatSessionId)
+      .where(sql`chat_session_id IS NOT NULL`),
     projectCreatedAtIdx: index('idx_tasks_project_created_at').on(table.projectId, table.createdAt),
     projectUserIdx: index('idx_tasks_project_user').on(table.projectId, table.userId),
     chatSessionIdUnique: uniqueIndex('idx_tasks_chat_session_id_unique')
@@ -1700,6 +1706,12 @@ export const workspaces = sqliteTable(
     userIdIdx: index('idx_workspaces_user_id').on(table.userId),
     nodeIdIdx: index('idx_workspaces_node_id').on(table.nodeId),
     projectIdIdx: index('idx_workspaces_project_id').on(table.projectId),
+    nodeProjectStatusIdx: index('idx_workspaces_node_project_status').on(
+      table.nodeId,
+      table.projectId,
+      table.status,
+      table.id
+    ),
     nodeDisplayNameUnique: uniqueIndex('idx_workspaces_node_display_name_unique')
       .on(table.nodeId, table.normalizedDisplayName)
       .where(sql`node_id is not null and normalized_display_name is not null`),
@@ -3865,6 +3877,15 @@ export const sessionSummaries = sqliteTable(
       table.createdByUserId,
       table.updatedAt
     ),
+    archiveRankIdx: index('idx_session_summaries_archive_rank')
+      .on(
+        sql`${table.messageCount} DESC`,
+        table.updatedAt,
+        table.id,
+        table.projectId,
+        table.endedAt
+      )
+      .where(sql`status IN ('stopped', 'failed') AND ended_at IS NOT NULL`),
     terminalReconcileIdx: index('idx_session_summaries_terminal_reconcile').on(
       table.status,
       table.terminalReconcileDeferredUntil,
@@ -4098,6 +4119,13 @@ export const projectDataArchiveMigrations = sqliteTable(
     projectStateIdx: index('idx_project_data_archive_migrations_project_state').on(
       table.projectId,
       table.state,
+      table.updatedAt
+    ),
+    sessionRefusalIdx: index('idx_archive_migrations_session_refusal').on(
+      table.projectId,
+      table.sessionId,
+      table.state,
+      table.errorCode,
       table.updatedAt
     ),
     sessionIdx: index('idx_project_data_archive_migrations_session').on(
