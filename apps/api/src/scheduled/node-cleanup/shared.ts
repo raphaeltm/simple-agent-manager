@@ -109,7 +109,7 @@ export async function claimNodeForCleanup(
     options.requireWorkspaceIdle === false
       ? ''
       : `AND (
-         SELECT COALESCE(MAX(${options.preservedVm ? preservedVmRetirementActivitySql('workspace_activity') : 'workspace_activity.updated_at'}), nodes.created_at)
+         SELECT COALESCE(MAX(${options.preservedVm || ['stopped', 'destroying'].includes(node.status) ? preservedVmRetirementActivitySql('workspace_activity') : 'workspace_activity.updated_at'}), nodes.created_at)
          FROM workspaces workspace_activity
          WHERE workspace_activity.node_id = nodes.id
        ) < ?`;

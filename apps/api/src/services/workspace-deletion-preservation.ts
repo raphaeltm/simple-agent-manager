@@ -9,7 +9,8 @@ import type { WorkspaceDeletionIdentity } from './workspace-deletion';
 /** Status/age/pressure are scheduling hints, never authority to discard user data. */
 export async function automaticDeletionPreservationExpiresAt(
   env: Env,
-  expected: WorkspaceDeletionIdentity
+  expected: WorkspaceDeletionIdentity,
+  purpose: 'workspace_deletion' | 'vm_retirement' = 'workspace_deletion'
 ): Promise<string | null> {
   if (
     !expected.chatSessionId ||
@@ -42,7 +43,9 @@ export async function automaticDeletionPreservationExpiresAt(
     Date.parse(snapshot.expiresAt) <= Date.now()
   )
     return null;
-  const completedSleep = snapshot.sleepStatus === 'sleeping' && Boolean(snapshot.sleepingAt);
+  const completedSleep =
+    snapshot.sleepStatus === 'sleeping' &&
+    (Boolean(snapshot.sleepingAt) || purpose === 'vm_retirement');
   if (!completedSleep) {
     if (
       snapshot.recoveryStatus !== 'restored' ||
