@@ -12,6 +12,8 @@ import {
   reserveWorkspaceRestart,
 } from '../../../src/services/workspace-placement';
 import {
+  evaluateWorkspaceReservationCapacity,
+  loadActiveWorkspaceReservationUsage,
   resolveWorkspaceAdmissionPolicy,
   type WorkspaceAdmissionPolicy,
 } from '../../../src/services/workspace-resource-capacity';
@@ -572,7 +574,7 @@ describe('reserveWorkspacePlacement', () => {
       last_metrics: JSON.stringify({
         version: 1,
         cpuLoadAvg1: 0.2,
-        memoryPercent: 99,
+        memoryPercent: 10,
         diskPercent: 10,
       }),
     });
@@ -747,7 +749,7 @@ describe('reserveWorkspacePlacement', () => {
     expect(countWorkspace('user-a') + countWorkspace('user-b')).toBe(1);
   });
 
-  it('does not use live memory percentage as a final placement veto', async () => {
+  it('ignores legacy memory percent thresholds when physical headroom fits', async () => {
     const database = createDb();
     const snapshot = capacitySnapshot();
     seedNode();
@@ -755,7 +757,7 @@ describe('reserveWorkspacePlacement', () => {
     sqlite
       ?.prepare(`UPDATE nodes SET last_metrics = ?, last_heartbeat_at = ? WHERE id = 'node-1'`)
       .run(
-        JSON.stringify({ version: 1, cpuLoadAvg1: 0.2, memoryPercent: 99, diskPercent: 10 }),
+        JSON.stringify({ version: 1, cpuLoadAvg1: 0.2, memoryPercent: 10, diskPercent: 10 }),
         new Date().toISOString()
       );
     await expect(
@@ -765,6 +767,132 @@ describe('reserveWorkspacePlacement', () => {
         admissionPolicy({ memoryThresholdPercent: 1 })
       )
     ).resolves.toBe(true);
+  });
+
+  it('reserves measured memory headroom atomically across concurrent starts', async () => {
+    const database = createDb();
+    const snapshot = capacitySnapshot();
+    // 16GiB host: 12GiB used, 512MiB reserved for the host. Only one
+    // additional 2GiB start fits, even though declared budgets fit both.
+    seedNode({
+      last_metrics: JSON.stringify({
+        version: 1,
+        cpuLoadAvg1: 0.2,
+        memoryPercent: 75,
+        diskPercent: 10,
+      }),
+    });
+    seedActiveWorkspace('observed-tenant', JSON.stringify(reservation({ memoryMb: 1024 })));
+    const results = await Promise.all(
+      ['pressure-a', 'pressure-b'].map((id) =>
+        reserveWorkspacePlacement(
+          database,
+          {
+            ...reserveInput(snapshot),
+            id,
+            resolvedReservation: reservation({ memoryMb: 2048 }),
+          },
+          admissionPolicy()
+        )
+      )
+    );
+    expect(results.filter(Boolean)).toHaveLength(1);
+    expect(countWorkspace('pressure-a') + countWorkspace('pressure-b')).toBe(1);
+  });
+
+  it('rejects a live overusing tenant even when declared memory budgets fit', async () => {
+    const database = createDb();
+    const snapshot = capacitySnapshot();
+    seedNode({
+      last_metrics: JSON.stringify({
+        version: 1,
+        cpuLoadAvg1: 0.2,
+        memoryPercent: 90,
+        diskPercent: 10,
+      }),
+    });
+    seedActiveWorkspace('overusing-tenant');
+    await expect(
+      reserveWorkspacePlacement(database, reserveInput(snapshot), admissionPolicy())
+    ).resolves.toBe(false);
+    expect(countWorkspace('workspace-1')).toBe(0);
+  });
+
+  it.each([
+    ['fresh matching running container', 'running', 'valid', true],
+    ['missing container observations', 'running', 'missing', false],
+    ['duplicate identity', 'running', 'duplicate', false],
+    ['different workspace', 'running', 'foreign', false],
+    ['old lifecycle', 'running', 'old-lifecycle', false],
+    ['stale observation', 'running', 'stale', false],
+    ['future observation', 'running', 'future', false],
+    ['malformed observation', 'running', 'malformed', false],
+    ['creating workspace', 'creating', 'valid', false],
+    ['recovery workspace', 'recovery', 'valid', false],
+  ])('credits observed memory safely: %s', async (_name, status, variant, admitted) => {
+    const database = createDb();
+    const snapshot = capacitySnapshot();
+    const heartbeat = new Date().toISOString();
+    const collectedAt =
+      variant === 'old-lifecycle'
+        ? '2026-08-27T00:00:00.000Z'
+        : variant === 'stale'
+          ? new Date(Date.now() - 60_000).toISOString()
+          : variant === 'future'
+            ? new Date(Date.now() + 60_000).toISOString()
+            : heartbeat;
+    const observation = {
+      workspaceId: variant === 'foreign' ? 'another-workspace' : 'observed-tenant',
+      memoryUsageBytes: 3 * 1024 * 1024 * 1024,
+      collectedAt,
+    };
+    const workspaceMemory =
+      variant === 'missing'
+        ? undefined
+        : variant === 'duplicate'
+          ? [observation, observation]
+          : variant === 'malformed'
+            ? ['bad', { ...observation, memoryUsageBytes: 'lots' }]
+            : [observation];
+    const lastMetrics = JSON.stringify({
+      version: 1,
+      cpuLoadAvg1: 0.2,
+      memoryPercent: 75,
+      diskPercent: 10,
+      workspaceMemory,
+    });
+    seedNode({ last_metrics: lastMetrics, last_heartbeat_at: heartbeat });
+    seedActiveWorkspace('observed-tenant', JSON.stringify(reservation({ memoryMb: 3072 })));
+    sqlite?.prepare('UPDATE workspaces SET status = ? WHERE id = ?').run(status, 'observed-tenant');
+    const policy = admissionPolicy({ metricsTtlMs: 30_000 });
+    const request = reservation({ memoryMb: 2048 });
+    const usage = (await loadActiveWorkspaceReservationUsage(database, ['node-1'])).get('node-1');
+    const advisory = evaluateWorkspaceReservationCapacity(
+      {
+        id: 'node-1',
+        providerInstanceId: 'server-1',
+        observedHardwareSource: 'observed',
+        observedProviderInstanceVcpuCount: 8,
+        observedProviderInstanceMemoryMb: 16384,
+        observedProviderInstanceDiskGb: 240,
+        lastMetrics,
+        lastHeartbeatAt: heartbeat,
+      },
+      usage,
+      request,
+      policy
+    );
+    expect(advisory.admitted).toBe(admitted);
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        {
+          ...reserveInput(snapshot),
+          resolvedReservation: request,
+        },
+        policy
+      )
+    ).resolves.toBe(admitted);
   });
 
   it('rejects malformed, future, stale, and incomplete telemetry in final placement', async () => {

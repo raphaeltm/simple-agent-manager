@@ -11,6 +11,11 @@ export interface SessionRecoveryRefusalClassification {
  * on reason strings.
  */
 const SESSION_RECOVERY_REFUSALS: Record<string, SessionRecoveryRefusalClassification> = {
+  session_recovery_start_failed_retryable: {
+    action: 'retry',
+    description:
+      'SAM could not start the replacement runtime. The saved conversation is retained and SAM will retry within its wake budget.',
+  },
   workspace_deletion_unconfirmed: {
     action: 'retry',
     description: 'The previous workspace is still being deleted. SAM will retry the wake shortly.',

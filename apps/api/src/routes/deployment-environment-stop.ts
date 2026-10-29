@@ -7,7 +7,7 @@
  * Deployments page reads to tell a pause that didn't finish from a start that didn't.
  */
 import { DEPLOYMENT_STOP_ERROR_PREFIX } from '@simple-agent-manager/shared';
-import { and, eq } from 'drizzle-orm';
+import { and, eq, isNull, or } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -25,7 +25,8 @@ export function lifecycleErrorMessage(error: unknown): string {
 async function markEnvironmentStopFailed(
   db: DeploymentDb,
   envId: string,
-  observedErrorMessage: string
+  observedErrorMessage: string,
+  expectedNodeId: string | null
 ): Promise<void> {
   await db
     .update(schema.deploymentEnvironments)
@@ -35,7 +36,15 @@ async function markEnvironmentStopFailed(
       observedErrorMessage,
       updatedAt: new Date().toISOString(),
     })
-    .where(eq(schema.deploymentEnvironments.id, envId));
+    .where(
+      and(
+        eq(schema.deploymentEnvironments.id, envId),
+        eq(schema.deploymentEnvironments.status, 'stopping'),
+        expectedNodeId
+          ? eq(schema.deploymentEnvironments.nodeId, expectedNodeId)
+          : isNull(schema.deploymentEnvironments.nodeId)
+      )
+    );
 }
 
 export async function teardownLinkedDeploymentNode(
@@ -69,7 +78,8 @@ export async function teardownLinkedDeploymentNode(
       await markEnvironmentStopFailed(
         db,
         envId,
-        `${DEPLOYMENT_STOP_ERROR_PREFIX} because the linked deployment node record was not found; refusing to detach volumes without live teardown.`
+        `${DEPLOYMENT_STOP_ERROR_PREFIX} because the linked deployment node record was not found; refusing to detach volumes without live teardown.`,
+        nodeId
       );
       throw errors.conflict(
         'Cannot safely stop deployment environment: linked deployment node record was not found, so volumes were not detached.'
@@ -84,7 +94,8 @@ export async function teardownLinkedDeploymentNode(
       await markEnvironmentStopFailed(
         db,
         envId,
-        `${DEPLOYMENT_STOP_ERROR_PREFIX} because the deployment node was ${node.status}; refusing to detach volumes without live teardown.`
+        `${DEPLOYMENT_STOP_ERROR_PREFIX} because the deployment node was ${node.status}; refusing to detach volumes without live teardown.`,
+        nodeId
       );
       throw errors.conflict(
         `Cannot safely stop deployment environment: deployment node is ${node.status}, so volumes were not detached.`
@@ -110,7 +121,8 @@ export async function teardownLinkedDeploymentNode(
     await markEnvironmentStopFailed(
       db,
       envId,
-      `${DEPLOYMENT_STOP_ERROR_PREFIX} while tearing down the deployment node: ${message}`
+      `${DEPLOYMENT_STOP_ERROR_PREFIX} while tearing down the deployment node: ${message}`,
+      nodeId
     );
     throw errors.conflict(`Could not stop deployment environment on node: ${message}`);
   }
@@ -141,7 +153,8 @@ export async function detachVolumesForEnvironmentStop(
   env: Env,
   userId: string,
   envId: string,
-  serverIds: string[]
+  serverIds: string[],
+  expectedNodeId: string | null
 ): Promise<number> {
   let volumesDetached = 0;
   for (const serverId of serverIds) {
@@ -153,7 +166,8 @@ export async function detachVolumesForEnvironmentStop(
       await markEnvironmentStopFailed(
         db,
         envId,
-        `${DEPLOYMENT_STOP_ERROR_PREFIX} while detaching deployment volumes: ${message}`
+        `${DEPLOYMENT_STOP_ERROR_PREFIX} while detaching deployment volumes: ${message}`,
+        expectedNodeId
       );
       throw errors.conflict(`Could not detach deployment volume(s): ${message}`);
     }
@@ -161,7 +175,11 @@ export async function detachVolumesForEnvironmentStop(
   return volumesDetached;
 }
 
-export async function markEnvironmentStopped(db: DeploymentDb, envId: string): Promise<void> {
+export async function markEnvironmentStopped(
+  db: DeploymentDb,
+  envId: string,
+  expectedNodeId: string | null
+): Promise<void> {
   await db
     .update(schema.deploymentEnvironments)
     .set({
@@ -176,5 +194,17 @@ export async function markEnvironmentStopped(db: DeploymentDb, envId: string): P
       observedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     })
-    .where(eq(schema.deploymentEnvironments.id, envId));
+    .where(
+      and(
+        eq(schema.deploymentEnvironments.id, envId),
+        or(
+          eq(schema.deploymentEnvironments.status, 'stopping'),
+          eq(schema.deploymentEnvironments.status, 'stopped')
+        ),
+        or(
+          isNull(schema.deploymentEnvironments.nodeId),
+          expectedNodeId ? eq(schema.deploymentEnvironments.nodeId, expectedNodeId) : undefined
+        )
+      )
+    );
 }

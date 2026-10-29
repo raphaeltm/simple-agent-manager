@@ -1,5 +1,6 @@
 import {
   DEFAULT_WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH,
+  DEPLOYMENT_STOP_ERROR_PREFIX,
   isUserOwnedNodeClass,
 } from '@simple-agent-manager/shared';
 import { and, eq, sql } from 'drizzle-orm';
@@ -30,6 +31,32 @@ function managedNodeStopDiagnostic(env: Env): string {
     0,
     maxLength
   );
+}
+
+async function markDeploymentStopFailed(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  node: schema.Node,
+  message: string
+): Promise<void> {
+  if (node.nodeRole !== 'deployment') return;
+  await db
+    .update(schema.deploymentEnvironments)
+    .set({
+      status: 'error',
+      observedStatus: 'failed',
+      observedErrorMessage: `${DEPLOYMENT_STOP_ERROR_PREFIX} ${message}`,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(
+      and(
+        eq(schema.deploymentEnvironments.nodeId, node.id),
+        eq(schema.deploymentEnvironments.status, 'stopping'),
+        sql`EXISTS (SELECT 1 FROM nodes n WHERE n.id = ${node.id}
+      AND n.user_id = ${node.userId} AND n.status = 'destroying'
+      AND n.provider_instance_id IS ${node.providerInstanceId}
+      AND n.runtime_incarnation_id IS ${node.runtimeIncarnationId})`
+      )
+    );
 }
 
 export async function stopNodeResources(
@@ -121,6 +148,12 @@ export async function stopNodeResources(
   if ((nodeClaim.meta.changes ?? 0) !== 1) {
     throw new Error('Managed node changed before teardown could be claimed');
   }
+  if (node.nodeRole === 'deployment') {
+    await db
+      .update(schema.deploymentEnvironments)
+      .set({ status: 'stopping', updatedAt: now })
+      .where(eq(schema.deploymentEnvironments.nodeId, nodeId));
+  }
   await db
     .update(schema.workspaces)
     .set({ status: 'stopping', errorMessage: managedNodeStopDiagnostic(env), updatedAt: now })
@@ -143,6 +176,7 @@ export async function stopNodeResources(
       nodeId,
       ...serializeError(err),
     });
+    await markDeploymentStopFailed(db, node, 'managed node teardown remains unconfirmed');
     throw new Error('Managed node teardown remains unconfirmed');
   }
   if (!strictDeletion.runtimeTerminationConfirmedAt) {
@@ -155,7 +189,16 @@ export async function stopNodeResources(
       await deleteDNSRecord(node.backendDnsRecordId, env);
     } catch (err) {
       log.error('node_stop.delete_dns_failed', { nodeId, ...serializeError(err) });
+      if (node.nodeRole === 'deployment') {
+        await markDeploymentStopFailed(db, node, 'node DNS cleanup remains pending');
+        throw new Error('Deployment node DNS cleanup remains pending');
+      }
     }
+  }
+
+  if (node.nodeRole === 'deployment') {
+    await retireDeletedDeploymentNodeRecord(db, env, nodeId, userId, strictDeletion);
+    return;
   }
 
   // The node may have been reprovisioned while the provider call was in flight.
@@ -227,63 +270,93 @@ export async function retireDeletedDeploymentNodeRecord(
   env: Env,
   nodeId: string,
   userId: string,
-  proof: { runtimeTerminationConfirmedAt: string | null; runtimeIncarnationId: string | null }
+  proof: {
+    runtimeTerminationConfirmedAt: string | null;
+    runtimeIncarnationId: string | null;
+    providerInstanceId?: string | null;
+  }
 ): Promise<void> {
   const now = new Date().toISOString();
 
-  const terminalNode = await db
-    .update(schema.nodes)
-    .set({
-      status: 'deleted',
-      healthStatus: 'stale',
-      providerInstanceId: null,
-      backendDnsRecordId: null,
-      ipAddress: null,
-      errorMessage: null,
-      updatedAt: now,
-    })
-    .where(
-      and(
-        eq(schema.nodes.id, nodeId),
-        eq(schema.nodes.userId, userId),
-        eq(schema.nodes.nodeRole, 'deployment'),
-        proof.runtimeTerminationConfirmedAt
-          ? and(
-              sql`${schema.nodes.runtimeTerminationConfirmedAt} IS ${proof.runtimeTerminationConfirmedAt}`,
-              sql`${schema.nodes.runtimeIncarnationId} IS ${proof.runtimeIncarnationId}`
-            )
-          : eq(schema.nodes.nodeClass, 'user-owned')
-      )
-    )
-    .run();
+  const terminalProof = and(
+    eq(schema.nodes.id, nodeId),
+    eq(schema.nodes.userId, userId),
+    eq(schema.nodes.nodeRole, 'deployment'),
+    proof.runtimeTerminationConfirmedAt
+      ? and(
+          sql`${schema.nodes.runtimeTerminationConfirmedAt} IS ${proof.runtimeTerminationConfirmedAt}`,
+          sql`${schema.nodes.runtimeIncarnationId} IS ${proof.runtimeIncarnationId}`
+        )
+      : eq(schema.nodes.nodeClass, 'user-owned')
+  );
+  const terminalFence = sql`EXISTS (SELECT 1 FROM nodes WHERE ${terminalProof}
+    AND ${schema.nodes.status} = 'deleted')`;
+  // D1 batches are atomic: a failure cannot commit the node tombstone while
+  // leaving its environments permanently stopping. Every dependent statement
+  // checks the same proof, so a lost CAS cannot mutate a new incarnation.
+  const [terminalNode] = await db.batch([
+    db
+      .update(schema.nodes)
+      .set({
+        status: 'deleted',
+        healthStatus: 'stale',
+        providerInstanceId: null,
+        backendDnsRecordId: null,
+        ipAddress: null,
+        errorMessage: null,
+        updatedAt: now,
+      })
+      .where(terminalProof),
+    db
+      .update(schema.deploymentVolumes)
+      .set({
+        attachedServerId: null,
+        linuxDevice: null,
+        status: 'available',
+        updatedAt: now,
+      })
+      .where(
+        and(
+          proof.runtimeTerminationConfirmedAt && proof.providerInstanceId
+            ? eq(schema.deploymentVolumes.attachedServerId, proof.providerInstanceId)
+            : sql`0`,
+          terminalFence,
+          sql`EXISTS (SELECT 1 FROM deployment_environments de
+        WHERE de.id = ${schema.deploymentVolumes.environmentId} AND de.node_id = ${nodeId})`
+        )
+      ),
+    db
+      .update(schema.deploymentEnvironments)
+      .set({
+        nodeId: null,
+        status: 'stopped',
+        observedStatus: 'stopped',
+        observedErrorMessage: null,
+        observedAppliedSeq: null,
+        observedServicesJson: '[]',
+        observedDeployStatusJson: null,
+        observedDiskTelemetryJson: null,
+        observedAt: now,
+        updatedAt: now,
+      })
+      .where(and(eq(schema.deploymentEnvironments.nodeId, nodeId), terminalFence)),
+    db
+      .update(schema.workspaces)
+      .set({ status: 'deleted', updatedAt: now })
+      .where(
+        and(
+          eq(schema.workspaces.nodeId, nodeId),
+          eq(schema.workspaces.userId, userId),
+          terminalFence,
+          proof.runtimeTerminationConfirmedAt
+            ? eq(schema.workspaces.runtimeDeletionConfirmedAt, proof.runtimeTerminationConfirmedAt)
+            : undefined
+        )
+      ),
+  ]);
   if ((terminalNode.meta.changes ?? 0) !== 1) {
     throw new Error('Deployment node terminal proof no longer matches the current incarnation');
   }
-
-  await db
-    .update(schema.deploymentEnvironments)
-    .set({
-      nodeId: null,
-      status: 'stopped',
-      observedStatus: 'stopped',
-      observedErrorMessage: null,
-      observedAt: now,
-      updatedAt: now,
-    })
-    .where(eq(schema.deploymentEnvironments.nodeId, nodeId));
-
-  await db
-    .update(schema.workspaces)
-    .set({ status: 'deleted', updatedAt: now })
-    .where(
-      and(
-        eq(schema.workspaces.nodeId, nodeId),
-        eq(schema.workspaces.userId, userId),
-        proof.runtimeTerminationConfirmedAt
-          ? eq(schema.workspaces.runtimeDeletionConfirmedAt, proof.runtimeTerminationConfirmedAt)
-          : undefined
-      )
-    );
 
   await finalizeWorkspaceLifecycleClosure(env, {
     nodeId,

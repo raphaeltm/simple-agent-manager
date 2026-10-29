@@ -2,6 +2,7 @@ import {
   createProvider,
   hasAmbiguousLabel,
   type Provider,
+  type ProviderRequestContext,
   type VMInstance,
 } from '@simple-agent-manager/providers';
 import {
@@ -23,7 +24,12 @@ import {
 import { persistError } from '../services/observability';
 import { getPlatformCloudCredential } from '../services/platform-credentials';
 import { buildProviderConfig } from '../services/provider-credentials';
-import { parseMs, parsePositiveInt } from './node-cleanup/shared';
+import { parseMs, parsePositiveInt, resolveCleanupConfig } from './node-cleanup/shared';
+import {
+  listInventoryCredentials,
+  markInventoryCredentialAttempted,
+  resolveInventoryProvider,
+} from './provider-orphan-credentials';
 import {
   type ClaimingNode,
   loadClaimingNodeStatuses,
@@ -98,27 +104,90 @@ export async function reconcileProviderOrphans(
     env.PROVIDER_ORPHAN_DESTROY_LIMIT,
     DEFAULT_PROVIDER_ORPHAN_DESTROY_LIMIT
   );
+  const deadline = Date.now() + resolveCleanupConfig(env).stoppedHandoffSweepBudgetMs;
   const resolution = await resolveProvider(env);
-  if ('result' in resolution) return resolution.result;
-  const discovery = await discoverServers(resolution.provider, scope);
-  if ('result' in discovery) return discovery.result;
-  result.scanned = discovery.servers.length;
+  if ('provider' in resolution) {
+    await reconcileInventory(env, now, scope, resolution.provider, minAgeMs, destroyLimit, result);
+  } else {
+    Object.assign(result, resolution.result);
+  }
+  try {
+    const credentials = await listInventoryCredentials(env);
+    let lastAttempted: (typeof credentials)[number] | undefined;
+    for (const credential of credentials) {
+      if (Date.now() >= deadline || result.destroyed >= destroyLimit) break;
+      try {
+        const resolved = await resolveInventoryProvider(env, credential);
+        if (resolved) {
+          result.skipped = false;
+          result.skipReason = null;
+          await reconcileInventory(
+            env,
+            now,
+            scope,
+            resolved.provider,
+            minAgeMs,
+            destroyLimit,
+            result
+          );
+        }
+      } catch (error) {
+        result.errors++;
+        log.warn('provider_orphan.account_inventory_failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+      lastAttempted = credential;
+    }
+    if (lastAttempted) await markInventoryCredentialAttempted(env, lastAttempted);
+  } catch (error) {
+    result.errors++;
+    log.warn('provider_orphan.credential_inventory_failed', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+  return result;
+}
+
+async function reconcileInventory(
+  env: Env,
+  now: Date,
+  scope: OwnershipScope,
+  provider: Provider,
+  minAgeMs: number,
+  destroyLimit: number,
+  result: ProviderOrphanResult
+): Promise<void> {
+  const context = {
+    signal: AbortSignal.timeout(resolveCleanupConfig(env).stoppedHandoffRequestTimeoutMs),
+  };
+  const discovery = await discoverServers(provider, scope, context);
+  if ('result' in discovery) {
+    result.errors += discovery.result.errors;
+    result.skipped = true;
+    result.skipReason = discovery.result.skipReason;
+    return;
+  }
+  result.scanned += discovery.servers.length;
   const candidates = classifyCandidates(discovery.servers, scope, now.getTime() - minAgeMs, result);
   logOwnershipSkips(result);
-  if (candidates.length === 0) return result;
+  if (candidates.length === 0) return;
   const claims = await loadClaimsOrAbort(env, candidates, result);
-  if ('result' in claims) return claims.result;
+  if ('result' in claims) {
+    Object.assign(result, claims.result);
+    return;
+  }
   await destroyEligibleCandidates(
     env,
-    resolution.provider,
+    provider,
     candidates,
     claims.rows,
     scope,
     minAgeMs,
     destroyLimit,
-    result
+    result,
+    context
   );
-  return result;
 }
 
 async function resolveProvider(env: Env): Promise<ProviderResolution> {
@@ -154,14 +223,21 @@ async function resolveProvider(env: Env): Promise<ProviderResolution> {
   }
 }
 
-async function discoverServers(provider: Provider, scope: OwnershipScope): Promise<Discovery> {
+async function discoverServers(
+  provider: Provider,
+  scope: OwnershipScope,
+  context: ProviderRequestContext
+): Promise<Discovery> {
   try {
     return {
-      servers: await provider.listVMs({
-        [SAM_MANAGED_LABEL_KEY]: SAM_MANAGED_LABEL_VALUE,
-        [SAM_ENVIRONMENT_LABEL_KEY]: scope.environmentLabel,
-        [SAM_INSTALLATION_LABEL_KEY]: scope.installationId,
-      }),
+      servers: await provider.listVMs(
+        {
+          [SAM_MANAGED_LABEL_KEY]: SAM_MANAGED_LABEL_VALUE,
+          [SAM_ENVIRONMENT_LABEL_KEY]: scope.environmentLabel,
+          [SAM_INSTALLATION_LABEL_KEY]: scope.installationId,
+        },
+        context
+      ),
     };
   } catch (err) {
     log.error('provider_orphan.list_failed', {
@@ -272,7 +348,14 @@ async function loadClaimsOrAbort(
       error: err instanceof Error ? err.message : String(err),
       candidates: candidates.length,
     });
-    return { result: { ...result, skipped: true, skipReason: 'claim-lookup-failed', errors: 1 } };
+    return {
+      result: {
+        ...result,
+        skipped: true,
+        skipReason: 'claim-lookup-failed',
+        errors: result.errors + 1,
+      },
+    };
   }
 }
 
@@ -284,9 +367,14 @@ async function destroyEligibleCandidates(
   scope: OwnershipScope,
   minAgeMs: number,
   destroyLimit: number,
-  result: ProviderOrphanResult
+  result: ProviderOrphanResult,
+  context: ProviderRequestContext
 ): Promise<void> {
   for (const candidate of candidates) {
+    if (context.signal?.aborted) {
+      result.errors++;
+      return;
+    }
     if (result.destroyed >= destroyLimit) {
       log.info('provider_orphan.destroy_limit_reached', {
         destroyLimit,
@@ -296,8 +384,17 @@ async function destroyEligibleCandidates(
     }
     const claim = claims.get(candidate.nodeId.toLowerCase());
     if (!claimAllowsDeletion(candidate, claim, result)) continue;
-    if (!(await finalOwnershipMatches(provider, candidate, scope, result))) continue;
-    await destroyCandidate(env, provider, candidate, claim?.status, scope, minAgeMs, result);
+    if (!(await finalOwnershipMatches(provider, candidate, scope, result, context))) continue;
+    await destroyCandidate(
+      env,
+      provider,
+      candidate,
+      claim?.status,
+      scope,
+      minAgeMs,
+      result,
+      context
+    );
   }
 }
 
@@ -326,9 +423,10 @@ async function finalOwnershipMatches(
   provider: Provider,
   candidate: Candidate,
   scope: OwnershipScope,
-  result: ProviderOrphanResult
+  result: ProviderOrphanResult,
+  context: ProviderRequestContext
 ): Promise<boolean> {
-  const current = await readCurrentServer(provider, candidate, result);
+  const current = await readCurrentServer(provider, candidate, result, context);
   if (!current) return false;
   const labels = current.labels ?? {};
   if (hasAmbiguousOwnershipLabels(labels)) {
@@ -357,10 +455,11 @@ async function finalOwnershipMatches(
 async function readCurrentServer(
   provider: Provider,
   candidate: Candidate,
-  result: ProviderOrphanResult
+  result: ProviderOrphanResult,
+  context: ProviderRequestContext
 ): Promise<VMInstance | null> {
   try {
-    const current = await provider.getVM(candidate.serverId);
+    const current = await provider.getVM(candidate.serverId, context);
     if (current) return current;
     result.skippedAmbiguousOwnership++;
     finalOwnershipSkip('provider resource disappeared before exact ownership could be revalidated');
@@ -406,7 +505,8 @@ async function destroyCandidate(
   claimStatus: string | undefined,
   scope: OwnershipScope,
   minAgeMs: number,
-  result: ProviderOrphanResult
+  result: ProviderOrphanResult,
+  context: ProviderRequestContext
 ): Promise<void> {
   try {
     log.warn('provider_orphan.destroying', {
@@ -416,7 +516,7 @@ async function destroyCandidate(
       claimStatus: claimStatus ?? 'no-row',
       environment: scope.environmentLabel,
     });
-    await provider.deleteVM(candidate.serverId);
+    await provider.deleteVM(candidate.serverId, context);
     await recordDestroyedOrphan(env, candidate, claimStatus, scope.environmentLabel, minAgeMs);
     result.destroyed++;
   } catch (err) {

@@ -114,4 +114,22 @@ describe('workspace eviction recovery', () => {
       sqlite.prepare('SELECT sleeping_at, recovery_status FROM session_snapshots').get()
     ).toEqual({ sleeping_at: null, recovery_status: 'restored' });
   });
+  it('retains explicit idle evidence when a duplicate omits or contradicts it', async () => {
+    const identity = {
+      projectId: 'project',
+      workspaceId: 'workspace',
+      chatSessionId: 'chat',
+      nodeId: 'node',
+      generation: 'generation-1',
+    };
+    await recoverWorkspaceAfterEviction(env, { ...identity, interruptedWork: false });
+    await recoverWorkspaceAfterEviction(env, identity);
+    await recoverWorkspaceAfterEviction(env, { ...identity, interruptedWork: true });
+    expect(
+      sqlite.prepare('SELECT eviction_recovery_interrupted_work FROM session_snapshots').get()
+    ).toEqual({ eviction_recovery_interrupted_work: 0 });
+    expect(mocks.ensureSessionRecovery.mock.lastCall?.[4]).toMatchObject({
+      interruptedWork: false,
+    });
+  });
 });

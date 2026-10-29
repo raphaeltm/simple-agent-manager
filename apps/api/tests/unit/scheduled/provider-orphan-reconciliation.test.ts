@@ -23,6 +23,11 @@ const listVMs = vi.fn();
 const getVM = vi.fn();
 let listedServers: ReturnType<typeof server>[] = [];
 
+vi.mock('../../../src/scheduled/provider-orphan-credentials', () => ({
+  listInventoryCredentials: vi.fn(async () => []),
+  markInventoryCredentialAttempted: vi.fn(),
+  resolveInventoryProvider: vi.fn(),
+}));
 vi.mock('../../../src/services/platform-credentials', () => ({
   getPlatformCloudCredential: vi.fn().mockResolvedValue({
     decryptedToken: 'test-token',
@@ -153,7 +158,10 @@ describe('provider orphan reconciliation — destroys genuine orphans', () => {
     listVMs.mockResolvedValue([server()]);
     const result = await runProviderOrphanReconciliation(makeEnv([]));
 
-    expect(deleteVM).toHaveBeenCalledWith('srv-1');
+    expect(deleteVM).toHaveBeenCalledWith(
+      'srv-1',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
     expect(result.destroyed).toBe(1);
     expect(result.scanned).toBe(1);
   });
@@ -166,7 +174,10 @@ describe('provider orphan reconciliation — destroys genuine orphans', () => {
         makeEnv([{ id: ORPHAN_NODE_ID, status, provider_instance_id: 'srv-1' }])
       );
 
-      expect(deleteVM).toHaveBeenCalledWith('srv-1');
+      expect(deleteVM).toHaveBeenCalledWith(
+        'srv-1',
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
       expect(result.destroyed).toBe(1);
     }
   );
@@ -204,9 +215,18 @@ describe('provider orphan reconciliation — fails closed', () => {
     const result = await runProviderOrphanReconciliation(makeEnv([]));
 
     expect(deleteVM).toHaveBeenCalledTimes(1);
-    expect(deleteVM).toHaveBeenCalledWith('owned-orphan');
-    expect(deleteVM).not.toHaveBeenCalledWith('foreign-live');
-    expect(deleteVM).not.toHaveBeenCalledWith('legacy');
+    expect(deleteVM).toHaveBeenCalledWith(
+      'owned-orphan',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+    expect(deleteVM).not.toHaveBeenCalledWith(
+      'foreign-live',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+    expect(deleteVM).not.toHaveBeenCalledWith(
+      'legacy',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
     expect(result.destroyed).toBe(1);
   });
 
@@ -233,8 +253,14 @@ describe('provider orphan reconciliation — fails closed', () => {
     expect(resultA.destroyed).toBe(1);
     expect(resultB.destroyed).toBe(0);
     expect(deleteVM).toHaveBeenCalledTimes(1);
-    expect(deleteVM).toHaveBeenCalledWith('server-a');
-    expect(deleteVM).not.toHaveBeenCalledWith('server-b');
+    expect(deleteVM).toHaveBeenCalledWith(
+      'server-a',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+    expect(deleteVM).not.toHaveBeenCalledWith(
+      'server-b',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
   });
 
   it('destroys NOTHING when a live node row claims the server', async () => {
@@ -534,7 +560,10 @@ describe('provider orphan reconciliation — fails closed', () => {
 
     const result = await runProviderOrphanReconciliation(makeEnv([]));
 
-    expect(getVM).toHaveBeenCalledWith('srv-1');
+    expect(getVM).toHaveBeenCalledWith(
+      'srv-1',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
     expect(deleteVM).not.toHaveBeenCalled();
     expect(result.skippedForeignInstallation).toBe(1);
   });
@@ -652,9 +681,18 @@ describe('provider orphan reconciliation — bounded (rule 47)', () => {
       );
 
       expect(deleteVM).toHaveBeenCalledTimes(2);
-      expect(deleteVM).toHaveBeenCalledWith('at');
-      expect(deleteVM).toHaveBeenCalledWith('after');
-      expect(deleteVM).not.toHaveBeenCalledWith('before');
+      expect(deleteVM).toHaveBeenCalledWith(
+        'at',
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
+      expect(deleteVM).toHaveBeenCalledWith(
+        'after',
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
+      expect(deleteVM).not.toHaveBeenCalledWith(
+        'before',
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
       expect(result.skippedYoung).toBe(1);
     } finally {
       vi.useRealTimers();
@@ -739,8 +777,16 @@ describe('provider orphan reconciliation — bounded (rule 47)', () => {
       expect(gated.skipReason).toBe('interval-not-elapsed');
       expect(second.destroyed).toBe(1);
       expect(deleteVM).toHaveBeenCalledTimes(2);
-      expect(deleteVM).toHaveBeenNthCalledWith(1, 'srv-1');
-      expect(deleteVM).toHaveBeenNthCalledWith(2, 'srv-1');
+      expect(deleteVM).toHaveBeenNthCalledWith(
+        1,
+        'srv-1',
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
+      expect(deleteVM).toHaveBeenNthCalledWith(
+        2,
+        'srv-1',
+        expect.objectContaining({ signal: expect.any(AbortSignal) })
+      );
     } finally {
       vi.useRealTimers();
     }

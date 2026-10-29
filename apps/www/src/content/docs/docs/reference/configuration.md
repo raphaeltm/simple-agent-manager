@@ -179,7 +179,7 @@ Sandbox runtime surfaces and is not required for guided login.
 | `CLAUDE_SETUP_TTY_COLUMNS`             | `512`    | PTY width for `claude setup-token`, reducing opaque-token wrapping.                                 |
 | `CLAUDE_SETUP_OUTPUT_BUFFER_BYTES`     | `32768`  | Maximum in-memory Claude PTY output retained for parsing.                                           |
 | `CLAUDE_VERIFICATION_CODE_MAX_LENGTH`  | `1024`   | Maximum accepted length of Claude's browser-displayed `code#state` value.                           |
-| `CLAUDE_SETUP_ERROR_DETAIL_MAX_LENGTH` | `160`    | Maximum sanitized Claude CLI diagnostic length shown to the user.                                   |
+| `CLAUDE_SETUP_ERROR_DETAIL_MAX_LENGTH` | `160`    | Maximum internal CLI error text used for classification; displayed diagnostics are allowlisted.     |
 | `CLAUDE_OAUTH_TOKEN_MAX_LENGTH`        | `8192`   | Maximum captured Claude OAuth token length.                                                         |
 | `SETUP_SESSION_SWEEP_MAX_CANDIDATES`   | `50`     | Maximum expired sessions cleaned up by one scheduled sweep.                                         |
 | `POOL_LEASE_BUFFER_MS`                 | `300000` | Grace period after session TTL before a leaked capacity lease self-prunes.                          |

@@ -219,6 +219,52 @@ describe('D1 settings snapshot cache', () => {
     expect(load).toHaveBeenCalledTimes(3);
   });
 
+  it('recovers changed persisted settings after overload without invalidation', async () => {
+    const { database, set } = fixture();
+    let now = 0;
+    const cache = new AdminSettingsCache(undefined, () => now);
+    expect((await cache.read(database))[0]?.value).toBe('true');
+    const originalPrepare = database.prepare;
+    const prepare = vi.spyOn(database, 'prepare').mockImplementation(() => {
+      throw new Error('D1_OVERLOADED private SQL parameters');
+    });
+    now = ADMIN_SETTINGS_CACHE_MAX_MS;
+    await expect(cache.read(database)).rejects.toThrow('Admin settings are unavailable');
+    set(false);
+    prepare.mockImplementation(originalPrepare);
+    expect((await cache.read(database))[0]?.value).toBe('false');
+    expect(prepare).toHaveBeenCalledTimes(2);
+  });
+
+  it('coalesces concurrent overload failures and starts a fresh recovery read', async () => {
+    const { database } = fixture();
+    let rejectRead!: (error: Error) => void;
+    const load = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise<AdminSettingOverrideRow[]>((_resolve, reject) => {
+            rejectRead = reject;
+          })
+      )
+      .mockResolvedValue(rows(false));
+    const cache = new AdminSettingsCache(undefined, () => 0, load);
+    const reads = [cache.read(database), cache.read(database), cache.read(database)];
+    const settled = Promise.allSettled(reads);
+    expect(load).toHaveBeenCalledTimes(1);
+    rejectRead(new Error('D1_OVERLOADED private SQL parameters'));
+    for (const result of await settled) {
+      expect(result.status).toBe('rejected');
+      if (result.status === 'rejected') {
+        expect(result.reason.message).toBe(
+          'Admin settings are unavailable; retry after the database recovers.'
+        );
+      }
+    }
+    expect((await cache.read(database))[0]?.value).toBe('false');
+    expect(load).toHaveBeenCalledTimes(2);
+  });
+
   it('revokes a pre-save read from both cache publication and its waiting callers', async () => {
     const { database } = fixture();
     let release!: (value: AdminSettingOverrideRow[]) => void;

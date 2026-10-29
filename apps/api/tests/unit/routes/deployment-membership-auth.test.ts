@@ -36,9 +36,7 @@ const nodes = {
 };
 
 type Condition =
-  | { op: 'eq'; col: unknown; val: unknown }
-  | { op: 'and'; conds: Condition[] }
-  | undefined;
+  { op: 'eq'; col: unknown; val: unknown } | { op: 'and'; conds: Condition[] } | undefined;
 
 interface ProjectRow {
   id: string;
@@ -131,6 +129,12 @@ vi.mock('../../../src/services/deployment-volumes', () => ({
 
 vi.mock('../../../src/services/dns', () => ({
   cleanupAppRouteDNSRecords: vi.fn(async () => 0),
+}));
+
+// This suite isolates membership authorization; actual teardown SQL and strict
+// provider behavior are exercised by deployment-environment-lifecycle-vertical.
+vi.mock('../../../src/services/deployment-node-cleanup', () => ({
+  cleanupDeploymentNode: vi.fn(async () => ({ nodeDeleted: false, warnings: [] })),
 }));
 
 vi.mock('../../../src/services/nodes', () => ({
