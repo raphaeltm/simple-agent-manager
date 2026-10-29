@@ -17,7 +17,7 @@ Webhook acknowledges before project-event/PR ingestion completes, while swallowi
 - [x] Make webhook success wait for canonical event and PR ingestion; failure is visible, redelivery idempotent; trigger acceptance remains durable.
 - [x] Prove settings outage/recovery, concurrency coalescing and fail-closed behavior without stale permissive settings or retry loops.
 - [x] Inspect existing failed archive/runtime-asset state read-only; recover safely through existing paths if possible; report missing payload/authority honestly.
-- [ ] Run meaningful focused regressions, lint/typecheck/test/build and specialist/task completion reviews.
+- [x] Run meaningful focused regressions, lint/typecheck/test/build and specialist/task completion reviews.
 - [ ] Green non-draft PR; best-effort CodeRabbit; merge, successful production deployment and basic smoke.
 
 Staging explicitly waived by user for this task. No production lifecycle/stress tests, fixtures, blanket deletion or relaxed ownership/termination/preservation safeguards.
@@ -35,3 +35,14 @@ Read-only production audit after resume: task `01M61H0MTJF5DBKW726EPTA2E3` faile
 ## Post-mortem
 
 Measured query pressure and synchronous D1 contention coincided with overload; initiating cause is not established. Missing representative query-plan regression coverage allowed table/project-wide scans in global/keyed operations. Separately, background ingestion with swallowed errors allowed successful webhook acknowledgement before persistence. New real-SQL representative-cardinality tests and signed route/workerd redelivery coverage protect these failure classes; existing operational guidance already requires real boundary tests, so no new standing rule is needed.
+
+## Final local validation
+
+- Root lint/typecheck/build: 35/35 tasks passed (bounded sequential run).
+- All 11 non-API suites passed: 7,655 tests.
+- Full API collection: 980 files, 14,098 passed / 13 failed / 2 skipped initially. Failures were local test/hook/subprocess timeouts plus a mock assertion following a timed-out test. All 10 failing files passed sequentially, 220/220 tests, with ORIGINAL assertions and time limits. Aggregate API outcome: 14,111 passed, 2 skipped; aggregate package outcome: 21,766 passed, 2 skipped. No production/test timeout or assertion changes.
+- Changed workerd/ProjectData webhook suite: 8/8 passed (prior completed transcript evidence).
+- Migration safety, ordering, source-contract, changed-file formatting and PR preflight/review-evidence checks passed.
+- Cloudflare/security reviews PASS; test/constitution/doc-sync/task-completion review PASS with low checklist bookkeeping addressed.
+
+Implementation is archived after completion validation. The final release checklist remains a PR/release gate: green non-draft PR, CodeRabbit request/wait, merge, successful production deploy and basic smoke. Historical residuals above remain explicitly preserved.
