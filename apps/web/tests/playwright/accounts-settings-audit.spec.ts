@@ -12,6 +12,7 @@
 import { expect, type Page, test } from '@playwright/test';
 
 import { type AccountRows, accountRows, mergeRows } from '../unit/components/accounts/fixtures';
+import { NORMAL_CATALOG_RESPONSE } from './agent-models-fixtures';
 import {
   assertNoOverflow,
   type AuditResponder,
@@ -220,6 +221,35 @@ function accountsHandler(scenario: Scenario) {
     if (path.match(/^\/api\/projects\/[^/]+\/capacity-pools\/defaults/)) {
       return respond(200, emptyPool('project'));
     }
+    // Project settings → Agents also renders the profile list and the model-usage panel.
+    if (path === '/api/agent-models/catalog') return respond(200, NORMAL_CATALOG_RESPONSE);
+    if (/^\/api\/projects\/[^/]+\/agent-models$/.test(path)) {
+      return respond(200, {
+        featureEnabled: false,
+        models: null,
+        effectiveModelIds: NORMAL_CATALOG_RESPONSE.defaultModelIds,
+        effectiveSource: 'default',
+        monthlyBudgetUsd: null,
+        effectiveMonthlyBudgetUsd: 20,
+        defaultMonthlyBudgetUsd: 20,
+        maxMonthlyBudgetUsd: 200,
+        usage: {
+          month: '2026-10',
+          spentUsd: 0,
+          reservedUsd: 0,
+          callCount: 0,
+          resetsAt: '2026-11-01T00:00:00.000Z',
+          byModel: [],
+        },
+        canEdit: true,
+      });
+    }
+    if (/^\/api\/projects\/[^/]+\/(agent-profiles|skills)$/.test(path)) {
+      return respond(200, { items: [] });
+    }
+    if (/^\/api\/projects\/[^/]+\/agent-profiles\/picker$/.test(path)) {
+      return respond(200, { usage: [], hiddenProfileIds: [], usageWindowDays: 30 });
+    }
     if (path === '/api/projects') return respond(200, { projects });
     const project = path.match(/^\/api\/projects\/([^/]+)$/);
     if (project) {
@@ -407,11 +437,33 @@ function surfaceTests(viewport: 'mobile' | 'desktop') {
   });
 }
 
+function projectAgentsTest(viewport: 'mobile' | 'desktop') {
+  test('project agents tab summarises each agent’s account from the same resolution', async ({
+    page,
+  }) => {
+    await openPage(page, '/projects/p-client/settings/agents', {
+      rows: NORMAL_ROWS,
+      agents: AGENTS.map((agent) => ({ ...agent, supportsAcp: true })),
+    });
+    const claude = page.getByTestId('project-agent-card-claude-code');
+    await expect(claude).toContainText('This project uses Acme API key, pinned to it.');
+    await expect(claude).toContainText('Pinned account');
+    await expect(page.getByTestId('project-agent-card-openai-codex')).toContainText(
+      'This project uses your default account, ChatGPT Plus.'
+    );
+    await expect(page.getByTestId('project-agent-card-google-gemini')).toContainText('No account');
+    await assertNoOverflow(page);
+    await fullShot(page, `accounts-project-agents-${viewport}`);
+  });
+}
+
 test.describe('Accounts — Mobile', () => {
+  projectAgentsTest('mobile');
   surfaceTests('mobile');
 });
 
 test.describe('Accounts — Desktop', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false, hasTouch: false });
   surfaceTests('desktop');
+  projectAgentsTest('desktop');
 });
