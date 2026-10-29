@@ -907,6 +907,13 @@ describe('VM admission control D1 races', () => {
     // exercised by the dedicated host-reserve test, and applying it here would
     // make an 8 GB medium node refuse its second 4 GB workspace for an unrelated
     // reason.
+    // Isolate declared packing from live host use: two full reservations need
+    // an idle host, rather than double-spending the default 10% usage sample.
+    await env.DATABASE.prepare(
+      `UPDATE nodes SET last_metrics = json_set(last_metrics, '$.memoryPercent', 0) WHERE id = ?`
+    )
+      .bind(mediumNode)
+      .run();
     const packingPolicy = admissionPolicy();
     const firstPlacement = await reserveWorkspacePlacement(
       env.DATABASE,
@@ -1617,6 +1624,24 @@ describe('VM admission control D1 races', () => {
       resolvedReservationJson: JSON.stringify(fullReservation),
     });
 
+    // Releasing a stopped reservation does not erase measured host usage.
+    await expect(
+      reserveWorkspacePlacement(
+        env.DATABASE,
+        placement('workspace-vm-admission-capacity-stopped-pressure-denied', stoppedNode, {
+          resolvedReservation: fullReservation,
+        }),
+        policy
+      )
+    ).resolves.toBe(false);
+    // The following assertions isolate lifecycle reservation accounting.
+    await env.DATABASE.prepare(
+      `UPDATE nodes SET last_metrics = json_set(last_metrics, '$.memoryPercent', 0)
+        WHERE id IN (?, ?, ?, ?)`
+    )
+      .bind(creatingNode, recoveryNode, stoppedNode, deletedNode)
+      .run();
+
     await expect(
       reserveWorkspacePlacement(
         env.DATABASE,
@@ -1831,7 +1856,9 @@ describe('VM admission control D1 races', () => {
 
     expect(secondBusyWait.kind).toBe('waiting');
     if (secondBusyWait.kind !== 'waiting') throw new Error('expected repeated busy-build wait');
-    expect(Date.parse(secondBusyWait.waitDeadlineAt)).toBe(Date.parse(firstBusyWait.waitDeadlineAt));
+    expect(Date.parse(secondBusyWait.waitDeadlineAt)).toBe(
+      Date.parse(firstBusyWait.waitDeadlineAt)
+    );
   });
 
   it('uses the busy-build wait budget instead of the provider-capacity ceiling', async () => {

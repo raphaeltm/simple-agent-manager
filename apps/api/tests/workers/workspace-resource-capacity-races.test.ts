@@ -754,7 +754,7 @@ describe('workspace resource capacity final reservation CAS', () => {
     }
   });
 
-  it('keeps live memory percentage advisory at the final reservation boundary', async () => {
+  it('refuses exhausted physical headroom at the final reservation boundary', async () => {
     const userId = 'user-wrc-memory-advisory';
     const installationId = 'installation-wrc-memory-advisory';
     const projectId = 'project-wrc-memory-advisory';
@@ -781,7 +781,42 @@ describe('workspace resource capacity final reservation CAS', () => {
         placement('workspace-wrc-memory-admitted', nodeId, { userId, projectId, installationId }),
         admissionPolicy({ memoryThresholdPercent: 1 })
       )
-    ).resolves.toBe(true);
+    ).resolves.toBe(false);
+  });
+
+  it('does not spend the same measured memory headroom twice under concurrent D1 claims', async () => {
+    const nodeId = 'node-wrc-measured-memory-race';
+    await makeReadyNode(nodeId, USER_ID, 'medium', {
+      lastMetrics: JSON.stringify({ cpuLoadAvg1: 0.2, memoryPercent: 75, diskPercent: 10 }),
+    });
+    const snapshot = await seedCurrentAuthorityForNode({
+      nodeId,
+      userId: USER_ID,
+      projectId: PROJECT_ID,
+      label: 'measured-memory-race',
+    });
+    // 6GiB live use + 512MiB host reserve leaves one 1.5GiB start.
+    // Both requests fit the declared budgets; only the live headroom gate
+    // prevents the second start from spending the same heartbeat capacity.
+    const outcomes = await Promise.all(
+      ['a', 'b'].map((suffix) =>
+        reserveWorkspacePlacement(
+          env.DATABASE,
+          placement(`workspace-wrc-memory-race-${suffix}`, nodeId, {
+            capacityPlacementSnapshot: snapshot,
+            resolvedReservation: reservation({ memoryMb: 1536 }),
+          }),
+          admissionPolicy({ hostMemoryReserveMb: 512 })
+        )
+      )
+    );
+    expect(outcomes.filter(Boolean)).toHaveLength(1);
+    const persisted = await env.DATABASE.prepare(
+      'SELECT COUNT(*) AS count FROM workspaces WHERE node_id = ?'
+    )
+      .bind(nodeId)
+      .first<{ count: number }>();
+    expect(persisted?.count).toBe(1);
   });
 
   it('fails closed for malformed active snapshots and unknown observed hardware', async () => {
@@ -883,6 +918,7 @@ function interceptDatabase(
 
 function removeAggregateResourcePredicates(sql: string): string {
   const patterns = [
+    /\(n\.metrics_json IS NULL OR \(\s*n\.trusted_provider_instance_memory_mb \*\s*CAST\(json_extract\(n\.metrics_json, '\$\.memoryPercent'\) AS REAL\) \/ 100\.0\s*\+ active\.memory_mb - MIN\(active\.observed_memory_credit_mb,\s*n\.trusted_provider_instance_memory_mb \*\s*CAST\(json_extract\(n\.metrics_json, '\$\.memoryPercent'\) AS REAL\) \/ 100\.0\)\s*\+ requested\.memory_mb\s*<= n\.trusted_provider_instance_memory_mb - policy\.host_memory_reserve_mb\s*\)\)/,
     /\(\(active\.cpu_millis\s*\+\s*requested\.cpu_millis\)\s*<=\s*\(n\.trusted_provider_instance_vcpu_count\s*\*\s*1000\s*\*\s*policy\.cpu_share_budget_percent\)\s*\/\s*100\)/,
     /\(\(active\.memory_mb\s*\+\s*requested\.memory_mb\)\s*<=\s*n\.trusted_provider_instance_memory_mb\s*-\s*policy\.host_memory_reserve_mb\)/,
     /\(\(active\.disk_mb\s*\+\s*requested\.disk_mb\)\s*<=\s*n\.trusted_provider_instance_disk_gb\s*\*\s*1024\)/,
@@ -998,7 +1034,9 @@ describe('native final reservation mutation calibration', () => {
 
   it('calibrates the aggregate invariant against removal of the native resource CAS predicates', async () => {
     const nodeId = 'node-wrc-mutated-resource-cas';
-    await makeReadyNode(nodeId, USER_ID, 'small');
+    await makeReadyNode(nodeId, USER_ID, 'small', {
+      lastMetrics: JSON.stringify({ cpuLoadAvg1: 0.2, memoryPercent: 0, diskPercent: 10 }),
+    });
     const snapshot = await seedCurrentAuthorityForNode({
       nodeId,
       userId: USER_ID,

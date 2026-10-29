@@ -41,6 +41,7 @@ import { runTrialExpireSweep } from './trial-expire';
 import { runTrialRolloverAudit } from './trial-rollover';
 import { runTrialWaitlistCleanup } from './trial-waitlist-cleanup';
 import { runTriggerExecutionCleanup } from './trigger-execution-cleanup';
+import { runWorkspaceEvictionRecovery } from './workspace-eviction-recovery';
 
 /** Cloudflare scheduled entry point. Special cron jobs are not part of the operational sweep brake. */
 export async function scheduled(
@@ -147,6 +148,9 @@ export async function scheduled(
   );
   const sessionSleepLifecycleRepair = await sweeps.isolate('session_sleep_lifecycle_repair', () =>
     runSessionSleepLifecycleRepair(env, new Date())
+  );
+  const evictionRecovery = await sweeps.isolate('workspace_eviction_recovery', () =>
+    runWorkspaceEvictionRecovery(env, ctx.waitUntil.bind(ctx))
   );
   const nodeCleanup = await sweeps.isolate('node_cleanup', () => runNodeCleanupSweep(env));
   const terminalNodeLifecycleRepair = await sweeps.isolate('terminal_node_lifecycle_repair', () =>
@@ -290,6 +294,7 @@ export async function scheduled(
     stuckTaskDoHealthChecked: stuckTasks?.doHealthChecked,
     observabilityPurgedByAge: observabilityPurge?.deletedByAge,
     observabilityPurgedByCount: observabilityPurge?.deletedByCount,
+    evictionRecovery,
     githubTriggerRecovery,
     agentEmailRecovery,
     cronTriggersChecked: cronTriggers?.checked,

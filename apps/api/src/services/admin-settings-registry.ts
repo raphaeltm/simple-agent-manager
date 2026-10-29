@@ -58,6 +58,9 @@ export type AdminSettingName =
   | 'integration.gitlab.clientId'
   | 'integration.gitlab.clientSecret'
   | 'operations.workloadIdentityTokenTtlSeconds'
+  | 'operations.evictionRecoveryRetryBatchSize'
+  | 'operations.evictionRecoveryRetryWallMs'
+  | 'operations.evictionRecoveryRetryDelayMs'
   | 'operations.resourceLinkTouchIntervalMs'
   | 'operations.resourceLinkWeakPerTarget'
   | 'operations.resourceLinkWeakCleanupBatchSize'
@@ -289,6 +292,28 @@ function validGitLabHost(value: unknown): boolean {
 }
 
 const definitions: AdminSettingDefinition[] = [
+  integerDefinition(
+    'operations.evictionRecoveryRetryBatchSize',
+    5,
+    'Operations',
+    'Failed eviction wakes selected per scheduled sweep.',
+    { min: 1, max: 100 }
+  ),
+  integerDefinition(
+    'operations.evictionRecoveryRetryWallMs',
+    10000,
+    'Operations',
+    'Time budget in milliseconds before starting another failed eviction wake; an in-flight durable wake may finish afterward.',
+    { min: 1, max: 30000 }
+  ),
+  integerDefinition(
+    'operations.evictionRecoveryRetryDelayMs',
+    60000,
+    'Operations',
+    'Minimum interval in milliseconds between failed eviction wake attempts and preclaim deferrals. Automatic attempts do not decay their budget.',
+    { min: 1, max: 86400000 }
+  ),
+
   integerDefinition(
     'operations.githubTriggerQueueMaxPendingLimit',
     DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING_LIMIT,

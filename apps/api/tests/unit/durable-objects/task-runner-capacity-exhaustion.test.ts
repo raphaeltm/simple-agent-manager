@@ -888,6 +888,12 @@ describe('TaskRunner capacity exhaustion policy', () => {
     expect(attemptedInstanceTypes()).toEqual([PRIMARY, ALTERNATE]);
     expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
     expect(state.config.providerInstanceType).toBe(ALTERNATE);
+    expect(
+      state.stepResults.placementDiagnostics?.attempts.map((attempt) => attempt.outcome)
+    ).toEqual(['capacity-exhausted', 'succeeded']);
+    expect(state.stepResults.capacityPlacementSnapshot?.capacityPoolCandidateId).toBe(
+      'candidate-user-alternate'
+    );
   });
 
   // Consumer #4 of `isTransientCapacityError` (`node-provisioning-step.ts:592`). The diagnostic
