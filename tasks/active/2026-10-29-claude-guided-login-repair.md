@@ -28,4 +28,20 @@ apps/api/scripts/claude-setup-token.mjs; apps/api/src/durable-objects/credential
 
 ## Validation
 
-78 focused tests passed (including real route → DO → driver with synthetic CLI boundaries); five initial regression cases failed before the fix. API typecheck, build, changed-file ESLint, and repository file-size checks passed. Exact pinned Claude 2.1.281 characterized under the production PTY wrapper with isolated HOME and a synthetic invalid code; complete URL, state match, acknowledged input, and safe HTTP400 rejection observed. No real account credentials used. Security, Cloudflare/constitution, and tests/completion/docs local reviews passed after fixing the wrapped-token chunk boundary. Broad API suite passed: 980 files and 14,126 tests passed (1 file/2 tests skipped). Staging verification pending. CodeRabbit findings corrected: byte-accurate UTF-8 output cap and agent-specific fallback error. 80 focused tests pass and local delta review passes.
+78 focused tests passed (including real route → DO → driver with synthetic CLI boundaries); five initial regression cases failed before the fix. API typecheck, build, changed-file ESLint, and repository file-size checks passed. Exact pinned Claude 2.1.281 characterized under the production PTY wrapper with isolated HOME and a synthetic invalid code; complete URL, state match, acknowledged input, and safe HTTP400 rejection observed. No real account credentials used. Security, Cloudflare/constitution, and tests/completion/docs local reviews passed after fixing the wrapped-token chunk boundary. Broad API suite passed: 980 files and 14,126 tests passed (1 file/2 tests skipped). Initial staging deployment and synthetic HTTP400 smoke passed; real user follow-up failed as documented below. CodeRabbit findings corrected: byte-accurate UTF-8 output cap and agent-specific fallback error. 80 focused tests pass and local delta review passes.
+
+## Follow-up after real staging attempt
+
+The initial staging deployment and HTTP400 smoke passed, but the user's real attempt `01M63PQB4NC6E59NY697Y5EAPK` failed on 2026-10-29 at 11:29:47 UTC. Safe diagnostics showed CLI 2.1.281, matching state, acknowledged code and Enter writes, then exit 0 without captured token. This does not establish that authorization succeeded. No raw terminal output or credentials were retained.
+
+Astra tested the unmodified pinned CLI against a loopback TLS proxy with synthetic token/profile responses and isolated configuration. Normal Ink rendering omits unchanged screen cells and inserts cursor moves between words; stripping ANSI corrupts prose. The exact missing-token failure did not reproduce. Claude's supported `CLAUDE_AX_SCREEN_READER=1` emits complete linear success lines, avoiding that parser dependency (https://code.claude.com/docs/en/accessibility). The driver now forces this mode for its child only. No new deployment variable or user configuration is required.
+
+- [x] Capture a real CLI synthetic-success fixture with original stdout chunks.
+- [x] Assert exact token capture, state redaction, every streamed split, and child environment override.
+- [x] Exercise the actual driver + native CLI + PTY + local synthetic OAuth response: completed, exact token written mode 0600, code file deleted, no stdout/stderr leak.
+- [ ] Complete delta review and deploy follow-up to staging.
+- [ ] Verify live staging failure path and hand off real-account retry.
+
+The renderer change is an evidence-based robustness fix, not a proven diagnosis of the user's failed attempt. Real-account success still requires staging verification.
+
+Follow-up validation: 82 focused tests, API typecheck/build passed. Full API lint found only test import ordering, corrected. Security/runtime/env/constitution and completion/test/docs delta reviews passed; staging and real-account validation remain pending.

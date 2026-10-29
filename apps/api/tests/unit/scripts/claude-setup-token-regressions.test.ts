@@ -8,6 +8,7 @@ import {
   runClaudeSetupToken,
   utf8Tail,
 } from '../../../scripts/claude-setup-token.mjs';
+import screenReaderSuccess from '../../fixtures/claude-setup-token/screen-reader-success.json';
 
 const url =
   'https://claude.ai/oauth/authorize?client_id=test&response_type=code&redirect_uri=https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback&code_challenge=challenge&code_challenge_method=S256&state=expected';
@@ -45,6 +46,26 @@ function harness(code = 'synthetic#expected', overrides: Record<string, unknown>
 }
 afterEach(() => vi.unstubAllEnvs());
 describe('Claude setup-token real-boundary regressions', () => {
+  it('captures the exact token from real CLI screen-reader chunks without leaking it into state', async () => {
+    const h = harness();
+    await h.ready;
+    for (const chunk of screenReaderSuccess.chunks) h.child.stdout.write(chunk);
+    h.child.emit('exit', 0, null);
+    h.child.emit('close', 0, null);
+    await vi.waitFor(() => expect(h.states.at(-1)).toMatchObject({ status: 'completed' }));
+    expect(h.writeCredential).toHaveBeenCalledExactlyOnceWith(screenReaderSuccess.token);
+    expect(JSON.stringify(h.states)).not.toContain(screenReaderSuccess.token);
+  });
+  it('never saves a partial token at any character split of real CLI screen-reader output', () => {
+    const output = screenReaderSuccess.chunks.join('');
+    for (let split = 1; split < output.length; split++) {
+      const parsed = extractClaudeSetupOutput(output.slice(0, split), 512, false).token;
+      expect(parsed === undefined || parsed === screenReaderSuccess.token, `split ${split}`).toBe(
+        true
+      );
+    }
+    expect(extractClaudeSetupOutput(output, 512, true).token).toBe(screenReaderSuccess.token);
+  });
   it('bounds multilingual output by UTF-8 bytes without corrupting the suffix', () => {
     const text = '漢😀é'.repeat(100) + 'OAuth error: status code 400';
     for (let limit = 30; limit < 45; limit++) {

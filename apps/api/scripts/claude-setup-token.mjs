@@ -85,7 +85,15 @@ export async function runClaudeSetupToken({
       '/dev/null',
     ],
     {
-      env: { ...process.env, DISABLE_AUTOUPDATER: '1', NO_COLOR: '1', TERM: 'xterm-256color' },
+      // setup-token's normal Ink renderer emits differential cursor updates.
+      // Request supported linear output so tokens arrive as complete lines.
+      env: {
+        ...process.env,
+        DISABLE_AUTOUPDATER: '1',
+        NO_COLOR: '1',
+        TERM: 'xterm-256color',
+        CLAUDE_AX_SCREEN_READER: '1',
+      },
       stdio: ['pipe', 'pipe', 'pipe'],
     }
   );

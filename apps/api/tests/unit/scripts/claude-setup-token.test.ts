@@ -236,12 +236,15 @@ describe('Claude setup-token driver', () => {
     const credentials: string[] = [];
     let spawnedCommand = '';
     let spawnedArgs: string[] = [];
+    let spawnedEnv: NodeJS.ProcessEnv = {};
+    vi.stubEnv('CLAUDE_AX_SCREEN_READER', '0');
 
     const ready = runClaudeSetupToken({
       ...validSetupPaths(),
-      spawnProcess: (command, args) => {
+      spawnProcess: (command, args, options) => {
         spawnedCommand = command;
         spawnedArgs = args;
+        spawnedEnv = options.env;
         return fake;
       },
       writeState: async (state) => states.push(state),
@@ -253,6 +256,7 @@ describe('Claude setup-token driver', () => {
     });
 
     expect(spawnedCommand).toBe('script');
+    expect(spawnedEnv.CLAUDE_AX_SCREEN_READER).toBe('1');
     expect(spawnedArgs).toEqual([
       '-qfec',
       expect.stringContaining('claude setup-token'),
