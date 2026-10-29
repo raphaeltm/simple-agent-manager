@@ -302,7 +302,7 @@ function surfaceTests(viewport: 'mobile' | 'desktop') {
       agents: AGENTS.map((agent) => ({ ...agent, configured: false })),
     });
     await expect(page.getByText('Connect your first account:')).toBeVisible();
-    await expect(page.getByText('Connect an agent account and its defaults appear here.')).toBeVisible();
+    await expect(page.getByText('Connect an agent account and its settings appear here.')).toBeVisible();
     await assertNoOverflow(page);
     await shot(page, 'agents-empty');
   });

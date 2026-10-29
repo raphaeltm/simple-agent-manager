@@ -1,5 +1,5 @@
 /**
- * Settings → Agents defaults: one card per agent you can run, plus a compact
+ * Settings → Agents → Agent settings: one card per agent you can run, plus a compact
  * line for agents with no account yet. Defaults are per agent, never per
  * account.
  */
@@ -88,12 +88,38 @@ export function AgentDefaultsSection({ groups, onConnect }: Readonly<AgentDefaul
       {active.length > 0 ? (
         <div className="grid items-start gap-3 md:grid-cols-2">
           {active.map((agent) => {
-            const index = agents.indexOf(agent);
+            const query = settings[agents.indexOf(agent)];
+            // Never render a card before its saved settings arrive: the form
+            // would show defaults that are not yours and could save over them.
+            if (!query || query.isPending) {
+              return (
+                <Skeleton
+                  key={agent.id}
+                  width="100%"
+                  height="18rem"
+                  borderRadius="var(--sam-radius-lg)"
+                />
+              );
+            }
+            if (query.isError) {
+              return (
+                <Alert key={agent.id} variant="error">
+                  Couldn’t load your {agent.name} settings.{' '}
+                  <button
+                    type="button"
+                    onClick={() => void query.refetch()}
+                    className="cursor-pointer border-none bg-transparent p-0 text-[length:inherit] text-inherit underline"
+                  >
+                    Retry
+                  </button>
+                </Alert>
+              );
+            }
             return (
               <AgentSettingsCard
                 key={agent.id}
                 agent={agent}
-                settings={settings[index]?.data ?? null}
+                settings={query.data ?? null}
                 onSave={handleSave}
                 onReset={handleReset}
               />
@@ -102,7 +128,7 @@ export function AgentDefaultsSection({ groups, onConnect }: Readonly<AgentDefaul
         </div>
       ) : (
         <p className="m-0 rounded-lg border border-dashed border-border-default p-4 text-sm text-fg-muted">
-          Connect an agent account and its defaults appear here.
+          Connect an agent account and its settings appear here.
         </p>
       )}
       {idle.length > 0 && (
@@ -119,8 +145,8 @@ export function AgentDefaultsSection({ groups, onConnect }: Readonly<AgentDefaul
                 <ProviderMark provider={provider} size={26} />
                 <span className="flex min-w-0 flex-1 flex-col">
                   <span className="truncate text-sm text-fg-primary">{agent.name}</span>
-                  <span className="truncate text-[11px] text-fg-muted">
-                    Connect a {provider.company} account to set its defaults
+                  <span className="text-[11px] text-fg-muted">
+                    Connect a {provider.company} account to choose its settings
                   </span>
                 </span>
                 <button

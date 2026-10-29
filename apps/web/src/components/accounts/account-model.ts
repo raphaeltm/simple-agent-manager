@@ -3,19 +3,21 @@
  * settings UI shows: which accounts exist, which one is the default, which
  * projects pin one, and which are connected but unused.
  *
- * Project resolution mirrors `resolveEnvironment` in
- * `packages/shared/src/composable-credentials/resolver.ts`, the function the
- * runtime uses:
+ * Which account a project uses is answered by `resolveEnvironment`
+ * (`packages/shared/src/composable-credentials/resolver.ts`), the same function
+ * the runtime uses, run over the rows the API lists:
  *   1. a project-scoped attachment wins; an inactive one, or one whose
  *      configuration/credential is inactive, BLOCKS the project (no fallback);
  *   2. otherwise the first active user-scoped attachment (the default);
  *   3. otherwise the platform, when the resolution status reports one.
- * Keep the two in step: a coverage bar that disagrees with the resolver tells a
- * user the wrong account will be billed.
  */
-import type {
-  CCConsumerResolutionStatus,
-  CredentialLimitCredentialSummary,
+import {
+  type CCCompositionSnapshot,
+  type CCConsumerRef,
+  type CCConsumerResolutionStatus,
+  type CCResolvedEnvironment,
+  type CredentialLimitCredentialSummary,
+  resolveEnvironment,
 } from '@simple-agent-manager/shared';
 
 import type {
@@ -175,21 +177,30 @@ function buildProvider(
     .map((account, index) => ({ ...account, swatch: accountSwatch(provider.hue, index) }));
 
   const defaultAccount = accounts.find((account) => account.role === 'default') ?? null;
-  const platformFallback =
-    resolution?.source === 'platform' || resolution?.source === 'platform-proxy';
+  const consumer: CCConsumerRef =
+    provider.kind === 'agent'
+      ? { kind: 'agent', agentType: provider.id }
+      : { kind: 'compute', provider: provider.id };
+  const composition = toComposition(
+    consumer,
+    configurations,
+    attachments,
+    credentialsById,
+    resolution
+  );
+  const accountsByConfiguration = new Map(
+    accounts.map((account) => [account.configurationId, account])
+  );
+  const userLevel = resolveEnvironment(composition, consumer, { userId: OWNER });
+  const platformFallback = userLevel !== null && isPlatformManaged(userLevel);
   const resolutions = new Map<string, ProjectResolution>();
   for (const project of snapshot.projects) {
-    resolutions.set(
-      project.id,
-      resolveProject(
-        project.id,
-        attachments,
-        configurations,
-        accounts,
-        defaultAccount,
-        platformFallback
-      )
-    );
+    const resolved = resolveEnvironment(composition, consumer, {
+      userId: OWNER,
+      projectId: project.id,
+    });
+    const pin = attachments.find((att) => att.projectId === project.id);
+    resolutions.set(project.id, toResolution(resolved, pin, accountsByConfiguration));
   }
 
   return {
@@ -198,36 +209,102 @@ function buildProvider(
     defaultAccount,
     platformFallback,
     resolutions,
-    segments: buildSegments(snapshot.projects, resolutions),
+    segments: buildSegments(provider.kind, snapshot.projects, resolutions),
   };
 }
 
-function resolveProject(
-  projectId: string,
-  attachments: CCAttachmentListItem[],
+/** Every listed row belongs to the caller, so one stand-in owner id is exact. */
+const OWNER = 'me';
+
+/**
+ * The listed rows as the snapshot `resolveEnvironment` reads. Resolution looks
+ * only at ids and active flags; secrets never reach the browser, so each
+ * credential carries an empty placeholder. The platform default comes from the
+ * resolution status, which the API computes with the platform rows it can see.
+ */
+function toComposition(
+  consumer: CCConsumerRef,
   configurations: CCConfigurationListItem[],
-  accounts: AccountView[],
-  defaultAccount: AccountView | null,
-  platformFallback: boolean
-): ProjectResolution {
-  const pin = attachments.find((att) => att.projectId === projectId);
-  if (pin) {
-    // Same checks, in the same order, as the resolver's `materialize`: anything
-    // that fails stops the chain for this project.
-    const account =
-      accounts.find((candidate) => candidate.configurationId === pin.configurationId) ?? null;
-    if (!pin.isActive) return { source: 'blocked', account, reason: 'paused' };
-    const configuration = configurations.find((cfg) => cfg.id === pin.configurationId);
-    if (!configuration?.isActive) return { source: 'blocked', account, reason: 'inactive' };
-    if (configuration.credentialId === null) return { source: 'platform' }; // platform binding
-    if (!account?.active) return { source: 'blocked', account, reason: 'inactive' };
-    return { source: 'pinned', account };
+  attachments: CCAttachmentListItem[],
+  credentialsById: Map<string, CCCredentialListItem>,
+  resolution: CCConsumerResolutionStatus | undefined
+): CCCompositionSnapshot {
+  const placeholder = (id: string, isActive: boolean) => ({
+    id,
+    ownerId: OWNER,
+    name: id,
+    kind: 'api-key' as const,
+    secret: { kind: 'api-key' as const, apiKey: '' },
+    isActive,
+  });
+  const platform: CCCompositionSnapshot['platform'] = {};
+  const key =
+    consumer.kind === 'agent' ? `agent:${consumer.agentType}` : `compute:${consumer.provider}`;
+  if (resolution?.source === 'platform-proxy') platform[key] = { mode: 'proxy' };
+  if (resolution?.source === 'platform') {
+    platform[key] = { mode: 'credential', credential: placeholder('platform', true) };
   }
-  if (defaultAccount?.active) return { source: 'default', account: defaultAccount };
-  return platformFallback ? { source: 'platform' } : { source: 'none' };
+  return {
+    credentials: configurations
+      .map((cfg) => (cfg.credentialId ? credentialsById.get(cfg.credentialId) : undefined))
+      .filter((cred): cred is CCCredentialListItem => Boolean(cred))
+      .map((cred) => placeholder(cred.id, cred.isActive)),
+    configurations: configurations.map((cfg) => ({
+      id: cfg.id,
+      ownerId: OWNER,
+      name: cfg.name,
+      consumer,
+      credentialId: cfg.credentialId,
+      settings: {},
+      isActive: cfg.isActive,
+    })),
+    attachments: attachments.map((att) => ({
+      id: att.id,
+      configurationId: att.configurationId,
+      consumer,
+      target:
+        att.projectId === null
+          ? { scope: 'user' as const, userId: OWNER }
+          : { scope: 'project' as const, userId: OWNER, projectId: att.projectId },
+      isActive: att.isActive,
+    })),
+    platform,
+  };
+}
+
+/** Resolved, but to SAM's platform credential or proxy rather than one of yours. */
+function isPlatformManaged(resolved: CCResolvedEnvironment): boolean {
+  return (
+    resolved.source === 'platform' ||
+    resolved.source === 'platform-proxy' ||
+    resolved.credential === null
+  );
+}
+
+function toResolution(
+  resolved: CCResolvedEnvironment | null,
+  pin: CCAttachmentListItem | undefined,
+  accountsByConfiguration: Map<string, AccountView>
+): ProjectResolution {
+  if (resolved === null) {
+    // Nothing resolved: a pin that exists stopped the chain, else nothing was set.
+    if (!pin) return { source: 'none' };
+    return {
+      source: 'blocked',
+      account: accountsByConfiguration.get(pin.configurationId) ?? null,
+      reason: pin.isActive ? 'inactive' : 'paused',
+    };
+  }
+  if (isPlatformManaged(resolved)) return { source: 'platform' };
+  const account = resolved.configuration && accountsByConfiguration.get(resolved.configuration.id);
+  if (!account) return { source: 'platform' };
+  return resolved.source === 'project-attachment'
+    ? { source: 'pinned', account }
+    : { source: 'default', account };
 }
 
 function buildSegments(
+  kind: AccountKind,
   projects: AccountProject[],
   resolutions: Map<string, ProjectResolution>
 ): CoverageSegment[] {
@@ -235,7 +312,7 @@ function buildSegments(
   for (const project of projects) {
     const resolution = resolutions.get(project.id);
     if (!resolution) continue;
-    const seed = segmentSeed(resolution);
+    const seed = segmentSeed(kind, resolution);
     const existing = byKey.get(seed.key);
     if (existing) existing.projectIds.push(project.id);
     else byKey.set(seed.key, { ...seed, projectIds: [project.id] });
@@ -244,7 +321,10 @@ function buildSegments(
   return [...byKey.values()].sort((a, b) => order.indexOf(a.role) - order.indexOf(b.role));
 }
 
-function segmentSeed(resolution: ProjectResolution): Omit<CoverageSegment, 'projectIds'> {
+function segmentSeed(
+  kind: AccountKind,
+  resolution: ProjectResolution
+): Omit<CoverageSegment, 'projectIds'> {
   switch (resolution.source) {
     case 'default':
       return {
@@ -263,7 +343,7 @@ function segmentSeed(resolution: ProjectResolution): Omit<CoverageSegment, 'proj
     case 'blocked':
       return {
         key: 'blocked',
-        label: 'Blocked',
+        label: 'Paused pin',
         role: 'blocked',
         color: 'var(--sam-color-danger)',
       };
@@ -277,7 +357,8 @@ function segmentSeed(resolution: ProjectResolution): Omit<CoverageSegment, 'proj
     case 'none':
       return {
         key: 'none',
-        label: 'No account',
+        // A project needs one cloud, not every cloud: no account here is normal.
+        label: kind === 'compute' ? 'Not used' : 'No account',
         role: 'none',
         color: 'var(--sam-color-border-default)',
       };
@@ -311,4 +392,31 @@ export function coveredProjectCount(group: ProviderAccounts, accountId: string):
 /** A provider row is worth showing when it has accounts or SAM covers it. */
 export function isProviderInUse(group: ProviderAccounts): boolean {
   return group.accounts.length > 0 || group.platformFallback;
+}
+
+/** What a project falls back to once its pin is removed. */
+export type DefaultFallback =
+  { kind: 'default'; label: string } | { kind: 'platform' } | { kind: 'none' };
+
+export function defaultFallback(group: ProviderAccounts): DefaultFallback {
+  if (group.defaultAccount?.active) return { kind: 'default', label: group.defaultAccount.label };
+  return group.platformFallback ? { kind: 'platform' } : { kind: 'none' };
+}
+
+/** The confirmation copy for moving one project off its pinned account. */
+export function describeUnpin(
+  projectName: string,
+  accountLabel: string,
+  providerName: string,
+  fallback: DefaultFallback
+): string {
+  const lead = `${projectName} will stop using ${accountLabel}`;
+  switch (fallback.kind) {
+    case 'default':
+      return `${lead} and use your default ${providerName} account, ${fallback.label}.`;
+    case 'platform':
+      return `${lead} and use SAM’s platform ${providerName} account.`;
+    case 'none':
+      return `${lead} and have no ${providerName} account until you connect one.`;
+  }
 }

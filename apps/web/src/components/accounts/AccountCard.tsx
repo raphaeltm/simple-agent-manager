@@ -5,12 +5,12 @@
  */
 import { Button, DropdownMenu, type DropdownMenuItem } from '@simple-agent-manager/ui';
 import { Pin, Star } from 'lucide-react';
-import { useState } from 'react';
-import { Link } from 'react-router';
+import { useEffect, useRef, useState } from 'react';
+import { Link, useNavigate } from 'react-router';
 
 import { ConfirmDialog } from '../ConfirmDialog';
 import { CredentialLimitChip } from '../credential-limits/CredentialLimitChip';
-import type { AccountView } from './account-model';
+import { type AccountView, type DefaultFallback, describeUnpin } from './account-model';
 import { AccountStatus, ProviderMark, RoleBadge } from './AccountBits';
 import { type AccountProvider, credentialKindLabel } from './provider-meta';
 import { canUseLegacyRoutes, useAccountActions } from './useAccountActions';
@@ -33,6 +33,8 @@ export interface AccountCardProps {
   showProvider?: boolean;
   /** Hide the role badge where a surrounding heading already names the role. */
   showRole?: boolean;
+  /** What a project uses once its pin to this account is removed. */
+  fallback: DefaultFallback;
   onReplace?: (account: AccountView) => void;
 }
 
@@ -49,15 +51,25 @@ export function AccountCard({
   projectCount,
   showProvider = false,
   showRole = true,
+  fallback,
   onReplace,
 }: Readonly<AccountCardProps>) {
   const actions = useAccountActions();
+  const navigate = useNavigate();
   const [renaming, setRenaming] = useState(false);
   const [draftName, setDraftName] = useState(account.label);
   const [pending, setPending] = useState<PendingConfirm | null>(null);
   const [busy, setBusy] = useState(false);
+  const [showAllProjects, setShowAllProjects] = useState(false);
+  const renameInputRef = useRef<HTMLInputElement>(null);
   const legacy = canUseLegacyRoutes(account);
   const projectsOf = [...account.pinnedProjectIds, ...account.pausedProjectIds];
+  const shownProjects = showAllProjects ? projectsOf : projectsOf.slice(0, MAX_PROJECT_CHIPS);
+
+  // Focus the field once when renaming starts, not on every render.
+  useEffect(() => {
+    if (renaming) renameInputRef.current?.focus();
+  }, [renaming]);
 
   const menuItems: DropdownMenuItem[] = [
     {
@@ -72,26 +84,30 @@ export function AccountCard({
   if (account.role === 'default' && onReplace) {
     menuItems.push({ id: 'replace', label: 'Replace…', onClick: () => onReplace(account) });
   }
-  if (account.role === 'default') {
+  if (account.role === 'default' && legacy) {
     menuItems.push({
       id: 'disconnect',
       label: 'Disconnect',
       variant: 'danger',
-      disabled: !legacy,
-      disabledReason: 'Manage this account in Advanced settings',
       onClick: () => setPending({ type: 'disconnect' }),
     });
   }
-  if (account.role === 'pinned') {
+  if (account.role === 'pinned' && legacy) {
     for (const projectId of projectsOf.slice(0, MAX_UNPIN_MENU_ITEMS)) {
       menuItems.push({
         id: `unpin-${projectId}`,
         label: `Use default in ${projectNames.get(projectId) ?? 'project'}`,
-        disabled: !legacy,
-        disabledReason: 'Manage this pin in Advanced settings',
         onClick: () => setPending({ type: 'unpin', projectId }),
       });
     }
+  }
+  if (account.role !== 'unattached' && !legacy) {
+    // Accounts saved outside the connect flow have no route here; Advanced manages them.
+    menuItems.push({
+      id: 'advanced',
+      label: 'Manage in Advanced',
+      onClick: () => void navigate('/settings/advanced'),
+    });
   }
   if (account.role === 'unattached') {
     menuItems.push({
@@ -162,8 +178,14 @@ export function AccountCard({
                 id={`rename-${account.id}`}
                 value={draftName}
                 maxLength={120}
-                ref={(element) => element?.focus()}
+                ref={renameInputRef}
                 onChange={(event) => setDraftName(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Escape') {
+                    event.stopPropagation();
+                    setRenaming(false);
+                  }
+                }}
                 className="min-h-9 min-w-0 flex-1 rounded-sm border border-border-default bg-inset px-2.5 text-sm text-fg-primary"
               />
               <Button type="submit" size="sm" loading={busy} disabled={!draftName.trim()}>
@@ -220,7 +242,7 @@ export function AccountCard({
         {account.role === 'pinned' && (
           <>
             <Pin size={11} aria-hidden="true" className="shrink-0 text-info-fg" />
-            {projectsOf.slice(0, MAX_PROJECT_CHIPS).map((projectId) => (
+            {shownProjects.map((projectId) => (
               <Link
                 key={projectId}
                 to={`/projects/${projectId}/settings/accounts`}
@@ -231,7 +253,14 @@ export function AccountCard({
               </Link>
             ))}
             {projectsOf.length > MAX_PROJECT_CHIPS && (
-              <span className="text-fg-muted">+{projectsOf.length - MAX_PROJECT_CHIPS} more</span>
+              <button
+                type="button"
+                aria-expanded={showAllProjects}
+                onClick={() => setShowAllProjects((value) => !value)}
+                className="min-h-8 cursor-pointer rounded-md border-none bg-transparent px-1.5 text-xs text-accent hover:underline"
+              >
+                {showAllProjects ? 'Show fewer' : `+${projectsOf.length - MAX_PROJECT_CHIPS} more`}
+              </button>
             )}
           </>
         )}
@@ -252,7 +281,7 @@ export function AccountCard({
         loading={busy}
         variant={pending?.type === 'unpin' ? 'warning' : 'danger'}
         title={confirmTitle(pending, account)}
-        message={confirmMessage(pending, account, provider, projectNames)}
+        message={confirmMessage(pending, account, provider, projectNames, fallback)}
         confirmLabel={
           pending?.type === 'unpin'
             ? 'Use default'
@@ -275,14 +304,15 @@ function confirmMessage(
   pending: PendingConfirm | null,
   account: AccountView,
   provider: AccountProvider,
-  projectNames: ReadonlyMap<string, string>
+  projectNames: ReadonlyMap<string, string>,
+  fallback: DefaultFallback
 ): string {
   if (pending?.type === 'remove') {
     return 'No project uses this account, so removing it changes nothing that runs today.';
   }
   if (pending?.type === 'unpin') {
     const name = projectNames.get(pending.projectId) ?? 'This project';
-    return `${name} will stop using ${account.label} and use your default ${provider.name} account.`;
+    return describeUnpin(name, account.label, provider.name, fallback);
   }
   return `Projects without a pinned account stop using it. If you saved another ${provider.name} credential before, SAM switches to that one; otherwise connect a new account.`;
 }

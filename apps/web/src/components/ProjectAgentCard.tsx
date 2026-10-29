@@ -4,7 +4,6 @@
  * through to your Settings → Agents defaults when empty.
  */
 import type {
-  AgentCredentialInfo,
   AgentInfo,
   AgentPermissionMode,
   AgentType,
@@ -18,6 +17,7 @@ import { Alert, Button, Card, StatusBadge } from '@simple-agent-manager/ui';
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 
+import type { ProjectResolution } from './accounts/account-model';
 import { ModelSelect } from './ModelSelect';
 
 const DEFAULT_SUCCESS_BANNER_MS = 3000;
@@ -46,8 +46,8 @@ function modelPlaceholderFor(agentId: string): string {
 export interface ProjectAgentCardProps {
   agent: AgentInfo;
   projectId: string;
-  projectCredentials: AgentCredentialInfo[] | null;
-  userCredentials: AgentCredentialInfo[];
+  /** Which account this project uses for the agent; undefined while loading. */
+  account: ProjectResolution | undefined;
   defaultValue: { model?: string | null; permissionMode?: AgentPermissionMode | null } | undefined;
   onSaveDefault: (
     agentType: AgentType,
@@ -59,8 +59,7 @@ export interface ProjectAgentCardProps {
 export function ProjectAgentCard({
   agent,
   projectId,
-  projectCredentials,
-  userCredentials,
+  account,
   defaultValue,
   onSaveDefault,
   onClearDefault,
@@ -78,9 +77,6 @@ export function ProjectAgentCard({
     setModel(defaultValue?.model ?? '');
     setPermissionMode(defaultValue?.permissionMode ?? '');
   }, [defaultValue]);
-
-  const hasCredentialOverride = (projectCredentials?.length ?? 0) > 0;
-  const hasUserCredential = userCredentials.length > 0;
 
   const hasConfigOverride = Boolean(defaultValue?.model || defaultValue?.permissionMode);
   const configChanged =
@@ -122,14 +118,7 @@ export function ProjectAgentCard({
     }
   };
 
-  // Same vocabulary as Project settings → Accounts: a pinned account, or your default.
-  const statusLabel = hasCredentialOverride
-    ? 'Pinned account'
-    : hasUserCredential
-      ? 'Your default account'
-      : 'No account';
-  const statusKind: 'connected' | 'disconnected' =
-    hasCredentialOverride || hasUserCredential ? 'connected' : 'disconnected';
+  const summary = account ? describeAccount(account) : null;
 
   return (
     <Card
@@ -142,7 +131,7 @@ export function ProjectAgentCard({
           <h3 className="text-base font-semibold text-fg-primary">{agent.name}</h3>
           <p className="text-xs text-fg-muted">{agent.description}</p>
         </div>
-        <StatusBadge status={statusKind} label={statusLabel} />
+        {summary && <StatusBadge status={summary.status} label={summary.label} />}
       </div>
 
       <section
@@ -156,11 +145,7 @@ export function ProjectAgentCard({
           Account
         </h4>
         <p className="m-0 text-xs text-fg-muted">
-          {hasCredentialOverride
-            ? 'This project uses an account pinned to it.'
-            : hasUserCredential
-              ? 'This project uses your default account.'
-              : 'No account connected for this agent yet.'}{' '}
+          {summary?.detail ?? 'Checking which account this project uses…'}{' '}
           <Link to={`/projects/${projectId}/settings/accounts`} className="font-medium text-accent">
             Manage in Accounts
           </Link>
@@ -271,4 +256,47 @@ export function ProjectAgentCard({
       </section>
     </Card>
   );
+}
+
+/**
+ * Same vocabulary as Project settings → Accounts, read from the same resolution,
+ * so the two tabs can never disagree about which account a project uses.
+ */
+function describeAccount(account: ProjectResolution): {
+  label: string;
+  status: 'connected' | 'disconnected';
+  detail: string;
+} {
+  switch (account.source) {
+    case 'pinned':
+      return {
+        label: 'Pinned account',
+        status: 'connected',
+        detail: `This project uses ${account.account.label}, pinned to it.`,
+      };
+    case 'default':
+      return {
+        label: 'Your default account',
+        status: 'connected',
+        detail: `This project uses your default account, ${account.account.label}.`,
+      };
+    case 'blocked':
+      return {
+        label: 'Paused pin',
+        status: 'disconnected',
+        detail: 'Its pinned account is paused, so this agent can’t run here.',
+      };
+    case 'platform':
+      return {
+        label: 'SAM platform',
+        status: 'connected',
+        detail: 'This project uses SAM’s platform account.',
+      };
+    case 'none':
+      return {
+        label: 'No account',
+        status: 'disconnected',
+        detail: 'No account connected for this agent yet.',
+      };
+  }
 }

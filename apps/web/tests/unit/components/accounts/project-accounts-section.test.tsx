@@ -120,7 +120,7 @@ describe('ProjectAccountsSection', () => {
     fireEvent.click(within(row).getByRole('button', { name: /Use my default/ }));
     const dialog = screen.getByRole('dialog');
     expect(dialog).toHaveTextContent(
-      'Acme client portal will stop using Acme API key and use your default Claude Code account.'
+      'Acme client portal will stop using Acme API key and use your default Claude Code account, Work Max plan.'
     );
     fireEvent.click(within(dialog).getByRole('button', { name: 'Use default' }));
 

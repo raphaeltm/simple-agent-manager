@@ -73,6 +73,7 @@ export function AgentConnectForm({
   // Whether the guided sign-in button is on screen; the manual field is worded
   // as its alternative only when it is.
   const [guidedShown, setGuidedShown] = useState(false);
+  const [savedCredential, setSavedCredential] = useState<string | null>(null);
 
   if (!agent) {
     return <Alert variant="error">This agent is not available on this installation.</Alert>;
@@ -113,10 +114,15 @@ export function AgentConnectForm({
       credential: credential.trim(),
     };
     try {
-      if (projectId) {
-        await saveProjectAgentCredential(projectId, request);
-      } else {
-        await saveAgentCredential(request);
+      // A retry after only the settings step failed must not store the key twice.
+      if (savedCredential !== request.credential) {
+        const saved = projectId
+          ? await saveProjectAgentCredential(projectId, request)
+          : await saveAgentCredential(request);
+        setSavedCredential(request.credential);
+        if (saved.validation?.valid === false) {
+          toast.warning(`${agent.name} saved, but the credential looks invalid`);
+        }
       }
       if (showOpenCodeConfig) {
         await saveAgentSettings('opencode', {
@@ -215,6 +221,10 @@ export function AgentConnectForm({
           <textarea
             id="connect-credential"
             placeholder="Paste the full contents of ~/.codex/auth.json"
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
             value={credential}
             onChange={(e) => setCredential(e.currentTarget.value)}
             className={`${fieldClass} min-h-32 resize-y font-mono`}

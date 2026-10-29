@@ -99,6 +99,7 @@ export function ProjectSettingsAgents() {
         {projectId && (
           <ProjectAgentsSection
             projectId={projectId}
+            projectName={project?.name}
             initialAgentDefaults={project?.agentDefaults ?? null}
             onUpdated={() => {
               void reload();

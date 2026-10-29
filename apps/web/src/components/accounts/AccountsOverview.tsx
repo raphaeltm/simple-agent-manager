@@ -3,7 +3,7 @@
  * accounts, and quick-connect chips for the rest.
  */
 import { Plus } from 'lucide-react';
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { type AccountView, isProviderInUse, type ProviderAccounts } from './account-model';
 import { ProviderMark } from './AccountBits';
@@ -12,6 +12,8 @@ import { ProviderAccountsRow } from './ProviderAccountsRow';
 export interface AccountsOverviewProps {
   groups: ProviderAccounts[];
   projectNames: ReadonlyMap<string, string>;
+  open: string[];
+  onToggle: (providerId: string) => void;
   onConnect: (providerId: string) => void;
   onReplace: (account: AccountView) => void;
 }
@@ -28,13 +30,50 @@ function initiallyOpen(groups: ProviderAccounts[]): string[] {
   );
 }
 
+/**
+ * Which provider rows are expanded. Held by the section rather than the
+ * overview so switching to "By project" and back keeps it, and a provider that
+ * becomes connected while the page is open expands so its new card shows.
+ */
+export function useOpenProviderRows(groups: ProviderAccounts[] | null) {
+  const [openIds, setOpenIds] = useState<string[] | null>(null);
+  const seenInUse = useRef<Set<string> | null>(null);
+
+  useEffect(() => {
+    if (!groups) return;
+    const inUse = groups.filter(isProviderInUse).map((group) => group.provider.id);
+    if (seenInUse.current === null) {
+      seenInUse.current = new Set(inUse);
+      setOpenIds(initiallyOpen(groups));
+      return;
+    }
+    const seen = seenInUse.current;
+    const added = inUse.filter((id) => !seen.has(id));
+    if (added.length === 0) return;
+    for (const id of added) seen.add(id);
+    setOpenIds((prev) => [...(prev ?? []), ...added]);
+  }, [groups]);
+
+  const open = openIds ?? (groups ? initiallyOpen(groups) : []);
+  const toggle = useCallback((providerId: string) => {
+    setOpenIds((prev) => {
+      const current = prev ?? [];
+      return current.includes(providerId)
+        ? current.filter((id) => id !== providerId)
+        : [...current, providerId];
+    });
+  }, []);
+  return { open, toggle };
+}
+
 export function AccountsOverview({
   groups,
   projectNames,
+  open,
+  onToggle,
   onConnect,
   onReplace,
 }: Readonly<AccountsOverviewProps>) {
-  const [open, setOpen] = useState<string[]>(() => initiallyOpen(groups));
   const inUse = groups.filter(isProviderInUse);
   const notConnected = groups.filter((group) => !isProviderInUse(group));
 
@@ -47,13 +86,7 @@ export function AccountsOverview({
           projectNames={projectNames}
           first={index === 0}
           open={open.includes(group.provider.id)}
-          onToggle={() =>
-            setOpen((prev) =>
-              prev.includes(group.provider.id)
-                ? prev.filter((id) => id !== group.provider.id)
-                : [...prev, group.provider.id]
-            )
-          }
+          onToggle={() => onToggle(group.provider.id)}
           onConnect={onConnect}
           onReplace={onReplace}
         />

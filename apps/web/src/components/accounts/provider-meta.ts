@@ -140,3 +140,10 @@ export function accountSwatch(hue: string, index: number): string {
   const amount = Math.min(0.2 + step * 0.15, 0.65);
   return index % 2 === 1 ? mix(hue, [255, 255, 255], amount) : mix(hue, [0, 0, 0], amount);
 }
+
+/** The legacy credential kind an agent account was saved under, when it has one. */
+export function legacyAgentKind(credentialKind: string): 'api-key' | 'oauth-token' | null {
+  if (credentialKind === 'api-key') return 'api-key';
+  if (credentialKind === 'oauth-token' || credentialKind === 'auth-json') return 'oauth-token';
+  return null;
+}

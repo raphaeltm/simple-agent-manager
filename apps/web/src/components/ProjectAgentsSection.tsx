@@ -4,66 +4,50 @@
  * Project settings → Accounts; the cards only summarise it.
  */
 import type {
-  AgentCredentialInfo,
   AgentInfo,
   AgentPermissionMode,
   AgentType,
   ProjectAgentDefaults,
 } from '@simple-agent-manager/shared';
 import { Alert, Spinner } from '@simple-agent-manager/ui';
-import { useCallback, useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useEffect, useMemo, useState } from 'react';
 
-import {
-  listAgentCredentials,
-  listAgents,
-  listProjectAgentCredentials,
-  updateProject,
-} from '../lib/api';
+import { useAccountsData } from '../hooks/useAccounts';
+import { useQueryScope } from '../hooks/useQueryScope';
+import { updateProject } from '../lib/api';
+import { agentCatalogQueryOptions } from '../lib/query-options';
 import { ProjectAgentCard } from './ProjectAgentCard';
 
 interface ProjectAgentsSectionProps {
   projectId: string;
+  projectName?: string;
   initialAgentDefaults: ProjectAgentDefaults | null | undefined;
   onUpdated: (next: ProjectAgentDefaults | null) => void;
 }
 
 export function ProjectAgentsSection({
   projectId,
+  projectName,
   initialAgentDefaults,
   onUpdated,
 }: ProjectAgentsSectionProps) {
-  const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [projectCreds, setProjectCreds] = useState<AgentCredentialInfo[]>([]);
-  const [userCreds, setUserCreds] = useState<AgentCredentialInfo[]>([]);
+  const queryScope = useQueryScope();
+  const catalog = useQuery({
+    ...agentCatalogQueryOptions(queryScope),
+    enabled: Boolean(queryScope),
+  });
+  const agents: AgentInfo[] = catalog.data ?? [];
+  const project = useMemo(
+    () => ({ id: projectId, name: projectName ?? projectId }),
+    [projectId, projectName]
+  );
+  const { model: accounts } = useAccountsData({ project });
   const [defaults, setDefaults] = useState<ProjectAgentDefaults>(initialAgentDefaults ?? {});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setDefaults(initialAgentDefaults ?? {});
   }, [initialAgentDefaults]);
-
-  const loadData = useCallback(async () => {
-    try {
-      setError(null);
-      const [agentResult, projectResult, userResult] = await Promise.all([
-        listAgents(),
-        listProjectAgentCredentials(projectId),
-        listAgentCredentials(),
-      ]);
-      setAgents(agentResult.agents);
-      setProjectCreds(projectResult.credentials);
-      setUserCreds(userResult.credentials);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load project agent data');
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId]);
-
-  useEffect(() => {
-    void loadData();
-  }, [loadData]);
 
   const handleSaveDefault = async (
     agentType: AgentType,
@@ -93,7 +77,7 @@ export function ProjectAgentsSection({
     onUpdated(updated.agentDefaults ?? null);
   };
 
-  if (loading && agents.length === 0) {
+  if (catalog.data === undefined && !catalog.error) {
     return (
       <div className="flex justify-center p-4">
         <Spinner size="md" />
@@ -101,12 +85,12 @@ export function ProjectAgentsSection({
     );
   }
 
-  if (error) {
+  if (catalog.data === undefined && catalog.error) {
     return (
       <Alert variant="error">
-        {error}
+        {catalog.error instanceof Error ? catalog.error.message : 'Failed to load project agents'}
         <button
-          onClick={() => void loadData()}
+          onClick={() => void catalog.refetch()}
           className="ml-2 text-inherit underline bg-transparent border-none cursor-pointer text-[length:inherit]"
         >
           Retry
@@ -123,15 +107,15 @@ export function ProjectAgentsSection({
       </Alert>
 
       {agents.map((agent) => {
-        const projectAgentCreds = projectCreds.filter((c) => c.agentType === agent.id);
-        const userAgentCreds = userCreds.filter((c) => c.agentType === agent.id);
+        const group = accounts?.agents.find((candidate) => candidate.provider.id === agent.id);
         return (
           <ProjectAgentCard
             key={agent.id}
             agent={agent}
             projectId={projectId}
-            projectCredentials={projectAgentCreds.length > 0 ? projectAgentCreds : null}
-            userCredentials={userAgentCreds}
+            account={
+              accounts ? (group?.resolutions.get(projectId) ?? { source: 'none' }) : undefined
+            }
             defaultValue={defaults[agent.id]}
             onSaveDefault={handleSaveDefault}
             onClearDefault={handleClearDefault}

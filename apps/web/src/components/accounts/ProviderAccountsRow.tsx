@@ -10,12 +10,13 @@ import {
   type AccountView,
   type CoverageSegment,
   coveredProjectCount,
+  defaultFallback,
   type ProviderAccounts,
 } from './account-model';
 import { ProviderMark } from './AccountBits';
 import { AccountCard } from './AccountCard';
 
-export function segmentFill(segment: Pick<CoverageSegment, 'role' | 'color'>): string {
+function segmentFill(segment: Pick<CoverageSegment, 'role' | 'color'>): string {
   switch (segment.role) {
     case 'blocked':
       return 'repeating-linear-gradient(135deg, color-mix(in srgb, var(--sam-color-danger) 70%, transparent) 0 5px, color-mix(in srgb, var(--sam-color-danger) 25%, transparent) 5px 10px)';
@@ -28,20 +29,16 @@ export function segmentFill(segment: Pick<CoverageSegment, 'role' | 'color'>): s
   }
 }
 
-export function CoverageBar({ segments }: Readonly<{ segments: CoverageSegment[] }>) {
+function CoverageBar({ segments }: Readonly<{ segments: CoverageSegment[] }>) {
   const total = segments.reduce((sum, segment) => sum + segment.projectIds.length, 0);
   if (total === 0) {
     return <div className="h-3.5 w-full rounded-full bg-inset" aria-hidden="true" />;
   }
+  // Decorative: the legend next to it states the same counts as text.
   return (
     <div
-      role="img"
-      aria-label={segments
-        .map(
-          (segment) =>
-            `${segment.label}: ${segment.projectIds.length} project${segment.projectIds.length === 1 ? '' : 's'}`
-        )
-        .join(', ')}
+      aria-hidden="true"
+      data-testid="coverage-bar"
       className="flex h-3.5 w-full gap-0.5 overflow-hidden rounded-full bg-inset"
     >
       {segments.map((segment) => {
@@ -98,6 +95,8 @@ function SegmentLegend({
   );
 }
 
+const LANE_COLUMNS: Record<number, string> = { 2: 'lg:grid-cols-2', 3: 'lg:grid-cols-3' };
+
 export interface ProviderAccountsRowProps {
   group: ProviderAccounts;
   projectNames: ReadonlyMap<string, string>;
@@ -122,6 +121,10 @@ export function ProviderAccountsRow({
   const pinned = accounts.filter((account) => account.role === 'pinned');
   const unattached = accounts.filter((account) => account.role === 'unattached');
   const blocked = segments.find((segment) => segment.role === 'blocked');
+  // Empty Pinned / Unattached lanes are hidden, so the grid fits what is left.
+  const laneCount = 1 + (pinned.length > 0 || blocked ? 1 : 0) + (unattached.length > 0 ? 1 : 0);
+  const laneColumns = LANE_COLUMNS[laneCount] ?? '';
+  const fallback = defaultFallback(group);
   const projectCount = projectNames.size;
   const panelId = `accounts-${provider.kind}-${provider.id}`;
   const subtitle =
@@ -138,6 +141,7 @@ export function ProviderAccountsRow({
       coveredCount={coveredProjectCount(group, account.id)}
       projectCount={projectCount}
       showRole={false}
+      fallback={fallback}
       onReplace={onReplace}
     />
   );
@@ -175,7 +179,7 @@ export function ProviderAccountsRow({
       </button>
 
       {open && (
-        <div id={panelId} className="grid items-start gap-3 px-3 pb-4 md:px-4 lg:grid-cols-3">
+        <div id={panelId} className={`grid items-start gap-3 px-3 pb-4 md:px-4 ${laneColumns}`}>
           <Lane
             icon={<Star size={12} aria-hidden="true" fill="currentColor" />}
             tone="text-success-fg"
@@ -192,38 +196,44 @@ export function ProviderAccountsRow({
               </EmptyLane>
             )}
           </Lane>
-          <Lane
-            icon={<Pin size={12} aria-hidden="true" />}
-            tone="text-info-fg"
-            title="Pinned"
-            caption="Only these projects"
-          >
-            {pinned.length > 0 ? pinned.map(card) : <EmptyLane>No projects pinned</EmptyLane>}
-            {blocked && (
-              <p className="m-0 flex items-start gap-1.5 rounded-md bg-danger-tint p-2 text-[11px] text-danger-fg">
-                <AlertTriangle size={12} aria-hidden="true" className="mt-px shrink-0" />
-                {blocked.projectIds.length} project{blocked.projectIds.length === 1 ? '' : 's'}{' '}
-                can’t use {provider.name} because their pinned account is turned off.
-              </p>
-            )}
-          </Lane>
-          <Lane
-            icon={<CircleDashed size={12} aria-hidden="true" />}
-            tone="text-fg-muted"
-            title="Unattached"
-            caption="Connected, never selected"
-          >
-            {unattached.length > 0 ? unattached.map(card) : <EmptyLane>Nothing idle</EmptyLane>}
-          </Lane>
+          {(pinned.length > 0 || blocked) && (
+            <Lane
+              icon={<Pin size={12} aria-hidden="true" />}
+              tone="text-info-fg"
+              title="Pinned"
+              caption="Only these projects"
+            >
+              {pinned.map(card)}
+              {blocked && (
+                <p className="m-0 flex items-start gap-1.5 rounded-md bg-danger-tint p-2 text-[11px] text-danger-fg">
+                  <AlertTriangle size={12} aria-hidden="true" className="mt-px shrink-0" />
+                  {blocked.projectIds.length} project{blocked.projectIds.length === 1 ? '' : 's'}{' '}
+                  can’t use {provider.name} because their pinned account is paused.
+                </p>
+              )}
+            </Lane>
+          )}
+          {unattached.length > 0 && (
+            <Lane
+              icon={<CircleDashed size={12} aria-hidden="true" />}
+              tone="text-fg-muted"
+              title="Unattached"
+              caption="Connected, not in use"
+            >
+              {unattached.map(card)}
+            </Lane>
+          )}
           <button
             type="button"
             onClick={() => onConnect(provider.id)}
-            className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 justify-self-start rounded-md border border-dashed border-border-default bg-transparent px-3 text-xs font-semibold text-accent hover:border-accent lg:col-span-3"
+            className="inline-flex min-h-11 cursor-pointer items-center gap-1.5 justify-self-start rounded-md border border-dashed border-border-default bg-transparent px-3 text-xs font-semibold text-accent hover:border-accent lg:col-span-full"
           >
             <Plus size={14} aria-hidden="true" />
-            {accounts.length > 0
+            {defaults.length > 0
               ? `Replace your ${provider.name} default`
-              : `Connect ${provider.name}`}
+              : accounts.length > 0
+                ? `Add a ${provider.name} default`
+                : `Connect ${provider.name}`}
           </button>
         </div>
       )}
@@ -247,10 +257,10 @@ function Lane({
   return (
     <div className="flex min-w-0 flex-col gap-2 rounded-md bg-inset p-2.5">
       <div className="flex flex-wrap items-baseline justify-between gap-x-2">
-        <h4 className={`m-0 inline-flex items-center gap-1.5 text-xs font-semibold ${tone}`}>
+        <h3 className={`m-0 inline-flex items-center gap-1.5 text-xs font-semibold ${tone}`}>
           {icon}
           {title}
-        </h4>
+        </h3>
         <span className="text-[10px] text-fg-muted">{caption}</span>
       </div>
       {children}

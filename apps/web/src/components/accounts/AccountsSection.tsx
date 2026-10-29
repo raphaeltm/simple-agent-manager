@@ -8,9 +8,14 @@ import { type ReactNode, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 
 import { Chips } from '../page-kit/ui';
-import type { AccountProject, AccountView, ProviderAccounts } from './account-model';
+import {
+  type AccountProject,
+  type AccountView,
+  isProviderInUse,
+  type ProviderAccounts,
+} from './account-model';
 import { AccountsByProject } from './AccountsByProject';
-import { AccountsOverview } from './AccountsOverview';
+import { AccountsOverview, useOpenProviderRows } from './AccountsOverview';
 
 type View = 'provider' | 'project';
 
@@ -24,6 +29,8 @@ export interface AccountsSectionProps {
   description: ReactNode;
   groups: ProviderAccounts[] | null;
   projects: AccountProject[];
+  /** The project list hit its cap, so coverage leaves some projects out. */
+  projectsTruncated: boolean;
   unlinkedCredentialCount: number;
   isLoading: boolean;
   error: string | null;
@@ -37,6 +44,7 @@ export function AccountsSection({
   description,
   groups,
   projects,
+  projectsTruncated,
   unlinkedCredentialCount,
   isLoading,
   error,
@@ -45,6 +53,7 @@ export function AccountsSection({
   onReplace,
 }: Readonly<AccountsSectionProps>) {
   const [view, setView] = useState<View>('provider');
+  const rows = useOpenProviderRows(groups);
   const projectNames = useMemo(
     () => new Map(projects.map((project) => [project.id, project.name])),
     [projects]
@@ -59,7 +68,8 @@ export function AccountsSection({
           </h2>
           <p className="m-0 mt-1 text-sm text-fg-muted">{description}</p>
         </div>
-        <Button size="sm" onClick={() => onConnect()}>
+        {/* Waits for the accounts so the sheet can say what a new default replaces. */}
+        <Button size="sm" onClick={() => onConnect()} disabled={!groups}>
           <Plus size={14} aria-hidden="true" /> Connect account
         </Button>
       </div>
@@ -92,6 +102,8 @@ export function AccountsSection({
           <AccountsOverview
             groups={groups}
             projectNames={projectNames}
+            open={rows.open}
+            onToggle={rows.toggle}
             onConnect={onConnect}
             onReplace={onReplace}
           />
@@ -99,8 +111,8 @@ export function AccountsSection({
           <AccountsByProject groups={groups} projects={projects} />
         ))}
 
-      {groups && (
-        <p className="m-0 flex flex-wrap gap-x-4 gap-y-1 text-[11px] text-fg-muted">
+      {groups?.some(isProviderInUse) && (
+        <p className="m-0 flex flex-wrap gap-x-4 gap-y-1 text-xs text-fg-muted">
           <span>
             <strong className="text-success-fg">★ Default</strong> — every project without a pin
           </span>
@@ -108,12 +120,25 @@ export function AccountsSection({
             <strong className="text-info-fg">Pinned</strong> — only the projects you choose
           </span>
           <span>
-            <strong className="text-fg-primary">Unattached</strong> — connected, nothing uses it
+            <strong className="text-fg-primary">Unattached</strong> — connected, not in use
           </span>
+        </p>
+      )}
+      {projectsTruncated && (
+        <p className="m-0 text-xs text-warning-fg">
+          Counts cover your first {projects.length} projects; the rest are not shown here.
+        </p>
+      )}
+      {groups && (
+        <p className="m-0 text-xs text-fg-muted">
+          Attach an existing account to a project, or turn one off, in{' '}
           <Link to="/settings/advanced" className="text-accent">
-            Advanced: raw credential records
-            {unlinkedCredentialCount > 0 ? ` (${unlinkedCredentialCount} unlinked)` : ''}
+            Advanced
           </Link>
+          {unlinkedCredentialCount > 0
+            ? ` (${unlinkedCredentialCount} credential${unlinkedCredentialCount === 1 ? '' : 's'} not linked to an account)`
+            : ''}
+          .
         </p>
       )}
     </section>

@@ -103,7 +103,7 @@ A project's **Accounts** tab (in its settings) shows, for each agent, whether th
 
 ### Agent defaults
 
-Under **Settings → Agents → Defaults**, each agent you can run has one card: **Model**, **Permissions** (see [Permission mode](#permission-mode)), **Billing** (Claude Code and Codex only; see [AI Provider Modes](#ai-provider-modes)), and, for OpenCode, the **OpenCode provider** (Zen, Go, or custom). Defaults belong to the agent, not to an account: they apply whichever account a project uses, and project profiles can override them.
+Under **Settings → Agents → Agent settings**, each agent you can run has one card: **Model**, **Permissions** (see [Permission mode](#permission-mode)), **Billing** (Claude Code and Codex only; see [AI Provider Modes](#ai-provider-modes)), and, for OpenCode, the **OpenCode provider** (Zen, Go, or custom). Defaults belong to the agent, not to an account: they apply whichever account a project uses, and project profiles can override them.
 
 ## Connecting a subscription with guided sign-in
 
@@ -203,7 +203,7 @@ Each agent runs in one of three provider modes, which control where LLM traffic 
 | **OAuth**   | A token from your provider subscription (for example Claude Max/Pro)             |
 | **SAM**     | The platform's managed AI proxy, with billing and budget handled by SAM (opt-in) |
 
-Connecting an account with an API key or a subscription sets which of the first two you use. For Claude Code and Codex, **Billing** in **Settings → Agents → Defaults** can pick one explicitly: **Automatic — your connected account**, **Your API key**, **Your subscription**, or **SAM platform**. The **SAM** platform proxy is never selected automatically — you have to opt in.
+Connecting an account with an API key or a subscription sets which of the first two you use. For Claude Code and Codex, **Billing** in **Settings → Agents → Agent settings** can pick one explicitly: **Automatic — your connected account**, **Your API key**, **Your subscription**, or **SAM platform**. The **SAM** platform proxy is never selected automatically — you have to opt in.
 
 In **SAM** mode the proxy serves the models in the platform catalog, which an operator can narrow, and an administrator can limit your account to certain model tiers (low-cost, standard, premium). A model outside either is refused with an error naming the model and what you can use; your own API keys and subscriptions are not affected.
 

@@ -13,11 +13,11 @@ import {
   ccConfigurationsQueryOptions,
   ccCredentialsQueryOptions,
   credentialLimitQueryKeys,
-  credentialQueryKeys,
   myCredentialLimitsQueryOptions,
   projectListQueryOptions,
   resolutionStatusQueryOptions,
 } from '../lib/query-options';
+import { useInvalidateCredentials } from './useCredentials';
 import { useQueryScope } from './useQueryScope';
 
 /** Projects the account views can attribute coverage to (same cap as Advanced). */
@@ -26,6 +26,8 @@ const ACCOUNT_PROJECT_LIMIT = 100;
 interface UseAccountsResult {
   model: AccountsModel | null;
   projects: AccountProject[];
+  /** The project list hit its cap, so coverage counts leave some projects out. */
+  projectsTruncated: boolean;
   /** True only before the first complete load — refetches keep `model` visible. */
   isLoading: boolean;
   error: string | null;
@@ -108,6 +110,7 @@ export function useAccountsData(options?: {
   return {
     model,
     projects: projectList,
+    projectsTruncated: (projects.data?.length ?? 0) >= ACCOUNT_PROJECT_LIMIT,
     isLoading: enabled && model === null && !error,
     error,
     retry,
@@ -116,18 +119,21 @@ export function useAccountsData(options?: {
 
 /**
  * Refresh everything an account mutation can change: the cc_* lists, the legacy
- * cloud-credential list (node pools and onboarding read it), agent credential
- * state, and usage limits.
+ * cloud-credential list (node pools and onboarding read it), agent credentials
+ * and the catalog's "configured" flags, and usage limits. Per-agent settings are
+ * left alone: no account change touches them.
  */
 export function useInvalidateAccounts(): () => Promise<void> {
   const queryClient = useQueryClient();
   const queryScope = useQueryScope();
+  const invalidateCredentials = useInvalidateCredentials(queryScope);
   return useCallback(async () => {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: accountQueryKeys.all(queryScope) }),
-      queryClient.invalidateQueries({ queryKey: credentialQueryKeys.all(queryScope) }),
-      queryClient.invalidateQueries({ queryKey: agentQueryKeys.all(queryScope) }),
+      invalidateCredentials(),
+      queryClient.invalidateQueries({ queryKey: agentQueryKeys.credentials(queryScope) }),
+      queryClient.invalidateQueries({ queryKey: agentQueryKeys.catalog(queryScope) }),
       queryClient.invalidateQueries({ queryKey: credentialLimitQueryKeys.all(queryScope) }),
     ]);
-  }, [queryClient, queryScope]);
+  }, [queryClient, queryScope, invalidateCredentials]);
 }

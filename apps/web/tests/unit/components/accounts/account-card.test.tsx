@@ -7,6 +7,10 @@ const mocks = vi.hoisted(() => ({
   deleteCCConfiguration: vi.fn(),
   deleteCCCredential: vi.fn(),
   listCCConfigurations: vi.fn(),
+  listCCAttachments: vi.fn(),
+  listCCCredentials: vi.fn(),
+  listAgentCredentials: vi.fn(),
+  deleteCCAttachment: vi.fn(),
   deleteCredential: vi.fn(),
   deleteAgentCredentialByKind: vi.fn(),
   deleteProjectAgentCredential: vi.fn(),
@@ -25,6 +29,10 @@ vi.mock('../../../../src/lib/api', async (importOriginal) => ({
   deleteCCConfiguration: mocks.deleteCCConfiguration,
   deleteCCCredential: mocks.deleteCCCredential,
   listCCConfigurations: mocks.listCCConfigurations,
+  listCCAttachments: mocks.listCCAttachments,
+  listCCCredentials: mocks.listCCCredentials,
+  listAgentCredentials: mocks.listAgentCredentials,
+  deleteCCAttachment: mocks.deleteCCAttachment,
   deleteCredential: mocks.deleteCredential,
   deleteAgentCredentialByKind: mocks.deleteAgentCredentialByKind,
   deleteProjectAgentCredential: mocks.deleteProjectAgentCredential,
@@ -38,6 +46,7 @@ vi.mock('../../../../src/hooks/useToast', () => ({
 import {
   type AccountView,
   buildAccountsModel,
+  defaultFallback,
   type ProviderAccounts,
 } from '../../../../src/components/accounts/account-model';
 import { AccountCard } from '../../../../src/components/accounts/AccountCard';
@@ -68,6 +77,7 @@ function renderCard(providerGroup: ProviderAccounts, view: AccountView, onReplac
         projectNames={new Map(PROJECTS.map((project) => [project.id, project.name]))}
         coveredCount={3}
         projectCount={PROJECTS.length}
+        fallback={defaultFallback(providerGroup)}
         onReplace={onReplace}
       />
     </MemoryRouter>,
@@ -110,6 +120,9 @@ describe('AccountCard', () => {
       if ('mockResolvedValue' in fn) fn.mockResolvedValue(undefined);
     }
     mocks.listCCConfigurations.mockResolvedValue([]);
+    mocks.listCCAttachments.mockResolvedValue([]);
+    mocks.listCCCredentials.mockResolvedValue([]);
+    mocks.listAgentCredentials.mockResolvedValue({ credentials: [] });
   });
 
   it('renames the account through the cc credential route', async () => {
@@ -159,27 +172,51 @@ describe('AccountCard', () => {
     );
   });
 
-  it('keeps a disconnected default’s records while a project still pins it', async () => {
-    const rows = accountRows({
-      id: 'both',
-      name: 'Shared key',
-      kind: 'agent',
-      target: 'claude-code',
-      isDefault: true,
-      pins: ['p-api'],
-    });
-    const claude = group(rows, 'agent', 'claude-code');
-    renderCard(claude, account(claude, 'Shared key'));
+  it('keeps a disconnected default’s records when the server shows a project still uses it', async () => {
+    // The cached view says nothing pins it; another tab pinned a project since.
+    mocks.listCCAttachments.mockResolvedValue([
+      { id: 'att-new-pin', configurationId: 'cfg-work', projectId: 'p-api', isActive: true },
+    ]);
+    const claude = group(CLAUDE, 'agent', 'claude-code');
+    renderCard(claude, account(claude, 'Work Max plan'));
 
-    openMenu('Shared key');
+    openMenu('Work Max plan');
     fireEvent.click(screen.getByRole('menuitem', { name: 'Disconnect' }));
     fireEvent.click(within(confirmDialog()).getByRole('button', { name: 'Disconnect' }));
 
-    await waitFor(() =>
-      expect(mocks.deleteAgentCredentialByKind).toHaveBeenCalledWith('claude-code', 'api-key')
-    );
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Work Max plan disconnected'));
+    expect(mocks.deleteAgentCredentialByKind).toHaveBeenCalledWith('claude-code', 'oauth-token');
     expect(mocks.deleteCCConfiguration).not.toHaveBeenCalled();
     expect(mocks.deleteCCCredential).not.toHaveBeenCalled();
+  });
+
+  it('detaches a cloud default that has no legacy row', async () => {
+    const { ApiClientError } = await import('../../../../src/lib/api');
+    mocks.deleteCredential.mockRejectedValue(new ApiClientError('NOT_FOUND', 'Not found', 404));
+    mocks.listCCAttachments
+      .mockResolvedValueOnce([
+        { id: 'att-hz-default', configurationId: 'cfg-hz', projectId: null, isActive: true },
+        { id: 'att-other', configurationId: 'cfg-other', projectId: null, isActive: true },
+      ])
+      .mockResolvedValue([]);
+    const rows = accountRows({
+      id: 'hz',
+      name: 'Hetzner — Personal',
+      kind: 'compute',
+      target: 'hetzner',
+      isDefault: true,
+    });
+    const hetzner = group(rows, 'compute', 'hetzner');
+    renderCard(hetzner, account(hetzner, 'Hetzner — Personal'));
+
+    openMenu('Hetzner — Personal');
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Disconnect' }));
+    fireEvent.click(within(confirmDialog()).getByRole('button', { name: 'Disconnect' }));
+
+    await waitFor(() => expect(mocks.deleteCCCredential).toHaveBeenCalledWith('cred-hz'));
+    expect(mocks.deleteCCAttachment).toHaveBeenCalledTimes(1);
+    expect(mocks.deleteCCAttachment).toHaveBeenCalledWith('att-hz-default');
+    expect(mocks.error).not.toHaveBeenCalled();
   });
 
   it('disconnects a cloud default through the provider credential route', async () => {
@@ -212,7 +249,7 @@ describe('AccountCard', () => {
     openMenu('Acme API key');
     fireEvent.click(screen.getByRole('menuitem', { name: 'Use default in Acme client portal' }));
     expect(confirmDialog()).toHaveTextContent(
-      'Acme client portal will stop using Acme API key and use your default Claude Code account.'
+      'Acme client portal will stop using Acme API key and use your default Claude Code account, Work Max plan.'
     );
     fireEvent.click(within(confirmDialog()).getByRole('button', { name: 'Use default' }));
 
@@ -240,6 +277,69 @@ describe('AccountCard', () => {
     expect(mocks.deleteCCConfiguration.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.deleteCCCredential.mock.invocationCallOrder[0] ?? 0
     );
+    expect(mocks.deleteAgentCredentialByKind).not.toHaveBeenCalled();
+  });
+
+  it('refuses to remove an account a project started using since the page loaded', async () => {
+    mocks.listCCAttachments.mockResolvedValue([
+      { id: 'att-pin', configurationId: 'cfg-spare', projectId: 'p-api', isActive: true },
+    ]);
+    const claude = group(CLAUDE, 'agent', 'claude-code');
+    renderCard(claude, account(claude, 'Old personal key'));
+
+    fireEvent.click(
+      within(screen.getByTestId('account-card-cfg-spare')).getByRole('button', { name: 'Remove' })
+    );
+    fireEvent.click(within(confirmDialog()).getByRole('button', { name: 'Remove' }));
+
+    await waitFor(() =>
+      expect(mocks.error).toHaveBeenCalledWith(
+        'A project started using this account. Refresh and try again.'
+      )
+    );
+    expect(mocks.deleteCCConfiguration).not.toHaveBeenCalled();
+  });
+
+  it('also deletes the removed key’s inactive legacy copy so it cannot be promoted later', async () => {
+    mocks.listAgentCredentials.mockResolvedValue({
+      credentials: [
+        { agentType: 'claude-code', credentialKind: 'api-key', isActive: false },
+        { agentType: 'claude-code', credentialKind: 'oauth-token', isActive: true },
+      ],
+    });
+    const claude = group(CLAUDE, 'agent', 'claude-code');
+    renderCard(claude, account(claude, 'Old personal key'));
+
+    fireEvent.click(
+      within(screen.getByTestId('account-card-cfg-spare')).getByRole('button', { name: 'Remove' })
+    );
+    fireEvent.click(within(confirmDialog()).getByRole('button', { name: 'Remove' }));
+
+    await waitFor(() =>
+      expect(mocks.deleteAgentCredentialByKind).toHaveBeenCalledWith('claude-code', 'api-key')
+    );
+  });
+
+  it('leaves the legacy copy alone when the current default uses the same kind', async () => {
+    mocks.listAgentCredentials.mockResolvedValue({
+      credentials: [{ agentType: 'claude-code', credentialKind: 'api-key', isActive: false }],
+    });
+    mocks.listCCAttachments
+      .mockResolvedValueOnce([]) // the in-use check for the removed account
+      .mockResolvedValue([
+        { id: 'att-d', configurationId: 'cfg-d', consumerTarget: 'claude-code', projectId: null },
+      ]);
+    mocks.listCCConfigurations.mockResolvedValue([{ id: 'cfg-d', credentialId: 'cred-d' }]);
+    mocks.listCCCredentials.mockResolvedValue([{ id: 'cred-d', kind: 'api-key' }]);
+    const claude = group(CLAUDE, 'agent', 'claude-code');
+    renderCard(claude, account(claude, 'Old personal key'));
+
+    fireEvent.click(
+      within(screen.getByTestId('account-card-cfg-spare')).getByRole('button', { name: 'Remove' })
+    );
+    fireEvent.click(within(confirmDialog()).getByRole('button', { name: 'Remove' }));
+
+    await waitFor(() => expect(mocks.success).toHaveBeenCalledWith('Old personal key removed'));
     expect(mocks.deleteAgentCredentialByKind).not.toHaveBeenCalled();
   });
 

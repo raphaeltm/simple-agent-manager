@@ -4,19 +4,27 @@ import type { ReactElement } from 'react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
+import { type AccountRows, accountRows, mergeRows } from './accounts/fixtures';
+
 const mocks = vi.hoisted(() => ({
   listAgents: vi.fn(),
-  listAgentCredentials: vi.fn(),
-  listProjectAgentCredentials: vi.fn(),
   updateProject: vi.fn(),
+  getResolutionStatus: vi.fn(),
+  listCCCredentials: vi.fn(),
+  listCCConfigurations: vi.fn(),
+  listCCAttachments: vi.fn(),
+  listProjects: vi.fn(),
+  getMyCredentialLimits: vi.fn(),
+}));
+
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
-  listAgents: mocks.listAgents,
-  listAgentCredentials: mocks.listAgentCredentials,
-  listProjectAgentCredentials: mocks.listProjectAgentCredentials,
-  updateProject: mocks.updateProject,
+  ...mocks,
 }));
 
 vi.mock('../../../src/hooks/useToast', () => ({
@@ -33,7 +41,7 @@ import { ProjectAgentsSection } from '../../../src/components/ProjectAgentsSecti
 
 // The account summary links to Project settings → Accounts, so render in a router.
 function renderSection(ui: ReactElement) {
-  return render(<MemoryRouter>{ui}</MemoryRouter>);
+  return render(<MemoryRouter>{ui}</MemoryRouter>, { wrapper: QueryTestWrapper });
 }
 
 const AGENT_LIST = {
@@ -57,26 +65,28 @@ const AGENT_LIST = {
   ],
 };
 
-function makeUserCred(agentType = 'claude-code') {
-  return {
-    id: `user-cred-${agentType}`,
-    agentType,
-    credentialKind: 'api-key',
-    maskedKey: 'sk-****abcd',
-    isActive: true,
-    createdAt: '2026-04-01T00:00:00Z',
-    updatedAt: '2026-04-01T00:00:00Z',
-  };
+const DEFAULT_CLAUDE = accountRows({
+  id: 'work',
+  name: 'Work key',
+  kind: 'agent',
+  target: 'claude-code',
+  isDefault: true,
+});
+
+function serveAccounts(rows: AccountRows) {
+  mocks.listCCCredentials.mockResolvedValue(rows.credentials);
+  mocks.listCCConfigurations.mockResolvedValue(rows.configurations);
+  mocks.listCCAttachments.mockResolvedValue(rows.attachments);
 }
 
 describe('ProjectAgentsSection', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.listAgents.mockResolvedValue(AGENT_LIST);
-    mocks.listAgentCredentials.mockResolvedValue({
-      credentials: [makeUserCred('claude-code')],
-    });
-    mocks.listProjectAgentCredentials.mockResolvedValue({ credentials: [] });
+    mocks.getResolutionStatus.mockResolvedValue({ consumers: [] });
+    mocks.listProjects.mockResolvedValue({ projects: [{ id: 'proj-1', name: 'Project one' }] });
+    mocks.getMyCredentialLimits.mockResolvedValue({ credentials: [] });
+    serveAccounts(DEFAULT_CLAUDE);
   });
 
   it('renders one card per agent', async () => {
@@ -95,8 +105,10 @@ describe('ProjectAgentsSection', () => {
     );
 
     const claude = await screen.findByTestId('project-agent-card-claude-code');
+    expect(
+      await within(claude).findByText('This project uses your default account, Work key.')
+    ).toBeInTheDocument();
     expect(within(claude).getByText('Your default account')).toBeInTheDocument();
-    expect(within(claude).getByText(/This project uses your default account/)).toBeInTheDocument();
     expect(within(claude).getByRole('link', { name: 'Manage in Accounts' })).toHaveAttribute(
       'href',
       '/projects/proj-1/settings/accounts'
@@ -110,26 +122,51 @@ describe('ProjectAgentsSection', () => {
   });
 
   it('shows a pinned account when the project has its own', async () => {
-    mocks.listProjectAgentCredentials.mockResolvedValue({
-      credentials: [
-        {
-          id: 'proj-cred-claude',
-          agentType: 'claude-code',
-          credentialKind: 'api-key',
-          maskedKey: 'sk-****proj',
-          isActive: true,
-          createdAt: '2026-04-01T00:00:00Z',
-          updatedAt: '2026-04-01T00:00:00Z',
-        },
-      ],
-    });
+    serveAccounts(
+      mergeRows(
+        DEFAULT_CLAUDE,
+        accountRows({
+          id: 'client',
+          name: 'Client key',
+          kind: 'agent',
+          target: 'claude-code',
+          pins: ['proj-1'],
+        })
+      )
+    );
     renderSection(
       <ProjectAgentsSection projectId="proj-1" initialAgentDefaults={null} onUpdated={vi.fn()} />
     );
 
     const claude = await screen.findByTestId('project-agent-card-claude-code');
     await waitFor(() => expect(within(claude).getByText('Pinned account')).toBeInTheDocument());
-    expect(within(claude).getByText(/uses an account pinned to it/)).toBeInTheDocument();
+    expect(
+      within(claude).getByText('This project uses Client key, pinned to it.')
+    ).toBeInTheDocument();
+  });
+
+  it('says the agent cannot run when the project’s pin is paused, as the Accounts tab does', async () => {
+    serveAccounts(
+      mergeRows(
+        DEFAULT_CLAUDE,
+        accountRows({
+          id: 'paused',
+          name: 'Paused key',
+          kind: 'agent',
+          target: 'claude-code',
+          pins: [{ id: 'proj-1', active: false }],
+        })
+      )
+    );
+    renderSection(
+      <ProjectAgentsSection projectId="proj-1" initialAgentDefaults={null} onUpdated={vi.fn()} />
+    );
+
+    const claude = await screen.findByTestId('project-agent-card-claude-code');
+    expect(
+      await within(claude).findByText('Its pinned account is paused, so this agent can’t run here.')
+    ).toBeInTheDocument();
+    expect(within(claude).getByText('Paused pin')).toBeInTheDocument();
   });
 
   it('calls updateProject when Save Override is clicked in Configuration', async () => {

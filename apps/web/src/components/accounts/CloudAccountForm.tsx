@@ -38,7 +38,10 @@ export function CloudAccountForm({
 }: Readonly<{ providerId: string; onSaved: () => void }>) {
   const queryScope = useQueryScope();
   const { credentials, loading } = useCredentials(queryScope);
-  const Form = CLOUD_FORMS[providerId as CredentialProvider];
+  // `providerId` can come from the URL; only own keys are providers.
+  const Form = Object.hasOwn(CLOUD_FORMS, providerId)
+    ? CLOUD_FORMS[providerId as CredentialProvider]
+    : undefined;
 
   if (!Form) {
     return <p className="m-0 text-sm text-fg-muted">This provider can’t be connected here yet.</p>;

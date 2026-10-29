@@ -111,7 +111,10 @@ function buildBudgetRequest(form: StepFormState): UpdateAiBudgetRequest | null {
   return Object.keys(body).length > 0 ? body : null;
 }
 
-export async function executeStep(stepId: StepId, form: StepFormState): Promise<void> {
+export async function executeStep(
+  stepId: StepId,
+  form: StepFormState
+): Promise<void> {
   switch (stepId) {
     case 'ai-setup': {
       if (!form.selectedAgent) {

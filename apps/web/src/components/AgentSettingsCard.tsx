@@ -23,8 +23,8 @@ import {
   OPENCODE_PROVIDERS,
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
-import { Alert, Button } from '@simple-agent-manager/ui';
-import { Layers } from 'lucide-react';
+import { Button } from '@simple-agent-manager/ui';
+import { Check, Layers } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { ProviderMark } from './accounts/AccountBits';
@@ -76,7 +76,7 @@ export function AgentSettingsCard({ agent, settings, onSave, onReset }: AgentSet
   const [saving, setSaving] = useState(false);
   const [resetting, setResetting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState(false);
+  const [success, setSuccess] = useState<string | null>(null);
 
   const provider = getAccountProvider('agent', agent.id);
   const isOpenCode = agent.id === 'opencode';
@@ -104,7 +104,7 @@ export function AgentSettingsCard({ agent, settings, onSave, onReset }: AgentSet
   const handleSave = async () => {
     try {
       setError(null);
-      setSuccess(false);
+      setSuccess(null);
       setSaving(true);
       const data: SaveAgentSettingsRequest = {
         model: model.trim() || null,
@@ -118,8 +118,8 @@ export function AgentSettingsCard({ agent, settings, onSave, onReset }: AgentSet
         data.providerMode = providerMode || null;
       }
       await onSave(agent.id, data);
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), SUCCESS_BANNER_MS);
+      setSuccess('Saved');
+      setTimeout(() => setSuccess(null), SUCCESS_BANNER_MS);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save settings');
     } finally {
@@ -130,7 +130,7 @@ export function AgentSettingsCard({ agent, settings, onSave, onReset }: AgentSet
   const handleReset = async () => {
     try {
       setError(null);
-      setSuccess(false);
+      setSuccess(null);
       setResetting(true);
       await onReset(agent.id);
       setModel('');
@@ -138,8 +138,8 @@ export function AgentSettingsCard({ agent, settings, onSave, onReset }: AgentSet
       setOpencodeProvider(DEFAULT_OPENCODE_PROVIDER);
       setOpencodeBaseUrl('');
       setProviderMode('');
-      setSuccess(true);
-      setTimeout(() => setSuccess(false), SUCCESS_BANNER_MS);
+      setSuccess('Back to SAM’s settings');
+      setTimeout(() => setSuccess(null), SUCCESS_BANNER_MS);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reset settings');
     } finally {
@@ -204,13 +204,6 @@ export function AgentSettingsCard({ agent, settings, onSave, onReset }: AgentSet
         ) : null}
         .
       </p>
-
-      {error && (
-        <Alert variant="error" onDismiss={() => setError(null)}>
-          {error}
-        </Alert>
-      )}
-      {success && <Alert variant="success">Defaults saved</Alert>}
 
       {isOpenCode && (
         <div className="flex flex-col gap-1.5">
@@ -325,6 +318,7 @@ export function AgentSettingsCard({ agent, settings, onSave, onReset }: AgentSet
                   onChange={() => setPermissionMode(mode as AgentPermissionMode)}
                   data-testid={`permission-mode-${agent.id}-${mode}`}
                 />
+                {checked && <Check size={12} aria-hidden="true" className="-ml-0.5 mr-1" />}
                 {AGENT_PERMISSION_MODE_LABELS[mode] || mode}
               </label>
             );
@@ -332,7 +326,7 @@ export function AgentSettingsCard({ agent, settings, onSave, onReset }: AgentSet
         </div>
         {permissionMode === 'bypassPermissions' && (
           <p
-            role="alert"
+            role="note"
             className="m-0 rounded-md bg-warning-tint px-3 py-2 text-xs text-warning-fg"
           >
             Bypass disables all safety prompts: the agent runs commands and edits files without
@@ -388,8 +382,17 @@ export function AgentSettingsCard({ agent, settings, onSave, onReset }: AgentSet
           loading={resetting}
           data-testid={`reset-settings-${agent.id}`}
         >
-          Reset to defaults
+          Reset
         </Button>
+        {/* Feedback sits beside the buttons: the top of a tall card is off-screen on phones. */}
+        <span role="status" className="text-xs text-success-fg">
+          {success}
+        </span>
+        {error && (
+          <p role="alert" className="m-0 w-full text-xs text-danger-fg">
+            {error}
+          </p>
+        )}
         <span className="inline-flex min-w-0 items-center gap-1 text-[11px] text-fg-muted sm:ml-auto">
           <Layers size={12} aria-hidden="true" className="shrink-0" />
           Project profiles can override these.

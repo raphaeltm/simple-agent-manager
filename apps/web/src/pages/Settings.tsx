@@ -1,5 +1,14 @@
 import { Breadcrumb, PageLayout, Tabs } from '@simple-agent-manager/ui';
-import { Bell, Bot, Cloud, Github, KeyRound, LineChart, Server } from 'lucide-react';
+import {
+  Bell,
+  Bot,
+  Cloud,
+  Github,
+  KeyRound,
+  LineChart,
+  Server,
+  SlidersHorizontal,
+} from 'lucide-react';
 import { NavLink, Outlet } from 'react-router';
 
 import { SamSettingsCard } from '../components/SamSettingsCard';
@@ -7,8 +16,8 @@ import { SamSettingsCard } from '../components/SamSettingsCard';
 /**
  * Settings sections. Agents and Infrastructure each hold one kind of account
  * plus that kind's defaults; the former Cloud Provider and Connections tabs
- * redirect into them (see `App.tsx`). The raw credential records page
- * (`/settings/advanced`) is linked from each accounts section.
+ * redirect into them (see `App.tsx`). Advanced holds the raw credential records
+ * behind the accounts.
  */
 const SETTINGS_SECTIONS = [
   { id: 'agents', label: 'Agents', path: 'agents', Icon: Bot },
@@ -18,6 +27,7 @@ const SETTINGS_SECTIONS = [
   { id: 'notifications', label: 'Notifications', path: 'notifications', Icon: Bell },
   { id: 'usage', label: 'Usage', path: 'usage', Icon: LineChart },
   { id: 'access', label: 'Access', path: 'access', Icon: KeyRound },
+  { id: 'advanced', label: 'Advanced', path: 'advanced', Icon: SlidersHorizontal },
 ] as const;
 
 // Hoisted: `Tabs` reads `tabs` on every render, so a stable array keeps its

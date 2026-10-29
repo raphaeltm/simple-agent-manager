@@ -9,6 +9,8 @@ import {
   type AccountsSnapshot,
   buildAccountsModel,
   coveredProjectCount,
+  defaultFallback,
+  describeUnpin,
   isProviderInUse,
   type ProviderAccounts,
 } from '../../../../src/components/accounts/account-model';
@@ -159,6 +161,55 @@ describe('buildAccountsModel', () => {
     expect(without.resolutions.get('p-web')).toEqual({ source: 'none' });
   });
 
+  it('treats a default bound to the platform (no credential) as platform-managed', () => {
+    const rows = mergeRows(CLIENT);
+    rows.configurations.push({
+      id: 'cfg-sam',
+      name: 'SAM provider',
+      consumerKind: 'agent',
+      consumerTarget: 'claude-code',
+      credentialId: null,
+      settingsJson: null,
+      isActive: true,
+      createdAt: '2026-09-01T00:00:00.000Z',
+      updatedAt: '2026-09-01T00:00:00.000Z',
+    });
+    rows.attachments.push({
+      id: 'att-sam',
+      configurationId: 'cfg-sam',
+      consumerKind: 'agent',
+      consumerTarget: 'claude-code',
+      projectId: null,
+      isActive: true,
+      createdAt: '2026-09-01T00:00:00.000Z',
+      updatedAt: '2026-09-01T00:00:00.000Z',
+    });
+    const claude = agentGroup(buildAccountsModel(snapshot(rows)), 'claude-code');
+
+    expect(claude.platformFallback).toBe(true);
+    expect(claude.defaultAccount).toBeNull();
+    expect(claude.resolutions.get('p-web')).toEqual({ source: 'platform' });
+    expect(claude.resolutions.get('p-client')).toMatchObject({ source: 'pinned' });
+    // The binding is not an account of yours, so it never renders as a card.
+    expect(claude.accounts.map((account) => account.label)).toEqual(['Acme']);
+  });
+
+  it('labels projects with no cloud account as not using that cloud', () => {
+    const hetzner = accountRows({
+      id: 'hz',
+      name: 'Hetzner',
+      kind: 'compute',
+      target: 'hetzner',
+      pins: ['p-api'],
+    });
+    const model = buildAccountsModel(snapshot(hetzner));
+
+    expect(cloudGroup(model, 'hetzner').segments.find((s) => s.role === 'none')?.label).toBe(
+      'Not used'
+    );
+    expect(agentGroup(model, 'claude-code').segments[0]?.label).toBe('No account');
+  });
+
   it('keeps agents and clouds apart and counts credentials no configuration uses', () => {
     const hetzner = accountRows({
       id: 'hz',
@@ -204,6 +255,41 @@ describe('buildAccountsModel', () => {
       message: 'Token expired',
     });
     expect(claude.accounts.find((account) => account.role === 'pinned')?.validation).toBeNull();
+  });
+});
+
+describe('unpin fallback copy', () => {
+  it('names what a project falls back to: your default, the platform, or nothing', () => {
+    const withDefault = agentGroup(
+      buildAccountsModel(snapshot(mergeRows(WORK, CLIENT))),
+      'claude-code'
+    );
+    expect(describeUnpin('Acme', 'Acme key', 'Claude Code', defaultFallback(withDefault))).toBe(
+      'Acme will stop using Acme key and use your default Claude Code account, Work.'
+    );
+
+    const platformOnly = agentGroup(
+      buildAccountsModel(
+        snapshot(CLIENT, {
+          resolution: [
+            resolutionStatus({
+              consumerId: 'claude-code',
+              consumerKind: 'agent',
+              source: 'platform',
+            }),
+          ],
+        })
+      ),
+      'claude-code'
+    );
+    expect(describeUnpin('Acme', 'Acme key', 'Claude Code', defaultFallback(platformOnly))).toBe(
+      'Acme will stop using Acme key and use SAM’s platform Claude Code account.'
+    );
+
+    const nothing = agentGroup(buildAccountsModel(snapshot(CLIENT)), 'claude-code');
+    expect(describeUnpin('Acme', 'Acme key', 'Claude Code', defaultFallback(nothing))).toBe(
+      'Acme will stop using Acme key and have no Claude Code account until you connect one.'
+    );
   });
 });
 

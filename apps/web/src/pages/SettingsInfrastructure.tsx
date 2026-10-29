@@ -10,7 +10,7 @@ import { useAccountsData } from '../hooks/useAccounts';
  * belong to you; a project can run its own node pool so collaborators share it.
  */
 export function SettingsInfrastructure() {
-  const { model, projects, isLoading, error, retry } = useAccountsData();
+  const { model, projects, projectsTruncated, isLoading, error, retry } = useAccountsData();
   const sheet = useConnectSheetState();
   const groups = model?.clouds ?? null;
 
@@ -21,6 +21,7 @@ export function SettingsInfrastructure() {
         description="The cloud accounts SAM can start machines in, and which projects bill to each one."
         groups={groups}
         projects={projects}
+        projectsTruncated={projectsTruncated}
         unlinkedCredentialCount={model?.unlinkedCredentialCount ?? 0}
         isLoading={isLoading}
         error={error}
@@ -32,17 +33,17 @@ export function SettingsInfrastructure() {
       <section aria-labelledby="node-pool-title" className="flex min-w-0 flex-col gap-3">
         <div className="max-w-2xl">
           <h2 id="node-pool-title" className="m-0 text-lg font-semibold text-fg-primary">
-            Defaults
+            Node pool
           </h2>
           <p className="m-0 mt-1 text-sm text-fg-muted">
-            Your node pool: which machine types and regions from your cloud accounts new workspaces
-            may use. A project can set up its own pool for everyone working in it.
+            Which machine types and regions from your cloud accounts new workspaces may use. A
+            project can set up its own pool for everyone working in it.
           </p>
         </div>
         <DefaultCapacityPoolsPanel scope="user" />
       </section>
 
-      {sheet.isOpen && (
+      {sheet.isOpen && model && (
         <ConnectAccountSheet
           kind="compute"
           providerId={sheet.providerId}

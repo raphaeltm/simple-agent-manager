@@ -5,6 +5,7 @@
  */
 import { AlertTriangle, CircleCheck, CircleDashed, CirclePause, Pin, Star } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { Link } from 'react-router';
 
 import type { AccountRole, AccountView } from './account-model';
 import type { AccountProvider } from './provider-meta';
@@ -73,7 +74,10 @@ export function AccountStatus({ account }: Readonly<{ account: AccountView }>) {
   if (!account.active) {
     return (
       <StatusLine tone="text-warning-fg" Icon={CirclePause}>
-        Paused — turned off in Advanced
+        Paused — turn it back on in{' '}
+        <Link to="/settings/advanced" className="text-accent">
+          Advanced
+        </Link>
       </StatusLine>
     );
   }
@@ -81,8 +85,12 @@ export function AccountStatus({ account }: Readonly<{ account: AccountView }>) {
     const count = account.pausedProjectIds.length;
     return (
       <StatusLine tone="text-warning-fg" Icon={CirclePause}>
-        Paused for {count} project{count === 1 ? '' : 's'} — {count === 1 ? 'it' : 'they'} can’t
-        use this account until it’s resumed or removed
+        Paused for {count} project{count === 1 ? '' : 's'} — {count === 1 ? 'it' : 'they'} can’t{' '}
+        {account.kind === 'agent' ? 'run this agent' : 'use this cloud'} until you resume the pin in{' '}
+        <Link to="/settings/advanced" className="text-accent">
+          Advanced
+        </Link>{' '}
+        or use the default instead
       </StatusLine>
     );
   }

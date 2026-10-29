@@ -6,7 +6,13 @@ import { AlertTriangle, ChevronDown, CornerDownRight, Pin, Sparkles, Star } from
 import { type ReactNode, useState } from 'react';
 
 import { ConfirmDialog } from '../ConfirmDialog';
-import { type AccountView, coveredProjectCount, type ProviderAccounts } from './account-model';
+import {
+  type AccountView,
+  coveredProjectCount,
+  defaultFallback,
+  describeUnpin,
+  type ProviderAccounts,
+} from './account-model';
 import { ProviderMark } from './AccountBits';
 import { AccountCard } from './AccountCard';
 import { useAccountActions } from './useAccountActions';
@@ -41,6 +47,7 @@ export function ProjectAccountRow({
   const shown: AccountView | null =
     resolution.source === 'pinned' || resolution.source === 'default' ? resolution.account : pinned;
   const panelId = `project-account-${provider.kind}-${provider.id}`;
+  const fallback = defaultFallback(group);
 
   const switchToDefault = async () => {
     if (!pinned) return;
@@ -132,6 +139,8 @@ export function ProjectAccountRow({
               projectNames={projectNames}
               coveredCount={coveredProjectCount(group, shown.id)}
               projectCount={projectNames.size}
+              showRole={false}
+              fallback={fallback}
             />
           )}
         </div>
@@ -144,7 +153,12 @@ export function ProjectAccountRow({
         loading={busy}
         variant="warning"
         title="Use your default account instead?"
-        message={`${projectName} will stop using ${pinned?.label ?? 'its own account'} and use your default ${provider.name} account.`}
+        message={describeUnpin(
+          projectName,
+          pinned?.label ?? 'its own account',
+          provider.name,
+          fallback
+        )}
         confirmLabel="Use default"
       />
     </section>
@@ -168,7 +182,7 @@ function ResolutionLine({ source }: Readonly<{ source: string }>) {
     case 'blocked':
       return (
         <span className="inline-flex items-center gap-1 text-[11px] text-danger-fg">
-          <AlertTriangle size={10} aria-hidden="true" /> Blocked — its pinned account is turned off
+          <AlertTriangle size={10} aria-hidden="true" /> Can’t run — its pinned account is paused
         </span>
       );
     case 'platform':

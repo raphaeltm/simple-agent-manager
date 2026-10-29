@@ -197,9 +197,11 @@ describe('Settings', () => {
     expect(within(work).queryByText('Default')).toBeNull();
     const acme = within(lane('Pinned')).getByTestId('account-card-cfg-acme');
     expect(within(acme).getByText('Acme API key')).toBeInTheDocument();
-    expect(within(lane('Unattached')).getByText(/Nothing idle/)).toBeInTheDocument();
-    expect(within(row).getByRole('img')).toHaveAccessibleName(
-      'Work Max plan: 1 project, Acme API key: 1 project'
+    // Nothing is unattached, so that lane is not shown at all.
+    expect(within(row).queryByRole('heading', { name: 'Unattached' })).toBeNull();
+    // The bar is decorative; its legend carries the same counts as text.
+    expect(within(row).getByRole('button', { expanded: true })).toHaveTextContent(
+      /Work Max plan\s*1.*Acme API key\s*1/
     );
     expect(within(row).getByRole('link', { name: 'Acme client portal' })).toHaveAttribute(
       'href',

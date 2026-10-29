@@ -20,7 +20,8 @@ import {
  * it would show an empty account list to a user who has only legacy credentials.
  *
  * NOT persistable: credential names and attachment topology are credential
- * metadata (see the never-persist list in `query-persist-config.ts`).
+ * metadata, so none of these operations is on `PERSISTED_QUERY_OPERATIONS`
+ * (`query-persist-config.ts`); `query-persistence-allowlist.test.ts` pins that.
  */
 export const accountQueryKeys = {
   all: (queryScope: string) => ['auth', queryScope, 'accounts'] as const,

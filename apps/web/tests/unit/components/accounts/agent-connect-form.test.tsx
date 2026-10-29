@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   saveAgentSettings: vi.fn(),
   getAgentCredentialSetupConfig: vi.fn(),
   success: vi.fn(),
+  warning: vi.fn(),
 }));
 
 vi.mock('../../../../src/lib/api', async (importOriginal) => ({
@@ -18,7 +19,12 @@ vi.mock('../../../../src/lib/api', async (importOriginal) => ({
 }));
 
 vi.mock('../../../../src/hooks/useToast', () => ({
-  useToast: () => ({ success: mocks.success, error: vi.fn(), info: vi.fn() }),
+  useToast: () => ({
+    success: mocks.success,
+    warning: mocks.warning,
+    error: vi.fn(),
+    info: vi.fn(),
+  }),
 }));
 
 import { AgentConnectForm } from '../../../../src/components/accounts/AgentConnectForm';
@@ -303,6 +309,39 @@ describe('AgentConnectForm', () => {
 
     expect(screen.getByLabelText('OpenCode API key')).toBeInTheDocument();
     expect(screen.queryByLabelText('OpenCode provider')).not.toBeInTheDocument();
+  });
+
+  it('retries only the settings step after it failed, without storing the key twice', async () => {
+    mocks.saveAgentSettings.mockRejectedValueOnce(new Error('settings rejected'));
+    const onConnected = vi.fn();
+    renderForm({ agentId: 'opencode', onConnected });
+
+    fireEvent.change(screen.getByLabelText('OpenCode API key'), {
+      target: { value: 'opencode-key' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    expect(await screen.findByText('settings rejected')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+    await waitFor(() => expect(onConnected).toHaveBeenCalled());
+    expect(mocks.saveAgentCredential).toHaveBeenCalledTimes(1);
+    expect(mocks.saveAgentSettings).toHaveBeenCalledTimes(2);
+  });
+
+  it('warns when the saved credential fails validation', async () => {
+    mocks.saveAgentCredential.mockResolvedValue({
+      validation: { valid: false, message: 'Key format looks wrong', validationMode: 'format' },
+    });
+    renderForm({ initialAuthMethod: 'api-key' });
+
+    fireEvent.change(screen.getByLabelText('API key'), { target: { value: 'not-a-key' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Connect' }));
+
+    await waitFor(() =>
+      expect(mocks.warning).toHaveBeenCalledWith(
+        'Claude Code saved, but the credential looks invalid'
+      )
+    );
   });
 
   it('surfaces an error when saving OpenCode provider settings fails', async () => {

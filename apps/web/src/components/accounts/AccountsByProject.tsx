@@ -3,6 +3,7 @@
  * A table on desktop; one card per project on phones.
  */
 import { AlertTriangle, Pin, Sparkles, Star } from 'lucide-react';
+import { Link } from 'react-router';
 
 import {
   type AccountProject,
@@ -52,12 +53,13 @@ export function AccountsByProject({ groups, projects }: Readonly<AccountsByProje
             {projects.map((project) => (
               <tr key={project.id} className="border-t border-border-default">
                 <td className="px-4 py-2">
-                  <div
-                    className="truncate text-xs font-medium text-fg-primary"
+                  <Link
+                    to={`/projects/${project.id}/settings/accounts`}
+                    className="block truncate text-xs font-medium text-fg-primary no-underline hover:text-accent"
                     title={project.name}
                   >
                     {project.name}
-                  </div>
+                  </Link>
                 </td>
                 {columns.map((group) => (
                   <td key={group.provider.id} className="px-3 py-2">
@@ -76,9 +78,12 @@ export function AccountsByProject({ groups, projects }: Readonly<AccountsByProje
             key={project.id}
             className="flex min-w-0 flex-col gap-2 rounded-lg border border-border-default bg-surface p-3"
           >
-            <span className="min-w-0 text-sm font-semibold text-fg-primary line-clamp-2 break-words [overflow-wrap:anywhere]">
+            <Link
+              to={`/projects/${project.id}/settings/accounts`}
+              className="min-w-0 text-sm font-semibold text-fg-primary no-underline line-clamp-2 break-words [overflow-wrap:anywhere] hover:text-accent"
+            >
               {project.name}
-            </span>
+            </Link>
             {columns.map((group) => (
               <span
                 key={group.provider.id}
@@ -114,7 +119,7 @@ function ResolutionCell({ resolution }: Readonly<{ resolution: ProjectResolution
     return (
       <span className="inline-flex min-w-0 items-center gap-1 text-[11px] text-danger-fg">
         <AlertTriangle size={11} aria-hidden="true" className="shrink-0" />
-        <span className="truncate">Blocked — pin turned off</span>
+        <span className="truncate">Paused pin — can’t run</span>
       </span>
     );
   }
