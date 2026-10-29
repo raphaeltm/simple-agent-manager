@@ -191,6 +191,16 @@ where it says so and the app continues from there.
 | ----------------------------- | ------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `chat.profileUsageWindowDays` | 30      | 1–365 | Days of each person's own new chats used to show their recent profiles first and to suggest hiding profiles they haven't picked. See [Agents](/docs/guides/agents/#choosing-a-profile-for-a-new-chat). |
 
+## Eviction recovery
+
+These **Operations** settings bound automatic retries after an eviction wake fails to start. Retries preserve the snapshot and source ownership checks.
+
+| Setting | Default | Range | What it controls |
+| ------- | ------- | ----- | ---------------- |
+| `operations.evictionRecoveryRetryBatchSize`   | 5       | 1–100          | Failed eviction wakes selected per cron sweep                                                                                       |
+| `operations.evictionRecoveryRetryWallMs`      | 10,000  | 1–30,000       | Milliseconds before starting another retry; an in-flight durable wake may finish afterward                                          |
+| `operations.evictionRecoveryRetryDelayMs`     | 60,000  | 1–86,400,000   | Minimum interval after failure or preclaim deferral; deferrals rotate fairly without resetting the failure anchor or attempt budget |
+
 ## Linked work
 
 These **Operations** settings control automatic links between chats, ideas, library files and pull requests. Links that mean work (a chat working on, creating or editing something) are always kept; links that only record reading or viewing are capped.
@@ -200,9 +210,6 @@ These **Operations** settings control automatic links between chats, ideas, libr
 | `operations.resourceLinkTouchIntervalMs`      | 300,000 | 0–86,400,000   | Minimum time between writes for repeated automatic links                                                                            |
 | `operations.resourceLinkWeakPerTarget`        | 100     | 1–10,000       | Weak automatic links kept for one target                                                                                            |
 | `operations.resourceLinkWeakCleanupBatchSize` | 100     | 1–1,000        | Excess weak links removed per write when a cap is lowered                                                                           |
-| `operations.evictionRecoveryRetryBatchSize`   | 5       | 1–100          | Failed eviction wakes selected per cron sweep                                                                                       |
-| `operations.evictionRecoveryRetryWallMs`      | 10,000  | 1–30,000       | Milliseconds before starting another retry; an in-flight durable wake may finish afterward                                          |
-| `operations.evictionRecoveryRetryDelayMs`     | 60,000  | 1–86,400,000   | Minimum interval after failure or preclaim deferral; deferrals rotate fairly without resetting the failure anchor or attempt budget |
 | `operations.resourceLinkProjectCap`           | 100,000 | 100–10,000,000 | Project link count above which new weak links are skipped                                                                           |
 | `operations.resourceLinkListCap`              | 50      | 1–500          | Items in each linked work context list                                                                                              |
 | `operations.resourceLinkBatchTargetLimit`     | 100     | 1–500          | Targets in one batched list lookup                                                                                                  |
