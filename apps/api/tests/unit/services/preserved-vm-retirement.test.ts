@@ -263,6 +263,23 @@ describe('legacy VM retirement: real SQL, snapshot verifier and strict provider 
     await queue.processExpired(extraWork);
     expect(extraWork).not.toHaveBeenCalled();
   });
+  it('does not reuse a successor snapshot with old eviction markers as original source preservation', async () => {
+    secondNode();
+    sqlite.exec(
+      "UPDATE nodes SET status='stopped' WHERE id='node'; UPDATE workspaces SET status='evicted',chat_session_id=NULL,created_at='2000-01-01' WHERE id='ws'; DELETE FROM session_snapshots WHERE workspace_id='ws'; UPDATE session_snapshots SET eviction_recovery_workspace_id='ws',eviction_recovery_node_id='node',eviction_recovery_generation='generation',restore_status='restored',restored_at='2001-01-01' WHERE workspace_id='next-ws'"
+    );
+    const result = emptyResult();
+    await sweepStoppedHandoffNodes(
+      drizzle(env.DATABASE, { schema }),
+      env,
+      now(),
+      resolveCleanupConfig(env),
+      result
+    );
+    expect(result.lifetimeDestroyed).toBe(0);
+    expect(boundary.remove).not.toHaveBeenCalled();
+    expect(workspace()).toEqual({ status: 'evicted', runtime_deletion_proof: null });
+  });
   function fallback() {
     const record = JSON.stringify({
       version: 1,

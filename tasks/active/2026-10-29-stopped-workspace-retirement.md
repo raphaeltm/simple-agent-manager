@@ -16,11 +16,11 @@ Legacy VM workspace deletion returns HTTP404 without physical deletion proof. Re
 
 ## Implementation checklist / acceptance
 
-- [ ] Use preservation-owned activity clock in stopped handoff selector and fenced claim, unaffected by retry writes.
-- [ ] Apply bounded exact-source verification to stopped/destroying managed VM handoff; preserve provider/owner/incarnation/placement gates.
-- [ ] Recover legacy complete preservation with missing sleeping_at without inventing stop proof; honor recorded bounded fallback only with transcript/ownership safeguards.
-- [ ] Keep no-snapshot failed-start/OOM sources blocked unless positive authority exists; report residual blockers.
-- [ ] Regression tests: old-agent404 bookkeeping, handoff/strict deletion, mixed sources, missing sleeping_at, retry exhaustion, concurrency, artifact loss, failure backoff/budgets.
+- [x] Use preservation-owned activity clock in stopped handoff selector and fenced claim, unaffected by retry writes.
+- [x] Apply bounded exact-source verification to stopped/destroying managed VM handoff; preserve provider/owner/incarnation/placement gates.
+- [x] Recover legacy complete preservation with missing sleeping_at without inventing stop proof; honor recorded bounded fallback only with transcript/ownership safeguards.
+- [x] Keep no-snapshot failed-start/OOM sources blocked unless positive authority exists; report residual blockers.
+- [x] Regression tests: old-agent404 bookkeeping, handoff/strict deletion, mixed sources, missing sleeping_at, retry exhaustion, concurrency, artifact loss, failure backoff/budgets.
 - [ ] Relevant lint/typecheck/tests/build; independent specialist reviews, best-effort CodeRabbit; green non-draft PR.
 - [ ] Merge, successful production deploy, basic smoke and bounded read-only affected-state check; report URL/SHA/evidence to parent.
 
@@ -29,3 +29,17 @@ Legacy VM workspace deletion returns HTTP404 without physical deletion proof. Re
 Staging explicitly waived by user; no production lifecycle/stress fixtures. Preserve transcript/artifacts and all ownership/termination proof boundaries. Coordinate on feature.reliability-20261029; deployment sibling owns strict deployment-node changes; OOM sibling owns relocation contract. No blanket delete or status/error-derived never-started proof.
 
 References: .claude/rules/47-control-loop-io-budget.md (API scoped copy), .claude/rules/25-review-merge-gate.md, Constitution X/XI.
+
+## Validation / review evidence
+- Focused real-SQL retirement suite: 50 passed, independently repeated by completion reviewer.
+- Broader lifecycle unit suites: 146 passed before final additions.
+- Root lint: 13 tasks passed; root typecheck: 19 passed; root build: 9 passed.
+- Workers scheduled cleanup: 28 passed. Full NodeLifecycle rerun pending; isolated retry-finalizer regression passes after original concurrent-load timeout.
+- Root tests running with turbo concurrency1 and maxWorkers2; default parallel attempt hit local fork timeouts, not an assertion in changed behavior.
+- Security/Cloudflare: PASS after recovery-point claim downgraded by exact CAS when unavailable.
+- Completion/test/constitution/doc: PASS, independent 50/50 and diff check.
+- Explicit staging waiver honored; production verification limited to basic smoke/read-only state.
+
+## Production recovery limits
+Read-only classification: node01M61H40DCXNPD22N1KYNZ727S has a full preserved unconfirmed source and can retire if provider/R2 checks pass. Node01M60MET9WNMZHBWHRS53KTJD9 additionally has failed-start source01M61J61GKHH00XN3C3GW0QCGS with no preservation authority. Its null-sleeping_at source is fully preserved and its separate bounded fallback source has an explicit decision.
+The two evictions on01M61JA31QX4TXBCJ5GKP1JCZF did recover onto successors: moved snapshots retain eviction markers and restore timestamps, but their current cleanup identities/generations belong to the successor node. Original-source generation is NULL. Successor snapshots alone cannot establish original-incarnation/latest-source preservation authority; keep originals fenced pending positive proof. Shared-channel coordinator/OOM owner informed.
