@@ -45,3 +45,5 @@ Astra tested the unmodified pinned CLI against a loopback TLS proxy with synthet
 The renderer change is an evidence-based robustness fix, not a proven diagnosis of the user's failed attempt. Real-account success still requires staging verification.
 
 Follow-up validation: 82 focused tests, API typecheck/build passed. Full API lint found only test import ordering, corrected. Security/runtime/env/constitution and completion/test/docs delta reviews passed; staging and real-account validation remain pending.
+
+CodeRabbit follow-up: admission failures now persist the same classified safe code/message as their logs. New regression failed before fix, then passed; 40 DO tests and changed-file lint pass, independent security delta review passes. Requires final staging redeploy.

@@ -460,18 +460,14 @@ export class CredentialSetupSession extends DurableObject<Env> {
       return;
     }
     if (state.status === 'failed') {
+      const failure = driverFailure(state, setupDisplayName(row.agent_type));
       log.warn('credential_setup.device_auth_failed', {
         sessionId: row.id,
         agentType: row.agent_type,
-        errorCode: driverFailure(state, setupDisplayName(row.agent_type)).code,
+        errorCode: failure.code,
         diagnostics: state.diagnostics ?? {},
       });
-      await this.teardown(
-        current,
-        'failed',
-        'device_auth_start_failed',
-        `${setupDisplayName(row.agent_type)} could not start the sign-in flow`
-      );
+      await this.teardown(current, 'failed', failure.code, failure.message);
       return;
     }
     if (

@@ -877,6 +877,50 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
     });
   });
 
+  it('persists the safe startup driver failure and cleans up before a sign-in URL is available', async () => {
+    const { instance, ctx, database } = createDO();
+    await Promise.resolve();
+    const fakeSandbox = createFakeSandbox();
+    fakeSandbox.readFile.mockResolvedValue({
+      content: JSON.stringify({
+        status: 'failed',
+        code: 'process_exited',
+        error: 'private terminal output',
+        diagnostics: { exitCode: 0 },
+      }),
+    });
+    vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
+    await instance.create({
+      id: 'setup-startup-exit',
+      setupHome: '/tmp/setup-startup-exit',
+      ttlMs: 900_000,
+      ...BASE_PARAMS,
+      agentType: 'claude-code',
+      provider: 'anthropic',
+      agentName: 'Claude Code',
+    });
+    await instance.alarm();
+    expect((await instance.getState())?.status).toBe('admitting');
+    await instance.alarm();
+
+    const message = 'The Claude sign-in process stopped before returning a token. Please try again.';
+    expect(await instance.getState()).toMatchObject({
+      status: 'failed',
+      errorCode: 'process_exited',
+      errorMessage: message,
+    });
+    expect(database._calls.some((call) =>
+      call.args.includes('process_exited') && call.args.includes(message)
+    )).toBe(true);
+    expect(JSON.stringify(database._calls)).not.toContain('private terminal output');
+    expect(destroySandboxInstance).toHaveBeenCalledWith(expect.anything(), 'setup-startup-exit', {
+      sandboxId: 'setup-startup-exit',
+    });
+    expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), 'lease-abc');
+    expect(ctx.storage.deleteAlarm).toHaveBeenCalled();
+    expect(saveAgentCredentialForUser).not.toHaveBeenCalled();
+  });
+
   it('does not label an unclassified driver failure as a rejected code', async () => {
     const created = createDO();
     await Promise.resolve();
