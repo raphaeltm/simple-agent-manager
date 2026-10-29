@@ -80,60 +80,70 @@ export async function runWorkspaceEvictionRecovery(
         const deadline = Date.now() + wallMs;
         for (const row of selected) {
           if (Date.now() >= deadline) break;
-          let deferred = true;
-          try {
-            const result = await ensureSessionRecovery(
-              env,
-              row.projectId,
-              row.chatSessionId,
-              {
-                taskId: row.taskId,
-                projectId: row.projectId,
-                chatSessionId: row.chatSessionId,
-                evictionRecoveryRetry: {
-                  workspaceId: row.workspaceId,
-                  nodeId: row.nodeId,
-                  generation: row.generation,
-                  recoveryAttemptId: row.recoveryAttemptId,
-                  maxAttempts,
-                },
-              },
-              {
-                excludedNodeId: row.nodeId,
-                evictionFence: {
-                  workspaceId: row.workspaceId,
-                  nodeId: row.nodeId,
-                  generation: row.generation,
-                },
-                wakeCause: 'runtime_lost',
-                interruptedWork:
-                  row.interruptedWork === null ? undefined : row.interruptedWork === 1,
-              }
-            );
-            deferred = result.status === 'unavailable';
-            log.info('workspace_eviction_recovery.retry', { taskId: row.taskId, ...result });
-          } catch (error) {
-            log.error('workspace_eviction_recovery.retry_failed', {
-              taskId: row.taskId,
-              error: error instanceof Error ? error.message : String(error),
-            });
-          } finally {
-            if (deferred) {
-              try {
-                await rotateDeferredRecovery(env, row, now.toISOString());
-              } catch (error) {
-                log.error('workspace_eviction_recovery.rotation_failed', {
-                  taskId: row.taskId,
-                  error: error instanceof Error ? error.message : String(error),
-                });
-              }
-            }
-          }
+          // Sequential dispatch keeps the deadline effective between paid recovery attempts.
+          await retryFailedEvictionRecovery(env, row, maxAttempts, now);
         }
       })()
     );
   }
   return { selected: selected.length };
+}
+
+/** Handle one candidate; failure must not suppress later eligible candidates. */
+async function retryFailedEvictionRecovery(
+  env: Env,
+  row: FailedEvictionRecovery,
+  maxAttempts: number,
+  now: Date
+): Promise<void> {
+  let deferred = true;
+  try {
+    const result = await ensureSessionRecovery(
+      env,
+      row.projectId,
+      row.chatSessionId,
+      {
+        taskId: row.taskId,
+        projectId: row.projectId,
+        chatSessionId: row.chatSessionId,
+        evictionRecoveryRetry: {
+          workspaceId: row.workspaceId,
+          nodeId: row.nodeId,
+          generation: row.generation,
+          recoveryAttemptId: row.recoveryAttemptId,
+          maxAttempts,
+        },
+      },
+      {
+        excludedNodeId: row.nodeId,
+        evictionFence: {
+          workspaceId: row.workspaceId,
+          nodeId: row.nodeId,
+          generation: row.generation,
+        },
+        wakeCause: 'runtime_lost',
+        interruptedWork: row.interruptedWork === null ? undefined : row.interruptedWork === 1,
+      }
+    );
+    deferred = result.status === 'unavailable';
+    log.info('workspace_eviction_recovery.retry', { taskId: row.taskId, ...result });
+  } catch (error) {
+    log.error('workspace_eviction_recovery.retry_failed', {
+      taskId: row.taskId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  } finally {
+    if (deferred) {
+      try {
+        await rotateDeferredRecovery(env, row, now.toISOString());
+      } catch (error) {
+        log.error('workspace_eviction_recovery.rotation_failed', {
+          taskId: row.taskId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
 }
 
 /** Rotate a still-identical failed attempt without resetting its clean-failure anchor. */

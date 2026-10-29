@@ -404,7 +404,10 @@ export async function loadActiveWorkspaceReservationUsage(
       existing.activeCount += 1;
       addReservationUsage(existing, row.reservationJson);
       const credit = observedWorkspaceMemoryCredit(row);
-      if (credit) (existing.observedMemoryCredits ??= []).push(credit);
+      if (credit) {
+        existing.observedMemoryCredits ??= [];
+        existing.observedMemoryCredits.push(credit);
+      }
       usage.set(row.nodeId, existing);
     }
   }

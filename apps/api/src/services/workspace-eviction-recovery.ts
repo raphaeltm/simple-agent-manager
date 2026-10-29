@@ -66,7 +66,7 @@ export function evictedWorkspaceSnapshotSleepStatement(
       identity.workspaceId,
       identity.nodeId,
       identity.generation,
-      identity.interruptedWork === undefined ? null : identity.interruptedWork ? 1 : 0,
+      identity.interruptedWork === undefined ? null : Number(identity.interruptedWork),
       identity.generation,
       now,
       identity.chatSessionId,

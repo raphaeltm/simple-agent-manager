@@ -62,3 +62,5 @@ This is the /do implementation archive; release checkbox remains pending until C
 ### CI Workers calibration
 
 CI shard3 found two additional declared-capacity fixture assumptions in vm-admission-control-races.test.ts: two full reservations and stopped/deleted release still reported10% live host memory use. Only those declared-budget scenarios now use idle telemetry. A discriminating control confirms stopped reservations do not erase live measured pressure. Production guards are unchanged. The complete native file passed25/25 tests; targeted ESLint passed. A fresh exact-head CI run is required before release.
+
+Final Sonar review: flattened equivalent refusal checks and boolean/array expressions; extracted per-candidate retry handler to reduce complexity while preserving sequential budget and guarded rotation. Independent security review PASS; focused79 tests and lint PASS. Await-in-loop retained intentionally for dispatch deadline enforcement.

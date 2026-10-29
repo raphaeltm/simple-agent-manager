@@ -440,20 +440,23 @@ export async function claimSessionSnapshotRecovery(
       if (winner?.taskId) return { status: 'waking', taskId: winner.taskId };
     }
   }
-  const reason = !snapshot
-    ? 'snapshot_missing'
-    : Date.parse(snapshot.expiresAt) <= now.getTime()
-      ? 'snapshot_expired'
-      : !isRestorableSnapshot(snapshot.status, snapshot.degradation)
-        ? 'snapshot_not_complete'
-        : !claimBudgetAvailable(snapshot)
-          ? 'recovery_attempts_exhausted'
-          : !(await archiveMigrationFenceIsClear(db, input.chatSessionId))
-            ? 'archive_migration_fenced'
-            : !(await sourceTaskGuardIsValid(db, input.sourceTaskGuard))
-              ? 'source_task_not_wakeable'
-              : 'snapshot_not_wakeable';
-  return { status: 'unavailable', reason };
+  if (!snapshot) return { status: 'unavailable', reason: 'snapshot_missing' };
+  if (Date.parse(snapshot.expiresAt) <= now.getTime()) {
+    return { status: 'unavailable', reason: 'snapshot_expired' };
+  }
+  if (!isRestorableSnapshot(snapshot.status, snapshot.degradation)) {
+    return { status: 'unavailable', reason: 'snapshot_not_complete' };
+  }
+  if (!claimBudgetAvailable(snapshot)) {
+    return { status: 'unavailable', reason: 'recovery_attempts_exhausted' };
+  }
+  if (!(await archiveMigrationFenceIsClear(db, input.chatSessionId))) {
+    return { status: 'unavailable', reason: 'archive_migration_fenced' };
+  }
+  if (!(await sourceTaskGuardIsValid(db, input.sourceTaskGuard))) {
+    return { status: 'unavailable', reason: 'source_task_not_wakeable' };
+  }
+  return { status: 'unavailable', reason: 'snapshot_not_wakeable' };
 }
 
 export async function hasRestorableSleepingSessionSnapshot(
