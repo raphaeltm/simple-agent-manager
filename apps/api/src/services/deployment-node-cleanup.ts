@@ -4,6 +4,8 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { deleteDNSRecord } from './dns';
+import { getTimeoutMs } from './fetch-timeout';
 import { retireDeletedDeploymentNodeRecord } from './node-resource-lifecycle';
 import { deleteNodeResourcesStrict } from './strict-node-deletion';
 
@@ -35,7 +37,7 @@ export async function cleanupDeploymentNode(
        )
      RETURNING status, runtime_termination_confirmed_at AS runtimeTerminationConfirmedAt,
                provider_instance_id AS providerInstanceId,
-               runtime_incarnation_id AS runtimeIncarnationId`
+               runtime_incarnation_id AS runtimeIncarnationId, backend_dns_record_id AS backendDnsRecordId`
   )
     .bind(now, nodeId, userId)
     .first<{
@@ -43,18 +45,36 @@ export async function cleanupDeploymentNode(
       runtimeTerminationConfirmedAt: string | null;
       providerInstanceId: string | null;
       runtimeIncarnationId: string | null;
+      backendDnsRecordId: string | null;
     }>();
   if (!claim) return { nodeDeleted: false, warnings: [] };
 
   try {
+    const signal = AbortSignal.timeout(options.requestTimeoutMs);
+    const deadline = Date.now() + options.requestTimeoutMs;
     const proof =
       claim.status === 'deleted'
         ? claim
         : await deleteNodeResourcesStrict(nodeId, userId, env, {
             expectedRuntime: { userId, runtime: 'vm', ...claim },
-            providerRequestContext: { signal: AbortSignal.timeout(options.requestTimeoutMs) },
-            requestDeadlineMs: Date.now() + options.requestTimeoutMs,
+            cleanupDns: false,
+            providerRequestContext: { signal },
+            requestDeadlineMs: deadline,
           });
+    // DNS is retryable cleanup too. Strict deletion's default DNS adapter is
+    // best-effort, so retain the record/link rather than losing its ID on failure.
+    if (claim.backendDnsRecordId) {
+      await deleteDNSRecord(
+        claim.backendDnsRecordId,
+        {
+          ...env,
+          CF_API_TIMEOUT_MS: String(
+            Math.max(1, Math.min(getTimeoutMs(env.CF_API_TIMEOUT_MS), deadline - Date.now()))
+          ),
+        },
+        signal
+      );
+    }
     await retireDeletedDeploymentNodeRecord(
       drizzle(env.DATABASE, { schema }),
       env,

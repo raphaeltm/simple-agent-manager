@@ -33,6 +33,32 @@ function managedNodeStopDiagnostic(env: Env): string {
   );
 }
 
+async function markDeploymentStopFailed(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  node: schema.Node,
+  message: string
+): Promise<void> {
+  if (node.nodeRole !== 'deployment') return;
+  await db
+    .update(schema.deploymentEnvironments)
+    .set({
+      status: 'error',
+      observedStatus: 'failed',
+      observedErrorMessage: `${DEPLOYMENT_STOP_ERROR_PREFIX} ${message}`,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(
+      and(
+        eq(schema.deploymentEnvironments.nodeId, node.id),
+        eq(schema.deploymentEnvironments.status, 'stopping'),
+        sql`EXISTS (SELECT 1 FROM nodes n WHERE n.id = ${node.id}
+      AND n.user_id = ${node.userId} AND n.status = 'destroying'
+      AND n.provider_instance_id IS ${node.providerInstanceId}
+      AND n.runtime_incarnation_id IS ${node.runtimeIncarnationId})`
+      )
+    );
+}
+
 export async function stopNodeResources(
   nodeId: string,
   userId: string,
@@ -150,24 +176,7 @@ export async function stopNodeResources(
       nodeId,
       ...serializeError(err),
     });
-    if (node.nodeRole === 'deployment') {
-      await db
-        .update(schema.deploymentEnvironments)
-        .set({
-          status: 'error',
-          observedStatus: 'failed',
-          observedErrorMessage: `${DEPLOYMENT_STOP_ERROR_PREFIX} managed node teardown remains unconfirmed`,
-          updatedAt: new Date().toISOString(),
-        })
-        .where(
-          and(
-            eq(schema.deploymentEnvironments.nodeId, nodeId),
-            sql`EXISTS (SELECT 1 FROM nodes n WHERE n.id = ${nodeId}
-          AND n.user_id = ${userId} AND n.status = 'destroying'
-          AND n.runtime_incarnation_id IS ${node.runtimeIncarnationId})`
-          )
-        );
-    }
+    await markDeploymentStopFailed(db, node, 'managed node teardown remains unconfirmed');
     throw new Error('Managed node teardown remains unconfirmed');
   }
   if (!strictDeletion.runtimeTerminationConfirmedAt) {
@@ -180,6 +189,10 @@ export async function stopNodeResources(
       await deleteDNSRecord(node.backendDnsRecordId, env);
     } catch (err) {
       log.error('node_stop.delete_dns_failed', { nodeId, ...serializeError(err) });
+      if (node.nodeRole === 'deployment') {
+        await markDeploymentStopFailed(db, node, 'node DNS cleanup remains pending');
+        throw new Error('Deployment node DNS cleanup remains pending');
+      }
     }
   }
 

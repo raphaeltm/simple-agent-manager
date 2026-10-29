@@ -11,6 +11,7 @@ import { registerDeploymentEnvironmentLifecycleRoutes } from '../../../src/route
 import { runDeploymentNodeCleanup } from '../../../src/scheduled/deployment-node-cleanup';
 import { cleanupDeploymentNode } from '../../../src/services/deployment-node-cleanup';
 import { provisionDeploymentNode } from '../../../src/services/deployment-provisioning';
+import { deleteDNSRecord } from '../../../src/services/dns';
 import { teardownDeploymentEnvironmentOnNode } from '../../../src/services/node-agent';
 import { stopNodeResources } from '../../../src/services/node-resource-lifecycle';
 import { exactProviderCredentialBindingFromPlacementSnapshot } from '../../../src/services/provider-credential-exact';
@@ -236,6 +237,26 @@ describe('deployment teardown with real SQL and strict provider boundary', () =>
       config
     );
   });
+
+  it.each(['environment', 'node'])(
+    'keeps DNS cleanup retryable after provider termination: %s',
+    async (entryPoint) => {
+      await seedNode({ backendDnsRecordId: 'dns-record' });
+      await seedEnvironment();
+      vi.mocked(deleteDNSRecord).mockRejectedValueOnce(new Error('DNS unavailable'));
+      if (entryPoint === 'environment') expect((await stop()).status).toBe(409);
+      else
+        await expect(stopNodeResources('node', 'user', env)).rejects.toThrow(
+          'DNS cleanup remains pending'
+        );
+      expect(environment()).toMatchObject({ status: 'error', node_id: 'node' });
+      expect(row()).toMatchObject({ status: 'destroying', backend_dns_record_id: 'dns-record' });
+      expect(row().runtime_termination_confirmed_at).toEqual(expect.any(String));
+      expect((await stop()).status).toBe(200);
+      expect(deleteDNSRecord).toHaveBeenCalledTimes(2);
+      expect(provider.deleteVM).toHaveBeenCalledTimes(1);
+    }
+  );
 
   it('rolls back terminalization atomically and retries using existing external deletion proof', async () => {
     await seedNode();
