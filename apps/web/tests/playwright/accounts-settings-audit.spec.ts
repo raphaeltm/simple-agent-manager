@@ -11,11 +11,7 @@
  */
 import { expect, type Page, test } from '@playwright/test';
 
-import {
-  type AccountRows,
-  accountRows,
-  mergeRows,
-} from '../unit/components/accounts/fixtures';
+import { type AccountRows, accountRows, mergeRows } from '../unit/components/accounts/fixtures';
 import {
   assertNoOverflow,
   type AuditResponder,
@@ -33,9 +29,8 @@ const USER = makeMockUser({
   userId: 'user-accounts',
 });
 
-const LONG = 'Acme-Corporation-Client-Engagement-Anthropic-Max-Plan-Seat-For-The-Platform-Team-'.repeat(
-  3
-);
+const LONG =
+  'Acme-Corporation-Client-Engagement-Anthropic-Max-Plan-Seat-For-The-Platform-Team-'.repeat(3);
 
 const PROJECTS = [
   { id: 'p-web', name: 'Marketing site' },
@@ -84,7 +79,13 @@ const NORMAL_ROWS = mergeRows(
     credentialKind: 'auth-json',
     isDefault: true,
   }),
-  accountRows({ id: 'zen', name: 'OpenCode Go', kind: 'agent', target: 'opencode', isDefault: true }),
+  accountRows({
+    id: 'zen',
+    name: 'OpenCode Go',
+    kind: 'agent',
+    target: 'opencode',
+    isDefault: true,
+  }),
   accountRows({
     id: 'hz',
     name: 'Hetzner — Personal',
@@ -266,9 +267,11 @@ function surfaceTests(viewport: 'mobile' | 'desktop') {
   test('agent accounts: default, pinned and unattached with coverage', async ({ page }) => {
     await openPage(page, '/settings/agents', { rows: NORMAL_ROWS });
     const claude = page.getByTestId('provider-row-claude-code');
-    await expect(
-      claude.getByRole('img', { name: 'Work Max plan: 3 projects, Acme API key: 1 project' })
-    ).toBeVisible();
+    // The bar is decorative; the legend beside it states the counts as text.
+    await expect(claude.getByTestId('coverage-bar')).toBeVisible();
+    await expect(claude.getByRole('button', { expanded: true })).toContainText(
+      /Work Max plan\s*3.*Acme API key\s*1.*1 unattached/
+    );
     await expect(claude.getByTestId('account-card-cfg-work')).toContainText('Used by 3 of 4');
     await expect(claude.getByTestId('account-card-cfg-acme')).toContainText('Acme client portal');
     await expect(claude.getByTestId('account-card-cfg-old')).toContainText(
@@ -280,7 +283,9 @@ function surfaceTests(viewport: 'mobile' | 'desktop') {
 
     await page.getByRole('radio', { name: 'By project' }).click();
     // A table from md up, one card per project on phones: assert the visible one.
-    await expect(page.getByText('Acme client portal').locator('visible=true').first()).toBeVisible();
+    await expect(
+      page.getByText('Acme client portal').locator('visible=true').first()
+    ).toBeVisible();
     await assertNoOverflow(page);
     await shot(page, 'agents-by-project');
   });
@@ -302,7 +307,9 @@ function surfaceTests(viewport: 'mobile' | 'desktop') {
       agents: AGENTS.map((agent) => ({ ...agent, configured: false })),
     });
     await expect(page.getByText('Connect your first account:')).toBeVisible();
-    await expect(page.getByText('Connect an agent account and its settings appear here.')).toBeVisible();
+    await expect(
+      page.getByText('Connect an agent account and its settings appear here.')
+    ).toBeVisible();
     await assertNoOverflow(page);
     await shot(page, 'agents-empty');
   });
@@ -311,7 +318,9 @@ function surfaceTests(viewport: 'mobile' | 'desktop') {
     await openPage(page, '/settings/agents', { rows: MANY_ROWS, projects: MANY_PROJECTS });
     const claude = page.getByTestId('provider-row-claude-code');
     await expect(claude).toContainText('1 project can’t use Claude Code');
-    await expect(claude.getByTestId('account-card-cfg-paused')).toContainText('Paused for 1 project');
+    await expect(claude.getByTestId('account-card-cfg-paused')).toContainText(
+      'Paused for 1 project'
+    );
     await expect(claude.getByTestId('account-card-cfg-many-11')).toBeVisible();
     await assertNoOverflow(page);
     await shot(page, 'agents-many');
@@ -355,7 +364,10 @@ function surfaceTests(viewport: 'mobile' | 'desktop') {
     // Pins are per provider: the Scaleway pin leaves every project on the Hetzner default.
     await expect(page.getByTestId('account-card-cfg-hz')).toContainText('Used by 4 of 4');
     // Single-account providers start collapsed after the first one.
-    await page.getByTestId('provider-row-scaleway').getByRole('button', { expanded: false }).click();
+    await page
+      .getByTestId('provider-row-scaleway')
+      .getByRole('button', { expanded: false })
+      .click();
     await expect(page.getByTestId('account-card-cfg-scw')).toContainText('Acme client portal');
     await assertNoOverflow(page);
     await shot(page, 'infrastructure');
@@ -379,7 +391,9 @@ function surfaceTests(viewport: 'mobile' | 'desktop') {
     await expect(page.getByTestId('project-account-row-openai-codex')).toContainText(
       'Your default'
     );
-    await expect(page.getByTestId('project-account-row-opencode')).toContainText('Blocked');
+    await expect(page.getByTestId('project-account-row-opencode')).toContainText(
+      'Can’t run — its pinned account is paused'
+    );
     await expect(page.getByTestId('project-account-row-scaleway')).toContainText('Scaleway — Acme');
     await assertNoOverflow(page);
     await shot(page, 'project');
