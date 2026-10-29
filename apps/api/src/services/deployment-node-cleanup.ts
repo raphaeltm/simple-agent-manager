@@ -6,7 +6,6 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { retireDeletedDeploymentNodeRecord } from './node-resource-lifecycle';
 import { deleteNodeResourcesStrict } from './strict-node-deletion';
-import { getProvisioningTimeoutMs } from './timeout';
 
 export interface DeploymentNodeCleanupResult {
   nodeDeleted: boolean;
@@ -34,14 +33,13 @@ export async function cleanupDeploymentNode(
          SELECT 1 FROM deployment_environments de WHERE de.node_id = nodes.id
            AND de.status != 'stopping'
        )
-     RETURNING status, created_at AS createdAt, runtime_termination_confirmed_at AS runtimeTerminationConfirmedAt,
+     RETURNING status, runtime_termination_confirmed_at AS runtimeTerminationConfirmedAt,
                provider_instance_id AS providerInstanceId,
                runtime_incarnation_id AS runtimeIncarnationId`
   )
     .bind(now, nodeId, userId)
     .first<{
       status: string;
-      createdAt: string;
       runtimeTerminationConfirmedAt: string | null;
       providerInstanceId: string | null;
       runtimeIncarnationId: string | null;
@@ -49,18 +47,6 @@ export async function cleanupDeploymentNode(
   if (!claim) return { nodeDeleted: false, warnings: [] };
 
   try {
-    // An empty inventory while createVM is still in flight is not durable
-    // absence. Quarantine fresh unknown allocations until the existing
-    // provisioning window has elapsed; the post-create authority fence can
-    // meanwhile record/delete any returned VM identity.
-    if (
-      !claim.providerInstanceId &&
-      !claim.runtimeTerminationConfirmedAt &&
-      (!Number.isFinite(Date.parse(claim.createdAt)) ||
-        Date.now() - Date.parse(claim.createdAt) < getProvisioningTimeoutMs(env))
-    ) {
-      throw new Error('Deployment allocation is still within its provisioning recovery window');
-    }
     const proof =
       claim.status === 'deleted'
         ? claim

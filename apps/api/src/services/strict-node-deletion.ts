@@ -34,6 +34,7 @@ import {
   type ExactProviderCredentialBinding,
   exactProviderCredentialBindingFromPlacementSnapshot,
 } from './provider-credentials';
+import { getProvisioningTimeoutMs } from './timeout';
 import { destroyVmAgentContainer } from './vm-agent-container';
 
 type NodeDb = ReturnType<typeof drizzle<typeof schema>>;
@@ -346,6 +347,16 @@ async function reconcileStrictProviderlessVm(
     throw new Error(
       `Cannot confirm managed VM termination for node ${node.id}: instance identity is missing`
     );
+  }
+  // A fresh createVM may still be in flight. Keep every deployment entry
+  // point (including direct node Stop) quarantined until the existing recovery
+  // window passes; a temporarily empty inventory cannot prove its termination.
+  if (
+    node.nodeRole === 'deployment' &&
+    (!Number.isFinite(Date.parse(node.createdAt)) ||
+      Date.now() - Date.parse(node.createdAt) < getProvisioningTimeoutMs(env))
+  ) {
+    throw new Error('Deployment allocation is still within its provisioning recovery window');
   }
   // Only Hetzner currently guarantees that a successful filtered inventory read is
   // complete. Other adapters may deliberately return partial multi-region inventory,

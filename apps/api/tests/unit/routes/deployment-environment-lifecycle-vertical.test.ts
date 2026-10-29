@@ -387,6 +387,15 @@ describe('deployment teardown with real SQL and strict provider boundary', () =>
     expect(provider.deleteVM).not.toHaveBeenCalled();
   });
 
+  it('applies the fresh-allocation fence to direct node stops too', async () => {
+    await seedNode({ providerInstanceId: null, createdAt: new Date().toISOString() });
+    await seedEnvironment();
+    await expect(stopNodeResources('node', 'user', env)).rejects.toThrow('remains unconfirmed');
+    expect(provider.listVMs).not.toHaveBeenCalled();
+    expect(row().runtime_termination_confirmed_at).toBeNull();
+    expect(environment()).toMatchObject({ status: 'error', node_id: 'node' });
+  });
+
   it.each(['exact', 'foreign', 'duplicate'])(
     'revalidates discovered providerless deployment ownership: %s',
     async (kind) => {
