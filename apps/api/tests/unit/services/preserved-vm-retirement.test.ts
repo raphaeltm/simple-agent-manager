@@ -16,6 +16,7 @@ import {
   resolveCleanupConfig,
 } from '../../../src/scheduled/node-cleanup/shared';
 import { preparePreservedVmRetirement } from '../../../src/services/preserved-vm-retirement';
+import { repairRetiredVmSleepSnapshots } from '../../../src/services/retired-vm-sleep-repair';
 import { buildSessionSnapshotR2Key } from '../../../src/services/session-snapshot-artifacts';
 import { deleteNodeResourcesStrict } from '../../../src/services/strict-node-deletion';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -280,6 +281,24 @@ describe('legacy VM retirement: real SQL, snapshot verifier and strict provider 
     expect(boundary.remove).not.toHaveBeenCalled();
     expect(workspace()).toEqual({ status: 'evicted', runtime_deletion_proof: null });
   });
+  it('repairs missing sleep confirmation on retry only from exact termination proof', async () => {
+    sqlite.exec('UPDATE session_snapshots SET sleeping_at=NULL');
+    await repairRetiredVmSleepSnapshots(env, 'node', 'owner');
+    expect(sqlite.prepare('SELECT sleeping_at FROM session_snapshots').get()).toEqual({
+      sleeping_at: null,
+    });
+    sqlite.exec(
+      "UPDATE nodes SET runtime_termination_confirmed_at='2001-01-01'; UPDATE workspaces SET status='deleted',runtime_deletion_proof='node_runtime_terminated',runtime_deletion_confirmed_at='2001-01-01'"
+    );
+    await repairRetiredVmSleepSnapshots(env, 'node', 'foreign');
+    expect(sqlite.prepare('SELECT sleeping_at FROM session_snapshots').get()).toEqual({
+      sleeping_at: null,
+    });
+    await repairRetiredVmSleepSnapshots(env, 'node', 'owner');
+    expect(sqlite.prepare('SELECT sleeping_at FROM session_snapshots').get()).toEqual({
+      sleeping_at: '2001-01-01',
+    });
+  });
   function fallback() {
     const record = JSON.stringify({
       version: 1,
@@ -326,6 +345,9 @@ describe('legacy VM retirement: real SQL, snapshot verifier and strict provider 
       "UPDATE session_snapshots SET sleep_status='stopping',sleep_claim_id='claim',sleeping_at=NULL,sleep_stopping_since='2000-01-01'"
     );
     expect((await handoff()).lifetimeDestroyed).toBe(1);
+    expect(
+      sqlite.prepare('SELECT sleep_status,sleeping_at,sleep_claim_id FROM session_snapshots').get()
+    ).toEqual({ sleep_status: 'sleeping', sleeping_at: expect.any(String), sleep_claim_id: null });
   });
   it('rejects stopping fallback without a durable claim', async () => {
     fallback();

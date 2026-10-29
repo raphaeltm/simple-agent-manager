@@ -31,15 +31,17 @@ Staging explicitly waived by user; no production lifecycle/stress fixtures. Pres
 References: .claude/rules/47-control-loop-io-budget.md (API scoped copy), .claude/rules/25-review-merge-gate.md, Constitution X/XI.
 
 ## Validation / review evidence
-- Focused real-SQL retirement suite: 50 passed, independently repeated by completion reviewer.
+- Focused real-SQL retirement suite: 52 passed, independently repeated by completion reviewer.
 - Broader lifecycle unit suites: 146 passed before final additions.
 - Root lint: 13 tasks passed; root typecheck: 19 passed; root build: 9 passed.
-- Workers scheduled cleanup: 28 passed. Full NodeLifecycle rerun pending; isolated retry-finalizer regression passes after original concurrent-load timeout.
+- Workers scheduled cleanup: 28 passed. NodeLifecycle: 81 passed; isolated retry-finalizer regression also passes after original concurrent-load timeout.
 - Root tests running with turbo concurrency1 and maxWorkers2; default parallel attempt hit local fork timeouts, not an assertion in changed behavior.
 - Security/Cloudflare: PASS after recovery-point claim downgraded by exact CAS when unavailable.
-- Completion/test/constitution/doc: PASS, independent 50/50 and diff check.
+- Completion/test/constitution/doc: PASS, independent 52/52 and diff check.
 - Explicit staging waiver honored; production verification limited to basic smoke/read-only state.
 
 ## Production recovery limits
 Read-only classification: node01M61H40DCXNPD22N1KYNZ727S has a full preserved unconfirmed source and can retire if provider/R2 checks pass. Node01M60MET9WNMZHBWHRS53KTJD9 additionally has failed-start source01M61J61GKHH00XN3C3GW0QCGS with no preservation authority. Its null-sleeping_at source is fully preserved and its separate bounded fallback source has an explicit decision.
 The two evictions on01M61JA31QX4TXBCJ5GKP1JCZF did recover onto successors: moved snapshots retain eviction markers and restore timestamps, but their current cleanup identities/generations belong to the successor node. Original-source generation is NULL. Successor snapshots alone cannot establish original-incarnation/latest-source preservation authority; keep originals fenced pending positive proof. Shared-channel coordinator/OOM owner informed.
+
+Final recovery repair: `retired-vm-sleep-repair.ts` confirms wakeability only from exact matching durable VM/workspace termination proof, retried before source preparation after interruption. No pre-proof timestamp fabrication; backup keys and expiry retained. Both specialists re-reviewed PASS; 132 combined focused tests pass.
