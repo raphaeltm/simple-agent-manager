@@ -20,7 +20,7 @@ Choose2: preserves current layouts, adds consistent visual and screen-reader fee
 - [x] C5 Independent analytics queries, hidden-tab polling pause, longer cached gateway refresh.
 - [x] Deferred-promise ordering/cache/cancellation tests with meaningful controls.
 - [x] Mobile375px and desktop1280px Playwright audit for all changed surfaces, including Runtime/Integrations/Settings/Quotas. Review images and fix issues.
-- [ ] Full checks and specialist/task-completion reviews.
+- [x] Full checks and specialist/task-completion reviews.
 - [ ] Staging coordination, authenticated full page/action sweep, before/after wall/browser timings, zero console errors.
 - [ ] PR/CI/CodeRabbit gates, merge and basic production smoke.
 
@@ -35,3 +35,6 @@ Managed secret placeholders must be resolved with SAM exec_with_secrets; literal
 
 ## Supplemental session recovery
 The staging auth/bootstrap stall could leave a cold private route spinning indefinitely. AuthProvider now exposes a sanitized verification error and BetterAuth retry callback; ProtectedRoute keeps the requested URL and offers retry without granting access. Existing successful-session preservation and logout isolation remain unchanged.30focused auth/route tests PASS. Actual BetterAuth503→200 retry recovery and URL preservation passed at375/1280; screenshots inspected. Final fullweb rerun after this change PASS:384files/4,813tests.
+
+## Implementation archival
+Implementation complete. Final task-completion-validator A–F PASS on1d4a56413...bf4ebc0d7. Fullweb384files/4,813tests and rebasedquality35tasksPASS. Staging measurements/browser flows, CI/CodeRabbit, sequential backend/frontend PR gates, merge and production smoke remain pending in the overall active task and PR checklist.
