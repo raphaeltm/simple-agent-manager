@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import * as observabilitySchema from '../../../src/db/observability-schema';
 import { log } from '../../../src/lib/logger';
 import { resolveCleanupConfig, runNodeCleanupSweep } from '../../../src/scheduled/node-cleanup';
+import { invalidateAdminSettings } from '../../../src/services/admin-settings';
 import { clearCapacityCatalogCache } from '../../../src/services/default-capacity-source-credentials';
 import { buildSessionSnapshotR2Key } from '../../../src/services/session-snapshot-artifacts';
 import { findRestorableOrInFlightSleepSnapshot } from '../../../src/services/session-snapshot-sleep-predicate';
@@ -198,6 +199,8 @@ describe('bounded stranded retirement through the real cleanup cron entry', () =
     f.sqlite
       .prepare('INSERT INTO platform_settings(key,value,updated_at) VALUES (?,?,?)')
       .run('operations.nodeCleanupBlockedRetirementMs', String(20 * 60_000), NOW.toISOString());
+    // Direct SQL fixture writes model the invalidation performed by the admin mutation.
+    invalidateAdminSettings(f.env);
     await runNodeCleanupSweep(f.env);
     expect(f.providerDeletes).toHaveLength(1);
     expect(node(f)).toMatchObject({ status: 'deleted' });

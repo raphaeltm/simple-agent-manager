@@ -51,14 +51,16 @@ const adminAgentEmailRoutes = new Hono<{ Bindings: Env }>();
 // request was GET /agent-email (status), whose handler makes no external HTTP calls.
 adminAgentEmailRoutes.use('/*', async (c, next) => {
   if (c.req.method !== 'GET') return next();
-  const limits = await withDeadline(
-    () => getAgentEmailLimits(c.env),
-    DEFAULT_AGENT_EMAIL_READ_TIMEOUT_MS
-  );
-  const timeoutMs = c.req.path.endsWith('/setup')
-    ? limits.setupPlanTimeoutMs
-    : limits.readTimeoutMs;
-  await withDeadline(() => next(), timeoutMs, c.req.raw.signal).catch((error: unknown) => {
+  try {
+    const limits = await withDeadline(
+      () => getAgentEmailLimits(c.env),
+      DEFAULT_AGENT_EMAIL_READ_TIMEOUT_MS
+    );
+    const timeoutMs = c.req.path.endsWith('/setup')
+      ? limits.setupPlanTimeoutMs
+      : limits.readTimeoutMs;
+    await withDeadline(() => next(), timeoutMs, c.req.raw.signal);
+  } catch (error: unknown) {
     if (error instanceof IoTimeoutError)
       throw new AppError(
         504,
@@ -66,7 +68,7 @@ adminAgentEmailRoutes.use('/*', async (c, next) => {
         'Agent email verification timed out. Try again.'
       );
     throw error;
-  });
+  }
 });
 adminAgentEmailRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin());
 

@@ -3,6 +3,14 @@ name: Deploy Staging
 on:
   workflow_dispatch:
     inputs:
+      performance_audit:
+        description: 'Run bounded admin/Runtime browser timings and screenshots with the staging smoke account'
+        type: boolean
+        default: false
+      performance_audit_only:
+        description: 'Audit the current staging deployment without redeploying (requires performance_audit)'
+        type: boolean
+        default: false
       activation_only:
         description: 'Run C storage activation on the already deployed candidate; skip deployment'
         type: boolean
@@ -65,7 +73,7 @@ permissions:
 
 jobs:
   deploy:
-    if: ${{ !inputs.github_trigger_audit_send_only && !inputs.activation_only }}
+    if: ${{ !inputs.github_trigger_audit_send_only && !inputs.activation_only && !inputs.performance_audit_only }}
     uses: ./.github/workflows/deploy-reusable.yml
     with:
       environment: staging
@@ -78,13 +86,14 @@ jobs:
   # Skipped if the token is not configured (new deployments before token setup).
   smoke-tests:
     needs: deploy
-    if: ${{ always() && !inputs.activation_only && !inputs.dry_run && (needs.deploy.result == 'success' || (inputs.github_trigger_audit && inputs.github_trigger_audit_send_only)) }}
+    if: ${{ always() && !inputs.activation_only && !inputs.dry_run && (needs.deploy.result == 'success' || (inputs.performance_audit && inputs.performance_audit_only) || (inputs.github_trigger_audit && inputs.github_trigger_audit_send_only)) }}
     runs-on: ubuntu-latest
     environment: staging
     env:
       SMOKE_TEST_TOKEN: ${{ !inputs.github_trigger_audit_send_only && secrets.SMOKE_TEST_TOKEN || '' }}
       SMOKE_TEST_URL: https://app.${{ vars.BASE_DOMAIN }}
       SMOKE_TEST_API_URL: https://api.${{ vars.BASE_DOMAIN }}
+      SAM_PERFORMANCE_AUDIT: ${{ inputs.performance_audit && 'true' || 'false' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -105,9 +114,24 @@ jobs:
           ln -sf /tmp/pw/node_modules/playwright-core $GITHUB_WORKSPACE/node_modules/playwright-core
           ln -sf /tmp/pw/node_modules/.bin/playwright $GITHUB_WORKSPACE/node_modules/.bin/playwright
 
+      - name: Require credentials for an explicit performance audit
+        if: ${{ inputs.performance_audit && env.SMOKE_TEST_TOKEN == '' }}
+        run: |
+          echo '::error::SMOKE_TEST_TOKEN is required for the requested staging performance audit'
+          exit 1
+
       - name: Run smoke tests
         if: ${{ !inputs.github_trigger_audit_send_only && env.SMOKE_TEST_TOKEN != '' }}
         run: npx playwright test --config=tests/smoke/playwright.config.ts
+
+      - name: Upload bounded performance audit
+        if: ${{ always() && inputs.performance_audit }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: admin-runtime-performance-${{ github.run_id }}
+          if-no-files-found: error
+          path: .codex/tmp/smoke-test-results/**/performance/
+          retention-days: 7
 
       - name: Skip notice (no token configured)
         if: ${{ !inputs.github_trigger_audit_send_only && env.SMOKE_TEST_TOKEN == '' }}

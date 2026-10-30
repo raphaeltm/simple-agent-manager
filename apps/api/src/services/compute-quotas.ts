@@ -267,7 +267,8 @@ export async function removeUserQuotaOverride(
 /** List all user quota overrides with user info and current usage. */
 export async function listUserQuotasWithUsage(
   db: DrizzleD1Database<typeof schema>,
-  suppliedDefaultQuota?: Awaited<ReturnType<typeof getDefaultQuota>> | ReturnType<typeof getDefaultQuota>
+  suppliedDefaultQuota?:
+    Awaited<ReturnType<typeof getDefaultQuota>> | ReturnType<typeof getDefaultQuota>
 ): Promise<
   Array<{
     userId: string;
@@ -305,6 +306,7 @@ export async function listUserQuotasWithUsage(
   // Collect all relevant user IDs (those with overrides + those with usage)
   const allUserIds = new Set<string>();
   for (const o of overrides) allUserIds.add(o.userId);
+  for (const userId of usageByUser.keys()) allUserIds.add(userId);
 
   // Get unique user IDs from compute_usage
   const usageUserIds = [...new Set(usageRows.map((r) => r.userId))];

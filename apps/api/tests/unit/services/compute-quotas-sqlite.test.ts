@@ -111,6 +111,17 @@ describe('quota and usage queries against real SQLite with the D1 bind ceiling',
     expect(actual.get('owner')).toBeCloseTo(expected, 8);
   });
 
+  it('includes ongoing platform node charges after an old workspace session ended', async () => {
+    seedUser('node-owner');
+    seedNode('running-node', 'node-owner', { provider_instance_vcpu_count: 3 });
+    sqlite
+      .prepare('INSERT INTO compute_usage(id,user_id,started_at,ended_at) VALUES(?,?,?,?)')
+      .run('old-workspace', 'node-owner', '2026-09-01T00:00:00.000Z', '2026-09-02T00:00:00.000Z');
+    const quotas = await listUserQuotasWithUsage(database());
+    expect(quotas).toHaveLength(1);
+    expect(quotas[0]).toMatchObject({ userId: 'node-owner', currentUsage: 12 });
+  });
+
   it('does not list users whose only compute record ended before this period', async () => {
     seedUser('historical');
     seedUser('current');
