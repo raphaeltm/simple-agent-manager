@@ -60,7 +60,7 @@ The control plane uses the VM-agent capability path `DELETE /workspaces/:id/phys
 
 - `POST /api/projects` — Create project
 - `GET /api/projects` — List user's projects (supports `limit` and `cursor`)
-- `GET /api/projects/:id` — Get project detail (includes task status counts and linked workspace count)
+- `GET /api/projects/:id` — Get project detail (includes task status counts and linked workspace count). Recent sessions/activity are empty by default; pass `?include=recent` for bounded best-effort recent data (the CLI requests this).
 - `GET /api/projects/:projectId/comments` — List project-wide comment inbox across chat and library threads (supports `status=open|sent|resolved`, `limit`)
 - `GET /api/projects/:id/capacity-pools/defaults` — Read default capacity pool context for the current project/user context. Requires project `project:read`; every active member receives the redacted `effectiveSummary` plus safe `placementSettings` resource defaults/settings. Raw project/user summaries require project `secret:read`, raw installation summaries are superadmin-only, and encrypted credential material is never returned. `?ensure=true` reconciles only for callers that also have project `secret:read`; non-superadmins never reconcile installation credentials through this route.
 - `POST /api/projects/:id/capacity-pools/defaults/reconcile` — Explicitly reconcile visible default capacity pool metadata from existing credentials and return the same safe summary payload. Non-superadmins reconcile project/user scopes only.

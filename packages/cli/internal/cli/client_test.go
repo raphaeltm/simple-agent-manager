@@ -273,3 +273,18 @@ func (b *countingBody) Close() error {
 	b.closed = true
 	return nil
 }
+
+func TestProjectDetailRequestsAndDecodesRecentSessions(t *testing.T) {
+	doer, captured := captureJSONRequest(t, `{"id":"project/1","recentSessions":[{"id":"session-1","status":"active"}]}`, http.StatusOK)
+	client := NewAPIClient(CLIConfig{APIURL: "https://api.example.com"}, doer)
+	detail, err := client.GetProjectDetail(context.Background(), "project/1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if captured.URL != "https://api.example.com/api/projects/project%2F1?include=recent" {
+		t.Fatalf("url = %s", captured.URL)
+	}
+	if len(detail.RecentSessions) != 1 || detail.RecentSessions[0].ID != "session-1" {
+		t.Fatalf("recent sessions missing: %#v", detail.RecentSessions)
+	}
+}
