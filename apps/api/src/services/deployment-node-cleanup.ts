@@ -27,7 +27,7 @@ export async function cleanupDeploymentNode(
 ): Promise<DeploymentNodeCleanupResult> {
   const now = new Date().toISOString();
   const claim = await env.DATABASE.prepare(
-    `UPDATE nodes SET status = CASE WHEN status = 'deleted' THEN 'deleted' ELSE 'destroying' END, health_status = 'stale', updated_at = ?
+    `UPDATE nodes SET cleanup_blocked_since = NULL, cleanup_blocked_reason = NULL, cleanup_blocked_alerted_at = NULL, status = CASE WHEN status = 'deleted' THEN 'deleted' ELSE 'destroying' END, health_status = 'stale', updated_at = ?
      WHERE id = ? AND user_id = ?
        AND node_role = 'deployment' AND node_class = 'managed' AND runtime = 'vm'
        AND (status != 'deleted' OR runtime_termination_confirmed_at IS NOT NULL)

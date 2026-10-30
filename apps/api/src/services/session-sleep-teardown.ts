@@ -361,6 +361,9 @@ export async function completeSleepTeardown(
         healthStatus: 'unhealthy',
         errorMessage: null,
         updatedAt: now,
+        cleanupBlockedSince: null,
+        cleanupBlockedReason: null,
+        cleanupBlockedAlertedAt: null,
       })
       .where(and(eq(schema.nodes.id, workspace.nodeId), confirmedRuntime));
     const result = await db.batch([workspaceSleeping, agentSleeping, nodeSleeping]);

@@ -302,3 +302,13 @@ from KV, and the stalled-turn check only from its variable. Those releases can n
 anyway ([Update forward, not back](/docs/guides/self-hosting/#option-a-update-self-hosted-instance-workflow-recommended)),
 but if you run one, set the KV switches to the values you want and check them. Rolling back the
 Worker doesn't roll back saved settings, and the tables that hold them must stay.
+
+## Blocked VM cleanup
+
+`operations.nodeCleanupBlockedRetirementMs` controls how long automatic cleanup may remain blocked before SAM retires a stopped workspace VM. The default is 1,800,000 milliseconds (30 minutes); admins can set a whole number from 1 to 86,400,000 milliseconds.
+
+SAM first attempts to preserve existing recovery sources. At the deadline, it retires eligible VMs and records any workspace disk that could not be verified as preserved. Saved backup objects and conversation transcripts remain. Affected conversations show a failure instead of offering an unusable disk restore.
+
+Two related settings control warning and alert frequency: `operations.nodeCleanupRefusalWarnAfterMs` defaults to 300,000 milliseconds (five minutes), and `operations.nodeCleanupOwnershipAlertIntervalMs` defaults to 86,400,000 milliseconds (one day).
+
+Active workspaces and provider ownership checks remain protected. When ownership cannot be proved, SAM keeps the VM and raises an admin-visible error, deduplicated to once per node per day. Blocked nodes show the time and reason in their existing error message on the node list and detail page.

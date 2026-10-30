@@ -1,9 +1,12 @@
 // FILE SIZE EXCEPTION: Declarative typed settings registry (data, like schema.ts); split by domain is tracked in idea 01M5NPWZYJ6XK8G1FK9KXEX813. See .claude/rules/18-file-size-limits.md
 /** Phase 1 only. Existing readers are wired here after the recovery wave releases integration. */
 import {
+  DEFAULT_CLEANUP_OWNERSHIP_ALERT_INTERVAL_MS,
+  DEFAULT_CLEANUP_REFUSAL_WARN_AFTER_MS,
   DEFAULT_COMMENT_NOTIFICATION_WINDOW_MS,
   DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING_LIMIT,
   DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS_LIMIT,
+  DEFAULT_NODE_CLEANUP_BLOCKED_RETIREMENT_MS,
   DEFAULT_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
   MAX_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
 } from '@simple-agent-manager/shared';
@@ -60,6 +63,9 @@ export type AdminSettingName =
   | 'operations.workloadIdentityTokenTtlSeconds'
   | 'operations.evictionRecoveryRetryBatchSize'
   | 'operations.evictionRecoveryRetryWallMs'
+  | 'operations.nodeCleanupBlockedRetirementMs'
+  | 'operations.nodeCleanupRefusalWarnAfterMs'
+  | 'operations.nodeCleanupOwnershipAlertIntervalMs'
   | 'operations.evictionRecoveryRetryDelayMs'
   | 'operations.resourceLinkTouchIntervalMs'
   | 'operations.resourceLinkWeakPerTarget'
@@ -292,6 +298,27 @@ function validGitLabHost(value: unknown): boolean {
 }
 
 const definitions: AdminSettingDefinition[] = [
+  integerDefinition(
+    'operations.nodeCleanupRefusalWarnAfterMs',
+    DEFAULT_CLEANUP_REFUSAL_WARN_AFTER_MS,
+    'Operations',
+    'Cleanup refusal warning and retry interval in milliseconds.',
+    { min: 1, max: 86400000 }
+  ),
+  integerDefinition(
+    'operations.nodeCleanupOwnershipAlertIntervalMs',
+    DEFAULT_CLEANUP_OWNERSHIP_ALERT_INTERVAL_MS,
+    'Operations',
+    'Minimum interval between ownership alerts for the same blocked node in milliseconds.',
+    { min: 1, max: 604800000 }
+  ),
+  integerDefinition(
+    'operations.nodeCleanupBlockedRetirementMs',
+    DEFAULT_NODE_CLEANUP_BLOCKED_RETIREMENT_MS,
+    'Operations',
+    'Maximum continuous node cleanup refusal in milliseconds before automatic VM retirement or ownership alert.',
+    { min: 1, max: 86400000 }
+  ),
   integerDefinition(
     'operations.evictionRecoveryRetryBatchSize',
     5,

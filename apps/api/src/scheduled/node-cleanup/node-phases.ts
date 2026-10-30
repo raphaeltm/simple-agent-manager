@@ -298,7 +298,7 @@ async function sweepManagedHandoffNodes(
   const preservedVmBudget = { remainingSources: config.workspaceSweepLimit };
   const activitySql = `COALESCE(MAX(${preservedVmRetirementActivitySql('w')}), n.created_at)`;
   const candidates = await env.DATABASE.prepare(
-    `SELECT n.id, n.user_id, n.status, n.created_at,
+    `SELECT n.id, n.user_id, n.status, n.created_at, n.cleanup_blocked_since,
             COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count,
             ${activitySql} as last_activity
      FROM nodes n
@@ -316,7 +316,7 @@ async function sweepManagedHandoffNodes(
        ${boundedWarmPlacementClaimGuardSql('n.id')}
      GROUP BY n.id, n.user_id, n.status, n.created_at
      HAVING ${activitySql} < ?
-     ORDER BY last_activity ASC
+     ORDER BY n.cleanup_blocked_since IS NULL, n.cleanup_blocked_since ASC, last_activity ASC
      LIMIT ?`
   )
     .bind(
@@ -350,6 +350,8 @@ async function sweepManagedHandoffNodes(
 
     const destroyed = await destroyNodeForCleanup(db, env, now.toISOString(), node, {
       preservedVmBudget,
+      blockedRetirementMs: config.blockedRetirementMs,
+      refusalWarnAfterMs: config.refusalWarnAfterMs,
       logEvent: options.logEvent,
       requestDeadlineMs: Math.min(
         sweepDeadlineMs,
@@ -477,7 +479,7 @@ export async function sweepIncompatibleVmAgentNodes(
        )
      GROUP BY n.id, n.user_id, n.status, n.created_at, n.agent_version
      HAVING COALESCE(MAX(${preservedVmRetirementActivitySql('w')}), n.created_at) < ?
-     ORDER BY last_activity ASC
+     ORDER BY n.cleanup_blocked_since IS NULL, n.cleanup_blocked_since ASC, last_activity ASC
      LIMIT ?`
   )
     .bind(
@@ -514,6 +516,8 @@ export async function sweepIncompatibleVmAgentNodes(
 
     const destroyed = await destroyNodeForCleanup(db, env, now.toISOString(), node, {
       preservedVmBudget,
+      blockedRetirementMs: config.blockedRetirementMs,
+      refusalWarnAfterMs: config.refusalWarnAfterMs,
       logEvent: 'node_cleanup.destroying_incompatible_vm_agent',
       failureLogEvent: 'node_cleanup.incompatible_vm_agent_destroy_failed',
       successMessage: 'Destroyed idle node running incompatible VM agent build',
@@ -587,7 +591,7 @@ export async function sweepIdleOrphanNodes(
        )
      GROUP BY n.id, n.user_id, n.status, n.created_at, n.warm_since
      HAVING ${LAST_WORKSPACE_ACTIVITY_SQL} < ?
-     ORDER BY last_activity ASC
+     ORDER BY n.cleanup_blocked_since IS NULL, n.cleanup_blocked_since ASC, last_activity ASC
      LIMIT ?`
   )
     .bind(now.toISOString(), idleThreshold, idleThreshold, idleThreshold, config.nodeSweepLimit)

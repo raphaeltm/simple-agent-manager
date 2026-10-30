@@ -606,6 +606,7 @@ export async function deleteNodeResourcesStrict(
     cleanupDns?: boolean;
     /** Only the explicit permanent operator deletion adapter may discard local workspace data. */
     explicitPermanentDeletion?: boolean;
+    boundedStrandedRetirement?: import('./bounded-stranded-retirement-authority').BoundedStrandedRetirement;
     expectedRuntime?: StrictNodeRuntimeIdentity;
     workspaceDeletion?: ContainerWorkspaceDeletionAuthority;
     preservedVm?: PreservedVmRetirement;
@@ -650,7 +651,8 @@ export async function deleteNodeResourcesStrict(
           userId,
           initialNode,
           options.workspaceDeletion,
-          options.preservedVm
+          options.preservedVm,
+          options.boundedStrandedRetirement
         );
   if (!initialNode.runtimeTerminationConfirmedAt) await beforeDestroy?.();
   const node = await claimManagedNodeDeletion(db, initialNode);

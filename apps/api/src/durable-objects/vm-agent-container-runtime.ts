@@ -175,7 +175,7 @@ export async function persistRuntimeSleeping(env: Env, identity: RuntimeIdentity
   await env.DATABASE.batch([
     env.DATABASE.prepare(
       `UPDATE nodes
-       SET status = 'sleeping', health_status = 'unhealthy', error_message = NULL, updated_at = ?
+       SET cleanup_blocked_since = NULL, cleanup_blocked_reason = NULL, cleanup_blocked_alerted_at = NULL, status = 'sleeping', health_status = 'unhealthy', error_message = NULL, updated_at = ?
        WHERE id = ?`
     ).bind(now, identity.nodeId),
     env.DATABASE.prepare(
@@ -210,7 +210,7 @@ export async function persistRuntimeSleepingAfterRevokedWake(
   await env.DATABASE.batch([
     env.DATABASE.prepare(
       `UPDATE nodes
-          SET status = 'sleeping', health_status = 'unhealthy', error_message = NULL, updated_at = ?
+          SET cleanup_blocked_since = NULL, cleanup_blocked_reason = NULL, cleanup_blocked_alerted_at = NULL, status = 'sleeping', health_status = 'unhealthy', error_message = NULL, updated_at = ?
         WHERE id = ?
           AND status NOT IN ('stopped', 'deleted', 'error')
           AND ${liveWorkspace}`
@@ -245,7 +245,7 @@ export async function persistRuntimeEnded(
   const results = await env.DATABASE.batch([
     env.DATABASE.prepare(
       `UPDATE nodes
-       SET status = ?, health_status = 'unhealthy', error_message = ?, updated_at = ?
+       SET cleanup_blocked_since = NULL, cleanup_blocked_reason = NULL, cleanup_blocked_alerted_at = NULL, status = ?, health_status = 'unhealthy', error_message = ?, updated_at = ?
        WHERE id = ? AND status NOT IN ('destroying', 'stopped', 'deleted')`
     ).bind(status, errorMessage, now, identity.nodeId),
     env.DATABASE.prepare(

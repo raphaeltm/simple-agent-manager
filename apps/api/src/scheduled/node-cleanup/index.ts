@@ -24,6 +24,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { resolveAdminSettingDetailsMany } from '../../services/admin-settings';
 import { sweepEmptyNodeWarmHandoff } from './empty-node-warm-handoff';
 import {
   sweepDestroyingHandoffNodes,
@@ -34,6 +35,7 @@ import {
   sweepStoppedHandoffNodes,
 } from './node-phases';
 import { emptyResult, type NodeCleanupResult, resolveCleanupConfig } from './shared';
+import { sweepStrandedNodes } from './stranded-node-retirement';
 import { sweepTerminalCfContainers } from './terminal-cf-container-phase';
 import { sweepUnhealthyNodes, type UnhealthyNodeBoundaries } from './unhealthy-nodes';
 import { sweepOrphanedWorkspaces, sweepStaleStoppedWorkspaces } from './workspace-phases';
@@ -57,6 +59,17 @@ export async function runNodeCleanupSweep(
   const db = drizzle(env.DATABASE, { schema });
   const now = new Date();
   const config = resolveCleanupConfig(env);
+  const cleanupSettings = await resolveAdminSettingDetailsMany(env, [
+    'operations.nodeCleanupBlockedRetirementMs',
+    'operations.nodeCleanupRefusalWarnAfterMs',
+    'operations.nodeCleanupOwnershipAlertIntervalMs',
+  ]);
+  const [retirementSetting, warningSetting, alertSetting] = cleanupSettings;
+  if (!retirementSetting || !warningSetting || !alertSetting)
+    throw new Error('Cleanup retirement settings are unavailable');
+  config.blockedRetirementMs = Number(retirementSetting.value);
+  config.refusalWarnAfterMs = Number(warningSetting.value);
+  config.ownershipAlertIntervalMs = Number(alertSetting.value);
   const result = emptyResult();
 
   const phases: Array<[string, () => Promise<void>]> = [
@@ -69,6 +82,7 @@ export async function runNodeCleanupSweep(
     ['max_lifetime', () => sweepMaxLifetimeNodes(db, env, now, config, result)],
     ['stopped_handoff', () => sweepStoppedHandoffNodes(db, env, now, config, result)],
     ['destroying_handoff', () => sweepDestroyingHandoffNodes(db, env, now, config, result)],
+    ['stranded_nodes', () => sweepStrandedNodes(db, env, now, config, result)],
     ['orphaned_workspaces', () => sweepOrphanedWorkspaces(db, env, now, config, result)],
     ['incompatible_vm_agent', () => sweepIncompatibleVmAgentNodes(db, env, now, config, result)],
     ['idle_orphan_nodes', () => sweepIdleOrphanNodes(db, env, now, config, result)],

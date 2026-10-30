@@ -124,6 +124,8 @@ export interface NodeMetrics {
 }
 
 export interface NodeResponse {
+  cleanupBlockedSince?: string | null;
+  cleanupBlockedReason?: string | null;
   id: string;
   name: string;
   status: NodeStatus;
@@ -370,14 +372,7 @@ export interface DetectedPort {
 }
 
 export type WorkspacePortsState =
-  | 'ready'
-  | 'not_ready'
-  | 'sleeping'
-  | 'stopped'
-  | 'evicted'
-  | 'deleted'
-  | 'gone'
-  | 'error';
+  'ready' | 'not_ready' | 'sleeping' | 'stopped' | 'evicted' | 'deleted' | 'gone' | 'error';
 
 /** Response from GET /workspaces/{id}/ports on the VM agent. */
 export interface PortsResponse {
@@ -510,13 +505,7 @@ export interface NodeContainerListResponse {
 
 /** Machine-readable container state */
 export type ContainerState =
-  | 'running'
-  | 'exited'
-  | 'paused'
-  | 'created'
-  | 'restarting'
-  | 'removing'
-  | 'dead';
+  'running' | 'exited' | 'paused' | 'created' | 'restarting' | 'removing' | 'dead';
 
 /** Container info with full state and metrics */
 export interface ContainerInfo {

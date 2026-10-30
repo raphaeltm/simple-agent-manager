@@ -203,7 +203,7 @@ export async function persistRuntimeRecovering(
   const [nodeResult, workspaceResult] = await env.DATABASE.batch([
     env.DATABASE.prepare(
       `UPDATE nodes
-       SET status = 'recovery',
+       SET cleanup_blocked_since = NULL, cleanup_blocked_reason = NULL, cleanup_blocked_alerted_at = NULL, status = 'recovery',
            health_status = 'unhealthy',
            error_message = ?,
            runtime_termination_confirmed_at = NULL,
@@ -320,7 +320,7 @@ export async function persistRuntimeRecovered(
   const [nodeResult, workspaceResult] = await env.DATABASE.batch([
     env.DATABASE.prepare(
       `UPDATE nodes
-       SET status = 'running',
+       SET cleanup_blocked_since = NULL, cleanup_blocked_reason = NULL, cleanup_blocked_alerted_at = NULL, status = 'running',
            health_status = 'healthy',
            error_message = NULL,
            runtime_termination_confirmed_at = NULL,
