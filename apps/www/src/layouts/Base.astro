@@ -2,6 +2,8 @@
 import '../styles/global.css';
 import '@simple-agent-manager/ui/glass.css';
 
+import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
+
 interface Props {
   title?: string;
   description?: string;
@@ -25,26 +27,7 @@ const apiUrl = `https://api.${baseDomain}`;
     <meta name="description" content={description} />
 
     <!-- Pre-paint theme init (shares Starlight's `starlight-theme` key so docs + marketing stay in sync). Must run before first paint to avoid FOUC. -->
-    <script is:inline>
-      (() => {
-        const parse = (t) =>
-          t === 'auto' || t === 'light' || t === 'dark' ? t : 'auto';
-        let stored = 'auto';
-        try {
-          stored = parse(localStorage.getItem('starlight-theme') || 'auto');
-        } catch {
-          // localStorage may be unavailable (private browsing, disabled
-          // storage) — fall back to the 'auto' default set above.
-        }
-        const resolved =
-          stored === 'auto'
-            ? window.matchMedia('(prefers-color-scheme: light)').matches
-              ? 'light'
-              : 'dark'
-            : stored;
-        document.documentElement.dataset.theme = resolved;
-      })();
-    </script>
+    <ThemeInit />
     <meta name="theme-color" content="#0b1110" media="(prefers-color-scheme: dark)" />
     <meta name="theme-color" content="#f8fbf8" media="(prefers-color-scheme: light)" />
 

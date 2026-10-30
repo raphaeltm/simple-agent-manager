@@ -1,0 +1,10 @@
+---
+import '../../../../packages/ui/src/brand/brand.css';
+import '../../../../packages/ui/src/glass/glass.css';
+import '../installer.css';
+
+import Footer from '../../../../packages/ui/src/brand/Footer.astro';
+import Header from '../../../../packages/ui/src/brand/Header.astro';
+import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
+---
+<!doctype html><html lang="en"><head><ThemeInit external /><meta charset="utf-8"/><meta name="viewport" content="width=device-width,initial-scale=1"/><title>Your SAM installation service</title></head><body class="maintenance-page sam-form"><Header compact icon="BRAND_ICON"/><main><div class="setup-card sam-glass sam-glass-rim"><div class="setup-content">SAM_MAINTENANCE_CONTENT</div></div></main><Footer compact icon="BRAND_ICON"><span>In your Cloudflare account</span></Footer></body></html>

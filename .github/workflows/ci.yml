@@ -107,6 +107,7 @@ jobs:
               - '.github/workflows/deploy-www.yml'
               # Shared sources the marketing site imports from @simple-agent-manager/ui
               - 'packages/ui/src/glass/**'
+              - 'packages/ui/src/brand/**'
               - 'packages/ui/package.json'
             repo-quality:
               - 'scripts/quality/check-runtime-tunables*'
@@ -599,7 +600,7 @@ jobs:
       - name: Verify installer engine, runtime integrity and bounded proof contracts
         run: |
           pnpm exec vitest run --config scripts/deploy/installer-engine.vitest.config.ts
-          node --test scripts/deploy/installer-runtime-identity.test.mjs scripts/deploy/installer-builder-bootstrap.test.mjs scripts/deploy/installer-source-cache.test.mjs scripts/deploy/test-build-installation-codex-runtime.mjs
+          node --test scripts/deploy/installer-pure-build.test.mjs scripts/deploy/installer-runtime-identity.test.mjs scripts/deploy/installer-builder-bootstrap.test.mjs scripts/deploy/installer-source-cache.test.mjs scripts/deploy/test-build-installation-codex-runtime.mjs
 
       - name: Validate wrangler binding consistency
         run: pnpm quality:wrangler-bindings

@@ -70,9 +70,9 @@ LOCKCHECK
 (
  cd "$build_dir/adapter"
  npm ci --ignore-scripts
- npm run typecheck
- INITIAL_AGENT_MODE=agent npm test
- npm run build
+ # Pure artifact build: validation belongs in repository CI. Ignore lifecycle
+ # hooks so upstream prebuild/postbuild cannot silently add validation here.
+ npm --ignore-scripts run build
  cp dist/index.js "$output_dir/adapter.js"
  cp package-lock.json "$output_dir/ADAPTER-package-lock.json"
 )

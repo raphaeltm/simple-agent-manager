@@ -1,0 +1,28 @@
+---
+const { compact = false, icon = "/images/sam-head.png" } = Astro.props;
+const currentYear = new Date().getFullYear();
+---
+<footer class="footer">
+  <div class="container footer-inner">
+    <div class="footer-brand">
+      <img src={icon} width="24" height="24" alt="" aria-hidden="true" style="border-radius: 4px;" />
+      <span>Simple Agent Manager</span>
+    </div>
+
+    <div class="footer-links">
+      {compact ? <slot /> : <>
+      <a href="/features/">Features</a>
+      <a href="/blog/">Blog</a>
+      <a href="/integrations/">Integrations</a>
+      <a href="https://github.com/raphaeltm/simple-agent-manager" target="_blank" rel="noopener noreferrer">GitHub</a>
+      <a href="https://bsky.app/profile/simple-agent-manager.org" target="_blank" rel="noopener noreferrer">Bluesky</a>
+      <a href="https://x.com/simpleagentman" target="_blank" rel="noopener noreferrer">X</a>
+      <a href="/docs/guides/self-hosting/">Self-Hosting Guide</a>
+      <a href="/docs/reference/contributing/">Contributing</a>
+      <a href="https://github.com/raphaeltm/simple-agent-manager/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">AGPL-3.0 License</a>
+      </>}
+    </div>
+
+    <p class="footer-copy">&copy; {currentYear} Simple Agent Manager. Open source under AGPL-3.0.</p>
+  </div>
+</footer>

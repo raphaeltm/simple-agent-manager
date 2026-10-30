@@ -5,6 +5,8 @@ on:
     branches: [main, 'sam/**']
     paths:
       - 'apps/installer/**'
+      - 'packages/ui/src/brand/**'
+      - 'packages/ui/src/glass/**'
   workflow_dispatch:
     inputs:
       environment:

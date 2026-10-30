@@ -1,0 +1,5 @@
+---
+import source from "./theme-init.js?raw";
+const { external = false } = Astro.props;
+---
+{external ? <script is:inline src="/theme-init.js"></script> : <script is:inline set:html={source}></script>}

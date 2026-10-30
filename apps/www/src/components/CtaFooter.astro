@@ -1,6 +1,6 @@
 ---
 const getStartedUrl = 'https://www.simple-agent-manager.org/self-host/';
-const currentYear = new Date().getFullYear();
+import Footer from "../../../../packages/ui/src/brand/Footer.astro";
 ---
 
 <section class="cta-section">
@@ -23,28 +23,7 @@ const currentYear = new Date().getFullYear();
   </div>
 </section>
 
-<footer class="footer">
-  <div class="container footer-inner">
-    <div class="footer-brand">
-      <img src="/images/sam-head.png" width="24" height="24" alt="" aria-hidden="true" style="border-radius: 4px;" />
-      <span>Simple Agent Manager</span>
-    </div>
-
-    <div class="footer-links">
-      <a href="/features/">Features</a>
-      <a href="/blog/">Blog</a>
-      <a href="/integrations/">Integrations</a>
-      <a href="https://github.com/raphaeltm/simple-agent-manager" target="_blank" rel="noopener noreferrer">GitHub</a>
-      <a href="https://bsky.app/profile/simple-agent-manager.org" target="_blank" rel="noopener noreferrer">Bluesky</a>
-      <a href="https://x.com/simpleagentman" target="_blank" rel="noopener noreferrer">X</a>
-      <a href="/docs/guides/self-hosting/">Self-Hosting Guide</a>
-      <a href="/docs/reference/contributing/">Contributing</a>
-      <a href="https://github.com/raphaeltm/simple-agent-manager/blob/main/LICENSE" target="_blank" rel="noopener noreferrer">AGPL-3.0 License</a>
-    </div>
-
-    <p class="footer-copy">&copy; {currentYear} Simple Agent Manager. Open source under AGPL-3.0.</p>
-  </div>
-</footer>
+<Footer />
 
 <style>
   .cta-section {
@@ -110,48 +89,4 @@ const currentYear = new Date().getFullYear();
     gap: 12px;
   }
 
-  /* Footer */
-  .footer {
-    border-top: 1px solid var(--color-border-subtle);
-    padding: 40px 0;
-  }
-
-  .footer-inner {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 20px;
-    text-align: center;
-  }
-
-  .footer-brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-family: var(--font-display);
-    font-size: 0.875rem;
-    font-weight: 500;
-    color: var(--color-fg-muted);
-  }
-
-  .footer-links {
-    display: flex;
-    flex-wrap: wrap;
-    justify-content: center;
-    gap: 24px;
-  }
-
-  .footer-links a {
-    font-size: 0.8125rem;
-    color: var(--color-fg-dim);
-  }
-
-  .footer-links a:hover {
-    color: var(--color-fg-muted);
-  }
-
-  .footer-copy {
-    font-size: 0.75rem;
-    color: var(--color-fg-dim);
-  }
 </style>
