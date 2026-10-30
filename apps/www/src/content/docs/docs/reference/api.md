@@ -390,12 +390,16 @@ Delete a node and clean up DNS records and Hetzner resources.
 
 ### Guided agent account sign-in
 
-`POST /api/agent-credential-setup-sessions` starts browser-based subscription sign-in.
-The optional JSON body accepts `agentType` (`claude-code` or `openai-codex`, default
-`openai-codex`) and `projectId`. Omit `projectId` for a personal default; supply a
-nonempty project ID to save an account pinned only to that project. Project setup
-requires `secret:write`, checked at creation and again before the captured credential
-is saved. Invalid JSON or invalid fields return `400`.
+`POST /api/agent-credential-setup-sessions` starts browser-based subscription sign-in
+for a personal default. Its optional JSON body accepts `agentType` (`claude-code`
+or `openai-codex`, default `openai-codex`).
+
+`POST /api/agent-credential-setup-sessions/project` uses the same sign-in flow and
+requires `projectId` in the JSON body, alongside optional `agentType`. It saves an
+account pinned only to that project and requires `secret:write`, checked at creation
+and again before the captured credential is saved. The personal endpoint rejects
+`projectId`; project creation must never fall back to personal creation. Invalid
+JSON or invalid fields return `400`.
 
 The response includes `id`, `status`, `agentType`, `expiresAt`, `verificationUrl`, and
 `userCode`. A new session returns `201`; an existing active session for the same
@@ -403,7 +407,11 @@ agent and destination is returned with `200`. An active session in a different
 destination returns `409`: finish or cancel it before starting another. Busy setup
 capacity returns `202` with `status: "no_capacity"`.
 
-Use `GET /api/agent-credential-setup-sessions/config` to check availability,
+Use `GET /api/agent-credential-setup-sessions/config` to check availability. It
+advertises `scopes: ["user", "project"]`; clients require explicit project support
+before offering guided project login. Older APIs return `404` for the dedicated
+project creation endpoint, so deployment skew or rollback cannot silently create a
+personal session. Use
 `GET /api/agent-credential-setup-sessions/:id` to poll,
 `POST /api/agent-credential-setup-sessions/:id/verification-code` with `{ code }` for
 Claude's browser-displayed code, and

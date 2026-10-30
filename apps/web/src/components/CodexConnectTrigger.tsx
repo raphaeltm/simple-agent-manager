@@ -45,6 +45,7 @@ export function AgentCredentialConnectTrigger({
   onAvailabilityChange,
 }: AgentCredentialConnectTriggerProps) {
   const [enabled, setEnabled] = useState(false);
+  const [supportsProject, setSupportsProject] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const checkedRef = useRef(false);
   const copy = TRIGGER_COPY[agentType];
@@ -55,7 +56,10 @@ export function AgentCredentialConnectTrigger({
     let active = true;
     void getAgentCredentialSetupConfig()
       .then((config) => {
-        if (active) setEnabled(setupConfigSupportsAgent(config, agentType));
+        if (active) {
+          setEnabled(setupConfigSupportsAgent(config, agentType));
+          setSupportsProject(config.scopes?.includes('project') === true);
+        }
       })
       .catch(() => {
         // Gate unreadable (route absent / network) — keep the guided button hidden.
@@ -66,7 +70,8 @@ export function AgentCredentialConnectTrigger({
     };
   }, [agentType]);
 
-  const available = enabled;
+  // Older APIs ignore projectId and would save to the personal default instead.
+  const available = enabled && (!projectId || supportsProject);
   useEffect(() => {
     onAvailabilityChange?.(available);
   }, [available, onAvailabilityChange]);

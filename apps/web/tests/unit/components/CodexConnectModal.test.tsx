@@ -324,6 +324,27 @@ describe('AgentCredentialConnectModal', () => {
     await waitFor(() => expect(onConnected).toHaveBeenCalledOnce());
   });
 
+  it('shows a project endpoint failure without retrying as a personal connection', async () => {
+    h.createAgentCredentialSetupSession.mockRejectedValue(
+      new Error('Project setup endpoint not found')
+    );
+    render(
+      <AgentCredentialConnectModal
+        agentType="claude-code"
+        projectId="client-project"
+        isOpen
+        onClose={vi.fn()}
+      />
+    );
+    expect(await screen.findByRole('alert')).toHaveTextContent('Project setup endpoint not found');
+    expect(h.createAgentCredentialSetupSession).toHaveBeenCalledTimes(1);
+    expect(h.createAgentCredentialSetupSession).toHaveBeenCalledWith(
+      'claude-code',
+      'client-project'
+    );
+    expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
+  });
+
   it('shows the active-session conflict with retry', async () => {
     h.createAgentCredentialSetupSession.mockResolvedValue({
       kind: 'active_exists',
@@ -341,6 +362,7 @@ describe('AgentCredentialConnectModal', () => {
         enabled: true,
         agentType: 'openai-codex',
         agentTypes: ['openai-codex', 'claude-code'],
+        scopes: ['user', 'project'],
       });
       h.createAgentCredentialSetupSession.mockResolvedValue({
         kind: 'created',
@@ -366,6 +388,41 @@ describe('AgentCredentialConnectModal', () => {
       expect(h.createAgentCredentialSetupSession).toHaveBeenCalledTimes(1);
     }
   );
+
+  it('does not start project login against an older API that ignores project scope', async () => {
+    h.getAgentCredentialSetupConfig.mockResolvedValue({
+      enabled: true,
+      agentType: 'claude-code',
+      agentTypes: ['claude-code'],
+    });
+    const availability = vi.fn();
+    render(
+      <AgentCredentialConnectTrigger
+        agentType="claude-code"
+        projectId="project-client"
+        onAvailabilityChange={availability}
+      />
+    );
+    await waitFor(() => expect(h.getAgentCredentialSetupConfig).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: /connect with/i })).toBeNull();
+    expect(availability).toHaveBeenLastCalledWith(false);
+    expect(h.createAgentCredentialSetupSession).not.toHaveBeenCalled();
+  });
+
+  it('preserves personal login against older APIs without scope capabilities', async () => {
+    h.getAgentCredentialSetupConfig.mockResolvedValue({
+      enabled: true,
+      agentType: 'claude-code',
+    });
+    const { rerender } = render(<AgentCredentialConnectTrigger agentType="claude-code" />);
+    expect(
+      await screen.findByRole('button', { name: /connect with claude code/i })
+    ).toBeInTheDocument();
+
+    rerender(<AgentCredentialConnectTrigger agentType="claude-code" projectId="client-project" />);
+    expect(screen.queryByRole('button', { name: /connect with/i })).toBeNull();
+    expect(h.createAgentCredentialSetupSession).not.toHaveBeenCalled();
+  });
 
   it('keeps guided setup hidden when the runtime does not support the agent', async () => {
     h.getAgentCredentialSetupConfig.mockResolvedValue({

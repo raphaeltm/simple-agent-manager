@@ -202,6 +202,7 @@ describe('AgentConnectForm', () => {
       enabled: true,
       agentType: 'claude-code',
       agentTypes: ['claude-code', 'openai-codex'],
+      scopes: ['user', 'project'],
     });
     mocks.createAgentCredentialSetupSession.mockResolvedValue({
       kind: 'no_capacity',

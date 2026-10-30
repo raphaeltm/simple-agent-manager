@@ -14,6 +14,7 @@ Project account setup only accepts pasted tokens although user account setup sup
 ## Checklist
 
 - [x] Scope-aware validated API/create/save path and authorization regressions
+- [x] Mixed-version safety: explicit config scope capability and dedicated project creation endpoint with no personal fallback
 - [x] Shared guided UI for user/project Claude and Codex, correct success refresh
 - [x] Constitution principle and relevant user/API docs
 - [ ] Unit/contract tests and lint/typecheck/build
@@ -23,7 +24,7 @@ Project account setup only accepts pasted tokens although user account setup sup
 
 ## Acceptance
 
-Project Claude guided connection stores only project credential/pin without changing personal defaults; same capability for Codex through shared flow. Wrong-owner/missing/deleted project and conflicting active scope fail safely. User flow remains compatible. Constitution describes installation/user/project/profile/skill composition, shared controls, scope/inheritance clarity and narrow justified exceptions without claiming every override is already implemented.
+Project Claude guided connection stores only project credential/pin without changing personal defaults; same capability for Codex through shared flow. Wrong-owner/missing/deleted project and conflicting active scope fail safely. Older APIs and API rollback cannot turn a project connection into a personal save. User flow remains compatible. Constitution describes installation/user/project/profile/skill composition, shared controls, scope/inheritance clarity and narrow justified exceptions without claiming every override is already implemented.
 
 ## Validation so far
 
@@ -34,3 +35,15 @@ Independent security/Cloudflare/constitution and docs/completion reviews passed.
 ## Post-mortem
 
 Project account setup hid guided login because the original integration only supported user-scope creation; the later accounts UI retained that restriction. Tests covered each view but did not require capability parity across scope. This PR adds cross-scope UI/payload and real encrypted-storage vertical tests, and Constitution Principle XIV makes shared controls/capabilities across override layers a standing requirement.
+
+## Release compatibility finding
+
+Deployment publishes Web before API. The old creation endpoint stripped unknown
+projectId, making a new UI/old API combination capable of starting personal login.
+Config capabilities alone do not cover rollback after a browser caches capability.
+The fix uses explicit project-scope advertisement plus a dedicated `/project`
+creation endpoint sharing the same handler. Old APIs return 404; clients never
+retry project creation against the personal endpoint. Initial staging08a was not
+used to log in any provider account; redeploy the protected candidate before smoke.
+
+Compatibility delta: security reviewer independently confirmed prior HIGH addressed. Final backend delta32 tests, frontend44 tests, API typecheck, web build, scoped lint and four refreshed guided browser cases passed. Prior broad suites14,300 API/4,795 web passed before the endpoint/capability delta; final PR CI will cover the complete candidate.

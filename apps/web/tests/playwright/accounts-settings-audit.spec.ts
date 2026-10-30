@@ -402,22 +402,28 @@ function surfaceTests(viewport: 'mobile' | 'desktop') {
             enabled: true,
             agentType: 'openai-codex',
             agentTypes: ['openai-codex', 'claude-code'],
+            scopes: ['user', 'project'],
           },
         });
       });
-      await page.route('**/api/agent-credential-setup-sessions', async (route) => {
-        submitted = route.request().postDataJSON();
-        await route.fulfill({
-          status: 201,
-          json: {
-            id: 'guided-project',
-            agentType: 'claude-code',
-            status: 'waiting_for_user',
-            expiresAt: '2099-01-01T00:00:00Z',
-            verificationUrl: 'https://claude.ai/oauth/authorize?mock=true',
-          },
-        });
-      });
+      await page.route(
+        scope === 'project'
+          ? '**/api/agent-credential-setup-sessions/project'
+          : '**/api/agent-credential-setup-sessions',
+        async (route) => {
+          submitted = route.request().postDataJSON();
+          await route.fulfill({
+            status: 201,
+            json: {
+              id: 'guided-project',
+              agentType: 'claude-code',
+              status: 'waiting_for_user',
+              expiresAt: '2099-01-01T00:00:00Z',
+              verificationUrl: 'https://claude.ai/oauth/authorize?mock=true',
+            },
+          });
+        }
+      );
       if (scope === 'project') {
         await page
           .getByTestId('project-account-row-claude-code')

@@ -61,6 +61,8 @@ export const isTerminalCodexSetupStatus = isTerminalAgentCredentialSetupStatus;
 /** Whether the guided flow is available from the deployed runtime bindings. */
 export interface AgentCredentialSetupConfig {
   enabled: boolean;
+  /** Supported save destinations. Older APIs support only personal accounts. */
+  scopes?: Array<'user' | 'project'>;
   /** Back-compat: the default guided setup agent. */
   agentType: string;
   /** All guided setup agents supported by this deployment. Absent on older API versions. */
@@ -130,10 +132,13 @@ export async function createAgentCredentialSetupSession(
   projectId?: string
 ): Promise<CreateAgentCredentialSetupResult> {
   try {
-    const body = await request<CreateSessionResponseBody>(BASE_PATH, {
-      method: 'POST',
-      body: JSON.stringify({ agentType, ...(projectId ? { projectId } : {}) }),
-    });
+    const body = await request<CreateSessionResponseBody>(
+      projectId !== undefined ? `${BASE_PATH}/project` : BASE_PATH,
+      {
+        method: 'POST',
+        body: JSON.stringify({ agentType, ...(projectId !== undefined ? { projectId } : {}) }),
+      }
+    );
     // 202: all slots busy — body is { status: 'no_capacity', message }.
     if (body.status === 'no_capacity') {
       return {

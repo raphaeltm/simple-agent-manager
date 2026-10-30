@@ -3,7 +3,8 @@
  *
  * User-facing flow for connecting subscription/OAuth-backed coding agents
  * without exposing terminal setup mechanics:
- *   POST   /                      create a setup session (leases a sandbox slot)
+ *   POST   /                      create a personal setup session
+ *   POST   /project               create a project setup session
  *   GET    /:id                   poll lifecycle status
  *   POST   /:id/verification-code forward Claude's browser code to its CLI
  *   POST   /:id/cancel            cancel + tear down
@@ -16,7 +17,7 @@
  */
 import { type AgentType, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
-import { Hono } from 'hono';
+import { type Context, Hono } from 'hono';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
@@ -110,13 +111,14 @@ agentCredentialSetupSessionsRoutes.get('/config', requireAuth(), requireApproved
     enabled,
     agentType: DEFAULT_SETUP_AGENT_TYPE,
     agentTypes: SUPPORTED_SETUP_AGENT_TYPES,
+    scopes: ['user', 'project'],
   });
 });
 
 // -----------------------------------------------------------------------------
-// POST / — create a setup session
+// Shared create handler — scope comes from the endpoint, never from request body
 // -----------------------------------------------------------------------------
-agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), async (c) => {
+async function createSession(c: Context<{ Bindings: Env }>, scope: 'user' | 'project') {
   if (!guidedSetupAvailable(c.env)) {
     throw errors.notFound('Guided credential setup is not enabled');
   }
@@ -135,7 +137,12 @@ agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), a
   if (!parsed.success) throw errors.badRequest('Invalid guided setup request');
   const body = parsed.output;
   const projectId = body.projectId ?? null;
-  const scope = projectId === null ? 'user' : 'project';
+  if (scope === 'project' && projectId === null) {
+    throw errors.badRequest('Project setup requires projectId');
+  }
+  if (scope === 'user' && projectId !== null) {
+    throw errors.badRequest('Use the project setup endpoint for project accounts');
+  }
   if (projectId !== null) {
     await requireProjectCapability(drizzle(c.env.DATABASE), projectId, userId, 'secret:write');
   }
@@ -276,7 +283,16 @@ agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), a
     });
     throw errors.internal('Failed to start guided setup session');
   }
-});
+}
+
+agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), (c) =>
+  createSession(c, 'user')
+);
+// A separate endpoint makes old API versions reject project login rather than
+// silently stripping projectId and replacing a personal credential on rollback.
+agentCredentialSetupSessionsRoutes.post('/project', requireAuth(), requireApproved(), (c) =>
+  createSession(c, 'project')
+);
 
 // -----------------------------------------------------------------------------
 // GET /:id — poll status (D1 is kept current by the DO)

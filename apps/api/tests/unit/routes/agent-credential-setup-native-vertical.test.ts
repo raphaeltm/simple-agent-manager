@@ -503,7 +503,7 @@ describe('native Codex setup route vertical slice', () => {
       app.onError((error, c) => c.json({ error: error.message }, 500));
       app.route('/api/agent-credential-setup-sessions', agentCredentialSetupSessionsRoutes);
       const response = await app.request(
-        '/api/agent-credential-setup-sessions',
+        '/api/agent-credential-setup-sessions/project',
         {
           method: 'POST',
           body: JSON.stringify({ agentType, projectId: 'project-a' }),

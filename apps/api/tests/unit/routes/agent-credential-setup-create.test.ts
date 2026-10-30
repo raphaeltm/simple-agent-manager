@@ -85,6 +85,28 @@ describe('guided setup route creation', () => {
     vi.clearAllMocks();
   });
 
+  it.each([true, false])(
+    'advertises project setup capability independently of binding availability (%s)',
+    async (enabled) => {
+      const env = {
+        DATABASE: createSqliteD1(setupDatabase()),
+        ...(enabled ? { SANDBOX: {}, CREDENTIAL_SETUP_SESSION: {}, SETUP_SESSION_POOL: {} } : {}),
+      } as unknown as Env;
+      const response = await createApp().request(
+        '/api/agent-credential-setup-sessions/config',
+        {},
+        env
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toMatchObject({
+        enabled,
+        agentTypes: ['openai-codex', 'claude-code'],
+        scopes: ['user', 'project'],
+      });
+      expect(h.leaseSetupSlot).not.toHaveBeenCalled();
+    }
+  );
+
   it('creates a Claude Code setup session with Claude-specific setup home metadata', async () => {
     const sqlite = setupDatabase();
     h.leaseSetupSlot.mockResolvedValue({ granted: true, leaseId: 'lease-claude' });
@@ -282,7 +304,7 @@ describe('guided setup route creation', () => {
         status: 'provisioning',
       }));
       const response = await createApp().request(
-        '/api/agent-credential-setup-sessions',
+        '/api/agent-credential-setup-sessions/project',
         {
           method: 'POST',
           body: JSON.stringify({ agentType, projectId: 'project-a' }),
@@ -314,7 +336,7 @@ describe('guided setup route creation', () => {
       SETUP_SESSION_POOL: {},
     } as unknown as Env;
     const response = await createApp().request(
-      '/api/agent-credential-setup-sessions',
+      '/api/agent-credential-setup-sessions/project',
       { method: 'POST', body: JSON.stringify({ projectId }) },
       env
     );
@@ -334,7 +356,7 @@ describe('guided setup route creation', () => {
       SETUP_SESSION_POOL: {},
     } as unknown as Env;
     const response = await createApp().request(
-      '/api/agent-credential-setup-sessions',
+      '/api/agent-credential-setup-sessions/project',
       { method: 'POST', body: JSON.stringify({ projectId: 'project-a' }) },
       env
     );
@@ -358,7 +380,7 @@ describe('guided setup route creation', () => {
         SETUP_SESSION_POOL: {},
       } as unknown as Env;
       const response = await createApp().request(
-        '/api/agent-credential-setup-sessions',
+        '/api/agent-credential-setup-sessions/project',
         {
           method: 'POST',
           body: JSON.stringify({ projectId: 'project-a', agentType: 'claude-code' }),
@@ -387,7 +409,7 @@ describe('guided setup route creation', () => {
         SETUP_SESSION_POOL: {},
       } as unknown as Env;
       const response = await createApp().request(
-        '/api/agent-credential-setup-sessions',
+        `/api/agent-credential-setup-sessions${projectId ? '/project' : ''}`,
         {
           method: 'POST',
           body: JSON.stringify({ ...(projectId ? { projectId } : {}), agentType: 'claude-code' }),
@@ -399,4 +421,23 @@ describe('guided setup route creation', () => {
       expect(h.leaseSetupSlot).not.toHaveBeenCalled();
     }
   );
+  it.each([
+    { path: '/project', body: {} },
+    { path: '', body: { projectId: 'project-a' } },
+  ])('rejects mismatched scope at $path', async ({ path, body }) => {
+    const env = {
+      DATABASE: createSqliteD1(setupDatabase()),
+      SANDBOX: {},
+      CREDENTIAL_SETUP_SESSION: {},
+      SETUP_SESSION_POOL: {},
+    } as unknown as Env;
+    const response = await createApp().request(
+      `/api/agent-credential-setup-sessions${path}`,
+      { method: 'POST', body: JSON.stringify(body) },
+      env
+    );
+    expect(response.status).toBe(400);
+    expect(h.leaseSetupSlot).not.toHaveBeenCalled();
+    expect(h.startSetupSession).not.toHaveBeenCalled();
+  });
 });
