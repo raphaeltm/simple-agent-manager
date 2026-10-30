@@ -188,7 +188,7 @@ export function AgentConnectForm({
         {isGuidedSubscription && (
           <AgentCredentialConnectTrigger
             agentType={agent.id as 'openai-codex' | 'claude-code'}
-            scope={projectId ? 'project' : 'user'}
+            projectId={projectId}
             onConnected={onConnected}
             onAvailabilityChange={setGuidedShown}
           />

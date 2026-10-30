@@ -6,6 +6,7 @@ const mocks = vi.hoisted(() => ({
   saveProjectAgentCredential: vi.fn(),
   saveAgentSettings: vi.fn(),
   getAgentCredentialSetupConfig: vi.fn(),
+  createAgentCredentialSetupSession: vi.fn(),
   success: vi.fn(),
   warning: vi.fn(),
 }));
@@ -16,6 +17,7 @@ vi.mock('../../../../src/lib/api', async (importOriginal) => ({
   saveProjectAgentCredential: mocks.saveProjectAgentCredential,
   saveAgentSettings: mocks.saveAgentSettings,
   getAgentCredentialSetupConfig: mocks.getAgentCredentialSetupConfig,
+  createAgentCredentialSetupSession: mocks.createAgentCredentialSetupSession,
 }));
 
 vi.mock('../../../../src/hooks/useToast', () => ({
@@ -192,17 +194,29 @@ describe('AgentConnectForm', () => {
     expect(await screen.findByLabelText('Or paste a setup token manually')).toBeInTheDocument();
   });
 
-  it('hides the guided sign-in for a project-scoped account', async () => {
+  it.each([
+    ['claude-code', 'Connect with Claude Code', 'Or paste a setup token manually'],
+    ['openai-codex', 'Connect with Codex', 'Or paste auth.json manually'],
+  ])('offers guided project sign-in and manual fallback for %s', async (agentId, button, label) => {
     mocks.getAgentCredentialSetupConfig.mockResolvedValue({
       enabled: true,
       agentType: 'claude-code',
-      agentTypes: ['claude-code'],
+      agentTypes: ['claude-code', 'openai-codex'],
+      scopes: ['user', 'project'],
     });
-    renderForm({ projectId: 'proj-1' });
+    mocks.createAgentCredentialSetupSession.mockResolvedValue({
+      kind: 'no_capacity',
+      message: 'All guided setup slots are in use.',
+    });
+    renderForm({ agentId, projectId: 'proj-1' });
 
-    await waitFor(() => expect(mocks.getAgentCredentialSetupConfig).toHaveBeenCalled());
-    expect(screen.getByLabelText('Setup token')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Connect with Claude Code' })).toBeNull();
+    fireEvent.click(await screen.findByRole('button', { name: button }));
+    await waitFor(() =>
+      expect(mocks.createAgentCredentialSetupSession).toHaveBeenCalledWith(agentId, 'proj-1')
+    );
+    expect(screen.getByLabelText(label)).toBeInTheDocument();
+    expect(screen.getByText(/Your personal default stays unchanged/)).toBeInTheDocument();
+    expect(mocks.saveAgentCredential).not.toHaveBeenCalled();
   });
 
   it('shows the save error and does not report success', async () => {

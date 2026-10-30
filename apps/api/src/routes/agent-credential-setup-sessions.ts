@@ -3,7 +3,8 @@
  *
  * User-facing flow for connecting subscription/OAuth-backed coding agents
  * without exposing terminal setup mechanics:
- *   POST   /                      create a setup session (leases a sandbox slot)
+ *   POST   /                      create a personal setup session
+ *   POST   /project               create a project setup session
  *   GET    /:id                   poll lifecycle status
  *   POST   /:id/verification-code forward Claude's browser code to its CLI
  *   POST   /:id/cancel            cancel + tear down
@@ -15,7 +16,8 @@
  * environment variable is needed to turn this product flow on.
  */
 import { type AgentType, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
-import { Hono } from 'hono';
+import { drizzle } from 'drizzle-orm/d1';
+import { type Context, Hono } from 'hono';
 import * as v from 'valibot';
 
 import type { Env } from '../env';
@@ -23,11 +25,8 @@ import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import {
-  CreateAgentCredentialSetupSessionSchema,
-  jsonValidator,
-  parseOptionalBody,
-} from '../schemas';
+import { requireProjectCapability } from '../middleware/project-auth';
+import { CreateAgentCredentialSetupSessionSchema, jsonValidator } from '../schemas';
 import {
   ACTIVE_SETUP_STATUSES,
   getClaudeVerificationCodeMaxLength,
@@ -112,20 +111,33 @@ agentCredentialSetupSessionsRoutes.get('/config', requireAuth(), requireApproved
     enabled,
     agentType: DEFAULT_SETUP_AGENT_TYPE,
     agentTypes: SUPPORTED_SETUP_AGENT_TYPES,
+    scopes: ['user', 'project'],
   });
 });
 
-// -----------------------------------------------------------------------------
-// POST / — create a setup session
-// -----------------------------------------------------------------------------
-agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), async (c) => {
-  if (!guidedSetupAvailable(c.env)) {
-    throw errors.notFound('Guided credential setup is not enabled');
+function parseSetupRequest(rawBody: string, scope: 'user' | 'project') {
+  let raw: unknown = {};
+  if (rawBody.trim()) {
+    try {
+      raw = JSON.parse(rawBody);
+    } catch {
+      throw errors.badRequest('Invalid JSON body');
+    }
   }
+  const parsed = v.safeParse(CreateAgentCredentialSetupSessionSchema, raw);
+  if (!parsed.success) throw errors.badRequest('Invalid guided setup request');
+  const body = parsed.output;
+  const projectId = body.projectId ?? null;
+  if (scope === 'project' && projectId === null) {
+    throw errors.badRequest('Project setup requires projectId');
+  }
+  if (scope === 'user' && projectId !== null) {
+    throw errors.badRequest('Use the project setup endpoint for project accounts');
+  }
+  return { body, projectId };
+}
 
-  const userId = getUserId(c);
-  const body = await parseOptionalBody(c.req.raw, CreateAgentCredentialSetupSessionSchema, {});
-  const requestedAgentType = body.agentType ?? DEFAULT_SETUP_AGENT_TYPE;
+function resolveSetupAgent(requestedAgentType: string) {
   if (!isValidAgentType(requestedAgentType) || !isSupportedSetupAgentType(requestedAgentType)) {
     throw errors.badRequest(
       `Guided setup currently supports only ${SUPPORTED_SETUP_AGENT_TYPES.join(', ')}`
@@ -137,6 +149,24 @@ agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), a
     throw errors.badRequest(`Unknown agent type: ${agentType}`);
   }
 
+  return { agentType, agentDef };
+}
+
+// -----------------------------------------------------------------------------
+// Shared create handler — scope comes from the endpoint, never from request body
+// -----------------------------------------------------------------------------
+async function createSession(c: Context<{ Bindings: Env }>, scope: 'user' | 'project') {
+  if (!guidedSetupAvailable(c.env)) {
+    throw errors.notFound('Guided credential setup is not enabled');
+  }
+
+  const userId = getUserId(c);
+  const { body, projectId } = parseSetupRequest(await c.req.text(), scope);
+  if (projectId !== null) {
+    await requireProjectCapability(drizzle(c.env.DATABASE), projectId, userId, 'secret:write');
+  }
+  const { agentType, agentDef } = resolveSetupAgent(body.agentType ?? DEFAULT_SETUP_AGENT_TYPE);
+
   // Friendly pre-check: one active setup session per (user, agentType). The
   // partial unique index is the atomic backstop below.
   const existingActive = await c.env.DATABASE.prepare(
@@ -147,6 +177,11 @@ agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), a
     .first<{ id: string }>();
   if (existingActive) {
     const row = await loadOwnedSession(c.env, existingActive.id, userId);
+    if (row.project_id !== projectId) {
+      throw errors.conflict(
+        'A setup session for this agent is already in progress in another account scope. Finish or cancel it first.'
+      );
+    }
     const state = await getSetupSessionState(c.env, row.id);
     return c.json({
       id: row.id,
@@ -183,11 +218,13 @@ agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), a
     await c.env.DATABASE.prepare(
       `INSERT INTO agent_credential_setup_sessions
        (id, user_id, project_id, scope, agent_type, credential_kind, status, sandbox_id, pool_lease_id, expires_at, created_at, updated_at)
-       VALUES (?, ?, NULL, 'user', ?, ?, 'provisioning', ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, 'provisioning', ?, ?, ?, ?, ?)`
     )
       .bind(
         sessionId,
         userId,
+        projectId,
+        scope,
         agentType,
         SETUP_CREDENTIAL_KIND,
         sandboxId,
@@ -213,8 +250,8 @@ agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), a
     const state = await startSetupSession(c.env, {
       id: sessionId,
       userId,
-      projectId: null,
-      scope: 'user',
+      projectId,
+      scope,
       agentType,
       credentialKind: SETUP_CREDENTIAL_KIND,
       provider: agentDef.provider,
@@ -255,7 +292,16 @@ agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), a
     });
     throw errors.internal('Failed to start guided setup session');
   }
-});
+}
+
+agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), (c) =>
+  createSession(c, 'user')
+);
+// A separate endpoint makes old API versions reject project login rather than
+// silently stripping projectId and replacing a personal credential on rollback.
+agentCredentialSetupSessionsRoutes.post('/project', requireAuth(), requireApproved(), (c) =>
+  createSession(c, 'project')
+);
 
 // -----------------------------------------------------------------------------
 // GET /:id — poll status (D1 is kept current by the DO)

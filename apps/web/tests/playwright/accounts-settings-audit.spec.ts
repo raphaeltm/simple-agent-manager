@@ -388,6 +388,90 @@ function surfaceTests(viewport: 'mobile' | 'desktop') {
     expect(new URL(page.url()).search).toBe('');
   });
 
+  for (const scope of ['user', 'project'] as const) {
+    test(`guided login keeps the same controls for ${scope} accounts`, async ({ page }) => {
+      await openPage(
+        page,
+        scope === 'project' ? '/projects/p-client/settings/accounts' : '/settings/agents',
+        { rows: NORMAL_ROWS }
+      );
+      let submitted: unknown;
+      await page.route('**/api/agent-credential-setup-sessions/config', async (route) => {
+        await route.fulfill({
+          json: {
+            enabled: true,
+            agentType: 'openai-codex',
+            agentTypes: ['openai-codex', 'claude-code'],
+            scopes: ['user', 'project'],
+          },
+        });
+      });
+      await page.route('**/api/agent-credential-setup-sessions/guided-project', async (route) => {
+        await route.fulfill({
+          json: {
+            id: 'guided-project',
+            agentType: 'claude-code',
+            status: 'waiting_for_user',
+            expiresAt: '2099-01-01T00:00:00Z',
+            verificationUrl: 'https://claude.ai/oauth/authorize?mock=true',
+          },
+        });
+      });
+      await page.route(
+        scope === 'project'
+          ? '**/api/agent-credential-setup-sessions/project'
+          : '**/api/agent-credential-setup-sessions',
+        async (route) => {
+          submitted = route.request().postDataJSON();
+          await route.fulfill({
+            status: 201,
+            json: {
+              id: 'guided-project',
+              agentType: 'claude-code',
+              status: 'waiting_for_user',
+              expiresAt: '2099-01-01T00:00:00Z',
+              verificationUrl: 'https://claude.ai/oauth/authorize?mock=true',
+            },
+          });
+        }
+      );
+      if (scope === 'project') {
+        await page
+          .getByTestId('project-account-row-claude-code')
+          .getByRole('button', { name: /Use a different account here/ })
+          .click();
+      } else {
+        await page.getByRole('button', { name: 'Connect account' }).click();
+        await page
+          .getByRole('dialog')
+          .getByRole('button', { name: /Claude Code/ })
+          .click();
+      }
+      await expect(page.getByRole('button', { name: 'Connect with Claude Code' })).toBeVisible();
+      await expect(page.getByText('Or paste a setup token manually')).toBeVisible();
+      await assertNoOverflow(page);
+      await screenshot(page, `accounts-guided-${scope}-form-${viewport}`);
+      await page.getByRole('button', { name: 'Connect with Claude Code' }).click();
+      const modal = page.getByRole('dialog', { name: 'Connect with Claude Code' });
+      await expect(modal.getByRole('link', { name: 'Open Claude sign-in' })).toBeVisible();
+      expect(submitted).toEqual({
+        agentType: 'claude-code',
+        ...(scope === 'project' ? { projectId: 'p-client' } : {}),
+      });
+      await expect(modal).toContainText(
+        scope === 'project'
+          ? 'Your personal default stays unchanged'
+          : 'saved as your personal default'
+      );
+      await assertNoOverflow(page);
+      await screenshot(page, `accounts-guided-${scope}-modal-${viewport}`);
+      const size = page.viewportSize()!;
+      await page.setViewportSize({ width: 320, height: 667 });
+      await assertNoOverflow(page);
+      await page.setViewportSize(size);
+    });
+  }
+
   test('cloud accounts on Infrastructure', async ({ page }) => {
     await openPage(page, '/settings/infrastructure', { rows: NORMAL_ROWS });
     await expect(page.getByTestId('provider-row-hetzner')).toBeVisible();

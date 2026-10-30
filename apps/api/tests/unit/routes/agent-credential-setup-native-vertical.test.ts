@@ -1,4 +1,5 @@
 import { EventEmitter } from 'node:events';
+import { readdirSync, readFileSync } from 'node:fs';
 import { PassThrough } from 'node:stream';
 
 import Database from 'better-sqlite3';
@@ -29,7 +30,11 @@ vi.mock('../../../src/services/sandbox', async (importOriginal) => {
 });
 vi.mock('../../../src/services/setup-session-pool', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../src/services/setup-session-pool')>();
-  return { ...actual, releaseSetupSlot: vi.fn().mockResolvedValue(undefined) };
+  return {
+    ...actual,
+    leaseSetupSlot: vi.fn().mockResolvedValue({ granted: true, leaseId: 'lease-project' }),
+    releaseSetupSlot: vi.fn().mockResolvedValue(undefined),
+  };
 });
 vi.mock('../../../src/services/agent-credential-save', async (importOriginal) => {
   const actual =
@@ -424,6 +429,137 @@ describe('native Codex setup route vertical slice', () => {
         .get('session-claude');
       expect(JSON.stringify(finalRow)).not.toContain(code);
       expect(JSON.stringify(finalRow)).not.toContain(token);
+    }
+  );
+
+  it.each(
+    (['claude-code', 'openai-codex'] as const).flatMap((agentType) =>
+      (['allowed', 'revoked', 'deleted'] as const).map((permission) => ({ agentType, permission }))
+    )
+  )(
+    'captures $agentType only with current project permission ($permission)',
+    async ({ agentType, permission }) => {
+      const sqlite = new Database(':memory:');
+      const migrations = new URL('../../../src/db/migrations/', import.meta.url);
+      for (const name of readdirSync(migrations)
+        .filter((name) => name.endsWith('.sql'))
+        .sort()) {
+        sqlite.exec(readFileSync(new URL(name, migrations), 'utf8'));
+      }
+      sqlite.pragma('foreign_keys = OFF');
+      sqlite.exec(`INSERT INTO users (id, github_id, email, name, created_at, updated_at) VALUES ('owner-user','github-owner','owner@test.com','Owner',0,0);
+        INSERT INTO projects (id,user_id,name,normalized_name,installation_id,repository,created_by,created_at,updated_at) VALUES ('project-a','owner-user','Project','project','installation','org/repo','owner-user','now','now');
+        INSERT INTO project_members (project_id,user_id,role,status,created_at,updated_at) VALUES ('project-a','owner-user','owner','active','now','now');`);
+      const encryptionKey = Buffer.alloc(32, 1).toString('base64');
+      const env = {
+        DATABASE: createSqliteD1(sqlite),
+        ENCRYPTION_KEY: encryptionKey,
+        KV: { get: vi.fn().mockResolvedValue(null) },
+      } as unknown as Env;
+      const actual = await vi.importActual<
+        typeof import('../../../src/services/agent-credential-save')
+      >('../../../src/services/agent-credential-save');
+      const credential = (label: string) =>
+        agentType === 'claude-code'
+          ? `sk-ant-oat${label.repeat(48)}`
+          : JSON.stringify({
+              tokens: { access_token: label, refresh_token: label, account_id: label },
+            });
+      const metadata = {
+        env,
+        userId: 'owner-user',
+        agentType,
+        credentialKind: 'oauth-token' as const,
+        provider: agentType === 'claude-code' ? 'anthropic' : 'openai',
+        agentName: agentType,
+        autoActivate: true,
+      };
+      await actual.saveAgentCredentialForUser({ ...metadata, credential: credential('P') });
+      const personalBefore = sqlite
+        .prepare('SELECT * FROM credentials WHERE project_id IS NULL')
+        .all();
+      const personalAttachmentBefore = sqlite
+        .prepare('SELECT * FROM cc_attachments WHERE project_id IS NULL')
+        .all();
+      vi.mocked(saveAgentCredentialForUser).mockImplementation(actual.saveAgentCredentialForUser);
+      const files = new Map<string, string>();
+      const sandbox = {
+        writeFile: vi.fn(async (path: string, content: string) => {
+          files.set(path, content);
+        }),
+        exec: vi.fn().mockResolvedValue({ stdout: '', stderr: '', exitCode: 0 }),
+        exists: vi.fn(async (path: string) => ({ exists: files.has(path) })),
+        readFile: vi.fn(async (path: string) => ({ content: files.get(path) ?? '' })),
+      };
+      vi.mocked(getSandboxInstance).mockResolvedValue(sandbox as never);
+      const session = new CredentialSetupSession(createDoContext() as never, env);
+      await Promise.resolve();
+      Object.assign(env, {
+        SANDBOX: {},
+        SETUP_SESSION_POOL: {},
+        CREDENTIAL_SETUP_SESSION: { idFromName: vi.fn((id) => id), get: vi.fn(() => session) },
+      });
+      const app = new Hono<{ Bindings: Env }>();
+      app.onError((error, c) => c.json({ error: error.message }, 500));
+      app.route('/api/agent-credential-setup-sessions', agentCredentialSetupSessionsRoutes);
+      const response = await app.request(
+        '/api/agent-credential-setup-sessions/project',
+        {
+          method: 'POST',
+          body: JSON.stringify({ agentType, projectId: 'project-a' }),
+        },
+        env
+      );
+      expect(response.status).toBe(201);
+      const created = (await response.json()) as { id: string };
+      const home = `/root/.${agentType === 'claude-code' ? 'claude' : 'codex'}-setup-${created.id}`;
+      await session.alarm();
+      files.set(`${home}/device-auth-state.json`, JSON.stringify({ status: 'completed' }));
+      files.set(
+        `${home}/${agentType === 'claude-code' ? 'claude-oauth-token.txt' : 'auth.json'}`,
+        credential('Q')
+      );
+      if (permission === 'revoked')
+        sqlite.exec("UPDATE project_members SET role='viewer' WHERE project_id='project-a'");
+      if (permission === 'deleted') sqlite.exec("DELETE FROM projects WHERE id='project-a'");
+      await session.alarm();
+      if (permission !== 'allowed') {
+        expect(await session.getState()).toMatchObject({
+          status: 'failed',
+          errorCode: 'capture_save_failed',
+        });
+        expect(
+          sqlite.prepare('SELECT * FROM credentials WHERE project_id IS NOT NULL').all()
+        ).toHaveLength(0);
+        expect(
+          sqlite.prepare('SELECT * FROM cc_attachments WHERE project_id IS NOT NULL').all()
+        ).toHaveLength(0);
+        expect(sqlite.prepare('SELECT * FROM credentials WHERE project_id IS NULL').all()).toEqual(
+          personalBefore
+        );
+        return;
+      }
+      expect((await session.getState()).status).toBe('completed');
+      const projectLegacy = sqlite
+        .prepare('SELECT * FROM credentials WHERE project_id = ?')
+        .get('project-a') as { encrypted_token: string; iv: string; is_active: number };
+      const projectCC = sqlite
+        .prepare(
+          `SELECT c.encrypted_token,c.iv,a.is_active FROM cc_credentials c JOIN cc_configurations cfg ON cfg.credential_id=c.id JOIN cc_attachments a ON a.configuration_id=cfg.id WHERE a.project_id='project-a' AND a.consumer_target=?`
+        )
+        .get(agentType) as { encrypted_token: string; iv: string; is_active: number };
+      const { decrypt } = await import('../../../src/services/encryption');
+      for (const saved of [projectLegacy, projectCC]) {
+        expect(saved.is_active).toBe(1);
+        expect(saved.encrypted_token).not.toContain(credential('Q'));
+        expect(await decrypt(saved.encrypted_token, saved.iv, encryptionKey)).toBe(credential('Q'));
+      }
+      expect(sqlite.prepare('SELECT * FROM credentials WHERE project_id IS NULL').all()).toEqual(
+        personalBefore
+      );
+      expect(sqlite.prepare('SELECT * FROM cc_attachments WHERE project_id IS NULL').all()).toEqual(
+        personalAttachmentBefore
+      );
     }
   );
 

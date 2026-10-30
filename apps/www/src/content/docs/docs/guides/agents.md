@@ -99,7 +99,7 @@ You can connect multiple agents and switch between them per chat by choosing a d
 
 ### Using another account in one project
 
-A project's **Accounts** tab (in its settings) shows, for each agent, whether the project uses **your default** or an account pinned to that project. Select **Use another account here** to connect an account only that project uses; your other projects keep your default. **Use my default** removes the pin. In a [shared project](/docs/guides/collaboration/), this is how you attach a shared project credential. On the project's **Agents** tab, each agent card shows which account it uses, with a **Manage in Accounts** link.
+A project's **Accounts** tab (in its settings) shows, for each agent, whether the project uses **your default** or an account pinned to that project. Select **Use another account here** to connect an account only that project uses; your other projects keep your default. The same guided sign-in and manual connection methods are available here as in your personal settings. For a Claude Code or Codex subscription, choose its subscription method and sign in from your browser, including on a phone. The connected account is pinned only to this project; your personal default stays unchanged. **Use my default** removes the pin. In a [shared project](/docs/guides/collaboration/), this is how you attach a shared project credential. On the project's **Agents** tab, each agent card shows which account it uses, with a **Manage in Accounts** link.
 
 ### Agent defaults
 
@@ -109,7 +109,7 @@ Under **Settings → Agents → Agent settings**, each agent you can run has one
 
 If you pay for **Claude Max/Pro** or a **ChatGPT** plan, you can connect that subscription instead of an API key — without leaving the browser or touching a terminal. This is the recommended way to use Claude Code or OpenAI Codex on a subscription.
 
-1. Go to **Settings → Agents**, click **Connect account**, and pick Claude Code or OpenAI Codex.
+1. Go to **Settings → Agents**, click **Connect account**, and pick Claude Code or OpenAI Codex. To connect only for one project, open **Project settings → Accounts → Use another account here** instead.
 2. Choose the subscription method (**Claude subscription** or **ChatGPT sign-in**) rather than API key, then click **Connect with Claude Code** or **Connect with Codex**.
 3. Click the **Open sign-in** link and approve access on the provider's page. For Codex, enter the short code SAM displays when the provider asks. For Claude Code, copy the `code#state` value Claude displays, return to SAM, paste the complete value into the dialog, and click **Continue sign-in**.
 4. Leave the SAM window open — it updates on its own. When the provider confirms, your subscription credential is saved, encrypted at rest. Name the account to finish.
@@ -119,7 +119,7 @@ If you pay for **Claude Max/Pro** or a **ChatGPT** plan, you can connect that su
 A few things worth knowing:
 
 - **No terminal, no file paste.** The old flow asked you to run `claude setup-token` or paste `~/.codex/auth.json`. Those still work as a manual fallback (in the same panel), but the guided flow removes them from the happy path.
-- **User-scoped.** Guided sign-in saves the credential for your account, so it applies across your projects. To set a subscription credential for a single [shared project](/docs/guides/collaboration/), use **Use another account here** in that project's **Accounts** tab and the manual paste fallback.
+- **Your chosen scope.** Connecting from personal settings saves your default account. Connecting from a project saves and pins the account only to that project, leaving your personal default and other projects unchanged. Both use the same guided sign-in dialog.
 - **Availability.** Guided sign-in is available on the hosted platform and on self-hosted deployments running on Cloudflare Containers (SAM's default runtime). If the button isn't shown, use the manual API key or token fields in the same panel.
 
 If Claude sign-in fails, SAM distinguishes a mismatched sign-in attempt from a rejected code, a connection problem, or a stopped login process. Use **Try again** to start a fresh attempt and paste the entire code from that newly opened Claude page. When reporting a failure, include the message and approximate time; never share the code or token.

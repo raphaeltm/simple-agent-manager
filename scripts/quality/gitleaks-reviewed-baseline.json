@@ -242,6 +242,14 @@
       "reviewedAt": "2026-10-14T05:38:00.000Z",
       "expiresAt": "2026-11-12T21:00:00.000Z",
       "digests": ["419191fd312e7f253561b139ecd663e03707e788def54ec6ac2ff5911379c268"]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "Reviewed test-only AES encryption key introduced by project-login persistence tests and removed from the current tree; exact historical PR-range match only.",
+      "owner": "security",
+      "reviewedAt": "2026-10-30T00:00:00.000Z",
+      "expiresAt": "2026-11-07T00:00:00.000Z",
+      "digests": ["bb847051068d2d7c76a22d9eb73522cbb3076bc10036a2a11cdc94204eca9736"]
     }
   ]
 }
