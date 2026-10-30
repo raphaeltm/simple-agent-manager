@@ -40,6 +40,7 @@ declare module 'hono' {
      * request (`.claude/rules/02` "Unconditional Account-Denial Gates").
      */
     signupApprovalRequired: boolean;
+    signupApprovalRead: Promise<{ value: boolean } | { error: unknown }>;
   }
 }
 
@@ -122,19 +123,22 @@ function buildAuthContext(session: AuthSession): AuthContext {
 export function requireAuth(): MiddlewareHandler<{ Bindings: Env }> {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     if (!c.get('auth')) {
+      // One fresh approval read overlaps auth configuration and session lookup. Nested
+      // routers reuse this request's result; no cross-request approval cache is introduced.
+      const approval = isSignupApprovalRequired(c.env).then(
+        (value) => ({ value }),
+        (error: unknown) => ({ error })
+      );
       const auth = await createAuth(c.env);
       const session = await auth.api.getSession({
         headers: c.req.raw.headers,
         query: { disableCookieCache: true },
       });
-
-      if (!session?.user) {
-        throw errors.unauthorized('Authentication required');
-      }
-
+      if (!session?.user) throw errors.unauthorized('Authentication required');
       const authContext = buildAuthContext(session);
       assertUserNotSuspended(authContext.user);
       c.set('auth', authContext);
+      c.set('signupApprovalRead', approval);
     }
 
     await next();
@@ -188,7 +192,12 @@ export function requireApproved(): MiddlewareHandler<{ Bindings: Env }> {
     // still evaluated on every pass.
     let required = c.get('signupApprovalRequired');
     if (required === undefined) {
-      required = await isSignupApprovalRequired(c.env);
+      const read = c.get('signupApprovalRead');
+      if (read) {
+        const result = await read;
+        if ('error' in result) throw result.error;
+        required = result.value;
+      } else required = await isSignupApprovalRequired(c.env);
       c.set('signupApprovalRequired', required);
     }
 
