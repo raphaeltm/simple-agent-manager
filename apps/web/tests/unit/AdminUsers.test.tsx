@@ -97,4 +97,15 @@ describe('AdminUsers signup approval config', () => {
       screen.getByText('New users wait for admin approval before using SAM.')
     ).toBeInTheDocument();
   });
+  it('clears an earlier action error after a later approval succeeds', async () => {
+    mocks.approveOrSuspendUser
+      .mockRejectedValueOnce(new Error('Approval unavailable'))
+      .mockResolvedValueOnce({});
+    render(<AdminUsers />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve', exact: true }));
+    await screen.findByText('Approval unavailable');
+    fireEvent.click(screen.getByRole('button', { name: 'Approve', exact: true }));
+    await waitFor(() => expect(mocks.approveOrSuspendUser).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByText('Approval unavailable')).not.toBeInTheDocument());
+  });
 });

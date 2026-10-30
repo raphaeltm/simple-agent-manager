@@ -222,6 +222,7 @@ export function AdminSettings() {
   const [message, setMessage] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const draftRevision = useRef<number | null>(null);
   const [saving, setSaving] = useState(false);
   const inFlight = useRef(false);
   const [conflict, setConflict] = useState(false);
@@ -230,7 +231,10 @@ export function AdminSettings() {
     setError(null);
     const result = await settings.refetch();
     if (result.error) setError('Could not load settings. Retry to read the current configuration.');
-    else setConflict(false);
+    else {
+      draftRevision.current = result.data?.revision ?? null;
+      setConflict(false);
+    }
   };
   const save = async (changes: { name: string; value: SettingValue }[]) => {
     if (!view || inFlight.current || conflict) return;
@@ -240,7 +244,8 @@ export function AdminSettings() {
     setMessage(null);
     try {
       await client.cancelQueries({ queryKey: queryKey, exact: true });
-      const next = await patchAdminSettings(view.revision, changes);
+      const next = await patchAdminSettings(draftRevision.current ?? view.revision, changes);
+      draftRevision.current = next.revision;
       setView(next);
       setDrafts((current) => {
         const remaining = { ...current };
@@ -268,6 +273,7 @@ export function AdminSettings() {
     }
   };
   const requestSave = (setting: AdminSetting, reset = false) => {
+    if (!Object.keys(drafts).length) draftRevision.current = view?.revision ?? null;
     setMessage(null);
     try {
       let value: SettingValue = null;
@@ -352,7 +358,10 @@ export function AdminSettings() {
                         dirty={Object.hasOwn(drafts, setting.name)}
                         disabled={saving || loading}
                         conflict={conflict}
-                        onChange={(value) => setDrafts({ ...drafts, [setting.name]: value })}
+                        onChange={(value) => {
+                          if (!Object.keys(drafts).length) draftRevision.current = view.revision;
+                          setDrafts({ ...drafts, [setting.name]: value });
+                        }}
                         requestSave={requestSave}
                       />
                     ))}

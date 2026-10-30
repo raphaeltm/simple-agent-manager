@@ -130,6 +130,7 @@ export function AdminComputeQuotas() {
   const [editSaving, setEditSaving] = useState(false);
 
   const loadData = async () => {
+    setError(null);
     const result = await quotas.refetch();
     if (result.error) setError(result.error.message);
   };

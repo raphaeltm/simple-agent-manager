@@ -45,6 +45,7 @@ export function AdminUsers() {
   const setSignupApprovalConfig = (config: SignupApprovalConfig) =>
     client.setQueryData(signupKey, { config });
   const fetchUsers = async () => {
+    setError(null);
     await usersQuery.refetch();
   };
 

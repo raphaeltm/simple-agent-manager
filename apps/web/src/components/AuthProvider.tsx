@@ -111,11 +111,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   const nextCacheNamespace = buildLibraryCacheNamespace(enrichedUser?.id);
-  const canResolveCacheNamespace = !isPending || Boolean(enrichedUser?.id);
+  // A failed cold verification is unknown, not a confirmed signed-out identity.
+  const canResolveCacheNamespace = Boolean(enrichedUser?.id) || (!isPending && !error);
+  const canShowSignedOutVerificationError =
+    activeCacheNamespace === null && !isPending && Boolean(error) && !enrichedUser?.id;
   const isCacheNamespaceTransitioning =
     activeCacheNamespace === undefined
       ? canResolveCacheNamespace
-      : !canResolveCacheNamespace || activeCacheNamespace !== nextCacheNamespace;
+      : (!canResolveCacheNamespace && !canShowSignedOutVerificationError) ||
+        activeCacheNamespace !== nextCacheNamespace;
 
   // Rehydrate the persisted query cache for the RESOLVED namespace (never the
   // in-flight one). Holding the spinner over this is what makes a reload paint
@@ -204,14 +208,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
       isApproved,
       isRefetching: effectiveIsRefetching,
       sessionError: error ? 'Session verification is temporarily unavailable.' : null,
-      retrySession: () => { void refetch(); },
+      retrySession: () => {
+        void refetch();
+      },
     }),
-    [enrichedUser, isPending, isAuthenticated, isSuperadmin, isApproved, effectiveIsRefetching, error, refetch]
+    [
+      enrichedUser,
+      isPending,
+      isAuthenticated,
+      isSuperadmin,
+      isApproved,
+      effectiveIsRefetching,
+      error,
+      refetch,
+    ]
   );
 
   return (
     <AuthContext.Provider value={value}>
-      {isCacheNamespaceTransitioning ? null : isRestoringPersistedQueryCache ? (
+      {isCacheNamespaceTransitioning || isRestoringPersistedQueryCache ? (
         // Keep the SAME affordance ProtectedRoute was already showing while the
         // session resolved, so restoring the persisted cache continues one
         // uninterrupted spinner instead of unmounting it into a silent blank

@@ -84,10 +84,23 @@ export function AdminPlatformConfig() {
           feedbackProjectsFooter={
             <>
               {projects.error && <Alert variant="error">{projects.error.message}</Alert>}
-              {projects.hasNextPage && (
-                <button type="button" disabled={projects.isFetchingNextPage}
+              {projects.isError && !projects.data && (
+                <button
+                  type="button"
                   className="text-sm text-accent min-h-11"
-                  onClick={() => void projects.fetchNextPage()}>
+                  disabled={projects.isFetching}
+                  onClick={() => void projects.refetch()}
+                >
+                  Retry project list
+                </button>
+              )}
+              {projects.hasNextPage && (
+                <button
+                  type="button"
+                  disabled={projects.isFetchingNextPage}
+                  className="text-sm text-accent min-h-11"
+                  onClick={() => void projects.fetchNextPage()}
+                >
                   {projects.isFetchingNextPage ? 'Loading projects...' : 'Load more projects'}
                 </button>
               )}

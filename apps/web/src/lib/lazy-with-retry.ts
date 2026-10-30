@@ -161,6 +161,16 @@ export async function importWithRetry<T>(loader: () => Promise<T>): Promise<T> {
   }
 }
 
+/** Share preloads with route rendering without retaining a failed import forever. */
+export function memoizeRouteImport<T>(loader: () => Promise<T>): () => Promise<T> {
+  let loaded: Promise<T> | undefined;
+  return () =>
+    (loaded ??= loader().catch((error: unknown) => {
+      loaded = undefined;
+      throw error;
+    }));
+}
+
 /**
  * Route components are rendered as bare route elements (`<Dashboard />`) and take no
  * props. Pinning the props type here keeps the wrapper compatible with `React.lazy`'s

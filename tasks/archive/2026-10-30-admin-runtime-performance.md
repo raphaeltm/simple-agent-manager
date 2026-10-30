@@ -61,7 +61,7 @@ Frontend full suite384files/4,813tests PASS, lint/type/build35tasks PASS. Deferr
 
 ## Release gates
 
-- [x] Backend CI, CodeRabbit best-effort wait and merge(#2480,af45a52b0); production deployment/smoke remains pending.
+- [x] Backend CI, CodeRabbit best-effort wait, merge(#2480,af45a52b0), production deploy41137878463 SUCCESS and publichealth/web/admin-entry200.
 - [x] Final frontend staging, current-source screenshot review and task-completion-validator A–F PASS.
 - [ ] Frontend PR only after backend merge; CI, CodeRabbit wait, merge and production deployment/smoke.
 - [ ] Final before/after timing report.
@@ -71,3 +71,7 @@ RuntimeAssetsSection remains untouched; duplication Idea01M66TJYMJDK61SVXXM9EV3Y
 ## Implementation archival
 
 All implementation/testing criteria complete; completion-validator A–F PASS. Archive is the /do pre-PR implementation checkpoint, not a claim that pending release gates have passed. Backend merged; frontend PR, both production deployment monitoring and final report remain explicit release gates. Their canonical final evidence is the sequential PR bodies/workflow state.
+
+## Post-review validation
+
+PR2 CodeRabbit five inline/two outside findings fixed and reviewed locally: failed-preload retry, initial project-list retry, stale action banners, draft revision CAS anchoring, and cold-session recovery without false revocation/blank progress. RED controls and final80focused tests PASS; final386files/4,824webtests plus35quality tasks PASS. Four new375/1280 recovery screenshots inspected. Backend production complete; post-review frontend staging/CI/incremental review and frontend production remain required release gates.

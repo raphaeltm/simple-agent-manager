@@ -50,3 +50,9 @@ Implementation complete. Final task-completion-validator A–F PASS on1d4a56413.
 ## Final local verification
 
 Application5e1e93715 (rebased onto backend16e10e7bf), including header polish:384files/4,813frontend tests PASS;35lint/typecheck/build tasks PASS. Final staging41131612547 SUCCESS13smokes without retries. Artifact13014263120; both final strict sweeps18GET200/reconcile200/18coldpages+2held-refresh cache revisits/chat/zeroerrors. Eight required375/1280 current-source screenshots inspected PASS. Runtime54–199ms and Settings176–296ms cached revisits; cold Runtime1.28–6.14s and mobileSettings8.14s outlier retained in PR tables. Earlier deployment/count references above are historical checkpoints.
+
+## CodeRabbit review follow-up
+
+Five inline and two outside-diff findings verified and fixed: rejected route preloads are evicted through the existing lazy-import helper; user/quota action errors clear on reload; failed first feedback project pages have Retry; settings drafts retain their original revision through background reads and advance only on acknowledged writes or explicit reload; cold auth failures remain unknown rather than signed-out, avoid false cross-tab revocation and show verification progress. A known signed-out→pending→error control preserves Retry without weakening prior-user fences.
+
+Critical and recovery controls reproduced failures before the fixes; final focused80tests PASS. Full frontend386files/4,824tests PASS;35lint/type/build tasks PASS. Four final375/1280 mock recovery captures inspected PASS; evidence branch d7d608dbab8a134a6541532ce5f9d73346b6329b. Application source frozen during validation. Fresh post-review staging, incremental CodeRabbit/CI and release verification remain pending; earlier5e1e93715 staging/timings are historical.

@@ -12,7 +12,7 @@ import { RouteFallback } from './components/RouteFallback';
 import { GlobalAudioProvider } from './contexts/GlobalAudioContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { ToastProvider } from './hooks/useToast';
-import { lazyNamed } from './lib/lazy-with-retry';
+import { lazyNamed, memoizeRouteImport } from './lib/lazy-with-retry';
 import { queryClient } from './lib/query-client';
 // Initial landing set — statically imported per .claude/rules/60-request-io-and-bundle-budgets.md.
 // Every other page below is code-split via lazyNamed(). Do NOT add static page imports here.
@@ -65,12 +65,9 @@ const IdeasListPage = lazyNamed(() => import('./pages/ideas/IdeasListPage'), 'Id
 const Node = lazyNamed(() => import('./pages/Node'), 'Node');
 const Nodes = lazyNamed(() => import('./pages/Nodes'), 'Nodes');
 // Start the active child chunk alongside the shell on cold deep links.
-let projectShellLoad: Promise<typeof import('./pages/Project')> | undefined;
-const loadProjectShell = () => (projectShellLoad ??= import('./pages/Project'));
-let projectChatLoad: Promise<typeof import('./pages/project-chat')> | undefined;
-const loadProjectChat = () => (projectChatLoad ??= import('./pages/project-chat'));
-let projectSettingsLoad: Promise<typeof import('./pages/ProjectSettings')> | undefined;
-const loadProjectSettings = () => (projectSettingsLoad ??= import('./pages/ProjectSettings'));
+const loadProjectShell = memoizeRouteImport(() => import('./pages/Project'));
+const loadProjectChat = memoizeRouteImport(() => import('./pages/project-chat'));
+const loadProjectSettings = memoizeRouteImport(() => import('./pages/ProjectSettings'));
 const ProjectShell = lazyNamed(loadProjectShell, 'Project');
 function Project() {
   const { pathname } = useLocation();

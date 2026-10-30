@@ -321,3 +321,30 @@ test.describe('Platform config first-run and admin UI', () => {
     await expect(page.getByRole('button', { name: 'Log in with GitLab' })).toBeVisible();
   });
 });
+
+test('admin feedback project list retries its first page without losing integration edits', async ({
+  page,
+}) => {
+  await setupMocks(page);
+  let unavailable = true;
+  await page.route('**/api/projects?*', (route) =>
+    unavailable
+      ? respondJson(route, 503, {
+          error: 'UNAVAILABLE',
+          message: 'Projects temporarily unavailable',
+        })
+      : route.fallback()
+  );
+  await page.goto('/admin/integrations');
+  await expect(page.getByTestId('platform-config-form')).toBeVisible();
+  const retry = page.getByRole('button', { name: 'Retry project list' });
+  await expect(retry).toBeVisible();
+  await retry.scrollIntoViewIfNeeded();
+  await assertNoOverflow(page);
+  await screenshot(page, 'platform-config-project-list-retry');
+  unavailable = false;
+  await retry.click();
+  await expect(page.getByRole('option', { name: /Long Private Feedback Project/ })).toBeAttached();
+  await expect(retry).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Save integrations' })).toBeVisible();
+});
