@@ -87,6 +87,21 @@ jobs:
             infra:
               - 'infra/**'
             deploy-scripts:
+              - 'package.json'
+              - 'turbo.json'
+              - 'apps/*/package.json'
+              - 'packages/*/package.json'
+              - 'packages/vm-agent/Makefile'
+              - 'packages/cli/Makefile'
+              - 'apps/installer/scripts/**'
+              - 'apps/www/scripts/build-tracker.ts'
+              - 'scripts/diagnostics/build-pinned-codex-review.sh'
+              - 'scripts/diagnostics/patches/**'
+              - 'scripts/diagnostics/pinned-codex-local.provenance'
+              - 'apps/api/Dockerfile.sandbox'
+              - 'apps/api/Dockerfile.vm-agent-container'
+              - 'apps/api/scripts/**'
+              - 'apps/api/container-entrypoints/**'
               - 'scripts/deploy/**'
               # The generated Worker config is built from wrangler.toml, so its text-binding
               # guard and effective-config tests must run when only wrangler.toml changes.

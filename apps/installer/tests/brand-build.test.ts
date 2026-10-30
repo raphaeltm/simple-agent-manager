@@ -23,7 +23,9 @@ describe('standalone brand build', () => {
       expect(maintenanceBrand.scriptHashes).toContain(
         "'sha256-" + createHash('sha256').update(script[1]!).digest('base64') + "'"
       );
-      expect(script[1]).not.toMatch(/\bimport\s.*?from\s*['"]\//);
+      expect(script[1]).not.toMatch(
+        /\bimport\s*(?:[^'"()]*?\bfrom\s*)?['"]\.{0,2}\/|\bimport\s*\(\s*['"]\.{0,2}\//
+      );
     }
   });
   it('serves installer assets locally without a marketing runtime dependency', () => {
