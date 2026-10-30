@@ -97,6 +97,8 @@ describe('Phase 1 settings registry', () => {
     expect(
       Object.fromEntries(agentEmail.map((setting) => [setting.name, setting.defaultValue]))
     ).toEqual({
+      'agentEmail.setupPlanTimeoutMs': 15_000,
+      'agentEmail.readTimeoutMs': 5_000,
       'agentEmail.maxInboundBytes': 5 * 1024 * 1024,
       'agentEmail.maxBodyChars': 12_000,
       'agentEmail.maxReplyChars': 20_000,

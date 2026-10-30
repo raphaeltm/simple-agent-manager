@@ -16,6 +16,7 @@ import {
   findAdminSetting,
   publicAdminSettingDefinition,
 } from './admin-settings-registry';
+import { readAdminSettingsSnapshot } from './admin-settings-snapshot';
 import { decrypt } from './encryption';
 import { INTEGRATION_CREDENTIAL_TYPE } from './platform-config-store';
 
@@ -66,11 +67,16 @@ export type CredentialRow = {
   updatedAt: string;
   updatedBy: string | null;
 };
+let decryptedCredentials = new WeakMap<CredentialRow, Map<string, Promise<string>>>();
 let credentialCache = new WeakMap<
   D1Database,
   { startedAt: number; expiresAt: number; promise: Promise<CredentialRow[]> }
 >();
-export async function credentialRows(env: Env, fresh = false, attempt = 0): Promise<CredentialRow[]> {
+export async function credentialRows(
+  env: Env,
+  fresh = false,
+  attempt = 0
+): Promise<CredentialRow[]> {
   if (attempt >= 3) throw new AdminSettingsUnavailableError();
   const db = resolveD1BindingIdentity(env.DATABASE);
   const generation = generationOf(db);
@@ -119,13 +125,21 @@ let kvCache = new WeakMap<
   D1Database,
   Map<string, { startedAt: number; expiresAt: number; promise: Promise<string | null> }>
 >();
+type KvReads = ReadonlyMap<string, Promise<{ value: string | null } | { error: unknown }>>;
 async function legacyKv(
   env: Env,
   key: string,
   fresh: boolean,
   ttlMs = LEGACY_KV_CACHE_MAX_MS,
-  attempt = 0
+  attempt = 0,
+  preloaded?: KvReads
 ) {
+  const pending = preloaded?.get(key);
+  if (pending) {
+    const result = await pending;
+    if ('error' in result) throw result.error;
+    return result.value;
+  }
   if (attempt >= 3) throw new AdminSettingsUnavailableError();
   const db = resolveD1BindingIdentity(env.DATABASE);
   const generation = generationOf(db);
@@ -161,6 +175,7 @@ async function legacyKv(
 let disabled = new WeakMap<D1Database, Set<string>>();
 /** Compatibility test seam; outstanding reads retain a distinct generation and must fail. */
 export function __resetAdminSettingsCacheForTest(): void {
+  decryptedCredentials = new WeakMap();
   resetGeneration = ++generationClock;
   generations = new WeakMap();
   credentialCache = new WeakMap();
@@ -203,11 +218,12 @@ function operationalKvKey(env: Env, def: AdminSettingDefinition): string | null 
 async function hasEmergencyVeto(
   env: Env,
   def: AdminSettingDefinition,
-  fresh = false
+  fresh = false,
+  kvReads?: KvReads
 ): Promise<boolean> {
   const key = operationalKvKey(env, def);
   if (!key) return false;
-  const value = await legacyKv(env, key, fresh, adminSettingCacheMs(env, def.name));
+  const value = await legacyKv(env, key, fresh, adminSettingCacheMs(env, def.name), 0, kvReads);
   return value === 'false' || value === 'disabled';
 }
 export type OverrideRows = Awaited<ReturnType<AdminSettingsCache['read']>>;
@@ -215,6 +231,23 @@ function validStoredValue(def: AdminSettingDefinition, value: unknown): boolean 
   // Preserve legacy nonempty OAuth values; stricter validation applies to new edits.
   if (def.category === 'OAuth') return typeof value === 'string' && Boolean(value.trim());
   return def.validate(value);
+}
+async function decryptedCredential(env: Env, row: CredentialRow): Promise<string> {
+  const key = getCredentialEncryptionKey(env);
+  let values = decryptedCredentials.get(row);
+  if (!values) {
+    values = new Map();
+    decryptedCredentials.set(row, values);
+  }
+  let pending = values.get(key);
+  if (!pending) {
+    pending = decrypt(row.ciphertext, row.iv, key).catch((error) => {
+      values.delete(key);
+      throw error;
+    });
+    values.set(key, pending);
+  }
+  return pending;
 }
 async function credentialDetails(
   env: Env,
@@ -229,9 +262,7 @@ async function credentialDetails(
   );
   if (!result) return null;
   return {
-    value: secretValue
-      ? await decrypt(result.ciphertext, result.iv, getCredentialEncryptionKey(env))
-      : null,
+    value: secretValue ? await decryptedCredential(env, result) : null,
     configured: true,
     source: 'database' as const,
     updatedAt: result.updatedAt,
@@ -246,13 +277,14 @@ async function overrideDetails(
   env: Env,
   def: AdminSettingDefinition,
   rows: OverrideRows,
-  fresh: boolean
+  fresh: boolean,
+  kvReads?: KvReads
 ) {
   const row = rows.find((row) => row.key === def.name);
   if (!row) return null;
   const value = parseValue(def, row.value);
   if (!validStoredValue(def, value)) throw new AdminSettingsUnavailableError();
-  if (value === true && (await hasEmergencyVeto(env, def, fresh)))
+  if (value === true && (await hasEmergencyVeto(env, def, fresh, kvReads)))
     return kvDetails(env, def, false);
   observe(env, def.name, value as AdminSettingValue);
   return {
@@ -277,12 +309,17 @@ function environmentDetails(env: Env, def: AdminSettingDefinition, secretValue: 
     updatedBy: null,
   };
 }
-async function legacyKvDetails(env: Env, def: AdminSettingDefinition, fresh: boolean) {
+async function legacyKvDetails(
+  env: Env,
+  def: AdminSettingDefinition,
+  fresh: boolean,
+  kvReads?: KvReads
+) {
   if (!def.legacyKv) return null;
   let key = operationalKvKey(env, def);
   if (def.legacyKv === 'trials') key = env.TRIALS_ENABLED_KV_KEY ?? 'trials:enabled';
   if (!key) return null;
-  const value = await legacyKv(env, key, fresh, adminSettingCacheMs(env, def.name));
+  const value = await legacyKv(env, key, fresh, adminSettingCacheMs(env, def.name), 0, kvReads);
   if (value === null) return null;
   const enabled =
     def.legacyKv === 'trials' ? value === 'true' : value !== 'false' && value !== 'disabled';
@@ -294,15 +331,16 @@ export async function resolved(
   rows: OverrideRows,
   secretValue: boolean,
   credentials?: CredentialRow[],
-  fresh = false
+  fresh = false,
+  kvReads?: KvReads
 ) {
   const stored = def.credential
     ? await credentialDetails(env, def, secretValue, credentials)
-    : await overrideDetails(env, def, rows, fresh);
+    : await overrideDetails(env, def, rows, fresh, kvReads);
   if (stored) return stored;
   const environment = environmentDetails(env, def, secretValue);
   if (environment) return environment;
-  const kv = await legacyKvDetails(env, def, fresh);
+  const kv = await legacyKvDetails(env, def, fresh, kvReads);
   if (kv) return kv;
   observe(env, def.name, def.defaultValue);
   return {
@@ -314,7 +352,11 @@ export async function resolved(
   };
 }
 /** Resolve a related group with one row/ciphertext read, including when caching is disabled. */
-export async function resolveAdminSettingDetailsMany(env: Env, names: AdminSettingName[]) {
+export async function resolveAdminSettingDetailsMany(
+  env: Env,
+  names: AdminSettingName[],
+  options: { fresh?: boolean } = {}
+) {
   const definitions = names.map(requiredDefinition);
   const primary = resolveD1BindingIdentity(env.DATABASE);
   const maxAge = Math.min(...names.map((name) => adminSettingCacheMs(env, name)));
@@ -322,8 +364,10 @@ export async function resolveAdminSettingDetailsMany(env: Env, names: AdminSetti
     const generation = generationOf(primary);
     try {
       const [rows, credentials] = await Promise.all([
-        cache.read(primary, false, maxAge),
-        credentialRows(env),
+        cache.read(primary, options.fresh ?? false, maxAge),
+        definitions.some((def) => def.credential)
+          ? credentialRows(env, options.fresh)
+          : Promise.resolve([]),
       ]);
       const values = await Promise.all(
         definitions.map((def) => resolved(env, def, rows, true, credentials))
@@ -397,42 +441,32 @@ function outageValue(
 export async function readAdminSettings(env: Env, options: { fresh?: boolean } = {}) {
   const primary = resolveD1BindingIdentity(env.DATABASE);
   try {
-    const revisionBefore = await primary
-      .prepare('SELECT revision FROM admin_settings_revision WHERE singleton=1')
-      .first<{ revision: number }>();
-    const rows = await cache.read(env.DATABASE, options.fresh ?? true);
-    const credentials = await credentialRows(env, options.fresh ?? true);
-    const revision = await primary
-      .prepare('SELECT revision FROM admin_settings_revision WHERE singleton=1')
-      .first<{ revision: number }>();
-    if (!revision) throw new AdminSettingsUnavailableError();
+    const snapshotPromise = readAdminSettingsSnapshot(primary);
+    const kvReads = new Map<string, Promise<{ value: string | null } | { error: unknown }>>();
+    for (const def of ADMIN_SETTINGS_REGISTRY) {
+      const key =
+        def.legacyKv === 'trials'
+          ? (env.TRIALS_ENABLED_KV_KEY ?? 'trials:enabled')
+          : operationalKvKey(env, def);
+      if (key && !kvReads.has(key))
+        kvReads.set(
+          key,
+          legacyKv(env, key, options.fresh ?? true, adminSettingCacheMs(env, def.name)).then(
+            (value) => ({ value }),
+            (error: unknown) => ({ error })
+          )
+        );
+    }
+    const snapshot = await snapshotPromise;
+    if (snapshot.revision === undefined) throw new AdminSettingsUnavailableError();
+    const { rows, credentials } = snapshot;
     const settings = await Promise.all(
       ADMIN_SETTINGS_REGISTRY.map(async (def) => ({
         ...publicAdminSettingDefinition(def),
-        ...(await resolved(env, def, rows, false, credentials, options.fresh ?? true)),
+        ...(await resolved(env, def, rows, false, credentials, options.fresh ?? true, kvReads)),
       }))
     );
-    const history = await primary
-      .prepare(
-        'SELECT name,action,actor_user_id AS actorUserId,created_at AS createdAt,revision FROM admin_settings_audit ORDER BY revision DESC,name LIMIT 100'
-      )
-      .all<{
-        name: string;
-        action: 'set' | 'reset';
-        actorUserId: string;
-        createdAt: string;
-        revision: number;
-      }>();
-    if (!history.success) throw new AdminSettingsUnavailableError();
-    const revisionAfter = await primary
-      .prepare('SELECT revision FROM admin_settings_revision WHERE singleton=1')
-      .first<{ revision: number }>();
-    if (
-      revisionBefore?.revision !== revision.revision ||
-      revisionAfter?.revision !== revision.revision
-    )
-      throw new AdminSettingsUnavailableError();
-    return { revision: revision.revision, settings, history: history.results };
+    return { revision: snapshot.revision, settings, history: snapshot.history };
   } catch {
     throw new AdminSettingsUnavailableError();
   }
