@@ -54,7 +54,7 @@ export function ProjectSettings() {
     <div className="grid gap-4 min-w-0">
       <div className="grid gap-1 min-w-0">
         <h1 className="sam-type-page-title m-0 text-fg-primary">Project Settings</h1>
-        <div className="text-xs text-fg-muted truncate">{project?.name ?? projectId}</div>
+        <div className="min-h-4 text-xs text-fg-muted truncate">{project?.name}</div>
       </div>
 
       <Tabs
