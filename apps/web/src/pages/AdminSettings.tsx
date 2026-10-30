@@ -1,11 +1,12 @@
 import { Alert, Button, Spinner } from '@simple-agent-manager/ui';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRef, useState } from 'react';
 
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { useQueryScope } from '../hooks/useQueryScope';
 import {
   ADMIN_SETTING_CATEGORIES,
   type AdminSetting,
-  type AdminSettingsView,
   fetchAdminSettings,
   patchAdminSettings,
   type SettingValue,
@@ -203,33 +204,38 @@ function SettingCard({
 }
 
 export function AdminSettings() {
-  const [view, setView] = useState<AdminSettingsView | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const scope = useQueryScope();
+  const client = useQueryClient();
+  const queryKey = ['auth', scope, 'admin', 'settings'] as const;
+  const settings = useQuery({
+    queryKey,
+    queryFn: ({ signal }) => fetchAdminSettings(signal),
+    enabled: Boolean(scope),
+  });
+  const view = settings.data;
+  const loading = settings.isPending;
+  const setView = (next: NonNullable<typeof view>) => client.setQueryData(queryKey, next);
+  const [actionError, setError] = useState<string | null>(null);
+  const error =
+    actionError ??
+    (settings.error ? 'Could not load settings. Retry to read the current configuration.' : null);
   const [message, setMessage] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const draftRevision = useRef<number | null>(null);
   const [saving, setSaving] = useState(false);
   const inFlight = useRef(false);
   const [conflict, setConflict] = useState(false);
   const [pending, setPending] = useState<{ name: string; value: SettingValue }[] | null>(null);
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = async () => {
     setError(null);
-    try {
-      setView(await fetchAdminSettings());
+    const result = await settings.refetch();
+    if (result.error) setError('Could not load settings. Retry to read the current configuration.');
+    else {
+      draftRevision.current = result.data?.revision ?? null;
       setConflict(false);
-    } catch {
-      setError('Could not load settings. Retry to read the current configuration.');
-    } finally {
-      setLoading(false);
     }
-  }, []);
-  // Only initial mount/retry loads remote state. Editing and saving never trigger a reload effect.
-  useEffect(() => {
-    void load();
-  }, [load]);
-
+  };
   const save = async (changes: { name: string; value: SettingValue }[]) => {
     if (!view || inFlight.current || conflict) return;
     inFlight.current = true;
@@ -237,7 +243,9 @@ export function AdminSettings() {
     setError(null);
     setMessage(null);
     try {
-      const next = await patchAdminSettings(view.revision, changes);
+      await client.cancelQueries({ queryKey: queryKey, exact: true });
+      const next = await patchAdminSettings(draftRevision.current ?? view.revision, changes);
+      draftRevision.current = next.revision;
       setView(next);
       setDrafts((current) => {
         const remaining = { ...current };
@@ -265,6 +273,7 @@ export function AdminSettings() {
     }
   };
   const requestSave = (setting: AdminSetting, reset = false) => {
+    if (!Object.keys(drafts).length) draftRevision.current = view?.revision ?? null;
     setMessage(null);
     try {
       let value: SettingValue = null;
@@ -349,7 +358,10 @@ export function AdminSettings() {
                         dirty={Object.hasOwn(drafts, setting.name)}
                         disabled={saving || loading}
                         conflict={conflict}
-                        onChange={(value) => setDrafts({ ...drafts, [setting.name]: value })}
+                        onChange={(value) => {
+                          if (!Object.keys(drafts).length) draftRevision.current = view.revision;
+                          setDrafts({ ...drafts, [setting.name]: value });
+                        }}
                         requestSave={requestSave}
                       />
                     ))}

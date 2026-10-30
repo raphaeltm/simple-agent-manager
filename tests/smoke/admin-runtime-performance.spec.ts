@@ -110,6 +110,12 @@ test('bounded admin and Runtime performance audit', async ({ context }, info) =>
             ? page.getByRole('heading', { name: 'Analytics', exact: true })
             : page.getByText(content!, { exact: false }).first();
       await expect(ready).toBeVisible({ timeout: auditTimeoutMs });
+      if (path!.endsWith('/settings/runtime')) {
+        await expect(
+          page.getByRole('heading', { name: 'Environment Variables', exact: true })
+        ).toBeVisible({ timeout: auditTimeoutMs });
+        await expect(page.getByText('Loading runtime config...')).toHaveCount(0);
+      }
       await expect(page.getByText('Something went wrong')).toHaveCount(0);
       browserTimings.push({ path, width, contentMs: Math.round(performance.now() - start) });
       await writeFile(
@@ -132,6 +138,63 @@ test('bounded admin and Runtime performance audit', async ({ context }, info) =>
   await expect(page.getByText('Runtime Config', { exact: true })).toBeVisible({
     timeout: auditTimeoutMs,
   });
+  await expect(
+    page.getByRole('heading', { name: 'Environment Variables', exact: true })
+  ).toBeVisible({ timeout: auditTimeoutMs });
+  // Hold any revalidation so cached content, rather than a fast server, must satisfy revisits.
+  const cachedRevisits = [
+    {
+      path: `/projects/${projectId}/settings/runtime`,
+      apiPath: `/api/projects/${projectId}/runtime-config`,
+      content: 'Runtime Config',
+      away: 'General',
+      back: 'Runtime',
+    },
+    {
+      path: '/admin/settings',
+      apiPath: '/api/admin/settings',
+      content: 'Runtime settings',
+      away: 'Quotas',
+      back: 'Settings',
+    },
+  ];
+  for (const revisit of cachedRevisits) {
+    await page.goto(`${app}${revisit.path}`, {
+      waitUntil: 'domcontentloaded',
+      timeout: auditTimeoutMs,
+    });
+    await expect(page.getByText(revisit.content, { exact: true })).toBeVisible({
+      timeout: auditTimeoutMs,
+    });
+    await expect(page.getByText('Loading runtime config...')).toHaveCount(0);
+    await page.getByRole('tab', { name: revisit.away, exact: true }).click();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const pattern = `${api}${revisit.apiPath}`;
+    await page.route(pattern, async (route) => {
+      await gate;
+      await route.continue();
+    });
+    try {
+      const start = performance.now();
+      await page.getByRole('tab', { name: revisit.back, exact: true }).click();
+      await expect(page.getByText(revisit.content, { exact: true })).toBeVisible({
+        timeout: auditTimeoutMs,
+      });
+      await expect(page.getByText('Loading runtime config...')).toHaveCount(0);
+      browserTimings.push({
+        path: revisit.path,
+        width: 1280,
+        contentMs: Math.round(performance.now() - start),
+        cachedRevisit: true,
+      });
+    } finally {
+      release();
+      await page.unroute(pattern);
+    }
+  }
   await page.goto(`${app}/admin/infrastructure`, {
     waitUntil: 'domcontentloaded',
     timeout: auditTimeoutMs,

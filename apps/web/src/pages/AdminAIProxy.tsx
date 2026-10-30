@@ -1,7 +1,9 @@
 import { Body, Button, Card, Spinner } from '@simple-agent-manager/ui';
+import { useQuery } from '@tanstack/react-query';
 import { RotateCcw } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 
+import { useQueryScope } from '../hooks/useQueryScope';
 import {
   type AIProxyConfigResponse,
   type BillingMode,
@@ -15,7 +17,8 @@ const BILLING_MODE_OPTIONS: Array<{ value: BillingMode; label: string; descripti
   {
     value: 'auto',
     label: 'Auto',
-    description: 'Use Unified Billing when CF AIG token is available, otherwise fall back to platform API key.',
+    description:
+      'Use Unified Billing when CF AIG token is available, otherwise fall back to platform API key.',
   },
   {
     value: 'unified',
@@ -67,28 +70,26 @@ function tierBadgeClasses(tier: string): string {
 }
 
 export function AdminAIProxy() {
-  const [config, setConfig] = useState<AIProxyConfigResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const scope = useQueryScope();
+  const queryKey = ['auth', scope, 'admin', 'AdminAIProxy', null] as const;
+  const query = useQuery({
+    queryKey,
+    queryFn: ({ signal }) => fetchAIProxyConfig(signal),
+    enabled: Boolean(scope),
+  });
+  const config = query.data ?? null;
+  const loading = query.isPending;
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedModel, setSelectedModel] = useState<string>('');
+  const [actionError, setError] = useState<string | null>(null);
+  const error = actionError ?? query.error?.message;
+  const [modelDraft, setSelectedModel] = useState<string | null>(null);
+  const selectedModel = modelDraft ?? config?.defaultModel ?? '';
 
-  const fetchConfig = useCallback(async () => {
-    try {
-      setError(null);
-      const res = await fetchAIProxyConfig();
-      setConfig(res);
-      setSelectedModel(res.defaultModel);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load AI proxy config');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchConfig();
-  }, [fetchConfig]);
+  const fetchConfig = async () => {
+    setError(null);
+    const result = await query.refetch();
+    if (result.error) setError(result.error.message);
+  };
 
   const handleSave = async () => {
     if (!selectedModel || selectedModel === config?.defaultModel) return;
@@ -97,6 +98,7 @@ export function AdminAIProxy() {
     try {
       await updateAIProxyConfig(selectedModel);
       await fetchConfig();
+      setSelectedModel(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update config');
     } finally {
@@ -110,6 +112,7 @@ export function AdminAIProxy() {
     try {
       await updateAIProxyBillingMode(mode);
       await fetchConfig();
+      setSelectedModel(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to update billing mode');
     } finally {
@@ -123,6 +126,7 @@ export function AdminAIProxy() {
     try {
       await resetAIProxyConfig();
       await fetchConfig();
+      setSelectedModel(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to reset config');
     } finally {
@@ -149,25 +153,26 @@ export function AdminAIProxy() {
   const hasChanges = selectedModel !== config.defaultModel;
 
   // Group models by tier for display
-  const modelsByTier = config.models.reduce<
-    Record<string, AIProxyConfigResponse['models']>
-  >((acc, model) => {
-    const tier = model.tier;
-    if (!acc[tier]) acc[tier] = [];
-    acc[tier].push(model);
-    return acc;
-  }, {});
+  const modelsByTier = config.models.reduce<Record<string, AIProxyConfigResponse['models']>>(
+    (acc, model) => {
+      const tier = model.tier;
+      if (!acc[tier]) acc[tier] = [];
+      acc[tier].push(model);
+      return acc;
+    },
+    {}
+  );
 
   const sortedTiers = Object.keys(modelsByTier).sort(
-    (a, b) => (TIER_ORDER[a] ?? 99) - (TIER_ORDER[b] ?? 99),
+    (a, b) => (TIER_ORDER[a] ?? 99) - (TIER_ORDER[b] ?? 99)
   );
 
   return (
     <div className="space-y-6">
       <Body>
-        Configure the default AI model and billing mode for the platform inference proxy. Models are routed
-        through Cloudflare AI Gateway. Workers AI models are Cloudflare-billed; Anthropic and OpenAI
-        models require credentials or Unified Billing.
+        Configure the default AI model and billing mode for the platform inference proxy. Models are
+        routed through Cloudflare AI Gateway. Workers AI models are Cloudflare-billed; Anthropic and
+        OpenAI models require credentials or Unified Billing.
       </Body>
 
       {error && (
@@ -198,9 +203,7 @@ export function AdminAIProxy() {
                   />
                   <div className="min-w-0">
                     <span className="text-sm font-medium">{option.label}</span>
-                    <p className="mt-0.5 text-xs text-fg-muted">
-                      {option.description}
-                    </p>
+                    <p className="mt-0.5 text-xs text-fg-muted">{option.description}</p>
                   </div>
                 </label>
               ))}
@@ -209,23 +212,29 @@ export function AdminAIProxy() {
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-fg-muted">
             {config.hasUnifiedBilling && (
-              <span className="font-medium text-success-fg">
-                ● Unified Billing active
-              </span>
+              <span className="font-medium text-success-fg">● Unified Billing active</span>
             )}
             <span>
               Anthropic:{' '}
-              <span className={config.hasAnthropicCredential
-                ? 'font-medium text-success-fg'
-                : 'font-medium text-warning-fg'}>
+              <span
+                className={
+                  config.hasAnthropicCredential
+                    ? 'font-medium text-success-fg'
+                    : 'font-medium text-warning-fg'
+                }
+              >
                 {config.hasAnthropicCredential ? '● configured' : '○ not configured'}
               </span>
             </span>
             <span>
               OpenAI:{' '}
-              <span className={config.hasOpenAICredential
-                ? 'font-medium text-success-fg'
-                : 'font-medium text-warning-fg'}>
+              <span
+                className={
+                  config.hasOpenAICredential
+                    ? 'font-medium text-success-fg'
+                    : 'font-medium text-warning-fg'
+                }
+              >
                 {config.hasOpenAICredential ? '● configured' : '○ not configured'}
               </span>
             </span>
@@ -249,11 +258,7 @@ export function AdminAIProxy() {
               {sortedTiers.map((tier) => (
                 <optgroup key={tier} label={TIER_LABELS[tier] ?? tier}>
                   {modelsByTier[tier]?.map((model) => (
-                    <option
-                      key={model.id}
-                      value={model.id}
-                      disabled={!model.available}
-                    >
+                    <option key={model.id} value={model.id} disabled={!model.available}>
                       {model.label} ({PROVIDER_LABELS[model.provider] ?? model.provider})
                       {model.costPer1kInputTokens > 0
                         ? ` — ${formatCost(model.costPer1kInputTokens)}/1K in`
@@ -265,7 +270,8 @@ export function AdminAIProxy() {
               ))}
             </select>
             <p className="mt-1.5 text-xs text-fg-muted">
-              Workers AI models bill through Cloudflare. Anthropic and OpenAI models require credentials on the{' '}
+              Workers AI models bill through Cloudflare. Anthropic and OpenAI models require
+              credentials on the{' '}
               <a href="/admin/credentials" className="text-accent underline">
                 Credentials
               </a>{' '}
@@ -277,7 +283,11 @@ export function AdminAIProxy() {
             <span>
               Source:{' '}
               <span className="font-medium text-fg-primary">
-                {config.source === 'admin' ? 'Admin override' : config.source === 'env' ? 'Environment variable' : 'Platform default'}
+                {config.source === 'admin'
+                  ? 'Admin override'
+                  : config.source === 'env'
+                    ? 'Environment variable'
+                    : 'Platform default'}
               </span>
             </span>
             {config.updatedAt && (
@@ -295,12 +305,7 @@ export function AdminAIProxy() {
               {saving ? 'Saving...' : 'Save'}
             </Button>
             {config.source === 'admin' && (
-              <Button
-                variant="secondary"
-                size="sm"
-                onClick={handleReset}
-                disabled={saving}
-              >
+              <Button variant="secondary" size="sm" onClick={handleReset} disabled={saving}>
                 <RotateCcw size={14} />
                 Reset to Default
               </Button>
@@ -317,7 +322,9 @@ export function AdminAIProxy() {
             {sortedTiers.map((tier) => (
               <div key={tier}>
                 <div className="mb-2 flex items-center gap-2">
-                  <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${tierBadgeClasses(tier)}`}>
+                  <span
+                    className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium ${tierBadgeClasses(tier)}`}
+                  >
                     {TIER_LABELS[tier] ?? tier}
                   </span>
                 </div>
@@ -340,9 +347,7 @@ export function AdminAIProxy() {
                         <span className="text-xs text-fg-muted">No metered cost</span>
                       )}
                       {!model.available && (
-                        <span className="text-xs text-warning-fg">
-                          Requires credentials
-                        </span>
+                        <span className="text-xs text-warning-fg">Requires credentials</span>
                       )}
                       {model.id === config.defaultModel && (
                         <span className="rounded bg-accent-tint px-1.5 py-0.5 text-xs font-medium text-accent">

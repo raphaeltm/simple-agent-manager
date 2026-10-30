@@ -1,7 +1,8 @@
 import type { HealthSummary } from '@simple-agent-manager/shared';
-import { useCallback, useEffect, useRef,useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 import { fetchAdminHealth } from '../lib/api';
+import { useQueryScope } from './useQueryScope';
 
 export interface UseAdminHealthOptions {
   refreshIntervalMs?: number;
@@ -20,69 +21,25 @@ const DEFAULT_REFRESH_INTERVAL = 30_000; // 30 seconds
 export function useAdminHealth(options?: UseAdminHealthOptions): UseAdminHealthReturn {
   const { refreshIntervalMs = DEFAULT_REFRESH_INTERVAL } = options ?? {};
 
-  const [health, setHealth] = useState<HealthSummary | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const mountedRef = useRef(true);
-  const hasLoadedRef = useRef(false);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => { mountedRef.current = false; };
-  }, []);
-
-  const fetchHealth = useCallback(async () => {
-    if (hasLoadedRef.current) {
-      setIsRefreshing(true);
-    }
-    try {
-      setError(null);
-
-      const result = await fetchAdminHealth();
-
-      if (!mountedRef.current) return;
-
-      setHealth(result);
-    } catch (err) {
-      if (mountedRef.current) {
-        setError(err instanceof Error ? err.message : 'Failed to load health data');
-      }
-    } finally {
-      if (mountedRef.current) {
-        hasLoadedRef.current = true;
-        setLoading(false);
-        setIsRefreshing(false);
-      }
-    }
-  }, []);
-
-  // Fetch on mount
-  useEffect(() => {
-    fetchHealth();
-  }, [fetchHealth]);
-
-  // Auto-refresh interval
-  useEffect(() => {
-    if (!refreshIntervalMs || refreshIntervalMs <= 0) return;
-
-    const intervalId = setInterval(() => {
-      fetchHealth();
-    }, refreshIntervalMs);
-
-    return () => clearInterval(intervalId);
-  }, [refreshIntervalMs, fetchHealth]);
-
-  const refresh = useCallback(() => {
-    fetchHealth();
-  }, [fetchHealth]);
-
+  const scope = useQueryScope();
+  const query = useQuery({
+    queryKey: ['auth', scope, 'admin', 'health'],
+    queryFn: ({ signal }) => fetchAdminHealth(signal),
+    enabled: Boolean(scope),
+    refetchInterval: refreshIntervalMs > 0 ? refreshIntervalMs : false,
+    refetchIntervalInBackground: false,
+  });
   return {
-    health,
-    loading,
-    isRefreshing,
-    error,
-    refresh,
+    health: query.data ?? null,
+    loading: query.isPending,
+    isRefreshing: query.isFetching && query.data !== undefined,
+    error: query.error
+      ? query.error instanceof Error
+        ? query.error.message
+        : 'Failed to load health data'
+      : null,
+    refresh: () => {
+      void query.refetch();
+    },
   };
 }

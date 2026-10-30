@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef,useState } from 'react';
+import { useQueries } from '@tanstack/react-query';
+import { useState } from 'react';
 
 import {
   type AnalyticsAiUsageResponse,
@@ -20,6 +21,8 @@ import {
   fetchAnalyticsRetention,
   fetchAnalyticsWebsiteTraffic,
 } from '../lib/api';
+import { PROJECT_CREATE_CONFIG_STALE_TIME_MS } from '../lib/query-stale-times';
+import { useQueryScope } from './useQueryScope';
 
 export interface UseAdminAnalyticsReturn {
   dau: AnalyticsDauResponse | null;
@@ -42,89 +45,105 @@ export interface UseAdminAnalyticsReturn {
 const DEFAULT_REFRESH_INTERVAL = 60_000; // 60 seconds
 const DEFAULT_ANALYTICS_PERIOD = '7d';
 
-export function useAdminAnalytics(refreshIntervalMs = DEFAULT_REFRESH_INTERVAL): UseAdminAnalyticsReturn {
-  const [dau, setDau] = useState<AnalyticsDauResponse | null>(null);
-  const [events, setEvents] = useState<AnalyticsEventsResponse | null>(null);
-  const [funnel, setFunnel] = useState<AnalyticsFunnelResponse | null>(null);
-  const [featureAdoption, setFeatureAdoption] = useState<AnalyticsFeatureAdoptionResponse | null>(null);
-  const [geo, setGeo] = useState<AnalyticsGeoResponse | null>(null);
-  const [retention, setRetention] = useState<AnalyticsRetentionResponse | null>(null);
-  const [forwardStatus, setForwardStatus] = useState<AnalyticsForwardStatusResponse | null>(null);
-  const [websiteTraffic, setWebsiteTraffic] = useState<AnalyticsWebsiteTrafficResponse | null>(null);
-  const [aiUsage, setAiUsage] = useState<AnalyticsAiUsageResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+export function useAdminAnalytics(
+  refreshIntervalMs = DEFAULT_REFRESH_INTERVAL
+): UseAdminAnalyticsReturn {
+  const scope = useQueryScope();
   const [eventPeriod, setEventPeriod] = useState(DEFAULT_ANALYTICS_PERIOD);
-
-  const mountedRef = useRef(true);
-  const hasLoadedRef = useRef(false);
-
-  useEffect(() => {
-    mountedRef.current = true;
-    return () => { mountedRef.current = false; };
-  }, []);
-
-  const fetchAll = useCallback(async (period: string) => {
-    if (hasLoadedRef.current) {
-      setIsRefreshing(true);
-    }
-    try {
-      setError(null);
-      const [dauRes, eventsRes, funnelRes, adoptionRes, geoRes, retentionRes, forwardRes, websiteTrafficRes, aiUsageRes] = await Promise.all([
-        fetchAnalyticsDau(),
-        fetchAnalyticsEvents(period),
-        fetchAnalyticsFunnel(),
-        fetchAnalyticsFeatureAdoption(period),
-        fetchAnalyticsGeo(period),
-        fetchAnalyticsRetention(),
-        fetchAnalyticsForwardStatus(),
-        fetchAnalyticsWebsiteTraffic(period),
-        fetchAnalyticsAiUsage(period).catch(() => null),
-      ]);
-
-      if (!mountedRef.current) return;
-
-      setDau(dauRes);
-      setEvents(eventsRes);
-      setFunnel(funnelRes);
-      setFeatureAdoption(adoptionRes);
-      setGeo(geoRes);
-      setRetention(retentionRes);
-      setForwardStatus(forwardRes);
-      setWebsiteTraffic(websiteTrafficRes);
-      setAiUsage(aiUsageRes);
-    } catch (err) {
-      if (mountedRef.current) {
-        setError(err instanceof Error ? err.message : 'Failed to load analytics data');
-      }
-    } finally {
-      if (mountedRef.current) {
-        hasLoadedRef.current = true;
-        setLoading(false);
-        setIsRefreshing(false);
-      }
-    }
-  }, []);
-
-  // Fetch on mount and when period changes
-  useEffect(() => {
-    fetchAll(eventPeriod);
-  }, [fetchAll, eventPeriod]);
-
-  // Auto-refresh
-  useEffect(() => {
-    if (!refreshIntervalMs || refreshIntervalMs <= 0) return;
-    const id = setInterval(() => fetchAll(eventPeriod), refreshIntervalMs);
-    return () => clearInterval(id);
-  }, [refreshIntervalMs, fetchAll, eventPeriod]);
-
-  const refresh = useCallback(() => {
-    fetchAll(eventPeriod);
-  }, [fetchAll, eventPeriod]);
-
+  const base = {
+    enabled: Boolean(scope),
+    refetchInterval: refreshIntervalMs > 0 ? refreshIntervalMs : (false as const),
+    refetchIntervalInBackground: false,
+  };
+  const key = (name: string, period?: string) => [
+    'auth',
+    scope,
+    'admin-analytics',
+    name,
+    period ?? null,
+  ];
+  const queries = useQueries({
+    queries: [
+      { ...base, queryKey: key('dau'), queryFn: ({ signal }) => fetchAnalyticsDau(signal) },
+      {
+        ...base,
+        queryKey: key('events', eventPeriod),
+        queryFn: ({ signal }) => fetchAnalyticsEvents(eventPeriod, signal),
+      },
+      { ...base, queryKey: key('funnel'), queryFn: ({ signal }) => fetchAnalyticsFunnel(signal) },
+      {
+        ...base,
+        queryKey: key('adoption', eventPeriod),
+        queryFn: ({ signal }) => fetchAnalyticsFeatureAdoption(eventPeriod, signal),
+      },
+      {
+        ...base,
+        queryKey: key('geo', eventPeriod),
+        queryFn: ({ signal }) => fetchAnalyticsGeo(eventPeriod, signal),
+      },
+      {
+        ...base,
+        queryKey: key('retention'),
+        queryFn: ({ signal }) => fetchAnalyticsRetention(undefined, signal),
+      },
+      {
+        ...base,
+        queryKey: key('forward-status'),
+        queryFn: ({ signal }) => fetchAnalyticsForwardStatus(signal),
+      },
+      {
+        ...base,
+        queryKey: key('website', eventPeriod),
+        queryFn: ({ signal }) => fetchAnalyticsWebsiteTraffic(eventPeriod, signal),
+      },
+      {
+        ...base,
+        queryKey: key('ai-usage', eventPeriod),
+        queryFn: ({ signal }) => fetchAnalyticsAiUsage(eventPeriod, signal),
+        staleTime: PROJECT_CREATE_CONFIG_STALE_TIME_MS,
+        refetchInterval:
+          refreshIntervalMs > 0
+            ? Math.max(refreshIntervalMs, PROJECT_CREATE_CONFIG_STALE_TIME_MS)
+            : (false as const),
+      },
+    ],
+  });
+  const [
+    dau,
+    events,
+    funnel,
+    featureAdoption,
+    geo,
+    retention,
+    forwardStatus,
+    websiteTraffic,
+    aiUsage,
+  ] = queries;
   return {
-    dau, events, funnel, featureAdoption, geo, retention, forwardStatus, websiteTraffic, aiUsage,
-    loading, isRefreshing, error, eventPeriod, setEventPeriod, refresh,
+    dau: dau.data ?? null,
+    events: events.data ?? null,
+    funnel: funnel.data ?? null,
+    featureAdoption: featureAdoption.data ?? null,
+    geo: geo.data ?? null,
+    retention: retention.data ?? null,
+    forwardStatus: forwardStatus.data ?? null,
+    websiteTraffic: websiteTraffic.data ?? null,
+    aiUsage: aiUsage.data ?? null,
+    // Reveal each settled panel while others continue loading.
+    loading: queries.every((query) => query.isPending),
+    isRefreshing: queries.some((query) => query.isFetching && query.data !== undefined),
+    error: (() => {
+      const failure = queries.find((query) => query.error)?.error;
+      return failure
+        ? failure instanceof Error
+          ? failure.message
+          : 'Failed to load analytics data'
+        : null;
+    })(),
+    eventPeriod,
+    setEventPeriod,
+    refresh: () => {
+      for (const query of queries) void query.refetch();
+    },
   };
 }

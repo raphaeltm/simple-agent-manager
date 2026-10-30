@@ -23,7 +23,7 @@ const MOCK_USER = makeMockUser({
 // Generate 30 days of DAU data
 function makeDauData(
   days = 30,
-  opts: { allZero?: boolean } = {},
+  opts: { allZero?: boolean } = {}
 ): Array<{ date: string; unique_users: number }> {
   return Array.from({ length: days }, (_, i) => {
     const d = new Date('2026-02-26');
@@ -36,19 +36,29 @@ function makeDauData(
 }
 
 // Generate feature adoption totals + trend
-function makeFeatureAdoption(
-  opts: { longEventNames?: boolean; manyEvents?: boolean } = {},
-) {
+function makeFeatureAdoption(opts: { longEventNames?: boolean; manyEvents?: boolean } = {}) {
   const events = opts.manyEvents
     ? [
-        'project_created', 'project_deleted', 'workspace_created', 'workspace_started',
-        'workspace_stopped', 'task_submitted', 'task_completed', 'task_failed',
-        'node_created', 'node_deleted', 'credential_saved', 'session_created', 'settings_changed',
+        'project_created',
+        'project_deleted',
+        'workspace_created',
+        'workspace_started',
+        'workspace_stopped',
+        'task_submitted',
+        'task_completed',
+        'task_failed',
+        'node_created',
+        'node_deleted',
+        'credential_saved',
+        'session_created',
+        'settings_changed',
       ]
     : ['project_created', 'workspace_created', 'task_submitted', 'task_completed'];
 
   const totals = events.map((name, i) => ({
-    event_name: opts.longEventNames ? `very_long_event_name_that_exceeds_label_map_${name}_${i}` : name,
+    event_name: opts.longEventNames
+      ? `very_long_event_name_that_exceeds_label_map_${name}_${i}`
+      : name,
     count: Math.max(1, (events.length - i) * 150),
     unique_users: Math.max(1, (events.length - i) * 30),
   }));
@@ -58,7 +68,11 @@ function makeFeatureAdoption(
     for (let d = 0; d < 7; d++) {
       const date = new Date('2026-03-20');
       date.setDate(date.getDate() + d);
-      trend.push({ event_name: ev.event_name, date: date.toISOString().slice(0, 10), count: Math.max(0, ev.count / 7 + (Math.random() * 10 - 5)) });
+      trend.push({
+        event_name: ev.event_name,
+        date: date.toISOString().slice(0, 10),
+        count: Math.max(0, ev.count / 7 + (Math.random() * 10 - 5)),
+      });
     }
   }
 
@@ -200,24 +214,32 @@ function makeAiUsageData(opts: { empty?: boolean; manyModels?: boolean } = {}) {
     trialCostUsd: opts.empty ? 0 : 12.3456,
     cachedRequests: opts.empty ? 0 : 4321,
     errorRequests: opts.empty ? 0 : 42,
-    byModel: opts.empty ? [] : models.map((model, i) => ({
-      model,
-      provider: model.startsWith('@cf/') ? 'workers-ai' : model.startsWith('gpt') ? 'openai' : 'anthropic',
-      requests: 100000 - i * 7000,
-      inputTokens: 8000000 - i * 250000,
-      outputTokens: 1000000 - i * 50000,
-      totalTokens: 9000000 - i * 300000,
-      costUsd: i === 0 ? 0.0042 : 123.456 / (i + 1),
-      cachedRequests: 100 - i,
-      errorRequests: i,
-    })),
-    byDay: opts.empty ? [] : Array.from({ length: 14 }, (_, i) => ({
-      date: `2026-03-${String(i + 1).padStart(2, '0')}`,
-      requests: 1000 + i * 500,
-      inputTokens: 100000 + i * 10000,
-      outputTokens: 20000 + i * 2000,
-      costUsd: i === 0 ? 0.0004 : 10 + i * 2,
-    })),
+    byModel: opts.empty
+      ? []
+      : models.map((model, i) => ({
+          model,
+          provider: model.startsWith('@cf/')
+            ? 'workers-ai'
+            : model.startsWith('gpt')
+              ? 'openai'
+              : 'anthropic',
+          requests: 100000 - i * 7000,
+          inputTokens: 8000000 - i * 250000,
+          outputTokens: 1000000 - i * 50000,
+          totalTokens: 9000000 - i * 300000,
+          costUsd: i === 0 ? 0.0042 : 123.456 / (i + 1),
+          cachedRequests: 100 - i,
+          errorRequests: i,
+        })),
+    byDay: opts.empty
+      ? []
+      : Array.from({ length: 14 }, (_, i) => ({
+          date: `2026-03-${String(i + 1).padStart(2, '0')}`,
+          requests: 1000 + i * 500,
+          inputTokens: 100000 + i * 10000,
+          outputTokens: 20000 + i * 2000,
+          costUsd: i === 0 ? 0.0004 : 10 + i * 2,
+        })),
     period: '30d',
   };
 }
@@ -282,9 +304,18 @@ async function setupMocks(page: Page, scenario: MockScenario) {
   const respond = (route: Route, status: number, body: unknown) =>
     route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
+  await page.addInitScript(
+    (id) => localStorage.setItem(`sam-onboarding-wizard-dismissed-${id}`, 'true'),
+    MOCK_USER.user.id
+  );
+  await page.routeWebSocket('**/api/notifications/ws', () => undefined);
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
+    if (path === '/api/credentials' || path === '/api/github/installations')
+      return respond(route, 200, []);
+    if (path === '/api/credentials/agent') return respond(route, 200, { credentials: [] });
+    if (path === '/api/projects') return respond(route, 200, { projects: [] });
 
     // Auth — BetterAuth calls /api/auth/get-session and related paths
     if (path.includes('/api/auth/')) {
@@ -299,7 +330,10 @@ async function setupMocks(page: Page, scenario: MockScenario) {
     // Analytics endpoints
     if (path.includes('/admin/analytics/dau')) {
       if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
-      return respond(route, 200, { dau: scenario.dau ?? [], periodDays: scenario.dau?.length ?? 0 });
+      return respond(route, 200, {
+        dau: scenario.dau ?? [],
+        periodDays: scenario.dau?.length ?? 0,
+      });
     }
 
     if (path.includes('/admin/analytics/funnel')) {
@@ -325,17 +359,34 @@ async function setupMocks(page: Page, scenario: MockScenario) {
     if (path.includes('/admin/analytics/website-traffic')) {
       if (scenario.apiError) return respond(route, 500, { error: 'Internal Server Error' });
       return respond(route, 200, {
-        hosts: [{
-          host: 'simple-agent-manager.org',
-          totalViews: 12400,
-          uniqueVisitors: 3200,
-          uniqueSessions: 4100,
-          sections: [
-            { name: 'landing', views: 5200, unique_visitors: 2100, topPages: [{ page: '/', views: 4000, unique_visitors: 1800 }] },
-            { name: 'docs', views: 4100, unique_visitors: 1600, topPages: [{ page: '/docs/getting-started', views: 2000, unique_visitors: 900 }] },
-            { name: 'blog', views: 2100, unique_visitors: 800, topPages: [{ page: '/blog/launch', views: 1200, unique_visitors: 500 }] },
-          ],
-        }],
+        hosts: [
+          {
+            host: 'simple-agent-manager.org',
+            totalViews: 12400,
+            uniqueVisitors: 3200,
+            uniqueSessions: 4100,
+            sections: [
+              {
+                name: 'landing',
+                views: 5200,
+                unique_visitors: 2100,
+                topPages: [{ page: '/', views: 4000, unique_visitors: 1800 }],
+              },
+              {
+                name: 'docs',
+                views: 4100,
+                unique_visitors: 1600,
+                topPages: [{ page: '/docs/getting-started', views: 2000, unique_visitors: 900 }],
+              },
+              {
+                name: 'blog',
+                views: 2100,
+                unique_visitors: 800,
+                topPages: [{ page: '/blog/launch', views: 1200, unique_visitors: 500 }],
+              },
+            ],
+          },
+        ],
         trend: [],
         period: '7d',
       });
@@ -383,12 +434,16 @@ async function setupMocks(page: Page, scenario: MockScenario) {
 // ---------------------------------------------------------------------------
 
 test.describe('Admin Analytics — Mobile (375x667)', () => {
-  test.skip(({ viewport }) => viewport?.width !== 375, 'Mobile audit runs only on the 375px project');
+  test.skip(
+    ({ viewport }) => viewport?.width !== 375,
+    'Mobile audit runs only on the 375px project'
+  );
 
   test('normal data — all charts render', async ({ page }) => {
     await setupMocks(page, NORMAL);
     await page.goto('/admin/analytics');
     await page.waitForTimeout(800);
+    await expect(page.getByText('Something went wrong')).toHaveCount(0);
     await screenshot(page, 'admin-analytics-normal-mobile');
     await assertNoHorizontalOverflow(page);
   });
@@ -606,7 +661,10 @@ test.describe('Admin Analytics — Mobile (375x667)', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('Admin Analytics — Desktop (1280x800)', () => {
-  test.skip(({ viewport }) => viewport?.width !== 1280, 'Desktop audit runs only on the 1280px project');
+  test.skip(
+    ({ viewport }) => viewport?.width !== 1280,
+    'Desktop audit runs only on the 1280px project'
+  );
 
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
@@ -614,6 +672,7 @@ test.describe('Admin Analytics — Desktop (1280x800)', () => {
     await setupMocks(page, NORMAL);
     await page.goto('/admin/analytics');
     await page.waitForTimeout(800);
+    await expect(page.getByText('Something went wrong')).toHaveCount(0);
     await screenshot(page, 'admin-analytics-normal-desktop');
     await assertNoHorizontalOverflow(page);
   });

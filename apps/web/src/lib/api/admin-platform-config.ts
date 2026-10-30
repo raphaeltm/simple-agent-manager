@@ -80,8 +80,10 @@ export interface PlatformConfigStatusResponse {
   status: PlatformConfigStatus;
 }
 
-export async function fetchAdminPlatformConfig(): Promise<PlatformConfigStatusResponse> {
-  return request<PlatformConfigStatusResponse>('/api/admin/platform-config');
+export async function fetchAdminPlatformConfig(
+  signal?: AbortSignal
+): Promise<PlatformConfigStatusResponse> {
+  return request<PlatformConfigStatusResponse>('/api/admin/platform-config', { signal });
 }
 
 export async function updateAdminPlatformConfig(

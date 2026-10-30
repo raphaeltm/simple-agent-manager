@@ -240,7 +240,7 @@ describe('Project page', () => {
     renderProjectPage('/projects/proj-1/tasks');
 
     await waitFor(() => {
-      expect(mocks.getProject).toHaveBeenCalledWith('proj-1');
+      expect(mocks.getProject).toHaveBeenCalledWith('proj-1', expect.any(AbortSignal));
       expect(mocks.listProjectTasks).toHaveBeenCalledWith('proj-1', {
         status: undefined,
         minPriority: undefined,

@@ -154,6 +154,7 @@ export {
   projectDetailQueryOptions,
   projectListQueryOptions,
   projectQueryKeys,
+  projectRuntimeConfigQueryOptions,
 } from './projects';
 export { reportIssueConfigQueryOptions, reportIssueQueryKeys } from './report-issue';
 export {

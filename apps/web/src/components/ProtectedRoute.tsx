@@ -1,4 +1,4 @@
-import { Spinner } from '@simple-agent-manager/ui';
+import { Button, Spinner } from '@simple-agent-manager/ui';
 import { type ReactNode } from 'react';
 import { Navigate, useLocation } from 'react-router';
 
@@ -12,7 +12,7 @@ interface ProtectedRouteProps {
 }
 
 export function ProtectedRoute({ children, skipApprovalCheck }: ProtectedRouteProps) {
-  const { isAuthenticated, isLoading, isApproved, isRefetching, user } = useAuth();
+  const { isAuthenticated, isLoading, isApproved, isRefetching, user, sessionError, retrySession } = useAuth();
   const location = useLocation();
 
   // Show spinner during initial load or while re-checking session (e.g. after tab regains focus).
@@ -25,6 +25,18 @@ export function ProtectedRoute({ children, skipApprovalCheck }: ProtectedRoutePr
         aria-label="Verifying your session"
       >
         <Spinner size="lg" />
+      </div>
+    );
+  }
+
+  if (!isAuthenticated && sessionError) {
+    return (
+      <div className="min-h-[var(--sam-app-height)] flex items-center justify-center bg-canvas p-4">
+        <div role="alert" className="glass-surface rounded-lg p-4 grid gap-3 max-w-md">
+          <p className="m-0 text-fg-primary">Could not verify your session.</p>
+          <p className="m-0 text-sm text-fg-muted">Try again to continue to this page.</p>
+          <Button onClick={retrySession}>Retry session verification</Button>
+        </div>
       </div>
     );
   }
