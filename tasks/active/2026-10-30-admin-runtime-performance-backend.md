@@ -25,6 +25,9 @@ No tracing config changes; no infrastructure or dependencies added. Tooling-only
 - [x] Safe runtime and admin credential projections.
 - [x] Period-filtered usage, grouped canonical node CPU accounting, shared default quota and100-bind-safe user lookups.
 - [x] SQL error trend buckets.
+- [x] Supplemental staging blocker: bound shared configuration/cache loads, evict timed-out pending entries and reject late stale publication.
+- [x] Shared bounded auth read for middleware and GET session; deadline/attempts runtime settings, fresh D1 session on retry honoring the routing kill switch, unchanged denial/cancellation behavior.
+- [x] Keep every public platform-config writer and cache invalidation together while extracting statement construction; split counting test fixture under500lines.
 - [x] Split touched oversized services/routes into focused modules preserving public imports.
 
 ## Validation and acceptance
@@ -38,16 +41,24 @@ No tracing config changes; no infrastructure or dependencies added. Tooling-only
 - [x] CLI race/coverage run; package82.4%, total82.2%.
 - [x] Final candidate batch-count and race regressions green.
 - [x] Full suite21tasks on1f7; rebased quality35tasks and24review regressions green on031e9f2d4 + reviewed fixes.
-- [x] Specialist code/test/doc reviews pass after two regression-backed fixes; completion release gates remain pending.
+- [x] Specialist code/test/doc supplemental reviews completed; fixed D1 retry kill-switch finding and re-review PASS. Completion release gates remain pending.
 - [ ] Staging deployed on pinned backend head after shared-use coordination.
 - [ ] Authenticated Playwright verifies relevant pages/actions; zero console errors.
 - [ ] Measured staging before/after timing and server round-trip tables in PR.
 - [ ] CI and best-effort CodeRabbit gates; merge and production basic smoke.
 
-## Current verification limitation
+## Staging verification in progress
 
-Provided SAM_PLAYWRIGHT_PRIMARY_USER exists but staging token-login returns401 UNAUTHORIZED Invalid token format; current value has neither supported PAT prefix. Asked user where current staging browser credentials are stored; local work continues. Tracing task occupies staging deploys41078819673/41082816507; do not overwrite active verification.
+Managed workspace environment values are secret placeholders. Resolving CF_TOKEN and SAM_PLAYWRIGHT_PRIMARY_USER through SAM exec_with_secrets succeeds; no user credential update is needed. Baseline browser/API records and Workers telemetry were captured before deployment, including metadata reconcile16,340ms browser/16,266ms Workers (n=1). Baseline browser Runtime4,840–5,126ms; old Settings/Diagnoses sometimes failed a30second content deadline. Backend staging run41097318525 deployed runtime ec4b712ad at100percent on2026-10-30T17:28:07Z; authenticated audit and after-timings pending. Existing merged native tracing is enabled; tracing config untouched.
 
 ## References
 
 Overall task, rules03/18/39/48/59/60/62; .claude/skills/api-reference/SKILL.md documents include=recent. No edits to scripts/deploy/sync-wrangler-config.ts.
+
+## Supplemental staging investigation
+
+Intermediate runtime ec4b712ad returned200 on18directAPI probes. A cold Infrastructure navigation remained at the whole-app spinner: native trace7f141c6ea74ba60691eac4569c4231e7 identifies GET/api/auth/get-session at2026-10-30T17:34:09.811Z, wall30029ms CPU10 canceled. Native telemetry exposes the root span, so the specific dependency is not proven. Two shared configuration in-flight caches had no deadline/age bound and could amplify one stalled read across requests; those loads are now bounded and evicted.
+
+A separate stable-deploy desktop Runtime failure showed the app shell and “Loading project…”, rather than the whole-app spinner. Preserve that distinction. The planned frontend Runtime rendering change removes that detail gate; shared middleware read deadlines also bound its auth path.
+
+Supplemental controls:71focused auth/cache/denial tests PASS, including late stale SQL result suppression and disabled-mode retry0sessioncalls versus enabled distinctsessions. Rootquality35tasksPASS before final kill-switch edit; latestfullsuite pending. Final-head staging rerun and timing table remain mandatory before PR.

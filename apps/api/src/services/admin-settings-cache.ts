@@ -1,6 +1,8 @@
 import * as v from 'valibot';
 
 import { resolveD1BindingIdentity } from '../lib/d1-session';
+import { DEFAULT_CONFIG_READ_TIMEOUT_MS } from './config-read-deadline';
+import { withDeadline } from './fetch-timeout';
 
 /** Safety ceiling, not a deploy-time tunable: no instance may hide edits longer than this. */
 export const ADMIN_SETTINGS_CACHE_MAX_MS = 60_000;
@@ -100,7 +102,8 @@ export class AdminSettingsCache {
   async read(
     database: D1Database,
     fresh = false,
-    maxAgeMs = this.ttlMs
+    maxAgeMs = this.ttlMs,
+    readTimeoutMs = DEFAULT_CONFIG_READ_TIMEOUT_MS
   ): Promise<AdminSettingOverrideRow[]> {
     const ttlMs =
       Number.isFinite(maxAgeMs) && maxAgeMs >= 0 ? Math.min(maxAgeMs, this.ttlMs) : this.ttlMs;
@@ -115,7 +118,7 @@ export class AdminSettingsCache {
     const maxReadAttempts = 3;
     for (let attempt = 0; attempt < maxReadAttempts; attempt += 1) {
       const attemptGeneration = state.generation;
-      const rows = await this.readAttempt(primary, state, useCache, ttlMs);
+      const rows = await this.readAttempt(primary, state, useCache, ttlMs, readTimeoutMs);
       if (this.resetGeneration !== resetGeneration) throw new AdminSettingsUnavailableError();
       if (state.generation !== attemptGeneration) continue;
       if (rows) return rows;
@@ -129,13 +132,18 @@ export class AdminSettingsCache {
     return structuredClone(state.snapshot.rows);
   }
 
-  private flight(primary: D1Database, state: BindingCache, useCache: boolean) {
+  private flight(
+    primary: D1Database,
+    state: BindingCache,
+    useCache: boolean,
+    readTimeoutMs: number
+  ) {
     const existing = useCache ? state.inFlight : undefined;
     if (existing?.generation === state.generation) return existing;
     const flight = {
       generation: state.generation,
       startedAt: this.now(),
-      promise: this.load(primary),
+      promise: withDeadline(() => this.load(primary), readTimeoutMs),
     };
     if (useCache) state.inFlight = flight;
     return flight;
@@ -146,11 +154,12 @@ export class AdminSettingsCache {
     primary: D1Database,
     state: BindingCache,
     useCache: boolean,
-    ttlMs: number
+    ttlMs: number,
+    readTimeoutMs: number
   ) {
     const snapshot = this.liveSnapshot(state, useCache, ttlMs);
     if (snapshot) return snapshot;
-    const flight = this.flight(primary, state, useCache);
+    const flight = this.flight(primary, state, useCache, readTimeoutMs);
     try {
       const rows = await flight.promise;
       if (state.generation !== flight.generation) return undefined;

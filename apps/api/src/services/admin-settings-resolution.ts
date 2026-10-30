@@ -17,7 +17,9 @@ import {
   publicAdminSettingDefinition,
 } from './admin-settings-registry';
 import { readAdminSettingsSnapshot } from './admin-settings-snapshot';
+import { DEFAULT_CONFIG_READ_TIMEOUT_MS } from './config-read-deadline';
 import { decrypt } from './encryption';
+import { withDeadline } from './fetch-timeout';
 import { INTEGRATION_CREDENTIAL_TYPE } from './platform-config-store';
 
 export function requiredDefinition(name: string): AdminSettingDefinition {
@@ -79,6 +81,7 @@ export async function credentialRows(
 ): Promise<CredentialRow[]> {
   if (attempt >= 3) throw new AdminSettingsUnavailableError();
   const db = resolveD1BindingIdentity(env.DATABASE);
+  if (!db || typeof db.prepare !== 'function') throw new AdminSettingsUnavailableError();
   const generation = generationOf(db);
   const ttlMs = adminSettingCacheMs(env, 'integration.github.clientSecret');
   const useCache = !fresh && ttlMs > 0;
@@ -97,16 +100,20 @@ export async function credentialRows(
   const entry = {
     startedAt: Date.now(),
     expiresAt: Date.now() + ttlMs,
-    promise: db
-      .prepare(
-        'SELECT provider,credential_kind AS kind,encrypted_token AS ciphertext,iv,updated_at AS updatedAt,COALESCE(updated_by,created_by) AS updatedBy FROM platform_credentials WHERE credential_type=? AND is_enabled=1 ORDER BY updated_at DESC,created_at DESC'
-      )
-      .bind(INTEGRATION_CREDENTIAL_TYPE)
-      .all<CredentialRow>()
-      .then((result) => {
-        if (!result.success) throw new AdminSettingsUnavailableError();
-        return result.results;
-      }),
+    promise: withDeadline(
+      () =>
+        db
+          .prepare(
+            'SELECT provider,credential_kind AS kind,encrypted_token AS ciphertext,iv,updated_at AS updatedAt,COALESCE(updated_by,created_by) AS updatedBy FROM platform_credentials WHERE credential_type=? AND is_enabled=1 ORDER BY updated_at DESC,created_at DESC'
+          )
+          .bind(INTEGRATION_CREDENTIAL_TYPE)
+          .all<CredentialRow>()
+          .then((result) => {
+            if (!result.success) throw new AdminSettingsUnavailableError();
+            return result.results;
+          }),
+      DEFAULT_CONFIG_READ_TIMEOUT_MS
+    ),
   };
   if (useCache) credentialCache.set(db, entry);
   try {
@@ -159,7 +166,11 @@ async function legacyKv(
       throw new AdminSettingsUnavailableError();
     return value;
   }
-  const entry = { startedAt: Date.now(), expiresAt: Date.now() + ttlMs, promise: env.KV.get(key) };
+  const entry = {
+    startedAt: Date.now(),
+    expiresAt: Date.now() + ttlMs,
+    promise: withDeadline(() => env.KV.get(key), DEFAULT_CONFIG_READ_TIMEOUT_MS),
+  };
   if (useCache) map.set(key, entry);
   try {
     const value = await entry.promise;
@@ -364,7 +375,7 @@ export async function resolveAdminSettingDetailsMany(
     const generation = generationOf(primary);
     try {
       const [rows, credentials] = await Promise.all([
-        cache.read(primary, options.fresh ?? false, maxAge),
+        cache.read(primary, options.fresh ?? false, maxAge, DEFAULT_CONFIG_READ_TIMEOUT_MS),
         definitions.some((def) => def.credential)
           ? credentialRows(env, options.fresh)
           : Promise.resolve([]),
@@ -397,7 +408,12 @@ export async function resolveAdminSetting(
       await resolved(
         env,
         def,
-        await cache.read(env.DATABASE, false, adminSettingCacheMs(env, name)),
+        await cache.read(
+          env.DATABASE,
+          false,
+          adminSettingCacheMs(env, name),
+          DEFAULT_CONFIG_READ_TIMEOUT_MS
+        ),
         true
       )
     ).value;
@@ -441,7 +457,10 @@ function outageValue(
 export async function readAdminSettings(env: Env, options: { fresh?: boolean } = {}) {
   const primary = resolveD1BindingIdentity(env.DATABASE);
   try {
-    const snapshotPromise = readAdminSettingsSnapshot(primary);
+    const snapshotPromise = withDeadline(
+      () => readAdminSettingsSnapshot(primary),
+      DEFAULT_CONFIG_READ_TIMEOUT_MS
+    );
     const kvReads = new Map<string, Promise<{ value: string | null } | { error: unknown }>>();
     for (const def of ADMIN_SETTINGS_REGISTRY) {
       const key =

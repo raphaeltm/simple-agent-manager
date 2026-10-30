@@ -1,10 +1,11 @@
 import type { UserRole, UserStatus } from '@simple-agent-manager/shared';
 import type { Context, MiddlewareHandler, Next } from 'hono';
 
-import { createAuth } from '../auth';
+import type { createAuth } from '../auth';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
+import { withAuthReadDeadline } from '../services/read-auth-session';
 import {
   assertUserAllowedBySignupApproval,
   assertUserNotSuspended,
@@ -129,11 +130,12 @@ export function requireAuth(): MiddlewareHandler<{ Bindings: Env }> {
         (value) => ({ value }),
         (error: unknown) => ({ error })
       );
-      const auth = await createAuth(c.env);
-      const session = await auth.api.getSession({
-        headers: c.req.raw.headers,
-        query: { disableCookieCache: true },
-      });
+      const session = await withAuthReadDeadline(c.env, c.req.raw, (auth) =>
+        auth.api.getSession({
+          headers: c.req.raw.headers,
+          query: { disableCookieCache: true },
+        })
+      );
       if (!session?.user) throw errors.unauthorized('Authentication required');
       const authContext = buildAuthContext(session);
       assertUserNotSuspended(authContext.user);
@@ -153,11 +155,12 @@ export function requireAuth(): MiddlewareHandler<{ Bindings: Env }> {
 export function optionalAuth(): MiddlewareHandler<{ Bindings: Env }> {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
     try {
-      const auth = await createAuth(c.env);
-      const session = await auth.api.getSession({
-        headers: c.req.raw.headers,
-        query: { disableCookieCache: true },
-      });
+      const session = await withAuthReadDeadline(c.env, c.req.raw, (auth) =>
+        auth.api.getSession({
+          headers: c.req.raw.headers,
+          query: { disableCookieCache: true },
+        })
+      );
 
       if (session?.user) {
         const authContext = buildAuthContext(session);

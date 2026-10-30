@@ -328,3 +328,17 @@ Superadmins can search for these controls in **Admin → Settings**. Values are 
 | `performance.externalReadTimeoutMs`         |    5000 |    100–120000 | External Analytics Engine, AI Gateway log and Cloudflare log reads.                                          |
 
 The GitHub route returns `504 GITHUB_TIMEOUT` when its overall deadline expires. Admin agent-email reads return `504 AGENT_EMAIL_TIMEOUT` if configuration, authentication or verification exceeds its deadline. The initial email-settings lookup has a fixed 5000 ms bootstrap ceiling so an unreadable settings store cannot leave the request open. Optional project recent data fails softly to empty arrays, preserving the project response and CLI contract.
+
+### Session and configuration read recovery
+
+`performance.configReadTimeoutMs` defaults to 5,000 ms (range 100–30,000) for shared platform
+configuration and each session-read attempt. `performance.authReadAttempts` defaults to 2
+(range 1–3), and applies only to read-only session verification after a timeout or configuration
+outage. A denial is returned unchanged; exhausting attempts returns an unavailable error, never
+a fabricated signed-out session.
+
+Before D1 can supply these settings, shared configuration storage reads use the 5,000 ms
+bootstrap default. Bootstrap cannot depend on reading its own D1 override. Once settings are
+available, the runtime deadline governs legacy platform configuration and session reads.
+Pending cache loads expire on deadline; late results cannot republish stale data. No deployment
+configuration is required.

@@ -86,6 +86,8 @@ export type AdminSettingName =
   | 'performance.githubInstallationsDeadlineMs'
   | 'performance.projectRecentTimeoutMs'
   | 'performance.externalReadTimeoutMs'
+  | 'performance.configReadTimeoutMs'
+  | 'performance.authReadAttempts'
   | 'trials.enabled';
 
 export interface AdminSettingDefinition {

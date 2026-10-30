@@ -15,6 +15,11 @@ import {
   validGitLabHost,
 } from './admin-setting-definitions';
 import { AGENT_EMAIL_SETTINGS } from './agent-email/setting-definitions';
+import {
+  DEFAULT_AUTH_READ_ATTEMPTS,
+  DEFAULT_CONFIG_READ_TIMEOUT_MS,
+  MAX_CONFIG_READ_TIMEOUT_MS,
+} from './config-read-deadline';
 import { CONNECTOR_READ_SETTINGS } from './connector-read-settings-definition';
 import { ENV_KEYS, SETTING_KEYS } from './platform-config-store';
 import { WORKFLOW_DEFAULTS, WORKFLOW_SETTING_DETAILS } from './workflow-defaults';
@@ -156,6 +161,22 @@ export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
     'Operations',
     'Maximum milliseconds for admin external analytics reads.',
     { min: 100, max: 120_000 }
+  ),
+  {
+    ...integerDefinition(
+      'performance.configReadTimeoutMs',
+      DEFAULT_CONFIG_READ_TIMEOUT_MS,
+      'Operations',
+      'Maximum milliseconds per legacy platform configuration or session read; bootstrap uses the default deadline before D1 settings are available.',
+      { min: 100, max: MAX_CONFIG_READ_TIMEOUT_MS }
+    ),
+  },
+  integerDefinition(
+    'performance.authReadAttempts',
+    DEFAULT_AUTH_READ_ATTEMPTS,
+    'Operations',
+    'Maximum attempts for an idempotent session read after a configuration outage or timeout.',
+    { min: 1, max: 3 }
   ),
   ...AGENT_EMAIL_SETTINGS.map((setting) =>
     integerDefinition(

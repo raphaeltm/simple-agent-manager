@@ -74,7 +74,7 @@ function makeContext() {
   const store: Record<string, unknown> = {};
   const c = {
     env: { GITHUB_CLIENT_ID: 'x' } as Record<string, unknown>,
-    req: { raw: { headers: new Headers() } },
+    req: { raw: new Request('https://api.example.com/private') },
     set: (key: string, value: unknown) => {
       store[key] = value;
     },
