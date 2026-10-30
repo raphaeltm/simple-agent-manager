@@ -184,10 +184,10 @@ Current scoped checklist (parent coordinator records final evidence below):
 - [x] Run installer lint/typecheck/tests/build, www build and affected repository checks.
 - [x] Compare homepage before/after at 375px and 1440px, light/dark; record screenshot diff evidence.
 - [x] Audit all installer and maintenance states at 320px, 375px and 1280px, light/dark; open side-by-side comparisons and attach them to the draft PR.
-- [ ] Deploy only installer staging with mode `preserve`; confirm exact head SHA at `/health`. Known OAuth-registration 403/code 10000 after asset deployment is expected; keep readiness gate and sign-in disabled.
+- [x] Deploy only installer staging with mode `preserve`; confirm exact head SHA at `/health`. Known OAuth-registration 403/code 10000 after asset deployment is expected; keep readiness gate and sign-in disabled.
 - [x] Write adoption migration design below; implementation is outside this task.
 - [x] Save the migration design as SAM idea `01M652Y8YBVTQWSZSEDJATBKTT`, linked to `01M60R60ZQT4203MGXAVJNPRH5`.
-- [ ] Finish independent reviews and reconcile final evidence; keep both PRs draft/unmerged.
+- [x] Finish independent reviews and reconcile final evidence; keep both PRs draft/unmerged.
 
 No paid Cloudflare container cold build is authorized in this follow-up. OAuth
 client setup, a newly approved cold-build run, authenticated install/revocation
@@ -267,3 +267,5 @@ unknown keys or replacement plans. No adoption control is shipped by this task.
 - Comparisons and privacy/self-host/handoff screenshots are committed under `apps/installer/review/`; the coordinator opened and inspected the homepage/installer and plan/maintenance comparisons. User design acceptance remains Raphaël's decision, independent of agent rubric scores.
 - Local reviews: build/test guard, documentation sync, security, UI/UX and completion/constitution all addressed. Security review caught blocked hosted-handoff inline CSS; extraction now preserves external stylesheet/script links, with generated-asset/CSP regression tests.
 - Audit session latest message was read; SAM rejected cross-session resolved-thread access (`sessionId must match the calling agent session`). The seven threads could not be inspected directly; their detailed findings supplied in this task were retained.
+
+Staging assets deployed from `b18b263e5d687240034baf82b6bfb8cfb42a923a`; `/health` returned that SHA with `oauthConfigured:false`. Run `40980043903` passed installer checks, browser audit and bounded bootstrap smoke/cleanup, then failed at the expected OAuth GET 403 after publishing assets. Readiness was not bypassed. Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/2475 (base installer branch, never main). Follow-up evidence commit corrects maintenance light-mode capture by explicitly selecting the theme, without product changes; final staging head is recorded in the PR.

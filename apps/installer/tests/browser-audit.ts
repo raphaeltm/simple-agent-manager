@@ -136,6 +136,13 @@ async function captureMaintenanceControls(page: Page, target: string) {
     ] as const) {
       await page.setViewportSize({ width, height });
       await page.goto(target);
+      await page
+        .getByRole('button', {
+          name: theme === 'light' ? 'Light theme' : 'Dark theme',
+          exact: true,
+        })
+        .click();
+      await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
       await page.evaluate(() => document.fonts.ready);
       await assertNoOverflow(page, 'Maintenance');
       await page.evaluate(() => scrollTo(0, 0));
