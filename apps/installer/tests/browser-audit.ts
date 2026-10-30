@@ -246,6 +246,8 @@ async function auditViewport(
     colorScheme: theme,
     reducedMotion: 'reduce',
   });
+  const cspErrors: string[] = [];
+  page.on('console', message => { if(message.type() === 'error' && message.text().includes('Content Security Policy')) cspErrors.push(message.text()); });
   let state = 'connect';
   await installFixtureRoutes(
     page,
@@ -313,6 +315,7 @@ async function auditViewport(
     fullPage: true,
   });
   screenshots++;
+  expect(cspErrors).toEqual([]);
   await page.close();
   return screenshots;
 }

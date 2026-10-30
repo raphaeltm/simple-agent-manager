@@ -29,6 +29,7 @@ describe('standalone brand build', () => {
   it('serves installer assets locally without a marketing runtime dependency', () => {
     const html = readFileSync(new URL('../site-static/index.html', import.meta.url), 'utf8');
     expect(html).toContain('class="theme-toggle"');
+    expect(html).not.toMatch(/\sstyle=/);
     expect(html).not.toContain('Prototype</span>');
     expect(html).not.toContain('installation-plane');
     expect(html).not.toMatch(
