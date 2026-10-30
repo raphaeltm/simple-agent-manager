@@ -15,6 +15,7 @@ import { resolveSafeCapacityPoolPlacementSettingsSummary } from '../../services/
 import { updateDefaultCapacityPool } from '../../services/default-capacity-pool-updates';
 import {
   type DefaultCapacityPoolsEnsureResult,
+  ensureDefaultCapacityPoolsForExistingCredentials,
   readDefaultCapacityPoolSummaries,
   toSafeEffectiveCapacityPoolSummary,
 } from '../../services/default-capacity-pools';
@@ -143,18 +144,14 @@ async function readProjectDefaultPoolSummaries(
     env: Env;
   }
 ): Promise<DefaultCapacityPoolsEnsureResult> {
-  const summaries = await readDefaultCapacityPoolSummaries(db, {
-    userId: input.userId,
-    projectId: input.projectId,
-    includeInstallation: input.includeInstallation,
-    ensure: input.ensure,
-    includeDisabled: true,
-    env: input.env,
-  });
-
-  if (input.includeInstallation) return summaries;
-
-  const fallback = await readDefaultCapacityPoolSummaries(db, {
+  if (input.ensure)
+    await ensureDefaultCapacityPoolsForExistingCredentials(db, {
+      userId: input.userId,
+      projectId: input.projectId,
+      includeInstallation: input.includeInstallation,
+      env: input.env,
+    });
+  return readDefaultCapacityPoolSummaries(db, {
     userId: input.userId,
     projectId: input.projectId,
     includeInstallation: true,
@@ -162,8 +159,6 @@ async function readProjectDefaultPoolSummaries(
     includeDisabled: true,
     env: input.env,
   });
-
-  return { ...summaries, installation: fallback.installation };
 }
 
 async function buildDefaultPoolResponse(
@@ -175,17 +170,21 @@ async function buildDefaultPoolResponse(
     includeDetails: boolean;
     ensure: boolean;
     policyMutationSupported: boolean;
-    placementSettings: SafeCapacityPoolPlacementSettingsSummary;
+    placementSettings:
+      SafeCapacityPoolPlacementSettingsSummary | Promise<SafeCapacityPoolPlacementSettingsSummary>;
     env: Env;
   }
 ): Promise<ProjectDefaultCapacityPoolsResponse> {
-  const summaries = await readProjectDefaultPoolSummaries(db, {
-    userId: input.userId,
-    projectId: input.projectId,
-    includeInstallation: input.includeInstallation,
-    ensure: input.ensure,
-    env: input.env,
-  });
+  const [summaries, placementSettings] = await Promise.all([
+    readProjectDefaultPoolSummaries(db, {
+      userId: input.userId,
+      projectId: input.projectId,
+      includeInstallation: input.includeInstallation,
+      ensure: input.ensure,
+      env: input.env,
+    }),
+    input.placementSettings,
+  ]);
   const effective = resolveVisibleEffective(
     summaries,
     input.includeInstallation,
@@ -200,7 +199,7 @@ async function buildDefaultPoolResponse(
     precedence: PRECEDENCE,
     reconciledScopes: input.ensure ? reconciledScopes(input.includeInstallation) : [],
     policyMutationSupported: input.policyMutationSupported,
-    placementSettings: input.placementSettings,
+    placementSettings,
   };
 }
 
@@ -222,7 +221,7 @@ capacityPoolRoutes.get('/:id/capacity-pools/defaults', async (c) => {
   const includeInstallation = auth.user.role === 'superadmin';
   const includeDetails = await hasProjectCapability(db, projectId, userId, 'secret:read');
   const policyMutationSupported = await hasProjectCapability(db, projectId, userId, 'secret:write');
-  const placementSettings = await resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env);
+  const placementSettings = resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env);
   c.header('Cache-Control', 'private, no-store');
   return c.json(
     await buildDefaultPoolResponse(db, {
@@ -253,7 +252,7 @@ capacityPoolRoutes.post('/:id/capacity-pools/defaults/reconcile', async (c) => {
 
   await requireProjectCapability(db, projectId, userId, 'secret:read');
   const policyMutationSupported = await hasProjectCapability(db, projectId, userId, 'secret:write');
-  const placementSettings = await resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env);
+  const placementSettings = resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env);
 
   c.header('Cache-Control', 'private, no-store');
   return c.json(
