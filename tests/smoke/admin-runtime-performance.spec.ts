@@ -106,7 +106,9 @@ test('bounded admin and Runtime performance audit', async ({ context }, info) =>
       const ready =
         path === '/admin/infrastructure'
           ? page.getByRole('button', { name: 'Refresh machine list' }).first()
-          : page.getByText(content!, { exact: false }).first();
+          : path === '/admin/analytics'
+            ? page.getByRole('heading', { name: 'Analytics', exact: true })
+            : page.getByText(content!, { exact: false }).first();
       await expect(ready).toBeVisible({ timeout: auditTimeoutMs });
       await expect(page.getByText('Something went wrong')).toHaveCount(0);
       browserTimings.push({ path, width, contentMs: Math.round(performance.now() - start) });
