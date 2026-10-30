@@ -1,6 +1,15 @@
+---
+import "../../../../packages/ui/src/brand/brand.css";
+import "../../../../packages/ui/src/glass/glass.css";
+import "../installer.css";
+
+import Footer from "../../../../packages/ui/src/brand/Footer.astro";
+import Header from "../../../../packages/ui/src/brand/Header.astro";
+import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
+---
 <!doctype html>
 <html lang="en">
-  <head>
+  <head><ThemeInit external />
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <title>Permissions & privacy · SAM installer</title>
@@ -12,86 +21,18 @@
       type="font/woff2"
       crossorigin
     />
-    <script src="/theme.js"></script>
-    <link rel="stylesheet" href="/glass.css" />
-    <link rel="stylesheet" href="/style.css" />
+    
+    
+    
   </head>
-  <body>
-    <header class="site-header sam-glass sam-glass--chrome sam-glass-rim">
-      <a class="brand" href="/" aria-label="SAM installer home"
-        ><img src="/brand-icon.png" width="30" height="30" alt="" /><span class="wordmark"
-          >SAM<span>simple agent manager</span></span
-        ></a
-      >
-      <nav class="header-actions" aria-label="Installer navigation">
-        <div class="theme-controls" role="group" aria-label="Color theme">
-          <button
-            type="button"
-            class="theme-option"
-            data-theme-value="auto"
-            aria-label="System theme"
-            title="System"
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.6"
-              aria-hidden="true"
-            >
-              <rect x="2" y="3" width="20" height="14" rx="2" />
-              <path d="M8 21h8m-4-4v4" />
-            </svg></button
-          ><button
-            type="button"
-            class="theme-option"
-            data-theme-value="light"
-            aria-label="Light theme"
-            title="Light"
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.6"
-              aria-hidden="true"
-            >
-              <circle cx="12" cy="12" r="4" />
-              <path
-                d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.4 1.4m11.2 11.2L19 19M5 19l1.4-1.4M17.6 6.4L19 5"
-              />
-            </svg></button
-          ><button
-            type="button"
-            class="theme-option"
-            data-theme-value="dark"
-            aria-label="Dark theme"
-            title="Dark"
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.6"
-              aria-hidden="true"
-            >
-              <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" />
-            </svg>
-          </button>
-        </div>
-        <a href="/">← Setup</a>
-      </nav>
-    </header>
+  <body class="sam-form">
+    <Header compact icon="/brand-icon.png" />
     <main class="privacy-main">
+
       <span class="badge">Your access. Your choice.</span>
       <h1>Permissions<br />& <span class="gradient-text">privacy.</span></h1>
       <p class="intro">Know what you’re sharing, what we create, and what stays yours.</p>
+<p>No GitHub account is needed to get SAM running in Cloudflare. Signing in afterwards requires GitHub, GitLab or Google; there is no email login.</p>
       <div class="privacy-content sam-glass sam-glass-rim">
         <h2>What you authorize</h2>
         <p>
@@ -155,6 +96,6 @@
         </p>
       </div>
     </main>
-    <footer><a href="/">← Back to setup</a><span>SAM · simple agent manager</span></footer>
+    <Footer compact icon="/sam-head.png"><a href="/privacy.html">Permissions & privacy</a><a href="/self-host.html">Self-host</a><span id="version"></span></Footer>
   </body>
 </html>

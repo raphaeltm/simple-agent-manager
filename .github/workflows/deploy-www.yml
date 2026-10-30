@@ -8,6 +8,7 @@ on:
       - '.github/workflows/deploy-www.yml'
       # Shared sources the marketing site imports from @simple-agent-manager/ui
       - 'packages/ui/src/glass/**'
+      - 'packages/ui/src/brand/**'
       - 'packages/ui/package.json'
   workflow_dispatch:
 

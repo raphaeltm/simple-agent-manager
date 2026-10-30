@@ -51,7 +51,7 @@ function invalidatePlan() {
   formRevision++;
   approvedPlan = undefined;
   $('confirm').checked = false;
-  if (fullInstaller) $('install').disabled = true;
+  if (fullInstaller) { $('install').disabled = true; $('install').className = 'sam-btn sam-btn--secondary'; $('preview').className = 'sam-btn sam-btn--primary'; }
   $('plan-summary').textContent = '';
 }
 async function loadZones() {
@@ -178,12 +178,34 @@ $('preview').addEventListener('click', async () => {
     if (revision !== formRevision) return;
     $('plan-summary').dataset.tone = plan.conflicts.length ? 'warning' : 'success';
     $('plan-summary').setAttribute('role', plan.conflicts.length ? 'alert' : 'status');
-    $('plan-summary').textContent = plan.conflicts.length
-      ? `Existing DNS records block installation: ${plan.conflicts.map((record) => record.name).join(', ')}. Choose a fresh subdomain.`
-      : `Create ${plan.hostnames.join(', ')}. ${plan.workersDev.action === 'create' ? 'Initialize account address' : 'Preserve account address'} ${plan.workersDev.subdomain}.workers.dev. Build source ${plan.sourceCommit.slice(0, 12)} in your account. Cloudflare Workers Paid and usage charges apply.`;
+    const summary = $('plan-summary');
+    if (plan.conflicts.length) {
+      summary.textContent = `Existing DNS records block installation: ${plan.conflicts.map((record) => record.name).join(', ')}. Choose a fresh subdomain.`;
+    } else {
+      const title = document.createElement('h3'); title.textContent = 'Your installation plan';
+      const list = document.createElement('dl'); list.className = 'plan-list';
+      const row = (label, value) => {
+        const group = document.createElement('div');
+        const term = document.createElement('dt'); term.textContent = label;
+        const detail = document.createElement('dd');
+        if (typeof value === 'string') detail.textContent = value; else detail.append(value);
+        group.append(term, detail); list.append(group);
+      };
+      const hosts = document.createElement('ul');
+      plan.hostnames.forEach(host => { const li = document.createElement('li'); li.textContent = host; hosts.append(li); });
+      row('Hostnames', hosts);
+      row('Account address', `${plan.workersDev.action === 'create' ? 'Initialize account address' : 'Preserve account address'} ${plan.workersDev.subdomain}.workers.dev`);
+      const source = document.createElement('a'); source.textContent = plan.sourceCommit.slice(0, 8);
+      if (/^[a-f0-9]{40}$/.test(plan.sourceCommit)) source.href = `https://github.com/raphaeltm/simple-agent-manager/commit/${plan.sourceCommit}`;
+      row('Build source', source);
+      row('Cost', 'Cloudflare Workers Paid and usage charges apply. Your build runs in your account.');
+      summary.replaceChildren(title, list);
+    }
     if (!plan.conflicts.length) {
       approvedPlan = plan;
       $('install').disabled = false;
+      $('install').className = 'sam-btn sam-btn--primary';
+      $('preview').className = 'sam-btn sam-btn--secondary';
     }
   } catch (error) {
     message(error.message);

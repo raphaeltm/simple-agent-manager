@@ -1,6 +1,16 @@
+---
+import "../../../../packages/ui/src/brand/brand.css";
+import "../../../../packages/ui/src/glass/glass.css";
+import "../installer.css";
+
+import Badge from "../../../../packages/ui/src/brand/Badge.astro";
+import Footer from "../../../../packages/ui/src/brand/Footer.astro";
+import Header from "../../../../packages/ui/src/brand/Header.astro";
+import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
+---
 <!doctype html>
 <html lang="en">
-  <head>
+  <head><ThemeInit external />
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta
@@ -16,157 +26,38 @@
       type="font/woff2"
       crossorigin
     />
-    <script src="/theme.js"></script>
-    <link rel="stylesheet" href="/glass.css" />
-    <link rel="stylesheet" href="/style.css" />
-    <script src="/app.js" defer></script>
-    <script type="module" src="/scene.js"></script>
+    
+    
+    
+    <script is:inline src="/app.js" defer></script>
+    <script is:inline type="module" src="/scene.js"></script>
   </head>
-  <body class="installer-page">
+  <body class="installer-page sam-form">
     <div class="installer-environment" aria-hidden="true">
       <div class="ambient-light"></div>
       <div class="installer-floor" data-installer-field></div>
       <div class="floor-haze"></div>
     </div>
     <a class="skip-link" href="#setup">Skip to setup</a>
-    <header class="site-header sam-glass sam-glass--chrome sam-glass-rim">
-      <a
-        class="brand"
-        href="https://www.simple-agent-manager.org/"
-        aria-label="SAM — simple agent manager home"
-      >
-        <img src="/brand-icon.png" width="30" height="30" alt="" />
-        <span class="wordmark">SAM<span>simple agent manager</span></span>
-      </a>
-      <nav class="header-actions" aria-label="Installer navigation">
-        <div class="theme-controls" role="group" aria-label="Color theme">
-          <button
-            type="button"
-            class="theme-option"
-            data-theme-value="auto"
-            aria-label="System theme"
-            title="System"
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.6"
-              aria-hidden="true"
-            >
-              <rect x="2" y="3" width="20" height="14" rx="2" />
-              <path d="M8 21h8m-4-4v4" />
-            </svg></button
-          ><button
-            type="button"
-            class="theme-option"
-            data-theme-value="light"
-            aria-label="Light theme"
-            title="Light"
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.6"
-              aria-hidden="true"
-            >
-              <circle cx="12" cy="12" r="4" />
-              <path
-                d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.4 1.4m11.2 11.2L19 19M5 19l1.4-1.4M17.6 6.4L19 5"
-              />
-            </svg></button
-          ><button
-            type="button"
-            class="theme-option"
-            data-theme-value="dark"
-            aria-label="Dark theme"
-            title="Dark"
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="1.6"
-              aria-hidden="true"
-            >
-              <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" />
-            </svg>
-          </button>
-        </div>
-        <a class="header-privacy" href="/privacy.html"
-          >Permissions & privacy <span aria-hidden="true">↗</span></a
-        >
-      </nav>
-    </header>
+    <Header compact icon="/brand-icon.png" />
     <main>
       <div class="intro-layout">
         <div class="hero-copy">
-          <span class="badge"
-            ><span class="status-dot" aria-hidden="true"></span>Open Source & Self-Hosted</span
-          >
-          <h1>Your cloud.<br /><span class="gradient-text">Ready for SAM.</span></h1>
+          <Badge>Open Source &amp; Self-Hosted</Badge>
+          <h1 class="hero-title">Your cloud.<br /><span class="gradient-text">Ready for SAM.</span></h1>
           <p class="intro">
             <span class="desktop-intro">Give your agents a place of their own. </span>Start with an
             installation service in your Cloudflare account.
           </p>
+          <p class="sign-in-note">No GitHub needed to install. Signing in to SAM afterwards requires GitHub, GitLab or Google.</p>
           <a id="explore" class="hero-start" href="#setup"
             ><span id="explore-label">Set up your cloud</span> <span aria-hidden="true">↗</span></a
           >
-          <div class="ownership-facts">
-            <div>
-              <span class="fact-number">01</span>
-              <p>
-                Your infrastructure.<small>The service lives in your Cloudflare account.</small>
-              </p>
-            </div>
-            <div>
-              <span class="fact-number">02</span>
-              <p>Your access.<small>Approve permissions, then take ownership.</small></p>
-            </div>
-          </div>
-          <p class="hero-meta">No GitHub setup <span>·</span> No SAM account</p>
+
         </div>
         <div class="setup-column" id="setup" tabindex="-1">
-          <div class="installation-plane sam-glass sam-glass-rim" aria-hidden="true">
-            <div class="plane-chrome">
-              <span class="window-dots"><i></i><i></i><i></i></span
-              ><span>Your installation · a preview</span><span>↗</span>
-            </div>
-            <div class="account-route">
-              <div class="cloud-account">
-                <svg width="34" height="34" viewBox="0 0 48 48" fill="none">
-                  <path
-                    d="M12 34a9 9 0 1 1 2-17.8A12 12 0 0 1 38 20a7 7 0 0 1-2 14Z"
-                    stroke="currentColor"
-                    stroke-width="2"
-                  /></svg
-                ><span>Your Cloudflare<small>ACCOUNT</small></span>
-              </div>
-              <div class="route-line"><i></i><span>→</span></div>
-              <div class="service-object">
-                <img src="/brand-icon.png" width="38" height="38" alt="" /><span
-                  >Installation service<small>PROTECTED WORKER</small></span
-                >
-              </div>
-            </div>
-            <div class="plane-spec">
-              <span>sam-maintenance-…</span><span>Hosted in your account</span>
-            </div>
-          </div>
           <div class="setup-card sam-glass sam-glass-rim">
-            <div class="card-heading">
-              <span class="console-title"
-                ><span class="window-dots" aria-hidden="true"><i></i><i></i><i></i></span> SAM /
-                SETUP</span
-              ><span class="badge prototype">Prototype</span>
-            </div>
+
             <ol class="steps" aria-label="Setup progress">
               <li id="step-connect" aria-current="step">
                 <span class="step-number">1</span><span>Connect</span>
@@ -178,11 +69,10 @@
               <section id="connect" aria-labelledby="connect-title">
                 <h2 id="connect-title">Start with Cloudflare</h2>
                 <p>
-                  Connect Cloudflare to create a protected installation service. No GitHub setup
-                  needed.
+                  Create an installation service in your Cloudflare account.
                 </p>
                 <form method="post" action="/oauth/start">
-                  <button id="login" disabled>
+                  <button class="sam-btn sam-btn--primary" id="login" disabled>
                     <svg
                       width="22"
                       height="22"
@@ -239,10 +129,9 @@
                     <label for="owner-email">Your administrator email</label
                     ><input id="owner-email" type="email" autocomplete="email" />
                     <p class="small">
-                      Use this verified email when you configure sign-in in your new instance. No
-                      GitHub setup is needed to install.
+                      Use this verified email for your administrator account when you configure sign-in.
                     </p>
-                    <button id="preview" type="button" class="secondary">
+                    <button id="preview" type="button" class="sam-btn sam-btn--primary">
                       Review installation
                     </button>
                     <div id="plan-summary" class="small" role="status"></div>
@@ -255,7 +144,7 @@
                       ></span
                     ></label
                   >
-                  <button id="install" type="submit">
+                  <button class="sam-btn sam-btn--primary" id="install" type="submit">
                     Create my installation service <span aria-hidden="true">→</span>
                   </button>
                 </form>
@@ -269,14 +158,14 @@
                 </p>
                 <p id="worker-name" class="resource"></p>
                 <form method="post" action="/handoff">
-                  <button>Continue to my service <span aria-hidden="true">→</span></button>
+                  <button class="sam-btn sam-btn--primary">Continue to my service <span aria-hidden="true">→</span></button>
                 </form>
                 <p class="small">
                   Save the recovery credential shown by your service. It keeps your access
                   independent of this temporary installer session.
                 </p>
               </section>
-              <button id="disconnect" class="secondary" hidden>Disconnect and clear session</button>
+              <button id="disconnect" class="sam-btn sam-btn--secondary" hidden>Disconnect and clear session</button>
               <div id="message" role="status" aria-live="polite"></div>
               <section id="cleanup-panel" hidden aria-labelledby="cleanup-title">
                 <h3 id="cleanup-title">Finish an interrupted setup</h3>
@@ -285,9 +174,9 @@
                   your installation service are preserved.
                 </p>
                 <form id="cleanup-reconnect-form" method="post" action="/oauth/start">
-                  <button id="cleanup-reconnect" class="secondary">Reconnect for cleanup</button>
+                  <button id="cleanup-reconnect" class="sam-btn sam-btn--secondary">Reconnect for cleanup</button>
                 </form>
-                <button id="cleanup-resume" class="secondary" type="button" hidden>
+                <button id="cleanup-resume" class="sam-btn sam-btn--secondary" type="button" hidden>
                   Finish cleanup
                 </button>
               </section>
@@ -312,8 +201,8 @@
                 </p></noscript
               >
             </div>
-            <aside class="prototype-note">
-              <strong>A small first step. You keep the keys.</strong>
+            <aside class="mode-note">
+              <strong>Your installation, in your account.</strong>
               <p id="installer-mode-note">
                 Creates a protected installation service. Full SAM installation, builds, and updates
                 aren’t connected yet.
@@ -321,7 +210,7 @@
             </aside>
           </div>
           <p class="setup-footnote">
-            No SAM account needed <span aria-hidden="true">·</span> No analytics
+            No analytics <span aria-hidden="true">·</span> Open source
           </p>
         </div>
       </div>
@@ -339,9 +228,6 @@
         </nav>
       </div>
     </main>
-    <footer>
-      <a href="https://www.simple-agent-manager.org/">← Back to SAM</a
-      ><a href="/privacy.html">Permissions & privacy</a><span id="version"></span>
-    </footer>
+    <Footer compact icon="/sam-head.png"><a href="/privacy.html">Permissions & privacy</a><a href="/self-host.html">Self-host</a><span id="version"></span></Footer>
   </body>
 </html>

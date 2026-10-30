@@ -4,7 +4,7 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "assets": {
-    "directory": "public",
+    "directory": "site-static",
     "binding": "ASSETS",
     "run_worker_first": true
   },
@@ -19,7 +19,9 @@
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["InstallerSession"]
+      "new_sqlite_classes": [
+        "InstallerSession"
+      ]
     }
   ],
   "observability": {

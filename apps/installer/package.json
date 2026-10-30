@@ -20,6 +20,7 @@
     "vitest": "catalog:",
     "wrangler": "catalog:",
     "@playwright/test": "1.62.1",
-    "tsx": "catalog:"
+    "tsx": "catalog:",
+    "astro": "6.4.8"
   }
 }

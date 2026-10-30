@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { type Browser, chromium, expect, type Page } from '@playwright/test';
 
 import { maintenanceSource } from '../src/maintenance';
+import { installerShell } from '../src/maintenance-brand.generated';
 import { digest } from '../src/security';
 const output = '../../.codex/tmp/playwright-screenshots';
 
@@ -93,10 +94,41 @@ async function assertNoOverflow(page: Page, label: string) {
   if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth))
     throw new Error(label + ' overflow');
 }
+async function captureState(page: Page, name: string) {
+  let count = 0;
+  for (const theme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
+    await page
+      .getByRole('button', { name: theme === 'light' ? 'Light theme' : 'Dark theme', exact: true })
+      .click();
+    await expect(
+      page.getByRole('button', {
+        name: theme === 'light' ? 'Light theme' : 'Dark theme',
+        exact: true,
+      })
+    ).toHaveAttribute('aria-pressed', 'true');
+    for (const [device, width, height] of [
+      ['mobile', 375, 667],
+      ['desktop', 1280, 800],
+      ['narrow', 320, 700],
+    ] as const) {
+      await page.setViewportSize({ width, height });
+      await page.evaluate(() => document.fonts.ready);
+      await page.evaluate(() => scrollTo(0, 0));
+      await assertNoOverflow(page, name + '-' + device + '-' + theme);
+      await page.screenshot({
+        path: output + '/installer-' + name + '-' + device + '-' + theme + '.png',
+        fullPage: true,
+      });
+      count++;
+    }
+  }
+  return count;
+}
 async function captureMaintenanceControls(page: Page, target: string) {
   let screenshots = 0;
   for (const theme of ['light', 'dark'] as const) {
-    await page.emulateMedia({ colorScheme: theme });
+    await page.emulateMedia({ colorScheme: theme, reducedMotion: 'reduce' });
     for (const [device, width, height] of [
       ['mobile', 375, 667],
       ['desktop', 1280, 800],
@@ -106,6 +138,7 @@ async function captureMaintenanceControls(page: Page, target: string) {
       await page.goto(target);
       await page.evaluate(() => document.fonts.ready);
       await assertNoOverflow(page, 'Maintenance');
+      await page.evaluate(() => scrollTo(0, 0));
       await page.screenshot({
         path: output + '/installer-maintenance-controls-' + device + '-' + theme + '.png',
         fullPage: true,
@@ -147,10 +180,23 @@ async function auditScenario(page: Page, scenario: string, baseUrl: string) {
   await expect(page.locator('#version')).toHaveText('Build audit-fixtur');
   if (scenario === 'connect') {
     await expect(page.locator('#login')).toBeEnabled();
+    await page.locator('#login').focus();
+    await expect(page.locator('#login')).toBeFocused();
+    expect(
+      await page.locator('#login').evaluate((el) => getComputedStyle(el).outlineStyle)
+    ).not.toBe('none');
     await page.getByText('What access am I granting?').click();
     await expect(page.getByText(/These may allow changes to existing Workers/)).toBeVisible();
     await page.getByText('What access am I granting?').click();
   }
+  const stepBounds = await page.locator('.steps').evaluate((el) => {
+    const parent = el.getBoundingClientRect();
+    return [...el.querySelectorAll('li')].every((item) => {
+      const r = item.getBoundingClientRect();
+      return r.left >= parent.left && r.right <= parent.right;
+    });
+  });
+  expect(stepBounds).toBe(true);
   if (scenario.startsWith('full-')) await auditFullSettings(page, scenario);
   if (scenario === 'empty' || scenario === 'unconfigured')
     await expect(page.locator(scenario === 'empty' ? '#install' : '#login')).toBeDisabled();
@@ -185,7 +231,11 @@ async function auditViewport(
 ) {
   let screenshots = 0;
   const label = `${device}-${theme}`;
-  const page = await browser.newPage({ viewport: { width, height }, colorScheme: theme });
+  const page = await browser.newPage({
+    viewport: { width, height },
+    colorScheme: theme,
+    reducedMotion: 'reduce',
+  });
   let state = 'connect';
   await installFixtureRoutes(
     page,
@@ -212,6 +262,7 @@ async function auditViewport(
     await auditScenario(page, scenario, baseUrl);
     if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth))
       throw new Error(`Overflow ${label} ${scenario}`);
+    await page.evaluate(() => scrollTo(0, 0));
     await page.screenshot({
       path: `${output}/installer-${scenario}-${label}.png`,
       fullPage: true,
@@ -231,7 +282,7 @@ async function auditViewport(
   await expect(page.locator('.steps .completed')).toHaveCount(0);
   await page
     .getByRole('button', { name: theme === 'light' ? 'Dark theme' : 'Light theme' })
-    .click();
+    .press('Enter');
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute(
     'data-theme',
@@ -256,7 +307,7 @@ async function auditViewport(
   return screenshots;
 }
 async function auditMaintenance(browser: Browser) {
-  let screenshots = 2;
+  let screenshots = 0;
   const temp = await mkdtemp(join(tmpdir(), 'sam-installer-browser-'));
   execFileSync(
     '/usr/bin/openssl',
@@ -322,7 +373,26 @@ async function auditMaintenance(browser: Browser) {
   await new Promise((resolve) => service.listen(0, resolve));
   target = 'https://127.0.0.1:' + service.address().port;
   const handoffScript = await readFile('public/handoff.js', 'utf8');
-  const installer = createServer(tls, (req, res) => {
+  const installer = createServer(tls, async (req, res) => {
+    if (
+      /^\/(?:_astro\/[a-zA-Z0-9_.-]+|theme-init\.js|fonts\/[a-zA-Z0-9_.-]+|(?:brand-icon|sam-head)\.png)$/.test(
+        req.url || ''
+      )
+    ) {
+      const path = req.url!;
+      res.setHeader(
+        'Content-Type',
+        path.endsWith('.js')
+          ? 'application/javascript'
+          : path.endsWith('.css')
+            ? 'text/css'
+            : path.endsWith('.png')
+              ? 'image/png'
+              : 'font/woff2'
+      );
+      res.end(await readFile('site-static' + path));
+      return;
+    }
     if (req.url === '/handoff.js') {
       res.setHeader('Content-Type', 'application/javascript');
       res.end(handoffScript);
@@ -331,11 +401,13 @@ async function auditMaintenance(browser: Browser) {
     res.setHeader('Content-Type', 'text/html');
     res.setHeader('Referrer-Policy', 'strict-origin');
     res.end(
-      '<script src="/handoff.js" defer></script><form id="maintenance-claim-form" method="POST" action="' +
+      installerShell.before +
+        '<script src="/handoff.js" defer></script><form id="maintenance-claim-form" method="POST" action="' +
         target +
         '/claim"><input name="key" value="' +
         key +
-        '"><input id="maintenance-recovery" name="recovery" type="hidden"><input id="maintenance-recovery-display" readonly><input id="maintenance-recovery-saved" type="checkbox"><button id="maintenance-claim-submit" disabled>Continue</button></form>'
+        '"><input id="maintenance-recovery" name="recovery" type="hidden"><input id="maintenance-recovery-display" readonly><input id="maintenance-recovery-saved" type="checkbox"><button id="maintenance-claim-submit" class="sam-btn sam-btn--primary" disabled>Continue</button></form>' +
+        installerShell.after
     );
   });
   await new Promise((resolve) => installer.listen(0, resolve));
@@ -343,12 +415,11 @@ async function auditMaintenance(browser: Browser) {
   env.INSTALLER_ORIGIN = origin;
   await page.goto(origin);
   await expect(page.locator('#maintenance-recovery-display')).toHaveValue(/^[a-f0-9]{64}$/);
+  screenshots += await captureState(page, 'handoff');
   await page.locator('#maintenance-recovery-saved').check();
   await page.getByRole('button', { name: 'Continue' }).click();
   await page.getByText('Ownership handoff verified.').waitFor();
-  await page.screenshot({ path: output + '/installer-handoff-desktop.png', fullPage: true });
-  await page.setViewportSize({ width: 375, height: 667 });
-  await page.screenshot({ path: output + '/installer-handoff-mobile.png', fullPage: true });
+  screenshots += await captureState(page, 'maintenance-claimed');
 
   let builderJob: Record<string, unknown> = { status: 'idle' };
   Object.assign(env, {
@@ -409,31 +480,11 @@ async function auditMaintenance(browser: Browser) {
     };
     await page.goto(target);
     await page.evaluate(() => document.fonts.ready);
-    for (const [device, width, height] of [
-      ['mobile', 375, 667],
-      ['desktop', 1280, 800],
-    ] as const) {
-      await page.setViewportSize({ width, height });
-      await page.screenshot({
-        path: output + '/installer-maintenance-' + state + '-' + device + '.png',
-        fullPage: true,
-      });
-      screenshots++;
-    }
+    screenshots += await captureState(page, 'maintenance-' + state);
   }
   await page.getByRole('button', { name: 'Open initial setup instructions' }).click();
   await expect(page.getByText('synthetic-private-setup-token-for-audit')).toBeVisible();
-  for (const [device, width, height] of [
-    ['mobile', 375, 667],
-    ['desktop', 1280, 800],
-  ] as const) {
-    await page.setViewportSize({ width, height });
-    await page.screenshot({
-      path: output + '/installer-maintenance-setup-' + device + '.png',
-      fullPage: true,
-    });
-    screenshots++;
-  }
+  screenshots += await captureState(page, 'maintenance-setup');
   await context.close();
   service.close();
   installer.close();
