@@ -6,6 +6,8 @@ An independent Cloudflare Worker with static assets and its own session Durable 
 
 **Experimental full mode:** Source-gated installation and update machinery is under development. It has not completed authenticated end-to-end OAuth, credential-revocation, and full in-account build validation. Do not treat it as a supported installer or infer hosted availability from this source. Use the established self-hosting guide for a complete SAM installation. Fresh deployments start in bootstrap mode. The ordinary deployment command preserves the currently deployed mode and consent scopes; it does not enable full mode on a bootstrap deployment.
 
+You do not need GitHub to get SAM running in your Cloudflare account. Signing in afterwards requires a configured GitHub, GitLab or Google provider; SAM has no email login. Maintenance recovery is separate from SAM sign-in.
+
 Public user instructions: [Installer guide](https://www.simple-agent-manager.org/docs/guides/installer/). Source for that guide is `apps/www/src/content/docs/docs/guides/installer.mdx`.
 
 ## Deploy your own installer
@@ -37,7 +39,7 @@ When the deployed Worker has both OAuth secret bindings and the requested scopes
 
 Full-mode preview also reads the account's `workers.dev` address and includes the exact target in the approved plan. It preserves an existing address. If the account has none, provisioning can create only the previewed, explicitly approved address and reads it back before continuing; a changed address requires a new preview. This changes an account-wide setting. Cloudflare's [create-subdomain endpoint](https://developers.cloudflare.com/api/resources/workers/subresources/subdomains/methods/update/) accepts Workers Scripts Write, already included in full-mode consent; Account Settings Write is not required for this operation. The API has no compare-and-set guard: an external administrator changing the setting between the final absence check and PUT remains a race the installer cannot eliminate. Coordinate account-wide changes during installation. Bootstrap-only mode still asks the operator to initialize a missing address.
 
-Private OAuth clients are usable by members of their parent account. To serve other users, follow Cloudflare's [publisher verification and public promotion](https://developers.cloudflare.com/fundamentals/oauth/create-an-oauth-client/). Public promotion is permanent and intentionally not automated.
+Private OAuth clients can only be authorized by members of the owning Cloudflare account. Public promotion is self-serve: supply the client name, logo, client URL and scopes, verify the client URL's domain with a DNS TXT record, then change visibility to public. This is not an approval queue. Promotion is permanent and is intentionally not automated. See Cloudflare's [OAuth client setup](https://developers.cloudflare.com/fundamentals/oauth/create-an-oauth-client/).
 
 ## Development
 
@@ -47,7 +49,7 @@ Variables: `APP_ORIGIN` (exact origin), `SESSION_TTL_SECONDS` (60–3600, defaul
 
 ## Repository deployment
 
-`deploy-installer.yml` only runs in `raphaeltm/simple-agent-manager`. Pushes changing `apps/installer/**` on `sam/**` deploy staging; main deploys production. It can also be manually dispatched; production is restricted to main. Workflow-only/docs-only changes do not automatically deploy. It uses existing GitHub `staging`/`production` secrets `CF_API_TOKEN`, `CF_ACCOUNT_ID`, and variable `BASE_DOMAIN`. It does not invoke the main SAM deployment. Both environments create private OAuth clients; public promotion is a separate operator action. Manual dispatch offers `mode: preserve | bootstrap | full`, defaulting to `preserve`. Automatic pushes always preserve the deployed mode/scopes. `full` is an explicit staging-proof opt-in and must not be treated as validated hosted availability. Optional environment secret `OAUTH_REGISTRATION_TOKEN` can supply existing managed OAuth registration authority; no new secret is mandatory.
+`deploy-installer.yml` only runs in `raphaeltm/simple-agent-manager`. Pushes changing `apps/installer/**`, `packages/ui/src/brand/**` or `packages/ui/src/glass/**`, or the copied www font/favicon/mascot sources on `sam/**` deploy staging; main deploys production. It can also be manually dispatched; production is restricted to main. Workflow-only/docs-only changes do not automatically deploy. It uses existing GitHub `staging`/`production` secrets `CF_API_TOKEN`, `CF_ACCOUNT_ID`, and variable `BASE_DOMAIN`. It does not invoke the main SAM deployment. Both environments create private OAuth clients; public promotion is a separate operator action. Manual dispatch offers `mode: preserve | bootstrap | full`, defaulting to `preserve`. Automatic pushes always preserve the deployed mode/scopes. `full` is an explicit staging-proof opt-in and must not be treated as validated hosted availability. Optional environment secret `OAUTH_REGISTRATION_TOKEN` can supply existing managed OAuth registration authority; no new secret is mandatory.
 
 ## Security and lifecycle
 
@@ -71,16 +73,24 @@ Deployment adds a hostname-specific `install.${BASE_DOMAIN}/*` Worker route alon
 
 ## Brand assets
 
-The installer uses the homepage's Chillax display font, green palette, mascot, and
-shared glass material. Static copies keep the installer independently deployable:
-`public/fonts/Chillax-Variable.woff2` and `public/sam-head.png` come from
-`apps/www/public/`, and `public/glass.css` comes from `packages/ui/src/glass/glass.css`.
-When those source assets change, refresh the copies and visually compare both sites.
+The homepage, installer and maintenance service consume the shared Astro markup and
+brand styles in `packages/ui/src/brand/`, alongside `packages/ui/src/glass/`.
+`scripts/build-scene.mjs` prepares the shared floor renderer, font and mascot and
+builds the installer's Astro pages into `site-static/`. It also embeds the compiled
+maintenance shell, styles, font and theme scripts into generated
+`src/maintenance-brand.generated.ts`. Generated outputs are not hand-maintained.
 
-The installer scene uses the **actual** shared glass node renderer from
-`packages/ui/src/glass/`, compiled by `scripts/build-scene.mjs` before dev/build/deploy.
-Generated browser modules live in gitignored `public/scene/`; no runtime request goes
-to the marketing site. The floor is a still composition (including reduced motion),
-and the tilted account-to-service panel is explicitly labelled as a preview.
+All sharing happens at build time. The deployed installer and user-owned
+maintenance Worker do not fetch brand components from the marketing site or SAM;
+the installer remains independently deployable from this monorepo. There are no
+manual asset-copy refresh steps.
 
-The build-scene preparation also embeds the real font and mascot into the independent maintenance Worker. Its generated `src/maintenance-brand.generated.ts` is ignored by Git and regenerated before checks/dev/build/deploy; maintenance does not fetch brand assets from our hosted installer.
+## In-account build policy
+
+The account-owned builder only produces installation artifacts. Tests, lint and
+standalone typechecks belong in repository CI for the pinned source commit, never
+in the user's Cloudflare build. Local installer `lint`, `typecheck`, `test` and
+`build` commands remain developer validation steps. The last paid cold build
+failed in Codex adapter tests before reaching later build stages; a successful
+cold build is still unproven. Another paid cold build requires explicit cost
+approval; a static installer staging deploy does not establish full-install proof.

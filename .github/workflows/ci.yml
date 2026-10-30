@@ -87,6 +87,21 @@ jobs:
             infra:
               - 'infra/**'
             deploy-scripts:
+              - 'package.json'
+              - 'turbo.json'
+              - 'apps/*/package.json'
+              - 'packages/*/package.json'
+              - 'packages/vm-agent/Makefile'
+              - 'packages/cli/Makefile'
+              - 'apps/installer/scripts/**'
+              - 'apps/www/scripts/build-tracker.ts'
+              - 'scripts/diagnostics/build-pinned-codex-review.sh'
+              - 'scripts/diagnostics/patches/**'
+              - 'scripts/diagnostics/pinned-codex-local.provenance'
+              - 'apps/api/Dockerfile.sandbox'
+              - 'apps/api/Dockerfile.vm-agent-container'
+              - 'apps/api/scripts/**'
+              - 'apps/api/container-entrypoints/**'
               - 'scripts/deploy/**'
               # The generated Worker config is built from wrangler.toml, so its text-binding
               # guard and effective-config tests must run when only wrangler.toml changes.
@@ -107,6 +122,7 @@ jobs:
               - '.github/workflows/deploy-www.yml'
               # Shared sources the marketing site imports from @simple-agent-manager/ui
               - 'packages/ui/src/glass/**'
+              - 'packages/ui/src/brand/**'
               - 'packages/ui/package.json'
             repo-quality:
               - 'scripts/quality/check-runtime-tunables*'
@@ -599,7 +615,7 @@ jobs:
       - name: Verify installer engine, runtime integrity and bounded proof contracts
         run: |
           pnpm exec vitest run --config scripts/deploy/installer-engine.vitest.config.ts
-          node --test scripts/deploy/installer-runtime-identity.test.mjs scripts/deploy/installer-builder-bootstrap.test.mjs scripts/deploy/installer-source-cache.test.mjs scripts/deploy/test-build-installation-codex-runtime.mjs
+          node --test scripts/deploy/installer-pure-build.test.mjs scripts/deploy/installer-runtime-identity.test.mjs scripts/deploy/installer-builder-bootstrap.test.mjs scripts/deploy/installer-source-cache.test.mjs scripts/deploy/test-build-installation-codex-runtime.mjs
 
       - name: Validate wrangler binding consistency
         run: pnpm quality:wrangler-bindings

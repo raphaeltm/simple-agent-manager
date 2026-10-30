@@ -1,5 +1,6 @@
 import { BootstrapCleanup } from './cleanup';
 import { cloudflare, CloudflareError, revoke } from './cloudflare';
+import { installerShell } from './maintenance-brand.generated';
 import { challenge, escapeHtml, json, randomSecret } from './security';
 import {
   authorityLimits,
@@ -248,11 +249,13 @@ export class InstallerSession {
     delete session.credentials;
     await this.ctx.storage.put('session', session);
     return new Response(
-      `<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Open your installation service</title><link rel="stylesheet" href="/style.css"><script type="module" src="/handoff.js"></script><main><p class="eyebrow">HANDOFF READY</p><h1>Continue in your account</h1><p>Our temporary Cloudflare credential has been deleted. This claim page remains available until its short session expires. ${revoked ? 'Cloudflare accepted the token revocation request.' : 'Revocation could not be confirmed. Revoke the installer authorization in your Cloudflare profile.'}</p><form id="maintenance-claim-form" method="post" action="${escapeHtml(url)}/claim"><input type="hidden" name="key" value="${escapeHtml(key)}"><input type="hidden" id="maintenance-recovery" name="recovery"><label for="maintenance-recovery-display">Save your recovery credential</label><input id="maintenance-recovery-display" readonly><p id="maintenance-handoff-status">Your browser creates this credential locally. Save it in your password manager before continuing. It is never sent to our hosted service.</p><label class="check"><input type="checkbox" id="maintenance-recovery-saved" required><span>I saved my recovery credential.</span></label><button id="maintenance-claim-submit" disabled>Open my installation service</button></form><p>Save the recovery credential shown by your service. It lets you return independently of this temporary installer session.</p></main></html>`,
+      installerShell.before +
+        `<script type="module" src="/handoff.js"></script><p class="eyebrow">HANDOFF READY</p><h1>Continue in your account</h1><p>Our temporary Cloudflare credential has been deleted. This claim page remains available until its short session expires. ${revoked ? 'Cloudflare accepted the token revocation request.' : 'Revocation could not be confirmed. Revoke the installer authorization in your Cloudflare profile.'}</p><form id="maintenance-claim-form" method="post" action="${escapeHtml(url)}/claim"><input type="hidden" name="key" value="${escapeHtml(key)}"><input type="hidden" id="maintenance-recovery" name="recovery"><label for="maintenance-recovery-display">Save your recovery credential</label><input id="maintenance-recovery-display" readonly><p id="maintenance-handoff-status">Your browser creates this credential locally. Save it in your password manager before continuing. It is never sent to our hosted service.</p><label class="check"><input type="checkbox" id="maintenance-recovery-saved" required><span>I saved my recovery credential.</span></label><button class="sam-btn sam-btn--primary" id="maintenance-claim-submit" disabled>Open my installation service</button></form><p>Save the recovery credential shown by your service. It lets you return independently of this temporary installer session.</p>` +
+        installerShell.after,
       {
         headers: {
           'Content-Type': 'text/html; charset=utf-8',
-          'Content-Security-Policy': `default-src 'none'; script-src 'self'; style-src 'self'; form-action ${url}; frame-ancestors 'none'; base-uri 'none'`,
+          'Content-Security-Policy': `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; form-action ${url}; frame-ancestors 'none'; base-uri 'none'`,
         },
       }
     );

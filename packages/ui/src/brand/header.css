@@ -1,0 +1,209 @@
+.header {
+  position: fixed;
+  top: 8px;
+  left: 50%;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  width: min(1200px, calc(100% - 24px));
+  height: calc(var(--header-height) - 14px);
+  padding: 0 8px 0 14px;
+  border-radius: 16px;
+  transform: translateX(-50%);
+}
+
+:where(.header, .mobile-nav) .logo {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-shrink: 0;
+  color: var(--color-fg-primary);
+}
+
+:where(.header, .mobile-nav) .logo:hover {
+  color: var(--color-fg-primary);
+}
+
+:where(.header, .mobile-nav) .logo-icon {
+  border-radius: 8px;
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.08);
+}
+
+:where(.header, .mobile-nav) .logo-text {
+  font-family: var(--font-display);
+  font-size: 1.25rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+:where(.header, .mobile-nav) .nav {
+  display: none;
+  align-items: center;
+  gap: 2px;
+}
+
+:where(.header, .mobile-nav) .nav-link {
+  padding: 7px 10px;
+  border-radius: 10px;
+  font-size: 0.875rem;
+  color: var(--color-fg-muted);
+  white-space: nowrap;
+  transition:
+    color 0.2s,
+    background-color 0.2s;
+}
+
+:where(.header, .mobile-nav) .nav-link:hover {
+  color: var(--color-fg-primary);
+  background: rgb(255 255 255 / 0.06);
+}
+
+html[data-theme='light'] .nav-link:hover {
+  background: rgb(17 39 29 / 0.06);
+}
+
+.header-actions {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+:where(.header, .mobile-nav) .icon-link {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 11px;
+  color: var(--color-fg-muted);
+}
+
+:where(.header, .mobile-nav) .icon-link:hover {
+  color: var(--color-fg-primary);
+}
+
+/* Mobile toggle */
+:where(.header, .mobile-nav) .mobile-toggle {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  width: 44px;
+  height: 44px;
+  margin-left: auto;
+  padding: 11px;
+  border: none;
+  border-radius: 12px;
+  background: none;
+  cursor: pointer;
+}
+
+:where(.header, .mobile-nav) .mobile-toggle span {
+  display: block;
+  width: 100%;
+  height: 2px;
+  border-radius: 2px;
+  background: var(--color-fg-muted);
+  transition:
+    transform 0.3s,
+    opacity 0.3s;
+}
+
+:where(.header, .mobile-nav) .mobile-toggle.is-active span:nth-child(1) {
+  transform: translateY(7px) rotate(45deg);
+}
+
+:where(.header, .mobile-nav) .mobile-toggle.is-active span:nth-child(2) {
+  opacity: 0;
+}
+
+:where(.header, .mobile-nav) .mobile-toggle.is-active span:nth-child(3) {
+  transform: translateY(-7px) rotate(-45deg);
+}
+
+/* Mobile menu sheet */
+.mobile-nav {
+  position: fixed;
+  top: calc(var(--header-height) + 2px);
+  left: 12px;
+  right: 12px;
+  z-index: 99;
+  max-height: calc(100dvh - var(--header-height) - 14px);
+  overflow-y: auto;
+  padding: 12px 20px 20px;
+  border-radius: 18px;
+  opacity: 0;
+  visibility: hidden;
+  transform: translateY(-8px) scale(0.98);
+  transform-origin: top center;
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease,
+    visibility 0s linear 0.2s;
+}
+
+.mobile-nav.is-open {
+  opacity: 1;
+  visibility: visible;
+  transform: none;
+  transition:
+    opacity 0.2s ease,
+    transform 0.2s ease,
+    visibility 0s;
+}
+
+.mobile-nav nav {
+  display: flex;
+  flex-direction: column;
+}
+
+.mobile-nav-link {
+  padding: 13px 4px;
+  border-bottom: 1px solid var(--color-border-subtle);
+  font-size: 1.0625rem;
+  color: var(--color-fg-muted);
+}
+
+.mobile-nav-link:hover {
+  color: var(--color-fg-primary);
+}
+
+:where(.header, .mobile-nav) .mobile-cta {
+  margin-top: 20px;
+}
+
+:where(.header, .mobile-nav) .mobile-theme {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--color-border-subtle);
+}
+
+:where(.header, .mobile-nav) .mobile-theme-label {
+  font-size: 0.875rem;
+  color: var(--color-fg-muted);
+}
+
+/* Seven links plus actions need about 1,050px; below that the menu takes over. */
+@media (min-width: 1120px) {
+  :where(.header, .mobile-nav) .nav,
+  .header-actions {
+    display: flex;
+  }
+
+  :where(.header, .mobile-nav) .mobile-toggle,
+  .mobile-nav {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mobile-nav,
+  .mobile-nav.is-open,
+  :where(.header, .mobile-nav) .mobile-toggle span {
+    transition: none;
+  }
+}

@@ -1,6 +1,6 @@
 # Full hosted SAM installer
 
-User authorization: complete the installer, pursue the goal, independently review implementation and documentation, make PR2465 green while keeping it DRAFT and UNMERGED, deploy to staging for human testing. Preserve approved branding.
+User authorization: complete the installer, pursue the goal, independently review implementation and documentation, make PR2465 green while keeping it DRAFT and UNMERGED, deploy to staging for human testing. The 2026-10-30 review rejected the earlier branding approval: shared source components and human screenshot review are required.
 
 ## Research and implementation plan
 
@@ -158,10 +158,118 @@ Commit 28f5235be already fixed missing Container-enabled upload declarations in 
 
 Raphaël explicitly authorized another attempt and required foreground shell timeout loops instead of scheduled continuation. Ran one isolated standard-3 builder against pinned source `78c2bb67a503c8f1e7879c0b72734f0f9de5e948`, staying in-session through terminal result and cleanup. Controller deadline shortened to 55 minutes, leaving cleanup margin inside the 3500-second shell/3600-second managed execution limits. The credential-free log was read throughout and retained before leaving.
 
-**Result: FAILED, with captured evidence.** Launcher ran 10:13:12.624–10:48:51.378 UTC (2138.754 seconds, about 35m39s), exit 1. The source-build stage reached the pinned adapter typecheck/test sequence; adapter `CodexAcpClient.test.ts` cases `handles logout command` and `handles skills command` hit their 40000ms test timeouts. This was not the 55-minute deadline. Later application/CLI/VM/image stages were not reached. The bounded stderr tail also contains a malformed-JSON fixture diagnostic; that alone is not identified as the cause. Exact root cause of the two timeouts remains unproven. Do not skip the tests or simply increase their timeout as a claimed fix.
+**Result: FAILED, with captured evidence.** Launcher ran 10:13:12.624–10:48:51.378 UTC (2138.754 seconds, about 35m39s), exit 1. The source-build stage reached the pinned adapter typecheck/test sequence; adapter `CodexAcpClient.test.ts` cases `handles logout command` and `handles skills command` hit their 40000ms test timeouts. This was not the 55-minute deadline. Later application/CLI/VM/image stages were not reached. The bounded stderr tail also contains a malformed-JSON fixture diagnostic; that alone is not identified as the cause. Exact root cause of the two timeouts remains unproven. Historical conclusion, superseded by the 2026-10-30 user instruction: the in-account path must contain zero tests, lint or standalone typechecks. Removing those invocations enforces build policy; it does not prove the underlying adapter timeout fixed.
 
 Peak observed disk use: 9,378,832,384 bytes (9.38 GB); memory peak was unavailable. A transient probe error was followed by updated fit readings. No OOM or disk exhaustion is established by the evidence. Configured compute upper estimate $0.201696 before allowances, conservative incremental estimate $2; actual billing was not measured. Combined conservative estimates for original plus retry are $4, below the authorized $5.
 
 Launcher deleted only `sam-build-proof-0d3e21f91763`. Independent authenticated Cloudflare verification at 10:49:52 UTC returned Worker settings 404 and a successful applications list with no exact matching test application. No resources remain and no additional paid retry was launched.
 
-Evidence: `tasks/evidence/2026-10-29-installer-cold-build/retry/result.json` and `retry/progress.jsonl`. Next required investigation is a focused reproduction of the pinned adapter logout/skills cases and their fixtures/process lifecycle before another paid full build. PR #2465 remains draft/unmerged; full cold-build/install acceptance stays incomplete.
+Evidence: `tasks/evidence/2026-10-29-installer-cold-build/retry/result.json` and `retry/progress.jsonl`. Adapter timeout investigation belongs in repository validation, separately from enforcing the pure-build policy. No further paid cold build is authorized by the current task. PR #2465 remains draft/unmerged; full cold-build/install acceptance stays incomplete.
+
+## Shared-brand and pure-build follow-up — 2026-10-30
+
+This follow-up starts from `sam/use-sam-mcp-tools-kyqej5` and targets that branch
+with a separate draft PR. Neither this PR nor #2465 may merge or target main.
+Earlier local design approvals are historical evidence, not Raphaël's acceptance
+of the redesigned surface. Original full-install and live-proof checkboxes above
+remain incomplete unless their actual acceptance evidence exists.
+
+Current scoped checklist (parent coordinator records final evidence below):
+
+- [x] Review documentation against the supported login providers in `apps/api/src/auth.ts`: no GitHub setup to install; subsequent SAM sign-in requires configured GitHub, GitLab or Google; no email login.
+- [x] Correct OAuth visibility guidance: private clients are restricted to owning-account members; permanent public promotion is self-serve with name/logo/URL/scopes and DNS TXT domain verification, not an approval queue.
+- [x] Complete shared `packages/ui/src/brand/` extraction, homepage adoption and build-time-only installer/maintenance consumption; remove hand-maintained asset copies and refresh instructions.
+- [x] Complete installer recomposition, structured plan, compact accessible controls and every existing state.
+- [x] Complete removal of checks from the entire in-account build call path and regression coverage preventing test runners from returning.
+- [x] Run installer lint/typecheck/tests/build, www build and affected repository checks.
+- [x] Compare homepage before/after at 375px and 1440px, light/dark; record screenshot diff evidence.
+- [x] Audit all installer and maintenance states at 320px, 375px and 1280px, light/dark; open side-by-side comparisons and attach them to the draft PR.
+- [x] Deploy only installer staging with mode `preserve`; confirm exact head SHA at `/health`. Known OAuth-registration 403/code 10000 after asset deployment is expected; keep readiness gate and sign-in disabled.
+- [x] Write adoption migration design below; implementation is outside this task.
+- [x] Save the migration design as SAM idea `01M652Y8YBVTQWSZSEDJATBKTT`, linked to `01M60R60ZQT4203MGXAVJNPRH5`.
+- [x] Finish independent reviews and reconcile final evidence; keep both PRs draft/unmerged.
+
+No paid Cloudflare container cold build is authorized in this follow-up. OAuth
+client setup, a newly approved cold-build run, authenticated install/revocation
+proof and migration implementation remain separate work.
+
+## Design only: adopt an existing GitHub Actions installation
+
+This section proposes a future migration, not an implemented installer flow. Link
+its SAM idea to parent installer idea `01M60R60ZQT4203MGXAVJNPRH5`.
+
+**Entry point.** Offer **Adopt existing installation** alongside new installation
+in the installer. After Cloudflare authorization, select the existing account and
+domain, then enter or discover the installation's exact R2 Pulumi bucket, backend
+prefix, project and stack. Show a read-only preflight before creating deployment
+authority. Clearly distinguish adopting resources from creating a fresh stack.
+Maintenance ownership uses the same saved browser recovery and explicit handoff
+model as a fresh installation.
+
+**State takeover.** Use the existing R2 backend and object layout unchanged; do not
+create a new empty state bucket or import resources into a parallel stack. Require
+the existing secrets-provider configuration and its actual decryption authority
+(for example the original Pulumi passphrase or access to its configured provider).
+Verify decryption before proceeding. Record an encrypted state backup and exact
+object version/digest, then prevent concurrent GitHub and maintenance writers.
+State contains credentials: never expose decrypted export contents in logs,
+browser previews, checkpoints or downloadable public artifacts. Missing state or
+decryption access blocks adoption, rather than triggering resource recreation.
+
+**Credentials and configuration.** Recover Pulumi-generated encryption, signing
+and other keys from the existing encrypted state using its existing decryption
+context. Preserve their values and provider identities; do not rotate them merely
+because execution moves. Inventory configuration from the existing stack, Worker
+settings and the old GitHub workflow/environment mapping. Cloudflare cannot read
+Worker secret values back, and GitHub-held secrets cannot be recovered as plaintext
+through the ordinary API. Ask the owner once to re-enter overrides that are absent
+from decryptable state, with an explicit required/optional inventory. Store them
+only in the user-owned maintenance service's protected secret path; show presence
+and origin without echoing values. Validate required credentials before takeover.
+Do not silently replace missing legacy overrides with newly generated keys.
+
+**Identity and safety preview.** Bind adoption to the exact domain, DNS routes,
+Worker and Pages identities, D1 databases, Durable Object namespaces, KV, R2
+buckets, runtime publication identity and current immutable source/runtime version.
+Reuse existing resources and state URNs. Start with the installed version and its
+existing artifacts; adoption should not itself upgrade or rebuild the runtime.
+Run a read-only infrastructure preview and reject destructive changes, database
+replacement, domain changes, key rotation or runtime identity changes. Show the
+owner a structured before/after inventory, missing overrides and any unavoidable
+configuration differences. Require approval bound to the state digest and exact
+plan; state drift invalidates approval. Backup does not promise automatic database
+rollback.
+
+**Cutover and recovery.** Pause/disable GitHub deployment scheduling and new pushes
+before the first maintenance mutation, drain any active workflow, then acquire
+exclusive deployment ownership. Keep the reviewed workflow configuration available
+for recovery. Establish account-owned deployment/storage/runtime credentials and
+maintenance recovery, verify existing domain/API/UI health, unchanged data bindings
+and runtime identity, and prove maintenance can read the same state independently
+of hosted-installer OAuth. Only after verified adoption permanently switch off the
+GitHub deploy workflow and remove obsolete GitHub-held deployment credentials.
+If preflight or validation fails, retain the original state/configuration and a
+clear rollback-to-GitHub instruction; never allow both writers to resume together.
+An actual SAM update remains a later separately previewed and approved operation.
+
+**UI sequence.** Adoption selection → Cloudflare account/domain → existing state
+and decryption preflight → one-time missing-override entry → read-only identity
+and plan review → pause existing deployment and approve takeover → save recovery
+and claim maintenance → verification result and workflow-disable instructions.
+Show actionable blocked states for missing state/decryption, concurrent deployment,
+unknown keys or replacement plans. No adoption control is shipped by this task.
+
+## Follow-up validation evidence (2026-10-30)
+
+- Installer lint, standalone typecheck, 106 tests and artifact build pass. Marketing lint, typecheck (one pre-existing baseline diagnostic) and 267-page build pass. Deployment Node guard/bootstrap/runtime/source checks and 36 engine tests pass. Frozen lockfile install passes. Source-contract and Wrangler-binding checks pass. Optional Cloudflare cost query returned 401; no paid build or provisioning was started.
+- Full browser audit captured 126 screenshots: 14 installer states (including privacy/self-host), handoff, claimed maintenance, controls, running, failed, completed and setup across 320/375/1280, light/dark. Tests exercise create→ready→disconnect, preview/conflict, cross-site handoff, cleanup, keyboard focus, Enter theme switching, reduced motion, document overflow and measured stepper bounds. Fixed the clipped 320px stepper discovered by independent image review.
+- Homepage full-page before/after dimensions match at 375×19071 and 1440×14459. At a >2/channel threshold, changed pixels are 0.000058%–0.03203%. See `apps/installer/review/homepage-diffs.json`, amplified full-page diff PNGs, and before/after comparisons. Original mobile button height is retained through padding after removing the 44px minimum.
+- Comparisons and privacy/self-host/handoff screenshots are committed under `apps/installer/review/`; the coordinator opened and inspected the homepage/installer and plan/maintenance comparisons. User design acceptance remains Raphaël's decision, independent of agent rubric scores.
+- Local reviews: build/test guard, documentation sync, security, UI/UX and completion/constitution all addressed. Security review caught blocked hosted-handoff inline CSS; extraction now preserves external stylesheet/script links, with generated-asset/CSP regression tests.
+- Audit session latest message was read; SAM rejected cross-session resolved-thread access (`sessionId must match the calling agent session`). The seven threads could not be inspected directly; their detailed findings supplied in this task were retained.
+
+Staging assets deployed from `b18b263e5d687240034baf82b6bfb8cfb42a923a`; `/health` returned that SHA with `oauthConfigured:false`. Run `40980043903` passed installer checks, browser audit and bounded bootstrap smoke/cleanup, then failed at the expected OAuth GET 403 after publishing assets. Readiness was not bypassed. Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/2475 (base installer branch, never main). Follow-up evidence commit corrects maintenance light-mode capture by explicitly selecting the theme, without product changes; final staging head is recorded in the PR.
+
+Final staging browser smoke caught the homepage footer's inherited inline image radius being blocked by installer CSP. It moved unchanged into shared footer CSS; no CSP was loosened. Static output forbids style attributes and the full browser audit now fails on CSP console errors. The 126-capture audit and 106 tests pass again; independent security re-review confirms the fix. Actual handoff HTML/CSP is rendered by InstallerSession in the browser harness, and maintenance theme captures explicitly select and settle their colors.
+
+CodeRabbit final-head review returned five actionable comments and three nits. Valid feedback is addressed: build-input/deployment-asset path filters; real Astro template checks for both installer pages and shared UI components (zero diagnostics), with explicit Astro lint coverage; required glass stylesheet docs; literal-safe asset replacement and original script attributes; minified/relative import guards; filtered/local-wrapper package validation guards. The 44px toggle recommendation is explicitly rejected because it contradicts Raphaël's task instruction. No minimum target was added.

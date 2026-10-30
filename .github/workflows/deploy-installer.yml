@@ -5,6 +5,11 @@ on:
     branches: [main, 'sam/**']
     paths:
       - 'apps/installer/**'
+      - 'apps/www/public/fonts/Chillax-Variable.woff*'
+      - 'apps/www/public/favicon.png'
+      - 'apps/www/public/images/sam-head.png'
+      - 'packages/ui/src/brand/**'
+      - 'packages/ui/src/glass/**'
   workflow_dispatch:
     inputs:
       environment:

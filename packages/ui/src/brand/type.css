@@ -1,0 +1,40 @@
+.hero-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px 6px 10px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 0.78125rem;
+  color: var(--color-fg-muted);
+}
+
+.badge-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--color-accent-strong);
+  box-shadow: 0 0 10px rgb(34 197 94 / 0.8);
+}
+
+.hero-title {
+  font-family: var(--font-display);
+  font-size: clamp(2.375rem, 4.6vw, 3.75rem);
+  font-weight: 600;
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  color: var(--color-fg-primary);
+  /* Even line lengths, so no word is left alone on the last line. */
+  text-wrap: balance;
+}
+
+.gradient-text {
+  background: linear-gradient(100deg, #22c55e 0%, #6ee7a8 45%, #22c55e 70%, #16a34a 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+html[data-theme='light'] .gradient-text {
+  background-image: linear-gradient(100deg, #166534 0%, #15803d 50%, #166534 100%);
+}

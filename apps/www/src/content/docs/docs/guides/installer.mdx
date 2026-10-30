@@ -3,7 +3,7 @@ title: Cloudflare installer prototype
 description: Try the hosted SAM installer or deploy the same installer in your own Cloudflare account.
 ---
 
-The installer offers a guided start in your own Cloudflare account, without setting up GitHub first. You can use the hosted version or run the same open-source installer yourself.
+The installer offers a guided start in your own Cloudflare account, without setting up GitHub first. Signing in to SAM afterwards requires GitHub, GitLab or Google through a configured provider; there is no email login. You can use the hosted version or run the same open-source installer yourself.
 
 :::caution[Prototype]
 The default bootstrap mode creates a protected installation-service Worker. This preview branch adds durable owner recovery; the hosted deployment may still run an earlier revision, so check its displayed source version. Experimental full installation and update code is not enabled by default and has not completed authenticated end-to-end validation. To install SAM today, follow the [self-hosting guide](/docs/guides/self-hosting/).
@@ -51,7 +51,7 @@ pnpm --filter @simple-agent-manager/installer run deploy
 
 The deployment creates the installer at `https://install.example.com`, provisions its private OAuth client, and stores the client credentials as Worker secrets. It uses its own session storage and does not share marketing analytics or SAM login sessions.
 
-Open that address and sign in with Cloudflare. Private clients work for members of the account that hosts the installer. To let other Cloudflare users authorize it, complete Cloudflare's [domain verification and public-client setup](https://developers.cloudflare.com/fundamentals/oauth/create-an-oauth-client/). Public promotion cannot be reversed.
+Open that address and sign in with Cloudflare. Private clients can only be authorized by members of the owning Cloudflare account. Public promotion is self-serve: supply a name, logo, client URL and scopes, verify the client URL's domain with a DNS TXT record, then change visibility to public. There is no approval queue, and promotion is permanent. See Cloudflare's [domain verification and public-client setup](https://developers.cloudflare.com/fundamentals/oauth/create-an-oauth-client/).
 
 ### Use an existing OAuth client
 
@@ -63,11 +63,15 @@ If initial client creation succeeds but saving its secret fails, rotate the secr
 
 The branch also contains source-pinned build, deployment, and explicit update orchestration in the user's account. This is not an enabled or verified public installation path yet. Fresh deployments start in bootstrap mode; normal redeployment preserves the existing mode and consent scopes. Full mode needs broader OAuth permissions, separate installation-owned credentials, paid-service prerequisites, and successful live validation of bootstrap revocation and a complete in-account build. No working enablement recipe is provided until those checks pass.
 
-A full installation can be deployed before configuring GitHub. Initial SAM setup uses `SETUP_TOKEN` to configure a supported login provider; the intended administrator must then sign in with the configured provider-verified owner email. Recovery access to the maintenance service remains separate from SAM login.
+A full installation can be deployed before configuring GitHub. Initial SAM setup uses `SETUP_TOKEN` to configure GitHub, GitLab or Google as a login provider (there is no email login); the intended administrator must then sign in with the configured provider-verified owner email. Recovery access to the maintenance service remains separate from SAM login.
 
 Update review selects an immutable release commit; it is not a preview of every infrastructure mutation. Code rollback is not database rollback. Automatic conflict merging, automatic uninstall, and verified recovery from every failure are not promised.
 
 Experimental full-mode source preservation stores the approved SAM checkout and full Git history in the installation's R2 storage, with an immutable commit/tree/content-digest manifest. Same-source recovery verifies and restores those saved bytes; toolchain and dependency downloads can still require network access. Updates must be ahead of the installed source and implement the supported installer protocol before approval or paid build admission. These paths remain unverified end to end.
+
+The in-account build only produces artifacts; tests, lint and standalone typechecks run in repository CI for the pinned source. The last paid cold build failed while running Codex adapter tests. Removing those checks from the build path does not establish that a full cold build succeeds; another paid run requires explicit cost approval.
+
+The installer shares brand styles and Astro components with the homepage at build time. Its static output and the maintenance Worker's embedded shell are self-contained; they do not depend on the marketing site or SAM at runtime.
 
 ### Remove a test deployment
 
