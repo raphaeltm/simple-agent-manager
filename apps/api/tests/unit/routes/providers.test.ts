@@ -246,10 +246,13 @@ describe('GET /api/providers/catalog', () => {
         }),
       ])
     );
-    expect(mockProvider.listInstanceOfferings).toHaveBeenCalledWith({
-      preferApi: true,
-      allowStaticFallback: false,
-    });
+    expect(mockProvider.listInstanceOfferings).toHaveBeenCalledWith(
+      {
+        preferApi: true,
+        allowStaticFallback: false,
+      },
+      { signal: expect.any(AbortSignal) }
+    );
   });
 
   it('identifies project-scoped provider catalogs on the authorized project scope', async () => {
@@ -551,11 +554,19 @@ describe('GET /api/providers/catalog', () => {
     expect(body.catalogs[0]!.offerings).toHaveLength(3);
     expect(body.refreshFailures).toEqual([]);
     expect(mockProvider.listInstanceOfferings).toHaveBeenCalledTimes(2);
-    expect(mockProvider.listInstanceOfferings).toHaveBeenNthCalledWith(1, {
-      preferApi: true,
-      allowStaticFallback: false,
-    });
-    expect(mockProvider.listInstanceOfferings).toHaveBeenNthCalledWith(2, { preferApi: false });
+    expect(mockProvider.listInstanceOfferings).toHaveBeenNthCalledWith(
+      1,
+      {
+        preferApi: true,
+        allowStaticFallback: false,
+      },
+      { signal: expect.any(AbortSignal) }
+    );
+    expect(mockProvider.listInstanceOfferings).toHaveBeenNthCalledWith(
+      2,
+      { preferApi: false },
+      { signal: expect.any(AbortSignal) }
+    );
   });
 
   it('reports provider unavailability when both live and static catalog enumeration fail', async () => {

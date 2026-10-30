@@ -6,7 +6,11 @@ import { errors } from '../middleware/error';
 
 export type { ConnectorSettingKey, ConnectorSettings } from './connector-settings-definition';
 export { CONNECTOR_DEFAULTS, validateConnectorSetting } from './connector-settings-definition';
-import { readAdminSettings, resolveAdminSetting, updateAdminSettings } from './admin-settings';
+import {
+  resolveAdminSetting,
+  resolveAdminSettingDetailsMany,
+  updateAdminSettings,
+} from './admin-settings';
 import {
   CONNECTOR_DEFAULTS,
   type ConnectorSettingKey,
@@ -14,10 +18,15 @@ import {
   validateConnectorSetting,
 } from './connector-settings-definition';
 export async function getConnectorSettingsConfig(env: Env) {
-  const config = await readAdminSettings(env, { fresh: true });
+  const keys = Object.keys(CONNECTOR_DEFAULTS) as ConnectorSettingKey[];
+  const settings = await resolveAdminSettingDetailsMany(
+    env,
+    keys.map((key) => `connector.${key}` as const),
+    { fresh: true }
+  );
   return Object.fromEntries(
-    (Object.keys(CONNECTOR_DEFAULTS) as ConnectorSettingKey[]).map((key) => {
-      const setting = config.settings.find((item) => item.name === `connector.${key}`);
+    keys.map((key, index) => {
+      const setting = settings[index];
       if (!setting) throw new Error('Connector setting metadata missing');
       return [
         key,

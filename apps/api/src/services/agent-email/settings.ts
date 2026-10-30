@@ -4,6 +4,8 @@ import { resolveAdminSetting } from '../admin-settings';
 import { AGENT_EMAIL_SETTINGS, type AgentEmailSettingName } from './setting-definitions';
 
 export interface AgentEmailLimits {
+  setupPlanTimeoutMs: number;
+  readTimeoutMs: number;
   maxInboundBytes: number;
   maxBodyChars: number;
   maxReplyChars: number;
@@ -20,6 +22,8 @@ export interface AgentEmailLimits {
 }
 
 const FIELD_BY_SETTING: Record<AgentEmailSettingName, keyof AgentEmailLimits> = {
+  'agentEmail.setupPlanTimeoutMs': 'setupPlanTimeoutMs',
+  'agentEmail.readTimeoutMs': 'readTimeoutMs',
   'agentEmail.maxInboundBytes': 'maxInboundBytes',
   'agentEmail.maxBodyChars': 'maxBodyChars',
   'agentEmail.maxReplyChars': 'maxReplyChars',

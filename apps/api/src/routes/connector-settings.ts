@@ -115,15 +115,17 @@ connectorAdminRoutes.delete('/connections/:id', async (c) => {
   return c.json({ revoked: true });
 });
 connectorAdminRoutes.get('/clients', async (c) => {
-  await c.env.DATABASE.prepare(
-    'DELETE FROM connector_oauth_clients WHERE expires_at IS NOT NULL AND expires_at<=?'
-  )
-    .bind(Date.now())
-    .run();
+  c.executionCtx.waitUntil(
+    c.env.DATABASE.prepare(
+      'DELETE FROM connector_oauth_clients WHERE expires_at IS NOT NULL AND expires_at<=?'
+    )
+      .bind(Date.now())
+      .run()
+  );
   const rows = await c.env.DATABASE.prepare(
-    'SELECT id,client_name,redirect_hosts,created_at,blocked FROM connector_oauth_clients WHERE id>? ORDER BY id LIMIT ?'
+    'SELECT id,client_name,redirect_hosts,created_at,blocked FROM connector_oauth_clients WHERE id>? AND (expires_at IS NULL OR expires_at>?) ORDER BY id LIMIT ?'
   )
-    .bind(c.req.query('cursor') ?? '', pageSize(c.env) + 1)
+    .bind(c.req.query('cursor') ?? '', Date.now(), pageSize(c.env) + 1)
     .all<{
       id: string;
       client_name: string;

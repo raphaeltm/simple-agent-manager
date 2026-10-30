@@ -97,6 +97,8 @@ describe('Phase 1 settings registry', () => {
     expect(
       Object.fromEntries(agentEmail.map((setting) => [setting.name, setting.defaultValue]))
     ).toEqual({
+      'agentEmail.setupPlanTimeoutMs': 15_000,
+      'agentEmail.readTimeoutMs': 5_000,
       'agentEmail.maxInboundBytes': 5 * 1024 * 1024,
       'agentEmail.maxBodyChars': 12_000,
       'agentEmail.maxReplyChars': 20_000,
@@ -382,13 +384,47 @@ describe('D1 settings snapshot cache', () => {
           release = resolve;
         })
     );
-    const cache = new AdminSettingsCache(undefined, () => now, load);
+    const cache = new AdminSettingsCache(100, () => now, load);
     const first = cache.read(database);
-    now = ADMIN_SETTINGS_CACHE_MAX_MS - 1;
+    now = 99;
     const second = cache.read(database);
-    now = ADMIN_SETTINGS_CACHE_MAX_MS;
+    now = 100;
     release(rows(true));
     await expect(first).rejects.toThrow('Admin settings are unavailable');
     await expect(second).rejects.toThrow('Admin settings are unavailable');
   });
+});
+
+it('evicts a timed-out shared load, recovers, and ignores its late stale result', async () => {
+  vi.useFakeTimers();
+  try {
+    let release!: (value: AdminSettingOverrideRow[]) => void;
+    const load = vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          })
+      )
+      .mockResolvedValue(rows(false));
+    const cache = new AdminSettingsCache(60_000, () => Date.now(), load);
+    const database = {} as D1Database;
+    const first = cache.read(database, false, 60_000, 100);
+    const concurrent = cache.read(database, false, 60_000, 100);
+    const failures = Promise.all([
+      expect(first).rejects.toThrow('unavailable'),
+      expect(concurrent).rejects.toThrow('unavailable'),
+    ]);
+    await vi.advanceTimersByTimeAsync(101);
+    await failures;
+    expect(load).toHaveBeenCalledOnce();
+    expect(await cache.read(database, false, 60_000, 100)).toEqual(rows(false));
+    release(rows(true));
+    await Promise.resolve();
+    expect(await cache.read(database, false, 60_000, 100)).toEqual(rows(false));
+    expect(load).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
 });

@@ -91,22 +91,37 @@ function cursorStore() {
 
 function beforeStatement(database: D1Database, match: RegExp, action: () => void): D1Database {
   let fired = false;
-  const wrap = (statement: D1PreparedStatement, sql: string): D1PreparedStatement =>
-    new Proxy(statement, {
+  const queries = new WeakMap<object, string>();
+  const fire = (sql: string) => {
+    if (!fired && match.test(sql)) {
+      fired = true;
+      action();
+    }
+  };
+  const wrap = (statement: D1PreparedStatement, sql: string): D1PreparedStatement => {
+    const wrapped = new Proxy(statement, {
       get(target, key) {
         if (key === 'bind') return (...params: unknown[]) => wrap(target.bind(...params), sql);
         if (key === 'run' || key === 'all' || key === 'raw')
           return (...args: unknown[]) => {
-            if (!fired && match.test(sql)) {
-              fired = true;
-              action();
-            }
+            fire(sql);
             return Reflect.apply(Reflect.get(target, key), target, args);
           };
         return Reflect.get(target, key);
       },
     });
-  return { ...database, prepare: (sql: string) => wrap(database.prepare(sql), sql) };
+    queries.set(wrapped, sql);
+    return wrapped;
+  };
+  return {
+    ...database,
+    prepare: (sql: string) => wrap(database.prepare(sql), sql),
+    batch<T = unknown>(statements: D1PreparedStatement[]) {
+      // Concurrent edits can precede the transaction, never interleave its statements.
+      for (const statement of statements) fire(queries.get(statement) ?? '');
+      return database.batch<T>(statements);
+    },
+  };
 }
 
 async function publish(db: ReturnType<typeof drizzle>, offerings = [offering()], options = {}) {

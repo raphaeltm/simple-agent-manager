@@ -195,32 +195,32 @@ where it says so and the app continues from there.
 
 These **Operations** settings bound automatic retries after an eviction wake fails to start. Retries preserve the snapshot and source ownership checks.
 
-| Setting | Default | Range | What it controls |
-| ------- | ------- | ----- | ---------------- |
-| `operations.evictionRecoveryRetryBatchSize`   | 5       | 1–100          | Failed eviction wakes selected per cron sweep                                                                                       |
-| `operations.evictionRecoveryRetryWallMs`      | 10,000  | 1–30,000       | Milliseconds before starting another retry; an in-flight durable wake may finish afterward                                          |
-| `operations.evictionRecoveryRetryDelayMs`     | 60,000  | 1–86,400,000   | Minimum interval after failure or preclaim deferral; deferrals rotate fairly without resetting the failure anchor or attempt budget |
+| Setting                                     | Default | Range        | What it controls                                                                                                                    |
+| ------------------------------------------- | ------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `operations.evictionRecoveryRetryBatchSize` | 5       | 1–100        | Failed eviction wakes selected per cron sweep                                                                                       |
+| `operations.evictionRecoveryRetryWallMs`    | 10,000  | 1–30,000     | Milliseconds before starting another retry; an in-flight durable wake may finish afterward                                          |
+| `operations.evictionRecoveryRetryDelayMs`   | 60,000  | 1–86,400,000 | Minimum interval after failure or preclaim deferral; deferrals rotate fairly without resetting the failure anchor or attempt budget |
 
 ## Linked work
 
 These **Operations** settings control automatic links between chats, ideas, library files and pull requests. Links that mean work (a chat working on, creating or editing something) are always kept; links that only record reading or viewing are capped.
 
-| Setting                                       | Default | Range          | What it controls                                                                                                                    |
-| --------------------------------------------- | ------- | -------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
-| `operations.resourceLinkTouchIntervalMs`      | 300,000 | 0–86,400,000   | Minimum time between writes for repeated automatic links                                                                            |
-| `operations.resourceLinkWeakPerTarget`        | 100     | 1–10,000       | Weak automatic links kept for one target                                                                                            |
-| `operations.resourceLinkWeakCleanupBatchSize` | 100     | 1–1,000        | Excess weak links removed per write when a cap is lowered                                                                           |
-| `operations.resourceLinkProjectCap`           | 100,000 | 100–10,000,000 | Project link count above which new weak links are skipped                                                                           |
-| `operations.resourceLinkListCap`              | 50      | 1–500          | Items in each linked work context list                                                                                              |
-| `operations.resourceLinkBatchTargetLimit`     | 100     | 1–500          | Targets in one batched list lookup                                                                                                  |
-| `operations.resourceLinkBatchPerTargetCap`    | 50      | 1–100          | Session links returned per batched target                                                                                           |
-| `operations.resourceLinkContextMaxLength`     | 500     | 1–5,000        | Characters kept in an explicit link note                                                                                            |
-| `operations.agentIdeaContextMaxLength`        | 20,000  | 500–200,000    | Characters of a linked idea included in an agent's session bootstrap                                                                |
-| `operations.agentLinkedListCap`               | 12      | 1–50           | Related items in each agent context list                                                                                            |
-| `operations.agentLinkedUpdatesCap`            | 5       | 1–50           | Recent idea notes in agent context                                                                                                  |
-| `operations.agentLinkedTextMaxLength`         | 300     | 50–2,000       | Characters in each related text field sent to an agent                                                                              |
-| `operations.agentLinkedMaxBytes`              | 24,000  | 2,000–36,000   | Serialized bytes in the related context sent to an agent                                                                            |
-| `operations.agentIdeaContentPageLength`       | 65,536  | 1,000–65,536   | Idea content read in one `get_idea` call; a continuation notice names the next offset when a page is shorter                        |
+| Setting                                       | Default | Range          | What it controls                                                                                             |
+| --------------------------------------------- | ------- | -------------- | ------------------------------------------------------------------------------------------------------------ |
+| `operations.resourceLinkTouchIntervalMs`      | 300,000 | 0–86,400,000   | Minimum time between writes for repeated automatic links                                                     |
+| `operations.resourceLinkWeakPerTarget`        | 100     | 1–10,000       | Weak automatic links kept for one target                                                                     |
+| `operations.resourceLinkWeakCleanupBatchSize` | 100     | 1–1,000        | Excess weak links removed per write when a cap is lowered                                                    |
+| `operations.resourceLinkProjectCap`           | 100,000 | 100–10,000,000 | Project link count above which new weak links are skipped                                                    |
+| `operations.resourceLinkListCap`              | 50      | 1–500          | Items in each linked work context list                                                                       |
+| `operations.resourceLinkBatchTargetLimit`     | 100     | 1–500          | Targets in one batched list lookup                                                                           |
+| `operations.resourceLinkBatchPerTargetCap`    | 50      | 1–100          | Session links returned per batched target                                                                    |
+| `operations.resourceLinkContextMaxLength`     | 500     | 1–5,000        | Characters kept in an explicit link note                                                                     |
+| `operations.agentIdeaContextMaxLength`        | 20,000  | 500–200,000    | Characters of a linked idea included in an agent's session bootstrap                                         |
+| `operations.agentLinkedListCap`               | 12      | 1–50           | Related items in each agent context list                                                                     |
+| `operations.agentLinkedUpdatesCap`            | 5       | 1–50           | Recent idea notes in agent context                                                                           |
+| `operations.agentLinkedTextMaxLength`         | 300     | 50–2,000       | Characters in each related text field sent to an agent                                                       |
+| `operations.agentLinkedMaxBytes`              | 24,000  | 2,000–36,000   | Serialized bytes in the related context sent to an agent                                                     |
+| `operations.agentIdeaContentPageLength`       | 65,536  | 1,000–65,536   | Idea content read in one `get_idea` call; a continuation notice names the next offset when a page is shorter |
 
 If you lower the cap on read and view links below what a target already has, nothing is removed straight away: each new read or view link to that target then removes at most one batch of them, until the target is back under the cap. Reading the same thing again doesn't count as a new link.
 
@@ -312,3 +312,33 @@ SAM first attempts to preserve existing recovery sources. At the deadline, it re
 Two related settings control warning and alert frequency: `operations.nodeCleanupRefusalWarnAfterMs` defaults to 300,000 milliseconds (five minutes), and `operations.nodeCleanupOwnershipAlertIntervalMs` defaults to 86,400,000 milliseconds (one day).
 
 Active workspaces and provider ownership checks remain protected. When ownership cannot be proved, SAM keeps the VM and raises an admin-visible error, deduplicated to once per node per day. Blocked nodes show the time and reason in their existing error message on the node list and detail page.
+
+## Read deadlines
+
+Superadmins can search for these controls in **Admin → Settings**. Values are milliseconds, stored in D1; changing them requires no deployment. A shorter limit reduces waiting but can leave verification incomplete when an external service is slow.
+
+| Setting                                     | Default | Allowed range | Applies to                                                                                                   |
+| ------------------------------------------- | ------: | ------------: | ------------------------------------------------------------------------------------------------------------ |
+| `agentEmail.setupPlanTimeoutMs`             |   15000 |    100–120000 | Complete read-only agent-email setup inspection; a deadline returns a partial verification plan.             |
+| `agentEmail.readTimeoutMs`                  |    5000 |     100–30000 | Each Cloudflare/DNS verification read and the admin status request.                                          |
+| `performance.githubRequestTimeoutMs`        |    5000 |    100–120000 | Each GitHub discovery HTTP request, including its response body.                                             |
+| `performance.githubInstallationsDeadlineMs` |   15000 |    100–120000 | Overall GitHub installation discovery route.                                                                 |
+| `performance.providerCatalogTimeoutMs`      |   10000 |    100–120000 | Each provider machine catalog read; an unavailable catalog can use the existing incomplete fallback.         |
+| `performance.projectRecentTimeoutMs`        |    3000 |     100–30000 | Optional recent sessions/activity reads requested with `include=recent`; ordinary project detail omits them. |
+| `performance.externalReadTimeoutMs`         |    5000 |    100–120000 | External Analytics Engine, AI Gateway log and Cloudflare log reads.                                          |
+
+The GitHub route returns `504 GITHUB_TIMEOUT` when its overall deadline expires. Admin agent-email reads return `504 AGENT_EMAIL_TIMEOUT` if configuration, authentication or verification exceeds its deadline. The initial email-settings lookup has a fixed 5000 ms bootstrap ceiling so an unreadable settings store cannot leave the request open. Optional project recent data fails softly to empty arrays, preserving the project response and CLI contract.
+
+### Session and configuration read recovery
+
+`performance.configReadTimeoutMs` defaults to 5,000 ms (range 100–30,000) for shared platform
+configuration and each session-read attempt. `performance.authReadAttempts` defaults to 2
+(range 1–3), and applies only to read-only session verification after a timeout or configuration
+outage. A denial is returned unchanged; exhausting attempts returns an unavailable error, never
+a fabricated signed-out session.
+
+Before D1 can supply these settings, shared configuration storage reads use the 5,000 ms
+bootstrap default. Bootstrap cannot depend on reading its own D1 override. Once settings are
+available, the runtime deadline governs legacy platform configuration and session reads.
+Pending cache loads expire on deadline; late results cannot republish stale data. No deployment
+configuration is required.

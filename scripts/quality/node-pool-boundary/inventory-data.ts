@@ -133,7 +133,7 @@ export const ALLOCATION_WRITER_INVENTORY: readonly AllocationWriterInventoryEntr
     canonicalService: 'explicit idea adapter',
   },
   {
-    filePath: 'apps/api/src/services/debug-agent.ts',
+    filePath: 'apps/api/src/services/debug-agent-runs.ts',
     table: 'tasks',
     owner: 'saveDebugDiagnosisAsIdea',
     role: 'debug diagnosis task adapter',

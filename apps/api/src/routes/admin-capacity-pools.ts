@@ -79,13 +79,15 @@ function buildInstallationDefaultPoolResponse(
 adminCapacityPoolsRoutes.get('/defaults', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   const ensure = parseEnsureQuery(c.req.query('ensure'));
-  const summaries = await readDefaultCapacityPoolSummaries(db, {
-    includeInstallation: true,
-    ensure,
-    includeDisabled: true,
-    env: c.env,
-  });
-  const placementSettings = await resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env);
+  const [summaries, placementSettings] = await Promise.all([
+    readDefaultCapacityPoolSummaries(db, {
+      includeInstallation: true,
+      ensure,
+      includeDisabled: true,
+      env: c.env,
+    }),
+    resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env),
+  ]);
 
   c.header('Cache-Control', 'private, no-store');
   return c.json(buildInstallationDefaultPoolResponse(summaries, ensure, placementSettings));
@@ -99,13 +101,15 @@ adminCapacityPoolsRoutes.get('/defaults', async (c) => {
  */
 adminCapacityPoolsRoutes.post('/defaults/reconcile', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
-  const summaries = await readDefaultCapacityPoolSummaries(db, {
-    includeInstallation: true,
-    ensure: true,
-    includeDisabled: true,
-    env: c.env,
-  });
-  const placementSettings = await resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env);
+  const [summaries, placementSettings] = await Promise.all([
+    readDefaultCapacityPoolSummaries(db, {
+      includeInstallation: true,
+      ensure: true,
+      includeDisabled: true,
+      env: c.env,
+    }),
+    resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env),
+  ]);
 
   c.header('Cache-Control', 'private, no-store');
   return c.json(buildInstallationDefaultPoolResponse(summaries, true, placementSettings));
@@ -138,12 +142,14 @@ adminCapacityPoolsRoutes.patch('/defaults', async (c) => {
     'Candidate updates must belong to the default capacity pool'
   );
 
-  const summaries = await readDefaultCapacityPoolSummaries(db, {
-    includeInstallation: true,
-    includeDisabled: true,
-    env: c.env,
-  });
-  const placementSettings = await resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env);
+  const [summaries, placementSettings] = await Promise.all([
+    readDefaultCapacityPoolSummaries(db, {
+      includeInstallation: true,
+      includeDisabled: true,
+      env: c.env,
+    }),
+    resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env),
+  ]);
   c.header('Cache-Control', 'private, no-store');
   return c.json(buildInstallationDefaultPoolResponse(summaries, false, placementSettings));
 });
