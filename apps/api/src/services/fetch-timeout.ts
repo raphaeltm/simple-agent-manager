@@ -8,7 +8,7 @@ import { deadlineResponse } from './fetch-timeout-body';
  */
 
 export class IoTimeoutError extends Error {
-  override name = 'IoTimeoutError';
+  override name = 'TimeoutError';
 }
 
 const DEFAULT_API_TIMEOUT_MS = 30_000;

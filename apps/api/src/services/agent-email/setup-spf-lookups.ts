@@ -66,7 +66,9 @@ export async function verifySpfLookupBudget(
       children.push({ domain, ancestors: new Set([...ancestors, domain]) });
     }
     const policies = await Promise.all(children.map(({ domain }) => lookup(domain)));
-    await Promise.all(children.map((child, index) => visit(policies[index]!, child.ancestors)));
+    await Promise.all(
+      children.map((child, index) => visit(policies[index] ?? '', child.ancestors))
+    );
   }
   await visit(policy, new Set());
 }
