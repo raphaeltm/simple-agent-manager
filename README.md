@@ -1,0 +1,1 @@
+Mock-data visual evidence for SAM admin and Runtime performance, task01M66P8F6P67ATNM175YHC2ZAY. Captured375x667 and1280x800. Reviewed by root and UI/UX specialist. Source branch sam/admin-runtime-client-hc2zay. No authentication state, traces, or live response bodies. Images are kept on this evidence-only branch, outside product history.
