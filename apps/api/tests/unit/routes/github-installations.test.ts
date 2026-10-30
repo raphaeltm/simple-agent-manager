@@ -208,6 +208,7 @@ describe('GitHub App installation sharing', () => {
     };
 
     const mockDB = {
+      batch: vi.fn((queries: Promise<unknown>[]) => Promise.all(queries)),
       select: vi.fn(() => makeSelectBuilder()),
       insert: vi.fn((table: unknown) => makeInsertBuilder(table)),
       delete: vi.fn((table: unknown) => makeDeleteBuilder(table)),
@@ -334,6 +335,22 @@ describe('GitHub App installation sharing', () => {
     return response;
   };
 
+  it('bounds the installations route even when GitHub discovery never settles', async () => {
+    vi.useFakeTimers();
+    mocks.getAuthenticatedGitHubUser.mockImplementation(() => new Promise(() => {}));
+    try {
+      const pending = app.request('/api/github/installations', {}, mockEnv);
+      await vi.advanceTimersByTimeAsync(15_000);
+      const response = await pending;
+      expect(response.status).toBe(504);
+      expect(await response.json()).toMatchObject({ error: 'GITHUB_TIMEOUT' });
+      expect(mocks.getAuthenticatedGitHubUser).toHaveBeenCalledTimes(1);
+      expect(mocks.getUserAccessibleInstallations).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('stores callback installation only when the GitHub user can access it', async () => {
     limitResponses.push([]);
     mocks.getUserAccessibleInstallations.mockResolvedValue(accessibleAcmeInstallation());
@@ -353,6 +370,8 @@ describe('GitHub App installation sharing', () => {
         uninstalledAt: null,
       }),
     ]);
+    expect(mocks.getAuthenticatedGitHubUser).toHaveBeenCalledTimes(1);
+    expect(mocks.getUserAccessibleInstallations).toHaveBeenCalledTimes(1);
     expect(insertedPerUserRows()).toHaveLength(1);
     expect(insertedPerUserRows()[0]).toMatchObject({
       userId: 'user-1',
@@ -677,10 +696,13 @@ describe('GitHub App installation sharing', () => {
     const res = await app.request('/api/github/installations', {}, mockEnv);
 
     expect(res.status).toBe(200);
-    expect(getAuthenticatedGitHubUser).toHaveBeenCalledWith('github-user-token', {
-      flow: 'sync',
-      userId: 'user-1',
-    });
+    expect(getAuthenticatedGitHubUser).toHaveBeenCalledWith(
+      'github-user-token',
+      expect.objectContaining({
+        flow: 'sync',
+        userId: 'user-1',
+      })
+    );
     expect(insertedCanonicalRows()).toEqual([
       expect.objectContaining({
         installationId: '111',
@@ -894,16 +916,23 @@ describe('GitHub App installation sharing', () => {
     const res = await app.request('/api/github/installations', {}, mockEnv);
 
     expect(res.status).toBe(200);
-    expect(getAuthenticatedUserOrganizations).toHaveBeenCalledWith('github-user-token', {
-      flow: 'shared-org-discovery',
-      userId: 'user-1',
-    });
-    expect(verifyUserInstallationAccess).toHaveBeenCalledWith('github-user-token', '120081765', {
-      flow: 'shared-org-discovery',
-      userId: 'user-1',
-      installationId: '120081765',
-      accountName: 'effprop',
-    });
+    expect(getAuthenticatedUserOrganizations).toHaveBeenCalledWith(
+      'github-user-token',
+      expect.objectContaining({
+        flow: 'shared-org-discovery',
+        userId: 'user-1',
+      })
+    );
+    expect(verifyUserInstallationAccess).toHaveBeenCalledWith(
+      'github-user-token',
+      '120081765',
+      expect.objectContaining({
+        flow: 'shared-org-discovery',
+        userId: 'user-1',
+        installationId: '120081765',
+        accountName: 'effprop',
+      })
+    );
     expect(insertedCanonicalRows()).toHaveLength(0);
     expect(insertedPerUserRows()).toHaveLength(1);
     expect(insertedPerUserRows()[0]).toMatchObject({
