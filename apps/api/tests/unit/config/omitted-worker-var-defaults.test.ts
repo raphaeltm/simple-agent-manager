@@ -127,7 +127,10 @@ const API = 'apps/api/src';
 const READ_PATHS: readonly ReadPath[] = [
   {
     label: 'shared operational and trial settings resolver',
-    sources: [`${API}/services/admin-settings.ts`],
+    sources: [
+      `${API}/services/admin-settings-resolution.ts`,
+      `${API}/services/admin-settings-mutations.ts`,
+    ],
     read: async (vars) => {
       const fixture = createAdminSettingsEnv(vars);
       try {
