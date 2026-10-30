@@ -115,16 +115,7 @@ agentCredentialSetupSessionsRoutes.get('/config', requireAuth(), requireApproved
   });
 });
 
-// -----------------------------------------------------------------------------
-// Shared create handler — scope comes from the endpoint, never from request body
-// -----------------------------------------------------------------------------
-async function createSession(c: Context<{ Bindings: Env }>, scope: 'user' | 'project') {
-  if (!guidedSetupAvailable(c.env)) {
-    throw errors.notFound('Guided credential setup is not enabled');
-  }
-
-  const userId = getUserId(c);
-  const rawBody = await c.req.text();
+function parseSetupRequest(rawBody: string, scope: 'user' | 'project') {
   let raw: unknown = {};
   if (rawBody.trim()) {
     try {
@@ -143,10 +134,10 @@ async function createSession(c: Context<{ Bindings: Env }>, scope: 'user' | 'pro
   if (scope === 'user' && projectId !== null) {
     throw errors.badRequest('Use the project setup endpoint for project accounts');
   }
-  if (projectId !== null) {
-    await requireProjectCapability(drizzle(c.env.DATABASE), projectId, userId, 'secret:write');
-  }
-  const requestedAgentType = body.agentType ?? DEFAULT_SETUP_AGENT_TYPE;
+  return { body, projectId };
+}
+
+function resolveSetupAgent(requestedAgentType: string) {
   if (!isValidAgentType(requestedAgentType) || !isSupportedSetupAgentType(requestedAgentType)) {
     throw errors.badRequest(
       `Guided setup currently supports only ${SUPPORTED_SETUP_AGENT_TYPES.join(', ')}`
@@ -157,6 +148,24 @@ async function createSession(c: Context<{ Bindings: Env }>, scope: 'user' | 'pro
   if (!agentDef) {
     throw errors.badRequest(`Unknown agent type: ${agentType}`);
   }
+
+  return { agentType, agentDef };
+}
+
+// -----------------------------------------------------------------------------
+// Shared create handler — scope comes from the endpoint, never from request body
+// -----------------------------------------------------------------------------
+async function createSession(c: Context<{ Bindings: Env }>, scope: 'user' | 'project') {
+  if (!guidedSetupAvailable(c.env)) {
+    throw errors.notFound('Guided credential setup is not enabled');
+  }
+
+  const userId = getUserId(c);
+  const { body, projectId } = parseSetupRequest(await c.req.text(), scope);
+  if (projectId !== null) {
+    await requireProjectCapability(drizzle(c.env.DATABASE), projectId, userId, 'secret:write');
+  }
+  const { agentType, agentDef } = resolveSetupAgent(body.agentType ?? DEFAULT_SETUP_AGENT_TYPE);
 
   // Friendly pre-check: one active setup session per (user, agentType). The
   // partial unique index is the atomic backstop below.

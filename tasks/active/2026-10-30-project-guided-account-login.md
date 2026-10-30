@@ -61,3 +61,7 @@ Fallback continuation was used: workflow event matched but prompt deliveryd52dc3
 ## CI scanner cleanup
 
 The current-tree scan found one newly introduced synthetic AES key in the persistence test. Replaced the random-looking literal with Buffer.alloc(32,1).toString('base64'). The bounded PR-range scan still includes the earlier introduction commit, so an exact historical synthetic-fixture digest was independently reviewed and allowed until2026-11-07, without extending existing allowances or suppressing a rule/path. Raw scan reports stayed private and were deleted. Both current-tree and PR-range scans pass, and all12 native vertical tests pass after the test-only change. Independent scanner_delta_review passed; runtime code remains identical to stagedc471.
+
+## Final static-analysis cleanup
+
+Extracted request parsing/scope validation and agent resolution from the shared create handler to address Sonar S3776 complexity. All 60 focused backend tests, scoped lint, API typecheck and independent security/completion delta review pass. Validation/authorization/lease ordering and dedicated project endpoint behavior are unchanged. A fresh staging deployment and live cancel-only scope smoke are required before merge.
