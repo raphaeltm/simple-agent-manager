@@ -7,8 +7,9 @@ import { join } from 'node:path';
 import { type Browser, chromium, expect, type Page } from '@playwright/test';
 
 import { maintenanceSource } from '../src/maintenance';
-import { installerShell } from '../src/maintenance-brand.generated';
 import { digest } from '../src/security';
+import { InstallerSession } from '../src/session';
+import type { Env, Session } from '../src/types';
 const output = '../../.codex/tmp/playwright-screenshots';
 
 async function installFixtureRoutes(
@@ -107,6 +108,7 @@ async function captureState(page: Page, name: string) {
         exact: true,
       })
     ).toHaveAttribute('aria-pressed', 'true');
+    await page.waitForTimeout(350);
     for (const [device, width, height] of [
       ['mobile', 375, 667],
       ['desktop', 1280, 800],
@@ -143,6 +145,7 @@ async function captureMaintenanceControls(page: Page, target: string) {
         })
         .click();
       await expect(page.locator('html')).toHaveAttribute('data-theme', theme);
+      await page.waitForTimeout(350);
       await page.evaluate(() => document.fonts.ready);
       await assertNoOverflow(page, 'Maintenance');
       await page.evaluate(() => scrollTo(0, 0));
@@ -339,7 +342,7 @@ async function auditMaintenance(browser: Browser) {
     key: await readFile(join(temp, 'key.pem')),
     cert: await readFile(join(temp, 'cert.pem')),
   };
-  const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  const context = await browser.newContext({ ignoreHTTPSErrors: true, reducedMotion: 'reduce' });
   const page = await context.newPage();
   const key = 'synthetic-owner-key';
   // Execute the exact repository-owned ESM module, retaining its exports unchanged.
@@ -405,17 +408,30 @@ async function auditMaintenance(browser: Browser) {
       res.end(handoffScript);
       return;
     }
-    res.setHeader('Content-Type', 'text/html');
-    res.setHeader('Referrer-Policy', 'strict-origin');
-    res.end(
-      installerShell.before +
-        '<script src="/handoff.js" defer></script><form id="maintenance-claim-form" method="POST" action="' +
-        target +
-        '/claim"><input name="key" value="' +
-        key +
-        '"><input id="maintenance-recovery" name="recovery" type="hidden"><input id="maintenance-recovery-display" readonly><input id="maintenance-recovery-saved" type="checkbox"><button id="maintenance-claim-submit" class="sam-btn sam-btn--primary" disabled>Continue</button></form>' +
-        installerShell.after
+    const session: Session = {
+      expires: Date.now() + 60000,
+      verifier: 'fixture',
+      state: 'fixture',
+      job: {
+        status: 'ready',
+        url: target,
+        key,
+        accountId: 'a'.repeat(32),
+        name: 'sam-maintenance-fixture',
+      },
+    };
+    const handoff = new InstallerSession(
+      {
+        storage: { get: async () => session, put: async () => {} },
+      } as unknown as DurableObjectState,
+      {} as Env
     );
+    const response = await handoff.fetch(new Request(origin + '/handoff', { method: 'POST' }));
+    res.writeHead(response.status, {
+      ...Object.fromEntries(response.headers),
+      'Referrer-Policy': 'strict-origin',
+    });
+    res.end(await response.text());
   });
   await new Promise((resolve) => installer.listen(0, resolve));
   origin = 'https://localhost:' + installer.address().port;
@@ -424,7 +440,7 @@ async function auditMaintenance(browser: Browser) {
   await expect(page.locator('#maintenance-recovery-display')).toHaveValue(/^[a-f0-9]{64}$/);
   screenshots += await captureState(page, 'handoff');
   await page.locator('#maintenance-recovery-saved').check();
-  await page.getByRole('button', { name: 'Continue' }).click();
+  await page.getByRole('button', { name: 'Open my installation service' }).click();
   await page.getByText('Ownership handoff verified.').waitFor();
   screenshots += await captureState(page, 'maintenance-claimed');
 
