@@ -76,6 +76,59 @@ afterEach(() => {
 });
 
 describe('sync wrangler config', () => {
+  it.each(['staging', 'prod'] as const)(
+    'emits persisted native traces without changing logs for %s',
+    (environment) => {
+      vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+      const checkedIn = TOML.parse(
+        readFileSync(join(import.meta.dirname, '../../apps/api/wrangler.toml'), 'utf-8')
+      ) as WranglerToml;
+      const generated = generateApiWorkerEnv(checkedIn, outputs, environment, false, false, null);
+      const serialized = TOML.parse(
+        TOML.stringify({ env: { [environment]: generated } } as TOML.JsonMap)
+      );
+      expect((serialized.env as TOML.JsonMap)[environment]).toMatchObject({
+        observability: {
+          enabled: true,
+          traces: { enabled: true, head_sampling_rate: 1, persist: true },
+          logs: { invocation_logs: true, head_sampling_rate: 1 },
+        },
+      });
+    }
+  );
+
+  it.each(['staging', 'prod'] as const)(
+    'preserves native trace overrides for %s',
+    (environment) => {
+      vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+      for (const traces of [
+        { head_sampling_rate: 0.05 },
+        { head_sampling_rate: 0 },
+        { enabled: false },
+        { persist: false, destinations: ['external-traces'] },
+      ]) {
+        const generated = generateApiWorkerEnv(
+          { observability: { enabled: true, traces } },
+          outputs,
+          environment,
+          false,
+          false,
+          null
+        );
+        expect(generated.observability?.traces).toEqual({
+          enabled: true,
+          head_sampling_rate: 1,
+          persist: true,
+          ...traces,
+        });
+        expect(generated.observability?.logs).toEqual({
+          invocation_logs: true,
+          head_sampling_rate: 1,
+        });
+      }
+    }
+  );
+
   it('keeps the checked-in staging Worker under the text-binding guard', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
     const checkedIn = TOML.parse(

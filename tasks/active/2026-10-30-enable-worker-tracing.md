@@ -10,9 +10,9 @@ Admin page investigation found a canceled 114-second request with only 7ms CPU. 
 - Traces retain seven days. Shared ingestion/storage billing starts December 1, 2026; document the sampling and billing tradeoff.
 
 ## Checklist
-- [ ] Generate enabled traces with explicit 100% sampling; preserve top-level trace overrides.
-- [ ] Extend deployment types and test generated TOML for staging/prod, reduced sampling and disabled tracing.
-- [ ] Document setup, overrides, retention and billing reference.
+- [x] Generate enabled traces with explicit 100% sampling; preserve top-level trace overrides.
+- [x] Extend deployment types and test generated TOML for staging/prod, reduced sampling and disabled tracing.
+- [x] Document setup, overrides, retention and billing reference.
 - [ ] Run relevant validation and independent local specialist reviews.
 - [ ] Verify staging trace configuration and captured dependency spans.
 - [ ] Merge after CI/review and verify production deployment/configuration and new traces.
@@ -26,3 +26,9 @@ Admin page investigation found a canceled 114-second request with only 7ms CPU. 
 ## References
 - https://developers.cloudflare.com/workers/observability/traces/
 - https://developers.cloudflare.com/observability/pricing/
+
+## Validation evidence
+- Focused generator suite: 66 tests passed (1 file); generated TOML round-trip verifies staging/prod trace defaults, override tests include 0%, 5%, disabled, external destination/persistence.
+- Deployment scripts TypeScript check passed.
+- Task-only main push rejected by required-check protection; task record kept on PR branch.
+- ESLint, formatting, deployment tsc and public docs build passed (266 pages). Independent Cloudflare/constitution/docs review passed.

@@ -413,6 +413,7 @@ export interface WranglerToml extends WranglerTomlBindings {
   compatibility_flags?: string[];
   vars?: Record<string, string>;
   limits?: WorkerLimitsConfig;
+  observability?: ObservabilityConfig;
   env?: Record<string, WranglerEnvConfig>;
   [key: string]: unknown;
 }
@@ -459,8 +460,16 @@ export interface AnalyticsEngineDatasetBinding {
   dataset: string;
 }
 
+export interface ObservabilityTracesConfig {
+  enabled?: boolean;
+  head_sampling_rate?: number;
+  persist?: boolean;
+  destinations?: string[];
+}
+
 export interface ObservabilityConfig {
   enabled: boolean;
+  traces?: ObservabilityTracesConfig;
   logs?: {
     invocation_logs: boolean;
     head_sampling_rate: number;
