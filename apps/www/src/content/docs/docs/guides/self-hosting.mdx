@@ -769,5 +769,6 @@ history. Starting December 1, 2026, stored traces count toward account-wide obse
 ingestion and storage allowances; 100% sampling can generate substantial volume on busy
 installations. Review [Cloudflare tracing](https://developers.cloudflare.com/workers/observability/traces/)
 and [observability pricing](https://developers.cloudflare.com/observability/pricing/) before
-choosing ongoing sampling. Traces can include URLs, query strings, and database statement
-metadata; restrict access to observability data as you would for production logs.
+choosing ongoing sampling. The generated configuration redacts query strings from observability URLs because callback
+and terminal URLs can contain credentials. Traces can still include URL paths and database
+statement metadata; restrict access to observability data as you would for production logs.

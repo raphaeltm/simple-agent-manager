@@ -90,6 +90,7 @@ describe('sync wrangler config', () => {
       expect((serialized.env as TOML.JsonMap)[environment]).toMatchObject({
         observability: {
           enabled: true,
+          redact_query_string: true,
           traces: { enabled: true, head_sampling_rate: 1, persist: true },
           logs: { invocation_logs: true, head_sampling_rate: 1 },
         },
@@ -115,6 +116,7 @@ describe('sync wrangler config', () => {
           false,
           null
         );
+        expect(generated.observability?.redact_query_string).toBe(true);
         expect(generated.observability?.traces).toEqual({
           enabled: true,
           head_sampling_rate: 1,

@@ -12,6 +12,7 @@ Admin page investigation found a canceled 114-second request with only 7ms CPU. 
 ## Checklist
 - [x] Generate enabled traces with explicit 100% sampling; preserve top-level trace overrides.
 - [x] Extend deployment types and test generated TOML for staging/prod, reduced sampling and disabled tracing.
+- [x] Redact query strings in generated observability config so callback/terminal credentials are not retained.
 - [x] Document setup, overrides, retention and billing reference.
 - [x] Run relevant validation and independent local specialist reviews.
 - [ ] Verify staging trace configuration and captured dependency spans.
@@ -33,3 +34,6 @@ Admin page investigation found a canceled 114-second request with only 7ms CPU. 
 - Task-only main push rejected by required-check protection; task record kept on PR branch.
 - ESLint, formatting, deployment tsc and public docs build passed (266 pages). Independent Cloudflare/constitution/docs review passed.
 - Completion validator A/B/C/F passed; D/E not applicable. Release telemetry remains pending.
+
+## Review follow-up
+CodeRabbit identified query credential retention risk. Added observability.redact_query_string=true for generated environments, type coverage and assertions; docs clarify metadata remaining after redaction. Staging old-head retry still running; final redacted configuration must be verified before production.

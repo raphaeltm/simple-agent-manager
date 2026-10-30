@@ -1152,6 +1152,8 @@ export function generateApiWorkerEnv(
     // Workers Observability: native traces provide dependency timings without an SDK.
     observability: {
       enabled: true,
+      // Callback and terminal URLs can carry credentials in query parameters.
+      redact_query_string: true,
       traces: {
         enabled: true,
         head_sampling_rate: 1,

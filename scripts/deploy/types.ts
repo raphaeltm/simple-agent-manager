@@ -469,6 +469,7 @@ export interface ObservabilityTracesConfig {
 
 export interface ObservabilityConfig {
   enabled: boolean;
+  redact_query_string?: boolean;
   traces?: ObservabilityTracesConfig;
   logs?: {
     invocation_logs: boolean;
