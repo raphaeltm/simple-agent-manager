@@ -132,11 +132,12 @@ export function UserDetail({ userId, onBack }: { userId: string; onBack: () => v
         <Spinner />
       </div>
     );
-  if (error) return <p className="sam-type-body text-danger-fg py-4 m-0">{error}</p>;
+  if (error && !data) return <p className="sam-type-body text-danger-fg py-4 m-0">{error}</p>;
   if (!data) return null;
 
   return (
     <div className="space-y-4 min-w-0 overflow-hidden">
+      {error && <p role="alert" className="text-sm text-danger-fg">Refresh failed: {error}</p>}
       <button
         type="button"
         onClick={onBack}
@@ -281,7 +282,7 @@ export function AdminComputeUsage() {
     );
   }
 
-  if (error) {
+  if (error && !data) {
     return <p className="sam-type-body text-danger-fg py-4 m-0">{error}</p>;
   }
 
@@ -292,6 +293,7 @@ export function AdminComputeUsage() {
 
   return (
     <div className="space-y-4 min-w-0 overflow-hidden">
+      {error && <p role="alert" className="text-sm text-danger-fg">Refresh failed: {error}</p>}
       <div>
         <SectionHeading>Node Usage</SectionHeading>
         <Body className="text-fg-muted text-sm">

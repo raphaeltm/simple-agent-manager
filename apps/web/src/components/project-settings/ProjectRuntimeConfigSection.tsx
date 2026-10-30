@@ -53,6 +53,7 @@ export function ProjectRuntimeConfigSection({ projectId }: ProjectRuntimeConfigS
     }
     try {
       setSavingRuntimeConfig(true);
+      await queryClient.cancelQueries({ queryKey: options.queryKey, exact: true });
       const response = await upsertProjectRuntimeEnvVar(projectId, {
         key: envKeyInput.trim(),
         value: envValueInput,
@@ -73,6 +74,7 @@ export function ProjectRuntimeConfigSection({ projectId }: ProjectRuntimeConfigS
   const handleDeleteEnvVar = async (envKey: string) => {
     try {
       setSavingRuntimeConfig(true);
+      await queryClient.cancelQueries({ queryKey: options.queryKey, exact: true });
       const response = await deleteProjectRuntimeEnvVar(projectId, envKey);
       setRuntimeConfig(response);
       toast.success(`Removed ${envKey}`);
@@ -90,6 +92,7 @@ export function ProjectRuntimeConfigSection({ projectId }: ProjectRuntimeConfigS
     }
     try {
       setSavingRuntimeConfig(true);
+      await queryClient.cancelQueries({ queryKey: options.queryKey, exact: true });
       const response = await upsertProjectRuntimeFile(projectId, {
         path: filePathInput.trim(),
         content: fileContentInput,
@@ -110,6 +113,7 @@ export function ProjectRuntimeConfigSection({ projectId }: ProjectRuntimeConfigS
   const handleDeleteFile = async (path: string) => {
     try {
       setSavingRuntimeConfig(true);
+      await queryClient.cancelQueries({ queryKey: options.queryKey, exact: true });
       const response = await deleteProjectRuntimeFile(projectId, path);
       setRuntimeConfig(response);
       toast.success(`Removed ${path}`);

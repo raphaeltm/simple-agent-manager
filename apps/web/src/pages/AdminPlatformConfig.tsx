@@ -1,5 +1,5 @@
 import { Alert, Spinner } from '@simple-agent-manager/ui';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useState } from 'react';
 
 import { AdminAgentEmailPanel } from '../components/AdminAgentEmailPanel';
@@ -19,14 +19,16 @@ export function AdminPlatformConfig() {
     queryFn: ({ signal }) => fetchAdminPlatformConfig(signal),
     enabled: Boolean(scope),
   });
-  // One bounded page supplies the dropdown independently of the integrations form.
-  const projects = useQuery({
+  // Fetch additional project pages only when requested by the user.
+  const projects = useInfiniteQuery({
     queryKey: ['auth', scope, 'admin', 'feedback-project-options'],
-    queryFn: ({ signal }) => listProjects(PROJECT_LIST_LIMIT, undefined, signal),
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ signal, pageParam }) => listProjects(PROJECT_LIST_LIMIT, pageParam, signal),
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
     enabled: Boolean(scope && config.data),
   });
   const status = config.data?.status;
-  const feedbackProjects = projects.data?.projects ?? [];
+  const feedbackProjects = projects.data?.pages.flatMap((page) => page.projects) ?? [];
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -36,6 +38,7 @@ export function AdminPlatformConfig() {
     setError(null);
     setMessage(null);
     try {
+      await client.cancelQueries({ queryKey: queryKey, exact: true });
       const response = await updateAdminPlatformConfig(config);
       client.setQueryData(queryKey, response);
       setMessage('Platform integration settings saved.');
@@ -78,6 +81,18 @@ export function AdminPlatformConfig() {
           submitting={saving}
           onPrimary={handleSave}
           feedbackProjects={feedbackProjects}
+          feedbackProjectsFooter={
+            <>
+              {projects.error && <Alert variant="error">{projects.error.message}</Alert>}
+              {projects.hasNextPage && (
+                <button type="button" disabled={projects.isFetchingNextPage}
+                  className="text-sm text-accent min-h-11"
+                  onClick={() => void projects.fetchNextPage()}>
+                  {projects.isFetchingNextPage ? 'Loading projects...' : 'Load more projects'}
+                </button>
+              )}
+            </>
+          }
         />
       )}
       <AdminConnectorPanel />

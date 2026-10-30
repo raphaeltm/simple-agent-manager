@@ -181,7 +181,7 @@ async function setupMocks(
             linkedWorkspaces: 0,
           },
         ],
-        nextCursor: null,
+        nextCursor: new URL(request.url()).searchParams.has('cursor') ? null : 'next-project-page',
       });
     }
     if (path === '/api/notifications/unread-count') return respondJson(route, 200, { count: 0 });
@@ -261,6 +261,7 @@ test.describe('Platform config first-run and admin UI', () => {
     await expect(
       page.getByRole('button', { name: 'Remove runtime infrastructure client' })
     ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Load more projects' })).toBeVisible();
     await assertNoOverflow(page);
     await screenshot(page, 'platform-config-admin');
     await page.getByRole('heading', { name: 'Private feedback project' }).scrollIntoViewIfNeeded();

@@ -61,6 +61,7 @@ export function AdminTrials() {
     setSaving(true);
     setError(null);
     try {
+      await client.cancelQueries({ queryKey: queryKey, exact: true });
       const result = await updateAdminTrialsConfig(!config.enabled);
       setConfig(result);
     } catch (err) {

@@ -101,7 +101,7 @@ describe('AdminSettings', () => {
     const confirm = screen.getByRole('button', { name: 'Apply change' });
     fireEvent.click(confirm);
     fireEvent.click(confirm);
-    expect(mocks.patchAdminSettings).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(mocks.patchAdminSettings).toHaveBeenCalledTimes(1));
     expect(mocks.patchAdminSettings).toHaveBeenCalledWith(2, [
       { name: 'operations.doAlarmsEnabled', value: null },
     ]);

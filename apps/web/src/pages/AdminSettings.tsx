@@ -239,6 +239,7 @@ export function AdminSettings() {
     setError(null);
     setMessage(null);
     try {
+      await client.cancelQueries({ queryKey: queryKey, exact: true });
       const next = await patchAdminSettings(view.revision, changes);
       setView(next);
       setDrafts((current) => {

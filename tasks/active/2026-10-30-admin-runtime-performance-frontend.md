@@ -15,7 +15,7 @@ Choose2: preserves current layouts, adds consistent visual and screen-reader fee
 - [x] A3 Remove unused installations query/context field.
 - [x] C1 Settings chunk/active data preload overlaps project detail; Runtime/deploy render from projectId without waiting; no chat preload on settings.
 - [x] C2 Runtime TanStack cache, scoped keys, mutation setQueryData, preserved content.
-- [x] C3 Integrations query, independent child panels while config loading, lazy bounded project dropdown.
+- [x] C3 Integrations query, independent child panels while config loading, bounded first-page project dropdown with explicit user pagination.
 - [x] C4 Scoped cached admin pages/settings/users/diagnoses/credentials/AI proxy/trials/costs/usage/quotas and health/trend hooks; preserve content and logout isolation.
 - [x] C5 Independent analytics queries, hidden-tab polling pause, longer cached gateway refresh.
 - [x] Deferred-promise ordering/cache/cancellation tests with meaningful controls.
@@ -26,6 +26,9 @@ Choose2: preserves current layouts, adds consistent visual and screen-reader fee
 
 ## Validation
 Full web suite:384files/4808tests PASS. Deferred chunk-order controls, Runtime query order/cache/cancellation, Integrations independent mounting, user isolation and cached admin revisit PASS. Latest typecheck and touched-file lint PASS. Mobile375/desktop1280 captures reviewed for every changed surface; mock fixtures corrected to render real pages rather than onboarding/error boundaries. Screenshots retained in .codex/tmp/performance-screenshots; final visual run17pass plus Trials8pass across focused reruns. No product layout redesign.
+
+## Specialist review fixes
+All reviewers returned PASS/ADDRESSED after fixing stale GET overwrite after Runtime/admin mutations, cross-identity trend placeholders, cached Usage retention on refresh errors, and feedback project pagination. Deferred regression suite27/27 PASS; refreshed Integrations375/1280 images inspected. AdminSettings duplicate-submit test now waits for asynchronous query cancellation before checking the write;15focused regressions PASS. Final broad checks running.
 
 ## Staging state
 Managed secret placeholders must be resolved with SAM exec_with_secrets; literal workspace values are not credentials. No credential update is required. Backend baseline API timings and565Workersinvocations captured; candidate not yet deployed. BackendPRmustcompletefullgatesandmergebeforefrontendPR.

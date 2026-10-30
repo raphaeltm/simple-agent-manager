@@ -80,6 +80,7 @@ export function AdminUsers() {
     setSignupConfigSaving(true);
     try {
       setError(null);
+      await client.cancelQueries({ queryKey: signupKey, exact: true });
       const res = await updateSignupApprovalConfig({ requireApproval: nextRequireApproval });
       setSignupApprovalConfig(res.config);
     } catch (err) {

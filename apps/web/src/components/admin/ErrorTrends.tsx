@@ -1,6 +1,6 @@
 import type { ErrorTrendBucket } from '@simple-agent-manager/shared';
 import { Body, Button, Card, Spinner } from '@simple-agent-manager/ui';
-import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { type FC, useState } from 'react';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
@@ -27,7 +27,8 @@ export const ErrorTrends: FC = () => {
   const query = useQuery({
     queryKey: ['auth', scope, 'admin', 'error-trends', range],
     queryFn: ({ signal }) => fetchAdminErrorTrends(range, signal),
-    placeholderData: keepPreviousData,
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === scope ? previous : undefined,
     enabled: Boolean(scope),
   });
   const data = query.data;
