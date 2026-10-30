@@ -653,6 +653,9 @@ export async function continueInstantSessionLaunch(
         healthStatus: 'unhealthy',
         errorMessage: message,
         updatedAt: failedAt,
+        cleanupBlockedSince: null,
+        cleanupBlockedReason: null,
+        cleanupBlockedAlertedAt: null,
       })
       .where(eq(schema.nodes.id, node.id))
       .catch((updateErr) => {

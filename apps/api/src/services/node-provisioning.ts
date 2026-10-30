@@ -32,6 +32,8 @@ import {
   resolveEnvironmentLabel,
   resolveInstallationId,
 } from './node-provider-labels';
+import { resolveHetznerBaseImageOverride } from './node-provisioning-image';
+export { resolveHetznerBaseImageOverride } from './node-provisioning-image';
 import { recordRejectedAllocationAbsence } from './node-rejection-proof';
 import { persistError } from './observability';
 import {
@@ -49,27 +51,6 @@ import { resolveEffectiveNodeHostMemoryReserveMb } from './workspace-resource-ca
 const NODE_ERROR_MESSAGE_MAX_LENGTH = 500;
 
 type ProvisionNodeRow = typeof schema.nodes.$inferSelect;
-
-/**
- * Resolves the Hetzner base image override from the `HETZNER_BASE_IMAGE` env var.
- *
- * The default (returned as `undefined`) lets the Hetzner provider pick its own
- * default — currently `docker-ce` (Hetzner's Docker marketplace image, which
- * skips Docker install and saves ~30-60s on cold provisioning). Setting
- * `HETZNER_BASE_IMAGE=ubuntu-24.04` provides an emergency rollback without a
- * code change. The override is only applied for the Hetzner provider; other
- * providers have their own image resolution logic.
- *
- * Exported for unit-testing the env-var → provider plumbing.
- */
-export function resolveHetznerBaseImageOverride(
-  targetProvider: CredentialProvider | undefined,
-  envValue: string | undefined
-): string | undefined {
-  if (targetProvider !== 'hetzner') return undefined;
-  const trimmed = envValue?.trim();
-  return trimmed ? trimmed : undefined;
-}
 
 /** Optional task context for cloud-init (enables message reporter on VM). */
 export interface ProvisionTaskContext {
@@ -347,6 +328,7 @@ export async function provisionNode(
             providerResult.exactCredentialBinding?.credentialFingerprint ??
             node.placementCredentialFingerprint,
           runtimeIncarnationId: provisioningRuntimeIncarnationId,
+          cleanupRetirementSourcesJson: null,
           runtimeTerminationConfirmedAt: null,
           updatedAt: new Date().toISOString(),
         })
@@ -520,6 +502,8 @@ export async function provisionNode(
         ...(durable
           ? {
               status: sql`CASE WHEN ${schema.nodes.status} IN ('creating','running','recovery','error') THEN 'creating' ELSE ${schema.nodes.status} END`,
+              cleanupBlockedSince: sql`CASE WHEN ${schema.nodes.status} IN ('stopped','destroying') THEN ${schema.nodes.cleanupBlockedSince} ELSE NULL END`,
+              cleanupBlockedReason: sql`CASE WHEN ${schema.nodes.status} IN ('stopped','destroying') THEN ${schema.nodes.cleanupBlockedReason} ELSE NULL END`,
             }
           : {}),
         ...observedHardwareDbValues(vm),
@@ -607,6 +591,9 @@ export async function provisionNode(
           status: 'creating',
           errorMessage: 'Awaiting IP allocation — will be set on first heartbeat',
           updatedAt: new Date().toISOString(),
+          cleanupBlockedSince: null,
+          cleanupBlockedReason: null,
+          cleanupBlockedAlertedAt: null,
         })
         .where(creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId, vm.id))
         .run();
@@ -661,6 +648,9 @@ export async function provisionNode(
           ? truncateNodeErrorMessage(`Backend DNS record creation failed: ${dnsErrorMessage}`)
           : null,
         updatedAt: new Date().toISOString(),
+        cleanupBlockedSince: null,
+        cleanupBlockedReason: null,
+        cleanupBlockedAlertedAt: null,
       })
       .where(creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId, vm.id))
       .run();
@@ -766,6 +756,9 @@ export async function provisionNode(
               ? { runtimeTerminationConfirmedAt: new Date().toISOString() }
               : {}),
             updatedAt: new Date().toISOString(),
+            cleanupBlockedSince: null,
+            cleanupBlockedReason: null,
+            cleanupBlockedAlertedAt: null,
           })
           .where(creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId))
           .run();
@@ -785,6 +778,9 @@ export async function provisionNode(
           ? { runtimeTerminationConfirmedAt: new Date().toISOString() }
           : {}),
         updatedAt: new Date().toISOString(),
+        cleanupBlockedSince: null,
+        cleanupBlockedReason: null,
+        cleanupBlockedAlertedAt: null,
       })
       .where(creatingProvisioningPredicate(node, provisioningRuntimeIncarnationId))
       .run();

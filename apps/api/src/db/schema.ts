@@ -1609,6 +1609,10 @@ export const nodes = sqliteTable(
     placementCredentialFingerprint: text('placement_credential_fingerprint'),
     /** Candidate-page escape after cleanup failure; ISO-8601 UTC timestamp. */
     cleanupBackoffUntil: text('cleanup_backoff_until'),
+    cleanupBlockedSince: text('cleanup_blocked_since'),
+    cleanupBlockedReason: text('cleanup_blocked_reason'),
+    cleanupBlockedAlertedAt: text('cleanup_blocked_alerted_at'),
+    cleanupRetirementSourcesJson: text('cleanup_retirement_sources_json'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),

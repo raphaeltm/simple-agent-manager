@@ -209,6 +209,9 @@ export async function stopNodeResources(
       status: 'deleted',
       healthStatus: 'stale',
       updatedAt: now,
+      cleanupBlockedSince: null,
+      cleanupBlockedReason: null,
+      cleanupBlockedAlertedAt: null,
     })
     .where(
       and(
@@ -305,6 +308,9 @@ export async function retireDeletedDeploymentNodeRecord(
         ipAddress: null,
         errorMessage: null,
         updatedAt: now,
+        cleanupBlockedSince: null,
+        cleanupBlockedReason: null,
+        cleanupBlockedAlertedAt: null,
       })
       .where(terminalProof),
     db

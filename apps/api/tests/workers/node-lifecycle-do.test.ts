@@ -2120,6 +2120,18 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
         });
       });
 
+      const deadLetterBeforeCronRetry = await runInDurableObject(stub, async (instance) =>
+        instance.ctx.storage.get<Record<string, unknown>>(`ws-delete:${wsId}`)
+      );
+      // The cron safety net must not resurrect this same physical deletion.
+      expect(await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID)).toBe(false);
+      expect(await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID)).toBe(false);
+      expect(
+        await runInDurableObject(stub, async (instance) =>
+          instance.ctx.storage.get<Record<string, unknown>>(`ws-delete:${wsId}`)
+        )
+      ).toEqual(deadLetterBeforeCronRetry);
+
       expect(fetchMock).not.toHaveBeenCalled();
       expect(await getAlarm(stub)).toBeNull();
       expect(

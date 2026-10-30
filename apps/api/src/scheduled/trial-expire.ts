@@ -381,7 +381,7 @@ async function cleanupExpiredTrialResources(
         if (activeAfterCleanup === 0) {
           const nodeDeleteResult = await env.DATABASE.prepare(
             `UPDATE nodes
-             SET status = 'deleted',
+             SET cleanup_blocked_since = NULL, cleanup_blocked_reason = NULL, cleanup_blocked_alerted_at = NULL, status = 'deleted',
                  warm_since = NULL,
                  health_status = 'stale',
                  error_message = NULL,
@@ -673,7 +673,7 @@ async function releaseNodeDeletionClaim(
   const truncated = message.length > 500 ? `${message.slice(0, 500)}...` : message;
   await env.DATABASE.prepare(
     `UPDATE nodes
-     SET status = 'error',
+     SET status = 'error', cleanup_blocked_since = NULL, cleanup_blocked_reason = NULL, cleanup_blocked_alerted_at = NULL,
          health_status = 'unhealthy',
          error_message = ?,
          updated_at = ?
