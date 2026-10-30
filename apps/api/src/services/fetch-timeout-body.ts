@@ -9,6 +9,9 @@ export function deadlineResponse(
     return response;
   }
   const reader = response.body.getReader();
+  // workerd rejects this bookkeeping promise when an upstream body is canceled.
+  // Actual consumers still receive the error from reader.read() below.
+  void reader.closed.catch(() => {});
   let finished = false;
   const finish = () => {
     if (finished) return;
@@ -23,31 +26,34 @@ export function deadlineResponse(
     finish();
     void reader.cancel(signal.reason).catch(() => {});
   };
-  const body = new ReadableStream<Uint8Array>({
-    start(controller) {
-      bodyController = controller;
-      signal.addEventListener('abort', onAbort, { once: true });
-      if (signal.aborted) onAbort();
-    },
-    async pull(controller) {
-      try {
-        const result = await reader.read();
-        if (finished) return;
-        if (result.done) {
+  const body = new ReadableStream<Uint8Array>(
+    {
+      start(controller) {
+        bodyController = controller;
+        signal.addEventListener('abort', onAbort, { once: true });
+        if (signal.aborted) onAbort();
+      },
+      async pull(controller) {
+        try {
+          const result = await reader.read();
+          if (finished) return;
+          if (result.done) {
+            finish();
+            controller.close();
+          } else controller.enqueue(result.value);
+        } catch (error) {
+          if (finished) return;
           finish();
-          controller.close();
-        } else controller.enqueue(result.value);
-      } catch (error) {
-        if (finished) return;
+          controller.error(error);
+        }
+      },
+      cancel(reason) {
         finish();
-        controller.error(error);
-      }
+        return reader.cancel(reason);
+      },
     },
-    cancel(reason) {
-      finish();
-      return reader.cancel(reason);
-    },
-  });
+    { highWaterMark: 0 }
+  );
   const bounded = new Response(body, {
     status: response.status,
     statusText: response.statusText,

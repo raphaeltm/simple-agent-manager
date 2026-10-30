@@ -299,12 +299,16 @@ export async function updateAdminSettings(
     ]);
     if (result.some((item) => !item.success)) throw new AdminSettingsUnavailableError();
   } catch {
-    throw new AdminSettingsUnavailableError();
-  } finally {
+    // A failed transport may have committed; discard cached state conservatively.
     invalidateAdminSettings(env);
+    throw new AdminSettingsUnavailableError();
   }
-  if (result[0]?.meta.changes !== 1)
-    throw errors.conflict('Settings changed. Reload before saving.');
+  // A successful zero-change CAS fences every mutation/audit statement. It cannot
+  // invalidate a winning writer's concurrent fresh response read.
+  const changes = result[0]?.meta?.changes;
+  if (changes === 0) throw errors.conflict('Settings changed. Reload before saving.');
+  invalidateAdminSettings(env);
+  if (changes !== 1) throw new AdminSettingsUnavailableError();
   await propagateOperationalEnables(env, input.changes);
   return readAdminSettings(env, { fresh: true });
 }
