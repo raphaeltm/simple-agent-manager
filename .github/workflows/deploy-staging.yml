@@ -121,8 +121,12 @@ jobs:
           exit 1
 
       - name: Run smoke tests
-        if: ${{ !inputs.github_trigger_audit_send_only && env.SMOKE_TEST_TOKEN != '' }}
+        if: ${{ !inputs.github_trigger_audit_send_only && !inputs.performance_audit_only && env.SMOKE_TEST_TOKEN != '' }}
         run: npx playwright test --config=tests/smoke/playwright.config.ts
+
+      - name: Run current-deployment performance audit only
+        if: ${{ inputs.performance_audit && inputs.performance_audit_only && env.SMOKE_TEST_TOKEN != '' }}
+        run: npx playwright test --config=tests/smoke/playwright.config.ts admin-runtime-performance.spec.ts
 
       - name: Upload bounded performance audit
         if: ${{ always() && inputs.performance_audit }}

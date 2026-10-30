@@ -4,6 +4,8 @@ import { expect, test } from '@playwright/test';
 
 import { loginWithToken } from './helpers/auth';
 
+test.describe.configure({ retries: 0 });
+
 const DEFAULT_AUDIT_TIMEOUT_MS = 30_000;
 const auditTimeoutMs =
   Number(process.env.SAM_PERFORMANCE_AUDIT_TIMEOUT_MS) || DEFAULT_AUDIT_TIMEOUT_MS;
@@ -13,7 +15,11 @@ test('bounded admin and Runtime performance audit', async ({ context }, info) =>
   test.setTimeout(auditTimeoutMs * 20);
   const api = process.env.SMOKE_TEST_API_URL || 'https://api.sammy.party';
   const app = process.env.SMOKE_TEST_URL || 'https://app.sammy.party';
-  const page = await loginWithToken(context, { apiUrl: api, appUrl: app });
+  const page = await loginWithToken(context, {
+    apiUrl: api,
+    appUrl: app,
+    waitUntil: 'domcontentloaded',
+  });
   const session = await (
     await page.request.get(`${api}/api/auth/get-session`, { timeout: auditTimeoutMs })
   ).json();
@@ -97,11 +103,17 @@ test('bounded admin and Runtime performance audit', async ({ context }, info) =>
     for (const [path, content] of routes) {
       const start = performance.now();
       await page.goto(`${app}${path}`, { waitUntil: 'domcontentloaded', timeout: auditTimeoutMs });
-      await expect(page.getByText(content!, { exact: false }).first()).toBeVisible({
-        timeout: auditTimeoutMs,
-      });
+      const ready =
+        path === '/admin/infrastructure'
+          ? page.getByRole('button', { name: 'Refresh machine list' }).first()
+          : page.getByText(content!, { exact: false }).first();
+      await expect(ready).toBeVisible({ timeout: auditTimeoutMs });
       await expect(page.getByText('Something went wrong')).toHaveCount(0);
       browserTimings.push({ path, width, contentMs: Math.round(performance.now() - start) });
+      await writeFile(
+        `${output}/timings.json`,
+        JSON.stringify({ startedAt, timings, browserTimings, errors }, null, 2)
+      );
       await page.screenshot({
         path: `${output}/${width}-${path!.split('/').pop()}.png`,
         fullPage: true,
@@ -137,7 +149,7 @@ test('bounded admin and Runtime performance audit', async ({ context }, info) =>
   const report = {
     startedAt,
     endedAt: new Date().toISOString(),
-    candidate: process.env.GITHUB_SHA,
+    auditCodeSha: process.env.GITHUB_SHA,
     timings,
     browserTimings,
     errors,
