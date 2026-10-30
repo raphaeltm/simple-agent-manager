@@ -424,6 +424,9 @@ describe('bounded stranded retirement through the real cleanup cron entry', () =
       })
     ).toBeNull();
     expect(f.failSession).toHaveBeenCalled();
+    expect(f.sqlite.prepare('SELECT recovery_failed_at FROM session_snapshots').get()).toEqual({
+      recovery_failed_at: NOW.toISOString(),
+    });
   });
 
   it('retains the original refusal clock when deadline provider deletion fails', async () => {

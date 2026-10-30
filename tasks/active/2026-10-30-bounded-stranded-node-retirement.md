@@ -37,3 +37,5 @@ Initial real-cron suite 7 red/2 green: 31-minute source produced no provider del
 Read-only production baseline 2026-10-30 14:58 UTC through exec_with_secrets: no stopped/destroying managed workspace nodes; deployment node01KXAR1T3XCQKKPBEJEERQ2PSZ still destroying, provider150100869, credential source/referenceNULL. Latest production deployment successful (run41056852924).
 
 Final focused suite:17 cron/SQLite tests passed, including preservation of the original blocked clock after an exact provider delete returns403; four HTTP writer/visibility tests,67 existing handoff tests and workerd dead-letter control remain green. Local security, Cloudflare, test, constitution, doc-sync and task-completion reviews PASS/ADDRESSED. Full repository tests continue with bounded concurrency; lint/typecheck/build and migration/runtime/file-size checks pass.
+
+Exact branch discrimination at15:32 UTC in isolated detached checkout: disabled only forced destroyNodeForCleanup call;31-minute case failed exact provider-delete assertion,29-minute control passed (15 skipped). Restored call:2passed/15skipped. Temporary checkout removed; main working tree was not mutated.

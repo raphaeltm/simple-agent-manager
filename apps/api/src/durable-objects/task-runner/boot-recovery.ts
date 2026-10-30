@@ -90,7 +90,7 @@ export async function recoverNodeBoot(
   }
   await rc.env.DATABASE.batch([
     rc.env.DATABASE.prepare(
-      `UPDATE nodes SET cleanup_blocked_since = NULL, cleanup_blocked_reason = NULL, cleanup_blocked_alerted_at = NULL, status = 'deleted', updated_at = ? WHERE id = ? AND status = 'destroying' AND runtime_termination_confirmed_at IS NOT NULL`
+      `UPDATE nodes SET status = 'deleted', cleanup_blocked_since = NULL, cleanup_blocked_reason = NULL, updated_at = ? WHERE runtime_termination_confirmed_at IS NOT NULL AND id = ? AND status = 'destroying'`
     ).bind(new Date().toISOString(), intent.nodeId),
     rc.env.DATABASE.prepare(
       `UPDATE tasks SET auto_provisioned_node_id = NULL, provisioned_vm_size = NULL, updated_at = ? WHERE id = ? AND auto_provisioned_node_id = ?`

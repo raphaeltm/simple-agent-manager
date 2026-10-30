@@ -24,7 +24,7 @@ export async function repairStrandedRetirementNotices(
     // Invalidate every affected wake in one D1 write BEFORE any fallible DO call.
     await env.DATABASE.prepare(
       `UPDATE session_snapshots
-      SET status='expired', sleep_status='failed', recovery_status='failed',
+      SET status='expired', sleep_status='failed', recovery_status='failed', recovery_failed_at=?,
         recovery_error='Workspace disk was not preserved before automatic VM retirement',
         sleeping_at=COALESCE(sleeping_at, ?), expires_at=?, sleep_after=NULL,
         sleep_claim_id=NULL, sleep_claimed_at=NULL, updated_at=?
@@ -37,6 +37,7 @@ export async function repairStrandedRetirementNotices(
             AND session_snapshots.snapshot_generation IS json_extract(source.value,'$.snapshotGeneration'))`
     )
       .bind(
+        node.runtime_termination_confirmed_at,
         node.runtime_termination_confirmed_at,
         node.runtime_termination_confirmed_at,
         node.runtime_termination_confirmed_at,
@@ -79,13 +80,14 @@ export async function repairStrandedRetirementNotices(
           if (!preserved && parsed.snapshotId) {
             await env.DATABASE.prepare(
               `UPDATE session_snapshots SET status='expired',sleep_status='failed',
-              recovery_status='failed',recovery_error='Workspace disk was not preserved before automatic VM retirement',
+              recovery_status='failed',recovery_failed_at=?,recovery_error='Workspace disk was not preserved before automatic VM retirement',
               sleeping_at=COALESCE(sleeping_at,?),expires_at=?,sleep_after=NULL,sleep_claim_id=NULL,sleep_claimed_at=NULL
               WHERE id=? AND node_id=? AND user_id=? AND COALESCE(recovery_status,'') NOT IN ('waking','restored') AND workspace_id IS ? AND snapshot_generation IS ?
               AND EXISTS (SELECT 1 FROM nodes n WHERE n.id=session_snapshots.node_id AND n.runtime_incarnation_id IS ?
                 AND n.runtime_termination_confirmed_at IS NOT NULL)`
             )
               .bind(
+                node.runtime_termination_confirmed_at,
                 node.runtime_termination_confirmed_at,
                 node.runtime_termination_confirmed_at,
                 parsed.snapshotId,
