@@ -7,7 +7,7 @@ import {
 } from './admin-settings';
 import type { AdminSettingName } from './admin-settings-registry';
 import { DEFAULT_CONFIG_READ_TIMEOUT_MS } from './config-read-deadline';
-import { withDeadline } from './fetch-timeout';
+import { IoTimeoutError, withDeadline } from './fetch-timeout';
 import { buildPlatformIntegrationStatements, settingStatement } from './platform-config-statements';
 import {
   creatorId,
@@ -241,6 +241,7 @@ let platformConfigCacheGeneration = 0;
 let platformConfigInFlight: {
   database: D1Database;
   generation: number;
+  deadlineAt: number;
   promise: Promise<ResolvedPlatformConfig>;
 } | null = null;
 
@@ -365,17 +366,28 @@ async function resolveLegacyPlatformConfig(
   if (
     joinable &&
     joinable.database === database &&
-    joinable.generation === platformConfigCacheGeneration
+    joinable.generation === platformConfigCacheGeneration &&
+    Date.now() < joinable.deadlineAt
   ) {
-    return joinable.promise;
+    const config = await joinable.promise;
+    if (
+      platformConfigCacheGeneration !== joinable.generation ||
+      platformConfigInFlight !== joinable
+    )
+      return resolveLegacyPlatformConfig(env);
+    return config;
   }
 
   const generation = platformConfigCacheGeneration;
   const promise = withDeadline(() => readPlatformConfigFromStore(env), timeoutMs);
-  platformConfigInFlight = { database, generation, promise };
+  const deadlineAt = Date.now() + timeoutMs;
+  platformConfigInFlight = { database, generation, deadlineAt, promise };
 
   try {
     const config = await promise;
+    if (platformConfigInFlight?.promise !== promise) return resolveLegacyPlatformConfig(env);
+    if (Date.now() >= deadlineAt)
+      throw new IoTimeoutError('Platform configuration read exceeded its deadline');
     if (platformConfigCacheGeneration === generation) {
       // No write landed while we were reading, so this result is still current: publish it.
       platformConfigCache = { database, config, expiresAt: now + ttl };

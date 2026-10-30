@@ -384,11 +384,11 @@ describe('D1 settings snapshot cache', () => {
           release = resolve;
         })
     );
-    const cache = new AdminSettingsCache(undefined, () => now, load);
+    const cache = new AdminSettingsCache(100, () => now, load);
     const first = cache.read(database);
-    now = ADMIN_SETTINGS_CACHE_MAX_MS - 1;
+    now = 99;
     const second = cache.read(database);
-    now = ADMIN_SETTINGS_CACHE_MAX_MS;
+    now = 100;
     release(rows(true));
     await expect(first).rejects.toThrow('Admin settings are unavailable');
     await expect(second).rejects.toThrow('Admin settings are unavailable');

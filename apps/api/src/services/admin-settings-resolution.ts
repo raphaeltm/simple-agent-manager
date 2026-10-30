@@ -4,10 +4,12 @@ import { resolveD1BindingIdentity } from '../lib/d1-session';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { errors } from '../middleware/error';
 import {
-  ADMIN_SETTINGS_CACHE_MAX_MS,
+  adminSettingCacheMs,
   AdminSettingsCache,
   AdminSettingsUnavailableError,
+  LEGACY_KV_CACHE_MAX_MS,
 } from './admin-settings-cache';
+import { DecryptedCredentialValues } from './admin-settings-credential-values';
 import {
   ADMIN_SETTINGS_REGISTRY,
   type AdminSettingDefinition,
@@ -18,7 +20,6 @@ import {
 } from './admin-settings-registry';
 import { readAdminSettingsSnapshot } from './admin-settings-snapshot';
 import { DEFAULT_CONFIG_READ_TIMEOUT_MS } from './config-read-deadline';
-import { decrypt } from './encryption';
 import { withDeadline } from './fetch-timeout';
 import { INTEGRATION_CREDENTIAL_TYPE } from './platform-config-store';
 
@@ -34,32 +35,8 @@ let resetGeneration = 0;
 function generationOf(db: D1Database): number {
   return generations.get(db) ?? resetGeneration;
 }
-const LEGACY_KV_CACHE_MAX_MS = 30_000;
-function isOperationalSetting(name: AdminSettingName): boolean {
-  return name === 'operations.cronSweepsEnabled' || name === 'operations.doAlarmsEnabled';
-}
 function assertGeneration(db: D1Database, generation: number): void {
   if (generationOf(db) !== generation) throw new AdminSettingsUnavailableError();
-}
-/** Honor shorter legacy convergence windows, including zero, within the safety ceiling. */
-export function adminSettingCacheMs(env: Env, name: AdminSettingName): number {
-  // A long-lived SamSession must observe an installation stop before its next effect.
-  if (name === 'operations.samOperatorDisabled') return 0;
-  const ceiling =
-    name === 'trials.enabled' ||
-    name === 'operations.cronSweepsEnabled' ||
-    name === 'operations.doAlarmsEnabled'
-      ? LEGACY_KV_CACHE_MAX_MS
-      : ADMIN_SETTINGS_CACHE_MAX_MS;
-  let raw: string | undefined;
-  if (name.startsWith('integration.')) raw = env.PLATFORM_CONFIG_CACHE_MS;
-  else if (name === 'trials.enabled') raw = env.TRIAL_KILL_SWITCH_CACHE_MS;
-  else if (isOperationalSetting(name)) raw = env.CONTROL_LOOP_KILL_SWITCH_CACHE_MS;
-  let configured = ceiling;
-  if (raw !== undefined) {
-    configured = isOperationalSetting(name) ? Number.parseInt(raw, 10) : Number(raw);
-  }
-  return Number.isFinite(configured) && configured >= 0 ? Math.min(configured, ceiling) : ceiling;
 }
 export type CredentialRow = {
   provider: string;
@@ -69,10 +46,16 @@ export type CredentialRow = {
   updatedAt: string;
   updatedBy: string | null;
 };
-let decryptedCredentials = new WeakMap<CredentialRow, Map<string, Promise<string>>>();
+const decryptedCredentials = new DecryptedCredentialValues();
 let credentialCache = new WeakMap<
   D1Database,
-  { startedAt: number; expiresAt: number; promise: Promise<CredentialRow[]> }
+  {
+    startedAt: number;
+    expiresAt: number;
+    deadlineAt: number;
+    pending: boolean;
+    promise: Promise<CredentialRow[]>;
+  }
 >();
 export async function credentialRows(
   env: Env,
@@ -89,9 +72,11 @@ export async function credentialRows(
   if (
     useCache &&
     existing &&
+    (!existing.pending || Date.now() < existing.deadlineAt) &&
     Math.min(existing.expiresAt, existing.startedAt + ttlMs) > Date.now()
   ) {
     const rows = await existing.promise;
+    if (credentialCache.get(db) !== existing) return credentialRows(env, false, attempt + 1);
     assertGeneration(db, generation);
     if (Date.now() >= Math.min(existing.expiresAt, existing.startedAt + ttlMs))
       throw new AdminSettingsUnavailableError();
@@ -100,6 +85,8 @@ export async function credentialRows(
   const entry = {
     startedAt: Date.now(),
     expiresAt: Date.now() + ttlMs,
+    deadlineAt: Date.now() + DEFAULT_CONFIG_READ_TIMEOUT_MS,
+    pending: true,
     promise: withDeadline(
       () =>
         db
@@ -120,8 +107,13 @@ export async function credentialRows(
     const rows = await entry.promise;
     if (useCache && credentialCache.get(db) !== entry)
       return credentialRows(env, false, attempt + 1);
-    if (generationOf(db) !== generation || (ttlMs > 0 && Date.now() >= entry.expiresAt))
+    if (
+      generationOf(db) !== generation ||
+      Date.now() >= entry.deadlineAt ||
+      (ttlMs > 0 && Date.now() >= entry.expiresAt)
+    )
       throw new AdminSettingsUnavailableError();
+    entry.pending = false;
     return rows;
   } catch {
     if (credentialCache.get(db) === entry) credentialCache.delete(db);
@@ -130,7 +122,16 @@ export async function credentialRows(
 }
 let kvCache = new WeakMap<
   D1Database,
-  Map<string, { startedAt: number; expiresAt: number; promise: Promise<string | null> }>
+  Map<
+    string,
+    {
+      startedAt: number;
+      expiresAt: number;
+      deadlineAt: number;
+      pending: boolean;
+      promise: Promise<string | null>;
+    }
+  >
 >();
 type KvReads = ReadonlyMap<string, Promise<{ value: string | null } | { error: unknown }>>;
 async function legacyKv(
@@ -157,8 +158,14 @@ async function legacyKv(
   }
   const useCache = !fresh && ttlMs > 0;
   const cached = map.get(key);
-  if (useCache && cached && Math.min(cached.expiresAt, cached.startedAt + ttlMs) > Date.now()) {
+  if (
+    useCache &&
+    cached &&
+    (!cached.pending || Date.now() < cached.deadlineAt) &&
+    Math.min(cached.expiresAt, cached.startedAt + ttlMs) > Date.now()
+  ) {
     const value = await cached.promise;
+    if (map.get(key) !== cached) return legacyKv(env, key, false, ttlMs, attempt + 1);
     if (
       generationOf(db) !== generation ||
       Date.now() >= Math.min(cached.expiresAt, cached.startedAt + ttlMs)
@@ -169,14 +176,21 @@ async function legacyKv(
   const entry = {
     startedAt: Date.now(),
     expiresAt: Date.now() + ttlMs,
+    deadlineAt: Date.now() + DEFAULT_CONFIG_READ_TIMEOUT_MS,
+    pending: true,
     promise: withDeadline(() => env.KV.get(key), DEFAULT_CONFIG_READ_TIMEOUT_MS),
   };
   if (useCache) map.set(key, entry);
   try {
     const value = await entry.promise;
     if (useCache && map.get(key) !== entry) return legacyKv(env, key, false, ttlMs, attempt + 1);
-    if (generationOf(db) !== generation || (ttlMs > 0 && Date.now() >= entry.expiresAt))
+    if (
+      generationOf(db) !== generation ||
+      Date.now() >= entry.deadlineAt ||
+      (ttlMs > 0 && Date.now() >= entry.expiresAt)
+    )
       throw new AdminSettingsUnavailableError();
+    entry.pending = false;
     return value;
   } catch {
     if (map.get(key) === entry) map.delete(key);
@@ -186,7 +200,7 @@ async function legacyKv(
 let disabled = new WeakMap<D1Database, Set<string>>();
 /** Compatibility test seam; outstanding reads retain a distinct generation and must fail. */
 export function __resetAdminSettingsCacheForTest(): void {
-  decryptedCredentials = new WeakMap();
+  decryptedCredentials.clear();
   resetGeneration = ++generationClock;
   generations = new WeakMap();
   credentialCache = new WeakMap();
@@ -243,23 +257,6 @@ function validStoredValue(def: AdminSettingDefinition, value: unknown): boolean 
   if (def.category === 'OAuth') return typeof value === 'string' && Boolean(value.trim());
   return def.validate(value);
 }
-async function decryptedCredential(env: Env, row: CredentialRow): Promise<string> {
-  const key = getCredentialEncryptionKey(env);
-  let values = decryptedCredentials.get(row);
-  if (!values) {
-    values = new Map();
-    decryptedCredentials.set(row, values);
-  }
-  let pending = values.get(key);
-  if (!pending) {
-    pending = decrypt(row.ciphertext, row.iv, key).catch((error) => {
-      values.delete(key);
-      throw error;
-    });
-    values.set(key, pending);
-  }
-  return pending;
-}
 async function credentialDetails(
   env: Env,
   def: AdminSettingDefinition,
@@ -273,7 +270,9 @@ async function credentialDetails(
   );
   if (!result) return null;
   return {
-    value: secretValue ? await decryptedCredential(env, result) : null,
+    value: secretValue
+      ? await decryptedCredentials.read(result, getCredentialEncryptionKey(env))
+      : null,
     configured: true,
     source: 'database' as const,
     updatedAt: result.updatedAt,
@@ -491,3 +490,5 @@ export async function readAdminSettings(env: Env, options: { fresh?: boolean } =
   }
 }
 export type AdminSettingsView = Awaited<ReturnType<typeof readAdminSettings>>;
+
+export { adminSettingCacheMs } from './admin-settings-cache';
