@@ -39,7 +39,7 @@ For Claude Code and OpenAI Codex, SAM supports guided account sign-in. The proje
   <figcaption>The sign-in screen explains which account setting will change before you continue.</figcaption>
 </figure>
 
-After authorization, SAM stores the connection for the chosen scope. The account itself is still yours to manage; the project setting says where SAM should use it.
+After authorization, SAM stores the connection for the chosen scope. The credential remains managed as an account; the project setting says where SAM should use it. Removing a project pin returns that project to the normal fallback order.
 
 ## Resolve a setting once, then reuse it
 
