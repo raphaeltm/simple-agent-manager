@@ -89,6 +89,20 @@ describe('agent email admin setup', () => {
     return fake;
   }
 
+  it('returns an unavailable partial plan by the overall deadline even if fetch ignores abort', async () => {
+    sqlite.prepare('INSERT INTO platform_settings(key,value,updated_at) VALUES(?,?,?)')
+      .run('agentEmail.setupPlanTimeoutMs', '100', new Date().toISOString());
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    vi.useFakeTimers();
+    try {
+      const result = planAgentEmailSetup(env);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(await result).toMatchObject({ state: 'unavailable', domain: DOMAIN, consentToken: null });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   function stored(key: string): Record<string, unknown> | null {
     const row = sqlite
       .prepare('SELECT value, updated_by AS updatedBy FROM platform_settings WHERE key = ?')

@@ -26,6 +26,7 @@ import { jsonValidator } from '../schemas';
 import { agentEmailAddress, parseAgentEmailRecipient } from '../services/agent-email/address';
 import { CloudflareEmailApiError } from '../services/agent-email/cloudflare-email-api';
 import { readLoopbackStatus, sendLoopbackTest } from '../services/agent-email/loopback';
+import { DEFAULT_AGENT_EMAIL_READ_TIMEOUT_MS } from '../services/agent-email/setting-definitions';
 import { getAgentEmailLimits } from '../services/agent-email/settings';
 import { planAgentEmailSetup, runAgentEmailSetup } from '../services/agent-email/setup';
 import {
@@ -33,6 +34,7 @@ import {
   AgentEmailSetupRefusedError,
 } from '../services/agent-email/setup-errors';
 import { activeAgentEmailSender, agentEmailConfig } from '../services/agent-email/setup-state';
+import { withDeadline } from '../services/fetch-timeout';
 
 const LoopbackSchema = v.object({
   to: v.pipe(v.string(), v.trim(), v.toLowerCase(), v.maxLength(254)),
@@ -47,9 +49,18 @@ const adminAgentEmailRoutes = new Hono<{ Bindings: Env }>();
 
 adminAgentEmailRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin());
 
-adminAgentEmailRoutes.get('/', async (c) =>
-  c.json({ ...(await agentEmailConfig(c.env)), loopback: await readLoopbackStatus(c.env) })
-);
+adminAgentEmailRoutes.get('/', async (c) => {
+  const limits = await withDeadline(
+    () => getAgentEmailLimits(c.env),
+    DEFAULT_AGENT_EMAIL_READ_TIMEOUT_MS
+  );
+  const [config, loopback] = await withDeadline(
+    () => Promise.all([agentEmailConfig(c.env), readLoopbackStatus(c.env)]),
+    limits.readTimeoutMs,
+    c.req.raw.signal
+  );
+  return c.json({ ...config, loopback });
+});
 
 /** The setup's own refusals are conflicts; a failed Cloudflare call is an upstream error. */
 function setupError(error: unknown): unknown {
