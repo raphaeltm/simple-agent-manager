@@ -388,6 +388,29 @@ Delete a node and clean up DNS records and Hetzner resources.
 
 ## Credentials
 
+### Guided agent account sign-in
+
+`POST /api/agent-credential-setup-sessions` starts browser-based subscription sign-in.
+The optional JSON body accepts `agentType` (`claude-code` or `openai-codex`, default
+`openai-codex`) and `projectId`. Omit `projectId` for a personal default; supply a
+nonempty project ID to save an account pinned only to that project. Project setup
+requires `secret:write`, checked at creation and again before the captured credential
+is saved. Invalid JSON or invalid fields return `400`.
+
+The response includes `id`, `status`, `agentType`, `expiresAt`, `verificationUrl`, and
+`userCode`. A new session returns `201`; an existing active session for the same
+agent and destination is returned with `200`. An active session in a different
+destination returns `409`: finish or cancel it before starting another. Busy setup
+capacity returns `202` with `status: "no_capacity"`.
+
+Use `GET /api/agent-credential-setup-sessions/config` to check availability,
+`GET /api/agent-credential-setup-sessions/:id` to poll,
+`POST /api/agent-credential-setup-sessions/:id/verification-code` with `{ code }` for
+Claude's browser-displayed code, and
+`POST /api/agent-credential-setup-sessions/:id/cancel` to cancel. Setup sessions belong
+to the authenticated user; captured credentials are saved encrypted on the server
+and never returned to the browser.
+
 ### `POST /api/credentials`
 
 Add or update a credential (cloud provider token or agent API key).

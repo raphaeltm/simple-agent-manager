@@ -80,7 +80,7 @@ describe('AgentCredentialConnectModal', () => {
     render(<CodexConnectModal isOpen onClose={vi.fn()} />);
 
     const openLink = await screen.findByRole('link', { name: /open openai sign-in/i });
-    expect(h.createAgentCredentialSetupSession).toHaveBeenCalledWith('openai-codex');
+    expect(h.createAgentCredentialSetupSession).toHaveBeenCalledWith('openai-codex', undefined);
     expect(openLink).toHaveAttribute('href', OPENAI_VERIFICATION_URL);
     expect(screen.getByText(USER_CODE)).toBeInTheDocument();
 
@@ -105,7 +105,7 @@ describe('AgentCredentialConnectModal', () => {
     render(<AgentCredentialConnectModal agentType="claude-code" isOpen onClose={vi.fn()} />);
 
     const openLink = await screen.findByRole('link', { name: /open claude sign-in/i });
-    expect(h.createAgentCredentialSetupSession).toHaveBeenCalledWith('claude-code');
+    expect(h.createAgentCredentialSetupSession).toHaveBeenCalledWith('claude-code', undefined);
     expect(openLink).toHaveAttribute('href', CLAUDE_VERIFICATION_URL);
     expect(screen.queryByRole('button', { name: /copy code/i })).not.toBeInTheDocument();
     expect(screen.queryByTestId('codex-terminal')).not.toBeInTheDocument();
@@ -334,23 +334,55 @@ describe('AgentCredentialConnectModal', () => {
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
   });
 
-  it('keeps guided setup user-scoped and visible only when runtime bindings support the agent', async () => {
+  it.each(['openai-codex', 'claude-code'] as const)(
+    'connects a project %s account through the same guided modal',
+    async (agentType) => {
+      h.getAgentCredentialSetupConfig.mockResolvedValue({
+        enabled: true,
+        agentType: 'openai-codex',
+        agentTypes: ['openai-codex', 'claude-code'],
+      });
+      h.createAgentCredentialSetupSession.mockResolvedValue({
+        kind: 'created',
+        session: makeSession('provisioning', { agentType }),
+      });
+      const availability = vi.fn();
+      render(
+        <AgentCredentialConnectTrigger
+          agentType={agentType}
+          projectId="project-client"
+          onAvailabilityChange={availability}
+        />
+      );
+      fireEvent.click(await screen.findByRole('button', { name: /connect with/i }));
+      await waitFor(() =>
+        expect(h.createAgentCredentialSetupSession).toHaveBeenCalledWith(
+          agentType,
+          'project-client'
+        )
+      );
+      expect(screen.getByText(/personal default stays unchanged/)).toBeInTheDocument();
+      expect(availability).toHaveBeenLastCalledWith(true);
+      expect(h.createAgentCredentialSetupSession).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('keeps guided setup hidden when the runtime does not support the agent', async () => {
     h.getAgentCredentialSetupConfig.mockResolvedValue({
       enabled: true,
       agentType: 'openai-codex',
-      agentTypes: ['openai-codex', 'claude-code'],
+      agentTypes: ['openai-codex'],
     });
+    const availability = vi.fn();
     render(
       <AgentCredentialConnectTrigger
-        agentType="openai-codex"
-        scope="project"
-        onConnected={vi.fn()}
+        agentType="claude-code"
+        projectId="p"
+        onAvailabilityChange={availability}
       />
     );
     await waitFor(() => expect(h.getAgentCredentialSetupConfig).toHaveBeenCalled());
-    expect(screen.queryByRole('button', { name: /connect with codex/i })).toBeNull();
-
-    render(<AgentCredentialConnectTrigger agentType="claude-code" scope="user" />);
-    await screen.findByRole('button', { name: /connect with claude code/i });
+    expect(screen.queryByRole('button', { name: /connect with/i })).toBeNull();
+    expect(availability).toHaveBeenLastCalledWith(false);
   });
 });

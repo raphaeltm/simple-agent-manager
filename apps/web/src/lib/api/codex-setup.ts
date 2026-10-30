@@ -126,12 +126,13 @@ export const getCodexSetupConfig = getAgentCredentialSetupConfig;
  * 201/202/409 responses into a discriminated result the modal can branch on.
  */
 export async function createAgentCredentialSetupSession(
-  agentType: GuidedSetupAgentType
+  agentType: GuidedSetupAgentType,
+  projectId?: string
 ): Promise<CreateAgentCredentialSetupResult> {
   try {
     const body = await request<CreateSessionResponseBody>(BASE_PATH, {
       method: 'POST',
-      body: JSON.stringify({ agentType }),
+      body: JSON.stringify({ agentType, ...(projectId ? { projectId } : {}) }),
     });
     // 202: all slots busy — body is { status: 'no_capacity', message }.
     if (body.status === 'no_capacity') {

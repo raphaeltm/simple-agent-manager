@@ -28,10 +28,12 @@
  */
 import type { AgentType, CredentialKind } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
+import { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { requireProjectCapability } from '../../middleware/project-auth';
 import { saveAgentCredentialForUser } from '../../services/agent-credential-save';
 import {
   getClaudeOauthTokenMaxLength,
@@ -567,6 +569,15 @@ export class CredentialSetupSession extends DurableObject<Env> {
     current = this.readRow();
     if (!current || current.status !== 'saving') return;
     try {
+      // Login may take minutes: membership or secret privileges can change while waiting.
+      if (row.project_id !== null) {
+        await requireProjectCapability(
+          drizzle(this.env.DATABASE),
+          row.project_id,
+          row.user_id,
+          'secret:write'
+        );
+      }
       await saveAgentCredentialForUser({
         env: this.env,
         userId: row.user_id,

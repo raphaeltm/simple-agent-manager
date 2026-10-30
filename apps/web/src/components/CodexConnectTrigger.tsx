@@ -20,12 +20,8 @@ interface AgentCredentialConnectTriggerProps {
   agentType: GuidedSetupAgentType;
   /** Forwarded to the modal; fires after the credential is captured + saved. */
   onConnected?: () => void;
-  /**
-   * Credential scope. The guided flow only saves USER-scoped credentials in v1,
-   * so it is hidden in project-scoped contexts to avoid silently overwriting the
-   * user default (the manual credential paste stays available there).
-   */
-  scope?: 'user' | 'project';
+  /** When set, save the connected account as this project’s override. */
+  projectId?: string;
   /** Reports whether the guided button is shown, so callers can word their manual fallback. */
   onAvailabilityChange?: (available: boolean) => void;
 }
@@ -45,7 +41,7 @@ const TRIGGER_COPY: Record<GuidedSetupAgentType, { button: string; description: 
 export function AgentCredentialConnectTrigger({
   agentType,
   onConnected,
-  scope = 'user',
+  projectId,
   onAvailabilityChange,
 }: AgentCredentialConnectTriggerProps) {
   const [enabled, setEnabled] = useState(false);
@@ -70,7 +66,7 @@ export function AgentCredentialConnectTrigger({
     };
   }, [agentType]);
 
-  const available = enabled && scope === 'user';
+  const available = enabled;
   useEffect(() => {
     onAvailabilityChange?.(available);
   }, [available, onAvailabilityChange]);
@@ -93,6 +89,7 @@ export function AgentCredentialConnectTrigger({
       <p className="text-xs text-fg-muted m-0">{copy.description}</p>
       <AgentCredentialConnectModal
         agentType={agentType}
+        projectId={projectId}
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         onConnected={() => {

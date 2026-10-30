@@ -15,6 +15,7 @@ import {
 
 interface AgentCredentialConnectModalProps {
   agentType: GuidedSetupAgentType;
+  projectId?: string;
   isOpen: boolean;
   onClose: () => void;
   onConnected?: () => void;
@@ -102,6 +103,7 @@ function isFailureStatus(status: AgentCredentialSetupStatus): boolean {
 
 export function AgentCredentialConnectModal({
   agentType,
+  projectId,
   isOpen,
   onClose,
   onConnected,
@@ -190,7 +192,7 @@ export function AgentCredentialConnectModal({
 
     void (async () => {
       try {
-        const result = await createAgentCredentialSetupSession(agentType);
+        const result = await createAgentCredentialSetupSession(agentType, projectId);
         if (result.kind === 'created') sessionIdRef.current = result.session.id;
         if (cancelled) return;
         if (result.kind !== 'created') {
@@ -220,7 +222,7 @@ export function AgentCredentialConnectModal({
       manualCloseTimerRef.current = null;
       sessionIdRef.current = null;
     };
-  }, [agentType, isOpen, retryNonce]);
+  }, [agentType, projectId, isOpen, retryNonce]);
 
   const handleCopy = async () => {
     if (!session?.userCode) return;
@@ -328,6 +330,11 @@ export function AgentCredentialConnectModal({
       aria-labelledby={titleId}
     >
       <div className="flex flex-col gap-5">
+        <p className="m-0 text-sm text-fg-muted">
+          {projectId
+            ? 'This account will be saved for this project. Your personal default stays unchanged.'
+            : 'This account will be saved as your personal default.'}
+        </p>
         {phase === 'creating' && <p role="status">Starting guided setup…</p>}
 
         {(phase === 'blocked' || phase === 'error') && message && (

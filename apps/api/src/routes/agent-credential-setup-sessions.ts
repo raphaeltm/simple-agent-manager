@@ -15,6 +15,7 @@
  * environment variable is needed to turn this product flow on.
  */
 import { type AgentType, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import * as v from 'valibot';
 
@@ -23,11 +24,8 @@ import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import {
-  CreateAgentCredentialSetupSessionSchema,
-  jsonValidator,
-  parseOptionalBody,
-} from '../schemas';
+import { requireProjectCapability } from '../middleware/project-auth';
+import { CreateAgentCredentialSetupSessionSchema, jsonValidator } from '../schemas';
 import {
   ACTIVE_SETUP_STATUSES,
   getClaudeVerificationCodeMaxLength,
@@ -124,7 +122,23 @@ agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), a
   }
 
   const userId = getUserId(c);
-  const body = await parseOptionalBody(c.req.raw, CreateAgentCredentialSetupSessionSchema, {});
+  const rawBody = await c.req.text();
+  let raw: unknown = {};
+  if (rawBody.trim()) {
+    try {
+      raw = JSON.parse(rawBody);
+    } catch {
+      throw errors.badRequest('Invalid JSON body');
+    }
+  }
+  const parsed = v.safeParse(CreateAgentCredentialSetupSessionSchema, raw);
+  if (!parsed.success) throw errors.badRequest('Invalid guided setup request');
+  const body = parsed.output;
+  const projectId = body.projectId ?? null;
+  const scope = projectId === null ? 'user' : 'project';
+  if (projectId !== null) {
+    await requireProjectCapability(drizzle(c.env.DATABASE), projectId, userId, 'secret:write');
+  }
   const requestedAgentType = body.agentType ?? DEFAULT_SETUP_AGENT_TYPE;
   if (!isValidAgentType(requestedAgentType) || !isSupportedSetupAgentType(requestedAgentType)) {
     throw errors.badRequest(
@@ -147,6 +161,11 @@ agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), a
     .first<{ id: string }>();
   if (existingActive) {
     const row = await loadOwnedSession(c.env, existingActive.id, userId);
+    if (row.project_id !== projectId) {
+      throw errors.conflict(
+        'A setup session for this agent is already in progress in another account scope. Finish or cancel it first.'
+      );
+    }
     const state = await getSetupSessionState(c.env, row.id);
     return c.json({
       id: row.id,
@@ -183,11 +202,13 @@ agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), a
     await c.env.DATABASE.prepare(
       `INSERT INTO agent_credential_setup_sessions
        (id, user_id, project_id, scope, agent_type, credential_kind, status, sandbox_id, pool_lease_id, expires_at, created_at, updated_at)
-       VALUES (?, ?, NULL, 'user', ?, ?, 'provisioning', ?, ?, ?, ?, ?)`
+       VALUES (?, ?, ?, ?, ?, ?, 'provisioning', ?, ?, ?, ?, ?)`
     )
       .bind(
         sessionId,
         userId,
+        projectId,
+        scope,
         agentType,
         SETUP_CREDENTIAL_KIND,
         sandboxId,
@@ -213,8 +234,8 @@ agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), a
     const state = await startSetupSession(c.env, {
       id: sessionId,
       userId,
-      projectId: null,
-      scope: 'user',
+      projectId,
+      scope,
       agentType,
       credentialKind: SETUP_CREDENTIAL_KIND,
       provider: agentDef.provider,
