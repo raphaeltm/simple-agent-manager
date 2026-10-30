@@ -61,4 +61,7 @@ Intermediate runtime ec4b712ad returned200 on18directAPI probes. A cold Infrastr
 
 A separate stable-deploy desktop Runtime failure showed the app shell and “Loading project…”, rather than the whole-app spinner. Preserve that distinction. The planned frontend Runtime rendering change removes that detail gate; shared middleware read deadlines also bound its auth path.
 
-Supplemental controls:71focused auth/cache/denial tests PASS, including late stale SQL result suppression and disabled-mode retry0sessioncalls versus enabled distinctsessions. Rootquality35tasksPASS before final kill-switch edit; latestfullsuite pending. Final-head staging rerun and timing table remain mandatory before PR.
+Supplemental controls:71focused auth/cache/denial tests PASS, including late stale SQL result suppression and disabled-mode retry0sessioncalls versus enabled distinctsessions. Final frozen validation PASS:21root testtasks; API14,357passed/2skipped, web382files; finalquality35tasksPASS. Task-completion-validator A–F PASS; implementation complete, release verification pending. Final-head staging rerun and timing table remain mandatory before PR.
+
+## Implementation archival
+Implementation complete. Final task-completion-validator PASS at1d4a56413. Stagingrun41106438574 is verifying that exact runtime source; staging measurements/browser flows, CI/CodeRabbit, merge and production smoke remain pending in the overall active task and PR checklist.
