@@ -17,9 +17,9 @@ Project account setup only accepts pasted tokens although user account setup sup
 - [x] Mixed-version safety: explicit config scope capability and dedicated project creation endpoint with no personal fallback
 - [x] Shared guided UI for user/project Claude and Codex, correct success refresh
 - [x] Constitution principle and relevant user/API docs
-- [ ] Unit/contract tests and lint/typecheck/build
+- [x] Unit/contract tests and lint/typecheck/build
 - [x] Mobile/desktop visual audit and independent specialist reviews
-- [ ] Staging scoped-flow verification and cleanup
+- [x] Staging scoped-flow verification and cleanup
 - [ ] PR, CI, best-effort CodeRabbit, merge, production smoke
 
 ## Acceptance
@@ -30,7 +30,7 @@ Project Claude guided connection stores only project credential/pin without chan
 
 56 backend focused cases and 16 frontend cases passed. Four Playwright cases passed for user/project form and modal at 375×667 and 1280×800, with 320px overflow assertions. Implementation and root agents inspected captured screenshots: changed dialogs have clear guided CTAs and readable scope text; no clipping. Existing underlying account-card warnings at 320px are outside this change. UI rubric: hierarchy 4, clarity 5, mobile 4, accessibility 4, consistency 5. Evidence: `tasks/evidence/2026-10-30-project-guided-login/`.
 
-Independent security/Cloudflare/constitution and docs/completion reviews passed. Root lint/typecheck, API/web builds, file-size and context-budget checks passed; broad API/web test suites running. No migration, bindings, secrets or new tunables.
+Independent security/Cloudflare/constitution and docs/completion reviews passed. Root lint/typecheck, API/web builds, file-size and context-budget checks passed; broad API/web suites passed before the final compatibility delta. No migration, bindings, secrets or new tunables.
 
 ## Post-mortem
 
@@ -47,3 +47,13 @@ retry project creation against the personal endpoint. Initial staging08a was not
 used to log in any provider account; redeploy the protected candidate before smoke.
 
 Compatibility delta: security reviewer independently confirmed prior HIGH addressed. Final backend delta32 tests, frontend44 tests, API typecheck, web build, scoped lint and four refreshed guided browser cases passed. Prior broad suites14,300 API/4,795 web passed before the endpoint/capability delta; final PR CI will cover the complete candidate.
+
+## Live staging verification (2026-10-30)
+
+Deployment41031118237 and smoke-tests passed on c471106ed3ba816771e22e48329f2a6e2d6a16f2. Cloudflare deployment2b4bdd6e-197b-4e0d-ae9e-350b853858a9 served Worker697424e0-86bc-4334-a88d-e16398b80f47 at100% with that commit annotation.
+
+Authenticated live Playwright visited dashboard, projects and settings with no page errors. On project Test Project1, real Claude setup01M6672KHB26MSZ6X1RGEFZZ3R at375×667 and Codex setup01M66737SMMXR0PZEFRC0HHV6T at1280×800 both returned201 through /project, reached waiting_for_user with a provider sign-in link, rejected personal-scope reuse409 and cancelled successfully. D1 confirmed both rows scope=project, correct project_id, status=cancelled. Personal credential metadata was identical before/after; invalid project input returned400. No real provider approval or credential changes were performed.
+
+Root inspected live mobile Claude form/modal and desktop Codex form screenshots: readable scope text and visible guided CTA, no clipping/overflow in changed dialogs. Safe captures and staging-result.json are committed under the evidence directory. The live Codex code-bearing modal capture is not published; mock captures cover that modal. Initial harness selector assumed an expanded account row; expanded the collapsed live row and reran without changing product code or creating any container in the initial attempt.
+
+Fallback continuation was used: workflow event matched but prompt deliveryd52dc317-4519-4a9b-8c37-d911a74ad1be failed. The scheduled continuation arrived10:48UTC after09:33 due time; ignored tooling/state was absent after workspace rotation and was restored. No release gate was bypassed.

@@ -21,3 +21,9 @@ The implementation agent inspected all changed surfaces; the root agent addition
 | Consistency         | 5/5   |
 
 Security/Cloudflare and documentation/completion independent reviews passed. No new environment variables, bindings, migrations, or configurable limits.
+
+## Live staging
+
+Final protected candidate c471106ed3ba816771e22e48329f2a6e2d6a16f2 deployed successfully in run41031118237. Live Playwright verified Claude/mobile and Codex/desktop project login readiness, scope handoff, cross-scope conflict, cancellation, unchanged personal metadata and D1 scope/status. Both test containers were cancelled. Dashboard/projects/settings loaded with no page errors. No real subscription approval or credential write was performed; storage success is covered by the real encrypted-storage vertical tests.
+
+Root inspected live Claude mobile form/modal and Codex desktop form captures; no changed-dialog visual issues. Live code-bearing Codex modal is omitted from published evidence; mock captures show those controls without real sign-in codes. See staging-result.json for safe observations.
