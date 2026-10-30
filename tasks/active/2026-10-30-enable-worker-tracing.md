@@ -13,7 +13,7 @@ Admin page investigation found a canceled 114-second request with only 7ms CPU. 
 - [x] Generate enabled traces with explicit 100% sampling; preserve top-level trace overrides.
 - [x] Extend deployment types and test generated TOML for staging/prod, reduced sampling and disabled tracing.
 - [x] Document setup, overrides, retention and billing reference.
-- [ ] Run relevant validation and independent local specialist reviews.
+- [x] Run relevant validation and independent local specialist reviews.
 - [ ] Verify staging trace configuration and captured dependency spans.
 - [ ] Merge after CI/review and verify production deployment/configuration and new traces.
 
@@ -32,3 +32,4 @@ Admin page investigation found a canceled 114-second request with only 7ms CPU. 
 - Deployment scripts TypeScript check passed.
 - Task-only main push rejected by required-check protection; task record kept on PR branch.
 - ESLint, formatting, deployment tsc and public docs build passed (266 pages). Independent Cloudflare/constitution/docs review passed.
+- Completion validator A/B/C/F passed; D/E not applicable. Release telemetry remains pending.
