@@ -24,7 +24,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { resolveAdminSettingDetailsMany } from '../../services/admin-settings';
+import { resolveAdminSetting } from '../../services/admin-settings';
 import { sweepEmptyNodeWarmHandoff } from './empty-node-warm-handoff';
 import {
   sweepDestroyingHandoffNodes,
@@ -59,17 +59,14 @@ export async function runNodeCleanupSweep(
   const db = drizzle(env.DATABASE, { schema });
   const now = new Date();
   const config = resolveCleanupConfig(env);
-  const cleanupSettings = await resolveAdminSettingDetailsMany(env, [
-    'operations.nodeCleanupBlockedRetirementMs',
-    'operations.nodeCleanupRefusalWarnAfterMs',
-    'operations.nodeCleanupOwnershipAlertIntervalMs',
+  const [retirementMs, warningMs, alertMs] = await Promise.all([
+    resolveAdminSetting(env, 'operations.nodeCleanupBlockedRetirementMs'),
+    resolveAdminSetting(env, 'operations.nodeCleanupRefusalWarnAfterMs'),
+    resolveAdminSetting(env, 'operations.nodeCleanupOwnershipAlertIntervalMs'),
   ]);
-  const [retirementSetting, warningSetting, alertSetting] = cleanupSettings;
-  if (!retirementSetting || !warningSetting || !alertSetting)
-    throw new Error('Cleanup retirement settings are unavailable');
-  config.blockedRetirementMs = Number(retirementSetting.value);
-  config.refusalWarnAfterMs = Number(warningSetting.value);
-  config.ownershipAlertIntervalMs = Number(alertSetting.value);
+  config.blockedRetirementMs = Number(retirementMs);
+  config.refusalWarnAfterMs = Number(warningMs);
+  config.ownershipAlertIntervalMs = Number(alertMs);
   const result = emptyResult();
 
   const phases: Array<[string, () => Promise<void>]> = [

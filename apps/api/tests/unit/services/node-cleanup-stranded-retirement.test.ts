@@ -458,6 +458,7 @@ describe('bounded stranded retirement through the real cleanup cron entry', () =
       context: string;
     }>;
     expect(errors.filter((row) => row.context.includes('host'))).toHaveLength(1);
+    expect(errors[0]?.context).toContain('provenance');
     expect(node(f)).toMatchObject({ status: 'destroying' });
   });
 });

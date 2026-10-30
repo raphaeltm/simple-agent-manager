@@ -53,7 +53,11 @@ export async function diagnoseCleanupRefusal(
     (n.runtime='cf-container' AND EXISTS (SELECT 1 FROM workspaces w
       WHERE w.node_id=n.id AND w.status='sleeping')) AS sleeping_container_retention,
     NOT (1=1 ${boundedWarmPlacementClaimGuardSql('n.id')}) AS warm_placement_claim,
-    NOT (${cleanupNodeProvenanceSql('n', options.allowManagedRunningProvenance)}) AS provenance,
+    (NOT (${cleanupNodeProvenanceSql('n', options.allowManagedRunningProvenance)})
+      OR (n.runtime='vm' AND (n.placement_credential_source IS NULL
+        OR n.placement_credential_source NOT IN ('user','project','platform')
+        OR NULLIF(TRIM(n.placement_credential_reference),'') IS NULL
+        OR NULLIF(TRIM(n.runtime_incarnation_id),'') IS NULL))) AS provenance,
     COALESCE((SELECT MAX(${preservedVmRetirementActivitySql('w')})
       FROM workspaces w WHERE w.node_id=n.id), n.created_at) >= ? AS idle_window,
     n.cleanup_backoff_until > ? AS backoff
@@ -112,9 +116,11 @@ export async function recordCleanupRefusal(
       )
   ).toISOString();
   await env.DATABASE.prepare(
-    `UPDATE nodes SET cleanup_blocked_since=COALESCE(cleanup_blocked_since, ?),
-      cleanup_blocked_reason=?, cleanup_backoff_until=?
-    WHERE id=? AND user_id=? AND status=? AND status IN ('stopped','destroying')`
+    `UPDATE nodes SET cleanup_blocked_since=CASE WHEN status IN ('stopped','destroying')
+        THEN COALESCE(cleanup_blocked_since, ?) ELSE NULL END,
+      cleanup_blocked_reason=CASE WHEN status IN ('stopped','destroying') THEN ? ELSE NULL END,
+      cleanup_backoff_until=?
+    WHERE id=? AND user_id=? AND status=?`
   )
     .bind(nowIso, refusal.reasons.join(', '), backoff, node.id, node.user_id, node.status)
     .run();
