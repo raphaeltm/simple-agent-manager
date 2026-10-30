@@ -24,6 +24,7 @@ export {
   savePlatformIntegrationConfig,
   setSetupCompleted,
 } from './platform-config-core';
+export { resolveLoginOAuthConfig } from './platform-config-login';
 export {
   areGitHubTriggersConfigured,
   getGitHubAppConfig,

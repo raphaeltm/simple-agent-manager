@@ -65,3 +65,8 @@ Supplemental controls:71focused auth/cache/denial tests PASS, including late sta
 
 ## Implementation archival
 Implementation complete. Final task-completion-validator PASS at1d4a56413. Stagingrun41106438574 is verifying that exact runtime source; staging measurements/browser flows, CI/CodeRabbit, merge and production smoke remain pending in the overall active task and PR checklist.
+
+## Cold bootstrap dependency refinement
+The final1d4a56413 staging API probes all returned200, but a cold navigation reached the sign-in page. Exact native telemetry: GET/api/auth/get-session at2026-10-30T18:50:13.815Z returned503 after10004ms (CPU101); other session calls were200 in5–470ms. The bounded helper worked; the specific stalled dependency remains unproven. A subsequent review found createAuth unnecessarily awaited five legacy App/webhook/feedback reads and infrastructure OAuth settings.
+
+The focused login resolver now uses the existing shared settings/credential caches for seven login keys only. Full platform/App/feedback callers, source precedence, provider projections, invalidation and denial freshness are preserved. A real-SQL control with unrelated legacy reads stalled fails on the old implementation and passes on the new one; environment/database/unset provider parity also passes.84focused testsPASS; Cloudflare and security re-reviewPASS. Final root/quality checks and new pinned deployment/browser audit remain pending; no PR yet.

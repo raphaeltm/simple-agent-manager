@@ -8,10 +8,7 @@ import {
 import type { AdminSettingName } from './admin-settings-registry';
 import { DEFAULT_CONFIG_READ_TIMEOUT_MS } from './config-read-deadline';
 import { withDeadline } from './fetch-timeout';
-import {
-  buildPlatformIntegrationStatements,
-  settingStatement,
-} from './platform-config-statements';
+import { buildPlatformIntegrationStatements, settingStatement } from './platform-config-statements';
 import {
   creatorId,
   ENV_KEYS,
@@ -43,8 +40,8 @@ import type {
 /**
  * Per-isolate cache TTL for the resolved platform config, in milliseconds.
  *
- * `resolvePlatformConfig` costs five D1 round-trips for the fields outside Phase 1 and sits on the auth preamble of every
- * authenticated request (`createAuth`), so it is exactly the "stable config" case the
+ * `resolvePlatformConfig` reads five fields outside Phase 1 for App/webhook/feedback callers.
+ * Login bootstrap uses the focused OAuth resolver. This is the stable config case the
  * per-isolate cache in `.claude/rules/60-request-io-and-bundle-budgets.md` exists for.
  * Platform OAuth config changes at most a handful of times in a deployment's lifetime.
  */
