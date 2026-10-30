@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const h = vi.hoisted(() => ({
@@ -322,6 +322,66 @@ describe('AgentCredentialConnectModal', () => {
 
     resolvePoll?.(makeSession('completed'));
     await waitFor(() => expect(onConnected).toHaveBeenCalledOnce());
+  });
+
+  it('keeps the current project session when an earlier create resolves late', async () => {
+    type Result = Awaited<
+      ReturnType<typeof import('../../../src/lib/api').createAgentCredentialSetupSession>
+    >;
+    let resolveOld!: (result: Result) => void;
+    let resolveCurrent!: (result: Result) => void;
+    h.createAgentCredentialSetupSession
+      .mockImplementationOnce(
+        () =>
+          new Promise<Result>((resolve) => {
+            resolveOld = resolve;
+          })
+      )
+      .mockImplementationOnce(
+        () =>
+          new Promise<Result>((resolve) => {
+            resolveCurrent = resolve;
+          })
+      );
+    const current = makeSession('waiting_for_user', {
+      id: 'current-project-session',
+      agentType: 'claude-code',
+      verificationUrl: CLAUDE_VERIFICATION_URL,
+    });
+    h.getAgentCredentialSetupSession.mockResolvedValue(current);
+    h.submitAgentCredentialSetupVerificationCode.mockResolvedValue(current);
+    const props = { agentType: 'claude-code' as const, isOpen: true, onClose: vi.fn() };
+    const { rerender } = render(<AgentCredentialConnectModal {...props} projectId="old-project" />);
+    rerender(<AgentCredentialConnectModal {...props} projectId="current-project" />);
+    await act(async () => {
+      resolveCurrent({ kind: 'created', session: current });
+    });
+    await screen.findByRole('link', { name: /open claude sign-in/i });
+    await act(async () => {
+      resolveOld({ kind: 'created', session: { ...current, id: 'stale-project-session' } });
+    });
+    await waitFor(() => expect(h.getAgentCredentialSetupSession).toHaveBeenCalled());
+    expect(h.getAgentCredentialSetupSession.mock.calls.every(([id]) => id === current.id)).toBe(
+      true
+    );
+    fireEvent.change(screen.getByLabelText(/paste the code claude shows you/i), {
+      target: { value: CLAUDE_VERIFICATION_CODE },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /continue sign-in/i }));
+    await waitFor(() =>
+      expect(h.submitAgentCredentialSetupVerificationCode).toHaveBeenCalledWith(
+        current.id,
+        CLAUDE_VERIFICATION_CODE
+      )
+    );
+    fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }));
+    await waitFor(() =>
+      expect(h.cancelAgentCredentialSetupSession).toHaveBeenCalledWith(current.id)
+    );
+    expect(h.createAgentCredentialSetupSession.mock.calls).toEqual([
+      ['claude-code', 'old-project'],
+      ['claude-code', 'current-project'],
+    ]);
   });
 
   it('shows a project endpoint failure without retrying as a personal connection', async () => {

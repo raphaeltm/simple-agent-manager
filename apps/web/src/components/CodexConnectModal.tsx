@@ -193,8 +193,8 @@ export function AgentCredentialConnectModal({
     void (async () => {
       try {
         const result = await createAgentCredentialSetupSession(agentType, projectId);
-        if (result.kind === 'created') sessionIdRef.current = result.session.id;
         if (cancelled) return;
+        if (result.kind === 'created') sessionIdRef.current = result.session.id;
         if (result.kind !== 'created') {
           setPhase('blocked');
           setMessage(result.message);

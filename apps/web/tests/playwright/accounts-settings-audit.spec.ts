@@ -396,13 +396,24 @@ function surfaceTests(viewport: 'mobile' | 'desktop') {
         { rows: NORMAL_ROWS }
       );
       let submitted: unknown;
-      await page.route('**/api/agent-credential-setup-sessions/**', async (route) => {
+      await page.route('**/api/agent-credential-setup-sessions/config', async (route) => {
         await route.fulfill({
           json: {
             enabled: true,
             agentType: 'openai-codex',
             agentTypes: ['openai-codex', 'claude-code'],
             scopes: ['user', 'project'],
+          },
+        });
+      });
+      await page.route('**/api/agent-credential-setup-sessions/guided-project', async (route) => {
+        await route.fulfill({
+          json: {
+            id: 'guided-project',
+            agentType: 'claude-code',
+            status: 'waiting_for_user',
+            expiresAt: '2099-01-01T00:00:00Z',
+            verificationUrl: 'https://claude.ai/oauth/authorize?mock=true',
           },
         });
       });

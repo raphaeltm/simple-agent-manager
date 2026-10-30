@@ -65,3 +65,7 @@ The current-tree scan found one newly introduced synthetic AES key in the persis
 ## Final static-analysis cleanup
 
 Extracted request parsing/scope validation and agent resolution from the shared create handler to address Sonar S3776 complexity. All 60 focused backend tests, scoped lint, API typecheck and independent security/completion delta review pass. Validation/authorization/lease ordering and dedicated project endpoint behavior are unchanged. A fresh staging deployment and live cancel-only scope smoke are required before merge.
+
+## CodeRabbit review fixes
+
+Resolved both review findings: cancelled create continuations now return before writing the shared session ID; a deferred-response regression verifies current-project polling, code submission and cancellation after a stale response. Browser audit mocks configuration and session polling separately.45 focused unit tests,4 refreshed mobile/desktop browser cases, web typecheck/build/lint pass; screenshots inspected and independent security/completion delta review PASS.
