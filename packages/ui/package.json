@@ -21,13 +21,13 @@
   },
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit && tsc --project tsconfig.storybook.json --noEmit",
+    "typecheck": "tsc --noEmit && tsc --project tsconfig.storybook.json --noEmit && astro check --tsconfig tsconfig.astro.json",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
     "storybook": "storybook dev --port 6006",
     "build-storybook": "storybook build",
     "test:storybook": "playwright test --config playwright.storybook.config.ts",
-    "lint": "eslint 'src/**/*.{ts,tsx}' '.storybook/**/*.{ts,tsx}' 'tests/playwright/**/*.{ts,tsx}' 'playwright.storybook.config.ts'"
+    "lint": "eslint 'src/**/*.{ts,tsx,astro}' '.storybook/**/*.{ts,tsx}' 'tests/playwright/**/*.{ts,tsx}' 'playwright.storybook.config.ts'"
   },
   "peerDependencies": {
     "lucide-react": "catalog:",
@@ -60,6 +60,8 @@
     "tailwindcss": "4.3.3",
     "typescript": "catalog:",
     "vite": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "catalog:",
+    "@astrojs/check": "catalog:",
+    "astro": "6.4.8"
   }
 }

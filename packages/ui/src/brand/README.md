@@ -2,7 +2,8 @@
 
 Build-time Astro components and framework-independent CSS shared by the marketing
 site, standalone installer, and account-owned maintenance Worker. Import
-`@simple-agent-manager/ui/brand.css` and `@simple-agent-manager/ui/brand/*.astro`.
+`@simple-agent-manager/ui/brand.css` and `@simple-agent-manager/ui/glass.css`.
+Import components from `@simple-agent-manager/ui/brand/*.astro`.
 The app's React tokens remain separate.
 
 `brand.css` owns the public palette, typography, radii and buttons; `type.css`

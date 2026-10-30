@@ -108,3 +108,4 @@ apps/installer/public/fonts/
 apps/installer/public/brand-icon.png
 apps/installer/public/sam-head.png
 apps/installer/public/theme-init.js
+packages/ui/.astro/

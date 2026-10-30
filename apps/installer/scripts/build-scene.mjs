@@ -48,12 +48,12 @@ const [hostedBefore, hostedAfter] = shell
   .split('SAM_MAINTENANCE_CONTENT');
 for (const match of [...shell.matchAll(/<link\b[^>]*rel="stylesheet"[^>]*href="([^"]+)"[^>]*>/g)]) {
   const css = await readFile(new URL('../site-static' + match[1], import.meta.url), 'utf8');
-  shell = shell.replace(match[0], `<style>${css}</style>`);
+  shell = shell.replace(match[0], () => `<style>${css}</style>`);
 }
 // Inline the local compiled scripts so maintenance has no origin dependencies.
 for (const match of [...shell.matchAll(/<script\b([^>]*?)src="([^"]+)"([^>]*)><\/script>/g)]) {
   const code = await readFile(new URL('../site-static' + match[2], import.meta.url), 'utf8');
-  shell = shell.replace(match[0], `<script type="module">${code}</script>`);
+  shell = shell.replace(match[0], () => `<script${match[1]}${match[3]}>${code}</script>`);
 }
 shell = shell
   .replaceAll('BRAND_ICON', iconUrl)

@@ -17,10 +17,10 @@ const root = resolve(import.meta.dirname, '../..');
 // Normalize command arrays as well as shell commands. Emitting tsc is an artifact
 // build; tsc --noEmit and named validation tasks are standalone checks.
 function assertPure(source, label) {
-  const commands = source.replace(/['"`,\[\]]/g, ' ');
+  const commands = source.replace(/['"`,()\[\]]/g, ' ');
   assert.doesNotMatch(
     commands,
-    /\b(?:vitest|jest|mocha|ava|eslint(?!-disable)|oxlint|golangci-lint)\b|\b(?:go|cargo(?:\s+\+[^\s]+)?)\s+test\b|\bnode\s+--test\b|\b(?:pnpm|npm|yarn|bun)(?:\s+--[\w=-]+)*(?:\s+(?:run|exec))?\s+(?:test(?:[\w:-]*)|lint(?:[\w:-]*)|typecheck)\b|\btsc\b[^\n;&]*--noEmit|\bastro\s+check\b/i,
+    /\b(?:vitest|jest|mocha|ava|eslint(?!-disable)|oxlint|golangci-lint)\b|\b(?:go|cargo(?:\s+\+[^\s]+)?)\s+test\b|\bnode\s+--test\b|\b(?:pnpm|npm|yarn|bun)(?:\s+(?:(?:--(?:filter|dir|prefix|workspace)|-[FC])\s+[^\s;&]+|--[\w=@/.*!:-]+|-[rw]))*(?:\s+(?:run|exec))?\s+(?:test(?:[\w:-]*)|lint(?:[\w:-]*)|typecheck)\b|\btsc\b[^\n;&]*--noEmit|\bastro\s+check\b/i,
     label
   );
 }
@@ -153,6 +153,13 @@ test('guard catches forbidden runners in shell commands and engine command array
     'go test ./...',
     'cargo +1.95.0 test',
     'pnpm test:unit',
+    'pnpm --filter @simple-agent-manager/api test',
+    'pnpm --filter=@simple-agent-manager/api run test:unit',
+    'pnpm -F @simple-agent-manager/api test',
+    "execute('pnpm', ['--filter', '@simple-agent-manager/api', 'test'])",
+    "pnpm('test')",
+    "pnpm('--filter', '@simple-agent-manager/api', 'test')",
+    "pnpm('--filter', '@simple-agent-manager/api', 'run', 'typecheck')",
     'npm run lint',
     'pnpm typecheck',
     "execute('pnpm', ['exec', 'vitest', 'run'])",
@@ -163,7 +170,7 @@ test('guard catches forbidden runners in shell commands and engine command array
   }
   assert.doesNotThrow(() =>
     assertPure(
-      'tsc && cargo build && go build && npm --ignore-scripts run build',
+      "tsc && cargo build && go build && npm --ignore-scripts run build && pnpm --filter @simple-agent-manager/api build && pnpm('--filter', '@simple-agent-manager/api', 'build')",
       'artifact builds'
     )
   );
