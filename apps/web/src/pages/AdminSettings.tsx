@@ -1,11 +1,12 @@
 import { Alert, Button, Spinner } from '@simple-agent-manager/ui';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useRef, useState } from 'react';
 
 import { ConfirmDialog } from '../components/ConfirmDialog';
+import { useQueryScope } from '../hooks/useQueryScope';
 import {
   ADMIN_SETTING_CATEGORIES,
   type AdminSetting,
-  type AdminSettingsView,
   fetchAdminSettings,
   patchAdminSettings,
   type SettingValue,
@@ -203,9 +204,21 @@ function SettingCard({
 }
 
 export function AdminSettings() {
-  const [view, setView] = useState<AdminSettingsView | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const scope = useQueryScope();
+  const client = useQueryClient();
+  const queryKey = ['auth', scope, 'admin', 'settings'] as const;
+  const settings = useQuery({
+    queryKey,
+    queryFn: ({ signal }) => fetchAdminSettings(signal),
+    enabled: Boolean(scope),
+  });
+  const view = settings.data;
+  const loading = settings.isPending;
+  const setView = (next: NonNullable<typeof view>) => client.setQueryData(queryKey, next);
+  const [actionError, setError] = useState<string | null>(null);
+  const error =
+    actionError ??
+    (settings.error ? 'Could not load settings. Retry to read the current configuration.' : null);
   const [message, setMessage] = useState<string | null>(null);
   const [query, setQuery] = useState('');
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -213,23 +226,12 @@ export function AdminSettings() {
   const inFlight = useRef(false);
   const [conflict, setConflict] = useState(false);
   const [pending, setPending] = useState<{ name: string; value: SettingValue }[] | null>(null);
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = async () => {
     setError(null);
-    try {
-      setView(await fetchAdminSettings());
-      setConflict(false);
-    } catch {
-      setError('Could not load settings. Retry to read the current configuration.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-  // Only initial mount/retry loads remote state. Editing and saving never trigger a reload effect.
-  useEffect(() => {
-    void load();
-  }, [load]);
-
+    const result = await settings.refetch();
+    if (result.error) setError('Could not load settings. Retry to read the current configuration.');
+    else setConflict(false);
+  };
   const save = async (changes: { name: string; value: SettingValue }[]) => {
     if (!view || inFlight.current || conflict) return;
     inFlight.current = true;

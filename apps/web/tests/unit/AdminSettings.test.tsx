@@ -1,7 +1,8 @@
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ApiClientError } from '../../src/lib/api/client';
+import { renderWithQuery as render } from '../test-utils/query-test-utils';
 const mocks = vi.hoisted(() => ({ fetchAdminSettings: vi.fn(), patchAdminSettings: vi.fn() }));
 vi.mock('../../src/lib/api/admin-settings', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/lib/api/admin-settings')>()),
@@ -222,3 +223,5 @@ describe('AdminSettings', () => {
     );
   });
 });
+
+vi.mock('../../src/hooks/useQueryScope', () => ({ useQueryScope: () => 'admin-1' }));

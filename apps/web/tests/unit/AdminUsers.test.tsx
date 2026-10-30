@@ -1,5 +1,7 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { renderWithQuery as render } from '../test-utils/query-test-utils';
 
 const mocks = vi.hoisted(() => ({
   approveOrSuspendUser: vi.fn(),
@@ -69,21 +71,30 @@ describe('AdminUsers signup approval config', () => {
 
     expect(await screen.findByText('Signup approval')).toBeInTheDocument();
     expect(
-      screen.getByText('New and pending users can use SAM while approval is off. Stored pending users are not changed to active.'),
+      screen.getByText(
+        'New and pending users can use SAM while approval is off. Stored pending users are not changed to active.'
+      )
     ).toBeInTheDocument();
-    expect(screen.getByRole('switch', { name: /turn signup approval on/i })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('switch', { name: /turn signup approval on/i })).toHaveAttribute(
+      'aria-checked',
+      'false'
+    );
     expect(await screen.findByText('Pending User')).toBeInTheDocument();
   });
 
   it('updates the runtime approval setting through the admin API', async () => {
     render(<AdminUsers />);
 
-    fireEvent.click(await screen.findByRole('switch', { name: /turn signup approval on/i }));
+    const toggle = await screen.findByRole('switch', { name: /turn signup approval on/i });
+    await waitFor(() => expect(toggle).toBeEnabled());
+    fireEvent.click(toggle);
 
     await waitFor(() => {
       expect(mocks.updateSignupApprovalConfig).toHaveBeenCalledWith({ requireApproval: true });
     });
     expect(await screen.findByText('Approval on')).toBeInTheDocument();
-    expect(screen.getByText('New users wait for admin approval before using SAM.')).toBeInTheDocument();
+    expect(
+      screen.getByText('New users wait for admin approval before using SAM.')
+    ).toBeInTheDocument();
   });
 });

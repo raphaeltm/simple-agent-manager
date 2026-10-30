@@ -1,6 +1,6 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { type ReactNode, Suspense } from 'react';
-import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router';
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from 'react-router';
 
 import { AppShell } from './components/AppShell';
 import { AuthProvider, useAuth } from './components/AuthProvider';
@@ -64,28 +64,25 @@ const IdeaPage = lazyNamed(() => import('./pages/ideas/IdeaPage'), 'IdeaPage');
 const IdeasListPage = lazyNamed(() => import('./pages/ideas/IdeasListPage'), 'IdeasListPage');
 const Node = lazyNamed(() => import('./pages/Node'), 'Node');
 const Nodes = lazyNamed(() => import('./pages/Nodes'), 'Nodes');
-/**
- * `/projects/:id` renders the `Project` shell, whose `<Outlet/>` then renders a child
- * route — so the child's chunk would only START loading once the shell has rendered.
- * That sequential waterfall lands on the app's hottest path (rule 26: project chat is
- * the primary UX surface), and the shell chunk is tiny (~1 kB gzip), so the second
- * request is almost pure round-trip latency.
- *
- * Merging the two into one `advancedChunks` group was measured to be far worse — it made
- * the combined 343 kB gzip chunk eager on every page load (see `vite.config.ts`). Kicking
- * the child import off in parallel with the shell import gets the same overlap with none
- * of the initial-load cost.
- *
- * `chat` is the correct chunk to warm: `/projects/:id` index-redirects to it.
- */
-const Project = lazyNamed(() => {
-  const shell = import('./pages/Project');
-  // Fire-and-forget: failures are surfaced by the route's own lazy import, and an
-  // unhandled rejection here would be reported as a page-level error.
-  void import('./pages/project-chat').catch(() => undefined);
-  return shell;
-}, 'Project');
-const ProjectChat = lazyNamed(() => import('./pages/project-chat'), 'ProjectChat');
+// Start the active child chunk alongside the shell on cold deep links.
+let projectShellLoad: Promise<typeof import('./pages/Project')> | undefined;
+const loadProjectShell = () => (projectShellLoad ??= import('./pages/Project'));
+let projectChatLoad: Promise<typeof import('./pages/project-chat')> | undefined;
+const loadProjectChat = () => (projectChatLoad ??= import('./pages/project-chat'));
+let projectSettingsLoad: Promise<typeof import('./pages/ProjectSettings')> | undefined;
+const loadProjectSettings = () => (projectSettingsLoad ??= import('./pages/ProjectSettings'));
+const ProjectShell = lazyNamed(loadProjectShell, 'Project');
+function Project() {
+  const { pathname } = useLocation();
+  void loadProjectShell().catch(() => undefined);
+  if (/\/settings(?:\/|$)/.test(pathname)) {
+    void loadProjectSettings().catch(() => undefined);
+  } else if (/\/projects\/[^/]+(?:\/chat(?:\/|$)|\/?$)/.test(pathname)) {
+    void loadProjectChat().catch(() => undefined);
+  }
+  return <ProjectShell />;
+}
+const ProjectChat = lazyNamed(loadProjectChat, 'ProjectChat');
 const ProjectActivity = lazyNamed(() => import('./pages/ProjectActivity'), 'ProjectActivity');
 const ProjectAgentChat = lazyNamed(() => import('./pages/ProjectAgentChat'), 'ProjectAgentChat');
 const ProjectCreate = lazyNamed(() => import('./pages/ProjectCreate'), 'ProjectCreate');
@@ -111,39 +108,18 @@ const ProjectNotifications = lazyNamed(
 );
 const ProjectProfiles = lazyNamed(() => import('./pages/ProjectProfiles'), 'ProjectProfiles');
 const Projects = lazyNamed(() => import('./pages/Projects'), 'Projects');
-const ProjectSettings = lazyNamed(() => import('./pages/ProjectSettings'), 'ProjectSettings');
-const ProjectSettingsAccess = lazyNamed(
-  () => import('./pages/ProjectSettings'),
-  'ProjectSettingsAccess'
-);
-const ProjectSettingsAgents = lazyNamed(
-  () => import('./pages/ProjectSettings'),
-  'ProjectSettingsAgents'
-);
-const ProjectSettingsAccounts = lazyNamed(
-  () => import('./pages/ProjectSettings'),
-  'ProjectSettingsAccounts'
-);
-const ProjectSettingsDeploy = lazyNamed(
-  () => import('./pages/ProjectSettings'),
-  'ProjectSettingsDeploy'
-);
-const ProjectSettingsGeneral = lazyNamed(
-  () => import('./pages/ProjectSettings'),
-  'ProjectSettingsGeneral'
-);
-const ProjectSettingsIndexRedirect = lazyNamed(
-  () => import('./pages/ProjectSettings'),
-  'ProjectSettingsIndexRedirect'
-);
+const ProjectSettings = lazyNamed(loadProjectSettings, 'ProjectSettings');
+const ProjectSettingsAccess = lazyNamed(loadProjectSettings, 'ProjectSettingsAccess');
+const ProjectSettingsAgents = lazyNamed(loadProjectSettings, 'ProjectSettingsAgents');
+const ProjectSettingsAccounts = lazyNamed(loadProjectSettings, 'ProjectSettingsAccounts');
+const ProjectSettingsDeploy = lazyNamed(loadProjectSettings, 'ProjectSettingsDeploy');
+const ProjectSettingsGeneral = lazyNamed(loadProjectSettings, 'ProjectSettingsGeneral');
+const ProjectSettingsIndexRedirect = lazyNamed(loadProjectSettings, 'ProjectSettingsIndexRedirect');
 const ProjectSettingsInfrastructure = lazyNamed(
-  () => import('./pages/ProjectSettings'),
+  loadProjectSettings,
   'ProjectSettingsInfrastructure'
 );
-const ProjectSettingsRuntime = lazyNamed(
-  () => import('./pages/ProjectSettings'),
-  'ProjectSettingsRuntime'
-);
+const ProjectSettingsRuntime = lazyNamed(loadProjectSettings, 'ProjectSettingsRuntime');
 const ProjectSkills = lazyNamed(() => import('./pages/ProjectSkills'), 'ProjectSkills');
 const AutomationOverview = lazyNamed(
   () => import('./pages/automation/AutomationOverview'),

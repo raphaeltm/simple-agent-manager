@@ -76,15 +76,19 @@ describe('project detail intent prefetch', () => {
     renderWithQuery(
       <MemoryRouter>
         <ProjectSummaryCard project={PROJECT} queryScope="user-1" />
-      </MemoryRouter>,
+      </MemoryRouter>
     );
 
     const projectCard = screen.getByText('Prefetched project').closest('[role="button"]');
     if (!projectCard) throw new Error('Project card was not rendered');
     fireEvent.mouseEnter(projectCard);
 
-    await waitFor(() => expect(mocks.getProject).toHaveBeenCalledWith('project-1'));
-    expect(queryClient.getQueryData(projectQueryKeys.detail('user-1', 'project-1'))).toEqual(PROJECT_DETAIL);
+    await waitFor(() =>
+      expect(mocks.getProject).toHaveBeenCalledWith('project-1', expect.any(AbortSignal))
+    );
+    expect(queryClient.getQueryData(projectQueryKeys.detail('user-1', 'project-1'))).toEqual(
+      PROJECT_DETAIL
+    );
 
     await queryClient.fetchQuery(projectDetailQueryOptions('user-1', 'project-1'));
     expect(mocks.getProject).toHaveBeenCalledTimes(1);
@@ -97,33 +101,37 @@ describe('project detail intent prefetch', () => {
         loading={false}
         onNavigate={vi.fn()}
         queryScope="user-1"
-      />,
+      />
     );
 
     fireEvent.focus(screen.getByRole('button', { name: /Prefetched project/ }));
 
-    await waitFor(() => expect(mocks.getProject).toHaveBeenCalledWith('project-1'));
+    await waitFor(() =>
+      expect(mocks.getProject).toHaveBeenCalledWith('project-1', expect.any(AbortSignal))
+    );
   });
 
   it('prefetches on touch intent from a project card', async () => {
     renderWithQuery(
       <MemoryRouter>
         <ProjectSummaryCard project={PROJECT} queryScope="user-1" />
-      </MemoryRouter>,
+      </MemoryRouter>
     );
 
     const projectCard = screen.getByText('Prefetched project').closest('[role="button"]');
     if (!projectCard) throw new Error('Project card was not rendered');
     fireEvent.touchStart(projectCard);
 
-    await waitFor(() => expect(mocks.getProject).toHaveBeenCalledWith('project-1'));
+    await waitFor(() =>
+      expect(mocks.getProject).toHaveBeenCalledWith('project-1', expect.any(AbortSignal))
+    );
   });
 
   it('cancels speculative hover when the pointer only sweeps across a card', async () => {
     renderWithQuery(
       <MemoryRouter>
         <ProjectSummaryCard project={PROJECT} queryScope="user-1" />
-      </MemoryRouter>,
+      </MemoryRouter>
     );
 
     const projectCard = screen.getByText('Prefetched project').closest('[role="button"]');

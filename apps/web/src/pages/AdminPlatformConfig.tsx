@@ -1,63 +1,35 @@
 import { Alert, Spinner } from '@simple-agent-manager/ui';
-import { useCallback, useEffect, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 
 import { AdminAgentEmailPanel } from '../components/AdminAgentEmailPanel';
 import { AdminConnectorPanel } from '../components/AdminConnectorPanel';
 import { PlatformIntegrationConfigForm } from '../components/PlatformIntegrationConfigForm';
-import type { PlatformConfigStatus, PlatformIntegrationConfigInput } from '../lib/api';
+import { useQueryScope } from '../hooks/useQueryScope';
+import type { PlatformIntegrationConfigInput } from '../lib/api';
 import { fetchAdminPlatformConfig, listProjects, updateAdminPlatformConfig } from '../lib/api';
 import { PROJECT_LIST_LIMIT } from '../lib/project-query-config';
 
-type FeedbackProjectOption = {
-  id: string;
-  name: string;
-  status: string;
-};
-
-async function loadAccessibleFeedbackProjects(): Promise<FeedbackProjectOption[]> {
-  const projects: FeedbackProjectOption[] = [];
-  let cursor: string | null | undefined;
-  do {
-    const response = await listProjects(PROJECT_LIST_LIMIT, cursor ?? undefined);
-    projects.push(
-      ...response.projects.map((project) => ({
-        id: project.id,
-        name: project.name,
-        status: project.status,
-      }))
-    );
-    cursor = response.nextCursor;
-  } while (cursor);
-  return projects;
-}
-
 export function AdminPlatformConfig() {
-  const [status, setStatus] = useState<PlatformConfigStatus | null>(null);
-  const [feedbackProjects, setFeedbackProjects] = useState<FeedbackProjectOption[]>([]);
-  const [loading, setLoading] = useState(true);
+  const scope = useQueryScope();
+  const client = useQueryClient();
+  const queryKey = ['auth', scope, 'admin', 'platform-config'] as const;
+  const config = useQuery({
+    queryKey,
+    queryFn: ({ signal }) => fetchAdminPlatformConfig(signal),
+    enabled: Boolean(scope),
+  });
+  // One bounded page supplies the dropdown independently of the integrations form.
+  const projects = useQuery({
+    queryKey: ['auth', scope, 'admin', 'feedback-project-options'],
+    queryFn: ({ signal }) => listProjects(PROJECT_LIST_LIMIT, undefined, signal),
+    enabled: Boolean(scope && config.data),
+  });
+  const status = config.data?.status;
+  const feedbackProjects = projects.data?.projects ?? [];
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  const loadConfig = useCallback(async () => {
-    setError(null);
-    try {
-      const [response, projects] = await Promise.all([
-        fetchAdminPlatformConfig(),
-        loadAccessibleFeedbackProjects(),
-      ]);
-      setStatus(response.status);
-      setFeedbackProjects(projects);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load platform integrations');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadConfig();
-  }, [loadConfig]);
 
   const handleSave = async (config: PlatformIntegrationConfigInput) => {
     setSaving(true);
@@ -65,7 +37,7 @@ export function AdminPlatformConfig() {
     setMessage(null);
     try {
       const response = await updateAdminPlatformConfig(config);
-      setStatus(response.status);
+      client.setQueryData(queryKey, response);
       setMessage('Platform integration settings saved.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save platform integrations');
@@ -73,14 +45,6 @@ export function AdminPlatformConfig() {
       setSaving(false);
     }
   };
-
-  if (loading) {
-    return (
-      <div className="flex justify-center py-12">
-        <Spinner />
-      </div>
-    );
-  }
 
   return (
     <div className="space-y-4">
@@ -90,6 +54,12 @@ export function AdminPlatformConfig() {
           platform credentials; existing environment fallbacks remain active until overridden.
         </p>
       </div>
+      {config.isPending && (
+        <div className="flex justify-center py-12">
+          <Spinner />
+        </div>
+      )}
+      {config.error && <Alert variant="error">{config.error.message}</Alert>}
       {error && (
         <Alert variant="error" onDismiss={() => setError(null)}>
           {error}

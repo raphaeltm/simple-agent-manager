@@ -1,7 +1,9 @@
 import { Body, Button, Card, Spinner } from '@simple-agent-manager/ui';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, Power, RefreshCw } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 
+import { useQueryScope } from '../hooks/useQueryScope';
 import {
   type AdminTrialsConfigResponse,
   fetchAdminTrialsConfig,
@@ -32,26 +34,26 @@ function StatusBadge({ enabled }: { enabled: boolean }) {
 }
 
 export function AdminTrials() {
-  const [config, setConfig] = useState<AdminTrialsConfigResponse | null>(null);
-  const [loading, setLoading] = useState(true);
+  const scope = useQueryScope();
+  const client = useQueryClient();
+  const queryKey = ['auth', scope, 'admin', 'AdminTrials', null] as const;
+  const query = useQuery({
+    queryKey,
+    queryFn: ({ signal }) => fetchAdminTrialsConfig(signal),
+    enabled: Boolean(scope),
+  });
+  const config = query.data ?? null;
+  const setConfig = (next: AdminTrialsConfigResponse) => client.setQueryData(queryKey, next);
+  const loading = query.isPending;
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [actionError, setError] = useState<string | null>(null);
+  const error = actionError ?? query.error?.message;
 
-  const loadConfig = useCallback(async () => {
-    try {
-      setError(null);
-      const result = await fetchAdminTrialsConfig();
-      setConfig(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load trial settings');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadConfig();
-  }, [loadConfig]);
+  const loadConfig = async () => {
+    setError(null);
+    const result = await query.refetch();
+    if (result.error) setError(result.error.message);
+  };
 
   const handleToggleTrials = async () => {
     if (!config) return;
@@ -90,7 +92,8 @@ export function AdminTrials() {
     <div className="space-y-6">
       <Body>
         Control whether new anonymous trial workspaces can be created. Pausing trials stops new
-        trial creation but does not delete existing projects, nodes, workspaces, or claimed accounts.
+        trial creation but does not delete existing projects, nodes, workspaces, or claimed
+        accounts.
       </Body>
 
       {error && (
@@ -104,9 +107,7 @@ export function AdminTrials() {
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div className="min-w-0 space-y-2">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="m-0 text-base font-semibold text-fg-primary">
-                  Trial onboarding
-                </h2>
+                <h2 className="m-0 text-base font-semibold text-fg-primary">Trial onboarding</h2>
                 <StatusBadge enabled={config.enabled} />
               </div>
               <p className="m-0 max-w-2xl text-sm text-fg-muted">
@@ -136,9 +137,7 @@ export function AdminTrials() {
             </div>
             <div className="rounded-md border border-border-default bg-surface-secondary p-3">
               <div className="text-xs font-medium uppercase text-fg-muted">KV key</div>
-              <code className="mt-1 block break-all text-sm text-fg-primary">
-                {config.kvKey}
-              </code>
+              <code className="mt-1 block break-all text-sm text-fg-primary">{config.kvKey}</code>
             </div>
             <div className="rounded-md border border-border-default bg-surface-secondary p-3">
               <div className="text-xs font-medium uppercase text-fg-muted">Cache TTL</div>

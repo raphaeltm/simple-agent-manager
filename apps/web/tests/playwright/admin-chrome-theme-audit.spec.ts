@@ -1,4 +1,4 @@
-import { type Page, type Route, test } from '@playwright/test';
+import { expect, type Page, type Route, test } from '@playwright/test';
 
 import {
   assertNoOverflow as assertNoHorizontalOverflow,
@@ -26,26 +26,32 @@ function makeCostSummary(empty = false) {
       trialCostUsd: empty ? 0 : 12.3456,
       cachedRequests: empty ? 0 : 4321,
       errorRequests: empty ? 0 : 98,
-      byModel: empty ? [] : Array.from({ length: 8 }, (_, i) => ({
-        model: `@cf/vendor/model-with-a-very-long-name-${i}`,
-        provider: i % 2 === 0 ? 'workers-ai' : 'openai',
-        requests: 900000 - i * 71000,
-        inputTokens: 70000000 - i * 3000000,
-        outputTokens: 12000000 - i * 500000,
-        costUsd: 1200.4321 / (i + 1),
-      })),
-      byDay: empty ? [] : Array.from({ length: 14 }, (_, i) => ({
-        date: `2026-05-${String(i + 1).padStart(2, '0')}`,
-        requests: 1000 + i * 250,
-        costUsd: i === 0 ? 0.0004 : 12.45 + i * 8.25,
-      })),
-      byUser: empty ? [] : Array.from({ length: 30 }, (_, i) => ({
-        userId: `user-with-long-stable-id-${String(i).padStart(2, '0')}-abcdef`,
-        requests: 100000 - i * 1200,
-        inputTokens: 8000000 - i * 50000,
-        outputTokens: 900000 - i * 20000,
-        costUsd: i === 0 ? 0.0042 : 99.99 / (i + 1),
-      })),
+      byModel: empty
+        ? []
+        : Array.from({ length: 8 }, (_, i) => ({
+            model: `@cf/vendor/model-with-a-very-long-name-${i}`,
+            provider: i % 2 === 0 ? 'workers-ai' : 'openai',
+            requests: 900000 - i * 71000,
+            inputTokens: 70000000 - i * 3000000,
+            outputTokens: 12000000 - i * 500000,
+            costUsd: 1200.4321 / (i + 1),
+          })),
+      byDay: empty
+        ? []
+        : Array.from({ length: 14 }, (_, i) => ({
+            date: `2026-05-${String(i + 1).padStart(2, '0')}`,
+            requests: 1000 + i * 250,
+            costUsd: i === 0 ? 0.0004 : 12.45 + i * 8.25,
+          })),
+      byUser: empty
+        ? []
+        : Array.from({ length: 30 }, (_, i) => ({
+            userId: `user-with-long-stable-id-${String(i).padStart(2, '0')}-abcdef`,
+            requests: 100000 - i * 1200,
+            inputTokens: 8000000 - i * 50000,
+            outputTokens: 900000 - i * 20000,
+            costUsd: i === 0 ? 0.0042 : 99.99 / (i + 1),
+          })),
     },
     projection: {
       projectedMonthlyCostUsd: empty ? 0 : 123456.78,
@@ -94,22 +100,40 @@ function makeErrors() {
   }));
 }
 
-async function setupAdminMocks(page: Page, options: { emptyCosts?: boolean; errorCosts?: boolean; errorLists?: boolean } = {}) {
+async function setupAdminMocks(
+  page: Page,
+  options: { emptyCosts?: boolean; errorCosts?: boolean; errorLists?: boolean } = {}
+) {
   const respond = (route: Route, status: number, body: unknown) =>
     route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
+  await page.addInitScript(
+    (id) => localStorage.setItem(`sam-onboarding-wizard-dismissed-${id}`, 'true'),
+    MOCK_USER.user.id
+  );
+  await page.routeWebSocket('**/api/notifications/ws', () => undefined);
   await page.route('**/api/**', async (route: Route) => {
     const path = new URL(route.request().url()).pathname;
+    if (path === '/api/credentials' || path === '/api/github/installations')
+      return respond(route, 200, []);
+    if (path === '/api/credentials/agent') return respond(route, 200, { credentials: [] });
+    if (path === '/api/projects') return respond(route, 200, { projects: [] });
 
     if (path.includes('/api/auth/')) return respond(route, 200, MOCK_USER);
-    if (path.startsWith('/api/notifications')) return respond(route, 200, { notifications: [], unreadCount: 0 });
+    if (path.startsWith('/api/notifications'))
+      return respond(route, 200, { notifications: [], unreadCount: 0 });
     if (path.includes('/api/admin/costs')) {
       if (options.errorCosts) return respond(route, 500, { error: 'Cost backend unavailable' });
       return respond(route, 200, makeCostSummary(options.emptyCosts));
     }
     if (path.includes('/api/admin/observability/logs/query')) {
       if (options.errorLists) return respond(route, 500, { error: 'Log query failed' });
-      return respond(route, 200, { logs: makeLogs(), cursor: null, queryId: 'query-1', hasMore: false });
+      return respond(route, 200, {
+        logs: makeLogs(),
+        cursor: null,
+        queryId: 'query-1',
+        hasMore: false,
+      });
     }
     if (path.includes('/api/admin/observability/errors')) {
       if (options.errorLists) return respond(route, 500, { error: 'Error query failed' });
@@ -119,23 +143,34 @@ async function setupAdminMocks(page: Page, options: { emptyCosts?: boolean; erro
       return respond(route, 200, { buckets: [], range: '24h' });
     }
     if (path.includes('/api/admin/health')) return respond(route, 200, { status: 'ok' });
-    if (path.startsWith('/api/projects')) return respond(route, 200, { projects: [], nextCursor: null });
+    if (path.startsWith('/api/projects'))
+      return respond(route, 200, { projects: [], nextCursor: null });
     return respond(route, 200, {});
   });
 }
 
-async function auditRoute(page: Page, theme: 'dark' | 'light', route: string, name: string, options = {}) {
+async function auditRoute(
+  page: Page,
+  theme: 'dark' | 'light',
+  route: string,
+  name: string,
+  options = {}
+) {
   await seedTheme(page, theme);
   await setupAdminMocks(page, options);
   await page.goto(route);
   await page.waitForTimeout(900);
   await expectTheme(page, theme);
+  await expect(page.getByText('Something went wrong')).toHaveCount(0);
   await screenshot(page, `admin-${name}-${theme}`);
   await assertNoHorizontalOverflow(page);
 }
 
 test.describe('Admin Chrome Theme — Mobile (375x667)', () => {
-  test.skip(({ viewport }) => viewport?.width !== 375, 'Mobile audit runs only on the 375px project');
+  test.skip(
+    ({ viewport }) => viewport?.width !== 375,
+    'Mobile audit runs only on the 375px project'
+  );
 
   test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
 
@@ -158,7 +193,10 @@ test.describe('Admin Chrome Theme — Mobile (375x667)', () => {
 });
 
 test.describe('Admin Chrome Theme — Desktop (1280x800)', () => {
-  test.skip(({ viewport }) => viewport?.width !== 1280, 'Desktop audit runs only on the 1280px project');
+  test.skip(
+    ({ viewport }) => viewport?.width !== 1280,
+    'Desktop audit runs only on the 1280px project'
+  );
 
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 

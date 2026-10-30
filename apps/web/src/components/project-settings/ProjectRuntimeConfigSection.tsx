@@ -1,15 +1,20 @@
 import type { ProjectRuntimeConfigResponse } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
-import { useCallback, useEffect, useId, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useId, useState } from 'react';
 
+import { useQueryScope } from '../../hooks/useQueryScope';
 import { useToast } from '../../hooks/useToast';
 import {
   deleteProjectRuntimeEnvVar,
   deleteProjectRuntimeFile,
-  getProjectRuntimeConfig,
   upsertProjectRuntimeEnvVar,
   upsertProjectRuntimeFile,
 } from '../../lib/api';
+import {
+  projectQueryKeys,
+  projectRuntimeConfigQueryOptions,
+} from '../../lib/query-options/projects';
 
 interface ProjectRuntimeConfigSectionProps {
   projectId: string;
@@ -17,11 +22,18 @@ interface ProjectRuntimeConfigSectionProps {
 
 export function ProjectRuntimeConfigSection({ projectId }: ProjectRuntimeConfigSectionProps) {
   const toast = useToast();
-  const [runtimeConfig, setRuntimeConfig] = useState<ProjectRuntimeConfigResponse>({
-    envVars: [],
-    files: [],
-  });
-  const [runtimeConfigLoading, setRuntimeConfigLoading] = useState(true);
+  const queryScope = useQueryScope();
+  const queryClient = useQueryClient();
+  const options = projectRuntimeConfigQueryOptions(queryScope, projectId);
+  const runtimeQuery = useQuery(options);
+  const runtimeConfig = runtimeQuery.data ?? { envVars: [], files: [] };
+  const runtimeConfigLoading = runtimeQuery.isPending;
+  const setRuntimeConfig = useCallback(
+    (config: ProjectRuntimeConfigResponse) => {
+      queryClient.setQueryData(projectQueryKeys.runtimeConfig(queryScope, projectId), config);
+    },
+    [queryClient, queryScope, projectId]
+  );
   const [savingRuntimeConfig, setSavingRuntimeConfig] = useState(false);
 
   const [envKeyInput, setEnvKeyInput] = useState('');
@@ -31,25 +43,8 @@ export function ProjectRuntimeConfigSection({ projectId }: ProjectRuntimeConfigS
   const [fileContentInput, setFileContentInput] = useState('');
   const [fileSecretInput, setFileSecretInput] = useState(false);
 
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [hasLoaded, setHasLoaded] = useState(false);
-
-  const loadRuntimeConfig = useCallback(async () => {
-    try {
-      setLoadError(null);
-      const config = await getProjectRuntimeConfig(projectId);
-      setRuntimeConfig(config);
-      setHasLoaded(true);
-    } catch {
-      setLoadError('Failed to load runtime config');
-    } finally {
-      setRuntimeConfigLoading(false);
-    }
-  }, [projectId]);
-
-  useEffect(() => {
-    void loadRuntimeConfig();
-  }, [loadRuntimeConfig]);
+  const loadError = runtimeQuery.error ? 'Failed to load runtime config' : null;
+  const hasLoaded = runtimeQuery.data !== undefined;
 
   const handleUpsertEnvVar = async () => {
     if (!envKeyInput.trim()) {

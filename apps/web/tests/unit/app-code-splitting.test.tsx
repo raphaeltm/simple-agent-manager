@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 /**
@@ -46,11 +46,19 @@ vi.mock('../../src/pages/Chats', () => ({ Chats: () => <div data-testid="chats-p
 
 // Records module evaluation order so the Project-shell/ProjectChat waterfall fix can be
 // observed: both chunks must start loading together, not one after the other.
-const loadOrder = vi.hoisted(() => [] as string[]);
+const preload = vi.hoisted(() => {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  return { order: [] as string[], gate, release };
+});
+const loadOrder = preload.order;
 
 vi.mock('../../src/pages/Project', async () => {
   const { Outlet } = await import('react-router');
   loadOrder.push('Project');
+  await preload.gate;
   return {
     Project: () => (
       <div data-testid="project-detail-page">
@@ -120,7 +128,12 @@ describe('App code splitting', () => {
     expect(loadOrder).toEqual([]);
 
     renderAt('/projects/proj-1/chat');
-    await screen.findByTestId('project-chat-page');
+    await waitFor(() => {
+      expect(loadOrder).toContain('Project');
+      expect(loadOrder).toContain('project-chat');
+    });
+    await act(async () => preload.release());
+    await screen.findByTestId('project-chat-page', {}, { timeout: 3000 });
 
     // Both modules must have been requested. The discriminating part is that the child
     // import is kicked off inside the shell's own loader, so it is in flight before the

@@ -1,8 +1,10 @@
 import type { AdminUserQuotaSummary, QuotaSource } from '@simple-agent-manager/shared';
 import { Body, Card, CardTitle, SectionHeading, Spinner } from '@simple-agent-manager/ui';
+import { useQuery } from '@tanstack/react-query';
 import { Gauge, Save, Trash2, UserCog } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
 
+import { useQueryScope } from '../hooks/useQueryScope';
 import {
   fetchAdminUserQuotas,
   removeAdminUserQuota,
@@ -61,7 +63,8 @@ function UserQuotaRow({
         )}
         <div className="flex flex-wrap gap-x-3 gap-y-0.5 mt-1 sm:hidden">
           <span className="sam-type-caption tabular-nums">
-            {user.currentUsage.toFixed(2)} / {user.monthlyVcpuHoursLimit?.toFixed(0) ?? '∞'} vCPU-hrs
+            {user.currentUsage.toFixed(2)} / {user.monthlyVcpuHoursLimit?.toFixed(0) ?? '∞'}{' '}
+            vCPU-hrs
           </span>
           <span className="sam-type-caption text-fg-muted">{formatSource(user.source)}</span>
         </div>
@@ -106,39 +109,30 @@ function UserQuotaRow({
 }
 
 export function AdminComputeQuotas() {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [defaultLimit, setDefaultLimit] = useState<string>('');
+  const scope = useQueryScope();
+  const quotas = useQuery({
+    queryKey: ['auth', scope, 'admin', 'compute-quotas'],
+    queryFn: ({ signal }) => fetchAdminUserQuotas(signal),
+    enabled: Boolean(scope),
+  });
+  const loading = quotas.isPending;
+  const [actionError, setError] = useState<string | null>(null);
+  const error = actionError ?? quotas.error?.message;
+  const [defaultDraft, setDefaultLimit] = useState<string | null>(null);
+  const defaultLimit =
+    defaultDraft ?? quotas.data?.defaultQuota.monthlyVcpuHoursLimit?.toString() ?? '';
   const [defaultSaving, setDefaultSaving] = useState(false);
-  const [users, setUsers] = useState<AdminUserQuotaSummary[]>([]);
+  const users = quotas.data?.users ?? [];
 
   // Edit modal state
   const [editUserId, setEditUserId] = useState<string | null>(null);
   const [editLimit, setEditLimit] = useState('');
   const [editSaving, setEditSaving] = useState(false);
 
-  const loadData = useCallback(async () => {
-    try {
-      setLoading(true);
-      const data = await fetchAdminUserQuotas();
-      setDefaultLimit(
-        data.defaultQuota.monthlyVcpuHoursLimit !== null
-          ? String(data.defaultQuota.monthlyVcpuHoursLimit)
-          : ''
-      );
-      setUsers(data.users);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load quota data');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadData();
-  }, [loadData]);
-
+  const loadData = async () => {
+    const result = await quotas.refetch();
+    if (result.error) setError(result.error.message);
+  };
   const handleSaveDefault = async () => {
     setDefaultSaving(true);
     try {
@@ -149,6 +143,7 @@ export function AdminComputeQuotas() {
       }
       await updateAdminDefaultQuota(limit);
       await loadData();
+      setDefaultLimit(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save default quota');
     } finally {
@@ -221,7 +216,10 @@ export function AdminComputeQuotas() {
             </Body>
             <div className="flex items-end gap-3">
               <div className="flex-1 max-w-xs">
-                <label htmlFor="default-limit" className="sam-type-caption text-fg-muted block mb-1">
+                <label
+                  htmlFor="default-limit"
+                  className="sam-type-caption text-fg-muted block mb-1"
+                >
                   Monthly vCPU-hours limit
                 </label>
                 <input
@@ -284,8 +282,8 @@ export function AdminComputeQuotas() {
             <div className="p-6">
               <CardTitle>Edit User Quota</CardTitle>
               <Body className="text-fg-muted mt-2 mb-4">
-                Set a custom vCPU-hours limit for this user. Leave empty to use the platform default.
-                Set to 0 to block compute.
+                Set a custom vCPU-hours limit for this user. Leave empty to use the platform
+                default. Set to 0 to block compute.
               </Body>
               <div className="mb-4">
                 <label htmlFor="user-limit" className="sam-type-caption text-fg-muted block mb-1">

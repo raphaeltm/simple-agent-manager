@@ -1,14 +1,11 @@
-import type {
-  AdminNodeUsageResponse,
-  AdminUserNodeDetailedUsage,
-  AdminUserNodeUsageSummary,
-  NodeUsageRecord,
-} from '@simple-agent-manager/shared';
+import type { AdminUserNodeUsageSummary, NodeUsageRecord } from '@simple-agent-manager/shared';
 import { Body, Card, CardTitle, SectionHeading, Spinner } from '@simple-agent-manager/ui';
+import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, Clock, Cpu, HardDrive, Server } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 
 import { HardwareDetails } from '../components/hardware/HardwareDetails';
+import { useQueryScope } from '../hooks/useQueryScope';
 import { fetchAdminNodeUsage, fetchAdminUserNodeUsage } from '../lib/api';
 
 function formatHours(hours: number): string {
@@ -119,17 +116,15 @@ function UserRow({ user, onSelect }: { user: AdminUserNodeUsageSummary; onSelect
 }
 
 export function UserDetail({ userId, onBack }: { userId: string; onBack: () => void }) {
-  const [data, setData] = useState<AdminUserNodeDetailedUsage | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    setLoading(true);
-    fetchAdminUserNodeUsage(userId)
-      .then(setData)
-      .catch((err) => setError(err instanceof Error ? err.message : 'Failed to load'))
-      .finally(() => setLoading(false));
-  }, [userId]);
+  const scope = useQueryScope();
+  const query = useQuery({
+    queryKey: ['auth', scope, 'admin', 'node-usage', userId],
+    queryFn: ({ signal }) => fetchAdminUserNodeUsage(userId, signal),
+    enabled: Boolean(scope && userId),
+  });
+  const data = query.data;
+  const loading = query.isPending;
+  const error = query.error?.message;
 
   if (loading)
     return (
@@ -262,28 +257,17 @@ export function UserDetail({ userId, onBack }: { userId: string; onBack: () => v
 }
 
 export function AdminComputeUsage() {
-  const [data, setData] = useState<AdminNodeUsageResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const scope = useQueryScope();
+  const queryKey = ['auth', scope, 'admin', 'AdminComputeUsage', null] as const;
+  const query = useQuery({
+    queryKey,
+    queryFn: ({ signal }) => fetchAdminNodeUsage(signal),
+    enabled: Boolean(scope),
+  });
+  const data = query.data ?? null;
+  const loading = query.isPending;
+  const error = query.error?.message;
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
-  const hasLoadedRef = useRef(false);
-
-  const loadData = useCallback(async () => {
-    try {
-      setError(null);
-      const res = await fetchAdminNodeUsage();
-      setData(res);
-      hasLoadedRef.current = true;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load usage data');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
 
   if (selectedUser) {
     return <UserDetail userId={selectedUser} onBack={() => setSelectedUser(null)} />;

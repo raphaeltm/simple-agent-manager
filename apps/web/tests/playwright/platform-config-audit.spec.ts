@@ -132,6 +132,7 @@ async function setupMocks(
   await page.addInitScript(() => {
     window.localStorage.setItem('sam-onboarding-wizard-dismissed-admin-platform-config', 'true');
   });
+  await page.routeWebSocket('**/api/notifications/ws', () => undefined);
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -187,6 +188,18 @@ async function setupMocks(
     if (path === '/api/notifications') {
       return respondJson(route, 200, { notifications: [], unreadCount: 0, nextCursor: null });
     }
+
+    if (path === '/api/admin/connector/connections')
+      return respondJson(route, 200, { connections: [], nextCursor: null });
+    if (path === '/api/admin/connector/clients')
+      return respondJson(route, 200, { clients: [], nextCursor: null });
+    if (path === '/api/admin/connector/settings') return respondJson(route, 200, { settings: {} });
+    if (path === '/api/admin/agent-email')
+      return respondJson(route, 200, {
+        enabled: true,
+        domain: 'agents.example.com',
+        loopback: { lastSent: null, lastReceived: null },
+      });
 
     if (path === '/api/setup/status') {
       return respondJson(route, 200, {
