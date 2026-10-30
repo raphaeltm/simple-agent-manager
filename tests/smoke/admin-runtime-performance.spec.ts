@@ -110,6 +110,12 @@ test('bounded admin and Runtime performance audit', async ({ context }, info) =>
             ? page.getByRole('heading', { name: 'Analytics', exact: true })
             : page.getByText(content!, { exact: false }).first();
       await expect(ready).toBeVisible({ timeout: auditTimeoutMs });
+      if (path!.endsWith('/settings/runtime')) {
+        await expect(
+          page.getByRole('heading', { name: 'Environment Variables', exact: true })
+        ).toBeVisible({ timeout: auditTimeoutMs });
+        await expect(page.getByText('Loading runtime config...')).toHaveCount(0);
+      }
       await expect(page.getByText('Something went wrong')).toHaveCount(0);
       browserTimings.push({ path, width, contentMs: Math.round(performance.now() - start) });
       await writeFile(
@@ -132,6 +138,9 @@ test('bounded admin and Runtime performance audit', async ({ context }, info) =>
   await expect(page.getByText('Runtime Config', { exact: true })).toBeVisible({
     timeout: auditTimeoutMs,
   });
+  await expect(
+    page.getByRole('heading', { name: 'Environment Variables', exact: true })
+  ).toBeVisible({ timeout: auditTimeoutMs });
   // Hold any revalidation so cached content, rather than a fast server, must satisfy revisits.
   const cachedRevisits = [
     {
