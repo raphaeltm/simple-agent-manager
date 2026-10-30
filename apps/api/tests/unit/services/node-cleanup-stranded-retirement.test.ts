@@ -426,6 +426,14 @@ describe('bounded stranded retirement through the real cleanup cron entry', () =
     expect(f.failSession).toHaveBeenCalled();
   });
 
+  it('retains the original refusal clock when deadline provider deletion fails', async () => {
+    const f = await strandedFixture();
+    f.rejectedProviderIds.add('provider-host');
+    await runNodeCleanupSweep(f.env);
+    expect(f.providerDeletes).toEqual(['https://api.hetzner.cloud/v1/servers/provider-host']);
+    expect(node(f)).toMatchObject({ status: 'stopped', cleanup_blocked_since: f.since });
+  });
+
   it('alerts once for an overdue deployment ownership failure and never calls the provider', async () => {
     const f = await strandedFixture();
     f.sqlite.exec(`DELETE FROM session_snapshots; DELETE FROM workspaces;

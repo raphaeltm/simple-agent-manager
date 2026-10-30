@@ -149,7 +149,7 @@ export async function sweepStrandedNodes(
   // Ordinary selectors deliberately omit the artifact guard. Refusal diagnostics and
   // this independent page guarantee a bounded outcome, including missing provenance.
   const candidates = await env.DATABASE.prepare(
-    `SELECT id,user_id,status FROM nodes
+    `SELECT id,user_id,status,cleanup_blocked_since FROM nodes
     WHERE node_class='managed' AND runtime='vm' AND status IN ('stopped','destroying')
       AND (cleanup_blocked_since IS NULL OR cleanup_backoff_until IS NULL OR cleanup_backoff_until <= ?
         OR (cleanup_blocked_since <= ? AND (cleanup_blocked_alerted_at IS NULL OR cleanup_blocked_alerted_at <= ?)))
