@@ -1,4 +1,4 @@
-import { afterEach,describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { fetchWithTimeout, getTimeoutMs } from '../../../src/services/fetch-timeout';
 
@@ -140,12 +140,38 @@ describe('fetchWithTimeout', () => {
     );
   });
 
-  it('clears timeout on successful fetch', async () => {
+  it('clears timeout after the response body completes', async () => {
     const clearTimeoutSpy = vi.spyOn(globalThis, 'clearTimeout');
     const mockResponse = new Response('ok', { status: 200 });
     globalThis.fetch = vi.fn().mockResolvedValue(mockResponse);
 
-    await fetchWithTimeout('https://example.com', {}, 5000);
+    const response = await fetchWithTimeout('https://example.com', {}, 5000);
+    await response.text();
     expect(clearTimeoutSpy).toHaveBeenCalled();
+  });
+  it('aborts a body that stalls after headers arrive', async () => {
+    vi.useFakeTimers();
+    const cancel = vi.fn();
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(new ReadableStream({ cancel })));
+    try {
+      const response = await fetchWithTimeout('https://example.com/stalled?token=secret', {}, 50);
+      const read = expect(response.json()).rejects.toThrow(
+        'Request timed out after 50ms: https://example.com/stalled'
+      );
+      await vi.advanceTimersByTimeAsync(50);
+      await read;
+      expect(cancel).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('honors cancellation supplied in RequestInit during a body read', async () => {
+    const caller = new AbortController();
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(new ReadableStream()));
+    const response = await fetchWithTimeout('https://example.com', { signal: caller.signal });
+    const read = expect(response.text()).rejects.toThrow('Navigation canceled');
+    caller.abort(new Error('Navigation canceled'));
+    await read;
   });
 });
