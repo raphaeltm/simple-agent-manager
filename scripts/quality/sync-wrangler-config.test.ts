@@ -109,7 +109,7 @@ describe('sync wrangler config', () => {
         { persist: false, destinations: ['external-traces'] },
       ]) {
         const generated = generateApiWorkerEnv(
-          { observability: { enabled: true, traces } },
+          { observability: { enabled: true, redact_query_string: false, traces } },
           outputs,
           environment,
           false,
