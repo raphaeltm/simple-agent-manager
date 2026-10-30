@@ -16,6 +16,35 @@ import { ensureSessionRecovery } from '../../src/services/session-recovery';
 import { cancelVmTaskAdmission } from '../../src/services/vm-admission-control';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
+/** Gate the actual task handoff, allowing independent catalog batches to run first. */
+function interceptRecoveryBatch(
+  database: D1Database,
+  implementation: (statements: D1PreparedStatement[]) => ReturnType<D1Database['batch']>
+) {
+  const handoffs = new WeakSet<object>();
+  const prepare = database.prepare.bind(database);
+  vi.spyOn(database, 'prepare').mockImplementation((query) => {
+    const statement = prepare(query);
+    const bind = statement.bind.bind(statement);
+    statement.bind = (...values: unknown[]) => {
+      const bound = bind(...values);
+      if (/^\s*UPDATE tasks/.test(query) && /execution_step\s*=\s*'node_selection'/.test(query))
+        handoffs.add(bound);
+      return bound;
+    };
+    return statement;
+  });
+  const batch = database.batch.bind(database);
+  let intercepted = false;
+  vi.spyOn(database, 'batch').mockImplementation(async (statements) => {
+    if (!intercepted && statements.some((statement) => handoffs.has(statement))) {
+      intercepted = true;
+      return implementation(statements);
+    }
+    return batch(statements);
+  });
+}
+
 const { ensureTaskRunnerStartedMock, startTaskRunnerDOMock, getUserIdMock } = vi.hoisted(() => ({
   getUserIdMock: vi.fn(() => 'user-1'),
   ensureTaskRunnerStartedMock: vi.fn(async () => false),
@@ -321,7 +350,7 @@ describe('session recovery stable task identity', () => {
         batchClaimed = resolve;
       });
       const batch = database.batch.bind(database);
-      vi.spyOn(database, 'batch').mockImplementationOnce(async (statements) => {
+      interceptRecoveryBatch(database, async (statements) => {
         batchClaimed();
         await heldBatch;
         return batch(statements);
@@ -408,7 +437,7 @@ describe('session recovery stable task identity', () => {
         VALUES ('retained','user-1','project-1','deleted','chat-1','confirmed');`);
       const database = createSqliteD1(sqlite);
       const batch = database.batch.bind(database);
-      vi.spyOn(database, 'batch').mockImplementationOnce(async (statements) => {
+      interceptRecoveryBatch(database, async (statements) => {
         sqlite.exec("UPDATE session_snapshots SET recovery_attempt_id = 'newer-attempt'");
         return batch(statements);
       });
@@ -486,7 +515,7 @@ describe('session recovery stable task identity', () => {
             release = resolve;
           });
           const batch = database.batch.bind(database);
-          vi.spyOn(database, 'batch').mockImplementationOnce(async (statements) => {
+          interceptRecoveryBatch(database, async (statements) => {
             claimed();
             await held;
             return batch(statements);
@@ -662,7 +691,7 @@ describe('session recovery stable task identity', () => {
         expect((await archive(database)).status).toBe(caller === 'user-1' ? 409 : 200);
       } else {
         const batch = database.batch.bind(database);
-        vi.spyOn(database, 'batch').mockImplementationOnce(async (statements) => {
+        interceptRecoveryBatch(database, async (statements) => {
           // Recovery claimed the snapshot, but has not yet queued the task.
           expect(
             sqlite.prepare('SELECT recovery_status FROM session_snapshots').pluck().get()
