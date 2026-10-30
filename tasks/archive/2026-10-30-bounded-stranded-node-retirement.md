@@ -17,7 +17,7 @@ Task 01M66M4XPQVGXYH5NTM8VMDWDB; idea 01M66M4A33YHH9X90ZFQD2PAZ1, read in full.
 - [x] R9 minimal blocked-state API/UI visibility or explicit scope explanation.
 - [x] Real cron SQLite divergence/29min/active/preserved/clock/ownership/default/wake tests.
 - [x] Discrimination: remove forced branch; divergence red and within-deadline green; restore.
-- [ ] lint/typecheck/tests/build; specialist security/Cloudflare/test/completion/config/doc reviews.
+- [x] lint/typecheck/tests/build; specialist security/Cloudflare/test/completion/config/doc reviews.
 - [x] Staging deployment explicitly waived by Raphaël; do not deploy staging.
 - [ ] PR evidence/CI/CodeRabbit request and wait/merge.
 - [ ] Deploy Production success then read-only migration/cron/overdue workspace nodes/deployment node verification.
@@ -36,6 +36,8 @@ Initial real-cron suite 7 red/2 green: 31-minute source produced no provider del
 
 Read-only production baseline 2026-10-30 14:58 UTC through exec_with_secrets: no stopped/destroying managed workspace nodes; deployment node01KXAR1T3XCQKKPBEJEERQ2PSZ still destroying, provider150100869, credential source/referenceNULL. Latest production deployment successful (run41056852924).
 
-Final focused suite:17 cron/SQLite tests passed, including preservation of the original blocked clock after an exact provider delete returns403; four HTTP writer/visibility tests,67 existing handoff tests and workerd dead-letter control remain green. Local security, Cloudflare, test, constitution, doc-sync and task-completion reviews PASS/ADDRESSED. Full repository tests continue with bounded concurrency; lint/typecheck/build and migration/runtime/file-size checks pass.
+Final focused suite:17 cron/SQLite tests passed, including preservation of the original blocked clock after an exact provider delete returns403; four HTTP writer/visibility tests,67 existing handoff tests and workerd dead-letter control remain green. Local security, Cloudflare, test, constitution, doc-sync and task-completion reviews PASS/ADDRESSED. Final bounded verification passed every non-API package and the complete corrected API suite (986 files/14,325 tests); lint/typecheck/build and migration/runtime/file-size checks pass.
 
 Exact branch discrimination at15:32 UTC in isolated detached checkout: disabled only forced destroyNodeForCleanup call;31-minute case failed exact provider-delete assertion,29-minute control passed (15 skipped). Restored call:2passed/15skipped. Temporary checkout removed; main working tree was not mutated.
+
+Final local validation PASS: all non-API packages from complete bounded repository run; complete corrected API rerun986files/14,325tests pass (1file/2tests skipped), duration491.59s. Full lint13/13,typecheck19/19,build9/9; latest API typecheck/build PASS. Runtime tunables, migration safety/order, file size, preflight and specialist evidence checks PASS. Initial full suite found3errors (missing recovery_failed_at and two SQL writer-shape contracts); all fixed directly, affected39tests passed, full API rerun green. No test or allowlist was weakened. Delivery continues in the PR body/SAM task after implementation archive; staging remains explicitly waived.
