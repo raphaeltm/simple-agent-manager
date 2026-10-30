@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router';
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
@@ -15,6 +15,7 @@ vi.mock('../../../src/pages/PendingApproval', () => ({
 }));
 
 vi.mock('@simple-agent-manager/ui', () => ({
+  Button: ({ children, onClick }: { children: React.ReactNode; onClick: () => void }) => <button onClick={onClick}>{children}</button>,
   Spinner: ({ size }: { size: string }) => <div data-testid="spinner" data-size={size} />,
 }));
 
@@ -172,4 +173,17 @@ describe('ProtectedRoute', () => {
     expect(screen.getByTestId('protected-content')).toBeInTheDocument();
     expect(screen.queryByTestId('pending-approval')).not.toBeInTheDocument();
   });
+});
+
+
+it('keeps a cold session verification failure on the requested page with a retry', () => {
+  const retry = vi.fn();
+  mockUseAuth.mockReturnValue({ isLoading: false, isAuthenticated: false, isRefetching: false,
+    sessionError: 'Session verification is temporarily unavailable.', retrySession: retry });
+  renderProtected();
+  expect(screen.getByRole('alert')).toHaveTextContent('Could not verify your session.');
+  expect(screen.queryByTestId('landing')).not.toBeInTheDocument();
+  expect(screen.queryByTestId('protected-content')).not.toBeInTheDocument();
+  fireEvent.click(screen.getByRole('button', { name: 'Retry session verification' }));
+  expect(retry).toHaveBeenCalledOnce();
 });

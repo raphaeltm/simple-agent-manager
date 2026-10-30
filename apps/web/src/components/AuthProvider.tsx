@@ -49,6 +49,8 @@ interface AuthContextValue {
   isApproved: boolean;
   /** True when BetterAuth is re-checking the session (e.g. after tab regains focus) */
   isRefetching: boolean;
+  sessionError?: string | null;
+  retrySession?: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -69,7 +71,7 @@ interface AuthProviderProps {
  * All authorization decisions are enforced server-side via requireAuth().
  */
 export function AuthProvider({ children }: AuthProviderProps) {
-  const { data: session, isPending, error, isRefetching } = useSession();
+  const { data: session, isPending, error, isRefetching, refetch } = useSession();
   const lastGoodSessionRef = useRef<typeof session>(null);
   const [githubReauthMessage, setGitHubReauthMessage] = useState<string | null>(null);
   const [activeCacheNamespace, setActiveCacheNamespace] = useState<string | null | undefined>(
@@ -201,8 +203,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       isSuperadmin,
       isApproved,
       isRefetching: effectiveIsRefetching,
+      sessionError: error ? 'Session verification is temporarily unavailable.' : null,
+      retrySession: () => { void refetch(); },
     }),
-    [enrichedUser, isPending, isAuthenticated, isSuperadmin, isApproved, effectiveIsRefetching]
+    [enrichedUser, isPending, isAuthenticated, isSuperadmin, isApproved, effectiveIsRefetching, error, refetch]
   );
 
   return (

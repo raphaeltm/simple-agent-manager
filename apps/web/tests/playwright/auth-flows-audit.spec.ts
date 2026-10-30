@@ -88,3 +88,25 @@ test.describe('CLI auth UI audit', () => {
     await assertNoOverflow(page);
   });
 });
+
+test('cold session failure offers retry without losing the requested page', async ({ page }, info) => {
+  await setupAuthenticatedMocks(page);
+  await page.addInitScript((id) => localStorage.setItem(`sam-onboarding-wizard-dismissed-${id}`, 'true'), MOCK_USER.user.id);
+  await page.route('**/api/credentials', (route) => jsonResponse(route, 200, []));
+  await page.route('**/api/connector/connections*', (route) => jsonResponse(route, 200, { connections: [], nextCursor: null }));
+  let unavailable = true;
+  await page.route('**/api/auth/get-session', (route) =>
+    jsonResponse(route, unavailable ? 503 : 200, unavailable
+      ? { error: 'AUTH_UNAVAILABLE', message: 'Session verification is temporarily unavailable.' }
+      : MOCK_USER)
+  );
+  await page.goto('/settings/access');
+  await expect(page.getByRole('alert')).toContainText('Could not verify your session.');
+  await expect(page.getByRole('button', { name: 'Retry session verification' })).toBeVisible();
+  await assertNoOverflow(page);
+  await screenshot(page, `session-verification-retry-${getProjectSuffix(info.project.name)}`);
+  unavailable = false;
+  await page.getByRole('button', { name: 'Retry session verification' }).click();
+  await expect(page.getByRole('heading', { name: 'Settings', exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/\/settings\/access$/);
+});
