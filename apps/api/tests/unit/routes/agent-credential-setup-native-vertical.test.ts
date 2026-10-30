@@ -450,7 +450,7 @@ describe('native Codex setup route vertical slice', () => {
       sqlite.exec(`INSERT INTO users (id, github_id, email, name, created_at, updated_at) VALUES ('owner-user','github-owner','owner@test.com','Owner',0,0);
         INSERT INTO projects (id,user_id,name,normalized_name,installation_id,repository,created_by,created_at,updated_at) VALUES ('project-a','owner-user','Project','project','installation','org/repo','owner-user','now','now');
         INSERT INTO project_members (project_id,user_id,role,status,created_at,updated_at) VALUES ('project-a','owner-user','owner','active','now','now');`);
-      const encryptionKey = 'SK4ihJazAK3GIWUQcM6nZ1odR6KQHrqRAVSp6HdPxrg=';
+      const encryptionKey = Buffer.alloc(32, 1).toString('base64');
       const env = {
         DATABASE: createSqliteD1(sqlite),
         ENCRYPTION_KEY: encryptionKey,
