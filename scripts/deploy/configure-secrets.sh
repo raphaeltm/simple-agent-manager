@@ -293,6 +293,7 @@ set_worker_secret "GITHUB_WEBHOOK_SECRET" "${GH_WEBHOOK_SECRET:-${GITHUB_WEBHOOK
 set_worker_secret "CF_API_TOKEN" "${CF_API_TOKEN:-}" "$ENVIRONMENT" "true" || FAILED=true
 set_worker_secret "CF_ZONE_ID" "${CF_ZONE_ID:-}" "$ENVIRONMENT" "true" || FAILED=true
 set_worker_secret "CF_ACCOUNT_ID" "${CF_ACCOUNT_ID:-}" "$ENVIRONMENT" "true" || FAILED=true
+set_worker_secret "BOOTSTRAP_OWNER_EMAIL" "${BOOTSTRAP_OWNER_EMAIL:-}" "$ENVIRONMENT" "false"
 set_worker_secret "CF_AIG_TOKEN" "${CF_AIG_TOKEN:-}" "$ENVIRONMENT" "false"
 
 # Configure deployment apply signing keys. Deployment nodes only apply releases

@@ -6,6 +6,10 @@ user-invocable: false
 
 # SAM Environment Variable Reference
 
+## Installer first-owner binding
+
+`BOOTSTRAP_OWNER_EMAIL` is an optional API Worker secret set by the user-owned installer before public login. Only the matching provider-verified email can establish the first administrator; leave unset for ordinary installations. Preserve it during routine updates. It is distinct from `SETUP_TOKEN`, which authorizes provider configuration rather than user login.
+
 ## GitHub Environment Secrets (GitHub Settings -> Environments -> production)
 
 Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB_*`.

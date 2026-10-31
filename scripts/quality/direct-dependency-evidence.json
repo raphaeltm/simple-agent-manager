@@ -9,6 +9,15 @@
       "registryUrl": "https://www.npmjs.com/package/@axe-core/playwright",
       "necessity": "Runs accessibility assertions in browser evidence tests."
     },
+    "@cloudflare/workers-oauth-provider": {
+      "registryUrl": "https://www.npmjs.com/package/@cloudflare/workers-oauth-provider",
+      "necessity": "Maintained Workers OAuth server provides PKCE, hashed tokens, audience binding and refresh rotation independently from user login."
+    },
+    "@cloudflare/workers-types": {
+      "registryUrl": "https://www.npmjs.com/package/@cloudflare/workers-types",
+      "homepageUrl": "https://github.com/cloudflare/workerd",
+      "necessity": "Provides Cloudflare Worker and Durable Object runtime types for the independently typechecked installer package."
+    },
     "@eslint/js": {
       "registryUrl": "https://www.npmjs.com/package/@eslint/js",
       "necessity": "Provides supported ESLint flat recommended configuration."
@@ -17,9 +26,17 @@
       "registryUrl": "https://www.npmjs.com/package/@expressive-code/plugin-line-numbers",
       "necessity": "Adds line-number gutters to docs and blog code blocks."
     },
+    "@modelcontextprotocol/client": {
+      "registryUrl": "https://www.npmjs.com/package/@modelcontextprotocol/client",
+      "necessity": "Real modern MCP client used to verify Connector protocol compatibility."
+    },
     "@modelcontextprotocol/sdk": {
       "registryUrl": "https://www.npmjs.com/package/@modelcontextprotocol/sdk",
       "necessity": "Runs the disposable HTTPS MCP service and notification fixture for ACP URL completion verification."
+    },
+    "@modelcontextprotocol/server": {
+      "registryUrl": "https://www.npmjs.com/package/@modelcontextprotocol/server",
+      "necessity": "Official stateless MCP protocol server with legacy client compatibility for the SAM Connector."
     },
     "@playwright/test": {
       "registryUrl": "https://www.npmjs.com/package/@playwright/test",
@@ -146,18 +163,6 @@
     "yaml": {
       "registryUrl": "https://www.npmjs.com/package/yaml",
       "necessity": "Structurally parses GitHub workflow contracts in security regression tests."
-    },
-    "@modelcontextprotocol/server": {
-      "registryUrl": "https://www.npmjs.com/package/@modelcontextprotocol/server",
-      "necessity": "Official stateless MCP protocol server with legacy client compatibility for the SAM Connector."
-    },
-    "@modelcontextprotocol/client": {
-      "registryUrl": "https://www.npmjs.com/package/@modelcontextprotocol/client",
-      "necessity": "Real modern MCP client used to verify Connector protocol compatibility."
-    },
-    "@cloudflare/workers-oauth-provider": {
-      "registryUrl": "https://www.npmjs.com/package/@cloudflare/workers-oauth-provider",
-      "necessity": "Maintained Workers OAuth server provides PKCE, hashed tokens, audience binding and refresh rotation independently from user login."
     }
   },
   "go": {

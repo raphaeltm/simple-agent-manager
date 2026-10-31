@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Host the installer yourself · SAM</title>
+    <link rel="icon" href="/sam-head.png" />
+    <link rel="stylesheet" href="/glass.css" />
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/theme.js"></script>
+    <script src="/guide.js" defer></script>
+  </head>
+  <body>
+    <header class="site-header sam-glass sam-glass--chrome sam-glass-rim">
+      <a class="brand" href="/" aria-label="SAM installer home"
+        ><img src="/brand-icon.png" width="30" height="30" alt="" /><span class="wordmark"
+          >SAM<span>simple agent manager</span></span
+        ></a
+      >
+      <nav class="header-actions" aria-label="Installer navigation">
+        <div class="theme-controls" role="group" aria-label="Color theme">
+          <button
+            type="button"
+            class="theme-option"
+            data-theme-value="auto"
+            aria-label="System theme"
+            title="System"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              aria-hidden="true"
+            >
+              <rect x="2" y="3" width="20" height="14" rx="2" />
+              <path d="M8 21h8m-4-4v4" />
+            </svg></button
+          ><button
+            type="button"
+            class="theme-option"
+            data-theme-value="light"
+            aria-label="Light theme"
+            title="Light"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="4" />
+              <path
+                d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.4 1.4m11.2 11.2L19 19M5 19l1.4-1.4M17.6 6.4L19 5"
+              />
+            </svg></button
+          ><button
+            type="button"
+            class="theme-option"
+            data-theme-value="dark"
+            aria-label="Dark theme"
+            title="Dark"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              aria-hidden="true"
+            >
+              <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" />
+            </svg>
+          </button>
+        </div>
+        <a href="/">← Setup</a>
+      </nav>
+    </header>
+    <main class="privacy-main">
+      <span class="badge">Same source. Your host.</span>
+      <h1>Run the installer<br /><span class="gradient-text">on your terms.</span></h1>
+      <p class="intro">
+        Prefer to handle Cloudflare access yourself? Deploy this same open-source installer in your
+        own account.
+      </p>
+      <div class="privacy-content sam-glass sam-glass-rim">
+        <h2>1. Get the source</h2>
+        <p>
+          You’ll need Node.js 22+, pnpm 9.15.9, a Workers Paid account, and an active domain in
+          Cloudflare.
+          <a id="source" href="https://github.com/raphaeltm/simple-agent-manager"
+            >Inspect the deployed source →</a
+          >
+        </p>
+        <pre><code>git clone https://github.com/raphaeltm/simple-agent-manager.git
+cd simple-agent-manager
+<span id="revision-command"># For an unmerged preview, check out the revision linked above.
+</span>pnpm install --frozen-lockfile</code></pre>
+        <h2>2. Configure your deployment</h2>
+        <p>
+          Set <code>CLOUDFLARE_API_TOKEN</code> and <code>CLOUDFLARE_ACCOUNT_ID</code> through your
+          shell’s secret manager. Never commit credentials or paste them into chat.
+        </p>
+        <p>
+          The deployment token needs Account Settings Read, Workers Scripts Edit, OAuth Client
+          Read/Write, and zone permissions for Workers Custom Domains and Workers Routes. Scope it
+          to the account and zone you intend to use.
+        </p>
+        <pre><code>export BASE_DOMAIN=example.com
+pnpm --filter @simple-agent-manager/installer run deploy</code></pre>
+        <h2>3. Open your installer</h2>
+        <p>
+          The script deploys at <code>https://install.example.com</code>, registers a private OAuth
+          client, and saves its credentials as Worker secrets. Keep those credentials private.
+          Rerunning preserves the existing client and secret.
+        </p>
+        <p>
+          While this prototype is unmerged, check out the revision shown by “Inspect the deployed
+          source” before deploying. The default branch may not include the installer yet.
+        </p>
+        <h2>Before sharing it with others</h2>
+        <p>
+          Private OAuth clients work for members of their parent account. Serving other users
+          requires Cloudflare’s
+          <a href="https://developers.cloudflare.com/fundamentals/oauth/create-an-oauth-client/"
+            >publisher verification and public promotion</a
+          >. Promotion is permanent and is never performed automatically by this script.
+        </p>
+        <h2>What you’re deploying</h2>
+        <p>
+          The standard command deploys bootstrap-only mode, separate from SAM. This preview branch
+          adds durable owner recovery: save the browser-generated credential before claiming your
+          service. The hosted address may still run an earlier revision; check its source version.
+        </p>
+        <p>
+          Experimental full installation and update machinery is under development. It is not
+          enabled by this command and has not completed authenticated OAuth, credential-revocation,
+          and full in-account build validation. Use the established SAM self-hosting guide for a
+          complete installation. No working full-mode enablement recipe is provided yet.
+        </p>
+        <p><a href="/privacy.html">Review permissions & privacy →</a></p>
+      </div>
+    </main>
+    <footer><a href="/">← Back to setup</a><span>SAM · simple agent manager</span></footer>
+  </body>
+</html>

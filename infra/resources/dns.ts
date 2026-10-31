@@ -1,14 +1,22 @@
 import * as cloudflare from '@pulumi/cloudflare';
 import * as pulumi from '@pulumi/pulumi';
 import { pagesProject } from './pages';
-import { zoneId, baseDomain, prefix, stack } from './config';
+import {
+  zoneId,
+  zoneName,
+  baseDomain,
+  prefix,
+  stack,
+  workersDevSubdomain,
+  zoneRelativeDnsName,
+} from './config';
 
-const apiWorkerHostname = `${prefix}-api-${stack}.${prefix}.workers.dev`;
+const apiWorkerHostname = `${prefix}-api-${stack}.${workersDevSubdomain}.workers.dev`;
 
 // API subdomain (api.example.com -> Worker)
 export const apiDnsRecord = new cloudflare.Record(`${prefix}-dns-api`, {
   zoneId: zoneId,
-  name: `api`,
+  name: zoneRelativeDnsName('api', baseDomain, zoneName),
   type: 'CNAME',
   content: apiWorkerHostname,
   proxied: true,
@@ -18,7 +26,7 @@ export const apiDnsRecord = new cloudflare.Record(`${prefix}-dns-api`, {
 
 export const previewDnsRecord = new cloudflare.Record(`${prefix}-dns-preview`, {
   zoneId,
-  name: 'preview',
+  name: zoneRelativeDnsName('preview', baseDomain, zoneName),
   type: 'CNAME',
   content: apiWorkerHostname,
   proxied: true,
@@ -33,7 +41,7 @@ export const previewDnsRecord = new cloudflare.Record(`${prefix}-dns-preview`, {
 // CNAME to someone else's Pages project.
 export const appDnsRecord = new cloudflare.Record(`${prefix}-dns-app`, {
   zoneId: zoneId,
-  name: `app`,
+  name: zoneRelativeDnsName('app', baseDomain, zoneName),
   type: 'CNAME',
   content: pagesProject.subdomain,
   proxied: true,
@@ -44,7 +52,7 @@ export const appDnsRecord = new cloudflare.Record(`${prefix}-dns-app`, {
 // Wildcard subdomain (*.example.com -> Worker for workspace routing)
 export const wildcardDnsRecord = new cloudflare.Record(`${prefix}-dns-wildcard`, {
   zoneId: zoneId,
-  name: `*`,
+  name: zoneRelativeDnsName('*', baseDomain, zoneName),
   type: 'CNAME',
   content: apiWorkerHostname,
   proxied: true,
