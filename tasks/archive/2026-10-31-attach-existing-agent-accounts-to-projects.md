@@ -66,3 +66,12 @@ project:
 - [x] The same non-default account can be pinned to multiple projects
 
 Staging verification skipped at Raphaël's explicit request (2026-10-31).
+
+## Implementation notes
+
+- Shipped component is `AccountProjectsDialog.tsx` (checklist called it `AttachProjectsDialog`).
+- Review follow-ups: OpenAI-compatible accounts (cc-only) are pinnable/unpinnable via direct
+  attachment delete; POST body validated with valibot; unattached footer layout and picker
+  disclosure ARIA fixed.
+- Concurrent pins: D1 runs each batch as one transaction and serializes writes, so no unique
+  index was added (a migration could fail on pre-existing duplicates in production).
