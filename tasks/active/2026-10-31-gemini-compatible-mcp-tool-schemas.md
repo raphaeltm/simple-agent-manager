@@ -95,12 +95,12 @@ Two contributing gaps:
 
 ## Acceptance Criteria
 
-- [ ] No `MCP_TOOLS` schema contains a Gemini-incompatible node, enforced by a test that fails on
+- [x] No `MCP_TOOLS` schema contains a Gemini-incompatible node, enforced by a test that fails on
       the pre-fix `create_agent_profile.runtime` shape.
-- [ ] Nullable update fields still accept `null` (the handler behavior tests still pass).
-- [ ] An unclassified prompt error produces an `ACP Prompt failed` report with a redacted `detail`;
+- [x] Nullable update fields still accept `null` (the handler behavior tests still pass).
+- [x] An unclassified prompt error produces an `ACP Prompt failed` report with a redacted `detail`;
       a token inside the error does not survive; a classified error carries no raw detail.
-- [ ] `oc_sk_` canaries are redacted by the API redactor and every VM agent redactor.
+- [x] `oc_sk_` canaries are redacted by the API redactor and every VM agent redactor.
 
 ## Notes
 
@@ -112,6 +112,15 @@ Two contributing gaps:
   task-callback redaction test (server) and `TestErrorDeliveryRegistersAndUploadsOnlyRedactedAutomaticEvidence`
   (errorreport); a naive byte slice reddens the UTF-8 test; deleting the API shape reddens the two
   canary-driven redaction suites.
+- Review round 1 (security-auditor HIGH, go-specialist HIGH): the acp and server span redactors
+  were near-duplicate lists, weaker than errorreport's (no AWS/Google/OAuth/Slack/npm/Stripe/JWT/PEM)
+  and `\b`-anchored, which misses `KEY_sk-…` because `_` is a word character. Consolidated both into
+  `packages/vm-agent/internal/diagredact` with a `(^|[^A-Za-z0-9])` prefix group (RE2 has no
+  lookbehind), the full shared shape set, and tests over the shared canary fixture plus
+  `_`-joined variants. Correction to the audit: `Reporter.Report` already runs errorreport's strong
+  `sanitizeString` over the context before the outbox insert, so only the journal slog line used the
+  weak list. Discrimination: removing the added shapes reddens the acp canary test and three
+  diagredact tests; a `\b` prefix reddens the underscore test for all five shapes.
 - `main` is branch-protected (GH013), so the task file is committed on the feature branch.
 
 - Staging deployment was skipped by explicit user instruction (2026-10-31).

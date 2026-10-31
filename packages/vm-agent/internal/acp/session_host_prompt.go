@@ -700,10 +700,13 @@ func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promp
 	// 2026-10-31 Vertex rejection of a sam-mcp tool schema was visible only in the
 	// node journal. Carry the agent's own error, redacted and bounded, so platform
 	// logs say why. Classified failures keep the bare code (ClassifyPromptFailure).
+	logArgs := []any{"reason", errMsg}
 	if errMsg == "agent_prompt_failed" {
-		fields["detail"] = promptFailureDetail(err)
+		detail := promptFailureDetail(err)
+		fields["detail"] = detail
+		logArgs = append(logArgs, "detail", detail)
 	}
-	slog.Warn("ACP Prompt failed (non-fatal)", "reason", errMsg, "detail", fields["detail"])
+	slog.Warn("ACP Prompt failed (non-fatal)", logArgs...)
 	h.reportLifecycle("warn", "ACP Prompt failed", fields)
 	h.broadcastMessage(h.marshalJSONRPCError(reqID, -32603, errMsg))
 	attempt.completeWith(h, "error", err, func() { h.markPromptDoneForAttempt(attempt) })

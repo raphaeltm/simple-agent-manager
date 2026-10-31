@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -131,5 +133,35 @@ func TestPromptFailureDetailRedactsBeforeTruncating(t *testing.T) {
 
 	if strings.Contains(detail, "oc_sk_") {
 		t.Fatalf("truncation exposed a key prefix: %q", detail[len(detail)-40:])
+	}
+}
+
+// Every token shape the shared fixture holds the API and errorreport to must
+// also be stripped from the detail, since the detail reaches the node journal
+// before errorreport sanitizes the outbound copy.
+func TestPromptFailureDetailStripsEverySharedCanary(t *testing.T) {
+	data, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "tests", "fixtures", "diagnostic-secret-canaries.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fixtures []struct {
+		Name      string   `json:"name"`
+		Fragments []string `json:"fragments"`
+	}
+	if err := json.Unmarshal(data, &fixtures); err != nil {
+		t.Fatal(err)
+	}
+	if len(fixtures) < 12 {
+		t.Fatalf("loaded %d canaries; the shared fixture did not parse", len(fixtures))
+	}
+	for _, fixture := range fixtures {
+		canary := strings.Join(fixture.Fragments, "")
+		detail := promptFailureDetail(errors.New("upstream rejected the request: " + canary))
+		if strings.Contains(detail, canary) {
+			t.Errorf("%s survived in detail: %q", fixture.Name, detail)
+		}
+		if !strings.Contains(detail, "upstream rejected the request:") {
+			t.Errorf("%s: detail lost its readable text: %q", fixture.Name, detail)
+		}
 	}
 }
