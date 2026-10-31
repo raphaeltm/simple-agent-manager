@@ -162,11 +162,13 @@ export function ProjectAccountRow({
                   : `Connect an account only ${projectName} uses`
               }
               expanded={candidates.length > 0 ? picking : undefined}
+              controls={`${panelId}-picker`}
               onClick={useOther}
             />
           </div>
           {picking && candidates.length > 0 && (
             <AccountPicker
+              id={`${panelId}-picker`}
               providerName={provider.name}
               projectNames={projectNames}
               candidates={candidates}
@@ -249,6 +251,7 @@ function ChoiceTile({
   title,
   subtitle,
   expanded,
+  controls,
   onClick,
 }: Readonly<{
   selected: boolean;
@@ -257,13 +260,18 @@ function ChoiceTile({
   subtitle: string;
   /** Set when the tile opens a list rather than choosing directly. */
   expanded?: boolean;
+  /** Id of the list the tile opens. */
+  controls?: string;
   onClick: () => void;
 }>) {
+  const disclosure = expanded !== undefined;
   return (
     <button
       type="button"
-      aria-pressed={selected}
+      // A tile that opens a list is a disclosure, not a toggle.
+      aria-pressed={disclosure ? undefined : selected}
       aria-expanded={expanded}
+      aria-controls={disclosure ? controls : undefined}
       onClick={onClick}
       className={`flex min-h-11 min-w-0 cursor-pointer items-start gap-2.5 rounded-md border px-3 py-2.5 text-left ${
         selected
@@ -282,6 +290,7 @@ function ChoiceTile({
 
 /** Your other accounts for this provider, each one tap away from being pinned here. */
 function AccountPicker({
+  id,
   providerName,
   projectNames,
   candidates,
@@ -289,6 +298,7 @@ function AccountPicker({
   onPick,
   onConnectNew,
 }: Readonly<{
+  id: string;
   providerName: string;
   projectNames: ReadonlyMap<string, string>;
   candidates: AccountView[];
@@ -298,6 +308,7 @@ function AccountPicker({
 }>) {
   return (
     <div
+      id={id}
       role="group"
       aria-label={`Your ${providerName} accounts`}
       data-testid="project-account-picker"

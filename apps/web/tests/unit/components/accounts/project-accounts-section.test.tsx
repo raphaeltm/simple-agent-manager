@@ -269,6 +269,10 @@ describe('ProjectAccountsSection', () => {
 
     expect(screen.queryByRole('dialog')).toBeNull();
     const picker = within(row).getByRole('group', { name: 'Your Claude Code accounts' });
+    // The tile is a disclosure for the list, not a toggle.
+    expect(tile).toHaveAttribute('aria-expanded', 'true');
+    expect(tile).not.toHaveAttribute('aria-pressed');
+    expect(tile).toHaveAttribute('aria-controls', picker.id);
     // The default is what "Use my default" already means, so it is not offered again.
     expect(within(picker).queryByText('Work Max plan')).toBeNull();
     fireEvent.click(within(picker).getByRole('button', { name: /SAM Claude/ }));

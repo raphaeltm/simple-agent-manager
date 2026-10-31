@@ -285,15 +285,20 @@ export function AccountCard({
         )}
         {account.role === 'unattached' && (
           <>
-            <span className="min-w-0 flex-1 text-fg-muted">Connected, but nothing uses it.</span>
-            {chooseProjects && (
-              <Button size="sm" onClick={chooseProjects}>
-                Use in a project
+            {/* A real basis lets the buttons wrap below the text instead of squeezing it. */}
+            <span className="min-w-0 flex-1 basis-40 text-fg-muted">
+              Connected, but nothing uses it.
+            </span>
+            <span className="ml-auto flex shrink-0 items-center gap-1.5">
+              {chooseProjects && (
+                <Button size="sm" onClick={chooseProjects}>
+                  Use in a project
+                </Button>
+              )}
+              <Button size="sm" variant="ghost" onClick={() => setPending({ type: 'remove' })}>
+                Remove
               </Button>
-            )}
-            <Button size="sm" variant="ghost" onClick={() => setPending({ type: 'remove' })}>
-              Remove
-            </Button>
+            </span>
           </>
         )}
       </footer>
