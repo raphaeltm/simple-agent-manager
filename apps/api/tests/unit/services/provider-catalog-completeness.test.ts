@@ -16,6 +16,7 @@ import { listProviderCatalogOfferings } from '../../../src/services/provider-cat
 const originalFetch = globalThis.fetch;
 
 afterEach(() => {
+  vi.useRealTimers();
   globalThis.fetch = originalFetch;
   vi.restoreAllMocks();
 });
@@ -57,6 +58,20 @@ function hetznerServerType(name: string) {
 }
 
 describe('provider catalog completeness at the provider boundary', () => {
+  it('bounds a stalled live catalog and retains an incomplete static fallback', async () => {
+    globalThis.fetch = vi.fn(() => new Promise(() => {}));
+    vi.useFakeTimers();
+    const result = listProviderCatalogOfferings('hetzner', new HetznerProvider('token'), 100);
+    await vi.advanceTimersByTimeAsync(100);
+    const catalog = await result;
+    expect(catalog.offerings.length).toBeGreaterThan(0);
+    expect(catalog.refreshStatus).toMatchObject({
+      succeeded: false,
+      origin: 'static',
+      complete: false,
+    });
+  });
+
   it('treats a successful EMPTY Hetzner server_types response as a complete API inventory', async () => {
     mockHetznerServerTypes([]);
     const provider = new HetznerProvider('token');

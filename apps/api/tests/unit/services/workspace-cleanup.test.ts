@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   confirmWorkspaceDeletion: vi.fn(),
   scheduleWorkspaceDeletion: vi.fn(),
   deleteSessionSnapshotState: vi.fn(),
+  retireContainer: vi.fn(),
   logWarn: vi.fn(),
 }));
 
@@ -24,6 +25,9 @@ vi.mock('../../../src/services/workspace-deletion', async (importActual) => {
       mocks.loadWorkspaceDeletionSnapshot(...args),
   };
 });
+vi.mock('../../../src/services/workspace-confirmed-container-retirement', () => ({
+  retireConfirmedContainerWorkspaceNode: (...args: unknown[]) => mocks.retireContainer(...args),
+}));
 vi.mock('../../../src/services/session-snapshots', () => ({
   deleteSessionSnapshotState: (...args: unknown[]) => mocks.deleteSessionSnapshotState(...args),
 }));
@@ -91,6 +95,7 @@ function workspace(overrides: Partial<Workspace> = {}): Workspace {
 describe('cleanupWorkspaceForDeletion', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.retireContainer.mockResolvedValue(undefined);
     mocks.claimWorkspaceDeletionAttempt.mockResolvedValue('claimed');
     mocks.scheduleWorkspaceDeletion.mockResolvedValue(undefined);
     mocks.deleteSessionSnapshotState.mockResolvedValue(true);
@@ -158,6 +163,76 @@ describe('cleanupWorkspaceForDeletion', () => {
     });
   });
 
+  it('preserves successor chat interactions when only the old workspace source is deleted', async () => {
+    const { db } = buildDb();
+    const env = buildEnv();
+    const purge = vi.fn();
+    env.INTERACTION_STORE = {
+      idFromName: vi.fn(),
+      get: () => ({ purge }),
+    } as unknown as Env['INTERACTION_STORE'];
+    mocks.deleteSessionSnapshotState.mockResolvedValueOnce(false);
+    mocks.attemptWorkspaceDeletion.mockImplementationOnce(
+      async (options: { beforeFinalize?: () => Promise<void> }) => {
+        await options.beforeFinalize?.();
+        return { status: 'confirmed', proof: 'vm_agent_confirmed', workspaceFinalized: true };
+      }
+    );
+    expect(
+      await cleanupWorkspaceForDeletion({
+        db: db as never,
+        env,
+        workspace: workspace(),
+        userId: 'user-cleanup-1',
+      })
+    ).toMatchObject({ status: 'confirmed' });
+    expect(purge).not.toHaveBeenCalled();
+  });
+
+  it('retains the proof tombstone and same durable attempt after CF retirement fails', async () => {
+    const { db } = buildDb();
+    const env = buildEnv();
+    mocks.loadWorkspaceDeletionSnapshot.mockResolvedValueOnce({
+      workspaceId: 'ws-cleanup-1',
+      nodeId: 'node-cleanup-1',
+      nodeUserId: 'user-cleanup-1',
+      nodeRuntime: 'cf-container',
+      nodeProviderInstanceId: null,
+      nodeRuntimeIncarnationId: 'incarnation',
+      userId: 'user-cleanup-1',
+      projectId: 'project-cleanup-1',
+      chatSessionId: 'session-cleanup-1',
+      status: 'stopped',
+      runtimeDeletionConfirmedAt: null,
+      runtimeDeletionProof: null,
+    });
+    mocks.attemptWorkspaceDeletion.mockResolvedValueOnce({
+      status: 'confirmed',
+      proof: 'vm_agent_confirmed',
+      workspaceFinalized: true,
+    });
+    mocks.retireContainer.mockRejectedValueOnce(new Error('transient destroy failure'));
+    expect(
+      await cleanupWorkspaceForDeletion({
+        db: db as never,
+        env,
+        workspace: workspace(),
+        userId: 'user-cleanup-1',
+      })
+    ).toMatchObject({ status: 'confirmed' });
+    expect(db.delete).not.toHaveBeenCalled();
+    expect(mocks.confirmWorkspaceDeletion).not.toHaveBeenCalled();
+    expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith(
+      'node-cleanup-1',
+      'ws-cleanup-1',
+      'user-cleanup-1',
+      expect.objectContaining({
+        expected: expect.objectContaining({ nodeRuntimeIncarnationId: 'incarnation' }),
+        lastError: expect.stringContaining('retirement pending'),
+      })
+    );
+  });
+
   it('hard-deletes local state only after confirmed runtime deletion and lifecycle finalization', async () => {
     const { db, deletedTables } = buildDb();
     const env = buildEnv();
@@ -176,7 +251,12 @@ describe('cleanupWorkspaceForDeletion', () => {
     });
 
     expect(outcome).toMatchObject({ status: 'confirmed', proof: 'vm_agent_confirmed' });
-    expect(mocks.deleteSessionSnapshotState).toHaveBeenCalledWith(db, env, 'session-cleanup-1');
+    expect(mocks.deleteSessionSnapshotState).toHaveBeenCalledWith(
+      db,
+      env,
+      'session-cleanup-1',
+      expect.objectContaining({ workspaceId: workspace().id })
+    );
     expect(mocks.claimWorkspaceDeletionAttempt).toHaveBeenCalledWith(
       'node-cleanup-1',
       'ws-cleanup-1',

@@ -1,8 +1,9 @@
 import type { ErrorTrendResponse } from '@simple-agent-manager/shared';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ErrorTrends } from '../../../../src/components/admin/ErrorTrends';
+import { renderWithQuery as render } from '../../../test-utils/query-test-utils';
 
 // Mock the api module
 const mockFetchAdminErrorTrends = vi.fn();
@@ -118,15 +119,16 @@ describe('ErrorTrends', () => {
     render(<ErrorTrends />);
 
     await waitFor(() => {
-      expect(mockFetchAdminErrorTrends).toHaveBeenCalledWith('24h');
+      expect(mockFetchAdminErrorTrends).toHaveBeenCalledWith('24h', expect.any(AbortSignal));
     });
 
     // Click 7d button
     mockFetchAdminErrorTrends.mockResolvedValue(createMockTrends('7d', '1d', 7, true));
+    await waitFor(() => expect(screen.getByText('7d')).toBeEnabled());
     fireEvent.click(screen.getByText('7d'));
 
     await waitFor(() => {
-      expect(mockFetchAdminErrorTrends).toHaveBeenCalledWith('7d');
+      expect(mockFetchAdminErrorTrends).toHaveBeenCalledWith('7d', expect.any(AbortSignal));
     });
   });
 
@@ -230,6 +232,7 @@ describe('ErrorTrends', () => {
 
     // Change range — keep the chart visible while loading
     mockFetchAdminErrorTrends.mockReturnValue(new Promise(() => {}));
+    await waitFor(() => expect(screen.getByText('7d')).toBeEnabled());
     fireEvent.click(screen.getByText('7d'));
 
     // Chart should still be visible (old data)
@@ -271,3 +274,5 @@ describe('ErrorTrends', () => {
     expect(screen.getAllByText('Invalid Date').length).toBeGreaterThan(0);
   });
 });
+
+vi.mock('../../../../src/hooks/useQueryScope', () => ({ useQueryScope: () => 'admin-1' }));

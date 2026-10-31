@@ -1,5 +1,7 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { renderWithQuery as render } from '../test-utils/query-test-utils';
 
 const mocks = vi.hoisted(() => ({
   fetchAdminTrialsConfig: vi.fn(),
@@ -58,3 +60,5 @@ describe('AdminTrials', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('no kv access');
   });
 });
+
+vi.mock('../../src/hooks/useQueryScope', () => ({ useQueryScope: () => 'admin-1' }));

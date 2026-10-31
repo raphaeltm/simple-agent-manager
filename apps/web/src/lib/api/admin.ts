@@ -38,9 +38,12 @@ const diagnosisEventMaxPages =
 // =============================================================================
 // Admin
 // =============================================================================
-export async function listAdminUsers(status?: UserStatus): Promise<AdminUsersResponse> {
+export async function listAdminUsers(
+  status?: UserStatus,
+  signal?: AbortSignal
+): Promise<AdminUsersResponse> {
   const params = status ? `?status=${status}` : '';
-  return request<AdminUsersResponse>(`/api/admin/users${params}`);
+  return request<AdminUsersResponse>(`/api/admin/users${params}`, { signal });
 }
 
 export async function approveOrSuspendUser(
@@ -63,8 +66,10 @@ export async function changeUserRole(
   });
 }
 
-export async function fetchSignupApprovalConfig(): Promise<SignupApprovalConfigResponse> {
-  return request<SignupApprovalConfigResponse>('/api/admin/signup-approval');
+export async function fetchSignupApprovalConfig(
+  signal?: AbortSignal
+): Promise<SignupApprovalConfigResponse> {
+  return request<SignupApprovalConfigResponse>('/api/admin/signup-approval', { signal });
 }
 
 export async function updateSignupApprovalConfig(
@@ -114,8 +119,8 @@ export async function fetchAdminErrors(filter?: AdminErrorsFilter): Promise<Erro
   return request<ErrorListResponse>(`/api/admin/observability/errors${qs ? `?${qs}` : ''}`);
 }
 
-export async function fetchAdminHealth(): Promise<HealthSummary> {
-  return request<HealthSummary>('/api/admin/observability/health');
+export async function fetchAdminHealth(signal?: AbortSignal): Promise<HealthSummary> {
+  return request<HealthSummary>('/api/admin/observability/health', { signal });
 }
 
 export async function fetchAdminProjectEventInspector(
@@ -132,9 +137,12 @@ export async function fetchAdminProjectEventInspector(
   );
 }
 
-export async function fetchAdminErrorTrends(range?: string): Promise<ErrorTrendResponse> {
+export async function fetchAdminErrorTrends(
+  range?: string,
+  signal?: AbortSignal
+): Promise<ErrorTrendResponse> {
   const params = range ? `?range=${range}` : '';
-  return request<ErrorTrendResponse>(`/api/admin/observability/trends${params}`);
+  return request<ErrorTrendResponse>(`/api/admin/observability/trends${params}`, { signal });
 }
 
 export interface AdminLogQueryParams {
@@ -172,17 +180,23 @@ export async function runAdminDebugDiagnosis(
   });
 }
 
-export async function fetchAdminDebugDiagnoses(filter: {
-  errorId?: string;
-  startTime?: string;
-  endTime?: string;
-}): Promise<DebugDiagnosisListResponse> {
+export async function fetchAdminDebugDiagnoses(
+  filter: {
+    errorId?: string;
+    startTime?: string;
+    endTime?: string;
+    summaryOnly?: boolean;
+  },
+  signal?: AbortSignal
+): Promise<DebugDiagnosisListResponse> {
   const params = new URLSearchParams();
+  if (filter.summaryOnly) params.set('summaryOnly', 'true');
   if (filter.errorId) params.set('errorId', filter.errorId);
   if (filter.startTime) params.set('startTime', filter.startTime);
   if (filter.endTime) params.set('endTime', filter.endTime);
   return request<DebugDiagnosisListResponse>(
-    `/api/admin/observability/diagnoses?${params.toString()}`
+    `/api/admin/observability/diagnoses?${params.toString()}`,
+    { signal }
   );
 }
 
@@ -290,228 +304,7 @@ export async function saveAdminDebugDiagnosisAsIdea(
 // Admin Analytics
 // =============================================================================
 
-export interface AnalyticsDauResponse {
-  dau: Array<{ date: string; unique_users: number }>;
-  periodDays: number;
-}
-
-export interface AnalyticsEventsResponse {
-  events: Array<{
-    event_name: string;
-    count: number;
-    unique_users: number;
-    avg_response_ms: number;
-  }>;
-  period: string;
-}
-
-export interface AnalyticsFunnelResponse {
-  funnel: Array<{ event_name: string; unique_users: number }>;
-  periodDays: number;
-}
-
-export async function fetchAnalyticsDau(): Promise<AnalyticsDauResponse> {
-  return request<AnalyticsDauResponse>('/api/admin/analytics/dau');
-}
-
-export async function fetchAnalyticsEvents(period?: string): Promise<AnalyticsEventsResponse> {
-  const params = period ? `?period=${period}` : '';
-  return request<AnalyticsEventsResponse>(`/api/admin/analytics/events${params}`);
-}
-
-export async function fetchAnalyticsFunnel(): Promise<AnalyticsFunnelResponse> {
-  return request<AnalyticsFunnelResponse>('/api/admin/analytics/funnel');
-}
-
-// Phase 3: Feature adoption, geo distribution, retention cohorts
-
-export interface AnalyticsFeatureAdoptionResponse {
-  totals: Array<{ event_name: string; count: number; unique_users: number }>;
-  trend: Array<{ event_name: string; date: string; count: number }>;
-  period: string;
-}
-
-export interface AnalyticsGeoResponse {
-  geo: Array<{ country: string; event_count: number; unique_users: number }>;
-  period: string;
-}
-
-export interface AnalyticsRetentionResponse {
-  retention: Array<{
-    cohortWeek: string;
-    cohortSize: number;
-    weeks: Array<{ week: number; users: number; rate: number }>;
-  }>;
-  weeks: number;
-  truncated?: boolean;
-}
-
-export async function fetchAnalyticsFeatureAdoption(
-  period?: string
-): Promise<AnalyticsFeatureAdoptionResponse> {
-  const params = period ? `?period=${period}` : '';
-  return request<AnalyticsFeatureAdoptionResponse>(
-    `/api/admin/analytics/feature-adoption${params}`
-  );
-}
-
-export async function fetchAnalyticsGeo(period?: string): Promise<AnalyticsGeoResponse> {
-  const params = period ? `?period=${period}` : '';
-  return request<AnalyticsGeoResponse>(`/api/admin/analytics/geo${params}`);
-}
-
-export async function fetchAnalyticsRetention(weeks?: number): Promise<AnalyticsRetentionResponse> {
-  const params = weeks ? `?weeks=${weeks}` : '';
-  return request<AnalyticsRetentionResponse>(`/api/admin/analytics/retention${params}`);
-}
-
-// Website traffic analytics
-
-export interface WebsiteTrafficSection {
-  name: string;
-  views: number;
-  unique_visitors: number;
-  topPages: Array<{ page: string; views: number; unique_visitors: number }>;
-}
-
-export interface WebsiteTrafficHost {
-  host: string;
-  totalViews: number;
-  uniqueVisitors: number;
-  uniqueSessions: number;
-  sections: WebsiteTrafficSection[];
-}
-
-export interface AnalyticsWebsiteTrafficResponse {
-  hosts: WebsiteTrafficHost[];
-  trend: Array<{ host: string; date: string; views: number }>;
-  period: string;
-}
-
-export async function fetchAnalyticsWebsiteTraffic(
-  period?: string
-): Promise<AnalyticsWebsiteTrafficResponse> {
-  const params = period ? `?period=${period}` : '';
-  return request<AnalyticsWebsiteTrafficResponse>(`/api/admin/analytics/website-traffic${params}`);
-}
-
-// Analytics forwarding status (Phase 4)
-export interface AnalyticsForwardStatusResponse {
-  enabled: boolean;
-  lastForwardedAt: string | null;
-  destinations: {
-    segment: { configured: boolean };
-    ga4: { configured: boolean };
-  };
-  events: string[];
-}
-
-export async function fetchAnalyticsForwardStatus(): Promise<AnalyticsForwardStatusResponse> {
-  return request<AnalyticsForwardStatusResponse>('/api/admin/analytics/forward-status');
-}
-
-// Phase 5: AI Usage (AI Gateway logs)
-
-export interface AiUsageByModel {
-  model: string;
-  provider: string;
-  requests: number;
-  inputTokens: number;
-  outputTokens: number;
-  totalTokens: number;
-  costUsd: number;
-  cachedRequests: number;
-  errorRequests: number;
-}
-
-export interface AiUsageByDay {
-  date: string;
-  requests: number;
-  inputTokens: number;
-  outputTokens: number;
-  costUsd: number;
-}
-
-export interface AnalyticsAiUsageResponse {
-  totalRequests: number;
-  totalInputTokens: number;
-  totalOutputTokens: number;
-  totalCostUsd: number;
-  trialRequests: number;
-  trialCostUsd: number;
-  cachedRequests: number;
-  errorRequests: number;
-  byModel: AiUsageByModel[];
-  byDay: AiUsageByDay[];
-  period: string;
-}
-
-export async function fetchAnalyticsAiUsage(period?: string): Promise<AnalyticsAiUsageResponse> {
-  const params = period ? `?period=${period}` : '';
-  return request<AnalyticsAiUsageResponse>(`/api/admin/analytics/ai-usage${params}`);
-}
-
-// =============================================================================
-// Admin Cost Monitoring
-// =============================================================================
-
-export interface CostByModel {
-  model: string;
-  provider: string;
-  requests: number;
-  inputTokens: number;
-  outputTokens: number;
-  costUsd: number;
-}
-
-export interface CostByDay {
-  date: string;
-  costUsd: number;
-  requests: number;
-}
-
-export interface CostByUser {
-  userId: string;
-  requests: number;
-  inputTokens: number;
-  outputTokens: number;
-  costUsd: number;
-}
-
-export interface CostSummaryResponse {
-  llm: {
-    totalCostUsd: number;
-    totalRequests: number;
-    totalInputTokens: number;
-    totalOutputTokens: number;
-    trialCostUsd: number;
-    cachedRequests: number;
-    errorRequests: number;
-    byModel: CostByModel[];
-    byDay: CostByDay[];
-    byUser: CostByUser[];
-  };
-  projection: {
-    projectedMonthlyCostUsd: number;
-    dailyAverageCostUsd: number;
-    daysElapsed: number;
-    daysInMonth: number;
-  };
-  compute: {
-    totalNodeHours: number;
-    totalVcpuHours: number;
-    estimatedCostUsd: number;
-    activeNodes: number;
-    vcpuHourCostUsd: number;
-  };
-  period: string;
-  periodLabel: string;
-}
-
-export async function fetchAdminCosts(period?: string): Promise<CostSummaryResponse> {
-  const params = period ? `?period=${period}` : '';
-  return request<CostSummaryResponse>(`/api/admin/costs${params}`);
-}
+export * from './admin-analytics';
 
 // =============================================================================
 // Admin AI Proxy Config
@@ -539,8 +332,8 @@ export interface AIProxyConfigResponse {
   }>;
 }
 
-export async function fetchAIProxyConfig(): Promise<AIProxyConfigResponse> {
-  return request<AIProxyConfigResponse>('/api/admin/ai-proxy/config');
+export async function fetchAIProxyConfig(signal?: AbortSignal): Promise<AIProxyConfigResponse> {
+  return request<AIProxyConfigResponse>('/api/admin/ai-proxy/config', { signal });
 }
 
 export async function updateAIProxyConfig(defaultModel: string): Promise<{
@@ -581,8 +374,10 @@ export interface AdminTrialsConfigResponse {
   cacheTtlMs: number;
 }
 
-export async function fetchAdminTrialsConfig(): Promise<AdminTrialsConfigResponse> {
-  return request<AdminTrialsConfigResponse>('/api/admin/trials/config');
+export async function fetchAdminTrialsConfig(
+  signal?: AbortSignal
+): Promise<AdminTrialsConfigResponse> {
+  return request<AdminTrialsConfigResponse>('/api/admin/trials/config', { signal });
 }
 
 export async function updateAdminTrialsConfig(
@@ -598,8 +393,10 @@ export async function updateAdminTrialsConfig(
 // Admin Platform Credentials
 // =============================================================================
 
-export async function listPlatformCredentials(): Promise<ListPlatformCredentialsResponse> {
-  return request<ListPlatformCredentialsResponse>('/api/admin/platform-credentials');
+export async function listPlatformCredentials(
+  signal?: AbortSignal
+): Promise<ListPlatformCredentialsResponse> {
+  return request<ListPlatformCredentialsResponse>('/api/admin/platform-credentials', { signal });
 }
 
 export async function createPlatformCredential(
@@ -627,6 +424,7 @@ export async function deletePlatformCredential(id: string): Promise<{ success: b
   });
 }
 
+export * from './admin-compute';
 export type {
   FeedbackProjectStatus,
   PlatformConfigFieldStatus,
@@ -637,103 +435,3 @@ export type {
   PlatformIntegrationStatus,
 } from './admin-platform-config';
 export { fetchAdminPlatformConfig, updateAdminPlatformConfig } from './admin-platform-config';
-
-// =============================================================================
-// Admin Compute Usage
-// =============================================================================
-
-export type {
-  AdminComputeUsageResponse,
-  AdminUserDetailedUsage,
-} from '@simple-agent-manager/shared';
-
-export async function fetchAdminComputeUsage(): Promise<
-  import('@simple-agent-manager/shared').AdminComputeUsageResponse
-> {
-  return request('/api/admin/usage/compute');
-}
-
-export async function fetchAdminUserComputeUsage(
-  userId: string
-): Promise<import('@simple-agent-manager/shared').AdminUserDetailedUsage> {
-  return request(`/api/admin/usage/compute/${userId}`);
-}
-
-// =============================================================================
-// Admin Node Usage
-// =============================================================================
-
-export type {
-  AdminNodeUsageResponse,
-  AdminUserNodeDetailedUsage,
-} from '@simple-agent-manager/shared';
-
-export async function fetchAdminNodeUsage(): Promise<
-  import('@simple-agent-manager/shared').AdminNodeUsageResponse
-> {
-  return request('/api/admin/usage/nodes');
-}
-
-export async function fetchAdminUserNodeUsage(
-  userId: string
-): Promise<import('@simple-agent-manager/shared').AdminUserNodeDetailedUsage> {
-  return request(`/api/admin/usage/nodes/${userId}`);
-}
-
-// =============================================================================
-// Admin Compute Quotas
-// =============================================================================
-
-export type {
-  AdminDefaultQuotaResponse,
-  AdminUserQuotasListResponse,
-  AdminUserQuotaSummary,
-  AdminUserResolvedQuota,
-} from '@simple-agent-manager/shared';
-
-export async function fetchAdminDefaultQuota(): Promise<
-  import('@simple-agent-manager/shared').AdminDefaultQuotaResponse
-> {
-  return request('/api/admin/quotas/default');
-}
-
-export async function updateAdminDefaultQuota(
-  monthlyVcpuHoursLimit: number | null
-): Promise<import('@simple-agent-manager/shared').AdminDefaultQuotaResponse> {
-  return request('/api/admin/quotas/default', {
-    method: 'PUT',
-    body: JSON.stringify({ monthlyVcpuHoursLimit }),
-  });
-}
-
-export async function fetchAdminUserQuotas(): Promise<
-  import('@simple-agent-manager/shared').AdminUserQuotasListResponse
-> {
-  return request('/api/admin/quotas/users');
-}
-
-export async function fetchAdminUserQuota(
-  userId: string
-): Promise<import('@simple-agent-manager/shared').AdminUserResolvedQuota> {
-  return request(`/api/admin/quotas/users/${userId}`);
-}
-
-export async function updateAdminUserQuota(
-  userId: string,
-  monthlyVcpuHoursLimit: number | null
-): Promise<{
-  userId: string;
-  monthlyVcpuHoursLimit: number | null;
-  source: string;
-  currentUsage: number;
-  remaining: number | null;
-}> {
-  return request(`/api/admin/quotas/users/${userId}`, {
-    method: 'PUT',
-    body: JSON.stringify({ monthlyVcpuHoursLimit }),
-  });
-}
-
-export async function removeAdminUserQuota(userId: string): Promise<{ success: boolean }> {
-  return request(`/api/admin/quotas/users/${userId}`, { method: 'DELETE' });
-}

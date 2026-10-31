@@ -87,7 +87,7 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 	if s.config.IsStandaloneMode() {
 		provisionErr = s.prepareStandaloneWorkspaceRuntime(ctx, runtime)
 	} else {
-		_, provisionErr = s.provisionWorkspaceRuntime(ctx, runtime)
+		_, provisionErr = s.provisionWorkspaceRuntimeWithLifecycleLockHeld(ctx, runtime, timings)
 	}
 	if provisionErr != nil {
 		_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "fresh_injection_failed", provisionErr.Error(), callbackToken)

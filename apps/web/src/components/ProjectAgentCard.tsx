@@ -1,16 +1,12 @@
 /**
- * Per-project unified agent card. Combines project credential override
- * (delegates to AgentKeyCard scope='project') with project-scoped model /
- * permission mode overrides. Both subsections fall through to user-level
- * values when empty.
+ * Per-project agent card: which account the project uses (managed in the
+ * Accounts tab) and project-scoped model / permission mode overrides, which fall
+ * through to your Settings → Agents defaults when empty.
  */
 import type {
-  AgentCredentialInfo,
   AgentInfo,
   AgentPermissionMode,
   AgentType,
-  CredentialKind,
-  SaveAgentCredentialRequest,
 } from '@simple-agent-manager/shared';
 import {
   AGENT_PERMISSION_MODE_LABELS,
@@ -19,13 +15,14 @@ import {
 } from '@simple-agent-manager/shared';
 import { Alert, Button, Card, StatusBadge } from '@simple-agent-manager/ui';
 import { useEffect, useState } from 'react';
+import { Link } from 'react-router';
 
-import { AgentKeyCard } from './AgentKeyCard';
+import type { ProjectResolution } from './accounts/account-model';
 import { ModelSelect } from './ModelSelect';
 
 const DEFAULT_SUCCESS_BANNER_MS = 3000;
 const SUCCESS_BANNER_MS = Number(
-  import.meta.env.VITE_SUCCESS_BANNER_MS ?? DEFAULT_SUCCESS_BANNER_MS,
+  import.meta.env.VITE_SUCCESS_BANNER_MS ?? DEFAULT_SUCCESS_BANNER_MS
 );
 
 const FORM_CONTROL =
@@ -48,34 +45,28 @@ function modelPlaceholderFor(agentId: string): string {
 
 export interface ProjectAgentCardProps {
   agent: AgentInfo;
-  projectCredentials: AgentCredentialInfo[] | null;
-  userCredentials: AgentCredentialInfo[];
+  projectId: string;
+  /** Which account this project uses for the agent; undefined while loading. */
+  account: ProjectResolution | undefined;
   defaultValue: { model?: string | null; permissionMode?: AgentPermissionMode | null } | undefined;
-  onSaveCredential: (req: SaveAgentCredentialRequest) => Promise<AgentCredentialInfo>;
-  onDeleteCredential: (agentType: AgentType, credentialKind: CredentialKind) => Promise<void>;
   onSaveDefault: (
     agentType: AgentType,
-    entry: { model: string | null; permissionMode: AgentPermissionMode | null },
+    entry: { model: string | null; permissionMode: AgentPermissionMode | null }
   ) => Promise<void>;
   onClearDefault: (agentType: AgentType) => Promise<void>;
-  /** Refresh credentials after the guided "Connect with Codex" flow succeeds. */
-  onCredentialConnected?: () => void;
 }
 
 export function ProjectAgentCard({
   agent,
-  projectCredentials,
-  userCredentials,
+  projectId,
+  account,
   defaultValue,
-  onSaveCredential,
-  onDeleteCredential,
   onSaveDefault,
   onClearDefault,
-  onCredentialConnected,
 }: ProjectAgentCardProps) {
   const [model, setModel] = useState(defaultValue?.model ?? '');
   const [permissionMode, setPermissionMode] = useState<AgentPermissionMode | ''>(
-    defaultValue?.permissionMode ?? '',
+    defaultValue?.permissionMode ?? ''
   );
   const [saving, setSaving] = useState(false);
   const [clearing, setClearing] = useState(false);
@@ -86,10 +77,6 @@ export function ProjectAgentCard({
     setModel(defaultValue?.model ?? '');
     setPermissionMode(defaultValue?.permissionMode ?? '');
   }, [defaultValue]);
-
-  const hasCredentialOverride = (projectCredentials?.length ?? 0) > 0;
-  const activeUserCred = userCredentials.find((c) => c.isActive);
-  const hasUserCredential = userCredentials.length > 0;
 
   const hasConfigOverride = Boolean(defaultValue?.model || defaultValue?.permissionMode);
   const configChanged =
@@ -131,15 +118,7 @@ export function ProjectAgentCard({
     }
   };
 
-  // Project-scope status label reflects override presence only — user inheritance is
-  // surfaced via inline copy below the credential form.
-  const statusLabel = hasCredentialOverride
-    ? 'Project override'
-    : hasUserCredential
-      ? 'Inheriting user credential'
-      : 'No credential';
-  const statusKind: 'connected' | 'disconnected' =
-    hasCredentialOverride || hasUserCredential ? 'connected' : 'disconnected';
+  const summary = account ? describeAccount(account) : null;
 
   return (
     <Card
@@ -152,7 +131,7 @@ export function ProjectAgentCard({
           <h3 className="text-base font-semibold text-fg-primary">{agent.name}</h3>
           <p className="text-xs text-fg-muted">{agent.description}</p>
         </div>
-        <StatusBadge status={statusKind} label={statusLabel} />
+        {summary && <StatusBadge status={summary.status} label={summary.label} />}
       </div>
 
       <section
@@ -163,30 +142,14 @@ export function ProjectAgentCard({
           id={`project-agent-connection-${agent.id}`}
           className="text-xs font-semibold uppercase tracking-wide text-fg-muted"
         >
-          Credential (project override)
+          Account
         </h4>
-        <AgentKeyCard
-          agent={agent}
-          credentials={projectCredentials}
-          onSave={onSaveCredential}
-          onDelete={onDeleteCredential}
-          scope="project"
-          embedded
-          onCredentialConnected={onCredentialConnected}
-        />
-        {!hasCredentialOverride && hasUserCredential && (
-          <p className="text-xs text-fg-muted">
-            Inheriting user credential
-            {activeUserCred?.maskedKey ? ` (${activeUserCred.maskedKey})` : ''} — add an override
-            above to use a different key for this project only.
-          </p>
-        )}
-        {!hasCredentialOverride && !hasUserCredential && (
-          <p className="text-xs text-fg-muted">
-            No user-level credential set. Adding one here creates a project-scoped credential.
-            To set a default across all your projects, use Settings → Agents.
-          </p>
-        )}
+        <p className="m-0 text-xs text-fg-muted">
+          {summary?.detail ?? 'Checking which account this project uses…'}{' '}
+          <Link to={`/projects/${projectId}/settings/accounts`} className="font-medium text-accent">
+            Manage in Accounts
+          </Link>
+        </p>
       </section>
 
       <section
@@ -259,7 +222,10 @@ export function ProjectAgentCard({
             ))}
           </select>
           {permissionMode === 'bypassPermissions' && (
-            <div role="alert" className="text-xs text-danger-fg py-2 px-3 rounded-md bg-danger-tint mt-2">
+            <div
+              role="alert"
+              className="text-xs text-danger-fg py-2 px-3 rounded-md bg-danger-tint mt-2"
+            >
               ⚠ Warning: bypassPermissions disables all safety prompts for this project.
             </div>
           )}
@@ -290,4 +256,47 @@ export function ProjectAgentCard({
       </section>
     </Card>
   );
+}
+
+/**
+ * Same vocabulary as Project settings → Accounts, read from the same resolution,
+ * so the two tabs can never disagree about which account a project uses.
+ */
+function describeAccount(account: ProjectResolution): {
+  label: string;
+  status: 'connected' | 'disconnected';
+  detail: string;
+} {
+  switch (account.source) {
+    case 'pinned':
+      return {
+        label: 'Pinned account',
+        status: 'connected',
+        detail: `This project uses ${account.account.label}, pinned to it.`,
+      };
+    case 'default':
+      return {
+        label: 'Your default account',
+        status: 'connected',
+        detail: `This project uses your default account, ${account.account.label}.`,
+      };
+    case 'blocked':
+      return {
+        label: 'Paused pin',
+        status: 'disconnected',
+        detail: 'Its pinned account is paused, so this agent can’t run here.',
+      };
+    case 'platform':
+      return {
+        label: 'SAM platform',
+        status: 'connected',
+        detail: 'This project uses SAM’s platform account.',
+      };
+    case 'none':
+      return {
+        label: 'No account',
+        status: 'disconnected',
+        detail: 'No account connected for this agent yet.',
+      };
+  }
 }

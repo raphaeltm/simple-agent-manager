@@ -41,7 +41,7 @@ function authSettingsAction(code: FailureClassification['code']) {
   switch (code) {
     case 'model-credential-missing':
     case 'model-credential-rejected':
-      return { href: '/settings/connections', label: 'Open agent connections' };
+      return { href: '/settings/agents', label: 'Open agent accounts' };
     case 'mcp-auth-required':
       return { href: '/settings/mcp-servers', label: 'Review personal MCP settings' };
     default:
@@ -223,8 +223,10 @@ export function FailureCard({
             </a>
           )}
           {settingsAction && classification.code === 'mcp-auth-required' && (
-            <a href={`/projects/${encodeURIComponent(projectId)}/settings/runtime`}
-              className="inline-flex self-start items-center gap-2 rounded-md border border-border-default px-3 py-2 text-xs font-medium text-accent no-underline hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-primary">
+            <a
+              href={`/projects/${encodeURIComponent(projectId)}/settings/runtime`}
+              className="inline-flex self-start items-center gap-2 rounded-md border border-border-default px-3 py-2 text-xs font-medium text-accent no-underline hover:bg-surface-raised focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-primary"
+            >
               View project MCP settings
               <ExternalLink size={13} aria-hidden="true" />
             </a>

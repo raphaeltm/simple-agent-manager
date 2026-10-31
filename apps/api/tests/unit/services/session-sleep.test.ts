@@ -1090,7 +1090,12 @@ describe('sleepWorkspaceSession', () => {
     expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
     expect(mocks.finalizeSessionSnapshotSleeping).toHaveBeenCalledTimes(1);
     expect(mocks.sleepSession).toHaveBeenCalledWith(env, 'project-1', 'chat-1', expect.objectContaining({ runtimeGuard: expect.objectContaining({ workspaceId: 'workspace-1', userId: 'user-1', nodeId: 'node-1', evictionGeneration: null, claimId: expect.any(String) }) }));
-    expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('node-1', 'workspace-1', 'user-1');
+    expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith(
+      'node-1',
+      'workspace-1',
+      'user-1',
+      { retryAfterMs: 0 }
+    );
     expect(mocks.handOffEmptyWorkspaceNode).toHaveBeenCalledWith(env, {
       nodeId: 'node-1',
       expectedUserId: 'user-1',
@@ -1122,7 +1127,12 @@ describe('sleepWorkspaceSession', () => {
     ).resolves.toMatchObject({ status: 'sleeping', workspaceId: 'workspace-1' });
 
     expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
-    expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('node-1', 'workspace-1', 'user-1');
+    expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith(
+      'node-1',
+      'workspace-1',
+      'user-1',
+      { retryAfterMs: 0 }
+    );
     expect(mocks.handOffEmptyWorkspaceNode).toHaveBeenCalledWith(
       env,
       expect.objectContaining({ nodeId: 'node-1', reason: 'session_sleep' })

@@ -475,7 +475,7 @@ export function CreateWorkspace() {
             }
             onAction={
               cloudStatus === 'missing' || cloudStatus === 'error'
-                ? () => navigate('/settings')
+                ? () => navigate('/settings/infrastructure')
                 : undefined
             }
           />
@@ -496,7 +496,7 @@ export function CreateWorkspace() {
             }
             onAction={
               githubStatus === 'missing' || githubStatus === 'error'
-                ? () => navigate('/settings')
+                ? () => navigate('/settings/github')
                 : undefined
             }
           />

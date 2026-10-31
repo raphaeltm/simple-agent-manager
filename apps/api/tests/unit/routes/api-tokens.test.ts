@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { buildAuthTestApp, createMockAuth } from './auth-test-helpers';
 
@@ -149,7 +150,9 @@ describe('API token routes', () => {
       expect(mockGetSession).toHaveBeenCalledWith(
         expect.objectContaining({ query: { disableCookieCache: true } })
       );
-      expect(currentMockDB.select).not.toHaveBeenCalled();
+      for (const read of currentMockDB.select.mock.results) {
+        expect(read.value.from).toHaveBeenCalledWith(schema.platformSettings);
+      }
       expect(currentMockDB.insert).not.toHaveBeenCalled();
       expect(currentMockDB.update).not.toHaveBeenCalled();
     }

@@ -54,16 +54,15 @@ SAM supports seven providers:
 
 ### Connecting a provider
 
-1. Open **Settings → Connections** and start connecting a cloud provider. (The **Cloud Provider** tab lets you fill in each provider's form directly instead.)
-2. Pick a provider — each card shows a one-line description to help you choose.
-3. Use the linked provider console to create the credential, paste it into the form, and save. SAM encrypts the credential at rest and validates it before the first VM is created.
-
-![The cloud provider picker in SAM's Connections settings: a selectable card for each supported provider — Hetzner, Scaleway, Google Cloud, Vultr, Infomaniak Public Cloud, DigitalOcean, and UpCloud — each with a short description, above the credential form for the selected provider.](/images/docs/cloud-provider-connect.png)
+1. Open **Settings → Infrastructure** and, under **Cloud accounts**, click **Connect account**.
+2. Pick a provider.
+3. Fill in that provider's form: use the linked provider console to create the credential, paste it in, and save. Hetzner's form can test the token first; Google Cloud offers **Connect with Google** or a service-account JSON key. SAM encrypts the credential at rest and validates it before the first VM is created.
+4. Name the account (for example, Work or Personal). It becomes your default for that provider. A previous default stays connected and shows as **Unattached**.
 
 Once a provider is connected, SAM uses it automatically when it provisions workspaces. You can connect more than one and set a default provider (and region) per project in project settings. For per-provider VM sizes, regions, and example pricing, see the [Self-Hosting guide](/docs/guides/self-hosting/#user-vm-costs).
 
 :::note
-Cloud provider credentials are stored encrypted per user — never as environment variables or shared secrets. In a [shared project](/docs/guides/collaboration/), a member can attach a project-level cloud credential so shared work doesn't run on someone's personal account.
+Cloud provider credentials are stored encrypted per user — never as environment variables or shared secrets. In a [shared project](/docs/guides/collaboration/), a member can attach a project-level cloud credential from the project's **Accounts** tab (**Use a cloud account only this project bills to**) so shared work doesn't run on someone's personal account.
 :::
 
 ### Choosing an environment size and profile

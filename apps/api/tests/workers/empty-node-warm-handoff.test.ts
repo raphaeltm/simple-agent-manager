@@ -58,7 +58,13 @@ beforeEach(() => {
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
-      if (url.includes('.vm.test.example.com')) return new Response(null, { status: 204 });
+      if (url.includes('.vm.test.example.com')) {
+        if (url.endsWith('/physical-deletion') && init?.method === 'DELETE') {
+          const identity = JSON.parse(String(init.body));
+          return Response.json({ ...identity, success: true, physicalDeleted: true });
+        }
+        return new Response(null, { status: 204 });
+      }
       if (url.startsWith('https://api.hetzner.cloud/v1/servers/') && init?.method === 'DELETE') {
         providerDeletes.push(url);
         return new Response(null, { status: 204 });
@@ -175,6 +181,17 @@ async function seedWorkspaceOn(
     createdAt: at,
     updatedAt: at,
   });
+  await env.DATABASE.prepare('UPDATE workspaces SET eviction_generation=? WHERE id=?')
+    .bind(`generation-${workspaceId}`, workspaceId)
+    .run();
+  // A logical tombstone is eligible for retirement only after physical proof.
+  if (status === 'deleted') {
+    await env.DATABASE.prepare(
+      `UPDATE workspaces SET runtime_deletion_confirmed_at = ?, runtime_deletion_proof = 'vm_agent_confirmed' WHERE id = ?`
+    )
+      .bind(at, workspaceId)
+      .run();
+  }
 }
 
 async function nodeRow(nodeId: string): Promise<{

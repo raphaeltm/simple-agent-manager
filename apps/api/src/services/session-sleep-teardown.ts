@@ -170,7 +170,12 @@ export async function scheduleSleepingWorkspaceDeletion(
   if (workspace.nodeRuntime === 'cf-container') return;
   const stub = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(workspace.nodeId));
   await (stub as unknown as import('../durable-objects/node-lifecycle').NodeLifecycle)
-    .scheduleWorkspaceDeletion(workspace.nodeId, workspace.id, workspace.userId)
+    // A verified sleeping source must release its bytes before replacement can
+    // wake. The queue still verifies preservation and every deletion fence;
+    // delaying it by the ordinary stopped-workspace TTL only delays wake.
+    .scheduleWorkspaceDeletion(workspace.nodeId, workspace.id, workspace.userId, {
+      retryAfterMs: 0,
+    })
     .catch((error) => {
       log.warn(logEvent, {
         workspaceId: workspace.id,
@@ -356,6 +361,9 @@ export async function completeSleepTeardown(
         healthStatus: 'unhealthy',
         errorMessage: null,
         updatedAt: now,
+        cleanupBlockedSince: null,
+        cleanupBlockedReason: null,
+        cleanupBlockedAlertedAt: null,
       })
       .where(and(eq(schema.nodes.id, workspace.nodeId), confirmedRuntime));
     const result = await db.batch([workspaceSleeping, agentSleeping, nodeSleeping]);

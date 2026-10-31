@@ -761,6 +761,43 @@ describe('initialStatusForProviderOffering', () => {
 });
 
 describe('default capacity pool creation', () => {
+  it('publishes a full candidate page in one ordered D1 batch instead of one round trip per row', async () => {
+    createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+    const database = createSqliteD1WithBindLimit(sqlite!, 100);
+    const candidates = new WeakSet<object>();
+    const batches: number[] = [];
+    const observed = {
+      ...database,
+      prepare(query: string) {
+        const statement = database.prepare(query);
+        return {
+          ...statement,
+          bind(...values: unknown[]) {
+            const bound = statement.bind(...values);
+            if (query.includes('INSERT INTO capacity_pool_candidates')) candidates.add(bound);
+            return bound;
+          },
+        };
+      },
+      async batch(statements: D1PreparedStatement[]) {
+        const count = statements.filter((statement) => candidates.has(statement)).length;
+        if (count) batches.push(count);
+        return database.batch(statements);
+      },
+    } as D1Database;
+    const result = await ensureDefaultCapacityPoolsForExistingCredentials(
+      drizzleD1(observed, { schema }) as never,
+      {
+        userId: 'user-1',
+        includeInstallation: false,
+        offeringResolver: async () => manyLiveOfferings(100),
+      }
+    );
+    expect(batches).toEqual([200]);
+    expect(result.user?.candidates).toHaveLength(100);
+  });
+
   it('reads an existing authoritative pool without refreshing provider catalogs on placement', async () => {
     const db = createDb();
     seedUserCredential({ id: 'user-hetzner' });
@@ -5317,7 +5354,8 @@ describe('capacity pool review findings', () => {
           releaseOlder = resolve;
         });
         const database = createSqliteD1WithBindLimit(sqlite!, 100);
-        let candidateWrites = 0;
+        const candidateStatements = new WeakSet<object>();
+        let paused = false;
         const pausedDatabase = {
           ...database,
           prepare(query: string) {
@@ -5326,21 +5364,21 @@ describe('capacity pool review findings', () => {
               ...statement,
               bind(...values: unknown[]) {
                 const bound = statement.bind(...values);
-                return {
-                  ...bound,
-                  async run() {
-                    if (
-                      query.includes('INSERT INTO capacity_pool_candidates') &&
-                      ++candidateWrites === 2
-                    ) {
-                      reachedOlder();
-                      await olderGate;
-                    }
-                    return bound.run();
-                  },
-                };
+                if (query.includes('INSERT INTO capacity_pool_candidates'))
+                  candidateStatements.add(bound);
+                return bound;
               },
             };
+          },
+          async batch(statements: D1PreparedStatement[]) {
+            // D1 publication is now atomic. Pause before the transaction, allowing
+            // the newer publisher to claim its source generation before these writes.
+            if (!paused && statements.some((statement) => candidateStatements.has(statement))) {
+              paused = true;
+              reachedOlder();
+              await olderGate;
+            }
+            return database.batch(statements);
           },
         } as D1Database;
         const older = ensureDefaultCapacityPoolsForExistingCredentials(

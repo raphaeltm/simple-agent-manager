@@ -88,27 +88,28 @@ function taskRunner(taskId: string): DurableObjectStub<TaskRunner> {
   return env.TASK_RUNNER.get(env.TASK_RUNNER.idFromName(taskId)) as DurableObjectStub<TaskRunner>;
 }
 
-/** Advance the real deletion queue to its own due timestamp and drain its external work. */
-async function deleteFailedReplacement(nodeId: string, taskId: string): Promise<void> {
-  const row = await env.DATABASE.prepare('SELECT workspace_id FROM tasks WHERE id = ?')
+/** A failed replacement has no verified snapshot of its own bytes. */
+async function assertFailedReplacementPreserved(nodeId: string, taskId: string): Promise<void> {
+  const row = await env.DATABASE.prepare('SELECT workspace_id, user_id FROM tasks WHERE id = ?')
     .bind(taskId)
-    .first<{ workspace_id: string }>();
+    .first<{ workspace_id: string; user_id: string }>();
+  expect(row).not.toBeNull();
   const stub = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(nodeId));
   await runInDurableObject(stub, async (instance, ctx) => {
-    const entry = await ctx.storage.get<{ deleteAt: number }>(`ws-delete:${row!.workspace_id}`);
-    expect(entry).toBeDefined();
-    const clock = vi.spyOn(Date, 'now').mockReturnValue(entry!.deleteAt + 1);
-    const pending: Promise<unknown>[] = [];
-    const waitUntil = vi.spyOn(ctx, 'waitUntil').mockImplementation((promise) => {
-      pending.push(promise);
-    });
-    try {
-      await instance.alarm();
-      await Promise.all(pending);
-    } finally {
-      waitUntil.mockRestore();
-      clock.mockRestore();
-    }
+    expect(await instance.scheduleWorkspaceDeletion(nodeId, row!.workspace_id, row!.user_id)).toBe(
+      false
+    );
+    expect(await ctx.storage.get(`ws-delete:${row!.workspace_id}`)).toBeUndefined();
+  });
+  expect(
+    await env.DATABASE.prepare(
+      'SELECT runtime_deletion_confirmed_at, runtime_deletion_proof FROM workspaces WHERE id=?'
+    )
+      .bind(row!.workspace_id)
+      .first()
+  ).toEqual({
+    runtime_deletion_confirmed_at: null,
+    runtime_deletion_proof: null,
   });
 }
 
@@ -856,12 +857,12 @@ describe('eviction snapshot -> real TaskRunner workspace linking', () => {
   });
 
   it.each([false, true])(
-    'returns a failed replacement to sleep and releases claim/binding (stopped mirror=%s)',
+    'returns a failed replacement to sleep, protects its bytes and releases claim/binding (stopped mirror=%s)',
     async (stopMirror) => {
       const f = await agentOnVm('task');
       await completeEvictionSnapshot(f);
       const nodeId = await readyReplacementNode(f);
-      installMovingVm(f, nodeId, true);
+      const calls = installMovingVm(f, nodeId, true);
       await evict(f);
       if (stopMirror) {
         // Inject an explicitly eviction-attributed stopped mirror under the live wake claim.
@@ -888,13 +889,14 @@ describe('eviction snapshot -> real TaskRunner workspace linking', () => {
           f.chatSessionId
         )
       ).toEqual([]);
-      await deleteFailedReplacement(nodeId, f.taskId);
+      await assertFailedReplacementPreserved(nodeId, f.taskId);
+      expect(calls.some((path) => path.endsWith('/physical-deletion'))).toBe(false);
       const failedWorkspace = await env.DATABASE.prepare(
         'SELECT status, chat_session_id FROM workspaces WHERE id = (SELECT workspace_id FROM tasks WHERE id = ?)'
       )
         .bind(f.taskId)
         .first();
-      expect(failedWorkspace).toEqual({ status: 'deleted', chat_session_id: null });
+      expect(failedWorkspace).toEqual({ status: 'stopped', chat_session_id: null });
 
       expect(
         await env.DATABASE.prepare(

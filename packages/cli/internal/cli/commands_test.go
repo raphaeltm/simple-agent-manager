@@ -107,7 +107,7 @@ func TestProjectDetailShowsInfo(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s", code, stderr.String())
 	}
-	if captured.URL != "https://api.example.com/api/projects/project_1" {
+	if captured.URL != "https://api.example.com/api/projects/project_1?include=recent" {
 		t.Fatalf("path = %s", captured.URL)
 	}
 	output := stdout.String()
@@ -126,7 +126,7 @@ func TestProjectDetailWithOverride(t *testing.T) {
 	if code != 0 {
 		t.Fatalf("code = %d stderr=%s", code, stderr.String())
 	}
-	if captured.URL != "https://api.example.com/api/projects/01ABCDEFGHIJKLMNOPQRSTUVWX" {
+	if captured.URL != "https://api.example.com/api/projects/01ABCDEFGHIJKLMNOPQRSTUVWX?include=recent" {
 		t.Fatalf("path = %s", captured.URL)
 	}
 }

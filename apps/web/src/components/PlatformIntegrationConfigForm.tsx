@@ -24,6 +24,7 @@ interface PlatformIntegrationConfigFormProps {
   onPrimary: (config: PlatformIntegrationConfigInput) => Promise<void> | void;
   onSecondary?: (config: PlatformIntegrationConfigInput) => Promise<void> | void;
   feedbackProjects?: FeedbackProjectOption[];
+  feedbackProjectsFooter?: ReactNode;
 }
 
 const FIELD_LABELS = {
@@ -46,6 +47,7 @@ export function PlatformIntegrationConfigForm({
   onPrimary,
   onSecondary,
   feedbackProjects = [],
+  feedbackProjectsFooter,
 }: PlatformIntegrationConfigFormProps) {
   const [values, setValues] = useState<FormValues>({});
   const [showRemoveInfrastructureConfirm, setShowRemoveInfrastructureConfirm] = useState(false);
@@ -199,6 +201,7 @@ export function PlatformIntegrationConfigForm({
         <FeedbackProjectSection
           status={status.feedbackProject}
           projects={feedbackProjects}
+          footer={feedbackProjectsFooter}
           value={values['feedback.projectId'] ?? status.feedbackProject.projectId ?? ''}
           onChange={(value) => updateValue('feedback.projectId', value)}
         />
@@ -331,11 +334,13 @@ function IntegrationSection({
 }
 
 function FeedbackProjectSection({
+  footer,
   status,
   projects,
   value,
   onChange,
 }: {
+  footer?: ReactNode;
   status: FeedbackProjectStatus;
   projects: FeedbackProjectOption[];
   value: string;
@@ -375,6 +380,7 @@ function FeedbackProjectSection({
           ))}
         </select>
       </label>
+      {footer}
       <p
         className={`rounded-md border px-3 py-2 text-sm ${
           status.state === 'ready'

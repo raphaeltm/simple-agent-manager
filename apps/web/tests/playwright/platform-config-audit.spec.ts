@@ -132,6 +132,7 @@ async function setupMocks(
   await page.addInitScript(() => {
     window.localStorage.setItem('sam-onboarding-wizard-dismissed-admin-platform-config', 'true');
   });
+  await page.routeWebSocket('**/api/notifications/ws', () => undefined);
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
@@ -180,13 +181,25 @@ async function setupMocks(
             linkedWorkspaces: 0,
           },
         ],
-        nextCursor: null,
+        nextCursor: new URL(request.url()).searchParams.has('cursor') ? null : 'next-project-page',
       });
     }
     if (path === '/api/notifications/unread-count') return respondJson(route, 200, { count: 0 });
     if (path === '/api/notifications') {
       return respondJson(route, 200, { notifications: [], unreadCount: 0, nextCursor: null });
     }
+
+    if (path === '/api/admin/connector/connections')
+      return respondJson(route, 200, { connections: [], nextCursor: null });
+    if (path === '/api/admin/connector/clients')
+      return respondJson(route, 200, { clients: [], nextCursor: null });
+    if (path === '/api/admin/connector/settings') return respondJson(route, 200, { settings: {} });
+    if (path === '/api/admin/agent-email')
+      return respondJson(route, 200, {
+        enabled: true,
+        domain: 'agents.example.com',
+        loopback: { lastSent: null, lastReceived: null },
+      });
 
     if (path === '/api/setup/status') {
       return respondJson(route, 200, {
@@ -248,6 +261,7 @@ test.describe('Platform config first-run and admin UI', () => {
     await expect(
       page.getByRole('button', { name: 'Remove runtime infrastructure client' })
     ).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Load more projects' })).toBeVisible();
     await assertNoOverflow(page);
     await screenshot(page, 'platform-config-admin');
     await page.getByRole('heading', { name: 'Private feedback project' }).scrollIntoViewIfNeeded();
@@ -306,4 +320,31 @@ test.describe('Platform config first-run and admin UI', () => {
     await expect(page.getByRole('button', { name: 'Log in with Google' })).toHaveCount(0);
     await expect(page.getByRole('button', { name: 'Log in with GitLab' })).toBeVisible();
   });
+});
+
+test('admin feedback project list retries its first page without losing integration edits', async ({
+  page,
+}) => {
+  await setupMocks(page);
+  let unavailable = true;
+  await page.route('**/api/projects?*', (route) =>
+    unavailable
+      ? respondJson(route, 503, {
+          error: 'UNAVAILABLE',
+          message: 'Projects temporarily unavailable',
+        })
+      : route.fallback()
+  );
+  await page.goto('/admin/integrations');
+  await expect(page.getByTestId('platform-config-form')).toBeVisible();
+  const retry = page.getByRole('button', { name: 'Retry project list' });
+  await expect(retry).toBeVisible();
+  await retry.scrollIntoViewIfNeeded();
+  await assertNoOverflow(page);
+  await screenshot(page, 'platform-config-project-list-retry');
+  unavailable = false;
+  await retry.click();
+  await expect(page.getByRole('option', { name: /Long Private Feedback Project/ })).toBeAttached();
+  await expect(retry).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Save integrations' })).toBeVisible();
 });

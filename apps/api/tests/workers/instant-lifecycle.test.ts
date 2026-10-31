@@ -22,8 +22,10 @@ async function seedInstant(status: 'sleeping' | 'running') {
   await seedProject('instant-project', 'instant-user', 'instant-install');
   await seedNode('instant-node', 'instant-user', { status, createdAt: old, updatedAt: old });
   await env.DATABASE.prepare(
-    "UPDATE nodes SET runtime = 'cf-container' WHERE id = 'instant-node'"
-  ).run();
+    "UPDATE nodes SET runtime = 'cf-container',status=?,runtime_termination_confirmed_at=NULL WHERE id = 'instant-node'"
+  )
+    .bind(status)
+    .run();
   await seedWorkspace('instant-workspace', 'instant-node', 'instant-user', {
     status,
     projectId: 'instant-project',
@@ -31,6 +33,11 @@ async function seedInstant(status: 'sleeping' | 'running') {
     createdAt: old,
     updatedAt: old,
   });
+  await env.DATABASE.prepare(
+    `UPDATE workspaces SET status=?,runtime_deletion_confirmed_at=NULL,runtime_deletion_proof=NULL WHERE id='instant-workspace'`
+  )
+    .bind(status)
+    .run();
   await seedAgentSession('instant-agent', 'instant-workspace', 'instant-user', { status });
   await seedTask('instant-task', 'instant-project', 'instant-user', {
     status: 'in_progress',
@@ -69,8 +76,33 @@ describe('Instant lifecycle on Workers D1', () => {
       ).first()
     ).toEqual({ status: 'sleeping' });
   });
+  it('refuses whole-node destruction while a running source lacks physical proof', async () => {
+    await seedInstant('running');
+    const destroyForUser = vi.fn();
+    const testEnv = {
+      ...env,
+      CF_CONTAINER_ENABLED: 'true',
+      VM_AGENT_CONTAINER: { idFromName: (id: string) => id, get: () => ({ destroyForUser }) },
+    } as unknown as Env;
+    await expect(stopNodeResources('instant-node', 'instant-user', testEnv)).rejects.toThrow(
+      'Node retirement blocked by unconfirmed workspace artifacts'
+    );
+    expect(destroyForUser).not.toHaveBeenCalled();
+    expect(await node()).toEqual({ status: 'running', runtime_termination_confirmed_at: null });
+    expect(
+      await env.DATABASE.prepare(
+        "SELECT status,runtime_deletion_confirmed_at FROM workspaces WHERE id='instant-workspace'"
+      ).first()
+    ).toEqual({ status: 'running', runtime_deletion_confirmed_at: null });
+  });
   it('records strict teardown proof when the real onStop persistence runs inside destroy', async () => {
     await seedInstant('running');
+    // Whole-node retirement follows confirmed source cleanup, not logical status alone.
+    await env.DATABASE.prepare(
+      `UPDATE workspaces SET status='stopped', runtime_deletion_confirmed_at=?, runtime_deletion_proof='vm_agent_confirmed' WHERE id='instant-workspace'`
+    )
+      .bind(new Date().toISOString())
+      .run();
     const testEnv = {
       ...env,
       CF_CONTAINER_ENABLED: 'true',

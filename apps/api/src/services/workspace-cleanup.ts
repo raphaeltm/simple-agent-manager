@@ -5,16 +5,19 @@ import { type drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { purgeInteractionStore } from './acp-interaction-store';
 import { handOffEmptyWorkspaceNode } from './node-warm-handoff';
 import { deleteSessionSnapshotState } from './session-snapshots';
+import { retireConfirmedContainerWorkspaceNode } from './workspace-confirmed-container-retirement';
 import {
   attemptWorkspaceDeletion,
   loadWorkspaceDeletionSnapshot,
+  terminalNodeProof,
   workspaceDeletionIdentityLogContext,
+  type WorkspaceDeletionMode,
   type WorkspaceDeletionOutcome,
   type WorkspaceDeletionSnapshot,
 } from './workspace-deletion';
+import { automaticDeletionPreservationAvailable } from './workspace-deletion-preservation';
 import { deleteWorkspaceResourceHistoryObjectsForWorkspace } from './workspace-resource-history';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
@@ -27,6 +30,8 @@ export interface WorkspaceDeletionCleanupOptions {
   logContext?: Record<string, unknown>;
   /** Preserve the proof-bearing D1 tombstone after lifecycle closure. */
   deleteConfirmedRow?: boolean;
+  mode?: WorkspaceDeletionMode;
+  requireRuntimeTerminationProof?: boolean;
 }
 
 function workspaceDeletionRetryBaseMs(env: Env): number {
@@ -45,6 +50,7 @@ function workspaceDeletionLogSource(logContext: Record<string, unknown>): string
 function requestedWorkspaceDeletionIdentity(workspace: schema.Workspace, userId: string) {
   return {
     workspaceId: workspace.id,
+    workspaceGeneration: workspace.evictionGeneration,
     nodeId: workspace.nodeId,
     nodeUserId: null,
     nodeRuntime: null,
@@ -63,6 +69,7 @@ function deletionSnapshotMatchesRequest(
 ): expected is NonNullable<typeof expected> {
   return (
     expected?.userId === userId &&
+    (expected.workspaceGeneration ?? null) === (workspace.evictionGeneration ?? null) &&
     expected.nodeId === workspace.nodeId &&
     expected.projectId === workspace.projectId &&
     expected.chatSessionId === workspace.chatSessionId
@@ -79,7 +86,8 @@ async function claimExplicitWorkspaceDeletion(
   workspace: schema.Workspace,
   userId: string,
   expected: WorkspaceDeletionSnapshot,
-  logContext: Record<string, unknown>
+  logContext: Record<string, unknown>,
+  mode: WorkspaceDeletionMode
 ): Promise<WorkspaceDeletionOutcome | null> {
   const deletionAlreadyProven = Boolean(
     expected.runtimeDeletionConfirmedAt && expected.runtimeDeletionProof
@@ -91,7 +99,7 @@ async function claimExplicitWorkspaceDeletion(
     workspace.id,
     userId,
     expected,
-    'explicit'
+    mode
   );
   if (claim === 'already_claimed_same_identity') {
     const diagnostic = 'Workspace deletion unconfirmed: durable attempt already in progress';
@@ -186,7 +194,15 @@ async function schedulePendingWorkspaceDeletion(
 export async function cleanupWorkspaceForDeletion(
   options: WorkspaceDeletionCleanupOptions
 ): Promise<WorkspaceDeletionOutcome> {
-  const { db, env, workspace, userId, logContext = {}, deleteConfirmedRow = true } = options;
+  const {
+    db,
+    env,
+    workspace,
+    userId,
+    logContext = {},
+    deleteConfirmedRow = true,
+    mode = 'explicit',
+  } = options;
   const expected = await loadWorkspaceDeletionSnapshot(env.DATABASE, workspace.id);
   const requestedIdentity = requestedWorkspaceDeletionIdentity(workspace, userId);
   if (!deletionSnapshotMatchesRequest(expected, workspace, userId)) {
@@ -198,14 +214,38 @@ export async function cleanupWorkspaceForDeletion(
     });
     return { status: 'fenced', reason: 'workspace_assignment_changed' };
   }
+  const runtimeAlreadyTerminated =
+    mode === 'automatic' ? await terminalNodeProof(env.DATABASE, expected) : null;
+  if (options.requireRuntimeTerminationProof && !runtimeAlreadyTerminated) {
+    return {
+      status: 'retry',
+      reason: 'runtime_deletion_unconfirmed',
+      diagnostic: 'Workspace deletion unconfirmed: strict node termination proof required',
+    };
+  }
+  if (
+    mode === 'automatic' &&
+    !runtimeAlreadyTerminated &&
+    !expected.runtimeDeletionConfirmedAt &&
+    !(await automaticDeletionPreservationAvailable(env, expected).catch(() => false))
+  ) {
+    return {
+      status: 'retry',
+      reason: 'preservation_unconfirmed',
+      diagnostic: 'Workspace deletion unconfirmed: exact runtime preservation unavailable',
+    };
+  }
   const lifecycleStub = nodeLifecycleStub(env, workspace.nodeId);
-  const claimOutcome = await claimExplicitWorkspaceDeletion(
-    lifecycleStub,
-    workspace,
-    userId,
-    expected,
-    logContext
-  );
+  const claimOutcome = runtimeAlreadyTerminated
+    ? null
+    : await claimExplicitWorkspaceDeletion(
+        lifecycleStub,
+        workspace,
+        userId,
+        expected,
+        logContext,
+        mode
+      );
   if (claimOutcome) return claimOutcome;
 
   const outcome = await attemptWorkspaceDeletion({
@@ -213,22 +253,38 @@ export async function cleanupWorkspaceForDeletion(
     expected,
     attempt: 1,
     source: workspaceDeletionLogSource(logContext),
-    mode: 'explicit',
+    mode,
     allowWorkspaceNeverStartedProof: workspace.status === 'pending',
     beforeFinalize:
-      workspace.chatSessionId && workspace.projectId
+      mode === 'explicit' && workspace.chatSessionId && workspace.projectId
         ? async () => {
             const chatSessionId = workspace.chatSessionId as string;
-            const projectId = workspace.projectId as string;
-            await Promise.all([
-              deleteSessionSnapshotState(db, env, chatSessionId),
-              purgeInteractionStore(env, projectId, chatSessionId),
-            ]);
+            await deleteSessionSnapshotState(db, env, chatSessionId, expected);
           }
         : undefined,
   });
 
   if (outcome.status === 'confirmed') {
+    if (workspace.nodeId && expected.nodeRuntime === 'cf-container' && !runtimeAlreadyTerminated) {
+      try {
+        await retireConfirmedContainerWorkspaceNode(env, expected);
+      } catch (error) {
+        // Retain both the physical-proof tombstone and the SAME durable attempt.
+        // The bounded queue retries retirement using this captured incarnation,
+        // including for direct CF nodes that have no task-provenance sweep.
+        await lifecycleStub?.scheduleWorkspaceDeletion(workspace.nodeId, workspace.id, userId, {
+          retryAfterMs: workspaceDeletionRetryBaseMs(env),
+          expected,
+          lastError: 'Workspace physical deletion confirmed; container retirement pending',
+        });
+        log.warn('workspace.confirmed_container_retirement_deferred', {
+          workspaceId: workspace.id,
+          nodeId: workspace.nodeId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return outcome;
+      }
+    }
     await finishConfirmedWorkspaceCleanup(
       db,
       env,

@@ -1,7 +1,9 @@
-import type { ErrorTrendBucket, ErrorTrendResponse } from '@simple-agent-manager/shared';
+import type { ErrorTrendBucket } from '@simple-agent-manager/shared';
 import { Body, Button, Card, Spinner } from '@simple-agent-manager/ui';
-import { type FC, useCallback, useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { type FC, useState } from 'react';
 
+import { useQueryScope } from '../../hooks/useQueryScope';
 import { fetchAdminErrorTrends } from '../../lib/api';
 
 const RANGES = ['1h', '24h', '7d', '30d'] as const;
@@ -21,26 +23,18 @@ const SOURCE_LABELS: Record<string, string> = {
 
 export const ErrorTrends: FC = () => {
   const [range, setRange] = useState<Range>('24h');
-  const [data, setData] = useState<ErrorTrendResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  const fetchTrends = useCallback(async (r: Range) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const result = await fetchAdminErrorTrends(r);
-      setData(result);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load error trends');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchTrends(range);
-  }, [range, fetchTrends]);
+  const scope = useQueryScope();
+  const query = useQuery({
+    queryKey: ['auth', scope, 'admin', 'error-trends', range],
+    queryFn: ({ signal }) => fetchAdminErrorTrends(range, signal),
+    placeholderData: (previous, previousQuery) =>
+      previousQuery?.queryKey[1] === scope ? previous : undefined,
+    enabled: Boolean(scope),
+  });
+  const data = query.data;
+  const loading = query.isPending;
+  const error = query.error?.message;
+  const fetchTrends = () => query.refetch();
 
   const handleRangeChange = (r: Range) => {
     setRange(r);
@@ -90,7 +84,7 @@ export const ErrorTrends: FC = () => {
         {error && !data && (
           <div className="p-4 flex flex-col items-center gap-3">
             <Body className="text-danger-fg">{error}</Body>
-            <Button size="sm" variant="secondary" onClick={() => fetchTrends(range)}>
+            <Button size="sm" variant="secondary" onClick={() => fetchTrends()}>
               Retry
             </Button>
           </div>

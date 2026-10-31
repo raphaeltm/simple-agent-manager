@@ -21,7 +21,7 @@
  * real-trigger control pair through the actual app.
  */
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const probe = vi.hoisted(() => ({
   getSessionCalls: 0,
@@ -31,6 +31,8 @@ const probe = vi.hoisted(() => ({
   authLayerEntries: 0,
   approvedLayerEntries: 0,
   session: null as unknown,
+  sessionGate: null as Promise<unknown> | null,
+  approvalGate: null as Promise<boolean> | null,
 }));
 
 /*
@@ -70,7 +72,7 @@ vi.mock('../../../src/auth', () => ({
     api: {
       getSession: async () => {
         probe.getSessionCalls += 1;
-        return probe.session;
+        return probe.sessionGate ?? probe.session;
       },
     },
   }),
@@ -82,7 +84,7 @@ vi.mock('../../../src/services/signup-approval', async (importOriginal) => {
     ...actual,
     isSignupApprovalRequired: async () => {
       probe.approvalReads += 1;
-      return false;
+      return probe.approvalGate ?? false;
     },
   };
 });
@@ -175,12 +177,18 @@ describe('the REAL production routers, mounted as index.ts mounts them', () => {
     return app;
   }
 
+  beforeAll(async () => {
+    await buildRealApp();
+  }, 30_000);
+
   beforeEach(() => {
     probe.getSessionCalls = 0;
     probe.approvalReads = 0;
     probe.authLayerEntries = 0;
     probe.approvedLayerEntries = 0;
     probe.session = ACTIVE_SESSION;
+    probe.sessionGate = null;
+    probe.approvalGate = null;
   });
 
   it('PREMISE: a project sub-route enters the auth stack FOUR times', async () => {
@@ -234,8 +242,41 @@ describe('auth middleware runs once per request', () => {
     probe.getSessionCalls = 0;
     probe.approvalReads = 0;
     probe.session = ACTIVE_SESSION;
+    probe.sessionGate = null;
+    probe.approvalGate = null;
     layerLog = [];
     app = buildApp(layerLog);
+  });
+
+  it('starts the fresh approval read before the session lookup has resolved', async () => {
+    let releaseSession: (value: unknown) => void = () => {};
+    let releaseApproval: (value: boolean) => void = () => {};
+    probe.sessionGate = new Promise((resolve) => {
+      releaseSession = resolve;
+    });
+    probe.approvalGate = new Promise((resolve) => {
+      releaseApproval = resolve;
+    });
+    const pending = app.request('http://api.example.test/api/projects/p1/tasks', {}, env);
+    await vi.waitFor(() => {
+      expect(probe.getSessionCalls).toBe(1);
+      expect(probe.approvalReads).toBe(1);
+    });
+    expect(layerLog).toEqual(['projectsRoutes:/*']);
+    releaseSession(ACTIVE_SESSION);
+    releaseApproval(false);
+    expect((await pending).status).toBe(200);
+  });
+
+  it('observes approval changes on the next request while reusing one read in nested routers', async () => {
+    probe.session = { ...ACTIVE_SESSION, user: { ...ACTIVE_SESSION.user, status: 'pending' } };
+    const first = await app.request('http://api.example.test/api/projects/p1/tasks', {}, env);
+    expect(first.status).toBe(200);
+    probe.approvalGate = Promise.resolve(true);
+    const second = await app.request('http://api.example.test/api/projects/p1/tasks', {}, env);
+    expect(second.status).toBe(403);
+    expect(probe.approvalReads).toBe(2);
+    expect(probe.getSessionCalls).toBe(2);
   });
 
   it('PREMISE: the mirrored mounting enters both of ITS auth layers', async () => {

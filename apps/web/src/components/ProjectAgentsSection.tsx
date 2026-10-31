@@ -1,104 +1,57 @@
 /**
- * Project-scope unified agents section. Replaces the former
- * ProjectAgentDefaultsSection + ProjectAgentCredentialsSection split with a
- * single ProjectAgentCard per agent covering both credential overrides and
- * model/permission overrides.
+ * Project-scope agents section: one ProjectAgentCard per agent with the
+ * project's model/permission overrides. Which account the project uses lives in
+ * Project settings → Accounts; the cards only summarise it.
  */
 import type {
-  AgentCredentialInfo,
   AgentInfo,
   AgentPermissionMode,
   AgentType,
-  CredentialKind,
   ProjectAgentDefaults,
-  SaveAgentCredentialRequest,
 } from '@simple-agent-manager/shared';
 import { Alert, Spinner } from '@simple-agent-manager/ui';
-import { useCallback, useEffect, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { useEffect, useMemo, useState } from 'react';
 
-import { useToast } from '../hooks/useToast';
-import {
-  deleteProjectAgentCredential,
-  listAgentCredentials,
-  listAgents,
-  listProjectAgentCredentials,
-  saveProjectAgentCredential,
-  updateProject,
-} from '../lib/api';
+import { useAccountsData } from '../hooks/useAccounts';
+import { useQueryScope } from '../hooks/useQueryScope';
+import { updateProject } from '../lib/api';
+import { agentCatalogQueryOptions } from '../lib/query-options';
 import { ProjectAgentCard } from './ProjectAgentCard';
 
 interface ProjectAgentsSectionProps {
   projectId: string;
+  projectName?: string;
   initialAgentDefaults: ProjectAgentDefaults | null | undefined;
   onUpdated: (next: ProjectAgentDefaults | null) => void;
 }
 
 export function ProjectAgentsSection({
   projectId,
+  projectName,
   initialAgentDefaults,
   onUpdated,
 }: ProjectAgentsSectionProps) {
-  const toast = useToast();
-  const [agents, setAgents] = useState<AgentInfo[]>([]);
-  const [projectCreds, setProjectCreds] = useState<AgentCredentialInfo[]>([]);
-  const [userCreds, setUserCreds] = useState<AgentCredentialInfo[]>([]);
+  const queryScope = useQueryScope();
+  const catalog = useQuery({
+    ...agentCatalogQueryOptions(queryScope),
+    enabled: Boolean(queryScope),
+  });
+  const agents: AgentInfo[] = catalog.data ?? [];
+  const project = useMemo(
+    () => ({ id: projectId, name: projectName ?? projectId }),
+    [projectId, projectName]
+  );
+  const { model: accounts } = useAccountsData({ project });
   const [defaults, setDefaults] = useState<ProjectAgentDefaults>(initialAgentDefaults ?? {});
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     setDefaults(initialAgentDefaults ?? {});
   }, [initialAgentDefaults]);
 
-  const loadData = useCallback(async () => {
-    try {
-      setError(null);
-      const [agentResult, projectResult, userResult] = await Promise.all([
-        listAgents(),
-        listProjectAgentCredentials(projectId),
-        listAgentCredentials(),
-      ]);
-      setAgents(agentResult.agents);
-      setProjectCreds(projectResult.credentials);
-      setUserCreds(userResult.credentials);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load project agent data');
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId]);
-
-  useEffect(() => {
-    void loadData();
-  }, [loadData]);
-
-  const handleSaveCredential = async (req: SaveAgentCredentialRequest) => {
-    const result = await saveProjectAgentCredential(projectId, req);
-    if (result.validation?.valid === false) {
-      toast.warning('Project credential override saved with a validation warning');
-    } else {
-      toast.success('Project credential override saved');
-    }
-    setProjectCreds((prev) => {
-      const filtered = prev.filter(
-        (c) => !(c.agentType === req.agentType && c.credentialKind === req.credentialKind),
-      );
-      return [...filtered, result];
-    });
-    return result;
-  };
-
-  const handleDeleteCredential = async (agentType: AgentType, credentialKind: CredentialKind) => {
-    await deleteProjectAgentCredential(projectId, agentType, credentialKind);
-    toast.success('Project override cleared — falling back to user credential');
-    setProjectCreds((prev) =>
-      prev.filter((c) => !(c.agentType === agentType && c.credentialKind === credentialKind)),
-    );
-  };
-
   const handleSaveDefault = async (
     agentType: AgentType,
-    entry: { model: string | null; permissionMode: AgentPermissionMode | null },
+    entry: { model: string | null; permissionMode: AgentPermissionMode | null }
   ) => {
     const next: ProjectAgentDefaults = { ...defaults };
     if (entry.model === null && entry.permissionMode === null) {
@@ -124,7 +77,7 @@ export function ProjectAgentsSection({
     onUpdated(updated.agentDefaults ?? null);
   };
 
-  if (loading && agents.length === 0) {
+  if (catalog.data === undefined && !catalog.error) {
     return (
       <div className="flex justify-center p-4">
         <Spinner size="md" />
@@ -132,12 +85,12 @@ export function ProjectAgentsSection({
     );
   }
 
-  if (error) {
+  if (catalog.data === undefined && catalog.error) {
     return (
       <Alert variant="error">
-        {error}
+        {catalog.error instanceof Error ? catalog.error.message : 'Failed to load project agents'}
         <button
-          onClick={() => void loadData()}
+          onClick={() => void catalog.refetch()}
           className="ml-2 text-inherit underline bg-transparent border-none cursor-pointer text-[length:inherit]"
         >
           Retry
@@ -149,25 +102,23 @@ export function ProjectAgentsSection({
   return (
     <div className="flex flex-col gap-4" data-testid="project-agents-section">
       <Alert variant="info">
-        Project overrides apply only to this project. Clear an override to fall back to your
-        user-level setting. Credentials and configuration fall through independently.
+        Overrides apply only to this project. Clear one to fall back to your defaults in Settings →
+        Agents.
       </Alert>
 
       {agents.map((agent) => {
-        const projectAgentCreds = projectCreds.filter((c) => c.agentType === agent.id);
-        const userAgentCreds = userCreds.filter((c) => c.agentType === agent.id);
+        const group = accounts?.agents.find((candidate) => candidate.provider.id === agent.id);
         return (
           <ProjectAgentCard
             key={agent.id}
             agent={agent}
-            projectCredentials={projectAgentCreds.length > 0 ? projectAgentCreds : null}
-            userCredentials={userAgentCreds}
+            projectId={projectId}
+            account={
+              accounts ? (group?.resolutions.get(projectId) ?? { source: 'none' }) : undefined
+            }
             defaultValue={defaults[agent.id]}
-            onSaveCredential={handleSaveCredential}
-            onDeleteCredential={handleDeleteCredential}
             onSaveDefault={handleSaveDefault}
             onClearDefault={handleClearDefault}
-            onCredentialConnected={loadData}
           />
         );
       })}

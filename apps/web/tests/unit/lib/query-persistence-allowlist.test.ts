@@ -2,6 +2,7 @@ import { QueryClient } from '@tanstack/react-query';
 import { describe, expect, it } from 'vitest';
 
 import {
+  accountQueryKeys,
   agentQueryKeys,
   chatQueryKeys,
   commandQueryKeys,
@@ -81,6 +82,11 @@ describe('persisted query allowlist', () => {
   });
 
   it.each([
+    ['account credentials', accountQueryKeys.credentials(SCOPE)],
+    ['account configurations', accountQueryKeys.configurations(SCOPE)],
+    ['account attachments', accountQueryKeys.attachments(SCOPE)],
+    ['account resolution status', accountQueryKeys.resolutionStatus(SCOPE, 'project-1')],
+    ['agent settings', agentQueryKeys.settings(SCOPE, 'claude-code')],
     ['credentials', credentialQueryKeys.list(SCOPE)],
     ['agent catalog', agentQueryKeys.catalog(SCOPE)],
     ['agent credentials', agentQueryKeys.credentials(SCOPE)],
@@ -133,6 +139,11 @@ describe('query key shape invariant', () => {
    * isolation and its ability to ever be persisted.
    */
   it.each([
+    ['account credentials', accountQueryKeys.credentials(SCOPE)],
+    ['account configurations', accountQueryKeys.configurations(SCOPE)],
+    ['account attachments', accountQueryKeys.attachments(SCOPE)],
+    ['account resolution status', accountQueryKeys.resolutionStatus(SCOPE, 'project-1')],
+    ['agent settings', agentQueryKeys.settings(SCOPE, 'claude-code')],
     ['credentials', credentialQueryKeys.list(SCOPE)],
     ['agent catalog', agentQueryKeys.catalog(SCOPE)],
     ['agent profiles', agentQueryKeys.profileList(SCOPE, 'project-1')],

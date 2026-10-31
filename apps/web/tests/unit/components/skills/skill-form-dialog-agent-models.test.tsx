@@ -121,7 +121,8 @@ describe('SkillFormDialog — AI model calls field', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(screen.queryByText('Choose AI models')).not.toBeInTheDocument());
-    fireEvent.click(screen.getByRole('button', { name: 'Create Skill' }));
+    // The parent becomes interactive after the nested modal releases its aria-hidden state.
+    fireEvent.click(await screen.findByRole('button', { name: 'Create Skill' }));
 
     await waitFor(() =>
       expect(onSave).toHaveBeenCalledWith(

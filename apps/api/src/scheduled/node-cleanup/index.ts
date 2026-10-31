@@ -24,6 +24,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { resolveAdminSetting } from '../../services/admin-settings';
 import { sweepEmptyNodeWarmHandoff } from './empty-node-warm-handoff';
 import {
   sweepDestroyingHandoffNodes,
@@ -34,6 +35,7 @@ import {
   sweepStoppedHandoffNodes,
 } from './node-phases';
 import { emptyResult, type NodeCleanupResult, resolveCleanupConfig } from './shared';
+import { sweepStrandedNodes } from './stranded-node-retirement';
 import { sweepTerminalCfContainers } from './terminal-cf-container-phase';
 import { sweepUnhealthyNodes, type UnhealthyNodeBoundaries } from './unhealthy-nodes';
 import { sweepOrphanedWorkspaces, sweepStaleStoppedWorkspaces } from './workspace-phases';
@@ -57,6 +59,14 @@ export async function runNodeCleanupSweep(
   const db = drizzle(env.DATABASE, { schema });
   const now = new Date();
   const config = resolveCleanupConfig(env);
+  const [retirementMs, warningMs, alertMs] = await Promise.all([
+    resolveAdminSetting(env, 'operations.nodeCleanupBlockedRetirementMs'),
+    resolveAdminSetting(env, 'operations.nodeCleanupRefusalWarnAfterMs'),
+    resolveAdminSetting(env, 'operations.nodeCleanupOwnershipAlertIntervalMs'),
+  ]);
+  config.blockedRetirementMs = Number(retirementMs);
+  config.refusalWarnAfterMs = Number(warningMs);
+  config.ownershipAlertIntervalMs = Number(alertMs);
   const result = emptyResult();
 
   const phases: Array<[string, () => Promise<void>]> = [
@@ -69,6 +79,7 @@ export async function runNodeCleanupSweep(
     ['max_lifetime', () => sweepMaxLifetimeNodes(db, env, now, config, result)],
     ['stopped_handoff', () => sweepStoppedHandoffNodes(db, env, now, config, result)],
     ['destroying_handoff', () => sweepDestroyingHandoffNodes(db, env, now, config, result)],
+    ['stranded_nodes', () => sweepStrandedNodes(db, env, now, config, result)],
     ['orphaned_workspaces', () => sweepOrphanedWorkspaces(db, env, now, config, result)],
     ['incompatible_vm_agent', () => sweepIncompatibleVmAgentNodes(db, env, now, config, result)],
     ['idle_orphan_nodes', () => sweepIdleOrphanNodes(db, env, now, config, result)],

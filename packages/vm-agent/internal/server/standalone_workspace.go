@@ -219,6 +219,9 @@ func (s *Server) prepareStandaloneWorkspaceRuntime(ctx context.Context, runtime 
 		return fmt.Errorf("failed to create standalone workspace parent directory: %w", err)
 	}
 
+	if err := s.createOwnedWorkspaceRoot(runtime, workDir); err != nil {
+		return err
+	}
 	runtime = s.updateStandaloneRuntimeWorkDir(runtime, workDir)
 	s.rebuildWorkspacePTYManager(runtime)
 
@@ -241,8 +244,11 @@ func (s *Server) prepareStandaloneWorkspaceRuntime(ctx context.Context, runtime 
 		return nil
 	}
 
-	if err := os.RemoveAll(workDir); err != nil {
-		return fmt.Errorf("failed to clean standalone workspace directory: %w", err)
+	// Git can clone into an empty existing directory. Never clear unknown user data.
+	if entries, err := os.ReadDir(workDir); err == nil && len(entries) > 0 {
+		return fmt.Errorf("refusing to replace nonempty standalone workspace directory")
+	} else if err != nil && !os.IsNotExist(err) {
+		return err
 	}
 
 	if err := s.cloneStandaloneRepository(ctx, runtime, workDir); err != nil {

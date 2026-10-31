@@ -91,12 +91,17 @@ describe('incompatible occupied host capacity admission', () => {
     expect(
       await markSessionSnapshotSleeping(drizzle(fixture.database, { schema }), rc.env, 'old-chat')
     ).toBe(true);
-    sqlite.exec(
-      "UPDATE workspaces SET status='sleeping',runtime_deletion_confirmed_at='2026-10-05T12:00:00.000Z'"
-    );
+    sqlite.exec("UPDATE workspaces SET status='sleeping'");
     sqlite.prepare('UPDATE workspaces SET updated_at=?').run(new Date().toISOString());
     expect(await claimNodeForCleanup(rc.env, node, new Date().toISOString())).toBe(false);
     vi.advanceTimersByTime(30 * 60 * 1000 + 1);
+    // Sleep/snapshot success alone cannot release the occupied node: local source
+    // bytes must first be deleted by the exact durable workspace operation.
+    expect(await claimNodeForCleanup(rc.env, node, new Date().toISOString())).toBe(false);
+    expect(provision).not.toHaveBeenCalled();
+    sqlite.exec(`UPDATE workspaces SET status='deleted',
+      runtime_deletion_confirmed_at='2026-10-05T12:00:00.000Z',
+      runtime_deletion_proof='vm_agent_confirmed'`);
     expect(await claimNodeForCleanup(rc.env, node, new Date().toISOString())).toBe(true);
     // The provider deletion receipt is the external boundary; its confirmed
     // terminal state is what makes the production DB cap permit a replacement.

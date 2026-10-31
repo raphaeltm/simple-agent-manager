@@ -194,3 +194,9 @@ export const WORKSPACE_IDLE_CHECK_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 /** Minimum interval (ms) between terminal activity updates to the DO to avoid write amplification.
  * Intended for frontend heartbeat interval — not yet enforced server-side. */
 export const TERMINAL_ACTIVITY_THROTTLE_MS = 60 * 1000; // 1 minute
+
+/** Maximum continuous automatic cleanup refusal before bounded VM retirement. */
+export const DEFAULT_NODE_CLEANUP_BLOCKED_RETIREMENT_MS = 30 * 60 * 1000;
+
+export const DEFAULT_CLEANUP_REFUSAL_WARN_AFTER_MS = 5 * 60 * 1000;
+export const DEFAULT_CLEANUP_OWNERSHIP_ALERT_INTERVAL_MS = 24 * 60 * 60 * 1000;

@@ -119,6 +119,7 @@ async function stopTaskBackedSession(
 
   const cleanupStatus: TerminalTaskCleanupStatus = terminalStatus ?? 'cancelled';
   await cleanupTerminalTaskResources(env, taskId, {
+    requiredUserId: context.requireStopAcknowledgement ? context.userId : context.actorUserId,
     status: cleanupStatus,
     errorMessage: cleanupStatus === 'failed' ? (task?.errorMessage ?? null) : 'Archived by user',
     destructiveSessionEnd: true,

@@ -21,7 +21,7 @@ vi.mock('../../../src/services/admin-settings', () => ({
 vi.mock('../../../src/services/github-project-event-producer', async (importOriginal) => {
   const original =
     await importOriginal<typeof import('../../../src/services/github-project-event-producer')>();
-  return { ...original, handleGitHubProjectEventAdmission: mocks.admission };
+  return { ...original, admitGitHubWebhookProjectEvents: mocks.admission };
 });
 vi.mock('../../../src/services/github-trigger-recovery', () => ({
   persistGitHubTriggerIntake: vi.fn().mockResolvedValue(null),
@@ -244,6 +244,38 @@ describe('verified GitHub PR webhooks', () => {
     await deliver('check_run', checkRun('completed', '2026-10-23T10:03:00Z'));
     await deliver('check_run', checkRun('created', '2026-10-23T10:02:00Z'));
     await deliver('check_run', checkRun('created'));
+    expect(
+      sqlite.prepare("SELECT checks_state FROM pull_requests WHERE project_id = 'p1'").get()
+    ).toEqual({ checks_state: 'success' });
+  });
+
+  it('does not scan orphan checks for tracked heads or unassociated unknown heads', async () => {
+    await deliver('pull_request', pr('opened'));
+    const prepare = vi.spyOn(env.DATABASE, 'prepare');
+    const check = (sha: string) => ({
+      action: 'completed',
+      repository: { id: 91, full_name: 'acme/widget' },
+      check_run: {
+        id: 1001,
+        name: 'build',
+        app: { id: 12 },
+        head_sha: sha,
+        conclusion: 'success',
+        updated_at: '2026-10-23T10:03:00Z',
+        pull_requests: [{ number: 7, head: { sha }, base: { repo: { id: 91 } } }],
+      },
+    });
+    await deliver('check_run', check('a'.repeat(40)));
+    await deliver('check_run', {
+      ...check('b'.repeat(40)),
+      check_run: { ...check('b'.repeat(40)).check_run, pull_requests: [] },
+    });
+    expect(
+      prepare.mock.calls.some(([sql]) =>
+        sql.includes('DELETE FROM pull_request_checks WHERE rowid')
+      )
+    ).toBe(false);
+    expect(sqlite.prepare('SELECT count(*) AS n FROM pull_request_checks').get()).toEqual({ n: 2 });
     expect(
       sqlite.prepare("SELECT checks_state FROM pull_requests WHERE project_id = 'p1'").get()
     ).toEqual({ checks_state: 'success' });

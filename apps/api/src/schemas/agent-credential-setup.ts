@@ -1,12 +1,11 @@
 import * as v from 'valibot';
 
-/**
- * Guided credential setup session create-body schema
- * (apps/api/src/routes/agent-credential-setup-sessions.ts POST /). Every
- * field is optional because the route already tolerates a missing/invalid
- * JSON body entirely (via `parseOptionalBody`, mirroring its pre-existing
- * `.catch(() => ({}))` fallback) and falls back to the default agent type.
- */
-export const CreateAgentCredentialSetupSessionSchema = v.object({
+import { MAX_RESOURCE_ID_LENGTH } from './_validator';
+
+/** Empty bodies preserve default user setup; supplied fields must be valid. */
+export const CreateAgentCredentialSetupSessionSchema = v.strictObject({
   agentType: v.optional(v.string()),
+  projectId: v.optional(
+    v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(MAX_RESOURCE_ID_LENGTH))
+  ),
 });

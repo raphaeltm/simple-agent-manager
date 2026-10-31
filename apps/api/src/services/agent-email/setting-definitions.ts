@@ -27,7 +27,22 @@ export const DEFAULT_AGENT_EMAIL_RETRY_MAX_SECONDS = 900;
 /** Accepted emails one recovery sweep retries. */
 export const DEFAULT_AGENT_EMAIL_RECOVERY_BATCH_SIZE = 10;
 
+export const DEFAULT_AGENT_EMAIL_SETUP_PLAN_TIMEOUT_MS = 15_000;
+export const DEFAULT_AGENT_EMAIL_READ_TIMEOUT_MS = 5_000;
+
 export const AGENT_EMAIL_SETTINGS = [
+  {
+    name: 'agentEmail.setupPlanTimeoutMs',
+    defaultValue: DEFAULT_AGENT_EMAIL_SETUP_PLAN_TIMEOUT_MS,
+    description: 'Maximum milliseconds to inspect the complete agent email setup plan.',
+    range: { min: 100, max: 120_000 },
+  },
+  {
+    name: 'agentEmail.readTimeoutMs',
+    defaultValue: DEFAULT_AGENT_EMAIL_READ_TIMEOUT_MS,
+    description: 'Maximum milliseconds for each read-only agent email verification call.',
+    range: { min: 100, max: 30_000 },
+  },
   {
     name: 'agentEmail.maxInboundBytes',
     defaultValue: DEFAULT_AGENT_EMAIL_MAX_INBOUND_BYTES,

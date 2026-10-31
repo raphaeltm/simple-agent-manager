@@ -55,7 +55,11 @@ export function toNodeResponse(
     heartbeatStaleAfterSeconds: node.heartbeatStaleAfterSeconds,
     lastMetrics,
     deploymentEnvironments,
-    errorMessage: node.errorMessage,
+    cleanupBlockedSince: node.cleanupBlockedSince ?? null,
+    cleanupBlockedReason: node.cleanupBlockedReason ?? null,
+    errorMessage: node.cleanupBlockedSince
+      ? `Cleanup blocked since ${node.cleanupBlockedSince}: ${node.cleanupBlockedReason ?? 'unknown'}`
+      : node.errorMessage,
     createdAt: node.createdAt,
     updatedAt: node.updatedAt,
   };
