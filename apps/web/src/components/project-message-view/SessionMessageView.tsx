@@ -16,6 +16,7 @@ import { FloatingHeader } from './FloatingHeader';
 import { loadToolCallContent } from './load-tool-content';
 import { type ChatListContext, useFloatingHeaderHeight } from './MessageListScaffold';
 import { ProjectMessageViewDrawers } from './ProjectMessageViewDrawers';
+import { RetainedSnapshotExport } from './RetainedSnapshotExport';
 import { useSessionFocusHandoff } from './session-focus-handoff';
 import { resolveSessionViewerCapabilities, sessionOwnerLabel } from './session-viewer-access';
 import { SessionFooter } from './SessionFooter';
@@ -396,6 +397,12 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   return (
     <div className="flex flex-col flex-1 min-h-0">
       <SessionStatusBanners lc={lc} />
+      <RetainedSnapshotExport
+        key={sessionId}
+        projectId={projectId}
+        sessionId={sessionId}
+        isMine={lc.session?.isMine === true}
+      />
 
       <ConversationPane
         lc={lc}
