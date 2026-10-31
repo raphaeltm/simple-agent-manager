@@ -26,6 +26,7 @@ import (
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/container"
 	"github.com/workspace/vm-agent/internal/deploy"
+	"github.com/workspace/vm-agent/internal/diagredact"
 	"github.com/workspace/vm-agent/internal/errorreport"
 	"github.com/workspace/vm-agent/internal/eventstore"
 	"github.com/workspace/vm-agent/internal/logreader"
@@ -61,17 +62,6 @@ type taskCallbackContext struct {
 }
 
 const fatalErrorStopReason = acp.FatalErrorStopReason
-
-var taskCallbackDiagnosticRedactionPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{16,}`),
-	regexp.MustCompile(`(?i)((?:api[_-]?key|token|secret|password|authorization)\s*[:=]\s*)("[^"]+"|'[^']+'|[^\s,;]+)`),
-	regexp.MustCompile(`(?i)(https?://)([^/\s@]+)@`),
-	regexp.MustCompile(`(?i)([?&](?:access[_-]?token|api[_-]?key|token|secret|password)=)([^&\s]+)`),
-	regexp.MustCompile(`\b(sk-[A-Za-z0-9_-]{12,})\b`),
-	regexp.MustCompile(`\b(gh[pousr]_[A-Za-z0-9_]{12,})\b`),
-	regexp.MustCompile(`\b(github_pat_[A-Za-z0-9_]{12,})\b`),
-	regexp.MustCompile(`\b(sam_test_[A-Za-z0-9_-]{12,})\b`),
-}
 
 var safePromptTimeoutMessage = regexp.MustCompile(`^Prompt timed out after [0-9hms.µ]+$`)
 
@@ -1569,20 +1559,7 @@ func taskCallbackErrorMessage(promptErr error) string {
 }
 
 func redactTaskCallbackDiagnosticText(text string) string {
-	redacted := text
-	for _, pattern := range taskCallbackDiagnosticRedactionPatterns {
-		redacted = pattern.ReplaceAllStringFunc(redacted, func(match string) string {
-			submatches := pattern.FindStringSubmatch(match)
-			if len(submatches) >= 3 {
-				return submatches[1] + "[REDACTED]"
-			}
-			if len(submatches) >= 2 && strings.HasSuffix(strings.ToLower(submatches[1]), " ") {
-				return submatches[1] + "[REDACTED]"
-			}
-			return "[REDACTED]"
-		})
-	}
-	return redacted
+	return diagredact.Text(text)
 }
 
 func awaitingFollowupCallbackBody(pushResult *gitPushResult) map[string]interface{} {

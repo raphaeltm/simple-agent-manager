@@ -17,16 +17,31 @@ export const RESOURCE_REQUIREMENTS_FIELD_PROPERTIES = {
   exclusiveNode: { type: 'boolean' },
 } as const;
 
+/**
+ * Wraps a property schema so it also accepts `null`, in a shape Gemini function calling accepts.
+ *
+ * Vertex rejects a schema node that sets any field alongside `anyOf`. A JSON Schema type array
+ * (`type: ['string', 'null']`) is not safe either: OpenCode's Gemini sanitizer rewrites it into
+ * `anyOf` and keeps the node's `enum` and `description`, which Vertex then rejects. That is how
+ * `create_agent_profile.runtime` failed every OpenCode prompt on a Gemini model. So `anyOf` is the
+ * node's only field, and the description lives on the non-null branch.
+ * `tests/unit/routes/mcp-tool-schema-gemini-compat.test.ts` enforces this for every tool.
+ */
+export function nullableMcpProperty<const T extends Record<string, unknown>>(schema: T) {
+  return { anyOf: [schema, { type: 'null' }] } as const;
+}
+
 export function resourceRequirementsMcpProperty(options: {
   nullable: boolean;
   description: string;
 }) {
-  return {
-    type: options.nullable ? (['object', 'null'] as const) : ('object' as const),
+  const schema = {
+    type: 'object',
     description: options.description,
     properties: RESOURCE_REQUIREMENTS_FIELD_PROPERTIES,
     additionalProperties: true,
   } as const;
+  return options.nullable ? nullableMcpProperty(schema) : schema;
 }
 
 /** Shared property schemas for configuration fields common to profiles and skills. */
@@ -69,18 +84,16 @@ export const SHARED_CONFIG_FIELD_PROPERTIES = {
     description:
       'Deprecated legacy VM size override: small, medium, large. Prefer resourceRequirements; the canonical compatibility adapter translates legacy tiers.',
   },
-  resourceRequirements: {
-    ...resourceRequirementsMcpProperty({
-      nullable: true,
-      description:
-        'Modern workload requirements for this configuration layer. Known fields: minVcpu, minMemoryGb, minDiskGb, and exclusiveNode. Placement uses explicit CPU, memory, and disk reservations. Omitted fields inherit; explicit false is preserved. Null clears the value on update.',
-    }),
-  },
-  resourceRequirementsJson: {
-    type: ['string', 'null'],
+  resourceRequirements: resourceRequirementsMcpProperty({
+    nullable: true,
+    description:
+      'Modern workload requirements for this configuration layer. Known fields: minVcpu, minMemoryGb, minDiskGb, and exclusiveNode. Placement uses explicit CPU, memory, and disk reservations. Omitted fields inherit; explicit false is preserved. Null clears the value on update.',
+  }),
+  resourceRequirementsJson: nullableMcpProperty({
+    type: 'string',
     description:
       'Compatibility JSON string for workload requirements. Prefer resourceRequirements; only supported modern fields are persisted.',
-  },
+  }),
   provider: {
     type: 'string',
     description: 'Cloud provider: hetzner, scaleway, gcp, vultr, infomaniak, digitalocean, upcloud',
@@ -93,11 +106,11 @@ export const SHARED_CONFIG_FIELD_PROPERTIES = {
     type: 'string',
     description: 'Workspace profile: full, lightweight',
   },
-  runtime: {
-    type: ['string', 'null'],
-    enum: [...AGENT_PROFILE_RUNTIMES, null],
+  runtime: nullableMcpProperty({
+    type: 'string',
+    enum: [...AGENT_PROFILE_RUNTIMES],
     description: 'Execution runtime: vm or cf-container. Use null to inherit the default.',
-  },
+  }),
   devcontainerConfigName: {
     type: 'string',
     description:

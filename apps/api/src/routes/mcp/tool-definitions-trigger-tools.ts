@@ -12,7 +12,10 @@ import {
   TRIGGER_STATUSES,
 } from '@simple-agent-manager/shared';
 
-import { resourceRequirementsMcpProperty } from './tool-definitions-shared-fields';
+import {
+  nullableMcpProperty,
+  resourceRequirementsMcpProperty,
+} from './tool-definitions-shared-fields';
 
 const githubConfigProperty = {
   type: 'object',
@@ -155,7 +158,14 @@ export const TRIGGER_TOOLS = [
                 properties: {
                   path: { type: 'string' },
                   operator: { type: 'string', enum: ['exists', 'equals', 'contains'] },
-                  value: { type: ['string', 'number', 'boolean', 'null'] },
+                  value: {
+                    anyOf: [
+                      { type: 'string' },
+                      { type: 'number' },
+                      { type: 'boolean' },
+                      { type: 'null' },
+                    ],
+                  },
                 },
                 required: ['path', 'operator'],
                 additionalProperties: false,
@@ -206,11 +216,11 @@ export const TRIGGER_TOOLS = [
           description:
             'Modern workload requirements for this trigger layer. Known fields: minVcpu, minMemoryGb, minDiskGb, and exclusiveNode. Placement uses explicit CPU, memory, and disk reservations. Omitted fields inherit; explicit false is preserved.',
         }),
-        resourceRequirementsJson: {
-          type: ['string', 'null'],
+        resourceRequirementsJson: nullableMcpProperty({
+          type: 'string',
           description:
             'Compatibility JSON string for trigger workload requirements. Prefer resourceRequirements.',
-        },
+        }),
       },
       required: ['name', 'promptTemplate'],
       additionalProperties: false,
@@ -233,10 +243,10 @@ export const TRIGGER_TOOLS = [
           type: 'string',
           description: 'Human-readable name for the trigger.',
         },
-        description: {
-          type: ['string', 'null'],
+        description: nullableMcpProperty({
+          type: 'string',
           description: 'Optional trigger description. Use null to clear it.',
-        },
+        }),
         status: {
           type: 'string',
           description: 'Trigger status. Paused or disabled triggers do not schedule future runs.',
@@ -264,35 +274,35 @@ export const TRIGGER_TOOLS = [
             'The prompt sent to the agent each time the trigger fires. ' +
             'Supports {{variable}} interpolation.',
         },
-        agentProfileId: {
-          type: ['string', 'null'],
+        agentProfileId: nullableMcpProperty({
+          type: 'string',
           description: 'Agent profile to use for triggered tasks. Use null to clear the override.',
-        },
-        skillId: {
-          type: ['string', 'null'],
+        }),
+        skillId: nullableMcpProperty({
+          type: 'string',
           description: 'Skill to use for triggered tasks. Use null to clear the override.',
-        },
+        }),
         taskMode: {
           type: 'string',
           description: 'Task mode: "task" (fire-and-forget) or "conversation" (interactive).',
           enum: ['task', 'conversation'],
         },
-        vmSizeOverride: {
-          type: ['string', 'null'],
+        vmSizeOverride: nullableMcpProperty({
+          type: 'string',
           description:
             'Deprecated legacy VM size override. Use null to clear the override. Prefer resourceRequirements.',
-          enum: ['small', 'medium', 'large', null],
-        },
+          enum: ['small', 'medium', 'large'],
+        }),
         resourceRequirements: resourceRequirementsMcpProperty({
           nullable: true,
           description:
             'Modern workload requirements for this trigger layer. Known fields: minVcpu, minMemoryGb, minDiskGb, and exclusiveNode. Placement uses explicit CPU, memory, and disk reservations. Omitted fields inherit; explicit false is preserved. Use null to clear.',
         }),
-        resourceRequirementsJson: {
-          type: ['string', 'null'],
+        resourceRequirementsJson: nullableMcpProperty({
+          type: 'string',
           description:
             'Compatibility JSON string for trigger workload requirements. Prefer resourceRequirements. Use null to clear.',
-        },
+        }),
         maxConcurrent: {
           type: 'number',
           description: 'Maximum queued/running executions allowed for this trigger.',

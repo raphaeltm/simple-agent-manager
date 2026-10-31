@@ -6,11 +6,12 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"regexp"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/diagredact"
 )
 
 const crashRecoveredStopReason = "recovered"
@@ -22,15 +23,6 @@ const crashRecoveredStopReason = "recovered"
 const FatalErrorStopReason = "fatal_error"
 
 const fatalErrorStopReason = FatalErrorStopReason
-
-var diagnosticRedactionPatterns = []*regexp.Regexp{
-	regexp.MustCompile(`(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{16,}`),
-	regexp.MustCompile(`(?i)((?:api[_-]?key|token|secret|password|authorization)\s*[:=]\s*)("[^"]+"|'[^']+'|[^\s,;]+)`),
-	regexp.MustCompile(`\b(sk-[A-Za-z0-9_-]{12,})\b`),
-	regexp.MustCompile(`\b(gh[pousr]_[A-Za-z0-9_]{12,})\b`),
-	regexp.MustCompile(`\b(github_pat_[A-Za-z0-9_]{12,})\b`),
-	regexp.MustCompile(`\b(sam_test_[A-Za-z0-9_-]{12,})\b`),
-}
 
 func isCrashPromptError(err error) bool {
 	if err == nil {
@@ -57,20 +49,7 @@ func isCrashPromptError(err error) bool {
 }
 
 func redactAgentDiagnosticText(text string) string {
-	redacted := text
-	for _, pattern := range diagnosticRedactionPatterns {
-		redacted = pattern.ReplaceAllStringFunc(redacted, func(match string) string {
-			submatches := pattern.FindStringSubmatch(match)
-			if len(submatches) >= 3 {
-				return submatches[1] + "[REDACTED]"
-			}
-			if len(submatches) >= 2 && strings.HasSuffix(strings.ToLower(submatches[1]), " ") {
-				return submatches[1] + "[REDACTED]"
-			}
-			return "[REDACTED]"
-		})
-	}
-	return redacted
+	return diagredact.Text(text)
 }
 
 type recoveryNotify func(stopReason string, err error)

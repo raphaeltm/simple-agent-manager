@@ -26,8 +26,11 @@ var (
 	sensitiveKeyPattern    = regexp.MustCompile(`(?i)(authorization|cookie|credential|password|private.?key|api.?key|access.?key|secret|token)`)
 	sensitiveValuePatterns = []*regexp.Regexp{
 		regexp.MustCompile(`(?i)bearer\s+[a-z0-9._~+/=-]{8,}`),
+		regexp.MustCompile(`(?i)authorization["']?\s*[:=]\s*["']?basic\s+[a-z0-9._~+/=-]+`),
+		regexp.MustCompile(`sam_(?:pat|wh|test)_[A-Za-z0-9_-]{8,}`),
 		regexp.MustCompile(`(?i)(?:github_pat_|gh[pousr]_)[a-z0-9_]{8,}`),
 		regexp.MustCompile(`(?i)sk-[a-z0-9_-]{8,}`),
+		regexp.MustCompile(`(?i)oc_sk_[a-z0-9_-]{8,}`), // OpenCode API keys since October 2026
 		regexp.MustCompile(`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`),
 		regexp.MustCompile(`\bxox[baprs]-[A-Za-z0-9-]{10,}\b`),
 		regexp.MustCompile(`\bnpm_[A-Za-z0-9]{20,}\b`),

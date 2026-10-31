@@ -36,6 +36,15 @@ func (h *SessionHost) reportAgentError(agentType, step, message, detail string) 
 	}
 }
 
+// diagnosticErrorMaxBytes bounds agent error text sent to the control plane.
+const diagnosticErrorMaxBytes = 2048
+
+// promptFailureDetail redacts before truncating, so a cut can never leave a
+// token too short for the redaction patterns to recognise.
+func promptFailureDetail(err error) string {
+	return truncateToByteBudget(redactAgentDiagnosticText(err.Error()), diagnosticErrorMaxBytes)
+}
+
 func (h *SessionHost) reportLifecycle(level, message string, ctx map[string]interface{}) {
 	if h.config.ErrorReporter == nil {
 		return
@@ -327,7 +336,7 @@ func (h *SessionHost) prepareActivityReport(activity string) (activityReportRequ
 	// Attach a redacted status error for prompting/error states so the control
 	// plane can persist a useful failure reason without leaking credentials.
 	if statusErr != "" && (activity == "prompting" || activity == "error") {
-		redactedStatusErr := truncateString(redactAgentDiagnosticText(statusErr), 2048)
+		redactedStatusErr := truncateString(redactAgentDiagnosticText(statusErr), diagnosticErrorMaxBytes)
 		payload.StatusError = &redactedStatusErr
 	}
 

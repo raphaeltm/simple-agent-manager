@@ -692,11 +692,22 @@ func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promp
 			errMsg = "Prompt cancelled (context deadline exceeded)"
 		}
 	}
-	slog.Warn("ACP Prompt failed (non-fatal)", "reason", errMsg)
-	h.reportLifecycle("warn", "ACP Prompt failed", map[string]interface{}{
+	fields := map[string]interface{}{
 		"error":    errMsg,
 		"duration": time.Since(info.startedAt).String(),
-	})
+	}
+	// An unclassified failure used to report only agent_prompt_failed, so the
+	// 2026-10-31 Vertex rejection of a sam-mcp tool schema was visible only in the
+	// node journal. Carry the agent's own error, redacted and bounded, so platform
+	// logs say why. Classified failures keep the bare code (ClassifyPromptFailure).
+	logArgs := []any{"reason", errMsg}
+	if errMsg == "agent_prompt_failed" {
+		detail := promptFailureDetail(err)
+		fields["detail"] = detail
+		logArgs = append(logArgs, "detail", detail)
+	}
+	slog.Warn("ACP Prompt failed (non-fatal)", logArgs...)
+	h.reportLifecycle("warn", "ACP Prompt failed", fields)
 	h.broadcastMessage(h.marshalJSONRPCError(reqID, -32603, errMsg))
 	attempt.completeWith(h, "error", err, func() { h.markPromptDoneForAttempt(attempt) })
 }

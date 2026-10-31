@@ -5,6 +5,7 @@
  * layer: skill fields override the resolved agent profile when a task runs the skill.
  */
 import {
+  nullableMcpProperty,
   SHARED_CONFIG_FIELD_PROPERTIES,
   VALID_VALUES_HINT,
 } from './tool-definitions-shared-fields';
@@ -12,16 +13,16 @@ import {
 /** Skill field properties = shared config fields + skill-specific extras. */
 const SKILL_FIELD_PROPERTIES = {
   ...SHARED_CONFIG_FIELD_PROPERTIES,
-  agentType: {
-    type: ['string', 'null'],
+  agentType: nullableMcpProperty({
+    type: 'string',
     description:
       'Optional agent type override (e.g., claude-code, openai-codex). Leave unset so the run uses the agent of the profile chosen for it; a skill only overrides what it sets. null or an empty string clears the override.',
-  },
-  resourceRequirementsJson: {
-    type: ['string', 'null'],
+  }),
+  resourceRequirementsJson: nullableMcpProperty({
+    type: 'string',
     description:
       'Compatibility JSON string describing workload requirements for this skill. Prefer resourceRequirements; only supported modern fields are persisted.',
-  },
+  }),
   defaultProfileId: {
     type: 'string',
     description:

@@ -2,7 +2,10 @@
  * MCP tool definitions — task lifecycle, dispatch, and notification tools.
  */
 
-import { resourceRequirementsMcpProperty } from './tool-definitions-shared-fields';
+import {
+  nullableMcpProperty,
+  resourceRequirementsMcpProperty,
+} from './tool-definitions-shared-fields';
 
 export const TASK_LIFECYCLE_TOOLS = [
   {
@@ -226,11 +229,11 @@ export const TASK_LIFECYCLE_TOOLS = [
             'Workspace provisioning profile. "full" includes full devcontainer build. "lightweight" skips it for faster startup.',
           enum: ['full', 'lightweight'],
         },
-        devcontainerConfigName: {
-          type: ['string', 'null'],
+        devcontainerConfigName: nullableMcpProperty({
+          type: 'string',
           description:
             'Devcontainer config name — a subdirectory under .devcontainer/ (e.g., "data-science"). Null or omitted means auto-discover default config. Only relevant when workspaceProfile is "full".',
-        },
+        }),
         provider: {
           type: 'string',
           description:

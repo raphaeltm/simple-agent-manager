@@ -1,20 +1,28 @@
+import { nullableMcpProperty } from './tool-definitions-shared-fields';
+
 const string = { type: 'string' } as const;
 const timestamp = { type: 'integer', minimum: 1 } as const;
+// `anyOf` alone on its node and single-value enums instead of `oneOf`/`const`: Gemini function
+// calling supports neither. The handler enforces that exactly one action shape is sent.
 const action = {
-  oneOf: [
+  anyOf: [
     {
       type: 'object',
-      properties: { kind: { const: 'message_session' }, sessionId: string, prompt: string },
+      properties: {
+        kind: { type: 'string', enum: ['message_session'] },
+        sessionId: string,
+        prompt: string,
+      },
       required: ['kind', 'sessionId', 'prompt'],
       additionalProperties: false,
     },
     {
       type: 'object',
       properties: {
-        kind: { const: 'start_session' },
+        kind: { type: 'string', enum: ['start_session'] },
         prompt: string,
-        agentProfileId: { type: ['string', 'null'] },
-        skillId: { type: ['string', 'null'] },
+        agentProfileId: nullableMcpProperty(string),
+        skillId: nullableMcpProperty(string),
       },
       required: ['kind', 'prompt'],
       additionalProperties: false,

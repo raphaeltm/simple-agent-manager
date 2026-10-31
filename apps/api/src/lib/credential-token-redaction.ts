@@ -7,9 +7,9 @@
  * them; the logger in turn missed fine-grained GitHub PATs and cut SAM PATs at their first `-`.
  * A token family is defined here once so no redactor can know fewer shapes than its siblings.
  * The VM agent's Go redactor (`packages/vm-agent/internal/errorreport/snapshot.go`) is held to the
- * same `sk-`/GitHub shapes by the shared canary fixture `tests/fixtures/diagnostic-secret-canaries.json`.
+ * same `sk-`/`oc_sk_`/GitHub shapes by the shared canary fixture `tests/fixtures/diagnostic-secret-canaries.json`.
  *
- * Only prefix-identified tokens belong here: `sk-`, `ghp_` or `sam_pat_` never occur in prose, so
+ * Only prefix-identified tokens belong here: `sk-`, `oc_sk_`, `ghp_` or `sam_pat_` never occur in prose, so
  * one rule fits every redactor. `Bearer …`/`Basic …` values stay with each redactor on purpose —
  * those are English words, and a log line can afford to over-redact where a comment shown to a
  * user cannot.
@@ -23,6 +23,8 @@ const CREDENTIAL_TOKEN_SHAPES: readonly string[] = [
   // Provider API keys: OpenAI `sk-…`, `sk-proj-…`, `sk-svcacct-…`; Anthropic `sk-ant-api03-…`,
   // `sk-ant-oat01-…`; OpenAI-compatible providers such as OpenRouter's `sk-or-v1-…`.
   String.raw`sk-[A-Za-z0-9_-]{8,}`,
+  // OpenCode Zen/Go API keys, which moved from `sk-…` to `oc_sk_…` in October 2026.
+  String.raw`oc_sk_[A-Za-z0-9_-]{8,}`,
   // GitHub tokens: classic PAT, OAuth, user-to-server, installation, refresh, fine-grained PAT.
   String.raw`(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]{8,}`,
   // SAM personal access and webhook trigger tokens; their bodies are base64url, so `-` counts.
