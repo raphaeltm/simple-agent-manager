@@ -13,7 +13,7 @@ This is a useful pattern for any scheduled cleanup job: retries need a limit, an
 
 ## Why a refused deletion can last forever
 
-SAM runs coding agents on virtual machines in a user's cloud account. When a machine becomes idle, a scheduled Cloudflare Worker asks the cloud provider to remove it. Before deleting it, SAM checks that the VM still belongs to the expected account and that its workspace data can be preserved.
+SAM runs coding agents on virtual machines provisioned through project, user, or platform-provided cloud credentials. When a managed machine becomes idle, a scheduled Cloudflare Worker asks its cloud provider to remove it. Before deletion, SAM checks the VM's identity and whether its workspace data can be preserved.
 
 Those checks are important. But older workspaces can lack the proof that today's cleanup expects. If cleanup simply refuses in that case, the VM can remain stopped in SAM's records while still existing at the provider. A retry timer can make that worse: an hour-long backoff would push past a 30-minute cleanup deadline.
 
@@ -34,7 +34,7 @@ const backoff = new Date(
 
 The `Math.min()` matters: even if a normal failure would wait an hour, the retry cannot sleep past the retirement deadline. The default is 30 minutes, and the value can be configured by the installation operator.
 
-After the deadline, a separate scheduled sweep checks the VM's provider instance and runtime identity again. It also confirms that no workspace is running, starting, recovering, or being claimed for warm reuse. If those checks pass, SAM retries preservation and retires the VM.
+After the deadline, a separate scheduled sweep tries preservation and retirement. It proceeds only if it can verify the provider instance, runtime identity, and credential provenance, and if no workspace is running, starting, recovering, or being claimed for warm reuse. If ownership or provenance is unclear, SAM holds the safety fence and raises an operator-visible error instead.
 
 ```mermaid
 flowchart TD
@@ -42,15 +42,15 @@ flowchart TD
     B --> C[Retry with a bounded backoff]
     C -->|Normal cleanup succeeds| D[Release the VM]
     C -->|Still blocked at 30 minutes| E[Recheck ownership and active work]
-    E -->|Checks pass| F[Retry preservation, then retire the VM]
-    E -->|Ownership is unclear or work is active| G[Keep the safety fence and alert an operator]
+    E -->|Identity and safety checks pass| F[Retry preservation, then retire the VM]
+    E -->|Provenance is unclear or work is active| G[Keep the safety fence and alert an operator]
 ```
 
 The blocked timestamp lives in Cloudflare D1, SAM's SQL database. The scheduled Worker uses it to make progress across separate cron runs, instead of relying on one long-running process to stay alive.
 
 ## A deadline does not mean “delete at any cost”
 
-Thirty minutes is the point where SAM takes a different cleanup path, not permission to ignore ownership. The retirement code still requires a known provider instance and runtime incarnation, a recognized credential source, and no active workspace or conflicting warm-placement claim. It checks those conditions again immediately before destruction so that a change during cleanup cannot slip through.
+Thirty minutes is the point where SAM takes a different cleanup path, not permission to ignore ownership. The initial authority check requires a known provider instance and runtime incarnation, a recognized credential source, and no active workspace or conflicting warm-placement claim. Immediately before destruction, SAM rechecks that the VM is still in the expected state with the same provider instance and runtime incarnation, and that no active workspace, cross-user snapshot, or warm-placement claim appeared during cleanup.
 
 If SAM cannot establish that authority, or sees active work, it keeps the safety fence and writes an operator-visible error with the provider and VM identifiers. If it does retire a VM whose workspace state could not be fully preserved, it records which sources were affected and sends recovery notices. The cleanup path does not silently discard the evidence or pretend that the workspace can resume normally.
 
