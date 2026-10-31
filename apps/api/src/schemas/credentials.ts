@@ -79,3 +79,8 @@ export const CreateCCAttachmentSchema = v.object({
   configurationId: v.pipe(v.string(), v.minLength(1)),
   projectId: v.optional(v.pipe(v.string(), v.minLength(1))),
 });
+
+/** PATCH /api/cc/attachments/:id — pause or resume an attachment. */
+export const UpdateCCAttachmentSchema = v.object({
+  isActive: v.optional(v.boolean()),
+});

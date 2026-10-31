@@ -33,6 +33,7 @@ export {
   CredentialKindBodySchema,
   SaveAgentCredentialSchema,
   SaveGcpServiceAccountCredentialSchema,
+  UpdateCCAttachmentSchema,
 } from './credentials';
 
 // Node schemas

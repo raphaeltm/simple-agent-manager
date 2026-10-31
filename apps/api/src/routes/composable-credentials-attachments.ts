@@ -16,7 +16,7 @@ import { ulid } from '../lib/ulid';
 import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
-import { CreateCCAttachmentSchema, jsonValidator } from '../schemas';
+import { CreateCCAttachmentSchema, jsonValidator, UpdateCCAttachmentSchema } from '../schemas';
 import { reconcileCapacityPoolsForCredentialMutation } from '../services/capacity-pool-credential-lifecycle';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
@@ -135,11 +135,11 @@ export function registerCCAttachmentRoutes(ccRoutes: Hono<{ Bindings: Env }>): v
   });
 
   /** PATCH /api/cc/attachments/:id — update an attachment (isActive) */
-  ccRoutes.patch('/attachments/:id', async (c) => {
+  ccRoutes.patch('/attachments/:id', jsonValidator(UpdateCCAttachmentSchema), async (c) => {
     const db = drizzle(c.env.DATABASE, { schema });
     const userId = getUserId(c);
     const { id } = c.req.param();
-    const body = await c.req.json();
+    const body = c.req.valid('json');
 
     const updates: Record<string, unknown> = {};
     if (typeof body.isActive === 'boolean') updates.isActive = body.isActive;

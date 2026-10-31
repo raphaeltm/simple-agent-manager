@@ -305,4 +305,34 @@ describe('POST /api/cc/attachments — pin an existing account to a project', ()
     expect(response.status).toBe(400);
     expect(await resolvedConfiguration(PROJECT_A)).toBe('cfg-defang');
   });
+
+  it.each([
+    ['malformed JSON', '{"isActive":'],
+    ['a null body', 'null'],
+    ['a non-boolean isActive', '{"isActive":"no"}'],
+  ])('PATCH rejects %s with 400 and leaves the pin active', async (_label, raw) => {
+    const response = await app.request(
+      '/api/cc/attachments/att-pin-a',
+      { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: raw },
+      env
+    );
+
+    expect(response.status).toBe(400);
+    expect(await resolvedConfiguration(PROJECT_A)).toBe('cfg-defang');
+  });
+
+  it('PATCH still pauses a pin, which halts the project', async () => {
+    const response = await app.request(
+      '/api/cc/attachments/att-pin-a',
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ isActive: false }),
+      },
+      env
+    );
+
+    expect(response.status).toBe(200);
+    expect(await resolvedConfiguration(PROJECT_A)).toBeNull();
+  });
 });
