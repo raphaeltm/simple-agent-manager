@@ -2,6 +2,9 @@
  * Account mutations, each routed through the endpoint that already owns that
  * operation so the legacy `credentials` table and the cc_* tables stay in sync:
  *
+ * - Pin an existing account to projects → `POST /api/cc/attachments` with a
+ *   projectId, which replaces that project's previous pin in one batch. One
+ *   account can be pinned to any number of projects.
  * - Disconnect a default / remove a project pin → the legacy delete routes,
  *   which also detach the cc_* attachments (`disconnect*FromCC`). A disconnected
  *   default that no project uses then has its cc_* records removed too, so it
@@ -22,6 +25,7 @@ import { useInvalidateAccounts } from '../../hooks/useAccounts';
 import { useToast } from '../../hooks/useToast';
 import {
   ApiClientError,
+  createCCAttachment,
   deleteAgentCredentialByKind,
   deleteCCAttachment,
   deleteCCConfiguration,
@@ -41,6 +45,20 @@ import { legacyAgentKind } from './provider-meta';
 /** Whether the legacy routes can disconnect or unpin this account. */
 export function canUseLegacyRoutes(account: AccountView): boolean {
   return account.kind === 'compute' || legacyAgentKind(account.credentialKind) !== null;
+}
+
+/**
+ * Whether an account can be pinned to projects from the account views: an
+ * active, non-default agent account whose pins the legacy routes can remove.
+ * Pinning a default changes nothing, and a paused account would halt the project.
+ */
+export function canPinToProjects(account: AccountView): boolean {
+  return (
+    account.kind === 'agent' &&
+    account.role !== 'default' &&
+    account.active &&
+    canUseLegacyRoutes(account)
+  );
 }
 
 /** An account a project still uses, discovered only at delete time. */
@@ -109,11 +127,38 @@ async function detachCloudDefault(account: AccountView): Promise<void> {
   }
 }
 
+/** Move one project off its pinned account, onto the default. */
+async function unpinProject(account: AccountView, projectId: string): Promise<void> {
+  if (account.kind === 'compute') {
+    await deleteProjectCloudCredential(projectId, account.target);
+    return;
+  }
+  const kind = legacyAgentKind(account.credentialKind);
+  if (!kind) throw new Error('This pin can only be removed from Advanced settings.');
+  await deleteProjectAgentCredential(projectId, account.target, kind);
+}
+
+/** Projects to pin to an account, and projects to move back to the default. */
+export interface ProjectPinChanges {
+  pin: string[];
+  unpin: string[];
+}
+
+export function describePinChanges(label: string, changes: ProjectPinChanges): string {
+  const projects = (n: number) => `${n} project${n === 1 ? '' : 's'}`;
+  const pinned = `${projects(changes.pin.length)} now ${changes.pin.length === 1 ? 'uses' : 'use'} ${label}`;
+  const unpinned = `${projects(changes.unpin.length)} moved back to your default`;
+  if (changes.unpin.length === 0) return pinned;
+  if (changes.pin.length === 0) return unpinned;
+  return `${pinned}; ${unpinned}`;
+}
+
 export interface AccountActions {
   rename: (account: AccountView, name: string) => Promise<boolean>;
   disconnectDefault: (account: AccountView) => Promise<boolean>;
   removePin: (account: AccountView, projectId: string) => Promise<boolean>;
   removeUnattached: (account: AccountView) => Promise<boolean>;
+  updateProjectPins: (account: AccountView, changes: ProjectPinChanges) => Promise<boolean>;
 }
 
 export function useAccountActions(): AccountActions {
@@ -179,16 +224,27 @@ export function useAccountActions(): AccountActions {
   const removePin = useCallback(
     (account: AccountView, projectId: string) =>
       run(
-        () => {
-          if (account.kind === 'compute') {
-            return deleteProjectCloudCredential(projectId, account.target);
-          }
-          const kind = legacyAgentKind(account.credentialKind);
-          if (!kind) throw new Error('This pin can only be removed from Advanced settings.');
-          return deleteProjectAgentCredential(projectId, account.target, kind);
-        },
+        () => unpinProject(account, projectId),
         'The project now uses your default account',
         'Failed to remove the project account'
+      ),
+    [run]
+  );
+
+  const updateProjectPins = useCallback(
+    (account: AccountView, changes: ProjectPinChanges) =>
+      run(
+        async () => {
+          // One request per project: each pin replaces that project's previous
+          // pin atomically on the server, so a failure part-way leaves every
+          // project on exactly one account.
+          for (const projectId of changes.pin) {
+            await createCCAttachment({ configurationId: account.configurationId, projectId });
+          }
+          for (const projectId of changes.unpin) await unpinProject(account, projectId);
+        },
+        describePinChanges(account.label, changes),
+        'Failed to update the projects using this account'
       ),
     [run]
   );
@@ -206,5 +262,5 @@ export function useAccountActions(): AccountActions {
     [run]
   );
 
-  return { rename, disconnectDefault, removePin, removeUnattached };
+  return { rename, disconnectDefault, removePin, removeUnattached, updateProjectPins };
 }

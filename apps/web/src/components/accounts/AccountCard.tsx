@@ -4,7 +4,7 @@
  * looks and behaves the same everywhere.
  */
 import { Button, DropdownMenu, type DropdownMenuItem } from '@simple-agent-manager/ui';
-import { Pin, Star } from 'lucide-react';
+import { Pin, Plus, Star } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 
@@ -13,7 +13,7 @@ import { CredentialLimitChip } from '../credential-limits/CredentialLimitChip';
 import { type AccountView, type DefaultFallback, describeUnpin } from './account-model';
 import { AccountStatus, ProviderMark, RoleBadge } from './AccountBits';
 import { type AccountProvider, credentialKindLabel } from './provider-meta';
-import { canUseLegacyRoutes, useAccountActions } from './useAccountActions';
+import { canPinToProjects, canUseLegacyRoutes, useAccountActions } from './useAccountActions';
 
 const MAX_PROJECT_CHIPS = 3;
 const MAX_UNPIN_MENU_ITEMS = 4;
@@ -36,6 +36,8 @@ export interface AccountCardProps {
   /** What a project uses once its pin to this account is removed. */
   fallback: DefaultFallback;
   onReplace?: (account: AccountView) => void;
+  /** Choose which projects pin this account (Settings → Agents only). */
+  onChooseProjects?: (account: AccountView) => void;
 }
 
 function formatAdded(iso: string): string {
@@ -53,6 +55,7 @@ export function AccountCard({
   showRole = true,
   fallback,
   onReplace,
+  onChooseProjects,
 }: Readonly<AccountCardProps>) {
   const actions = useAccountActions();
   const navigate = useNavigate();
@@ -65,6 +68,8 @@ export function AccountCard({
   const legacy = canUseLegacyRoutes(account);
   const projectsOf = [...account.pinnedProjectIds, ...account.pausedProjectIds];
   const shownProjects = showAllProjects ? projectsOf : projectsOf.slice(0, MAX_PROJECT_CHIPS);
+  const chooseProjects =
+    onChooseProjects && canPinToProjects(account) ? () => onChooseProjects(account) : null;
 
   // Focus the field once when renaming starts, not on every render.
   useEffect(() => {
@@ -81,6 +86,9 @@ export function AccountCard({
       },
     },
   ];
+  if (chooseProjects) {
+    menuItems.push({ id: 'projects', label: 'Use in projects…', onClick: chooseProjects });
+  }
   if (account.role === 'default' && onReplace) {
     menuItems.push({ id: 'replace', label: 'Replace…', onClick: () => onReplace(account) });
   }
@@ -262,11 +270,26 @@ export function AccountCard({
                 {showAllProjects ? 'Show fewer' : `+${projectsOf.length - MAX_PROJECT_CHIPS} more`}
               </button>
             )}
+            {chooseProjects && (
+              <button
+                type="button"
+                onClick={chooseProjects}
+                className="inline-flex min-h-8 cursor-pointer items-center gap-1 rounded-md border-none bg-transparent px-1.5 text-xs text-accent hover:underline"
+              >
+                <Plus size={11} aria-hidden="true" />
+                Add project
+              </button>
+            )}
           </>
         )}
         {account.role === 'unattached' && (
           <>
             <span className="min-w-0 flex-1 text-fg-muted">Connected, but nothing uses it.</span>
+            {chooseProjects && (
+              <Button size="sm" onClick={chooseProjects}>
+                Use in a project
+              </Button>
+            )}
             <Button size="sm" variant="ghost" onClick={() => setPending({ type: 'remove' })}>
               Remove
             </Button>

@@ -4,7 +4,7 @@
  * account cards.
  */
 import { AlertTriangle, ChevronDown, CircleDashed, Pin, Plus, Star } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useMemo, useState } from 'react';
 
 import {
   type AccountView,
@@ -15,6 +15,7 @@ import {
 } from './account-model';
 import { ProviderMark } from './AccountBits';
 import { AccountCard } from './AccountCard';
+import { AccountProjectsDialog } from './AccountProjectsDialog';
 
 function segmentFill(segment: Pick<CoverageSegment, 'role' | 'color'>): string {
   switch (segment.role) {
@@ -117,6 +118,13 @@ export function ProviderAccountsRow({
   onReplace,
 }: Readonly<ProviderAccountsRowProps>) {
   const { provider, accounts, segments } = group;
+  const [choosingFor, setChoosingFor] = useState<string | null>(null);
+  const projects = useMemo(
+    () => [...projectNames].map(([id, name]) => ({ id, name })),
+    [projectNames]
+  );
+  // Look the account up by id so the dialog sees the refreshed pins after a save.
+  const choosing = accounts.find((account) => account.id === choosingFor) ?? null;
   const defaults = accounts.filter((account) => account.role === 'default');
   const pinned = accounts.filter((account) => account.role === 'pinned');
   const unattached = accounts.filter((account) => account.role === 'unattached');
@@ -143,6 +151,7 @@ export function ProviderAccountsRow({
       showRole={false}
       fallback={fallback}
       onReplace={onReplace}
+      onChooseProjects={(chosen) => setChoosingFor(chosen.id)}
     />
   );
 
@@ -236,6 +245,15 @@ export function ProviderAccountsRow({
                 : `Connect ${provider.name}`}
           </button>
         </div>
+      )}
+
+      {choosing && (
+        <AccountProjectsDialog
+          account={choosing}
+          group={group}
+          projects={projects}
+          onClose={() => setChoosingFor(null)}
+        />
       )}
     </section>
   );

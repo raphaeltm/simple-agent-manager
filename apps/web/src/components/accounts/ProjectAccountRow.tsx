@@ -1,8 +1,17 @@
 /**
  * One provider in Project settings → Accounts: which account this project uses,
- * and the choice between your default and an account only this project uses.
+ * and the choice between your default and a pinned account — one you already
+ * connected, or a new one.
  */
-import { AlertTriangle, ChevronDown, CornerDownRight, Pin, Sparkles, Star } from 'lucide-react';
+import {
+  AlertTriangle,
+  ChevronDown,
+  CornerDownRight,
+  Pin,
+  Plus,
+  Sparkles,
+  Star,
+} from 'lucide-react';
 import { type ReactNode, useState } from 'react';
 
 import { ConfirmDialog } from '../ConfirmDialog';
@@ -15,7 +24,8 @@ import {
 } from './account-model';
 import { ProviderMark } from './AccountBits';
 import { AccountCard } from './AccountCard';
-import { useAccountActions } from './useAccountActions';
+import { credentialKindLabel } from './provider-meta';
+import { canPinToProjects, useAccountActions } from './useAccountActions';
 
 export interface ProjectAccountRowProps {
   group: ProviderAccounts;
@@ -43,11 +53,17 @@ export function ProjectAccountRow({
   );
   const [confirming, setConfirming] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [picking, setPicking] = useState(false);
+  const [pickingId, setPickingId] = useState<string | null>(null);
   const actions = useAccountActions();
   const shown: AccountView | null =
     resolution.source === 'pinned' || resolution.source === 'default' ? resolution.account : pinned;
   const panelId = `project-account-${provider.kind}-${provider.id}`;
   const fallback = defaultFallback(group);
+  // Accounts you already connected that this project could pin instead.
+  const candidates = group.accounts.filter(
+    (account) => account.id !== pinned?.id && canPinToProjects(account)
+  );
 
   const switchToDefault = async () => {
     if (!pinned) return;
@@ -55,6 +71,18 @@ export function ProjectAccountRow({
     await actions.removePin(pinned, projectId);
     setBusy(false);
     setConfirming(false);
+  };
+
+  const useOther = () => {
+    if (candidates.length === 0) onUseDifferent(provider.id);
+    else setPicking((value) => !value);
+  };
+
+  const pin = async (account: AccountView) => {
+    setPickingId(account.id);
+    const ok = await actions.updateProjectPins(account, { pin: [projectId], unpin: [] });
+    setPickingId(null);
+    if (ok) setPicking(false);
   };
 
   return (
@@ -125,13 +153,28 @@ export function ProjectAccountRow({
               onClick={() => (pinned ? setConfirming(true) : undefined)}
             />
             <ChoiceTile
-              selected={Boolean(pinned)}
+              selected={Boolean(pinned) || picking}
               icon={<Pin size={13} aria-hidden="true" className="text-info-fg" />}
               title={pinned ? 'Use a different account here' : 'Use another account here'}
-              subtitle={`Connect an account only ${projectName} uses`}
-              onClick={() => onUseDifferent(provider.id)}
+              subtitle={
+                candidates.length > 0
+                  ? 'Pick one of your accounts, or connect a new one'
+                  : `Connect an account only ${projectName} uses`
+              }
+              expanded={candidates.length > 0 ? picking : undefined}
+              onClick={useOther}
             />
           </div>
+          {picking && candidates.length > 0 && (
+            <AccountPicker
+              providerName={provider.name}
+              projectNames={projectNames}
+              candidates={candidates}
+              pickingId={pickingId}
+              onPick={(account) => void pin(account)}
+              onConnectNew={() => onUseDifferent(provider.id)}
+            />
+          )}
           {shown && (
             <AccountCard
               account={shown}
@@ -205,18 +248,22 @@ function ChoiceTile({
   icon,
   title,
   subtitle,
+  expanded,
   onClick,
 }: Readonly<{
   selected: boolean;
   icon: ReactNode;
   title: string;
   subtitle: string;
+  /** Set when the tile opens a list rather than choosing directly. */
+  expanded?: boolean;
   onClick: () => void;
 }>) {
   return (
     <button
       type="button"
       aria-pressed={selected}
+      aria-expanded={expanded}
       onClick={onClick}
       className={`flex min-h-11 min-w-0 cursor-pointer items-start gap-2.5 rounded-md border px-3 py-2.5 text-left ${
         selected
@@ -231,4 +278,72 @@ function ChoiceTile({
       </span>
     </button>
   );
+}
+
+/** Your other accounts for this provider, each one tap away from being pinned here. */
+function AccountPicker({
+  providerName,
+  projectNames,
+  candidates,
+  pickingId,
+  onPick,
+  onConnectNew,
+}: Readonly<{
+  providerName: string;
+  projectNames: ReadonlyMap<string, string>;
+  candidates: AccountView[];
+  pickingId: string | null;
+  onPick: (account: AccountView) => void;
+  onConnectNew: () => void;
+}>) {
+  return (
+    <div
+      role="group"
+      aria-label={`Your ${providerName} accounts`}
+      data-testid="project-account-picker"
+      className="flex min-w-0 flex-col gap-1.5 rounded-md border border-border-default bg-inset p-2"
+    >
+      {candidates.map((account) => (
+        <button
+          key={account.id}
+          type="button"
+          disabled={pickingId !== null}
+          onClick={() => onPick(account)}
+          className="flex min-w-0 cursor-pointer items-center gap-2.5 rounded-md border border-border-default bg-surface px-2.5 py-2 text-left hover:border-accent disabled:cursor-wait disabled:opacity-70"
+        >
+          <span
+            aria-hidden="true"
+            className="h-2.5 w-2.5 shrink-0 rounded-full"
+            style={{ background: account.swatch }}
+          />
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate text-sm text-fg-primary" title={account.label}>
+              {account.label}
+            </span>
+            <span className="truncate text-[11px] text-fg-muted">
+              {credentialKindLabel(account.credentialKind)} · {describeUse(account, projectNames)}
+            </span>
+          </span>
+          <span className="shrink-0 text-xs font-semibold text-accent">
+            {pickingId === account.id ? 'Pinning…' : 'Use here'}
+          </span>
+        </button>
+      ))}
+      <button
+        type="button"
+        onClick={onConnectNew}
+        className="inline-flex min-h-9 cursor-pointer items-center gap-1.5 self-start rounded-md border-none bg-transparent px-1.5 text-xs font-semibold text-accent hover:underline"
+      >
+        <Plus size={13} aria-hidden="true" />
+        Connect a new account
+      </button>
+    </div>
+  );
+}
+
+function describeUse(account: AccountView, projectNames: ReadonlyMap<string, string>): string {
+  const ids = account.pinnedProjectIds;
+  if (ids.length === 0) return 'Not used by any project';
+  if (ids.length === 1) return `Pinned in ${projectNames.get(ids[0] ?? '') ?? '1 project'}`;
+  return `Pinned in ${ids.length} projects`;
 }

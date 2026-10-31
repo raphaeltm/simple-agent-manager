@@ -38,31 +38,31 @@ project:
 
 ## Implementation checklist
 
-- [ ] API: project-scoped `POST /api/cc/attachments` replaces any existing project
+- [x] API: project-scoped `POST /api/cc/attachments` replaces any existing project
       attachment for the same (user, consumer, project) atomically (one D1 batch)
-- [ ] API: project-scoped attach authorizes with `requireProjectCapability(...,
+- [x] API: project-scoped attach authorizes with `requireProjectCapability(...,
       'secret:write')`, same as the project pin route
-- [ ] API: refuse to pin an inactive configuration/credential to a project (it would
+- [x] API: refuse to pin an inactive configuration/credential to a project (it would
       halt the project's resolution)
-- [ ] API behavioral tests against real SQLite (replace, other project untouched,
+- [x] API behavioral tests against real SQLite (replace, other project untouched,
       cross-user config rejected, non-member project rejected, inactive rejected)
-- [ ] Web: `useAccountActions` gains `attachToProjects` (add + remove diff)
-- [ ] Web: `AttachProjectsDialog` — searchable project checklist showing what each
+- [x] Web: `useAccountActions` gains `attachToProjects` (add + remove diff)
+- [x] Web: `AttachProjectsDialog` — searchable project checklist showing what each
       project uses today
-- [ ] Web: Settings → Agents account cards (pinned + unattached, agent kind, active)
+- [x] Web: Settings → Agents account cards (pinned + unattached, agent kind, active)
       get "Use in projects…" in the menu, and a visible button on unattached cards
-- [ ] Web: Project settings → "Use another account here" opens a picker of existing
+- [x] Web: Project settings → "Use another account here" opens a picker of existing
       accounts plus "Connect a new account"; falls through to connect when none exist
-- [ ] Web tests for both flows (rendered behavior, real API call shapes)
-- [ ] Playwright visual audit, mobile + desktop
-- [ ] Docs: update user docs describing project account pinning
+- [x] Web tests for both flows (rendered behavior, real API call shapes)
+- [x] Playwright visual audit, mobile + desktop
+- [x] Docs: update user docs describing project account pinning
 
 ## Acceptance criteria
 
-- [ ] From Settings → Agents an unattached account can be attached to one or more projects
-- [ ] From Settings → Agents a pinned account can be added to / removed from projects
-- [ ] From Project settings an existing account can be selected without reconnecting
-- [ ] Attaching replaces the project's previous pin; the project resolves to the new account
-- [ ] The same non-default account can be pinned to multiple projects
+- [x] From Settings → Agents an unattached account can be attached to one or more projects
+- [x] From Settings → Agents a pinned account can be added to / removed from projects
+- [x] From Project settings an existing account can be selected without reconnecting
+- [x] Attaching replaces the project's previous pin; the project resolves to the new account
+- [x] The same non-default account can be pinned to multiple projects
 
 Staging verification skipped at Raphaël's explicit request (2026-10-31).
