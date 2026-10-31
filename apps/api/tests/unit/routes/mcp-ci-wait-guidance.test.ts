@@ -18,7 +18,11 @@ describe('agent-facing CI wait contract', () => {
     'advertises a completion filter that matches %s, not a bare name or short SHA',
     (type) => {
       const eventType = `${type}.completed`;
-      for (const text of [create.description, fields.eventType.description, instructions]) {
+      for (const text of [
+        create.description,
+        fields.eventType.anyOf[0].description,
+        instructions,
+      ]) {
         expect(text).toContain(eventType);
       }
       const filter: ProjectEventFilterV1 = {
@@ -53,7 +57,7 @@ describe('agent-facing CI wait contract', () => {
       expect(text).toContain('create_project_schedule');
       expect(text).toContain('bounded fallback check');
     }
-    expect(fields.subjectId.description).toContain('never an abbreviated SHA');
+    expect(fields.subjectId.anyOf[0].description).toContain('never an abbreviated SHA');
     expect(create.inputSchema.properties.expiresAt.description).toContain(
       'Expiry does not itself wake'
     );

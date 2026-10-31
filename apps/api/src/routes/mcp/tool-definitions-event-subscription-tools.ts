@@ -6,58 +6,54 @@ import {
 
 import { MIN_WAKE_INTERVAL_SECONDS_PROPERTY } from './wake-interval-param';
 
-const STRING_OR_STRING_ARRAY = {
-  anyOf: [
-    { type: 'string' },
-    {
-      type: 'array',
-      items: { type: 'string' },
-      minItems: 1,
-    },
-  ],
-} as const;
+// `anyOf` must be the only field of its node for Gemini function calling, so the description
+// rides on the first branch (see nullableMcpProperty in tool-definitions-shared-fields.ts).
+function stringOrStringArray<const D extends string>(description: D) {
+  return {
+    anyOf: [
+      { type: 'string', description },
+      {
+        type: 'array',
+        items: { type: 'string' },
+        minItems: 1,
+      },
+    ],
+  } as const;
+}
 
-const SEVERITY_OR_SEVERITY_ARRAY = {
-  anyOf: [
-    { type: 'string', enum: PROJECT_EVENT_SEVERITIES },
-    {
-      type: 'array',
-      items: { type: 'string', enum: PROJECT_EVENT_SEVERITIES },
-      minItems: 1,
-    },
-  ],
-} as const;
+function severityOrSeverityArray<const D extends string>(description: D) {
+  return {
+    anyOf: [
+      { type: 'string', enum: PROJECT_EVENT_SEVERITIES, description },
+      {
+        type: 'array',
+        items: { type: 'string', enum: PROJECT_EVENT_SEVERITIES },
+        minItems: 1,
+      },
+    ],
+  } as const;
+}
 
 const EVENT_FILTER_SCHEMA = {
   type: 'object' as const,
   properties: {
+    // A bound, not `enum: [1]`: Gemini stringifies enum values, and the filter validator
+    // requires the number 1.
     version: {
       type: 'integer',
-      enum: [1],
-      description: 'ProjectData event filter version. The canonical pull model accepts only v1.',
+      minimum: 1,
+      maximum: 1,
+      description: 'ProjectData event filter version. The canonical pull model accepts only 1.',
     },
-    source: {
-      ...STRING_OR_STRING_ARRAY,
-      description: 'Exact event source value or bounded set of values.',
-    },
-    eventType: {
-      ...STRING_OR_STRING_ARRAY,
-      description:
-        'Exact event type value or bounded set of values; no prefix matching. GitHub CI completion: check_run.completed, check_suite.completed, workflow_run.completed.',
-    },
-    subjectType: {
-      ...STRING_OR_STRING_ARRAY,
-      description: 'Exact event subject type value or bounded set of values.',
-    },
-    subjectId: {
-      ...STRING_OR_STRING_ARRAY,
-      description:
-        'Exact event subject id value or bounded set of values. For GitHub commit subjects, use the full 40-character PR head SHA, never an abbreviated SHA.',
-    },
-    severity: {
-      ...SEVERITY_OR_SEVERITY_ARRAY,
-      description: 'Exact event severity or bounded set of severities.',
-    },
+    source: stringOrStringArray('Exact event source value or bounded set of values.'),
+    eventType: stringOrStringArray(
+      'Exact event type value or bounded set of values; no prefix matching. GitHub CI completion: check_run.completed, check_suite.completed, workflow_run.completed.'
+    ),
+    subjectType: stringOrStringArray('Exact event subject type value or bounded set of values.'),
+    subjectId: stringOrStringArray(
+      'Exact event subject id value or bounded set of values. For GitHub commit subjects, use the full 40-character PR head SHA, never an abbreviated SHA.'
+    ),
+    severity: severityOrSeverityArray('Exact event severity or bounded set of severities.'),
   },
   required: ['version'],
   additionalProperties: false,

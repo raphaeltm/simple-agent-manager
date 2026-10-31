@@ -14,6 +14,11 @@ import type { ProjectDataArchiveExactReadInput } from '../../../src/project-data
 import { groupTokensIntoMessages } from '../../../src/routes/mcp';
 import * as projectHelpers from '../../../src/routes/projects/_helpers';
 import * as agentProfileService from '../../../src/services/agent-profiles';
+import {
+  findAnyOfWithSiblings,
+  findGeminiSchemaViolations,
+  opencodeSanitizeGemini,
+} from '../../helpers/gemini-tool-schema';
 import { createUnpublishedStorageSession } from '../../helpers/reliability-storage';
 import { createSqlStorage } from '../durable-objects/sql-storage-test-utils';
 
@@ -906,6 +911,21 @@ describe('MCP Routes', () => {
       for (const tool of body.result.tools) {
         expect(tool.inputSchema).toBeDefined();
         expect(tool.inputSchema.type).toBe('object');
+      }
+    });
+
+    it('serves only input schemas Gemini function calling accepts', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/list'));
+
+      const body = await res.json();
+      expect(body.result.tools.map((tool: { name: string }) => tool.name)).toContain(
+        'create_agent_profile'
+      );
+      for (const tool of body.result.tools) {
+        expect(findGeminiSchemaViolations(tool.inputSchema, tool.name)).toEqual([]);
+        expect(findAnyOfWithSiblings(opencodeSanitizeGemini(tool.inputSchema), tool.name)).toEqual(
+          []
+        );
       }
     });
 

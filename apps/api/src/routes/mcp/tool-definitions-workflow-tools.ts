@@ -1,3 +1,5 @@
+import { nullableMcpProperty } from './tool-definitions-shared-fields';
+
 export const WORKFLOW_TOOLS = [
   {
     name: 'start_workflow_run',
@@ -26,10 +28,11 @@ export const WORKFLOW_TOOLS = [
               items: {
                 type: 'object',
                 additionalProperties: false,
-                oneOf: [
-                  { required: ['key', 'title', 'instructions', 'agentProfileId'] },
-                  { required: ['key', 'title', 'kind', 'wait'] },
-                ],
+                // Two step shapes, described rather than expressed as `oneOf`, which Gemini
+                // function calling rejects. services/workflow-plan.ts enforces them.
+                description:
+                  'Either an agent step (key, title, instructions, agentProfileId; kind omitted or "agent") or a wait step (key, title, kind "wait", wait).',
+                required: ['key', 'title'],
                 properties: {
                   kind: { type: 'string', enum: ['agent', 'wait'] },
                   key: { type: 'string', description: 'Unique step key.' },
@@ -52,11 +55,11 @@ export const WORKFLOW_TOOLS = [
                           'Exact ProjectData event source. Agent message channels are excluded.',
                       },
                       eventTypes: { type: 'array', minItems: 1, items: { type: 'string' } },
-                      subject: {
-                        type: ['object', 'null'],
+                      subject: nullableMcpProperty({
+                        type: 'object',
                         properties: { type: { type: 'string' }, id: { type: 'string' } },
                         required: ['type', 'id'],
-                      },
+                      }),
                       timeoutMs: {
                         type: 'integer',
                         minimum: 1,
