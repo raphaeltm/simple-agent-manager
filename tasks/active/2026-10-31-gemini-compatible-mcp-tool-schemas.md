@@ -72,26 +72,26 @@ Two contributing gaps:
 
 ## Implementation Checklist
 
-- [ ] Add a nullable-schema helper. Rewrite every type array as `anyOf` that is the only field of
+- [x] Add a nullable-schema helper. Rewrite every type array as `anyOf` that is the only field of
       its node (description moves into the non-null branch); `null` stays representable through a
       `{type:'null'}` branch.
-- [ ] Event subscription filter: put `anyOf` alone on its node and move descriptions into the
+- [x] Event subscription filter: put `anyOf` alone on its node and move descriptions into the
       branches; express `version` without a non-string enum.
-- [ ] `create_project_schedule.action`: `oneOf` → `anyOf`, and `const` → single-value string enum.
-- [ ] `start_workflow_run` steps: drop the `oneOf` of `required` lists, document the two step
+- [x] `create_project_schedule.action`: `oneOf` → `anyOf`, and `const` → single-value string enum.
+- [x] `start_workflow_run` steps: drop the `oneOf` of `required` lists, document the two step
       shapes in descriptions, and confirm the handler enforces them.
-- [ ] Add a regression test that walks every `MCP_TOOLS` input schema and enforces the Gemini
+- [x] Add a regression test that walks every `MCP_TOOLS` input schema and enforces the Gemini
       rules: no type arrays, `anyOf` is the only field of its node, no
       `oneOf`/`allOf`/`const`/`not`/`if`/`$ref`, string-only enums. Include a fixture case for the
       exact pre-fix `runtime` shape, and port OpenCode's sanitizer so the test also checks the
       post-sanitizer output.
-- [ ] Update any existing schema-shape assertions in tests.
-- [ ] VM agent: on an unclassified prompt failure, add a redacted, UTF-8-safe, bounded `detail`
+- [x] Update any existing schema-shape assertions in tests.
+- [x] VM agent: on an unclassified prompt failure, add a redacted, UTF-8-safe, bounded `detail`
       field to the `ACP Prompt failed` lifecycle report and the slog line; classified failures keep
       the code only.
-- [ ] Add `oc_sk_` to every redaction site listed above, plus a canary fixture entry, and extend
+- [x] Add `oc_sk_` to every redaction site listed above, plus a canary fixture entry, and extend
       the Go and TS canary tests.
-- [ ] Update docs that describe redacted token shapes or MCP schema conventions, if any.
+- [x] Update docs that describe redacted token shapes or MCP schema conventions, if any.
 
 ## Acceptance Criteria
 
@@ -103,6 +103,16 @@ Two contributing gaps:
 - [ ] `oc_sk_` canaries are redacted by the API redactor and every VM agent redactor.
 
 ## Notes
+
+- `apps/web/src/lib/analytics.ts` needed no change: its `LONG_OPAQUE_SEGMENT_RE` already scrubs
+  `oc_sk_…` path segments (24+ chars with letters and digits).
+- Discrimination checks run: reverting the schema sources reddens 12 tool cases plus 9 shape
+  assertions; truncating before redacting reddens `TestPromptFailureDetailRedactsBeforeTruncating`;
+  deleting the Go `oc_sk_` pattern reddens the unclassified-detail and truncation tests (acp), the
+  task-callback redaction test (server) and `TestErrorDeliveryRegistersAndUploadsOnlyRedactedAutomaticEvidence`
+  (errorreport); a naive byte slice reddens the UTF-8 test; deleting the API shape reddens the two
+  canary-driven redaction suites.
+- `main` is branch-protected (GH013), so the task file is committed on the feature branch.
 
 - Staging deployment was skipped by explicit user instruction (2026-10-31).
 - The OpenCode v2 upgrade is a separate task: `01M69A9YWZ9J4KWZ2YB4E4GTHE`.
