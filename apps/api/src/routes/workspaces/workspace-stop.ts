@@ -7,13 +7,12 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { purgeInteractionStore } from '../../services/acp-interaction-store';
 import { stopComputeTracking } from '../../services/compute-usage';
 import { stopWorkspaceOnNode } from '../../services/node-agent';
 import { handOffEmptyWorkspaceNode } from '../../services/node-warm-handoff';
+import { requireNodeWorkspaceArtifactsDeleted } from '../../services/node-workspace-retirement-guard';
 import { stopNodeResources } from '../../services/nodes';
 import * as projectDataService from '../../services/project-data';
-import { deleteSessionSnapshotState } from '../../services/session-snapshots';
 import { finalizeWorkspaceStopOnNode } from '../../services/workspace-eviction-lifecycle';
 import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
 import {
@@ -92,6 +91,16 @@ workspaceStopRoutes.post('/:id/stop', requireAuth(), requireApproved(), async (c
     assertNodeOperational(node, 'stop workspace');
   }
 
+  if (isCfContainerNode) {
+    try {
+      await requireNodeWorkspaceArtifactsDeleted(c.env, nodeId, userId);
+    } catch {
+      throw errors.conflict(
+        'Workspace stop is protected while local data remains unpreserved; use Sleep to preserve it'
+      );
+    }
+  }
+
   const claimedAt = new Date().toISOString();
   const stopIdentity = and(
     eq(schema.workspaces.id, workspace.id),
@@ -132,14 +141,6 @@ workspaceStopRoutes.post('/:id/stop', requireAuth(), requireApproved(), async (c
       let runtimeStopConfirmed = retryStopCleanup;
       try {
         if (isCfContainerNode) {
-          if (workspace.chatSessionId && workspace.projectId) {
-            const chatSessionId = workspace.chatSessionId;
-            const projectId = workspace.projectId;
-            await Promise.all([
-              deleteSessionSnapshotState(innerDb, c.env, chatSessionId),
-              purgeInteractionStore(c.env, projectId, chatSessionId),
-            ]);
-          }
           if (node.status === 'running' && isActiveWorkspaceStatus(workspace.status)) {
             await stopWorkspaceOnNode(nodeId, workspace.id, c.env, userId).catch((e) => {
               log.warn('workspace.cf_container_agent_stop_failed', {

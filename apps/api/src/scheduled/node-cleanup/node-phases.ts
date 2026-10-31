@@ -15,6 +15,7 @@ import { eq } from 'drizzle-orm';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { preservedVmRetirementActivitySql } from '../../services/preserved-vm-retirement';
 import { prepareAbsoluteLifetimeRelease } from './absolute-lifetime-preservation';
 import {
   boundedWarmPlacementClaimGuardSql,
@@ -294,10 +295,12 @@ async function sweepManagedHandoffNodes(
 ): Promise<void> {
   const sweepDeadlineMs = Date.now() + config.stoppedHandoffSweepBudgetMs;
   const workspaceIdleThreshold = getNodeWorkspaceIdleThresholdIso(now, config);
+  const preservedVmBudget = { remainingSources: config.workspaceSweepLimit };
+  const activitySql = `COALESCE(MAX(${preservedVmRetirementActivitySql('w')}), n.created_at)`;
   const candidates = await env.DATABASE.prepare(
-    `SELECT n.id, n.user_id, n.status, n.created_at,
+    `SELECT n.id, n.user_id, n.status, n.created_at, n.cleanup_blocked_since,
             COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count,
-            ${LAST_WORKSPACE_ACTIVITY_SQL} as last_activity
+            ${activitySql} as last_activity
      FROM nodes n
      LEFT JOIN workspaces w ON w.node_id = n.id
      WHERE n.status = ?
@@ -312,8 +315,8 @@ async function sweepManagedHandoffNodes(
        )
        ${boundedWarmPlacementClaimGuardSql('n.id')}
      GROUP BY n.id, n.user_id, n.status, n.created_at
-     HAVING ${LAST_WORKSPACE_ACTIVITY_SQL} < ?
-     ORDER BY last_activity ASC
+     HAVING ${activitySql} < ?
+     ORDER BY n.cleanup_blocked_since IS NULL, n.cleanup_blocked_since ASC, last_activity ASC
      LIMIT ?`
   )
     .bind(
@@ -333,7 +336,7 @@ async function sweepManagedHandoffNodes(
     }>();
 
   for (const node of candidates.results) {
-    if (Date.now() >= sweepDeadlineMs) break;
+    if (Date.now() >= sweepDeadlineMs || preservedVmBudget.remainingSources <= 0) break;
     if (node.active_ws_count > 0) {
       log.warn(options.skippedActiveLogEvent, {
         nodeId: node.id,
@@ -346,6 +349,9 @@ async function sweepManagedHandoffNodes(
     }
 
     const destroyed = await destroyNodeForCleanup(db, env, now.toISOString(), node, {
+      preservedVmBudget,
+      blockedRetirementMs: config.blockedRetirementMs,
+      refusalWarnAfterMs: config.refusalWarnAfterMs,
       logEvent: options.logEvent,
       requestDeadlineMs: Math.min(
         sweepDeadlineMs,
@@ -452,7 +458,7 @@ export async function sweepIncompatibleVmAgentNodes(
   const candidates = await env.DATABASE.prepare(
     `SELECT n.id, n.user_id, n.status, n.created_at, n.agent_version,
             COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count,
-            ${LAST_WORKSPACE_ACTIVITY_SQL} as last_activity
+            COALESCE(MAX(${preservedVmRetirementActivitySql('w')}), n.created_at) as last_activity
      FROM nodes n
      LEFT JOIN workspaces w ON w.node_id = n.id
      WHERE n.status = 'running'
@@ -472,8 +478,8 @@ export async function sweepIncompatibleVmAgentNodes(
            AND aw.status IN ('running', 'creating', 'recovery')
        )
      GROUP BY n.id, n.user_id, n.status, n.created_at, n.agent_version
-     HAVING ${LAST_WORKSPACE_ACTIVITY_SQL} < ?
-     ORDER BY last_activity ASC
+     HAVING COALESCE(MAX(${preservedVmRetirementActivitySql('w')}), n.created_at) < ?
+     ORDER BY n.cleanup_blocked_since IS NULL, n.cleanup_blocked_since ASC, last_activity ASC
      LIMIT ?`
   )
     .bind(
@@ -493,7 +499,9 @@ export async function sweepIncompatibleVmAgentNodes(
       last_activity: string;
     }>();
 
+  const preservedVmBudget = { remainingSources: config.workspaceSweepLimit };
   for (const node of candidates.results) {
+    if (preservedVmBudget.remainingSources <= 0) break;
     if (node.active_ws_count > 0) {
       log.info('node_cleanup.incompatible_vm_agent_skipped_active_workspaces', {
         nodeId: node.id,
@@ -507,6 +515,9 @@ export async function sweepIncompatibleVmAgentNodes(
     }
 
     const destroyed = await destroyNodeForCleanup(db, env, now.toISOString(), node, {
+      preservedVmBudget,
+      blockedRetirementMs: config.blockedRetirementMs,
+      refusalWarnAfterMs: config.refusalWarnAfterMs,
       logEvent: 'node_cleanup.destroying_incompatible_vm_agent',
       failureLogEvent: 'node_cleanup.incompatible_vm_agent_destroy_failed',
       successMessage: 'Destroyed idle node running incompatible VM agent build',
@@ -580,7 +591,7 @@ export async function sweepIdleOrphanNodes(
        )
      GROUP BY n.id, n.user_id, n.status, n.created_at, n.warm_since
      HAVING ${LAST_WORKSPACE_ACTIVITY_SQL} < ?
-     ORDER BY last_activity ASC
+     ORDER BY n.cleanup_blocked_since IS NULL, n.cleanup_blocked_since ASC, last_activity ASC
      LIMIT ?`
   )
     .bind(now.toISOString(), idleThreshold, idleThreshold, idleThreshold, config.nodeSweepLimit)

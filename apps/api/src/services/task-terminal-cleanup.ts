@@ -4,7 +4,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { purgeInteractionStore } from './acp-interaction-store';
+import { errors } from '../middleware/error';
 import {
   preserveFailedTaskWork,
   surfaceFailedTaskWorkLoss,
@@ -12,9 +12,9 @@ import {
 } from './failed-task-preservation';
 import * as projectDataService from './project-data';
 import { queueWorkspaceSessionSleep } from './session-sleep';
-import { deleteSessionSnapshotState } from './session-snapshots';
 import { cleanupTaskRun } from './task-runner';
 import { cancelVmTaskAdmission } from './vm-admission-control';
+import { cleanupWorkspaceForDeletion } from './workspace-cleanup';
 
 export type TerminalTaskCleanupStatus = 'completed' | 'failed' | 'cancelled';
 
@@ -106,11 +106,7 @@ export async function cleanupTerminalTaskResources(
   }
 
   const [workspace] = await db
-    .select({
-      chatSessionId: schema.workspaces.chatSessionId,
-      userId: schema.workspaces.userId,
-      projectId: schema.workspaces.projectId,
-    })
+    .select()
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, task.workspaceId))
     .limit(1);
@@ -158,14 +154,38 @@ export async function cleanupTerminalTaskResources(
     });
   }
 
-  const cleanupProjectId = workspace?.projectId ?? task.projectId;
-  if (workspace?.chatSessionId && cleanupProjectId && options.destructiveSessionEnd) {
-    const chatSessionId = workspace.chatSessionId;
+  // Explicit session archive uses the same durable, identity-fenced physical
+  // deletion operation as workspace delete. Keep backups until it confirms;
+  // direct node destruction would bypass partial-failure and ownership fences.
+  if (
+    options.destructiveSessionEnd &&
+    !options.requireStopAcknowledgement &&
+    workspace &&
+    (!options.requiredUserId || options.requiredUserId === workspace.userId)
+  ) {
     await options.beforeSideEffect?.();
-    await Promise.all([
-      deleteSessionSnapshotState(db, env, chatSessionId),
-      purgeInteractionStore(env, cleanupProjectId, chatSessionId),
-    ]);
+    const outcome = await cleanupWorkspaceForDeletion({
+      db,
+      env,
+      workspace,
+      userId: options.requiredUserId ?? workspace.userId,
+      mode: 'explicit',
+      logContext: { ...options.logContext, closePath: 'task_session_archive' },
+    });
+    if (outcome.status !== 'confirmed') {
+      throw errors.conflict(
+        'Session archive cleanup is pending; saved workspace data is retained for retry'
+      );
+    }
+    return;
+  }
+  if (workspace && options.destructiveSessionEnd && options.requiredUserId !== workspace.userId) {
+    // Session status may be project-scoped, but deleting another runner's
+    // compute or its only backup is not granted by project membership alone.
+    log.info('task.terminal_cleanup.backup_retained_owner_mismatch', {
+      taskId,
+      workspaceId: task.workspaceId,
+    });
   }
 
   if (workspace?.chatSessionId) {

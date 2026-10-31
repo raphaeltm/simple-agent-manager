@@ -782,3 +782,21 @@ recipient identities are derived from the canonical execution record.
 ### GitHub draft filter preview
 
 `POST /api/projects/:projectId/triggers/github/filter-preview` requires authenticated project task-read access. Body is `{ eventType, filters? }` using the shared GitHub configuration schema. Returns `{ limit, warning, deliveries: [{ id, eventType, action, receivedAt, matched: boolean | null, reason }] }`. Results are bounded by the GitHub recovery batch limit, scoped to the project's installation and repository; null means retained payload unavailable/invalid. No raw external content, prompt rendering, admission or replay occurs.
+
+## Guided Agent Credential Setup
+
+`POST /api/agent-credential-setup-sessions` accepts optional `agentType` (Claude Code
+or Codex) for a personal default and rejects `projectId`.
+`POST /api/agent-credential-setup-sessions/project` shares the creation logic but
+requires a nonempty `projectId` plus optional `agentType`. Project selection requires
+`secret:write` at creation and again before capture is saved. The server persists
+scope through the setup session and saves through the shared encrypted
+legacy/composable credential writer. Project saves pin the project account without
+changing the user default. Invalid input is `400`; a different-scope active session
+for the same agent is `409`, never reused. The same-scope existing session is
+returned (`200`), newly created sessions are `201`, and exhausted setup capacity is
+`202` (`no_capacity`). `GET /config` advertises supported `scopes`; project UI requires
+explicit project support. A project request never falls back to the personal
+endpoint: older API versions return `404` for `/project`, preserving safety during
+deployment skew or rollback. See the public API reference for polling,
+verification-code submission, and cancellation endpoints.

@@ -116,9 +116,9 @@ export function StepProfile({
 
       {!agentsLoading && !agentsError && configuredAgents.length === 0 && (
         <Alert variant="warning">
-          No agents are configured yet. Add an agent API key or OAuth token in{' '}
-          <Link to="/settings" className="underline">
-            Settings
+          No agents are configured yet. Connect an agent account in{' '}
+          <Link to="/settings/agents" className="underline">
+            Settings → Agents
           </Link>{' '}
           to create profiles, or skip this step and add them later.
         </Alert>

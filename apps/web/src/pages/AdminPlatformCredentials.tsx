@@ -1,12 +1,13 @@
 import type {
   CreatePlatformCredentialRequest,
-  PlatformCredentialResponse,
   PlatformCredentialType,
 } from '@simple-agent-manager/shared';
 import { Body, Button, Card, Spinner } from '@simple-agent-manager/ui';
+import { useQuery } from '@tanstack/react-query';
 import { Plus, Trash2 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 
+import { useQueryScope } from '../hooks/useQueryScope';
 import {
   createPlatformCredential,
   deletePlatformCredential,
@@ -35,30 +36,26 @@ const AGENT_TYPE_LABELS: Record<string, string> = {
 };
 
 export function AdminPlatformCredentials() {
-  const [credentials, setCredentials] = useState<PlatformCredentialResponse[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const scope = useQueryScope();
+  const queryKey = ['auth', scope, 'admin', 'AdminPlatformCredentials', null] as const;
+  const query = useQuery({
+    queryKey,
+    queryFn: ({ signal }) => listPlatformCredentials(signal),
+    enabled: Boolean(scope),
+  });
+  const credentials = query.data?.credentials ?? [];
+  const loading = query.isPending;
+  const [actionError, setError] = useState<string | null>(null);
+  const error = actionError ?? query.error?.message;
   const [showForm, setShowForm] = useState(false);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
-  const hasLoadedRef = useRef(false);
 
-  const fetchCredentials = useCallback(async () => {
-    try {
-      setError(null);
-      const res = await listPlatformCredentials();
-      setCredentials(res.credentials);
-      hasLoadedRef.current = true;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load platform credentials');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchCredentials();
-  }, [fetchCredentials]);
+  const fetchCredentials = async () => {
+    setError(null);
+    const result = await query.refetch();
+    if (result.error) setError(result.error.message);
+  };
 
   const handleToggle = async (id: string, currentEnabled: boolean) => {
     setActionLoading(id);

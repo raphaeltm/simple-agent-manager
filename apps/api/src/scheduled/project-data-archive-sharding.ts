@@ -1348,24 +1348,15 @@ function applyMessageBudget(
  * refused one to descend to. Reading exactly `limit` rows is what turned a single
  * unaffordable session into a four-day standstill in production.
  */
-async function selectCandidates(
-  env: Env,
-  config: ArchiveCoordinatorConfig,
-  now: Date,
-  limit: number
-): Promise<CandidateRow[]> {
-  if (limit <= 0) return [];
-  const cutoff = now.getTime() - config.sessionGraceMs;
-  const nowIso = now.toISOString();
-  const rows = await env.DATABASE.prepare(
-    `SELECT ss.project_id, ss.id AS session_id, ss.message_count
+export function projectDataArchiveCandidateSql(compact: boolean): string {
+  return `SELECT ss.project_id, ss.id AS session_id, ss.message_count
      FROM session_summaries ss
      LEFT JOIN project_data_session_locations loc
        ON loc.project_id = ss.project_id AND loc.session_id = ss.id
      LEFT JOIN project_data_archive_circuit_breakers breaker
        ON breaker.project_id = ss.project_id
      WHERE ss.status IN ('stopped', 'failed')
-       ${env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true' ? 'AND ss.message_count <= ?' : ''}
+       ${compact ? 'AND ss.message_count <= ?' : ''}
        AND ss.ended_at IS NOT NULL
        AND ss.ended_at <= ?
        AND (loc.session_id IS NULL OR loc.location_state = 'root')
@@ -1379,7 +1370,20 @@ async function selectCandidates(
        )
        ${PRECOPY_REFUSAL_EXCLUSION_SQL}
      ORDER BY ss.message_count DESC, ss.updated_at ASC, ss.id ASC
-     LIMIT ?`
+     LIMIT ?`;
+}
+
+async function selectCandidates(
+  env: Env,
+  config: ArchiveCoordinatorConfig,
+  now: Date,
+  limit: number
+): Promise<CandidateRow[]> {
+  if (limit <= 0) return [];
+  const cutoff = now.getTime() - config.sessionGraceMs;
+  const nowIso = now.toISOString();
+  const rows = await env.DATABASE.prepare(
+    projectDataArchiveCandidateSql(env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true')
   )
     .bind(
       ...(env.PROJECT_DATA_ARCHIVE_COMPACT_ENABLED === 'true' ? [config.sweepMessageCeiling] : []),

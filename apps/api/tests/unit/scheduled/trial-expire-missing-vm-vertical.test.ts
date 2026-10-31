@@ -56,8 +56,7 @@ vi.mock('drizzle-orm/d1', () => ({
             run: execute,
             then: <TResult1 = { meta: { changes: number } }, TResult2 = never>(
               onfulfilled?:
-                | ((value: { meta: { changes: number } }) => TResult1 | PromiseLike<TResult1>)
-                | null,
+                ((value: { meta: { changes: number } }) => TResult1 | PromiseLike<TResult1>) | null,
               onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null
             ) => execute().then(onfulfilled, onrejected),
           };
@@ -138,7 +137,7 @@ describe('expired-trial exact provider deletion vertical slice', () => {
     });
   });
 
-  it('flows from cron discovery through real strict deletion to guarded local finalization', async () => {
+  it('preserves trial data when exact physical deletion proof is unavailable', async () => {
     const calls: Array<{ sql: string; binds: unknown[] }> = [];
     const prepare = vi.fn((sql: string) => ({
       bind: vi.fn((...binds: unknown[]) => {
@@ -189,32 +188,14 @@ describe('expired-trial exact provider deletion vertical slice', () => {
 
     const result = await runTrialExpireSweep(env, 1_700_000_000_000);
 
-    expect(result).toMatchObject({ workspacesDeleted: 1, nodesDeleted: 1, cleanupErrors: 0 });
+    expect(result).toMatchObject({ workspacesDeleted: 0, nodesDeleted: 0, cleanupErrors: 1 });
     expect(providerGetVM).not.toHaveBeenCalled();
-    expect(providerDeleteVM).toHaveBeenCalledWith('vm-missing');
-    expect(deleteDNSRecord).toHaveBeenCalledWith('dns-old', env);
-    expect(drizzleUpdates).toEqual(
-      expect.arrayContaining([
-        { runtimeTerminationConfirmedAt: expect.any(String) },
-        expect.objectContaining({
-          status: 'deleted',
-          runtimeDeletionConfirmedAt: expect.any(String),
-          runtimeDeletionProof: 'node_runtime_terminated',
-        }),
-      ])
-    );
-    expect(calls.some(({ sql }) => sql.includes('UPDATE agent_sessions'))).toBe(true);
-    expect(calls.some(({ sql }) => sql.includes('UPDATE compute_usage'))).toBe(true);
-    expect(
-      calls.some(
-        ({ sql }) => sql.includes('UPDATE workspaces') && sql.includes("status = 'deleted'")
-      )
-    ).toBe(true);
-    expect(
-      calls.some(({ sql }) => sql.includes('UPDATE nodes') && sql.includes("status = 'deleted'"))
-    ).toBe(true);
-    expect(stopSession).toHaveBeenCalledWith(env, 'project-old', 'chat-old');
-    expect(cleanupWorkspaceActivity).toHaveBeenCalledWith(env, 'project-old', 'workspace-old');
-    expect(persistError).not.toHaveBeenCalled();
+    expect(providerDeleteVM).not.toHaveBeenCalled();
+    expect(deleteDNSRecord).not.toHaveBeenCalled();
+    expect(drizzleUpdates.some((update) => update.status === 'deleted')).toBe(false);
+    expect(calls.some(({ sql }) => sql.includes('UPDATE agent_sessions'))).toBe(false);
+    expect(calls.some(({ sql }) => sql.includes('UPDATE compute_usage'))).toBe(false);
+    expect(stopSession).not.toHaveBeenCalled();
+    expect(cleanupWorkspaceActivity).not.toHaveBeenCalled();
   });
 });

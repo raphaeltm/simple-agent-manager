@@ -37,7 +37,19 @@ adminPlatformCredentialRoutes.use('/*', requireAuth(), requireApproved(), requir
 adminPlatformCredentialRoutes.get('/', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
 
-  const rows = await db.select().from(schema.platformCredentials);
+  const rows = await db
+    .select({
+      id: schema.platformCredentials.id,
+      credentialType: schema.platformCredentials.credentialType,
+      provider: schema.platformCredentials.provider,
+      agentType: schema.platformCredentials.agentType,
+      credentialKind: schema.platformCredentials.credentialKind,
+      label: schema.platformCredentials.label,
+      isEnabled: schema.platformCredentials.isEnabled,
+      createdAt: schema.platformCredentials.createdAt,
+      updatedAt: schema.platformCredentials.updatedAt,
+    })
+    .from(schema.platformCredentials);
 
   const credentials: PlatformCredentialResponse[] = rows.map((row) => ({
     id: row.id,

@@ -496,22 +496,10 @@ export async function restartWorkspaceOnNode(
   });
 }
 
-export async function deleteWorkspaceOnNode(
-  nodeId: string,
-  workspaceId: string,
-  env: Env,
-  userId: string,
-  options?: { requestTimeoutMs?: number } & GuardedNodeAgentMutationOptions
-): Promise<unknown> {
-  return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}`, {
-    method: 'DELETE',
-    userId,
-    workspaceId,
-    requestTimeoutMs: options?.requestTimeoutMs,
-    beforeExternalMutation: options?.beforeExternalMutation,
-    recoverContainerOnTimeout: false,
-  });
-}
+export {
+  deleteWorkspaceOnNode,
+  type WorkspacePhysicalDeletionIdentity,
+} from './node-agent-workspace-deletion';
 
 export async function teardownDeploymentEnvironmentOnNode(
   nodeId: string,

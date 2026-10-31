@@ -1,16 +1,17 @@
 import type { Env } from '../env';
 import { resolvePlatformConfig } from './platform-config-core';
+import { type ResolvedLoginOAuthConfig,resolveLoginOAuthConfig } from './platform-config-login';
 import type { ResolvedPlatformConfig } from './platform-config-types';
 
 /*
  * Selectors below are pure projections of an already-resolved config. Callers that need more
- * than one projection (notably `createAuth`) resolve once and select many, instead of paying
- * `resolvePlatformConfig`'s 14 D1 round-trips per projection. The `get*` wrappers keep the
- * single-projection call sites unchanged.
+ * than one projection resolve once and select many. Login-only callers use the shared settings
+ * resolver without waiting for unrelated App/webhook/feedback configuration. The `get*` wrappers
+ * keep single-projection call sites unchanged.
  */
 
 export function selectGitHubOAuthConfig(
-  config: ResolvedPlatformConfig
+  config: Pick<ResolvedLoginOAuthConfig, 'github'>
 ): { clientId: string; clientSecret: string } | null {
   if (!config.github.clientId.value || !config.github.clientSecret.value) return null;
   return { clientId: config.github.clientId.value, clientSecret: config.github.clientSecret.value };
@@ -19,7 +20,7 @@ export function selectGitHubOAuthConfig(
 export async function getGitHubOAuthConfig(
   env: Env
 ): Promise<{ clientId: string; clientSecret: string } | null> {
-  return selectGitHubOAuthConfig(await resolvePlatformConfig(env));
+  return selectGitHubOAuthConfig(await resolveLoginOAuthConfig(env));
 }
 
 function normalizeBaseUrl(value: string): string {
@@ -31,7 +32,7 @@ function normalizeBaseUrl(value: string): string {
   }
 }
 
-export function selectGitLabOAuthConfig(config: ResolvedPlatformConfig): {
+export function selectGitLabOAuthConfig(config: Pick<ResolvedLoginOAuthConfig, 'gitlab'>): {
   host: string;
   apiBaseUrl: string;
   clientId: string;
@@ -58,7 +59,7 @@ export async function getGitLabOAuthConfig(env: Env): Promise<{
   clientId: string;
   clientSecret: string;
 } | null> {
-  return selectGitLabOAuthConfig(await resolvePlatformConfig(env));
+  return selectGitLabOAuthConfig(await resolveLoginOAuthConfig(env));
 }
 
 /**
@@ -73,7 +74,7 @@ export async function getGitLabOAuthConfig(env: Env): Promise<{
  * URIs and scopes.
  */
 export function selectGoogleLoginOAuthConfig(
-  config: ResolvedPlatformConfig
+  config: Pick<ResolvedLoginOAuthConfig, 'google'>
 ): { clientId: string; clientSecret: string } | null {
   if (!config.google.clientId.value || !config.google.clientSecret.value) return null;
   return { clientId: config.google.clientId.value, clientSecret: config.google.clientSecret.value };
@@ -82,7 +83,7 @@ export function selectGoogleLoginOAuthConfig(
 export async function getGoogleLoginOAuthConfig(
   env: Env
 ): Promise<{ clientId: string; clientSecret: string } | null> {
-  return selectGoogleLoginOAuthConfig(await resolvePlatformConfig(env));
+  return selectGoogleLoginOAuthConfig(await resolveLoginOAuthConfig(env));
 }
 
 /**

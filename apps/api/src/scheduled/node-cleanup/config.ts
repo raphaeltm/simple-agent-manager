@@ -1,6 +1,9 @@
 import {
+  DEFAULT_CLEANUP_OWNERSHIP_ALERT_INTERVAL_MS,
+  DEFAULT_CLEANUP_REFUSAL_WARN_AFTER_MS,
   DEFAULT_MAX_AUTO_NODE_LIFETIME_MS,
   DEFAULT_NODE_ABSOLUTE_MAX_LIFETIME_MS,
+  DEFAULT_NODE_CLEANUP_BLOCKED_RETIREMENT_MS,
   DEFAULT_NODE_CLEANUP_FAILURE_BACKOFF_MS,
   DEFAULT_NODE_CLEANUP_SWEEP_LIMIT,
   DEFAULT_NODE_EMPTY_WARM_HANDOFF_GRACE_MS,
@@ -53,6 +56,9 @@ export interface CleanupConfig {
   workspaceSweepLimit: number;
   cfContainerSweepLimit: number;
   failureBackoffMs: number;
+  blockedRetirementMs: number;
+  refusalWarnAfterMs: number;
+  ownershipAlertIntervalMs: number;
   unhealthyDrainAfterMs: number;
   unhealthyReleaseAfterMs: number;
   unhealthyFleetMaxFraction: number;
@@ -167,6 +173,9 @@ function buildCleanupConfig(env: Env): CleanupConfig {
       env.CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT,
       DEFAULT_CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT
     ),
+    blockedRetirementMs: DEFAULT_NODE_CLEANUP_BLOCKED_RETIREMENT_MS,
+    refusalWarnAfterMs: DEFAULT_CLEANUP_REFUSAL_WARN_AFTER_MS,
+    ownershipAlertIntervalMs: DEFAULT_CLEANUP_OWNERSHIP_ALERT_INTERVAL_MS,
     failureBackoffMs: parseMs(
       env.NODE_CLEANUP_FAILURE_BACKOFF_MS,
       DEFAULT_NODE_CLEANUP_FAILURE_BACKOFF_MS

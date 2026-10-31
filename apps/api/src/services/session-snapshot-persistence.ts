@@ -1,4 +1,4 @@
-import { and, eq } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -19,6 +19,7 @@ import {
   sessionSnapshotCaptureKeys,
 } from './session-snapshot-capture-cleanup';
 import { scheduleSessionSnapshotSleep } from './session-snapshot-sleep-lifecycle';
+import type { WorkspaceDeletionIdentity } from './workspace-deletion';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -30,20 +31,76 @@ function snapshotExpiry(now: Date, ttlDays: number): string {
 export async function deleteSessionSnapshotState(
   db: Db,
   env: Env,
-  chatSessionId: string
+  chatSessionId: string,
+  expected?: WorkspaceDeletionIdentity
 ): Promise<boolean> {
   const snapshot = await db
-    .select({
-      id: schema.sessionSnapshots.id,
-      homeR2Key: schema.sessionSnapshots.homeR2Key,
-      wipR2Key: schema.sessionSnapshots.wipR2Key,
-      manifestR2Key: schema.sessionSnapshots.manifestR2Key,
-      captureGeneration: schema.sessionSnapshots.captureGeneration,
-    })
+    .select()
     .from(schema.sessionSnapshots)
     .where(eq(schema.sessionSnapshots.chatSessionId, chatSessionId))
     .get();
   if (!snapshot) return false;
+  if (expected) {
+    if (
+      snapshot.recoveryWorkspaceId &&
+      snapshot.recoveryWorkspaceId !== expected.workspaceId &&
+      ['waking', 'restored'].includes(snapshot.recoveryStatus ?? '')
+    )
+      return false;
+    if (
+      snapshot.workspaceId !== expected.workspaceId ||
+      snapshot.nodeId !== expected.nodeId ||
+      snapshot.userId !== expected.userId ||
+      snapshot.projectId !== expected.projectId ||
+      chatSessionId !== expected.chatSessionId
+    )
+      return false;
+    if (snapshot.cleanupIdentityJson) {
+      let identity: Record<string, unknown>;
+      try {
+        identity = JSON.parse(snapshot.cleanupIdentityJson);
+      } catch {
+        return false;
+      }
+      if (
+        !identity ||
+        identity.workspaceId !== expected.workspaceId ||
+        identity.nodeId !== expected.nodeId ||
+        identity.userId !== expected.userId ||
+        identity.nodeRuntimeIncarnationId !== expected.nodeRuntimeIncarnationId ||
+        identity.workspaceGeneration !== (expected.workspaceGeneration ?? '')
+      )
+        return false;
+    }
+  }
+  // Revoke only the captured row before external cleanup. A sibling handoff or
+  // new capture must win its own CAS; immutable old object keys cannot revoke
+  // successor metadata created while R2 deletion is suspended.
+  const deleted = await db
+    .delete(schema.sessionSnapshots)
+    .where(
+      and(
+        eq(schema.sessionSnapshots.id, snapshot.id),
+        eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
+        sql`${schema.sessionSnapshots.workspaceId} IS ${snapshot.workspaceId}`,
+        sql`${schema.sessionSnapshots.nodeId} IS ${snapshot.nodeId}`,
+        sql`${schema.sessionSnapshots.userId} IS ${snapshot.userId}`,
+        sql`${schema.sessionSnapshots.projectId} IS ${snapshot.projectId}`,
+        sql`${schema.sessionSnapshots.snapshotGeneration} IS ${snapshot.snapshotGeneration}`,
+        sql`${schema.sessionSnapshots.captureGeneration} IS ${snapshot.captureGeneration}`,
+        sql`${schema.sessionSnapshots.homeR2Key} IS ${snapshot.homeR2Key}`,
+        sql`${schema.sessionSnapshots.wipR2Key} IS ${snapshot.wipR2Key}`,
+        sql`${schema.sessionSnapshots.manifestR2Key} IS ${snapshot.manifestR2Key}`,
+        sql`${schema.sessionSnapshots.cleanupIdentityJson} IS ${snapshot.cleanupIdentityJson}`,
+        sql`${schema.sessionSnapshots.recoveryWorkspaceId} IS ${snapshot.recoveryWorkspaceId}`,
+        sql`${schema.sessionSnapshots.recoveryStatus} IS ${snapshot.recoveryStatus}`,
+        sql`${schema.sessionSnapshots.recoveryAttemptId} IS ${snapshot.recoveryAttemptId}`,
+        sql`${schema.sessionSnapshots.restoredAt} IS ${snapshot.restoredAt}`
+      )
+    )
+    .returning({ id: schema.sessionSnapshots.id });
+  if (deleted.length !== 1) return false;
+
   const inFlightCaptureKeys = snapshot.captureGeneration
     ? sessionSnapshotCaptureKeys(env, chatSessionId, snapshot.captureGeneration)
     : [];
@@ -57,8 +114,14 @@ export async function deleteSessionSnapshotState(
       ].filter((key): key is string => Boolean(key))
     ),
   ];
-  if (keys.length > 0) await env.R2.delete(keys);
-  await db.delete(schema.sessionSnapshots).where(eq(schema.sessionSnapshots.id, snapshot.id));
+  try {
+    if (keys.length > 0) await env.R2.delete(keys);
+  } catch (error) {
+    // Retain retryable cleanup metadata after an object-store failure without
+    // ever overwriting a capture/handoff that acquired this chat in the meantime.
+    await db.insert(schema.sessionSnapshots).values(snapshot).onConflictDoNothing();
+    throw error;
+  }
   return true;
 }
 

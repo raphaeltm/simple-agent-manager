@@ -442,7 +442,7 @@ deploymentEnvironmentRoutes.delete(
       // remaining placements can transition the node out of the scheduling pool.
       const claim = await c.env.DATABASE.prepare(
         `UPDATE nodes
-         SET status = 'deleting', updated_at = ?
+         SET cleanup_blocked_since = NULL, cleanup_blocked_reason = NULL, cleanup_blocked_alerted_at = NULL, status = 'deleting', updated_at = ?
          WHERE id = ?
            AND user_id = ?
            AND node_role = 'deployment'
@@ -466,6 +466,9 @@ deploymentEnvironmentRoutes.delete(
               status: 'error',
               errorMessage: `Deployment node could not be fully deprovisioned: ${cleanup.errors.join('; ')}`,
               updatedAt: new Date().toISOString(),
+              cleanupBlockedSince: null,
+              cleanupBlockedReason: null,
+              cleanupBlockedAlertedAt: null,
             })
             .where(and(eq(schema.nodes.id, environment.nodeId), eq(schema.nodes.userId, userId)));
           throw errors.conflict(

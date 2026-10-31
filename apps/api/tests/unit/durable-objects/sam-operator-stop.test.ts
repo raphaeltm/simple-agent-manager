@@ -91,7 +91,10 @@ function fixture(sessionBacked: boolean, actor = 'owner') {
     },
     NODE_LIFECYCLE: {
       idFromName: (id: string) => id,
-      get: () => ({ scheduleWorkspaceDeletion: scheduleDeletion }),
+      get: () => ({
+        claimWorkspaceDeletionAttempt: async () => 'claimed',
+        scheduleWorkspaceDeletion: scheduleDeletion,
+      }),
     },
   } as unknown as Env;
   const ctx = {
@@ -220,6 +223,23 @@ describe('SAM confirmed stop acknowledgement through real cleanup and SQLite', (
     async (sessionBacked) => {
       const f = fixture(sessionBacked);
       f.stop.mockRejectedValueOnce(new Error('Node stop acknowledgement unavailable'));
+      if (sessionBacked) {
+        await expect(
+          samWorkStop.run(
+            {
+              env: f.env,
+              requestId: 'legacy-stop',
+              actor: { userId: 'owner', via: 'web', scopes: new Set(['sam.read', 'sam.write']) },
+            },
+            { projectId: 'project', sessionId: 'chat', requestKey: 'legacy-key' }
+          )
+        ).rejects.toThrow('Session archive cleanup is pending');
+        expect(f.stop).not.toHaveBeenCalled();
+        expect(f.database.prepare('SELECT status FROM workspaces').get()).toEqual({
+          status: 'stopping',
+        });
+        return;
+      }
       const result = await samWorkStop.run(
         {
           env: f.env,

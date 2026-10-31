@@ -16,7 +16,7 @@ import {
   upsertCanonicalInstallationAccount,
 } from '../services/github-installation-accounts';
 import { getStoredInstallationId } from '../services/github-installation-ids';
-import { handleGitHubProjectEventAdmission } from '../services/github-project-event-producer';
+import { admitGitHubWebhookProjectEvents } from '../services/github-project-event-producer';
 import { ingestPullRequestWebhook } from '../services/github-pull-request-events';
 import {
   persistGitHubTriggerIntake,
@@ -66,20 +66,14 @@ export async function handleGitHubWebhook(c: GitHubContext): Promise<Response> {
     await handleRepositoryEvent(db, data, now);
   }
 
-  // Project event admission has its own delivery-ID deduplication and must survive
-  // a failure to durably admit the independent trigger input.
-  c.executionCtx.waitUntil(
-    handleGitHubProjectEventAdmission(c.env, {
-      deliveryId,
-      eventType: event,
-      payload: data,
-    })
-  );
-  c.executionCtx.waitUntil(
-    ingestPullRequestWebhook(c.env, event, data).catch((error) => {
-      log.error('github.webhook.pr_ingestion_failed', { error: String(error) });
-    })
-  );
+  // Complete independent event and PR persistence before acknowledging acceptance.
+  // Delivery-ID deduplication and PR timestamp fences make partial-failure redelivery safe.
+  await admitGitHubWebhookProjectEvents(c.env, {
+    deliveryId,
+    eventType: event,
+    payload: data,
+  });
+  await ingestPullRequestWebhook(c.env, event, data);
   const triggerIntake = await persistGitHubTriggerIntake(c.env, {
     deliveryId,
     eventType: event,

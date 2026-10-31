@@ -429,8 +429,11 @@ function buildWorkspaceAdmissionSql(
            COALESCE(SUM(CASE
              WHEN ${validReservationJsonSql('w.resolved_reservation_json')}
              THEN CAST(json_extract(w.resolved_reservation_json, '$.diskMb') AS INTEGER)
-             ELSE 0 END), 0) AS disk_mb
-         FROM node_scope n
+             ELSE 0 END), 0) AS disk_mb,
+           COALESCE(SUM(CASE
+             WHEN ${validReservationJsonSql('w.resolved_reservation_json')}
+             THEN ${observedWorkspaceMemoryCreditSql()} ELSE 0 END), 0) AS observed_memory_credit_mb
+         FROM node_scope n, admission_policy policy
          LEFT JOIN workspaces w
            ON w.node_id = n.id
           AND w.status IN (${ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL})
@@ -460,6 +463,15 @@ function workspaceAdmissionEligibilitySql(): string {
          AND (requested.exclusive_node = 0 OR active.active_count = 0)
          AND ${trustedHardwareCapacitySql()}
          AND ${finalMeasuredPressurePredicateSql()}
+         AND (n.metrics_json IS NULL OR (
+           n.trusted_provider_instance_memory_mb *
+             CAST(json_extract(n.metrics_json, '$.memoryPercent') AS REAL) / 100.0
+             + active.memory_mb - MIN(active.observed_memory_credit_mb,
+               n.trusted_provider_instance_memory_mb *
+                 CAST(json_extract(n.metrics_json, '$.memoryPercent') AS REAL) / 100.0)
+             + requested.memory_mb
+           <= n.trusted_provider_instance_memory_mb - policy.host_memory_reserve_mb
+         ))
          AND (
            (
              active.active_count = 0
@@ -479,6 +491,32 @@ function workspaceAdmissionEligibilitySql(): string {
              AND ((active.disk_mb + requested.disk_mb) <= n.trusted_provider_instance_disk_gb * 1024)
            )
          )`;
+}
+
+/** Match the advisory evaluator's credit; creating/recovery rows always retain
+ * their entire reservation, including simultaneous claims on one heartbeat. */
+function observedWorkspaceMemoryCreditSql(): string {
+  const observations = `CASE WHEN json_type(n.metrics_json, '$.workspaceMemory') = 'array'
+    THEN json_extract(n.metrics_json, '$.workspaceMemory') ELSE '[]' END`;
+  const metric = `CASE WHEN metric.type = 'object' THEN metric.value ELSE '{}' END`;
+  return `(CASE WHEN w.status = 'running' AND (
+    SELECT COUNT(*) FROM json_each(${observations}) metric
+    WHERE metric.type = 'object' AND json_extract(${metric}, '$.workspaceId') = w.id
+  ) = 1 THEN COALESCE((
+    SELECT MIN(CAST(json_extract(w.resolved_reservation_json, '$.memoryMb') AS REAL),
+      CAST(json_extract(${metric}, '$.memoryUsageBytes') AS REAL) / 1048576.0)
+    FROM json_each(${observations}) metric
+    WHERE metric.type = 'object'
+      AND json_extract(${metric}, '$.workspaceId') = w.id
+      AND json_type(${metric}, '$.memoryUsageBytes') IN ('integer', 'real')
+      AND CAST(json_extract(${metric}, '$.memoryUsageBytes') AS REAL) >= 0
+      AND CAST(json_extract(${metric}, '$.memoryUsageBytes') AS REAL) <= ${Number.MAX_VALUE}
+      AND json_type(${metric}, '$.collectedAt') = 'text'
+      AND julianday(json_extract(${metric}, '$.collectedAt')) >= julianday(w.updated_at)
+      AND julianday(json_extract(${metric}, '$.collectedAt')) <= julianday(n.last_heartbeat_at)
+      AND (julianday(n.last_heartbeat_at) - julianday(json_extract(${metric}, '$.collectedAt'))) * 86400000
+        <= policy.metrics_ttl_ms
+  ), 0) ELSE 0 END)`;
 }
 
 function validReservationJsonSql(expression: string): string {

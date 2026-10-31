@@ -20,15 +20,11 @@ interface AgentCredentialConnectTriggerProps {
   agentType: GuidedSetupAgentType;
   /** Forwarded to the modal; fires after the credential is captured + saved. */
   onConnected?: () => void;
-  /**
-   * Credential scope. The guided flow only saves USER-scoped credentials in v1,
-   * so it is hidden in project-scoped contexts to avoid silently overwriting the
-   * user default (the manual credential paste stays available there).
-   */
-  scope?: 'user' | 'project';
+  /** When set, save the connected account as this project’s override. */
+  projectId?: string;
+  /** Reports whether the guided button is shown, so callers can word their manual fallback. */
+  onAvailabilityChange?: (available: boolean) => void;
 }
-
-type CodexConnectTriggerProps = Omit<AgentCredentialConnectTriggerProps, 'agentType'>;
 
 const TRIGGER_COPY: Record<GuidedSetupAgentType, { button: string; description: string }> = {
   'openai-codex': {
@@ -45,9 +41,11 @@ const TRIGGER_COPY: Record<GuidedSetupAgentType, { button: string; description: 
 export function AgentCredentialConnectTrigger({
   agentType,
   onConnected,
-  scope = 'user',
+  projectId,
+  onAvailabilityChange,
 }: AgentCredentialConnectTriggerProps) {
   const [enabled, setEnabled] = useState(false);
+  const [supportsProject, setSupportsProject] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
   const checkedRef = useRef(false);
   const copy = TRIGGER_COPY[agentType];
@@ -58,7 +56,10 @@ export function AgentCredentialConnectTrigger({
     let active = true;
     void getAgentCredentialSetupConfig()
       .then((config) => {
-        if (active) setEnabled(setupConfigSupportsAgent(config, agentType));
+        if (active) {
+          setEnabled(setupConfigSupportsAgent(config, agentType));
+          setSupportsProject(config.scopes?.includes('project') === true);
+        }
       })
       .catch(() => {
         // Gate unreadable (route absent / network) — keep the guided button hidden.
@@ -69,7 +70,13 @@ export function AgentCredentialConnectTrigger({
     };
   }, [agentType]);
 
-  if (!enabled || scope !== 'user') {
+  // Older APIs ignore projectId and would save to the personal default instead.
+  const available = enabled && (!projectId || supportsProject);
+  useEffect(() => {
+    onAvailabilityChange?.(available);
+  }, [available, onAvailabilityChange]);
+
+  if (!available) {
     return null;
   }
 
@@ -87,6 +94,7 @@ export function AgentCredentialConnectTrigger({
       <p className="text-xs text-fg-muted m-0">{copy.description}</p>
       <AgentCredentialConnectModal
         agentType={agentType}
+        projectId={projectId}
         isOpen={modalOpen}
         onClose={() => setModalOpen(false)}
         onConnected={() => {
@@ -98,8 +106,4 @@ export function AgentCredentialConnectTrigger({
       />
     </div>
   );
-}
-
-export function CodexConnectTrigger(props: CodexConnectTriggerProps) {
-  return <AgentCredentialConnectTrigger agentType="openai-codex" {...props} />;
 }

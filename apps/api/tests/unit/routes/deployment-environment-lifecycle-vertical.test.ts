@@ -1,566 +1,539 @@
-/**
- * Cross-boundary vertical-slice test for the deployment environment stop/start
- * lifecycle (deployment-environment-lifecycle.ts).
- *
- * This proves the data-persistence contract that unit tests of individual
- * helpers cannot: a provider-backed volume's `providerVolumeId` survives a full
- * stop -> start round-trip. On stop the linked node is torn down BEFORE volumes
- * are detached (live-teardown ordering, required so the VM releases the block
- * device cleanly), and the volume row is detached. On start a fresh node is
- * provisioned with the provider/location placement constraint derived from the
- * volumes, and the SAME volume row is re-attached to the new node.
- *
- * The test mounts the real Hono routes via registerDeploymentEnvironmentLifecycleRoutes
- * and drives them through app.request(). Only the service boundaries
- * (provisioning, node-agent teardown, volume attach/detach, summary builder) are
- * mocked, each carrying realistic mutable in-memory state. The in-file
- * resolveVolumePlacementConstraint and the real AppError/middleware error module
- * are intentionally NOT mocked.
- */
+import { HetznerProvider } from '@simple-agent-manager/providers';
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { AppError } from '../../../src/middleware/error';
+import { registerDeploymentEnvironmentLifecycleRoutes } from '../../../src/routes/deployment-environment-lifecycle';
+import { runDeploymentNodeCleanup } from '../../../src/scheduled/deployment-node-cleanup';
+import { cleanupDeploymentNode } from '../../../src/services/deployment-node-cleanup';
+import { provisionDeploymentNode } from '../../../src/services/deployment-provisioning';
+import { deleteDNSRecord } from '../../../src/services/dns';
+import { teardownDeploymentEnvironmentOnNode } from '../../../src/services/node-agent';
+import { stopNodeResources } from '../../../src/services/node-resource-lifecycle';
+import { exactProviderCredentialBindingFromPlacementSnapshot } from '../../../src/services/provider-credential-exact';
+import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
-const deploymentEnvironments = {
-  id: 'deploymentEnvironments.id',
-  projectId: 'deploymentEnvironments.projectId',
-  nodeId: 'deploymentEnvironments.nodeId',
-  status: 'deploymentEnvironments.status',
-  requiresVolumes: 'deploymentEnvironments.requiresVolumes',
-  resolvedReservationJson: 'deploymentEnvironments.resolvedReservationJson',
-};
-const deploymentReleases = {
-  id: 'deploymentReleases.id',
-  environmentId: 'deploymentReleases.environmentId',
-  version: 'deploymentReleases.version',
-  status: 'deploymentReleases.status',
-};
-const deploymentVolumes = {
-  id: 'deploymentVolumes.id',
-  environmentId: 'deploymentVolumes.environmentId',
-  providerVolumeId: 'deploymentVolumes.providerVolumeId',
-  providerName: 'deploymentVolumes.providerName',
-  location: 'deploymentVolumes.location',
-  attachedServerId: 'deploymentVolumes.attachedServerId',
-  createdAt: 'deploymentVolumes.createdAt',
-};
-const nodes = {
-  id: 'nodes.id',
-  userId: 'nodes.userId',
-  status: 'nodes.status',
-  providerInstanceId: 'nodes.providerInstanceId',
-};
-
-type Condition =
-  | { op: 'eq'; col: unknown; val: unknown }
-  | { op: 'lt'; col: unknown; val: unknown }
-  | { op: 'and'; conds: Condition[] }
-  | undefined;
-
-interface EnvironmentRow {
-  id: string;
-  projectId: string;
-  nodeId: string | null;
-  status: string;
-  requiresVolumes: boolean;
-  resolvedReservationJson?: string | null;
-}
-
-interface ReleaseRow {
-  id: string;
-  environmentId: string;
-  version: number;
-  status: string;
-}
-
-interface VolumeRow {
-  id: string;
-  environmentId: string;
-  providerVolumeId: string;
-  providerName: string;
-  location: string;
-  attachedServerId: string | null;
-  createdAt: string;
-}
-
-interface NodeRow {
-  id: string;
-  userId: string;
-  status: string;
-  providerInstanceId: string | null;
-}
-
-const mockRequireProjectCapability = vi.fn();
-const mockProvisionDeploymentNode = vi.fn();
-const mockTeardownDeploymentEnvironmentOnNode = vi.fn();
-const mockListEnvironmentVolumes = vi.fn();
-const mockAttachEnvironmentVolumesToLinkedNode = vi.fn();
-const mockDetachEnvironmentVolumes = vi.fn();
-const mockDeleteNodeResources = vi.fn();
-const mockBuildDeploymentEnvironmentResponse = vi.fn();
-const recordDeploymentEnvironmentLifecycleEventBestEffort = vi.hoisted(() =>
-  vi.fn(async () => undefined)
-);
-
-let envRows: EnvironmentRow[] = [];
-let releaseRows: ReleaseRow[] = [];
-let volumeRows: VolumeRow[] = [];
-let nodeRows: NodeRow[] = [];
-
-vi.mock('drizzle-orm', () => ({
-  and: (...conds: Condition[]) => ({ op: 'and', conds }),
-  desc: (col: unknown) => ({ op: 'desc', col }),
-  eq: (col: unknown, val: unknown) => ({ op: 'eq', col, val }),
-  lt: (col: unknown, val: unknown) => ({ op: 'lt', col, val }),
+const provider = vi.hoisted(() => ({
+  deleteVM: vi.fn(),
+  listVMs: vi.fn(),
+  getVM: vi.fn(),
+  detachVolume: vi.fn(),
+  attachVolume: vi.fn(),
 }));
-
-vi.mock('../../../src/db/schema', () => ({
-  deploymentEnvironments,
-  deploymentReleases,
-  deploymentVolumes,
-  nodes,
-}));
-
-vi.mock('../../../src/middleware/auth', () => ({
-  requireAuth: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
-  requireApproved: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
-  getUserId: () => 'user-1',
-}));
-
-vi.mock('../../../src/middleware/project-auth', () => ({
-  requireProjectCapability: (...args: unknown[]) => mockRequireProjectCapability(...args),
-}));
-
 vi.mock('../../../src/services/deployment-provisioning', () => ({
-  provisionDeploymentNode: (...args: unknown[]) => mockProvisionDeploymentNode(...args),
+  provisionDeploymentNode: vi.fn(),
 }));
-
-vi.mock('../../../src/services/node-agent', () => ({
-  teardownDeploymentEnvironmentOnNode: (...args: unknown[]) =>
-    mockTeardownDeploymentEnvironmentOnNode(...args),
+vi.mock('../../../src/services/provider-credentials', () => ({
+  createProviderForUser: vi.fn(async (_db, _user, _key, _env, _provider, _project, binding) => {
+    if (binding && binding.credentialFingerprint !== 'sha256:original')
+      throw new Error('Credential rotated');
+    return { provider, providerName: 'hetzner' };
+  }),
+  exactProviderCredentialBindingFromPlacementSnapshot: (
+    snapshot: Parameters<typeof exactProviderCredentialBindingFromPlacementSnapshot>[0]
+  ) => exactProviderCredentialBindingFromPlacementSnapshot(snapshot),
 }));
-
-vi.mock('../../../src/services/deployment-volumes', () => ({
-  listEnvironmentVolumes: (...args: unknown[]) => mockListEnvironmentVolumes(...args),
-  attachEnvironmentVolumesToLinkedNode: (...args: unknown[]) =>
-    mockAttachEnvironmentVolumesToLinkedNode(...args),
-  detachEnvironmentVolumes: (...args: unknown[]) => mockDetachEnvironmentVolumes(...args),
+vi.mock('../../../src/lib/secrets', () => ({ getCredentialEncryptionKey: () => 'test-key' }));
+vi.mock('../../../src/services/dns', () => ({ deleteDNSRecord: vi.fn() }));
+vi.mock('../../../src/services/workspace-lifecycle-finalizer', () => ({
+  finalizeWorkspaceLifecycleClosure: vi.fn(),
 }));
-
-vi.mock('../../../src/services/nodes', () => ({
-  deleteNodeResources: (...args: unknown[]) => mockDeleteNodeResources(...args),
-}));
-
-vi.mock('../../../src/services/deployment-environment-summary', () => ({
-  buildDeploymentEnvironmentResponse: (...args: unknown[]) =>
-    mockBuildDeploymentEnvironmentResponse(...args),
-}));
-
 vi.mock('../../../src/services/project-lifecycle-events', () => ({
-  recordDeploymentEnvironmentLifecycleEventBestEffort,
+  recordDeploymentEnvironmentLifecycleEventBestEffort: vi.fn(),
+}));
+vi.mock('../../../src/services/node-agent', () => ({
+  teardownDeploymentEnvironmentOnNode: vi.fn(),
+  getNodeAgentBackgroundRequestTimeoutMs: () => 5000,
+}));
+vi.mock('../../../src/services/deployment-environment-summary', () => ({
+  buildDeploymentEnvironmentResponse: vi.fn(async (_db, _env, row) => row),
+}));
+vi.mock('../../../src/middleware/auth', () => ({
+  getUserId: () => 'user',
+  requireAuth: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  requireApproved: () => async (_c: unknown, next: () => Promise<void>) => next(),
+}));
+vi.mock('../../../src/middleware/project-auth', async (original) => ({
+  ...(await original<typeof import('../../../src/middleware/project-auth')>()),
+  requireProjectCapability: vi.fn(),
 }));
 
-vi.mock('../../../src/lib/logger', () => ({
-  log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
-}));
-
-vi.mock('drizzle-orm/d1', () => ({
-  drizzle: () => createMockDb(),
-}));
-
-const { registerDeploymentEnvironmentLifecycleRoutes } =
-  await import('../../../src/routes/deployment-environment-lifecycle');
-
-function eqValue(condition: Condition, col: unknown): unknown {
-  if (!condition) {
-    return undefined;
-  }
-  if (condition.op === 'eq') {
-    return condition.col === col ? condition.val : undefined;
-  }
-  if (condition.op === 'lt') {
-    return undefined;
-  }
-  for (const child of condition.conds) {
-    const value = eqValue(child, col);
-    if (value !== undefined) {
-      return value;
-    }
-  }
-  return undefined;
+let sqlite: Database.Database;
+let env: Env;
+const options = { retryAfterMs: 60000, requestTimeoutMs: 5000 };
+function row() {
+  return sqlite.prepare('SELECT * FROM nodes WHERE id = ?').get('node') as Record<string, unknown>;
 }
-
-function projectSelection<T extends Record<string, unknown>>(
-  row: T,
-  selection?: Record<string, unknown>
-): T | Record<string, unknown> {
-  if (!selection) {
-    return row;
-  }
-  return Object.fromEntries(
-    Object.entries(selection).map(([key, column]) => {
-      const prop = String(column).split('.').at(-1) ?? '';
-      return [key, row[prop]];
-    })
-  );
+function environment() {
+  return sqlite
+    .prepare('SELECT * FROM deployment_environments WHERE id = ?')
+    .get('environment') as Record<string, unknown>;
 }
-
-function selectRows(table: unknown, condition: Condition, selection?: Record<string, unknown>) {
-  let rows: Record<string, unknown>[] = [];
-  if (table === nodes) {
-    const id = eqValue(condition, nodes.id);
-    const userId = eqValue(condition, nodes.userId);
-    rows = nodeRows.filter(
-      (row) =>
-        (id === undefined || row.id === id) && (userId === undefined || row.userId === userId)
-    );
-  } else if (table === deploymentEnvironments) {
-    const id = eqValue(condition, deploymentEnvironments.id);
-    const projectId = eqValue(condition, deploymentEnvironments.projectId);
-    rows = envRows.filter(
-      (row) =>
-        (id === undefined || row.id === id) &&
-        (projectId === undefined || row.projectId === projectId)
-    );
-  } else if (table === deploymentReleases) {
-    const environmentId = eqValue(condition, deploymentReleases.environmentId);
-    rows = releaseRows
-      .filter((row) => environmentId === undefined || row.environmentId === environmentId)
-      .sort((a, b) => (b.version as number) - (a.version as number));
-  } else if (table === deploymentVolumes) {
-    const environmentId = eqValue(condition, deploymentVolumes.environmentId);
-    rows = volumeRows.filter(
-      (row) => environmentId === undefined || row.environmentId === environmentId
-    );
-  }
-  return rows.map((row) => projectSelection(row, selection));
+async function seedNode(overrides: Partial<schema.Node> = {}) {
+  await drizzle(env.DATABASE)
+    .insert(schema.nodes)
+    .values({
+      id: 'node',
+      userId: 'user',
+      name: 'deployment',
+      status: 'running',
+      runtime: 'vm',
+      nodeClass: 'managed',
+      nodeRole: 'deployment',
+      workloadRole: 'deployment',
+      vmSize: 'small',
+      vmLocation: 'fsn1',
+      cloudProvider: 'hetzner',
+      providerInstanceId: '123',
+      runtimeIncarnationId: 'incarnation',
+      createdAt: '2026-10-22T08:53:43.601Z',
+      updatedAt: '2026-10-22T08:53:43.601Z',
+      placementCredentialSource: 'user',
+      placementCredentialReference: 'credentials:original',
+      placementCredentialVersion: 1,
+      placementCredentialFingerprint: 'sha256:original',
+      capacityPoolId: 'pool',
+      capacityPoolScope: 'user',
+      capacityPoolRevision: 1,
+      capacitySourceId: 'source',
+      capacitySourceGeneration: 1,
+      capacityPoolCandidateId: 'candidate',
+      providerInstanceType: 'cx23',
+      providerInstanceVcpuCount: 2,
+      providerInstanceMemoryMb: 4096,
+      ...overrides,
+    });
 }
-
-function createQueryChain(table: unknown, selection?: Record<string, unknown>) {
-  let condition: Condition;
-  const chain = {
-    innerJoin: () => chain,
-    where: (nextCondition: Condition) => {
-      condition = nextCondition;
-      return chain;
-    },
-    orderBy: () => chain,
-    limit: async (count: number) => selectRows(table, condition, selection).slice(0, count),
-    then: (
-      resolve: (value: Record<string, unknown>[]) => unknown,
-      reject?: (reason: unknown) => unknown
-    ) => Promise.resolve(selectRows(table, condition, selection)).then(resolve, reject),
-  };
-  return chain;
+async function seedEnvironment(status = 'active') {
+  await drizzle(env.DATABASE)
+    .insert(schema.deploymentEnvironments)
+    .values({
+      id: 'environment',
+      projectId: 'project',
+      name: 'app',
+      nodeId: 'node',
+      status,
+    } as schema.NewDeploymentEnvironmentRow);
 }
-
-function createMockDb() {
-  return {
-    select: vi.fn((selection?: Record<string, unknown>) => ({
-      from: vi.fn((table: unknown) => createQueryChain(table, selection)),
-    })),
-    update: vi.fn((table: unknown) => ({
-      set: vi.fn((values: Record<string, unknown>) => ({
-        where: vi.fn(async (condition: Condition) => {
-          for (const row of selectRows(table, condition)) {
-            Object.assign(row, values);
-          }
-        }),
-      })),
-    })),
-  };
-}
-
-function createApp() {
+function app() {
   const app = new Hono<{ Bindings: Env }>();
-  app.onError((err, c) => {
-    const appError = err as { statusCode?: number; error?: string; message?: string };
-    if (typeof appError.statusCode === 'number') {
-      return c.json({ error: appError.error, message: appError.message }, appError.statusCode);
-    }
-    return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
-  });
-  const subRouter = new Hono<{ Bindings: Env }>();
-  registerDeploymentEnvironmentLifecycleRoutes(subRouter);
-  app.route('/api/projects', subRouter);
+  app.onError((e, c) => c.json({ message: e.message }, e instanceof AppError ? e.statusCode : 500));
+  registerDeploymentEnvironmentLifecycleRoutes(app);
   return app;
 }
+const start = () =>
+  app().request('/project/environments/environment/start', { method: 'POST' }, env);
+const stop = () => app().request('/project/environments/environment/stop', { method: 'POST' }, env);
 
-function env(): Env {
-  return {
-    DATABASE: {} as D1Database,
-    BASE_DOMAIN: 'sammy.party',
+beforeEach(() => {
+  sqlite = new Database(':memory:');
+  createAllSchemaTables(sqlite, schema);
+  env = {
+    DATABASE: createSqliteD1(sqlite),
+    ENVIRONMENT: 'production',
+    SAM_INSTALLATION_ID: '0123456789abcdef0123456789abcdef',
   } as Env;
-}
+  vi.clearAllMocks();
+  provider.deleteVM.mockResolvedValue(undefined);
+  provider.listVMs.mockResolvedValue([]);
+  provider.attachVolume.mockResolvedValue({ linuxDevice: '/dev/data' });
+});
+afterEach(() => {
+  sqlite.close();
+  vi.unstubAllGlobals();
+});
 
-function stop(app: ReturnType<typeof createApp>) {
-  return app.request('/api/projects/proj-1/environments/env-1/stop', { method: 'POST' }, env());
-}
+describe('deployment teardown with real SQL and strict provider boundary', () => {
+  it('retains placement and visible failure, then retries the real stop to strict termination', async () => {
+    await seedNode();
+    await seedEnvironment();
+    provider.deleteVM.mockRejectedValueOnce(new Error('provider unavailable'));
+    expect((await stop()).status).toBe(409);
+    expect(environment()).toMatchObject({
+      status: 'error',
+      node_id: 'node',
+      observed_status: 'failed',
+    });
+    expect(row()).toMatchObject({ status: 'destroying', runtime_termination_confirmed_at: null });
+    expect((await stop()).status).toBe(200);
+    expect(provider.deleteVM).toHaveBeenCalledTimes(2);
+    expect(environment()).toMatchObject({ status: 'stopped', node_id: null });
+    expect(row().runtime_termination_confirmed_at).toEqual(expect.any(String));
+    expect(row().status).toBe('deleted');
+  });
 
-function start(app: ReturnType<typeof createApp>) {
-  return app.request('/api/projects/proj-1/environments/env-1/start', { method: 'POST' }, env());
-}
+  it('backstop recovers an interrupted claim but protects a healthy legacy deployment', async () => {
+    await seedNode({ status: 'destroying' });
+    await drizzle(env.DATABASE)
+      .insert(schema.nodes)
+      .values({
+        id: 'healthy',
+        userId: 'user',
+        name: 'legacy',
+        status: 'running',
+        runtime: 'vm',
+        nodeClass: 'managed',
+        nodeRole: 'deployment',
+        providerInstanceId: 'healthy-vm',
+      } as schema.NewNode);
+    expect(await runDeploymentNodeCleanup(env)).toEqual({ deleted: 1, failed: 0 });
+    expect(sqlite.prepare('SELECT status FROM nodes WHERE id = ?').get('healthy')).toEqual({
+      status: 'running',
+    });
+    expect(provider.deleteVM).toHaveBeenCalledTimes(1);
+    expect(provider.deleteVM.mock.calls[0]?.[0]).toBe('123');
+  });
 
-describe('deployment environment stop/start lifecycle', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    mockRequireProjectCapability.mockResolvedValue(undefined);
-    mockBuildDeploymentEnvironmentResponse.mockImplementation(
-      async (_db: unknown, _env: unknown, row: EnvironmentRow) => ({
-        id: row.id,
-        status: row.status,
-        nodeId: row.nodeId,
-      })
+  it('resumes a stale stop before the deletion claim through live teardown and volume detach', async () => {
+    await seedNode();
+    await seedEnvironment('stopping');
+    sqlite
+      .prepare(
+        "UPDATE deployment_environments SET updated_at = '2026-10-22T09:00:00Z', requires_volumes = 1"
+      )
+      .run();
+    sqlite
+      .prepare(
+        `INSERT INTO deployment_volumes (id, environment_id, name, provider_volume_id,
+      provider_name, location, attached_server_id, status) VALUES
+      ('volume','environment','data','physical-volume','hetzner','fsn1','123','attached')`
+      )
+      .run();
+    sqlite
+      .prepare(
+        "INSERT INTO deployment_releases (id, environment_id, version) VALUES ('release','environment',1)"
+      )
+      .run();
+    sqlite
+      .prepare(
+        "INSERT INTO deployment_environment_config_vars (id, environment_id, env_key, stored_value) VALUES ('config','environment','MODE','production')"
+      )
+      .run();
+    const releases = sqlite.prepare('SELECT * FROM deployment_releases').all();
+    const config = sqlite.prepare('SELECT * FROM deployment_environment_config_vars').all();
+    expect(await runDeploymentNodeCleanup(env)).toEqual({ deleted: 0, failed: 0 });
+    expect(teardownDeploymentEnvironmentOnNode).toHaveBeenCalled();
+    expect(provider.detachVolume).toHaveBeenCalledWith({
+      volumeId: 'physical-volume',
+      serverId: '123',
+      location: 'fsn1',
+    });
+    expect(environment()).toMatchObject({ status: 'stopped', node_id: null });
+    expect(
+      sqlite
+        .prepare('SELECT provider_volume_id, attached_server_id, status FROM deployment_volumes')
+        .get()
+    ).toEqual({
+      provider_volume_id: 'physical-volume',
+      attached_server_id: null,
+      status: 'available',
+    });
+    expect(sqlite.prepare('SELECT * FROM deployment_releases').all()).toEqual(releases);
+    expect(sqlite.prepare('SELECT * FROM deployment_environment_config_vars').all()).toEqual(
+      config
     );
-    mockTeardownDeploymentEnvironmentOnNode.mockResolvedValue(undefined);
-    mockDeleteNodeResources.mockResolvedValue({ nodeFound: false });
-    mockListEnvironmentVolumes.mockImplementation(async (_db: unknown, environmentId: string) =>
-      volumeRows.filter((row) => row.environmentId === environmentId)
-    );
-    mockDetachEnvironmentVolumes.mockImplementation(
-      async (
-        _db: unknown,
-        _env: unknown,
-        _userId: unknown,
-        environmentId: string,
-        serverId: string
-      ) => {
-        const detached = volumeRows.filter(
-          (row) => row.environmentId === environmentId && row.attachedServerId === serverId
+  });
+
+  it.each(['environment', 'node'])(
+    'keeps DNS cleanup retryable after provider termination: %s',
+    async (entryPoint) => {
+      await seedNode({ backendDnsRecordId: 'dns-record' });
+      await seedEnvironment();
+      vi.mocked(deleteDNSRecord).mockRejectedValueOnce(new Error('DNS unavailable'));
+      if (entryPoint === 'environment') expect((await stop()).status).toBe(409);
+      else
+        await expect(stopNodeResources('node', 'user', env)).rejects.toThrow(
+          'DNS cleanup remains pending'
         );
-        for (const row of detached) {
-          row.attachedServerId = null;
-        }
-        return detached;
-      }
-    );
-    mockAttachEnvironmentVolumesToLinkedNode.mockImplementation(
-      async (_db: unknown, _env: unknown, _userId: unknown, environmentId: string) => {
-        const attached = volumeRows.filter((row) => row.environmentId === environmentId);
-        for (const row of attached) {
-          row.attachedServerId = 'srv-2';
-        }
-        return attached;
-      }
-    );
-    mockProvisionDeploymentNode.mockImplementation(async () => {
-      const target = envRows.find((row) => row.id === 'env-1');
-      if (target) {
-        target.nodeId = 'node-2';
-      }
+      expect(environment()).toMatchObject({ status: 'error', node_id: 'node' });
+      expect(row()).toMatchObject({ status: 'destroying', backend_dns_record_id: 'dns-record' });
+      expect(row().runtime_termination_confirmed_at).toEqual(expect.any(String));
+      expect((await stop()).status).toBe(200);
+      expect(deleteDNSRecord).toHaveBeenCalledTimes(2);
+      expect(provider.deleteVM).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it('rolls back terminalization atomically and retries using existing external deletion proof', async () => {
+    await seedNode();
+    await seedEnvironment();
+    sqlite.exec(`CREATE TRIGGER fail_environment_retirement BEFORE UPDATE ON deployment_environments
+      WHEN NEW.status = 'stopped' BEGIN SELECT RAISE(ABORT, 'simulated commit failure'); END;`);
+    expect((await stop()).status).toBe(409);
+    expect(row()).toMatchObject({ status: 'destroying', provider_instance_id: '123' });
+    expect(row().runtime_termination_confirmed_at).toEqual(expect.any(String));
+    expect(environment()).toMatchObject({ status: 'error', node_id: 'node' });
+    sqlite.exec('DROP TRIGGER fail_environment_retirement');
+    expect((await stop()).status).toBe(200);
+    expect(provider.deleteVM).toHaveBeenCalledTimes(1);
+    expect(environment()).toMatchObject({ status: 'stopped', node_id: null });
+  });
+
+  it('recovers old partial terminalization from exact persisted proof without provider I/O', async () => {
+    await seedNode({
+      status: 'deleted',
+      providerInstanceId: null,
+      runtimeTerminationConfirmedAt: '2026-10-22T10:00:00Z',
+    });
+    await seedEnvironment('stopping');
+    expect(await runDeploymentNodeCleanup(env)).toEqual({ deleted: 1, failed: 0 });
+    expect(environment()).toMatchObject({ status: 'stopped', node_id: null });
+    expect(provider.deleteVM).not.toHaveBeenCalled();
+  });
+
+  it('recovers a direct node stop failure with a linked environment', async () => {
+    await seedNode();
+    await seedEnvironment();
+    provider.deleteVM.mockRejectedValueOnce(new Error('transient provider failure'));
+    await expect(stopNodeResources('node', 'user', env)).rejects.toThrow('remains unconfirmed');
+    expect(environment()).toMatchObject({ status: 'error', node_id: 'node' });
+    expect(await runDeploymentNodeCleanup(env)).toEqual({ deleted: 1, failed: 0 });
+    expect(environment()).toMatchObject({ status: 'stopped', node_id: null });
+  });
+
+  it('preserves the same provider volume through a real SQL stop/start round trip', async () => {
+    await seedNode();
+    await seedEnvironment();
+    sqlite.prepare('UPDATE deployment_environments SET requires_volumes = 1').run();
+    sqlite
+      .prepare(
+        `INSERT INTO deployment_volumes (id,environment_id,name,provider_volume_id,
+      provider_name,location,attached_server_id,status) VALUES
+      ('volume','environment','data','physical-volume','hetzner','fsn1','123','attached')`
+      )
+      .run();
+    sqlite
+      .prepare(
+        "INSERT INTO deployment_releases (id,environment_id,version) VALUES ('release','environment',1)"
+      )
+      .run();
+    expect((await stop()).status).toBe(200);
+    vi.mocked(provisionDeploymentNode).mockImplementation(async () => {
+      await seedNode({ id: 'replacement', providerInstanceId: '456' });
+      sqlite.prepare("UPDATE deployment_environments SET node_id = 'replacement'").run();
       return {
-        nodeId: 'node-2',
+        nodeId: 'replacement',
         provisioningStarted: false,
         provisioningPromise: Promise.resolve(),
       };
     });
+    const response = await start();
+    expect(response.status, await response.clone().text()).toBe(200);
+    expect(provider.attachVolume).toHaveBeenCalledWith({
+      volumeId: 'physical-volume',
+      serverId: '456',
+      location: 'fsn1',
+    });
+    expect(
+      sqlite.prepare('SELECT provider_volume_id, attached_server_id FROM deployment_volumes').get()
+    ).toEqual({ provider_volume_id: 'physical-volume', attached_server_id: '456' });
+  });
 
-    envRows = [
-      {
-        id: 'env-1',
-        projectId: 'proj-1',
-        nodeId: 'node-1',
+  it('rejects malformed stored reservations before provisioning a stopped environment', async () => {
+    await seedEnvironment('stopped');
+    sqlite
+      .prepare(
+        "UPDATE deployment_environments SET node_id = NULL, resolved_reservation_json = 'malformed'"
+      )
+      .run();
+    sqlite
+      .prepare(
+        "INSERT INTO deployment_releases (id,environment_id,version) VALUES ('release','environment',1)"
+      )
+      .run();
+    expect((await start()).status).toBe(409);
+    expect(provisionDeploymentNode).not.toHaveBeenCalled();
+  });
+
+  it('marks failed provisioning visibly rather than leaving a start stuck', async () => {
+    await seedEnvironment('stopped');
+    sqlite.prepare('UPDATE deployment_environments SET node_id = NULL').run();
+    sqlite
+      .prepare(
+        "INSERT INTO deployment_releases (id,environment_id,version) VALUES ('release','environment',1)"
+      )
+      .run();
+    vi.mocked(provisionDeploymentNode).mockResolvedValueOnce(null);
+    expect((await start()).status).toBe(409);
+    expect(environment()).toMatchObject({ status: 'error', node_id: null });
+  });
+
+  it('keeps workspace bytes and snapshots protected during deployment cleanup', async () => {
+    await seedNode({ status: 'destroying' });
+    sqlite
+      .prepare(
+        "INSERT INTO workspaces (id,node_id,user_id,status) VALUES ('workspace','node','user','sleeping')"
+      )
+      .run();
+    expect((await cleanupDeploymentNode(env, 'node', 'user', options)).nodeDeleted).toBe(false);
+    expect(provider.deleteVM).not.toHaveBeenCalled();
+    expect(row().runtime_termination_confirmed_at).toBeNull();
+    expect(sqlite.prepare('SELECT status FROM workspaces').get()).toEqual({ status: 'sleeping' });
+  });
+
+  it('backs off provider failures so another sweep does not repeat I/O immediately', async () => {
+    await seedNode({ status: 'destroying' });
+    provider.deleteVM.mockRejectedValue(new Error('timeout'));
+    expect(await runDeploymentNodeCleanup(env)).toEqual({ deleted: 0, failed: 1 });
+    expect(await runDeploymentNodeCleanup(env)).toEqual({ deleted: 0, failed: 0 });
+    expect(provider.deleteVM).toHaveBeenCalledTimes(1);
+  });
+
+  it('proves providerless deployment absence using exact complete inventory with deployment labels', async () => {
+    await seedNode({ status: 'destroying', providerInstanceId: null });
+    expect(await cleanupDeploymentNode(env, 'node', 'user', options)).toEqual({
+      nodeDeleted: true,
+      warnings: [],
+    });
+    expect(provider.listVMs.mock.calls[0]?.[0]).toMatchObject({
+      role: 'deployment',
+      incarnation: 'incarnation',
+      node: 'node',
+    });
+    expect(provider.deleteVM).not.toHaveBeenCalled();
+    expect(row().runtime_termination_confirmed_at).toEqual(expect.any(String));
+  });
+
+  it('never treats an empty inventory during a fresh in-flight allocation as termination proof', async () => {
+    await seedNode({ providerInstanceId: null, createdAt: new Date().toISOString() });
+    await seedEnvironment();
+    expect((await stop()).status).toBe(409);
+    expect(environment()).toMatchObject({ status: 'error', node_id: 'node' });
+    expect(row().runtime_termination_confirmed_at).toBeNull();
+    expect(provider.listVMs).not.toHaveBeenCalled();
+    expect(provider.deleteVM).not.toHaveBeenCalled();
+  });
+
+  it('applies the fresh-allocation fence to direct node stops too', async () => {
+    await seedNode({ providerInstanceId: null, createdAt: new Date().toISOString() });
+    await seedEnvironment();
+    await expect(stopNodeResources('node', 'user', env)).rejects.toThrow('remains unconfirmed');
+    expect(provider.listVMs).not.toHaveBeenCalled();
+    expect(row().runtime_termination_confirmed_at).toBeNull();
+    expect(environment()).toMatchObject({ status: 'error', node_id: 'node' });
+  });
+
+  it.each(['exact', 'foreign', 'duplicate'])(
+    'revalidates discovered providerless deployment ownership: %s',
+    async (kind) => {
+      await seedNode({ status: 'destroying', providerInstanceId: null });
+      const vm = {
+        id: 'discovered',
+        location: 'fsn1',
+        serverType: 'cx23',
+        createdAt: '2026-10-22T08:53:44.000Z',
+        labels: {
+          node: 'node',
+          role: 'deployment',
+          managed: 'simple-agent-manager',
+          env: 'production',
+          installation: '0123456789abcdef0123456789abcdef',
+          incarnation: kind === 'foreign' ? 'foreign' : 'incarnation',
+        },
+      };
+      provider.listVMs.mockResolvedValue(kind === 'duplicate' ? [vm, vm] : [vm]);
+      provider.getVM.mockResolvedValue(vm);
+      const cleanup = await cleanupDeploymentNode(env, 'node', 'user', options);
+      expect(cleanup.nodeDeleted).toBe(kind === 'exact');
+      if (kind === 'exact') {
+        expect(provider.getVM).toHaveBeenCalledWith(
+          'discovered',
+          expect.objectContaining({ signal: expect.any(AbortSignal) })
+        );
+        expect(provider.deleteVM).toHaveBeenCalledWith(
+          'discovered',
+          expect.objectContaining({ signal: expect.any(AbortSignal) })
+        );
+      } else {
+        expect(provider.deleteVM).not.toHaveBeenCalled();
+        expect(row().runtime_termination_confirmed_at).toBeNull();
+      }
+    }
+  );
+
+  it('confirms externally deleted VMs through the real provider adapter 404 path', async () => {
+    await seedNode({ status: 'destroying' });
+    const fetch = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ error: { code: 'not_found', message: 'Server not found' } }),
+          { status: 404 }
+        )
+    );
+    vi.stubGlobal('fetch', fetch);
+    const adapter = new HetznerProvider('fixture-token');
+    provider.deleteVM.mockImplementationOnce((id, context) => adapter.deleteVM(id, context));
+    expect(await cleanupDeploymentNode(env, 'node', 'user', options)).toEqual({
+      nodeDeleted: true,
+      warnings: [],
+    });
+    expect(fetch).toHaveBeenCalledWith(
+      'https://api.hetzner.cloud/v1/servers/123',
+      expect.objectContaining({ method: 'DELETE' })
+    );
+    expect(row().runtime_termination_confirmed_at).toEqual(expect.any(String));
+    expect(row().status).toBe('deleted');
+  });
+
+  it('refuses missing legacy binding even if a guessed provider account would report absence', async () => {
+    await seedNode({
+      status: 'destroying',
+      placementCredentialSource: null,
+      placementCredentialReference: null,
+      placementCredentialVersion: null,
+      placementCredentialFingerprint: null,
+    });
+    expect((await cleanupDeploymentNode(env, 'node', 'user', options)).warnings).not.toHaveLength(
+      0
+    );
+    expect(row().runtime_termination_confirmed_at).toBeNull();
+    expect(provider.deleteVM).not.toHaveBeenCalled();
+    expect(provider.listVMs).not.toHaveBeenCalled();
+  });
+
+  it('does not delete a shared node with another active environment', async () => {
+    await seedNode();
+    await seedEnvironment();
+    await drizzle(env.DATABASE)
+      .insert(schema.deploymentEnvironments)
+      .values({
+        id: 'other',
+        projectId: 'project',
+        name: 'other',
+        nodeId: 'node',
         status: 'active',
-        requiresVolumes: true,
-        resolvedReservationJson: JSON.stringify({
-          version: 3,
-          cpuMillis: 750,
-          memoryMb: 768,
-          diskMb: 2_048,
-          exclusiveNode: true,
-          source: 'task',
-          sourceId: 'env-1',
-        }),
-      },
-    ];
-    releaseRows = [{ id: 'rel-1', environmentId: 'env-1', version: 7, status: 'created' }];
-    volumeRows = [
-      {
-        id: 'vol-1',
-        environmentId: 'env-1',
-        providerVolumeId: 'prov-vol-persistent',
-        providerName: 'hetzner',
-        location: 'nbg1',
-        attachedServerId: 'srv-1',
-        createdAt: '2026-06-30T00:00:00Z',
-      },
-    ];
-    nodeRows = [{ id: 'node-1', userId: 'user-1', status: 'running', providerInstanceId: 'srv-1' }];
+      } as schema.NewDeploymentEnvironmentRow);
+    expect((await stop()).status).toBe(200);
+    expect(environment()).toMatchObject({ status: 'stopped', node_id: null });
+    expect(row().status).toBe('running');
+    expect(provider.deleteVM).not.toHaveBeenCalled();
   });
 
-  it('preserves the provider volume across a full stop -> start round-trip', async () => {
-    const app = createApp();
-
-    // --- STOP ---
-    const stopResponse = await stop(app);
-    const stopBody = (await stopResponse.json()) as {
-      lifecycle: { stopped: boolean; volumesDetached: number; nodeId: string | null };
-    };
-    expect(stopResponse.status, JSON.stringify(stopBody)).toBe(200);
-
-    // Live node teardown must run BEFORE volume detach so the VM releases the
-    // block device cleanly.
-    const teardownOrder = mockTeardownDeploymentEnvironmentOnNode.mock.invocationCallOrder[0];
-    const detachOrder = mockDetachEnvironmentVolumes.mock.invocationCallOrder[0];
-    expect(teardownOrder).toBeLessThan(detachOrder);
-    expect(mockTeardownDeploymentEnvironmentOnNode).toHaveBeenCalledWith(
-      'node-1',
-      'env-1',
-      expect.anything(),
-      'user-1'
-    );
-
-    // Volume detached from the old server; env stopped and unlinked.
-    expect(stopBody.lifecycle.stopped).toBe(true);
-    expect(stopBody.lifecycle.volumesDetached).toBe(1);
-    expect(volumeRows[0].attachedServerId).toBeNull();
-    expect(volumeRows[0].providerVolumeId).toBe('prov-vol-persistent');
-    const stoppedEnv = envRows.find((row) => row.id === 'env-1');
-    expect(stoppedEnv?.status).toBe('stopped');
-    expect(stoppedEnv?.nodeId).toBeNull();
-    expect(recordDeploymentEnvironmentLifecycleEventBestEffort).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        projectId: 'proj-1',
-        environmentId: 'env-1',
-        lifecycle: 'stopped',
-        status: 'stopped',
-        fromStatus: 'active',
-        nodeId: 'node-1',
-        userId: 'user-1',
-        source: 'deployment_environment.stop',
-      })
-    );
-
-    // --- START ---
-    const startResponse = await start(app);
-    const startBody = (await startResponse.json()) as {
-      lifecycle: { started: boolean; nodeId: string | null; alreadyActive: boolean };
-    };
-    expect(startResponse.status, JSON.stringify(startBody)).toBe(200);
-
-    // Provisioning uses the placement constraint derived from the volumes.
-    expect(mockProvisionDeploymentNode).toHaveBeenCalledWith(
-      'env-1',
-      'proj-1',
-      'user-1',
-      expect.anything(),
-      expect.objectContaining({
-        requiresVolumes: true,
-        reservation: expect.objectContaining({
-          cpuMillis: 750,
-          memoryMb: 768,
-          diskMb: 2_048,
-          exclusiveNode: true,
-        }),
-        providerOverride: 'hetzner',
-        vmLocationOverride: 'nbg1',
-      })
-    );
-
-    // The SAME volume (unchanged providerVolumeId) is re-attached to the new node.
-    expect(mockAttachEnvironmentVolumesToLinkedNode).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      'user-1',
-      'env-1'
-    );
-    expect(volumeRows[0].providerVolumeId).toBe('prov-vol-persistent');
-    expect(volumeRows[0].attachedServerId).toBe('srv-2');
-    expect(startBody.lifecycle.started).toBe(true);
-    expect(startBody.lifecycle.alreadyActive).toBe(false);
-    expect(startBody.lifecycle.nodeId).toBe('node-2');
-    expect(recordDeploymentEnvironmentLifecycleEventBestEffort).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({
-        projectId: 'proj-1',
-        environmentId: 'env-1',
-        lifecycle: 'starting',
-        fromStatus: 'stopped',
-        releaseId: 'rel-1',
-        releaseVersion: 7,
-        nodeId: 'node-2',
-        userId: 'user-1',
-        source: 'deployment_environment.start',
-      })
-    );
+  it('does not mutate another owner or user-owned hardware', async () => {
+    await seedNode({ nodeClass: 'user-owned' });
+    expect(await cleanupDeploymentNode(env, 'node', 'user', options)).toEqual({
+      nodeDeleted: false,
+      warnings: [],
+    });
+    expect(await cleanupDeploymentNode(env, 'node', 'foreign', options)).toEqual({
+      nodeDeleted: false,
+      warnings: [],
+    });
+    expect(row().status).toBe('running');
+    expect(provider.deleteVM).not.toHaveBeenCalled();
   });
 
-  it('rejects a malformed stored reservation before starting or provisioning', async () => {
-    envRows[0]!.status = 'stopped';
-    envRows[0]!.nodeId = null;
-    envRows[0]!.resolvedReservationJson = '{"cpuMillis":"invalid"}';
-    volumeRows[0]!.attachedServerId = null;
-
-    const response = await start(createApp());
-    const body = (await response.json()) as { message: string };
-
-    expect(response.status).toBe(409);
-    expect(body.message).toContain('stored deployment resource reservation is invalid');
-    expect(mockProvisionDeploymentNode).not.toHaveBeenCalled();
-  });
-
-  it('returns 409 when stopping an environment that is already stopping', async () => {
-    envRows[0].status = 'stopping';
-    const app = createApp();
-    const response = await stop(app);
-    const body = (await response.json()) as { error: string };
-    expect(response.status).toBe(409);
-    expect(body.error).toBe('CONFLICT');
-    expect(mockTeardownDeploymentEnvironmentOnNode).not.toHaveBeenCalled();
-  });
-
-  it('propagates a 409 when live node teardown fails on stop', async () => {
-    mockTeardownDeploymentEnvironmentOnNode.mockRejectedValue(new Error('agent unreachable'));
-    const app = createApp();
-    const response = await stop(app);
-    const body = (await response.json()) as { error: string };
-    expect(response.status).toBe(409);
-    expect(body.error).toBe('CONFLICT');
-    // Volume must NOT be detached when teardown failed.
-    expect(mockDetachEnvironmentVolumes).not.toHaveBeenCalled();
-    expect(volumeRows[0].attachedServerId).toBe('srv-1');
-    expect(envRows.find((row) => row.id === 'env-1')?.status).toBe('error');
-  });
-
-  it('returns started:true with alreadyActive when starting an already-active environment', async () => {
-    const app = createApp();
-    const response = await start(app);
-    const body = (await response.json()) as {
-      lifecycle: { started: boolean; alreadyActive: boolean; provisioningStarted: boolean };
-    };
-    expect(response.status).toBe(200);
-    expect(body.lifecycle.alreadyActive).toBe(true);
-    expect(body.lifecycle.provisioningStarted).toBe(false);
-    expect(mockProvisionDeploymentNode).not.toHaveBeenCalled();
-  });
-
-  it('does not strand the environment in starting when provisioning fails', async () => {
-    envRows[0].status = 'stopped';
-    envRows[0].nodeId = null;
-    volumeRows[0].attachedServerId = null;
-    mockProvisionDeploymentNode.mockResolvedValue(null);
-    const app = createApp();
-    const response = await start(app);
-    const body = (await response.json()) as { error: string };
-    expect(response.status).toBe(409);
-    expect(body.error).toBe('CONFLICT');
-    const failed = envRows.find((row) => row.id === 'env-1');
-    expect(failed?.status).not.toBe('starting');
-    expect(failed?.status).toBe('error');
-    expect(mockAttachEnvironmentVolumesToLinkedNode).not.toHaveBeenCalled();
-  });
-
-  it('returns 409 when requiresVolumes is set but no volume records exist', async () => {
-    envRows[0].status = 'stopped';
-    envRows[0].nodeId = null;
-    volumeRows = [];
-    const app = createApp();
-    const response = await start(app);
-    const body = (await response.json()) as { error: string };
-    expect(response.status).toBe(409);
-    expect(body.error).toBe('CONFLICT');
-    expect(mockProvisionDeploymentNode).not.toHaveBeenCalled();
+  it('refuses incomplete providerless placement and inventory failure without inventing proof', async () => {
+    await seedNode({ status: 'destroying', providerInstanceId: null, capacityPoolId: null });
+    expect((await cleanupDeploymentNode(env, 'node', 'user', options)).nodeDeleted).toBe(false);
+    expect(provider.listVMs).not.toHaveBeenCalled();
+    sqlite.prepare("UPDATE nodes SET capacity_pool_id = 'pool'").run();
+    provider.listVMs.mockRejectedValue(new Error('partial inventory'));
+    expect((await cleanupDeploymentNode(env, 'node', 'user', options)).nodeDeleted).toBe(false);
+    expect(row().runtime_termination_confirmed_at).toBeNull();
   });
 });

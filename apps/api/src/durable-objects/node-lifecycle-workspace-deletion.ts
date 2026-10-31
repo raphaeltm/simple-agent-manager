@@ -2,6 +2,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { getNodeAgentBackgroundRequestTimeoutMs } from '../services/node-agent';
 import { persistError } from '../services/observability';
+import { retireConfirmedContainerWorkspaceNode } from '../services/workspace-confirmed-container-retirement';
 import {
   attemptWorkspaceDeletion,
   loadWorkspaceDeletionSnapshot,
@@ -10,6 +11,7 @@ import {
   workspaceDeletionIdentityLogContext,
   type WorkspaceDeletionMode,
 } from '../services/workspace-deletion';
+import { automaticDeletionPreservationAvailable } from '../services/workspace-deletion-preservation';
 import {
   claimedDeletionEntry,
   deletionEntryClaimedWithoutNodeIncarnation,
@@ -50,6 +52,7 @@ export type {
 
 const WORKSPACE_DELETION_ELIGIBLE_STATUSES = new Set([
   'stopped',
+  'evicted',
   'sleeping',
   'stopping',
   'deleted',
@@ -66,6 +69,7 @@ function sameDeletionIdentity(
 ): boolean {
   return (
     left.workspaceId === right.workspaceId &&
+    (left.workspaceGeneration ?? null) === (right.workspaceGeneration ?? null) &&
     left.nodeId === right.nodeId &&
     left.nodeUserId === right.nodeUserId &&
     left.nodeRuntime === right.nodeRuntime &&
@@ -121,6 +125,21 @@ export class NodeLifecycleWorkspaceDeletionQueue {
       nodeId,
       userId,
     });
+    if (
+      existing?.mode !== 'explicit' &&
+      identity &&
+      !identity.runtimeDeletionConfirmedAt &&
+      !(await automaticDeletionPreservationAvailable(this.env as Env, scheduledIdentity).catch(
+        () => false
+      ))
+    ) {
+      log.info('node_lifecycle.workspace_deletion_preservation_required', {
+        workspaceId,
+        nodeId,
+        action: 'not_scheduled',
+      });
+      return false;
+    }
     const existingMatches = deletionEntryMatchesScheduledIdentity(existing, scheduledIdentity);
     if (existing && !existingMatches) {
       log.warn('node_lifecycle.workspace_deletion_schedule_fenced', {
@@ -191,10 +210,14 @@ export class NodeLifecycleWorkspaceDeletionQueue {
         userId,
         expected,
       });
-      if (!existingMatches || existing?.deadLetteredAt) {
+      const explicitPromotion = mode === 'explicit' && existing?.mode === 'automatic';
+      if (!existingMatches || (existing?.deadLetteredAt && !explicitPromotion)) {
         return { result: 'fenced' as const, entry: existing ?? null };
       }
-      if ((existing?.attemptCount ?? 0) > 0 || existing?.lastAttemptAt != null) {
+      if (
+        !explicitPromotion &&
+        ((existing?.attemptCount ?? 0) > 0 || existing?.lastAttemptAt != null)
+      ) {
         return { result: 'already_claimed_same_identity' as const, entry: existing };
       }
       const claimed = {
@@ -204,11 +227,13 @@ export class NodeLifecycleWorkspaceDeletionQueue {
         nodeProviderInstanceId: expected.nodeProviderInstanceId,
         nodeRuntimeIncarnationId: expected.nodeRuntimeIncarnationId,
         workspaceId,
+        workspaceGeneration: expected.workspaceGeneration,
+        mode,
         userId,
         projectId: expected.projectId,
         chatSessionId: expected.chatSessionId,
         deleteAt: now + workspaceDeletionRetryDelayMs(this.env, 1),
-        firstScheduledAt: existing?.firstScheduledAt ?? now,
+        firstScheduledAt: explicitPromotion ? now : (existing?.firstScheduledAt ?? now),
         attemptCount: 1,
         lastAttemptAt: now,
         lastError: existing?.lastError ?? null,
@@ -397,6 +422,20 @@ export class NodeLifecycleWorkspaceDeletionQueue {
     }
 
     const expected = deletionIdentityForAttempt({ entry, current: currentIdentity, storedNodeId });
+    if (
+      entry.mode !== 'explicit' &&
+      currentIdentity &&
+      !currentIdentity.runtimeDeletionConfirmedAt &&
+      !(await automaticDeletionPreservationAvailable(this.env as Env, expected).catch(() => false))
+    ) {
+      await this.putEntryWithAlarm(key, {
+        ...entry,
+        deleteAt:
+          now + workspaceDeletionRetryDelayMs(this.env, Math.max(1, entry.attemptCount ?? 0)),
+        lastError: 'Automatic deletion requires verified preservation',
+      });
+      return;
+    }
     const attempt = (entry.attemptCount ?? 0) + 1;
     const claimId = crypto.randomUUID();
     const claimedEntry = claimedDeletionEntry({
@@ -436,7 +475,7 @@ export class NodeLifecycleWorkspaceDeletionQueue {
         expected,
         attempt,
         `${WORKSPACE_DELETION_DIAGNOSTIC_PREFIX}: durable attempt ${attempt} claimed`,
-        'automatic'
+        entry.mode ?? 'automatic'
       );
       if (!d1Claimed) {
         await this.handleRejectedD1Claim(key, claimId, entry, expected, dispatch);
@@ -503,16 +542,19 @@ export class NodeLifecycleWorkspaceDeletionQueue {
     expected: WorkspaceDeletionIdentity,
     attempt: number
   ): Promise<void> {
+    let physicalDeletionConfirmed = false;
     try {
       const outcome = await attemptWorkspaceDeletion({
         env: this.env as unknown as Env,
         expected,
         attempt,
         source: 'node_lifecycle',
-        mode: 'automatic',
+        mode: entry.mode ?? 'automatic',
         requestTimeoutMs: getNodeAgentBackgroundRequestTimeoutMs(this.env),
       });
       if (outcome.status === 'confirmed') {
+        physicalDeletionConfirmed = true;
+        await retireConfirmedContainerWorkspaceNode(this.env as unknown as Env, expected);
         await this.deleteExact(key, claimId);
         log.info('node_lifecycle.workspace_auto_deleted', {
           workspaceId: entry.workspaceId,
@@ -557,7 +599,9 @@ export class NodeLifecycleWorkspaceDeletionQueue {
       });
     } catch (error) {
       await this.updateExactClaim(key, claimId, {
-        lastError: 'workspace deletion attempt failed before classification',
+        lastError: physicalDeletionConfirmed
+          ? 'Workspace physical deletion confirmed; container retirement pending'
+          : 'workspace deletion attempt failed before classification',
         deleteAt: Date.now() + workspaceDeletionRetryDelayMs(this.env, attempt),
       });
       log.error('node_lifecycle.workspace_deletion_failed', {

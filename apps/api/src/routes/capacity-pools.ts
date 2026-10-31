@@ -13,6 +13,7 @@ import { resolveSafeCapacityPoolPlacementSettingsSummary } from '../services/cap
 import { updateDefaultCapacityPool } from '../services/default-capacity-pool-updates';
 import {
   type DefaultCapacityPoolsEnsureResult,
+  ensureDefaultCapacityPoolsForExistingCredentials,
   readDefaultCapacityPoolSummaries,
   toSafeEffectiveCapacityPoolSummary,
 } from '../services/default-capacity-pools';
@@ -83,22 +84,19 @@ async function readUserDefaultPoolSummaries(
     env: Env;
   }
 ): Promise<DefaultCapacityPoolsEnsureResult> {
-  const summaries = await readDefaultCapacityPoolSummaries(db, {
-    userId: input.userId,
-    includeInstallation: false,
-    ensure: input.ensure,
-    includeDisabled: true,
-    env: input.env,
-  });
-  const fallback = await readDefaultCapacityPoolSummaries(db, {
+  if (input.ensure)
+    await ensureDefaultCapacityPoolsForExistingCredentials(db, {
+      userId: input.userId,
+      includeInstallation: false,
+      env: input.env,
+    });
+  return readDefaultCapacityPoolSummaries(db, {
     userId: input.userId,
     includeInstallation: true,
     ensure: false,
     includeDisabled: true,
     env: input.env,
   });
-
-  return { ...summaries, installation: fallback.installation };
 }
 
 /**
@@ -111,12 +109,10 @@ capacityPoolsRoutes.get('/defaults', async (c) => {
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
   const ensure = parseEnsureQuery(c.req.query('ensure'));
-  const summaries = await readUserDefaultPoolSummaries(db, {
-    userId,
-    ensure,
-    env: c.env,
-  });
-  const placementSettings = await resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env);
+  const [summaries, placementSettings] = await Promise.all([
+    readUserDefaultPoolSummaries(db, { userId, ensure, env: c.env }),
+    resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env),
+  ]);
 
   c.header('Cache-Control', 'private, no-store');
   return c.json(buildUserDefaultPoolResponse(summaries, ensure, placementSettings));
@@ -131,12 +127,14 @@ capacityPoolsRoutes.get('/defaults', async (c) => {
 capacityPoolsRoutes.post('/defaults/reconcile', async (c) => {
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
-  const summaries = await readUserDefaultPoolSummaries(db, {
-    userId,
-    ensure: true,
-    env: c.env,
-  });
-  const placementSettings = await resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env);
+  const [summaries, placementSettings] = await Promise.all([
+    readUserDefaultPoolSummaries(db, {
+      userId,
+      ensure: true,
+      env: c.env,
+    }),
+    resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env),
+  ]);
 
   c.header('Cache-Control', 'private, no-store');
   return c.json(buildUserDefaultPoolResponse(summaries, true, placementSettings));
@@ -171,12 +169,14 @@ capacityPoolsRoutes.patch('/defaults', async (c) => {
     'Candidate updates must belong to the default capacity pool'
   );
 
-  const summaries = await readUserDefaultPoolSummaries(db, {
-    userId,
-    ensure: false,
-    env: c.env,
-  });
-  const placementSettings = await resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env);
+  const [summaries, placementSettings] = await Promise.all([
+    readUserDefaultPoolSummaries(db, {
+      userId,
+      ensure: false,
+      env: c.env,
+    }),
+    resolveSafeCapacityPoolPlacementSettingsSummary(db, c.env),
+  ]);
   c.header('Cache-Control', 'private, no-store');
   return c.json(buildUserDefaultPoolResponse(summaries, false, placementSettings));
 });

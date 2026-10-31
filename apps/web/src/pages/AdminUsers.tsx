@@ -1,76 +1,53 @@
 import type { AdminUser, SignupApprovalConfig, UserStatus } from '@simple-agent-manager/shared';
-import { Body,Button, Card, Spinner, StatusBadge } from '@simple-agent-manager/ui';
-import { useCallback, useEffect, useRef,useState } from 'react';
+import { Body, Button, Card, Spinner, StatusBadge } from '@simple-agent-manager/ui';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useState } from 'react';
 
 import { useAuth } from '../components/AuthProvider';
 import { useIsMobile } from '../hooks/useIsMobile';
-import { approveOrSuspendUser, changeUserRole,fetchSignupApprovalConfig, listAdminUsers, updateSignupApprovalConfig } from '../lib/api';
+import { useQueryScope } from '../hooks/useQueryScope';
+import {
+  approveOrSuspendUser,
+  changeUserRole,
+  fetchSignupApprovalConfig,
+  listAdminUsers,
+  updateSignupApprovalConfig,
+} from '../lib/api';
 
 type StatusFilter = 'all' | UserStatus;
 
 export function AdminUsers() {
   const { user: currentUser } = useAuth();
   const isMobile = useIsMobile();
-  const [users, setUsers] = useState<AdminUser[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const scope = useQueryScope();
+  const client = useQueryClient();
   const [filter, setFilter] = useState<StatusFilter>('all');
+  const usersQuery = useQuery({
+    queryKey: ['auth', scope, 'admin', 'users', filter],
+    queryFn: ({ signal }) => listAdminUsers(filter === 'all' ? undefined : filter, signal),
+    enabled: Boolean(scope),
+  });
+  const signupKey = ['auth', scope, 'admin', 'signup-approval'] as const;
+  const signup = useQuery({
+    queryKey: signupKey,
+    queryFn: ({ signal }) => fetchSignupApprovalConfig(signal),
+    enabled: Boolean(scope),
+  });
+  const users = usersQuery.data?.users ?? [];
+  const loading = usersQuery.isPending;
+  const isRefreshing = usersQuery.isFetching && usersQuery.data !== undefined;
+  const [actionError, setError] = useState<string | null>(null);
+  const error = actionError ?? usersQuery.error?.message ?? signup.error?.message;
   const [actionLoading, setActionLoading] = useState<string | null>(null);
-  const [signupApprovalConfig, setSignupApprovalConfig] = useState<SignupApprovalConfig | null>(null);
-  const [signupConfigLoading, setSignupConfigLoading] = useState(true);
+  const signupApprovalConfig = signup.data?.config ?? null;
+  const signupConfigLoading = signup.isPending;
   const [signupConfigSaving, setSignupConfigSaving] = useState(false);
-  const hasLoadedRef = useRef(false);
-
-  const fetchUsers = useCallback(async () => {
-    if (hasLoadedRef.current) {
-      setIsRefreshing(true);
-    }
-    try {
-      setError(null);
-      const statusParam = filter === 'all' ? undefined : filter;
-      const res = await listAdminUsers(statusParam);
-      setUsers(res.users);
-      hasLoadedRef.current = true;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load users');
-    } finally {
-      setLoading(false);
-      setIsRefreshing(false);
-    }
-  }, [filter]);
-
-  useEffect(() => {
-    if (!hasLoadedRef.current) {
-      setLoading(true);
-    }
-    fetchUsers();
-  }, [fetchUsers]);
-
-  useEffect(() => {
-    let active = true;
-    async function loadConfig() {
-      try {
-        setSignupConfigLoading(true);
-        const res = await fetchSignupApprovalConfig();
-        if (active) {
-          setSignupApprovalConfig(res.config);
-        }
-      } catch (err) {
-        if (active) {
-          setError(err instanceof Error ? err.message : 'Failed to load signup approval setting');
-        }
-      } finally {
-        if (active) {
-          setSignupConfigLoading(false);
-        }
-      }
-    }
-    loadConfig();
-    return () => {
-      active = false;
-    };
-  }, []);
+  const setSignupApprovalConfig = (config: SignupApprovalConfig) =>
+    client.setQueryData(signupKey, { config });
+  const fetchUsers = async () => {
+    setError(null);
+    await usersQuery.refetch();
+  };
 
   const handleAction = async (userId: string, action: 'approve' | 'suspend') => {
     setActionLoading(userId);
@@ -104,6 +81,7 @@ export function AdminUsers() {
     setSignupConfigSaving(true);
     try {
       setError(null);
+      await client.cancelQueries({ queryKey: signupKey, exact: true });
       const res = await updateSignupApprovalConfig({ requireApproval: nextRequireApproval });
       setSignupApprovalConfig(res.config);
     } catch (err) {
@@ -125,9 +103,7 @@ export function AdminUsers() {
   return (
     <div>
       {error && (
-        <div className="p-3 mb-4 rounded-sm bg-danger-tint text-danger-fg text-sm">
-          {error}
-        </div>
+        <div className="p-3 mb-4 rounded-sm bg-danger-tint text-danger-fg text-sm">{error}</div>
       )}
 
       <SignupApprovalPanel
@@ -144,9 +120,7 @@ export function AdminUsers() {
             key={f.value}
             onClick={() => setFilter(f.value)}
             className={`px-3 py-2 rounded-sm border-none cursor-pointer text-sm font-medium transition-all duration-150 ${
-              filter === f.value
-                ? 'text-accent bg-surface-hover'
-                : 'text-fg-muted bg-transparent'
+              filter === f.value ? 'text-accent bg-surface-hover' : 'text-fg-muted bg-transparent'
             }`}
           >
             {f.label}
@@ -157,7 +131,11 @@ export function AdminUsers() {
             )}
           </button>
         ))}
-        {isRefreshing && <span role="status" aria-label="Refreshing users"><Spinner size="sm" /></span>}
+        {isRefreshing && (
+          <span role="status" aria-label="Refreshing users">
+            <Spinner size="sm" />
+          </span>
+        )}
       </div>
 
       {loading && users.length === 0 ? (
@@ -183,10 +161,7 @@ export function AdminUsers() {
                 const isLoading = actionLoading === u.id;
 
                 return (
-                  <div
-                    key={u.id}
-                    className="px-4 py-3 border-b border-border-default"
-                  >
+                  <div key={u.id} className="px-4 py-3 border-b border-border-default">
                     {/* User info row */}
                     <div className="flex items-center gap-3">
                       <UserAvatar user={u} />
@@ -213,7 +188,12 @@ export function AdminUsers() {
                     {/* Actions row */}
                     {!isSuperadminUser && !isCurrentUser && (
                       <div className="flex gap-2 mt-2 flex-wrap">
-                        <UserActions user={u} isLoading={isLoading} onAction={handleAction} onRoleChange={handleRoleChange} />
+                        <UserActions
+                          user={u}
+                          isLoading={isLoading}
+                          onAction={handleAction}
+                          onRoleChange={handleRoleChange}
+                        />
                       </div>
                     )}
                   </div>
@@ -226,11 +206,21 @@ export function AdminUsers() {
               <table className="w-full border-collapse text-sm">
                 <thead>
                   <tr className="border-b border-border-default text-left">
-                    <th className="px-4 py-3 font-semibold text-fg-muted text-xs uppercase tracking-wide">User</th>
-                    <th className="px-4 py-3 font-semibold text-fg-muted text-xs uppercase tracking-wide">Role</th>
-                    <th className="px-4 py-3 font-semibold text-fg-muted text-xs uppercase tracking-wide">Status</th>
-                    <th className="px-4 py-3 font-semibold text-fg-muted text-xs uppercase tracking-wide">Joined</th>
-                    <th className="px-4 py-3 font-semibold text-fg-muted text-xs uppercase tracking-wide text-right">Actions</th>
+                    <th className="px-4 py-3 font-semibold text-fg-muted text-xs uppercase tracking-wide">
+                      User
+                    </th>
+                    <th className="px-4 py-3 font-semibold text-fg-muted text-xs uppercase tracking-wide">
+                      Role
+                    </th>
+                    <th className="px-4 py-3 font-semibold text-fg-muted text-xs uppercase tracking-wide">
+                      Status
+                    </th>
+                    <th className="px-4 py-3 font-semibold text-fg-muted text-xs uppercase tracking-wide">
+                      Joined
+                    </th>
+                    <th className="px-4 py-3 font-semibold text-fg-muted text-xs uppercase tracking-wide text-right">
+                      Actions
+                    </th>
                   </tr>
                 </thead>
                 <tbody>
@@ -240,10 +230,7 @@ export function AdminUsers() {
                     const isLoading = actionLoading === u.id;
 
                     return (
-                      <tr
-                        key={u.id}
-                        className="border-b border-border-default"
-                      >
+                      <tr key={u.id} className="border-b border-border-default">
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-3">
                             <UserAvatar user={u} />
@@ -254,9 +241,7 @@ export function AdminUsers() {
                                   <span className="text-fg-muted font-normal"> (you)</span>
                                 )}
                               </div>
-                              <div className="text-fg-muted text-xs">
-                                {u.email}
-                              </div>
+                              <div className="text-fg-muted text-xs">{u.email}</div>
                             </div>
                           </div>
                         </td>
@@ -274,7 +259,12 @@ export function AdminUsers() {
                         <td className="px-4 py-3 text-right">
                           {!isSuperadminUser && !isCurrentUser && (
                             <div className="flex gap-2 justify-end">
-                              <UserActions user={u} isLoading={isLoading} onAction={handleAction} onRoleChange={handleRoleChange} />
+                              <UserActions
+                                user={u}
+                                isLoading={isLoading}
+                                onAction={handleAction}
+                                onRoleChange={handleRoleChange}
+                              />
                             </div>
                           )}
                         </td>
@@ -314,7 +304,8 @@ function SignupApprovalPanel({
             <h2 className="text-sm font-semibold text-fg-primary m-0">Signup approval</h2>
             {config && (
               <span className="text-xs text-fg-muted">
-                {sourceLabel}{updatedAt ? `, updated ${updatedAt}` : ''}
+                {sourceLabel}
+                {updatedAt ? `, updated ${updatedAt}` : ''}
               </span>
             )}
           </div>
@@ -354,13 +345,7 @@ function SignupApprovalPanel({
 
 function UserAvatar({ user }: { user: AdminUser }) {
   if (user.avatarUrl) {
-    return (
-      <img
-        src={user.avatarUrl}
-        alt=""
-        className="w-8 h-8 rounded-full shrink-0"
-      />
-    );
+    return <img src={user.avatarUrl} alt="" className="w-8 h-8 rounded-full shrink-0" />;
   }
   return (
     <div className="w-8 h-8 rounded-full bg-surface-hover flex items-center justify-center text-xs font-semibold text-fg-muted shrink-0">
@@ -381,7 +366,12 @@ function UserStatusBadge({ status }: { status: string }) {
   return <StatusBadge status="error" label="Suspended" />;
 }
 
-function UserActions({ user, isLoading, onAction, onRoleChange }: {
+function UserActions({
+  user,
+  isLoading,
+  onAction,
+  onRoleChange,
+}: {
   user: AdminUser;
   isLoading: boolean;
   onAction: (id: string, action: 'approve' | 'suspend') => void;
@@ -390,27 +380,52 @@ function UserActions({ user, isLoading, onAction, onRoleChange }: {
   return (
     <>
       {user.status === 'pending' && (
-        <Button size="sm" variant="primary" onClick={() => onAction(user.id, 'approve')} disabled={isLoading}>
+        <Button
+          size="sm"
+          variant="primary"
+          onClick={() => onAction(user.id, 'approve')}
+          disabled={isLoading}
+        >
           {isLoading ? 'Approving...' : 'Approve'}
         </Button>
       )}
       {user.status === 'active' && (
-        <Button size="sm" variant="ghost" onClick={() => onAction(user.id, 'suspend')} disabled={isLoading}>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => onAction(user.id, 'suspend')}
+          disabled={isLoading}
+        >
           Suspend
         </Button>
       )}
       {user.status === 'suspended' && (
-        <Button size="sm" variant="primary" onClick={() => onAction(user.id, 'approve')} disabled={isLoading}>
+        <Button
+          size="sm"
+          variant="primary"
+          onClick={() => onAction(user.id, 'approve')}
+          disabled={isLoading}
+        >
           {isLoading ? 'Restoring...' : 'Restore'}
         </Button>
       )}
       {user.status === 'active' && user.role === 'user' && (
-        <Button size="sm" variant="ghost" onClick={() => onRoleChange(user.id, 'admin')} disabled={isLoading}>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => onRoleChange(user.id, 'admin')}
+          disabled={isLoading}
+        >
           Make Admin
         </Button>
       )}
       {user.status === 'active' && user.role === 'admin' && (
-        <Button size="sm" variant="ghost" onClick={() => onRoleChange(user.id, 'user')} disabled={isLoading}>
+        <Button
+          size="sm"
+          variant="ghost"
+          onClick={() => onRoleChange(user.id, 'user')}
+          disabled={isLoading}
+        >
           Remove Admin
         </Button>
       )}

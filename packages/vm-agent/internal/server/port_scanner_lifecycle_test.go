@@ -107,7 +107,11 @@ func TestProvisionSuccessStartsPortScanner(t *testing.T) {
 	}
 
 	// The fix: stop and delete handlers must call stopPortScanner
-	count := strings.Count(content, "stopPortScanner(workspaceID)")
+	deletion, err := os.ReadFile("workspace_deletion.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := strings.Count(content, "stopPortScanner(workspaceID)") + strings.Count(string(deletion), "stopPortScanner(d.WorkspaceID)")
 	if count < 2 {
 		t.Fatalf("expected stopPortScanner in both stop and delete handlers, found %d occurrences", count)
 	}

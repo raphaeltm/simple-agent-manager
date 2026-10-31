@@ -20,7 +20,6 @@ admin-users-signup-approval-audit.spec.ts
 agent-context-audit.spec.ts
 agent-crash-report-audit.spec.ts
 agent-guided-connect-audit.spec.ts
-agent-settings-audit.spec.ts
 ai-usage-audit.spec.ts
 auth-flows-audit.spec.ts
 chat-dom-bound-audit.spec.ts
@@ -35,7 +34,6 @@ command-palette-audit.spec.ts
 comments-navigation-audit.spec.ts
 completion-dock-audit.spec.ts
 compute-usage-audit.spec.ts
-connections-ui-audit.spec.ts
 credential-health-audit.spec.ts
 debug-diagnosis-audit.spec.ts
 deployment-settings-audit.spec.ts

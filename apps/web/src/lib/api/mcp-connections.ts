@@ -19,8 +19,11 @@ function basePath(projectId: string | null): string {
   return projectId === null ? '/api/mcp-connections' : `/api/projects/${projectId}/mcp-connections`;
 }
 
-export async function listMcpConnections(projectId: string | null): Promise<McpConnection[]> {
-  const response = await request<McpConnectionListResponse>(basePath(projectId));
+export async function listMcpConnections(
+  projectId: string | null,
+  signal?: AbortSignal
+): Promise<McpConnection[]> {
+  const response = await request<McpConnectionListResponse>(basePath(projectId), { signal });
   // The deploy publishes the web UI before the API Worker, so for a minute this UI can talk
   // to an API that predates custom headers and omits `headerNames`.
   return response.items.map((connection) => ({

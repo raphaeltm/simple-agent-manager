@@ -1,3 +1,4 @@
+import { sql } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -11,12 +12,12 @@ export type CanonicalInstallationAccountInput = {
   accountName: string;
 };
 
-export async function upsertCanonicalInstallationAccount(
+export function canonicalInstallationAccountUpsert(
   db: GitHubDb,
   account: CanonicalInstallationAccountInput,
   now: string
-): Promise<void> {
-  await db
+) {
+  return db
     .insert(schema.githubInstallationAccounts)
     .values({
       installationId: account.installationId,
@@ -29,6 +30,10 @@ export async function upsertCanonicalInstallationAccount(
     })
     .onConflictDoUpdate({
       target: schema.githubInstallationAccounts.installationId,
+      setWhere: sql`${schema.githubInstallationAccounts.accountType} IS NOT ${account.accountType}
+        OR ${schema.githubInstallationAccounts.accountName} IS NOT ${account.accountName}
+        OR ${schema.githubInstallationAccounts.accountNameNormalized} IS NOT ${normalizeAccountName(account.accountName)}
+        OR ${schema.githubInstallationAccounts.uninstalledAt} IS NOT NULL`,
       set: {
         accountType: account.accountType,
         accountName: account.accountName,
@@ -37,6 +42,14 @@ export async function upsertCanonicalInstallationAccount(
         uninstalledAt: null,
       },
     });
+}
+
+export async function upsertCanonicalInstallationAccount(
+  db: GitHubDb,
+  account: CanonicalInstallationAccountInput,
+  now: string
+): Promise<void> {
+  await canonicalInstallationAccountUpsert(db, account, now);
 }
 
 export async function tombstoneCanonicalInstallationAccount(

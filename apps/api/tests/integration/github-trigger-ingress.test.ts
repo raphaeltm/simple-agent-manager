@@ -10,7 +10,7 @@ import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { handleGitHubWebhook } from '../../src/routes/github-webhook';
 import { notifyFailedSweeps } from '../../src/scheduled/failed-sweep-notifications';
-import { handleGitHubProjectEventAdmission } from '../../src/services/github-project-event-producer';
+import { admitGitHubWebhookProjectEvents } from '../../src/services/github-project-event-producer';
 import {
   persistGitHubTriggerIntake,
   recoverGitHubTriggerDelivery,
@@ -28,7 +28,7 @@ vi.mock('../../src/services/trigger-submit', () => ({
     .mockResolvedValue({ taskId: 'task-new', sessionId: 'session-new', branchName: 'sam/new' }),
 }));
 vi.mock('../../src/services/github-project-event-producer', () => ({
-  handleGitHubProjectEventAdmission: vi.fn().mockResolvedValue({}),
+  admitGitHubWebhookProjectEvents: vi.fn().mockResolvedValue({}),
 }));
 vi.mock('../../src/scheduled/failed-sweep-notifications', () => ({
   notifyFailedSweeps: vi.fn().mockResolvedValue({ notifiedSweeps: 1, notificationsSent: 1 }),
@@ -266,7 +266,7 @@ describe('signed GitHub webhook → scoped trigger → actual admission', () => 
   it('returns non-success when durable intake storage fails before ACK', async () => {
     sqlite.prepare('ALTER TABLE github_trigger_inbox RENAME TO intake_unavailable').run();
     expect((await deliver(payload())).status).toBe(500);
-    expect(handleGitHubProjectEventAdmission).toHaveBeenCalledOnce();
+    expect(admitGitHubWebhookProjectEvents).toHaveBeenCalledOnce();
     expect(submitTriggeredTask).not.toHaveBeenCalled();
   });
   it('does not resurrect pre-upgrade claimed deliveries', async () => {
@@ -517,7 +517,7 @@ describe('signed GitHub webhook → scoped trigger → actual admission', () => 
   it('rejects oversized intake without storing an event or running a task', async () => {
     env.GITHUB_TRIGGER_RECOVERY_PAYLOAD_MAX_BYTES = '1';
     expect((await deliver(payload())).status).toBe(400);
-    expect(handleGitHubProjectEventAdmission).toHaveBeenCalledOnce();
+    expect(admitGitHubWebhookProjectEvents).toHaveBeenCalledOnce();
     expect(sqlite.prepare('SELECT COUNT(*) AS n FROM github_trigger_inbox').get()).toEqual({
       n: 0,
     });

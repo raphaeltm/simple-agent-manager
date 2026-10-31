@@ -53,6 +53,7 @@ async function deleteManagedNodeRuntime(
   try {
     const strictResult = await deleteNodeResourcesStrict(nodeId, userId, env, {
       cleanupDns: false,
+      explicitPermanentDeletion: true,
       expectedRuntime: {
         userId: node.userId,
         runtime: node.runtime,

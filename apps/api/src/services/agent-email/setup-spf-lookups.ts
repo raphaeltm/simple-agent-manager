@@ -4,6 +4,7 @@ import * as v from 'valibot';
 import type { Env } from '../../env';
 import { readResponseJson } from '../../lib/runtime-validation';
 import { fetchWithTimeout, getTimeoutMs } from '../fetch-timeout';
+import type { EmailReadOptions } from './cloudflare-email-api';
 
 const DEFAULT_DOH_RESOLVER_URL = 'https://cloudflare-dns.com/dns-query';
 const DEFAULT_DOH_TIMEOUT_MS = 10_000;
@@ -14,14 +15,19 @@ const answerSchema = v.object({
   Answer: v.optional(v.array(v.object({ type: v.number(), data: v.string() })), []),
 });
 
-export async function readPublicSpf(env: Env, domain: string): Promise<string> {
+export async function readPublicSpf(
+  env: Env,
+  domain: string,
+  options: EmailReadOptions = {}
+): Promise<string> {
   const url = new URL(env.DOH_RESOLVER_URL ?? DEFAULT_DOH_RESOLVER_URL);
   url.searchParams.set('name', domain);
   url.searchParams.set('type', 'TXT');
   const response = await fetchWithTimeout(
     url.toString(),
     { headers: { accept: 'application/dns-json' } },
-    getTimeoutMs(env.DOH_TIMEOUT_MS, DEFAULT_DOH_TIMEOUT_MS)
+    options.timeoutMs ?? getTimeoutMs(env.DOH_TIMEOUT_MS, DEFAULT_DOH_TIMEOUT_MS),
+    options.callerSignal
   );
   if (!response.ok) throw new Error('Could not verify the SPF lookup budget. Try again later.');
   const data = await readResponseJson(response, answerSchema, 'agent_email.spf_dns');
@@ -42,6 +48,7 @@ export async function verifySpfLookupBudget(
   async function visit(content: string, ancestors: Set<string>): Promise<void> {
     const terms = content.trim().split(/\s+/);
     if (terms.shift()?.toLowerCase() !== 'v=spf1') throw new Error('Invalid SPF version.');
+    const children: { domain: string; ancestors: Set<string> }[] = [];
     for (const term of terms) {
       const mechanism = term.replace(/^[+?~-]/, '').toLowerCase();
       if (/^(?:all|ip[46]:[^%]+)$/.test(mechanism)) continue;
@@ -56,8 +63,12 @@ export async function verifySpfLookupBudget(
       const domain = nested[1];
       if (!domain || ancestors.has(domain))
         throw new Error('The SPF policy contains an include or redirect loop.');
-      await visit(await lookup(domain), new Set([...ancestors, domain]));
+      children.push({ domain, ancestors: new Set([...ancestors, domain]) });
     }
+    const policies = await Promise.all(children.map(({ domain }) => lookup(domain)));
+    await Promise.all(
+      children.map((child, index) => visit(policies[index] ?? '', child.ancestors))
+    );
   }
   await visit(policy, new Set());
 }

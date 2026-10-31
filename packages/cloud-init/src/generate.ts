@@ -79,6 +79,11 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
   if (!variables.nodeId || !SAFE_ID_RE.test(variables.nodeId)) {
     errors.push(`nodeId: must match ${SAFE_ID_RE} (got ${JSON.stringify(variables.nodeId)})`);
   }
+  for (const name of ['nodeUserId', 'nodeRuntimeIncarnationId'] as const) {
+    if (variables[name] !== undefined && !SAFE_ID_RE.test(variables[name])) {
+      errors.push(`${name}: must contain only safe identifier characters`);
+    }
+  }
   if (!variables.hostname || !SAFE_HOSTNAME_RE.test(variables.hostname)) {
     errors.push(
       `hostname: must match ${SAFE_HOSTNAME_RE} (got ${JSON.stringify(variables.hostname)})`
@@ -447,6 +452,9 @@ export type CloudProvider = (typeof VALID_CLOUD_PROVIDERS)[number];
  */
 export interface CloudInitVariables {
   nodeId: string;
+  /** Stable owner and boot incarnation fence for physical workspace cleanup. */
+  nodeUserId?: string;
+  nodeRuntimeIncarnationId?: string;
   hostname: string;
   controlPlaneUrl: string;
   jwksUrl: string;
@@ -581,6 +589,8 @@ export function generateCloudInit(
 
   const replacements: Record<string, string> = {
     '{{ node_id }}': variables.nodeId,
+    '{{ node_user_id }}': variables.nodeUserId ?? '',
+    '{{ node_runtime_incarnation_id }}': variables.nodeRuntimeIncarnationId ?? '',
     '{{ hostname }}': variables.hostname,
     '{{ control_plane_url }}': variables.controlPlaneUrl,
     '{{ vm_agent_release_query }}': variables.vmAgentRequiredVersion

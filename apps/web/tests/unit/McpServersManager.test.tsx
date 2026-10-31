@@ -401,7 +401,7 @@ describe('McpServersManager', () => {
   it('reads the project endpoint when given a project id', async () => {
     renderWithQuery(<McpServersManager projectId="proj-42" queryScope="user-1" />);
     await waitFor(() => {
-      expect(listMcpConnections).toHaveBeenCalledWith('proj-42');
+      expect(listMcpConnections).toHaveBeenCalledWith('proj-42', expect.any(AbortSignal));
     });
   });
 });

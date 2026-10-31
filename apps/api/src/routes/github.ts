@@ -1,8 +1,6 @@
-// FILE SIZE EXCEPTION: GitHub installation security routes share callback, sync, repo, and branch invariants; split after hotfix stabilization.
-import type { GitHubInstallation, Repository } from '@simple-agent-manager/shared';
-import { and, eq, inArray, isNull, or } from 'drizzle-orm';
+import type { Repository } from '@simple-agent-manager/shared';
+import { and, eq, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import type { Context } from 'hono';
 import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
@@ -12,21 +10,14 @@ import { ulid } from '../lib/ulid';
 import { getUserId, optionalAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import {
-  type AuthenticatedGitHubUser,
   getAuthenticatedGitHubUser,
-  getAuthenticatedUserOrganizations,
   getRepositoryBranches,
   getUserAccessibleInstallations,
   getUserInstallationRepositories,
-  type UserAccessibleInstallation,
-  verifyUserInstallationAccess,
 } from '../services/github-app';
 import {
   getCanonicalAccountInput,
-  type GitHubDb,
-  type GitHubInstallationAccountRow,
   normalizeAccountType,
-  personalInstallationOwnerMatches,
   upsertCanonicalInstallationAccount,
 } from '../services/github-installation-accounts';
 import {
@@ -36,10 +27,15 @@ import {
 import {
   isDatabaseConflictError,
   summarizeAccessibleInstallations,
-  summarizeInstallationRows,
 } from '../services/github-route-helpers';
 import { getGitHubUserAccessToken } from '../services/github-user-access-token';
 import { getGitHubAppConfig } from '../services/platform-config';
+import {
+  deleteInstallationRow,
+  getRequiredGitHubUserAccessToken,
+  isAuthenticatedUsersPersonalInstallation,
+} from './github-installation-sync';
+import { registerGitHubInstallationsRoute } from './github-installations';
 import { handleGitHubWebhook } from './github-webhook';
 
 const githubRoutes = new Hono<{ Bindings: Env }>();
@@ -50,40 +46,7 @@ const githubRoutes = new Hono<{ Bindings: Env }>();
  * Syncs installations from GitHub on each request so that users see every
  * installation their authenticated GitHub account can access.
  */
-githubRoutes.get('/installations', requireAuth(), requireApproved(), async (c) => {
-  const userId = getUserId(c);
-  const db = drizzle(c.env.DATABASE, { schema });
-
-  // Sync: discover installations the user can access but doesn't have a DB record for
-  const accessToken = await getGitHubUserAccessToken(c, userId);
-  log.info('github.installations_sync.token_status', {
-    userId,
-    tokenPresent: Boolean(accessToken),
-  });
-  if (accessToken) {
-    await syncUserInstallations(db, userId, accessToken);
-  }
-
-  const installations = await db
-    .select()
-    .from(schema.githubInstallations)
-    .where(eq(schema.githubInstallations.userId, userId));
-  const visibleInstallations = accessToken
-    ? await filterVisibleInstallations(db, userId, accessToken, installations)
-    : installations.filter((inst) => normalizeAccountType(inst.accountType) === 'organization');
-
-  const response: GitHubInstallation[] = visibleInstallations.map((inst) => ({
-    id: inst.id,
-    userId: inst.userId,
-    installationId: getExternalInstallationId(inst),
-    accountType: inst.accountType as 'personal' | 'organization',
-    accountName: inst.accountName,
-    createdAt: inst.createdAt,
-    updatedAt: inst.updatedAt,
-  }));
-
-  return c.json(response);
-});
+registerGitHubInstallationsRoute(githubRoutes);
 
 /**
  * GET /api/github/install-url - Get GitHub App installation URL
@@ -476,396 +439,4 @@ githubRoutes.delete('/installations/:id', requireAuth(), requireApproved(), asyn
  * Fetches installations in user context, then creates any missing per-user
  * records for installations the authenticated GitHub account can access.
  */
-async function syncUserInstallations(
-  db: GitHubDb,
-  userId: string,
-  accessToken: string
-): Promise<void> {
-  await syncDirectUserInstallations(db, userId, accessToken);
-  await syncSharedOrgInstallations(db, userId, accessToken);
-}
-
-async function getRequiredGitHubUserAccessToken(
-  c: Context<{ Bindings: Env }>,
-  userId: string
-): Promise<string> {
-  const accessToken = await getGitHubUserAccessToken(c, userId);
-  log.info('github.user_context_required.token_status', {
-    userId,
-    tokenPresent: Boolean(accessToken),
-  });
-  if (!accessToken) {
-    throw errors.forbidden('GitHub user token unavailable');
-  }
-  return accessToken;
-}
-
-async function filterVisibleInstallations(
-  db: GitHubDb,
-  userId: string,
-  accessToken: string,
-  installations: schema.GitHubInstallation[]
-): Promise<schema.GitHubInstallation[]> {
-  const personalRows = installations.filter(
-    (inst) => normalizeAccountType(inst.accountType) === 'personal'
-  );
-  if (personalRows.length === 0) {
-    return installations;
-  }
-
-  const [authenticatedGitHubUser, accessibleInstallations] = await Promise.all([
-    getAuthenticatedGitHubUser(accessToken, { flow: 'sync', userId }),
-    getUserAccessibleInstallations(accessToken, { flow: 'sync', userId }),
-  ]);
-  const accessibleById = new Map(
-    accessibleInstallations.map((installation) => [String(installation.id), installation])
-  );
-
-  const visible: schema.GitHubInstallation[] = [];
-  for (const installation of installations) {
-    if (normalizeAccountType(installation.accountType) !== 'personal') {
-      visible.push(installation);
-      continue;
-    }
-
-    const externalInstallationId = getExternalInstallationId(installation);
-    const accessibleInstallation = accessibleById.get(externalInstallationId);
-    if (
-      accessibleInstallation &&
-      isAuthenticatedUsersPersonalInstallation(accessibleInstallation, authenticatedGitHubUser)
-    ) {
-      visible.push(installation);
-      continue;
-    }
-
-    await deleteInstallationRow(db, userId, installation.id);
-    log.warn('github.installations_sync.removed_mismatched_personal_installation', {
-      userId,
-      installationId: externalInstallationId,
-      accountName: installation.accountName,
-    });
-  }
-
-  return visible;
-}
-
-async function deleteInstallationRow(
-  db: GitHubDb,
-  userId: string,
-  installationRowId: string
-): Promise<void> {
-  await db
-    .delete(schema.githubInstallations)
-    .where(
-      and(
-        eq(schema.githubInstallations.id, installationRowId),
-        eq(schema.githubInstallations.userId, userId)
-      )
-    );
-}
-
-async function syncDirectUserInstallations(
-  db: GitHubDb,
-  userId: string,
-  accessToken: string
-): Promise<void> {
-  try {
-    log.info('github.installations_sync.token_status', {
-      userId,
-      tokenPresent: Boolean(accessToken),
-    });
-
-    // User-context GitHub verification: only sync installations the
-    // authenticated GitHub user can access.
-    const [authenticatedGitHubUser, accessibleInstallations] = await Promise.all([
-      getAuthenticatedGitHubUser(accessToken, { flow: 'sync', userId }),
-      getUserAccessibleInstallations(accessToken, { flow: 'sync', userId }),
-    ]);
-    log.info('github.installations_sync.accessible_installations', {
-      userId,
-      installationCount: accessibleInstallations.length,
-      installations: summarizeAccessibleInstallations(accessibleInstallations),
-    });
-    if (accessibleInstallations.length === 0) return;
-
-    const canonicalInstallations = accessibleInstallations.filter(
-      (inst) =>
-        normalizeAccountType(inst.account.type) === 'organization' ||
-        isAuthenticatedUsersPersonalInstallation(inst, authenticatedGitHubUser)
-    );
-    const syncableInstallations = accessibleInstallations.filter((inst) =>
-      isAuthenticatedUsersPersonalInstallation(inst, authenticatedGitHubUser)
-    );
-    const deferredOrgInstallationCount = accessibleInstallations.filter(
-      (inst) => normalizeAccountType(inst.account.type) === 'organization'
-    ).length;
-    const rejectedPersonalInstallationCount = accessibleInstallations.filter(
-      (inst) =>
-        normalizeAccountType(inst.account.type) === 'personal' &&
-        !isAuthenticatedUsersPersonalInstallation(inst, authenticatedGitHubUser)
-    ).length;
-    if (deferredOrgInstallationCount > 0) {
-      log.info('github.installations_sync.deferred_org_installations', {
-        userId,
-        deferredInstallationCount: deferredOrgInstallationCount,
-        reason: 'shared_org_discovery_required',
-      });
-    }
-    if (rejectedPersonalInstallationCount > 0) {
-      log.info('github.installations_sync.skipped_direct_installations', {
-        userId,
-        skippedInstallationCount: rejectedPersonalInstallationCount,
-        reason: 'not_authenticated_user_personal_installation',
-      });
-    }
-    const now = new Date().toISOString();
-    for (const inst of canonicalInstallations) {
-      await upsertCanonicalInstallationAccount(
-        db,
-        getCanonicalAccountInput(String(inst.id), inst.account.type, inst.account.login),
-        now
-      );
-    }
-
-    if (syncableInstallations.length === 0) return;
-
-    // Get user's existing installation records
-    const existingRecords = await db
-      .select({
-        installationId: schema.githubInstallations.installationId,
-        externalInstallationId: schema.githubInstallations.externalInstallationId,
-      })
-      .from(schema.githubInstallations)
-      .where(eq(schema.githubInstallations.userId, userId));
-
-    const existingInstallationIds = new Set(
-      existingRecords.map((record) => getExternalInstallationId(record))
-    );
-
-    const missingInstallations = syncableInstallations.filter(
-      (inst) => !existingInstallationIds.has(String(inst.id))
-    );
-
-    log.info('github.installations_sync.missing_installations', {
-      userId,
-      missingInstallationCount: missingInstallations.length,
-      installations: summarizeAccessibleInstallations(missingInstallations),
-    });
-
-    if (missingInstallations.length === 0) return;
-
-    for (const inst of missingInstallations) {
-      try {
-        const canonicalAccount = getCanonicalAccountInput(
-          String(inst.id),
-          inst.account.type,
-          inst.account.login
-        );
-        await db.insert(schema.githubInstallations).values({
-          id: ulid(),
-          userId,
-          installationId: getStoredInstallationId(userId, String(inst.id)),
-          externalInstallationId: String(inst.id),
-          accountType: canonicalAccount.accountType,
-          accountName: canonicalAccount.accountName,
-          createdAt: now,
-          updatedAt: now,
-        });
-        log.info('github.installations_sync.insert_result', {
-          userId,
-          installationId: String(inst.id),
-          result: 'success',
-          accountName: inst.account.login,
-          accountType: inst.account.type,
-        });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        const result = isDatabaseConflictError(err) ? 'conflict' : 'error';
-        const details = {
-          userId,
-          installationId: String(inst.id),
-          result,
-          accountName: inst.account.login,
-          accountType: inst.account.type,
-          error: message,
-        };
-        if (result === 'conflict') {
-          log.warn('github.installations_sync.insert_result', details);
-        } else {
-          log.error('github.installations_sync.insert_result', details);
-        }
-      }
-    }
-  } catch (err) {
-    log.error('github.sync_installations_failed', {
-      userId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-}
-
-function isAuthenticatedUsersPersonalInstallation(
-  installation: UserAccessibleInstallation,
-  authenticatedUser: AuthenticatedGitHubUser
-): boolean {
-  if (normalizeAccountType(installation.account.type) !== 'personal') {
-    return false;
-  }
-  return personalInstallationOwnerMatches(installation.account, authenticatedUser);
-}
-
-async function syncSharedOrgInstallations(
-  db: GitHubDb,
-  userId: string,
-  accessToken: string
-): Promise<void> {
-  try {
-    const organizations = await getAuthenticatedUserOrganizations(accessToken, {
-      flow: 'shared-org-discovery',
-      userId,
-    });
-    const orgLogins = organizations.map((org) => org.login);
-    log.info('github.shared_org_installations.org_memberships', {
-      userId,
-      organizationCount: orgLogins.length,
-      organizations: orgLogins,
-    });
-    if (orgLogins.length === 0) return;
-
-    const existingInstallationIds = await getExistingInstallationIds(db, userId);
-    const candidates = await getSharedOrgInstallationCandidates(
-      db,
-      orgLogins,
-      existingInstallationIds
-    );
-    log.info('github.shared_org_installations.candidates', {
-      userId,
-      candidateCount: candidates.length,
-      installations: summarizeInstallationRows(candidates),
-    });
-
-    await insertVerifiedSharedInstallations(db, userId, accessToken, candidates);
-  } catch (err) {
-    log.error('github.shared_org_installations.failed', {
-      userId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-}
-
-async function getExistingInstallationIds(db: GitHubDb, userId: string): Promise<Set<string>> {
-  const existingRecords = await db
-    .select({
-      installationId: schema.githubInstallations.installationId,
-      externalInstallationId: schema.githubInstallations.externalInstallationId,
-    })
-    .from(schema.githubInstallations)
-    .where(eq(schema.githubInstallations.userId, userId));
-
-  return new Set(existingRecords.map((record) => getExternalInstallationId(record)));
-}
-
-async function getSharedOrgInstallationCandidates(
-  db: GitHubDb,
-  orgLogins: string[],
-  existingInstallationIds: Set<string>
-): Promise<GitHubInstallationAccountRow[]> {
-  const normalizedOrgLogins = orgLogins.map((login) => login.toLowerCase());
-  const knownOrgInstallations = await db
-    .select()
-    .from(schema.githubInstallationAccounts)
-    .where(
-      and(
-        eq(schema.githubInstallationAccounts.accountType, 'organization'),
-        isNull(schema.githubInstallationAccounts.uninstalledAt),
-        inArray(schema.githubInstallationAccounts.accountNameNormalized, normalizedOrgLogins)
-      )
-    );
-
-  const candidates = new Map<string, GitHubInstallationAccountRow>();
-  for (const installation of knownOrgInstallations) {
-    if (!existingInstallationIds.has(installation.installationId)) {
-      candidates.set(installation.installationId, installation);
-    }
-  }
-  return [...candidates.values()];
-}
-
-async function insertVerifiedSharedInstallations(
-  db: GitHubDb,
-  userId: string,
-  accessToken: string,
-  candidates: GitHubInstallationAccountRow[]
-): Promise<void> {
-  const now = new Date().toISOString();
-  for (const candidate of candidates) {
-    try {
-      const canAccess = await verifyUserInstallationAccess(accessToken, candidate.installationId, {
-        flow: 'shared-org-discovery',
-        userId,
-        installationId: candidate.installationId,
-        accountName: candidate.accountName,
-      });
-      if (!canAccess) {
-        log.warn('github.shared_org_installations.verification_skipped', {
-          userId,
-          installationId: candidate.installationId,
-          accountName: candidate.accountName,
-          reason: 'not_accessible_to_user',
-        });
-        continue;
-      }
-      await insertSharedInstallation(db, userId, candidate, now);
-    } catch (err) {
-      log.error('github.shared_org_installations.verify_or_insert_failed', {
-        userId,
-        installationId: candidate.installationId,
-        accountName: candidate.accountName,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-}
-
-async function insertSharedInstallation(
-  db: GitHubDb,
-  userId: string,
-  candidate: GitHubInstallationAccountRow,
-  now: string
-): Promise<void> {
-  try {
-    await db.insert(schema.githubInstallations).values({
-      id: ulid(),
-      userId,
-      installationId: getStoredInstallationId(userId, candidate.installationId),
-      externalInstallationId: candidate.installationId,
-      accountType: 'organization',
-      accountName: candidate.accountName,
-      createdAt: now,
-      updatedAt: now,
-    });
-    log.info('github.shared_org_installations.insert_result', {
-      userId,
-      installationId: candidate.installationId,
-      result: 'success',
-      accountName: candidate.accountName,
-    });
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    const result = isDatabaseConflictError(err) ? 'conflict' : 'error';
-    const details = {
-      userId,
-      installationId: candidate.installationId,
-      result,
-      accountName: candidate.accountName,
-      error: message,
-    };
-    if (result === 'conflict') {
-      log.warn('github.shared_org_installations.insert_result', details);
-    } else {
-      log.error('github.shared_org_installations.insert_result', details);
-    }
-  }
-}
-
 export { githubRoutes };

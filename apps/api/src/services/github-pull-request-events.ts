@@ -194,18 +194,6 @@ async function ingestChecksWebhook(
           sha
         )
         .run();
-      await env.DATABASE.prepare(
-        `DELETE FROM pull_request_checks WHERE rowid IN (
-           SELECT c.rowid FROM pull_request_checks c
-           WHERE c.project_id = ? AND c.repository = ?
-             AND NOT EXISTS (
-               SELECT 1 FROM pull_requests p
-               WHERE p.project_id = c.project_id AND p.repository = c.repository
-                 AND p.head_sha = c.head_sha)
-           ORDER BY c.updated_at DESC, c.rowid DESC LIMIT -1 OFFSET ?)`
-      )
-        .bind(project.id, repositoryFullName, pendingCap)
-        .run();
       const result = await env.DATABASE.prepare(
         `UPDATE pull_requests SET checks_state = (
            SELECT CASE
@@ -228,6 +216,23 @@ async function ingestChecksWebhook(
           cap
         )
         .run();
+      // Only an associated check for an untracked head can grow the unmatched set.
+      // Tracked-head updates cannot add orphans; pruning after each one rescans the
+      // entire repository on every CI event, usually deleting nothing.
+      if (associated && (result.meta.changes ?? 0) === 0) {
+        await env.DATABASE.prepare(
+          `DELETE FROM pull_request_checks WHERE rowid IN (
+             SELECT c.rowid FROM pull_request_checks c
+             WHERE c.project_id = ? AND c.repository = ?
+               AND NOT EXISTS (
+                 SELECT 1 FROM pull_requests p
+                 WHERE p.project_id = c.project_id AND p.repository = c.repository
+                   AND p.head_sha = c.head_sha)
+             ORDER BY c.updated_at DESC, c.rowid DESC LIMIT -1 OFFSET ?)`
+        )
+          .bind(project.id, repositoryFullName, pendingCap)
+          .run();
+      }
       if ((result.meta.changes ?? 0) >= cap)
         log.warn('github.pr_checks_update_capped', { projectId: project.id });
     })

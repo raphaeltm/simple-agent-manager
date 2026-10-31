@@ -175,7 +175,13 @@ export async function sweepStaleStoppedWorkspaces(
     `SELECT w.id, w.node_id, w.user_id, w.project_id, w.chat_session_id
      FROM workspaces w
      LEFT JOIN nodes n ON n.id = w.node_id
-     WHERE w.status = 'stopped'
+     WHERE w.status IN ('stopped', 'sleeping', 'stopping', 'evicted')
+       AND EXISTS (
+         SELECT 1 FROM session_snapshots s
+         WHERE s.workspace_id = w.id AND s.node_id = w.node_id AND s.user_id = w.user_id
+           AND CASE WHEN json_valid(s.cleanup_identity_json)
+             THEN json_extract(s.cleanup_identity_json, '$.preserved') ELSE NULL END = 1
+       )
        AND (n.id IS NULL OR n.node_class != 'user-owned')
        AND w.updated_at < ?
      ORDER BY w.updated_at ASC

@@ -117,7 +117,8 @@ describe('ProfileFormDialog — AI model calls field', () => {
     // least one microtask after the click returns.
     await waitFor(() => expect(screen.queryByText('Choose AI models')).not.toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create Profile' }));
+    // The picker title can disappear before its focus/aria-hidden cleanup finishes.
+    fireEvent.click(await screen.findByRole('button', { name: 'Create Profile' }));
 
     await waitFor(() =>
       expect(onSave).toHaveBeenCalledWith(

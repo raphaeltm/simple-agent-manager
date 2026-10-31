@@ -53,7 +53,8 @@ export default defineConfig({
       miniflare: {
         // 2024-04-03+ required for DO RPC (calling methods directly on stubs)
         compatibilityDate: '2024-04-03',
-        compatibilityFlags: ['nodejs_compat'],
+        // Match the deployed flag: legacy tracking reports caught stream failures too early.
+        compatibilityFlags: ['nodejs_compat', 'unhandled_rejection_after_microtask_checkpoint'],
         d1Databases: ['DATABASE', 'OBSERVABILITY_DATABASE'],
         kvNamespaces: ['KV', 'OAUTH_KV'],
         r2Buckets: ['R2', 'PROJECT_DATA_ARCHIVE_R2'],

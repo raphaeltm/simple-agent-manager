@@ -81,8 +81,8 @@ describe('FailureCard', () => {
   });
 
   it.each([
-    ['model_provider_credential_missing', 'Open agent connections', '/settings/connections'],
-    ['model_provider_credential_rejected', 'Open agent connections', '/settings/connections'],
+    ['model_provider_credential_missing', 'Open agent accounts', '/settings/agents'],
+    ['model_provider_credential_rejected', 'Open agent accounts', '/settings/agents'],
     ['mcp_endpoint_needs_auth', 'Review personal MCP settings', '/settings/mcp-servers'],
   ] as const)('links a creator to existing settings for %s', (errorMessage, label, href) => {
     renderWithQuery(

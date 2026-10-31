@@ -129,7 +129,8 @@ Connecting, changing, or removing a cloud credential updates the pools that use 
 **Refresh** on the panel does the same on demand: it creates the pool for the scope you are viewing
 if one is missing, and re-reads the provider's machine list (for example after your provider
 launches a new machine type). A project without its own pool says which pool it uses and links to
-it; to give the project its own pool, connect a cloud account to the project.
+it; to give the project its own pool, connect a cloud account to the project (in its **Accounts**
+tab, under **Compute**).
 
 Without any pool of your own, the panel tells you whether shared machines from the installation
 are running your work, and links to connecting your own cloud account.
@@ -141,17 +142,19 @@ are running your work, and links to connecting your own cloud account.
 A **source** is one cloud provider credential the pool is allowed to spend against. Sources come
 from credentials you have already connected:
 
-- **Project** credentials — a cloud credential a member has connected and granted to the project.
-  It works like a project-scoped API key: the credential stays user-managed, but the project may
-  use it for infrastructure.
-- **User** credentials — your personal cloud provider connection, from **Settings → Cloud
-  Provider**.
+- **Project** credentials — a cloud credential a member has connected and granted to the project,
+  from the project's **Accounts** tab (**Use a cloud account only this project bills to**, under
+  **Compute**). It works like a project-scoped API key: the credential stays user-managed, but the
+  project may use it for infrastructure.
+- **User** credentials — your personal cloud account, from **Settings → Infrastructure → Cloud
+  accounts**.
 - **Platform** credentials — installation-level credentials added by a superadmin.
 
 A pool with no active source cannot rent anything. The panel links straight to the right setup
 page when that is the case. When a pool has more than one connection, the panel shows each one as
-its own section, named after where you manage it (for example **Cloud Provider settings** or
-**Connections**), so you can tell them apart without seeing credential ids.
+its own section, named after the provider and where you manage it (for example **Hetzner ·
+Infrastructure settings**, **Hetzner · Project accounts**, or **Hetzner · Project credentials**), so
+you can tell them apart without seeing credential ids.
 
 ### Allowed offerings
 
@@ -399,8 +402,10 @@ A node accepts additional work only if **all** of these hold:
   against the whole disk, unless the deployment configures otherwise.
 - Nothing on the node asked for an exclusive machine, and this work is not asking for one.
 - A node that is **already hosting work** is reporting fresh health telemetry, and its disk
-  pressure is below its threshold (80% by default). Live memory percentage is used for ranking;
-  explicit reserved memory and the host reserve control admission. A brand-new machine that has
+  pressure is below its threshold (80% by default). Memory admission checks both declared reservations
+  and measured headroom: current host use plus outstanding reserved memory and the new request
+  must fit after the host reserve. Fresh observations of running work avoid counting its usage twice;
+  starting work and missing observations keep the full reservation outstanding. A brand-new machine that has
   not reported yet is not held back by this. Restarting a stopped, errored, or evicted workspace
   also requires admission; rebuilding an already active workspace retains its reservation.
 - Live CPU is treated differently from memory and disk. CPU is shared out by the kernel, so a busy

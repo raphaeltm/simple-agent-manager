@@ -36,22 +36,23 @@ export interface AdminAgentEmailStatus extends AgentEmailConfigResponse {
  * Mirrors `getArtifactsEnabled` in `./projects`: a failed fetch degrades to "not available"
  * rather than breaking the create flow.
  */
-export async function getAgentEmailConfig(): Promise<AgentEmailConfigResponse> {
+export async function getAgentEmailConfig(signal?: AbortSignal): Promise<AgentEmailConfigResponse> {
   try {
-    return await request<AgentEmailConfigResponse>('/api/config/agent-email');
-  } catch {
+    return await request<AgentEmailConfigResponse>('/api/config/agent-email', { signal });
+  } catch (error) {
+    if (signal?.aborted) throw error;
     return { enabled: false, domain: null };
   }
 }
 
 /** Superadmin only. */
-export async function fetchAdminAgentEmail(): Promise<AdminAgentEmailStatus> {
-  return request<AdminAgentEmailStatus>('/api/admin/agent-email');
+export async function fetchAdminAgentEmail(signal?: AbortSignal): Promise<AdminAgentEmailStatus> {
+  return request<AdminAgentEmailStatus>('/api/admin/agent-email', { signal });
 }
 
 /** Superadmin only. What turning agent email on would do now; reads Cloudflare. */
-export async function fetchAgentEmailSetupPlan(): Promise<AgentEmailSetupPlan> {
-  return request<AgentEmailSetupPlan>('/api/admin/agent-email/setup');
+export async function fetchAgentEmailSetupPlan(signal?: AbortSignal): Promise<AgentEmailSetupPlan> {
+  return request<AgentEmailSetupPlan>('/api/admin/agent-email/setup', { signal });
 }
 
 /**

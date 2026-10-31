@@ -76,14 +76,20 @@ const dnsResultInfoSchema = v.object({ count: v.number(), total_count: v.number(
 /** Cloudflare's `per_page` maximum for listing DNS records, so one page holds every match. */
 const DNS_RECORDS_PER_PAGE = 5_000_000;
 
+export interface EmailReadOptions {
+  callerSignal?: AbortSignal;
+  timeoutMs?: number;
+}
+
 async function call<TSchema extends v.GenericSchema>(
   env: Env,
   method: 'GET' | 'POST' | 'PUT' | 'PATCH',
   path: string,
   resultSchema: TSchema,
-  body?: unknown
+  body?: unknown,
+  options: EmailReadOptions = {}
 ): Promise<v.InferOutput<TSchema>> {
-  return (await callWithInfo(env, method, path, resultSchema, body)).result;
+  return (await callWithInfo(env, method, path, resultSchema, body, options)).result;
 }
 
 async function callWithInfo<TSchema extends v.GenericSchema>(
@@ -91,7 +97,8 @@ async function callWithInfo<TSchema extends v.GenericSchema>(
   method: 'GET' | 'POST' | 'PUT' | 'PATCH',
   path: string,
   resultSchema: TSchema,
-  body?: unknown
+  body?: unknown,
+  options: EmailReadOptions = {}
 ): Promise<{ result: v.InferOutput<TSchema>; resultInfo: unknown }> {
   const response = await fetchWithTimeout(
     `${CLOUDFLARE_API_BASE}/zones/${env.CF_ZONE_ID}${path}`,
@@ -103,7 +110,8 @@ async function callWithInfo<TSchema extends v.GenericSchema>(
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     },
-    getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS)
+    options.timeoutMs ?? getTimeoutMs(env.CF_API_TIMEOUT_MS, DEFAULT_CF_API_TIMEOUT_MS),
+    options.callerSignal
   );
   if (!response.ok) {
     const fallback = `HTTP ${response.status}`;
@@ -124,8 +132,8 @@ async function callWithInfo<TSchema extends v.GenericSchema>(
   return { result: parsed.result, resultInfo: parsed.result_info };
 }
 
-export async function getZoneName(env: Env): Promise<string> {
-  return (await call(env, 'GET', '', v.object({ name: v.string() }))).name;
+export async function getZoneName(env: Env, options?: EmailReadOptions): Promise<string> {
+  return (await call(env, 'GET', '', v.object({ name: v.string() }), undefined, options)).name;
 }
 
 /**
@@ -135,14 +143,17 @@ export async function getZoneName(env: Env): Promise<string> {
 export async function listDnsRecords(
   env: Env,
   type: string,
-  name: string
+  name: string,
+  options?: EmailReadOptions
 ): Promise<DnsRecordView[]> {
   const query = `type=${encodeURIComponent(type)}&name=${encodeURIComponent(name)}&per_page=${DNS_RECORDS_PER_PAGE}`;
   const { result, resultInfo } = await callWithInfo(
     env,
     'GET',
     `/dns_records?${query}`,
-    dnsRecordsSchema
+    dnsRecordsSchema,
+    undefined,
+    options
   );
   const info = v.safeParse(dnsResultInfoSchema, resultInfo);
   if (!info.success || info.output.total_count > result.length) {
@@ -155,8 +166,8 @@ export async function listDnsRecords(
   return result;
 }
 
-export function getRoutingSettings(env: Env) {
-  return call(env, 'GET', '/email/routing', routingSettingsSchema);
+export function getRoutingSettings(env: Env, options?: EmailReadOptions) {
+  return call(env, 'GET', '/email/routing', routingSettingsSchema, undefined, options);
 }
 
 /**
@@ -193,8 +204,8 @@ export async function updateRoutingRule(
   await call(env, 'PUT', `/email/routing/rules/${encodeURIComponent(id)}`, v.unknown(), rule);
 }
 
-export function listSendingSubdomains(env: Env) {
-  return call(env, 'GET', '/email/sending/subdomains', sendingSubdomainsSchema);
+export function listSendingSubdomains(env: Env, options?: EmailReadOptions) {
+  return call(env, 'GET', '/email/sending/subdomains', sendingSubdomainsSchema, undefined, options);
 }
 
 /** Replace exactly the SPF record inspected by the consented setup; never touch MX. */

@@ -413,7 +413,9 @@ describe('GlobalCommandPalette — Context Awareness', () => {
     await openAndFilter('settings');
 
     const labels = optionLabels();
-    expect(labels.some((l) => l?.includes('Settings: Cloud Provider'))).toBe(true);
+    expect(labels.some((l) => l?.includes('Settings: Agents'))).toBe(true);
+    expect(labels.some((l) => l?.includes('Settings: Infrastructure'))).toBe(true);
+    expect(labels.some((l) => l?.includes('Settings: Cloud Provider'))).toBe(false);
     expect(labels.some((l) => l?.includes('Settings: GitHub'))).toBe(true);
     expect(labels.some((l) => l?.includes('Settings: Access'))).toBe(true);
   });

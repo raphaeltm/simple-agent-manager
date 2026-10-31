@@ -38,7 +38,7 @@ The old `POST /api/sam/chat` inference path is closed: enabled clients receive `
 
 Task agents can call `wait_for_subtasks` with a stable workflow-step `waitKey`, unique same-project task IDs, an optional `condition` of `all` (the default) or `any`, and an optional bounded `wakeAfterSeconds`. The agent must persist the workflow state and key before calling, reuse the key after a lost response, and end its turn after registration. ProjectData then reconciles selected task terminal state and durably wakes the same canonical caller session exactly once, including after session sleep and runtime replacement. Automatic wake prompts carry only trusted task IDs and statuses; agents fetch peer-authored output explicitly as untrusted data. Servers without durable prompt delivery reject registration so clients can use bounded foreground polling as a compatibility fallback.
 
-Private feedback-project agents can also call `list_incident_queue`, `get_incident`, `claim_incident`, and `resolve_incident`. These tools are scoped server-side to the effective private feedback project setting (Admin → Integrations runtime value first, then `PLATFORM_FEEDBACK_PROJECT_ID` fallback); callers cannot provide a project id. `claim_incident` and `resolve_incident` require a task-scoped MCP token, use bounded leases/CAS tokens, and return only private redacted incident evidence labelled as untrusted. `resolve_incident` accepts structured ship-or-track fields for resolved outcomes: `fixPrUrl`, `dispatchedTaskId`, or `linkedRecordId`; rejected outcomes require a justification note instead.
+Private feedback-project agents can also call `list_incident_queue`, `get_incident`, `claim_incident`, and `resolve_incident`. Use the full incident ID returned by `list_incident_queue` or the generated backlog prompt; abbreviated display references are not tool identifiers. These tools are scoped server-side to the effective private feedback project setting (Admin → Integrations runtime value first, then `PLATFORM_FEEDBACK_PROJECT_ID` fallback); callers cannot provide a project id. `claim_incident` and `resolve_incident` require a task-scoped MCP token, use bounded leases/CAS tokens, and return only private redacted incident evidence labelled as untrusted. `resolve_incident` accepts structured ship-or-track fields for resolved outcomes: `fixPrUrl`, `dispatchedTaskId`, or `linkedRecordId`; rejected outcomes require a justification note instead.
 
 Project eventing uses a pull loop over the canonical ProjectData `project_event_*` tables. Agents create a short-lived subscription with `create_project_event_subscription`, using v1 exact/set filters for `source`, `eventType`, `subjectType`, `subjectId`, and `severity`; recover existing subscriptions with `list_project_event_subscriptions`; inspect or cancel with `get_project_event_subscription` and `cancel_project_event_subscription`. Project, task, session, workspace, owner, and agent identity come from the verified MCP token, not tool arguments.
 
@@ -387,6 +387,37 @@ Stop a running node. All workspaces on the node must be stopped first.
 Delete a node and clean up DNS records and Hetzner resources.
 
 ## Credentials
+
+### Guided agent account sign-in
+
+`POST /api/agent-credential-setup-sessions` starts browser-based subscription sign-in
+for a personal default. Its optional JSON body accepts `agentType` (`claude-code`
+or `openai-codex`, default `openai-codex`).
+
+`POST /api/agent-credential-setup-sessions/project` uses the same sign-in flow and
+requires `projectId` in the JSON body, alongside optional `agentType`. It saves an
+account pinned only to that project and requires `secret:write`, checked at creation
+and again before the captured credential is saved. The personal endpoint rejects
+`projectId`; project creation must never fall back to personal creation. Invalid
+JSON or invalid fields return `400`.
+
+The response includes `id`, `status`, `agentType`, `expiresAt`, `verificationUrl`, and
+`userCode`. A new session returns `201`; an existing active session for the same
+agent and destination is returned with `200`. An active session in a different
+destination returns `409`: finish or cancel it before starting another. Busy setup
+capacity returns `202` with `status: "no_capacity"`.
+
+Use `GET /api/agent-credential-setup-sessions/config` to check availability. It
+advertises `scopes: ["user", "project"]`; clients require explicit project support
+before offering guided project login. Older APIs return `404` for the dedicated
+project creation endpoint, so deployment skew or rollback cannot silently create a
+personal session. Use
+`GET /api/agent-credential-setup-sessions/:id` to poll,
+`POST /api/agent-credential-setup-sessions/:id/verification-code` with `{ code }` for
+Claude's browser-displayed code, and
+`POST /api/agent-credential-setup-sessions/:id/cancel` to cancel. Setup sessions belong
+to the authenticated user; captured credentials are saved encrypted on the server
+and never returned to the browser.
 
 ### `POST /api/credentials`
 

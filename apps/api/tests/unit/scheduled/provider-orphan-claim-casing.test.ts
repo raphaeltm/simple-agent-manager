@@ -152,7 +152,10 @@ describe('provider orphan claim lookup — ULID casing', () => {
 
     const result = await runProviderOrphanReconciliation(makeEnv());
 
-    expect(deleteVM).toHaveBeenCalledWith('srv-deleted');
+    expect(deleteVM).toHaveBeenCalledWith(
+      'srv-deleted',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
     expect(result.destroyed).toBe(1);
   });
 
@@ -161,7 +164,10 @@ describe('provider orphan claim lookup — ULID casing', () => {
 
     const result = await runProviderOrphanReconciliation(makeEnv());
 
-    expect(deleteVM).toHaveBeenCalledWith('srv-unknown');
+    expect(deleteVM).toHaveBeenCalledWith(
+      'srv-unknown',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
     expect(result.destroyed).toBe(1);
   });
 
@@ -177,9 +183,18 @@ describe('provider orphan claim lookup — ULID casing', () => {
 
     const result = await runProviderOrphanReconciliation(makeEnv());
 
-    expect(deleteVM).toHaveBeenCalledWith('srv-deleted');
-    expect(deleteVM).toHaveBeenCalledWith('srv-unknown');
-    expect(deleteVM).not.toHaveBeenCalledWith('srv-live');
+    expect(deleteVM).toHaveBeenCalledWith(
+      'srv-deleted',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+    expect(deleteVM).toHaveBeenCalledWith(
+      'srv-unknown',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
+    expect(deleteVM).not.toHaveBeenCalledWith(
+      'srv-live',
+      expect.objectContaining({ signal: expect.any(AbortSignal) })
+    );
     expect(result.destroyed).toBe(2);
     expect(result.skippedClaimed).toBe(1);
   });

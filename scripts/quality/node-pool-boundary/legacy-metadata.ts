@@ -20,7 +20,7 @@ const METADATA_READERS = [
     'includes the historical label in the complete candidate change fingerprint',
   ],
   [
-    'apps/api/src/services/default-capacity-pool-candidates.ts',
+    'apps/api/src/services/default-capacity-pool-candidates-values.ts',
     'legacyVmSizeHintForOffering',
     'maps a concrete offering back to a historical candidate id to preserve user membership edits',
   ],

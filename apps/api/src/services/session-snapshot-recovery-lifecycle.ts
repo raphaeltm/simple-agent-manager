@@ -1,4 +1,18 @@
-import { and, eq, exists, gt, gte, isNotNull, isNull, lte, not, notInArray, or } from 'drizzle-orm';
+import {
+  and,
+  eq,
+  exists,
+  gt,
+  gte,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  not,
+  notInArray,
+  or,
+  sql,
+} from 'drizzle-orm';
 import { alias } from 'drizzle-orm/sqlite-core';
 
 import * as schema from '../db/schema';
@@ -62,6 +76,42 @@ function sourceTaskGuardCondition(db: Db, guard: SessionRecoverySourceTaskGuard 
         and(
           eq(sourceTask.id, guard.taskId),
           eq(sourceTask.projectId, guard.projectId),
+          ...(guard.evictionRecoveryRetry
+            ? [
+                eq(sourceTask.status, 'sleeping'),
+                eq(sourceTask.userId, schema.sessionSnapshots.userId),
+                eq(sourceTask.chatSessionId, guard.chatSessionId),
+                eq(schema.sessionSnapshots.projectId, guard.projectId),
+                eq(schema.sessionSnapshots.recoveryStatus, 'failed'),
+                eq(schema.sessionSnapshots.recoveryTaskId, guard.taskId),
+                eq(
+                  schema.sessionSnapshots.recoveryAttemptId,
+                  guard.evictionRecoveryRetry.recoveryAttemptId
+                ),
+                eq(schema.sessionSnapshots.workspaceId, guard.evictionRecoveryRetry.workspaceId),
+                eq(
+                  schema.sessionSnapshots.evictionRecoveryWorkspaceId,
+                  guard.evictionRecoveryRetry.workspaceId
+                ),
+                eq(
+                  schema.sessionSnapshots.evictionRecoveryNodeId,
+                  guard.evictionRecoveryRetry.nodeId
+                ),
+                sql`${schema.sessionSnapshots.evictionRecoveryGeneration} IS ${guard.evictionRecoveryRetry.generation}`,
+                lt(
+                  schema.sessionSnapshots.recoveryAttempts,
+                  guard.evictionRecoveryRetry.maxAttempts
+                ),
+                sql`EXISTS (SELECT 1 FROM workspaces eviction_source
+                  WHERE eviction_source.id = ${guard.evictionRecoveryRetry.workspaceId}
+                    AND eviction_source.node_id = ${guard.evictionRecoveryRetry.nodeId}
+                    AND eviction_source.eviction_generation IS ${guard.evictionRecoveryRetry.generation}
+                    AND eviction_source.status = 'evicted'
+                    AND eviction_source.user_id = ${schema.sessionSnapshots.userId}
+                    AND eviction_source.project_id = ${schema.sessionSnapshots.projectId}
+                    AND (eviction_source.chat_session_id IS NULL OR eviction_source.chat_session_id = ${schema.sessionSnapshots.chatSessionId}))`,
+              ]
+            : []),
           sourceIsWakeable,
           or(
             eq(sourceTask.chatSessionId, guard.chatSessionId),
@@ -193,6 +243,8 @@ export async function claimSessionSnapshotRecovery(
     recoveryAttemptId?: string;
     now?: Date;
     sourceTaskGuard?: SessionRecoverySourceTaskGuard;
+    /** Automatic eviction callbacks and cron retries share one non-decaying budget. */
+    automaticEvictionRecovery?: boolean;
   }
 ): Promise<SessionSnapshotRecoveryClaim> {
   const now = input.now ?? new Date();
@@ -200,6 +252,18 @@ export async function claimSessionSnapshotRecovery(
   const maxAttempts = sessionRecoveryMaxAttempts(env);
   const decayMs = sessionRecoveryAttemptDecayMs(env);
   const decayCutoff = sessionRecoveryDecayCutoffIso(env, now.getTime());
+  const nonDecaying =
+    input.automaticEvictionRecovery || Boolean(input.sourceTaskGuard?.evictionRecoveryRetry);
+  const claimBudgetCondition = nonDecaying
+    ? lt(schema.sessionSnapshots.recoveryAttempts, maxAttempts)
+    : sessionRecoveryBudgetCondition(maxAttempts, decayCutoff);
+  const claimBudgetAvailable = (snapshot: {
+    recoveryAttempts: number;
+    recoveryFailedAt: string | null;
+  }) =>
+    nonDecaying
+      ? snapshot.recoveryAttempts < maxAttempts
+      : budgetAvailable(snapshot, maxAttempts, decayMs, now.getTime());
   // Read before the claim clears the anchor, so the warn below can describe the
   // burst that just decayed. Scoped to the same session+user as the claim.
   const priorBurstSpent = await db
@@ -228,7 +292,9 @@ export async function claimSessionSnapshotRecovery(
       // continuing the spent one, so the cap still bounds `maxAttempts` failures
       // per window. `recovery_failed_at` is cleared in the same statement: leaving
       // it would make every later claim look decayed and remove the cap entirely.
-      recoveryAttempts: sessionRecoveryAttemptsAfterClaim(decayCutoff),
+      recoveryAttempts: nonDecaying
+        ? sql`${schema.sessionSnapshots.recoveryAttempts} + 1`
+        : sessionRecoveryAttemptsAfterClaim(decayCutoff),
       recoveryError: null,
       recoveryFailedAt: null,
       recoveryClaimedAt: nowIso,
@@ -241,7 +307,7 @@ export async function claimSessionSnapshotRecovery(
         restorableSnapshotCondition(),
         isNotNull(schema.sessionSnapshots.sleepingAt),
         gt(schema.sessionSnapshots.expiresAt, now.toISOString()),
-        sessionRecoveryBudgetCondition(maxAttempts, decayCutoff),
+        claimBudgetCondition,
         or(
           isNull(schema.sessionSnapshots.recoveryStatus),
           eq(schema.sessionSnapshots.recoveryStatus, 'failed')
@@ -256,7 +322,7 @@ export async function claimSessionSnapshotRecovery(
     // but a session doing it repeatedly is burning real provisioning attempts
     // on something that may never restore, and nothing else surfaces it
     // (`.claude/rules/47` operator visibility).
-    if (priorBurstSpent) {
+    if (priorBurstSpent && !nonDecaying) {
       log.warn('session_recovery.attempt_budget_burst_restarted', {
         chatSessionId: input.chatSessionId,
         taskId: input.taskId,
@@ -335,13 +401,15 @@ export async function claimSessionSnapshotRecovery(
         now: nowIso,
       });
     }
-    if (budgetAvailable(snapshot, maxAttempts, decayMs, now.getTime())) {
+    if (claimBudgetAvailable(snapshot)) {
       const reclaimed = await db
         .update(schema.sessionSnapshots)
         .set({
           recoveryTaskId: input.taskId,
           recoveryAttemptId: input.recoveryAttemptId ?? null,
-          recoveryAttempts: sessionRecoveryAttemptsAfterClaim(decayCutoff),
+          recoveryAttempts: nonDecaying
+            ? sql`${schema.sessionSnapshots.recoveryAttempts} + 1`
+            : sessionRecoveryAttemptsAfterClaim(decayCutoff),
           recoveryClaimedAt: nowIso,
           recoveryError: null,
           recoveryFailedAt: null,
@@ -356,7 +424,7 @@ export async function claimSessionSnapshotRecovery(
               isNull(schema.sessionSnapshots.recoveryClaimedAt),
               lte(schema.sessionSnapshots.recoveryClaimedAt, staleBefore)
             ),
-            sessionRecoveryBudgetCondition(maxAttempts, decayCutoff),
+            claimBudgetCondition,
             archiveMigrationFenceCondition(db, input.chatSessionId),
             sourceTaskGuardCondition(db, input.sourceTaskGuard)
           )
@@ -372,20 +440,23 @@ export async function claimSessionSnapshotRecovery(
       if (winner?.taskId) return { status: 'waking', taskId: winner.taskId };
     }
   }
-  const reason = !snapshot
-    ? 'snapshot_missing'
-    : Date.parse(snapshot.expiresAt) <= now.getTime()
-      ? 'snapshot_expired'
-      : !isRestorableSnapshot(snapshot.status, snapshot.degradation)
-        ? 'snapshot_not_complete'
-        : !budgetAvailable(snapshot, maxAttempts, decayMs, now.getTime())
-          ? 'recovery_attempts_exhausted'
-          : !(await archiveMigrationFenceIsClear(db, input.chatSessionId))
-            ? 'archive_migration_fenced'
-            : !(await sourceTaskGuardIsValid(db, input.sourceTaskGuard))
-              ? 'source_task_not_wakeable'
-              : 'snapshot_not_wakeable';
-  return { status: 'unavailable', reason };
+  if (!snapshot) return { status: 'unavailable', reason: 'snapshot_missing' };
+  if (Date.parse(snapshot.expiresAt) <= now.getTime()) {
+    return { status: 'unavailable', reason: 'snapshot_expired' };
+  }
+  if (!isRestorableSnapshot(snapshot.status, snapshot.degradation)) {
+    return { status: 'unavailable', reason: 'snapshot_not_complete' };
+  }
+  if (!claimBudgetAvailable(snapshot)) {
+    return { status: 'unavailable', reason: 'recovery_attempts_exhausted' };
+  }
+  if (!(await archiveMigrationFenceIsClear(db, input.chatSessionId))) {
+    return { status: 'unavailable', reason: 'archive_migration_fenced' };
+  }
+  if (!(await sourceTaskGuardIsValid(db, input.sourceTaskGuard))) {
+    return { status: 'unavailable', reason: 'source_task_not_wakeable' };
+  }
+  return { status: 'unavailable', reason: 'snapshot_not_wakeable' };
 }
 
 export async function hasRestorableSleepingSessionSnapshot(

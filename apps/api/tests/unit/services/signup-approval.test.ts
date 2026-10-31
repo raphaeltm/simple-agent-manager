@@ -42,7 +42,7 @@ vi.mock('../../../src/services/platform-config', async (importOriginal) => {
   return {
     ...actual,
     // Mock only the D1 boundary; the real select* projections still run.
-    resolvePlatformConfig: async (env: Parameters<typeof buildResolvedPlatformConfig>[0]) =>
+    resolveLoginOAuthConfig: async (env: Parameters<typeof buildResolvedPlatformConfig>[0]) =>
       buildResolvedPlatformConfig(env),
   };
 });

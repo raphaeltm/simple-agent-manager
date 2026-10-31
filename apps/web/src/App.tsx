@@ -1,6 +1,6 @@
 import { QueryClientProvider } from '@tanstack/react-query';
 import { type ReactNode, Suspense } from 'react';
-import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router';
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from 'react-router';
 
 import { AppShell } from './components/AppShell';
 import { AuthProvider, useAuth } from './components/AuthProvider';
@@ -12,12 +12,13 @@ import { RouteFallback } from './components/RouteFallback';
 import { GlobalAudioProvider } from './contexts/GlobalAudioContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { ToastProvider } from './hooks/useToast';
-import { lazyNamed } from './lib/lazy-with-retry';
+import { lazyNamed, memoizeRouteImport } from './lib/lazy-with-retry';
 import { queryClient } from './lib/query-client';
 // Initial landing set — statically imported per .claude/rules/60-request-io-and-bundle-budgets.md.
 // Every other page below is code-split via lazyNamed(). Do NOT add static page imports here.
 import { Dashboard } from './pages/Dashboard';
 import { Landing } from './pages/Landing';
+import { LegacyCloudProviderRedirect, SettingsRedirect } from './pages/settings-redirects';
 
 const AccountMap = lazyNamed(() => import('./pages/AccountMap'), 'AccountMap');
 const Admin = lazyNamed(() => import('./pages/Admin'), 'Admin');
@@ -63,28 +64,22 @@ const IdeaPage = lazyNamed(() => import('./pages/ideas/IdeaPage'), 'IdeaPage');
 const IdeasListPage = lazyNamed(() => import('./pages/ideas/IdeasListPage'), 'IdeasListPage');
 const Node = lazyNamed(() => import('./pages/Node'), 'Node');
 const Nodes = lazyNamed(() => import('./pages/Nodes'), 'Nodes');
-/**
- * `/projects/:id` renders the `Project` shell, whose `<Outlet/>` then renders a child
- * route — so the child's chunk would only START loading once the shell has rendered.
- * That sequential waterfall lands on the app's hottest path (rule 26: project chat is
- * the primary UX surface), and the shell chunk is tiny (~1 kB gzip), so the second
- * request is almost pure round-trip latency.
- *
- * Merging the two into one `advancedChunks` group was measured to be far worse — it made
- * the combined 343 kB gzip chunk eager on every page load (see `vite.config.ts`). Kicking
- * the child import off in parallel with the shell import gets the same overlap with none
- * of the initial-load cost.
- *
- * `chat` is the correct chunk to warm: `/projects/:id` index-redirects to it.
- */
-const Project = lazyNamed(() => {
-  const shell = import('./pages/Project');
-  // Fire-and-forget: failures are surfaced by the route's own lazy import, and an
-  // unhandled rejection here would be reported as a page-level error.
-  void import('./pages/project-chat').catch(() => undefined);
-  return shell;
-}, 'Project');
-const ProjectChat = lazyNamed(() => import('./pages/project-chat'), 'ProjectChat');
+// Start the active child chunk alongside the shell on cold deep links.
+const loadProjectShell = memoizeRouteImport(() => import('./pages/Project'));
+const loadProjectChat = memoizeRouteImport(() => import('./pages/project-chat'));
+const loadProjectSettings = memoizeRouteImport(() => import('./pages/ProjectSettings'));
+const ProjectShell = lazyNamed(loadProjectShell, 'Project');
+function Project() {
+  const { pathname } = useLocation();
+  void loadProjectShell().catch(() => undefined);
+  if (/\/settings(?:\/|$)/.test(pathname)) {
+    void loadProjectSettings().catch(() => undefined);
+  } else if (/\/projects\/[^/]+(?:\/chat(?:\/|$)|\/?$)/.test(pathname)) {
+    void loadProjectChat().catch(() => undefined);
+  }
+  return <ProjectShell />;
+}
+const ProjectChat = lazyNamed(loadProjectChat, 'ProjectChat');
 const ProjectActivity = lazyNamed(() => import('./pages/ProjectActivity'), 'ProjectActivity');
 const ProjectAgentChat = lazyNamed(() => import('./pages/ProjectAgentChat'), 'ProjectAgentChat');
 const ProjectCreate = lazyNamed(() => import('./pages/ProjectCreate'), 'ProjectCreate');
@@ -110,39 +105,18 @@ const ProjectNotifications = lazyNamed(
 );
 const ProjectProfiles = lazyNamed(() => import('./pages/ProjectProfiles'), 'ProjectProfiles');
 const Projects = lazyNamed(() => import('./pages/Projects'), 'Projects');
-const ProjectSettings = lazyNamed(() => import('./pages/ProjectSettings'), 'ProjectSettings');
-const ProjectSettingsAccess = lazyNamed(
-  () => import('./pages/ProjectSettings'),
-  'ProjectSettingsAccess'
-);
-const ProjectSettingsAgents = lazyNamed(
-  () => import('./pages/ProjectSettings'),
-  'ProjectSettingsAgents'
-);
-const ProjectSettingsConnections = lazyNamed(
-  () => import('./pages/ProjectSettings'),
-  'ProjectSettingsConnections'
-);
-const ProjectSettingsDeploy = lazyNamed(
-  () => import('./pages/ProjectSettings'),
-  'ProjectSettingsDeploy'
-);
-const ProjectSettingsGeneral = lazyNamed(
-  () => import('./pages/ProjectSettings'),
-  'ProjectSettingsGeneral'
-);
-const ProjectSettingsIndexRedirect = lazyNamed(
-  () => import('./pages/ProjectSettings'),
-  'ProjectSettingsIndexRedirect'
-);
+const ProjectSettings = lazyNamed(loadProjectSettings, 'ProjectSettings');
+const ProjectSettingsAccess = lazyNamed(loadProjectSettings, 'ProjectSettingsAccess');
+const ProjectSettingsAgents = lazyNamed(loadProjectSettings, 'ProjectSettingsAgents');
+const ProjectSettingsAccounts = lazyNamed(loadProjectSettings, 'ProjectSettingsAccounts');
+const ProjectSettingsDeploy = lazyNamed(loadProjectSettings, 'ProjectSettingsDeploy');
+const ProjectSettingsGeneral = lazyNamed(loadProjectSettings, 'ProjectSettingsGeneral');
+const ProjectSettingsIndexRedirect = lazyNamed(loadProjectSettings, 'ProjectSettingsIndexRedirect');
 const ProjectSettingsInfrastructure = lazyNamed(
-  () => import('./pages/ProjectSettings'),
+  loadProjectSettings,
   'ProjectSettingsInfrastructure'
 );
-const ProjectSettingsRuntime = lazyNamed(
-  () => import('./pages/ProjectSettings'),
-  'ProjectSettingsRuntime'
-);
+const ProjectSettingsRuntime = lazyNamed(loadProjectSettings, 'ProjectSettingsRuntime');
 const ProjectSkills = lazyNamed(() => import('./pages/ProjectSkills'), 'ProjectSkills');
 const AutomationOverview = lazyNamed(
   () => import('./pages/automation/AutomationOverview'),
@@ -189,17 +163,9 @@ const Settings = lazyNamed(() => import('./pages/Settings'), 'Settings');
 const SettingsAgents = lazyNamed(() => import('./pages/SettingsAgents'), 'SettingsAgents');
 const ConnectorConsent = lazyNamed(() => import('./pages/ConnectorConsent'), 'ConnectorConsent');
 const SettingsApiTokens = lazyNamed(() => import('./pages/SettingsApiTokens'), 'SettingsApiTokens');
-const SettingsCloudProvider = lazyNamed(
-  () => import('./pages/SettingsCloudProvider'),
-  'SettingsCloudProvider'
-);
 const SettingsComputeUsage = lazyNamed(
   () => import('./pages/SettingsComputeUsage'),
   'SettingsComputeUsage'
-);
-const SettingsConnections = lazyNamed(
-  () => import('./pages/SettingsConnections'),
-  'SettingsConnections'
 );
 const SettingsMcpServers = lazyNamed(
   () => import('./pages/SettingsMcpServers'),
@@ -357,9 +323,10 @@ export default function App() {
                           <Route index element={page(<ProjectSettingsIndexRedirect />)} />
                           <Route path="general" element={page(<ProjectSettingsGeneral />)} />
                           <Route path="access" element={page(<ProjectSettingsAccess />)} />
+                          <Route path="accounts" element={page(<ProjectSettingsAccounts />)} />
                           <Route
                             path="connections"
-                            element={page(<ProjectSettingsConnections />)}
+                            element={<SettingsRedirect to="../accounts" />}
                           />
                           <Route path="agents" element={page(<ProjectSettingsAgents />)} />
                           <Route
@@ -405,20 +372,24 @@ export default function App() {
                       <Route path="/workspaces" element={<Navigate to="/nodes" replace />} />
                       <Route path="/workspaces/new" element={page(<CreateWorkspace />)} />
                       <Route path="/settings" element={page(<Settings />)}>
-                        <Route index element={<Navigate to="cloud-provider" replace />} />
-                        <Route path="cloud-provider" element={page(<SettingsCloudProvider />)} />
+                        <Route index element={<Navigate to="agents" replace />} />
+                        <Route path="agents" element={page(<SettingsAgents />)} />
                         <Route path="infrastructure" element={page(<SettingsInfrastructure />)} />
                         <Route path="github" element={page(<SettingsGitHub />)} />
-                        <Route path="connections" element={page(<SettingsConnections />)} />
-                        <Route path="agents" element={page(<SettingsAgents />)} />
                         <Route path="mcp-servers" element={page(<SettingsMcpServers />)} />
+                        {/* Former tabs, folded into Agents and Infrastructure. */}
+                        <Route path="cloud-provider" element={<LegacyCloudProviderRedirect />} />
+                        <Route
+                          path="connections"
+                          element={<SettingsRedirect to="/settings/agents" />}
+                        />
                         <Route
                           path="agent-keys"
-                          element={<Navigate to="../connections" replace />}
+                          element={<SettingsRedirect to="/settings/agents" />}
                         />
                         <Route
                           path="agent-config"
-                          element={<Navigate to="../connections" replace />}
+                          element={<SettingsRedirect to="/settings/agents" />}
                         />
                         <Route path="notifications" element={page(<SettingsNotifications />)} />
                         <Route path="usage" element={page(<SettingsComputeUsage />)} />

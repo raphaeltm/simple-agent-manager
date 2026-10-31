@@ -1149,9 +1149,17 @@ export function generateApiWorkerEnv(
     // (see task-runner.ts handleNodeAgentReady and verifyNodeAgentHealthy).
     routes: getApiWorkerRoutes(outputs.stackSummary.baseDomain),
 
-    // Workers Observability
+    // Workers Observability: native traces provide dependency timings without an SDK.
     observability: {
       enabled: true,
+      // Callback and terminal URLs can carry credentials in query parameters.
+      redact_query_string: true,
+      traces: {
+        enabled: true,
+        head_sampling_rate: 1,
+        persist: true,
+        ...topLevel.observability?.traces,
+      },
       logs: {
         invocation_logs: true,
         head_sampling_rate: 1,

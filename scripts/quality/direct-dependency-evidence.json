@@ -164,6 +164,11 @@
     "golang.org/x/vuln/cmd/govulncheck": {
       "registryUrl": "https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck",
       "necessity": "Pins the official govulncheck CLI used by the diff-local Go vulnerability gate."
+    },
+    "golang.org/x/sys": {
+      "registryUrl": "https://pkg.go.dev/golang.org/x/sys",
+      "homepageUrl": "https://go.googlesource.com/sys",
+      "necessity": "Uses unix.Openat and unix.Mkdirat for pinned-directory workspace ownership initialization without symlink traversal on Linux and Darwin. Promotes the existing pinned v0.48.0 indirect module to direct use; no version or resolved module change."
     }
   }
 }

@@ -23,7 +23,7 @@ export const agentEmailQueryKeys = {
 export function agentEmailConfigQueryOptions(queryScope: string) {
   return queryOptions({
     queryKey: agentEmailQueryKeys.config(queryScope),
-    queryFn: getAgentEmailConfig,
+    queryFn: ({ signal }) => getAgentEmailConfig(signal),
     staleTime: PROJECT_CREATE_CONFIG_STALE_TIME_MS,
   });
 }
@@ -31,7 +31,7 @@ export function agentEmailConfigQueryOptions(queryScope: string) {
 export function adminAgentEmailQueryOptions(queryScope: string) {
   return queryOptions({
     queryKey: agentEmailQueryKeys.adminStatus(queryScope),
-    queryFn: fetchAdminAgentEmail,
+    queryFn: ({ signal }) => fetchAdminAgentEmail(signal),
     enabled: Boolean(queryScope),
   });
 }
@@ -40,7 +40,9 @@ export function adminAgentEmailQueryOptions(queryScope: string) {
 export function adminAgentEmailSetupQueryOptions(queryScope: string, enabled: boolean) {
   return queryOptions({
     queryKey: agentEmailQueryKeys.setupPlan(queryScope),
-    queryFn: fetchAgentEmailSetupPlan,
+    queryFn: ({ signal }) => fetchAgentEmailSetupPlan(signal),
+    retry: false,
+    staleTime: PROJECT_CREATE_CONFIG_STALE_TIME_MS,
     enabled: Boolean(queryScope) && enabled,
   });
 }

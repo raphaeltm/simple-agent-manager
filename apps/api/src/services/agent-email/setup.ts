@@ -40,9 +40,11 @@ import {
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { IoTimeoutError, withDeadline } from '../fetch-timeout';
 import { agentEmailDomain } from './address';
 import {
   type DnsRecordView,
+  type EmailReadOptions,
   enableSubaddressing,
   enableSubdomainRouting,
   getRoutingSettings,
@@ -51,6 +53,8 @@ import {
   listSendingSubdomains,
   writeRoutingSpf,
 } from './cloudflare-email-api';
+import { DEFAULT_AGENT_EMAIL_SETUP_PLAN_TIMEOUT_MS } from './setting-definitions';
+import { getAgentEmailLimits } from './settings';
 import {
   CLOUDFLARE_ROUTING_SPF,
   consentTokenFor,
@@ -111,10 +115,14 @@ async function withConsent(planned: AgentEmailSetupPlan): Promise<AgentEmailSetu
 }
 
 /** The records that decide where a name's mail goes and who may send as it: MX and SPF. */
-async function listMailRecords(env: Env, name: string): Promise<DnsRecordView[]> {
+async function listMailRecords(
+  env: Env,
+  name: string,
+  options?: EmailReadOptions
+): Promise<DnsRecordView[]> {
   const [mx, txt] = await Promise.all([
-    listDnsRecords(env, 'MX', name),
-    listDnsRecords(env, 'TXT', name),
+    listDnsRecords(env, 'MX', name, options),
+    listDnsRecords(env, 'TXT', name, options),
   ]);
   return [...mx, ...txt.filter((record) => isSpfRecord(record))];
 }
@@ -125,14 +133,35 @@ async function subdomainRoutingOn(env: Env, domain: string): Promise<boolean> {
 
 /** What the setup would do now. Reads Cloudflare only when the deploy prepared agent email. */
 export async function planAgentEmailSetup(env: Env): Promise<AgentEmailSetupPlan> {
-  return (await inspect(env)).plan;
+  const startedAt = Date.now();
+  try {
+    const limits = await withDeadline(
+      () => getAgentEmailLimits(env),
+      DEFAULT_AGENT_EMAIL_SETUP_PLAN_TIMEOUT_MS
+    );
+    const remainingMs = limits.setupPlanTimeoutMs - (Date.now() - startedAt);
+    if (remainingMs <= 0) throw new IoTimeoutError('Agent email setup plan deadline reached');
+    return await withDeadline(
+      async (callerSignal) =>
+        (await inspect(env, { callerSignal, timeoutMs: limits.readTimeoutMs })).plan,
+      remainingMs
+    );
+  } catch (error) {
+    if (!(error instanceof IoTimeoutError)) throw error;
+    return unavailable(
+      `Couldn't verify agent email setup: ${error instanceof Error ? error.message : 'verification failed'}. Try again.`,
+      {
+        domain: agentEmailDomain(env.BASE_DOMAIN),
+      }
+    ).plan;
+  }
 }
 
 function unavailable(reason: string, fields: PlanFields = {}): Inspection {
   return { plan: plan('unavailable', { ...fields, reason }), facts: null };
 }
 
-async function inspect(env: Env): Promise<Inspection> {
+async function inspect(env: Env, options: EmailReadOptions = {}): Promise<Inspection> {
   if (!hasAgentEmailBinding(env)) {
     return unavailable(
       'This deployment has not prepared agent email. Deploy again with a token that has Email Routing and Email Sending permissions; deployment prepares it automatically.'
@@ -146,14 +175,14 @@ async function inspect(env: Env): Promise<Inspection> {
   }
   if (await isAgentEmailOn(env)) return { plan: plan('on', { domain }), facts: null };
 
-  const mainDomain = normalizeName(await getZoneName(env));
-  const [sendingSubdomains, subdomainMx, settings, mainDomainMail, attempt] = await Promise.all([
-    listSendingSubdomains(env),
-    listDnsRecords(env, 'MX', domain),
-    getRoutingSettings(env),
-    listMailRecords(env, mainDomain),
+  const [mainDomain, sendingSubdomains, subdomainMx, settings, attempt] = await Promise.all([
+    getZoneName(env, options).then(normalizeName),
+    listSendingSubdomains(env, options),
+    listDnsRecords(env, 'MX', domain, options),
+    getRoutingSettings(env, options),
     readSetupAttempt(env, domain),
   ]);
+  const mainDomainMail = await listMailRecords(env, mainDomain, options);
   const sending = sendingSubdomains.find((subdomain) => normalizeName(subdomain.name) === domain);
   if (!sending) {
     return unavailable(
@@ -191,7 +220,7 @@ async function inspect(env: Env): Promise<Inspection> {
     if ('reason' in spf) return { plan: plan('refused', { ...base, reason: spf.reason }), facts };
     if (spf.after !== CLOUDFLARE_ROUTING_SPF) {
       try {
-        await verifySpfLookupBudget(spf.after, (domain) => readPublicSpf(env, domain));
+        await verifySpfLookupBudget(spf.after, (domain) => readPublicSpf(env, domain, options));
       } catch (error) {
         return {
           plan: plan('refused', {

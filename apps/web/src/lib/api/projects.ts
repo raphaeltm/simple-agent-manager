@@ -134,7 +134,11 @@ export async function listActiveTasks(): Promise<DashboardActiveTasksResponse> {
 // Projects
 // =============================================================================
 
-export async function listProjects(limit?: number, cursor?: string): Promise<ListProjectsResponse> {
+export async function listProjects(
+  limit?: number,
+  cursor?: string,
+  signal?: AbortSignal
+): Promise<ListProjectsResponse> {
   const params = new URLSearchParams();
   if (limit !== undefined) {
     params.set('limit', String(limit));
@@ -144,7 +148,7 @@ export async function listProjects(limit?: number, cursor?: string): Promise<Lis
   }
 
   const url = params.toString() ? `/api/projects?${params.toString()}` : '/api/projects';
-  return request<ListProjectsResponse>(url);
+  return request<ListProjectsResponse>(url, { signal });
 }
 
 export async function createProject(data: CreateProjectRequest): Promise<Project> {
@@ -167,8 +171,8 @@ export async function getArtifactsEnabled(): Promise<boolean> {
   }
 }
 
-export async function getProject(id: string): Promise<ProjectDetailResponse> {
-  return request<ProjectDetailResponse>(`/api/projects/${id}`);
+export async function getProject(id: string, signal?: AbortSignal): Promise<ProjectDetailResponse> {
+  return request<ProjectDetailResponse>(`/api/projects/${id}`, { signal });
 }
 
 export async function getProjectCredentialAttributionHealth(
@@ -193,9 +197,12 @@ export async function deleteProject(id: string): Promise<{ success: boolean }> {
 }
 
 export async function getProjectRuntimeConfig(
-  projectId: string
+  projectId: string,
+  signal?: AbortSignal
 ): Promise<ProjectRuntimeConfigResponse> {
-  return request<ProjectRuntimeConfigResponse>(`/api/projects/${projectId}/runtime-config`);
+  return request<ProjectRuntimeConfigResponse>(`/api/projects/${projectId}/runtime-config`, {
+    signal,
+  });
 }
 
 export async function upsertProjectRuntimeEnvVar(

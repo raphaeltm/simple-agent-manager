@@ -302,7 +302,14 @@ function agentSettingsHandler(opencodeProvider: 'opencode-zen' | 'opencode-go') 
     if (path.includes('/api/auth')) return respond(200, MOCK_USER);
     if (path === '/api/agents') {
       return respond(200, {
-        agents: [{ id: 'opencode', name: 'OpenCode', description: 'OpenCode agent with multi-provider support' }],
+        agents: [
+          {
+            id: 'opencode',
+            name: 'OpenCode',
+            description: 'OpenCode agent with multi-provider support',
+            configured: true,
+          },
+        ],
       });
     }
     if (path === '/api/model-catalog/opencode') {
@@ -344,7 +351,7 @@ async function openAgentSettings(page: Page, opencodeProvider: 'opencode-zen' | 
   await dismissOnboarding(page);
   await setupAuditRoutes(page, agentSettingsHandler(opencodeProvider));
   await page.goto('/settings/agents');
-  await page.getByTestId('agent-card-opencode').waitFor({ timeout: 15_000 });
+  await page.getByTestId('agent-settings-opencode').waitFor({ timeout: 15_000 });
   await page.waitForTimeout(600);
 }
 
@@ -479,7 +486,7 @@ function surfaceTests() {
     await screenshot(page, 'credential-limits-agent-settings-zen-note', { scopeToProject: true });
 
     await openAgentSettings(page, 'opencode-go');
-    await expect(page.getByTestId('agent-card-opencode')).toBeVisible();
+    await expect(page.getByTestId('agent-settings-opencode')).toBeVisible();
     await expect(page.getByTestId('opencode-zen-balance-note')).toHaveCount(0);
   });
 

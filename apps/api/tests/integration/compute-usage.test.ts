@@ -28,10 +28,9 @@ import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 describe('compute usage metering pipeline', () => {
   const schemaFile = readFileSync(resolve(process.cwd(), 'src/db/schema.ts'), 'utf8');
   const serviceFile = readFileSync(resolve(process.cwd(), 'src/services/compute-usage.ts'), 'utf8');
-  const nodeUsageServiceFile = readFileSync(
-    resolve(process.cwd(), 'src/services/node-usage.ts'),
-    'utf8'
-  );
+  const nodeUsageServiceFile = ['node-usage-calculation.ts', 'node-usage-summaries.ts']
+    .map((file) => readFileSync(resolve(process.cwd(), 'src/services', file), 'utf8'))
+    .join('\n');
   const workspaceCreateFile = readFileSync(
     resolve(process.cwd(), 'src/routes/workspaces/workspace-create.ts'),
     'utf8'
@@ -195,12 +194,20 @@ describe('compute usage metering pipeline', () => {
     });
 
     it('durable fresh-node continuation meters after provider metadata and attachment, before readiness', () => {
-      const durableOwner = readFileSync(resolve(process.cwd(), 'src/durable-objects/node-lifecycle-provisioning.ts'), 'utf8');
-      const continuation = readFileSync(resolve(process.cwd(), 'src/services/direct-workspace-creation.ts'), 'utf8');
+      const durableOwner = readFileSync(
+        resolve(process.cwd(), 'src/durable-objects/node-lifecycle-provisioning.ts'),
+        'utf8'
+      );
+      const continuation = readFileSync(
+        resolve(process.cwd(), 'src/services/direct-workspace-creation.ts'),
+        'utf8'
+      );
       expect(workspaceCreateFile).toContain('await scheduleDirectProvisioning(');
       const provisionCall = durableOwner.indexOf('await provisionNode(');
       expect(provisionCall).toBeGreaterThanOrEqual(0);
-      expect(durableOwner.indexOf('await continueDirectWorkspaceCreation(')).toBeGreaterThan(provisionCall);
+      expect(durableOwner.indexOf('await continueDirectWorkspaceCreation(')).toBeGreaterThan(
+        provisionCall
+      );
 
       const runningCheck = continuation.indexOf("provisionedNode.status !== 'running'");
       const attachCall = continuation.indexOf('await attachPrecreatedWorkspacePlacement(');
