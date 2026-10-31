@@ -3,8 +3,8 @@
  */
 
 import {
-  resourceRequirementsMcpProperty,
   nullableMcpProperty,
+  resourceRequirementsMcpProperty,
 } from './tool-definitions-shared-fields';
 
 export const TASK_LIFECYCLE_TOOLS = [

@@ -2,6 +2,7 @@
  * MCP tool definitions for Project Policies (Phase 4: Policy Propagation).
  */
 import { POLICY_CATEGORIES, POLICY_SCOPES, POLICY_SOURCES } from '@simple-agent-manager/shared';
+
 import { nullableMcpProperty } from './tool-definitions-shared-fields';
 
 const SCOPE_DESCRIPTION =

@@ -13,8 +13,8 @@ import {
 } from '@simple-agent-manager/shared';
 
 import {
-  resourceRequirementsMcpProperty,
   nullableMcpProperty,
+  resourceRequirementsMcpProperty,
 } from './tool-definitions-shared-fields';
 
 const githubConfigProperty = {

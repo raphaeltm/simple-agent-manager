@@ -5,9 +5,9 @@
  * layer: skill fields override the resolved agent profile when a task runs the skill.
  */
 import {
+  nullableMcpProperty,
   SHARED_CONFIG_FIELD_PROPERTIES,
   VALID_VALUES_HINT,
-  nullableMcpProperty,
 } from './tool-definitions-shared-fields';
 
 /** Skill field properties = shared config fields + skill-specific extras. */
