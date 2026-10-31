@@ -53,6 +53,8 @@ Mistral Vibe is installed via `uv` (Python package manager) and requires Python 
 
 ### OpenCode
 
+SAM installs OpenCode v2.2.5 from pinned GitHub release binaries with SHA-256 verification, including Linux x64 and arm64 on glibc and musl. VM devcontainers and Instant sessions use the same installer. ACP runs a private server for each agent process; session data stays in OpenCode’s XDG data directory and is included in sleep/wake snapshots. Custom OpenAI-compatible providers use OpenCode’s bundled implementation and do not need a separate npm dependency install.
+
 | Property                         | Value                                                                                                 |
 | -------------------------------- | ----------------------------------------------------------------------------------------------------- |
 | **Provider**                     | OpenCode (SST)                                                                                        |

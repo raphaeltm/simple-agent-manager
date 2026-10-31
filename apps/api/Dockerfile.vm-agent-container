@@ -11,6 +11,7 @@ RUN bash /tmp/install-codex-runtime.sh /tmp/codex-runtime-linux-amd64.tar.gz /op
 FROM docker.io/library/node:22-bookworm-slim@sha256:d649c27dae7ba0137b3cef5dd75baa422c08dc3d9e3fc0c23dfb172dc3cc6436
 
 COPY container-entrypoints/patch-acp-amp.py /tmp/patch-acp-amp.py
+COPY container-artifacts/install-opencode.sh /tmp/install-opencode.sh
 
 LABEL org.opencontainers.image.title="SAM vm-agent instant runtime" \
       org.opencontainers.image.description="Secret-free runtime image; user assets are applied at ACP session start"
@@ -24,7 +25,12 @@ RUN set -eux; \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" > /etc/apt/sources.list.d/github-cli.list; \
     apt-get update; \
     apt-get install -y --no-install-recommends gh; \
-    npm install -g @agentclientprotocol/claude-agent-acp@0.81.2 @anthropic-ai/claude-code@2.1.281 @agentclientprotocol/codex-acp@2.1.1 @openai/codex@0.160.0 @google/gemini-cli@0.61.0 opencode-ai@1.18.32 @ampcode/cli@0.0.1790261352-g2ab14a; \
+    npm install -g \
+      @agentclientprotocol/claude-agent-acp@0.81.2 @anthropic-ai/claude-code@2.1.281 \
+      @agentclientprotocol/codex-acp@2.1.1 @openai/codex@0.160.0 \
+      @google/gemini-cli@0.61.0 @ampcode/cli@0.0.1790261352-g2ab14a; \
+    sh /tmp/install-opencode.sh; \
+    rm /tmp/install-opencode.sh; \
     curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR=/usr/local/bin sh; \
     UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install mistral-vibe==2.25.8 --python 3.12 --quiet; \
     UV_TOOL_DIR=/opt/uv-tools UV_PYTHON_INSTALL_DIR=/opt/uv-python UV_TOOL_BIN_DIR=/usr/local/bin uv tool install acp-amp==0.1.3 --with agent-client-protocol==0.7.1 --with amp-sdk==0.1.2 --with pydantic==2.12.5 --with pydantic-core==2.41.5 --with annotated-types==0.7.0 --with typing-inspection==0.4.2 --with typing-extensions==4.15.0 --python 3.12 --quiet; \

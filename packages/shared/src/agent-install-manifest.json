@@ -38,10 +38,17 @@
   },
   {
     "agentType": "opencode",
-    "method": "npm",
-    "package": "opencode-ai",
-    "version": "1.18.32",
-    "bin": "opencode"
+    "method": "github-release",
+    "package": "opencode",
+    "version": "2.2.5",
+    "bin": "opencode",
+    "repository": "anomalyco/opencode",
+    "assets": {
+      "linux-x64-baseline": "09f44302c10fd036912f59c81fd1aef5df45dd06f649197f9dfc9bbe2a79614e",
+      "linux-x64-baseline-musl": "889389e99ffa39fa41d512b2c9c15316522d97398fb912503ef667f80e22a827",
+      "linux-arm64": "5a528f42caf576c6cdece6a191eb273d3db54effa5518e0402684d8f8026aeb6",
+      "linux-arm64-musl": "bbf927e3f7a92040f25fd78436c251f41deb25cefac1c906e79c01aa572bf73b"
+    }
   },
   {
     "agentType": "amp",
