@@ -594,12 +594,6 @@ func (h *SessionHost) writeOpenCodeStartupConfig(ctx context.Context, cred *agen
 		"provider", provider, "model", opencodeConfig["model"],
 		"configLen", len(configJSON), "workspaceId", h.config.WorkspaceID)
 
-	if npmPkg := opencodeProviderNeedsNpmPackage(provider); npmPkg != "" {
-		if err := preInstallOpencodeProviderDeps(ctx, startup.containerID, h.config.ContainerUser, npmPkg); err != nil {
-			slog.Warn("Failed to pre-install OpenCode provider dependency (agent may fail silently)",
-				"package", npmPkg, "provider", provider, "error", err)
-		}
-	}
 }
 
 func (h *SessionHost) writeVibeStartupConfig(ctx context.Context, startup *agentStartup) {
