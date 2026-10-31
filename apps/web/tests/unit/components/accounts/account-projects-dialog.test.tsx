@@ -19,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   listAgents: vi.fn(),
   getAgentSettings: vi.fn(),
   createCCAttachment: vi.fn(),
+  deleteCCAttachment: vi.fn(),
   deleteProjectAgentCredential: vi.fn(),
 }));
 
@@ -245,5 +246,37 @@ describe('Settings → Agents: use an existing account in projects', () => {
     fireEvent.change(within(dialog).getByRole('searchbox'), { target: { value: 'defang' } });
     expect(within(dialog).getAllByRole('checkbox')).toHaveLength(1);
     expect(within(dialog).getByRole('checkbox', { name: /Defang Global/ })).toBeInTheDocument();
+  });
+
+  it('pins and unpins an OpenAI-compatible account, which only exists as cc_* rows', async () => {
+    rows = mergeRows(
+      accountRows(WORK),
+      accountRows({
+        id: 'zai',
+        name: 'z.ai endpoint',
+        kind: 'agent',
+        target: 'claude-code',
+        credentialKind: 'openai-compatible',
+        pins: ['p-client'],
+      })
+    );
+    mocks.createCCAttachment.mockResolvedValue({ id: 'att-new' });
+    mocks.deleteCCAttachment.mockResolvedValue({ success: true });
+    renderPage();
+
+    const zai = within(await claudeRow()).getByTestId('account-card-cfg-zai');
+    fireEvent.click(within(zai).getByRole('button', { name: 'Add project' }));
+    const dialog = screen.getByRole('dialog', { name: 'Use z.ai endpoint in projects' });
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /Acme client portal/ }));
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /Marketing site/ }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(mocks.deleteCCAttachment).toHaveBeenCalledWith('att-zai-p-client'));
+    expect(mocks.createCCAttachment).toHaveBeenCalledWith({
+      configurationId: 'cfg-zai',
+      projectId: 'p-web',
+    });
+    // There is no legacy row for this kind to delete.
+    expect(mocks.deleteProjectAgentCredential).not.toHaveBeenCalled();
   });
 });

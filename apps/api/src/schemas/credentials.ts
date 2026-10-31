@@ -73,3 +73,9 @@ export const SaveAgentCredentialSchema = v.object({
 export const CredentialKindBodySchema = v.object({
   credentialKind: CredentialKindSchema,
 });
+
+/** POST /api/cc/attachments — attach a configuration to the caller, or to one project. */
+export const CreateCCAttachmentSchema = v.object({
+  configurationId: v.pipe(v.string(), v.minLength(1)),
+  projectId: v.optional(v.pipe(v.string(), v.minLength(1))),
+});

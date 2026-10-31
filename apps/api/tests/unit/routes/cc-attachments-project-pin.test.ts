@@ -295,4 +295,14 @@ describe('POST /api/cc/attachments — pin an existing account to a project', ()
       { configurationId: 'cfg-defang', consumerTarget: 'claude-code' },
     ]);
   });
+
+  it.each([
+    ['a missing configurationId', { projectId: PROJECT_A }],
+    ['a non-string projectId', { configurationId: 'cfg-sam', projectId: 42 }],
+  ])('rejects %s before touching any pin', async (_label, body) => {
+    const response = await attach(body);
+
+    expect(response.status).toBe(400);
+    expect(await resolvedConfiguration(PROJECT_A)).toBe('cfg-defang');
+  });
 });

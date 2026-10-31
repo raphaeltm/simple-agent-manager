@@ -100,7 +100,8 @@ export function AccountCard({
       onClick: () => setPending({ type: 'disconnect' }),
     });
   }
-  if (account.role === 'pinned' && legacy) {
+  // Agent pins of any kind can be removed (cc-only kinds through their attachment).
+  if (account.role === 'pinned' && (legacy || account.kind === 'agent')) {
     for (const projectId of projectsOf.slice(0, MAX_UNPIN_MENU_ITEMS)) {
       menuItems.push({
         id: `unpin-${projectId}`,

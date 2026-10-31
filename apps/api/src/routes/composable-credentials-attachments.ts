@@ -16,6 +16,7 @@ import { ulid } from '../lib/ulid';
 import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
+import { CreateCCAttachmentSchema, jsonValidator } from '../schemas';
 import { reconcileCapacityPoolsForCredentialMutation } from '../services/capacity-pool-credential-lifecycle';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
@@ -72,15 +73,10 @@ export function registerCCAttachmentRoutes(ccRoutes: Hono<{ Bindings: Env }>): v
   });
 
   /** POST /api/cc/attachments — create an attachment */
-  ccRoutes.post('/attachments', async (c) => {
+  ccRoutes.post('/attachments', jsonValidator(CreateCCAttachmentSchema), async (c) => {
     const db = drizzle(c.env.DATABASE, { schema });
     const userId = getUserId(c);
-    const body = await c.req.json();
-
-    const { configurationId, projectId } = body;
-    if (!configurationId) {
-      throw errors.badRequest('configurationId is required');
-    }
+    const { configurationId, projectId } = c.req.valid('json');
 
     // Verify configuration belongs to user
     const [cfg] = await db
@@ -111,7 +107,9 @@ export function registerCCAttachmentRoutes(ccRoutes: Hono<{ Bindings: Env }>): v
       await requireProjectCapability(db, projectId, userId, 'secret:write');
       await requireActiveAccount(db, userId, cfg);
       // The resolver takes the first project attachment it finds for a consumer, so a
-      // project keeps exactly one: pinning an account replaces the previous pin.
+      // project keeps exactly one: pinning an account replaces the previous pin. A D1
+      // batch is one transaction and D1 runs a database's writes one at a time, so two
+      // concurrent pins cannot interleave: the later batch deletes the earlier row.
       await db.batch([
         db
           .delete(schema.ccAttachments)

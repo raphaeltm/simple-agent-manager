@@ -28,6 +28,7 @@ export {
 
 // Credential schemas
 export {
+  CreateCCAttachmentSchema,
   CreateCredentialSchema,
   CredentialKindBodySchema,
   SaveAgentCredentialSchema,

@@ -49,16 +49,11 @@ export function canUseLegacyRoutes(account: AccountView): boolean {
 
 /**
  * Whether an account can be pinned to projects from the account views: an
- * active, non-default agent account whose pins the legacy routes can remove.
- * Pinning a default changes nothing, and a paused account would halt the project.
+ * active, non-default agent account. Pinning a default changes nothing, and a
+ * paused account would halt the project.
  */
 export function canPinToProjects(account: AccountView): boolean {
-  return (
-    account.kind === 'agent' &&
-    account.role !== 'default' &&
-    account.active &&
-    canUseLegacyRoutes(account)
-  );
+  return account.kind === 'agent' && account.role !== 'default' && account.active;
 }
 
 /** An account a project still uses, discovered only at delete time. */
@@ -134,8 +129,18 @@ async function unpinProject(account: AccountView, projectId: string): Promise<vo
     return;
   }
   const kind = legacyAgentKind(account.credentialKind);
-  if (!kind) throw new Error('This pin can only be removed from Advanced settings.');
-  await deleteProjectAgentCredential(projectId, account.target, kind);
+  if (kind) {
+    await deleteProjectAgentCredential(projectId, account.target, kind);
+    return;
+  }
+  // Kinds the legacy table never held (an OpenAI-compatible endpoint) exist only
+  // as cc_* rows, so removing the attachment is the whole unpin.
+  const attachments = await listCCAttachments();
+  for (const att of attachments) {
+    if (att.configurationId === account.configurationId && att.projectId === projectId) {
+      await deleteCCAttachment(att.id);
+    }
+  }
 }
 
 /** Projects to pin to an account, and projects to move back to the default. */
