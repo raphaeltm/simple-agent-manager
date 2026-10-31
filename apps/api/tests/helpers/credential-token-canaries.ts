@@ -20,6 +20,7 @@ export const credentialTokenCanaries = {
   openaiProjectKey: fixtureCanary('openai-project-key'),
   anthropicApiKey: fixtureCanary('anthropic-api-key'),
   githubFineGrainedPat: fixtureCanary('github-fine-grained-pat'),
+  opencodeApiKey: fixtureCanary('opencode-api-key'),
   samPersonalAccessToken: ['sam_', 'pat_', 'q7Hk2Zx9Lm4P-w8Rt6Vb3Nc1Yd5_Fg0JuE2rT'].join(''),
 } as const;
 

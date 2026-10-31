@@ -68,6 +68,7 @@ var taskCallbackDiagnosticRedactionPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(https?://)([^/\s@]+)@`),
 	regexp.MustCompile(`(?i)([?&](?:access[_-]?token|api[_-]?key|token|secret|password)=)([^&\s]+)`),
 	regexp.MustCompile(`\b(sk-[A-Za-z0-9_-]{12,})\b`),
+	regexp.MustCompile(`\b(oc_sk_[A-Za-z0-9_-]{12,})`), // OpenCode API keys since October 2026
 	regexp.MustCompile(`\b(gh[pousr]_[A-Za-z0-9_]{12,})\b`),
 	regexp.MustCompile(`\b(github_pat_[A-Za-z0-9_]{12,})\b`),
 	regexp.MustCompile(`\b(sam_test_[A-Za-z0-9_-]{12,})\b`),

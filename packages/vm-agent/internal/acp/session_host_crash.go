@@ -27,6 +27,7 @@ var diagnosticRedactionPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{16,}`),
 	regexp.MustCompile(`(?i)((?:api[_-]?key|token|secret|password|authorization)\s*[:=]\s*)("[^"]+"|'[^']+'|[^\s,;]+)`),
 	regexp.MustCompile(`\b(sk-[A-Za-z0-9_-]{12,})\b`),
+	regexp.MustCompile(`\b(oc_sk_[A-Za-z0-9_-]{12,})`), // OpenCode API keys since October 2026
 	regexp.MustCompile(`\b(gh[pousr]_[A-Za-z0-9_]{12,})\b`),
 	regexp.MustCompile(`\b(github_pat_[A-Za-z0-9_]{12,})\b`),
 	regexp.MustCompile(`\b(sam_test_[A-Za-z0-9_-]{12,})\b`),
