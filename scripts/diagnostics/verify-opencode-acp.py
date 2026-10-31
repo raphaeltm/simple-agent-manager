@@ -16,10 +16,14 @@ import threading
 from pathlib import Path
 
 
+PROMPT_METHOD = 'session/prompt'
+
+
 class Provider(http.server.BaseHTTPRequestHandler):
     calls = []
 
     def log_message(self, *_args):
+        # Keep the bounded probe output focused on ACP assertions, not HTTP access logs.
         pass
 
     def do_POST(self):
@@ -148,7 +152,7 @@ def main():
             processes.append(first)
             session = first.request('session/new', {'cwd': str(cwd), 'mcpServers': []})['sessionId']
             prompt = {'sessionId': session, 'prompt': [{'type': 'text', 'text': 'Read fixture.txt with the read tool then say SAM_V2_PROBE_OK.'}]}
-            first.request('session/prompt', prompt)
+            first.request(PROMPT_METHOD, prompt)
             assert_marker(first)
             updates = [x['params'].get('update', {}) for x in first.notifications if x.get('method') == 'session/update']
             assert any(x.get('sessionUpdate') == 'tool_call' for x in updates), 'no tool call'
@@ -160,7 +164,7 @@ def main():
             second.request('session/set_config_option', {'sessionId': session, 'configId': 'model', 'value': 'custom/sam-probe'})
             second.request('session/set_mode', {'sessionId': session, 'modeId': 'build'})
             baseline = len(Provider.calls)
-            second.request('session/prompt', prompt)
+            second.request(PROMPT_METHOD, prompt)
             assert_marker(second)
             assert_history(Provider.calls[baseline:])
             second.close()
@@ -174,7 +178,7 @@ def main():
             processes.append(third)
             third.request('session/load', {'sessionId': session, 'cwd': str(cwd), 'mcpServers': []})
             baseline = len(Provider.calls)
-            third.request('session/prompt', prompt)
+            third.request(PROMPT_METHOD, prompt)
             assert_marker(third)
             assert_history(Provider.calls[baseline:])
             assert any(m.get('role') == 'tool' and 'SAM_V2_PROBE_TOOL_RESULT' in str(m.get('content'))

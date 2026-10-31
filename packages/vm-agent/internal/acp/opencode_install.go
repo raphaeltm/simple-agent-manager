@@ -1,6 +1,6 @@
 package acp
 
-import _ "embed"
+import _ "embed" // Register go:embed support for the shared installer below.
 
 const opencodeVersion = "2.2.5"
 

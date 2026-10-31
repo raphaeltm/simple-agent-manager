@@ -27,12 +27,14 @@ case "$target" in
       apk add --no-cache libstdc++
     fi
     ;;
+  *) : ;;
 esac
 case "$target" in
   linux-x64-baseline) digest=09f44302c10fd036912f59c81fd1aef5df45dd06f649197f9dfc9bbe2a79614e ;;
   linux-x64-baseline-musl) digest=889389e99ffa39fa41d512b2c9c15316522d97398fb912503ef667f80e22a827 ;;
   linux-arm64) digest=5a528f42caf576c6cdece6a191eb273d3db54effa5518e0402684d8f8026aeb6 ;;
   linux-arm64-musl) digest=bbf927e3f7a92040f25fd78436c251f41deb25cefac1c906e79c01aa572bf73b ;;
+  *) echo 'OpenCode: unsupported release target' >&2; exit 1 ;;
 esac
 
 destination=${SAM_AGENT_HOME:+$SAM_AGENT_HOME/bin}
@@ -50,7 +52,7 @@ mkdir -p "$destination"
 stage=$(mktemp -d "$destination/.opencode-install.XXXXXX")
 trap 'rm -rf "$stage"' 0
 trap 'exit 1' HUP INT TERM
-curl -fLsS --retry 2 "https://github.com/anomalyco/opencode/releases/download/v$version/opencode-$target.tar.gz" -o "$stage/archive.tar.gz"
+curl --proto =https --proto-redir =https -fLsS --retry 2 "https://github.com/anomalyco/opencode/releases/download/v$version/opencode-$target.tar.gz" -o "$stage/archive.tar.gz"
 printf '%s  %s\n' "$digest" "$stage/archive.tar.gz" | sha256sum -c -
 tar -xzf "$stage/archive.tar.gz" -C "$stage" opencode
 chmod 755 "$stage/opencode"
