@@ -5,20 +5,22 @@ import { formatOfferingNumber } from '../../lib/compute-pool-offerings';
 export function sourceSettingsLabel(group: MachineGroup): string {
   if (group.kind === 'platform') return 'Platform credentials';
   if (group.credentialSource === 'project') {
-    return group.kind === 'connection' ? 'Project connections' : 'Project credentials';
+    return group.kind === 'connection' ? 'Project accounts' : 'Project credentials';
   }
-  if (group.kind === 'connection') return 'Connections';
-  if (group.kind === 'cloud-provider-key') return 'Cloud Provider settings';
+  if (group.kind === 'connection' || group.kind === 'cloud-provider-key') {
+    return 'Infrastructure settings';
+  }
   return 'Cloud account';
 }
 
 export function sourceSettingsHref(group: MachineGroup, projectId: string | null): string | null {
   if (group.kind === 'platform') return '/admin/credentials';
   if (group.credentialSource === 'project') {
-    return projectId ? `/projects/${projectId}/settings/connections` : null;
+    return projectId ? `/projects/${projectId}/settings/accounts` : null;
   }
-  if (group.kind === 'connection') return '/settings/connections';
-  if (group.kind === 'cloud-provider-key') return '/settings/cloud-provider';
+  if (group.kind === 'connection' || group.kind === 'cloud-provider-key') {
+    return '/settings/infrastructure';
+  }
   return null;
 }
 

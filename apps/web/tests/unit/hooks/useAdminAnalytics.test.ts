@@ -1,7 +1,8 @@
-import { act, renderHook, waitFor } from '@testing-library/react';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { act, renderHook as baseRenderHook, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAdminAnalytics } from '../../../src/hooks/useAdminAnalytics';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 // ---------------------------------------------------------------------------
 // Mock all eight analytics API functions (Phase 3 + Phase 4 forward status + website traffic)
@@ -17,6 +18,7 @@ const mockFetchWebsiteTraffic = vi.fn();
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
+  fetchAnalyticsAiUsage: vi.fn().mockResolvedValue(null),
   fetchAnalyticsDau: (...args: unknown[]) => mockFetchDau(...args),
   fetchAnalyticsEvents: (...args: unknown[]) => mockFetchEvents(...args),
   fetchAnalyticsFunnel: (...args: unknown[]) => mockFetchFunnel(...args),
@@ -31,13 +33,42 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
 // Helpers
 // ---------------------------------------------------------------------------
 const DAU_FIXTURE = { dau: [{ date: '2026-03-27', unique_users: 5 }], periodDays: 30 };
-const EVENTS_FIXTURE = { events: [{ event_name: 'task_submitted', count: 10, unique_users: 5, avg_response_ms: 0 }], period: '7d' };
+const EVENTS_FIXTURE = {
+  events: [{ event_name: 'task_submitted', count: 10, unique_users: 5, avg_response_ms: 0 }],
+  period: '7d',
+};
 const FUNNEL_FIXTURE = { funnel: [{ event_name: 'signup', unique_users: 100 }], periodDays: 30 };
-const ADOPTION_FIXTURE = { totals: [{ event_name: 'task_submitted', count: 42, unique_users: 10 }], trend: [], period: '30d' };
+const ADOPTION_FIXTURE = {
+  totals: [{ event_name: 'task_submitted', count: 42, unique_users: 10 }],
+  trend: [],
+  period: '30d',
+};
 const GEO_FIXTURE = { geo: [{ country: 'US', event_count: 100, unique_users: 20 }], period: '30d' };
-const RETENTION_FIXTURE = { retention: [{ cohortWeek: '2026-03-10', cohortSize: 5, weeks: [{ week: 0, users: 5, rate: 100 }] }], weeks: 12 };
-const FORWARD_STATUS_FIXTURE = { enabled: false, lastForwardedAt: null, destinations: { segment: { configured: false }, ga4: { configured: false } }, events: ['signup', 'login'] };
-const WEBSITE_TRAFFIC_FIXTURE = { hosts: [{ host: 'www.example.com', totalViews: 100, uniqueVisitors: 50, uniqueSessions: 60, sections: [] }], trend: [], period: '7d' };
+const RETENTION_FIXTURE = {
+  retention: [
+    { cohortWeek: '2026-03-10', cohortSize: 5, weeks: [{ week: 0, users: 5, rate: 100 }] },
+  ],
+  weeks: 12,
+};
+const FORWARD_STATUS_FIXTURE = {
+  enabled: false,
+  lastForwardedAt: null,
+  destinations: { segment: { configured: false }, ga4: { configured: false } },
+  events: ['signup', 'login'],
+};
+const WEBSITE_TRAFFIC_FIXTURE = {
+  hosts: [
+    {
+      host: 'www.example.com',
+      totalViews: 100,
+      uniqueVisitors: 50,
+      uniqueSessions: 60,
+      sections: [],
+    },
+  ],
+  trend: [],
+  period: '7d',
+};
 
 function setupSuccessMocks() {
   mockFetchDau.mockResolvedValue(DAU_FIXTURE);
@@ -107,7 +138,7 @@ describe('useAdminAnalytics', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    expect(mockFetchWebsiteTraffic).toHaveBeenCalledWith('7d');
+    expect(mockFetchWebsiteTraffic).toHaveBeenCalledWith('7d', expect.any(AbortSignal));
   });
 
   it('passes the current eventPeriod to fetchAnalyticsEvents', async () => {
@@ -116,7 +147,7 @@ describe('useAdminAnalytics', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    expect(mockFetchEvents).toHaveBeenCalledWith('7d');
+    expect(mockFetchEvents).toHaveBeenCalledWith('7d', expect.any(AbortSignal));
   });
 
   it('passes the current eventPeriod to fetchAnalyticsFeatureAdoption', async () => {
@@ -125,7 +156,7 @@ describe('useAdminAnalytics', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    expect(mockFetchFeatureAdoption).toHaveBeenCalledWith('7d');
+    expect(mockFetchFeatureAdoption).toHaveBeenCalledWith('7d', expect.any(AbortSignal));
   });
 
   it('passes the current eventPeriod to fetchAnalyticsGeo', async () => {
@@ -134,16 +165,16 @@ describe('useAdminAnalytics', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    expect(mockFetchGeo).toHaveBeenCalledWith('7d');
+    expect(mockFetchGeo).toHaveBeenCalledWith('7d', expect.any(AbortSignal));
   });
 
-  it('calls fetchAnalyticsDau with no arguments', async () => {
+  it('forwards cancellation to fetchAnalyticsDau', async () => {
     setupSuccessMocks();
     const { result } = renderHook(() => useAdminAnalytics(0));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    expect(mockFetchDau).toHaveBeenCalledWith();
+    expect(mockFetchDau).toHaveBeenCalledWith(expect.any(AbortSignal));
   });
 
   it('calls fetchAnalyticsRetention with no arguments', async () => {
@@ -152,7 +183,7 @@ describe('useAdminAnalytics', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
-    expect(mockFetchRetention).toHaveBeenCalledWith();
+    expect(mockFetchRetention).toHaveBeenCalledWith(undefined, expect.any(AbortSignal));
   });
 
   // -------------------------------------------------------------------------
@@ -230,14 +261,14 @@ describe('useAdminAnalytics', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(mockFetchEvents).toHaveBeenCalledTimes(1);
-    expect(mockFetchEvents).toHaveBeenLastCalledWith('7d');
+    expect(mockFetchEvents).toHaveBeenLastCalledWith('7d', expect.any(AbortSignal));
 
     act(() => {
       result.current.setEventPeriod('30d');
     });
 
     await waitFor(() => expect(mockFetchEvents).toHaveBeenCalledTimes(2));
-    expect(mockFetchEvents).toHaveBeenLastCalledWith('30d');
+    expect(mockFetchEvents).toHaveBeenLastCalledWith('30d', expect.any(AbortSignal));
   });
 
   it('passes updated period to feature adoption and geo after period change', async () => {
@@ -249,8 +280,10 @@ describe('useAdminAnalytics', () => {
       result.current.setEventPeriod('90d');
     });
 
-    await waitFor(() => expect(mockFetchFeatureAdoption).toHaveBeenLastCalledWith('90d'));
-    expect(mockFetchGeo).toHaveBeenLastCalledWith('90d');
+    await waitFor(() =>
+      expect(mockFetchFeatureAdoption).toHaveBeenLastCalledWith('90d', expect.any(AbortSignal))
+    );
+    expect(mockFetchGeo).toHaveBeenLastCalledWith('90d', expect.any(AbortSignal));
   });
 
   it('updates eventPeriod state immediately', () => {
@@ -275,7 +308,11 @@ describe('useAdminAnalytics', () => {
 
     // After initial load, refresh should use isRefreshing not loading
     let resolveGeo!: (v: typeof GEO_FIXTURE) => void;
-    mockFetchGeo.mockReturnValue(new Promise((res) => { resolveGeo = res; }));
+    mockFetchGeo.mockReturnValue(
+      new Promise((res) => {
+        resolveGeo = res;
+      })
+    );
 
     act(() => {
       result.current.refresh();
@@ -324,7 +361,9 @@ describe('useAdminAnalytics', () => {
 
     const callCountAfterMount = mockFetchDau.mock.calls.length;
 
-    act(() => { vi.advanceTimersByTime(120_000); }); // advance 2 minutes
+    act(() => {
+      vi.advanceTimersByTime(120_000);
+    }); // advance 2 minutes
 
     expect(mockFetchDau.mock.calls.length).toBe(callCountAfterMount); // no extra calls
 
@@ -340,10 +379,33 @@ describe('useAdminAnalytics', () => {
 
     const callsAfterMount = mockFetchDau.mock.calls.length;
 
-    act(() => { vi.advanceTimersByTime(5_100); });
+    act(() => {
+      vi.advanceTimersByTime(5_100);
+    });
 
     await waitFor(() => expect(mockFetchDau.mock.calls.length).toBeGreaterThan(callsAfterMount));
 
     vi.useRealTimers();
   });
+});
+
+vi.mock('../../../src/hooks/useQueryScope', () => ({ useQueryScope: () => 'admin-1' }));
+function renderHook<T>(callback: () => T) {
+  return baseRenderHook(callback, { wrapper: QueryTestWrapper });
+}
+
+it('reveals a fast analytics panel while another source is still pending', async () => {
+  setupSuccessMocks();
+  let resolveDau!: (value: typeof DAU_FIXTURE) => void;
+  mockFetchDau.mockReturnValue(
+    new Promise((resolve) => {
+      resolveDau = resolve;
+    })
+  );
+  const { result } = renderHook(() => useAdminAnalytics(0));
+  await waitFor(() => expect(result.current.events).toEqual(EVENTS_FIXTURE));
+  expect(result.current.loading).toBe(false);
+  expect(result.current.dau).toBeNull();
+  await act(async () => resolveDau(DAU_FIXTURE));
+  await waitFor(() => expect(result.current.dau).toEqual(DAU_FIXTURE));
 });

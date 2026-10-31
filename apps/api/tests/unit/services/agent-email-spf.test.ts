@@ -29,6 +29,7 @@ describe('SPF setup safety', () => {
   });
   it('counts nested includes, not only the top level', async () => {
     const lookup = vi.fn(async (domain: string) => {
+      if (domain === 'extra.example') return 'v=spf1 ip4:192.0.2.2 -all';
       const n = Number(domain.split('.')[0]?.slice(1));
       return n === 10 ? 'v=spf1 ip4:192.0.2.1 -all' : `v=spf1 include:n${n + 1}.example -all`;
     });

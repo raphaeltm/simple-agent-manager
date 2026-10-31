@@ -531,7 +531,7 @@ describe('node-pool metadata exemptions preserve real authority detection', () =
       'return hash([input.machineSize]);',
     ],
     [
-      'apps/api/src/services/default-capacity-pool-candidates.ts',
+      'apps/api/src/services/default-capacity-pool-candidates-values.ts',
       'legacyVmSizeHintForOffering',
       'return input.machineSize;',
     ],
@@ -684,7 +684,7 @@ describe('node-pool metadata exemptions preserve real authority detection', () =
   });
 
   it('follows SQL interpolations to actual legacy or native destination columns', () => {
-    const path = 'apps/api/src/services/default-capacity-pool-candidates.ts';
+    const path = 'apps/api/src/services/default-capacity-pool-candidates-values.ts';
     expect(
       authorityFindings(
         file(

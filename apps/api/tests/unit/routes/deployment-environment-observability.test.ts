@@ -26,12 +26,31 @@ const mockSelect = vi.fn();
 const mockUpdate = vi.fn();
 const mockDelete = vi.fn();
 
+// Physical teardown and SQL guards are exercised in lifecycle-vertical.test.ts.
+vi.mock('../../../src/services/deployment-node-cleanup', () => ({
+  cleanupDeploymentNode: async (...args: unknown[]) => {
+    const result = await mockDeleteNodeResources(...args);
+    return {
+      nodeDeleted: !!result?.nodeFound && !result?.errors?.length,
+      warnings: result?.errors ?? [],
+    };
+  },
+}));
+vi.mock('../../../src/scheduled/node-cleanup/config', () => ({
+  resolveCleanupConfig: () => ({
+    failureBackoffMs: 60000,
+    stoppedHandoffRequestTimeoutMs: 5000,
+    orphanGracePeriodMs: 300000,
+  }),
+}));
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({ select: mockSelect, update: mockUpdate, delete: mockDelete }),
 }));
 
 vi.mock('drizzle-orm', () => ({
   and: (...args: unknown[]) => args,
+  or: (...args: unknown[]) => args,
+  isNull: (value: unknown) => [value, null],
   desc: (value: unknown) => value,
   eq: (a: unknown, b: unknown) => [a, b],
 }));
@@ -196,7 +215,7 @@ describe('deployment environment observability routes', () => {
     mockUpdate.mockImplementation((table: unknown) => ({
       set: vi.fn((values: Record<string, unknown>) => {
         updateCalls.push({ table, values });
-        return { where: vi.fn().mockResolvedValue(undefined) };
+        return { where: vi.fn(() => ({ run: vi.fn(async () => ({ meta: { changes: 1 } })) })) };
       }),
     }));
     mockDelete.mockReturnValue({ where: vi.fn().mockResolvedValue(undefined) });

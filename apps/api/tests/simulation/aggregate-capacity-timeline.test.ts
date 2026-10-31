@@ -29,6 +29,14 @@ const LARGE_NODE = {
   observedHardwareSource: 'observed',
 };
 
+// These fixtures isolate declared-budget boundaries. Live-memory pressure has
+// separate scenarios below; unknown container observations otherwise retain the
+// full outstanding reservation in addition to the simulated host use.
+const IDLE_BUDGET_NODE = {
+  ...LARGE_NODE,
+  lastMetrics: JSON.stringify({ version: 1, cpuLoadAvg1: 0.2, memoryPercent: 0, diskPercent: 10 }),
+};
+
 const FULL_NODE: ResolvedResourceReservation = {
   ...HALF_NODE,
   cpuMillis: 4_000,
@@ -43,7 +51,7 @@ function exactSnapshot(world: AggregateCapacityTimeline, taskId: string): string
 describe('aggregate capacity deterministic virtual timeline', () => {
   it('serializes concurrent full-node reservations', () => {
     const world = new AggregateCapacityTimeline();
-    world.addNode('node-1', LARGE_NODE);
+    world.addNode('node-1', IDLE_BUDGET_NODE);
     world.submit('full-a', FULL_NODE, { preferredNodeId: 'node-1', commitDelayMs: 10 });
     world.submit('full-b', FULL_NODE, { preferredNodeId: 'node-1', commitDelayMs: 10 });
     world.runUntilIdle();
@@ -56,7 +64,7 @@ describe('aggregate capacity deterministic virtual timeline', () => {
 
   it('serializes contenders that both observe the last remaining capacity', () => {
     const world = new AggregateCapacityTimeline();
-    world.addNode('node-1', LARGE_NODE);
+    world.addNode('node-1', IDLE_BUDGET_NODE);
     world.submit('existing', HALF_NODE, { preferredNodeId: 'node-1' });
     world.runUntilIdle();
 
@@ -73,7 +81,7 @@ describe('aggregate capacity deterministic virtual timeline', () => {
   it('packs many small legacy reservations until explicit memory is exhausted', () => {
     const world = new AggregateCapacityTimeline();
     world.addNode('node-large-pack', {
-      ...LARGE_NODE,
+      ...IDLE_BUDGET_NODE,
       observedProviderInstanceVcpuCount: 16,
       observedProviderInstanceMemoryMb: 32_768,
     });
@@ -91,6 +99,36 @@ describe('aggregate capacity deterministic virtual timeline', () => {
     world.submit('small-overflow', small, { preferredNodeId: 'node-large-pack' });
     world.runUntilIdle();
     expect(world.tasks.get('small-overflow')?.status).toBe('retry-wait');
+    world.assertSafety();
+  });
+
+  it('rechecks rising measured memory pressure at commit and retains the exact reservation for retry', () => {
+    const world = new AggregateCapacityTimeline();
+    world.addNode('node-pressure', IDLE_BUDGET_NODE);
+    const exact = { ...HALF_NODE, source: 'task' as const, sourceId: 'task-pressure' };
+    world.submit('pressure', exact, { preferredNodeId: 'node-pressure', commitDelayMs: 10 });
+    expect(world.tasks.get('pressure')?.status).toBe('reserving');
+
+    // The declared reservation still fits, but live usage rises after advisory
+    // selection. The final recheck must defer without creating a workspace.
+    world.nodes.get('node-pressure')!.lastMetrics = JSON.stringify({
+      version: 1,
+      cpuLoadAvg1: 0.2,
+      memoryPercent: 75,
+      diskPercent: 10,
+    });
+    world.runUntilIdle();
+    expect(world.tasks.get('pressure')?.status).toBe('retry-wait');
+    expect(world.activeWorkspaces('node-pressure')).toHaveLength(0);
+    expect(world.tasks.get('pressure')?.reservationJson).toBe(JSON.stringify(exact));
+
+    // Recover naturally once pressure falls, preserving the configured plan.
+    world.nodes.get('node-pressure')!.lastMetrics = IDLE_BUDGET_NODE.lastMetrics;
+    world.heartbeat('node-pressure');
+    world.retry('pressure', { preferredNodeId: 'node-pressure' });
+    world.runUntilIdle();
+    expect(world.tasks.get('pressure')?.status).toBe('running');
+    expect(exactSnapshot(world, 'pressure')).toBe(JSON.stringify(exact));
     world.assertSafety();
   });
 
@@ -212,7 +250,7 @@ describe('aggregate capacity deterministic virtual timeline', () => {
 describe('aggregate capacity simulation calibration', () => {
   it('detects removal of the final capacity recheck', () => {
     const world = new AggregateCapacityTimeline(NO_FINAL_CAPACITY_CAS_POLICY);
-    world.addNode('node-1', LARGE_NODE);
+    world.addNode('node-1', IDLE_BUDGET_NODE);
     world.submit('existing', HALF_NODE, { preferredNodeId: 'node-1' });
     world.runUntilIdle();
     world.submit('contender-a', HALF_NODE, { preferredNodeId: 'node-1', commitDelayMs: 10 });

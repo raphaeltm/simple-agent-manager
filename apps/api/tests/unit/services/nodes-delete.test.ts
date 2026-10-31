@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+// Physical-artifact and placement predicates run against real SQL in
+// node-workspace-retirement-guard.test.ts. This suite isolates provider identity fences.
+vi.mock('../../../src/services/node-workspace-retirement-guard', () => ({
+  requireNodeWorkspaceArtifactsDeleted: vi.fn().mockResolvedValue(undefined),
+}));
+
 const nodeRows: unknown[] = [];
 const updateCalls: Array<Record<string, unknown>> = [];
 let selectCallCount = 0;
@@ -7,6 +13,7 @@ let beforeSelectReturn: ((call: number) => void) | null = null;
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
+    batch: (queries: PromiseLike<unknown>[]) => Promise.all(queries),
     select: () => {
       const selectRows = async () => {
         selectCallCount += 1;

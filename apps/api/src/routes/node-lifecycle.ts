@@ -190,6 +190,9 @@ nodeLifecycleRoutes.post('/:id/ready', async (c) => {
       agentReadyAt: now,
       agentVersion,
       updatedAt: now,
+      cleanupBlockedSince: null,
+      cleanupBlockedReason: null,
+      cleanupBlockedAlertedAt: null,
     })
     .where(
       and(
@@ -478,6 +481,12 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
         error: String(dnsErr),
       });
     }
+  }
+
+  if (updatePayload.status) {
+    updatePayload.cleanupBlockedSince = null;
+    updatePayload.cleanupBlockedReason = null;
+    updatePayload.cleanupBlockedAlertedAt = null;
   }
 
   const updatedRows = await db

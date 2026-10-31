@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
+	"github.com/google/uuid"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)
@@ -67,7 +69,17 @@ func newInteractionRecorder(t *testing.T, createStatus int) *interactionRecorder
 		settles:     make(chan acpInteractionSettleRequest, 8),
 		completions: make(chan string, 8),
 	}
+	// Background settlement retries can outlive a fixture and hit a reused
+	// ephemeral port. Keep each recorder's HTTP namespace unique, even though
+	// fixtures deliberately share workspace IDs and callback credentials.
+	prefix := "/" + uuid.NewString()
 	recorder.server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path, ownFixture := strings.CutPrefix(r.URL.Path, prefix+"/")
+		if !ownFixture {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		r.URL.Path = "/" + path
 		if r.Header.Get("Authorization") != "Bearer callback-token" {
 			t.Errorf("authorization = %q", r.Header.Get("Authorization"))
 			w.WriteHeader(http.StatusUnauthorized)
@@ -112,6 +124,7 @@ func newInteractionRecorder(t *testing.T, createStatus int) *interactionRecorder
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"status": "settled"})
 	}))
+	recorder.server.URL += prefix
 	t.Cleanup(recorder.server.Close)
 	return recorder
 }
@@ -458,8 +471,9 @@ func TestRequestPermissionSettleRetriesNotFoundUntilDelayedCreateCommits(t *test
 			if err := json.NewDecoder(request.Body).Decode(&settle); err != nil {
 				t.Errorf("decode settle: %v", err)
 			}
+			call := settleCalls.Add(1)
 			settles <- settle
-			if settleCalls.Add(1) == 1 {
+			if call == 1 {
 				close(commitCreate)
 				return &http.Response{
 					StatusCode: http.StatusNotFound,
@@ -721,5 +735,56 @@ func TestInteractionAnswerRaceAndReceiptEvictionAreBounded(t *testing.T) {
 	<-second.result
 	if status := host.ResolveAcpInteractionAnswer("first", generation, decision); status != "no_waiter" {
 		t.Fatalf("evicted receipt status = %q", status)
+	}
+}
+
+func TestInteractionRecorderRejectsCallbacksFromReusedFixturePort(t *testing.T) {
+	old := newInteractionRecorder(t, http.StatusCreated)
+	current := newInteractionRecorder(t, http.StatusCreated)
+	oldURL, err := url.Parse(old.server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	currentURL, err := url.Parse(current.server.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Model a late callback to the old namespace arriving at the new listener.
+	oldURL.Host = currentURL.Host
+	settle := acpInteractionSettleRequest{InteractionID: "current-interaction", Generation: "current-generation", Reason: "completed"}
+	body, err := json.Marshal(settle)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, test := range []struct {
+		baseURL    string
+		wantStatus int
+	}{
+		{oldURL.String(), http.StatusNotFound},
+		{current.server.URL, http.StatusOK},
+	} {
+		request, err := http.NewRequest(http.MethodPost, test.baseURL+"/acp-interactions/current-interaction/settle", bytes.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Authorization", "Bearer callback-token")
+		response, err := current.server.Client().Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		response.Body.Close()
+		if response.StatusCode != test.wantStatus {
+			t.Fatalf("callback status = %d, want %d", response.StatusCode, test.wantStatus)
+		}
+		if test.wantStatus == http.StatusNotFound {
+			select {
+			case got := <-current.settles:
+				t.Fatalf("foreign fixture recorded settlement: %+v", got)
+			default:
+			}
+		}
+	}
+	if got := waitSettle(t, current); got.InteractionID != settle.InteractionID || got.Generation != settle.Generation || got.Reason != settle.Reason {
+		t.Fatalf("current fixture settlement = %+v, want %+v", got, settle)
 	}
 }

@@ -42,8 +42,8 @@ export interface AdminSettingsView {
     revision: number;
   }[];
 }
-export function fetchAdminSettings() {
-  return request<AdminSettingsView>('/api/admin/settings');
+export function fetchAdminSettings(signal?: AbortSignal) {
+  return request<AdminSettingsView>('/api/admin/settings', { signal });
 }
 export function patchAdminSettings(
   expectedRevision: number,

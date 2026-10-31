@@ -43,7 +43,9 @@ function getPeriodProjectionInfo(period: AdminCostPeriod): {
 } {
   const now = new Date();
   if (period === 'current-month') {
-    const daysInMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)).getUTCDate();
+    const daysInMonth = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 0)
+    ).getUTCDate();
     return { daysElapsed: Math.max(1, now.getUTCDate()), daysInMonth, isCurrentMonth: true };
   }
   const days = period === '30d' ? 30 : 90;
@@ -122,7 +124,10 @@ adminCostRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin())
 adminCostRoutes.get('/', async (c) => {
   const enabled = c.env.COST_MONITORING_ENABLED !== 'false';
   if (!enabled) {
-    return c.json({ error: 'cost_monitoring_disabled', message: 'Cost monitoring is disabled' }, 404);
+    return c.json(
+      { error: 'cost_monitoring_disabled', message: 'Cost monitoring is disabled' },
+      404
+    );
   }
 
   const period = parsePeriod(c.req.query('period'));
@@ -141,6 +146,12 @@ adminCostRoutes.get('/', async (c) => {
   let cachedRequests = 0;
   let errorRequests = 0;
 
+  // Settle immediately so a compute failure cannot become an unhandled rejection
+  // while the independent gateway walk is in progress.
+  const nodeUsagePromise = getAllUsersNodeUsageSummary(drizzle(c.env.DATABASE, { schema })).then(
+    (value) => ({ value }),
+    (error: unknown) => ({ error })
+  );
   const gatewayId = c.env.AI_GATEWAY_ID;
   if (gatewayId) {
     await iterateGatewayLogs(c.env, gatewayId, periodBounds.startDate, (entry) => {
@@ -196,7 +207,13 @@ adminCostRoutes.get('/', async (c) => {
           userEntry.outputTokens += tokensOut;
           userEntry.costUsd += cost;
         } else {
-          userMap.set(userId, { userId, requests: 1, inputTokens: tokensIn, outputTokens: tokensOut, costUsd: cost });
+          userMap.set(userId, {
+            userId,
+            requests: 1,
+            inputTokens: tokensIn,
+            outputTokens: tokensOut,
+            costUsd: cost,
+          });
         }
       }
     });
@@ -212,7 +229,8 @@ adminCostRoutes.get('/', async (c) => {
   };
 
   // --- Compute Costs ---
-  const vcpuHourCost = parseFloat(c.env.COMPUTE_VCPU_HOUR_COST_USD || '') || DEFAULT_COMPUTE_VCPU_HOUR_COST_USD;
+  const vcpuHourCost =
+    parseFloat(c.env.COMPUTE_VCPU_HOUR_COST_USD || '') || DEFAULT_COMPUTE_VCPU_HOUR_COST_USD;
 
   let compute: ComputeCostSummary = {
     totalNodeHours: 0,
@@ -223,8 +241,9 @@ adminCostRoutes.get('/', async (c) => {
   };
 
   try {
-    const db = drizzle(c.env.DATABASE, { schema });
-    const nodeUsage = await getAllUsersNodeUsageSummary(db);
+    const nodeResult = await nodeUsagePromise;
+    if ('error' in nodeResult) throw nodeResult.error;
+    const nodeUsage = nodeResult.value;
     const totalVcpuHours = nodeUsage.users.reduce((sum, u) => sum + u.totalVcpuHours, 0);
     const totalNodeHours = nodeUsage.users.reduce((sum, u) => sum + u.totalNodeHours, 0);
     const activeNodes = nodeUsage.users.reduce((sum, u) => sum + u.activeNodes, 0);
@@ -236,7 +255,9 @@ adminCostRoutes.get('/', async (c) => {
       vcpuHourCostUsd: vcpuHourCost,
     };
   } catch (err) {
-    log.error('admin_costs.compute_error', { error: err instanceof Error ? err.message : String(err) });
+    log.error('admin_costs.compute_error', {
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   const summary: CostSummaryResponse = {

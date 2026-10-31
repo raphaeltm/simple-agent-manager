@@ -191,6 +191,16 @@ where it says so and the app continues from there.
 | ----------------------------- | ------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | `chat.profileUsageWindowDays` | 30      | 1–365 | Days of each person's own new chats used to show their recent profiles first and to suggest hiding profiles they haven't picked. See [Agents](/docs/guides/agents/#choosing-a-profile-for-a-new-chat). |
 
+## Eviction recovery
+
+These **Operations** settings bound automatic retries after an eviction wake fails to start. Retries preserve the snapshot and source ownership checks.
+
+| Setting                                     | Default | Range        | What it controls                                                                                                                    |
+| ------------------------------------------- | ------- | ------------ | ----------------------------------------------------------------------------------------------------------------------------------- |
+| `operations.evictionRecoveryRetryBatchSize` | 5       | 1–100        | Failed eviction wakes selected per cron sweep                                                                                       |
+| `operations.evictionRecoveryRetryWallMs`    | 10,000  | 1–30,000     | Milliseconds before starting another retry; an in-flight durable wake may finish afterward                                          |
+| `operations.evictionRecoveryRetryDelayMs`   | 60,000  | 1–86,400,000 | Minimum interval after failure or preclaim deferral; deferrals rotate fairly without resetting the failure anchor or attempt budget |
+
 ## Linked work
 
 These **Operations** settings control automatic links between chats, ideas, library files and pull requests. Links that mean work (a chat working on, creating or editing something) are always kept; links that only record reading or viewing are capped.
@@ -292,3 +302,43 @@ from KV, and the stalled-turn check only from its variable. Those releases can n
 anyway ([Update forward, not back](/docs/guides/self-hosting/#option-a-update-self-hosted-instance-workflow-recommended)),
 but if you run one, set the KV switches to the values you want and check them. Rolling back the
 Worker doesn't roll back saved settings, and the tables that hold them must stay.
+
+## Blocked VM cleanup
+
+`operations.nodeCleanupBlockedRetirementMs` controls how long automatic cleanup may remain blocked before SAM retires a stopped workspace VM. The default is 1,800,000 milliseconds (30 minutes); admins can set a whole number from 1 to 86,400,000 milliseconds.
+
+SAM first attempts to preserve existing recovery sources. At the deadline, it retires eligible VMs and records any workspace disk that could not be verified as preserved. Saved backup objects and conversation transcripts remain. Affected conversations show a failure instead of offering an unusable disk restore.
+
+Two related settings control warning and alert frequency: `operations.nodeCleanupRefusalWarnAfterMs` defaults to 300,000 milliseconds (five minutes), and `operations.nodeCleanupOwnershipAlertIntervalMs` defaults to 86,400,000 milliseconds (one day).
+
+Active workspaces and provider ownership checks remain protected. When ownership cannot be proved, SAM keeps the VM and raises an admin-visible error, deduplicated to once per node per day. Blocked nodes show the time and reason in their existing error message on the node list and detail page.
+
+## Read deadlines
+
+Superadmins can search for these controls in **Admin → Settings**. Values are milliseconds, stored in D1; changing them requires no deployment. A shorter limit reduces waiting but can leave verification incomplete when an external service is slow.
+
+| Setting                                     | Default | Allowed range | Applies to                                                                                                   |
+| ------------------------------------------- | ------: | ------------: | ------------------------------------------------------------------------------------------------------------ |
+| `agentEmail.setupPlanTimeoutMs`             |   15000 |    100–120000 | Complete read-only agent-email setup inspection; a deadline returns a partial verification plan.             |
+| `agentEmail.readTimeoutMs`                  |    5000 |     100–30000 | Each Cloudflare/DNS verification read and the admin status request.                                          |
+| `performance.githubRequestTimeoutMs`        |    5000 |    100–120000 | Each GitHub discovery HTTP request, including its response body.                                             |
+| `performance.githubInstallationsDeadlineMs` |   15000 |    100–120000 | Overall GitHub installation discovery route.                                                                 |
+| `performance.providerCatalogTimeoutMs`      |   10000 |    100–120000 | Each provider machine catalog read; an unavailable catalog can use the existing incomplete fallback.         |
+| `performance.projectRecentTimeoutMs`        |    3000 |     100–30000 | Optional recent sessions/activity reads requested with `include=recent`; ordinary project detail omits them. |
+| `performance.externalReadTimeoutMs`         |    5000 |    100–120000 | External Analytics Engine, AI Gateway log and Cloudflare log reads.                                          |
+
+The GitHub route returns `504 GITHUB_TIMEOUT` when its overall deadline expires. Admin agent-email reads return `504 AGENT_EMAIL_TIMEOUT` if configuration, authentication or verification exceeds its deadline. The initial email-settings lookup has a fixed 5000 ms bootstrap ceiling so an unreadable settings store cannot leave the request open. Optional project recent data fails softly to empty arrays, preserving the project response and CLI contract.
+
+### Session and configuration read recovery
+
+`performance.configReadTimeoutMs` defaults to 5,000 ms (range 100–30,000) for shared platform
+configuration and each session-read attempt. `performance.authReadAttempts` defaults to 2
+(range 1–3), and applies only to read-only session verification after a timeout or configuration
+outage. A denial is returned unchanged; exhausting attempts returns an unavailable error, never
+a fabricated signed-out session.
+
+Before D1 can supply these settings, shared configuration storage reads use the 5,000 ms
+bootstrap default. Bootstrap cannot depend on reading its own D1 override. Once settings are
+available, the runtime deadline governs legacy platform configuration and session reads.
+Pending cache loads expire on deadline; late results cannot republish stale data. No deployment
+configuration is required.

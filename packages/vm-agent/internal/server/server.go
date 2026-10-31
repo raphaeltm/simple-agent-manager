@@ -148,6 +148,8 @@ type Server struct {
 	sessionSnapshotLocks  map[string]sessionSnapshotLock
 	sessionSnapshotRunner func(context.Context, *sessionSnapshotHandlerInput) (map[string]interface{}, error)
 
+	workspaceDeletionCancel context.CancelFunc
+	workspaceDeletionDone   chan struct{}
 	workspaceLifecycleMu    sync.Mutex
 	workspaceLifecycleLocks map[string]*workspaceLifecycleEntry
 
@@ -1024,6 +1026,7 @@ func (s *Server) stopAllPortScanners() {
 
 // Start starts the HTTP server (plain HTTP or TLS based on config).
 func (s *Server) Start() error {
+	s.startWorkspaceDeletionReconciler()
 	s.startNodeHealthReporter()
 	s.startAcpHeartbeatReporter()
 	s.startResourceGuard()
@@ -1145,7 +1148,8 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /workspaces/{workspaceId}/stop", s.handleStopWorkspace)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/restart", s.handleRestartWorkspace)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/rebuild", s.handleRebuildWorkspace)
-	mux.HandleFunc("DELETE /workspaces/{workspaceId}", s.handleDeleteWorkspace)
+	mux.HandleFunc("DELETE /workspaces/{workspaceId}", s.handleSafeDeleteWorkspace)
+	mux.HandleFunc("DELETE /workspaces/{workspaceId}/physical-deletion", s.handleSafeDeleteWorkspace)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/agent-sessions", s.handleListAgentSessions)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions", s.handleCreateAgentSession)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/start", s.handleStartAgentSession)

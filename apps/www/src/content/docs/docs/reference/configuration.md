@@ -179,7 +179,7 @@ Sandbox runtime surfaces and is not required for guided login.
 | `CLAUDE_SETUP_TTY_COLUMNS`             | `512`    | PTY width for `claude setup-token`, reducing opaque-token wrapping.                                 |
 | `CLAUDE_SETUP_OUTPUT_BUFFER_BYTES`     | `32768`  | Maximum in-memory Claude PTY output retained for parsing.                                           |
 | `CLAUDE_VERIFICATION_CODE_MAX_LENGTH`  | `1024`   | Maximum accepted length of Claude's browser-displayed `code#state` value.                           |
-| `CLAUDE_SETUP_ERROR_DETAIL_MAX_LENGTH` | `160`    | Maximum sanitized Claude CLI diagnostic length shown to the user.                                   |
+| `CLAUDE_SETUP_ERROR_DETAIL_MAX_LENGTH` | `160`    | Maximum internal CLI error text used for classification; displayed diagnostics are allowlisted.     |
 | `CLAUDE_OAUTH_TOKEN_MAX_LENGTH`        | `8192`   | Maximum captured Claude OAuth token length.                                                         |
 | `SETUP_SESSION_SWEEP_MAX_CANDIDATES`   | `50`     | Maximum expired sessions cleaned up by one scheduled sweep.                                         |
 | `POOL_LEASE_BUFFER_MS`                 | `300000` | Grace period after session TTL before a leaked capacity lease self-prunes.                          |
@@ -492,9 +492,9 @@ Pulumi options `diagnosticIncidentPrefix` (default `diagnostic-incidents`) and `
 | `PLATFORM_FEEDBACK_TRIAGE_BUDGET_DEFER_MS`                     | `86400000`   | Retry delay for per-run budget deferrals                                                                                                                                                  |
 | `PLATFORM_FEEDBACK_INCIDENT_DISPATCH_LEASE_TTL_MS`             | `7200000`    | Dispatch lease before a failed incident trigger handoff can be reclaimed                                                                                                                  |
 | `PLATFORM_FEEDBACK_INCIDENT_AGENT_LEASE_TTL_MS`                | `3600000`    | Agent claim lease before another task can reclaim a private incident                                                                                                                      |
-| `PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS`             | `3`          | Agent-reported failed dispatch attempts before an incident is rejected                                                                                                                    |
+| `PLATFORM_FEEDBACK_INCIDENT_MAX_DISPATCH_ATTEMPTS`             | `3`          | Failed or unfinished agent triage attempts before automatic retries stop                                                                                                                  |
 | `PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS`                | `1800000`    | Minimum elapsed time after terminal resolution/expiry before a newer occurrence can reopen the same signature; set `0` to disable cooldown-only suppression                               |
-| `PLATFORM_FEEDBACK_INCIDENT_RECLAIM_LIMIT`                     | `25`         | Maximum expired dispatch leases reclaimed by one incident sweep                                                                                                                           |
+| `PLATFORM_FEEDBACK_INCIDENT_RECLAIM_LIMIT`                     | `25`         | Maximum expired leases processed per dispatch or claim reclaim pass                                                                                                                       |
 | `PLATFORM_FEEDBACK_INCIDENT_MAX_AGE_MS`                        | `2592000000` | Maximum active incident age before expiry                                                                                                                                                 |
 | `PLATFORM_FEEDBACK_INCIDENT_STALE_SINGLETON_MAX_AGE_MS`        | `259200000`  | Maximum age for one-off pending incidents with no recurrence                                                                                                                              |
 | `PLATFORM_FEEDBACK_INCIDENT_STALE_SINGLETON_EXPIRY_BATCH_SIZE` | `25`         | Maximum stale singleton incidents expired per sweep                                                                                                                                       |
@@ -512,7 +512,7 @@ Pulumi options `diagnosticIncidentPrefix` (default `diagnostic-incidents`) and `
 | `PLATFORM_FEEDBACK_INCIDENT_EVIDENCE_MAX_BYTES`                | `32768`      | Maximum serialized evidence bytes retained per incident                                                                                                                                   |
 | `PLATFORM_FEEDBACK_INCIDENT_RESOLUTION_NOTE_MAX_LENGTH`        | `2000`       | Maximum private incident resolution-note length                                                                                                                                           |
 
-Resolved and expired incident signatures reopen only when a newer occurrence arrives after `PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS`; older lookback-window occurrences remain closed. VM-agent incidents resolved with fix evidence also wait for occurrences from nodes reporting the current `VM_AGENT_REQUIRED_VERSION`, because Worker deploys do not update already-running VM binaries. Dispatch attempts are consumed only when the incident task reports its own failure; platform-side handoff/session failures release the dispatch without incrementing `dispatch_attempts`.
+Resolved and expired incident signatures reopen only when a newer occurrence arrives after `PLATFORM_FEEDBACK_INCIDENT_REOPEN_COOLDOWN_MS`; older lookback-window occurrences remain closed. VM-agent incidents resolved with fix evidence also wait for occurrences from nodes reporting the current `VM_AGENT_REQUIRED_VERSION`, because Worker deploys do not update already-running VM binaries. Dispatch attempts are consumed when an agent reports failure, an unfinished claim expires after its owner stops working, or a dispatched agent sleeps or completes without classifying the incident. After the configured attempt limit, automatic retries stop and the incident records that triage exhausted its budget without resolution. Platform-side handoff/session failures still release the dispatch without consuming an agent attempt. Active investigators retain their claims with bounded renewal; sleeping tasks are left untouched when incident ownership is released. The original maximum incident age remains the upper bound.
 
 Automated triage and superadmin-initiated diagnosis read the same `DEBUG_AGENT_DAILY_TOKEN_LIMIT` value but count against **independent per-feature counters**, so worst-case daily spend across both is twice this value. Automated triage treats budget exhaustion as a retryable deferral: daily exhaustion retries after the next UTC day starts, and per-run exhaustion uses `PLATFORM_FEEDBACK_TRIAGE_BUDGET_DEFER_MS`. Incident trigger agents run from the private grouped backlog and dispatch one agent for a bounded backlog summary, not one agent per occurrence. Automatic incident dispatch ignores pending signatures already linked to open tracked work and warning-only signatures below the configured severity floor, then applies the batch/age gate and per-trigger rate cap before reserving incidents.
 
@@ -1166,7 +1166,7 @@ An out-of-range weight makes the unit fail to load, which would take the slice h
 | `MAX_NODES_PER_USER`                               | `10`               | Max nodes per user                                                                                                                  |
 | `TASK_RUN_NODE_CPU_SHARE_BUDGET_PERCENT`           | `100`              | CPU millicore share budget per node for aggregate workspace reservations                                                            |
 | `TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB`             | `512`              | Memory reserved for the host/VM agent before admitting occupied-node packing                                                        |
-| `TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT`    | `80`               | Fresh node disk telemetry at or above this percent vetoes new VM workspace and deployment admission                                                        |
+| `TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT`    | `80`               | Fresh node disk telemetry at or above this percent vetoes new VM workspace and deployment admission                                 |
 | `TASK_RUN_NODE_METRICS_TTL_MS`                     | `180000`           | Freshness window for occupied-node resource telemetry                                                                               |
 | `TASK_RUN_NODE_CPU_SCORE_WEIGHT_PERCENT`           | `40`               | CPU weight in existing-node load scoring after load average is normalized by vCPU                                                   |
 | `TASK_RUN_NODE_MEMORY_SCORE_WEIGHT_PERCENT`        | `60`               | Memory weight in existing-node load scoring                                                                                         |
@@ -1614,6 +1614,29 @@ VM workspace admission uses persisted `workspaces.resolved_reservation_json` sna
 
 For managed VM nodes, the effective host-memory reserve contract is shared by admission and cloud-init: project scaling overrides win, then `TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB`, then `VM_AGENT_MEMORY_RESERVE_MB`, then the 512 MB default. Cloud-init applies the cgroup hierarchy only on newly provisioned nodes. Existing nodes need a drain/recreate, a VM-agent/bootstrap upgrade flow, or a manual in-place systemd/Docker reconfiguration before they can be treated as protected by the workload-slice cap; SAM does not destructively evict existing workspaces to retrofit this.
 
+## Workspace Cleanup (VM)
+
+SAM keeps workspace deletion pending until the node verifies that its exact container, owned volume and host clone are absent. A failed removal retains its deletion record for bounded retries after an agent restart. Automatic cleanup requires a verified full snapshot of the exact runtime; failed snapshots, uncertain ownership and unpreserved eviction sources remain protected. Explicit permanent deletion follows the user's deletion request.
+
+New nodes receive `NODE_USER_ID` and `NODE_RUNTIME_INCARNATION_ID` from provisioning. Nodes without these identities cannot report strict physical deletion proof. Configured standalone/user roots without a SAM ownership record are preserved rather than recursively deleted.
+
+The VM-agent service accepts `WORKSPACE_DELETION_RETRY_INTERVAL` (default `1m`), `WORKSPACE_DELETION_ATTEMPT_TIMEOUT` (`30s`), `WORKSPACE_DELETION_BATCH_SIZE` (`32`), `WORKSPACE_DELETION_MAX_ENTRIES` (`512`) and `WORKSPACE_DELETION_TOMBSTONE_RETENTION` (`168h`). Completed local deletion receipts are pruned in bounded batches; unfinished intents are retained. Automatic local retries stop when their verified snapshot authority expires. A new permanent deletion request can explicitly authorize the same exact target.
+
+Image-transfer housekeeping runs with the same bounded periodic backstop and uses the following service environment variables:
+
+| Variable                                       | Default                                           | Purpose                                                                       |
+| ---------------------------------------------- | ------------------------------------------------- | ----------------------------------------------------------------------------- |
+| `SAM_IMAGE_TRANSFER_SCRATCH_DIR`               | OS temporary directory plus `sam-image-transfers` | Private directory for SAM-owned publish/deploy archive transfers              |
+| `SAM_IMAGE_TRANSFER_SCRATCH_DRY_RUN`           | `true`                                            | Report abandoned candidates without deleting them                             |
+| `SAM_IMAGE_TRANSFER_SCRATCH_RETENTION`         | `24h`                                             | Minimum age of an abandoned operation; active leases always protect transfers |
+| `SAM_IMAGE_TRANSFER_SCRATCH_MAX_ENTRIES`       | `64`                                              | Directory entries inspected per sweep                                         |
+| `SAM_IMAGE_TRANSFER_SCRATCH_MAX_FILES`         | `128`                                             | Maximum files inspected in one operation                                      |
+| `SAM_IMAGE_TRANSFER_SCRATCH_MAX_RECLAIM_BYTES` | `1073741824`                                      | Maximum candidate/reclaimed bytes per sweep                                   |
+
+The scratch root must be private and owned by the VM-agent user. Every parent directory must be owned by that user or root and must prevent other users from replacing its children; trusted sticky directories such as `/tmp` are supported. Unsafe custom roots or `TMPDIR` paths are rejected before transfer files are created.
+
+Successful transfers still remove their own temporary archives. Housekeeping excludes unmarked legacy files, workspace and snapshot data, user caches, nested Docker volumes, build caches, and current or rollback images. Unknown files, links, mounts and directories remain protected. Disk pressure never authorizes deleting user work.
+
 ## Journald Configuration (VM)
 
 Applied via cloud-init on each node:
@@ -1756,7 +1779,7 @@ Project event MCP tools use the ProjectData event limits above: `PROJECT_EVENT_L
 | `VITE_CACHED_COMMANDS_STALE_TIME_MS`         | `300000`           | Freshness window for cached slash-command registries                                                                                             |
 | `VITE_REPORT_ISSUE_CONFIG_STALE_TIME_MS`     | `300000`           | Freshness window for the report-issue availability flag                                                                                          |
 | `VITE_PROJECT_CREATE_CONFIG_STALE_TIME_MS`   | `300000`           | Freshness window for project-creation config flags                                                                                               |
-| `VITE_CREDENTIAL_LIMITS_STALE_TIME_MS`       | `30000`            | Freshness window for credential usage-limit windows shown in the chat header and Settings → Advanced                                             |
+| `VITE_CREDENTIAL_LIMITS_STALE_TIME_MS`       | `30000`            | Freshness window for credential usage-limit windows shown in the chat header, on account cards in Settings → Agents, and in Settings → Advanced  |
 | `VITE_CREDENTIAL_LIMITS_REFETCH_INTERVAL_MS` | `60000`            | Poll cadence for credential usage-limit windows while the tab is visible (paused in the background)                                              |
 | `VITE_IDEAS_POLL_MS`                         | `30000`            | Ideas list refresh cadence while the tab is visible                                                                                              |
 | `VITE_IDEA_DETAIL_POLL_MS`                   | `30000`            | An idea page's refresh cadence (its state and updates) while the tab is visible                                                                  |

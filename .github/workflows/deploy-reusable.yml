@@ -27,7 +27,7 @@ on:
 
 env:
   NODE_VERSION: '22'
-  GO_VERSION: '1.26.6'
+  GO_VERSION: '1.26.10'
 
 jobs:
   validate:
@@ -1077,7 +1077,7 @@ jobs:
 
       - name: Assert Go version
         if: ${{ inputs.dry_run != true }}
-        run: go version | grep -E '^go version go1\.26\.6 '
+        run: go version | grep -E '^go version go1\.26\.10 '
 
       - name: Prepare Versioned VM Agent Container Artifact
         if: ${{ inputs.dry_run != true }}

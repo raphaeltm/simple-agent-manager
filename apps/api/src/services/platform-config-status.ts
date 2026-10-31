@@ -155,9 +155,16 @@ export async function getPlatformConfigStatus(
   env: Env,
   options: { userId?: string } = {}
 ): Promise<PlatformConfigStatus> {
-  const config = await resolvePlatformConfig(env);
+  const configPromise = resolvePlatformConfig(env);
+  const [config, setupCompleted, feedbackProject] = await Promise.all([
+    configPromise,
+    isSetupCompleted(env),
+    configPromise.then((config) =>
+      feedbackProjectStatus(env, config.feedback.projectId, options.userId)
+    ),
+  ]);
   return {
-    setupCompleted: await isSetupCompleted(env),
+    setupCompleted,
     setupForced: env.SETUP_FORCE === 'true',
     integrations: {
       githubOAuth: integrationStatus(
@@ -195,6 +202,6 @@ export async function getPlatformConfigStatus(
         ['host', 'clientId', 'clientSecret']
       ),
     },
-    feedbackProject: await feedbackProjectStatus(env, config.feedback.projectId, options.userId),
+    feedbackProject,
   };
 }

@@ -178,7 +178,19 @@ function vmPeer(f: Fixture, replacementNode: string, restoreFailure: boolean) {
       return Response.json(
         acceptedPromptResponse(prompt[1]!, String(body.deliveryId), runtimeIdentity, Date.now())
       );
-    if (request.method === 'DELETE') return new Response(null, { status: 204 });
+    if (request.method === 'DELETE') {
+      expect(path).toBe(`/workspaces/${f.workspaceId}/physical-deletion`);
+      expect(body).toMatchObject({
+        workspaceId: f.workspaceId,
+        nodeId: f.nodeId,
+        nodeRuntimeIncarnationId: `incarnation-${f.nodeId}`,
+        userId: f.userId,
+        workspaceGeneration: `generation-${f.workspaceId}`,
+        deletionMode: 'automatic',
+        preservationExpiresAt: expect.any(String),
+      });
+      return Response.json({ ...body, physicalDeleted: true, success: true });
+    }
     if (path.endsWith('/stop') || path.endsWith('/start') || path.endsWith('/agent-sessions'))
       return Response.json({ ok: true });
     throw new Error(`Unexpected test VM endpoint: ${request.method} ${path}`);
@@ -248,6 +260,14 @@ describe('provider limit -> canonical sleep -> full restored continuation', () =
       expect(calls.some((c) => c.path.endsWith('/hibernate'))).toBe(true);
       expect(calls.some((c) => c.path === `/workspaces/${f.workspaceId}/stop`)).toBe(true);
       await deleteSleptWorkspace(f.nodeId, f.taskId);
+      // Completed durable proof remains sufficient after its queue entry is
+      // removed; the helper must not issue a second destructive request.
+      const deletedRequests = calls.filter((c) => c.path.endsWith('/physical-deletion')).length;
+      expect(deletedRequests).toBe(1);
+      await deleteSleptWorkspace(f.nodeId, f.taskId);
+      expect(calls.filter((c) => c.path.endsWith('/physical-deletion'))).toHaveLength(
+        deletedRequests
+      );
       const clock = {
         mockReturnValue: (now: number) => vi.setSystemTime(now),
         mockRestore: () => vi.useRealTimers(),

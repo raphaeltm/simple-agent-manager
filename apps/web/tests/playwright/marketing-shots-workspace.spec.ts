@@ -919,7 +919,7 @@ test('sam-project-settings', async ({ page }) => {
   await expect(page.getByRole('heading', { name: 'Default Agent Type' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Agent Overrides' })).toBeVisible();
   await expect(page.getByText('Claude Code').first()).toBeVisible();
-  await expect(page.getByText('Project override').first()).toBeVisible();
+  await expect(page.getByText('Pinned account').first()).toBeVisible();
   await assertNoCrash(page);
   await assertNoOverflow(page);
 

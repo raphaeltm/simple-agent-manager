@@ -7,10 +7,10 @@ import { Button, Tabs } from '@simple-agent-manager/ui';
 import { useEffect, useRef, useState } from 'react';
 import { Navigate, Outlet, useLocation, useNavigate } from 'react-router';
 
+import { ProjectAccountsSection } from '../components/accounts/ProjectAccountsSection';
 import { DeploymentSettings } from '../components/DeploymentSettings';
 import { McpServersManager } from '../components/mcp-servers/McpServersManager';
 import { DefaultCapacityPoolsPanel } from '../components/project-settings/DefaultCapacityPoolsPanel';
-import { ProjectConnectionsSection } from '../components/project-settings/ProjectConnectionsSection';
 import { ProjectMembersSection } from '../components/project-settings/ProjectMembersSection';
 import { ProjectRuntimeConfigSection } from '../components/project-settings/ProjectRuntimeConfigSection';
 import { RepositoryAccessSettings } from '../components/RepositoryAccessSettings';
@@ -40,7 +40,7 @@ export { ProjectSettingsAgents } from '../components/project-settings/ProjectSet
 const PROJECT_SETTINGS_TABS = [
   { id: 'general', label: 'General', path: 'general' },
   { id: 'access', label: 'Access', path: 'access' },
-  { id: 'connections', label: 'Connections', path: 'connections' },
+  { id: 'accounts', label: 'Accounts', path: 'accounts' },
   { id: 'agents', label: 'Agents', path: 'agents' },
   { id: 'infrastructure', label: 'Infrastructure', path: 'infrastructure' },
   { id: 'runtime', label: 'Runtime', path: 'runtime' },
@@ -54,7 +54,7 @@ export function ProjectSettings() {
     <div className="grid gap-4 min-w-0">
       <div className="grid gap-1 min-w-0">
         <h1 className="sam-type-page-title m-0 text-fg-primary">Project Settings</h1>
-        <div className="text-xs text-fg-muted truncate">{project?.name ?? projectId}</div>
+        <div className="min-h-4 text-xs text-fg-muted truncate">{project?.name}</div>
       </div>
 
       <Tabs
@@ -215,10 +215,12 @@ export function ProjectSettingsAccess() {
   );
 }
 
-export function ProjectSettingsConnections() {
-  const { projectId, reload } = useProjectContext();
+export function ProjectSettingsAccounts() {
+  const { projectId, project } = useProjectContext();
 
-  return <ProjectConnectionsSection projectId={projectId} onUpdated={() => void reload()} />;
+  return (
+    <ProjectAccountsSection projectId={projectId} projectName={project?.name ?? 'This project'} />
+  );
 }
 
 export function ProjectSettingsInfrastructure() {

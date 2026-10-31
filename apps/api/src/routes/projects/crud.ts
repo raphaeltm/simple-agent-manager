@@ -1,28 +1,15 @@
-import type {
-  ListProjectsResponse,
-  ProjectDetailResponse,
-  TaskStatus,
-} from '@simple-agent-manager/shared';
-import { and, count, desc, eq, inArray, isNotNull, lt, sql } from 'drizzle-orm';
+import type { ListProjectsResponse } from '@simple-agent-manager/shared';
+import { and, count, desc, eq, inArray, lt, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { toProjectResponse, toProjectSummaryResponse } from '../../lib/mappers';
+import { toProjectSummaryResponse } from '../../lib/mappers';
 import { parsePositiveInt } from '../../lib/route-helpers';
-import { getCredentialEncryptionKey } from '../../lib/secrets';
-import { ulid } from '../../lib/ulid';
 import { getUserId } from '../../middleware/auth';
-import { errors } from '../../middleware/error';
-import { requireProjectAccess, requireProjectCapability } from '../../middleware/project-auth';
-import {
-  jsonValidator,
-  UpsertProjectRuntimeEnvVarSchema,
-  UpsertProjectRuntimeFileSchema,
-} from '../../schemas';
-import { encrypt } from '../../services/encryption';
+import { requireProjectCapability } from '../../middleware/project-auth';
 import {
   buildProjectLibraryDeleteStatements,
   buildProjectLibraryR2Prefix,
@@ -30,17 +17,11 @@ import {
   getProjectDeleteCleanupBatchSize,
 } from '../../services/file-library';
 import { getRuntimeLimits } from '../../services/limits';
-import * as projectDataService from '../../services/project-data';
-import { getProjectMultiplayerState } from '../../services/project-multiplayer';
 import { deleteWorkspaceResourceHistoryObjectsForProject } from '../../services/workspace-resource-history';
-import {
-  buildProjectRuntimeConfigResponse,
-  byteLength,
-  normalizeProjectFilePath,
-  PROJECT_ENV_KEY_PATTERN,
-} from './_helpers';
 import { registerProjectCreateRoute } from './project-create';
+import { registerProjectDetailRoute } from './project-detail';
 import { registerProjectUpdateRoute } from './project-update';
+import { registerProjectRuntimeConfigRoutes } from './runtime-config';
 
 const crudRoutes = new Hono<{ Bindings: Env }>();
 
@@ -161,299 +142,8 @@ crudRoutes.get('/', async (c) => {
   return c.json(response);
 });
 
-crudRoutes.get('/:id', async (c) => {
-  const userId = getUserId(c);
-  const projectId = c.req.param('id');
-  const db = drizzle(c.env.DATABASE, { schema });
-
-  const project = await requireProjectAccess(db, projectId, userId);
-
-  const taskCountsRows = await db
-    .select({ status: schema.tasks.status, count: count() })
-    .from(schema.tasks)
-    .where(eq(schema.tasks.projectId, project.id))
-    .groupBy(schema.tasks.status);
-
-  const taskCountsByStatus: Partial<Record<TaskStatus, number>> = {};
-  for (const row of taskCountsRows) {
-    taskCountsByStatus[row.status as TaskStatus] = Number(row.count);
-  }
-
-  const linkedWorkspacesRow = await db
-    .select({ count: sql<number>`count(distinct ${schema.tasks.workspaceId})` })
-    .from(schema.tasks)
-    .where(and(eq(schema.tasks.projectId, project.id), isNotNull(schema.tasks.workspaceId)))
-    .limit(1);
-
-  const activeWorkspaceCountRow = await db
-    .select({ count: count() })
-    .from(schema.workspaces)
-    .where(
-      and(eq(schema.workspaces.projectId, project.id), eq(schema.workspaces.status, 'running'))
-    );
-
-  const multiplayerState = await getProjectMultiplayerState(db, project.id);
-
-  // Fetch recent sessions and activity from the project's DO (best-effort)
-  let recentSessions: Record<string, unknown>[] = [];
-  let recentActivity: Record<string, unknown>[] = [];
-  try {
-    const [sessionsResult, activityResult] = await Promise.all([
-      projectDataService.listSessions(c.env, project.id, null, 5, 0),
-      projectDataService.listActivityEvents(c.env, project.id, null, 10, null),
-    ]);
-    recentSessions = sessionsResult.sessions;
-    recentActivity = activityResult.events;
-  } catch (err) {
-    // DO may not exist yet for projects created before this feature
-    log.error('project.do_fetch_failed', {
-      projectId: project.id,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-
-  const response: ProjectDetailResponse = {
-    ...toProjectResponse(project),
-    multiplayerActive: multiplayerState.multiplayerActive,
-    summary: {
-      taskCountsByStatus,
-      linkedWorkspaces: linkedWorkspacesRow[0]?.count ?? 0,
-      activeWorkspaceCount: activeWorkspaceCountRow[0]?.count ?? 0,
-      activeSessionCount: project.activeSessionCount ?? 0,
-      lastActivityAt: project.lastActivityAt ?? null,
-    },
-    recentSessions,
-    recentActivity,
-  } as ProjectDetailResponse & { recentSessions: unknown[]; recentActivity: unknown[] };
-
-  return c.json(response);
-});
-
-crudRoutes.get('/:id/runtime-config', async (c) => {
-  const userId = getUserId(c);
-  const projectId = c.req.param('id');
-  const db = drizzle(c.env.DATABASE, { schema });
-
-  const project = await requireProjectCapability(db, projectId, userId, 'secret:read');
-  const response = await buildProjectRuntimeConfigResponse(db, project);
-  return c.json(response);
-});
-
-crudRoutes.post(
-  '/:id/runtime/env-vars',
-  jsonValidator(UpsertProjectRuntimeEnvVarSchema),
-  async (c) => {
-    const userId = getUserId(c);
-    const projectId = c.req.param('id');
-    const db = drizzle(c.env.DATABASE, { schema });
-    const body = c.req.valid('json');
-    const limits = getRuntimeLimits(c.env);
-
-    const project = await requireProjectCapability(db, projectId, userId, 'secret:write');
-    const envKey = body.key?.trim();
-    if (!envKey || !PROJECT_ENV_KEY_PATTERN.test(envKey)) {
-      throw errors.badRequest('key must match [A-Za-z_][A-Za-z0-9_]*');
-    }
-
-    if (typeof body.value !== 'string') {
-      throw errors.badRequest('value is required');
-    }
-    if (byteLength(body.value) > limits.maxProjectRuntimeEnvValueBytes) {
-      throw errors.badRequest(
-        `value exceeds max size of ${limits.maxProjectRuntimeEnvValueBytes} bytes`
-      );
-    }
-
-    const isSecret = Boolean(body.isSecret);
-    const existingRows = await db
-      .select({ id: schema.projectRuntimeEnvVars.id })
-      .from(schema.projectRuntimeEnvVars)
-      .where(
-        and(
-          eq(schema.projectRuntimeEnvVars.projectId, project.id),
-          eq(schema.projectRuntimeEnvVars.envKey, envKey)
-        )
-      )
-      .limit(1);
-
-    if (!existingRows[0]) {
-      const countRows = await db
-        .select({ count: count() })
-        .from(schema.projectRuntimeEnvVars)
-        .where(and(eq(schema.projectRuntimeEnvVars.projectId, project.id)));
-
-      if ((countRows[0]?.count ?? 0) >= limits.maxProjectRuntimeEnvVarsPerProject) {
-        throw errors.badRequest(
-          `Maximum ${limits.maxProjectRuntimeEnvVarsPerProject} runtime env vars allowed per project`
-        );
-      }
-    }
-
-    const stored = isSecret
-      ? await encrypt(body.value, getCredentialEncryptionKey(c.env))
-      : { ciphertext: body.value, iv: null };
-
-    const now = new Date().toISOString();
-    if (existingRows[0]) {
-      await db
-        .update(schema.projectRuntimeEnvVars)
-        .set({
-          storedValue: stored.ciphertext,
-          valueIv: stored.iv,
-          isSecret,
-          updatedAt: now,
-        })
-        .where(eq(schema.projectRuntimeEnvVars.id, existingRows[0].id));
-    } else {
-      await db.insert(schema.projectRuntimeEnvVars).values({
-        id: ulid(),
-        projectId: project.id,
-        userId,
-        envKey,
-        storedValue: stored.ciphertext,
-        valueIv: stored.iv,
-        isSecret,
-        createdAt: now,
-        updatedAt: now,
-      });
-    }
-
-    const response = await buildProjectRuntimeConfigResponse(db, project);
-    return c.json(response);
-  }
-);
-
-crudRoutes.delete('/:id/runtime/env-vars/:envKey', async (c) => {
-  const userId = getUserId(c);
-  const projectId = c.req.param('id');
-  const envKey = c.req.param('envKey')?.trim();
-  const db = drizzle(c.env.DATABASE, { schema });
-
-  if (!envKey || !PROJECT_ENV_KEY_PATTERN.test(envKey)) {
-    throw errors.badRequest('envKey must match [A-Za-z_][A-Za-z0-9_]*');
-  }
-
-  const project = await requireProjectCapability(db, projectId, userId, 'secret:write');
-
-  await db
-    .delete(schema.projectRuntimeEnvVars)
-    .where(
-      and(
-        eq(schema.projectRuntimeEnvVars.projectId, project.id),
-        eq(schema.projectRuntimeEnvVars.envKey, envKey)
-      )
-    );
-
-  const response = await buildProjectRuntimeConfigResponse(db, project);
-  return c.json(response);
-});
-
-crudRoutes.post('/:id/runtime/files', jsonValidator(UpsertProjectRuntimeFileSchema), async (c) => {
-  const userId = getUserId(c);
-  const projectId = c.req.param('id');
-  const db = drizzle(c.env.DATABASE, { schema });
-  const body = c.req.valid('json');
-  const limits = getRuntimeLimits(c.env);
-  const project = await requireProjectCapability(db, projectId, userId, 'secret:write');
-
-  const path = normalizeProjectFilePath(body.path ?? '');
-  if (path.length > limits.maxProjectRuntimeFilePathLength) {
-    throw errors.badRequest(
-      `path exceeds max length of ${limits.maxProjectRuntimeFilePathLength} characters`
-    );
-  }
-
-  if (typeof body.content !== 'string') {
-    throw errors.badRequest('content is required');
-  }
-  if (byteLength(body.content) > limits.maxProjectRuntimeFileContentBytes) {
-    throw errors.badRequest(
-      `content exceeds max size of ${limits.maxProjectRuntimeFileContentBytes} bytes`
-    );
-  }
-
-  const isSecret = Boolean(body.isSecret);
-  const existingRows = await db
-    .select({ id: schema.projectRuntimeFiles.id })
-    .from(schema.projectRuntimeFiles)
-    .where(
-      and(
-        eq(schema.projectRuntimeFiles.projectId, project.id),
-        eq(schema.projectRuntimeFiles.filePath, path)
-      )
-    )
-    .limit(1);
-
-  if (!existingRows[0]) {
-    const countRows = await db
-      .select({ count: count() })
-      .from(schema.projectRuntimeFiles)
-      .where(and(eq(schema.projectRuntimeFiles.projectId, project.id)));
-
-    if ((countRows[0]?.count ?? 0) >= limits.maxProjectRuntimeFilesPerProject) {
-      throw errors.badRequest(
-        `Maximum ${limits.maxProjectRuntimeFilesPerProject} runtime files allowed per project`
-      );
-    }
-  }
-
-  const stored = isSecret
-    ? await encrypt(body.content, getCredentialEncryptionKey(c.env))
-    : { ciphertext: body.content, iv: null };
-  const now = new Date().toISOString();
-
-  if (existingRows[0]) {
-    await db
-      .update(schema.projectRuntimeFiles)
-      .set({
-        storedContent: stored.ciphertext,
-        contentIv: stored.iv,
-        isSecret,
-        updatedAt: now,
-      })
-      .where(eq(schema.projectRuntimeFiles.id, existingRows[0].id));
-  } else {
-    await db.insert(schema.projectRuntimeFiles).values({
-      id: ulid(),
-      projectId: project.id,
-      userId,
-      filePath: path,
-      storedContent: stored.ciphertext,
-      contentIv: stored.iv,
-      isSecret,
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
-
-  const response = await buildProjectRuntimeConfigResponse(db, project);
-  return c.json(response);
-});
-
-crudRoutes.delete('/:id/runtime/files', async (c) => {
-  const userId = getUserId(c);
-  const projectId = c.req.param('id');
-  const rawPath = c.req.query('path');
-  const db = drizzle(c.env.DATABASE, { schema });
-  const project = await requireProjectCapability(db, projectId, userId, 'secret:write');
-
-  if (!rawPath) {
-    throw errors.badRequest('path query parameter is required');
-  }
-  const path = normalizeProjectFilePath(rawPath);
-
-  await db
-    .delete(schema.projectRuntimeFiles)
-    .where(
-      and(
-        eq(schema.projectRuntimeFiles.projectId, project.id),
-        eq(schema.projectRuntimeFiles.filePath, path)
-      )
-    );
-
-  const response = await buildProjectRuntimeConfigResponse(db, project);
-  return c.json(response);
-});
+registerProjectDetailRoute(crudRoutes);
+registerProjectRuntimeConfigRoutes(crudRoutes);
 
 registerProjectUpdateRoute(crudRoutes);
 

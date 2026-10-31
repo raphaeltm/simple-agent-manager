@@ -1,11 +1,6 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
-import {
-  assertNoOverflow,
-  makeMockUser,
-  screenshot,
-  setupAuditRoutes,
-} from './audit-helpers';
+import { assertNoOverflow, makeMockUser, screenshot, setupAuditRoutes } from './audit-helpers';
 
 const ADMIN_USER = makeMockUser({
   email: 'admin@example.com',
@@ -30,7 +25,15 @@ async function respondJson(route: Route, status: number, body: unknown) {
 }
 
 async function setupMocks(page: Page, config: TrialConfigMock) {
+  await page.addInitScript(
+    (id) => localStorage.setItem(`sam-onboarding-wizard-dismissed-${id}`, 'true'),
+    ADMIN_USER.user.id
+  );
+  await page.routeWebSocket('**/api/notifications/ws', () => undefined);
   await setupAuditRoutes(page, (path, respond) => {
+    if (path === '/api/credentials' || path === '/api/github/installations')
+      return respond(200, []);
+    if (path === '/api/credentials/agent') return respond(200, { credentials: [] });
     if (path === '/api/auth/get-session') {
       return respond(200, ADMIN_USER);
     }
@@ -56,10 +59,18 @@ async function setupStatefulToggleMocks(page: Page, initialConfig: TrialConfigMo
   const patchBodies: unknown[] = [];
   let configGetCount = 0;
 
+  await page.addInitScript(
+    (id) => localStorage.setItem(`sam-onboarding-wizard-dismissed-${id}`, 'true'),
+    ADMIN_USER.user.id
+  );
+  await page.routeWebSocket('**/api/notifications/ws', () => undefined);
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
 
+    if (path === '/api/credentials' || path === '/api/github/installations')
+      return respondJson(route, 200, []);
+    if (path === '/api/credentials/agent') return respondJson(route, 200, { credentials: [] });
     if (path === '/api/auth/get-session') return respondJson(route, 200, ADMIN_USER);
     if (path === '/api/dashboard/active-tasks') return respondJson(route, 200, { tasks: [] });
     if (path === '/api/trial-status') return respondJson(route, 200, { isTrial: false });
@@ -139,7 +150,15 @@ test.describe('AdminTrials', () => {
   });
 
   test('error state', async ({ page }) => {
+    await page.addInitScript(
+      (id) => localStorage.setItem(`sam-onboarding-wizard-dismissed-${id}`, 'true'),
+      ADMIN_USER.user.id
+    );
+    await page.routeWebSocket('**/api/notifications/ws', () => undefined);
     await setupAuditRoutes(page, (path, respond) => {
+      if (path === '/api/credentials' || path === '/api/github/installations')
+        return respond(200, []);
+      if (path === '/api/credentials/agent') return respond(200, { credentials: [] });
       if (path === '/api/auth/get-session') return respond(200, ADMIN_USER);
       if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
       if (path === '/api/trial-status') return respond(200, { isTrial: false });

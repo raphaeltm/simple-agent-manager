@@ -1,10 +1,9 @@
-import type { GitHubInstallation, ProjectDetailResponse } from '@simple-agent-manager/shared';
+import type { ProjectDetailResponse } from '@simple-agent-manager/shared';
 import { createContext, useContext } from 'react';
 
 export interface ProjectContextValue {
   projectId: string;
   project: ProjectDetailResponse | null;
-  installations: GitHubInstallation[];
   reload: () => Promise<void>;
 }
 

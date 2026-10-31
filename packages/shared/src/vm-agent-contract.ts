@@ -86,8 +86,24 @@ export type CreateWorkspaceAgentResponse = z.infer<typeof CreateWorkspaceAgentRe
 // Control Plane -> VM Agent: DELETE /workspaces/:id
 // =============================================================================
 
-export const DeleteWorkspaceAgentResponseSchema = z.object({
-  success: z.boolean(),
+export const WorkspacePhysicalDeletionIdentitySchema = z.object({
+  workspaceId: z.string(),
+  nodeId: z.string(),
+  nodeRuntimeIncarnationId: z.string().min(1),
+  userId: z.string(),
+  workspaceGeneration: z.string(),
+});
+
+export const DeleteWorkspaceAgentRequestSchema = WorkspacePhysicalDeletionIdentitySchema.extend({
+  deletionMode: z.enum(['automatic', 'explicit']),
+  preservationExpiresAt: z.string().datetime().optional(),
+});
+
+export type DeleteWorkspaceAgentRequest = z.infer<typeof DeleteWorkspaceAgentRequestSchema>;
+
+export const DeleteWorkspaceAgentResponseSchema = WorkspacePhysicalDeletionIdentitySchema.extend({
+  success: z.literal(true),
+  physicalDeleted: z.literal(true),
 });
 
 export type DeleteWorkspaceAgentResponse = z.infer<typeof DeleteWorkspaceAgentResponseSchema>;

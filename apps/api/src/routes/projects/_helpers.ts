@@ -1,4 +1,5 @@
-import type { ProjectRuntimeConfigResponse } from '@simple-agent-manager/shared';
+export { buildProjectRuntimeConfigResponse } from './project-runtime-response';
+
 import { and, eq } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 import type { Context } from 'hono';
@@ -161,58 +162,6 @@ export function normalizeProjectFilePath(path: string): string {
   return segments.join('/');
 }
 
-export async function buildProjectRuntimeConfigResponse(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  project: schema.Project
-): Promise<ProjectRuntimeConfigResponse> {
-  const [envRows, fileRows] = await Promise.all([
-    db
-      .select()
-      .from(schema.projectRuntimeEnvVars)
-      .where(eq(schema.projectRuntimeEnvVars.projectId, project.id))
-      .orderBy(schema.projectRuntimeEnvVars.envKey),
-    db
-      .select()
-      .from(schema.projectRuntimeFiles)
-      .where(eq(schema.projectRuntimeFiles.projectId, project.id))
-      .orderBy(schema.projectRuntimeFiles.filePath),
-  ]);
-
-  const envVars: ProjectRuntimeConfigResponse['envVars'] = [];
-  for (const row of envRows) {
-    let value: string | null = row.storedValue;
-    if (row.isSecret) {
-      value = null;
-    }
-    envVars.push({
-      key: row.envKey,
-      value,
-      isSecret: row.isSecret,
-      hasValue: true,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    });
-  }
-
-  const files: ProjectRuntimeConfigResponse['files'] = [];
-  for (const row of fileRows) {
-    let content: string | null = row.storedContent;
-    if (row.isSecret) {
-      content = null;
-    }
-    files.push({
-      path: row.filePath,
-      content,
-      isSecret: row.isSecret,
-      hasValue: true,
-      createdAt: row.createdAt,
-      updatedAt: row.updatedAt,
-    });
-  }
-
-  return { envVars, files };
-}
-
 export async function requireOwnedInstallation(
   db: ReturnType<typeof drizzle<typeof schema>>,
   installationRowId: string,
@@ -269,11 +218,7 @@ export async function assertRepositoryAccess(
   let pageHint: number | undefined;
   try {
     const cached = await env?.KV?.get<{ page: number }>(cacheKey, 'json');
-    if (
-      cached &&
-      Number.isInteger(cached.page) &&
-      cached.page >= 1
-    ) {
+    if (cached && Number.isInteger(cached.page) && cached.page >= 1) {
       pageHint = cached.page;
     }
   } catch {

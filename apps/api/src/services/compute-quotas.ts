@@ -8,14 +8,16 @@
  * BYOC users are exempt.
  */
 import type { CredentialProvider, QuotaSource } from '@simple-agent-manager/shared';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, or, sql } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import { chunk, D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { getCurrentPeriodBounds } from './compute-usage';
 import { calculateNodeVcpuHoursForPeriod } from './node-usage';
+import { calculatePlatformNodeUsageByUser } from './node-usage-grouped';
 
 // =============================================================================
 // Quota Resolution
@@ -121,7 +123,7 @@ export async function checkQuotaForUser(
 export async function userHasOwnCloudCredentials(
   db: DrizzleD1Database<typeof schema>,
   userId: string,
-  targetProvider?: CredentialProvider,
+  targetProvider?: CredentialProvider
 ): Promise<boolean> {
   const conditions = [
     eq(schema.credentials.userId, userId),
@@ -256,9 +258,7 @@ export async function removeUserQuotaOverride(
 
   if (!existing) return false;
 
-  await db
-    .delete(schema.userQuotas)
-    .where(eq(schema.userQuotas.id, existing.id));
+  await db.delete(schema.userQuotas).where(eq(schema.userQuotas.id, existing.id));
 
   log.info('compute-quotas: user quota removed', { userId });
   return true;
@@ -266,7 +266,9 @@ export async function removeUserQuotaOverride(
 
 /** List all user quota overrides with user info and current usage. */
 export async function listUserQuotasWithUsage(
-  db: DrizzleD1Database<typeof schema>
+  db: DrizzleD1Database<typeof schema>,
+  suppliedDefaultQuota?:
+    Awaited<ReturnType<typeof getDefaultQuota>> | ReturnType<typeof getDefaultQuota>
 ): Promise<
   Array<{
     userId: string;
@@ -283,24 +285,28 @@ export async function listUserQuotasWithUsage(
   const periodStart = new Date(start);
   const periodEnd = new Date(end);
 
-  // Get all users with usage in this period
-  const usageRows = await db
-    .select({
-      userId: schema.computeUsage.userId,
-    })
-    .from(schema.computeUsage);
-
-  // Get all user quota overrides
-  const overrides = await db
-    .select()
-    .from(schema.userQuotas);
-
-  // Get the default quota
-  const defaultQuota = await getDefaultQuota(db);
+  const [usageRows, overrides, defaultQuota, usageByUser] = await Promise.all([
+    db
+      .selectDistinct({ userId: schema.computeUsage.userId })
+      .from(schema.computeUsage)
+      .where(
+        and(
+          sql`${schema.computeUsage.startedAt} < ${end}`,
+          or(
+            sql`${schema.computeUsage.endedAt} IS NULL`,
+            sql`${schema.computeUsage.endedAt} > ${start}`
+          )
+        )
+      ),
+    db.select().from(schema.userQuotas),
+    suppliedDefaultQuota ? Promise.resolve(suppliedDefaultQuota) : getDefaultQuota(db),
+    calculatePlatformNodeUsageByUser(db, periodStart, periodEnd),
+  ]);
 
   // Collect all relevant user IDs (those with overrides + those with usage)
   const allUserIds = new Set<string>();
   for (const o of overrides) allUserIds.add(o.userId);
+  for (const userId of usageByUser.keys()) allUserIds.add(userId);
 
   // Get unique user IDs from compute_usage
   const usageUserIds = [...new Set(usageRows.map((r) => r.userId))];
@@ -309,21 +315,27 @@ export async function listUserQuotasWithUsage(
   if (allUserIds.size === 0) return [];
 
   const userIds = [...allUserIds];
-  const users = await db
-    .select({
-      id: schema.users.id,
-      email: schema.users.email,
-      name: schema.users.name,
-      avatarUrl: schema.users.avatarUrl,
-    })
-    .from(schema.users)
-    .where(inArray(schema.users.id, userIds));
+  const users = (
+    await Promise.all(
+      chunk(userIds, D1_MAX_BOUND_PARAMETERS).map((ids) =>
+        db
+          .select({
+            id: schema.users.id,
+            email: schema.users.email,
+            name: schema.users.name,
+            avatarUrl: schema.users.avatarUrl,
+          })
+          .from(schema.users)
+          .where(inArray(schema.users.id, ids))
+      )
+    )
+  ).flat();
 
   const userLookup = new Map(users.map((u) => [u.id, u]));
   const overrideLookup = new Map(overrides.map((o) => [o.userId, o]));
 
   const results = await Promise.all(
-    userIds.map(async (userId) => {
+    userIds.map((userId) => {
       const user = userLookup.get(userId);
       const override = overrideLookup.get(userId);
 
@@ -340,17 +352,9 @@ export async function listUserQuotasWithUsage(
         source = 'unlimited';
       }
 
-      const currentUsage = await calculateNodeVcpuHoursForPeriod(
-        db,
-        userId,
-        periodStart,
-        periodEnd,
-        'platform'
-      );
+      const currentUsage = usageByUser.get(userId) ?? 0;
       const rounded = Math.round(currentUsage * 100) / 100;
-      const percentUsed = limit !== null && limit > 0
-        ? Math.round((rounded / limit) * 100)
-        : null;
+      const percentUsed = limit !== null && limit > 0 ? Math.round((rounded / limit) * 100) : null;
 
       return {
         userId,

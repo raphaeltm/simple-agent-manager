@@ -215,14 +215,15 @@ When the agent can't use its provider account, the chat says so — in a strip a
 or in the failure card under the chat header (expand the card for the next step):
 
 - **A strip: "Agent connection missing."** The agent has no credential it can use for this chat. If
-  you started the chat, select **Open agent connections** and connect the agent under
-  **Settings → Connections**; otherwise ask the person who started it. Then start the work again —
+  you started the chat, select **Open agent accounts** and connect the agent under
+  **Settings → Agents**; otherwise ask the person who started it. Then start the work again —
   **Retry** in the [session tool rail](/docs/guides/chat-features/#the-session-tool-rail), or a new
   chat.
 - **A failure card: "Agent connection rejected."** The provider refused the credential — usually an
-  expired subscription sign-in or a revoked API key. Reconnect it under **Settings → Connections**
-  (the card's **Open agent connections** button, for the person who started the chat). The agent
-  picks up the new connection only when it starts again: in a **Task**, wait for the chat to go to
+  expired subscription sign-in or a revoked API key. Reconnect it under **Settings → Agents** (the
+  card's **Open agent accounts** button, for the person who started the chat), or in the project's
+  **Accounts** tab if the project uses its own account. The agent picks up the new connection only
+  when it starts again: in a **Task**, wait for the chat to go to
   sleep, then reply to wake it; in a **Chat**, select **Sleep** (the moon button above the message
   box), then send a message. The woken session keeps its recorded settings and task behavior.
 - **A failure card: "Model unavailable for this account."** The credential works, but your plan or
@@ -380,6 +381,15 @@ remain retained. Active agent work delays cleanup, and a replacement runtime is 
 older sleep attempt. If cleanup remains stuck, [report it](/docs/guides/reporting-issues/) or contact
 your administrator.
 
+After a VM session saves a verified complete snapshot, SAM queues physical cleanup immediately.
+A new message waits for confirmed removal of the old workspace before starting its replacement.
+Failed or incomplete snapshots do not authorize physical deletion.
+
+An older VM agent may be unable to confirm workspace cleanup after a SAM update. In that case,
+SAM can retire the outdated VM once every remaining workspace has finished sleeping and its saved
+files are verified. Other active workspaces keep the VM protected. The sleeping session can wake
+on a replacement VM after the old VM's removal is confirmed.
+
 A related notice, **"SAM blocked the old sleep attempt because this workspace runtime changed."**,
 means the workspace's runtime was replaced (after a restart or rebuild, for example) while an older
 sleep attempt was finishing. SAM left the replacement alone and kept the previous checkpoint, and the
@@ -445,7 +455,8 @@ whether the cause is something you can fix first:
 
 - **Cloud provider credentials are missing for this wake.** No cloud credential is available to pay
   for a replacement machine — for example, the one the session used was removed. Connect one (yours
-  under **Settings → Connections**, or the project's), then send your message again.
+  under **Settings → Infrastructure**, or the project's in its **Accounts** tab), then send your
+  message again.
 - **No configured compute option can satisfy the stored requirements for this wake.** The machine
   the session was saved with can't be provisioned under your current compute settings — for
   example, an instance type, provider, or region it relied on is no longer in its

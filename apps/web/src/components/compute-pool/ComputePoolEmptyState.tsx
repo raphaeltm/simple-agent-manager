@@ -64,8 +64,8 @@ export function ComputePoolEmptyState({ scope, projectId, shared }: ComputePoolE
 
   const isProject = scope === 'project' && projectId;
   const connectHref = isProject
-    ? `/projects/${projectId}/settings/connections`
-    : '/settings/cloud-provider';
+    ? `/projects/${projectId}/settings/accounts?connect=cloud:any`
+    : '/settings/infrastructure?connect=any';
   const title = sharedReady
     ? isProject
       ? 'This project uses shared machines'

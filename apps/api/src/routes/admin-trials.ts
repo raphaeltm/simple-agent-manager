@@ -13,7 +13,7 @@ import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/a
 import { errors } from '../middleware/error';
 import { requireActiveSettingsSuperadmin } from '../middleware/settings-admin';
 import { jsonValidator } from '../schemas';
-import { readAdminSettings } from '../services/admin-settings';
+import { resolveAdminSettingDetailsMany } from '../services/admin-settings';
 import {
   resolveTrialKillSwitchCacheMs,
   resolveTrialsEnabledKvKey,
@@ -37,9 +37,11 @@ adminTrialsRoutes.use(
 );
 
 adminTrialsRoutes.get('/config', async (c) => {
-  const view = await readAdminSettings(c.env, { fresh: true });
+  const [enabled] = await resolveAdminSettingDetailsMany(c.env, ['trials.enabled'], {
+    fresh: true,
+  });
   return c.json({
-    enabled: view.settings.find((setting) => setting.name === 'trials.enabled')?.value,
+    enabled: enabled?.value,
     kvKey: resolveTrialsEnabledKvKey(c.env),
     cacheTtlMs: resolveTrialKillSwitchCacheMs(c.env),
   });

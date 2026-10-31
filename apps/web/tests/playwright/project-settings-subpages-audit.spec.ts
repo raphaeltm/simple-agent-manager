@@ -470,6 +470,27 @@ test.describe('Project settings sub-pages', () => {
     await setupMocks(page);
   });
 
+  test('Runtime cold deep link renders without waiting for project detail', async ({ page }) => {
+    await page.routeWebSocket('**/api/notifications/ws', () => undefined);
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    page.on('console', (message) => {
+      if (message.type() === 'error') errors.push(message.text());
+    });
+    await page.route(`**/api/projects/${PROJECT_ID}/mcp-connections`, (route) =>
+      route.fulfill({ json: { items: [] } })
+    );
+    await page.goto(`/projects/${PROJECT_ID}/settings/runtime`);
+    await expect(page.getByRole('heading', { name: 'Project Settings' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Environment Variables', exact: true })
+    ).toBeVisible();
+    await assertNoOverflow(page);
+    await expect(page.getByText('Failed to load MCP servers', { exact: false })).toHaveCount(0);
+    await screenshot(page, 'project-settings-runtime-performance');
+    expect(errors).toEqual([]);
+  });
+
   test('default route redirects to General and tab shell remains compact', async ({ page }) => {
     await page.goto(`/projects/${PROJECT_ID}/settings`);
     await expect(page).toHaveURL(new RegExp(`/projects/${PROJECT_ID}/settings/general$`));
@@ -523,7 +544,9 @@ test.describe('Project settings sub-pages', () => {
     );
 
     await page.getByRole('button', { name: 'Edit' }).click();
-    await expect(page.getByRole('heading', { name: 'Allowed machines', exact: true })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Allowed machines', exact: true })
+    ).toBeVisible();
     await page.getByRole('button', { name: 'cpx31 in Ashburn', exact: true }).click();
     await page
       .getByRole('button', { name: 'ccx33 in Hillsboro (not currently offered)', exact: true })

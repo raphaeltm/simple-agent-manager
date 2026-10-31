@@ -49,6 +49,8 @@ export interface ActiveWorkspaceReservationUsage {
   exclusiveCount: number;
   cpuMillis: number;
   memoryMb: number;
+  /** Fresh running-container usage already included in the node memory reading. */
+  observedMemoryCredits?: Array<{ memoryMb: number; collectedAt: number; heartbeatAt: number }>;
   diskMb: number;
 }
 
@@ -60,6 +62,7 @@ export interface WorkspaceReservationCapacityResult {
 
 export interface WorkspaceResourceNode {
   id: string;
+  nodeRole?: string | null;
   nodeClass?: string | null;
   providerInstanceId?: string | null;
   providerInstanceVcpuCount?: number | null;
@@ -298,6 +301,7 @@ export function trustedWorkspaceNodeCapacityColumnsSql(alias = ''): string {
   }
   const prefix = alias ? `${alias}.` : '';
   return `${prefix}node_class AS nodeClass,
+       ${prefix}node_role AS nodeRole,
        ${prefix}provider_instance_id AS providerInstanceId,
        ${prefix}observed_provider_instance_type AS observedProviderInstanceType,
        ${prefix}observed_provider_instance_vcpu_count AS observedProviderInstanceVcpuCount,
@@ -308,6 +312,7 @@ export function trustedWorkspaceNodeCapacityColumnsSql(alias = ''): string {
 
 /** Row shape produced by `trustedWorkspaceNodeCapacityColumnsSql`. */
 export interface TrustedWorkspaceNodeCapacityRow {
+  nodeRole?: string | null;
   nodeClass: string | null;
   providerInstanceId: string | null;
   observedProviderInstanceType: string | null;
@@ -376,23 +381,84 @@ export async function loadActiveWorkspaceReservationUsage(
     const placeholders = chunk.map(() => '?').join(',');
     const rows = await database
       .prepare(
-        `SELECT node_id AS nodeId, resolved_reservation_json AS reservationJson
-         FROM workspaces
-         WHERE node_id IN (${placeholders})
-           AND status IN (${ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL})`
+        `SELECT w.node_id AS nodeId, w.resolved_reservation_json AS reservationJson,
+           w.id AS workspaceId, w.status, w.updated_at AS updatedAt,
+           n.last_metrics AS lastMetrics, n.last_heartbeat_at AS lastHeartbeatAt
+         FROM workspaces w JOIN nodes n ON n.id = w.node_id
+         WHERE w.node_id IN (${placeholders})
+           AND w.status IN (${ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL})`
       )
       .bind(...chunk)
-      .all<{ nodeId: string; reservationJson: string | null }>();
+      .all<{
+        nodeId: string;
+        reservationJson: string | null;
+        workspaceId: string;
+        status: string;
+        updatedAt: string;
+        lastMetrics: string | null;
+        lastHeartbeatAt: string | null;
+      }>();
 
     for (const row of rows.results ?? []) {
       const existing = usage.get(row.nodeId) ?? emptyUsage();
       existing.activeCount += 1;
       addReservationUsage(existing, row.reservationJson);
+      const credit = observedWorkspaceMemoryCredit(row);
+      if (credit) {
+        existing.observedMemoryCredits ??= [];
+        existing.observedMemoryCredits.push(credit);
+      }
       usage.set(row.nodeId, existing);
     }
   }
 
   return usage;
+}
+
+/** Credit only a unique running-container observation from this lifecycle and heartbeat.
+ * Missing/invalid observations leave the complete reservation outstanding. */
+function observedWorkspaceMemoryCredit(row: {
+  workspaceId: string;
+  status: string;
+  updatedAt: string;
+  reservationJson: string | null;
+  lastMetrics: string | null;
+  lastHeartbeatAt: string | null;
+}): { memoryMb: number; collectedAt: number; heartbeatAt: number } | null {
+  const reservation = parseResolvedResourceReservation(row.reservationJson);
+  if (!reservation || row.status !== 'running' || !row.lastMetrics) return null;
+  const heartbeat = parseTimestampMs(row.lastHeartbeatAt);
+  const updated = parseTimestampMs(row.updatedAt);
+  if (heartbeat === null || updated === null) return null;
+  try {
+    const metrics = JSON.parse(row.lastMetrics);
+    if (!Array.isArray(metrics?.workspaceMemory)) return null;
+    const matches = metrics.workspaceMemory.filter(
+      (entry: unknown) =>
+        entry !== null &&
+        typeof entry === 'object' &&
+        (entry as Record<string, unknown>).workspaceId === row.workspaceId
+    );
+    if (matches.length !== 1) return null;
+    const metric = matches[0];
+    const collected =
+      typeof metric.collectedAt === 'string' ? parseTimestampMs(metric.collectedAt) : null;
+    // Reject samples from a predecessor lifecycle or a future heartbeat.
+    if (collected === null || collected < updated || collected > heartbeat) return null;
+    if (
+      typeof metric.memoryUsageBytes !== 'number' ||
+      !Number.isFinite(metric.memoryUsageBytes) ||
+      metric.memoryUsageBytes < 0
+    )
+      return null;
+    return {
+      memoryMb: Math.min(reservation.memoryMb, metric.memoryUsageBytes / (1024 * 1024)),
+      collectedAt: collected,
+      heartbeatAt: heartbeat,
+    };
+  } catch {
+    return null;
+  }
 }
 
 export function aggregateWorkspaceReservationRows(
@@ -465,6 +531,40 @@ export function evaluateWorkspaceReservationCapacity(
   }
   if (memoryMb !== null && active.memoryMb + request.memoryMb > usableMemoryMb(memoryMb, policy)) {
     reasons.push('memory budget would be exceeded after host reserve');
+  }
+  // The heartbeat already includes observed container usage. Charge only the
+  // unobserved remainder of existing reservations, then the full new start.
+  // Newly inserted creating rows never receive credit, so final SQL claims
+  // cannot repeatedly spend the same heartbeat headroom. Samples are not
+  // synchronous or hard runtime limits; cap credit at host usage as well.
+  const heartbeat = parseTimestampMs(node.lastHeartbeatAt);
+  const observedMemoryCreditMb = (active.observedMemoryCredits ?? []).reduce(
+    (total, credit) =>
+      heartbeat !== null &&
+      credit.heartbeatAt === heartbeat &&
+      credit.collectedAt >= heartbeat - policy.metricsTtlMs &&
+      credit.collectedAt <= heartbeat
+        ? total + credit.memoryMb
+        : total,
+    0
+  );
+  const measuredMemoryMb =
+    memoryMb !== null && metrics?.memoryPercent != null
+      ? (memoryMb * metrics.memoryPercent) / 100
+      : null;
+  if (
+    // Deployments use separate atomic admission and lack workspace observations.
+    // Keep this new workspace-only headroom guard aligned with its SQL claim.
+    node.nodeRole !== 'deployment' &&
+    memoryMb !== null &&
+    measuredMemoryMb !== null &&
+    measuredMemoryMb +
+      active.memoryMb -
+      Math.min(measuredMemoryMb, observedMemoryCreditMb) +
+      request.memoryMb >
+      usableMemoryMb(memoryMb, policy)
+  ) {
+    reasons.push('measured memory headroom would be exceeded after outstanding reservations');
   }
   if (diskGb !== null && active.diskMb + request.diskMb > diskGb * 1024) {
     reasons.push('disk reservation budget would be exceeded');

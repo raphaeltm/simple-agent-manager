@@ -1,7 +1,8 @@
 name = "workspaces-api"
 main = "src/index.ts"
 compatibility_date = "2026-01-01"
-compatibility_flags = ["nodejs_compat"]
+# Report handled multi-tick stream failures after the microtask checkpoint.
+compatibility_flags = ["nodejs_compat", "unhandled_rejection_after_microtask_checkpoint"]
 port = 8787
 
 # Paid Workers and sub-hour Cron Triggers default to 30s CPU. Declaring that

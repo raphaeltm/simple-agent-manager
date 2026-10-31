@@ -22,6 +22,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/workspace/vm-agent/internal/transferscratch"
 )
 
 // PushCredentials are the short-lived registry credentials minted by the control
@@ -296,11 +298,16 @@ func (o *Orchestrator) exportAndUploadServices(ctx context.Context, art *BuildAr
 	for _, upload := range init.Uploads {
 		uploadsByService[upload.ServiceName] = upload
 	}
-	dir, err := os.MkdirTemp("", "sam-publish-artifacts-*")
+	op, err := transferscratch.NewOperation("publish")
 	if err != nil {
 		return nil, fmt.Errorf("publish: create temp dir: %w", err)
 	}
-	defer os.RemoveAll(dir)
+	defer func() {
+		if err := op.Close(); err != nil {
+			o.log.Warn("publish: scratch cleanup pending", "error", err)
+		}
+	}()
+	dir := op.Path
 
 	releases := make([]ServiceRelease, 0, len(art.Services))
 	for i := range art.Services {

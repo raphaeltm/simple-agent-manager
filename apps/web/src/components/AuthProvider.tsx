@@ -49,6 +49,8 @@ interface AuthContextValue {
   isApproved: boolean;
   /** True when BetterAuth is re-checking the session (e.g. after tab regains focus) */
   isRefetching: boolean;
+  sessionError?: string | null;
+  retrySession?: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -69,7 +71,7 @@ interface AuthProviderProps {
  * All authorization decisions are enforced server-side via requireAuth().
  */
 export function AuthProvider({ children }: AuthProviderProps) {
-  const { data: session, isPending, error, isRefetching } = useSession();
+  const { data: session, isPending, error, isRefetching, refetch } = useSession();
   const lastGoodSessionRef = useRef<typeof session>(null);
   const [githubReauthMessage, setGitHubReauthMessage] = useState<string | null>(null);
   const [activeCacheNamespace, setActiveCacheNamespace] = useState<string | null | undefined>(
@@ -109,11 +111,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
   }, []);
 
   const nextCacheNamespace = buildLibraryCacheNamespace(enrichedUser?.id);
-  const canResolveCacheNamespace = !isPending || Boolean(enrichedUser?.id);
+  // A failed cold verification is unknown, not a confirmed signed-out identity.
+  const canResolveCacheNamespace = Boolean(enrichedUser?.id) || (!isPending && !error);
+  const canShowSignedOutVerificationError =
+    activeCacheNamespace === null && !isPending && Boolean(error) && !enrichedUser?.id;
   const isCacheNamespaceTransitioning =
     activeCacheNamespace === undefined
       ? canResolveCacheNamespace
-      : !canResolveCacheNamespace || activeCacheNamespace !== nextCacheNamespace;
+      : (!canResolveCacheNamespace && !canShowSignedOutVerificationError) ||
+        activeCacheNamespace !== nextCacheNamespace;
 
   // Rehydrate the persisted query cache for the RESOLVED namespace (never the
   // in-flight one). Holding the spinner over this is what makes a reload paint
@@ -201,13 +207,26 @@ export function AuthProvider({ children }: AuthProviderProps) {
       isSuperadmin,
       isApproved,
       isRefetching: effectiveIsRefetching,
+      sessionError: error ? 'Session verification is temporarily unavailable.' : null,
+      retrySession: () => {
+        void refetch();
+      },
     }),
-    [enrichedUser, isPending, isAuthenticated, isSuperadmin, isApproved, effectiveIsRefetching]
+    [
+      enrichedUser,
+      isPending,
+      isAuthenticated,
+      isSuperadmin,
+      isApproved,
+      effectiveIsRefetching,
+      error,
+      refetch,
+    ]
   );
 
   return (
     <AuthContext.Provider value={value}>
-      {isCacheNamespaceTransitioning ? null : isRestoringPersistedQueryCache ? (
+      {isCacheNamespaceTransitioning || isRestoringPersistedQueryCache ? (
         // Keep the SAME affordance ProtectedRoute was already showing while the
         // session resolved, so restoring the persisted cache continues one
         // uninterrupted spinner instead of unmounting it into a silent blank

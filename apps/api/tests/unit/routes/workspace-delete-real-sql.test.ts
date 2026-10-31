@@ -120,8 +120,8 @@ describe('DELETE /api/workspaces/:id deletion outcomes — real SQL', () => {
     sqlite
       .prepare(
         `INSERT INTO workspaces
-           (id, node_id, user_id, name, repository, branch, status, vm_size, vm_location)
-         VALUES (?, ?, ?, ?, ?, ?, 'stopped', 'small', 'nbg1')`
+           (id, node_id, user_id, name, repository, branch, status, vm_size, vm_location, eviction_generation)
+         VALUES (?, ?, ?, ?, ?, ?, 'stopped', 'small', 'nbg1', 'generation-delete-route')`
       )
       .run(WORKSPACE_ID, NODE_ID, USER_ID, 'Delete route workspace', 'example/repository', 'main');
 
@@ -131,7 +131,9 @@ describe('DELETE /api/workspaces/:id deletion outcomes — real SQL', () => {
     mocks.signNodeManagementToken.mockResolvedValue({ token: 'signed-test-token' });
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response(null, { status: 204 }))
+      vi.fn(async (_url: string | URL | Request, init?: RequestInit) =>
+        Response.json({ ...JSON.parse(String(init?.body)), success: true, physicalDeleted: true })
+      )
     );
 
     env = {
@@ -312,9 +314,13 @@ describe('DELETE /api/workspaces/:id deletion outcomes — real SQL', () => {
   it('returns 202 when VM proof exists but a concurrent status write defers finalization', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => {
+      vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
         setWorkspaceStatus('stopped');
-        return new Response(null, { status: 204 });
+        return Response.json({
+          ...JSON.parse(String(init?.body)),
+          success: true,
+          physicalDeleted: true,
+        });
       })
     );
 
@@ -359,6 +365,7 @@ describe('DELETE /api/workspaces/:id deletion outcomes — real SQL', () => {
     });
     expect(workspaceStatus()).toBeNull();
     expect(globalThis.fetch).toHaveBeenCalledOnce();
+    expect(vi.mocked(globalThis.fetch).mock.calls[0]?.[0]).toContain('/physical-deletion');
     expect(mocks.confirmWorkspaceDeletion).toHaveBeenCalledWith(WORKSPACE_ID);
     expect(mocks.scheduleWorkspaceDeletion).not.toHaveBeenCalled();
   });

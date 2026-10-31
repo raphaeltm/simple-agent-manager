@@ -1,6 +1,10 @@
 import * as v from 'valibot';
 
+import type { Env } from '../env';
 import { resolveD1BindingIdentity } from '../lib/d1-session';
+import type { AdminSettingName } from './admin-settings-registry';
+import { DEFAULT_CONFIG_READ_TIMEOUT_MS } from './config-read-deadline';
+import { withDeadline } from './fetch-timeout';
 
 /** Safety ceiling, not a deploy-time tunable: no instance may hide edits longer than this. */
 export const ADMIN_SETTINGS_CACHE_MAX_MS = 60_000;
@@ -23,7 +27,12 @@ export class AdminSettingsUnavailableError extends Error {
 interface BindingCache {
   generation: number;
   snapshot?: { rows: AdminSettingOverrideRow[]; startedAt: number; expiresAt: number };
-  inFlight?: { generation: number; startedAt: number; promise: Promise<AdminSettingOverrideRow[]> };
+  inFlight?: {
+    generation: number;
+    startedAt: number;
+    deadlineAt: number;
+    promise: Promise<AdminSettingOverrideRow[]>;
+  };
 }
 
 const overrideRowsSchema = v.array(
@@ -100,7 +109,8 @@ export class AdminSettingsCache {
   async read(
     database: D1Database,
     fresh = false,
-    maxAgeMs = this.ttlMs
+    maxAgeMs = this.ttlMs,
+    readTimeoutMs = DEFAULT_CONFIG_READ_TIMEOUT_MS
   ): Promise<AdminSettingOverrideRow[]> {
     const ttlMs =
       Number.isFinite(maxAgeMs) && maxAgeMs >= 0 ? Math.min(maxAgeMs, this.ttlMs) : this.ttlMs;
@@ -115,7 +125,7 @@ export class AdminSettingsCache {
     const maxReadAttempts = 3;
     for (let attempt = 0; attempt < maxReadAttempts; attempt += 1) {
       const attemptGeneration = state.generation;
-      const rows = await this.readAttempt(primary, state, useCache, ttlMs);
+      const rows = await this.readAttempt(primary, state, useCache, ttlMs, readTimeoutMs);
       if (this.resetGeneration !== resetGeneration) throw new AdminSettingsUnavailableError();
       if (state.generation !== attemptGeneration) continue;
       if (rows) return rows;
@@ -129,13 +139,20 @@ export class AdminSettingsCache {
     return structuredClone(state.snapshot.rows);
   }
 
-  private flight(primary: D1Database, state: BindingCache, useCache: boolean) {
+  private flight(
+    primary: D1Database,
+    state: BindingCache,
+    useCache: boolean,
+    readTimeoutMs: number
+  ) {
     const existing = useCache ? state.inFlight : undefined;
-    if (existing?.generation === state.generation) return existing;
+    if (existing?.generation === state.generation && this.now() < existing.deadlineAt)
+      return existing;
     const flight = {
       generation: state.generation,
       startedAt: this.now(),
-      promise: this.load(primary),
+      deadlineAt: this.now() + readTimeoutMs,
+      promise: withDeadline(() => this.load(primary), readTimeoutMs),
     };
     if (useCache) state.inFlight = flight;
     return flight;
@@ -146,16 +163,21 @@ export class AdminSettingsCache {
     primary: D1Database,
     state: BindingCache,
     useCache: boolean,
-    ttlMs: number
+    ttlMs: number,
+    readTimeoutMs: number
   ) {
     const snapshot = this.liveSnapshot(state, useCache, ttlMs);
     if (snapshot) return snapshot;
-    const flight = this.flight(primary, state, useCache);
+    const flight = this.flight(primary, state, useCache, readTimeoutMs);
     try {
       const rows = await flight.promise;
       if (state.generation !== flight.generation) return undefined;
+      if (useCache && state.inFlight !== flight) {
+        if (state.inFlight || state.snapshot) return undefined;
+        throw new AdminSettingsUnavailableError();
+      }
       // Slow responses cannot extend freshness beyond the start of their read.
-      if (ttlMs > 0 && this.now() >= flight.startedAt + ttlMs)
+      if (this.now() >= flight.deadlineAt || (ttlMs > 0 && this.now() >= flight.startedAt + ttlMs))
         throw new AdminSettingsUnavailableError();
       if (useCache)
         state.snapshot = {
@@ -166,10 +188,39 @@ export class AdminSettingsCache {
       return structuredClone(rows);
     } catch {
       if (state.generation !== flight.generation) return undefined;
-      delete state.snapshot;
+      if (useCache && state.inFlight !== flight) {
+        if (state.inFlight || state.snapshot) return undefined;
+        throw new AdminSettingsUnavailableError();
+      }
+      if (useCache && state.inFlight === flight) delete state.snapshot;
       throw new AdminSettingsUnavailableError();
     } finally {
       if (state.inFlight === flight) delete state.inFlight;
     }
   }
+}
+
+export const LEGACY_KV_CACHE_MAX_MS = 30_000;
+function isOperationalSetting(name: AdminSettingName): boolean {
+  return name === 'operations.cronSweepsEnabled' || name === 'operations.doAlarmsEnabled';
+}
+/** Honor shorter legacy convergence windows, including zero, within the safety ceiling. */
+export function adminSettingCacheMs(env: Env, name: AdminSettingName): number {
+  // A long-lived SamSession must observe an installation stop before its next effect.
+  if (name === 'operations.samOperatorDisabled') return 0;
+  const ceiling =
+    name === 'trials.enabled' ||
+    name === 'operations.cronSweepsEnabled' ||
+    name === 'operations.doAlarmsEnabled'
+      ? LEGACY_KV_CACHE_MAX_MS
+      : ADMIN_SETTINGS_CACHE_MAX_MS;
+  let raw: string | undefined;
+  if (name.startsWith('integration.')) raw = env.PLATFORM_CONFIG_CACHE_MS;
+  else if (name === 'trials.enabled') raw = env.TRIAL_KILL_SWITCH_CACHE_MS;
+  else if (isOperationalSetting(name)) raw = env.CONTROL_LOOP_KILL_SWITCH_CACHE_MS;
+  let configured = ceiling;
+  if (raw !== undefined) {
+    configured = isOperationalSetting(name) ? Number.parseInt(raw, 10) : Number(raw);
+  }
+  return Number.isFinite(configured) && configured >= 0 ? Math.min(configured, ceiling) : ceiling;
 }

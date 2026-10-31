@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -130,6 +131,8 @@ func TestSessionRestoreSerializesWorkspaceDeleteAfterCallerDisconnect(t *testing
 		}
 		_, _ = w.Write([]byte(`{}`))
 	})
+	s.config.NodeUserID = "user-1"
+	s.config.NodeRuntimeIncarnationID = "incarnation-1"
 	s.workspaces["ws"].Status = "running"
 	s.workspaces["ws"].PTY = pty.NewManager(pty.ManagerConfig{})
 	// Stub only the external Docker executable used by the real delete handler.
@@ -161,6 +164,7 @@ func TestSessionRestoreSerializesWorkspaceDeleteAfterCallerDisconnect(t *testing
 		defer close(deleteDone)
 		r := request(t.Context())
 		r.Method = http.MethodDelete
+		r.Body = io.NopCloser(strings.NewReader(`{"workspaceId":"ws","nodeId":"` + s.config.NodeID + `","userId":"user-1","nodeRuntimeIncarnationId":"incarnation-1","workspaceGeneration":"","deletionMode":"explicit"}`))
 		s.handleDeleteWorkspace(response, r)
 	}()
 	waitForRestoreLifecycleState(t, func() bool {
@@ -174,11 +178,11 @@ func TestSessionRestoreSerializesWorkspaceDeleteAfterCallerDisconnect(t *testing
 	}
 	close(releaseFetch)
 	awaitRestoreLifecycleSignal(t, deleteDone, "delete did not finish after restore settled")
-	if response.Code != http.StatusOK {
+	if response.Code != http.StatusConflict {
 		t.Fatalf("delete returned %d: %s", response.Code, response.Body.String())
 	}
-	if _, exists := s.getWorkspaceRuntime("ws"); exists || len(s.agentSessions.List("ws")) != 0 {
-		t.Fatal("restore resurrected the deleted workspace or session")
+	if _, exists := s.getWorkspaceRuntime("ws"); !exists {
+		t.Fatal("delete removed an unknown standalone user root")
 	}
 }
 

@@ -371,6 +371,8 @@ describe('workspace resource capacity', () => {
       hasWorkspaceReservationCapacity(
         {
           ...observedNode,
+          // Isolate the declared-budget boundary from measured headroom.
+          lastMetrics: JSON.stringify({ cpuLoadAvg1: 0.1, memoryPercent: 0, diskPercent: 10 }),
           observedProviderInstanceVcpuCount: 4,
           observedProviderInstanceMemoryMb: 8_192,
           observedProviderInstanceDiskGb: 80,
@@ -454,6 +456,8 @@ describe('workspace resource capacity', () => {
       memoryMb: 32_768,
       diskGb: 80,
     });
+    // Reservation-density fixture: no live memory consumption is simulated.
+    node.lastMetrics = JSON.stringify({ cpuLoadAvg1: 0.1, memoryPercent: 0, diskPercent: 10 });
     const admission = policy({
       hostMemoryReserveMb: 512,
       memoryThresholdPercent: 1,
@@ -511,6 +515,8 @@ describe('workspace resource capacity', () => {
     ] as const;
 
     for (const { name, request, node, fitExisting } of cases) {
+      // Test declared density independently of live pressure accounting.
+      node.lastMetrics = JSON.stringify({ cpuLoadAvg1: 0.1, memoryPercent: 0, diskPercent: 10 });
       const fitting = evaluateWorkspaceReservationCapacity(
         node,
         aggregateCopies(request, fitExisting),
@@ -680,14 +686,29 @@ describe('live CPU is a saturation ceiling, not an admission authority', () => {
     expect(result.reasons).toContain('disk pressure threshold reached');
   });
 
-  it('uses live memory percentage for scoring without vetoing a fitting reservation', () => {
+  it('vetoes physically exhausted headroom despite fitting declared reservations', () => {
     const result = evaluateWorkspaceReservationCapacity(
       hostAt(10, { memoryPercent: 99 }),
       oneCoTenant(),
       reservation({ cpuMillis: 1000 }),
       resolveWorkspaceAdmissionPolicy(productionEnv)
     );
-    expect(result.admitted).toBe(true);
+    expect(result.admitted).toBe(false);
+    expect(result.reasons).toContain(
+      'measured memory headroom would be exceeded after outstanding reservations'
+    );
+  });
+
+  it('keeps deployment admission separate while unknown node roles stay guarded', () => {
+    for (const nodeRole of ['deployment', 'workspace', null, undefined]) {
+      const result = evaluateWorkspaceReservationCapacity(
+        { ...hostAt(10, { memoryPercent: 99 }), nodeRole },
+        oneCoTenant(),
+        reservation({ cpuMillis: 1000 }),
+        resolveWorkspaceAdmissionPolicy(productionEnv)
+      );
+      expect(result.admitted, `role ${nodeRole}`).toBe(nodeRole === 'deployment');
+    }
   });
 
   it('is the only backstop when a co-tenant under-declares, and it holds', () => {

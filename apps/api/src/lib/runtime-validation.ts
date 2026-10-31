@@ -149,6 +149,9 @@ export async function readResponseJson<TSchema extends GenericSchema>(
   try {
     parsed = await response.json();
   } catch (err) {
+    // Cancellation is transport failure, not malformed JSON; preserve deadlines through parsing.
+    if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError'))
+      throw err;
     throw new RuntimeValidationError(
       err instanceof Error
         ? `Invalid response JSON at ${context}: ${err.message}`

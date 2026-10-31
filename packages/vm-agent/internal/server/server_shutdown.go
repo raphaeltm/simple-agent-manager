@@ -10,6 +10,7 @@ func (s *Server) Stop(ctx context.Context) error {
 	s.stopOnce.Do(func() {
 		// Signal background goroutines to stop.
 		close(s.done)
+		s.stopWorkspaceDeletionReconciler()
 		s.cancelAndWaitSessionRestores()
 		s.resourceHistoryStarted.Store(false)
 		s.stopAllResourceHistoryCollectors(ctx)

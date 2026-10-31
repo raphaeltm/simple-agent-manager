@@ -194,21 +194,28 @@ type Config struct {
 	JWTIssuer   string
 
 	// Workspace settings
-	NodeID             string
-	WorkspaceID        string
-	CallbackToken      string
-	BootstrapToken     string
-	Repository         string
-	Branch             string
-	BaseBranch         string
-	RepoProvider       string
-	CloneURL           string
-	RepositoryHost     string
-	RepositoryPath     string
-	WorkspaceDir       string
-	BootstrapStatePath string
-	BootstrapMaxWait   time.Duration
-	BootstrapTimeout   time.Duration // Overall bootstrap timeout including devcontainer build
+	WorkspaceDeletionTombstoneRetention time.Duration
+	WorkspaceDeletionMaxEntries         int
+	WorkspaceDeletionBatchSize          int
+	WorkspaceDeletionAttemptTimeout     time.Duration
+	WorkspaceDeletionRetryInterval      time.Duration
+	NodeRuntimeIncarnationID            string
+	NodeUserID                          string
+	NodeID                              string
+	WorkspaceID                         string
+	CallbackToken                       string
+	BootstrapToken                      string
+	Repository                          string
+	Branch                              string
+	BaseBranch                          string
+	RepoProvider                        string
+	CloneURL                            string
+	RepositoryHost                      string
+	RepositoryPath                      string
+	WorkspaceDir                        string
+	BootstrapStatePath                  string
+	BootstrapMaxWait                    time.Duration
+	BootstrapTimeout                    time.Duration // Overall bootstrap timeout including devcontainer build
 
 	// VM-agent lifecycle/provisioning settings - configurable per constitution principle XI
 	GracefulShutdownTimeout   time.Duration // Max time to wait for HTTP shutdown after SIGTERM (env: GRACEFUL_SHUTDOWN_TIMEOUT, default: 30s)

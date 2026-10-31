@@ -5,6 +5,7 @@ import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
+import { readAuthSession } from '../services/read-auth-session';
 import { assertUserNotSuspended } from '../services/signup-approval';
 import { maybeAttachTrialClaimCookie } from '../services/trial/oauth-hook';
 
@@ -45,6 +46,8 @@ authRoutes.get('/me', async (c) => {
  * - POST /api/auth/sign-out - Sign out
  * - GET /api/auth/session - Get current session
  */
+authRoutes.get('/get-session', (c) => readAuthSession(c.env, c.req.raw));
+
 authRoutes.on(['GET', 'POST'], '/*', async (c) => {
   try {
     const auth = await createAuth(c.env);

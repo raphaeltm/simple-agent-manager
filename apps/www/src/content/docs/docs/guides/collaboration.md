@@ -375,7 +375,7 @@ By default, a resource runs on the **personal** keys of the member who set it up
 
 You have two levers, depending on your goal:
 
-- **Move the cost onto a shared key** — click **Fix** on a personal-key row to go to **Settings → Connections** and attach a project-scoped credential. Members' sessions then use the shared project credential instead of an individual's key. (If you attach your _own_ key as the project credential, you are still the one paying.)
+- **Move the cost onto a shared key** — click **Fix** on a personal-key row to go to the project's **Accounts** tab and attach a project-scoped credential (**Use another account here** for an agent, or **Use a cloud account only this project bills to** under **Compute**). Members' sessions then use the shared project credential instead of an individual's key. (If you attach your _own_ key as the project credential, you are still the one paying.)
 - **Stop the work entirely** — pause or delete the trigger from the **Automation** page, or stop the task (or the resource itself). Attaching a credential changes _who_ pays; it does not stop the automation.
 
 ![The Credential Attribution panel, showing a nightly trigger running on a member's personal Claude Code key flagged for review with a Fix link, and a staging deployment covered by a shared project Hetzner credential.](/images/docs/collaboration-credentials.png)
@@ -396,7 +396,7 @@ Removing a member or leaving a project opens an **offboarding** step that previe
 
 The key thing to understand: **personal credentials leave with their owner.** A resource that was running on the departing member's personal key will stop working once they are gone unless you re-point it at a project credential. The preview lets you decide, per resource:
 
-- **Keep it running on a shared key** — point the resource at an existing project credential (the **Use existing project credential** option) so it survives the departure. This is how you keep a nightly trigger or a deployment alive. You need a compatible project credential connected under **Settings → Connections**.
+- **Keep it running on a shared key** — point the resource at an existing project credential (the **Use existing project credential** option) so it survives the departure. This is how you keep a nightly trigger or a deployment alive. You need a compatible project credential connected in the project's **Accounts** tab.
 - **Disable it** — a trigger is disabled and flagged, and a task's future work is stopped and flagged, so nothing runs silently broken.
 - **Defer** — postpone a resource instead of resolving it now. Deferring does not clear a block, so any resource that blocks removal (see below) still has to be disabled, reattached, or deleted before you can finish.
 

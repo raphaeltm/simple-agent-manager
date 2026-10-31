@@ -13,7 +13,7 @@
  * See .claude/rules/06-api-patterns.md (Hono middleware scoping)
  */
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { log } from '../../src/lib/logger';
 import { AppError } from '../../src/middleware/error';
@@ -221,6 +221,7 @@ async function createTestApp(): Promise<Hono> {
 
 describe('task callback auth routing (regression)', () => {
   let app: Hono;
+  beforeAll(async () => { await createTestApp(); }, 30_000);
 
   beforeEach(async () => {
     vi.clearAllMocks();

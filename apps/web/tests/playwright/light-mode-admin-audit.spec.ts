@@ -167,8 +167,18 @@ const platformCredentials = {
 };
 
 async function setupMocks(page: Page) {
+  await page.addInitScript(
+    (id) => localStorage.setItem(`sam-onboarding-wizard-dismissed-${id}`, 'true'),
+    MOCK_USER.user.id
+  );
+  await page.routeWebSocket('**/api/notifications/ws', () => undefined);
   await setupAuditRoutes(page, (path, respond) => {
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
+    if (path === '/api/credentials' || path === '/api/github/installations')
+      return respond(200, []);
+    if (path === '/api/credentials/agent') return respond(200, { credentials: [] });
+    if (path === '/api/admin/signup-approval')
+      return respond(200, { config: { requireApproval: false } });
     if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
     if (path === '/api/trial-status') return respond(200, { isTrial: false });
     // AppShell mounts the sidebar project list on every protected route; without

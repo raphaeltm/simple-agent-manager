@@ -230,6 +230,8 @@ describe('POST /api/projects/:projectId/sessions/:sessionId/stop cleanup', () =>
       status: 'cancelled',
       errorMessage: 'Archived by user',
       destructiveSessionEnd: true,
+      requiredUserId: 'user-stop-1',
+      requireStopAcknowledgement: undefined,
       logContext: {
         projectId: 'project-stop-1',
         sessionId: 'session-task-backed-1',
@@ -272,6 +274,8 @@ describe('POST /api/projects/:projectId/sessions/:sessionId/stop cleanup', () =>
         status: 'failed',
         errorMessage: 'Agent prompt failed',
         destructiveSessionEnd: true,
+        requiredUserId: 'user-stop-1',
+        requireStopAcknowledgement: undefined,
         logContext: {
           projectId: 'project-stop-1',
           sessionId: 'session-failed-1',
