@@ -20,7 +20,6 @@ import (
 
 const localShellPath = "/bin/sh"
 const geminiInstallPackage = "@google/gemini-cli@0.61.0"
-const opencodeInstallPackage = "opencode-ai@1.18.32"
 const vibeInstallPackage = "mistral-vibe==2.25.8"
 const ampCLIInstallPackage = "@ampcode/cli@0.0.1790261352-g2ab14a"
 
@@ -1070,9 +1069,8 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 			command:       "opencode",
 			args:          []string{"acp"},
 			envVarName:    "OPENCODE_API_KEY",
-			installCmd:    "npm install -g " + opencodeInstallPackage,
-			validationCmd: versionCheckCommand("opencode", strings.TrimPrefix(opencodeInstallPackage, "opencode-ai@")),
-			isNpmBased:    true,
+			installCmd:    opencodeInstallScript,
+			validationCmd: versionCheckCommand("opencode", "opencode v"+opencodeVersion),
 			injectionMode: "",
 			authFilePath:  "",
 		}
@@ -1259,7 +1257,7 @@ func resolveOpencodeModel(provider string, settings *agentSettingsPayload) strin
 // based on the provider selected in agent settings.
 //
 // OpenCode requires custom (non-built-in) providers to include:
-//   - "npm": the AI SDK package name (e.g. "@ai-sdk/openai-compatible")
+//   - "npm": the legacy AI SDK package name (v2 maps it to a bundled native provider)
 //   - "models": a map registering model aliases so OpenCode recognises them
 //   - model field: formatted as "providerID/modelAlias"
 //
@@ -1320,65 +1318,6 @@ func buildOpencodeConfig(settings *agentSettingsPayload) map[string]interface{} 
 	}
 
 	return config
-}
-
-// opencodeProviderNeedsNpmPackage returns the npm package name that a given
-// OpenCode provider requires, or "" if the provider is built-in.
-// OpenCode uses Bun to auto-install npm packages for custom providers, but
-// our containers only have Node.js/npm. Without pre-installation, the provider
-// silently fails and OpenCode returns end_turn with no content.
-func opencodeProviderNeedsNpmPackage(provider string) string {
-	switch provider {
-	case "custom":
-		return "@ai-sdk/openai-compatible"
-	default:
-		return ""
-	}
-}
-
-// preInstallOpencodeProviderDeps installs the npm package required by a custom
-// OpenCode provider into ~/.cache/opencode/node_modules/ — the exact location
-// where OpenCode resolves provider packages at runtime.
-//
-// OpenCode embeds Bun and uses it internally for provider package loading.
-// Pre-installing via npm is sufficient — the node_modules structure is compatible
-// with Bun's module resolver. Without pre-installation, OpenCode's embedded Bun
-// would auto-install the package, but this can fail in network-restricted environments.
-func preInstallOpencodeProviderDeps(ctx context.Context, containerID, user, npmPackage string) error {
-	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-
-	homeDir, err := resolveContainerHomeDir(ctx, containerID, user)
-	if err != nil {
-		homeDir = "/root"
-	}
-	cacheDir := path.Join(homeDir, ".cache", "opencode")
-
-	// Create the cache directory structure that OpenCode expects
-	if _, _, err := execInContainer(ctx, containerID, user, "", "mkdir", "-p", cacheDir); err != nil {
-		return fmt.Errorf("create opencode cache dir: %w", err)
-	}
-
-	// Install the package into the cache directory so OpenCode finds it
-	// at ~/.cache/opencode/node_modules/@ai-sdk/openai-compatible.
-	// Use --no-save to avoid writing package.json/package-lock.json that
-	// could conflict with OpenCode's own package management.
-	slog.Info("Pre-installing OpenCode provider dependency",
-		"package", npmPackage,
-		"cacheDir", cacheDir,
-		"container", containerID)
-	stdout, stderr, err := execInContainer(ctx, containerID, user, cacheDir, "npm", "install", "--no-save", npmPackage)
-	if err != nil {
-		return fmt.Errorf("npm install %s in cache dir: %w: %s", npmPackage, err, stderr)
-	}
-	slog.Info("Pre-installed OpenCode provider dependency",
-		"package", npmPackage,
-		"cacheDir", cacheDir,
-		"container", containerID,
-		"stdoutLen", len(stdout),
-		"stderrLen", len(stderr))
-	return nil
 }
 
 // sanitizeModelAlias creates a clean model alias from a full model ID.
