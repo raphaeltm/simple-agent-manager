@@ -63,7 +63,7 @@ func TestTextStripsTokensJoinedByUnderscore(t *testing.T) {
 	t.Parallel()
 
 	canaries := sharedCanaries(t)
-	for _, name := range []string{"openai-legacy-key", "opencode-api-key", "github-fine-grained-pat", "aws-access-key", "google-api-key"} {
+	for _, name := range []string{"openai-legacy-key", "opencode-api-key", "github-fine-grained-pat", "aws-access-key", "google-api-key", "sam-personal-access-token"} {
 		t.Run(name, func(t *testing.T) {
 			// \b does not fire between "_" and a letter, so a \b-anchored shape misses this.
 			got := Text("CONFIG_" + canaries[name])
@@ -95,6 +95,8 @@ func TestTextKeepsPrefixesAndRedactsPrivateKeyBlocks(t *testing.T) {
 	for input, want := range map[string]string{
 		"sent Bearer abcdefghijklmnop1234 upstream":                                   "sent Bearer [REDACTED] upstream",
 		"api_key=abc123 next":                                                         "api_key=[REDACTED] next",
+		"webhook sam_wh_Zk3Lq9Xv7Rt2Mn5Bp8 rejected":                                  "webhook [REDACTED] rejected",
+		`{"authorization":"Basic b3BlcmF0b3I6c2VjcmV0"}`:                              `{"authorization":"Basic [REDACTED]"}`,
 		"GET /x?X-Amz-Signature=deadbeef&y=1":                                         "GET /x?X-Amz-Signature=[REDACTED]&y=1",
 		"-----BEGIN RSA PRIVATE KEY-----\nMIIabc\n-----END RSA PRIVATE KEY----- tail": "[REDACTED] tail",
 	} {

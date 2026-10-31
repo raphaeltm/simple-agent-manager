@@ -157,7 +157,16 @@ func TestPromptFailureDetailStripsEverySharedCanary(t *testing.T) {
 	for _, fixture := range fixtures {
 		canary := strings.Join(fixture.Fragments, "")
 		detail := promptFailureDetail(errors.New("upstream rejected the request: " + canary))
-		if strings.Contains(detail, canary) {
+		// The tail is the secret part; a canary's readable prefix ("Authorization: Basic ")
+		// may legitimately survive, so checking only the whole string would pass a
+		// redactor that removed just the scheme word.
+		secret := canary
+		if fixture.Name == "credential-url" {
+			secret = "operator:password"
+		} else if len(secret) > 12 {
+			secret = secret[len(secret)-12:]
+		}
+		if strings.Contains(detail, secret) {
 			t.Errorf("%s survived in detail: %q", fixture.Name, detail)
 		}
 		if !strings.Contains(detail, "upstream rejected the request:") {

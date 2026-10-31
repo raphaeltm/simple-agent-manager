@@ -22,6 +22,9 @@ func token(shape string) *regexp.Regexp {
 }
 
 var patterns = []*regexp.Regexp{
+	// Before the keyword rule below, which would redact only the scheme word and
+	// leave a Basic credential behind it.
+	regexp.MustCompile(`(?i)(authorization["']?\s*[:=]\s*["']?(?:basic|bearer)\s+)[A-Za-z0-9._~+/=-]+`),
 	regexp.MustCompile(`(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{16,}`),
 	regexp.MustCompile(`(?i)((?:api[_-]?key|token|secret|password|authorization)\s*[:=]\s*)("[^"]+"|'[^']+'|[^\s,;]+)`),
 	regexp.MustCompile(`(?i)(https?://)([^/\s@]+)@`),
@@ -33,7 +36,7 @@ var patterns = []*regexp.Regexp{
 	token(`(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{16,}`),
 	token(`gh[pousr]_[A-Za-z0-9_]{8,}`),
 	token(`github_pat_[A-Za-z0-9_]{8,}`),
-	token(`sam_test_[A-Za-z0-9_-]{8,}`),
+	token(`sam_(?:pat|wh|test)_[A-Za-z0-9_-]{8,}`),
 	token(`(?:AKIA|ASIA)[A-Z0-9]{16}`),
 	token(`AIza[0-9A-Za-z_-]{20,}`),
 	token(`ya29\.[0-9A-Za-z_-]{20,}`),
