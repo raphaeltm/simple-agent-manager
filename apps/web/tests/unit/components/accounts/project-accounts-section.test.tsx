@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   saveAgentCredential: vi.fn(),
   deleteProjectAgentCredential: vi.fn(),
   updateCCCredential: vi.fn(),
+  createCCAttachment: vi.fn(),
 }));
 
 vi.mock('../../../../src/components/AuthProvider', () => ({
@@ -76,6 +77,20 @@ const ACME = accountRows({
   kind: 'agent',
   target: 'claude-code',
   pins: ['p-client'],
+});
+const SAM = accountRows({
+  id: 'sam',
+  name: 'SAM Claude',
+  kind: 'agent',
+  target: 'claude-code',
+  credentialKind: 'oauth-token',
+});
+const SHARED = accountRows({
+  id: 'shared',
+  name: 'Shared team key',
+  kind: 'agent',
+  target: 'claude-code',
+  pins: ['p-web'],
 });
 
 describe('ProjectAccountsSection', () => {
@@ -224,5 +239,109 @@ describe('ProjectAccountsSection', () => {
     expect(screen.queryByTestId('project-account-row-openai-codex')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /Codex/ }));
     expect(await screen.findByRole('dialog', { name: /Connect .*Codex/ })).toBeInTheDocument();
+  });
+
+  it('pins an account you already connected without reconnecting it', async () => {
+    serve(mergeRows(WORK, SAM));
+    mocks.createCCAttachment.mockImplementation(() => {
+      serve(
+        mergeRows(
+          WORK,
+          accountRows({
+            id: 'sam',
+            name: 'SAM Claude',
+            kind: 'agent',
+            target: 'claude-code',
+            credentialKind: 'oauth-token',
+            pins: ['p-client'],
+          })
+        )
+      );
+      return Promise.resolve({ id: 'att-sam-p-client' });
+    });
+    renderSection();
+
+    const row = await screen.findByTestId('project-account-row-claude-code');
+    fireEvent.click(within(row).getAllByRole('button')[0]!);
+    const tile = within(row).getByRole('button', { name: /Use another account here/ });
+    expect(tile).toHaveTextContent('Pick one of your accounts, or connect a new one');
+    fireEvent.click(tile);
+
+    expect(screen.queryByRole('dialog')).toBeNull();
+    const picker = within(row).getByRole('group', { name: 'Your Claude Code accounts' });
+    // The tile is a disclosure for the list, not a toggle.
+    expect(tile).toHaveAttribute('aria-expanded', 'true');
+    expect(tile).not.toHaveAttribute('aria-pressed');
+    expect(tile).toHaveAttribute('aria-controls', picker.id);
+    // The default is what "Use my default" already means, so it is not offered again.
+    expect(within(picker).queryByText('Work Max plan')).toBeNull();
+    fireEvent.click(within(picker).getByRole('button', { name: /SAM Claude/ }));
+
+    await waitFor(() =>
+      expect(mocks.createCCAttachment).toHaveBeenCalledWith({
+        configurationId: 'cfg-sam',
+        projectId: 'p-client',
+      })
+    );
+    expect(mocks.saveProjectAgentCredential).not.toHaveBeenCalled();
+    await waitFor(() => expect(row).toHaveTextContent('Pinned for this project'));
+    expect(within(row).getByTestId('account-card-cfg-sam')).toBeInTheDocument();
+    expect(within(row).queryByRole('group', { name: 'Your Claude Code accounts' })).toBeNull();
+  });
+
+  it('offers accounts other projects pin, and never the current pin or a paused account', async () => {
+    serve(
+      mergeRows(
+        WORK,
+        ACME,
+        SHARED,
+        accountRows({
+          id: 'paused',
+          name: 'Paused key',
+          kind: 'agent',
+          target: 'claude-code',
+          configurationActive: false,
+        })
+      )
+    );
+    mocks.createCCAttachment.mockResolvedValue({ id: 'att-shared-p-client' });
+    renderSection();
+
+    const row = await screen.findByTestId('project-account-row-claude-code');
+    fireEvent.click(within(row).getByRole('button', { name: /Use a different account here/ }));
+    const picker = within(row).getByRole('group', { name: 'Your Claude Code accounts' });
+    const options = within(picker)
+      .getAllByRole('button')
+      .map((button) => button.textContent);
+    expect(options).toEqual([
+      expect.stringContaining('Shared team key'),
+      expect.stringContaining('Connect a new account'),
+    ]);
+    expect(within(picker).getByRole('button', { name: /Shared team key/ })).toHaveTextContent(
+      'Pinned in Marketing site'
+    );
+
+    fireEvent.click(within(picker).getByRole('button', { name: /Shared team key/ }));
+    await waitFor(() =>
+      expect(mocks.createCCAttachment).toHaveBeenCalledWith({
+        configurationId: 'cfg-shared',
+        projectId: 'p-client',
+      })
+    );
+    // The server replaces the old pin; the client does not remove it separately.
+    expect(mocks.deleteProjectAgentCredential).not.toHaveBeenCalled();
+  });
+
+  it('connects a new account from the picker', async () => {
+    serve(mergeRows(WORK, SAM));
+    renderSection();
+
+    const row = await screen.findByTestId('project-account-row-claude-code');
+    fireEvent.click(within(row).getAllByRole('button')[0]!);
+    fireEvent.click(within(row).getByRole('button', { name: /Use another account here/ }));
+    fireEvent.click(within(row).getByRole('button', { name: 'Connect a new account' }));
+
+    expect(await screen.findByRole('dialog', { name: 'Connect Claude Code' })).toBeInTheDocument();
+    expect(mocks.createCCAttachment).not.toHaveBeenCalled();
   });
 });

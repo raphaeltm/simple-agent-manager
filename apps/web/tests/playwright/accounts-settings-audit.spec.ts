@@ -388,6 +388,72 @@ function surfaceTests(viewport: 'mobile' | 'desktop') {
     expect(new URL(page.url()).search).toBe('');
   });
 
+  test('use an existing account in projects from its card', async ({ page }) => {
+    await openPage(page, '/settings/agents', { rows: NORMAL_ROWS });
+    let pinned: unknown;
+    await page.route('**/api/cc/attachments', async (route) => {
+      if (route.request().method() !== 'POST') return route.fallback();
+      pinned = route.request().postDataJSON();
+      await route.fulfill({ status: 201, json: { id: 'att-new' } });
+    });
+    const old = page.getByTestId('account-card-cfg-old');
+    await old.getByRole('button', { name: 'Use in a project' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Use Old personal key in projects' });
+    await expect(dialog.getByRole('checkbox', { name: /Acme client portal/ })).toHaveAccessibleName(
+      /Pinned to Acme API key/
+    );
+    await dialog.getByRole('checkbox', { name: /Billing API/ }).check();
+    await expect(dialog).toContainText('1 project now uses Old personal key');
+    const box = await dialog.locator('[data-testid="account-projects-dialog"]').boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    await assertNoOverflow(page);
+    await screenshot(page, `accounts-use-in-projects-${viewport}`);
+
+    await dialog.getByRole('button', { name: 'Save' }).click();
+    await expect(dialog).toHaveCount(0);
+    expect(pinned).toEqual({ configurationId: 'cfg-old', projectId: 'p-api' });
+  });
+
+  test('use in projects with many long-named projects filters the list', async ({ page }) => {
+    await openPage(page, '/settings/agents', {
+      rows: mergeRows(
+        MANY_ROWS,
+        accountRows({
+          id: 'long-unattached',
+          name: `${LONG} 🚀`,
+          kind: 'agent',
+          target: 'claude-code',
+        })
+      ),
+      projects: MANY_PROJECTS,
+    });
+    const card = page.getByTestId('account-card-cfg-long-unattached');
+    await card.getByRole('button', { name: 'Use in a project' }).click();
+    const dialog = page.getByRole('dialog', { name: /Use .* in projects/ });
+    await expect(dialog.getByRole('checkbox')).toHaveCount(32);
+    await assertNoOverflow(page);
+    await screenshot(page, `accounts-use-in-projects-many-${viewport}`);
+
+    await dialog.getByRole('searchbox').fill('Project 14');
+    await expect(dialog.getByRole('checkbox')).toHaveCount(1);
+    await assertNoOverflow(page);
+    await screenshot(page, `accounts-use-in-projects-filtered-${viewport}`);
+  });
+
+  test('project picker wraps a long account name', async ({ page }) => {
+    await openPage(page, '/projects/p-web/settings/accounts', { rows: LONG_ROWS });
+    const claude = page.getByTestId('project-account-row-claude-code');
+    await claude.getByRole('button', { expanded: false }).first().click();
+    await claude.getByRole('button', { name: /Use another account here/ }).click();
+    const picker = claude.getByRole('group', { name: 'Your Claude Code accounts' });
+    await expect(picker).toContainText('Pinned in 3 projects');
+    const box = await picker.boundingBox();
+    expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    await assertNoOverflow(page);
+    await shot(page, 'project-picker-long');
+  });
+
   for (const scope of ['user', 'project'] as const) {
     test(`guided login keeps the same controls for ${scope} accounts`, async ({ page }) => {
       await openPage(
@@ -436,10 +502,10 @@ function surfaceTests(viewport: 'mobile' | 'desktop') {
         }
       );
       if (scope === 'project') {
-        await page
-          .getByTestId('project-account-row-claude-code')
-          .getByRole('button', { name: /Use a different account here/ })
-          .click();
+        const row = page.getByTestId('project-account-row-claude-code');
+        await row.getByRole('button', { name: /Use a different account here/ }).click();
+        // The project has another connected account, so the picker comes first.
+        await row.getByRole('button', { name: 'Connect a new account' }).click();
       } else {
         await page.getByRole('button', { name: 'Connect account' }).click();
         await page
@@ -513,6 +579,15 @@ function surfaceTests(viewport: 'mobile' | 'desktop') {
     await shot(page, 'project');
 
     await claude.getByRole('button', { name: /Use a different account here/ }).click();
+    const picker = claude.getByRole('group', { name: 'Your Claude Code accounts' });
+    // The unattached key is offered; the default and the current pin are not.
+    await expect(picker.getByRole('button', { name: /Old personal key/ })).toBeVisible();
+    await expect(picker).not.toContainText('Work Max plan');
+    await expect(picker).not.toContainText('Acme API key');
+    await assertNoOverflow(page);
+    await shot(page, 'project-picker');
+
+    await picker.getByRole('button', { name: 'Connect a new account' }).click();
     const sheet = page.getByRole('dialog', { name: 'Connect Claude Code' });
     await expect(sheet).toContainText('Only Acme client portal will use this account');
     await expect(sheet.getByRole('button', { name: 'Use for this project' })).toBeVisible();

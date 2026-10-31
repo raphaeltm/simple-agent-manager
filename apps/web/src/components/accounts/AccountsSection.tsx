@@ -131,7 +131,8 @@ export function AccountsSection({
       )}
       {groups && (
         <p className="m-0 text-xs text-fg-muted">
-          Attach an existing account to a project, or turn one off, in{' '}
+          Pin an account to projects from its card’s <strong>Use in projects…</strong>. Turn one off
+          in{' '}
           <Link to="/settings/advanced" className="text-accent">
             Advanced
           </Link>
