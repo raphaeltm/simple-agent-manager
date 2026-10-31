@@ -17,10 +17,11 @@ import (
 // download boundary are stubbed; extraction, hashing and replacement are real.
 func TestOpenCodeReleaseInstaller(t *testing.T) {
 	for _, tt := range []struct {
-		name, arch, libc, version string
-		corrupt, unsupported      bool
+		name, arch, libc, version       string
+		corrupt, unsupported, npmPrefix bool
 	}{
 		{name: "x64 glibc replaces npm symlink", arch: "x86_64", version: "opencode v2.2.5"},
+		{name: "existing npm prefix ahead of system bin", arch: "x86_64", version: "opencode v2.2.5", npmPrefix: true},
 		{name: "x64 musl", arch: "x86_64", libc: "musl", version: "opencode v2.2.5"},
 		{name: "arm64 glibc", arch: "aarch64", version: "opencode v2.2.5"},
 		{name: "arm64 musl", arch: "arm64", libc: "musl", version: "opencode v2.2.5"},
@@ -33,6 +34,9 @@ func TestOpenCodeReleaseInstaller(t *testing.T) {
 			bin := filepath.Join(root, "tools")
 			home := filepath.Join(root, "agents")
 			dest := filepath.Join(home, "bin")
+			if tt.npmPrefix {
+				dest = filepath.Join(root, "nvm", "bin")
+			}
 			for _, d := range []string{bin, dest} {
 				if err := os.MkdirAll(d, 0755); err != nil {
 					t.Fatal(err)
@@ -80,11 +84,16 @@ func TestOpenCodeReleaseInstaller(t *testing.T) {
 				write(archive, "corrupt archive")
 			}
 			write(filepath.Join(bin, "uname"), "#!/bin/sh\ncase \"$1\" in -s) echo Linux;; -m) echo "+tt.arch+";; esac\n")
+			write(filepath.Join(bin, "apk"), "#!/bin/sh\nif [ \"$1\" = info ]; then exit 1; fi\nprintf \"%s\\n\" \"$*\" > \"$PROBE_APK_LOG\"\n")
 			write(filepath.Join(bin, "ldd"), "#!/bin/sh\necho '"+tt.libc+" libc'\n")
 			// Capture the requested release URL and supply the local archive at the HTTP boundary.
 			write(filepath.Join(bin, "curl"), "#!/bin/sh\nprintf '%s\\n' \"$*\" > \"$PROBE_LOG\"\nfor arg do case \"$arg\" in https://*) url=$arg;; esac; done\nwhile [ \"$1\" != -o ]; do shift; done\ncp \"$PROBE_ARCHIVE\" \"$2\"\n")
 			cmd := exec.Command(localShellPath, "-c", script)
-			cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "SAM_AGENT_HOME="+home, "PROBE_ARCHIVE="+archive, "PROBE_LOG="+filepath.Join(root, "download.log"))
+			managedHome := home
+			if tt.npmPrefix {
+				managedHome = ""
+			}
+			cmd.Env = append(os.Environ(), "PATH="+dest+":"+bin+":"+os.Getenv("PATH"), "SAM_AGENT_HOME="+managedHome, "PROBE_ARCHIVE="+archive, "PROBE_LOG="+filepath.Join(root, "download.log"), "PROBE_APK_LOG="+filepath.Join(root, "apk.log"))
 			output, err := cmd.CombinedOutput()
 			wantOK := !tt.corrupt && !tt.unsupported && tt.version == "opencode v2.2.5"
 			if (err == nil) != wantOK {
@@ -114,6 +123,12 @@ func TestOpenCodeReleaseInstaller(t *testing.T) {
 					t.Fatal("unsupported arch downloaded")
 				}
 				return
+			}
+			if tt.libc == "musl" {
+				packages, err := os.ReadFile(filepath.Join(root, "apk.log"))
+				if err != nil || !strings.Contains(string(packages), "add --no-cache libstdc++") {
+					t.Fatal("missing musl runtime prerequisite", err)
+				}
 			}
 			target := "linux-arm64"
 			if tt.arch == "x86_64" {

@@ -21,6 +21,14 @@ esac
 # Baseline avoids an AVX2 requirement on older x64 VM hosts.
 if ldd --version 2>&1 | grep -qi musl || ls /lib/ld-musl-*.so.1 >/dev/null 2>&1; then target="$target-musl"; fi
 case "$target" in
+  *-musl)
+    # Unlike the glibc release, Bun's musl binary dynamically links libstdc++.
+    if command -v apk >/dev/null && ! apk info -e libstdc++ >/dev/null 2>&1; then
+      apk add --no-cache libstdc++
+    fi
+    ;;
+esac
+case "$target" in
   linux-x64-baseline) digest=09f44302c10fd036912f59c81fd1aef5df45dd06f649197f9dfc9bbe2a79614e ;;
   linux-x64-baseline-musl) digest=889389e99ffa39fa41d512b2c9c15316522d97398fb912503ef667f80e22a827 ;;
   linux-arm64) digest=5a528f42caf576c6cdece6a191eb273d3db54effa5518e0402684d8f8026aeb6 ;;
@@ -28,7 +36,15 @@ case "$target" in
 esac
 
 destination=${SAM_AGENT_HOME:+$SAM_AGENT_HOME/bin}
-destination=${destination:-/usr/local/bin}
+if [ -z "$destination" ]; then
+  # npm prefixes (including nvm) often precede /usr/local/bin in PATH. Replace
+  # the executable SAM actually resolves so a v1 symlink cannot shadow v2.
+  existing=$(command -v opencode || true)
+  case "$existing" in
+    /*) destination=${existing%/*} ;;
+    *) destination=/usr/local/bin ;;
+  esac
+fi
 mkdir -p "$destination"
 # Stage on the destination filesystem so replacing an old npm symlink is atomic.
 stage=$(mktemp -d "$destination/.opencode-install.XXXXXX")
@@ -40,3 +56,6 @@ tar -xzf "$stage/archive.tar.gz" -C "$stage" opencode
 chmod 755 "$stage/opencode"
 [ "$("$stage/opencode" --version)" = "opencode v$version" ]
 mv -f "$stage/opencode" "$destination/opencode"
+hash -r
+# Validate the command that the agent launcher will resolve, not just the stage.
+[ "$(opencode --version)" = "opencode v$version" ]

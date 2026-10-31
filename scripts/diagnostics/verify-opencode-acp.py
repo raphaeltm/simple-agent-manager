@@ -104,6 +104,18 @@ class ACP:
         self.log.close()
 
 
+def assert_marker(process):
+    assert any('SAM_V2_PROBE_OK' in str(m['params'].get('update', {}).get('content', {}))
+               for m in process.notifications if m.get('method') == 'session/update'), 'missing assistant marker'
+
+
+def assert_history(calls):
+    assert any(any(m.get('role') == 'assistant' and 'SAM_V2_PROBE_OK' in str(m.get('content'))
+                   for m in call.get('messages', [])) and
+               any(m.get('role') == 'tool' and 'SAM_V2_PROBE_TOOL_RESULT' in str(m.get('content'))
+                   for m in call.get('messages', [])) for call in calls), 'recovered request lost history'
+
+
 def main():
     args = argparse.ArgumentParser()
     args.add_argument('binary')
@@ -137,6 +149,7 @@ def main():
             session = first.request('session/new', {'cwd': str(cwd), 'mcpServers': []})['sessionId']
             prompt = {'sessionId': session, 'prompt': [{'type': 'text', 'text': 'Read fixture.txt with the read tool then say SAM_V2_PROBE_OK.'}]}
             first.request('session/prompt', prompt)
+            assert_marker(first)
             updates = [x['params'].get('update', {}) for x in first.notifications if x.get('method') == 'session/update']
             assert any(x.get('sessionUpdate') == 'tool_call' for x in updates), 'no tool call'
             first.close()
@@ -146,7 +159,10 @@ def main():
             second.request('session/load', {'sessionId': session, 'cwd': str(cwd), 'mcpServers': []})
             second.request('session/set_config_option', {'sessionId': session, 'configId': 'model', 'value': 'custom/sam-probe'})
             second.request('session/set_mode', {'sessionId': session, 'modeId': 'build'})
+            baseline = len(Provider.calls)
             second.request('session/prompt', prompt)
+            assert_marker(second)
+            assert_history(Provider.calls[baseline:])
             second.close()
             processes.remove(second)
             # Copy only the data directory to simulate snapshot restoration with
@@ -157,7 +173,10 @@ def main():
             third = ACP(binary, env, cwd)
             processes.append(third)
             third.request('session/load', {'sessionId': session, 'cwd': str(cwd), 'mcpServers': []})
+            baseline = len(Provider.calls)
             third.request('session/prompt', prompt)
+            assert_marker(third)
+            assert_history(Provider.calls[baseline:])
             assert any(m.get('role') == 'tool' and 'SAM_V2_PROBE_TOOL_RESULT' in str(m.get('content'))
                        for call in Provider.calls for m in call.get('messages', [])), 'tool result never reached model'
             print('PASS: ACP, legacy custom config, env key, tool result, process recovery and cold-cache snapshot restore')
