@@ -580,8 +580,8 @@ importers:
   infra:
     dependencies:
       '@pulumi/cloudflare':
-        specifier: 6.15.0
-        version: 6.15.0(typescript@5.9.3)
+        specifier: 6.23.1
+        version: 6.23.1(typescript@5.9.3)
       '@pulumi/pulumi':
         specifier: 3.270.0
         version: 3.270.0(typescript@5.9.3)
@@ -3645,8 +3645,8 @@ packages:
   '@protobufjs/utf8@1.1.2':
     resolution: {integrity: sha512-b1UQwcEZ4yCnMCD8DAL1VlbvBJE9/IX4FTIp7BG1xYpf29SLazLSrqUkj4w7Y5y7cCVP6E5tcqqcI0xemPkHug==}
 
-  '@pulumi/cloudflare@6.15.0':
-    resolution: {integrity: sha512-I2C1UA//YbkuGUV5O9skIMUu94StNSE4hiAU57GFtyL7WEqAMJLvV8Vpcu1192rI1/ZwFIJeR4MbAZfiYlPFqA==}
+  '@pulumi/cloudflare@6.23.1':
+    resolution: {integrity: sha512-VaEZaHQFFpToKdG+OkjlLPXhChxhKCHNGqnJoBC0yZaTG2bb02Vh5gP3NOIjQLn7enKkZX3VzdEV5dM0gJJcJA==}
 
   '@pulumi/pulumi@3.270.0':
     resolution: {integrity: sha512-k2GSGtoP2yrkIe4r+1YvyKL6k7mM6SYnySv6tSzGrv/oTY7WemEmvNEvn7Qd/JbkCMmYeBhWULDS5qB9qpvgkg==}
@@ -12618,7 +12618,7 @@ snapshots:
 
   '@protobufjs/utf8@1.1.2': {}
 
-  '@pulumi/cloudflare@6.15.0(typescript@5.9.3)':
+  '@pulumi/cloudflare@6.23.1(typescript@5.9.3)':
     dependencies:
       '@pulumi/pulumi': 3.270.0(typescript@5.9.3)
     transitivePeerDependencies:
