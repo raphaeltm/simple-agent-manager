@@ -98,6 +98,8 @@ export class NodeLifecycleWorkspaceDeletionQueue {
       retryAfterMs?: number;
       lastError?: string | null;
       expected?: WorkspaceDeletionIdentity;
+      /** Enqueue only when no entry exists; never re-time or re-label one already queued. */
+      onlyIfAbsent?: boolean;
     }
   ): Promise<boolean> {
     const now = Date.now();
@@ -155,6 +157,20 @@ export class NodeLifecycleWorkspaceDeletionQueue {
     if (existingMatches && existing?.deadLetteredAt) {
       await this.recalculateAlarm(await this.getWarmAlarmTime());
       return false;
+    }
+    if (existingMatches && options?.onlyIfAbsent) {
+      // The queued entry's own retry delay and last error stay authoritative. A
+      // re-schedule here used to pull an hour-long quarantine back to the cron's
+      // base delay and overwrite the failure diagnostic on every tick.
+      await this.recalculateAlarm(await this.getWarmAlarmTime());
+      log.info('node_lifecycle.workspace_deletion_already_queued', {
+        workspaceId,
+        nodeId: existing?.nodeId,
+        deleteAt: existing ? new Date(existing.deleteAt).toISOString() : null,
+        attemptCount: existing?.attemptCount ?? 0,
+        action: 'unchanged',
+      });
+      return true;
     }
 
     const entry = scheduledDeletionEntry({

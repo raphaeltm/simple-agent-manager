@@ -832,7 +832,7 @@ func ensureRepositoryReady(ctx context.Context, cfg *config.Config, state *boots
 			return fmt.Errorf("failed to create workspace parent directory: %w", err)
 		}
 
-		if err := os.RemoveAll(cfg.WorkspaceDir); err != nil {
+		if err := clearWorkspaceDirForClone(cfg.WorkspaceDir); err != nil {
 			return fmt.Errorf("failed to clean workspace directory: %w", err)
 		}
 

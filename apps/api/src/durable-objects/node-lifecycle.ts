@@ -459,6 +459,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
       retryAfterMs?: number;
       lastError?: string | null;
       expected?: WorkspaceDeletionIdentity;
+      onlyIfAbsent?: boolean;
     }
   ): Promise<boolean> {
     return await this.workspaceDeletionQueue().schedule(nodeId, workspaceId, userId, options);
