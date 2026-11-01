@@ -1,7 +1,7 @@
 import type { NotificationResponse } from '@simple-agent-manager/shared';
 import { Alert, Button } from '@simple-agent-manager/ui';
 import { Bell, CheckCheck, Loader2 } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router';
 
@@ -9,8 +9,10 @@ import { useNotifications } from '../hooks/useNotifications';
 import { usePushSubscription } from '../hooks/usePushSubscription';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 import { useAuth } from './AuthProvider';
+import { attentionRequest } from './notifications/attention-request';
 import { ATTENTION_TYPES } from './notifications/notification-type-config';
 import { NotificationGroup, NotificationItem } from './notifications/NotificationItem';
+import { NotificationQuestionDialog } from './notifications/question-dialog-loader';
 
 function pushInvitationDismissedKey(userId: string): string {
   return `sam-push-invitation-dismissed-${userId}`;
@@ -20,6 +22,7 @@ type FilterTab = 'attention' | 'updates' | 'all';
 
 export function NotificationCenter() {
   const [isOpen, setIsOpen] = useState(false);
+  const [question, setQuestion] = useState<NotificationResponse | null>(null);
   const [activeTab, setActiveTab] = useState<FilterTab>('attention');
   const [panelStyle, setPanelStyle] = useState<React.CSSProperties>({});
   const { user } = useAuth();
@@ -90,6 +93,11 @@ export function NotificationCenter() {
     (notification: NotificationResponse) => {
       if (!notification.readAt) {
         markRead(notification.id);
+      }
+      if (attentionRequest(notification).readable) {
+        setQuestion(notification);
+        setIsOpen(false);
+        return;
       }
       if (notification.actionUrl && notification.actionUrl.startsWith('/')) {
         navigate(notification.actionUrl);
@@ -183,6 +191,19 @@ export function NotificationCenter() {
         )}
       </button>
 
+      {question && (
+        <Suspense fallback={null}>
+          <NotificationQuestionDialog
+            key={question.id}
+            notification={question}
+            onClose={() => {
+              setQuestion(null);
+              buttonRef.current?.focus();
+            }}
+            onResolved={() => void refresh()}
+          />
+        </Suspense>
+      )}
       {/* Notification Panel — portaled to body to escape sidebar stacking context */}
       {isOpen &&
         createPortal(

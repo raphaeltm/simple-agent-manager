@@ -800,3 +800,23 @@ explicit project support. A project request never falls back to the personal
 endpoint: older API versions return `404` for `/project`, preserving safety during
 deployment skew or rollback. See the public API reference for polling,
 verification-code submission, and cancellation endpoints.
+
+## Notification question reader
+
+`GET /api/projects/:projectId/sessions/:sessionId/attention/:markerId`
+
+Requires active project membership with `task:read` and an existing session. Returns only the
+`needs_input` request scoped to both session and marker IDs, including settled requests:
+`{ request: { id, reason, options, createdAt, resolvedAt, resolvedAnswer, expired, canAnswer },
+session: { id, topic }, messages }`. `reason` is the full canonical saved question, rather than
+the shortened notification body. No runtime is contacted and the GET never answers a question.
+`canAnswer` requires a supported human-input source, current session-writer/project authority,
+and an unexpired, unresolved request without an in-flight answer.
+
+`context=true` adds preceding user/assistant messages assembled from their streaming rows, bounded before the request's
+creation time. `limit` overrides the existing admin setting `collaboration.commentContextMessages` (default: 6),
+subject to the existing `CHAT_SESSION_MESSAGE_MAX` ceiling. Empty, invalid or nonpositive query limits use that context setting. The existing comment-context row cap and Connector transcript character/scan bounds also apply; limited excerpts carry `truncated: true`. Empty
+context is valid. Reads use existing archive-owner routing. Missing session/request returns
+404; absent project capability is rejected by the standard membership/capability guards.
+Answers continue through the existing `POST .../attention/:markerId/resolve`; fixed choices
+must match the saved options exactly, and a request without options accepts a typed answer.

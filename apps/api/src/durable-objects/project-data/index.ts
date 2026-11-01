@@ -2573,6 +2573,16 @@ export class ProjectData extends DurableObject<Env> {
     return attention.getAttentionSummary(this.sql, sessionId);
   }
 
+  getAttentionRequest(sessionId: string, markerId: string, userId: string) {
+    const viewer = this.getSessionAccess({ sessionId, userId });
+    return {
+      ...viewer,
+      marker: viewer.access.found
+        ? attention.getAttentionMarker(this.sql, sessionId, markerId)
+        : null,
+    };
+  }
+
   listActiveAttentionMarkers(sessionId: string) {
     return attention.listActiveAttentionMarkers(this.sql, sessionId);
   }

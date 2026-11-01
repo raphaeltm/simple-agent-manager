@@ -350,8 +350,8 @@ describe('SAM background work canonical event boundary', () => {
     );
     prepare.mockClear();
     expect(await f.controller.work.view('alice')).toHaveLength(MAX_SAM_OPERATOR_EVENT_PAGE_SIZE);
-    // One task read per card; the single project's two membership reads run once, not per card.
-    expect(prepare).toHaveBeenCalledTimes(MAX_SAM_OPERATOR_EVENT_PAGE_SIZE + 2);
+    // One task read per card; the project's joined membership read runs once, not per card.
+    expect(prepare).toHaveBeenCalledTimes(MAX_SAM_OPERATOR_EVENT_PAGE_SIZE + 1);
   });
 
   /** Tracks cards across two projects, newest-expiring last so the listed order is known. */

@@ -328,6 +328,18 @@ export function parseAttentionOptions(metadata: string | null): string[] {
 /**
  * List all active (unresolved) attention markers for a session.
  */
+/** Canonical question, including settled requests. Both IDs scope the lookup. */
+export function getAttentionMarker(sql: SqlStorage, sessionId: string, markerId: string) {
+  const row = sql
+    .exec(
+      'SELECT * FROM session_attention_markers WHERE session_id = ? AND id = ? LIMIT 1',
+      sessionId,
+      markerId
+    )
+    .toArray()[0];
+  return row ? parseAttentionMarkerRow(row) : null;
+}
+
 export function listActiveAttentionMarkers(sql: SqlStorage, sessionId: string) {
   const rows = sql
     .exec(

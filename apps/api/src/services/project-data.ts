@@ -988,6 +988,23 @@ export async function getSession(
   );
 }
 
+/** One read for viewer access and the full saved question, including settled requests. */
+export async function getAttentionRequest(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  markerId: string,
+  userId: string
+): Promise<ReturnType<ProjectData['getAttentionRequest']>> {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'getAttentionRequest',
+    (stub) => stub.getAttentionRequest(sessionId, markerId, userId),
+    'idempotent_read'
+  );
+}
+
 /** Open attention markers for one chat, newest first (`project-data/attention.ts`). */
 export async function listActiveAttentionMarkers(
   env: Env,

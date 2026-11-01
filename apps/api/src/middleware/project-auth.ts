@@ -142,23 +142,23 @@ export async function requireActiveProjectMembership(
   projectId: string,
   userId: string
 ): Promise<{ project: schema.Project; membership: schema.ProjectMember }> {
-  const [projectRows, memberRows] = await Promise.all([
-    db.select().from(schema.projects).where(eq(schema.projects.id, projectId)).limit(1),
-    db
-      .select()
-      .from(schema.projectMembers)
-      .where(
-        and(
-          eq(schema.projectMembers.projectId, projectId),
-          eq(schema.projectMembers.userId, userId),
-          eq(schema.projectMembers.status, 'active')
-        )
+  // One read keeps project-scoped readers within their cold-request I/O budget.
+  const [row] = await db
+    .select({ project: schema.projects, membership: schema.projectMembers })
+    .from(schema.projects)
+    .innerJoin(schema.projectMembers, eq(schema.projectMembers.projectId, schema.projects.id))
+    .where(
+      and(
+        eq(schema.projects.id, projectId),
+        eq(schema.projectMembers.projectId, projectId),
+        eq(schema.projectMembers.userId, userId),
+        eq(schema.projectMembers.status, 'active')
       )
-      .limit(1),
-  ]);
+    )
+    .limit(1);
 
-  const project = assertProject(projectRows[0], projectId, 'Project');
-  const membership = assertActiveMembership(memberRows[0], projectId, userId);
+  const project = assertProject(row?.project, projectId, 'Project');
+  const membership = assertActiveMembership(row?.membership, projectId, userId);
 
   return { project, membership };
 }

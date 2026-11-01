@@ -7,18 +7,122 @@ import { drizzle } from 'drizzle-orm/d1';
 import type { Hono } from 'hono';
 
 import * as schema from '../db/schema';
+import { parseAttentionOptions } from '../durable-objects/project-data/attention';
 import type { Env } from '../env';
 import { markRejectedBeforeEffects } from '../lib/operation-effect-boundary';
 import { requireRouteParam } from '../lib/route-helpers';
 import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireProjectCapability } from '../middleware/project-auth';
+import {
+  hasProjectCapability,
+  projectRoleHasCapability,
+  requireActiveProjectMembership,
+  requireProjectCapability,
+} from '../middleware/project-auth';
 import { parseOptionalBody, ResolveAttentionAnswerSchema } from '../schemas';
+import { getCommentContextLimits } from '../services/collaboration-settings';
+import { getConnectorReadLimits } from '../services/connector-read-settings';
 import * as projectDataService from '../services/project-data';
 import { recordSharedSessionAnswer, requireSessionWriter } from '../services/session-access';
+import { getSessionMessageLimit } from './chat-message-query';
 import { preparePromptForLiveAgent, sendPreparedPromptToLiveAgent } from './chat-prompt-forward';
 
 export function registerChatAttentionRoute(chatRoutes: Hono<{ Bindings: Env }>): void {
+  // Read-only: no runtime contact or whole-conversation fetch. Context is opt-in.
+  chatRoutes.get('/:sessionId/attention/:markerId', async (c) => {
+    const userId = getUserId(c);
+    const projectId = requireRouteParam(c, 'projectId');
+    const sessionId = requireRouteParam(c, 'sessionId');
+    const markerId = requireRouteParam(c, 'markerId');
+    const db = drizzle(c.env.DATABASE, { schema });
+    const { membership } = await requireActiveProjectMembership(db, projectId, userId);
+    if (!projectRoleHasCapability(membership.role, 'task:read'))
+      throw errors.forbidden('Project capability is required');
+    const { session, access, marker } = await projectDataService.getAttentionRequest(
+      c.env,
+      projectId,
+      sessionId,
+      markerId,
+      userId
+    );
+    if (!session || !access.found) throw errors.notFound('Chat session');
+    if (!marker || marker.sessionId !== sessionId || marker.kind !== 'needs_input')
+      throw errors.notFound('Attention request');
+    const writer =
+      Boolean(access.ownerUserId) &&
+      projectRoleHasCapability(membership.role, 'task:write') &&
+      (access.role === 'owner' ||
+        (access.role === 'grantee' &&
+          Boolean(access.grant) &&
+          (await hasProjectCapability(db, projectId, access.ownerUserId ?? '', 'task:write'))));
+    const expired = marker.expiresAt !== null && marker.expiresAt <= Date.now();
+    const requested = Number(c.req.query('limit'));
+    // Share the existing admin-editable context setting with the comment reader.
+    const settings =
+      c.req.query('context') === 'true'
+        ? await Promise.all([getCommentContextLimits(c.env), getConnectorReadLimits(c.env)])
+        : null;
+    const context = settings?.[0];
+    const bounds = settings?.[1];
+    const limit = context
+      ? getSessionMessageLimit(
+          c.env,
+          String(Number.isSafeInteger(requested) && requested > 0 ? requested : context.messages)
+        )
+      : 0;
+    const page =
+      bounds && context
+        ? await projectDataService.getLogicalTranscriptPage(c.env, projectId, sessionId, {
+            before: marker.createdAt,
+            limit,
+            roles: ['user', 'assistant'],
+            maxScanRows: Math.min(context.maxRows, bounds.transcriptScanRows),
+            maxMessageChars: bounds.transcriptMessageChars,
+            maxPageChars: bounds.transcriptPageChars,
+            includeLatest: false,
+            includeToolTitles: false,
+          })
+        : null;
+    const messages =
+      page?.entries
+        .flatMap((entry) =>
+          entry.kind === 'message'
+            ? [
+                {
+                  id: entry.messageId,
+                  sessionId,
+                  role: entry.role,
+                  content: entry.content,
+                  createdAt: entry.createdAt,
+                  toolMetadata: null,
+                  sequence: entry.start?.sequence,
+                  truncated: entry.truncated || !entry.complete,
+                },
+              ]
+            : []
+        )
+        .reverse() ?? [];
+    return c.json({
+      request: {
+        id: marker.id,
+        reason: marker.reason,
+        options: parseAttentionOptions(marker.metadata),
+        createdAt: marker.createdAt,
+        resolvedAt: marker.resolvedAt,
+        resolvedAnswer: marker.resolvedAnswer,
+        expired,
+        canAnswer:
+          marker.source === 'request_human_input' &&
+          !expired &&
+          marker.resolvedAt === null &&
+          marker.resolvedAnswer === null &&
+          writer,
+      },
+      session: { id: sessionId, topic: typeof session.topic === 'string' ? session.topic : null },
+      messages,
+    });
+  });
+
   /**
    * POST /api/projects/:projectId/sessions/:sessionId/attention/:markerId/resolve
    * Validate, deliver, and record one of the agent-provided answer options.

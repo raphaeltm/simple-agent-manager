@@ -60,6 +60,17 @@ function makeDb(dataByTable: Map<unknown, unknown[]>) {
       return chain;
     },
     where: () => chain,
+    innerJoin: () => ({
+      where: () => ({
+        limit: async () =>
+          (dataByTable.get(schema.projects) ?? []).flatMap((project) =>
+            (dataByTable.get(schema.projectMembers) ?? []).map((membership) => ({
+              project,
+              membership,
+            }))
+          ),
+      }),
+    }),
     limit: () => Promise.resolve(dataByTable.get(currentTable) ?? []),
   };
   return {

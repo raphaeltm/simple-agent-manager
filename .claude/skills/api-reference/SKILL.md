@@ -465,3 +465,7 @@ Private VM-agent node-management routes: `POST /workspaces/:workspaceId/mcp/secr
 - `GET /oidc/.well-known/openid-configuration` and `GET /oidc/.well-known/jwks.json` — public provider-neutral workload issuer discovery and active public key. Separate from legacy GCP/internal JWT issuer.
 - `GET /api/projects/:projectId/sessions/:sessionId/workload-identity` — authenticated project-member read-only current workload metadata (issuer, subject, TTL, claims). Never mints a token. Unavailable runtime returns 409.
 - `exec_with_secrets` accepts optional `oidc: { audience: string }`; privately injects reserved `SAM_OIDC_TOKEN`, including when `secretNames` is empty. Same-session job status/cancel semantics are unchanged.
+
+### Full notification questions
+
+- `GET /api/projects/:projectId/sessions/:sessionId/attention/:markerId` — full saved human-input request, options and resolution/delivery status; project `task:read` required. `context=true` adds bounded preceding transcript excerpts; optional `limit` defaults to admin-editable `collaboration.commentContextMessages` (6) and uses the existing chat page maximum. Streamed rows are assembled into whole messages; scan/character-limited excerpts are labelled. No runtime contact. Answers still use `POST .../attention/:markerId/resolve`.

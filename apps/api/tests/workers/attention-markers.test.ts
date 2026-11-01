@@ -7,6 +7,11 @@ import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { ProjectData } from '../../src/durable-objects/project-data';
+import type { Env } from '../../src/env';
+import {
+  getAttentionRequest as readAttentionRequest,
+  getLogicalTranscriptPage,
+} from '../../src/services/project-data';
 
 function getStub(projectId: string): DurableObjectStub<ProjectData> {
   const id = env.PROJECT_DATA.idFromName(projectId);
@@ -14,6 +19,86 @@ function getStub(projectId: string): DurableObjectStub<ProjectData> {
 }
 
 describe('Attention Markers', () => {
+  it('reads a full historical question through service and real DO RPC, scoped to its session', async () => {
+    const projectId = 'notification-reader-service-slice';
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const sessionId = await stub.createSession(null, 'Old question');
+    const otherSession = await stub.createSession(null, 'Unrelated chat');
+    const reason = 'Full saved question, not a notification preview. '.repeat(80);
+    const marker = await stub.createAttentionMarker({
+      sessionId,
+      taskId: null,
+      workspaceId: null,
+      kind: 'needs_input',
+      source: 'request_human_input',
+      reason,
+    });
+    const request = await readAttentionRequest(
+      env as unknown as Env,
+      projectId,
+      sessionId,
+      marker.id,
+      'viewer'
+    );
+    expect(request.marker?.reason).toBe(reason);
+    expect(request.access.found).toBe(true);
+    const other = await readAttentionRequest(
+      env as unknown as Env,
+      projectId,
+      otherSession,
+      marker.id,
+      'viewer'
+    );
+    expect(other.marker).toBeNull();
+    await stub.resolveAttentionMarkerById(marker.id, 'human', 'answered');
+    expect(
+      (await readAttentionRequest(env as unknown as Env, projectId, sessionId, marker.id, 'viewer'))
+        .marker?.resolvedAt
+    ).toEqual(expect.any(Number));
+  });
+
+  it('reads whole preceding streamed messages through archive-aware service RPC', async () => {
+    const projectId = 'notification-context-service-slice';
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const sessionId = await stub.createSession(null, 'Context');
+    await runInDurableObject(stub, (instance) => {
+      const sql = (instance as unknown as { sql: SqlStorage }).sql;
+      for (const [i, role, content] of [
+        [0, 'user', 'First'],
+        [1, 'assistant', 'Stream part one. '],
+        [2, 'assistant', 'Stream part two.'],
+        [3, 'user', 'Follow-up'],
+        [4, 'assistant', 'After request'],
+      ] as const) {
+        sql.exec(
+          'INSERT INTO chat_messages (id,session_id,role,content,created_at,sequence) VALUES (?,?,?,?,?,?)',
+          `chunk-${i}`,
+          sessionId,
+          role,
+          content,
+          1000 + i,
+          i + 1
+        );
+      }
+    });
+    const page = await getLogicalTranscriptPage(env as unknown as Env, projectId, sessionId, {
+      before: 1004,
+      limit: 3,
+      roles: ['user', 'assistant'],
+      maxScanRows: 1000,
+      maxMessageChars: 6000,
+      maxPageChars: 24000,
+      includeLatest: false,
+      includeToolTitles: false,
+    });
+    const messages = page.entries.flatMap((entry) => (entry.kind === 'message' ? [entry] : []));
+    expect(messages.map((message) => message.messageId)).toEqual(['chunk-3', 'chunk-1', 'chunk-0']);
+    expect(messages[1]?.content).toBe('Stream part one. Stream part two.');
+    expect(messages.every((message) => message.complete)).toBe(true);
+  });
+
   it('creates a marker with correct fields', async () => {
     const stub = getStub('attn-create-1');
     const sessionId = await stub.createSession(null, 'Attention test');

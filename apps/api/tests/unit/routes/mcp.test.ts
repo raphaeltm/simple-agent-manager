@@ -154,11 +154,12 @@ function mockDispatchProjectAccess(
   mockD1.prepare.mockImplementation((sql: string) => {
     const projectQuery = sql.includes('from "projects"');
     const memberQuery = sql.includes('from "project_members"');
+    const joinedMembership = projectQuery && sql.includes('inner join "project_members"');
     if (!projectQuery && !memberQuery) return prepare(sql);
 
     const read = async () => {
       if (projectQuery && options.projectExists === false) return [];
-      if (memberQuery && options.memberRole === null) return [];
+      if ((memberQuery || joinedMembership) && options.memberRole === null) return [];
       const configured =
         options.consumeConfigured === false
           ? undefined
@@ -182,6 +183,22 @@ function mockDispatchProjectAccess(
             ...configured,
           };
       const table = memberQuery ? schema.projectMembers : schema.projects;
+      if (joinedMembership) {
+        const membership: Record<string, unknown> = {
+          projectId: 'proj-456',
+          userId: 'user-789',
+          role: options.memberRole ?? 'owner',
+          status: 'active',
+        };
+        return [
+          [
+            ...Object.keys(getTableColumns(schema.projects)).map((key) => row[key] ?? null),
+            ...Object.keys(getTableColumns(schema.projectMembers)).map(
+              (key) => membership[key] ?? null
+            ),
+          ],
+        ];
+      }
       return [Object.keys(getTableColumns(table)).map((key) => row[key] ?? null)];
     };
     return { ...mockD1._stmt, bind: vi.fn().mockReturnThis(), raw: vi.fn(read) };
@@ -288,6 +305,22 @@ function createStatefulTaskD1(task: StatefulTaskRow) {
         raw: vi.fn(async () => {
           if (sql.includes('from "projects"')) {
             const row: Record<string, unknown> = { id: task.project_id };
+            if (sql.includes('inner join "project_members"')) {
+              const membership: Record<string, unknown> = {
+                projectId: task.project_id,
+                userId: task.user_id,
+                role: 'owner',
+                status: 'active',
+              };
+              return [
+                [
+                  ...Object.keys(getTableColumns(schema.projects)).map((key) => row[key] ?? null),
+                  ...Object.keys(getTableColumns(schema.projectMembers)).map(
+                    (key) => membership[key] ?? null
+                  ),
+                ],
+              ];
+            }
             return [Object.keys(getTableColumns(schema.projects)).map((key) => row[key] ?? null)];
           }
           if (sql.includes('from "project_members"')) {
