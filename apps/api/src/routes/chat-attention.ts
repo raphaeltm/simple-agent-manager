@@ -1,4 +1,3 @@
-import { DEFAULT_NOTIFICATION_CONTEXT_MESSAGE_LIMIT } from '@simple-agent-manager/shared';
 /**
  * Attention answers: the agent asked a question with fixed options and a session writer
  * (the owner or an active grantee) picks one. Split out of `chat.ts`
@@ -21,6 +20,8 @@ import {
   requireProjectCapability,
 } from '../middleware/project-auth';
 import { parseOptionalBody, ResolveAttentionAnswerSchema } from '../schemas';
+import { getCommentContextLimits } from '../services/collaboration-settings';
+import { getConnectorReadLimits } from '../services/connector-read-settings';
 import * as projectDataService from '../services/project-data';
 import { recordSharedSessionAnswer, requireSessionWriter } from '../services/session-access';
 import { getSessionMessageLimit } from './chat-message-query';
@@ -55,23 +56,52 @@ export function registerChatAttentionRoute(chatRoutes: Hono<{ Bindings: Env }>):
           Boolean(access.grant) &&
           (await hasProjectCapability(db, projectId, access.ownerUserId ?? '', 'task:write'))));
     const expired = marker.expiresAt !== null && marker.expiresAt <= Date.now();
-    const page =
+    const requested = Number(c.req.query('limit'));
+    // Share the existing admin-editable context setting with the comment reader.
+    const settings =
       c.req.query('context') === 'true'
-        ? await projectDataService.getMessages(
-            c.env,
-            projectId,
-            sessionId,
-            getSessionMessageLimit(
-              c.env,
-              c.req.query('limit') ?? String(DEFAULT_NOTIFICATION_CONTEXT_MESSAGE_LIMIT)
-            ),
-            marker.createdAt,
-            null,
-            ['user', 'assistant'],
-            true,
-            'desc'
-          )
+        ? await Promise.all([getCommentContextLimits(c.env), getConnectorReadLimits(c.env)])
         : null;
+    const context = settings?.[0];
+    const bounds = settings?.[1];
+    const limit = context
+      ? getSessionMessageLimit(
+          c.env,
+          String(Number.isSafeInteger(requested) && requested > 0 ? requested : context.messages)
+        )
+      : 0;
+    const page =
+      bounds && context
+        ? await projectDataService.getLogicalTranscriptPage(c.env, projectId, sessionId, {
+            before: marker.createdAt,
+            limit,
+            roles: ['user', 'assistant'],
+            maxScanRows: Math.min(context.maxRows, bounds.transcriptScanRows),
+            maxMessageChars: bounds.transcriptMessageChars,
+            maxPageChars: bounds.transcriptPageChars,
+            includeLatest: false,
+            includeToolTitles: false,
+          })
+        : null;
+    const messages =
+      page?.entries
+        .flatMap((entry) =>
+          entry.kind === 'message'
+            ? [
+                {
+                  id: entry.messageId,
+                  sessionId,
+                  role: entry.role,
+                  content: entry.content,
+                  createdAt: entry.createdAt,
+                  toolMetadata: null,
+                  sequence: entry.start?.sequence,
+                  truncated: entry.truncated || !entry.complete,
+                },
+              ]
+            : []
+        )
+        .reverse() ?? [];
     return c.json({
       request: {
         id: marker.id,
@@ -89,7 +119,7 @@ export function registerChatAttentionRoute(chatRoutes: Hono<{ Bindings: Env }>):
           writer,
       },
       session: { id: sessionId, topic: typeof session.topic === 'string' ? session.topic : null },
-      messages: page?.messages ?? [],
+      messages,
     });
   });
 

@@ -813,9 +813,9 @@ the shortened notification body. No runtime is contacted and the GET never answe
 `canAnswer` requires a supported human-input source, current session-writer/project authority,
 and an unexpired, unresolved request without an in-flight answer.
 
-`context=true` adds preceding user/assistant transcript excerpts, bounded before the request's
-creation time. `limit` overrides the default `DEFAULT_NOTIFICATION_CONTEXT_MESSAGE_LIMIT` (3),
-subject to the existing `CHAT_SESSION_MESSAGE_MAX` ceiling and message RPC size bound. Empty
+`context=true` adds preceding user/assistant messages assembled from their streaming rows, bounded before the request's
+creation time. `limit` overrides the existing admin setting `collaboration.commentContextMessages` (default: 6),
+subject to the existing `CHAT_SESSION_MESSAGE_MAX` ceiling. Empty, invalid or nonpositive query limits use that context setting. The existing comment-context row cap and Connector transcript character/scan bounds also apply; limited excerpts carry `truncated: true`. Empty
 context is valid. Reads use existing archive-owner routing. Missing session/request returns
 404; absent project capability is rejected by the standard membership/capability guards.
 Answers continue through the existing `POST .../attention/:markerId/resolve`; fixed choices

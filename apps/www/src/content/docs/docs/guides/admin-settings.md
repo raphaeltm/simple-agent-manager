@@ -155,7 +155,7 @@ These limit [shared chats and comments](/docs/guides/collaboration/#work-togethe
 | `collaboration.sessionAccessMaxGrants`           | 10      | 1–100     | People one chat can be shared with at a time                                                       |
 | `collaboration.commentMentionsMax`               | 10      | 1–50      | People one comment or reply can @mention                                                           |
 | `collaboration.commentNotificationWindowSeconds` | 600     | 60–86,400 | Seconds during which further comments on one chat send each person no new **Comment** notification |
-| `collaboration.commentContextMessages`           | 6       | 1–50      | Messages shown before and after a commented message when a comment is opened in its conversation   |
+| `collaboration.commentContextMessages`           | 6       | 1–50      | Messages around a comment, or before an agent question opened from notifications                   |
 | `collaboration.commentContextMaxRows`            | 1,000   | 50–5,000  | Stored rows read before and after a commented message for that view                                |
 
 An agent's reply counts as one message however many streamed parts it was stored in. So does a

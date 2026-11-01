@@ -31,10 +31,14 @@ Full question readable even outside current chat page; responses stay visible wh
 
 ## Validation and review
 
-- 43 targeted web tests and 42 API/attention unit tests passed; 12 Workers tests passed including real service → DO RPC → SQLite for a full old question, cross-session lookup and resolved history.
+- 43 targeted web tests and 42 API/attention unit tests passed; 13 Workers tests passed including real service → DO RPC → SQLite for a full old question, cross-session lookup and resolved history.
 - Playwright: 10 tests passed at 375×667 and 1280×800, exercising bell/project reader, long content, context, typed answers, failures, direct quick answers and normal update navigation. Geometry asserts header/footer stay in viewport and answers stay stationary when body scrolls. Screenshots visually reviewed; no remaining layout issues. Physical mobile software keyboard was not tested.
 - API/web typechecks and builds passed; scoped ESLint passed. Prototype code removed.
 - Independent backend/security/constitution review ADDRESSED caller write authority and configurable context limit; final PASS. Independent task/test/doc review PASS. Independent UI review PASS; rubric 4/5 in all five categories.
 - Staging skipped by explicit Raphaël authorization. Task-only direct main push was rejected by GH013 required check; task is included in this normal feature PR instead, without bypass.
 - Reviewers verified no effect-handler conflict. Optional-context query is independent so a context failure does not remove the question or answer area.
 - Final read path bundles viewer access and saved request in one DO RPC, keeping cold archive/grantee reads within the request I/O budget. Independent backend reviewer rechecked and passed; affected unit and Workers slices rerun.
+
+- CodeRabbit context feedback addressed: whole streamed messages assembled through the logical transcript reader, invalid limits fall back to existing Admin comment-context setting (default six), existing scan/character bounds apply, and limited excerpts are visibly labeled. Real SQLite and Workers regressions cover streamed chunks, exclusive timestamp and ordering.
+
+- Final review fixes: shared membership helper joins project+active member in one D1 statement, retaining defensive identity checks. Cold worst-case reader remains eight operations including bootstrap/settings/archive work. Backend and independent completion review PASS. Full API unit sweep: 936 files passed, one skipped; six preloaded fixture failures were repaired and all affected files separately rerun PASS (372 targeted assertions across relevant runs). Final API typecheck and edited-file ESLint passed. Final browser10/10 and Workers13/13 passed; context screenshots reuploaded and UI review PASS.

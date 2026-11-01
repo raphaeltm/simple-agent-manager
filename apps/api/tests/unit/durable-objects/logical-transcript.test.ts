@@ -106,6 +106,20 @@ describe('logical transcript', () => {
   const messages = (entries: LogicalEntry[]) =>
     entries.flatMap((entry) => (entry.kind === 'message' ? [entry] : []));
 
+  it('returns whole preceding messages before a question timestamp, not the last three stream rows', async () => {
+    seed([
+      { id: 'u1', role: 'user', content: 'Start' },
+      ...chunks('a', 5),
+      { id: 'u2', role: 'user', content: 'Follow-up' },
+      { id: 'after-question', role: 'assistant', content: 'Not preceding' },
+    ]);
+    const result = await page({ before: 1007, limit: 3, roles: ['user', 'assistant'] });
+    const prior = messages(result.entries);
+    expect(prior.map((message) => message.messageId)).toEqual(['u2', 'a001', 'u1']);
+    expect(prior[1]?.content).toBe('a1.a2.a3.a4.a5.');
+    expect(prior.every((message) => message.complete && message.createdAt < 1007)).toBe(true);
+  });
+
   /** u1 | a1–a5 | tools | u2 | a6–a12 (one reply) | thought | tool | a13 */
   function seedConversation(): void {
     seed([

@@ -82,6 +82,7 @@ async function setup(
                     ? [
                         {
                           id: 'm1',
+                          truncated: true,
                           role: 'user',
                           createdAt: now - 120000,
                           content:
@@ -192,6 +193,9 @@ test('bell reader: full question, context, pinned answers and real answer payloa
   await dialog.getByRole('button', { name: 'Show earlier context' }).click();
   await expect(
     dialog.getByText('Please keep quick answers, but let me read the whole message first.')
+  ).toBeVisible();
+  await expect(
+    dialog.getByText('Excerpt limited. Open the conversation to read more.')
   ).toBeVisible();
   await shot(page, `question-context-${suffix()}`);
   await answer.click();

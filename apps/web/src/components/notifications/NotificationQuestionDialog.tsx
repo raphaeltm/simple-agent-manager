@@ -176,6 +176,11 @@ export function NotificationQuestionDialog({
                         })}
                       </p>
                       <RenderedMarkdown inline content={m.content} />
+                      {m.truncated && (
+                        <p className="mt-2 text-xs text-fg-muted">
+                          Excerpt limited. Open the conversation to read more.
+                        </p>
+                      )}
                     </article>
                   ))}
                 </>

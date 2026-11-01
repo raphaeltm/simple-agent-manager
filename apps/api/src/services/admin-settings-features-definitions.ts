@@ -108,7 +108,7 @@ export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
     'collaboration.commentContextMessages',
     DEFAULT_COMMENT_CONTEXT_MESSAGES,
     'Collaboration',
-    'Messages shown before and after a commented message when a comment is opened from the Comments page.',
+    'Messages of context shown when reading a comment or an agent question from notifications.',
     { min: 1, max: 50 }
   ),
   integerDefinition(

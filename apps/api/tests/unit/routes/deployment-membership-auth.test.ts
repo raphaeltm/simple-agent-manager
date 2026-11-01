@@ -235,6 +235,16 @@ function createMockDb() {
   return {
     select: vi.fn(() => ({
       from: vi.fn((table: unknown) => ({
+        innerJoin: vi.fn(() => ({
+          where: (condition: Condition) => ({
+            limit: async () =>
+              (selectRows(projects, condition) as ProjectRow[]).flatMap((project) =>
+                (selectRows(projectMembers, condition) as ProjectMemberRow[])
+                  .filter((membership) => membership.projectId === project.id)
+                  .map((membership) => ({ project, membership }))
+              ),
+          }),
+        })),
         where: vi.fn((condition: Condition) => ({
           limit: vi.fn(async () => selectRows(table, condition)),
           orderBy: vi.fn(async () => selectRows(table, condition)),

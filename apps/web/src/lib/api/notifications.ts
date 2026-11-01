@@ -103,7 +103,7 @@ export interface AttentionRequestContext {
     canAnswer: boolean;
   };
   session: { id: string; topic: string | null };
-  messages: import('./sessions').ChatMessageResponse[];
+  messages: (import('./sessions').ChatMessageResponse & { truncated?: boolean })[];
 }
 
 /** Full saved question independent of whichever chat page is currently loaded. */

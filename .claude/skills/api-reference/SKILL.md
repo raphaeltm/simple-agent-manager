@@ -468,4 +468,4 @@ Private VM-agent node-management routes: `POST /workspaces/:workspaceId/mcp/secr
 
 ### Full notification questions
 
-- `GET /api/projects/:projectId/sessions/:sessionId/attention/:markerId` — full saved human-input request, options and resolution/delivery status; project `task:read` required. `context=true` adds bounded preceding transcript excerpts; optional `limit` defaults to shared `DEFAULT_NOTIFICATION_CONTEXT_MESSAGE_LIMIT` and uses existing chat page maximum. No runtime contact. Answers still use `POST .../attention/:markerId/resolve`.
+- `GET /api/projects/:projectId/sessions/:sessionId/attention/:markerId` — full saved human-input request, options and resolution/delivery status; project `task:read` required. `context=true` adds bounded preceding transcript excerpts; optional `limit` defaults to admin-editable `collaboration.commentContextMessages` (6) and uses the existing chat page maximum. Streamed rows are assembled into whole messages; scan/character-limited excerpts are labelled. No runtime contact. Answers still use `POST .../attention/:markerId/resolve`.

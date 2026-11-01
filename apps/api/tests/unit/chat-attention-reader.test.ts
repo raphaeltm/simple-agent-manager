@@ -15,12 +15,22 @@ vi.mock('../../src/middleware/project-auth', async (original) => ({
   requireActiveProjectMembership: mocks.capability,
   hasProjectCapability: mocks.ownerCapability,
 }));
+vi.mock('../../src/services/collaboration-settings', () => ({
+  getCommentContextLimits: async () => ({ messages: 6, maxRows: 1000 }),
+}));
+vi.mock('../../src/services/connector-read-settings', () => ({
+  getConnectorReadLimits: async () => ({
+    transcriptScanRows: 4000,
+    transcriptMessageChars: 6000,
+    transcriptPageChars: 24000,
+  }),
+}));
 vi.mock('../../src/services/project-data', () => ({
   getAttentionRequest: async (...args: unknown[]) => {
     const viewer = await mocks.access(...args);
     return { ...viewer, marker: viewer.access.found ? await mocks.marker(...args) : null };
   },
-  getMessages: mocks.messages,
+  getLogicalTranscriptPage: mocks.messages,
 }));
 vi.mock('../../src/routes/chat-prompt-forward', () => ({
   preparePromptForLiveAgent: vi.fn(),
@@ -61,8 +71,18 @@ describe('notification question reader route', () => {
       resolvedAnswer: null,
     });
     mocks.messages.mockResolvedValue({
-      messages: [{ id: 'm-1', content: 'Previous context', role: 'user', createdAt: 900 }],
-      hasMore: true,
+      entries: [
+        {
+          kind: 'message',
+          messageId: 'm-1',
+          content: 'Previous context',
+          role: 'user',
+          createdAt: 900,
+          complete: true,
+          truncated: false,
+          start: { sequence: 1 },
+        },
+      ],
     });
   });
   it('returns full canonical text and options without reading transcript until requested', async () => {
@@ -85,12 +105,12 @@ describe('notification question reader route', () => {
       expect.anything(),
       'p-1',
       's-1',
-      3,
-      1000,
-      null,
-      ['user', 'assistant'],
-      true,
-      'desc'
+      expect.objectContaining({
+        before: 1000,
+        limit: 6,
+        roles: ['user', 'assistant'],
+        maxScanRows: 1000,
+      })
     );
   });
   it.each([
@@ -143,13 +163,51 @@ describe('notification question reader route', () => {
       expect.anything(),
       'p-1',
       's-1',
-      5,
-      1000,
-      null,
-      ['user', 'assistant'],
-      true,
-      'desc'
+      expect.objectContaining({ before: 1000, limit: 5 })
     );
+  });
+  it.each(['', 'bad', '0', '-1'])(
+    'uses the context default for invalid limit %j',
+    async (limit) => {
+      await app().request(path + '?context=true&limit=' + limit, {}, { DATABASE: {} });
+      expect(mocks.messages).toHaveBeenCalledWith(
+        expect.anything(),
+        'p-1',
+        's-1',
+        expect.objectContaining({ limit: 6 })
+      );
+    }
+  );
+  it('preserves full assembled message text and chronological ordering', async () => {
+    mocks.messages.mockResolvedValue({
+      entries: [
+        {
+          kind: 'message',
+          messageId: 'm-newer',
+          role: 'assistant',
+          content: 'First streamed chunk. Second streamed chunk.',
+          createdAt: 900,
+          complete: true,
+          truncated: false,
+          start: { sequence: 2 },
+        },
+        { kind: 'activity' },
+        {
+          kind: 'message',
+          messageId: 'm-older',
+          role: 'user',
+          content: 'Earlier question',
+          createdAt: 800,
+          complete: false,
+          truncated: false,
+          start: { sequence: 1 },
+        },
+      ],
+    });
+    const result = await (await app().request(path + '?context=true', {}, { DATABASE: {} })).json();
+    expect(result.messages.map((m: { id: string }) => m.id)).toEqual(['m-older', 'm-newer']);
+    expect(result.messages[1].content).toBe('First streamed chunk. Second streamed chunk.');
+    expect(result.messages[0].truncated).toBe(true);
   });
   it('rejects missing and cross-session markers', async () => {
     for (const marker of [null, { sessionId: 'other', kind: 'needs_input' }]) {

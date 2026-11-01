@@ -82,8 +82,8 @@ one records the exact answer and forwards it to the agent.
 Select the question text or **Read question & context** to open the full saved question in a
 focused dialog. On a phone, it fills most of the screen. The question scrolls independently of
 the answer area, so its choices stay available while you read. **Show earlier context** loads a
-small set of excerpts from before the request, even if the question is outside the chat's
-currently loaded page. **Open in conversation** takes you to the chat; after loading context,
+small set of earlier messages assembled from their streamed parts, even if the question is outside the chat's
+currently loaded page. A very long or scan-limited excerpt is labelled; open the conversation to read more. The number of earlier messages shares the **Collaboration** context setting in **Admin → Settings** with the comment reader. **Open in conversation** takes you to the chat; after loading context,
 it opens at the last preceding excerpt.
 
 The same reader opens from project notifications. Quick choice buttons still work directly in
