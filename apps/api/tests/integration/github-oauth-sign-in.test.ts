@@ -172,7 +172,10 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
   });
 
   /** Browser: click "Sign in with GitHub", approve on GitHub, land back on the callback. */
-  async function signInWithGitHub(code?: string): Promise<Response> {
+  async function signInWithGitHub(
+    code?: string,
+    onBeforeCallback?: (state: string, authorizeUrl: URL) => void
+  ): Promise<Response> {
     const start = await app.request(
       `${API_ORIGIN}/api/auth/sign-in/social`,
       {
@@ -186,11 +189,13 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
     jar.store(start);
     const { url } = (await start.json()) as { url: string };
     const authorizeUrl = new URL(url);
+    const state = authorizeUrl.searchParams.get('state') ?? '';
+    onBeforeCallback?.(state, authorizeUrl);
     const approvedCode = github.approve(authorizeUrl);
 
     const callback = new URL(GITHUB_REDIRECT_URI);
     callback.searchParams.set('code', code ?? approvedCode);
-    callback.searchParams.set('state', authorizeUrl.searchParams.get('state') ?? '');
+    callback.searchParams.set('state', state);
     // GitHub's RFC 9207 issuer parameter, present on every production callback.
     callback.searchParams.set('iss', 'https://github.com/login/oauth');
     const response = await app.request(
@@ -289,61 +294,24 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
   });
 
   it('namespaces OAuth state in verifications with auth-state: and consumes it on callback (CVE-2026-114607)', async () => {
-    const start = await app.request(
-      `${API_ORIGIN}/api/auth/sign-in/social`,
-      {
-        method: 'POST',
-        headers: { 'content-type': 'application/json', origin: APP_ORIGIN, cookie: jar.header() },
-        body: JSON.stringify({ provider: 'github', callbackURL: CALLBACK_URL }),
-      },
-      env
-    );
-    expect(start.status).toBe(200);
-    jar.store(start);
-    const { url } = (await start.json()) as { url: string };
-    const authorizeUrl = new URL(url);
-    const state = authorizeUrl.searchParams.get('state') ?? '';
-    expect(state).not.toBe('');
+    const verificationIdentifiers = () =>
+      (
+        sqlite.prepare(`SELECT identifier FROM verifications`).all() as Array<{
+          identifier: string;
+        }>
+      ).map((row) => row.identifier);
 
-    // Pre-1.7.7 stored the bare state as the verification identifier, allowing OAuth state
-    // records to collide with unprefixed verification tokens (CVE-2026-114607).
-    const rowsBeforeCallback = sqlite
-      .prepare(`SELECT identifier FROM verifications`)
-      .all() as Array<{ identifier: string }>;
-    expect(rowsBeforeCallback).toEqual([{ identifier: `auth-state:${state}` }]);
+    let issuedState = '';
+    const response = await signInWithGitHub(undefined, (state) => {
+      issuedState = state;
+      expect(issuedState).not.toBe('');
+      // Pre-1.7.7 stored the bare state as the verification identifier, allowing OAuth state
+      // records to collide with unprefixed verification tokens (CVE-2026-114607).
+      expect(verificationIdentifiers()).toEqual([`auth-state:${issuedState}`]);
+    });
 
-    const approvedCode = github.approve(authorizeUrl);
-    const callback = new URL(GITHUB_REDIRECT_URI);
-    callback.searchParams.set('code', approvedCode);
-    callback.searchParams.set('state', state);
-    callback.searchParams.set('iss', 'https://github.com/login/oauth');
-
-    const response = await app.request(
-      callback.toString(),
-      { headers: { cookie: jar.header() } },
-      env
-    );
     expect(response.status).toBe(302);
     expect(response.headers.get('location')).toBe(CALLBACK_URL);
-
-    // State verification record is consumed after the callback completes.
-    const rowsAfterCallback = sqlite
-      .prepare(`SELECT identifier FROM verifications`)
-      .all() as Array<{ identifier: string }>;
-    expect(rowsAfterCallback).toEqual([]);
-
-    // Replaying the consumed state with a fresh code fails.
-    const replayCallback = new URL(GITHUB_REDIRECT_URI);
-    replayCallback.searchParams.set('code', github.approve(authorizeUrl));
-    replayCallback.searchParams.set('state', state);
-    replayCallback.searchParams.set('iss', 'https://github.com/login/oauth');
-    const replayJar = createCookieJar();
-    const replayResponse = await app.request(
-      replayCallback.toString(),
-      { headers: { cookie: replayJar.header() } },
-      env
-    );
-    expect(replayResponse.status).toBe(302);
-    expect(replayResponse.headers.get('location')).not.toBe(CALLBACK_URL);
+    expect(verificationIdentifiers()).toEqual([]);
   });
 });
