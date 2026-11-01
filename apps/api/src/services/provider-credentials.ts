@@ -186,10 +186,18 @@ async function createProviderFromDecryptedToken(
 
 type ResolvedComputeCredential = CCResolvedEnvironment;
 
+/** Exhaustive so a new resolution source cannot silently be read as a platform credential. */
 function providerCredentialSource(resolved: ResolvedComputeCredential): CredentialSource {
-  if (resolved.source === 'project-attachment') return 'project';
-  if (resolved.source === 'user-attachment') return 'user';
-  return 'platform';
+  switch (resolved.source) {
+    case 'project-attachment':
+      return 'project';
+    case 'profile-attachment': // agent-only tier; listed for exhaustiveness
+    case 'user-attachment':
+      return 'user';
+    case 'platform':
+    case 'platform-proxy':
+      return 'platform';
+  }
 }
 
 async function resolveComputeCredentialWithBackfill(

@@ -10,13 +10,7 @@ export type ProjectScheduledAction =
     };
 
 export type ProjectScheduleState =
-  | 'pending'
-  | 'processing'
-  | 'admitted'
-  | 'cancelled'
-  | 'expired'
-  | 'failed'
-  | 'ambiguous';
+  'pending' | 'processing' | 'admitted' | 'cancelled' | 'expired' | 'failed' | 'ambiguous';
 
 /** A read-only observation of canonical task/inbox state, separate from admission. */
 export type ProjectScheduleExecution = {

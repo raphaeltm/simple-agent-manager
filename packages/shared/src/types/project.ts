@@ -201,10 +201,7 @@ export interface ListProjectsResponse {
  *  - `app-not-installed`: the GitHub App is no longer installed on the repo's owner.
  *  - `unsupported-url`: a discovered submodule URL could not be parsed as a GitHub repo. */
 export type ProjectRepositoryStatus =
-  | 'active'
-  | 'access-revoked'
-  | 'app-not-installed'
-  | 'unsupported-url';
+  'active' | 'access-revoked' | 'app-not-installed' | 'unsupported-url';
 
 /** An additional repository granted to a project's workspace tokens.
  *  The primary project repository is always included implicitly and is not
@@ -358,16 +355,10 @@ export interface ProjectOwnershipTransferResponse {
 
 export type ProjectMemberOffboardingPlanStatus = 'preview' | 'applied' | 'expired';
 export type ProjectMemberOffboardingResourceKind =
-  | 'trigger'
-  | 'task_tree'
-  | 'node'
-  | 'deployment_environment'
-  | 'project_attachment';
+  'trigger' | 'task_tree' | 'node' | 'deployment_environment' | 'project_attachment';
 export type ProjectMemberOffboardingCredentialSource = 'user' | 'project' | 'platform' | 'unknown';
 export type ProjectMemberOffboardingAction =
-  | 'reattach_to_project'
-  | 'break_and_flag'
-  | 'defer_removal';
+  'reattach_to_project' | 'break_and_flag' | 'defer_removal';
 export type ProjectMemberOffboardingResourceStatus = 'pending' | 'applied' | 'skipped';
 
 export interface ProjectMemberOffboardingResourcePreview {
@@ -493,11 +484,7 @@ export interface ProjectInvitePreviewResponse {
     repoProvider: RepoProvider;
   };
   membershipStatus:
-    | 'active-member'
-    | 'pending-request'
-    | 'approved-request'
-    | 'denied-request'
-    | 'can-request';
+    'active-member' | 'pending-request' | 'approved-request' | 'denied-request' | 'can-request';
   accessRequest: ProjectAccessRequestResponse | null;
 }
 

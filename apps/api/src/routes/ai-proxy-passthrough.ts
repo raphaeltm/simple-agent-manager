@@ -18,6 +18,8 @@ import {
   DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
   DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
   DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES,
+  type AgentCredentialScope,
+  type CCResolutionSource,
   type Dialect,
   HARNESS_CAPABILITIES,
   type HarnessCapability,
@@ -46,6 +48,8 @@ import {
   estimateInputTokensFromMessages,
   optionalExecutionContext,
 } from '../services/ai-token-usage-accounting';
+import { credentialScopeFromSource } from '../services/agent-key-resolution';
+import { resolveSessionProfileCredentialContext } from '../services/composable-credentials/profile-context';
 import { resolveForConsumer } from '../services/composable-credentials/resolve';
 import { copyCredentialLimitHeaders } from '../services/credential-limit-events';
 import {
@@ -92,6 +96,7 @@ interface ResolvedProxyUpstream {
   provider: AiProviderUsageAttribution;
   credentialReference: string;
   credentialSource: 'user' | 'project' | 'platform';
+  credentialScope: AgentCredentialScope;
   credentialProvider: string;
   providerMode: 'proxy-passthrough';
 }
@@ -103,8 +108,7 @@ interface PreparedProxyRequest extends PassthroughAuthResult {
 }
 
 type PreparedProxyResult =
-  | { ok: true; value: PreparedProxyRequest }
-  | { ok: false; response: Response };
+  { ok: true; value: PreparedProxyRequest } | { ok: false; response: Response };
 
 interface PrepareProxyOptions {
   dialect: Dialect;
@@ -261,28 +265,49 @@ function credentialSupportsDialect(
   return secret.kind === 'openai-compatible' && dialect === 'openai-compatible';
 }
 
-function credentialSourceFromResolution(source: string): 'user' | 'project' | 'platform' {
-  if (source === 'project-attachment') return 'project';
-  if (source === 'user-attachment') return 'user';
-  return 'platform';
+/**
+ * Who owns the credential. A profile pin is the user's own account. Exhaustive
+ * over the resolver's sources so a new source cannot silently become 'platform'.
+ */
+function credentialSourceFromResolution(
+  source: CCResolutionSource
+): 'user' | 'project' | 'platform' {
+  switch (source) {
+    case 'project-attachment':
+      return 'project';
+    case 'profile-attachment':
+    case 'user-attachment':
+      return 'user';
+    case 'platform':
+    case 'platform-proxy':
+      return 'platform';
+  }
 }
 
 async function resolveProxyUpstream(input: {
   env: Env;
   userId: string;
+  workspaceId: string;
   projectId: string | null;
   agentType?: string | null;
+  agentSessionId?: string | null;
   dialect: Dialect;
 }): Promise<ResolvedProxyUpstream | null> {
   const db = drizzle(input.env.DATABASE, { schema });
   const encryptionKey = getCredentialEncryptionKey(input.env);
+  // Same profile context as the agent-key callback that gave this session its key.
+  const profile = await resolveSessionProfileCredentialContext(db, {
+    workspaceId: input.workspaceId,
+    agentSessionId: input.agentSessionId,
+  });
   for (const capability of candidateCapabilities(input.agentType, input.dialect)) {
     const resolved = await resolveForConsumer(
       db,
       input.userId,
       encryptionKey,
       { kind: 'agent', agentType: capability.agentType },
-      input.projectId
+      input.projectId,
+      profile
     );
     if (!resolved?.credential || resolved.source === 'platform-proxy') continue;
     const secret = resolved.credential.secret;
@@ -300,6 +325,7 @@ async function resolveProxyUpstream(input: {
       provider: resolveProviderAttribution({ baseUrl, dialect: input.dialect, settings }),
       credentialReference: `cc_credentials:${resolved.credential.id}`,
       credentialSource: credentialSourceFromResolution(resolved.source),
+      credentialScope: credentialScopeFromSource(resolved.source),
       credentialProvider: input.dialect,
       providerMode: 'proxy-passthrough',
     };
@@ -462,8 +488,10 @@ async function prepareProxyRequest(
   const upstream = await resolveProxyUpstream({
     env: c.env,
     userId: auth.userId,
+    workspaceId: auth.workspaceId,
     projectId: auth.projectId,
     agentType: auth.agentType,
+    agentSessionId: auth.agentSessionId,
     dialect: options.dialect,
   });
   if (!upstream) {

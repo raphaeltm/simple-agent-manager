@@ -7,6 +7,7 @@
  *
  * Upstream auth resolution (Unified Billing vs platform key) lives in ai-billing.ts.
  */
+import type { AgentCredentialScope } from '@simple-agent-manager/shared';
 import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
@@ -38,6 +39,8 @@ export interface AIProxyAuthResult {
 export type AIProxyCredentialAttribution = {
   credentialReference: string;
   credentialSource: 'user' | 'project' | 'platform';
+  /** Resolution tier that chose the credential; platform attributions imply 'platform'. */
+  credentialScope?: AgentCredentialScope | null;
   credentialProvider?: string | null;
   providerMode?: string | null;
 };
@@ -185,8 +188,11 @@ export async function updateAIProxyAgentCredentialAttribution(
     });
     return;
   }
+  const credentialScope =
+    attribution.credentialScope ??
+    (attribution.credentialSource === 'platform' ? 'platform' : null);
   const existing = await env.DATABASE.prepare(
-    `SELECT agent_credential_source, agent_credential_reference, agent_credential_provider,
+    `SELECT agent_credential_source, agent_credential_scope, agent_credential_reference, agent_credential_provider,
             agent_provider_mode, agent_credential_generation
        FROM agent_sessions
       WHERE id = ?
@@ -204,6 +210,7 @@ export async function updateAIProxyAgentCredentialAttribution(
     )
     .first<{
       agent_credential_source: string | null;
+      agent_credential_scope: string | null;
       agent_credential_reference: string | null;
       agent_credential_provider: string | null;
       agent_provider_mode: string | null;
@@ -213,6 +220,7 @@ export async function updateAIProxyAgentCredentialAttribution(
     existing &&
     existing.agent_credential_generation === auth.agentCredentialGeneration &&
     existing.agent_credential_source === attribution.credentialSource &&
+    existing.agent_credential_scope === credentialScope &&
     existing.agent_credential_reference === attribution.credentialReference &&
     existing.agent_credential_provider === (attribution.credentialProvider ?? null) &&
     existing.agent_provider_mode === (attribution.providerMode ?? null)
@@ -222,6 +230,7 @@ export async function updateAIProxyAgentCredentialAttribution(
   const update = await env.DATABASE.prepare(
     `UPDATE agent_sessions
         SET agent_credential_source = ?,
+            agent_credential_scope = ?,
             agent_credential_reference = ?,
             agent_credential_provider = ?,
             agent_provider_mode = ?,
@@ -235,6 +244,7 @@ export async function updateAIProxyAgentCredentialAttribution(
   )
     .bind(
       attribution.credentialSource,
+      credentialScope,
       attribution.credentialReference,
       attribution.credentialProvider ?? null,
       attribution.providerMode ?? null,

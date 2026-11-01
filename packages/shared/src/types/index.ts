@@ -27,6 +27,7 @@ export {
 
 // User & Credentials
 export type {
+  AgentCredentialScope,
   AdminUser,
   AdminUserActionRequest,
   AdminUserRoleRequest,

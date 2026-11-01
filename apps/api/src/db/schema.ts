@@ -1919,6 +1919,10 @@ export const agentSessions = sqliteTable(
     agentCredentialSource: text('agent_credential_source', {
       enum: ['user', 'project', 'platform'],
     }).default('user'),
+    /** Resolution tier that chose the credential. Null on rows written before 0215. */
+    agentCredentialScope: text('agent_credential_scope', {
+      enum: ['profile', 'project', 'user', 'platform'],
+    }),
     agentCredentialReference: text('agent_credential_reference'),
     agentCredentialProvider: text('agent_credential_provider'),
     agentProviderMode: text('agent_provider_mode'),
@@ -5276,3 +5280,45 @@ export const ccAttachments = sqliteTable(
 
 export type CCAttachmentRow = typeof ccAttachments.$inferSelect;
 export type NewCCAttachmentRow = typeof ccAttachments.$inferInsert;
+
+/**
+ * Personal profile pins (migration 0215): one user's account choice for one agent
+ * profile. Kept out of cc_attachments, whose readers treat a NULL project as the
+ * user's default.
+ */
+export const ccProfileAttachments = sqliteTable(
+  'cc_profile_attachments',
+  {
+    id: text('id').primaryKey(),
+    configurationId: text('configuration_id')
+      .notNull()
+      .references(() => ccConfigurations.id, { onDelete: 'cascade' }),
+    userId: text('user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    agentProfileId: text('agent_profile_id')
+      .notNull()
+      .references(() => agentProfiles.id, { onDelete: 'cascade' }),
+    consumerKind: text('consumer_kind').notNull(),
+    consumerTarget: text('consumer_target').notNull(),
+    isActive: integer('is_active', { mode: 'boolean' }).notNull().default(true),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`(datetime('now'))`),
+  },
+  (table) => ({
+    userProfileConsumerIdx: uniqueIndex('idx_cc_profile_attachments_user_profile_consumer').on(
+      table.userId,
+      table.agentProfileId,
+      table.consumerKind,
+      table.consumerTarget
+    ),
+    profileIdx: index('idx_cc_profile_attachments_profile').on(table.agentProfileId),
+    configIdx: index('idx_cc_profile_attachments_config').on(table.configurationId),
+  })
+);
+
+export type CCProfileAttachmentRow = typeof ccProfileAttachments.$inferSelect;

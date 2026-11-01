@@ -25,6 +25,7 @@ import {
   ccAttachments,
   ccConfigurations,
   ccCredentials,
+  ccProfileAttachments,
   platformCredentials,
 } from '../../db/schema';
 import { maybeJsonRecord } from '../../lib/runtime-validation';
@@ -184,17 +185,19 @@ export function hydrateMissingCloudProviderSecretProviders(
 }
 
 /**
- * Build a CompositionSnapshot for a user, optionally scoped to a project.
- * Decrypts all credential secrets.
+ * Build a CompositionSnapshot for a user, optionally scoped to a project and to
+ * the agent profile a run uses. Only that profile's pins of this user are
+ * loaded. Decrypts all credential secrets.
  */
 export async function buildSnapshot(
   db: ReturnType<typeof drizzle>,
   userId: string,
   encryptionKey: string,
-  projectId?: string | null
+  projectId?: string | null,
+  profileId?: string | null
 ): Promise<CCCompositionSnapshot> {
   // Query all three tables for this user
-  const [credRows, configRows, attachRows] = await Promise.all([
+  const [credRows, configRows, attachRows, profilePinRows] = await Promise.all([
     db.select().from(ccCredentials).where(eq(ccCredentials.ownerId, userId)),
     db.select().from(ccConfigurations).where(eq(ccConfigurations.ownerId, userId)),
     db
@@ -208,6 +211,17 @@ export async function buildSnapshot(
             )
           : eq(ccAttachments.userId, userId)
       ),
+    profileId
+      ? db
+          .select()
+          .from(ccProfileAttachments)
+          .where(
+            and(
+              eq(ccProfileAttachments.userId, userId),
+              eq(ccProfileAttachments.agentProfileId, profileId)
+            )
+          )
+      : Promise.resolve([]),
   ]);
 
   // Decrypt credentials. A single unparseable/undecryptable credential must
@@ -263,6 +277,15 @@ export async function buildSnapshot(
       : { scope: 'user' as const, userId: row.userId },
     isActive: row.isActive,
   }));
+  for (const row of profilePinRows) {
+    attachments.push({
+      id: row.id,
+      configurationId: row.configurationId,
+      consumer: rowToConsumer(row),
+      target: { scope: 'profile', userId: row.userId, profileId: row.agentProfileId },
+      isActive: row.isActive,
+    });
+  }
 
   // Query platform defaults from the old platform_credentials table
   const platform = await buildPlatformDefaults(db, encryptionKey);
