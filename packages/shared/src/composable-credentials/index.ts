@@ -13,7 +13,7 @@ export type {
   SourcePlatformRow as CCSourcePlatformRow,
 } from './backfill';
 export { backfill, mapKind } from './backfill';
-export { resolveEnvironment } from './resolver';
+export { explainResolution, resolveEnvironment } from './resolver';
 export type {
   Attachment as CCAttachment,
   AttachmentScope as CCAttachmentScope,
@@ -29,6 +29,11 @@ export type {
   PlatformDefault as CCPlatformDefault,
   ResolutionContext as CCResolutionContext,
   ResolutionSource as CCResolutionSource,
+  ResolutionStep as CCResolutionStep,
+  ResolutionStepReason as CCResolutionStepReason,
+  ResolutionStepState as CCResolutionStepState,
+  ResolutionTier as CCResolutionTier,
+  ResolutionTrace as CCResolutionTrace,
   ResolutionStatusResponse as CCResolutionStatusResponse,
   ResolvedEnvironment as CCResolvedEnvironment,
 } from './types';

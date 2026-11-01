@@ -58,8 +58,7 @@ export type ConsumerKind = 'agent' | 'compute';
  * agentType/provider binding lives — on the configuration, not the credential.
  */
 export type ConsumerRef =
-  | { kind: 'agent'; agentType: string }
-  | { kind: 'compute'; provider: string };
+  { kind: 'agent'; agentType: string } | { kind: 'compute'; provider: string };
 
 /** Stable string key for a consumer ref (used to index attachments/platform defaults). */
 export function consumerKey(consumer: ConsumerRef): string {
@@ -104,10 +103,15 @@ export interface ConfigurationSettings {
 // Primitive 3 — Attachment (binds a configuration into a scope)
 // =============================================================================
 
-/** Where a configuration is attached. */
+/**
+ * Where a configuration is attached. Every scope belongs to one user: a project
+ * or profile attachment means "my account when I run in this project / with this
+ * profile", never another member's runs.
+ */
 export type AttachmentScope =
   | { scope: 'user'; userId: string }
-  | { scope: 'project'; userId: string; projectId: string };
+  | { scope: 'project'; userId: string; projectId: string }
+  | { scope: 'profile'; userId: string; profileId: string };
 
 export interface Attachment {
   id: string;
@@ -150,14 +154,21 @@ export interface CompositionSnapshot {
 export interface ResolutionContext {
   userId: string;
   projectId?: string;
+  /**
+   * Agent profile the run uses. Enables the profile-pin tier, which applies to
+   * agent consumers only.
+   */
+  profileId?: string;
+  /**
+   * Agent type the run actually starts (`skill.agentType ?? profile.agentType`).
+   * A profile pin for any other agent type is skipped, not used.
+   */
+  profileAgentType?: string;
 }
 
 /** Where the resolved configuration/credential came from. */
 export type ResolutionSource =
-  | 'project-attachment'
-  | 'user-attachment'
-  | 'platform'
-  | 'platform-proxy';
+  'profile-attachment' | 'project-attachment' | 'user-attachment' | 'platform' | 'platform-proxy';
 
 /** The output of the generalized resolver. */
 export interface ResolvedEnvironment {
@@ -165,6 +176,47 @@ export interface ResolvedEnvironment {
   configuration: Configuration | null;
   credential: Credential | null;
   source: ResolutionSource;
+}
+
+// =============================================================================
+// Resolution trace — how each tier was evaluated, for diagnostics
+// =============================================================================
+
+/** The tiers in the order the resolver checks them. */
+export type ResolutionTier = 'profile' | 'project' | 'user' | 'platform';
+
+/**
+ * - used: this tier supplied the result.
+ * - skipped: something is set here but does not apply; the chain continues.
+ * - halted: something is set here but unusable; the chain stops (Rule 28).
+ * - not-set: nothing is set at this tier.
+ * - not-reached: an earlier tier already decided.
+ */
+export type ResolutionStepState = 'used' | 'skipped' | 'halted' | 'not-set' | 'not-reached';
+
+export type ResolutionStepReason =
+  | 'paused'
+  | 'configuration-missing'
+  | 'configuration-inactive'
+  | 'credential-missing'
+  | 'credential-inactive'
+  | 'agent-type-mismatch';
+
+export interface ResolutionStep {
+  tier: ResolutionTier;
+  state: ResolutionStepState;
+  attachmentId: string | null;
+  configurationId: string | null;
+  reason: ResolutionStepReason | null;
+  /** For `agent-type-mismatch`: the agent type the skipped pin is for. */
+  pinnedAgentType?: string;
+}
+
+export interface ResolutionTrace {
+  resolved: ResolvedEnvironment | null;
+  /** True when a tier stopped the chain; `resolved` is then null. */
+  halted: boolean;
+  steps: ResolutionStep[];
 }
 
 // =============================================================================
