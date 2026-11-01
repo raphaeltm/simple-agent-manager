@@ -288,6 +288,19 @@ jobs:
       # The www Pages project ({prefix}-www) is shared across environments.
       # This phase is opt-in (include_marketing defaults to false).
       # ================================================================
+      - name: Delete Managed Apex Single Redirect
+        if: ${{ inputs.include_marketing }}
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
+          BASE_DOMAIN: ${{ steps.names.outputs.base_domain }}
+        run: |
+          if [ "$INPUT_DRY_RUN" = "true" ]; then
+            node scripts/deploy/apex-redirect.mjs --remove
+          else
+            node scripts/deploy/apex-redirect.mjs --remove --apply
+          fi
+
       - name: Delete Apex Redirect Page Rule
         id: delete_page_rule
         if: ${{ inputs.include_marketing }}
