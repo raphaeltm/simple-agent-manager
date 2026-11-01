@@ -19,7 +19,7 @@ import {
 import { type AccountRows, accountRows, mergeRows, PROJECTS, resolutionStatus } from './fixtures';
 
 function snapshot(rows: AccountRows, extra: Partial<AccountsSnapshot> = {}): AccountsSnapshot {
-  return { ...rows, projects: PROJECTS, resolution: [], limits: [], ...extra };
+  return { ...rows, profilePins: [], projects: PROJECTS, resolution: [], limits: [], ...extra };
 }
 
 function agentGroup(model: ReturnType<typeof buildAccountsModel>, id: string): ProviderAccounts {

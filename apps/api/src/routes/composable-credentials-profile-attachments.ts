@@ -64,16 +64,24 @@ async function candidateLimit(env: Env): Promise<number> {
     : DEFAULT_PROFILE_PIN_CANDIDATE_LIMIT;
 }
 
-function toItem(row: schema.CCProfileAttachmentRow): CCProfileAttachmentItem {
+function toItem(row: {
+  pin: schema.CCProfileAttachmentRow;
+  profileName: string;
+  projectId: string | null;
+  projectName: string | null;
+}): CCProfileAttachmentItem {
   return {
-    id: row.id,
-    configurationId: row.configurationId,
-    agentProfileId: row.agentProfileId,
-    consumerKind: row.consumerKind,
-    consumerTarget: row.consumerTarget,
-    isActive: row.isActive,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
+    id: row.pin.id,
+    configurationId: row.pin.configurationId,
+    agentProfileId: row.pin.agentProfileId,
+    profileName: row.profileName,
+    projectId: row.projectId,
+    projectName: row.projectName,
+    consumerKind: row.pin.consumerKind,
+    consumerTarget: row.pin.consumerTarget,
+    isActive: row.pin.isActive,
+    createdAt: row.pin.createdAt,
+    updatedAt: row.pin.updatedAt,
   };
 }
 
@@ -83,8 +91,18 @@ export function registerCCProfileAttachmentRoutes(ccRoutes: Hono<{ Bindings: Env
     const db = drizzle(c.env.DATABASE, { schema });
     const userId = getUserId(c);
     const rows = await db
-      .select()
+      .select({
+        pin: schema.ccProfileAttachments,
+        profileName: schema.agentProfiles.name,
+        projectId: schema.agentProfiles.projectId,
+        projectName: schema.projects.name,
+      })
       .from(schema.ccProfileAttachments)
+      .innerJoin(
+        schema.agentProfiles,
+        eq(schema.agentProfiles.id, schema.ccProfileAttachments.agentProfileId)
+      )
+      .leftJoin(schema.projects, eq(schema.projects.id, schema.agentProfiles.projectId))
       .where(eq(schema.ccProfileAttachments.userId, userId));
     return c.json({ attachments: rows.map(toItem) });
   });

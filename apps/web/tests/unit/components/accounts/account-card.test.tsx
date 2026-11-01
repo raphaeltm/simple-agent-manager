@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   listCCConfigurations: vi.fn(),
   listCCAttachments: vi.fn(),
   listCCCredentials: vi.fn(),
+  listProfilePins: vi.fn(),
   listAgentCredentials: vi.fn(),
   deleteCCAttachment: vi.fn(),
   deleteCredential: vi.fn(),
@@ -32,6 +33,7 @@ vi.mock('../../../../src/lib/api', async (importOriginal) => ({
   listCCConfigurations: mocks.listCCConfigurations,
   listCCAttachments: mocks.listCCAttachments,
   listCCCredentials: mocks.listCCCredentials,
+  listProfilePins: mocks.listProfilePins,
   listAgentCredentials: mocks.listAgentCredentials,
   deleteCCAttachment: mocks.deleteCCAttachment,
   deleteCredential: mocks.deleteCredential,
@@ -56,7 +58,7 @@ import { QueryTestWrapper } from '../../../test-utils/query-test-utils';
 import { type AccountRows, accountRows, mergeRows, PROJECTS } from './fixtures';
 
 function group(rows: AccountRows, kind: 'agent' | 'compute', id: string): ProviderAccounts {
-  const model = buildAccountsModel({ ...rows, projects: PROJECTS, resolution: [], limits: [] });
+  const model = buildAccountsModel({ ...rows, profilePins: [], projects: PROJECTS, resolution: [], limits: [] });
   const found = (kind === 'agent' ? model.agents : model.clouds).find(
     (candidate) => candidate.provider.id === id
   );
@@ -130,6 +132,7 @@ describe('AccountCard', () => {
     mocks.listCCConfigurations.mockResolvedValue([]);
     mocks.listCCAttachments.mockResolvedValue([]);
     mocks.listCCCredentials.mockResolvedValue([]);
+    mocks.listProfilePins.mockResolvedValue([]);
     mocks.listAgentCredentials.mockResolvedValue({ credentials: [] });
   });
 
@@ -367,7 +370,27 @@ describe('AccountCard', () => {
 
     await waitFor(() =>
       expect(mocks.error).toHaveBeenCalledWith(
-        'A project started using this account. Refresh and try again.'
+        'A project or profile started using this account. Refresh and try again.'
+      )
+    );
+    expect(mocks.deleteCCConfiguration).not.toHaveBeenCalled();
+  });
+
+  it('refuses to remove an account a profile started running on since the page loaded', async () => {
+    mocks.listProfilePins.mockResolvedValue([
+      { id: 'pin-1', configurationId: 'cfg-spare', agentProfileId: 'prof-1', isActive: true },
+    ]);
+    const claude = group(CLAUDE, 'agent', 'claude-code');
+    renderCard(claude, account(claude, 'Old personal key'));
+
+    fireEvent.click(
+      within(screen.getByTestId('account-card-cfg-spare')).getByRole('button', { name: 'Remove' })
+    );
+    fireEvent.click(within(confirmDialog()).getByRole('button', { name: 'Remove' }));
+
+    await waitFor(() =>
+      expect(mocks.error).toHaveBeenCalledWith(
+        'A project or profile started using this account. Refresh and try again.'
       )
     );
     expect(mocks.deleteCCConfiguration).not.toHaveBeenCalled();

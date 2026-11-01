@@ -20,6 +20,7 @@ import { AccountStatus, ProviderMark, RoleBadge } from './AccountBits';
 import { type AccountProvider, credentialKindLabel } from './provider-meta';
 import {
   canMakeDefault,
+  canPinToProfiles,
   canPinToProjects,
   canUseLegacyRoutes,
   useAccountActions,
@@ -51,6 +52,8 @@ export interface AccountCardProps {
   onReplace?: (account: AccountView) => void;
   /** Choose which projects pin this account (Settings → Agents only). */
   onChooseProjects?: (account: AccountView) => void;
+  /** Choose which of my profiles run on this account (Settings → Agents only). */
+  onChooseProfiles?: (account: AccountView) => void;
   /**
    * Projects without a pin, which follow the default. Passing it offers "Make
    * default" on eligible accounts (Settings → Agents only).
@@ -74,6 +77,7 @@ export function AccountCard({
   fallback,
   onReplace,
   onChooseProjects,
+  onChooseProfiles,
   unpinnedCount,
 }: Readonly<AccountCardProps>) {
   const actions = useAccountActions();
@@ -89,6 +93,8 @@ export function AccountCard({
   const shownProjects = showAllProjects ? projectsOf : projectsOf.slice(0, MAX_PROJECT_CHIPS);
   const chooseProjects =
     onChooseProjects && canPinToProjects(account) ? () => onChooseProjects(account) : null;
+  const chooseProfiles =
+    onChooseProfiles && canPinToProfiles(account) ? () => onChooseProfiles(account) : null;
   const offerMakeDefault = unpinnedCount !== undefined && canMakeDefault(account);
 
   // Focus the field once when renaming starts, not on every render.
@@ -114,6 +120,9 @@ export function AccountCard({
   });
   if (chooseProjects) {
     menuItems.push({ id: 'projects', label: 'Use in projects…', onClick: chooseProjects });
+  }
+  if (chooseProfiles) {
+    menuItems.push({ id: 'profiles', label: 'Use in profiles…', onClick: chooseProfiles });
   }
   if (account.role === 'default' && onReplace) {
     menuItems.push({ id: 'replace', label: 'Replace…', onClick: () => onReplace(account) });
@@ -339,6 +348,10 @@ export function AccountCard({
         )}
       </footer>
 
+      {account.profilePins.length > 0 && (
+        <ProfilePinChips account={account} onChoose={chooseProfiles} />
+      )}
+
       <ConfirmDialog
         isOpen={pending !== null}
         onClose={() => setPending(null)}
@@ -399,4 +412,47 @@ function confirmMessage(
     return describeUnpin(name, account.label, provider.name, fallback);
   }
   return `Projects without a pinned account stop using it. If you saved another ${provider.name} credential before, SAM switches to that one; otherwise connect a new account.`;
+}
+
+/** The profiles I run on this account, each linking to its editor. */
+function ProfilePinChips({
+  account,
+  onChoose,
+}: Readonly<{ account: AccountView; onChoose: (() => void) | null }>) {
+  return (
+    <div
+      className="flex min-w-0 flex-wrap items-center gap-1.5 text-xs"
+      data-testid="account-profile-pins"
+    >
+      <span className="text-fg-muted">Profiles:</span>
+      {account.profilePins.map((pin) => {
+        const title = pin.projectName ? `${pin.projectName} · ${pin.profileName}` : pin.profileName;
+        const className =
+          'inline-flex min-w-0 max-w-[12rem] items-center rounded-md border border-border-default bg-inset px-2 py-1 text-fg-primary no-underline';
+        return pin.projectId ? (
+          <Link
+            key={pin.id}
+            to={`/projects/${pin.projectId}/profiles?edit=${encodeURIComponent(pin.agentProfileId)}`}
+            title={title}
+            className={`${className} hover:border-accent`}
+          >
+            <span className="min-w-0 truncate">{pin.profileName}</span>
+          </Link>
+        ) : (
+          <span key={pin.id} title={`${title} (every project)`} className={className}>
+            <span className="min-w-0 truncate">{pin.profileName}</span>
+          </span>
+        );
+      })}
+      {onChoose && (
+        <button
+          type="button"
+          onClick={onChoose}
+          className="inline-flex min-h-8 cursor-pointer items-center rounded-md border-none bg-transparent px-1.5 text-xs text-accent hover:underline"
+        >
+          Change…
+        </button>
+      )}
+    </div>
+  );
 }

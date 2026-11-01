@@ -13,6 +13,7 @@ import {
   Star,
 } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
+import { Link } from 'react-router';
 
 import { ConfirmDialog } from '../ConfirmDialog';
 import {
@@ -73,6 +74,14 @@ export function ProjectAccountRow({
     setConfirming(false);
   };
 
+  // My profile pins that apply in this project (its profiles, or my global ones):
+  // they beat the project's account whenever I run that profile here.
+  const profileOverrides = group.accounts.flatMap((account) =>
+    account.profilePins
+      .filter((pin) => pin.projectId === projectId || pin.projectId === null)
+      .map((pin) => ({ pin, account }))
+  );
+
   const useOther = () => {
     if (candidates.length === 0) onUseDifferent(provider.id);
     else setPicking((value) => !value);
@@ -102,6 +111,13 @@ export function ProjectAccountRow({
           <span className="flex min-w-0 flex-col">
             <span className="truncate text-sm font-semibold text-fg-primary">{provider.name}</span>
             <ResolutionLine source={resolution.source} />
+            {profileOverrides.length > 0 && (
+              <span className="truncate text-[11px] text-info-fg">
+                {profileOverrides.length === 1
+                  ? '1 of your profiles uses its own account'
+                  : `${profileOverrides.length} of your profiles use their own account`}
+              </span>
+            )}
           </span>
         </span>
         <span className="flex min-h-11 w-full min-w-0 items-center gap-2 rounded-md border border-border-default bg-inset px-2.5 sm:w-72">
@@ -187,6 +203,9 @@ export function ProjectAccountRow({
               showRole={false}
               fallback={fallback}
             />
+          )}
+          {profileOverrides.length > 0 && (
+            <ProfileOverrides projectId={projectId} overrides={profileOverrides} />
           )}
         </div>
       )}
@@ -357,4 +376,46 @@ function describeUse(account: AccountView, projectNames: ReadonlyMap<string, str
   if (ids.length === 0) return 'Not used by any project';
   if (ids.length === 1) return `Pinned in ${projectNames.get(ids[0] ?? '') ?? '1 project'}`;
   return `Pinned in ${ids.length} projects`;
+}
+
+/** Profiles that run on their own account here instead of the project's. Private to me. */
+function ProfileOverrides({
+  projectId,
+  overrides,
+}: Readonly<{
+  projectId: string;
+  overrides: Array<{ pin: AccountView['profilePins'][number]; account: AccountView }>;
+}>) {
+  return (
+    <div
+      className="flex min-w-0 flex-col gap-1.5 rounded-md bg-inset p-2.5"
+      data-testid="project-account-profile-overrides"
+    >
+      <p className="m-0 text-xs text-fg-muted">
+        When you run these profiles here, they use their own account instead:
+      </p>
+      <ul className="m-0 flex min-w-0 list-none flex-col gap-1 p-0">
+        {overrides.map(({ pin, account }) => (
+          <li key={pin.id} className="flex min-w-0 items-center gap-1.5 text-xs">
+            <CornerDownRight size={12} aria-hidden="true" className="shrink-0 text-fg-muted" />
+            <Link
+              to={`/projects/${pin.projectId ?? projectId}/profiles?edit=${encodeURIComponent(pin.agentProfileId)}`}
+              className="min-w-0 truncate text-accent"
+              title={pin.profileName}
+            >
+              {pin.profileName}
+            </Link>
+            <span className="shrink-0 text-fg-muted">→</span>
+            <span className="min-w-0 truncate text-fg-primary" title={account.label}>
+              {account.label}
+              {account.active ? '' : ' (paused)'}
+            </span>
+            {pin.projectId === null && (
+              <span className="shrink-0 text-[10px] text-fg-muted">every project</span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }

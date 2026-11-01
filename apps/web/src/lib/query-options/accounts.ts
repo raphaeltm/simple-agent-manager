@@ -2,9 +2,12 @@ import { queryOptions } from '@tanstack/react-query';
 
 import {
   getResolutionStatus,
+  getSessionAgentCredential,
   listCCAttachments,
   listCCConfigurations,
   listCCCredentials,
+  listProfilePinCandidates,
+  listProfilePins,
 } from '../api';
 
 /**
@@ -33,6 +36,12 @@ export const accountQueryKeys = {
     [...accountQueryKeys.all(queryScope), 'configurations'] as const,
   attachments: (queryScope: string) =>
     [...accountQueryKeys.all(queryScope), 'attachments'] as const,
+  profilePins: (queryScope: string) =>
+    [...accountQueryKeys.all(queryScope), 'profile-pins'] as const,
+  profilePinCandidates: (queryScope: string, agentType: string | null) =>
+    [...accountQueryKeys.all(queryScope), 'profile-pin-candidates', agentType] as const,
+  sessionCredential: (queryScope: string, projectId: string, sessionId: string) =>
+    [...accountQueryKeys.all(queryScope), 'session-credential', projectId, sessionId] as const,
 };
 
 export function resolutionStatusQueryOptions(queryScope: string, projectId?: string) {
@@ -60,5 +69,33 @@ export function ccAttachmentsQueryOptions(queryScope: string) {
   return queryOptions({
     queryKey: accountQueryKeys.attachments(queryScope),
     queryFn: listCCAttachments,
+  });
+}
+
+/** The caller's personal profile pins (private: each member sees only their own). */
+export function profilePinsQueryOptions(queryScope: string) {
+  return queryOptions({
+    queryKey: accountQueryKeys.profilePins(queryScope),
+    queryFn: listProfilePins,
+  });
+}
+
+/** Profiles the caller may pin an account to, optionally for one agent type. */
+export function profilePinCandidatesQueryOptions(queryScope: string, agentType: string | null) {
+  return queryOptions({
+    queryKey: accountQueryKeys.profilePinCandidates(queryScope, agentType),
+    queryFn: () => listProfilePinCandidates(agentType ?? undefined),
+  });
+}
+
+/** Which account a chat's agent ran on; fetched on demand from session details. */
+export function sessionAgentCredentialQueryOptions(
+  queryScope: string,
+  projectId: string,
+  sessionId: string
+) {
+  return queryOptions({
+    queryKey: accountQueryKeys.sessionCredential(queryScope, projectId, sessionId),
+    queryFn: () => getSessionAgentCredential(projectId, sessionId),
   });
 }

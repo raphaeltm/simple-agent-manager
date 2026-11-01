@@ -267,6 +267,10 @@ export interface ProfileAttachmentItem {
   id: string;
   configurationId: string;
   agentProfileId: string;
+  profileName: string;
+  /** Null for a global profile, which applies in every project. */
+  projectId: string | null;
+  projectName: string | null;
   consumerKind: string;
   consumerTarget: string;
   isActive: boolean;

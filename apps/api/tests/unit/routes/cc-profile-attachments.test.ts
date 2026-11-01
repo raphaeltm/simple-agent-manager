@@ -333,9 +333,18 @@ describe('GET and DELETE /api/cc/profile-attachments', () => {
     await pin({ configurationId: 'cfg-max', profileId: 'prof-maintained' });
 
     const response = await app().request('/api/cc/profile-attachments', {}, env);
-    const body = (await response.json()) as { attachments: Array<{ configurationId: string }> };
+    const body = (await response.json()) as {
+      attachments: Array<{ configurationId: string; profileName: string; projectName: string }>;
+    };
 
-    expect(body.attachments.map((a) => a.configurationId)).toEqual(['cfg-max']);
+    expect(body.attachments).toEqual([
+      expect.objectContaining({
+        configurationId: 'cfg-max',
+        profileName: 'prof-maintained',
+        projectId: 'p-maintained',
+        projectName: 'Beta',
+      }),
+    ]);
   });
 
   it('removing my pin falls back to the project pin', async () => {

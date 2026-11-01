@@ -35,6 +35,7 @@ import {
   infraSummary,
   policySummary,
 } from './profile-form-summaries';
+import { ProfileAccountFormSection } from './ProfileAccountFormSection';
 import { Section, SelectField } from './ProfileFormPrimitives';
 import { ProfileInfrastructureFields } from './ProfileInfrastructureFields';
 import { ProfileRuntimeSection } from './ProfileRuntimeSection';
@@ -338,6 +339,9 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
             </label>
           </div>
         </Section>
+
+        {/* My account for this profile (edit mode only; saves on its own) */}
+        {isEdit && profile && <ProfileAccountFormSection profile={profile} projectId={projectId} />}
 
         <Section title="Platform Policy" summary={policySummary(githubCliPolicy)}>
           <GitHubCliPolicyFields

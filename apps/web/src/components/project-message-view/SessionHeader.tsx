@@ -6,18 +6,7 @@ import type {
 } from '@simple-agent-manager/shared';
 import { isExpiredTask } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
-import {
-  Bot,
-  CheckCircle2,
-  Clock,
-  Cpu,
-  Globe,
-  Hash,
-  MessageSquare,
-  Tag,
-  Timer,
-  User2,
-} from 'lucide-react';
+import { CheckCircle2, Clock, Globe, Hash, MessageSquare, Tag, Timer, User2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ChatSessionResponse } from '../../lib/api';
@@ -31,15 +20,14 @@ import { PublicPortsToggleRow } from './PublicPortsToggleRow';
 import { SessionCommentChip } from './SessionCommentChip';
 import { WorkspaceProfileBadge } from './SessionHeaderBadges';
 import {
-  formatAgentType,
   formatDuration,
   formatExecutionStep,
-  formatTaskMode,
   formatTime,
   getCreatorLabel,
 } from './SessionHeaderFormatters';
 import { SessionHeaderInfrastructure } from './SessionHeaderInfrastructure';
 import { SessionHeaderPullRequestRow } from './SessionHeaderPullRequestRow';
+import { SessionRunDetails } from './SessionRunDetails';
 import { SessionSourceContextRow } from './SessionSourceContextRow';
 import { SessionTriggerOrigin } from './SessionTriggerOrigin';
 import { SessionWorkingOnChip } from './SessionWorkingOnChip';
@@ -454,34 +442,13 @@ export function SessionHeader({
 
           <WorkloadIdentityDetails key={session.id} projectId={projectId} sessionId={session.id} />
 
-          {(session.agentType || taskEmbed?.taskMode || taskEmbed?.agentProfileHint) && (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-muted min-w-0">
-              {session.agentType && (
-                <span className="inline-flex items-center gap-1">
-                  <Bot size={11} className="opacity-60" aria-hidden="true" />
-                  <span className="font-medium text-fg-primary">
-                    {formatAgentType(session.agentType)}
-                  </span>
-                </span>
-              )}
-              {taskEmbed?.taskMode && (
-                <span className="inline-flex items-center gap-1">
-                  {taskEmbed.taskMode === 'conversation' ? (
-                    <MessageSquare size={11} className="opacity-60" aria-hidden="true" />
-                  ) : (
-                    <Cpu size={11} className="opacity-60" aria-hidden="true" />
-                  )}
-                  {formatTaskMode(taskEmbed.taskMode)}
-                </span>
-              )}
-              {taskEmbed?.agentProfileHint && (
-                <span className="inline-flex items-center gap-1 min-w-0 max-w-full">
-                  <User2 size={11} className="opacity-60 shrink-0" aria-hidden="true" />
-                  <span className="truncate">{taskEmbed.agentProfileHint}</span>
-                </span>
-              )}
-            </div>
-          )}
+          <SessionRunDetails
+            projectId={projectId}
+            sessionId={session.id}
+            agentType={session.agentType}
+            taskMode={taskEmbed?.taskMode}
+            agentProfileHint={taskEmbed?.agentProfileHint}
+          />
 
           {(taskEmbed?.id || session.startedAt) && (
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-muted">
