@@ -34,6 +34,11 @@ on:
       activation_verify_rate_identity:
         description: 'Optional own release MCP identity for fixed read-only DO evidence'
         type: string
+      use_shared_engine:
+        description: 'Opt in to shared-engine deployment for staging equivalence verification'
+        required: false
+        type: boolean
+        default: false
       dry_run:
         description: 'Preview changes without applying'
         required: false
@@ -77,6 +82,7 @@ jobs:
     uses: ./.github/workflows/deploy-reusable.yml
     with:
       environment: staging
+      use_shared_engine: ${{ inputs.use_shared_engine || false }}
       skip_agent: false # Required: staging VMs need the agent binary in R2
       dry_run: ${{ inputs.dry_run || false }}
     secrets: inherit

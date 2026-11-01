@@ -596,6 +596,11 @@ jobs:
       - name: Run deploy and quality script tests
         run: pnpm quality:scripts:test
 
+      - name: Verify installer engine, runtime integrity and bounded proof contracts
+        run: |
+          pnpm exec vitest run --config scripts/deploy/installer-engine.vitest.config.ts
+          node --test scripts/deploy/installer-runtime-identity.test.mjs scripts/deploy/installer-builder-bootstrap.test.mjs scripts/deploy/installer-source-cache.test.mjs scripts/deploy/test-build-installation-codex-runtime.mjs
+
       - name: Validate wrangler binding consistency
         run: pnpm quality:wrangler-bindings
 

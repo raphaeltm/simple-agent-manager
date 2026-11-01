@@ -1,0 +1,78 @@
+---
+title: Cloudflare installer prototype
+description: Try the hosted SAM installer or deploy the same installer in your own Cloudflare account.
+---
+
+The installer offers a guided start in your own Cloudflare account, without setting up GitHub first. You can use the hosted version or run the same open-source installer yourself.
+
+:::caution[Prototype]
+The default bootstrap mode creates a protected installation-service Worker. This preview branch adds durable owner recovery; the hosted deployment may still run an earlier revision, so check its displayed source version. Experimental full installation and update code is not enabled by default and has not completed authenticated end-to-end validation. To install SAM today, follow the [self-hosting guide](/docs/guides/self-hosting/).
+:::
+
+## Use the hosted installer
+
+The staging prototype is at [install.sammy.party](https://install.sammy.party). Access initially requires membership in the staging Cloudflare account while its OAuth client is private. The production address is reserved at `install.simple-agent-manager.org`; it is not a promise of public availability.
+
+1. Open the installer and select **Sign in with Cloudflare**.
+2. On Cloudflare, select the account you want to authorize and review the requested permissions.
+3. Back in the installer, choose your account and confirm creation of one installation-service Worker.
+4. On revisions with durable recovery, save the browser-generated recovery credential in your password manager **before** opening your service. Confirm that you saved it, then continue to claim ownership. Earlier hosted revisions have temporary owner access only.
+
+Your Cloudflare password stays with Cloudflare. The hosted installer temporarily receives an OAuth token with the permissions you approve. Worker deployment permissions can cover existing Workers in that account, not only the newly created service.
+
+The default hosted session lifetime is 15 minutes. In this preview branch, handoff removes hosted OAuth and deployment-credential copies but keeps the bounded claim record until its original expiry so interrupted handoff can be retried. Disconnect and expiry attempt cleanup and revocation; provider failures can delay cleanup. You can also revoke authorization from your Cloudflare profile. Disconnecting does not delete resources already transferred to your account.
+
+With durable recovery, maintenance sessions last 24 hours by default and are independent of the hosted session. Use your saved recovery credential to return; signing in this way replaces the previous active maintenance session. To replace the credential, first save the proposed replacement, then confirm it. The old credential stays valid until confirmation. The maintenance service stores credential hashes, not the recovery value.
+
+## Host the installer yourself
+
+Self-hosting lets you review and pin the installer source, then run it in an account you control. You do not need to deploy the main SAM application to host the installer.
+
+### Before you start
+
+You need:
+
+- A Cloudflare account with Workers Paid enabled, and a domain active in that account.
+- Node.js 22 or newer and pnpm 9.15.9.
+- The [SAM repository](https://github.com/raphaeltm/simple-agent-manager), checked out at the version you want to trust.
+- A Cloudflare API token scoped to that account and zone, with Account Settings Read, Workers Scripts Edit, OAuth Client Read/Write, and permissions for Workers Custom Domains and Workers Routes. Review Cloudflare's current permission names before granting access.
+
+### Deploy
+
+Install the repository dependencies, then supply your account credentials through your shell or secret manager. Do not commit the token or paste it into an issue or chat.
+
+```sh
+pnpm install --frozen-lockfile
+export CLOUDFLARE_API_TOKEN
+export CLOUDFLARE_ACCOUNT_ID
+export BASE_DOMAIN=example.com
+pnpm --filter @simple-agent-manager/installer run deploy
+```
+
+The deployment creates the installer at `https://install.example.com`, provisions its private OAuth client, and stores the client credentials as Worker secrets. It uses its own session storage and does not share marketing analytics or SAM login sessions.
+
+Open that address and sign in with Cloudflare. Private clients work for members of the account that hosts the installer. To let other Cloudflare users authorize it, complete Cloudflare's [domain verification and public-client setup](https://developers.cloudflare.com/fundamentals/oauth/create-an-oauth-client/). Public promotion cannot be reversed.
+
+### Use an existing OAuth client
+
+Set `OAUTH_CLIENT_ID` and `OAUTH_CLIENT_SECRET` before running the deployment command. The client must use Authorization Code with `client_secret_post`, the callback `https://install.example.com/oauth/callback`, and scopes `account-settings.read workers-scripts.edit`. Refresh tokens are not requested.
+
+If initial client creation succeeds but saving its secret fails, rotate the secret in Cloudflare and supply it through these variables before retrying. Rerunning deployment normally preserves the existing client and secrets.
+
+### Experimental installation support
+
+The branch also contains source-pinned build, deployment, and explicit update orchestration in the user's account. This is not an enabled or verified public installation path yet. Fresh deployments start in bootstrap mode; normal redeployment preserves the existing mode and consent scopes. Full mode needs broader OAuth permissions, separate installation-owned credentials, paid-service prerequisites, and successful live validation of bootstrap revocation and a complete in-account build. No working enablement recipe is provided until those checks pass.
+
+A full installation can be deployed before configuring GitHub. Initial SAM setup uses `SETUP_TOKEN` to configure a supported login provider; the intended administrator must then sign in with the configured provider-verified owner email. Recovery access to the maintenance service remains separate from SAM login.
+
+Update review selects an immutable release commit; it is not a preview of every infrastructure mutation. Code rollback is not database rollback. Automatic conflict merging, automatic uninstall, and verified recovery from every failure are not promised.
+
+Experimental full-mode source preservation stores the approved SAM checkout and full Git history in the installation's R2 storage, with an immutable commit/tree/content-digest manifest. Same-source recovery verifies and restores those saved bytes; toolchain and dependency downloads can still require network access. Updates must be ahead of the installed source and implement the supported installer protocol before approval or paid build admission. These paths remain unverified end to end.
+
+### Remove a test deployment
+
+Delete the `sam-installer-self-hosted` Worker and its OAuth client in your Cloudflare dashboard. Remove only the `sam-maintenance-…` services and durable state belonging to your test, and revoke outstanding installer authorizations. Experimental full-mode tests may also create account tokens, a builder application, storage, and SAM resources. Review the installation's recorded resource identities and retain needed data or backups before deleting them; there is no automatic uninstall.
+
+## Inspect the code
+
+The standalone app, deployment configuration, tests, and developer README live in [`apps/installer`](https://github.com/raphaeltm/simple-agent-manager/tree/main/apps/installer). The hosted and self-hosted versions use this same app. Source visibility helps you audit it; it does not prevent a hosted operator from changing the running code.

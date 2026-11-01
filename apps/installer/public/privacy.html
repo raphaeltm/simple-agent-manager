@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Permissions & privacy · SAM installer</title>
+    <link rel="icon" href="/sam-head.png" />
+    <link
+      rel="preload"
+      href="/fonts/Chillax-Variable.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    <script src="/theme.js"></script>
+    <link rel="stylesheet" href="/glass.css" />
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="site-header sam-glass sam-glass--chrome sam-glass-rim">
+      <a class="brand" href="/" aria-label="SAM installer home"
+        ><img src="/brand-icon.png" width="30" height="30" alt="" /><span class="wordmark"
+          >SAM<span>simple agent manager</span></span
+        ></a
+      >
+      <nav class="header-actions" aria-label="Installer navigation">
+        <div class="theme-controls" role="group" aria-label="Color theme">
+          <button
+            type="button"
+            class="theme-option"
+            data-theme-value="auto"
+            aria-label="System theme"
+            title="System"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              aria-hidden="true"
+            >
+              <rect x="2" y="3" width="20" height="14" rx="2" />
+              <path d="M8 21h8m-4-4v4" />
+            </svg></button
+          ><button
+            type="button"
+            class="theme-option"
+            data-theme-value="light"
+            aria-label="Light theme"
+            title="Light"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              aria-hidden="true"
+            >
+              <circle cx="12" cy="12" r="4" />
+              <path
+                d="M12 2v2m0 16v2M2 12h2m16 0h2M5 5l1.4 1.4m11.2 11.2L19 19M5 19l1.4-1.4M17.6 6.4L19 5"
+              />
+            </svg></button
+          ><button
+            type="button"
+            class="theme-option"
+            data-theme-value="dark"
+            aria-label="Dark theme"
+            title="Dark"
+          >
+            <svg
+              width="16"
+              height="16"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              aria-hidden="true"
+            >
+              <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8Z" />
+            </svg>
+          </button>
+        </div>
+        <a href="/">← Setup</a>
+      </nav>
+    </header>
+    <main class="privacy-main">
+      <span class="badge">Your access. Your choice.</span>
+      <h1>Permissions<br />& <span class="gradient-text">privacy.</span></h1>
+      <p class="intro">Know what you’re sharing, what we create, and what stays yours.</p>
+      <div class="privacy-content sam-glass sam-glass-rim">
+        <h2>What you authorize</h2>
+        <p>
+          Default bootstrap mode requests account read access and permission to deploy Workers.
+          Cloudflare’s permissions may cover existing Workers in the selected account. Only approve
+          accounts you intend to use. Experimental full installation requires broader resource and
+          token-provisioning permissions; it is not enabled or verified for general use.
+        </p>
+        <h2>Temporary access</h2>
+        <p>
+          The installer handles OAuth tokens server-side in an isolated session. Hosted access
+          expires after 15 minutes by default, bounded by token expiry. In this preview branch,
+          handoff removes hosted OAuth and deployment-credential copies but retains a bounded claim
+          record until the original expiry so interrupted handoff can be retried. Disconnect and
+          expiry attempt cleanup and revocation; provider failures can delay deletion or revocation.
+          Use Cloudflare’s authorized-applications screen to revoke access yourself if needed. No
+          central refresh token is retained.
+        </p>
+        <p>
+          Your password is entered only on Cloudflare. This app does not use analytics, third-party
+          scripts, or application request logging. Hosting and network providers may still process
+          request metadata.
+        </p>
+        <p>
+          If cleanup is interrupted after a grant expires, this tab can keep a nonsecret cleanup
+          reference. Reconnect with Cloudflare and choose “Finish cleanup” to remove unused setup
+          credentials. The reference grants no access by itself; credentials already owned by your
+          installation service are preserved.
+        </p>
+        <h2>What stays in your account</h2>
+        <p>
+          Default mode creates a maintenance Worker without an ongoing Cloudflare deployment token.
+          This preview branch adds durable recovery: save the browser-generated credential before
+          claiming ownership. Its hash stays in your account; maintenance sessions last 24 hours by
+          default. Recovery login replaces the previous active session. Replacement credentials
+          become active only after you save and confirm them. Earlier hosted revisions may still
+          have temporary owner access; check the displayed source version.
+        </p>
+        <p>
+          Experimental full mode temporarily handles installation credentials during bootstrap, then
+          transfers deployment and storage authority to your maintenance service and narrower
+          runtime authority to SAM. This lifecycle still needs live validation, including the effect
+          of OAuth revocation on derived credentials. It is not a claim that credentials never reach
+          our service. Disconnecting does not delete transferred resources. Review resource
+          identities and backups before removing a test installation; automatic uninstall is not
+          provided.
+        </p>
+        <p>
+          Experimental full-mode builders preserve approved SAM source and Git history, build
+          artifacts and deployment checkpoints in your account's R2 storage. Saved source is
+          verified against its commit, tree and content digest before reuse. Toolchain and
+          dependency downloads can still require network access. The approved code and its build
+          dependencies are trusted deployment code running with your installation's authority;
+          nested build containers are not a security boundary against malicious build scripts.
+        </p>
+        <h2>Your choice</h2>
+        <p>
+          You can deploy this same installer yourself and register your own OAuth client. Source
+          availability helps you review the app; it does not guarantee that a hosted operator cannot
+          modify its deployment.
+        </p>
+      </div>
+    </main>
+    <footer><a href="/">← Back to setup</a><span>SAM · simple agent manager</span></footer>
+  </body>
+</html>

@@ -7,6 +7,11 @@ on:
         required: true
         type: string
         description: 'GitHub Environment name (e.g. production, staging)'
+      use_shared_engine:
+        description: 'Opt in to the shared deployment engine for bounded staging equivalence verification'
+        required: false
+        type: boolean
+        default: false
       skip_agent:
         required: false
         type: boolean
@@ -123,8 +128,8 @@ jobs:
       # path; keep this explicit until pulumi/pulumi#24219 is fixed upstream.
       AWS_REQUEST_CHECKSUM_CALCULATION: 'when_supported'
     outputs:
-      api_url: ${{ steps.output.outputs.api_url }}
-      app_url: ${{ steps.output.outputs.app_url }}
+      api_url: ${{ steps.shared_engine.outputs.api_url || steps.output.outputs.api_url }}
+      app_url: ${{ steps.shared_engine.outputs.app_url || steps.output.outputs.app_url }}
 
     steps:
       # ========================================
@@ -189,6 +194,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Exercise the installation engine with fake process/Cloudflare boundaries
+      # before existing deployment commands run. Production mutation orchestration
+      # remains below until the CI adapter preserves dry-run, skip-agent, legacy
+      # secrets and all environment overrides with staging equivalence evidence.
+      - name: Verify installation engine orchestration contract
+        run: pnpm exec vitest run --config scripts/deploy/installer-engine.vitest.config.ts
+
       - name: Install Pulumi CLI
         uses: pulumi/actions@8e5e406f4007fca908480587cb9893c07090f58d # v7.0.0
 
@@ -201,10 +213,84 @@ jobs:
           PULUMI_STATE_BUCKET: ${{ vars.PULUMI_STATE_BUCKET }}
         run: node scripts/deploy/workflow-resource-names.mjs deploy
 
+      # Opt-in only: legacy mutations below are disabled for the whole job when
+      # this path is selected. Production callers retain the false default.
+      - name: Setup Go for Shared Engine
+        if: ${{ inputs.use_shared_engine && inputs.dry_run != true }}
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Deploy with Shared Engine (opt-in)
+        id: shared_engine
+        if: ${{ inputs.use_shared_engine }}
+        env:
+          SAM_CI_SECRETS_JSON: |
+            {
+              "ANTHROPIC_API_KEY_TRIAL": ${{ toJSON(secrets.ANTHROPIC_API_KEY_TRIAL || '') }},
+              "BETTER_AUTH_SECRET": ${{ toJSON(secrets.BETTER_AUTH_SECRET || '') }},
+              "CF_ACCOUNT_ID": ${{ toJSON(secrets.CF_ACCOUNT_ID || '') }},
+              "CF_AIG_TOKEN": ${{ toJSON(secrets.CF_AIG_TOKEN || '') }},
+              "CF_API_TOKEN": ${{ toJSON(secrets.CF_API_TOKEN || '') }},
+              "CF_ORIGIN_CA_KEY": ${{ toJSON(secrets.CF_ORIGIN_CA_KEY || '') }},
+              "CF_ZONE_ID": ${{ toJSON(secrets.CF_ZONE_ID || '') }},
+              "CREDENTIAL_ENCRYPTION_KEY": ${{ toJSON(secrets.CREDENTIAL_ENCRYPTION_KEY || '') }},
+              "DEPLOY_SIGNING_PRIVATE_KEY": ${{ toJSON(secrets.DEPLOY_SIGNING_PRIVATE_KEY || '') }},
+              "DEPLOY_SIGNING_PUBLIC_KEY": ${{ toJSON(secrets.DEPLOY_SIGNING_PUBLIC_KEY || '') }},
+              "DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID": ${{ toJSON(secrets.DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID || '') }},
+              "DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN": ${{ toJSON(secrets.DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN || '') }},
+              "ENCRYPTION_KEY": ${{ toJSON(secrets.ENCRYPTION_KEY || '') }},
+              "GA4_API_SECRET": ${{ toJSON(secrets.GA4_API_SECRET || '') }},
+              "GA4_MEASUREMENT_ID": ${{ toJSON(secrets.GA4_MEASUREMENT_ID || '') }},
+              "GH_APP_ID": ${{ toJSON(secrets.GH_APP_ID || '') }},
+              "GH_APP_PRIVATE_KEY": ${{ toJSON(secrets.GH_APP_PRIVATE_KEY || '') }},
+              "GH_APP_SLUG": ${{ toJSON(secrets.GH_APP_SLUG || '') }},
+              "GH_CLIENT_ID": ${{ toJSON(secrets.GH_CLIENT_ID || '') }},
+              "GH_CLIENT_SECRET": ${{ toJSON(secrets.GH_CLIENT_SECRET || '') }},
+              "GH_WEBHOOK_SECRET": ${{ toJSON(secrets.GH_WEBHOOK_SECRET || '') }},
+              "GITLAB_CLIENT_ID": ${{ toJSON(secrets.GITLAB_CLIENT_ID || '') }},
+              "GITLAB_CLIENT_SECRET": ${{ toJSON(secrets.GITLAB_CLIENT_SECRET || '') }},
+              "GITLAB_HOST": ${{ toJSON(secrets.GITLAB_HOST || '') }},
+              "GOOGLE_CLIENT_ID": ${{ toJSON(secrets.GOOGLE_CLIENT_ID || '') }},
+              "GOOGLE_CLIENT_SECRET": ${{ toJSON(secrets.GOOGLE_CLIENT_SECRET || '') }},
+              "GOOGLE_LOGIN_CLIENT_ID": ${{ toJSON(secrets.GOOGLE_LOGIN_CLIENT_ID || '') }},
+              "GOOGLE_LOGIN_CLIENT_SECRET": ${{ toJSON(secrets.GOOGLE_LOGIN_CLIENT_SECRET || '') }},
+              "JWT_PRIVATE_KEY": ${{ toJSON(secrets.JWT_PRIVATE_KEY || '') }},
+              "JWT_PUBLIC_KEY": ${{ toJSON(secrets.JWT_PUBLIC_KEY || '') }},
+              "PULUMI_CONFIG_PASSPHRASE": ${{ toJSON(secrets.PULUMI_CONFIG_PASSPHRASE || '') }},
+              "R2_ACCESS_KEY_ID": ${{ toJSON(secrets.R2_ACCESS_KEY_ID || '') }},
+              "R2_SECRET_ACCESS_KEY": ${{ toJSON(secrets.R2_SECRET_ACCESS_KEY || '') }},
+              "SEGMENT_WRITE_KEY": ${{ toJSON(secrets.SEGMENT_WRITE_KEY || '') }},
+              "SMOKE_TEST_AUTH_ENABLED": ${{ toJSON(secrets.SMOKE_TEST_AUTH_ENABLED || '') }},
+              "VAPID_PRIVATE_KEY": ${{ toJSON(secrets.VAPID_PRIVATE_KEY || '') }},
+              "VAPID_PUBLIC_KEY": ${{ toJSON(secrets.VAPID_PUBLIC_KEY || '') }},
+              "VAPID_SUBJECT": ${{ toJSON(secrets.VAPID_SUBJECT || '') }}
+            }
+          SAM_CI_VARIABLES_JSON: ${{ toJSON(vars) }}
+          SAM_CI_ENVIRONMENT: ${{ inputs.environment }}
+          SAM_CI_SOURCE_COMMIT: ${{ steps.deploy-sha.outputs.value }}
+          SAM_CI_DRY_RUN: ${{ inputs.dry_run }}
+          SAM_CI_SKIP_AGENT: ${{ inputs.skip_agent }}
+        run: |
+          node --input-type=module <<'JS'
+          import { writeFileSync } from 'node:fs';
+          import { join } from 'node:path';
+          const input = {
+            sourceCommit: process.env.SAM_CI_SOURCE_COMMIT,
+            environment: process.env.SAM_CI_ENVIRONMENT,
+            variables: JSON.parse(process.env.SAM_CI_VARIABLES_JSON),
+            dryRun: process.env.SAM_CI_DRY_RUN === 'true',
+            skipAgent: process.env.SAM_CI_SKIP_AGENT === 'true',
+          };
+          writeFileSync(join(process.env.RUNNER_TEMP, 'sam-engine-input.json'), JSON.stringify(input), { mode: 0o600 });
+          JS
+          pnpm exec tsx scripts/deploy/installer-engine-ci-cli.ts "$RUNNER_TEMP/sam-engine-input.json" "$RUNNER_TEMP/sam-engine-state.json"
+
       # ========================================
       # Phase 1: Infrastructure (Pulumi)
       # ========================================
       - name: Create Pulumi State Bucket (if not exists)
+        if: ${{ !inputs.use_shared_engine }}
         run: |
           BUCKET_NAME="$PULUMI_STATE_BUCKET"
 
@@ -229,6 +315,7 @@ jobs:
           PULUMI_STATE_BUCKET: ${{ steps.deploy_resources.outputs.pulumi_state_bucket }}
 
       - name: Validate Pulumi R2 Backend Access
+        if: ${{ !inputs.use_shared_engine }}
         run: |
           BUCKET_NAME="$PULUMI_STATE_BUCKET"
           R2_ENDPOINT="${CF_ACCOUNT_ID}.r2.cloudflarestorage.com"
@@ -311,6 +398,7 @@ jobs:
           PULUMI_STATE_BUCKET: ${{ steps.deploy_resources.outputs.pulumi_state_bucket }}
 
       - name: Login to Pulumi R2 Backend
+        if: ${{ !inputs.use_shared_engine }}
         run: |
           BUCKET_NAME="$PULUMI_STATE_BUCKET"
           R2_ENDPOINT="${CF_ACCOUNT_ID}.r2.cloudflarestorage.com"
@@ -325,6 +413,7 @@ jobs:
 
       - name: Select or Create Pulumi Stack
         id: pulumi-select
+        if: ${{ !inputs.use_shared_engine }}
         working-directory: infra
         run: |
           echo "stack_name=$STACK_NAME" >> "$GITHUB_OUTPUT"
@@ -336,6 +425,7 @@ jobs:
           STACK_NAME: ${{ steps.deploy_resources.outputs.stack }}
 
       - name: Set Pulumi Configuration
+        if: ${{ !inputs.use_shared_engine }}
         working-directory: infra
         run: |
           pulumi config set cloudflareAccountId "$CF_ACCOUNT_ID"
@@ -354,7 +444,7 @@ jobs:
           RESOURCE_PREFIX: ${{ steps.deploy_resources.outputs.prefix }}
 
       - name: Pulumi Preview
-        if: ${{ inputs.dry_run == true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run == true) }}
         working-directory: infra
         run: pulumi preview --diff
         env:
@@ -365,7 +455,7 @@ jobs:
           CLOUDFLARE_API_USER_SERVICE_KEY: ${{ secrets.CF_ORIGIN_CA_KEY }}
 
       - name: Pulumi Refresh
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         working-directory: infra
         run: bash ../scripts/deploy/pulumi-refresh-safe.sh
         env:
@@ -379,7 +469,7 @@ jobs:
           PULUMI_REFRESH_DIAGNOSTIC_TAIL_LINES: ${{ vars.PULUMI_REFRESH_DIAGNOSTIC_TAIL_LINES }}
 
       - name: Pulumi Up
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         working-directory: infra
         run: pulumi up --yes --skip-preview
         env:
@@ -397,7 +487,7 @@ jobs:
       # the sync adds the AGENT_EMAIL binding and the Worker-name var only from that marker. A
       # superadmin then turns agent email on in Admin > Integrations > Agent email.
       - name: Configure Agent Email (preview)
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         run: pnpm tsx scripts/deploy/configure-agent-email.ts
         env:
           AGENT_EMAIL_ENABLED: 'true'
@@ -408,7 +498,7 @@ jobs:
           CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
 
       - name: Sync Wrangler Config (API + Tail Worker)
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         run: pnpm tsx scripts/deploy/sync-wrangler-config.ts
         env:
           PULUMI_STACK: ${{ steps.pulumi-select.outputs.stack_name }}
@@ -934,7 +1024,7 @@ jobs:
           SANDBOX_VM_AGENT_PORT: ${{ vars.SANDBOX_VM_AGENT_PORT }}
 
       - name: Configure R2 CORS
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         run: |
           R2_BUCKET_NAME=$(cd infra && pulumi stack output r2Name)
           export R2_BUCKET_NAME
@@ -950,7 +1040,7 @@ jobs:
           BASE_DOMAIN: ${{ steps.deploy_resources.outputs.base_domain }}
 
       - name: Configure AI Gateway
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         run: bash scripts/deploy/configure-ai-gateway.sh
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
@@ -963,7 +1053,7 @@ jobs:
       # Idempotent, and a no-op for queries that do not open a session — see the script header
       # for why this is a deploy step rather than a Pulumi property.
       - name: Configure D1 Read Replication
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         env:
           # AWS_* for Pulumi R2 backend (pulumi stack output)
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
@@ -989,7 +1079,7 @@ jobs:
 
       - name: Check First Deploy Status
         id: first_deploy
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         run: |
           if [ -f .wrangler/api-worker-first-deploy ]; then
             echo "is_first=true" >> $GITHUB_OUTPUT
@@ -1004,7 +1094,7 @@ jobs:
           fi
 
       - name: Ensure workers.dev Subdomain
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
@@ -1035,7 +1125,7 @@ jobs:
 
       # Verify Pages custom domain is active (must run BEFORE Worker deploys wildcard routes)
       - name: Verify Pages Custom Domain
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         run: bash scripts/deploy/verify-pages-domain.sh
         env:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
@@ -1047,7 +1137,7 @@ jobs:
       # Phase 3: Application (Wrangler)
       # ========================================
       - name: Build Applications
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         run: pnpm build
         env:
           VITE_API_URL: https://api.${{ vars.BASE_DOMAIN }}
@@ -1070,17 +1160,17 @@ jobs:
 
       # Bake the deployment-built vm-agent before Wrangler builds the raw container.
       - name: Setup Go for Container Runtime
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
 
       - name: Assert Go version
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         run: go version | grep -E '^go version go1\.26\.10 '
 
       - name: Prepare Versioned VM Agent Container Artifact
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         # The container-baked binary must report the same version as the R2
         # release, so both take VERSION/BUILD_DATE from the VM-agent release
         # commit rather than from the deployment commit.
@@ -1096,7 +1186,7 @@ jobs:
           VM_AGENT_BUILD_DATE: ${{ steps.deploy-sha.outputs.build_date }}
 
       - name: Run Database Migrations With Safety Gates
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         working-directory: infra
         run: |
           DB_NAME=$(pulumi stack output d1DatabaseName)
@@ -1117,7 +1207,7 @@ jobs:
           D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT: ${{ vars.D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT }}
 
       - name: Guard ProjectData archive routing compatibility
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         working-directory: infra
         run: |
           DB_NAME=$(pulumi stack output d1DatabaseName)
@@ -1138,7 +1228,7 @@ jobs:
       # the sync step leaves VM_AGENT_REQUIRED_VERSION empty so existing nodes are
       # not drained for binaries this deployment intentionally did not publish.
       - name: Build VM Agent
-        if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true && inputs.skip_agent != true) }}
         # Pin VERSION to the VM-agent release commit so R2 binaries report the
         # same version string as the container-baked binary (prepare-container
         # above), and so unchanged agent source rebuilds byte-identically under
@@ -1150,7 +1240,7 @@ jobs:
           VM_AGENT_BUILD_DATE: ${{ steps.deploy-sha.outputs.build_date }}
 
       - name: Upload VM Agent Binaries
-        if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true && inputs.skip_agent != true) }}
         working-directory: infra
         run: |
           R2_BUCKET=$(pulumi stack output r2Name)
@@ -1167,7 +1257,7 @@ jobs:
       # can serve candidate VM bootstrap requests. Clean installations need no
       # pre-existing Worker route or operator-owned artifact secret.
       - name: Publish Pinned Codex Runtime
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         working-directory: infra
         run: |
           R2_BUCKET=$(pulumi stack output r2Name)
@@ -1183,7 +1273,7 @@ jobs:
       # A public cache avoids shared-runner anonymous Docker Hub pull limits,
       # retaining canonical digest pins and Docker Hub fallback on cache misses.
       - name: Configure Docker Hub cache
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         run: |
           sudo node scripts/deploy/configure-docker-mirror.mjs /etc/docker/daemon.json https://mirror.gcr.io
           sudo systemctl restart docker
@@ -1193,7 +1283,7 @@ jobs:
       # Established installations defer API code publication until after secrets so an
       # active Instant container sees at most the secret revision plus the final revision.
       - name: Bootstrap API Worker
-        if: ${{ inputs.dry_run != true && steps.first_deploy.outputs.is_first == 'true' }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true && steps.first_deploy.outputs.is_first == 'true') }}
         run: |
           OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler deploy --env "$DEPLOY_ENV" --message "commit:$DEPLOY_COMMIT_SHA" 2>&1) || {
             echo "$OUTPUT"
@@ -1219,7 +1309,7 @@ jobs:
 
       # The Tail Worker service binding requires the API Worker on first installation.
       - name: Deploy Tail Worker
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         run: pnpm --filter @simple-agent-manager/tail-worker exec wrangler deploy --env "$DEPLOY_ENV"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
@@ -1228,7 +1318,7 @@ jobs:
 
       # Newly created or repaired Tail Workers need their binding in final API config.
       - name: Re-sync Wrangler Config (add tail_consumers)
-        if: ${{ inputs.dry_run != true && steps.first_deploy.outputs.needs_tail_sync == 'true' }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true && steps.first_deploy.outputs.needs_tail_sync == 'true') }}
         run: |
           rm -f .wrangler/tail-worker-first-deploy
           pnpm tsx scripts/deploy/sync-wrangler-config.ts
@@ -1756,7 +1846,7 @@ jobs:
           SANDBOX_VM_AGENT_PORT: ${{ vars.SANDBOX_VM_AGENT_PORT }}
 
       - name: Re-deploy API Worker (with tail_consumers)
-        if: ${{ inputs.dry_run != true && steps.first_deploy.outputs.is_first == 'true' }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true && steps.first_deploy.outputs.is_first == 'true') }}
         run: |
           OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler deploy --env "$DEPLOY_ENV" --message "commit:$DEPLOY_COMMIT_SHA" 2>&1) || {
             echo "$OUTPUT"
@@ -1770,7 +1860,7 @@ jobs:
           ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}
 
       - name: Deploy Web UI
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         run: |
           PROJECT_NAME="${PREFIX}-web-${STACK}"
           # --branch main: Deploy as "production" so custom domains serve this deployment.
@@ -1783,10 +1873,10 @@ jobs:
           STACK: ${{ steps.deploy_resources.outputs.stack }}
 
       - name: Enable Trials on Staging (KV kill-switch)
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true && inputs.environment == 'staging') }}
         # Trials are gated by a KV flag that fails closed. Staging always enables them
         # automatically so the /try flow is live after every deploy. Production stays
         # opt-in (operator flips the flag manually when ready to accept live traffic).
-        if: ${{ inputs.dry_run != true && inputs.environment == 'staging' }}
         working-directory: apps/api
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
@@ -1800,7 +1890,7 @@ jobs:
             --remote
 
       - name: Configure Worker Secrets
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         run: bash scripts/deploy/configure-secrets.sh "$DEPLOY_ENV"
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
@@ -1852,7 +1942,7 @@ jobs:
       # secrets are configured. On established installations this bounds API revisions
       # to two, so the last Instant recovery attempt starts after the final revision.
       - name: Deploy API Worker
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         run: |
           OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler deploy --env "$DEPLOY_ENV" --message "commit:$DEPLOY_COMMIT_SHA" 2>&1) || {
             echo "$OUTPUT"
@@ -1877,11 +1967,11 @@ jobs:
           ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}
 
       - name: Build CLI
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         run: make -C packages/cli build-all version
 
       - name: Upload CLI Binaries
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         working-directory: infra
         run: |
           R2_BUCKET=$(pulumi stack output r2Name)
@@ -1902,7 +1992,7 @@ jobs:
       # Phase 5: Validation
       # ========================================
       - name: Health Check
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         run: |
           echo "Waiting for API to be ready at $API_URL..."
 
@@ -1935,7 +2025,7 @@ jobs:
 
       - name: Output Deployment URLs
         id: output
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         run: |
           echo "api_url=$API_URL" >> "$GITHUB_OUTPUT"
           echo "app_url=$APP_URL" >> "$GITHUB_OUTPUT"
@@ -1947,7 +2037,7 @@ jobs:
       # Job Summary
       # ========================================
       - name: Write Job Summary
-        if: always()
+        if: ${{ !inputs.use_shared_engine && (always()) }}
         run: |
           if [ "$DEPLOY_DRY_RUN" = "true" ]; then
             echo "## Pulumi Preview Complete" >> $GITHUB_STEP_SUMMARY
@@ -1991,7 +2081,7 @@ jobs:
           APP_URL: ${{ steps.deploy_resources.outputs.app_url }}
 
       - name: Security Keys Status
-        if: ${{ inputs.dry_run != true }}
+        if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}
         env:
           HAS_ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY != '' }}
         run: |
