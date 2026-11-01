@@ -10,17 +10,30 @@ import { Link, useNavigate } from 'react-router';
 
 import { ConfirmDialog } from '../ConfirmDialog';
 import { CredentialLimitChip } from '../credential-limits/CredentialLimitChip';
-import { type AccountView, type DefaultFallback, describeUnpin } from './account-model';
+import {
+  type AccountView,
+  type DefaultFallback,
+  describeMakeDefault,
+  describeUnpin,
+} from './account-model';
 import { AccountStatus, ProviderMark, RoleBadge } from './AccountBits';
 import { type AccountProvider, credentialKindLabel } from './provider-meta';
-import { canPinToProjects, canUseLegacyRoutes, useAccountActions } from './useAccountActions';
+import {
+  canMakeDefault,
+  canPinToProjects,
+  canUseLegacyRoutes,
+  useAccountActions,
+} from './useAccountActions';
 
 const MAX_PROJECT_CHIPS = 3;
 const MAX_UNPIN_MENU_ITEMS = 4;
 const ADDED_DATE = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' });
 
 type PendingConfirm =
-  { type: 'disconnect' } | { type: 'remove' } | { type: 'unpin'; projectId: string };
+  | { type: 'disconnect' }
+  | { type: 'remove' }
+  | { type: 'makeDefault' }
+  | { type: 'unpin'; projectId: string };
 
 export interface AccountCardProps {
   account: AccountView;
@@ -38,6 +51,11 @@ export interface AccountCardProps {
   onReplace?: (account: AccountView) => void;
   /** Choose which projects pin this account (Settings → Agents only). */
   onChooseProjects?: (account: AccountView) => void;
+  /**
+   * Projects without a pin, which follow the default. Passing it offers "Make
+   * default" on eligible accounts (Settings → Agents only).
+   */
+  unpinnedCount?: number;
 }
 
 function formatAdded(iso: string): string {
@@ -56,6 +74,7 @@ export function AccountCard({
   fallback,
   onReplace,
   onChooseProjects,
+  unpinnedCount,
 }: Readonly<AccountCardProps>) {
   const actions = useAccountActions();
   const navigate = useNavigate();
@@ -70,22 +89,29 @@ export function AccountCard({
   const shownProjects = showAllProjects ? projectsOf : projectsOf.slice(0, MAX_PROJECT_CHIPS);
   const chooseProjects =
     onChooseProjects && canPinToProjects(account) ? () => onChooseProjects(account) : null;
+  const offerMakeDefault = unpinnedCount !== undefined && canMakeDefault(account);
 
   // Focus the field once when renaming starts, not on every render.
   useEffect(() => {
     if (renaming) renameInputRef.current?.focus();
   }, [renaming]);
 
-  const menuItems: DropdownMenuItem[] = [
-    {
-      id: 'rename',
-      label: 'Rename',
-      onClick: () => {
-        setDraftName(account.label);
-        setRenaming(true);
-      },
+  const menuItems: DropdownMenuItem[] = [];
+  if (offerMakeDefault) {
+    menuItems.push({
+      id: 'make-default',
+      label: 'Make default',
+      onClick: () => setPending({ type: 'makeDefault' }),
+    });
+  }
+  menuItems.push({
+    id: 'rename',
+    label: 'Rename',
+    onClick: () => {
+      setDraftName(account.label);
+      setRenaming(true);
     },
-  ];
+  });
   if (chooseProjects) {
     menuItems.push({ id: 'projects', label: 'Use in projects…', onClick: chooseProjects });
   }
@@ -131,6 +157,7 @@ export function AccountCard({
     if (!pending) return;
     setBusy(true);
     if (pending.type === 'disconnect') await actions.disconnectDefault(account);
+    else if (pending.type === 'makeDefault') await actions.makeDefault(account);
     else if (pending.type === 'remove') await actions.removeUnattached(account);
     else await actions.removePin(account, pending.projectId);
     setBusy(false);
@@ -289,10 +316,19 @@ export function AccountCard({
             <span className="min-w-0 flex-1 basis-40 text-fg-muted">
               Connected, but nothing uses it.
             </span>
-            <span className="ml-auto flex shrink-0 items-center gap-1.5">
+            <span className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-1.5">
               {chooseProjects && (
                 <Button size="sm" onClick={chooseProjects}>
                   Use in a project
+                </Button>
+              )}
+              {offerMakeDefault && (
+                <Button
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => setPending({ type: 'makeDefault' })}
+                >
+                  Make default
                 </Button>
               )}
               <Button size="sm" variant="ghost" onClick={() => setPending({ type: 'remove' })}>
@@ -308,22 +344,37 @@ export function AccountCard({
         onClose={() => setPending(null)}
         onConfirm={() => void confirm()}
         loading={busy}
-        variant={pending?.type === 'unpin' ? 'warning' : 'danger'}
+        variant={confirmVariant(pending)}
         title={confirmTitle(pending, account)}
-        message={confirmMessage(pending, account, provider, projectNames, fallback)}
-        confirmLabel={
-          pending?.type === 'unpin'
-            ? 'Use default'
-            : pending?.type === 'remove'
-              ? 'Remove'
-              : 'Disconnect'
-        }
+        message={confirmMessage(
+          pending,
+          account,
+          provider,
+          projectNames,
+          fallback,
+          unpinnedCount ?? 0
+        )}
+        confirmLabel={confirmLabel(pending)}
       />
     </article>
   );
 }
 
+function confirmVariant(pending: PendingConfirm | null): 'danger' | 'warning' | 'info' {
+  if (pending?.type === 'makeDefault') return 'info';
+  if (pending?.type === 'unpin') return 'warning';
+  return 'danger';
+}
+
+function confirmLabel(pending: PendingConfirm | null): string {
+  if (pending?.type === 'makeDefault') return 'Make default';
+  if (pending?.type === 'unpin') return 'Use default';
+  if (pending?.type === 'remove') return 'Remove';
+  return 'Disconnect';
+}
+
 function confirmTitle(pending: PendingConfirm | null, account: AccountView): string {
+  if (pending?.type === 'makeDefault') return `Make ${account.label} your default?`;
   if (pending?.type === 'remove') return `Remove ${account.label}?`;
   if (pending?.type === 'unpin') return 'Use your default account instead?';
   return `Disconnect ${account.label}?`;
@@ -334,8 +385,12 @@ function confirmMessage(
   account: AccountView,
   provider: AccountProvider,
   projectNames: ReadonlyMap<string, string>,
-  fallback: DefaultFallback
+  fallback: DefaultFallback,
+  unpinnedCount: number
 ): string {
+  if (pending?.type === 'makeDefault') {
+    return describeMakeDefault(account.label, provider.name, fallback, unpinnedCount);
+  }
   if (pending?.type === 'remove') {
     return 'No project uses this account, so removing it changes nothing that runs today.';
   }

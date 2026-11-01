@@ -31,6 +31,7 @@ export {
   CreateCCAttachmentSchema,
   CreateCredentialSchema,
   CredentialKindBodySchema,
+  MakeCCDefaultSchema,
   SaveAgentCredentialSchema,
   SaveGcpServiceAccountCredentialSchema,
   UpdateCCAttachmentSchema,

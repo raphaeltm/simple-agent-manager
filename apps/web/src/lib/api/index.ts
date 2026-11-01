@@ -246,6 +246,7 @@ export {
   listCCAttachments,
   listCCConfigurations,
   listCCCredentials,
+  makeCCDefault,
   updateCCAttachment,
   updateCCConfiguration,
   updateCCCredential,

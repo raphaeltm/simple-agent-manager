@@ -415,6 +415,66 @@ function surfaceTests(viewport: 'mobile' | 'desktop') {
     expect(pinned).toEqual({ configurationId: 'cfg-old', projectId: 'p-api' });
   });
 
+  test('make an unattached or pinned account the default', async ({ page }) => {
+    await openPage(page, '/settings/agents', { rows: NORMAL_ROWS });
+    let madeDefault: unknown;
+    await page.route('**/api/cc/attachments/default', async (route) => {
+      madeDefault = route.request().postDataJSON();
+      await route.fulfill({ status: 200, json: { id: 'att-new-default' } });
+    });
+    const claude = page.getByTestId('provider-row-claude-code');
+    const old = claude.getByTestId('account-card-cfg-old');
+    await expect(old.getByRole('button', { name: 'Make default' })).toBeVisible();
+    // The footer's three buttons wrap inside the card instead of being clipped by it.
+    const cardBox = (await old.boundingBox())!;
+    for (const name of ['Use in a project', 'Make default', 'Remove']) {
+      const button = (await old.getByRole('button', { name, exact: true }).boundingBox())!;
+      expect(button.x).toBeGreaterThanOrEqual(cardBox.x);
+      expect(button.x + button.width).toBeLessThanOrEqual(cardBox.x + cardBox.width);
+    }
+    // The default itself never offers it.
+    await expect(
+      claude.getByTestId('account-card-cfg-work').getByRole('button', { name: 'Make default' })
+    ).toHaveCount(0);
+    await assertNoOverflow(page);
+    await shot(page, 'make-default-card');
+
+    // Pinned cards offer it from the menu.
+    await claude.getByRole('button', { name: 'Actions for Acme API key' }).click();
+    await expect(page.getByRole('menuitem', { name: 'Make default' })).toBeVisible();
+    await screenshot(page, `accounts-make-default-menu-${viewport}`);
+    await page.keyboard.press('Escape');
+
+    await old.getByRole('button', { name: 'Make default' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('Make Old personal key your default?');
+    await expect(dialog).toContainText(
+      '3 projects using Work Max plan will switch to Old personal key'
+    );
+    const box = await dialog.boundingBox();
+    expect(box!.x).toBeGreaterThanOrEqual(0);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    await assertNoOverflow(page);
+    await screenshot(page, `accounts-make-default-confirm-${viewport}`);
+
+    await dialog.getByRole('button', { name: 'Make default' }).click();
+    await expect(page.getByText('Old personal key is now your default')).toBeVisible();
+    expect(madeDefault).toEqual({ configurationId: 'cfg-old' });
+  });
+
+  test('make-default confirmation wraps a long account name', async ({ page }) => {
+    await openPage(page, '/settings/agents', { rows: LONG_ROWS });
+    const pinned = page.getByTestId('account-card-cfg-long-pinned');
+    await pinned.getByRole('button', { name: /^Actions for / }).click();
+    await page.getByRole('menuitem', { name: 'Make default' }).click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText('<script>alert("x")</script> 🚀');
+    const box = await dialog.boundingBox();
+    expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
+    await assertNoOverflow(page);
+    await screenshot(page, `accounts-make-default-confirm-long-${viewport}`);
+  });
+
   test('use in projects with many long-named projects filters the list', async ({ page }) => {
     await openPage(page, '/settings/agents', {
       rows: mergeRows(

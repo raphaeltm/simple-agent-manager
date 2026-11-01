@@ -9,6 +9,8 @@
  *   which also detach the cc_* attachments (`disconnect*FromCC`). A disconnected
  *   default that no project uses then has its cc_* records removed too, so it
  *   does not linger as an "Unattached" account.
+ * - Make an account the default → `POST /api/cc/attachments/default`, which
+ *   replaces the account-wide attachment and the active legacy row in one batch.
  * - Rename → `PATCH /api/cc/credentials/:id` (the name is display-only).
  * - Remove an unattached account → delete its configuration first, then the
  *   credential if nothing else references it. Deleting the credential alone
@@ -37,6 +39,7 @@ import {
   listCCAttachments,
   listCCConfigurations,
   listCCCredentials,
+  makeCCDefault,
   updateCCCredential,
 } from '../../lib/api';
 import type { AccountView } from './account-model';
@@ -53,6 +56,15 @@ export function canUseLegacyRoutes(account: AccountView): boolean {
  * paused account would halt the project.
  */
 export function canPinToProjects(account: AccountView): boolean {
+  return account.kind === 'agent' && account.role !== 'default' && account.active;
+}
+
+/**
+ * Whether an account can become the default from the account views: an active
+ * agent account that is not already the default. A paused default would leave
+ * every unpinned project without an account.
+ */
+export function canMakeDefault(account: AccountView): boolean {
   return account.kind === 'agent' && account.role !== 'default' && account.active;
 }
 
@@ -160,6 +172,7 @@ export function describePinChanges(label: string, changes: ProjectPinChanges): s
 
 export interface AccountActions {
   rename: (account: AccountView, name: string) => Promise<boolean>;
+  makeDefault: (account: AccountView) => Promise<boolean>;
   disconnectDefault: (account: AccountView) => Promise<boolean>;
   removePin: (account: AccountView, projectId: string) => Promise<boolean>;
   removeUnattached: (account: AccountView) => Promise<boolean>;
@@ -192,6 +205,16 @@ export function useAccountActions(): AccountActions {
         () => updateCCCredential(account.credentialId, { name: name.trim() }),
         `Renamed to ${name.trim()}`,
         'Failed to rename account'
+      ),
+    [run]
+  );
+
+  const makeDefault = useCallback(
+    (account: AccountView) =>
+      run(
+        () => makeCCDefault(account.configurationId),
+        `${account.label} is now your default`,
+        'Failed to change the default account'
       ),
     [run]
   );
@@ -267,5 +290,12 @@ export function useAccountActions(): AccountActions {
     [run]
   );
 
-  return { rename, disconnectDefault, removePin, removeUnattached, updateProjectPins };
+  return {
+    rename,
+    makeDefault,
+    disconnectDefault,
+    removePin,
+    removeUnattached,
+    updateProjectPins,
+  };
 }

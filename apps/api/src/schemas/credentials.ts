@@ -80,6 +80,11 @@ export const CreateCCAttachmentSchema = v.object({
   projectId: v.optional(v.pipe(v.string(), v.minLength(1))),
 });
 
+/** POST /api/cc/attachments/default — make an existing agent account the default. */
+export const MakeCCDefaultSchema = v.object({
+  configurationId: v.pipe(v.string(), v.minLength(1)),
+});
+
 /** PATCH /api/cc/attachments/:id — pause or resume an attachment. */
 export const UpdateCCAttachmentSchema = v.object({
   isActive: v.optional(v.boolean()),

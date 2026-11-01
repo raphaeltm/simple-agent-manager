@@ -10,9 +10,11 @@ import {
   buildAccountsModel,
   coveredProjectCount,
   defaultFallback,
+  describeMakeDefault,
   describeUnpin,
   isProviderInUse,
   type ProviderAccounts,
+  unpinnedProjectCount,
 } from '../../../../src/components/accounts/account-model';
 import { type AccountRows, accountRows, mergeRows, PROJECTS, resolutionStatus } from './fixtures';
 
@@ -289,6 +291,42 @@ describe('unpin fallback copy', () => {
     const nothing = agentGroup(buildAccountsModel(snapshot(CLIENT)), 'claude-code');
     expect(describeUnpin('Acme', 'Acme key', 'Claude Code', defaultFallback(nothing))).toBe(
       'Acme will stop using Acme key and have no Claude Code account until you connect one.'
+    );
+  });
+});
+
+describe('make-default copy', () => {
+  it('counts only projects without a pin, including those on the platform or on nothing', () => {
+    const withDefault = agentGroup(
+      buildAccountsModel(snapshot(mergeRows(WORK, CLIENT))),
+      'claude-code'
+    );
+    // Four projects, one pinned to Acme.
+    expect(unpinnedProjectCount(withDefault)).toBe(3);
+
+    const nothing = agentGroup(buildAccountsModel(snapshot(CLIENT)), 'claude-code');
+    expect(unpinnedProjectCount(nothing)).toBe(3);
+  });
+
+  it('names what the switching projects use today', () => {
+    const withDefault = agentGroup(
+      buildAccountsModel(snapshot(mergeRows(WORK, CLIENT))),
+      'claude-code'
+    );
+    expect(describeMakeDefault('Acme', 'Claude Code', defaultFallback(withDefault), 3)).toBe(
+      '3 projects using Work will switch to Acme, and so will new projects. Projects pinned to an account keep it. Work stays connected.'
+    );
+    expect(describeMakeDefault('Acme', 'Claude Code', defaultFallback(withDefault), 1)).toMatch(
+      /^1 project using Work/
+    );
+    expect(describeMakeDefault('Acme', 'Claude Code', defaultFallback(withDefault), 0)).toBe(
+      'New projects will use Acme. Projects pinned to an account keep it. Work stays connected.'
+    );
+    expect(describeMakeDefault('Acme', 'Claude Code', { kind: 'platform' }, 2)).toBe(
+      '2 projects using SAM’s platform Claude Code account will switch to Acme, and so will new projects. Projects pinned to an account keep it.'
+    );
+    expect(describeMakeDefault('Acme', 'Claude Code', { kind: 'none' }, 2)).toBe(
+      '2 projects without an account will use Acme, and so will new projects. Projects pinned to an account keep it.'
     );
   });
 });
