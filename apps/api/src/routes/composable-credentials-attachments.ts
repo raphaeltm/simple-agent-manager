@@ -16,8 +16,14 @@ import { ulid } from '../lib/ulid';
 import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
-import { CreateCCAttachmentSchema, jsonValidator, UpdateCCAttachmentSchema } from '../schemas';
+import {
+  CreateCCAttachmentSchema,
+  jsonValidator,
+  MakeCCDefaultSchema,
+  UpdateCCAttachmentSchema,
+} from '../schemas';
 import { reconcileCapacityPoolsForCredentialMutation } from '../services/capacity-pool-credential-lifecycle';
+import { makeAgentAccountDefault } from '../services/composable-credentials/make-default';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -132,6 +138,19 @@ export function registerCCAttachmentRoutes(ccRoutes: Hono<{ Bindings: Env }>): v
     );
 
     return c.json({ id, configurationId, projectId: projectId ?? null }, 201);
+  });
+
+  /**
+   * POST /api/cc/attachments/default — make an existing agent account the default
+   * for its agent: replaces the user-scoped attachment and the active legacy row
+   * together (see `makeAgentAccountDefault`). Registered before `/:id` routes.
+   */
+  ccRoutes.post('/attachments/default', jsonValidator(MakeCCDefaultSchema), async (c) => {
+    const userId = getUserId(c);
+    const { configurationId } = c.req.valid('json');
+    const result = await makeAgentAccountDefault(c.env, userId, configurationId);
+    await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'user', userId });
+    return c.json({ id: result.attachmentId, configurationId, projectId: null });
   });
 
   /** PATCH /api/cc/attachments/:id — update an attachment (isActive) */

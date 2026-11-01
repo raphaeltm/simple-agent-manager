@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   deleteAgentCredentialByKind: vi.fn(),
   deleteProjectAgentCredential: vi.fn(),
   deleteProjectCloudCredential: vi.fn(),
+  makeCCDefault: vi.fn(),
   success: vi.fn(),
   error: vi.fn(),
 }));
@@ -37,6 +38,7 @@ vi.mock('../../../../src/lib/api', async (importOriginal) => ({
   deleteAgentCredentialByKind: mocks.deleteAgentCredentialByKind,
   deleteProjectAgentCredential: mocks.deleteProjectAgentCredential,
   deleteProjectCloudCredential: mocks.deleteProjectCloudCredential,
+  makeCCDefault: mocks.makeCCDefault,
 }));
 
 vi.mock('../../../../src/hooks/useToast', () => ({
@@ -68,7 +70,12 @@ function account(providerGroup: ProviderAccounts, label: string): AccountView {
   return found;
 }
 
-function renderCard(providerGroup: ProviderAccounts, view: AccountView, onReplace = vi.fn()) {
+function renderCard(
+  providerGroup: ProviderAccounts,
+  view: AccountView,
+  onReplace = vi.fn(),
+  unpinnedCount?: number
+) {
   render(
     <MemoryRouter>
       <AccountCard
@@ -79,6 +86,7 @@ function renderCard(providerGroup: ProviderAccounts, view: AccountView, onReplac
         projectCount={PROJECTS.length}
         fallback={defaultFallback(providerGroup)}
         onReplace={onReplace}
+        unpinnedCount={unpinnedCount}
       />
     </MemoryRouter>,
     { wrapper: QueryTestWrapper }
@@ -123,6 +131,71 @@ describe('AccountCard', () => {
     mocks.listCCAttachments.mockResolvedValue([]);
     mocks.listCCCredentials.mockResolvedValue([]);
     mocks.listAgentCredentials.mockResolvedValue({ credentials: [] });
+  });
+
+  it('makes a pinned account the default from its menu', async () => {
+    const claude = group(CLAUDE, 'agent', 'claude-code');
+    renderCard(claude, account(claude, 'Acme API key'), vi.fn(), 3);
+
+    openMenu('Acme API key');
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Make default' }));
+    expect(confirmDialog()).toHaveTextContent(
+      '3 projects using Work Max plan will switch to Acme API key'
+    );
+    fireEvent.click(within(confirmDialog()).getByRole('button', { name: 'Make default' }));
+
+    await waitFor(() => expect(mocks.makeCCDefault).toHaveBeenCalledWith('cfg-acme'));
+    expect(mocks.success).toHaveBeenCalledWith('Acme API key is now your default');
+  });
+
+  it('offers Make default on an unattached card’s footer', () => {
+    const claude = group(CLAUDE, 'agent', 'claude-code');
+    renderCard(claude, account(claude, 'Old personal key'), vi.fn(), 3);
+
+    const card = screen.getByTestId('account-card-cfg-spare');
+    fireEvent.click(within(card).getByRole('button', { name: 'Make default' }));
+    expect(confirmDialog()).toHaveTextContent('Make Old personal key your default?');
+  });
+
+  it('does not offer Make default on the default, a paused account, or without a count', () => {
+    const paused = mergeRows(
+      CLAUDE,
+      accountRows({
+        id: 'paused',
+        name: 'Paused key',
+        kind: 'agent',
+        target: 'claude-code',
+        credentialActive: false,
+      })
+    );
+    const claude = group(paused, 'agent', 'claude-code');
+    const cases: Array<[ProviderAccounts, string, number | undefined]> = [
+      [claude, 'Work Max plan', 3],
+      [claude, 'Paused key', 3],
+      [claude, 'Acme API key', undefined],
+    ];
+    for (const [providerGroup, label, count] of cases) {
+      const { unmount } = render(
+        <MemoryRouter>
+          <AccountCard
+            account={account(providerGroup, label)}
+            provider={providerGroup.provider}
+            projectNames={new Map(PROJECTS.map((project) => [project.id, project.name]))}
+            coveredCount={1}
+            projectCount={PROJECTS.length}
+            fallback={defaultFallback(providerGroup)}
+            unpinnedCount={count}
+          />
+        </MemoryRouter>,
+        { wrapper: QueryTestWrapper }
+      );
+      openMenu(label);
+      // Liveness: the menu really opened.
+      expect(screen.getByRole('menuitem', { name: 'Rename' })).toBeInTheDocument();
+      expect(screen.queryByRole('menuitem', { name: 'Make default' })).toBeNull();
+      expect(screen.queryByRole('button', { name: 'Make default' })).toBeNull();
+      unmount();
+    }
   });
 
   it('renames the account through the cc credential route', async () => {

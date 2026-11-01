@@ -12,6 +12,7 @@ import {
   coveredProjectCount,
   defaultFallback,
   type ProviderAccounts,
+  unpinnedProjectCount,
 } from './account-model';
 import { ProviderMark } from './AccountBits';
 import { AccountCard } from './AccountCard';
@@ -133,6 +134,7 @@ export function ProviderAccountsRow({
   const laneCount = 1 + (pinned.length > 0 || blocked ? 1 : 0) + (unattached.length > 0 ? 1 : 0);
   const laneColumns = LANE_COLUMNS[laneCount] ?? '';
   const fallback = defaultFallback(group);
+  const unpinnedCount = unpinnedProjectCount(group);
   const projectCount = projectNames.size;
   const panelId = `accounts-${provider.kind}-${provider.id}`;
   const subtitle =
@@ -152,6 +154,7 @@ export function ProviderAccountsRow({
       fallback={fallback}
       onReplace={onReplace}
       onChooseProjects={(chosen) => setChoosingFor(chosen.id)}
+      unpinnedCount={unpinnedCount}
     />
   );
 

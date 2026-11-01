@@ -132,6 +132,14 @@ export async function createCCAttachment(body: {
   });
 }
 
+/** Make an existing agent account the default for its agent, replacing the current one. */
+export async function makeCCDefault(configurationId: string): Promise<{ id: string }> {
+  return request('/api/cc/attachments/default', {
+    method: 'POST',
+    body: JSON.stringify({ configurationId }),
+  });
+}
+
 export async function updateCCAttachment(
   id: string,
   body: { isActive?: boolean }

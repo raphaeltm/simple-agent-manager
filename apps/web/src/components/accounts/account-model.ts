@@ -394,6 +394,16 @@ export function isProviderInUse(group: ProviderAccounts): boolean {
   return group.accounts.length > 0 || group.platformFallback;
 }
 
+/** Projects with no pin of their own, which follow whatever the default is. */
+export function unpinnedProjectCount(group: ProviderAccounts): number {
+  return group.segments
+    .filter(
+      (segment) =>
+        segment.role === 'default' || segment.role === 'platform' || segment.role === 'none'
+    )
+    .reduce((total, segment) => total + segment.projectIds.length, 0);
+}
+
 /** What a project falls back to once its pin is removed. */
 export type DefaultFallback =
   { kind: 'default'; label: string } | { kind: 'platform' } | { kind: 'none' };
@@ -401,6 +411,30 @@ export type DefaultFallback =
 export function defaultFallback(group: ProviderAccounts): DefaultFallback {
   if (group.defaultAccount?.active) return { kind: 'default', label: group.defaultAccount.label };
   return group.platformFallback ? { kind: 'platform' } : { kind: 'none' };
+}
+
+/** The confirmation copy for making an account the default in place of the current one. */
+export function describeMakeDefault(
+  accountLabel: string,
+  providerName: string,
+  current: DefaultFallback,
+  unpinnedCount: number
+): string {
+  const projects = `${unpinnedCount} project${unpinnedCount === 1 ? '' : 's'}`;
+  const from =
+    current.kind === 'default'
+      ? current.label
+      : current.kind === 'platform'
+        ? `SAM’s platform ${providerName} account`
+        : null;
+  const lead =
+    unpinnedCount === 0
+      ? `New projects will use ${accountLabel}`
+      : from
+        ? `${projects} using ${from} will switch to ${accountLabel}, and so will new projects`
+        : `${projects} without an account will use ${accountLabel}, and so will new projects`;
+  const kept = current.kind === 'default' ? ` ${current.label} stays connected.` : '';
+  return `${lead}. Projects pinned to an account keep it.${kept}`;
 }
 
 /** The confirmation copy for moving one project off its pinned account. */
