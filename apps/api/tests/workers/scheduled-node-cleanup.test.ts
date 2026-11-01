@@ -1104,6 +1104,100 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       });
     });
 
+    it('keeps a retrying deletion on its backoff and diagnostic across cron ticks', async () => {
+      // Production 2026-11-01: a workspace whose VM kept answering 409 retried every
+      // ~15 minutes (76 attempts) because each cron tick pulled its hour-long
+      // quarantine back to the cron's base delay.
+      await seedBaseData();
+      const nodeId = 'node-nc-retry-backoff';
+      const wsId = 'ws-nc-retry-backoff';
+      await seedNode(nodeId, USER_ID);
+      await seedWorkspace(wsId, nodeId, USER_ID, {
+        projectId: PROJECT_ID,
+        status: 'stopped',
+        updatedAt: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+      });
+      await seedPreservation(wsId, nodeId);
+      const vmDeletes = vi.fn();
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+          const url =
+            typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+          if (url.includes('.vm.test.example.com') && url.endsWith('/physical-deletion')) {
+            vmDeletes();
+            // Fresh body per call: the exact response the production VM agent returned.
+            return Response.json(
+              { error: 'host workspace root ownership is unproven' },
+              { status: 409 }
+            );
+          }
+          if (url.includes('.vm.test.example.com')) return new Response(null, { status: 204 });
+          return originalFetch(input, init);
+        })
+      );
+      const cronEnv = {
+        ...env,
+        WORKSPACE_STOPPED_TTL_MS: '1000',
+        WORKSPACE_DELETION_RETRY_BASE_MS: '60000',
+      } as unknown as Env;
+      type Entry = {
+        attemptCount: number;
+        lastAttemptAt: number | null;
+        lastError: string | null;
+        deleteAt: number;
+      };
+      const stub = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(nodeId));
+      const key = `ws-delete:${wsId}`;
+      const readEntry = () =>
+        runInDurableObject(stub, async (instance) => instance.ctx.storage.get<Entry>(key));
+      const failDueAttempt = async (attempt: number) => {
+        await runInDurableObject(stub, async (instance) => {
+          const pending = await instance.ctx.storage.get<Entry>(key);
+          await instance.ctx.storage.put(key, { ...pending, deleteAt: Date.now() - 1 });
+          await instance.alarm();
+        });
+        await vi.waitFor(async () => {
+          expect((await readEntry())?.lastError).toContain(`VM attempt ${attempt}`);
+        });
+      };
+
+      expect((await runNodeCleanupSweep(cronEnv)).stoppedWorkspacesQueued).toBeGreaterThanOrEqual(
+        1
+      );
+      expect(await readEntry()).toMatchObject({ attemptCount: 0 });
+      await failDueAttempt(1);
+      await failDueAttempt(2);
+      expect(vmDeletes).toHaveBeenCalledTimes(2);
+
+      const backedOff = await readEntry();
+      expect(backedOff).toMatchObject({ attemptCount: 2 });
+      expect(backedOff!.lastError).toContain('http_status_409');
+      // Second attempt backs off 2 x base, well past the cron's own base delay.
+      expect(backedOff!.deleteAt - backedOff!.lastAttemptAt!).toBeGreaterThanOrEqual(120_000);
+      // A lost alarm must still be re-armed by the safety net.
+      await runInDurableObject(stub, async (instance) => instance.ctx.storage.deleteAlarm());
+
+      // Each claim stamps updated_at; let the cron's staleness window pass, as it
+      // does in production between hourly quarantined attempts.
+      await env.DATABASE.prepare('UPDATE workspaces SET updated_at = ? WHERE id = ?')
+        .bind(new Date(Date.now() - 60 * 60 * 1000).toISOString(), wsId)
+        .run();
+
+      const second = await runNodeCleanupSweep(cronEnv);
+      expect(second.errors).toBe(0);
+      // D1 is shared across this file, so the count may include other rows. The
+      // per-entry liveness proof is the alarm below: it was deleted before this
+      // tick and only the safety net reaching this entry re-arms it.
+      expect(second.stoppedWorkspacesQueued).toBeGreaterThanOrEqual(1);
+      expect(await readEntry()).toEqual(backedOff);
+      expect(
+        await runInDurableObject(stub, async (instance) => instance.ctx.storage.getAlarm())
+      ).toBe(backedOff!.deleteAt);
+      expect(vmDeletes).toHaveBeenCalledTimes(2);
+      expect((await getWorkspaceStatus(wsId))?.status).not.toBe('deleted');
+    });
+
     it('does not enqueue when restart wins after the stale-candidate scan', async () => {
       await seedBaseData();
       const nodeId = 'node-nc-stale-scan-restart-race';

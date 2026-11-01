@@ -218,7 +218,8 @@ export async function sweepStaleStoppedWorkspaces(
         env.NODE_LIFECYCLE.idFromName(ws.node_id)
       ) as DurableObjectStub<import('../../durable-objects/node-lifecycle').NodeLifecycle>;
       // Rule 47: cron is a bounded durable-enqueue safety net. The DO alarm claims
-      // the exact incarnation and moves VM I/O behind waitUntil.
+      // the exact incarnation and moves VM I/O behind waitUntil. It only enqueues
+      // missing entries: an entry already retrying keeps its backoff and diagnostic.
       const scheduled = await lifecycleStub.scheduleWorkspaceDeletion(
         ws.node_id,
         ws.id,
@@ -227,6 +228,7 @@ export async function sweepStaleStoppedWorkspaces(
           retryAfterMs: deletionRetryBaseMs(env),
           lastError: 'scheduled by stopped-workspace cleanup safety net',
           expected,
+          onlyIfAbsent: true,
         }
       );
       if (!scheduled) {
