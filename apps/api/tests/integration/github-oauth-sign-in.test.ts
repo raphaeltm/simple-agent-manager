@@ -172,7 +172,10 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
   });
 
   /** Browser: click "Sign in with GitHub", approve on GitHub, land back on the callback. */
-  async function signInWithGitHub(code?: string): Promise<Response> {
+  async function signInWithGitHub(
+    code?: string,
+    onBeforeCallback?: (state: string, authorizeUrl: URL) => void
+  ): Promise<Response> {
     const start = await app.request(
       `${API_ORIGIN}/api/auth/sign-in/social`,
       {
@@ -186,11 +189,13 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
     jar.store(start);
     const { url } = (await start.json()) as { url: string };
     const authorizeUrl = new URL(url);
+    const state = authorizeUrl.searchParams.get('state') ?? '';
+    onBeforeCallback?.(state, authorizeUrl);
     const approvedCode = github.approve(authorizeUrl);
 
     const callback = new URL(GITHUB_REDIRECT_URI);
     callback.searchParams.set('code', code ?? approvedCode);
-    callback.searchParams.set('state', authorizeUrl.searchParams.get('state') ?? '');
+    callback.searchParams.set('state', state);
     // GitHub's RFC 9207 issuer parameter, present on every production callback.
     callback.searchParams.set('iss', 'https://github.com/login/oauth');
     const response = await app.request(
@@ -286,5 +291,27 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
     expect((await currentUser()).status).toBe(401);
     expect(realUserIds()).toEqual([]);
     expect(githubAccounts()).toEqual([]);
+  });
+
+  it('namespaces OAuth state in verifications with auth-state: and consumes it on callback (CVE-2026-114607)', async () => {
+    const verificationIdentifiers = () =>
+      (
+        sqlite.prepare(`SELECT identifier FROM verifications`).all() as Array<{
+          identifier: string;
+        }>
+      ).map((row) => row.identifier);
+
+    let issuedState = '';
+    const response = await signInWithGitHub(undefined, (state) => {
+      issuedState = state;
+      expect(issuedState).not.toBe('');
+      // Pre-1.7.7 stored the bare state as the verification identifier, allowing OAuth state
+      // records to collide with unprefixed verification tokens (CVE-2026-114607).
+      expect(verificationIdentifiers()).toEqual([`auth-state:${issuedState}`]);
+    });
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toBe(CALLBACK_URL);
+    expect(verificationIdentifiers()).toEqual([]);
   });
 });
