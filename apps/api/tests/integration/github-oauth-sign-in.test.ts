@@ -331,5 +331,19 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
       .prepare(`SELECT identifier FROM verifications`)
       .all() as Array<{ identifier: string }>;
     expect(rowsAfterCallback).toEqual([]);
+
+    // Replaying the consumed state with a fresh code fails.
+    const replayCallback = new URL(GITHUB_REDIRECT_URI);
+    replayCallback.searchParams.set('code', github.approve(authorizeUrl));
+    replayCallback.searchParams.set('state', state);
+    replayCallback.searchParams.set('iss', 'https://github.com/login/oauth');
+    const replayJar = createCookieJar();
+    const replayResponse = await app.request(
+      replayCallback.toString(),
+      { headers: { cookie: replayJar.header() } },
+      env
+    );
+    expect(replayResponse.status).toBe(302);
+    expect(replayResponse.headers.get('location')).not.toBe(CALLBACK_URL);
   });
 });
