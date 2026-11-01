@@ -37,19 +37,14 @@ export function registerChatAttentionRoute(chatRoutes: Hono<{ Bindings: Env }>):
     const { membership } = await requireActiveProjectMembership(db, projectId, userId);
     if (!projectRoleHasCapability(membership.role, 'task:read'))
       throw errors.forbidden('Project capability is required');
-    const { session, access } = await projectDataService.getSessionAccess(
+    const { session, access, marker } = await projectDataService.getAttentionRequest(
       c.env,
       projectId,
       sessionId,
+      markerId,
       userId
     );
     if (!session || !access.found) throw errors.notFound('Chat session');
-    const marker = await projectDataService.getAttentionMarker(
-      c.env,
-      projectId,
-      sessionId,
-      markerId
-    );
     if (!marker || marker.sessionId !== sessionId || marker.kind !== 'needs_input')
       throw errors.notFound('Attention request');
     const writer =

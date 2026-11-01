@@ -16,8 +16,10 @@ vi.mock('../../src/middleware/project-auth', async (original) => ({
   hasProjectCapability: mocks.ownerCapability,
 }));
 vi.mock('../../src/services/project-data', () => ({
-  getSessionAccess: mocks.access,
-  getAttentionMarker: mocks.marker,
+  getAttentionRequest: async (...args: unknown[]) => {
+    const viewer = await mocks.access(...args);
+    return { ...viewer, marker: viewer.access.found ? await mocks.marker(...args) : null };
+  },
   getMessages: mocks.messages,
 }));
 vi.mock('../../src/routes/chat-prompt-forward', () => ({
@@ -73,7 +75,7 @@ describe('notification question reader route', () => {
       canAnswer: true,
     });
     expect(result.messages).toEqual([]);
-    expect(mocks.marker).toHaveBeenCalledWith(expect.anything(), 'p-1', 's-1', 'a-1');
+    expect(mocks.marker).toHaveBeenCalledWith(expect.anything(), 'p-1', 's-1', 'a-1', 'user-1');
     expect(mocks.messages).not.toHaveBeenCalled();
   });
   it('reads a small window before the request, not the latest conversation page', async () => {

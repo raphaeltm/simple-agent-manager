@@ -8,7 +8,7 @@ import { describe, expect, it } from 'vitest';
 
 import type { ProjectData } from '../../src/durable-objects/project-data';
 import type { Env } from '../../src/env';
-import { getAttentionMarker as readAttentionRequest } from '../../src/services/project-data';
+import { getAttentionRequest as readAttentionRequest } from '../../src/services/project-data';
 
 function getStub(projectId: string): DurableObjectStub<ProjectData> {
   const id = env.PROJECT_DATA.idFromName(projectId);
@@ -35,17 +35,24 @@ describe('Attention Markers', () => {
       env as unknown as Env,
       projectId,
       sessionId,
-      marker.id
+      marker.id,
+      'viewer'
     );
-    expect(request?.reason).toBe(reason);
-    expect(
-      await readAttentionRequest(env as unknown as Env, projectId, otherSession, marker.id)
-    ).toBeNull();
+    expect(request.marker?.reason).toBe(reason);
+    expect(request.access.found).toBe(true);
+    const other = await readAttentionRequest(
+      env as unknown as Env,
+      projectId,
+      otherSession,
+      marker.id,
+      'viewer'
+    );
+    expect(other.marker).toBeNull();
     await stub.resolveAttentionMarkerById(marker.id, 'human', 'answered');
     expect(
-      (await readAttentionRequest(env as unknown as Env, projectId, sessionId, marker.id))
-        ?.resolvedAt
-    ).not.toBeNull();
+      (await readAttentionRequest(env as unknown as Env, projectId, sessionId, marker.id, 'viewer'))
+        .marker?.resolvedAt
+    ).toEqual(expect.any(Number));
   });
 
   it('creates a marker with correct fields', async () => {

@@ -62,7 +62,7 @@ describe('Attention Markers Module', () => {
     expect(getAttentionMarker(sql, 'session-1', marker.id)?.reason).toBe(reason);
     expect(getAttentionMarker(sql, 'session-2', marker.id)).toBeNull();
     resolveAttentionMarkerById(sql, marker.id, 'human', 'answered');
-    expect(getAttentionMarker(sql, 'session-1', marker.id)?.resolvedAt).not.toBeNull();
+    expect(getAttentionMarker(sql, 'session-1', marker.id)?.resolvedAt).toEqual(expect.any(Number));
   });
 
   describe('human-input watchdog guard', () => {

@@ -37,3 +37,4 @@ Full question readable even outside current chat page; responses stay visible wh
 - Independent backend/security/constitution review ADDRESSED caller write authority and configurable context limit; final PASS. Independent task/test/doc review PASS. Independent UI review PASS; rubric 4/5 in all five categories.
 - Staging skipped by explicit Raphaël authorization. Task-only direct main push was rejected by GH013 required check; task is included in this normal feature PR instead, without bypass.
 - Reviewers verified no effect-handler conflict. Optional-context query is independent so a context failure does not remove the question or answer area.
+- Final read path bundles viewer access and saved request in one DO RPC, keeping cold archive/grantee reads within the request I/O budget. Independent backend reviewer rechecked and passed; affected unit and Workers slices rerun.

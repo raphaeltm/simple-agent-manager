@@ -988,18 +988,19 @@ export async function getSession(
   );
 }
 
-/** Full saved question, scoped to its session; includes resolved requests. */
-export async function getAttentionMarker(
+/** One read for viewer access and the full saved question, including settled requests. */
+export async function getAttentionRequest(
   env: Env,
   projectId: string,
   sessionId: string,
-  markerId: string
-) {
+  markerId: string,
+  userId: string
+): Promise<ReturnType<ProjectData['getAttentionRequest']>> {
   return callProjectDataWithRetry(
     env,
     projectId,
-    'getAttentionMarker',
-    (stub) => stub.getAttentionMarker(sessionId, markerId),
+    'getAttentionRequest',
+    (stub) => stub.getAttentionRequest(sessionId, markerId, userId),
     'idempotent_read'
   );
 }
