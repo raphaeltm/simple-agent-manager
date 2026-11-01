@@ -29,7 +29,10 @@ vi.mock('../../../src/middleware/auth', () => ({
 const projectAuthMocks = vi.hoisted(() => ({
   requireProjectCapability: vi.fn(),
 }));
-vi.mock('../../../src/middleware/project-auth', () => ({
+vi.mock('../../../src/middleware/project-auth', async (importOriginal) => ({
+  OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY: (
+    await importOriginal<typeof import('../../../src/middleware/project-auth')>()
+  ).OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY,
   requireProjectCapability: projectAuthMocks.requireProjectCapability,
 }));
 vi.mock('../../../src/lib/ulid', () => ({

@@ -257,3 +257,36 @@ export interface ConsumerResolutionStatus {
 export interface ResolutionStatusResponse {
   consumers: ConsumerResolutionStatus[];
 }
+
+// =============================================================================
+// Personal profile pins — HTTP shapes for /api/cc/profile-attachments
+// =============================================================================
+
+/** One of the caller's profile pins: run this account when I use this profile. */
+export interface ProfileAttachmentItem {
+  id: string;
+  configurationId: string;
+  agentProfileId: string;
+  consumerKind: string;
+  consumerTarget: string;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** A profile the caller may pin one of their accounts to. */
+export interface ProfilePinCandidate {
+  id: string;
+  name: string;
+  agentType: string;
+  /** Null for the caller's own global profile, which applies in every project. */
+  projectId: string | null;
+  projectName: string | null;
+}
+
+/** GET /api/cc/profile-attachments/profiles. `truncated` says the list hit its cap. */
+export interface ProfilePinCandidatesResponse {
+  profiles: ProfilePinCandidate[];
+  truncated: boolean;
+  limit: number;
+}

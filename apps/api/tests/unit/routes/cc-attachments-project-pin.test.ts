@@ -250,7 +250,21 @@ describe('POST /api/cc/attachments — pin an existing account to a project', ()
     expect(attachmentsFor(PROJECT_FOREIGN)).toEqual([]);
   });
 
-  it('refuses a member without secret:write, and writes nothing', async () => {
+  it('lets a maintainer (task:write, no secret:write) pin their own account', async () => {
+    const response = await attach({ configurationId: 'cfg-sam', projectId: PROJECT_MAINTAINED });
+
+    expect(response.status).toBe(201);
+    expect(attachmentsFor(PROJECT_MAINTAINED)).toEqual([
+      { configurationId: 'cfg-sam', consumerTarget: 'claude-code' },
+    ]);
+    expect(await resolvedConfiguration(PROJECT_MAINTAINED)).toBe('cfg-sam');
+  });
+
+  it('refuses a viewer, who cannot run tasks there, and writes nothing', async () => {
+    sqlite
+      .prepare(`UPDATE project_members SET role = 'viewer' WHERE project_id = ? AND user_id = ?`)
+      .run(PROJECT_MAINTAINED, OWNER);
+
     const response = await attach({ configurationId: 'cfg-sam', projectId: PROJECT_MAINTAINED });
 
     expect(response.status).toBe(403);

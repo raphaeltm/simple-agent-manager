@@ -37,7 +37,10 @@ import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { ulid } from '../../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { requireProjectCapability } from '../../middleware/project-auth';
+import {
+  OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY,
+  requireProjectCapability,
+} from '../../middleware/project-auth';
 import { rateLimitCredentialUpdate } from '../../middleware/rate-limit';
 import { CreateCredentialSchema, jsonValidator, SaveAgentCredentialSchema } from '../../schemas';
 import { saveAgentCredentialForUser } from '../../services/agent-credential-save';
@@ -436,7 +439,7 @@ projectCredentialsRoutes.put(
     const projectId = c.req.param('id');
     const db = drizzle(c.env.DATABASE, { schema });
 
-    await requireProjectCapability(db, projectId, userId, 'secret:write');
+    await requireProjectCapability(db, projectId, userId, OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY);
 
     const body = c.req.valid('json');
     const credential = body.credential;
@@ -507,7 +510,7 @@ projectCredentialsRoutes.delete('/:id/credentials/:agentType/:credentialKind', a
   const credentialKind = c.req.param('credentialKind') as CredentialKind;
   const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireProjectCapability(db, projectId, userId, 'secret:write');
+  await requireProjectCapability(db, projectId, userId, OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY);
 
   if (!isValidAgentType(agentType)) {
     throw errors.badRequest('Invalid agent type');

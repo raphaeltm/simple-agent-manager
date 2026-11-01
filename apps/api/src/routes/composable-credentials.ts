@@ -24,6 +24,7 @@ import { errors } from '../middleware/error';
 import { reconcileCapacityPoolsForCredentialMutation } from '../services/capacity-pool-credential-lifecycle';
 import { encrypt } from '../services/encryption';
 import { registerCCAttachmentRoutes, uniqueProjectIds } from './composable-credentials-attachments';
+import { registerCCProfileAttachmentRoutes } from './composable-credentials-profile-attachments';
 
 const ccRoutes = new Hono<{ Bindings: Env }>();
 
@@ -403,5 +404,6 @@ ccRoutes.delete('/configurations/:id', async (c) => {
 });
 
 registerCCAttachmentRoutes(ccRoutes);
+registerCCProfileAttachmentRoutes(ccRoutes);
 
 export { ccRoutes };

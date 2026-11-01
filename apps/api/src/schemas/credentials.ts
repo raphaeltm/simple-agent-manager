@@ -80,6 +80,12 @@ export const CreateCCAttachmentSchema = v.object({
   projectId: v.optional(v.pipe(v.string(), v.minLength(1))),
 });
 
+/** POST /api/cc/profile-attachments — run one of the caller's agent accounts for a profile. */
+export const CreateCCProfileAttachmentSchema = v.object({
+  configurationId: v.pipe(v.string(), v.minLength(1)),
+  profileId: v.pipe(v.string(), v.minLength(1)),
+});
+
 /** POST /api/cc/attachments/default — make an existing agent account the default. */
 export const MakeCCDefaultSchema = v.object({
   configurationId: v.pipe(v.string(), v.minLength(1)),

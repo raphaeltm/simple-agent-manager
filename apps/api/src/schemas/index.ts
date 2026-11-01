@@ -29,6 +29,7 @@ export {
 // Credential schemas
 export {
   CreateCCAttachmentSchema,
+  CreateCCProfileAttachmentSchema,
   CreateCredentialSchema,
   CredentialKindBodySchema,
   MakeCCDefaultSchema,

@@ -31,6 +31,13 @@ export const PROJECT_CAPABILITIES = [
 ] as const;
 export type ProjectCapability = (typeof PROJECT_CAPABILITIES)[number];
 
+/**
+ * Choosing which of YOUR OWN agent accounts runs your work in a project (pinning,
+ * unpinning, or connecting one there) changes only your runs, never another
+ * member's, so it needs the permission to run tasks rather than `secret:write`.
+ */
+export const OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY: ProjectCapability = 'task:write';
+
 const ROLE_CAPABILITIES: Record<ProjectMemberRole, ReadonlySet<ProjectCapability>> = {
   owner: new Set(PROJECT_CAPABILITIES),
   admin: new Set(

@@ -20,6 +20,7 @@ export type AdminSettingName =
   | ConnectorReadSettingName
   | AgentEmailSettingName
   | 'chat.profileUsageWindowDays'
+  | 'chat.profilePinCandidateLimit'
   | 'collaboration.ideaUpdateBodyMaxLength'
   | 'collaboration.ideaUpdateQuoteMaxLength'
   | 'collaboration.ideaUpdatePageSize'
@@ -116,6 +117,9 @@ export interface AdminSettingDefinition {
 
 /** Days of a person's own new chats that order their new-chat profile picker (idea 01M5EW9H86VD88S7E3WWA1D9X1). */
 export const DEFAULT_PROFILE_USAGE_WINDOW_DAYS = 30;
+
+/** Most profiles one person's "Use in profiles…" list returns; the response says when it cut. */
+export const DEFAULT_PROFILE_PIN_CANDIDATE_LIMIT = 500;
 
 /** Collaboration defaults (idea 01M59MYE4GY91BWTE8TZF1ZB5D); admins can change them at runtime. */
 export const DEFAULT_SESSION_ACCESS_MAX_GRANTS = 10;

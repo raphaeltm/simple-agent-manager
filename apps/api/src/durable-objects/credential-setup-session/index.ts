@@ -33,7 +33,10 @@ import * as v from 'valibot';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { requireProjectCapability } from '../../middleware/project-auth';
+import {
+  OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY,
+  requireProjectCapability,
+} from '../../middleware/project-auth';
 import { saveAgentCredentialForUser } from '../../services/agent-credential-save';
 import {
   getClaudeOauthTokenMaxLength,
@@ -569,13 +572,13 @@ export class CredentialSetupSession extends DurableObject<Env> {
     current = this.readRow();
     if (!current || current.status !== 'saving') return;
     try {
-      // Login may take minutes: membership or secret privileges can change while waiting.
+      // Login may take minutes: membership or role can change while waiting.
       if (row.project_id !== null) {
         await requireProjectCapability(
           drizzle(this.env.DATABASE),
           row.project_id,
           row.user_id,
-          'secret:write'
+          OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY
         );
       }
       await saveAgentCredentialForUser({
