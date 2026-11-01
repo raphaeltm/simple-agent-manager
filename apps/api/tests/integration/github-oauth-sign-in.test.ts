@@ -287,4 +287,49 @@ describe('GitHub sign-in through better-auth (vertical slice)', () => {
     expect(realUserIds()).toEqual([]);
     expect(githubAccounts()).toEqual([]);
   });
+
+  it('namespaces OAuth state in verifications with auth-state: and consumes it on callback (CVE-2026-114607)', async () => {
+    const start = await app.request(
+      `${API_ORIGIN}/api/auth/sign-in/social`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: APP_ORIGIN, cookie: jar.header() },
+        body: JSON.stringify({ provider: 'github', callbackURL: CALLBACK_URL }),
+      },
+      env
+    );
+    expect(start.status).toBe(200);
+    jar.store(start);
+    const { url } = (await start.json()) as { url: string };
+    const authorizeUrl = new URL(url);
+    const state = authorizeUrl.searchParams.get('state') ?? '';
+    expect(state).not.toBe('');
+
+    // Pre-1.7.7 stored the bare state as the verification identifier, allowing OAuth state
+    // records to collide with unprefixed verification tokens (CVE-2026-114607).
+    const rowsBeforeCallback = sqlite
+      .prepare(`SELECT identifier FROM verifications`)
+      .all() as Array<{ identifier: string }>;
+    expect(rowsBeforeCallback).toEqual([{ identifier: `auth-state:${state}` }]);
+
+    const approvedCode = github.approve(authorizeUrl);
+    const callback = new URL(GITHUB_REDIRECT_URI);
+    callback.searchParams.set('code', approvedCode);
+    callback.searchParams.set('state', state);
+    callback.searchParams.set('iss', 'https://github.com/login/oauth');
+
+    const response = await app.request(
+      callback.toString(),
+      { headers: { cookie: jar.header() } },
+      env
+    );
+    expect(response.status).toBe(302);
+    expect(response.headers.get('location')).toBe(CALLBACK_URL);
+
+    // State verification record is consumed after the callback completes.
+    const rowsAfterCallback = sqlite
+      .prepare(`SELECT identifier FROM verifications`)
+      .all() as Array<{ identifier: string }>;
+    expect(rowsAfterCallback).toEqual([]);
+  });
 });
