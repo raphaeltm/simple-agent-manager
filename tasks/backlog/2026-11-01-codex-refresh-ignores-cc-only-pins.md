@@ -34,5 +34,9 @@ user row in step with the default, so it does not cause or fix this.
       runs on (the cc resolver's answer for its project), not the legacy default
 - [ ] A rotation is written back with a compare-and-set on the value read, and a lost CAS
       skips the cc mirror and logs (no token material)
-- [ ] Tests: cc-only Codex pin refreshes against its own tokens; the default is unaffected;
-      a default switch during an in-flight refresh leaves the new default intact
+- [ ] The cc mirror write targets the credential identity captured when the rotation started
+      (or runs in the same atomic write as the legacy CAS), never "whichever cc credential is
+      the active default now", so a default switch cannot redirect the old account's tokens
+- [ ] Tests, through both `CodexRefreshLock` and `agent_credential_sync`: a cc-only Codex pin
+      refreshes against its own tokens; the default is unaffected; a default switch during an
+      in-flight refresh leaves the new default intact
