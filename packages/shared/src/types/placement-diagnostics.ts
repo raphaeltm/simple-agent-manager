@@ -47,7 +47,11 @@ export const PLACEMENT_DIAGNOSTICS_VERSION = 1;
  * the translation adapter and must always be LABELLED as an estimate in the UI.
  */
 export type PlacementResourceEvidence =
-  'requested' | 'observed' | 'planned' | 'compatibility-estimate' | 'unknown';
+  | 'requested'
+  | 'observed'
+  | 'planned'
+  | 'compatibility-estimate'
+  | 'unknown';
 
 export interface PlacementResourceFacts {
   cpuMillis: number | null;

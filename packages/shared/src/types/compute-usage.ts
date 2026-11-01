@@ -1,7 +1,11 @@
 import type { CredentialSource } from './user';
 
 export type ComputeVcpuCountSource =
-  'observed' | 'planned' | 'recorded' | 'compatibility-estimate' | 'unknown';
+  | 'observed'
+  | 'planned'
+  | 'recorded'
+  | 'compatibility-estimate'
+  | 'unknown';
 
 // =============================================================================
 // Compute Usage Metering Types

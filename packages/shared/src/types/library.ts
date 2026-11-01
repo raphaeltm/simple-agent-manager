@@ -235,7 +235,7 @@ export const LIBRARY_DIRECTORY_SEGMENT_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._\- ]*$
 export function validateDirectoryPath(
   path: string,
   maxDepth: number = LIBRARY_DEFAULTS.MAX_DIRECTORY_DEPTH,
-  maxLength: number = LIBRARY_DEFAULTS.MAX_DIRECTORY_PATH_LENGTH
+  maxLength: number = LIBRARY_DEFAULTS.MAX_DIRECTORY_PATH_LENGTH,
 ): string {
   // Reject null bytes
   if (path.includes('\0')) {
