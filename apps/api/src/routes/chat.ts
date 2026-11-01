@@ -41,6 +41,7 @@ import { registerChatSessionDetailRoute } from './chat-session-detail';
 import { registerChatSessionListRoute } from './chat-session-list';
 import { chatStateRoutes } from './chat-state';
 import { registerChatStopRoute } from './chat-stop';
+import { registerChatAgentCredentialRoute } from './chat-agent-credential';
 import { registerChatWorkloadIdentityRoute } from './chat-workload-identity';
 
 const chatRoutes = new Hono<{ Bindings: Env }>();
@@ -49,6 +50,7 @@ chatRoutes.use('/*', requireAuth(), requireApproved());
 
 registerChatSessionListRoute(chatRoutes);
 registerChatWorkloadIdentityRoute(chatRoutes);
+registerChatAgentCredentialRoute(chatRoutes);
 registerChatAcpInteractionRoutes(chatRoutes);
 
 /**

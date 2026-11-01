@@ -235,6 +235,24 @@ export type CredentialSource = 'user' | 'project' | 'platform' | 'self-hosted';
  */
 export type AgentCredentialScope = 'profile' | 'project' | 'user' | 'platform';
 
+/** Which account a chat's agent ran on, for session details. */
+export interface SessionAgentCredential {
+  agentType: string | null;
+  /** Who owns the credential. */
+  credentialSource: 'user' | 'project' | 'platform' | null;
+  /** Which tier chose it. Null on sessions recorded before tiers were stored. */
+  credentialScope: AgentCredentialScope | null;
+  /** The account's name, only for the person who ran the session. */
+  accountName: string | null;
+  isOwnSession: boolean;
+}
+
+/** GET /api/projects/:projectId/sessions/:sessionId/agent-credential */
+export interface SessionAgentCredentialResponse {
+  /** Null until the session's agent has received a credential. */
+  credential: SessionAgentCredential | null;
+}
+
 export interface PlatformCredential {
   id: string;
   credentialType: PlatformCredentialType;

@@ -52,6 +52,8 @@ export type {
   ProjectDeploymentCredential,
   ProjectDeploymentCredentialResponse,
   SaveGcpServiceAccountCredentialRequest,
+  SessionAgentCredential,
+  SessionAgentCredentialResponse,
   SetupProjectDeploymentRequest,
   SignupApprovalConfig,
   SignupApprovalConfigResponse,
