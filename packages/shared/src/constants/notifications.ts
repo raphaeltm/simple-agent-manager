@@ -4,6 +4,9 @@ import type { NotificationType, NotificationUrgency } from '../types';
 // Notification Defaults (Constitution Principle XI — all configurable)
 // =============================================================================
 
+/** Preceding transcript rows shown on demand in a notification question reader. */
+export const DEFAULT_NOTIFICATION_CONTEXT_MESSAGE_LIMIT = 3;
+
 /** Maximum notifications stored per user before oldest are auto-deleted */
 export const DEFAULT_MAX_NOTIFICATIONS_PER_USER = 500;
 

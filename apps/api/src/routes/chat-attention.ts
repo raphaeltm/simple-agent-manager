@@ -1,3 +1,4 @@
+import { DEFAULT_NOTIFICATION_CONTEXT_MESSAGE_LIMIT } from '@simple-agent-manager/shared';
 /**
  * Attention answers: the agent asked a question with fixed options and a session writer
  * (the owner or an active grantee) picks one. Split out of `chat.ts`
@@ -7,18 +8,96 @@ import { drizzle } from 'drizzle-orm/d1';
 import type { Hono } from 'hono';
 
 import * as schema from '../db/schema';
+import { parseAttentionOptions } from '../durable-objects/project-data/attention';
 import type { Env } from '../env';
 import { markRejectedBeforeEffects } from '../lib/operation-effect-boundary';
 import { requireRouteParam } from '../lib/route-helpers';
 import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireProjectCapability } from '../middleware/project-auth';
+import {
+  hasProjectCapability,
+  projectRoleHasCapability,
+  requireActiveProjectMembership,
+  requireProjectCapability,
+} from '../middleware/project-auth';
 import { parseOptionalBody, ResolveAttentionAnswerSchema } from '../schemas';
 import * as projectDataService from '../services/project-data';
 import { recordSharedSessionAnswer, requireSessionWriter } from '../services/session-access';
+import { getSessionMessageLimit } from './chat-message-query';
 import { preparePromptForLiveAgent, sendPreparedPromptToLiveAgent } from './chat-prompt-forward';
 
 export function registerChatAttentionRoute(chatRoutes: Hono<{ Bindings: Env }>): void {
+  // Read-only: no runtime contact or whole-conversation fetch. Context is opt-in.
+  chatRoutes.get('/:sessionId/attention/:markerId', async (c) => {
+    const userId = getUserId(c);
+    const projectId = requireRouteParam(c, 'projectId');
+    const sessionId = requireRouteParam(c, 'sessionId');
+    const markerId = requireRouteParam(c, 'markerId');
+    const db = drizzle(c.env.DATABASE, { schema });
+    const { membership } = await requireActiveProjectMembership(db, projectId, userId);
+    if (!projectRoleHasCapability(membership.role, 'task:read'))
+      throw errors.forbidden('Project capability is required');
+    const { session, access } = await projectDataService.getSessionAccess(
+      c.env,
+      projectId,
+      sessionId,
+      userId
+    );
+    if (!session || !access.found) throw errors.notFound('Chat session');
+    const marker = await projectDataService.getAttentionMarker(
+      c.env,
+      projectId,
+      sessionId,
+      markerId
+    );
+    if (!marker || marker.sessionId !== sessionId || marker.kind !== 'needs_input')
+      throw errors.notFound('Attention request');
+    const writer =
+      Boolean(access.ownerUserId) &&
+      projectRoleHasCapability(membership.role, 'task:write') &&
+      (access.role === 'owner' ||
+        (access.role === 'grantee' &&
+          Boolean(access.grant) &&
+          (await hasProjectCapability(db, projectId, access.ownerUserId ?? '', 'task:write'))));
+    const expired = marker.expiresAt !== null && marker.expiresAt <= Date.now();
+    const page =
+      c.req.query('context') === 'true'
+        ? await projectDataService.getMessages(
+            c.env,
+            projectId,
+            sessionId,
+            getSessionMessageLimit(
+              c.env,
+              c.req.query('limit') ?? String(DEFAULT_NOTIFICATION_CONTEXT_MESSAGE_LIMIT)
+            ),
+            marker.createdAt,
+            null,
+            ['user', 'assistant'],
+            true,
+            'desc'
+          )
+        : null;
+    return c.json({
+      request: {
+        id: marker.id,
+        reason: marker.reason,
+        options: parseAttentionOptions(marker.metadata),
+        createdAt: marker.createdAt,
+        resolvedAt: marker.resolvedAt,
+        resolvedAnswer: marker.resolvedAnswer,
+        expired,
+        canAnswer:
+          marker.source === 'request_human_input' &&
+          !expired &&
+          marker.resolvedAt === null &&
+          marker.resolvedAnswer === null &&
+          writer,
+      },
+      session: { id: sessionId, topic: typeof session.topic === 'string' ? session.topic : null },
+      messages: page?.messages ?? [],
+    });
+  });
+
   /**
    * POST /api/projects/:projectId/sessions/:sessionId/attention/:markerId/resolve
    * Validate, deliver, and record one of the agent-provided answer options.

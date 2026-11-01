@@ -90,3 +90,32 @@ export function getNotificationWsUrl(): string {
   const base = API_URL.replace(/^http/, 'ws');
   return `${base}/api/notifications/ws`;
 }
+
+export interface AttentionRequestContext {
+  request: {
+    id: string;
+    reason: string | null;
+    options: string[];
+    createdAt: number;
+    resolvedAt: number | null;
+    resolvedAnswer: string | null;
+    expired: boolean;
+    canAnswer: boolean;
+  };
+  session: { id: string; topic: string | null };
+  messages: import('./sessions').ChatMessageResponse[];
+}
+
+/** Full saved question independent of whichever chat page is currently loaded. */
+export async function getAttentionRequestContext(
+  projectId: string,
+  sessionId: string,
+  markerId: string,
+  context: boolean,
+  signal?: AbortSignal
+): Promise<AttentionRequestContext> {
+  return request<AttentionRequestContext>(
+    `/api/projects/${encodeURIComponent(projectId)}/sessions/${encodeURIComponent(sessionId)}/attention/${encodeURIComponent(markerId)}${context ? '?context=true' : ''}`,
+    signal ? { signal } : {}
+  );
+}

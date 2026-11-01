@@ -13,6 +13,7 @@ import {
   computeAttentionAlarmTime,
   computeHumanInputExpiry,
   createAttentionMarker,
+  getAttentionMarker,
   getAttentionSummary,
   getExpiredMarkers,
   hasPendingHumanInput,
@@ -46,6 +47,22 @@ describe('Attention Markers Module', () => {
 
   afterEach(() => {
     db.close();
+  });
+
+  it('reads a full request by session even after resolution, never across sessions', () => {
+    const reason = 'Full question '.repeat(150);
+    const marker = createAttentionMarker(sql, {
+      sessionId: 'session-1',
+      taskId: null,
+      workspaceId: null,
+      kind: 'needs_input',
+      source: 'request_human_input',
+      reason,
+    });
+    expect(getAttentionMarker(sql, 'session-1', marker.id)?.reason).toBe(reason);
+    expect(getAttentionMarker(sql, 'session-2', marker.id)).toBeNull();
+    resolveAttentionMarkerById(sql, marker.id, 'human', 'answered');
+    expect(getAttentionMarker(sql, 'session-1', marker.id)?.resolvedAt).not.toBeNull();
   });
 
   describe('human-input watchdog guard', () => {

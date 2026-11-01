@@ -2,8 +2,8 @@ import type { NotificationResponse } from '@simple-agent-manager/shared';
 import { Check, ChevronDown, ChevronRight, Folder, X } from 'lucide-react';
 import { useState } from 'react';
 
-import { resolveAttentionAnswer } from '../../lib/api';
-import { maybeJsonRecord } from '../../lib/runtime-validation';
+import { attentionRequest } from './attention-request';
+import { AttentionAnswerControls } from './AttentionAnswerControls';
 import { notificationTypeConfig } from './notification-type-config';
 
 /**
@@ -28,36 +28,7 @@ export function NotificationItem({
   const config = notificationTypeConfig(notification.type);
   const Icon = config.icon;
   const isUnread = !notification.readAt;
-  const [answering, setAnswering] = useState<string | null>(null);
-  const [answered, setAnswered] = useState<string | null>(null);
-  const [answerError, setAnswerError] = useState<string | null>(null);
-  const metadata = maybeJsonRecord(notification.metadata);
-  const answerOptions = Array.isArray(metadata?.options)
-    ? metadata.options.filter((option): option is string => typeof option === 'string')
-    : [];
-  const attentionMarkerId =
-    typeof metadata?.attentionMarkerId === 'string' ? metadata.attentionMarkerId : null;
-
-  const handleAnswer = async (event: React.MouseEvent, answer: string) => {
-    event.stopPropagation();
-    if (!notification.projectId || !notification.sessionId || !attentionMarkerId) return;
-    setAnswering(answer);
-    setAnswerError(null);
-    try {
-      const result = await resolveAttentionAnswer(
-        notification.projectId,
-        notification.sessionId,
-        attentionMarkerId,
-        answer
-      );
-      setAnswered(result.resolved ? answer : `${answer} (sending)`);
-      onResolved();
-    } catch (cause) {
-      setAnswerError(cause instanceof Error ? cause.message : 'Could not send this answer');
-    } finally {
-      setAnswering(null);
-    }
-  };
+  const { markerId, options, readable } = attentionRequest(notification);
 
   const timeAgo = getTimeAgo(notification.createdAt);
 
@@ -99,30 +70,21 @@ export function NotificationItem({
             </span>
           )}
         </button>
-        {answerOptions.length > 0 && !answered && (
-          <div className="mt-2 flex flex-wrap gap-2" aria-label="Answer options">
-            {answerOptions.map((option) => (
-              <button
-                key={option}
-                type="button"
-                disabled={answering !== null || !attentionMarkerId}
-                onClick={(event) => void handleAnswer(event, option)}
-                className="min-h-11 min-w-11 max-w-full break-words rounded-md border border-border-default bg-surface px-3 py-2 text-xs font-medium text-fg-primary hover:border-accent disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {answering === option ? 'Sending...' : option}
-              </button>
-            ))}
+        {readable && (
+          <button onClick={onClick} className="mt-2 text-xs text-accent hover:underline">
+            Read question & context
+          </button>
+        )}
+        {options.length > 0 && markerId && notification.projectId && notification.sessionId && (
+          <div className="mt-2">
+            <AttentionAnswerControls
+              projectId={notification.projectId}
+              sessionId={notification.sessionId}
+              markerId={markerId}
+              options={options}
+              onResolved={onResolved}
+            />
           </div>
-        )}
-        {answered && (
-          <p role="status" className="mt-2 text-xs text-success-fg">
-            Answered: {answered}
-          </p>
-        )}
-        {answerError && (
-          <p role="alert" className="mt-2 text-xs text-danger-fg">
-            {answerError}
-          </p>
         )}
         <div className="flex items-center gap-2 mt-1">
           <span className="text-[10px] text-fg-muted">{timeAgo}</span>

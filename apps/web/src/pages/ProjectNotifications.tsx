@@ -2,13 +2,15 @@ import type { NotificationResponse, NotificationType } from '@simple-agent-manag
 import { NOTIFICATION_PREVIEW_LENGTH, NOTIFICATION_TYPES } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
 import { Bell, Check, ChevronDown, ChevronRight, X } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
+import { attentionRequest } from '../components/notifications/attention-request';
 import {
   NOTIFICATION_TYPE_CONFIG,
   notificationTypeConfig,
 } from '../components/notifications/notification-type-config';
+import { NotificationQuestionDialog } from '../components/notifications/question-dialog-loader';
 import { dismissNotification, listNotifications, markNotificationRead } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
 
@@ -37,6 +39,7 @@ export function ProjectNotifications() {
   const { projectId } = useProjectContext();
   const navigate = useNavigate();
 
+  const [question, setQuestion] = useState<NotificationResponse | null>(null);
   const [notifications, setNotifications] = useState<NotificationResponse[]>([]);
   const [initialLoading, setInitialLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -117,6 +120,11 @@ export function ProjectNotifications() {
   };
 
   const handleNotificationClick = (notification: NotificationResponse) => {
+    if (attentionRequest(notification).readable) {
+      setQuestion(notification);
+      if (!notification.readAt) void handleMarkRead(notification.id);
+      return;
+    }
     if (notification.actionUrl) {
       navigate(notification.actionUrl);
     }
@@ -124,6 +132,16 @@ export function ProjectNotifications() {
 
   return (
     <div className="flex flex-col gap-4">
+      {question && (
+        <Suspense fallback={null}>
+          <NotificationQuestionDialog
+            key={question.id}
+            notification={question}
+            onClose={() => setQuestion(null)}
+            onResolved={() => void loadNotifications()}
+          />
+        </Suspense>
+      )}
       <div className="flex items-center justify-between">
         <h1 className="text-xl font-semibold text-fg-primary">Notifications</h1>
         {isRefreshing && <Spinner size="sm" />}

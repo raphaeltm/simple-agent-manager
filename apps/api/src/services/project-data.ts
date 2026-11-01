@@ -988,6 +988,22 @@ export async function getSession(
   );
 }
 
+/** Full saved question, scoped to its session; includes resolved requests. */
+export async function getAttentionMarker(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  markerId: string
+) {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'getAttentionMarker',
+    (stub) => stub.getAttentionMarker(sessionId, markerId),
+    'idempotent_read'
+  );
+}
+
 /** Open attention markers for one chat, newest first (`project-data/attention.ts`). */
 export async function listActiveAttentionMarkers(
   env: Env,

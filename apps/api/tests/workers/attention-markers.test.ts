@@ -7,6 +7,8 @@ import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 import type { ProjectData } from '../../src/durable-objects/project-data';
+import type { Env } from '../../src/env';
+import { getAttentionMarker as readAttentionRequest } from '../../src/services/project-data';
 
 function getStub(projectId: string): DurableObjectStub<ProjectData> {
   const id = env.PROJECT_DATA.idFromName(projectId);
@@ -14,6 +16,38 @@ function getStub(projectId: string): DurableObjectStub<ProjectData> {
 }
 
 describe('Attention Markers', () => {
+  it('reads a full historical question through service and real DO RPC, scoped to its session', async () => {
+    const projectId = 'notification-reader-service-slice';
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const sessionId = await stub.createSession(null, 'Old question');
+    const otherSession = await stub.createSession(null, 'Unrelated chat');
+    const reason = 'Full saved question, not a notification preview. '.repeat(80);
+    const marker = await stub.createAttentionMarker({
+      sessionId,
+      taskId: null,
+      workspaceId: null,
+      kind: 'needs_input',
+      source: 'request_human_input',
+      reason,
+    });
+    const request = await readAttentionRequest(
+      env as unknown as Env,
+      projectId,
+      sessionId,
+      marker.id
+    );
+    expect(request?.reason).toBe(reason);
+    expect(
+      await readAttentionRequest(env as unknown as Env, projectId, otherSession, marker.id)
+    ).toBeNull();
+    await stub.resolveAttentionMarkerById(marker.id, 'human', 'answered');
+    expect(
+      (await readAttentionRequest(env as unknown as Env, projectId, sessionId, marker.id))
+        ?.resolvedAt
+    ).not.toBeNull();
+  });
+
   it('creates a marker with correct fields', async () => {
     const stub = getStub('attn-create-1');
     const sessionId = await stub.createSession(null, 'Attention test');
