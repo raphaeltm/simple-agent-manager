@@ -9,12 +9,15 @@
  */
 import type {
   AgentCredentialScope,
-  CCResolutionSource,
   CredentialKind,
   CredentialSource,
   Dialect,
 } from '@simple-agent-manager/shared';
-import { DIALECT_VALUES } from '@simple-agent-manager/shared';
+import {
+  credentialOwnerFromSource,
+  credentialScopeFromSource,
+  DIALECT_VALUES,
+} from '@simple-agent-manager/shared';
 import { and, eq, isNull } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
@@ -216,7 +219,7 @@ function mapResolvedToLegacy(
       return null;
   }
 
-  const credentialSource = mapSourceToLegacy(resolved.source);
+  const credentialSource = credentialOwnerFromSource(resolved.source);
   const credentialReference = resolved.credential.id
     ? `cc_credentials:${resolved.credential.id}`
     : `cc_credentials:${resolved.source}`;
@@ -248,39 +251,6 @@ function readProviderDialect(value: unknown): Dialect | undefined {
   return typeof value === 'string' && (DIALECT_VALUES as readonly string[]).includes(value)
     ? (value as Dialect)
     : undefined;
-}
-
-/**
- * Who owns the credential. A profile pin is one of the user's own accounts, so it
- * reports `'user'`; the tier that chose it is `credentialScope`. Exhaustive over
- * the resolver's sources so a new source cannot silently become `'platform'`.
- */
-function mapSourceToLegacy(source: CCResolutionSource): CredentialSource {
-  switch (source) {
-    case 'project-attachment':
-      return 'project';
-    case 'profile-attachment':
-    case 'user-attachment':
-      return 'user';
-    case 'platform':
-    case 'platform-proxy':
-      return 'platform';
-  }
-}
-
-/** Which resolution tier chose the credential, for attribution. */
-export function credentialScopeFromSource(source: CCResolutionSource): AgentCredentialScope {
-  switch (source) {
-    case 'profile-attachment':
-      return 'profile';
-    case 'project-attachment':
-      return 'project';
-    case 'user-attachment':
-      return 'user';
-    case 'platform':
-    case 'platform-proxy':
-      return 'platform';
-  }
 }
 
 /**

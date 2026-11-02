@@ -6,12 +6,15 @@
  * provider-limit admission, the AI proxy passthrough) builds this context the
  * same way, so they cannot pick different accounts for one run.
  */
-import { and, eq, isNull, or } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
 import { log } from '../../lib/logger';
-import { resolveWorkspaceRuntimeAssetContext } from '../workspace-runtime-assets';
+import {
+  profileValidForRunCondition,
+  resolveWorkspaceRuntimeIds,
+} from '../workspace-runtime-assets';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -25,10 +28,10 @@ export interface ProfileCredentialContext {
  * Validate the run's profile and skill and derive the profile context.
  *
  * A profile is valid when it belongs to the run's project, or is the user's own
- * global profile (no project), matching `validateProfileId` in
- * `workspace-runtime-assets.ts`. A profile that is not valid for this run has no
- * pins that may apply to it, so this returns null and resolution continues at
- * the project tier.
+ * global profile (`profileValidForRunCondition`, shared with the runtime assets).
+ * A profile that is not valid for this run has no pins that may apply to it, so
+ * this returns null and resolution continues at the project tier. One parallel
+ * step: the profile and the skill are read together.
  */
 export async function resolveProfileCredentialContext(
   db: Db,
@@ -42,10 +45,6 @@ export async function resolveProfileCredentialContext(
   const profileId = input.profileId?.trim();
   if (!profileId) return null;
 
-  const ownGlobalProfile = and(
-    isNull(schema.agentProfiles.projectId),
-    eq(schema.agentProfiles.userId, input.userId)
-  );
   const [profileRows, skillRows] = await Promise.all([
     db
       .select({ agentType: schema.agentProfiles.agentType })
@@ -53,9 +52,7 @@ export async function resolveProfileCredentialContext(
       .where(
         and(
           eq(schema.agentProfiles.id, profileId),
-          input.projectId
-            ? or(eq(schema.agentProfiles.projectId, input.projectId), ownGlobalProfile)
-            : ownGlobalProfile
+          profileValidForRunCondition(input.projectId, input.userId)
         )
       )
       .limit(1),
@@ -85,19 +82,19 @@ export async function resolveProfileCredentialContext(
 
 /**
  * Profile context for a workspace's agent session: the same session → task →
- * workspace-hint resolution the runtime assets use
- * (`resolveWorkspaceRuntimeAssetContext`), so the credential and the profile's env
- * vars always come from one profile.
+ * workspace-hint resolution the runtime assets use (`resolveWorkspaceRuntimeIds`),
+ * so the credential and the profile's env vars always come from one profile.
+ * Validation happens once, in `resolveProfileCredentialContext`.
  */
 export async function resolveSessionProfileCredentialContext(
   db: Db,
   input: { workspaceId: string; agentSessionId?: string | null }
 ): Promise<ProfileCredentialContext | null> {
-  const runtime = await resolveWorkspaceRuntimeAssetContext(db, input);
+  const runtime = await resolveWorkspaceRuntimeIds(db, input);
   return resolveProfileCredentialContext(db, {
-    userId: runtime.userId,
-    projectId: runtime.projectId,
-    profileId: runtime.agentProfileId,
+    userId: runtime.workspace.userId,
+    projectId: runtime.workspace.projectId,
+    profileId: runtime.profileId,
     skillId: runtime.skillId,
   });
 }

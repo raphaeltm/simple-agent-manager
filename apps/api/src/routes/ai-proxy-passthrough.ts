@@ -74,6 +74,8 @@ interface PassthroughAuthResult {
   trialId?: string;
   agentType?: string | null;
   agentSessionId?: string | null;
+  agentProfileId?: string | null;
+  skillId?: string | null;
   agentCredentialReference?: string | null;
   agentCredentialSource?: 'user' | 'project' | 'platform' | null;
   agentCredentialProvider?: string | null;
@@ -278,7 +280,8 @@ async function prepareProxyRequest(
     workspaceId: auth.workspaceId,
     projectId: auth.projectId,
     agentType: auth.agentType,
-    agentSessionId: auth.agentSessionId,
+    agentProfileId: auth.agentProfileId,
+    skillId: auth.skillId,
     dialect: options.dialect,
   });
   if (!upstream) {

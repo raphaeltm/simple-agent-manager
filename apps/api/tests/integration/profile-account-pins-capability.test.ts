@@ -161,7 +161,8 @@ async function proxyUpstream() {
     workspaceId: auth.workspaceId,
     projectId: auth.projectId,
     agentType: auth.agentType,
-    agentSessionId: auth.agentSessionId,
+    agentProfileId: auth.agentProfileId,
+    skillId: auth.skillId,
     dialect: 'anthropic',
   });
 }
@@ -255,5 +256,86 @@ describe('a paused profile pin stops the run instead of switching accounts', () 
   it('the proxy finds no upstream and admission selects no credential', async () => {
     expect(await proxyUpstream()).toBeNull();
     expect(await admissionHolds('cc_credentials:cred-project')).toBe(false);
+  });
+});
+
+describe('profile context comes from the run', () => {
+  it('a global profile’s pin applies at the agent-key route', async () => {
+    sqlite.exec(`
+      INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type, created_at, updated_at)
+        VALUES ('prof-global', NULL, 'u1', 'Everyday', 'claude-code', '${NOW}', '${NOW}');
+      UPDATE agent_sessions SET agent_profile_id = 'prof-global' WHERE id = 's1';
+      UPDATE cc_profile_attachments SET agent_profile_id = 'prof-global' WHERE id = 'pin-1';
+    `);
+
+    const { body } = await agentKey();
+    expect(body).toMatchObject({ credentialReference: 'cc_credentials:cred-pinned' });
+    expect(sessionAttribution()).toMatchObject({ scope: 'profile' });
+  });
+
+  it('a skill that switches the agent makes the profile’s pin not apply', async () => {
+    sqlite.exec(`
+      INSERT INTO skills (id, project_id, user_id, name, agent_type, created_at, updated_at)
+        VALUES ('sk-go', 'p1', 'u1', 'Port to Go', 'openai-codex', '${NOW}', '${NOW}');
+      UPDATE agent_sessions SET skill_id = 'sk-go' WHERE id = 's1';
+    `);
+
+    // The session's skill runs Codex, so a Claude Code request is not the run's
+    // agent: the Claude pin on the profile is skipped and the project pin applies.
+    const { body } = await agentKey();
+    expect(body).toMatchObject({ credentialReference: 'cc_credentials:cred-project' });
+    expect(sessionAttribution()).toMatchObject({ scope: 'project' });
+  });
+});
+
+describe('the AI proxy fails closed when the agent type is unknown', () => {
+  async function seedOpenAICompatible(id: string, agentType: string): Promise<void> {
+    const secret = JSON.stringify({ apiKey: `sk-${id}`, baseUrl: 'https://openai-alt.example/v1' });
+    const { ciphertext, iv } = await encrypt(secret, ENCRYPTION_KEY);
+    sqlite
+      .prepare(
+        `INSERT INTO cc_credentials (id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at)
+         VALUES (?, 'u1', ?, 'openai-compatible', ?, ?, 1, ?, ?)`
+      )
+      .run(`cred-${id}`, id, ciphertext, iv, NOW, NOW);
+    sqlite
+      .prepare(
+        `INSERT INTO cc_configurations (id, owner_id, name, consumer_kind, consumer_target, credential_id, settings_json, is_active, created_at, updated_at)
+         VALUES (?, 'u1', ?, 'agent', ?, ?, '{"dialect":"openai-compatible"}', 1, ?, ?)`
+      )
+      .run(`cfg-${id}`, id, agentType, `cred-${id}`, NOW, NOW);
+  }
+
+  async function unknownAgentUpstream() {
+    return resolveProxyUpstream({
+      env,
+      userId: 'u1',
+      workspaceId: 'w1',
+      projectId: 'p1',
+      agentType: null,
+      agentProfileId: null,
+      skillId: null,
+      dialect: 'openai-compatible',
+    });
+  }
+
+  beforeEach(async () => {
+    await seedOpenAICompatible('codex', 'openai-codex');
+    await seedOpenAICompatible('zen', 'opencode');
+    sqlite.exec(`
+      INSERT INTO cc_attachments (id, configuration_id, consumer_kind, consumer_target, user_id, project_id, is_active)
+        VALUES ('att-codex-default', 'cfg-codex', 'agent', 'openai-codex', 'u1', NULL, 1),
+               ('att-codex-p1', 'cfg-codex', 'agent', 'openai-codex', 'u1', 'p1', 0),
+               ('att-zen-default', 'cfg-zen', 'agent', 'opencode', 'u1', NULL, 1);
+    `);
+  });
+
+  it('a paused pin on one candidate agent does not let a sibling agent’s account serve it', async () => {
+    expect(await unknownAgentUpstream()).toBeNull();
+  });
+
+  it('control: without the paused pin, an account serves the request', async () => {
+    sqlite.exec(`DELETE FROM cc_attachments WHERE id = 'att-codex-p1'`);
+    expect(await unknownAgentUpstream()).toMatchObject({ credentialProvider: 'openai-compatible' });
   });
 });

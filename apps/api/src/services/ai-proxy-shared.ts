@@ -29,6 +29,13 @@ export interface AIProxyAuthResult {
   trialId?: string;
   agentType?: string | null;
   agentSessionId?: string | null;
+  /**
+   * The run's profile and skill, from the running agent session (or the workspace's
+   * profile hint when no session is running). Not yet validated; the proxy passes
+   * them to `resolveProfileCredentialContext`.
+   */
+  agentProfileId?: string | null;
+  skillId?: string | null;
   agentCredentialReference?: string | null;
   agentCredentialSource?: 'user' | 'project' | 'platform' | null;
   agentCredentialProvider?: string | null;
@@ -123,6 +130,8 @@ export async function verifyAIProxyAuth(
     .select({
       id: schema.agentSessions.id,
       agentType: schema.agentSessions.agentType,
+      agentProfileId: schema.agentSessions.agentProfileId,
+      skillId: schema.agentSessions.skillId,
       agentCredentialReference: schema.agentSessions.agentCredentialReference,
       agentCredentialSource: schema.agentSessions.agentCredentialSource,
       agentCredentialProvider: schema.agentSessions.agentCredentialProvider,
@@ -156,6 +165,8 @@ export async function verifyAIProxyAuth(
     trialId,
     agentType,
     agentSessionId: agentSession?.id ?? null,
+    agentProfileId: agentSession ? agentSession.agentProfileId : workspace.agentProfileHint,
+    skillId: agentSession?.skillId ?? null,
     agentCredentialReference: agentSession?.agentCredentialReference ?? null,
     agentCredentialSource:
       agentSession?.agentCredentialSource === 'user' ||

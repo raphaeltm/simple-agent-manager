@@ -6,7 +6,8 @@
  */
 import {
   type AgentCredentialScope,
-  type CCResolutionSource,
+  credentialOwnerFromSource,
+  credentialScopeFromSource,
   type Dialect,
   HARNESS_CAPABILITIES,
   type HarnessCapability,
@@ -18,10 +19,12 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getCredentialEncryptionKey } from '../lib/secrets';
-import { credentialScopeFromSource } from '../services/agent-key-resolution';
 import type { AiProviderUsageAttribution } from '../services/ai-token-budget';
-import { resolveSessionProfileCredentialContext } from '../services/composable-credentials/profile-context';
-import { resolveForConsumer } from '../services/composable-credentials/resolve';
+import { resolveProfileCredentialContext } from '../services/composable-credentials/profile-context';
+import {
+  explainForConsumer,
+  type resolveForConsumer,
+} from '../services/composable-credentials/resolve';
 
 export interface ResolvedProxyUpstream {
   agentType: string;
@@ -162,50 +165,47 @@ function credentialSupportsDialect(
   return secret.kind === 'openai-compatible' && dialect === 'openai-compatible';
 }
 
-/**
- * Who owns the credential. A profile pin is the user's own account. Exhaustive
- * over the resolver's sources so a new source cannot silently become 'platform'.
- */
-function credentialSourceFromResolution(
-  source: CCResolutionSource
-): 'user' | 'project' | 'platform' {
-  switch (source) {
-    case 'project-attachment':
-      return 'project';
-    case 'profile-attachment':
-    case 'user-attachment':
-      return 'user';
-    case 'platform':
-    case 'platform-proxy':
-      return 'platform';
-  }
-}
-
 export async function resolveProxyUpstream(input: {
   env: Env;
   userId: string;
   workspaceId: string;
   projectId: string | null;
   agentType?: string | null;
-  agentSessionId?: string | null;
+  /** From `verifyAIProxyAuth`: the running session's profile and skill. */
+  agentProfileId?: string | null;
+  skillId?: string | null;
   dialect: Dialect;
 }): Promise<ResolvedProxyUpstream | null> {
   const db = drizzle(input.env.DATABASE, { schema });
   const encryptionKey = getCredentialEncryptionKey(input.env);
-  // Same profile context as the agent-key callback that gave this session its key.
-  const profile = await resolveSessionProfileCredentialContext(db, {
-    workspaceId: input.workspaceId,
-    agentSessionId: input.agentSessionId,
+  // Same profile context as the agent-key callback that gave this session its key,
+  // built from the session row auth already loaded (one extra parallel read, on
+  // every proxied call only when the session has a profile).
+  const profile = await resolveProfileCredentialContext(db, {
+    userId: input.userId,
+    projectId: input.projectId,
+    profileId: input.agentProfileId,
+    skillId: input.skillId,
   });
-  for (const capability of candidateCapabilities(input.agentType, input.dialect)) {
-    const resolved = await resolveForConsumer(
-      db,
-      input.userId,
-      encryptionKey,
-      { kind: 'agent', agentType: capability.agentType },
-      input.projectId,
-      profile
-    );
+  const candidates = await Promise.all(
+    candidateCapabilities(input.agentType, input.dialect).map(async (capability) => ({
+      capability,
+      trace: await explainForConsumer(
+        db,
+        input.userId,
+        encryptionKey,
+        { kind: 'agent', agentType: capability.agentType },
+        input.projectId,
+        profile
+      ),
+    }))
+  );
+  // Rule 28: a paused pin stops the run. When the agent type is unknown, every
+  // agent that speaks the dialect is a candidate, so a halt on any of them fails
+  // closed rather than letting a sibling agent's account serve the request.
+  if (candidates.some(({ trace }) => trace.halted)) return null;
+  for (const { capability, trace } of candidates) {
+    const resolved = trace.resolved;
     if (!resolved?.credential || resolved.source === 'platform-proxy') continue;
     const secret = resolved.credential.secret;
     const settings = resolved.configuration?.settings ?? {};
@@ -221,7 +221,7 @@ export async function resolveProxyUpstream(input: {
       baseUrl,
       provider: resolveProviderAttribution({ baseUrl, dialect: input.dialect, settings }),
       credentialReference: `cc_credentials:${resolved.credential.id}`,
-      credentialSource: credentialSourceFromResolution(resolved.source),
+      credentialSource: credentialOwnerFromSource(resolved.source),
       credentialScope: credentialScopeFromSource(resolved.source),
       credentialProvider: input.dialect,
       providerMode: 'proxy-passthrough',

@@ -56,55 +56,85 @@ choice must be private and apply only to their own runs, in single-person and sh
 ## Implementation checklist
 
 ### Shared
-- [ ] `AttachmentScope` gains `{ scope: 'profile'; userId; profileId }`; `ResolutionContext`
+- [x] `AttachmentScope` gains `{ scope: 'profile'; userId; profileId }`; `ResolutionContext`
       gains `profileId` and `profileAgentType`; `ResolutionSource` gains `profile-attachment`.
-- [ ] `explainResolution()` returns the result plus a per-tier trace (used / skipped / halted /
+- [x] `explainResolution()` returns the result plus a per-tier trace (used / skipped / halted /
       not set, with reasons); `resolveEnvironment()` delegates to it.
-- [ ] Profile tier: most specific; agent consumers only; skipped when the pin's agent type is not
+- [x] Profile tier: most specific; agent consumers only; skipped when the pin's agent type is not
       the running agent type; inactive pin or inactive configuration/credential halts.
 
 ### API
-- [ ] Migration: `cc_profile_attachments` table (FKs cascade, unique on
+- [x] Migration: `cc_profile_attachments` table (FKs cascade, unique on
       user/profile/consumer) and `agent_sessions.agent_credential_scope` column.
-- [ ] Drizzle schema for both.
-- [ ] Snapshot loads the caller's profile pins for the given profile only.
-- [ ] `resolveProfileCredentialContext()` helper: validates profile for (user, project) and
+- [x] Drizzle schema for both.
+- [x] Snapshot loads the caller's profile pins for the given profile only.
+- [x] `resolveProfileCredentialContext()` helper: validates profile for (user, project) and
       computes `skill.agentType ?? profile.agentType`.
-- [ ] Move agent-key resolution out of `credentials.ts`; pass profile; halt is definitive.
-- [ ] agent-key route passes the session's profile; attribution records scope.
-- [ ] Admission passes the task's profile/skill.
-- [ ] Proxy auth carries session profile/skill; `resolveProxyUpstream()` passes it; source map
+- [x] Move agent-key resolution out of `credentials.ts`; pass profile; halt is definitive.
+- [x] agent-key route passes the session's profile; attribution records scope.
+- [x] Admission passes the task's profile/skill.
+- [x] Proxy auth carries session profile/skill; `resolveProxyUpstream()` passes it; source map
       handles `profile-attachment`; attribution records scope.
-- [ ] Audit every reader of the credential source enum / resolution source (rule 79).
-- [ ] CRUD routes `/api/cc/profile-attachments` (list, candidates, create-replaces, patch, delete)
+- [x] Audit every reader of the credential source enum / resolution source (rule 79).
+- [x] CRUD routes `/api/cc/profile-attachments` (list, candidates, create-replaces, delete)
       with valibot schemas, paused-account refusal, profile access check (own global profile or
       project profile with `task:write`), same not-found for missing and foreign.
-- [ ] Project pin create requires `task:write` instead of `secret:write`.
-- [ ] Offboarding preview counts the member's pins on the project's profiles; apply deletes them.
+- [x] Project pin create requires `task:write` instead of `secret:write`.
+- [x] Offboarding preview counts the member's pins on the project's profiles; apply deletes them.
 
 ### Web
-- [ ] API client + TanStack Query hooks for profile pins and candidates.
-- [ ] Profile editor "Account" section (usual account / pinned account, paused disabled, skill
+- [x] API client + TanStack Query hooks for profile pins and candidates.
+- [x] Profile editor "Account" section (usual account / pinned account, paused disabled, skill
       warning, private label in shared projects, "Runs on X" with breakdown disclosure).
-- [ ] Settings → Agents account card: "Use in profiles…" dialog and list of pinning profiles.
-- [ ] Project settings → Accounts: show profiles that override the project pin.
-- [ ] Session details: chosen account and source.
-- [ ] Offboarding preview shows the pins that will be removed.
-- [ ] Playwright audit 375px / 1280px with stress data.
+- [x] Settings → Agents account card: "Use in profiles…" dialog and list of pinning profiles.
+- [x] Project settings → Accounts: show profiles that override the project pin.
+- [x] Session details: chosen account and source.
+- [x] Offboarding preview shows the pins that will be removed.
+- [x] Playwright audit 375px / 1280px with stress data.
 
 ### Docs
-- [ ] `apps/www/src/content/docs/docs/guides/agents.md` and credential-resolution docs.
+- [x] `apps/www/src/content/docs/docs/guides/agents.md` and credential-resolution docs.
 
 ## Acceptance criteria / tests
-- [ ] Resolver: profile pin beats project pin; inactive profile pin halts; agent-type mismatch
+- [x] Resolver: profile pin beats project pin; inactive profile pin halts; agent-type mismatch
       skipped; no pin = unchanged; global profile handled; another user's pin never applies.
-- [ ] Capability test: agent-key, admission and proxy choose the same account for a
+- [x] Capability test: agent-key, admission and proxy choose the same account for a
       profile-pinned session.
-- [ ] Halted profile pin does not fall back to the legacy credential at agent-key.
-- [ ] Profile pins coexist with project pins; offboarding deletes them.
-- [ ] Maintainer can pin their own account to a project; viewer cannot.
-- [ ] Pin creation authorization tested on a real SQL engine with foreign-user attack + owner
+- [x] Halted profile pin does not fall back to the legacy credential at agent-key.
+- [x] Profile pins coexist with project pins; offboarding deletes them.
+- [x] Maintainer can pin their own account to a project; viewer cannot.
+- [x] Pin creation authorization tested on a real SQL engine with foreign-user attack + owner
       control.
-- [ ] Guards proven discriminating by deletion.
+- [x] Guards proven discriminating by deletion.
 - [ ] Staging: pin a profile to a non-default account, chat, confirm `agent_sessions` attribution
       and a response; unpin and confirm fallback.
+
+## Implementation notes
+
+- Shared: `explainResolution()` (trace) in `packages/shared/src/composable-credentials/resolver.ts`;
+  `resolveEnvironment()` returns its result. Profile tier only for agent consumers.
+- API: migration `0215_cc_profile_attachments.sql`; snapshot loads only the run's profile pins;
+  `services/composable-credentials/profile-context.ts` builds one context for agent-key
+  (`resolveSessionProfileCredentialContext`), admission and the proxy.
+- `services/agent-key-resolution.ts` (moved out of `routes/credentials.ts`); a halted trace is
+  definitive (no legacy fallback). `routes/workspaces/agent-credential-attribution.ts` writes
+  `agent_credential_scope`. `routes/ai-proxy-passthrough-upstream.ts` split for size.
+- `agent_credential_source` keeps its CHECK; a profile pin reports `source='user'`,
+  `scope='profile'` (rule 31: no table rebuild to widen a CHECK).
+- Own-agent-account project pins/unpins/connects need `task:write`
+  (`OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY`): cc attachments POST, project agent credential
+  PUT/DELETE, guided setup create + DO save.
+- Offboarding: preview `personalProfilePinCount`; apply deletes pins on the project's profiles
+  when the member is removed. Per-resource actions moved to
+  `project-offboarding-resource-actions.ts`.
+- Session details: `GET /api/projects/:projectId/sessions/:sessionId/agent-credential`
+  (account name only for the session's own user).
+- Admin setting `chat.profilePinCandidateLimit` (default 500) caps the candidate list.
+- Discrimination proven by deletion: resolver guards (3), route guards (9), offboarding
+  predicates (2), each resolution site + definitive halt (4), UI guards (paused disabled,
+  private label, pins-loading race).
+- Follow-up idea `01M6CQ607MR1X3TG98NH3E624B`: the Codex refresh proxy only refreshes legacy
+  credential rows (pre-existing for #2485 project pins; also affects profile pins on cc-only
+  Codex subscription accounts).
+- Pre-existing doc inaccuracy fixed: project pins do not share an agent credential with other
+  members (resolver requires `target.userId === ctx.userId`).

@@ -1,5 +1,5 @@
 import type { WorkspaceRuntimeAssetsResponse } from '@simple-agent-manager/shared';
-import { and, eq, isNull, or } from 'drizzle-orm';
+import { and, eq, isNull, or, type SQL } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -116,6 +116,21 @@ async function resolveTaskRuntimeIds(
   };
 }
 
+/**
+ * A profile is valid for a run in `projectId` when it is one of that project's
+ * profiles or the run's user's own global profile. The one predicate every caller
+ * uses, including the credential profile context (`profile-context.ts`).
+ */
+export function profileValidForRunCondition(projectId: string | null, userId: string): SQL {
+  const ownGlobalProfile = and(
+    isNull(schema.agentProfiles.projectId),
+    eq(schema.agentProfiles.userId, userId)
+  ) as SQL;
+  return projectId
+    ? (or(eq(schema.agentProfiles.projectId, projectId), ownGlobalProfile) as SQL)
+    : ownGlobalProfile;
+}
+
 async function validateProfileId(
   db: Db,
   workspace: WorkspaceRuntimeBase,
@@ -128,13 +143,7 @@ async function validateProfileId(
     .where(
       and(
         eq(schema.agentProfiles.id, profileId),
-        or(
-          eq(schema.agentProfiles.projectId, workspace.projectId),
-          and(
-            isNull(schema.agentProfiles.projectId),
-            eq(schema.agentProfiles.userId, workspace.userId)
-          )
-        )
+        profileValidForRunCondition(workspace.projectId, workspace.userId)
       )
     )
     .limit(1);
@@ -197,46 +206,44 @@ async function resolveProjectAssets(
   };
 }
 
+export interface WorkspaceRuntimeIds {
+  workspace: WorkspaceRuntimeBase;
+  /** Not yet validated against the workspace's project. */
+  profileId: string | null;
+  skillId: string | null;
+  source: RuntimeAssetContext['source'];
+}
+
+/** Which profile and skill a workspace's run uses: agent session → task → workspace hint. */
+export async function resolveWorkspaceRuntimeIds(
+  db: Db,
+  input: RuntimeAssetContextInput
+): Promise<WorkspaceRuntimeIds> {
+  const workspace = await getWorkspaceRuntimeBase(db, input.workspaceId);
+  if (!workspace.projectId) {
+    return { workspace, profileId: null, skillId: null, source: 'none' };
+  }
+  const agentSessionId = input.agentSessionId?.trim();
+  if (agentSessionId) {
+    const ids = await resolveAgentSessionRuntimeIds(db, workspace, agentSessionId);
+    return { workspace, ...ids, source: 'agent-session' };
+  }
+  const taskIds = await resolveTaskRuntimeIds(db, workspace);
+  if (taskIds.profileId || taskIds.skillId) return { workspace, ...taskIds, source: 'task' };
+  if (workspace.agentProfileHint) {
+    return { workspace, profileId: workspace.agentProfileHint, skillId: null, source: 'workspace' };
+  }
+  return { workspace, profileId: null, skillId: null, source: 'none' };
+}
+
 export async function resolveWorkspaceRuntimeAssetContext(
   db: Db,
   input: RuntimeAssetContextInput
 ): Promise<RuntimeAssetContext> {
-  const workspace = await getWorkspaceRuntimeBase(db, input.workspaceId);
-  if (!workspace.projectId) {
-    return {
-      workspaceId: workspace.id,
-      projectId: null,
-      userId: workspace.userId,
-      agentProfileId: null,
-      skillId: null,
-      source: 'none',
-    };
-  }
-
-  let runtimeIds: { profileId: string | null; skillId: string | null } = {
-    profileId: null,
-    skillId: null,
-  };
-  let source: RuntimeAssetContext['source'] = 'none';
-
-  const agentSessionId = input.agentSessionId?.trim();
-  if (agentSessionId) {
-    runtimeIds = await resolveAgentSessionRuntimeIds(db, workspace, agentSessionId);
-    source = 'agent-session';
-  } else {
-    const taskIds = await resolveTaskRuntimeIds(db, workspace);
-    if (taskIds.profileId || taskIds.skillId) {
-      runtimeIds = taskIds;
-      source = 'task';
-    } else if (workspace.agentProfileHint) {
-      runtimeIds = { profileId: workspace.agentProfileHint, skillId: null };
-      source = 'workspace';
-    }
-  }
-
-  const [agentProfileId, skillId] = await Promise.all([
-    validateProfileId(db, workspace, runtimeIds.profileId),
-    validateSkillId(db, workspace, runtimeIds.skillId),
+  const { workspace, profileId, skillId, source } = await resolveWorkspaceRuntimeIds(db, input);
+  const [agentProfileId, validSkillId] = await Promise.all([
+    validateProfileId(db, workspace, profileId),
+    validateSkillId(db, workspace, skillId),
   ]);
 
   return {
@@ -244,7 +251,7 @@ export async function resolveWorkspaceRuntimeAssetContext(
     projectId: workspace.projectId,
     userId: workspace.userId,
     agentProfileId,
-    skillId,
+    skillId: validSkillId,
     source,
   };
 }

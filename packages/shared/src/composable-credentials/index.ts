@@ -6,6 +6,7 @@ export type {
   ProviderConfig as CCProviderConfig,
 } from './assemblers';
 export { agentAssembler, computeAssembler, sanitizeModelAlias } from './assemblers';
+export { credentialOwnerFromSource, credentialScopeFromSource } from './attribution';
 export type {
   BackfillReport as CCBackfillReport,
   BackfillResult as CCBackfillResult,

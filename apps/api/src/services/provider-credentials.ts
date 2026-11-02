@@ -3,6 +3,7 @@ import { createProvider, GcpProvider } from '@simple-agent-manager/providers';
 import {
   type CCResolvedEnvironment,
   computeAssembler,
+  credentialOwnerFromSource,
   type CredentialProvider,
   type CredentialSource,
 } from '@simple-agent-manager/shared';
@@ -186,18 +187,8 @@ async function createProviderFromDecryptedToken(
 
 type ResolvedComputeCredential = CCResolvedEnvironment;
 
-/** Exhaustive so a new resolution source cannot silently be read as a platform credential. */
 function providerCredentialSource(resolved: ResolvedComputeCredential): CredentialSource {
-  switch (resolved.source) {
-    case 'project-attachment':
-      return 'project';
-    case 'profile-attachment': // agent-only tier; listed for exhaustiveness
-    case 'user-attachment':
-      return 'user';
-    case 'platform':
-    case 'platform-proxy':
-      return 'platform';
-  }
+  return credentialOwnerFromSource(resolved.source);
 }
 
 async function resolveComputeCredentialWithBackfill(
