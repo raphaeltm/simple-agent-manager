@@ -36,6 +36,7 @@ import {
 import { appendBootLog } from '../../services/boot-log';
 import { registerBootstrapTokenConsume } from '../../services/bootstrap';
 import { syncActiveAgentCredentialSecret } from '../../services/composable-credentials/agent-sync';
+import { resolveSessionProfileCredentialContext } from '../../services/composable-credentials/profile-context';
 import { decrypt, encrypt } from '../../services/encryption';
 import { getInstallationToken, getUserInstallationRepositories } from '../../services/github-app';
 import {
@@ -61,15 +62,8 @@ import {
   signalWorkspaceDeletionUnconfirmedCallback,
   type WorkspaceDeletionCallbackKind,
 } from '../../services/workspace-deletion-callback-signal';
-import { resolveSessionProfileCredentialContext } from '../../services/composable-credentials/profile-context';
 import { getWorkspaceRuntimeAssets } from '../../services/workspace-runtime-assets';
 import { getDecryptedAgentKey, getDecryptedCredentialRecord } from '../credentials';
-import {
-  agentCredentialProviderFallback,
-  credentialAttributionFromData,
-  persistAgentCredentialAttribution,
-  platformProxyAttribution,
-} from './agent-credential-attribution';
 import { assertRepositoryAccess } from '../projects/_helpers';
 import {
   assertWorkspaceAcceptsCallback,
@@ -80,6 +74,12 @@ import {
   verifyWorkspaceCallbackAuth,
   type WorkspaceCallbackIdentitySnapshot,
 } from './_helpers';
+import {
+  agentCredentialProviderFallback,
+  credentialAttributionFromData,
+  persistAgentCredentialAttribution,
+  platformProxyAttribution,
+} from './agent-credential-attribution';
 
 /** Agent types eligible for AI proxy credential fallback (module-scope for isolate reuse). */
 const PROXY_ELIGIBLE_AGENTS: ReadonlySet<string> = new Set(

@@ -22,6 +22,7 @@ import * as chatPersistence from '../services/chat-persistence';
 import * as projectDataService from '../services/project-data';
 import { requireSessionWriter } from '../services/session-access';
 import { registerChatAcpInteractionRoutes } from './chat-acp-interactions';
+import { registerChatAgentCredentialRoute } from './chat-agent-credential';
 import { registerChatAttentionRoute } from './chat-attention';
 import { registerChatCancelRoute } from './chat-cancel';
 import { chatCommentRoutes } from './chat-comments';
@@ -41,7 +42,6 @@ import { registerChatSessionDetailRoute } from './chat-session-detail';
 import { registerChatSessionListRoute } from './chat-session-list';
 import { chatStateRoutes } from './chat-state';
 import { registerChatStopRoute } from './chat-stop';
-import { registerChatAgentCredentialRoute } from './chat-agent-credential';
 import { registerChatWorkloadIdentityRoute } from './chat-workload-identity';
 
 const chatRoutes = new Hono<{ Bindings: Env }>();

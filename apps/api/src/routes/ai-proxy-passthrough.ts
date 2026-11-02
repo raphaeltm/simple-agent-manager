@@ -15,11 +15,11 @@
  * from, or returned to, tenant workspaces.
  */
 import {
+  type AgentCredentialScope,
+  type CCResolutionSource,
   DEFAULT_AI_PROXY_RATE_LIMIT_RPM,
   DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS,
   DEFAULT_AI_PROXY_REQUEST_BODY_MAX_BYTES,
-  type AgentCredentialScope,
-  type CCResolutionSource,
   type Dialect,
   HARNESS_CAPABILITIES,
   type HarnessCapability,
@@ -40,6 +40,7 @@ import {
   createRateLimitKey,
   getCurrentWindowStart,
 } from '../middleware/rate-limit';
+import { credentialScopeFromSource } from '../services/agent-key-resolution';
 import { AIProxyAuthError, verifyAIProxyAuth } from '../services/ai-proxy-shared';
 import type { AiProviderUsageAttribution } from '../services/ai-token-budget';
 import { checkAiUsageGate } from '../services/ai-token-budget';
@@ -48,7 +49,6 @@ import {
   estimateInputTokensFromMessages,
   optionalExecutionContext,
 } from '../services/ai-token-usage-accounting';
-import { credentialScopeFromSource } from '../services/agent-key-resolution';
 import { resolveSessionProfileCredentialContext } from '../services/composable-credentials/profile-context';
 import { resolveForConsumer } from '../services/composable-credentials/resolve';
 import { copyCredentialLimitHeaders } from '../services/credential-limit-events';

@@ -32,12 +32,12 @@ export type {
   ProfilePinCandidatesResponse as CCProfilePinCandidatesResponse,
   ResolutionContext as CCResolutionContext,
   ResolutionSource as CCResolutionSource,
+  ResolutionStatusResponse as CCResolutionStatusResponse,
   ResolutionStep as CCResolutionStep,
   ResolutionStepReason as CCResolutionStepReason,
   ResolutionStepState as CCResolutionStepState,
   ResolutionTier as CCResolutionTier,
   ResolutionTrace as CCResolutionTrace,
-  ResolutionStatusResponse as CCResolutionStatusResponse,
   ResolvedEnvironment as CCResolvedEnvironment,
 } from './types';
 export { consumerKey } from './types';

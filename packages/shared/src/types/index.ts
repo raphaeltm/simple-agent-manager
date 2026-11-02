@@ -27,11 +27,11 @@ export {
 
 // User & Credentials
 export type {
-  AgentCredentialScope,
   AdminUser,
   AdminUserActionRequest,
   AdminUserRoleRequest,
   AdminUsersResponse,
+  AgentCredentialScope,
   CreateCredentialRequest,
   CreatePlatformCredentialRequest,
   Credential,

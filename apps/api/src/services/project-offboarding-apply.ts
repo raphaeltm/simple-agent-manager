@@ -16,8 +16,8 @@ import {
   conflict,
   type CurrentResource,
   type OffboardingMutationDb,
-  resourceKey,
   type ResourceKey,
+  resourceKey,
 } from './project-offboarding-resource-actions';
 import { selectTriggerExecutionPrincipal } from './trigger-execution-principal';
 
