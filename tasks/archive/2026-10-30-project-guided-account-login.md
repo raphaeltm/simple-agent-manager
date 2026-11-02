@@ -20,7 +20,7 @@ Project account setup only accepts pasted tokens although user account setup sup
 - [x] Unit/contract tests and lint/typecheck/build
 - [x] Mobile/desktop visual audit and independent specialist reviews
 - [x] Staging scoped-flow verification and cleanup
-- [ ] PR, CI, best-effort CodeRabbit, merge, production smoke
+- [x] PR, CI, best-effort CodeRabbit, merge, production smoke (#2476; CodeRabbit review 5711615609 had 2 minor findings, fixed in `43a00198d` with threads resolved; main CI 41054578568 and Deploy Production 41056852924 passed; read-only production smoke at 12:57 UTC on 2026-10-30, recorded in a #2476 comment.)
 
 ## Acceptance
 
@@ -69,3 +69,10 @@ Extracted request parsing/scope validation and agent resolution from the shared 
 ## CodeRabbit review fixes
 
 Resolved both review findings: cancelled create continuations now return before writing the shared session ID; a deferred-response regression verifies current-project polling, code submission and cancellation after a stale response. Browser audit mocks configuration and session polling separately.45 focused unit tests,4 refreshed mobile/desktop browser cases, web typecheck/build/lint pass; screenshots inspected and independent security/completion delta review PASS.
+
+## Reconciliation 2026-11-02
+
+Shipped. #2476 merged as `608bdbd1b` on 2026-10-30 and Deploy Production run 41056852924
+succeeded. The PR's last comment left the file in active "for human closure/archive". This
+reconciliation archives it because every box is met. Moved from `tasks/active/` to `tasks/archive/`
+by the 2026-11-02 weekly queue reconciliation.

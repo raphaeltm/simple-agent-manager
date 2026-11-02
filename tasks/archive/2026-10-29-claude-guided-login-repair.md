@@ -19,8 +19,8 @@ Claude guided sign-in fails after code submission and hides the true failure as 
 - [x] Tests cover chunking, wrong URL/state, exit/error/token races, IO failures, redaction, and DO mapping/vertical slice.
 - [x] Characterize pinned Claude 2.1.281 with isolated synthetic input and the production wrapper.
 - [x] Update affected docs and complete local specialist review.
-- [ ] Deploy exact reviewed branch to available staging, run bounded smoke and cleanup; deliver URL for user's real sign-in.
-- [ ] Draft PR retained unmerged; CI status reported. Full successful real-account E2E remains user test, not claimed by mocks.
+- [x] Deploy exact reviewed branch to available staging, run bounded smoke and cleanup; deliver URL for user's real sign-in. (Final revision `8c68b3176` deployed by staging run 40894817670 at https://app.sammy.party/settings/connections; recorded in the #2473 body.)
+- [ ] Draft PR retained unmerged; CI status reported. Full successful real-account E2E remains user test, not claimed by mocks. (Left unticked: the hold was lifted, not met. Raphaël confirmed a real-account staging sign-in and asked to ship; #2473 merged.)
 
 ## References
 
@@ -39,11 +39,18 @@ Astra tested the unmodified pinned CLI against a loopback TLS proxy with synthet
 - [x] Capture a real CLI synthetic-success fixture with original stdout chunks.
 - [x] Assert exact token capture, state redaction, every streamed split, and child environment override.
 - [x] Exercise the actual driver + native CLI + PTY + local synthetic OAuth response: completed, exact token written mode 0600, code file deleted, no stdout/stderr leak.
-- [ ] Complete delta review and deploy follow-up to staging.
-- [ ] Verify live staging failure path and hand off real-account retry.
+- [x] Complete delta review and deploy follow-up to staging. (Admission-error finding fixed in `8c68b3176` with an independent security review; that revision is the staging deploy above.)
+- [x] Verify live staging failure path and hand off real-account retry. (Live Playwright session `01M6438PY263RGSEE20AF3QDMS` showed HTTP400/code_rejected for a synthetic code; Raphaël then confirmed his real-account sign-in works.)
 
 The renderer change is an evidence-based robustness fix, not a proven diagnosis of the user's failed attempt. Real-account success still requires staging verification.
 
 Follow-up validation: 82 focused tests, API typecheck/build passed. Full API lint found only test import ordering, corrected. Security/runtime/env/constitution and completion/test/docs delta reviews passed; staging and real-account validation remain pending.
 
 CodeRabbit follow-up: admission failures now persist the same classified safe code/message as their logs. New regression failed before fix, then passed; 40 DO tests and changed-file lint pass, independent security delta review passes. Requires final staging redeploy.
+
+## Reconciliation 2026-11-02
+
+Shipped. #2473 merged as `0452e5cef` on 2026-10-29. Main CI 40918318915 passed and Deploy
+Production run 40920874879 succeeded (both recorded in the #2473 body). Raphaël confirmed the
+real-account staging sign-in before release. Moved from `tasks/active/` to `tasks/archive/` by the
+2026-11-02 weekly queue reconciliation.
