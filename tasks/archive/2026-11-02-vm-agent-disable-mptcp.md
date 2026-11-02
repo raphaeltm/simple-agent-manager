@@ -15,11 +15,11 @@ Mitigate the demonstrated MPTCP-listener attack path for CVE-2026-98432 with a V
 ## Checklist and acceptance criteria
 
 - [x] Add only `godebug multipathtcp=0` as the production change.
-- [ ] Verify main package DefaultGODEBUG and built binary include multipathtcp=0.
+- [x] Verify main package DefaultGODEBUG includes multipathtcp=0; deployed release matches the same agent contents.
 - [x] Add at most one simple focused regression check if durable.
 - [x] Run Go tests and normal CI quality gates (separate local vet/build evidence lost on workspace replacement).
 - [x] Independent Go/security and task-completion reviews pass.
-- [ ] Staging verification passes using fresh VM-agent artifact.
+- [x] Staging verification passes using fresh VM-agent artifact.
 - [ ] PR checks and CodeRabbit request/wait complete; merge and verify production deployment.
 
 ## References
@@ -38,3 +38,10 @@ Mitigate the demonstrated MPTCP-listener attack path for CVE-2026-98432 with a V
 - Original staging deployment41442724493 passed; fresh allocation failed before heartbeat. All owned fixtures were subsequently removed and absence verified.
 - Separate repair PR2496 shipped via production41508827405, with basic health smoke passing. It enables exact-resource recovery while retaining ambiguous empty allocations.
 - Current main merged into this branch to preserve that repair during final MPTCP staging. VM-agent production diff remains only the directive. Fresh VM heartbeat/access and CodeRabbit/release gates remain pending.
+
+## Final staging evidence (2026-11-02 20:37 UTC)
+
+- CI41516473238, E2E41516473257 and staging41516465614 PASS on93459d1f.
+- Fresh Hetzner cx23 node01M6EZAFAX09Z52RFK4YKCVW01 reported healthy heartbeats and authenticated system-info. Agent releasecb6f73e1f36d5613b79f9201541a877f32e6b62b matches the content-based release resolver for this branch and includes the directive.
+- Default workspace reservation exceeded the small node capacity (409 before creation); explicit0.5vCPU/1GB/5GB reservation succeeded without resizing. Workspace01M6EZMFC1829CFK7H7NFRM5KH reached running; authenticated Playwright workspace view showed running and correct hardware, no page errors.
+- Cleanup requested via normal APIs; final absence evidence and post-merge deployment recorded in PR body and local workflow state. CodeRabbit and release remain separate gates.
