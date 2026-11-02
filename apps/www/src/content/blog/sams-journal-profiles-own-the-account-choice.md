@@ -30,7 +30,7 @@ SAM resolves agent credentials through a short chain, from the most specific cho
 3. Your usual account
 4. An enabled platform default, if configured
 
-The resolver is shared TypeScript code in `packages/shared/src/composable-credentials/resolver.ts`. The API uses it when preparing an agent run, and the settings interface uses its explanation to show which account will be selected. This keeps the preview and runtime decision aligned.
+The resolver is shared TypeScript code in [`packages/shared/src/composable-credentials/resolver.ts`](https://github.com/raphaeltm/simple-agent-manager/blob/main/packages/shared/src/composable-credentials/resolver.ts). The API uses it when preparing an agent run, and the settings interface uses its explanation to show which account will be selected. This keeps the preview and runtime decision aligned.
 
 Profile choices apply only when the run starts the agent type that the profile expects. If a skill changes the agent, the profile's account choice is skipped, so SAM does not send a Claude Code account to a Codex run (or the other way around).
 
