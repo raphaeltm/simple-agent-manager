@@ -364,6 +364,7 @@ describe('project member offboarding apply', () => {
   let selectResults: QueryResult[];
   let executionPrincipalMembers: QueryResult;
   let updatedRows: Array<{ table: unknown; values: Record<string, unknown> }>;
+  let deletedTables: unknown[];
   let updateReturningRows: unknown[][];
   let transactionCalls: number;
 
@@ -383,6 +384,7 @@ describe('project member offboarding apply', () => {
       { userId: 'departing-user', role: 'admin', status: 'active' },
     ];
     updatedRows = [];
+    deletedTables = [];
     updateReturningRows = [];
     transactionCalls = 0;
 
@@ -433,6 +435,18 @@ describe('project member offboarding apply', () => {
           return updateChain;
         }),
       })),
+      // Removal also deletes the leaver's profile pins on this project's profiles; the
+      // scope of that delete is proven on real SQL in offboarding-profile-pins.test.ts.
+      delete: vi.fn((table: unknown) => {
+        const deleteChain = {
+          where: vi.fn(() => deleteChain),
+          returning: vi.fn(() => {
+            deletedTables.push(table);
+            return Promise.resolve([]);
+          }),
+        };
+        return deleteChain;
+      }),
       transaction: vi.fn(async (callback: (tx: typeof mockDb) => Promise<unknown>) => {
         transactionCalls += 1;
         return callback(mockDb);
@@ -548,6 +562,7 @@ describe('project member offboarding apply', () => {
         }),
       ])
     );
+    expect(deletedTables).toEqual([schema.ccProfileAttachments]);
     const auditUpdates = updatedRows.filter(
       (row) => row.table === schema.projectMemberOffboardingResourceActions
     );
@@ -910,8 +925,12 @@ describe('project member offboarding apply', () => {
   });
 
   it('keeps project-scoped write predicates in the apply service', async () => {
-    const source = await import('node:fs/promises').then((fs) =>
-      fs.readFile('src/services/project-offboarding-apply.ts', 'utf8')
+    // The per-resource actions live beside the apply service.
+    const source = await import('node:fs/promises').then(async (fs) =>
+      [
+        await fs.readFile('src/services/project-offboarding-apply.ts', 'utf8'),
+        await fs.readFile('src/services/project-offboarding-resource-actions.ts', 'utf8'),
+      ].join('\n')
     );
 
     expect(source).toContain('eq(schema.triggers.projectId, input.projectId)');

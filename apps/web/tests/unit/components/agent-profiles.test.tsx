@@ -40,6 +40,15 @@ vi.mock('../../../src/lib/api', () => ({
 // QueryClientProvider and AuthProvider this file's `Wrapper` doesn't set up —
 // this suite isn't about agent model calls, so stub the field the same way
 // the `lib/api` mock above keeps ProfileRuntimeSection from making requests.
+// The Account section owns its account queries and has its own tests
+// (tests/unit/components/accounts/account-profiles.test.tsx).
+const accountSectionMock = vi.hoisted(() => ({
+  ProfileAccountFormSection: vi.fn(() => <div data-testid="profile-account-form-section" />),
+}));
+vi.mock(
+  '../../../src/components/agent-profiles/ProfileAccountFormSection',
+  () => accountSectionMock
+);
 vi.mock('../../../src/components/agent-models/AgentModelAccessField', () => ({
   AgentModelAccessField: ({ value }: { value: string[] | null }) => (
     <div data-testid="agent-model-access-field">{value ? value.join(',') : 'inherit'}</div>
@@ -559,6 +568,25 @@ describe('ProfileFormDialog', () => {
     expect(screen.getByDisplayValue('Claude Opus 4.6 (claude-opus-4-6)')).toBeInTheDocument();
     expect(screen.getByLabelText('Effort')).toHaveValue('xhigh');
     expect(screen.getByDisplayValue('5')).toBeInTheDocument();
+    // Edit mode offers my account choice for this profile, wired to the profile.
+    expect(screen.getByTestId('profile-account-form-section')).toBeInTheDocument();
+    expect(accountSectionMock.ProfileAccountFormSection).toHaveBeenCalledWith(
+      expect.objectContaining({ profile, projectId: 'proj-test-1' }),
+      undefined
+    );
+  });
+
+  it('create mode has no account choice (the profile does not exist yet)', () => {
+    render(
+      <ProfileFormDialog
+        isOpen={true}
+        onClose={defaultOnClose}
+        onSave={defaultOnSave}
+        projectId="proj-test-1"
+      />,
+      { wrapper: Wrapper }
+    );
+    expect(screen.queryByTestId('profile-account-form-section')).toBeNull();
   });
 
   it('does not offer max effort for OpenAI Codex profiles', () => {

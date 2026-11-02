@@ -20,6 +20,15 @@ vi.mock('../../../../src/lib/api/agent-models', () => ({
   getProjectAgentModelSettings: mocks.getProjectAgentModelSettings,
   updateProjectAgentModelSettings: vi.fn(),
 }));
+// The Account section owns its account queries and has its own tests
+// (tests/unit/components/accounts/account-profiles.test.tsx).
+const accountSectionMock = vi.hoisted(() => ({
+  ProfileAccountFormSection: vi.fn(() => <div data-testid="profile-account-form-section" />),
+}));
+vi.mock(
+  '../../../../src/components/agent-profiles/ProfileAccountFormSection',
+  () => accountSectionMock
+);
 vi.mock('../../../../src/components/agent-profiles/ProfileRuntimeSection', () => ({
   ProfileRuntimeSection: () => <div data-testid="runtime-section" />,
 }));
