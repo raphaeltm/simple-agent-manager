@@ -33,7 +33,8 @@ vi.mock('../../../src/services/project-data', () => ({
   stopSession: (...args: unknown[]) => mocks.stopSession(...args),
 }));
 
-vi.mock('../../../src/services/node-agent', () => ({
+vi.mock('../../../src/services/node-agent', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/node-agent')>()),
   deleteWorkspaceOnNode: (...args: unknown[]) => mocks.deleteWorkspaceOnNode(...args),
   getNodeAgentBackgroundRequestTimeoutMs: vi.fn(() => 5_000),
   stopWorkspaceOnNode: (...args: unknown[]) => mocks.stopWorkspaceOnNode(...args),
