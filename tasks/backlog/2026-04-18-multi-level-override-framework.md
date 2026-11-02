@@ -11,7 +11,8 @@
 >   shared override controls.
 >
 > Still open: phases 3, 4, 5 and 8, source tiers for non-credential parameters, and the table
-> refresh. The table's "Agent credentials" row now has a profile tier.
+> refresh. The table below is stale: its "Agent credentials" row still shows Project "Phase 2
+> (planned)" and Profile "—", but both tiers now ship (#2485 project pins, #2490 profile pins).
 
 > **Reconciliation 2026-10-26:** #2414 (`0620c1595`) added callable AI models, resolved skill →
 > profile → project → SAM defaults with "Same as project/profile" inherit options
