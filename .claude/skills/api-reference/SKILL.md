@@ -326,6 +326,11 @@ MCP tools `list_ai_models` / `run_ai_model` (`routes/mcp/agent-model-tools.ts`, 
 - `GET /api/credentials` — Get the user's cloud provider connections. GCP returns safe `authType`, project, service-account email, zone, and optional key ID metadata; encrypted source credentials are never returned, and malformed rows are isolated.
 - `POST /api/credentials` — Save a cloud provider credential. New GCP WIF writes use the versioned `workload-identity` variant.
 - `DELETE /api/credentials/:provider` — Delete the stored cloud provider credential. GCP deletion atomically removes legacy and generated composable copies and cached derivatives; it does not revoke Google-managed keys.
+- `POST /api/cc/attachments` — Pin one of the caller's accounts as their default (no `projectId`) or to a project (replaces their previous pin for that agent; requires `task:write`, since it changes only the caller's own runs).
+- `GET /api/cc/profile-attachments` — The caller's personal profile pins (profile and project names included). Pins never apply to other members.
+- `GET /api/cc/profile-attachments/profiles?agentType=` — Profiles the caller may pin to: own global profiles plus project profiles where they have `task:write`; capped by admin setting `chat.profilePinCandidateLimit`, returns `truncated`/`limit`.
+- `POST /api/cc/profile-attachments` — `{ configurationId, profileId }`; replaces the caller's pin for that profile and agent. Refuses paused accounts and accounts for another agent; missing and foreign profiles both 404. Resolution: profile pin → project pin → default → platform (`explainResolution`).
+- `DELETE /api/cc/profile-attachments/:id` — Remove one of the caller's profile pins.
 
 ### GCP
 
@@ -463,6 +468,7 @@ Private VM-agent node-management routes: `POST /workspaces/:workspaceId/mcp/secr
 ### Workload identity
 
 - `GET /oidc/.well-known/openid-configuration` and `GET /oidc/.well-known/jwks.json` — public provider-neutral workload issuer discovery and active public key. Separate from legacy GCP/internal JWT issuer.
+- `GET /api/projects/:projectId/sessions/:sessionId/agent-credential` — Which account the chat's agent ran on: `credentialSource`, `credentialScope` (`profile`/`project`/`user`/`platform`), and `accountName` (only for the session's own user).
 - `GET /api/projects/:projectId/sessions/:sessionId/workload-identity` — authenticated project-member read-only current workload metadata (issuer, subject, TTL, claims). Never mints a token. Unavailable runtime returns 409.
 - `exec_with_secrets` accepts optional `oidc: { audience: string }`; privately injects reserved `SAM_OIDC_TOKEN`, including when `secretNames` is empty. Same-session job status/cancel semantics are unchanged.
 
