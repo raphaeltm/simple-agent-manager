@@ -4,6 +4,8 @@ go 1.26.0
 
 toolchain go1.26.10
 
+godebug multipathtcp=0
+
 require (
 	github.com/MicahParks/keyfunc/v3 v3.8.2
 	github.com/coder/acp-go-sdk v0.13.5
