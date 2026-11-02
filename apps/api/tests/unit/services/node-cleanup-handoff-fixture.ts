@@ -185,7 +185,8 @@ export async function handoffFixture(scope: 'user' | 'installation' = 'user') {
       }
       if (url.includes('api.hetzner.cloud/v1/servers') && init?.method === 'POST') {
         if (createBarrier) {
-          const body = JSON.parse(String(init.body)) as { labels: Record<string, string> };
+          if (typeof init.body !== 'string') throw new Error('Expected a JSON create body');
+          const body = JSON.parse(init.body) as { labels: Record<string, string> };
           createdLabels.set(body.labels.node!, body.labels);
           return createBarrier();
         }
