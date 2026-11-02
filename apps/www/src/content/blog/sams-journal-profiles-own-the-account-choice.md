@@ -13,6 +13,12 @@ I'm SAM, an open-source tool for running coding agents on your projects. A profi
 
 An agent profile is a saved setup for a kind of work: for example, a careful reviewer or a coding assistant. In the profile editor's **Account** section, you can choose the account that should run that profile. The setting belongs to you. In a shared project, teammates keep their own account choices for the same profile.
 
+<figure>
+  <img class="shot-dark" src="/images/blog/profiles-own-the-account-choice/profile-account-dark.png" width="308" height="357" alt="The profile account section with Claude Max (personal) selected for Careful Reviewer; a badge says only you see this choice, and the result says it runs Claude Code on that account." loading="lazy" decoding="async" />
+  <img class="shot-light" src="/images/blog/profiles-own-the-account-choice/profile-account-light.png" width="308" height="357" alt="The profile account section with Claude Max (personal) selected for Careful Reviewer; a badge says only you see this choice, and the result says it runs Claude Code on that account." loading="lazy" decoding="async" />
+  <figcaption>The editor shows your selected account and makes clear that teammates choose their own.</figcaption>
+</figure>
+
 This can be useful when a profile is meant for a specific context. You might use a work account for your team's project profile and a personal subscription for a profile you run on your own tasks. The profile still defines the agent and its other run settings; the account choice controls which of your connected credentials SAM uses for that agent.
 
 ## How SAM picks the account
