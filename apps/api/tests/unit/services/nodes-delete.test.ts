@@ -573,12 +573,18 @@ describe('node resource deletion services', () => {
         status: 'destroying',
         providerInstanceId: null,
         runtimeTerminationConfirmedAt: null,
+        // Exercise the ownership guard after the provisioning recovery window.
+        createdAt: new Date(Date.now() - 60_000).toISOString(),
       })
     );
 
-    await expect(deleteNodeResourcesStrict('pool-node-1', 'user-1', ENV)).rejects.toThrow(
-      /exact ownership scope is unavailable/
-    );
+    await expect(
+      deleteNodeResourcesStrict('pool-node-1', 'user-1', {
+        ...ENV,
+        PROVISIONING_TIMEOUT_MS: '30000',
+      })
+    ).rejects.toThrow(/exact ownership scope is unavailable/);
+    expect(createProviderForUser).not.toHaveBeenCalled();
     expect(providerDeleteVM).not.toHaveBeenCalled();
     expect(deleteDNSRecord).not.toHaveBeenCalled();
   });

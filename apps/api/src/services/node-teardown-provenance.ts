@@ -6,7 +6,9 @@
  * - its own server-written pool/credential snapshot. Direct and pool-placed provisioning has
  *   no task link, and a woken conversation clears the one it had, so the snapshot is the
  *   durable proof. It is independent of current pool revisions so retiring a source cannot
- *   strand a VM provisioned under its old authority.
+ *   strand a VM provisioned under its old authority. Providerless destroying rows
+ *   need strict inventory reconciliation to establish absence; requiring absence
+ *   proof here would prevent that reconciliation.
  *
  * The snapshot branch admits `stopped` and `destroying` nodes (the NodeLifecycle and cleanup
  * handoffs), plus `running` nodes only when the caller opts in. Only a node this predicate
@@ -48,7 +50,9 @@ export function cleanupNodeProvenanceSql(
     AND ${alias}.placement_credential_source IN ('user', 'project', 'platform')
     AND ${alias}.placement_credential_version > 0
     AND (${alias}.provider_instance_id IS NOT NULL
-      OR (${alias}.status = 'destroying' AND ${alias}.runtime_termination_confirmed_at IS NOT NULL))
+      OR (${alias}.status = 'destroying'
+        AND (${alias}.runtime_termination_confirmed_at IS NOT NULL
+          OR NULLIF(TRIM(${alias}.runtime_incarnation_id), '') IS NOT NULL)))
     AND ${alias}.provider_instance_vcpu_count > 0
     AND ${alias}.provider_instance_memory_mb > 0
     AND ${present}
