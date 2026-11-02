@@ -140,7 +140,7 @@ export function AccountProfilesDialog({
         </div>
 
         {profiles.length > SEARCH_THRESHOLD && (
-          <label className="flex min-h-9 items-center gap-2 rounded-md border border-border-default bg-inset px-2.5">
+          <label className="flex min-h-9 items-center gap-2 rounded-md border border-border-default bg-inset px-2.5 focus-within:ring-2 focus-within:ring-[var(--sam-color-focus-ring)]">
             <Search size={14} aria-hidden="true" className="shrink-0 text-fg-muted" />
             <span className="sr-only">Search profiles</span>
             <input
@@ -185,7 +185,10 @@ export function AccountProfilesDialog({
                         className="h-3.5 w-3.5 shrink-0 accent-[var(--sam-color-focus-ring)]"
                       />
                       <span className="flex min-w-0 flex-1 flex-col">
-                        <span className="truncate text-sm text-fg-primary" title={profile.name}>
+                        <span
+                          className="line-clamp-2 break-words text-sm text-fg-primary"
+                          title={profile.name}
+                        >
                           {profile.name}
                         </span>
                         <span className="truncate text-[11px] text-fg-muted">

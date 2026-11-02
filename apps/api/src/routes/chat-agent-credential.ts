@@ -18,6 +18,9 @@ import { getChatSessionRouteContext } from './chat-route-context';
  * agent-key callback (`agent_sessions.agent_credential_*`). The live session is the
  * chat's own ACP session (`acp_sessions.chat_session_id`), never "latest in the
  * workspace". Account names are private: only the person who ran the session sees one.
+ * The tier (`credentialScope`) and owner kind (`credentialSource`) are deliberately
+ * visible to every project member: the product owner wants members to see which
+ * kind of account a run used (for debugging cost and readiness), never which one.
  */
 export function registerChatAgentCredentialRoute(routes: Hono<{ Bindings: Env }>): void {
   routes.get('/:sessionId/agent-credential', async (c) => {

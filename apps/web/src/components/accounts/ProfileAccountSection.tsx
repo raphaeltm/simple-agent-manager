@@ -57,7 +57,10 @@ export function ProfileAccountSection({
           Which {agent} account this profile runs on when you use it.
           {profile.projectId === null
             ? ' This profile is yours, so the choice applies in every project.'
-            : ''}
+            : ''}{' '}
+          <span className="text-fg-primary">
+            Saved as soon as you pick it, separately from Save Changes.
+          </span>
         </p>
         {sharedProject && (
           <span className="inline-flex shrink-0 items-center gap-1 rounded-full border border-border-default px-2 py-0.5 text-[11px] text-fg-muted">
@@ -159,7 +162,7 @@ function AccountOption({
         className="h-3.5 w-3.5 shrink-0 accent-[var(--sam-color-focus-ring)]"
       />
       <span className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-sm text-fg-primary" title={label}>
+        <span className="line-clamp-2 break-words text-sm text-fg-primary" title={label}>
           {label}
         </span>
         {hint && <span className="text-[11px] text-fg-muted [overflow-wrap:anywhere]">{hint}</span>}
