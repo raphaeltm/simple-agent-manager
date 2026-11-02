@@ -9,6 +9,7 @@ import {
 import { clearCapacityCatalogCache } from '../../../src/services/default-capacity-source-credentials';
 import { provisionNode } from '../../../src/services/node-provisioning';
 import { findRestorableOrInFlightSleepSnapshot } from '../../../src/services/session-snapshot-sleep-predicate';
+import { deleteNodeResourcesStrict } from '../../../src/services/strict-node-deletion';
 import { seedHost } from '../routes/node-pool-upgrade-test-helpers';
 import { handoffFixture } from './node-cleanup-handoff-fixture';
 
@@ -152,7 +153,27 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
     expect(f.cleanupWorkspaceActivity).toHaveBeenCalledOnce();
   });
 
-  it('drives production-shaped providerless rows through the real sweep and isolates failures', async () => {
+  it('does not declare a fresh providerless workspace VM absent during allocation recovery', async () => {
+    const f = await handoffFixture();
+    f.sqlite.exec(`DELETE FROM session_snapshots; DELETE FROM workspaces;
+      UPDATE nodes SET status='destroying', provider_instance_id=NULL,
+        runtime_incarnation_id='incarnation-host', runtime_termination_confirmed_at=NULL,
+        created_at='2026-09-08T11:59:00.000Z' WHERE id='host';`);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(NOW);
+    await expect(
+      deleteNodeResourcesStrict('host', 'user-1', f.env, {
+        explicitPermanentDeletion: true,
+      })
+    ).rejects.toThrow('provisioning recovery window');
+    expect(f.inventorySelectors).toEqual([]);
+    expect(f.providerDeletes).toEqual([]);
+    expect(
+      f.sqlite.prepare("SELECT runtime_termination_confirmed_at FROM nodes WHERE id='host'").get()
+    ).toEqual({ runtime_termination_confirmed_at: null });
+  });
+
+  it('reconciles providerless direct creations without task links and isolates inventory failures', async () => {
     const f = await handoffFixture();
     const infoSpy = vi.spyOn(log, 'info');
     f.env.MAX_AUTO_NODE_LIFETIME_MS = '1000';
@@ -169,7 +190,7 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
       .run();
     f.sqlite
       .prepare(
-        `UPDATE tasks SET status = 'failed', auto_provisioned_node_id = 'host'
+        `UPDATE tasks SET status = 'failed', auto_provisioned_node_id = NULL
           WHERE id = 'task-1'`
       )
       .run();
@@ -276,7 +297,7 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
           WHERE id = 'host'`
       )
       .run();
-    f.sqlite.prepare("UPDATE tasks SET status = 'failed', auto_provisioned_node_id = 'host'").run();
+    f.sqlite.prepare("UPDATE tasks SET status = 'failed', auto_provisioned_node_id = NULL").run();
     f.inventoryModeByNodeId.set('host', 'exact');
 
     await f.sweepDestroying();
@@ -310,7 +331,7 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
             WHERE id = 'host'`
       )
       .run();
-    f.sqlite.prepare("UPDATE tasks SET status = 'failed', auto_provisioned_node_id = 'host'").run();
+    f.sqlite.prepare("UPDATE tasks SET status = 'failed', auto_provisioned_node_id = NULL").run();
     f.inventoryModeByNodeId.set('host', mode);
 
     await f.sweepDestroying();
@@ -334,7 +355,7 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
           WHERE id = 'host'`
       )
       .run();
-    f.sqlite.prepare("UPDATE tasks SET status = 'failed', auto_provisioned_node_id = 'host'").run();
+    f.sqlite.prepare("UPDATE tasks SET status = 'failed', auto_provisioned_node_id = NULL").run();
 
     await f.sweepDestroying();
 
@@ -366,7 +387,7 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
           WHERE id = 'host'`
       )
       .run();
-    f.sqlite.prepare("UPDATE tasks SET status = 'failed', auto_provisioned_node_id = 'host'").run();
+    f.sqlite.prepare("UPDATE tasks SET status = 'failed', auto_provisioned_node_id = NULL").run();
     f.inventoryModeByNodeId.set('host', 'exact');
 
     await f.sweepDestroying();
@@ -486,8 +507,8 @@ describe('direct managed pool VM stopped handoff cleanup', () => {
   it.each([
     ...protectedHandoffMutations,
     [
-      'missing provider rejection proof',
-      'UPDATE nodes SET runtime_termination_confirmed_at = NULL',
+      'missing providerless runtime incarnation',
+      'UPDATE nodes SET runtime_termination_confirmed_at = NULL, runtime_incarnation_id = NULL',
     ],
   ] as const)('keeps %s protected during destroying handoff cleanup', async (_label, mutation) => {
     const f = await handoffFixture();

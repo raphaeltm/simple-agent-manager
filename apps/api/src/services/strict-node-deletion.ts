@@ -350,13 +350,12 @@ async function reconcileStrictProviderlessVm(
   }
   // A fresh createVM may still be in flight. Keep every deployment entry
   // point (including direct node Stop) quarantined until the existing recovery
-  // window passes; a temporarily empty inventory cannot prove its termination.
+  // window passes for workspace nodes too; an empty inventory can be transient.
   if (
-    node.nodeRole === 'deployment' &&
-    (!Number.isFinite(Date.parse(node.createdAt)) ||
-      Date.now() - Date.parse(node.createdAt) < getProvisioningTimeoutMs(env))
+    !Number.isFinite(Date.parse(node.createdAt)) ||
+    Date.now() - Date.parse(node.createdAt) < getProvisioningTimeoutMs(env)
   ) {
-    throw new Error('Deployment allocation is still within its provisioning recovery window');
+    throw new Error('Node allocation is still within its provisioning recovery window');
   }
   // Only Hetzner currently guarantees that a successful filtered inventory read is
   // complete. Other adapters may deliberately return partial multi-region inventory,
