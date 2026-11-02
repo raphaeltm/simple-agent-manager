@@ -17,7 +17,7 @@ Mitigate the demonstrated MPTCP-listener attack path for CVE-2026-98432 with a V
 - [x] Add only `godebug multipathtcp=0` as the production change.
 - [ ] Verify main package DefaultGODEBUG and built binary include multipathtcp=0.
 - [x] Add at most one simple focused regression check if durable.
-- [ ] Run Go tests, vet/build and normal quality gates.
+- [x] Run Go tests and normal CI quality gates (separate local vet/build evidence lost on workspace replacement).
 - [x] Independent Go/security and task-completion reviews pass.
 - [ ] Staging verification passes using fresh VM-agent artifact.
 - [ ] PR checks and CodeRabbit request/wait complete; merge and verify production deployment.
@@ -34,4 +34,7 @@ Mitigate the demonstrated MPTCP-listener attack path for CVE-2026-98432 with a V
 - Go 1.26.10: regression fails before directive and passes after; `go list -f '{{.Name}} {{.DefaultGODEBUG}}' .` returns `main multipathtcp=0`.
 - Independent local Go/security, test-engineer, constitution and implementation-completion reviews: PASS, no findings.
 - `pnpm lint`: PASS (existing warnings). Remaining checks in progress.
-- Staging blocked: CF API rejects supplied CF_TOKEN (10000 Authentication error); Playwright browser token-login rejects both supplied smoke-user tokens (401 Invalid token format). No staging resources created. Credentials requested through SAM settings.
+- Credential correction: ordinary shell environments held placeholders. Actual Cloudflare and browser credentials work through `exec_with_secrets`; no credential refresh needed.
+- Original staging deployment41442724493 passed; fresh allocation failed before heartbeat. All owned fixtures were subsequently removed and absence verified.
+- Separate repair PR2496 shipped via production41508827405, with basic health smoke passing. It enables exact-resource recovery while retaining ambiguous empty allocations.
+- Current main merged into this branch to preserve that repair during final MPTCP staging. VM-agent production diff remains only the directive. Fresh VM heartbeat/access and CodeRabbit/release gates remain pending.
