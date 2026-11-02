@@ -1,5 +1,7 @@
 # Token cloud providers: first-run onboarding wizard parity
 
+> **Reconciliation 2026-11-02:** Still open; the wizard still offers only Hetzner and Scaleway (`apps/web/src/components/onboarding/choose-path/step-actions.ts:30`). Correction: #2474 (`09b7f3e08`) removed the "Settings → Cloud Providers" page. Vultr and DigitalOcean are now connected from Settings → Infrastructure (`SettingsInfrastructure.tsx`; `/settings/cloud-provider` redirects there via `settings-redirects.tsx`), and the type comment now names that page. The `step-actions.ts` pointers in Scope are about 5 lines lower than cited.
+
 **Filed by:** the Vultr provider PR (`sam/implement-vultr-fourth-cloud-qf96ez`), per rule 42 (tracked follow-up for a deliberately-deferred slice).
 
 ## Problem

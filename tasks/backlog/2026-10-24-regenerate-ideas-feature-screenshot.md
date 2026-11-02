@@ -1,5 +1,7 @@
 # Regenerate the Ideas marketing screenshot for Start work
 
+> **Reconciliation 2026-11-02:** The stale image is gone. #2449 (`6da30bb6a`) re-captured `sam-ideas-detail(-light)` from the redesigned idea page and rewrote its alt text and captions (`automation.json:16-37`). It also updated the capture test (`marketing-shots-workspace.spec.ts:636-653`), which no longer expects `Execute this idea` or `Conversations (3)`. The new shot shows an In review idea, so neither the Start work button nor its sheet is pictured. Decide whether a Start work or sheet shot is still wanted; if not, close this task after a phone and desktop check of `/features/automation`.
+
 > **Reconciliation 2026-10-26:** The image is unchanged, and #2439 (`d41ff95d6`) has since replaced
 > the page it shows. `apps/web/src/pages/ideas/IdeaPage.tsx` has a status card and The idea, Work,
 > Updates and Related sections, with no Conversations sidebar, so the alt text and the "Link chat

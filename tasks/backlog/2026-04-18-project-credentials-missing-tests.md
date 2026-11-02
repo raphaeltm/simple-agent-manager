@@ -1,5 +1,17 @@
 # Missing test coverage for project credential overrides (PR #753)
 
+> **Reconciliation 2026-11-02:**
+> - HIGH #6 is shipped. #2490 (`dedb75591`) added
+>   `tests/integration/profile-account-pins-capability.test.ts`, which drives the real
+>   `/agent-key` route on real SQLite. It returns the project-pinned account for a project
+>   workspace (`:223`) and the user default when `project_id` is NULL (`:317`).
+> - HIGH #5 is mostly superseded. #2474 (`09b7f3e08`) moved account connection to
+>   `ProjectAccountsSection`, which has behavioural connect/pin/unpin tests
+>   (`tests/unit/components/accounts/project-accounts-section.test.tsx`). Only a Retry click test
+>   for `ProjectAgentsSection.tsx:96` is left.
+> - Still open: LOW #9 (the DELETE 400s at `routes/projects/credentials.ts:516,519`) and LOW #10
+>   (route-level PUT update keeps `createdAt`).
+
 > **Reconciliation 2026-10-26:** nothing in scope shipped. `POST /:id/agent-key` is now
 > `apps/api/src/routes/workspaces/runtime.ts:883` (#2318, #2358). #2318 added two route-level
 > `/agent-key` tests (`apps/api/tests/integration/provider-limit-credential-injection.test.ts`,

@@ -1,5 +1,13 @@
 # Migrate File Proxy Token to Auth Header
 
+> **Reconciliation 2026-11-02:** Partial mitigation only. #2477 (`e7e5edef3`) turned on
+> `redact_query_string` for API Worker logs and traces. Because the Worker also fronts `ws-*`
+> hosts, terminal tokens in proxied query strings no longer land in Cloudflare Worker
+> observability. The `?token=` URLs themselves are unchanged: `session-workspace-proxy.ts:266`,
+> `routes/projects/files.ts:159,257,314` and `getFileRawUrl` (`apps/web/src/lib/api/files.ts:394`).
+> Browser history, referrers and VM-agent-side logs are still exposed. Every criterion except the
+> Worker-log slice of "no tokens in production logs" is still open.
+
 > **Reconciliation 2026-10-26:** Nothing in scope shipped; pointers moved. #2383 (`6a7c2995c`)
 > moved `proxyToVmAgent` (list, find, view, git status, git diff) to
 > `apps/api/src/routes/projects/session-workspace-proxy.ts:254`, which still sets `?token=` at

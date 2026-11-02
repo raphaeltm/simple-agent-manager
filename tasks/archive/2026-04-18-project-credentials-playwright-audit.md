@@ -1,5 +1,13 @@
 # Playwright visual audit for ProjectAgentCredentialsSection
 
+> **Reconciliation 2026-11-02:** Superseded. #2474 (`09b7f3e08`) removed
+> `ProjectAgentCredentialsSection`'s states (masked key, inheriting hint, "No user-level
+> credential" copy). The replacement project surfaces are audited at mobile and 1280 px with
+> overflow checks in `apps/web/tests/playwright/accounts-settings-audit.spec.ts`: Project settings
+> → Accounts pinned/default/paused/compute (`:616`), long names (`:504`), guided login (`:518`)
+> and the Agents tab (`:659`). Only the empty and error states lack project-scope cases (they run
+> on `/settings/agents`, `:334`/`:359`). That is not enough to keep this file. Archived by the 2026-11-02 weekly queue reconciliation.
+
 > **Reconciliation 2026-09-30:** still open. The target component was renamed to
 > `ProjectAgentsSection` / `ProjectAgentCard` in PR #757 (page `/projects/:id/settings/agents`).
 > The only coverage is one marketing screenshot
@@ -46,6 +54,6 @@ Do not modify `ProjectAgentCredentialsSection` unless the audit reveals a layout
 
 - Rule 17: `.claude/rules/17-ui-visual-testing.md`
 - Existing audit pattern: `apps/web/tests/playwright/ideas-ui-audit.spec.ts`
-- Related backlog (shared AgentKeyCard a11y): `tasks/backlog/2026-04-18-agent-key-card-accessibility.md`
+- Related backlog (shared AgentKeyCard a11y): `tasks/archive/2026-04-18-agent-key-card-accessibility.md`
 - Related backlog (Miniflare integration tests): `tasks/backlog/2026-04-18-credentials-miniflare-integration-tests.md`
 - Source PR: https://github.com/raphaeltm/simple-agent-manager/pull/753

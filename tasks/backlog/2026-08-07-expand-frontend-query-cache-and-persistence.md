@@ -1,5 +1,13 @@
 # Expand Frontend Query Caching and Safe Persistence
 
+> **Reconciliation 2026-11-02:** Progress. #2481 (`20db08dc5`) moved
+> `ProjectRuntimeConfigSection`, ten admin pages (AIProxy, ComputeQuotas, ComputeUsage, Costs,
+> Diagnoses, PlatformConfig, PlatformCredentials, Settings, Trials, Users) and the
+> `useAdminAnalytics`/`useAdminHealth` hooks onto TanStack Query. Still open: ProjectLibrary,
+> ProjectActivity, ProjectTasks, ProjectNotifications, ProjectMembersSection,
+> `pages/AgentContextPage/`, the `useAdminErrors`/`useAdminLogQuery`/`useAdminLogStream` hooks, and
+> staging validation of persistence.
+
 > **Reconciliation 2026-10-26:** #2426 (`833ebc366`) rebuilt ProjectDeployments and
 > ProjectDeploymentEnvironmentDetail as `pages/deployments/*` on TanStack Query
 > (`pages/deployments/data.ts`) and deleted the five deployment panels, and #2389 (`0a0276390`)

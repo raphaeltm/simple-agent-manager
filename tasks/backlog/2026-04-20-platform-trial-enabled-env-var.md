@@ -1,5 +1,7 @@
 # PLATFORM_TRIAL_ENABLED env var to disable trial on self-hosted
 
+> **Reconciliation 2026-11-02:** still open; pointer moved. #2480 (`af45a52b0`) split the admin settings registry, so `trials.enabled` is now defined in `apps/api/src/services/admin-settings-features-definitions.ts:50-56` (not `admin-settings-registry.ts:476-480`). `getTrialStatus()` (`platform-trial.ts`) is unchanged and still has no availability switch.
+
 > **Reconciliation 2026-10-26:** still open; `getTrialStatus()` (`platform-trial.ts:61-93`) has no
 > switch. #2304 (`980cef76c`) moved the anonymous `/try` switch from KV to the admin setting
 > `trials.enabled` (`apps/api/src/services/admin-settings-registry.ts:476-480`;

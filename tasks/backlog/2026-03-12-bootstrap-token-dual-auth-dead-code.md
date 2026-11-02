@@ -1,5 +1,11 @@
 # Bootstrap Token Endpoint Has Dual Auth (Unreachable)
 
+> **Reconciliation 2026-11-02:** Pointer correction only. #2490 (`dedb75591`) moved credential
+> attribution out of `runtime.ts`. The dual-auth endpoint is now
+> `apps/api/src/routes/workspaces/runtime.ts:1825-1861` (`requireAuth()` on `:1825`,
+> `verifyWorkspaceCallbackAuth` on `:1827`). The VM agent still redeems only `/api/bootstrap/:token`
+> (`bootstrap.go:729`), and nothing calls this route. It is still dead and dual-auth.
+
 > **Reconciliation 2026-10-26:** Still dual-auth and still uncalled: the VM agent redeems through
 > `/api/bootstrap/:token` (`packages/vm-agent/internal/bootstrap/bootstrap.go:717`). The endpoint
 > moved to `apps/api/src/routes/workspaces/runtime.ts:1950-1989` (`requireAuth()` at `:1953`,

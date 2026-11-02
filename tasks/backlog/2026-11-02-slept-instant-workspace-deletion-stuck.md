@@ -1,5 +1,7 @@
 # Deleting a slept Instant workspace stays in `stopping`
 
+> **Reconciliation 2026-11-02:** A lead for the first criterion. A slept cf-container node already avoids the proxy: `requestWorkspaceDeletion` destroys it through the container DO and then requires `terminalNodeProof` (`workspace-deletion.ts:614-642,199-224`), so "a slept container cannot answer" is probably not the cause. Check whether `stopNodeResources` throws for a sleeping container, or whether the strict teardown never writes the `runtime_termination_confirmed_at` that the proof reads for that incarnation. #2463, #2472 and #2478 all changed this path between 10-28 and 10-30.
+
 ## Problem
 
 Deleting an Instant (cf-container) workspace whose container is asleep never finishes on staging.

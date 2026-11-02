@@ -1,5 +1,13 @@
 # Playwright audit specs crash the app shell when `/api/credentials` is unmocked
 
+> **Reconciliation 2026-11-02:** Partly addressed per spec, not centrally. #2481 (`20db08dc5`)
+> gave `admin-trials-audit.spec.ts` its own shell mocks (`/api/credentials` and
+> `/api/github/installations` as `[]`), a notifications WebSocket stub and the onboarding-wizard
+> dismissal (`:28-36`). It did the same for five other admin/auth audit specs. Still open:
+> array-shaped defaults and wizard dismissal in `setupAuditRoutes` (it still falls back to `{}` at
+> `audit-routes.ts:106`), a loud fallback for unmatched paths, and a full-corpus run. The spec is
+> still quarantined, so CI does not prove it passes.
+
 > **Reconciliation 2026-10-26:** Partly done. #2439 (`d41ff95d6`) moved `setupAuditRoutes` to
 > `apps/web/tests/playwright/audit-routes.ts:97` and added an opt-in shell helper,
 > `respondToAppShellRoute` (`:72`, answers `/api/credentials` and `/api/github/*` with `[]`), plus

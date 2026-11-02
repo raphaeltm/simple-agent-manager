@@ -1,5 +1,7 @@
 # ACP Session Error Observability & Reconnection Reliability
 
+> **Reconciliation 2026-11-02:** #2483 (`c56af8e32`) improved prompt-failure diagnostics. When a failure is unclassified (`agent_prompt_failed`), the `ACP Prompt failed` lifecycle report now carries a `detail` field (`packages/vm-agent/internal/acp/session_host_prompt.go:~695-711`). The field holds the agent's own error, redacted and then bounded to 2048 bytes (`promptFailureDetail`, `session_host_reporting.go:~42-46`). The same PR moved VM-agent diagnostic redaction into one package, `internal/diagredact`. No open item below is closed: `reportAgentError` still takes a free-form `step` (`session_host_reporting.go:19`), and the per-session timeline, the silent-failure banners, the reconnection UI, the 1001 timeout, connection migration and the Phase 5 metrics are all still open.
+
 > **Reconciliation 2026-10-26:** #2318 (`7164053b4`) added a `provider_limit_reached` prompt-failure
 > code (`ClassifyProviderLimit`, `packages/vm-agent/internal/acp/provider_limit.go:30`) and moved the
 > 10-05 pointers: `auth_failure.go:15,57`, `session_host_prompt.go:684-700`, and

@@ -19,7 +19,7 @@ Raphaël approved prototype Direction A and authorized PR, merge and production.
 - [x] Behavioral tests cover full old request, options/custom replies, stale/concurrent state, send failure, dismissal/navigation and authorization boundaries.
 - [x] Playwright audits actual components with mocked APIs, mobile + desktop, long content, empty/error/context; visually review and upload screenshots.
 - [x] Remove prototype route/files before PR; docs and contract updated.
-- [ ] Typecheck/lint/targeted tests/build; independent specialist review; CI/CodeRabbit; merge/deploy/production smoke.
+- [x] Typecheck/lint/targeted tests/build; independent specialist review; CI/CodeRabbit; merge/deploy/production smoke. (#2487: CodeRabbit review addressed; main CI 41325525460 and Deploy Production 41327195249 passed; basic production smoke at 16:56 UTC on 2026-11-01 served the new dialog chunks, recorded in a #2487 comment.)
 
 ## Acceptance
 
@@ -42,3 +42,9 @@ Full question readable even outside current chat page; responses stay visible wh
 - CodeRabbit context feedback addressed: whole streamed messages assembled through the logical transcript reader, invalid limits fall back to existing Admin comment-context setting (default six), existing scan/character bounds apply, and limited excerpts are visibly labeled. Real SQLite and Workers regressions cover streamed chunks, exclusive timestamp and ordering.
 
 - Final review fixes: shared membership helper joins project+active member in one D1 statement, retaining defensive identity checks. Cold worst-case reader remains eight operations including bootstrap/settings/archive work. Backend and independent completion review PASS. Full API unit sweep: 936 files passed, one skipped; six preloaded fixture failures were repaired and all affected files separately rerun PASS (372 targeted assertions across relevant runs). Final API typecheck and edited-file ESLint passed. Final browser10/10 and Workers13/13 passed; context screenshots reuploaded and UI review PASS.
+
+## Reconciliation 2026-11-02
+
+Shipped. #2487 merged as `979acda77` on 2026-11-01 and Deploy Production run 41327195249
+succeeded. Raphaël waived staging for this task explicitly (quoted in the #2487 body). Moved from
+`tasks/active/` to `tasks/archive/` by the 2026-11-02 weekly queue reconciliation.

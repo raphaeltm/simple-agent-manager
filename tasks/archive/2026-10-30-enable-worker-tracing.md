@@ -15,8 +15,8 @@ Admin page investigation found a canceled 114-second request with only 7ms CPU. 
 - [x] Redact query strings in generated observability config so callback/terminal credentials are not retained.
 - [x] Document setup, overrides, retention and billing reference.
 - [x] Run relevant validation and independent local specialist reviews.
-- [ ] Verify staging trace configuration and captured dependency spans.
-- [ ] Merge after CI/review and verify production deployment/configuration and new traces.
+- [x] Verify staging trace configuration and captured dependency spans. (Staging run 41082816507 on `d6c1587e5`: traces enabled, rate 1, persisted, query redaction on; trace `c4de347b3d263d8d884151699863da8a` has a native `d1_first` span; recorded in the #2477 body.)
+- [x] Merge after CI/review and verify production deployment/configuration and new traces. (Merged as `e7e5edef3`; Deploy Production 41088475230 succeeded; production trace `dd515f607a1abe4e77a57738d1542929` has `d1_run`, `d1_all`, Durable Object storage and RPC spans, checked 2026-10-30 17:11 UTC.)
 
 ## Acceptance criteria
 - Staging and production generated configs enable persisted native traces by default at rate 1.
@@ -37,3 +37,10 @@ Admin page investigation found a canceled 114-second request with only 7ms CPU. 
 
 ## Review follow-up
 CodeRabbit identified query credential retention risk. Added observability.redact_query_string=true for generated environments, type coverage and assertions; docs clarify metadata remaining after redaction. Staging old-head retry still running; final redacted configuration must be verified before production.
+
+## Reconciliation 2026-11-02
+
+Shipped. #2477 merged as `e7e5edef3` on 2026-10-30 and Deploy Production run 41088475230
+succeeded. Staging and production trace evidence is in the #2477 body under "Staging Verification
+Evidence" and "Production Verification". Moved from `tasks/active/` to `tasks/archive/` by the
+2026-11-02 weekly queue reconciliation.

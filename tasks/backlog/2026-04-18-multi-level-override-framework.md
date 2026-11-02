@@ -1,5 +1,19 @@
 # Multi-Level Override Framework (Meta-Spec)
 
+> **Reconciliation 2026-11-02:** Two steps shipped.
+> - #2490 (`dedb75591`) added a profile tier for agent accounts (`cc_profile_attachments`,
+>   migration 0215). Resolution is profile pin → project pin → user default → platform
+>   (`packages/shared/src/composable-credentials/resolver.ts:75`), and
+>   `agent_sessions.agent_credential_scope` records which tier ran each session. That answers the
+>   audit-trail source-tier question for credentials only.
+> - #2476 (`608bdbd1b`) added constitution Principle XIV (`.specify/memory/constitution.md:299`),
+>   which fixes the installation → user → project → profile → skill composition and requires
+>   shared override controls.
+>
+> Still open: phases 3, 4, 5 and 8, source tiers for non-credential parameters, and the table
+> refresh. The table below is stale: its "Agent credentials" row still shows Project "Phase 2
+> (planned)" and Profile "—", but both tiers now ship (#2485 project pins, #2490 profile pins).
+
 > **Reconciliation 2026-10-26:** #2414 (`0620c1595`) added callable AI models, resolved skill →
 > profile → project → SAM defaults with "Same as project/profile" inherit options
 > (`apps/api/src/services/agent-models/access.ts:1-6`). #2399 (`cc2d968df`) made
