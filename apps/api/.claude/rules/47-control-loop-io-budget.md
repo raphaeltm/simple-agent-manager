@@ -149,6 +149,17 @@ until the budget refreshes and must not silently drop the candidate.
     `project-data/project-events-wake-config.ts`, used by both `selectWakeCandidates` and
     `computeProjectEventMaterializationAlarmTime`.
 
+13. **A safety net enqueues what is missing; it never re-times what is queued.** A sweep
+    that backstops another owner's queue must leave an existing entry's retry deadline and
+    failure diagnostic alone. Once an attempt has run, its backoff owns the timing.
+    Incident (2026-11-01): the stopped-workspace cron re-scheduled deletion entries that
+    were already quarantined for an hour. `Math.min` pulled each one back to the cron's
+    60 s base delay, and the cron's own text overwrote the VM's 409 diagnostic, so one
+    production workspace made 76 attempts. Fix: `onlyIfAbsent` on
+    `NodeLifecycleWorkspaceDeletionQueue.schedule`, passed by `sweepStaleStoppedWorkspaces`.
+    Test it through the real cron after real failed attempts, and assert the entry is
+    unchanged (`tests/workers/scheduled-node-cleanup.test.ts`).
+
 ## Required Tests
 
 For every new or changed sweep/reconcile candidate class, include a zombie
