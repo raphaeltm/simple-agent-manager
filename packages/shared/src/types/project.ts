@@ -398,6 +398,11 @@ export interface ProjectMemberOffboardingPreviewResponse {
     blockingTeardown: number;
   };
   resources: ProjectMemberOffboardingResourcePreview[];
+  /**
+   * The member's private account choices on this project's profiles. They need no
+   * decision and are deleted when the member is removed.
+   */
+  personalProfilePinCount: number;
 }
 
 export interface ProjectMemberOffboardingApplyActionSelection {
@@ -427,6 +432,8 @@ export interface ProjectMemberOffboardingApplyResponse {
   status: ProjectMemberStatus;
   appliedAt: string;
   resourceResults: ProjectMemberOffboardingResourceResult[];
+  /** Personal profile pins on this project's profiles deleted with the membership. */
+  removedProfilePinCount: number;
 }
 
 export type CredentialAttributionConsumerKind = 'agent' | 'compute';

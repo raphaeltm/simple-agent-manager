@@ -273,6 +273,18 @@ export function ProjectOffboardingModal({
                       </div>
                     </div>
 
+                    {preview.personalProfilePinCount > 0 && (
+                      <p
+                        className="m-0 rounded-md border border-border-default bg-inset p-3 text-xs text-fg-muted"
+                        data-testid="offboarding-profile-pins"
+                      >
+                        {preview.personalProfilePinCount === 1
+                          ? 'Their own account choice on 1 of this project’s profiles will be removed.'
+                          : `Their own account choices on ${preview.personalProfilePinCount} of this project’s profiles will be removed.`}{' '}
+                        These only ever applied to their own runs.
+                      </p>
+                    )}
+
                     {resourceCount === 0 ? (
                       <div className="rounded-md border border-border-default bg-inset p-3 text-sm text-fg-muted">
                         No live personal-backed resources were found. This member can be removed

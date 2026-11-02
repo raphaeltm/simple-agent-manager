@@ -5,6 +5,7 @@ import {
   DEFAULT_COMMENT_CONTEXT_MAX_ROWS,
   DEFAULT_COMMENT_CONTEXT_MESSAGES,
   DEFAULT_COMMENT_MENTIONS_MAX,
+  DEFAULT_PROFILE_PIN_CANDIDATE_LIMIT,
   DEFAULT_PROFILE_USAGE_WINDOW_DAYS,
   DEFAULT_SESSION_ACCESS_MAX_GRANTS,
   IDEA_UPDATE_DEFAULTS,
@@ -193,6 +194,13 @@ export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
     'Chat',
     'Days of each person’s own new chats used to put their recent profiles first and to suggest hiding ones they no longer use.',
     { min: 1, max: 365 }
+  ),
+  integerDefinition(
+    'chat.profilePinCandidateLimit',
+    DEFAULT_PROFILE_PIN_CANDIDATE_LIMIT,
+    'Chat',
+    'Most agent profiles listed when someone chooses which profiles use one of their accounts.',
+    { min: 50, max: 5000 }
   ),
   integerDefinition(
     'collaboration.commentNotificationWindowSeconds',

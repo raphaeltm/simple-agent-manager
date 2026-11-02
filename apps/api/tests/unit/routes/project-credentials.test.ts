@@ -15,7 +15,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 import { getDecryptedAgentKey } from '../../../src/routes/credentials';
 import { projectCredentialsRoutes } from '../../../src/routes/projects/credentials';
-import { resolveForConsumer } from '../../../src/services/composable-credentials/resolve';
+import {
+  explainForConsumer,
+  resolveForConsumer,
+} from '../../../src/services/composable-credentials/resolve';
 
 vi.mock('drizzle-orm/d1');
 vi.mock('../../../src/middleware/auth', () => ({
@@ -26,7 +29,10 @@ vi.mock('../../../src/middleware/auth', () => ({
 const projectAuthMocks = vi.hoisted(() => ({
   requireProjectCapability: vi.fn(),
 }));
-vi.mock('../../../src/middleware/project-auth', () => ({
+vi.mock('../../../src/middleware/project-auth', async (importOriginal) => ({
+  OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY: (
+    await importOriginal<typeof import('../../../src/middleware/project-auth')>()
+  ).OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY,
   requireProjectCapability: projectAuthMocks.requireProjectCapability,
 }));
 vi.mock('../../../src/lib/ulid', () => ({
@@ -38,6 +44,12 @@ vi.mock('../../../src/services/encryption', () => ({
 }));
 vi.mock('../../../src/services/composable-credentials/resolve', () => ({
   resolveForConsumer: vi.fn().mockResolvedValue(null),
+  explainForConsumer: vi.fn().mockResolvedValue({ resolved: null, halted: false, steps: [] }),
+}));
+// Profile pins are covered by tests/integration/profile-account-pins-capability.test.ts.
+vi.mock('../../../src/services/composable-credentials/profile-context', () => ({
+  resolveSessionProfileCredentialContext: vi.fn().mockResolvedValue(null),
+  resolveProfileCredentialContext: vi.fn().mockResolvedValue(null),
 }));
 vi.mock('../../../src/services/composable-credentials/lazy-backfill', () => ({
   lazyBackfillIfNeeded: vi.fn().mockResolvedValue(false),
@@ -519,32 +531,37 @@ describe('getDecryptedAgentKey — resolution order', () => {
   beforeEach(() => {
     mockDB = makeMockDB();
     vi.mocked(resolveForConsumer).mockResolvedValue(null);
+    vi.mocked(explainForConsumer).mockResolvedValue({ resolved: null, halted: false, steps: [] });
   });
 
   it('maps CC settings baseUrl and dialect for Anthropic-compatible passthrough credentials', async () => {
-    vi.mocked(resolveForConsumer).mockResolvedValueOnce({
-      consumer: { kind: 'agent', agentType: 'claude-code' },
-      configuration: {
-        id: 'cfg-anthropic-alt',
-        ownerId: 'u1',
-        name: 'Anthropic-compatible',
+    vi.mocked(explainForConsumer).mockResolvedValueOnce({
+      resolved: {
         consumer: { kind: 'agent', agentType: 'claude-code' },
-        credentialId: 'cred-anthropic-alt',
-        settings: {
-          baseUrl: 'https://anthropic-alt.example/anthropic',
-          dialect: 'anthropic',
+        configuration: {
+          id: 'cfg-anthropic-alt',
+          ownerId: 'u1',
+          name: 'Anthropic-compatible',
+          consumer: { kind: 'agent', agentType: 'claude-code' },
+          credentialId: 'cred-anthropic-alt',
+          settings: {
+            baseUrl: 'https://anthropic-alt.example/anthropic',
+            dialect: 'anthropic',
+          },
+          isActive: true,
         },
-        isActive: true,
+        credential: {
+          id: 'cred-anthropic-alt',
+          ownerId: 'u1',
+          name: 'Anthropic-compatible key',
+          kind: 'api-key',
+          secret: { kind: 'api-key', apiKey: 'sk-anthropic-compatible' },
+          isActive: true,
+        },
+        source: 'user-attachment',
       },
-      credential: {
-        id: 'cred-anthropic-alt',
-        ownerId: 'u1',
-        name: 'Anthropic-compatible key',
-        kind: 'api-key',
-        secret: { kind: 'api-key', apiKey: 'sk-anthropic-compatible' },
-        isActive: true,
-      },
-      source: 'user-attachment',
+      halted: false,
+      steps: [],
     });
 
     const result = await getDecryptedAgentKey(
@@ -552,7 +569,7 @@ describe('getDecryptedAgentKey — resolution order', () => {
       'u1',
       'claude-code',
       'test-key',
-      'p1',
+      'p1'
     );
 
     expect(result).toMatchObject({

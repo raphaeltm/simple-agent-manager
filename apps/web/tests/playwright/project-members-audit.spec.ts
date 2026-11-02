@@ -202,11 +202,13 @@ const normalOffboardingPreview = {
     offboardingResource('node', 'node-1', 'Workspace node for feature branch'),
     offboardingResource('deployment_environment', 'deploy-1', 'Production deployment'),
   ],
+  personalProfilePinCount: 3,
 };
 
 const longOffboardingPreview = {
   ...normalOffboardingPreview,
   offboardingPlanId: 'off-long',
+  personalProfilePinCount: 0,
   resources: [
     offboardingResource(
       'trigger',
@@ -248,6 +250,7 @@ const emptyOffboardingPreview = {
     blockingTeardown: 0,
   },
   resources: [],
+  personalProfilePinCount: 1,
 };
 
 const manyOffboardingPreview = {
@@ -397,6 +400,9 @@ test.describe('Project members settings — visual audit', () => {
     await setupMocks(page, { offboardingPreview: normalOffboardingPreview });
     await openRemoveMember(page);
     await expect(page.getByText('Running tasks')).toBeVisible();
+    await expect(page.getByTestId('offboarding-profile-pins')).toContainText(
+      'Their own account choices on 3 of this project’s profiles will be removed.'
+    );
     await screenshot(page, 'project-members-offboarding-normal');
     await assertNoOverflow(page);
   });
@@ -405,6 +411,7 @@ test.describe('Project members settings — visual audit', () => {
     await setupMocks(page, { offboardingPreview: longOffboardingPreview });
     await openRemoveMember(page);
     await expect(page.getByText(/Extremely long scheduled workflow name/)).toBeVisible();
+    await expect(page.getByTestId('offboarding-profile-pins')).toBeHidden();
     await screenshot(page, 'project-members-offboarding-long-text');
     await assertNoOverflow(page);
   });
@@ -413,6 +420,9 @@ test.describe('Project members settings — visual audit', () => {
     await setupMocks(page, { offboardingPreview: emptyOffboardingPreview });
     await openRemoveMember(page);
     await expect(page.getByText(/removed cleanly/i)).toBeVisible();
+    await expect(page.getByTestId('offboarding-profile-pins')).toContainText(
+      'Their own account choice on 1 of this project’s profiles will be removed.'
+    );
     await screenshot(page, 'project-members-offboarding-empty');
     await assertNoOverflow(page);
   });

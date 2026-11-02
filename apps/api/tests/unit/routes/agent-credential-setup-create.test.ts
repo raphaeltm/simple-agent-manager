@@ -13,7 +13,10 @@ const h = vi.hoisted(() => ({
   getSetupSessionState: vi.fn(),
 }));
 
-vi.mock('../../../src/middleware/project-auth', () => ({
+vi.mock('../../../src/middleware/project-auth', async (importOriginal) => ({
+  OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY: (
+    await importOriginal<typeof import('../../../src/middleware/project-auth')>()
+  ).OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY,
   requireProjectCapability: h.requireProjectCapability,
 }));
 
@@ -316,7 +319,7 @@ describe('guided setup route creation', () => {
         expect.anything(),
         'project-a',
         'owner-user',
-        'secret:write'
+        'task:write'
       );
       expect(
         sqlite.prepare('SELECT project_id, scope FROM agent_credential_setup_sessions').get()

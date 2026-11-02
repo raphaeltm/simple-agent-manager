@@ -15,6 +15,7 @@ import {
   type CCCompositionSnapshot,
   type CCConsumerRef,
   type CCConsumerResolutionStatus,
+  type CCProfileAttachmentItem,
   type CCResolvedEnvironment,
   type CredentialLimitCredentialSummary,
   resolveEnvironment,
@@ -52,6 +53,8 @@ export interface AccountView {
   pinnedProjectIds: string[];
   /** Projects whose pin to this account is paused (blocks the project). */
   pausedProjectIds: string[];
+  /** My profiles that run on this account (personal profile pins). */
+  profilePins: CCProfileAttachmentItem[];
   swatch: string;
   usage: CredentialLimitCredentialSummary | null;
   /** Format validation reported by the resolver for the default account. */
@@ -92,6 +95,8 @@ export interface AccountsSnapshot {
   credentials: CCCredentialListItem[];
   configurations: CCConfigurationListItem[];
   attachments: CCAttachmentListItem[];
+  /** My personal profile pins; empty when they have not loaded. */
+  profilePins: CCProfileAttachmentItem[];
   projects: AccountProject[];
   resolution: CCConsumerResolutionStatus[];
   limits: CredentialLimitCredentialSummary[];
@@ -141,9 +146,10 @@ function buildProvider(
     const pausedProjectIds = projectAttachments
       .filter((att) => !att.isActive)
       .map((att) => att.projectId as string);
+    const profilePins = snapshot.profilePins.filter((pin) => pin.configurationId === cfg.id);
     let role: AccountRole = 'unattached';
     if (isDefault) role = 'default';
-    else if (projectAttachments.length > 0) role = 'pinned';
+    else if (projectAttachments.length > 0 || profilePins.length > 0) role = 'pinned';
     unsorted.push({
       id: cfg.id,
       configurationId: cfg.id,
@@ -157,6 +163,7 @@ function buildProvider(
       role,
       pinnedProjectIds,
       pausedProjectIds,
+      profilePins,
       swatch: '',
       usage: snapshot.limits.find((limit) => limit.credentialId === credential.id) ?? null,
       validation:
@@ -214,20 +221,22 @@ function buildProvider(
 }
 
 /** Every listed row belongs to the caller, so one stand-in owner id is exact. */
-const OWNER = 'me';
+export const OWNER = 'me';
 
 /**
  * The listed rows as the snapshot `resolveEnvironment` reads. Resolution looks
  * only at ids and active flags; secrets never reach the browser, so each
  * credential carries an empty placeholder. The platform default comes from the
  * resolution status, which the API computes with the platform rows it can see.
+ * Profile pins only matter when the context names a profile.
  */
-function toComposition(
+export function toComposition(
   consumer: CCConsumerRef,
   configurations: CCConfigurationListItem[],
   attachments: CCAttachmentListItem[],
   credentialsById: Map<string, CCCredentialListItem>,
-  resolution: CCConsumerResolutionStatus | undefined
+  resolution: CCConsumerResolutionStatus | undefined,
+  profilePins: CCProfileAttachmentItem[] = []
 ): CCCompositionSnapshot {
   const placeholder = (id: string, isActive: boolean) => ({
     id,
@@ -258,16 +267,28 @@ function toComposition(
       settings: {},
       isActive: cfg.isActive,
     })),
-    attachments: attachments.map((att) => ({
-      id: att.id,
-      configurationId: att.configurationId,
-      consumer,
-      target:
-        att.projectId === null
-          ? { scope: 'user' as const, userId: OWNER }
-          : { scope: 'project' as const, userId: OWNER, projectId: att.projectId },
-      isActive: att.isActive,
-    })),
+    attachments: [
+      ...attachments.map((att) => ({
+        id: att.id,
+        configurationId: att.configurationId,
+        consumer,
+        target:
+          att.projectId === null
+            ? { scope: 'user' as const, userId: OWNER }
+            : { scope: 'project' as const, userId: OWNER, projectId: att.projectId },
+        isActive: att.isActive,
+      })),
+      ...profilePins.map((pin) => ({
+        id: pin.id,
+        configurationId: pin.configurationId,
+        consumer: {
+          kind: 'agent' as const,
+          agentType: pin.consumerTarget,
+        },
+        target: { scope: 'profile' as const, userId: OWNER, profileId: pin.agentProfileId },
+        isActive: pin.isActive,
+      })),
+    ],
     platform,
   };
 }

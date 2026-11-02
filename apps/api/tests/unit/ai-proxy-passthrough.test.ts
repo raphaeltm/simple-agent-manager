@@ -83,6 +83,17 @@ vi.mock('../../src/lib/secrets', () => ({
 
 vi.mock('../../src/services/composable-credentials/resolve', () => ({
   resolveForConsumer: (...args: unknown[]) => mockResolveForConsumer(...args),
+  explainForConsumer: async (...args: unknown[]) => ({
+    resolved: await mockResolveForConsumer(...args),
+    halted: false,
+    steps: [],
+  }),
+}));
+
+// Profile pins are covered by tests/integration/profile-account-pins-capability.test.ts.
+vi.mock('../../src/services/composable-credentials/profile-context', () => ({
+  resolveProfileCredentialContext: vi.fn(async () => null),
+  resolveSessionProfileCredentialContext: vi.fn(async () => null),
 }));
 
 // Mock global fetch

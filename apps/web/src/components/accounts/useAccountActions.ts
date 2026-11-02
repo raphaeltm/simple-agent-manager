@@ -17,9 +17,13 @@
  *   would leave a configuration with a NULL credential, which the resolver
  *   treats as a platform binding.
  *
- * Deleting a configuration cascades to every attachment, so the "nothing uses
- * it" check is re-read from the server right before the delete rather than
- * trusted from the cached view (another tab may have pinned a project since).
+ * - Run a profile on an account → `POST /api/cc/profile-attachments`, which
+ *   replaces my previous pin for that profile; `DELETE` puts the profile back
+ *   on my usual account. Profile pins are private to me.
+ *
+ * Deleting a configuration cascades to every attachment and profile pin, so the
+ * "nothing uses it" check is re-read from the server right before the delete
+ * rather than trusted from the cached view (another tab may have pinned since).
  */
 import { useCallback } from 'react';
 
@@ -28,17 +32,20 @@ import { useToast } from '../../hooks/useToast';
 import {
   ApiClientError,
   createCCAttachment,
+  createProfilePin,
   deleteAgentCredentialByKind,
   deleteCCAttachment,
   deleteCCConfiguration,
   deleteCCCredential,
   deleteCredential,
+  deleteProfilePin,
   deleteProjectAgentCredential,
   deleteProjectCloudCredential,
   listAgentCredentials,
   listCCAttachments,
   listCCConfigurations,
   listCCCredentials,
+  listProfilePins,
   makeCCDefault,
   updateCCCredential,
 } from '../../lib/api';
@@ -68,10 +75,18 @@ export function canMakeDefault(account: AccountView): boolean {
   return account.kind === 'agent' && account.role !== 'default' && account.active;
 }
 
-/** An account a project still uses, discovered only at delete time. */
+/**
+ * Whether an account can run profiles: any active agent account. Even the
+ * default is meaningful on a profile, because a profile pin beats a project pin.
+ */
+export function canPinToProfiles(account: AccountView): boolean {
+  return account.kind === 'agent' && account.active;
+}
+
+/** An account a project or profile still uses, discovered only at delete time. */
 class AccountInUseError extends Error {
   constructor() {
-    super('A project started using this account. Refresh and try again.');
+    super('A project or profile started using this account. Refresh and try again.');
   }
 }
 
@@ -81,8 +96,11 @@ class AccountInUseError extends Error {
  * configuration, because the delete would silently cascade it away.
  */
 async function deleteAccountRecords(account: AccountView): Promise<void> {
-  const attachments = await listCCAttachments();
-  if (attachments.some((att) => att.configurationId === account.configurationId)) {
+  const [attachments, profilePins] = await Promise.all([listCCAttachments(), listProfilePins()]);
+  if (
+    attachments.some((att) => att.configurationId === account.configurationId) ||
+    profilePins.some((pin) => pin.configurationId === account.configurationId)
+  ) {
     throw new AccountInUseError();
   }
   await deleteCCConfiguration(account.configurationId);
@@ -170,6 +188,22 @@ export function describePinChanges(label: string, changes: ProjectPinChanges): s
   return `${pinned}; ${unpinned}`;
 }
 
+/** Profiles to run on an account, and pins to remove (back to my usual account). */
+export interface ProfilePinChanges {
+  pin: string[];
+  /** Ids of my existing profile pins on this account. */
+  unpin: string[];
+}
+
+export function describeProfilePinChanges(label: string, changes: ProfilePinChanges): string {
+  const profiles = (n: number) => `${n} profile${n === 1 ? '' : 's'}`;
+  const pinned = `${profiles(changes.pin.length)} now ${changes.pin.length === 1 ? 'runs' : 'run'} on ${label}`;
+  const unpinned = `${profiles(changes.unpin.length)} back on your usual account`;
+  if (changes.unpin.length === 0) return pinned;
+  if (changes.pin.length === 0) return unpinned;
+  return `${pinned}; ${unpinned}`;
+}
+
 export interface AccountActions {
   rename: (account: AccountView, name: string) => Promise<boolean>;
   makeDefault: (account: AccountView) => Promise<boolean>;
@@ -177,6 +211,13 @@ export interface AccountActions {
   removePin: (account: AccountView, projectId: string) => Promise<boolean>;
   removeUnattached: (account: AccountView) => Promise<boolean>;
   updateProjectPins: (account: AccountView, changes: ProjectPinChanges) => Promise<boolean>;
+  updateProfilePins: (account: AccountView, changes: ProfilePinChanges) => Promise<boolean>;
+  /** Run one profile on `account`, or on my usual account when null. */
+  setProfileAccount: (
+    profileId: string,
+    account: AccountView | null,
+    currentPinId: string | null
+  ) => Promise<boolean>;
 }
 
 export function useAccountActions(): AccountActions {
@@ -290,6 +331,40 @@ export function useAccountActions(): AccountActions {
     [run]
   );
 
+  const updateProfilePins = useCallback(
+    (account: AccountView, changes: ProfilePinChanges) =>
+      run(
+        async () => {
+          // Each pin replaces that profile's previous pin on the server.
+          for (const profileId of changes.pin) {
+            await createProfilePin({ configurationId: account.configurationId, profileId });
+          }
+          for (const pinId of changes.unpin) await deleteProfilePin(pinId);
+        },
+        describeProfilePinChanges(account.label, changes),
+        'Failed to update the profiles using this account'
+      ),
+    [run]
+  );
+
+  const setProfileAccount = useCallback(
+    (profileId: string, account: AccountView | null, currentPinId: string | null) =>
+      run(
+        async () => {
+          if (account) {
+            await createProfilePin({ configurationId: account.configurationId, profileId });
+          } else if (currentPinId) {
+            await deleteProfilePin(currentPinId);
+          }
+        },
+        account
+          ? `This profile now runs on ${account.label}`
+          : 'This profile uses your usual account',
+        'Failed to change the account for this profile'
+      ),
+    [run]
+  );
+
   return {
     rename,
     makeDefault,
@@ -297,5 +372,7 @@ export function useAccountActions(): AccountActions {
     removePin,
     removeUnattached,
     updateProjectPins,
+    updateProfilePins,
+    setProfileAccount,
   };
 }

@@ -1,7 +1,8 @@
 /**
  * cc_attachments routes, registered on the `/api/cc` router (which applies auth).
  *
- * A project-scoped attachment pins one of the caller's accounts to a project. The
+ * A project-scoped attachment pins one of the caller's accounts to a project, for the
+ * caller's own runs there (it needs `task:write`, not `secret:write`). The
  * resolver (`resolveEnvironment`) takes the first project attachment it finds for a
  * consumer, so a project keeps exactly one: attaching replaces the previous pin. The
  * same configuration may be attached to any number of projects.
@@ -15,7 +16,10 @@ import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
 import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireProjectCapability } from '../middleware/project-auth';
+import {
+  OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY,
+  requireProjectCapability,
+} from '../middleware/project-auth';
 import {
   CreateCCAttachmentSchema,
   jsonValidator,
@@ -32,10 +36,10 @@ export function uniqueProjectIds(projectIds: Array<string | null>): string[] {
 }
 
 /**
- * A paused account pinned to a project halts that project's resolution (no
+ * A paused account pinned to a project or profile halts that resolution (no
  * fallback), so only an active configuration and credential can be pinned.
  */
-async function requireActiveAccount(
+export async function requireActiveAccount(
   db: Db,
   userId: string,
   cfg: { isActive: boolean; credentialId: string | null }
@@ -109,8 +113,9 @@ export function registerCCAttachmentRoutes(ccRoutes: Hono<{ Bindings: Env }>): v
     });
 
     if (projectId) {
-      // Same capability the project pin route (PUT /api/projects/:id/credentials) requires.
-      await requireProjectCapability(db, projectId, userId, 'secret:write');
+      // Pinning one of your own accounts changes only your own runs in this project, so
+      // it needs the permission to run tasks there, not the project's secret:write.
+      await requireProjectCapability(db, projectId, userId, OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY);
       await requireActiveAccount(db, userId, cfg);
       // The resolver takes the first project attachment it finds for a consumer, so a
       // project keeps exactly one: pinning an account replaces the previous pin. A D1

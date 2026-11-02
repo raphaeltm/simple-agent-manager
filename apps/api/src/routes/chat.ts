@@ -22,6 +22,7 @@ import * as chatPersistence from '../services/chat-persistence';
 import * as projectDataService from '../services/project-data';
 import { requireSessionWriter } from '../services/session-access';
 import { registerChatAcpInteractionRoutes } from './chat-acp-interactions';
+import { registerChatAgentCredentialRoute } from './chat-agent-credential';
 import { registerChatAttentionRoute } from './chat-attention';
 import { registerChatCancelRoute } from './chat-cancel';
 import { chatCommentRoutes } from './chat-comments';
@@ -49,6 +50,7 @@ chatRoutes.use('/*', requireAuth(), requireApproved());
 
 registerChatSessionListRoute(chatRoutes);
 registerChatWorkloadIdentityRoute(chatRoutes);
+registerChatAgentCredentialRoute(chatRoutes);
 registerChatAcpInteractionRoutes(chatRoutes);
 
 /**

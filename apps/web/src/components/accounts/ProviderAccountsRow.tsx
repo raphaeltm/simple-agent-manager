@@ -16,6 +16,7 @@ import {
 } from './account-model';
 import { ProviderMark } from './AccountBits';
 import { AccountCard } from './AccountCard';
+import { AccountProfilesDialog } from './AccountProfilesDialog';
 import { AccountProjectsDialog } from './AccountProjectsDialog';
 
 function segmentFill(segment: Pick<CoverageSegment, 'role' | 'color'>): string {
@@ -120,12 +121,14 @@ export function ProviderAccountsRow({
 }: Readonly<ProviderAccountsRowProps>) {
   const { provider, accounts, segments } = group;
   const [choosingFor, setChoosingFor] = useState<string | null>(null);
+  const [choosingProfilesFor, setChoosingProfilesFor] = useState<string | null>(null);
   const projects = useMemo(
     () => [...projectNames].map(([id, name]) => ({ id, name })),
     [projectNames]
   );
   // Look the account up by id so the dialog sees the refreshed pins after a save.
   const choosing = accounts.find((account) => account.id === choosingFor) ?? null;
+  const choosingProfiles = accounts.find((account) => account.id === choosingProfilesFor) ?? null;
   const defaults = accounts.filter((account) => account.role === 'default');
   const pinned = accounts.filter((account) => account.role === 'pinned');
   const unattached = accounts.filter((account) => account.role === 'unattached');
@@ -154,6 +157,7 @@ export function ProviderAccountsRow({
       fallback={fallback}
       onReplace={onReplace}
       onChooseProjects={(chosen) => setChoosingFor(chosen.id)}
+      onChooseProfiles={(chosen) => setChoosingProfilesFor(chosen.id)}
       unpinnedCount={unpinnedCount}
     />
   );
@@ -256,6 +260,13 @@ export function ProviderAccountsRow({
           group={group}
           projects={projects}
           onClose={() => setChoosingFor(null)}
+        />
+      )}
+      {choosingProfiles && (
+        <AccountProfilesDialog
+          account={choosingProfiles}
+          group={group}
+          onClose={() => setChoosingProfilesFor(null)}
         />
       )}
     </section>

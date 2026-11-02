@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ChatSessionResponse } from '../../../src/lib/api';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 const mocks = vi.hoisted(() => ({
   updateProjectTaskStatus: vi.fn(),
@@ -10,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   getProjectTask: vi.fn(),
   listChatMessages: vi.fn(),
   updateWorkspacePortsPublic: vi.fn(),
+  getSessionAgentCredential: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -19,6 +21,12 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   getProjectTask: mocks.getProjectTask,
   listChatMessages: mocks.listChatMessages,
   updateWorkspacePortsPublic: mocks.updateWorkspacePortsPublic,
+  getSessionAgentCredential: mocks.getSessionAgentCredential,
+}));
+
+// The session's account line is a TanStack query keyed on the signed-in user.
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
 }));
 
 // The usage chip owns a TanStack query; it has its own tests (credential-limit-chip.test.tsx).
@@ -230,7 +238,7 @@ function renderHeader(overrides: Partial<HarnessProps> = {}) {
     onSessionMutated: vi.fn(),
     ...overrides,
   };
-  const result = render(<HeaderHarness {...props} />);
+  const result = render(<HeaderHarness {...props} />, { wrapper: QueryTestWrapper });
   return { ...result, props };
 }
 
@@ -238,6 +246,7 @@ describe('SessionHeader', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.updateProjectTaskStatus.mockResolvedValue({});
+    mocks.getSessionAgentCredential.mockResolvedValue({ credential: null });
     mocks.deleteWorkspace.mockResolvedValue({});
     mocks.listChatMessages.mockResolvedValue({ messages: [], hasMore: false });
     mocks.updateWorkspacePortsPublic.mockResolvedValue(makeWorkspace({ portsPublicEnabled: true }));
@@ -288,6 +297,25 @@ describe('SessionHeader', () => {
     fireEvent.click(screen.getByLabelText(DETAILS_CONTROL));
     // Branch should now be visible
     expect(screen.getByText('sam/test')).toBeInTheDocument();
+  });
+
+  it('shows the account the agent ran on and the tier that chose it', async () => {
+    mocks.getSessionAgentCredential.mockResolvedValue({
+      credential: {
+        agentType: 'claude-code',
+        credentialSource: 'user',
+        credentialScope: 'profile',
+        accountName: 'Claude Max (personal)',
+        isOwnSession: true,
+      },
+    });
+    renderHeader();
+    fireEvent.click(screen.getByLabelText(DETAILS_CONTROL));
+
+    expect(await screen.findByTestId('session-agent-credential')).toHaveTextContent(
+      'Claude Max (personal) · chosen for this profile'
+    );
+    expect(mocks.getSessionAgentCredential).toHaveBeenCalledWith('proj-1', expect.any(String));
   });
 
   it('shows the full title and fallback initial prompt in expanded details', () => {

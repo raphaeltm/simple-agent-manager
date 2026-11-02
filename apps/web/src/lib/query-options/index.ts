@@ -34,7 +34,10 @@ export {
   ccAttachmentsQueryOptions,
   ccConfigurationsQueryOptions,
   ccCredentialsQueryOptions,
+  profilePinCandidatesQueryOptions,
+  profilePinsQueryOptions,
   resolutionStatusQueryOptions,
+  sessionAgentCredentialQueryOptions,
 } from './accounts';
 export {
   adminProjectDataArchiveBreakersQueryOptions,

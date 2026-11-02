@@ -1,5 +1,7 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
+import { assertNoClippedOverflow } from './audit-helpers';
+
 // ---------------------------------------------------------------------------
 // Visual audit for agent info in the SessionHeader expanded panel.
 //
@@ -148,6 +150,8 @@ async function setupApiMocks(
     sessions?: Array<Record<string, unknown>>;
     tasks?: Array<Record<string, unknown>>;
     workspace?: Record<string, unknown>;
+    /** Body of GET /sessions/:id/agent-credential (which account ran the session). */
+    credential?: Record<string, unknown> | null;
   } = {}
 ) {
   const session = opts.session ?? makeSession();
@@ -261,6 +265,9 @@ async function setupApiMocks(
           return order === 'asc' ? timeA - timeB : timeB - timeA;
         });
         return respond(200, { messages: sorted.slice(0, limit), hasMore: sorted.length > limit });
+      }
+      if (subPath.match(/\/sessions\/[^/]+\/agent-credential$/)) {
+        return respond(200, { credential: opts.credential ?? null });
       }
       if (subPath === '/tasks') return respond(200, { tasks, nextCursor: null });
       if (subPath.match(/\/tasks\//)) return respond(200, { id: 'task-1', status: 'in_progress' });
@@ -787,5 +794,55 @@ test.describe('workload identity details', () => {
       path: `../../.codex/tmp/playwright-screenshots/workload-identity-unavailable-${page.viewportSize()!.width}.png`,
       fullPage: true,
     });
+  });
+});
+
+const LONG_ACCOUNT =
+  'Acme-Corporation-Client-Engagement-Anthropic-Max-Plan-Seat-Acme-Corporation-2026 (personal, shared with nobody)';
+
+// Runs once per Playwright project (375x667 and 1280x800).
+const viewportName = () => (test.info().project.name.includes('Desktop') ? 'desktop' : 'mobile');
+
+test.describe('Session details: which account ran it', () => {
+  test('my session on an account chosen for this profile, long name', async ({ page }) => {
+    await setupApiMocks(page, {
+      credential: {
+        agentType: 'claude-code',
+        credentialSource: 'user',
+        credentialScope: 'profile',
+        accountName: LONG_ACCOUNT,
+        isOwnSession: true,
+      },
+    });
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+    await expandHeader(page);
+
+    const line = page.getByTestId('session-agent-credential');
+    await expect(line).toBeVisible();
+    await expect(line).toContainText(`${LONG_ACCOUNT} · chosen for this profile`);
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await screenshot(page, `session-details-credential-profile-${viewportName()}`);
+  });
+
+  test('another member’s session never names their account', async ({ page }) => {
+    await setupApiMocks(page, {
+      credential: {
+        agentType: 'claude-code',
+        credentialSource: 'user',
+        credentialScope: 'project',
+        accountName: null,
+        isOwnSession: false,
+      },
+    });
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+    await expandHeader(page);
+
+    const line = page.getByTestId('session-agent-credential');
+    await expect(line).toHaveText(/Their own account · /);
+    await expect(page.getByText('Claude Code').first()).toBeVisible();
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await screenshot(page, `session-details-credential-member-${viewportName()}`);
   });
 });

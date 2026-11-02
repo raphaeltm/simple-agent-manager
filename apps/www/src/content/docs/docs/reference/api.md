@@ -396,8 +396,9 @@ or `openai-codex`, default `openai-codex`).
 
 `POST /api/agent-credential-setup-sessions/project` uses the same sign-in flow and
 requires `projectId` in the JSON body, alongside optional `agentType`. It saves an
-account pinned only to that project and requires `secret:write`, checked at creation
-and again before the captured credential is saved. The personal endpoint rejects
+account pinned only to that project and requires `task:write` (pinning your own
+account affects only your own runs), checked at creation and again before the captured
+credential is saved. The personal endpoint rejects
 `projectId`; project creation must never fall back to personal creation. Invalid
 JSON or invalid fields return `400`.
 
@@ -418,6 +419,40 @@ Claude's browser-displayed code, and
 `POST /api/agent-credential-setup-sessions/:id/cancel` to cancel. Setup sessions belong
 to the authenticated user; captured credentials are saved encrypted on the server
 and never returned to the browser.
+
+### Account pins: projects and profiles
+
+Pins choose which of **your own** agent accounts runs your work. They never affect
+another member's runs. Resolution for an agent credential is profile pin → project
+pin → your default → SAM platform (`explainResolution` in
+`packages/shared/src/composable-credentials/resolver.ts`). A paused pin, or one whose
+account is paused, stops the run instead of falling back.
+
+- `POST /api/cc/attachments` with `{ configurationId, projectId }` pins one of your
+  accounts to a project, replacing your previous pin for that agent. It requires
+  `task:write` in the project. The project's agent credential routes
+  (`PUT /api/projects/:id/credentials`, `DELETE /api/projects/:id/credentials/:agentType/:credentialKind`)
+  use the same permission.
+- `GET /api/cc/profile-attachments` lists your profile pins with profile and project
+  names.
+- `GET /api/cc/profile-attachments/profiles?agentType=` lists the profiles you can pin
+  to: your own global profiles, and project profiles in projects where you have
+  `task:write`. The list is capped by the admin setting `chat.profilePinCandidateLimit`
+  (default 500) and returns `truncated` and `limit`.
+- `POST /api/cc/profile-attachments` with `{ configurationId, profileId }` pins an
+  account to a profile, replacing your previous pin for that profile and agent. The
+  account must be yours, active, and for the profile's agent; a missing profile and one
+  you cannot use both return `404`.
+- `DELETE /api/cc/profile-attachments/:id` removes one of your pins.
+
+A pin applies only when the run starts the profile's agent: a skill or task that
+switches agents skips it. Removing a member from a project deletes their pins on that
+project's profiles; the offboarding preview reports `personalProfilePinCount`.
+
+`GET /api/projects/:projectId/sessions/:sessionId/agent-credential` reports which
+account a chat's agent ran on: `credentialSource` (who owns it), `credentialScope`
+(`profile`, `project`, `user` or `platform`), and `accountName`, which is returned only
+to the person who ran the session.
 
 ### `POST /api/credentials`
 

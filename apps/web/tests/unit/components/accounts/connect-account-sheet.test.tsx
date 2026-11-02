@@ -20,7 +20,7 @@ import { QueryTestWrapper } from '../../../test-utils/query-test-utils';
 import { accountRows, mergeRows, PROJECTS } from './fixtures';
 
 function model(rows = mergeRows()) {
-  return buildAccountsModel({ ...rows, projects: PROJECTS, resolution: [], limits: [] });
+  return buildAccountsModel({ ...rows, profilePins: [], projects: PROJECTS, resolution: [], limits: [] });
 }
 
 function renderSheet(props: Partial<React.ComponentProps<typeof ConnectAccountSheet>> = {}) {

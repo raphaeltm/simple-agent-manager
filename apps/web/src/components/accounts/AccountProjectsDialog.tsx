@@ -96,7 +96,7 @@ export function AccountProjectsDialog({
         </div>
 
         {projects.length > SEARCH_THRESHOLD && (
-          <label className="flex min-h-9 items-center gap-2 rounded-md border border-border-default bg-inset px-2.5">
+          <label className="flex min-h-9 items-center gap-2 rounded-md border border-border-default bg-inset px-2.5 focus-within:ring-2 focus-within:ring-[var(--sam-color-focus-ring)]">
             <Search size={14} aria-hidden="true" className="shrink-0 text-fg-muted" />
             <span className="sr-only">Filter projects</span>
             <input

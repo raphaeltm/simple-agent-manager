@@ -3,6 +3,7 @@ import { createProvider, GcpProvider } from '@simple-agent-manager/providers';
 import {
   type CCResolvedEnvironment,
   computeAssembler,
+  credentialOwnerFromSource,
   type CredentialProvider,
   type CredentialSource,
 } from '@simple-agent-manager/shared';
@@ -187,9 +188,7 @@ async function createProviderFromDecryptedToken(
 type ResolvedComputeCredential = CCResolvedEnvironment;
 
 function providerCredentialSource(resolved: ResolvedComputeCredential): CredentialSource {
-  if (resolved.source === 'project-attachment') return 'project';
-  if (resolved.source === 'user-attachment') return 'user';
-  return 'platform';
+  return credentialOwnerFromSource(resolved.source);
 }
 
 async function resolveComputeCredentialWithBackfill(

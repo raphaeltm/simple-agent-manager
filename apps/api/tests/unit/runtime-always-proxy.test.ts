@@ -120,6 +120,11 @@ vi.mock('../../src/routes/credentials', () => ({
   getDecryptedCredential: vi.fn().mockResolvedValue(null),
 }));
 
+// Profile pins are covered by tests/integration/profile-account-pins-capability.test.ts.
+vi.mock('../../src/services/composable-credentials/profile-context', () => ({
+  resolveSessionProfileCredentialContext: vi.fn().mockResolvedValue(null),
+}));
+
 vi.mock('../../src/schemas', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../src/schemas')>();
   return {

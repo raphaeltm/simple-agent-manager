@@ -25,7 +25,10 @@ import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { requireProjectCapability } from '../middleware/project-auth';
+import {
+  OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY,
+  requireProjectCapability,
+} from '../middleware/project-auth';
 import { CreateAgentCredentialSetupSessionSchema, jsonValidator } from '../schemas';
 import {
   ACTIVE_SETUP_STATUSES,
@@ -163,7 +166,12 @@ async function createSession(c: Context<{ Bindings: Env }>, scope: 'user' | 'pro
   const userId = getUserId(c);
   const { body, projectId } = parseSetupRequest(await c.req.text(), scope);
   if (projectId !== null) {
-    await requireProjectCapability(drizzle(c.env.DATABASE), projectId, userId, 'secret:write');
+    await requireProjectCapability(
+      drizzle(c.env.DATABASE),
+      projectId,
+      userId,
+      OWN_AGENT_ACCOUNT_PROJECT_CAPABILITY
+    );
   }
   const { agentType, agentDef } = resolveSetupAgent(body.agentType ?? DEFAULT_SETUP_AGENT_TYPE);
 

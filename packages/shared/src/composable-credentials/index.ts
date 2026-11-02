@@ -6,6 +6,7 @@ export type {
   ProviderConfig as CCProviderConfig,
 } from './assemblers';
 export { agentAssembler, computeAssembler, sanitizeModelAlias } from './assemblers';
+export { credentialOwnerFromSource, credentialScopeFromSource } from './attribution';
 export type {
   BackfillReport as CCBackfillReport,
   BackfillResult as CCBackfillResult,
@@ -13,7 +14,7 @@ export type {
   SourcePlatformRow as CCSourcePlatformRow,
 } from './backfill';
 export { backfill, mapKind } from './backfill';
-export { resolveEnvironment } from './resolver';
+export { explainResolution, resolveEnvironment } from './resolver';
 export type {
   Attachment as CCAttachment,
   AttachmentScope as CCAttachmentScope,
@@ -27,9 +28,17 @@ export type {
   CredentialKind as CCCredentialKind,
   CredentialSecret as CCCredentialSecret,
   PlatformDefault as CCPlatformDefault,
+  ProfileAttachmentItem as CCProfileAttachmentItem,
+  ProfilePinCandidate as CCProfilePinCandidate,
+  ProfilePinCandidatesResponse as CCProfilePinCandidatesResponse,
   ResolutionContext as CCResolutionContext,
   ResolutionSource as CCResolutionSource,
   ResolutionStatusResponse as CCResolutionStatusResponse,
+  ResolutionStep as CCResolutionStep,
+  ResolutionStepReason as CCResolutionStepReason,
+  ResolutionStepState as CCResolutionStepState,
+  ResolutionTier as CCResolutionTier,
+  ResolutionTrace as CCResolutionTrace,
   ResolvedEnvironment as CCResolvedEnvironment,
 } from './types';
 export { consumerKey } from './types';

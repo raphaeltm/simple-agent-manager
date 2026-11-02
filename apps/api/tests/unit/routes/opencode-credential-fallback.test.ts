@@ -33,6 +33,12 @@ vi.mock('../../../src/services/encryption', () => ({
 }));
 vi.mock('../../../src/services/composable-credentials/resolve', () => ({
   resolveForConsumer: vi.fn().mockResolvedValue(null),
+  explainForConsumer: vi.fn().mockResolvedValue({ resolved: null, halted: false, steps: [] }),
+}));
+// Profile pins are covered by tests/integration/profile-account-pins-capability.test.ts.
+vi.mock('../../../src/services/composable-credentials/profile-context', () => ({
+  resolveSessionProfileCredentialContext: vi.fn().mockResolvedValue(null),
+  resolveProfileCredentialContext: vi.fn().mockResolvedValue(null),
 }));
 vi.mock('../../../src/services/composable-credentials/lazy-backfill', () => ({
   lazyBackfillIfNeeded: vi.fn().mockResolvedValue(false),

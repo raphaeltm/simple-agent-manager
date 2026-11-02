@@ -4,6 +4,7 @@ import { useCallback, useMemo } from 'react';
 import {
   type AccountProject,
   type AccountsModel,
+  type AccountsSnapshot,
   buildAccountsModel,
 } from '../components/accounts/account-model';
 import {
@@ -14,6 +15,7 @@ import {
   ccCredentialsQueryOptions,
   credentialLimitQueryKeys,
   myCredentialLimitsQueryOptions,
+  profilePinsQueryOptions,
   projectListQueryOptions,
   resolutionStatusQueryOptions,
 } from '../lib/query-options';
@@ -25,6 +27,10 @@ const ACCOUNT_PROJECT_LIMIT = 100;
 
 interface UseAccountsResult {
   model: AccountsModel | null;
+  /** The rows behind `model`, for explaining one run's resolution (`explainProfileAccount`). */
+  snapshot: AccountsSnapshot | null;
+  /** Profile pins have loaded (or failed), so `snapshot.profilePins` is not a placeholder. */
+  profilePinsSettled: boolean;
   projects: AccountProject[];
   /** The project list hit its cap, so coverage counts leave some projects out. */
   projectsTruncated: boolean;
@@ -64,6 +70,8 @@ export function useAccountsData(options?: {
     enabled,
   });
   const limits = useQuery({ ...myCredentialLimitsQueryOptions(queryScope), enabled });
+  // Profile pins are an enrichment like limits: accounts still render without them.
+  const profilePins = useQuery({ ...profilePinsQueryOptions(queryScope), enabled: listsEnabled });
 
   const projectList = useMemo(() => {
     const list = (projects.data ?? []).map((project) => ({ id: project.id, name: project.name }));
@@ -73,24 +81,27 @@ export function useAccountsData(options?: {
     return list;
   }, [projects.data, extraProjectId, extraProjectName]);
 
-  const model = useMemo(() => {
+  const snapshot = useMemo((): AccountsSnapshot | null => {
     if (!credentials.data || !configurations.data || !attachments.data) return null;
-    return buildAccountsModel({
+    return {
       credentials: credentials.data,
       configurations: configurations.data,
       attachments: attachments.data,
+      profilePins: profilePins.data ?? [],
       projects: projectList,
       resolution: resolution.data?.consumers ?? [],
       limits: limits.data?.credentials ?? [],
-    });
+    };
   }, [
     credentials.data,
     configurations.data,
     attachments.data,
+    profilePins.data,
     projectList,
     resolution.data,
     limits.data,
   ]);
+  const model = useMemo(() => (snapshot ? buildAccountsModel(snapshot) : null), [snapshot]);
 
   const failed = [credentials, configurations, attachments].find((query) => query.error);
   const error =
@@ -109,6 +120,8 @@ export function useAccountsData(options?: {
 
   return {
     model,
+    snapshot,
+    profilePinsSettled: profilePins.isFetched,
     projects: projectList,
     projectsTruncated: (projects.data?.length ?? 0) >= ACCOUNT_PROJECT_LIMIT,
     isLoading: enabled && model === null && !error,

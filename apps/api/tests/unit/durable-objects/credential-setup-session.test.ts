@@ -70,6 +70,13 @@ vi.mock('../../../src/services/setup-session-pool', async (importOriginal) => {
   return { ...actual, releaseSetupSlot: vi.fn() };
 });
 
+// The save-time membership re-check runs against D1; its predicate is covered by the
+// project-auth tests, so here only its decision is substituted.
+vi.mock('../../../src/middleware/project-auth', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/middleware/project-auth')>();
+  return { ...actual, requireProjectCapability: vi.fn() };
+});
+
 vi.mock('../../../src/services/agent-credential-save', async (importOriginal) => {
   const actual =
     await importOriginal<typeof import('../../../src/services/agent-credential-save')>();
@@ -82,6 +89,7 @@ const { getSandboxInstance, destroySandboxInstance } =
   await import('../../../src/services/sandbox');
 const { releaseSetupSlot } = await import('../../../src/services/setup-session-pool');
 const { saveAgentCredentialForUser } = await import('../../../src/services/agent-credential-save');
+const { requireProjectCapability } = await import('../../../src/middleware/project-auth');
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -294,6 +302,7 @@ beforeEach(() => {
   vi.mocked(destroySandboxInstance).mockReset().mockResolvedValue(undefined);
   vi.mocked(releaseSetupSlot).mockReset().mockResolvedValue(undefined);
   vi.mocked(saveAgentCredentialForUser).mockReset();
+  vi.mocked(requireProjectCapability).mockReset().mockResolvedValue({} as never);
 });
 
 // ---------------------------------------------------------------------------
@@ -392,6 +401,62 @@ describe('CredentialSetupSession — alarm() provisioning step', () => {
 
     expect((await instance.getState())?.status).toBe('completed');
     expect(saveAgentCredentialForUser).toHaveBeenCalledOnce();
+  });
+
+  async function captureProjectScoped() {
+    const { instance } = createDO();
+    await Promise.resolve();
+    const fakeSandbox = createFakeSandbox();
+    vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
+    await instance.create({
+      id: 'setup-project',
+      setupHome: '/tmp/codex-setup-project',
+      ttlMs: 900_000,
+      ...BASE_PARAMS,
+      projectId: 'proj-1',
+      scope: 'project',
+    });
+    await instance.alarm();
+    fakeSandbox.exists.mockResolvedValue({ exists: true });
+    fakeSandbox.readFile.mockImplementation(async (path: string) => ({
+      content: path.endsWith('device-auth-state.json')
+        ? JSON.stringify({ status: 'completed' })
+        : validAuthJson(),
+    }));
+    vi.mocked(saveAgentCredentialForUser).mockResolvedValue({
+      created: true,
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z',
+    });
+    await instance.alarm();
+    return instance;
+  }
+
+  it('re-checks task:write in the project before saving a project-scoped capture', async () => {
+    const instance = await captureProjectScoped();
+
+    expect(requireProjectCapability).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'user-1',
+      'task:write'
+    );
+    expect(saveAgentCredentialForUser).toHaveBeenCalledWith(
+      expect.objectContaining({ projectId: 'proj-1', userId: 'user-1' })
+    );
+    expect((await instance.getState())?.status).toBe('completed');
+  });
+
+  it('does not save when the member lost task:write during sign-in', async () => {
+    vi.mocked(requireProjectCapability).mockRejectedValue(
+      new Error('Project capability is required')
+    );
+    const instance = await captureProjectScoped();
+
+    expect(saveAgentCredentialForUser).not.toHaveBeenCalled();
+    const state = await instance.getState();
+    expect(state?.status).toBe('failed');
+    expect(state?.errorCode).toBe('capture_save_failed');
   });
 
   it('does not resurrect a session cancelled during device-state I/O', async () => {
