@@ -43,6 +43,8 @@ function tierTitle(tier: CCResolutionTier, runAgentType: string): string {
 }
 
 function stepDetail(step: ExplainedStep, runAgentType: string): string {
+  // An earlier tier decided, so this one was never evaluated: nothing to report.
+  if (step.state === 'not-reached') return '';
   const label = step.account?.label;
   switch (step.reason) {
     case 'agent-type-mismatch':
@@ -95,9 +97,11 @@ export function ResolutionBreakdown({
                   {STATE_LABELS[step.state]}
                 </span>
               </span>
-              <span className="text-[11px] text-fg-muted [overflow-wrap:anywhere]">
-                {stepDetail(step, explanation.runAgentType)}
-              </span>
+              {step.state !== 'not-reached' && (
+                <span className="text-[11px] text-fg-muted [overflow-wrap:anywhere]">
+                  {stepDetail(step, explanation.runAgentType)}
+                </span>
+              )}
             </span>
           </li>
         );

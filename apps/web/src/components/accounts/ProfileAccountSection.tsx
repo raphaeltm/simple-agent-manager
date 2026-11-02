@@ -6,7 +6,7 @@
  */
 import type { AgentProfile, AgentSkill } from '@simple-agent-manager/shared';
 import { Lock } from 'lucide-react';
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { Link } from 'react-router';
 
 import type { AccountView } from './account-model';
@@ -174,6 +174,11 @@ function RunsOn({
   agent,
 }: Readonly<{ explanation: ProfileAccountExplanation; agent: string }>) {
   const [open, setOpen] = useState(explanation.needsAttention);
+  // Surface the breakdown whenever something starts needing attention; the user
+  // can still close it.
+  useEffect(() => {
+    if (explanation.needsAttention) setOpen(true);
+  }, [explanation.needsAttention]);
   const { outcome } = explanation;
   return (
     <div className="flex min-w-0 flex-col gap-2 rounded-md border border-border-default p-2.5">

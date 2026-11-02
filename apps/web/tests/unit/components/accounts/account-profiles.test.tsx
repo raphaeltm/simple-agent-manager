@@ -349,6 +349,31 @@ describe('Profile editor: Account section', () => {
     expect(screen.getByRole('radio', { name: /Old Anthropic key/ })).toBeChecked();
   });
 
+  it('waits for my pins before showing a choice, then surfaces a paused pin', async () => {
+    let releasePins: (value: CCProfileAttachmentItem[]) => void = () => {};
+    mocks.listProfilePins.mockImplementation(
+      () =>
+        new Promise<CCProfileAttachmentItem[]>((resolve) => {
+          releasePins = resolve;
+        })
+    );
+    renderSection();
+
+    // Accounts are loaded, pins are not: no choice is shown yet, so "usual" is never
+    // displayed as selected for a profile that actually has a pin.
+    await waitFor(() => expect(mocks.listCCAttachments).toHaveBeenCalled());
+    await waitFor(() => expect(mocks.listProfilePins).toHaveBeenCalled());
+    expect(screen.getByText('Loading your accounts…')).toBeInTheDocument();
+    expect(screen.queryByRole('radio', { name: /Use my usual account/ })).toBeNull();
+
+    releasePins([pinOn(candidate('prof-deep'), 'cfg-paused')]);
+
+    await waitFor(() =>
+      expect(screen.getByRole('radio', { name: /Old Anthropic key/ })).toBeChecked()
+    );
+    expect(screen.getByRole('list', { name: 'How SAM picks the account' })).toBeVisible();
+  });
+
   it('in a single-person project, does not call the choice private', async () => {
     mocks.getProjectMembers.mockResolvedValue({
       members: [{ userId: 'user-1', role: 'owner', status: 'active' }],

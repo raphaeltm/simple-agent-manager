@@ -287,6 +287,7 @@ export function AccountCard({
         {account.role === 'pinned' && (
           <>
             <Pin size={11} aria-hidden="true" className="shrink-0 text-info-fg" />
+            {projectsOf.length === 0 && <span className="text-fg-muted">No projects</span>}
             {shownProjects.map((projectId) => (
               <Link
                 key={projectId}

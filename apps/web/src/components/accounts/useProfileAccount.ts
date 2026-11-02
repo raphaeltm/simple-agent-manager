@@ -27,7 +27,7 @@ export interface ProfileAccountState {
 export function useProfileAccount(
   profile: Pick<AgentProfile, 'id' | 'agentType' | 'projectId'> | null
 ): ProfileAccountState {
-  const { model, snapshot, isLoading, error } = useAccountsData();
+  const { model, snapshot, profilePinsSettled, isLoading, error } = useAccountsData();
   const actions = useAccountActions();
   const [saving, setSaving] = useState(false);
 
@@ -36,13 +36,14 @@ export function useProfileAccount(
     [model, profile?.agentType]
   );
   const explanation = useMemo(() => {
-    if (!profile || !snapshot || !group) return null;
+    // Until my pins load, "usual account" would be shown as the choice by mistake.
+    if (!profile || !snapshot || !group || !profilePinsSettled) return null;
     return explainProfileAccount(snapshot, group.accounts, {
       profileId: profile.id,
       agentType: profile.agentType,
       projectId: profile.projectId,
     });
-  }, [profile, snapshot, group]);
+  }, [profile, snapshot, group, profilePinsSettled]);
 
   const currentPinId = explanation?.pin?.id ?? null;
   const profileId = profile?.id ?? null;
@@ -56,5 +57,12 @@ export function useProfileAccount(
     [actions, profileId, currentPinId]
   );
 
-  return { group, explanation, isLoading, error, saving, choose };
+  return {
+    group,
+    explanation,
+    isLoading: isLoading || (snapshot !== null && !profilePinsSettled),
+    error,
+    saving,
+    choose,
+  };
 }

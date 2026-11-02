@@ -400,13 +400,13 @@ function ProfileOverrides({
             <CornerDownRight size={12} aria-hidden="true" className="shrink-0 text-fg-muted" />
             <Link
               to={`/projects/${pin.projectId ?? projectId}/profiles?edit=${encodeURIComponent(pin.agentProfileId)}`}
-              className="min-w-0 truncate text-accent"
+              className="max-w-[50%] shrink-0 truncate text-accent"
               title={pin.profileName}
             >
               {pin.profileName}
             </Link>
             <span className="shrink-0 text-fg-muted">→</span>
-            <span className="min-w-0 truncate text-fg-primary" title={account.label}>
+            <span className="min-w-0 flex-1 truncate text-fg-primary" title={account.label}>
               {account.label}
               {account.active ? '' : ' (paused)'}
             </span>

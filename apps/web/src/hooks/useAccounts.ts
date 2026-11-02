@@ -29,6 +29,8 @@ interface UseAccountsResult {
   model: AccountsModel | null;
   /** The rows behind `model`, for explaining one run's resolution (`explainProfileAccount`). */
   snapshot: AccountsSnapshot | null;
+  /** Profile pins have loaded (or failed), so `snapshot.profilePins` is not a placeholder. */
+  profilePinsSettled: boolean;
   projects: AccountProject[];
   /** The project list hit its cap, so coverage counts leave some projects out. */
   projectsTruncated: boolean;
@@ -119,6 +121,7 @@ export function useAccountsData(options?: {
   return {
     model,
     snapshot,
+    profilePinsSettled: profilePins.isFetched,
     projects: projectList,
     projectsTruncated: (projects.data?.length ?? 0) >= ACCOUNT_PROJECT_LIMIT,
     isLoading: enabled && model === null && !error,
