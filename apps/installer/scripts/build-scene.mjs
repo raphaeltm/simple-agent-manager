@@ -35,7 +35,12 @@ await copyFile(
   new URL('../../../packages/ui/src/brand/theme-init.js', import.meta.url),
   new URL('../public/theme-init.js', import.meta.url)
 );
-execFileSync('pnpm', ['exec', 'astro', 'build'], { cwd: app, stdio: 'inherit' });
+// Run the locally installed Astro CLI directly; never resolve an executable from PATH.
+execFileSync(
+  process.execPath,
+  [fileURLToPath(new URL('../node_modules/astro/bin/astro.mjs', import.meta.url)), 'build'],
+  { cwd: app, stdio: 'inherit' }
+);
 const font = await readFile(new URL('../public/fonts/Chillax-Variable.woff2', import.meta.url));
 const icon = await readFile(new URL('../public/brand-icon.png', import.meta.url));
 const iconUrl = `data:image/png;base64,${icon.toString('base64')}`;
