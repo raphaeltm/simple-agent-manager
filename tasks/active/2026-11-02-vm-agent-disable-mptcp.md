@@ -14,11 +14,11 @@ Mitigate the demonstrated MPTCP-listener attack path for CVE-2026-98432 with a V
 
 ## Checklist and acceptance criteria
 
-- [ ] Add only `godebug multipathtcp=0` as the production change.
+- [x] Add only `godebug multipathtcp=0` as the production change.
 - [ ] Verify main package DefaultGODEBUG and built binary include multipathtcp=0.
-- [ ] Add at most one simple focused regression check if durable.
+- [x] Add at most one simple focused regression check if durable.
 - [ ] Run Go tests, vet/build and normal quality gates.
-- [ ] Independent Go/security and task-completion reviews pass.
+- [x] Independent Go/security and task-completion reviews pass.
 - [ ] Staging verification passes using fresh VM-agent artifact.
 - [ ] PR checks and CodeRabbit request/wait complete; merge and verify production deployment.
 
@@ -28,3 +28,10 @@ Mitigate the demonstrated MPTCP-listener attack path for CVE-2026-98432 with a V
 - https://www.anthropic.com/research/discovering-vulnerabilities-with-claude
 - https://go.dev/doc/godebug
 - `.claude/commands/do.md`, `packages/vm-agent/AGENTS.md`
+
+## Validation evidence so far
+
+- Go 1.26.10: regression fails before directive and passes after; `go list -f '{{.Name}} {{.DefaultGODEBUG}}' .` returns `main multipathtcp=0`.
+- Independent local Go/security, test-engineer, constitution and implementation-completion reviews: PASS, no findings.
+- `pnpm lint`: PASS (existing warnings). Remaining checks in progress.
+- Staging blocked: CF API rejects supplied CF_TOKEN (10000 Authentication error); Playwright browser token-login rejects both supplied smoke-user tokens (401 Invalid token format). No staging resources created. Credentials requested through SAM settings.
