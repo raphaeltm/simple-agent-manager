@@ -1,5 +1,7 @@
 # AI Proxy Credential Hardening
 
+> **Reconciliation 2026-11-02:** nothing in scope shipped; pointers moved. #2490 (`dedb75591`) split agent-key resolution out of `apps/api/src/routes/workspaces/runtime.ts` (into `services/agent-key-resolution.ts`). `apiKey: '__platform_proxy__'` is now `runtime.ts:1065`, and the unguarded `agent-credential-sync` route is `:1121-1128`. AI-proxy token verification now lives in `apps/api/src/services/ai-proxy-auth.ts`, which is where a proxy-scoped token would be checked. The VM agent still injects the full callback token (`session_host_startup.go:374,411`).
+
 > **Reconciliation 2026-10-26:** nothing in scope shipped; pointers moved. #2332 (`faaf861ba`)
 > shifted `session_host_startup.go`: the platform AI proxy still injects the full callback token
 > (`:374`) and puts it in the base URL (`:411`). In `apps/api/src/routes/workspaces/runtime.ts`

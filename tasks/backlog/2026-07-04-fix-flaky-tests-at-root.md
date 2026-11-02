@@ -1,5 +1,7 @@
 # Fix All Known Flaky Tests at the Root (No Retries)
 
+> **Reconciliation 2026-11-02:** Three named flake candidates got test-side fixes, none confirmed as root-cause fixes. #2447 (`87549f5aa`) made `comment-send-to-agent-gating.test.tsx:432` wait for `scrollIntoView` instead of asserting synchronously. #2480 (`af45a52b0`) added a 30 s `beforeAll` warm-up to `task-callback-auth-routing.test.ts:224`. #2481 (`20db08dc5`) made `error-trends.test.tsx` wait for the range button to be enabled before clicking (`:127,235`). Still open: the global `asyncUtilTimeout`, the fail-fast fetch stub, the Go replay test, and the rest of the pattern audit.
+
 > **Reconciliation 2026-10-26:** #2407 (`1b99904ce`) fixed a new instance of this file's 1 s
 > `findBy` timeout class, `apps/web/tests/unit/pages/automation-flows.test.tsx`, with a per-file
 > 5 s wait (`CHAINED_LOAD`); it had failed `main` CI run 39717873907, so that production deploy was

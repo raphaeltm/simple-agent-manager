@@ -1,5 +1,11 @@
 # Project credentials UI follow-ups
 
+> **Reconciliation 2026-11-02:** Superseded; nothing left. #2474 (`09b7f3e08`) deleted
+> `AgentKeyCard` and moved account connection out of `ProjectAgentCard`. Both scopes now use the
+> same `ConnectAccountSheet` → `AgentConnectForm`, which carries its own OpenCode provider picker
+> (`components/accounts/AgentConnectForm.tsx:69,259`), so Finding 1's prop-forwarding has no
+> target. Finding 2 is done (`ProjectSettings.tsx` is 421 lines) and Finding 3 was already moot. Archived by the 2026-11-02 weekly queue reconciliation.
+
 > **Reconciliation 2026-10-26:** #2414 (`0620c1595`) moved the Agents tab into
 > `apps/web/src/components/project-settings/ProjectSettingsAgentsTab.tsx`, so
 > `ProjectSettings.tsx` is 419 lines and Finding 2 is done. Still open: Finding 1.
@@ -29,8 +35,8 @@
 
 Two genuinely new findings from UI/UX review that were not addressed in PR #753. Other findings either reflect pre-Phase-5 code, are incorrect analysis, or overlap with existing backlog tasks:
 
-- A11y concerns (44px touch targets, `window.confirm`, `aria-pressed`, focus-visible ring) → covered by `tasks/backlog/2026-04-18-agent-key-card-accessibility.md`
-- Visual audit coverage → covered by `tasks/backlog/2026-04-18-project-credentials-playwright-audit.md`
+- A11y concerns (44px touch targets, `window.confirm`, `aria-pressed`, focus-visible ring) → covered by `tasks/archive/2026-04-18-agent-key-card-accessibility.md`
+- Visual audit coverage → covered by `tasks/archive/2026-04-18-project-credentials-playwright-audit.md`
 - Failed-delete state clearing and save-toast-before-await → false positives: current code awaits API calls before state mutation, so rejections short-circuit correctly
 - Delete confirmation copy → already fixed via `scope="project"` prop in `AgentKeyCard.tsx:81-85` (commit `2bfe276e`)
 
@@ -78,5 +84,5 @@ The architecture doc (`docs/architecture/credential-security.md:337-344`) shows 
 - PR: https://github.com/raphaeltm/simple-agent-manager/pull/753
 - Rule 18: `.claude/rules/18-file-size-limits.md`
 - Rule 24: `.claude/rules/24-no-duplicate-ui-controls.md` (check no duplicate controls after extraction)
-- Related backlog: `tasks/backlog/2026-04-18-agent-key-card-accessibility.md`
-- Related backlog: `tasks/backlog/2026-04-18-project-credentials-playwright-audit.md`
+- Related backlog: `tasks/archive/2026-04-18-agent-key-card-accessibility.md`
+- Related backlog: `tasks/archive/2026-04-18-project-credentials-playwright-audit.md`

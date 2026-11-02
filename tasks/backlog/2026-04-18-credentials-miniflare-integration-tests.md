@@ -1,5 +1,17 @@
 # Miniflare + real D1 integration tests for project-scoped credentials
 
+> **Reconciliation 2026-11-02:** Partly shipped with real SQLite (`createSqliteD1`), not Miniflare.
+> - #2490 (`dedb75591`), `tests/integration/profile-account-pins-capability.test.ts`, drives the
+>   real `/agent-key` route over a seeded user default, project pin and profile pin. The project
+>   pin beats the default (`:223`), a project-less workspace gets the default (`:317`), and a
+>   paused pin halts (`:237`). That covers CRITICAL #1 for one user.
+> - #2490's `unit/routes/project-agent-credential-permission.test.ts` and #2485's
+>   `unit/routes/cc-attachments-project-pin.test.ts` cover membership refusal and another user's
+>   pin with real SQL.
+> - Still open: cross-user GET/PUT/DELETE with a second user's rows seeded; autoActivate touching
+>   only project rows (still mock-only, `project-credentials.test.ts:290`); DELETE leaving the user
+>   row; CodexRefreshLock against a real DB.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** real-D1 (Miniflare) tests of `getDecryptedAgentKey` in

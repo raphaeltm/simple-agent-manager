@@ -1,5 +1,12 @@
 # AgentKeyCard accessibility refactor
 
+> **Reconciliation 2026-11-02:** Superseded. #2474 (`09b7f3e08`) deleted `AgentKeyCard.tsx`, and no
+> code references it. The replacement shared accounts UI addresses A-1 to A-3 by design:
+> `components/accounts/AccountCard.tsx` uses design-system `Button`/`DropdownMenu` (labelled
+> "Actions for <account>") and `ConfirmDialog`, and `AgentConnectForm.tsx:152` is a labelled
+> `radiogroup`. Any new a11y gaps in the accounts components belong in a fresh task. Candidate for
+> archive. Archived by the 2026-11-02 weekly queue reconciliation.
+
 > **Reconciliation 2026-09-30 (weekly queue audit): partially shipped; still open.**
 >
 > - **Shipped:** none of the accessibility items. The delete-scope fix shipped earlier (see

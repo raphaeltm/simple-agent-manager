@@ -1,5 +1,7 @@
 # Trigger form errors are not tied to their fields
 
+> **Reconciliation 2026-11-02:** Partly addressed. #2447 (`87549f5aa`) moved the GitHub fields onto the shared `Field` helper (`GitHubTriggerFields.tsx:93-101`), so the new author-association and review-state filters show their errors inline, with `aria-invalid` and `aria-describedby`. The step-level `errors.github` and `errors.webhook` messages are still separate `<p role="alert">` siblings (`steps-start-when.tsx:156-159,185-188`) that no input points to, and `WebhookTriggerFields` has no error wiring. Every acceptance criterion is still open for those.
+
 ## Problem
 
 In the automation editor's "When" step, validation errors for GitHub and webhook triggers render as

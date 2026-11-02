@@ -1,5 +1,20 @@
 # Binary Install Security Hardening
 
+> **Reconciliation 2026-11-02:** #2484 (`30ae3a4e0`) reintroduced a raw GitHub-release binary
+> (OpenCode v2.2.5), and it meets this file's bar. `packages/vm-agent/internal/acp/opencode_install.sh`
+> does the following:
+>
+> - pins the version;
+> - allowlists `uname` values;
+> - pins a SHA-256 digest per target and checks it with `sha256sum -c` before extracting;
+> - stages the binary and checks its `--version` before replacing.
+>
+> VM installs (`gateway.go`) and the Instant image (`Dockerfile.vm-agent-container:13`) use the
+> same script. The 09-30 "no raw binary download remains" line is therefore out of date.
+>
+> Still open: the uv installer is fetched unpinned and unverified at `gateway.go:1065,1083` and
+> `Dockerfile.vm-agent-container:34`. Hash-pinning the `uv tool install` packages is optional.
+
 > **Reconciliation 2026-10-26:** Pointer correction only. The unpinned, unverified uv installer is
 > at `packages/vm-agent/internal/acp/gateway.go:1066,1085` (Mistral Vibe, Amp) and
 > `apps/api/Dockerfile.vm-agent-container:28`.

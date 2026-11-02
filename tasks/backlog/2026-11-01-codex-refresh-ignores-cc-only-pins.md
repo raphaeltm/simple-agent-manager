@@ -1,5 +1,7 @@
 # Codex token refresh answers a cc-only pinned account with the default's tokens
 
+> **Reconciliation 2026-11-02:** Still present on main (`codex-refresh-lock.ts:667-720`, `:422-428`; `runtime.ts` agent-credential-sync). #2490 (`dedb75591`) made the scope wider. A cc-only **profile** pin (`cc_profile_attachments`) is resolved for the workspace but is invisible to the refresh lock and the sync callback, the same way a #2485 project pin is. The fix must resolve the credential the run actually used, including the profile tier, and the tests should add a profile-pin case. Tracked as idea `01M6CQ607MR1X3TG98NH3E624B`.
+
 ## Problem
 
 `CodexRefreshLock.getStoredCredential` (`apps/api/src/durable-objects/codex-refresh-lock.ts`)

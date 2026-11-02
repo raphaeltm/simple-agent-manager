@@ -1,5 +1,25 @@
 # Notification UI — Accessibility & UX Follow-ups
 
+> **Reconciliation 2026-11-02:** Pointer correction only; nothing in scope shipped. #2487
+> (`979acda77`) reworked the notification item and center, so the lines moved.
+>
+> In `NotificationItem.tsx`:
+>
+> - `text-fg-secondary` is at `:55,169`;
+> - the hover-only actions are at `:111`;
+> - the group toggle without `aria-controls` is at `:159`;
+> - the `text-[9px]` badge is at `:175`.
+>
+> In `NotificationCenter.tsx`:
+>
+> - the panel `role="dialog"`, still without a focus trap, is at `:212`;
+> - the tablist is at `:236`;
+> - the tab badge is at `:273`;
+> - "Load more" is at `:355,390`.
+>
+> The new question reader (`NotificationQuestionDialog.tsx:33`) traps focus, but the bell panel
+> does not.
+
 > **Reconciliation 2026-10-26:** Nothing in scope shipped; pointers moved. #2381 (`110730c2a`)
 > moved `NotificationItem` and `NotificationGroup` to
 > `apps/web/src/components/notifications/NotificationItem.tsx`: `text-fg-secondary` is at `:84,207`,

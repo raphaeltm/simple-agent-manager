@@ -1,5 +1,11 @@
 # Trigger API Optimizations
 
+> **Reconciliation 2026-11-02:** Still open; pointers moved. #2447 (`87549f5aa`) moved the
+> consecutive-failure query into `apps/api/src/services/trigger-failure-window.ts`
+> (`consecutiveFailureCount`). `services/trigger-admission.ts:232-259` now calls it in a loop with a
+> fenced auto-pause `UPDATE`, and that loop still runs before the reservation insert at `:265`.
+> The three env vars are still absent from `apps/api/.env.example`.
+
 > **Reconciliation 2026-10-26:** Still open; pointers moved. #2413 (`99b3ac5b8`) moved
 > `createTrigger` to `apps/api/src/services/trigger-create.ts:174-305`. In
 > `services/trigger-admission.ts` (also changed by #2327 and #2335) the consecutive-failure loop is

@@ -1,5 +1,7 @@
 # Same-org GitHub submodules under tightly scoped workspace tokens
 
+> **Reconciliation 2026-11-02:** still open; there is still no Go test of `initSubmodules` (`packages/vm-agent/internal/bootstrap/bootstrap.go:884`). Pointers moved: #2490 (`dedb75591`) shortened `runtime.ts`, so `resolveAdditionalRepositoryIds` is now `apps/api/src/routes/workspaces/runtime.ts:670` and the scoped `repositoryIds` mint is `:1673-1686`.
+
 > **Reconciliation 2026-10-26:** still no Go test exercises `initSubmodules`
 > (`packages/vm-agent/internal/bootstrap/bootstrap.go:872`). Shipped-code pointers moved: the
 > `projectGithubRepositories` table is at `apps/api/src/db/schema.ts:757`;

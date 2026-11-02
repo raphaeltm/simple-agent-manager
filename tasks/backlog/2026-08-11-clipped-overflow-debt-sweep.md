@@ -1,5 +1,13 @@
 # Burn down clipped-overflow debt, then promote the guard to blocking everywhere
 
+> **Reconciliation 2026-11-02:** The four `settings-*-credential-audit` rows (Vultr, UpCloud,
+> Infomaniak, DigitalOcean) now point at a removed surface. #2474 (`09b7f3e08`) deleted
+> `SettingsCloudProvider.tsx`, and `/settings/cloud-provider` now redirects to Settings →
+> Infrastructure (`App.tsx:381`), where the provider forms open in `ConnectAccountSheet`. The
+> quarantined specs still expect inline per-provider sections, so they need rewriting against the
+> connect sheet (or deleting) before their overflow can be judged. The other rows are unchanged, and
+> `assertNoOverflow` still only reports (`audit-helpers.ts:218`).
+
 > **Reconciliation 2026-10-26:** One row is done: #2426 (`833ebc366`) replaced
 > `deployment-control-surface-audit` with `deployments-ui-audit`, which blocks on clipped overflow
 > (struck through in the table). #2389 (`0a0276390`) deleted `triggers-ui-audit.spec.ts`; the
