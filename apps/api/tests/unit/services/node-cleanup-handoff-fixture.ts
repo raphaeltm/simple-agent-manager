@@ -43,6 +43,8 @@ export async function handoffFixture(scope: 'user' | 'installation' = 'user') {
   const dnsRequests: string[] = [];
   let hangDns: 'request' | 'error-body' | undefined;
   let rejectCreateDuringDestroy = false;
+  let createBarrier: (() => Promise<Response>) | undefined;
+  const createdLabels = new Map<string, Record<string, string>>();
   function waitForAbort(signal: AbortSignal) {
     return new Promise<Response>((_resolve, reject) => {
       if (signal.aborted) reject(signal.reason);
@@ -123,6 +125,7 @@ export async function handoffFixture(scope: 'user' | 'installation' = 'user') {
               incarnation: `incarnation-${nodeId}`,
             }
           : {};
+        Object.assign(inventoryLabels, nodeId ? createdLabels.get(nodeId) : undefined);
         if (mode === 'foreign-installation')
           inventoryLabels.installation = 'fedcba9876543210fedcba9876543210';
         if (mode === 'foreign-environment') inventoryLabels.env = 'production';
@@ -181,6 +184,12 @@ export async function handoffFixture(scope: 'user' | 'installation' = 'user') {
         );
       }
       if (url.includes('api.hetzner.cloud/v1/servers') && init?.method === 'POST') {
+        if (createBarrier) {
+          if (typeof init.body !== 'string') throw new Error('Expected a JSON create body');
+          const body = JSON.parse(init.body) as { labels: Record<string, string> };
+          createdLabels.set(body.labels.node!, body.labels);
+          return createBarrier();
+        }
         if (!rejectCreateDuringDestroy) throw new Error('Unexpected provider create');
         f.sqlite.prepare("UPDATE nodes SET status = 'destroying' WHERE id = 'host'").run();
         return Response.json(
@@ -253,6 +262,9 @@ export async function handoffFixture(scope: 'user' | 'installation' = 'user') {
     dnsRequests,
     setHangDns: (mode: 'request' | 'error-body') => {
       hangDns = mode;
+    },
+    setCreateBarrier: (barrier: () => Promise<Response>) => {
+      createBarrier = barrier;
     },
     rejectCreateDuringDestroy: () => {
       rejectCreateDuringDestroy = true;

@@ -383,11 +383,11 @@ describe('deployment teardown with real SQL and strict provider boundary', () =>
     expect(provider.deleteVM).toHaveBeenCalledTimes(1);
   });
 
-  it('proves providerless deployment absence using exact complete inventory with deployment labels', async () => {
+  it('retains unresolved providerless deployments after empty inventory with exact labels', async () => {
     await seedNode({ status: 'destroying', providerInstanceId: null });
     expect(await cleanupDeploymentNode(env, 'node', 'user', options)).toEqual({
-      nodeDeleted: true,
-      warnings: [],
+      nodeDeleted: false,
+      warnings: [expect.stringContaining('allocation remains unresolved despite empty inventory')],
     });
     expect(provider.listVMs.mock.calls[0]?.[0]).toMatchObject({
       role: 'deployment',
@@ -395,7 +395,8 @@ describe('deployment teardown with real SQL and strict provider boundary', () =>
       node: 'node',
     });
     expect(provider.deleteVM).not.toHaveBeenCalled();
-    expect(row().runtime_termination_confirmed_at).toEqual(expect.any(String));
+    expect(row().runtime_termination_confirmed_at).toBeNull();
+    expect(row().status).toBe('destroying');
   });
 
   it('never treats an empty inventory during a fresh in-flight allocation as termination proof', async () => {
