@@ -16,7 +16,7 @@ Found on 2026-11-02 while verifying PR #2490 (personal profile account pins) on 
 the smoke user, project `hono`, profile "Claude Code Chat" (Instant runtime). Each test chat ran,
 answered, slept, and was then deleted through the API:
 
-| Workspace                    | Node                         | Deleted at (UTC) | State 95 min later                    |
+| Workspace                    | Node                         | Deleted at (UTC) | State at 03:47 UTC                    |
 | ---------------------------- | ---------------------------- | ---------------- | ------------------------------------- |
 | `01M6CYR2S52Z5JF5VSK6KDJY6H` | `01M6CYR2H8E50F3YZ9GGQFZJXY` | 02:13            | workspace `stopping`, node `sleeping` |
 | `01M6CZ20D18FWCN4G68EJKYDFV` | `01M6CZ2054TZMR2EVWETFR7VX6` | 02:13            | workspace `stopping`, node `sleeping` |
