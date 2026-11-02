@@ -11,7 +11,7 @@ The initial creation interruption is not proven; this fix must not claim to repa
 - [x] Reproduce through the real cleanup sweep with a complete direct-creation snapshot and no task link.
 - [x] Admit destroying providerless nodes with complete ownership snapshots to strict inventory reconciliation.
 - [x] Preserve a provisioning grace window before absence proof; retain exact credential/incarnation/provider ownership checks.
-- [x] Verify empty inventory converges, uncertain/foreign inventory remains blocked, and repeat sweeps do no work after completion.
+- [x] Verify exact inventory matches converge, empty/uncertain/foreign inventory remains blocked, and repeat sweeps do no work after completion.
 - [x] Local checks and independent security/completion review.
 - [x] Coordinate staging; verify only owned fixture cleanup, preserve all others.
 - [ ] PR, CI, CodeRabbit, merge, production smoke under /do.
@@ -29,3 +29,9 @@ Normal staging DELETE of our mature node and then workspace succeeded at16:36:10
 Staging deployment41483330085 succeeded for implementation0d64d3847. Authenticated Playwright dashboard/projects/settings navigation returned no page errors; health/login/nodes API200, former own fixture GET404. One controlled fresh direct cx23 node01M6EK6ESWN0AERFTBR3W6RKT2 created16:59:02 and normally allocated; DELETE200 at16:59:16 confirmed cleanup. This validates existing allocation/deletion behavior; the failed-allocation edge was not recreated live and is covered by the discriminating real-sweep regression suite. No heartbeat is claimed (not required for these API-only changes). PR/CI/release gates remain pending in workflow state.
 
 Full CI41487042716 found one existing ownership-negative test fixture omitted createdAt, so the new fail-closed grace check correctly rejected it earlier. The test now supplies an age beyond an explicit configured recovery window, retains the exact ownership error, and asserts no credential/provider construction. All128 tests across nodes-delete and both cleanup suites pass; scoped lint/formatting pass. Independent reviewer PASS; production implementation and staging evidence unchanged.
+
+## Review correction and remaining limitation
+
+CodeRabbit correctly identified that a grace period and empty inventory do not prove provider allocation finality. A create may still complete afterward. Strict reconciliation now retains unresolved empty-inventory records rather than writing termination proof. Existing authoritative rejection proofs still permit cleanup; exact owned resources are recovered and deleted after final identity validation. Thus this repair removes the automatic candidate-selection deadlock for discoverable VMs, but does not automatically finalize permanently empty ambiguous allocations. That broader outcome requires provider finality evidence or retained reconciliation tombstones, and is not claimed here.
+
+A real provisioning request held at the provider HTTP boundary now verifies concurrent stop cannot write termination proof on empty inventory; after a lost response, an exact resource can still be recovered. Same-second provider timestamps are accepted using the same precision as allocation recovery; preceding-second timestamps remain rejected. Both safety and precision regressions failed before correction. Independent security/completion reviewer PASS on the narrowed implementation. The separate late-response abort/identity-loss behavior is not changed.

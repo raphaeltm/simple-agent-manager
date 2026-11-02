@@ -332,8 +332,8 @@ function sameProviderInventoryIdentity(current: VMInstance, discovered: VMInstan
  * never trusted by itself; every returned server must repeat the node, incarnation,
  * environment, installation, role, and managed labels locally. A discovered server is
  * re-read immediately before deletion. Only Hetzner's fail-closed, fully paginated
- * inventory is accepted here; its complete empty result proves that the old rejected
- * allocation left no runtime to delete.
+ * inventory is accepted here. Empty inventory cannot prove allocation finality;
+ * retain the unresolved record so a late resource remains discoverable.
  */
 async function reconcileStrictProviderlessVm(
   db: NodeDb,
@@ -403,15 +403,16 @@ async function reconcileStrictProviderlessVm(
 
   const discovered = servers[0];
   if (!discovered) {
-    await requireSameNodeIncarnation(db, node, 'providerless inventory absence proof');
-    return 'already-absent';
+    throw new Error(
+      `Cannot reconcile providerless VM ${node.id}: allocation remains unresolved despite empty inventory`
+    );
   }
   const createdAt = Date.parse(discovered.createdAt);
   const nodeCreatedAt = Date.parse(node.createdAt);
   if (
     !Number.isFinite(createdAt) ||
     !Number.isFinite(nodeCreatedAt) ||
-    createdAt < nodeCreatedAt ||
+    createdAt < Math.floor(nodeCreatedAt / 1000) * 1000 ||
     createdAt > Date.now() ||
     discovered.location !== node.vmLocation ||
     discovered.serverType !== node.providerInstanceType
