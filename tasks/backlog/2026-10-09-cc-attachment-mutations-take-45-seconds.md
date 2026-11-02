@@ -1,6 +1,7 @@
 # Credential attachment create/delete takes 40–50 seconds
 
 > **Reconciliation 2026-11-02:** Partly addressed, not measured. #2480 (`af45a52b0`) now publishes capacity candidates in D1 batches inside the reconcile path that these routes wait on (`default-capacity-pools-ensure.ts:252-263`). That batching targets the "200–400 D1 round trips" this file suspects. #2485 (`65cfe12af`) replaces a project pin in one batch (`composable-credentials-attachments.ts:115-134`), so a retried project pin no longer duplicates, but a user-scoped POST still can (`:136`). Still open:
+>
 > - agent-attachment POST, PATCH and DELETE still `await` the reconcile (`:140,183,203`);
 > - #2489 added `POST /api/cc/attachments/default`, which does the same for agent accounts (`:157`);
 > - re-measure on staging against the under-2 s criterion.

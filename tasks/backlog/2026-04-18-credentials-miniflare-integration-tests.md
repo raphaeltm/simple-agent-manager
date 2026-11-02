@@ -1,6 +1,7 @@
 # Miniflare + real D1 integration tests for project-scoped credentials
 
 > **Reconciliation 2026-11-02:** Partly shipped with real SQLite (`createSqliteD1`), not Miniflare.
+>
 > - #2490 (`dedb75591`), `tests/integration/profile-account-pins-capability.test.ts`, drives the
 >   real `/agent-key` route over a seeded user default, project pin and profile pin. The project
 >   pin beats the default (`:223`), a project-less workspace gets the default (`:317`), and a
