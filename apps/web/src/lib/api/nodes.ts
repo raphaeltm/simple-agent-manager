@@ -37,6 +37,14 @@ export async function deleteNode(id: string): Promise<{ success: boolean }> {
   });
 }
 
+/** Removes a node SAM failed to delete, once the owner confirms they deleted its server. */
+export async function confirmNodeManualDeletion(id: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/api/nodes/${id}/manual-deletion`, {
+    method: 'POST',
+    body: JSON.stringify({ confirmed: true }),
+  });
+}
+
 /**
  * Fetch node system info via the control plane proxy.
  * Proxied for the same reason as events (vm-* DNS lacks SSL).
@@ -63,9 +71,7 @@ export async function getNodeLogs(
   if (filter?.limit) params.set('limit', String(filter.limit));
 
   const qs = params.toString();
-  return request<NodeLogResponse>(
-    `/api/nodes/${nodeId}/logs${qs ? `?${qs}` : ''}`
-  );
+  return request<NodeLogResponse>(`/api/nodes/${nodeId}/logs${qs ? `?${qs}` : ''}`);
 }
 
 export async function listNodeContainers(nodeId: string): Promise<NodeContainerListResponse> {

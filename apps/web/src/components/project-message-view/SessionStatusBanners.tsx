@@ -124,6 +124,7 @@ export function SessionStatusBanners({ lc }: Readonly<{ lc: UseSessionLifecycleR
       {lc.sessionState === 'sleeping' && (lc.isWaking || lc.agentActivity !== 'idle') && (
         <WakeProgressBanner
           wakePhase={lc.wakePhase}
+          wakeWait={lc.wakeWait}
           elapsed={
             lc.promptStartedAt != null ? <ElapsedTime startedAt={lc.promptStartedAt} /> : null
           }

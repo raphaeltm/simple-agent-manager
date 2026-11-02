@@ -26,7 +26,11 @@
  * banner over another's.
  */
 
-import { EXECUTION_STEP_ORDER, type TaskExecutionStep } from '@simple-agent-manager/shared';
+import {
+  EXECUTION_STEP_ORDER,
+  type TaskExecutionStep,
+  type WakeWaitReason,
+} from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { WakeProgressUpdate } from '../../hooks/useChatWebSocket';
@@ -34,11 +38,20 @@ import type { SessionStateSnapshot } from '../../lib/api';
 
 export type WakeRecoveryStatus = 'waking' | 'restored' | 'failed';
 
+/** Why the wake is waiting, as reported by the server (`routes/chat/wake-state.ts`). */
+export interface WakeWait {
+  reason: WakeWaitReason;
+  /** ISO time of the next retry, when one is scheduled. */
+  retryAt: string | null;
+}
+
 export interface WakeProgressState {
   /** True while a wake is in flight — drives banner visibility. */
   isWaking: boolean;
   /** Current phase, or null if the wake is claimed but no step reported yet. */
   wakePhase: TaskExecutionStep | null;
+  /** Why the wake is waiting. Never opens the banner by itself; only labels it. */
+  wakeWait: WakeWait | null;
 }
 
 export interface UseWakeProgressReturn extends WakeProgressState {
@@ -62,6 +75,7 @@ function isForwardProgress(
 export function useWakeProgress(sessionId: string | undefined): UseWakeProgressReturn {
   const [isWaking, setIsWaking] = useState(false);
   const [wakePhase, setWakePhase] = useState<TaskExecutionStep | null>(null);
+  const [wakeWait, setWakeWait] = useState<WakeWait | null>(null);
 
   /**
    * Latches once this wake reaches a terminal status.
@@ -79,12 +93,14 @@ export function useWakeProgress(sessionId: string | undefined): UseWakeProgressR
   useEffect(() => {
     setIsWaking(false);
     setWakePhase(null);
+    setWakeWait(null);
     settledRef.current = false;
   }, [sessionId]);
 
   const clearWakeProgress = useCallback(() => {
     setIsWaking(false);
     setWakePhase(null);
+    setWakeWait(null);
   }, []);
 
   const applyStatus = useCallback(
@@ -109,6 +125,10 @@ export function useWakeProgress(sessionId: string | undefined): UseWakeProgressR
     (state: SessionStateSnapshot | null | undefined) => {
       if (!state) return;
       applyStatus(state.recoveryStatus ?? null, state.wakePhase ?? null);
+      // Only the pull path carries the reason; pushed phase deltas leave it alone.
+      setWakeWait(
+        state.waitReason ? { reason: state.waitReason, retryAt: state.waitRetryAt ?? null } : null
+      );
     },
     [applyStatus]
   );
@@ -123,6 +143,7 @@ export function useWakeProgress(sessionId: string | undefined): UseWakeProgressR
   return {
     isWaking,
     wakePhase,
+    wakeWait,
     hydrateWakeProgress,
     applyWakeProgress,
     clearWakeProgress,

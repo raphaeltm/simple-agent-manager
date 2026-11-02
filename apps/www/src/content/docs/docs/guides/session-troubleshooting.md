@@ -269,11 +269,22 @@ minutes. The composer reads **Waking the agent — your message will be delivere
 works, and the **Nodes** page (**Infrastructure** in the main navigation) may briefly show the chat's old workspace deleted and a new one being
 created. That is normal.
 
-If a VM wake sits on **Waiting for server capacity...**, SAM can't get a machine for it yet. Your
-provider may be out of that machine type, your Hetzner account may be at its server or vCPU limit,
-or you may already have as many machines as SAM allows you (10 by default) or your
-[compute pool](/docs/guides/compute-pools/) permits. SAM keeps trying; if the wait drags on,
-delete machines you no longer need from the **Nodes** page. A message you sent is held for an
+If a VM wake is waiting, the strip says why when SAM knows (`attachWakeState` in
+`apps/api/src/routes/chat/wake-state.ts`):
+
+| The strip says                                                         | What is happening                                                                     |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| **Waiting for the previous workspace to finish shutting down...**      | SAM is still deleting the machine the chat slept on. The wake starts once it is gone. |
+| **Your cloud provider has no capacity right now. Retrying...**         | Your provider is out of that machine type in that location.                           |
+| **Your cloud account's server limit is reached. Retrying...**          | Your Hetzner (or other provider) account is at its server or vCPU limit.              |
+| **Your SAM server limit is reached. Waiting for a free slot...**       | You already have as many machines as SAM allows you (10 by default).                  |
+| **This project's server limit is reached. Waiting for a free slot...** | Your [compute pool](/docs/guides/compute-pools/) allows no more machines.             |
+| **Waiting for a new server to finish starting...**                     | SAM starts one new machine at a time for your account, and one is already starting.   |
+| **Waiting for a server that is still setting up...**                   | A machine that can take this chat is busy setting up another workspace.               |
+
+When SAM has scheduled its next attempt, the strip adds **Next try at** and the time. If it shows
+only **Waiting for server capacity...**, SAM has not recorded a reason yet. SAM keeps trying; if
+the wait drags on, delete machines you no longer need from the **Nodes** page. A message you sent is held for an
 hour: if the wake is still waiting then, the chat reports **Wake failed: Session is waking** (see
 [Wake failed](#wake-failed)).
 
@@ -573,6 +584,17 @@ instead, assume anything the agent had not pushed is gone. Check GitHub, then us
 
 If you delete a node yourself from the **Nodes** page, the tasks still running on it are marked
 **cancelled**, not failed — deleting it was your decision, not a malfunction.
+
+### SAM can't delete a node
+
+A node can stay in **Destroying** or **Error** when SAM cannot prove which cloud account its server
+belongs to, for example a machine created before SAM recorded that. SAM then refuses to delete it and
+retries every hour. If you have already deleted the server in your provider's console, open the node
+and select **I already deleted this server**. SAM checks with your provider first: if the server is
+still there, it says so and changes nothing. Otherwise it stops tracking the node and removes its
+records, the same way **Delete Node** does, without deleting anything at your provider
+(`recordManualNodeDeletion` in `apps/api/src/services/node-manual-deletion.ts`). The option is not
+offered for machines you enrolled yourself, and machines on SAM's own cloud account need an operator.
 
 ## The session has ended
 

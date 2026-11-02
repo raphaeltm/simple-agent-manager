@@ -386,6 +386,14 @@ Stop a running node. All workspaces on the node must be stopped first.
 
 Delete a node and clean up DNS records and Hetzner resources.
 
+### `POST /api/nodes/:id/manual-deletion`
+
+Remove a node SAM failed to delete, after you deleted its server at the provider yourself. Body:
+`{ "confirmed": true }`. The node must be yours, in `destroying`, `deleting` or `error`, and not a
+machine you enrolled yourself. Returns `403` for a node on SAM's own cloud account and `409` if the
+provider still reports the server. On success SAM removes the node's records as `DELETE` does; it
+never deletes anything at the provider.
+
 ## Credentials
 
 ### Guided agent account sign-in

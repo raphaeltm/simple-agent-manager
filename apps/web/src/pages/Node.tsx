@@ -19,6 +19,7 @@ import { useQueryScope } from '../hooks/useQueryScope';
 import { useToast } from '../hooks/useToast';
 import { useVisibilityAwarePoll } from '../hooks/useVisibilityAwarePoll';
 import {
+  confirmNodeManualDeletion,
   deleteNode,
   deleteWorkspace,
   getNode,
@@ -29,6 +30,9 @@ import {
   stopWorkspace,
 } from '../lib/api';
 import { NODE_DETAIL_POLL_MS, NODE_EVENTS_POLL_MS } from '../lib/poll-intervals';
+
+/** Statuses SAM leaves a node in after its own teardown attempt failed. */
+const MANUAL_DELETION_NODE_STATUSES: readonly string[] = ['destroying', 'deleting', 'error'];
 
 export function Node() {
   const navigate = useNavigate();
@@ -48,6 +52,11 @@ export function Node() {
 
   const { systemInfo, loading: sysInfoLoading } = useNodeSystemInfo(id, node?.status);
   const isDeploymentNode = node?.nodeRole === 'deployment';
+  // SAM's own teardown already failed for these. The API makes the final call.
+  const canConfirmManualDeletion =
+    !!node &&
+    node.nodeClass !== 'user-owned' &&
+    MANUAL_DELETION_NODE_STATUSES.includes(node.status as string);
   const deploymentEnvironments = node?.deploymentEnvironments ?? [];
 
   const loadNode = useCallback(async () => {
@@ -132,9 +141,10 @@ export function Node() {
     if (!id || !node) return;
 
     if (isDeploymentNode) {
-      const envSummary = deploymentEnvironments.length > 0
-        ? `${deploymentEnvironments.length} deployment environment${deploymentEnvironments.length === 1 ? '' : 's'}: ${deploymentEnvironments.map((env) => env.name).join(', ')}`
-        : 'deployment environments currently listed on this node';
+      const envSummary =
+        deploymentEnvironments.length > 0
+          ? `${deploymentEnvironments.length} deployment environment${deploymentEnvironments.length === 1 ? '' : 's'}: ${deploymentEnvironments.map((env) => env.name).join(', ')}`
+          : 'deployment environments currently listed on this node';
       const confirmed = window.confirm(
         `This is a deployment node ("${node.name}") hosting ${envSummary}. Deleting it here destroys the node infrastructure and affects ALL hosted environments, but it does not perform each environment's volume teardown.\n\nFor full per-environment teardown, use Destroy on the project Deployments page.\n\nContinue with node-only deletion?`
       );
@@ -157,14 +167,36 @@ export function Node() {
     }
   };
 
+  const handleConfirmManualDeletion = async () => {
+    if (!id || !node) return;
+    const server = node.cloudProvider
+      ? `this node's ${node.cloudProvider} server`
+      : "this node's server";
+    const confirmed = window.confirm(
+      `SAM could not delete ${server}. Only continue if you have already deleted it yourself in your cloud provider's console.\n\nSAM will stop tracking this node. It will not delete anything at your provider.\n\nContinue and stop tracking it?`
+    );
+    if (!confirmed) return;
+    try {
+      setDeleting(true);
+      await confirmNodeManualDeletion(id);
+      toast.success('Node removed');
+      navigate('/nodes');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to remove node');
+      setDeleting(false);
+    }
+  };
+
   const handleRetryEvents = () => {
     if (!id) return;
     setEventsError(null);
-    void listNodeEvents(id, 50).then((data) => {
-      setEvents(data.events || []);
-    }).catch((err) => {
-      setEventsError(err instanceof Error ? err.message : 'Failed to load events');
-    });
+    void listNodeEvents(id, 50)
+      .then((data) => {
+        setEvents(data.events || []);
+      })
+      .catch((err) => {
+        setEventsError(err instanceof Error ? err.message : 'Failed to load events');
+      });
   };
 
   const handleStopWorkspace = async (workspaceId: string) => {
@@ -212,7 +244,10 @@ export function Node() {
   return (
     <PageLayout title="Node" maxWidth="xl">
       {/* Breadcrumb navigation */}
-      <nav className="flex items-center gap-2 mb-4 text-fg-muted" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>
+      <nav
+        className="flex flex-wrap items-center gap-2 mb-4 text-fg-muted"
+        style={{ fontSize: 'var(--sam-type-secondary-size)' }}
+      >
         <button
           onClick={() => navigate('/dashboard')}
           className="bg-transparent border-none text-accent cursor-pointer p-0"
@@ -229,13 +264,18 @@ export function Node() {
           Nodes
         </button>
         <span>/</span>
-        <span className="text-fg-primary">{node?.name || 'Loading...'}</span>
+        {/* Node names are generated IDs with no break points; let them wrap anywhere. */}
+        <span className="text-fg-primary min-w-0 [overflow-wrap:anywhere]">
+          {node?.name || 'Loading...'}
+        </span>
       </nav>
 
       {/* Action buttons */}
       <div className="flex items-center gap-3 mb-6 flex-wrap">
         {!isDeploymentNode && (
-          <Button onClick={() => navigate('/workspaces/new', { state: id ? { nodeId: id } : undefined })}>
+          <Button
+            onClick={() => navigate('/workspaces/new', { state: id ? { nodeId: id } : undefined })}
+          >
             Create Workspace
           </Button>
         )}
@@ -246,13 +286,18 @@ export function Node() {
         >
           {stopping ? 'Stopping...' : 'Stop Node'}
         </Button>
-        <Button
-          variant="danger"
-          onClick={handleDelete}
-          disabled={stopping || deleting || !node}
-        >
+        <Button variant="danger" onClick={handleDelete} disabled={stopping || deleting || !node}>
           {deleting ? 'Deleting...' : isDeploymentNode ? 'Delete Node Only' : 'Delete Node'}
         </Button>
+        {canConfirmManualDeletion && (
+          <Button
+            variant="ghost"
+            onClick={() => void handleConfirmManualDeletion()}
+            disabled={stopping || deleting}
+          >
+            I already deleted this server
+          </Button>
+        )}
       </div>
 
       {error && (
@@ -276,10 +321,17 @@ export function Node() {
                 <Skeleton width="60px" height="1.25rem" borderRadius="9999px" />
               </div>
             </div>
-            <div className="border-t border-border-default pt-4 grid gap-4" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
+            <div
+              className="border-t border-border-default pt-4 grid gap-4"
+              style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}
+            >
               {Array.from({ length: 5 }, (_, i) => (
                 <div key={i}>
-                  <Skeleton width="50%" height="0.75rem" style={{ marginBottom: 'var(--sam-space-1)' }} />
+                  <Skeleton
+                    width="50%"
+                    height="0.75rem"
+                    style={{ marginBottom: 'var(--sam-space-1)' }}
+                  />
                   <Skeleton width="70%" height="0.875rem" />
                 </div>
               ))}
@@ -298,13 +350,17 @@ export function Node() {
               <div className="min-w-0">
                 <h2 className="m-0 text-sm font-semibold text-fg-primary">Deployment node</h2>
                 <p className="m-0 mt-1 text-sm text-fg-muted">
-                  This node runs {deploymentEnvironments.length || 'one or more'} project deployment environment{deploymentEnvironments.length === 1 ? '' : 's'}. Logs and system health are available here; environment policy, DNS cleanup, volume teardown, and release management are on the project Deployments page.
+                  This node runs {deploymentEnvironments.length || 'one or more'} project deployment
+                  environment{deploymentEnvironments.length === 1 ? '' : 's'}. Logs and system
+                  health are available here; environment policy, DNS cleanup, volume teardown, and
+                  release management are on the project Deployments page.
                 </p>
                 <p className="m-0 mt-1 text-sm text-fg-muted">
                   {deploymentEnvironments.length > 0
                     ? `Hosted environments: ${deploymentEnvironments.map((env) => env.name).join(', ')}. `
                     : ''}
-                  Deleting the node directly affects every hosted environment; use <strong>Destroy</strong> on the Deployments page for per-environment teardown.
+                  Deleting the node directly affects every hosted environment; use{' '}
+                  <strong>Destroy</strong> on the Deployments page for per-environment teardown.
                 </p>
               </div>
             </div>
@@ -333,7 +389,9 @@ export function Node() {
           {!isDeploymentNode && (
             <NodeWorkspacesSection
               workspaces={workspaces}
-              onCreateWorkspace={() => navigate('/workspaces/new', { state: id ? { nodeId: id } : undefined })}
+              onCreateWorkspace={() =>
+                navigate('/workspaces/new', { state: id ? { nodeId: id } : undefined })
+              }
               onStop={handleStopWorkspace}
               onRestart={handleRestartWorkspace}
               onDelete={handleDeleteWorkspace}

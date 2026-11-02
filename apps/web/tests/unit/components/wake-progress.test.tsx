@@ -13,7 +13,10 @@ import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 
 import { useWakeProgress } from '../../../src/components/project-message-view/useWakeProgress';
-import { WakeProgressBanner } from '../../../src/components/project-message-view/WakeProgressBanner';
+import {
+  WakeProgressBanner,
+  wakeProgressLabel,
+} from '../../../src/components/project-message-view/WakeProgressBanner';
 import type { SessionStateSnapshot } from '../../../src/lib/api';
 
 function snapshot(overrides: Partial<SessionStateSnapshot>): SessionStateSnapshot {
@@ -248,5 +251,93 @@ describe('WakeProgressBanner', () => {
 
     rerender(<WakeProgressBanner wakePhase="workspace_ready" elapsed={<span>4m 10s</span>} />);
     expect(screen.getByText('4m 10s')).toBeInTheDocument();
+  });
+});
+
+describe('wake wait reasons (production 2026-11-02: one label hid three causes)', () => {
+  it('names why the wake is waiting and keeps it across a pushed phase', () => {
+    const { result } = renderHook(() => useWakeProgress('s1'));
+    act(() =>
+      result.current.hydrateWakeProgress(
+        snapshot({
+          recoveryStatus: 'waking',
+          wakePhase: 'waiting_for_node_capacity',
+          waitReason: 'provider_transient_capacity',
+          waitRetryAt: '2099-01-01T00:00:00.000Z',
+        })
+      )
+    );
+    expect(result.current.wakeWait).toEqual({
+      reason: 'provider_transient_capacity',
+      retryAt: '2099-01-01T00:00:00.000Z',
+    });
+
+    // A pushed delta carries no reason; it must not erase the polled one.
+    act(() =>
+      result.current.applyWakeProgress({
+        recoveryStatus: 'waking',
+        wakePhase: 'waiting_for_node_capacity',
+      })
+    );
+    expect(result.current.wakeWait?.reason).toBe('provider_transient_capacity');
+
+    // The next poll without a reason clears it.
+    act(() =>
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'node_provisioning' })
+      )
+    );
+    expect(result.current.wakeWait).toBeNull();
+  });
+
+  it('does not open the banner from a reason alone', () => {
+    const { result } = renderHook(() => useWakeProgress('s1'));
+    act(() =>
+      result.current.hydrateWakeProgress(snapshot({ waitReason: 'previous_workspace_cleanup' }))
+    );
+    expect(result.current.isWaking).toBe(false);
+    expect(result.current.wakeWait?.reason).toBe('previous_workspace_cleanup');
+  });
+
+  it('labels the reason instead of the generic capacity phase', () => {
+    const now = Date.parse('2026-11-02T08:40:00.000Z');
+    expect(wakeProgressLabel('waiting_for_node_capacity', null, now)).toBe(
+      'Waiting for server capacity...'
+    );
+    expect(
+      wakeProgressLabel(
+        'waiting_for_node_capacity',
+        { reason: 'compatible_node_provisioning', retryAt: null },
+        now
+      )
+    ).toBe('Waiting for a new server to finish starting...');
+    const withRetry = wakeProgressLabel(
+      'waiting_for_node_capacity',
+      { reason: 'provider_transient_capacity', retryAt: '2026-11-02T08:52:00.000Z' },
+      now
+    );
+    expect(withRetry).toMatch(
+      /^Your cloud provider has no capacity right now\. Retrying\.\.\. Next try at .+\.$/
+    );
+    // A retry time already in the past is not a promise worth showing.
+    expect(
+      wakeProgressLabel(
+        null,
+        { reason: 'provider_transient_capacity', retryAt: '2026-11-02T08:30:00.000Z' },
+        now
+      )
+    ).toBe('Your cloud provider has no capacity right now. Retrying...');
+  });
+
+  it('renders the reason in the live region', () => {
+    render(
+      <WakeProgressBanner
+        wakePhase={null}
+        wakeWait={{ reason: 'previous_workspace_cleanup', retryAt: null }}
+      />
+    );
+    expect(screen.getByTestId('wake-progress-label')).toHaveTextContent(
+      'Waiting for the previous workspace to finish shutting down...'
+    );
   });
 });

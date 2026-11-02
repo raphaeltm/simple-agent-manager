@@ -567,6 +567,20 @@ async function markRuntimeTerminationConfirmed(db: NodeDb, node: NodeRow): Promi
   return confirmedAt;
 }
 
+/**
+ * The owner states they deleted the server at their provider after SAM's strict
+ * teardown could not. Writes the same proof markers as a strict delete, fenced on
+ * the exact incarnation the caller loaded, so every proof reader and the shared
+ * removal tail treat the node uniformly. Callers must first refuse when the
+ * provider positively reports the server still exists (`services/node-manual-deletion.ts`).
+ */
+export async function recordOwnerAttestedRuntimeTermination(
+  db: NodeDb,
+  node: NodeRow
+): Promise<string> {
+  return await markRuntimeTerminationConfirmed(db, node);
+}
+
 async function claimManagedNodeDeletion(db: NodeDb, node: NodeRow): Promise<NodeRow> {
   // Absence proof must also fence lifecycle changes: claim teardown before
   // consuming proof on any node that has not already entered terminal cleanup.

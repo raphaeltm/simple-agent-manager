@@ -38,17 +38,45 @@
  * file-size ceiling (rule 18).
  */
 
-import { type TaskExecutionStep, wakePhaseLabel } from '@simple-agent-manager/shared';
+import {
+  type TaskExecutionStep,
+  WAKE_WAIT_REASON_LABELS,
+  wakePhaseLabel,
+} from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
 import type { FC, ReactNode } from 'react';
 
+import type { WakeWait } from './useWakeProgress';
+
+/**
+ * The phase says where a wake is; a known wait reason says why it is not moving.
+ * "Waiting for server capacity..." alone hid three different causes.
+ */
+export function wakeProgressLabel(
+  wakePhase: TaskExecutionStep | null,
+  wakeWait: WakeWait | null | undefined,
+  now = Date.now()
+): string {
+  if (!wakeWait) return wakePhaseLabel(wakePhase);
+  const label = WAKE_WAIT_REASON_LABELS[wakeWait.reason];
+  const retryAt = wakeWait.retryAt ? Date.parse(wakeWait.retryAt) : Number.NaN;
+  if (!Number.isFinite(retryAt) || retryAt <= now) return label;
+  const time = new Date(retryAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return `${label} Next try at ${time}.`;
+}
+
 export interface WakeProgressBannerProps {
   wakePhase: TaskExecutionStep | null;
+  wakeWait?: WakeWait | null;
   /** Rendered alongside the label — the elapsed-time readout, when available. */
   elapsed?: ReactNode;
 }
 
-export const WakeProgressBanner: FC<WakeProgressBannerProps> = ({ wakePhase, elapsed }) => (
+export const WakeProgressBanner: FC<WakeProgressBannerProps> = ({
+  wakePhase,
+  wakeWait,
+  elapsed,
+}) => (
   <div
     data-testid="wake-progress-banner"
     className="flex items-center gap-2 px-4 py-1.5 border-b border-border-default bg-surface text-xs text-fg-muted"
@@ -79,7 +107,7 @@ export const WakeProgressBanner: FC<WakeProgressBannerProps> = ({ wakePhase, ela
       className="min-w-0 flex-1 break-words"
       data-testid="wake-progress-label"
     >
-      {wakePhaseLabel(wakePhase)}
+      {wakeProgressLabel(wakePhase, wakeWait)}
     </span>
     {elapsed != null && <span className="shrink-0">{elapsed}</span>}
   </div>

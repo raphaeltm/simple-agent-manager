@@ -39,7 +39,12 @@ export {
 } from './credentials';
 
 // Node schemas
-export { CreateNodeSchema, PatchNodeSchema, UpdateNodeLabelSchema } from './nodes';
+export {
+  ConfirmManualNodeDeletionSchema,
+  CreateNodeSchema,
+  PatchNodeSchema,
+  UpdateNodeLabelSchema,
+} from './nodes';
 
 // Workspace schemas
 export {
