@@ -453,7 +453,7 @@ The same ranking is the living queue, SAM idea `01M4DR7MBDD8AAVF1XMC2XYQEX` (v8)
 - [x] Repoint every citation of a moved task path (none outside the moved files and old ledgers)
 - [x] Delta-audit all 240 backlog files (seven reviewers plus one by hand)
 - [x] Remove backlog files only on a verified delete-class verdict (3 archived, each re-checked in code)
-- [x] Add a `Reconciliation 2026-11-02` note to every file with progress or a corrected pointer (30 files)
+- [x] Add a `Reconciliation 2026-11-02` note to every file with progress or a corrected pointer (30 files: 16 progress, 9 pointer, 2 new-file leads, and the 3 superseded files before archiving)
 - [x] Post a status nudge or park decision on each open PR older than seven days (5 of 5)
 - [x] Record the full ledger here in `tasks/archive/`
 
