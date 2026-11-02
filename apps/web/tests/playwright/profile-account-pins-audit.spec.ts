@@ -7,8 +7,8 @@
  * Rows come from the same fixtures the unit tests use, so roles and resolution are
  * computed by the real account model and the shared resolver.
  */
-import type { CCProfileAttachmentItem, CCProfilePinCandidate } from '@simple-agent-manager/shared';
 import { expect, type Page, test } from '@playwright/test';
+import type { CCProfileAttachmentItem, CCProfilePinCandidate } from '@simple-agent-manager/shared';
 
 import { type AccountRows, accountRows, mergeRows } from '../unit/components/accounts/fixtures';
 import {
