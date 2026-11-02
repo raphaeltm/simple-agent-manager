@@ -150,4 +150,45 @@ describe('offboarding and personal profile pins', () => {
       'pin-owner-proj-1',
     ]);
   });
+
+  it('a failed pin delete leaves the member active, and the same plan can be retried', async () => {
+    const f = fixture();
+    const preview = await createProjectMemberOffboardingPreview({
+      db: f.db,
+      database: f.env.DATABASE,
+      project: f.project,
+      memberUserId: LEAVER,
+      requestedBy: OWNER,
+      defaultAgentType: 'claude-code',
+    });
+    const apply = () =>
+      applyProjectMemberOffboarding({
+        db: f.db,
+        project: f.project,
+        memberUserId: LEAVER,
+        actorUserId: OWNER,
+        planId: preview.offboardingPlanId,
+        actions: [],
+        finalMemberStatus: 'removed',
+        defaultAgentType: 'claude-code',
+      });
+    const leaverStatus = () =>
+      (
+        f.sqlite
+          .prepare(`SELECT status FROM project_members WHERE project_id = 'proj-1' AND user_id = ?`)
+          .get(LEAVER) as { status: string }
+      ).status;
+
+    f.sqlite.exec(`CREATE TRIGGER fail_pin_delete BEFORE DELETE ON cc_profile_attachments
+      BEGIN SELECT RAISE(ABORT, 'pin delete failed'); END;`);
+    await expect(apply()).rejects.toThrow();
+    expect(leaverStatus()).toBe('active');
+    expect(remainingPins(f.sqlite)).toContain('pin-leaver-proj-1');
+
+    f.sqlite.exec(`DROP TRIGGER fail_pin_delete`);
+    const applied = await apply();
+    expect(applied.status).toBe('removed');
+    expect(leaverStatus()).toBe('removed');
+    expect(remainingPins(f.sqlite)).not.toContain('pin-leaver-proj-1');
+  });
 });

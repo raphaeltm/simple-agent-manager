@@ -20,11 +20,12 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import type { AiProviderUsageAttribution } from '../services/ai-token-budget';
-import { resolveProfileCredentialContext } from '../services/composable-credentials/profile-context';
+import { resolveSessionProfileCredentialContext } from '../services/composable-credentials/profile-context';
 import {
   explainForConsumer,
   type resolveForConsumer,
 } from '../services/composable-credentials/resolve';
+import type { PreloadedRuntimeRows } from '../services/workspace-runtime-assets';
 
 export interface ResolvedProxyUpstream {
   agentType: string;
@@ -171,22 +172,20 @@ export async function resolveProxyUpstream(input: {
   workspaceId: string;
   projectId: string | null;
   agentType?: string | null;
-  /** From `verifyAIProxyAuth`: the running session's profile and skill. */
-  agentProfileId?: string | null;
-  skillId?: string | null;
+  /** From `verifyAIProxyAuth`: the running session and the rows it loaded. */
+  agentSessionId?: string | null;
+  runtimeRows?: PreloadedRuntimeRows;
   dialect: Dialect;
 }): Promise<ResolvedProxyUpstream | null> {
   const db = drizzle(input.env.DATABASE, { schema });
   const encryptionKey = getCredentialEncryptionKey(input.env);
-  // Same profile context as the agent-key callback that gave this session its key,
-  // built from the session row auth already loaded (one extra parallel read, on
-  // every proxied call only when the session has a profile).
-  const profile = await resolveProfileCredentialContext(db, {
-    userId: input.userId,
-    projectId: input.projectId,
-    profileId: input.agentProfileId,
-    skillId: input.skillId,
-  });
+  // The same session → task → workspace-hint resolution the agent-key callback
+  // uses, fed the rows auth already loaded (no re-read when a session is running).
+  const profile = await resolveSessionProfileCredentialContext(
+    db,
+    { workspaceId: input.workspaceId, agentSessionId: input.agentSessionId },
+    input.runtimeRows
+  );
   const candidates = await Promise.all(
     candidateCapabilities(input.agentType, input.dialect).map(async (capability) => ({
       capability,

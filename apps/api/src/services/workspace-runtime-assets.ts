@@ -33,12 +33,22 @@ export interface RuntimeAssetContext {
   source: 'agent-session' | 'task' | 'workspace' | 'none';
 }
 
-type WorkspaceRuntimeBase = {
+export type WorkspaceRuntimeBase = {
   id: string;
   userId: string;
   projectId: string | null;
   agentProfileHint: string | null;
 };
+
+/**
+ * Rows a caller already loaded, so `resolveWorkspaceRuntimeIds` applies its
+ * precedence without reading them again. `agentSession` must come from a query
+ * scoped to this workspace and its owner; null means no session is running.
+ */
+export interface PreloadedRuntimeRows {
+  workspace: WorkspaceRuntimeBase;
+  agentSession: { id: string; profileId: string | null; skillId: string | null } | null;
+}
 
 async function getWorkspaceRuntimeBase(db: Db, workspaceId: string): Promise<WorkspaceRuntimeBase> {
   const rows = await db
@@ -217,15 +227,20 @@ export interface WorkspaceRuntimeIds {
 /** Which profile and skill a workspace's run uses: agent session → task → workspace hint. */
 export async function resolveWorkspaceRuntimeIds(
   db: Db,
-  input: RuntimeAssetContextInput
+  input: RuntimeAssetContextInput,
+  preloaded?: PreloadedRuntimeRows
 ): Promise<WorkspaceRuntimeIds> {
-  const workspace = await getWorkspaceRuntimeBase(db, input.workspaceId);
+  const workspace = preloaded?.workspace ?? (await getWorkspaceRuntimeBase(db, input.workspaceId));
   if (!workspace.projectId) {
     return { workspace, profileId: null, skillId: null, source: 'none' };
   }
   const agentSessionId = input.agentSessionId?.trim();
   if (agentSessionId) {
-    const ids = await resolveAgentSessionRuntimeIds(db, workspace, agentSessionId);
+    const loaded = preloaded?.agentSession;
+    const ids =
+      loaded?.id === agentSessionId
+        ? { profileId: loaded.profileId, skillId: loaded.skillId }
+        : await resolveAgentSessionRuntimeIds(db, workspace, agentSessionId);
     return { workspace, ...ids, source: 'agent-session' };
   }
   const taskIds = await resolveTaskRuntimeIds(db, workspace);

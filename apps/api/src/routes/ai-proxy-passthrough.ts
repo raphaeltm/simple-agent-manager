@@ -41,6 +41,7 @@ import {
   optionalExecutionContext,
 } from '../services/ai-token-usage-accounting';
 import { copyCredentialLimitHeaders } from '../services/credential-limit-events';
+import type { PreloadedRuntimeRows } from '../services/workspace-runtime-assets';
 import {
   anthropicError,
   anthropicUsageGateError,
@@ -74,8 +75,7 @@ interface PassthroughAuthResult {
   trialId?: string;
   agentType?: string | null;
   agentSessionId?: string | null;
-  agentProfileId?: string | null;
-  skillId?: string | null;
+  runtimeRows?: PreloadedRuntimeRows;
   agentCredentialReference?: string | null;
   agentCredentialSource?: 'user' | 'project' | 'platform' | null;
   agentCredentialProvider?: string | null;
@@ -280,8 +280,8 @@ async function prepareProxyRequest(
     workspaceId: auth.workspaceId,
     projectId: auth.projectId,
     agentType: auth.agentType,
-    agentProfileId: auth.agentProfileId,
-    skillId: auth.skillId,
+    agentSessionId: auth.agentSessionId,
+    runtimeRows: auth.runtimeRows,
     dialect: options.dialect,
   });
   if (!upstream) {

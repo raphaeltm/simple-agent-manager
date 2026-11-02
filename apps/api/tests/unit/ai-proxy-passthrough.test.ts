@@ -93,6 +93,7 @@ vi.mock('../../src/services/composable-credentials/resolve', () => ({
 // Profile pins are covered by tests/integration/profile-account-pins-capability.test.ts.
 vi.mock('../../src/services/composable-credentials/profile-context', () => ({
   resolveProfileCredentialContext: vi.fn(async () => null),
+  resolveSessionProfileCredentialContext: vi.fn(async () => null),
 }));
 
 // Mock global fetch

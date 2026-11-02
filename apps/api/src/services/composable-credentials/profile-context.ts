@@ -12,6 +12,7 @@ import type { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../../db/schema';
 import { log } from '../../lib/logger';
 import {
+  type PreloadedRuntimeRows,
   profileValidForRunCondition,
   resolveWorkspaceRuntimeIds,
 } from '../workspace-runtime-assets';
@@ -88,9 +89,10 @@ export async function resolveProfileCredentialContext(
  */
 export async function resolveSessionProfileCredentialContext(
   db: Db,
-  input: { workspaceId: string; agentSessionId?: string | null }
+  input: { workspaceId: string; agentSessionId?: string | null },
+  preloaded?: PreloadedRuntimeRows
 ): Promise<ProfileCredentialContext | null> {
-  const runtime = await resolveWorkspaceRuntimeIds(db, input);
+  const runtime = await resolveWorkspaceRuntimeIds(db, input, preloaded);
   return resolveProfileCredentialContext(db, {
     userId: runtime.workspace.userId,
     projectId: runtime.workspace.projectId,

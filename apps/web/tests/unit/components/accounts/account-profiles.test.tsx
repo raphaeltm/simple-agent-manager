@@ -238,6 +238,42 @@ describe('Settings → Agents: use an account in profiles', () => {
     expect(card).not.toHaveTextContent('Connected, but nothing uses it.');
   });
 
+  it('pins that arrive after the dialog opens are kept; only my toggles are saved', async () => {
+    let releasePins!: () => void;
+    mocks.listProfilePins.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          releasePins = () => resolve([pinOn(candidate('prof-global'), 'cfg-max')]);
+        })
+    );
+    renderPage();
+    const row = await screen.findByTestId('provider-row-claude-code');
+    const max = within(row).getByTestId('account-card-cfg-max');
+    fireEvent.click(within(max).getByRole('button', { name: 'Actions for Claude Max (personal)' }));
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Use in profiles…' }));
+    const dialog = await screen.findByRole('dialog', {
+      name: 'Use Claude Max (personal) in profiles',
+    });
+    await within(dialog).findByRole('checkbox', { name: /Everyday/ });
+
+    // My pin on Everyday loads only now, after the dialog opened.
+    pins = [pinOn(candidate('prof-global'), 'cfg-max')];
+    releasePins();
+    await waitFor(() =>
+      expect(within(dialog).getByRole('checkbox', { name: /Everyday/ })).toBeChecked()
+    );
+
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: /Opus deep work/ }));
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+
+    await waitFor(() =>
+      expect(mocks.createProfilePin.mock.calls).toEqual([
+        [{ configurationId: 'cfg-max', profileId: 'prof-deep' }],
+      ])
+    );
+    expect(mocks.deleteProfilePin).not.toHaveBeenCalled();
+  });
+
   it('unchecking a profile puts it back on my usual account', async () => {
     renderPage();
     const row = await screen.findByTestId('provider-row-claude-code');

@@ -108,7 +108,9 @@ function unpinProfile(): void {
 }
 
 /** (a) The agent-key callback, through the real route. */
-async function agentKey(): Promise<{ status: number; body: Record<string, unknown> }> {
+async function agentKey(
+  agentSessionId: string | null = 's1'
+): Promise<{ status: number; body: Record<string, unknown> }> {
   const app = new Hono<{ Bindings: Env }>();
   app.onError((err, c) =>
     err instanceof AppError
@@ -121,7 +123,10 @@ async function agentKey(): Promise<{ status: number; body: Record<string, unknow
     {
       method: 'POST',
       headers: { Authorization: 'Bearer test-callback', 'Content-Type': 'application/json' },
-      body: JSON.stringify({ agentType: 'claude-code', agentSessionId: 's1' }),
+      body: JSON.stringify({
+        agentType: 'claude-code',
+        ...(agentSessionId ? { agentSessionId } : {}),
+      }),
     },
     env
   );
@@ -152,7 +157,7 @@ async function admissionHolds(rejectedReference: string): Promise<boolean> {
   return holdTaskForProviderLimit(state, rc);
 }
 
-/** (c) The AI proxy: the session's auth, then the upstream it would forward to. */
+/** (c) The AI proxy: the session's auth, then the upstream it would forward to (as `prepareProxyRequest` wires it). */
 async function proxyUpstream() {
   const auth = await verifyAIProxyAuth('wstoken', env, drizzle(env.DATABASE, { schema }));
   return resolveProxyUpstream({
@@ -161,8 +166,8 @@ async function proxyUpstream() {
     workspaceId: auth.workspaceId,
     projectId: auth.projectId,
     agentType: auth.agentType,
-    agentProfileId: auth.agentProfileId,
-    skillId: auth.skillId,
+    agentSessionId: auth.agentSessionId,
+    runtimeRows: auth.runtimeRows,
     dialect: 'anthropic',
   });
 }
@@ -288,6 +293,44 @@ describe('profile context comes from the run', () => {
   });
 });
 
+describe('agent-key and the proxy pick the run’s profile the same way', () => {
+  beforeEach(() => {
+    // No running session: the run's profile comes from its task (pinned prof-1),
+    // not from the workspace hint (an unpinned profile).
+    sqlite.exec(`
+      INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type, created_at, updated_at)
+        VALUES ('prof-hint', 'p1', 'u1', 'Workspace hint', 'claude-code', '${NOW}', '${NOW}');
+      UPDATE workspaces SET agent_profile_hint = 'prof-hint' WHERE id = 'w1';
+      UPDATE agent_sessions SET status = 'stopped' WHERE id = 's1';
+    `);
+  });
+
+  it('with no running session, both use the task’s profile pin', async () => {
+    const { body } = await agentKey(null);
+    expect(body).toMatchObject({ credentialReference: 'cc_credentials:cred-pinned' });
+    expect(await proxyUpstream()).toMatchObject({
+      credentialReference: 'cc_credentials:cred-pinned',
+      credentialScope: 'profile',
+    });
+  });
+
+  it('with no project, neither applies a profile pin', async () => {
+    sqlite.exec(`
+      INSERT INTO agent_profiles (id, project_id, user_id, name, agent_type, created_at, updated_at)
+        VALUES ('prof-global', NULL, 'u1', 'Everyday', 'claude-code', '${NOW}', '${NOW}');
+      UPDATE workspaces SET project_id = NULL, agent_profile_hint = 'prof-global' WHERE id = 'w1';
+      UPDATE cc_profile_attachments SET agent_profile_id = 'prof-global' WHERE id = 'pin-1';
+    `);
+
+    const { body } = await agentKey(null);
+    expect(body).toMatchObject({ credentialReference: 'cc_credentials:cred-default' });
+    expect(await proxyUpstream()).toMatchObject({
+      credentialReference: 'cc_credentials:cred-default',
+      credentialScope: 'user',
+    });
+  });
+});
+
 describe('the AI proxy fails closed when the agent type is unknown', () => {
   async function seedOpenAICompatible(id: string, agentType: string): Promise<void> {
     const secret = JSON.stringify({ apiKey: `sk-${id}`, baseUrl: 'https://openai-alt.example/v1' });
@@ -313,8 +356,6 @@ describe('the AI proxy fails closed when the agent type is unknown', () => {
       workspaceId: 'w1',
       projectId: 'p1',
       agentType: null,
-      agentProfileId: null,
-      skillId: null,
       dialect: 'openai-compatible',
     });
   }

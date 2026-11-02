@@ -81,16 +81,20 @@ export function AccountProfilesDialog({
     return map;
   }, [group.accounts, account.id]);
 
-  const [selected, setSelected] = useState<Set<string>>(() => new Set(pinIdByProfile.keys()));
+  // Only the profiles I toggled, keyed to the state I chose. Everything else
+  // follows the current pins, so a refetch while the dialog is open (or pins that
+  // finish loading after it opened) never turns into an unpin I didn't make.
+  const [toggled, setToggled] = useState<ReadonlyMap<string, boolean>>(() => new Map());
   const [query, setQuery] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const changes: ProfilePinChanges = {
-    pin: [...selected].filter((id) => !pinIdByProfile.has(id)),
-    unpin: [...pinIdByProfile]
-      .filter(([profileId]) => !selected.has(profileId))
-      .map(([, pinId]) => pinId),
-  };
+  const isSelected = (profileId: string) => toggled.get(profileId) ?? pinIdByProfile.has(profileId);
+  const changes: ProfilePinChanges = { pin: [], unpin: [] };
+  for (const [profileId, checked] of toggled) {
+    const pinId = pinIdByProfile.get(profileId);
+    if (checked && !pinId) changes.pin.push(profileId);
+    else if (!checked && pinId) changes.unpin.push(pinId);
+  }
   const changed = changes.pin.length + changes.unpin.length > 0;
   const profiles = candidates.data?.profiles ?? [];
   const needle = query.trim().toLowerCase();
@@ -104,12 +108,9 @@ export function AccountProfilesDialog({
   const groups = groupByProject(shown);
 
   const toggle = (profileId: string) =>
-    setSelected((current) => {
-      const next = new Set(current);
-      if (next.has(profileId)) next.delete(profileId);
-      else next.add(profileId);
-      return next;
-    });
+    setToggled((current) =>
+      new Map(current).set(profileId, !(current.get(profileId) ?? pinIdByProfile.has(profileId)))
+    );
 
   const save = async () => {
     setSaving(true);
@@ -180,7 +181,7 @@ export function AccountProfilesDialog({
                     <label className="flex min-h-11 min-w-0 cursor-pointer items-center gap-2.5 px-3 py-2 hover:bg-surface-hover">
                       <input
                         type="checkbox"
-                        checked={selected.has(profile.id)}
+                        checked={isSelected(profile.id)}
                         onChange={() => toggle(profile.id)}
                         className="h-3.5 w-3.5 shrink-0 accent-[var(--sam-color-focus-ring)]"
                       />

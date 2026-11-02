@@ -281,6 +281,14 @@ export async function applyProjectMemberOffboarding(input: {
   const hasBlockers = resourceResults.some((result) => result.blocksRemoval);
   let removedProfilePinCount = 0;
   if (!hasBlockers && input.finalMemberStatus === 'removed') {
+    // Private account choices that only applied to this member's runs here.
+    // Deleted before the membership changes: the delete is idempotent, so a
+    // failure here leaves the member active and the apply safe to retry.
+    removedProfilePinCount = await deleteProjectProfilePins(
+      input.db,
+      input.project.id,
+      input.memberUserId
+    );
     const memberRows = await mutationDb
       .update(schema.projectMembers)
       .set({
@@ -299,12 +307,6 @@ export async function applyProjectMemberOffboarding(input: {
     if (memberRows.length !== 1) {
       throw conflict('stale_plan', 'Project membership changed; preview again');
     }
-    // Private account choices that only applied to this member's runs here.
-    removedProfilePinCount = await deleteProjectProfilePins(
-      input.db,
-      input.project.id,
-      input.memberUserId
-    );
   }
 
   const appliedPlanRows = await mutationDb

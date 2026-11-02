@@ -16,6 +16,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { verifyCallbackToken } from './jwt';
+import type { PreloadedRuntimeRows } from './workspace-runtime-assets';
 
 // =============================================================================
 // Auth: Callback Token Verification + Workspace Resolution
@@ -30,12 +31,11 @@ export interface AIProxyAuthResult {
   agentType?: string | null;
   agentSessionId?: string | null;
   /**
-   * The run's profile and skill, from the running agent session (or the workspace's
-   * profile hint when no session is running). Not yet validated; the proxy passes
-   * them to `resolveProfileCredentialContext`.
+   * The workspace and running-session rows auth loaded, handed to
+   * `resolveSessionProfileCredentialContext` so the proxy picks the run's profile
+   * exactly as the agent-key callback does, without reading them again.
    */
-  agentProfileId?: string | null;
-  skillId?: string | null;
+  runtimeRows: PreloadedRuntimeRows;
   agentCredentialReference?: string | null;
   agentCredentialSource?: 'user' | 'project' | 'platform' | null;
   agentCredentialProvider?: string | null;
@@ -165,8 +165,21 @@ export async function verifyAIProxyAuth(
     trialId,
     agentType,
     agentSessionId: agentSession?.id ?? null,
-    agentProfileId: agentSession ? agentSession.agentProfileId : workspace.agentProfileHint,
-    skillId: agentSession?.skillId ?? null,
+    runtimeRows: {
+      workspace: {
+        id: workspaceId,
+        userId: workspace.userId,
+        projectId: workspace.projectId,
+        agentProfileHint: workspace.agentProfileHint,
+      },
+      agentSession: agentSession
+        ? {
+            id: agentSession.id,
+            profileId: agentSession.agentProfileId,
+            skillId: agentSession.skillId,
+          }
+        : null,
+    },
     agentCredentialReference: agentSession?.agentCredentialReference ?? null,
     agentCredentialSource:
       agentSession?.agentCredentialSource === 'user' ||
