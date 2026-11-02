@@ -93,6 +93,17 @@ as hung applies. `runCompose` now treats compose stderr as the liveness signal
 Full rule, including the tail-retention and cancel-cause traps:
 `apps/api/.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md` §5c.
 
+## Never Replace a Resource Whose Identity Was Recorded
+
+Physical deletion proves ownership of a workspace root by its device and inode, recorded
+when SAM creates the root (`createOwnedWorkspaceRoot`). Any later step that deletes and
+recreates that path gives it a new inode, and deletion then refuses it forever with 409
+"host workspace root ownership is unproven". Bootstrap did this before every fresh clone
+until 2026-11-01. Empty the directory in place instead (`clearWorkspaceDirForClone`), and
+test the real provisioning path through to an accepted deletion
+(`internal/server/workspace_deletion_clone_identity_test.go`). Hold the original directory
+open in such a test, or inode reuse can make a replaced root pass.
+
 ## Model Catalog and Harness Compatibility
 
 When adding models, verify the minimum supported harness **and the SDK bundled
