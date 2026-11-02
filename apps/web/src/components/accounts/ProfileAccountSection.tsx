@@ -46,6 +46,7 @@ export function ProfileAccountSection({
   }
 
   const pinnedId = explanation.pin?.configurationId ?? null;
+  const selectedId = state.selectedConfigurationId;
   const switching = skills.filter(
     (skill) => skill.agentType !== null && skill.agentType !== profile.agentType
   );
@@ -74,7 +75,7 @@ export function ProfileAccountSection({
         <legend className="sr-only">Account for this profile</legend>
         <AccountOption
           name={name}
-          checked={pinnedId === null}
+          checked={selectedId === null}
           label="Use my usual account"
           hint={`Right now: ${outcomeLabel(explanation.usual)}`}
           onSelect={() => void state.choose(null)}
@@ -83,7 +84,7 @@ export function ProfileAccountSection({
           <AccountOption
             key={account.id}
             name={name}
-            checked={pinnedId === account.configurationId}
+            checked={selectedId === account.configurationId}
             label={account.label}
             hint={accountHint(account)}
             // A paused account would stop the run; it stays visible (and selected

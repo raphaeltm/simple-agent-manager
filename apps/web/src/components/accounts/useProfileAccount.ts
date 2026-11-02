@@ -20,6 +20,12 @@ export interface ProfileAccountState {
   isLoading: boolean;
   error: string | null;
   saving: boolean;
+  /**
+   * The configuration shown as chosen (null = my usual account). While a choice
+   * is saving this is the clicked one, so the radio does not snap back until the
+   * refetch lands; a failed save falls back to the saved pin.
+   */
+  selectedConfigurationId: string | null;
   /** Run the profile on `account`, or on my usual account when null. */
   choose: (account: AccountView | null) => Promise<void>;
 }
@@ -30,6 +36,8 @@ export function useProfileAccount(
   const { model, snapshot, profilePinsSettled, isLoading, error } = useAccountsData();
   const actions = useAccountActions();
   const [saving, setSaving] = useState(false);
+  // `undefined` = nothing in flight; `null` = switching to my usual account.
+  const [pendingId, setPendingId] = useState<string | null | undefined>(undefined);
 
   const group = useMemo(
     () => model?.agents.find((candidate) => candidate.provider.id === profile?.agentType) ?? null,
@@ -51,7 +59,10 @@ export function useProfileAccount(
     async (account: AccountView | null) => {
       if (!profileId) return;
       setSaving(true);
+      setPendingId(account?.configurationId ?? null);
+      // Resolves after the accounts queries have been refetched, success or not.
       await actions.setProfileAccount(profileId, account, currentPinId);
+      setPendingId(undefined);
       setSaving(false);
     },
     [actions, profileId, currentPinId]
@@ -63,6 +74,8 @@ export function useProfileAccount(
     isLoading: isLoading || (snapshot !== null && !profilePinsSettled),
     error,
     saving,
+    selectedConfigurationId:
+      pendingId !== undefined ? pendingId : (explanation?.pin?.configurationId ?? null),
     choose,
   };
 }

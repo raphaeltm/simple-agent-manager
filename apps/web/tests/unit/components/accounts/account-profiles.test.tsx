@@ -330,6 +330,64 @@ describe('Profile editor: Account section', () => {
     );
   });
 
+  it('shows the clicked account as chosen while the save is in flight', async () => {
+    let release!: () => void;
+    const created = mocks.createProfilePin.getMockImplementation()!;
+    mocks.createProfilePin.mockImplementation(
+      (input: { configurationId: string; profileId: string }) =>
+        new Promise((resolve) => {
+          release = () => resolve(created(input));
+        })
+    );
+    renderSection();
+
+    const section = await screen.findByTestId('profile-account-section');
+    const usual = within(section).getByRole('radio', { name: /Use my usual account/ });
+    const max = within(section).getByRole('radio', { name: /Claude Max \(personal\)/ });
+    expect(usual).toBeChecked();
+
+    fireEvent.click(max);
+
+    // The save has not returned, yet the choice already shows.
+    await waitFor(() => expect(mocks.createProfilePin).toHaveBeenCalled());
+    expect(max).toBeChecked();
+    expect(usual).not.toBeChecked();
+
+    release();
+    await waitFor(() =>
+      expect(screen.getByTestId('profile-account-outcome')).toHaveTextContent(
+        'Runs Claude Code on Claude Max (personal).'
+      )
+    );
+    expect(within(section).getByRole('radio', { name: /Claude Max \(personal\)/ })).toBeChecked();
+  });
+
+  it('a failed save puts the selection back on the saved choice', async () => {
+    let reject!: (err: Error) => void;
+    mocks.createProfilePin.mockImplementation(
+      () =>
+        new Promise((_, fail) => {
+          reject = fail;
+        })
+    );
+    renderSection();
+
+    const section = await screen.findByTestId('profile-account-section');
+    const max = within(section).getByRole('radio', { name: /Claude Max \(personal\)/ });
+    fireEvent.click(max);
+    await waitFor(() => expect(max).toBeChecked());
+
+    reject(new Error('Account is paused'));
+
+    await waitFor(() =>
+      expect(within(section).getByRole('radio', { name: /Use my usual account/ })).toBeChecked()
+    );
+    expect(
+      within(section).getByRole('radio', { name: /Claude Max \(personal\)/ })
+    ).not.toBeChecked();
+    expect(await screen.findByText('Account is paused')).toBeInTheDocument();
+  });
+
   it('a pin on a paused account stops the run and opens the breakdown', async () => {
     pins = [pinOn(candidate('prof-deep'), 'cfg-paused')];
     renderSection();
