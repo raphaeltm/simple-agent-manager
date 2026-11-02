@@ -92,6 +92,27 @@ test('in-account bootstrap and every reachable local script are pure builds', ()
   assert.ok(seen.has(resolve(root, 'apps/api/container-entrypoints/patch-acp-amp.py')));
 });
 
+// Under pipefail, `cmd | head` fails whenever head exits before cmd finishes
+// writing (SIGPIPE, exit 141). That is a race, so it fails some builds only.
+function assertNoEarlyPipeClose(source, label) {
+  if (!/\bpipefail\b/.test(source)) return;
+  assert.doesNotMatch(source, /\|\s*head\b/, label);
+}
+
+test('reachable pipefail shell scripts never close a pipe early', () => {
+  for (const file of auditBuildGraph(root)) {
+    if (!file.endsWith('.sh')) continue;
+    const source = readFileSync(file, 'utf8').replace(/^\s*#.*$/gm, '');
+    assertNoEarlyPipeClose(source, file);
+  }
+  assert.throws(() =>
+    assertNoEarlyPipeClose('set -euo pipefail\nldd --version | head -n 1\n', 'x')
+  );
+  assert.doesNotThrow(() =>
+    assertNoEarlyPipeClose('set -euo pipefail\nldd --version | sed -n 1p\n', 'x')
+  );
+});
+
 test('workspace artifact build scripts and their lifecycle/nested scripts stay pure', () => {
   for (const directory of [
     '.',
