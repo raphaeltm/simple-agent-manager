@@ -1,9 +1,9 @@
 package bootstrap
 
 import (
+	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 )
 
 // clearWorkspaceDirForClone empties a workspace directory before a fresh clone
@@ -15,7 +15,11 @@ import (
 // returned 409 "host workspace root ownership is unproven" on every attempt.
 //
 // Git clones into an existing empty directory. A symlink or non-directory at
-// the path is still removed outright and never followed.
+// the path is still removed outright and never followed. Entries are removed
+// through an os.Root, so a symlink inside the directory, or the directory being
+// swapped after it was inspected, cannot redirect the removal elsewhere. No
+// mount is expected below a workspace root at clone time: containers receive
+// the root (or a named volume) as their mount, never a host path beneath it.
 func clearWorkspaceDirForClone(dir string) error {
 	info, err := os.Lstat(dir)
 	if os.IsNotExist(err) {
@@ -27,14 +31,30 @@ func clearWorkspaceDirForClone(dir string) error {
 	if !info.IsDir() {
 		return os.RemoveAll(dir)
 	}
-	entries, err := os.ReadDir(dir)
+	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return err
 	}
-	for _, entry := range entries {
-		// RemoveAll removes a symlink entry itself, not its target.
-		if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
-			return fmt.Errorf("remove %s: %w", entry.Name(), err)
+	defer root.Close()
+	opened, err := root.Stat(".")
+	if err != nil {
+		return err
+	}
+	if !os.SameFile(info, opened) {
+		return errors.New("workspace directory changed while clearing it")
+	}
+	handle, err := root.Open(".")
+	if err != nil {
+		return err
+	}
+	names, err := handle.Readdirnames(-1)
+	_ = handle.Close()
+	if err != nil {
+		return err
+	}
+	for _, name := range names {
+		if err := root.RemoveAll(name); err != nil {
+			return fmt.Errorf("remove %s: %w", name, err)
 		}
 	}
 	return nil
