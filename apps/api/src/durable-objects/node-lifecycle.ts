@@ -81,6 +81,10 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     await this.provisioning().start(input);
   }
 
+  async confirmUnassignedWorkspaceDeletion(identity: WorkspaceDeletionIdentity): Promise<boolean> {
+    return this.provisioning().confirmUnassignedDeletion(identity);
+  }
+
   /** Internal D1/ProjectData cleanup only; serialize duplicates before restart is released. */
   async finalizeWorkspaceEviction(identity: WorkspaceEvictionIdentity): Promise<boolean> {
     return this.ctx.blockConcurrencyWhile(() =>

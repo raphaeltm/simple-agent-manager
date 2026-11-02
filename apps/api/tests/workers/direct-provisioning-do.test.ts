@@ -11,10 +11,16 @@ import {
 } from '../../src/durable-objects/node-lifecycle-provisioning';
 import type { Env } from '../../src/env';
 import { nodesRoutes } from '../../src/routes/nodes';
+import { crudRoutes } from '../../src/routes/workspaces/crud';
 import { registerWorkspaceCreateRoute } from '../../src/routes/workspaces/workspace-create';
 import { clearCapacityCatalogCache } from '../../src/services/default-capacity-source-credentials';
 import { encrypt } from '../../src/services/encryption';
-import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
+import { getSession } from '../../src/services/project-data';
+import {
+  attemptWorkspaceDeletion,
+  loadWorkspaceDeletionIdentity,
+} from '../../src/services/workspace-deletion';
+import { seedInstallation, seedNode, seedProject, seedUser } from './helpers/seed-d1';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -75,7 +81,11 @@ async function setup(interrupt: boolean, interruptDispatch = false, directNode =
       idFromName: (name: string) => env.NODE_LIFECYCLE.idFromName(name),
       get: (id: DurableObjectId) => {
         stub = env.NODE_LIFECYCLE.get(id) as DurableObjectStub<NodeLifecycle>;
+        const target = stub;
         return {
+          confirmUnassignedWorkspaceDeletion: (
+            identity: Parameters<NodeLifecycle['confirmUnassignedWorkspaceDeletion']>[0]
+          ) => target.confirmUnassignedWorkspaceDeletion(identity),
           startProvisioning: async (input: Parameters<NodeLifecycle['startProvisioning']>[0]) => {
             await runInDurableObject(stub, async (instance) => {
               Object.assign((instance as unknown as { env: Env }).env, overrides);
@@ -207,8 +217,202 @@ async function setup(interrupt: boolean, interruptDispatch = false, directNode =
     release,
     tick,
     intent,
+    inventory,
+    testEnv,
+    cookie,
   };
 }
+
+async function orphanedDirectCreation() {
+  const f = await setup(true);
+  if ((await f.intent())?.attempts === 0) await f.tick();
+  await vi.waitFor(async () => expect((await f.intent())?.lastError).toMatch(/unresolved/));
+  const intent = (await f.intent())!;
+  await runInDurableObject(f.stub, async (instance, state) => {
+    await state.storage.put(DIRECT_PROVISIONING_KEY, {
+      ...intent,
+      createdAt: Date.now() - 60_000,
+      status: 'unresolved',
+      nextAttemptAt: null,
+    });
+    await state.storage.deleteAlarm();
+    (instance as unknown as { provisioningController: unknown }).provisioningController = undefined;
+  });
+  await env.DATABASE.prepare('DELETE FROM nodes WHERE id=?').bind(intent.input.nodeId).run();
+  await env.DATABASE.prepare("UPDATE workspaces SET status='stopping' WHERE id=?")
+    .bind(f.workspaceId)
+    .run();
+  await env.DATABASE.prepare(
+    `INSERT INTO node_health_events(id,node_id,episode_started_at,event,reason,created_at)
+    VALUES(?,?,?,'deleted_by_owner','owner_requested_node_deletion',?)`
+  )
+    .bind(
+      crypto.randomUUID(),
+      intent.input.nodeId,
+      new Date().toISOString(),
+      new Date().toISOString()
+    )
+    .run();
+  const survivingServer = f.inventory[0];
+  f.inventory.splice(0);
+  const identity = (await loadWorkspaceDeletionIdentity(env.DATABASE, f.workspaceId))!;
+  return { ...f, identity, intentSnapshot: intent, survivingServer };
+}
+
+describe('explicit unassigned workspace deletion after host owner deletion', () => {
+  it.each([true, false])(
+    'authenticated HTTP DELETE confirms only absent inventory: %s',
+    async (absent) => {
+      const f = await orphanedDirectCreation();
+      if (!absent) f.inventory.push(f.survivingServer!);
+      const app = new Hono<{ Bindings: Env }>();
+      app.route('/api/workspaces', crudRoutes);
+      const background: Promise<unknown>[] = [];
+      const response = await app.request(
+        `https://api.test.example.com/api/workspaces/${f.workspaceId}`,
+        {
+          method: 'DELETE',
+          headers: { Cookie: f.cookie },
+        },
+        { ...f.testEnv, NODE_LIFECYCLE: env.NODE_LIFECYCLE },
+        {
+          waitUntil: (promise: Promise<unknown>) => background.push(promise),
+          passThroughOnException() {},
+        } as unknown as ExecutionContext
+      );
+      expect(response.status, await response.clone().text()).toBe(absent ? 200 : 202);
+      expect(await response.json()).toMatchObject({
+        success: true,
+        deletionStatus: absent ? 'confirmed' : 'pending',
+      });
+      await Promise.all(background);
+      const row = await env.DATABASE.prepare(
+        'SELECT status,runtime_deletion_confirmed_at FROM workspaces WHERE id=?'
+      )
+        .bind(f.workspaceId)
+        .first();
+      if (absent) {
+        expect(row).toBeNull();
+        expect(
+          await getSession(f.testEnv, f.identity.projectId!, f.identity.chatSessionId!)
+        ).toMatchObject({ status: 'stopped' });
+      } else expect(row).toEqual({ status: 'stopping', runtime_deletion_confirmed_at: null });
+      expect(f.creates).toHaveLength(1);
+      expect(f.dispatches).toHaveLength(0);
+      expect(vi.mocked(fetch).mock.calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
+    }
+  );
+
+  it('probes the exact account after DO restart and finalizes through the normal deletion service without another create', async () => {
+    const f = await orphanedDirectCreation();
+    const result = await attemptWorkspaceDeletion({
+      env: f.testEnv,
+      expected: f.identity,
+      attempt: 1,
+      source: 'explicit',
+      mode: 'explicit',
+    });
+    expect(result).toMatchObject({ status: 'confirmed', proof: 'node_runtime_terminated' });
+    expect(
+      await env.DATABASE.prepare('SELECT status,runtime_deletion_proof FROM workspaces WHERE id=?')
+        .bind(f.workspaceId)
+        .first()
+    ).toEqual({ status: 'deleted', runtime_deletion_proof: 'node_runtime_terminated' });
+    const replay = await attemptWorkspaceDeletion({
+      env: f.testEnv,
+      expected: f.identity,
+      attempt: 2,
+      source: 'explicit',
+      mode: 'explicit',
+    });
+    expect(replay.status).toBe('confirmed');
+    expect(f.creates).toHaveLength(1);
+    expect(f.dispatches).toHaveLength(0);
+    const calls = vi.mocked(fetch).mock.calls;
+    expect(calls.some(([, init]) => init?.method === 'DELETE')).toBe(false);
+    const inventoryCall = calls.find(([url]) => String(url).includes('/servers?'));
+    expect(String(inventoryCall?.[0])).not.toContain('incarnation');
+  });
+
+  it.each([
+    'runtime',
+    'credential',
+    'owner',
+    'generation',
+    'audit',
+    'intent',
+    'pending-intent',
+    'provider-failure',
+    'malformed-inventory',
+    'credential-during-inventory',
+    'generation-during-inventory',
+    'node-during-inventory',
+  ])('keeps deletion pending when proof changes: %s', async (failure) => {
+    const f = await orphanedDirectCreation();
+    if (failure === 'runtime') f.inventory.push(f.survivingServer!);
+    if (failure === 'credential')
+      await env.DATABASE.prepare(
+        "UPDATE credentials SET updated_at='2099-01-01T00:00:00Z' WHERE user_id=?"
+      )
+        .bind(f.userId)
+        .run();
+    if (failure === 'owner') f.identity.userId = 'another-user';
+    if (failure === 'generation') f.identity.workspaceGeneration = 'later-generation';
+    if (failure === 'audit')
+      await env.DATABASE.prepare('DELETE FROM node_health_events WHERE node_id=?')
+        .bind(f.intentSnapshot.input.nodeId)
+        .run();
+    if (failure === 'intent')
+      await runInDurableObject(f.stub, async (_instance, state) => {
+        const intent =
+          (await state.storage.get<DirectProvisioningIntent>(DIRECT_PROVISIONING_KEY))!;
+        await state.storage.put(DIRECT_PROVISIONING_KEY, { ...intent, allocationComplete: true });
+      });
+    if (failure === 'pending-intent')
+      await runInDurableObject(f.stub, async (_instance, state) => {
+        const intent =
+          (await state.storage.get<DirectProvisioningIntent>(DIRECT_PROVISIONING_KEY))!;
+        await state.storage.put(DIRECT_PROVISIONING_KEY, { ...intent, status: 'pending' });
+      });
+    if (failure.includes('inventory') || failure === 'provider-failure') {
+      const original = fetch;
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+          if (!String(url).includes('/servers?')) return original(url, init);
+          if (failure === 'provider-failure')
+            return Response.json({ error: 'unavailable' }, { status: 503 });
+          if (failure === 'malformed-inventory') return Response.json({ servers: null });
+          const response = await original(url, init);
+          if (failure === 'credential-during-inventory')
+            await env.DATABASE.prepare(
+              "UPDATE credentials SET updated_at='2099-01-01T00:00:00Z' WHERE user_id=?"
+            )
+              .bind(f.userId)
+              .run();
+          if (failure === 'generation-during-inventory')
+            await env.DATABASE.prepare(
+              "UPDATE workspaces SET eviction_generation='changed' WHERE id=?"
+            )
+              .bind(f.workspaceId)
+              .run();
+          if (failure === 'node-during-inventory')
+            await seedNode(f.intentSnapshot.input.nodeId, f.userId);
+          return response;
+        })
+      );
+    }
+    await expect(f.stub.confirmUnassignedWorkspaceDeletion(f.identity)).resolves.toBe(false);
+    expect(
+      await env.DATABASE.prepare(
+        'SELECT status,runtime_deletion_confirmed_at FROM workspaces WHERE id=?'
+      )
+        .bind(f.workspaceId)
+        .first()
+    ).toEqual({ status: 'stopping', runtime_deletion_confirmed_at: null });
+    expect(f.creates).toHaveLength(1);
+  });
+});
 
 describe('durable direct workspace allocation', () => {
   it('finishes native attachment, priced usage and dispatch after the HTTP request background work has ended', async () => {

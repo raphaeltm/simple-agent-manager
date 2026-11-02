@@ -6,6 +6,7 @@ import {
 export { workspaceDeletionIdentityLogContext } from './workspace-deletion-identity';
 import { DEFAULT_WORKSPACE_DELETION_DIAGNOSTIC_MAX_LENGTH } from '@simple-agent-manager/shared';
 
+import type { NodeLifecycle } from '../durable-objects/node-lifecycle';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { deleteWorkspaceOnNode, NodeAgentHttpError } from './node-agent';
@@ -599,6 +600,12 @@ async function requestWorkspaceDeletion(
 ): Promise<WorkspaceDeletionProof | Extract<WorkspaceDeletionOutcome, { status: 'retry' }>> {
   const { env, expected, attempt, requestTimeoutMs } = options;
   if (!expected.nodeId) {
+    if (options.mode === 'explicit') {
+      const stub = env.NODE_LIFECYCLE.get(
+        env.NODE_LIFECYCLE.idFromName(`workspace-create:${expected.workspaceId}`)
+      ) as DurableObjectStub<NodeLifecycle>;
+      if (await stub.confirmUnassignedWorkspaceDeletion(expected)) return 'node_runtime_terminated';
+    }
     const diagnostic = boundedDiagnostic(
       env,
       `Runtime deletion unconfirmed after attempt ${attempt} (node assignment unavailable)`
