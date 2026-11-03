@@ -115,7 +115,10 @@ there too. Open the chat and look for one of these:
   [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you).
 - **A question the agent asked with its `request_human_input` tool.** It shows as that tool's step
   in the chat, and as a notification — with answer buttons if the agent offered choices. Reply in
-  the composer, or pick an answer in the notification. If nobody answers for about two hours (longer
+  the composer, or answer from the notification, where **Read question & context** shows the whole
+  question and the messages before it (see
+  [Read and answer an agent's question](/docs/guides/notifications/#read-and-answer-an-agents-question)).
+  If nobody answers for about two hours (longer
   if the notification didn't reach you), the task fails but keeps its workspace, so you can still
   reply to carry on. See [Notifications](/docs/guides/notifications/#request_human_input).
 - **SAM's notice that it paused check-ins.** See
@@ -286,15 +289,15 @@ If a VM wake is waiting, the strip says why when SAM knows (`attachWakeState` in
   <img src="/images/docs/chat-wake-waiting.png" alt="A sleeping chat titled Add tax columns to receipts. A strip with a spinner across the top reads: Your cloud provider has no capacity right now. Retrying... Next try at 02:34 PM. The last message, a follow-up question from the user, waits below, and the message box reads Waking the agent, your message will be delivered." loading="lazy" />
 </picture>
 
-| The strip says                                                         | What is happening                                                                     | What you can do                                                                                                               |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
-| **Waiting for the previous workspace to finish shutting down...**      | SAM is still deleting the machine the chat slept on. The wake starts once it is gone. | Wait. If it lasts, check that node on the **Nodes** page (see [A node won't go away](#a-node-wont-go-away)).                  |
-| **Your cloud provider has no capacity right now. Retrying...**         | Your provider is out of that machine type in that location.                           | Wait, or allow more machine types or locations in your [compute pool](/docs/guides/compute-pools/).                           |
-| **Your cloud account's server limit is reached. Retrying...**          | Your Hetzner (or other provider) account is at its server or vCPU limit.              | Delete servers you no longer need in the provider's console or on the **Nodes** page, or ask the provider to raise the limit. |
-| **Your SAM server limit is reached. Waiting for a free slot...**       | You already have as many machines as SAM allows you (10 by default).                  | Delete machines you no longer need on the **Nodes** page.                                                                     |
-| **This project's server limit is reached. Waiting for a free slot...** | Your [compute pool](/docs/guides/compute-pools/) allows no more machines.             | Delete an unused machine, or raise the pool's machine limit.                                                                  |
-| **Waiting for a new server to finish starting...**                     | SAM starts one new machine at a time for your account, and one is already starting.   | Wait; it usually takes a few minutes.                                                                                         |
-| **Waiting for a server that is still setting up...**                   | A machine that can take this chat is busy setting up another workspace.               | Wait.                                                                                                                         |
+| The strip says                                                         | What is happening                                                                                 | What you can do                                                                                                               |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| **Waiting for the previous workspace to finish shutting down...**      | SAM is still deleting the machine the chat slept on. The wake starts once it is gone.             | Wait. If it lasts, check that node on the **Nodes** page (see [A node won't go away](#a-node-wont-go-away)).                  |
+| **Your cloud provider has no capacity right now. Retrying...**         | Your provider is out of that machine type in that location.                                       | Wait, or allow more machine types or locations in your [compute pool](/docs/guides/compute-pools/).                           |
+| **Your cloud account's server limit is reached. Retrying...**          | Your Hetzner (or other provider) account is at its server or vCPU limit.                          | Delete servers you no longer need in the provider's console or on the **Nodes** page, or ask the provider to raise the limit. |
+| **Your SAM server limit is reached. Waiting for a free slot...**       | You already have as many machines as SAM allows you (10 by default).                              | Delete machines you no longer need on the **Nodes** page.                                                                     |
+| **This project's server limit is reached. Waiting for a free slot...** | Your [compute pool](/docs/guides/compute-pools/) allows no more machines.                         | Delete an unused machine, or raise the pool's machine limit.                                                                  |
+| **Waiting for a new server to finish starting...**                     | SAM starts one new machine at a time for your account on each cloud, and one is already starting. | Wait; it usually takes a few minutes.                                                                                         |
+| **Waiting for a server that is still setting up...**                   | A machine that can take this chat is busy setting up another workspace.                           | Wait.                                                                                                                         |
 
 When SAM has scheduled its next attempt, the strip adds **Next try at** and the time. If it shows
 only **Waiting for server capacity...**, SAM has not recorded a reason yet. SAM keeps trying; if

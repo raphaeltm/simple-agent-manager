@@ -48,13 +48,49 @@ Agents/runtime:
 - #2477 Native Cloudflare Worker tracing (self-hosters?).
 - #2471 Webhook work persisted before acknowledgement (triggers doc updated in-PR).
 
-## Research
+## Research (local agents; reports in `.tmp/docs-update/research-*.md`)
 
-_(reports in `.tmp/docs-update/research-*.md`)_
+- **Accounts** (#2473–#2490): agents.md mostly updated in-PR, but wrong: "Advanced tab gone"
+  (recent changes), "Project settings → Profiles", raw records "at the bottom of the accounts
+  section", Replace "in its place". Missing: task-first section, pausing/resuming, card actions
+  for cloud vs agent, paused pin → Agent connection missing, any resolved-account change blocks a
+  provider-limit wait, `POST /api/cc/attachments/default`, Accounts concept, collaboration "shared
+  key" contradiction, offboarding removes profile pins. No accounts screenshots; the guided
+  sign-in docs spec targeted UI removed by #2474.
+- **Infra** (#2450–#2496): wake wait reasons and manual node removal documented in-PR but buried;
+  "Cleanup blocked since…" codes unexplained; 30-minute retirement and its chat outcome
+  undocumented; no escalation for "Pause didn't finish"; attention GET and `include=recent`
+  missing from the API reference; self-hosters not told where the ownership alert shows; no
+  screenshots for the question reader, wake strip or failed pause. Not user-visible: #2462/63/67/
+  69/92/93/96.
 
 ## Fix checklist
 
-_(populated after research)_
+Accounts: [x] task-first "Common account tasks" · [x] card actions table (agent-only marked) ·
+[x] pausing an account · [x] Profiles path · [x] Advanced location (agents.md, changelog) ·
+[x] Replace semantics · [x] project picker steps + "Connect a new account" · [x] guided sign-in
+labels + failure table · [x] troubleshooting paused pin + credential-changed causes · [x] API make
+default · [x] concepts Accounts · [x] collaboration lever + roles row + offboarding · [x] cloud
+default change (creating-workspaces) · [x] screenshots ×6 (agents desktop/phone, make default,
+project picker desktop/phone, profile account, guided sign-in recapture)
+
+Infra: [x] notifications task section + screenshots · [x] API attention GET, include=recent ·
+[x] troubleshooting index, wake actions + screenshot, "A node won't go away" + reason table +
+retirement outcome, manual removal steps · [x] app-deployments "If pausing doesn't finish" +
+screenshots · [x] creating-workspaces removing a machine · [x] compute-pools disk/CPU row ·
+[x] admin-settings ownership alert procedure · [x] Recent Product Changes 27 Oct – 3 Nov
+[-] node page screenshot: skipped, the badge reads "Unknown" (bug in idea below)
+
+Specs: new docs-screenshots-{accounts,notifications,wake-wait,deployments}; Deployments API mock
+moved to `deployments-ui-mocks.ts` (audit spec 44/44 green); broken tests removed from
+docs-screenshots.spec.ts.
+
+## Product issues filed
+
+- Idea `01M6FVR8CQJ56Z5EC6MMG74QAV`: Unknown badge for deleting nodes; manual-removal button on
+  SAM-capacity nodes; no admin path for platform-account nodes; raw cleanup codes; paused hint
+  points to Settings → Agents; Infrastructure footer advertises Use in projects…; connect sheet
+  "moves to Unattached" over-promises.
 
 ## Review log
 
