@@ -78,6 +78,21 @@ The API side is unchanged: its next retry (1 min) now finds the deletion finaliz
 - [x] File backlog task for the false `container_oom` classification (exit 137 from
       `docker rm -f`)
 
+- [x] Process fix: `.claude/rules/81-work-bounds-must-state-throughput.md` (state throughput and worst-case
+      time at the outer probable limit; deadline-bound must-finish work; test past every count)
+
+## Why It Was Not Caught
+
+- #2463's PR listed "removes at most 512 host entries per operation" as a cost-safety property. Nobody
+  computed 512/min against a 10k-entry repository.
+- Unit tests used 4-file directories. Staging used a tiny fixture repository, so deletion finished in
+  one attempt and both cycles passed.
+- Lifecycle timings are log-only (`recordLifecycleTimings`). Deletion failures log at warn, which is
+  not persisted to `platform_errors`. `updated_at` is rewritten on every retry, and the first persisted
+  signal is the 24h dead-letter. Production ran ~31-minute stops for six days with no automated signal.
+- Follow-up (separate PRs): a lifecycle state-age watchdog feeding the incident pipeline, stored
+  lifecycle durations with a daily regression check, and nightly limit tests.
+
 ## Acceptance Criteria
 
 - [ ] A workspace with more than 512 entries is physically deleted in a single attempt
