@@ -663,7 +663,7 @@ anything at your provider (`recordManualNodeDeletion` in
 `apps/api/src/services/node-manual-deletion.ts`). For a deployment node this affects every
 environment it hosts.
 
-It isn't offered for machines you enrolled yourself (use **Delete** for those). On a machine that runs on SAM's own cloud account, SAM refuses
+**I already deleted this server** isn't offered for machines you enrolled yourself (use **Delete** for those). On a machine that runs on SAM's own cloud account, SAM refuses
 with **This server runs on SAM-managed capacity; contact an operator**, so ask your administrator.
 
 ## The session has ended
