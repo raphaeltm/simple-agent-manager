@@ -516,6 +516,23 @@ describe('the superadmin decision route', () => {
     expect(edges.acceptPromptDelivery).toHaveBeenCalledTimes(1);
   });
 
+  it('a decision cannot re-open an executed approval to run it again', async () => {
+    const approval = await request('delete_node', NODE_A);
+    await decide(approval.id, 'approve');
+    expect((await execute(approval.id, 'delete_node', NODE_A)).error).toBeUndefined();
+
+    // The executed row is still inside its execution window, so only the pending-status
+    // conjunct of the decision CAS stops a second approval from re-arming it.
+    const reopened = await decide(approval.id, 'approve');
+
+    expect(reopened.status).toBe(409);
+    expect(row(approval.id).status).toBe('executed');
+    expect((await execute(approval.id, 'delete_node', NODE_A)).error?.message).toContain(
+      'already executed'
+    );
+    expect(edges.executeAction).toHaveBeenCalledTimes(1);
+  });
+
   it('cannot approve an expired request', async () => {
     const approval = await request('delete_node', NODE_A);
     main
