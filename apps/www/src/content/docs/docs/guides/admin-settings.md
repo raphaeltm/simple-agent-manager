@@ -379,8 +379,8 @@ debugger tools that let its agents look across every user's nodes, workspaces an
 | `operations.auditRetentionDays` | 90      | 1–3,650                                     | Days each debugger tool audit record is kept before the daily 03:00 UTC cleanup deletes it |
 
 `ops_get_access_status` reports this setting, the capabilities a task has, and why any are
-refused. The read tools below ship today; approved actions arrive in a later release, and each of
-them uses the gate below. What each value allows:
+refused. The read tools and the [approved actions](#approved-actions) below all use the gate
+below. What each value allows:
 
 - `off`: none. This is the default on new and updated installations.
 - `read`: the read-only tools below.
@@ -424,6 +424,8 @@ is told never to follow instructions found in it.
 | `ops_node_system_info`, `ops_node_events`, `ops_node_containers` | Live system info, agent events and containers from a running node                                                                                                                                          |
 | `ops_workspace_agent_sessions`                                   | Live agent sessions on a workspace                                                                                                                                                                         |
 | `ops_capture_debug_package`                                      | Saves a node's full debug package into the Operations project's library (see below)                                                                                                                        |
+| `ops_why_is_node_alive`                                          | Why a node still exists: its active workspaces, warm/claim state, the last keep/kill decisions and a plain verdict                                                                                         |
+| `ops_get_node_log_capture`                                       | One black box log capture (see below), filtered on the server with `source` and `contains`                                                                                                                 |
 
 These tools reach a node through the same path as a node owner's own **Logs** and **System info**
 views. When the Operations project's agent starts a task, its instructions include a short
@@ -472,6 +474,72 @@ attempts count).
 | `operations.opsWorkerLogDefaultWindowMinutes` | 60         | 1–1,440       | Minutes of Worker logs `ops_query_worker_logs` covers when no start time is given                                                                                                                               |
 | `operations.opsListMaxRows`                   | 100        | 1–500         | Most nodes, errors or log lines one list returns                                                                                                                                                                |
 | `operations.opsTextFieldMaxLength`            | 2,000      | 100–20,000    | Characters of one free-text field (an error message, for example) a tool returns                                                                                                                                |
+
+### Black box recorder, decision log and step traces
+
+SAM keeps three records that outlive the node or session they describe:
+
+- **Node decision log.** The node lifecycle, the cleanup sweep and the warm handoff each record one
+  short row per keep or kill decision (kept active, marked warm, destroy attempted, skipped and
+  why). `ops_why_is_node_alive` reads it. Heartbeats only show that a node is reachable, never that
+  it is idle.
+- **Black box log captures.** Before SAM tears a node down, and when a node turns unhealthy, it
+  saves the tail of the VM agent, systemd and cloud-init logs, gzipped, in R2. Teardown captures
+  run only when the node sent a recent heartbeat, and a capture never delays teardown past its
+  timeout. `ops_get_node` lists a node's captures and `ops_get_node_log_capture` reads one.
+  Captures are raw logs, like debug packages.
+- **Sleep and wake step traces.** For each sleep or wake, the VM agent reports which steps ran, how
+  long each took, which one failed and the end of its error output (secrets are redacted). They
+  appear in `ops_get_session_story` and `ops_timeline`. Older VM agents report timings only.
+
+All three appear in `ops_timeline`. A daily 03:00 UTC cleanup deletes them after their retention
+period.
+
+### Approved actions
+
+With the setting at `read_ask` or `read_auto_safe`, Operations agents can ask to act:
+
+| Action               | Acts on      | `read_ask`     | `read_auto_safe` |
+| -------------------- | ------------ | -------------- | ---------------- |
+| `retry_snapshot`     | chat session | needs approval | runs at once     |
+| `rerun_node_cleanup` | node         | needs approval | runs at once     |
+| `sleep_session`      | chat session | needs approval | needs approval   |
+| `delete_workspace`   | workspace    | needs approval | needs approval   |
+| `delete_node`        | node         | needs approval | needs approval   |
+| `restart_vm_agent`   | node         | needs approval | needs approval   |
+| `cancel_stuck_task`  | task         | needs approval | needs approval   |
+
+1. The agent calls `ops_request_action` with the action, the target ID, a reason and a short
+   evidence summary. SAM saves an approval record and, when approval is needed, sends the task's
+   owner an **Approval Needed** notification.
+2. Open it, or go to **Admin → Approvals**, and tap **Approve** or **Deny**. Any active superadmin
+   can decide. The decision reaches the agent's chat as a new message, waking it if it is asleep.
+3. The agent calls `ops_execute_action`. SAM checks the record is approved, not expired, for the
+   same action and target, and was requested by that task (or the same conversation after it woke
+   from sleep). It marks the record executed before running it, so one approval runs once.
+
+Approval is the server record only. An agent cannot approve itself by writing in chat or by
+quoting a log line, and `request_human_input` answers are never treated as approval. Each action
+runs through the same code as the matching button in the app (for example, deleting a node uses
+the same provider teardown as **Delete Node**). The result is saved on the record and shown on
+**Admin → Approvals**. Requests and approvals expire after `operations.actionApprovalTtlMs`; ask
+again once one has expired.
+
+### Telemetry and approval settings
+
+| Setting                                         | Default   | Range           | What it controls                                                           |
+| ----------------------------------------------- | --------- | --------------- | -------------------------------------------------------------------------- |
+| `operations.nodeDecisionLogRetentionDays`       | 14        | 1–365           | Days node keep/kill decisions are kept                                     |
+| `operations.nodeDecisionDedupeWindowMs`         | 1,800,000 | 1 minute–1 day  | How long before the same repeated cleanup-sweep decision is recorded again |
+| `operations.nodeLogCaptureRetentionDays`        | 7         | 1–90            | Days black box log captures are kept                                       |
+| `operations.nodeLogCaptureTimeoutMs`            | 5,000     | 500–30,000      | Longest a capture may add before node teardown goes ahead                  |
+| `operations.nodeLogCaptureLinesPerSource`       | 300       | 10–1,000        | Log lines captured from each of the VM agent, systemd and cloud-init       |
+| `operations.nodeLogCaptureMaxBytes`             | 1,000,000 | 10 KB–10 MB     | Largest uncompressed capture stored                                        |
+| `operations.nodeLogCaptureHeartbeatFreshnessMs` | 600,000   | 1 minute–1 day  | How recent a node's heartbeat must be for teardown to try a capture        |
+| `operations.snapshotTracesPerSession`           | 10        | 1–100           | Sleep/wake step traces kept per chat session                               |
+| `operations.snapshotTraceRetentionDays`         | 30        | 1–365           | Days step traces are kept                                                  |
+| `operations.actionApprovalTtlMs`                | 3,600,000 | 1 minute–7 days | How long a request waits for a decision, and an approval then stays usable |
+| `operations.actionApprovalRetentionDays`        | 90        | 1–365           | Days decided, expired and executed approval records are kept               |
 
 ## If the database can't be read
 
