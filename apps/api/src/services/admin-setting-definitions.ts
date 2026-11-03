@@ -1,6 +1,5 @@
 import type { Env } from '../env';
 import { type AgentEmailSettingName } from './agent-email/setting-definitions';
-import { type FleetOpsSettingName } from './fleet-ops/settings-definitions';
 import { type AgentModelSettingKey } from './agent-models/settings-definition';
 import { type ConnectorReadSettingName } from './connector-read-settings-definition';
 import {
@@ -8,6 +7,7 @@ import {
   type ConnectorSettingKey,
   validateConnectorSetting,
 } from './connector-settings-definition';
+import { type FleetOpsSettingName } from './fleet-ops/settings-definitions';
 import { type LifecycleLatencySettingKey } from './lifecycle-latency/defaults';
 import { type WORKFLOW_DEFAULTS } from './workflow-defaults';
 
