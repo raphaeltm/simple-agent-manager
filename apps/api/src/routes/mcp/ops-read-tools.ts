@@ -23,7 +23,7 @@ import { getSessionStory } from '../../services/fleet-ops/session-story';
 import { buildTimeline } from '../../services/fleet-ops/timeline';
 import { operatorNodeAccess } from '../../services/node-diagnostics-access';
 import { getLogQueryRateLimit, queryErrors } from '../../services/observability';
-import { queryWorkerLogs,WORKER_LOG_LEVELS } from '../../services/worker-log-query';
+import { queryWorkerLogs, WORKER_LOG_LEVELS } from '../../services/worker-log-query';
 import type { JsonRpcResponse, McpTokenData } from './_helpers';
 import {
   OpsToolInputError,

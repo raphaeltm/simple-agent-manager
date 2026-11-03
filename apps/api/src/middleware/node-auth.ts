@@ -33,12 +33,7 @@ export async function requireNodeScopedWorkspaceOwnership(
   const result = await db
     .select()
     .from(workspaces)
-    .where(
-      and(
-        eq(workspaces.id, workspaceId),
-        eq(workspaces.userId, userId)
-      )
-    )
+    .where(and(eq(workspaces.id, workspaceId), eq(workspaces.userId, userId)))
     .limit(1);
 
   const workspace = result[0];
