@@ -33,7 +33,6 @@ import {
   DEFAULT_NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS,
   DEFAULT_NODE_WARM_TIMEOUT_MS,
   DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS,
-  isUserOwnedNodeClass,
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
 
@@ -59,6 +58,7 @@ import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from '../services/workspace-r
 import {
   hasActiveWorkspace,
   hasRecentPlacementClaim,
+  isUserOwnedLifecycleNode,
   runNodeLifecycleTransition,
 } from './node-lifecycle-occupancy';
 import { NodeLifecycleProvisioning } from './node-lifecycle-provisioning';
@@ -79,6 +79,10 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
   }
   async startProvisioning(input: DirectProvisioningInput): Promise<void> {
     await this.provisioning().start(input);
+  }
+
+  async confirmUnassignedWorkspaceDeletion(identity: WorkspaceDeletionIdentity): Promise<boolean> {
+    return this.provisioning().confirmUnassignedDeletion(identity);
   }
 
   /** Internal D1/ProjectData cleanup only; serialize duplicates before restart is released. */
@@ -706,24 +710,8 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     await this.recalculateAlarm(null);
   }
 
-  /**
-   * True if the node is a user-owned (BYO) machine. On lookup failure returns false (treat as
-   * managed) — the common case is a managed node, and the node-cleanup cron guards are the teardown
-   * backstop, so failing to "managed" cannot destroy a BYO node.
-   */
   private async isUserOwnedNode(nodeId: string): Promise<boolean> {
-    try {
-      const row = await this.env.DATABASE.prepare('SELECT node_class FROM nodes WHERE id = ?')
-        .bind(nodeId)
-        .first<{ node_class: string }>();
-      return isUserOwnedNodeClass(row?.node_class);
-    } catch (err) {
-      log.error('node_lifecycle.node_class_lookup_failed', {
-        nodeId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-      return false;
-    }
+    return isUserOwnedLifecycleNode(this.env, nodeId);
   }
 
   private getWarmTimeoutMs(): number {

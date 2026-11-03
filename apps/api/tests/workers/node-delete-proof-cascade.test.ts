@@ -30,7 +30,8 @@ async function scenario(
   name: string,
   references: number,
   replaceBeforeDelete = false,
-  beforeDelete?: (nodeId: string, projectId: string) => Promise<void>
+  beforeDelete?: (nodeId: string, projectId: string) => Promise<void>,
+  changeBeforeAudit?: 'incarnation' | 'proof'
 ) {
   const nodeId = `node-delete-proof-${name}`;
   const projectId = `node-delete-proof-project-${name}`;
@@ -52,6 +53,28 @@ async function scenario(
   const database = {
     prepare(query: string) {
       const statement = env.DATABASE.prepare(query);
+      if (
+        changeBeforeAudit &&
+        /INSERT\s+(?:OR\s+IGNORE\s+)?INTO\s+node_health_events/i.test(query)
+      ) {
+        return {
+          bind(...values: unknown[]) {
+            const bound = statement.bind(...values);
+            return {
+              async run() {
+                await env.DATABASE.prepare(
+                  changeBeforeAudit === 'incarnation'
+                    ? "UPDATE nodes SET runtime_incarnation_id = 'audit-replacement' WHERE id = ?"
+                    : 'UPDATE nodes SET runtime_termination_confirmed_at = NULL WHERE id = ?'
+                )
+                  .bind(nodeId)
+                  .run();
+                return bound.run();
+              },
+            };
+          },
+        } as D1PreparedStatement;
+      }
       if (!query.startsWith('delete from "nodes"')) return statement;
       return {
         bind(...values: unknown[]) {
@@ -109,6 +132,120 @@ async function scenario(
 }
 
 describe('managed node DELETE with real D1 proof and task foreign-key cascades', () => {
+  it.each([undefined, 'incarnation', 'proof'] as const)(
+    'reuses an existing owner audit without bypassing the current proof fence: %s',
+    async (changed) => {
+      const createdAt = '2026-01-01T00:00:00.000Z';
+      const { response, nodeId } = await scenario(
+        `audit-existing-${changed ?? 'same-proof'}`,
+        1,
+        false,
+        async (id) => {
+          await env.DATABASE.prepare(
+            `INSERT INTO node_health_events
+             (id,node_id,episode_started_at,event,reason,created_at)
+             SELECT ?,id,COALESCE(last_heartbeat_at,created_at),
+               'deleted_by_owner','owner_requested_node_deletion',?
+             FROM nodes WHERE id=?`
+          )
+            .bind(`${id}-existing-audit`, createdAt, id)
+            .run();
+        },
+        changed
+      );
+      expect(response.status, await response.clone().text()).toBe(changed ? 409 : 200);
+      expect(
+        await env.DATABASE.prepare('SELECT id FROM nodes WHERE id=?').bind(nodeId).first()
+      ).toEqual(changed ? { id: nodeId } : null);
+      expect(
+        await env.DATABASE.prepare('SELECT auto_provisioned_node_id FROM tasks WHERE id=?')
+          .bind(`${nodeId}-task-0`)
+          .first()
+      ).toEqual({ auto_provisioned_node_id: changed ? nodeId : null });
+      expect(
+        await env.DATABASE.prepare('SELECT id,created_at FROM node_health_events WHERE node_id=?')
+          .bind(nodeId)
+          .all()
+      ).toMatchObject({
+        results: [{ id: `${nodeId}-existing-audit`, created_at: createdAt }],
+      });
+    }
+  );
+
+  it('retains the node when durable owner audit fails and completes the same DELETE on retry', async () => {
+    let failure: Awaited<ReturnType<typeof scenario>>;
+    try {
+      failure = await scenario('audit-failure', 1, false, async (nodeId) => {
+        await env.DATABASE.prepare(
+          `CREATE TRIGGER fail_owner_deletion_audit
+          BEFORE INSERT ON node_health_events
+          WHEN NEW.node_id = '${nodeId}' AND NEW.event = 'deleted_by_owner'
+          BEGIN SELECT RAISE(ABORT, 'owner deletion audit write failed'); END`
+        ).run();
+      });
+      expect(failure.response.status, await failure.response.clone().text()).toBe(500);
+      expect(
+        await env.DATABASE.prepare('SELECT id FROM nodes WHERE id = ?').bind(failure.nodeId).first()
+      ).toEqual({ id: failure.nodeId });
+      expect(
+        await env.DATABASE.prepare('SELECT auto_provisioned_node_id FROM tasks WHERE id = ?')
+          .bind(`${failure.nodeId}-task-0`)
+          .first()
+      ).toEqual({ auto_provisioned_node_id: failure.nodeId });
+      expect(
+        await env.DATABASE.prepare('SELECT id FROM node_health_events WHERE node_id = ?')
+          .bind(failure.nodeId)
+          .first()
+      ).toBeNull();
+    } finally {
+      await env.DATABASE.exec('DROP TRIGGER IF EXISTS fail_owner_deletion_audit');
+    }
+    const retry = await failure.app.request(
+      `/nodes/${failure.nodeId}`,
+      { method: 'DELETE' },
+      env as unknown as Env
+    );
+    expect(retry.status, await retry.clone().text()).toBe(200);
+    expect(
+      await env.DATABASE.prepare('SELECT id FROM nodes WHERE id = ?').bind(failure.nodeId).first()
+    ).toBeNull();
+    expect(
+      await env.DATABASE.prepare('SELECT event, reason FROM node_health_events WHERE node_id = ?')
+        .bind(failure.nodeId)
+        .all()
+    ).toMatchObject({
+      results: [{ event: 'deleted_by_owner', reason: 'owner_requested_node_deletion' }],
+    });
+    expect(
+      await env.DATABASE.prepare('SELECT auto_provisioned_node_id FROM tasks WHERE id = ?')
+        .bind(`${failure.nodeId}-task-0`)
+        .first()
+    ).toEqual({ auto_provisioned_node_id: null });
+  });
+
+  it.each(['incarnation', 'proof'] as const)(
+    'does not persist strict owner audit when %s changes at its write boundary',
+    async (changed) => {
+      const { response, nodeId } = await scenario(`audit-${changed}`, 1, false, undefined, changed);
+      expect(response.status, await response.clone().text()).toBe(409);
+      expect(
+        await env.DATABASE.prepare('SELECT id FROM nodes WHERE id = ?').bind(nodeId).first()
+      ).toEqual({ id: nodeId });
+      expect(
+        await env.DATABASE.prepare('SELECT auto_provisioned_node_id FROM tasks WHERE id = ?')
+          .bind(`${nodeId}-task-0`)
+          .first()
+      ).toEqual({ auto_provisioned_node_id: nodeId });
+      expect(
+        await env.DATABASE.prepare(
+          "SELECT id FROM node_health_events WHERE node_id = ? AND reason = 'owner_requested_node_deletion'"
+        )
+          .bind(nodeId)
+          .first()
+      ).toBeNull();
+    }
+  );
+
   it.each([
     { snapshotStatus: 'available', nodeClass: 'managed', variant: 'available' },
     { snapshotStatus: 'degraded', nodeClass: 'managed', variant: 'degraded' },

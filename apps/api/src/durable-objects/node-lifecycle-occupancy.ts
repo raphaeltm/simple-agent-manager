@@ -1,11 +1,35 @@
 /** Fail-closed occupancy checks used inside NodeLifecycle's serialized idle transition. */
-import { DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS,
+  isUserOwnedNodeClass,
+} from '@simple-agent-manager/shared';
 
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { boundedWarmPlacementClaimGuardSql } from '../services/warm-placement-claims';
 import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from '../services/workspace-resource-capacity';
 import type { NodeLifecycleEnv } from './node-lifecycle-types';
+
+/** On lookup failure retain the existing managed-node treatment; the cleanup cron is
+ * the backstop and cannot destroy a user-owned node through this advisory result.
+ */
+export async function isUserOwnedLifecycleNode(
+  env: NodeLifecycleEnv,
+  nodeId: string
+): Promise<boolean> {
+  try {
+    const row = await env.DATABASE.prepare('SELECT node_class FROM nodes WHERE id = ?')
+      .bind(nodeId)
+      .first<{ node_class: string }>();
+    return isUserOwnedNodeClass(row?.node_class);
+  } catch (err) {
+    log.error('node_lifecycle.node_class_lookup_failed', {
+      nodeId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return false;
+  }
+}
 
 /** A live admission owns capacity before its workspace exists, for a finite window only. */
 export async function hasRecentPlacementClaim(

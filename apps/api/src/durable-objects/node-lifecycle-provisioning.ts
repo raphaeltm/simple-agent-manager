@@ -13,10 +13,9 @@ import {
 import { NodeAllocationUncertainError } from '../services/node-allocation-recovery';
 import { provisionNode } from '../services/node-provisioning';
 import { persistError } from '../services/observability';
-import {
-  taskStatusIsNonTerminalSql,
-  TERMINAL_STATUS_VALUES,
-} from '../services/task-status';
+import { taskStatusIsNonTerminalSql, TERMINAL_STATUS_VALUES } from '../services/task-status';
+import { confirmUnassignedWorkspaceAbsence } from '../services/unassigned-workspace-deletion';
+import type { WorkspaceDeletionIdentity } from '../services/workspace-deletion';
 
 export const DIRECT_PROVISIONING_KEY = 'direct-provisioning:v1';
 export const DEFAULT_NODE_PROVISIONING_REQUEST_TIMEOUT_MS = 5_000;
@@ -47,6 +46,25 @@ function positive(value: string | undefined, fallback: number): number {
 export class NodeLifecycleProvisioning {
   private lock: Promise<unknown> = Promise.resolve();
   private inFlight = false;
+  async confirmUnassignedDeletion(expected: WorkspaceDeletionIdentity): Promise<boolean> {
+    return this.withLock(async () => {
+      if (this.inFlight) return false;
+      const intent = await this.ctx.storage.get<DirectProvisioningIntent>(DIRECT_PROVISIONING_KEY);
+      if (!intent) return false;
+      try {
+        if (!(await confirmUnassignedWorkspaceAbsence(this.env, expected, intent))) return false;
+      } catch (error) {
+        log.warn('workspace_deletion.unassigned_absence_unconfirmed', {
+          workspaceId: expected.workspaceId,
+          errorType: error instanceof Error ? error.name : 'UnknownError',
+        });
+        return false;
+      }
+      // Terminal intent remains sealed: start cannot replace it, and alarm cannot replay it.
+      await this.ctx.storage.deleteAlarm();
+      return true;
+    });
+  }
   constructor(
     private readonly ctx: DurableObjectState,
     private readonly env: Env

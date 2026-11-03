@@ -75,6 +75,10 @@ vi.mock('../../../src/services/node-health', async (importOriginal) => ({
   recordNodeHealthEvent: vi.fn(async () => undefined),
 }));
 
+vi.mock('../../../src/services/owner-node-deletion-audit', () => ({
+  recordOwnerNodeDeletionAudit: vi.fn(async () => undefined),
+}));
+
 vi.mock('../../../src/lib/logger', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
   log: { warn: vi.fn(), info: vi.fn(), error: vi.fn() },
