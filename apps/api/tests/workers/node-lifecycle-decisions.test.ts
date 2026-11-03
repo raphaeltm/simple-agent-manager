@@ -13,6 +13,7 @@ import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
 import { destroyNodeForCleanup } from '../../src/scheduled/node-cleanup/shared';
 import { listNodeLifecycleDecisions } from '../../src/services/node-lifecycle-decisions';
 import { handOffEmptyWorkspaceNode } from '../../src/services/node-warm-handoff';
+import { explainNodeLiveness } from '../../src/services/operations-node-liveness';
 import {
   seedInstallation,
   seedNode,
@@ -232,5 +233,29 @@ describe('cleanup sweep decisions', () => {
     expect(rows[0]).toMatchObject({ source: 'cleanup_sweep', decision: 'skipped' });
     expect(rows[0]!.reason).toContain('active_workspace');
     expect(rows[0]!.workspaceCount).toBe(1);
+  });
+});
+
+describe('explainNodeLiveness', () => {
+  it('joins D1, the NodeLifecycle DO and recorded decisions into a verdict', async () => {
+    await seedBase();
+    const nodeId = 'node-decisions-explain';
+    await seedNode(nodeId, USER_ID, { lastHeartbeatAt: new Date().toISOString() });
+    await stub(nodeId).markIdle(nodeId, USER_ID, 120_000);
+
+    const warm = await explainNodeLiveness(env as Env, nodeId);
+    expect(warm?.lifecycle?.status).toBe('warm');
+    expect(warm?.verdict).toContain('kept for fast reuse until');
+    expect(warm?.decisions[0]).toMatchObject({ decision: 'marked_warm' });
+
+    await seedWorkspace('ws-decisions-explain', nodeId, USER_ID, { status: 'running' });
+    await stub(nodeId).markActive();
+    const busy = await explainNodeLiveness(env as Env, nodeId);
+    expect(busy).toMatchObject({
+      activeWorkspaceCount: 1,
+      verdict: 'Kept alive by 1 active workspace(s).',
+    });
+    expect(busy?.workspaces.map((workspace) => workspace.id)).toEqual(['ws-decisions-explain']);
+    expect(await explainNodeLiveness(env as Env, 'node-does-not-exist')).toBeNull();
   });
 });
