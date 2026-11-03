@@ -298,16 +298,18 @@ These limit [email triggers](/docs/guides/email-triggers/) (preview). Every valu
 
 The **Operations project** is the private project you select in **Admin → Integrations**
 (it receives Report Issue drafts and automated triage; see
-[Reporting Issues](/docs/guides/reporting-issues/#for-operators-where-reports-land)). Its agents can
-be given debugger tools that look across every user's nodes, workspaces and sessions. One
-**Operations** setting controls them:
+[Reporting Issues](/docs/guides/reporting-issues/#for-operators-where-reports-land)). SAM is adding
+debugger tools that let its agents look across every user's nodes, workspaces and sessions. Two
+**Operations** settings control them:
 
 | Setting                         | Default | Values                                        | What it controls                                                                                         |
 | ------------------------------- | ------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
 | `operations.debuggerTools`      | `off`   | `off`, `read`, `read_ask`, `read_auto_safe`   | Which debugger tools Operations agents may use. `off` hides and refuses all of them                      |
 | `operations.auditRetentionDays` | 90      | 1–3,650                                       | Days each debugger tool audit record is kept before the daily 03:00 UTC cleanup deletes it               |
 
-What each value allows:
+Today the only debugger tool is `ops_get_access_status`, which reports this setting, the
+capabilities a task has, and why any are refused. Read tools and approved actions arrive in later
+releases, and each of them uses the gate below. What each value will allow:
 
 - `off`: none. This is the default on new and updated installations.
 - `read`: read-only tools.
@@ -315,8 +317,8 @@ What each value allows:
 - `read_auto_safe`: like `read_ask`, but low-risk actions run without approval. Deleting things
   always needs approval.
 
-Read-only debugger tools can return **raw** node diagnostics, such as unredacted logs, so only turn
-this on for an installation whose superadmins you trust. A debugger tool works only when **all** of
+The read tools are designed to return **raw** node diagnostics, such as unredacted logs, so only
+turn this on for an installation whose superadmins you trust. A debugger tool works only when **all** of
 these are true, and SAM checks every one again on every call:
 
 1. this setting allows what the tool does (`read`, or an action);
@@ -329,9 +331,6 @@ Turning the setting down applies to the next call; it is not cached. Agents in o
 see these tools, and the private incident tools (`list_incident_queue` and the rest) are now listed
 only to the Operations project too. Every debugger tool call, allowed or refused, is recorded in an
 audit log with the acting user, task, tool and target.
-
-An Operations agent can call `ops_get_access_status` to see the current value, which capabilities
-it has, and why any are refused.
 
 ## If the database can't be read
 

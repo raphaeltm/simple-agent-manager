@@ -135,8 +135,9 @@ SAM's in-app **Report an Issue** flow is off until you nominate a project to rec
 
 ### Let an agent debug your installation
 
-Agents in the Operations project can be given debugger tools that read across every user's nodes,
-workspaces and sessions, including raw node logs. They are off by default. To turn them on, set
+SAM is adding debugger tools that let agents in the Operations project read across every user's
+nodes, workspaces and sessions, including raw node logs, and later act on them with approval. Today
+only `ops_get_access_status` ships; it reports what a task may do. The tools are off by default. To turn them on, set
 `operations.debuggerTools` in [**Admin → Settings**](/docs/guides/admin-settings/#operations-debugger-tools)
 under **Operations**. Only tasks owned by an active superadmin can use them, checked on every call,
 and every call is audited. Leave the setting `off` if you do not want any agent to see other users'

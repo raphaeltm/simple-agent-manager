@@ -28,7 +28,7 @@ project, and `override_task_state` lacks the current-capability re-check and tas
 - `stop_subtask` gate: `denyWhenMcpActorLacksCurrentProjectCapability(..., 'task:write', ...)`
   (`orchestration-authority.ts`) + `resolveAgentTarget` rejects `!tokenData.taskId`.
 - Daily cron `0 3 * * *` exists (`scheduled/handler.ts`, analytics forward); policy b0950dd6 wants storage cleanup
-  at most daily → audit purge runs there, bounded batch, retention from an admin setting (policy 9017df94: tunables are
+  at most daily → audit purge runs there (one indexed DELETE), retention from an admin setting (policy 9017df94: tunables are
   admin settings, not env vars).
 - Latest D1 migration: `0216_…`. New table is additive (no FK parents touched).
 - `operations.projectId` alias: NOT trivial (platform-config status/write/UI paths all key on `feedback.projectId`) → skipped.
@@ -36,37 +36,37 @@ project, and `override_task_state` lacks the current-capability re-check and tas
 
 ## Implementation checklist
 
-- [ ] `choiceDefinition` helper + `operations.debuggerTools` (enum, default `off`) and
+- [x] `choiceDefinition` helper + `operations.debuggerTools` (enum, default `off`) and
       `operations.auditRetentionDays` (integer, default 90) settings; cache 0 for `operations.debuggerTools`
-- [ ] `services/operations-access.ts`: `OperationsToolsMode`, `resolveOperationsToolsMode`, `isOperationsProject`,
-      `evaluateOperationsAccess`, `requireOperationsAccess`, `OperationsAccessError`, `recordOperationsAudit`,
+- [x] `services/operations-access.ts`: `OperationsToolsMode`, `resolveOperationsToolsMode`, `isOperationsProject`,
+      `getOperationsAccessStatus`, `requireOperationsAccess`, `OperationsAccessError`, `recordOperationsAudit`,
       `purgeExpiredOperationsAudit`
-- [ ] Migration `0217_operations_audit_log.sql` + drizzle schema
-- [ ] `routes/mcp/tool-definitions-operations-tools.ts` (`OPERATIONS_TOOLS`) + `operations-tools.ts` handlers +
+- [x] Migration `0217_operations_audit_log.sql` + drizzle schema
+- [x] `routes/mcp/tool-definitions-operations-tools.ts` (`OPERATIONS_TOOLS`) + `operations-tools.ts` handlers +
       `OPERATIONS_TOOL_HANDLERS` registration in `tool-handler-table.ts`
-- [ ] `ops_get_access_status` tool
-- [ ] Map `OperationsAccessError` → JSON-RPC `INVALID_PARAMS` in `routes/mcp/index.ts` catch
-- [ ] tools/list filtering: `listMcpToolsForToken(env, tokenData)` — incidents only to Operations project; ops tools
+- [x] `ops_get_access_status` tool
+- [x] Map `OperationsAccessError` → JSON-RPC `INVALID_PARAMS` in `routes/mcp/index.ts` catch
+- [x] tools/list filtering: `listMcpToolsForToken(env, tokenData)` — incidents only to Operations project; ops tools
       only to Operations project when mode ≠ off; fail closed (hide) on read failure without failing tools/list
-- [ ] `override_task_state`: require task-scoped token + current `task:write` re-check
-- [ ] Daily audit purge wired into the `0 3 * * *` cron, isolated from analytics forward
-- [ ] Rename "feedback project" → "Operations project" in UI (`PlatformIntegrationConfigForm.tsx`), API messages,
+- [x] `override_task_state`: require task-scoped token + current `task:write` re-check
+- [x] Daily audit purge wired into the `0 3 * * *` cron, isolated from analytics forward
+- [x] Rename "feedback project" → "Operations project" in UI (`PlatformIntegrationConfigForm.tsx`), API messages,
       MCP descriptions/errors, public docs
-- [ ] Docs: admin-settings guide, self-hosting guide, configuration reference, agents tool table, api reference
-- [ ] Tests (real SQL): gate attack cases + owner control, demotion mid-task, mode off / read+act, discriminating
+- [x] Docs: admin-settings guide, self-hosting guide, configuration reference, agents tool table, api reference
+- [x] Tests (real SQL): gate attack cases + owner control, demotion mid-task, mode off / read+act, discriminating
       deletions; tools/list per project & mode; override_task_state stale capability / non-task token / legit path;
       audit write + failure tolerance + purge
-- [ ] Playwright visual audit of the renamed admin section + the new setting (375 / 1280)
-- [ ] Publish `contract-ready` on the channel after the contract push
+- [x] Playwright visual audit of the renamed admin section + the new setting (375 / 1280)
+- [x] Publish `contract-ready` on the channel after the contract push
 
 ## Acceptance criteria
 
-- [ ] `requireOperationsAccess` denies each of: non-Operations project, user-scoped token, non-superadmin owner,
+- [x] `requireOperationsAccess` denies each of: non-Operations project, user-scoped token, non-superadmin owner,
       demoted superadmin, mode `off`, mode `read` with `act`; allows the happy path
-- [ ] Each guard proven discriminating by deleting it once (record which test went red)
-- [ ] tools/list: Operations project sees incident tools (+ ops tools when mode ≠ off); other projects see neither
-- [ ] `override_task_state` rejects stale capability and non-task tokens; legitimate path works
-- [ ] Superadmin can edit `operations.debuggerTools` in Admin → Settings
+- [x] Each guard proven discriminating by deleting it once (record which test went red)
+- [x] tools/list: Operations project sees incident tools (+ ops tools when mode ≠ off); other projects see neither
+- [x] `override_task_state` rejects stale capability and non-task tokens; legitimate path works
+- [x] Superadmin can edit `operations.debuggerTools` in Admin → Settings
 - [ ] Staging: `ops_get_access_status` + tools/list verified for superadmin and non-superadmin tokens in the
       Operations project vs another project
 
@@ -74,3 +74,30 @@ project, and `override_task_state` lacks the current-capability re-check and tas
 
 - D1 I/O: tools/list +1 read for every token (feedback project id), +1 for the Operations project (mode).
   A gated call: mode (1) + feedback project id (1) + task/user join (1) + audit insert (1) = 4.
+
+## Discrimination evidence (rule 62)
+
+Each guard was deleted once; the named tests went red, then the guard was restored.
+
+| Guard removed | Tests that went red |
+| --- | --- |
+| Operations-project check | `denies a non-Operations project even for a superadmin-owned task there` |
+| Mode check | `denies every capability while the mode is off`, `allows read but denies act in read mode`, `logs every denial…` |
+| Task-scope check | `denies a user-scoped (non-task) token` |
+| Owner-mismatch check | `denies a token whose user is not the owner of its task` |
+| Superadmin check | member, demoted-mid-task, suspended, and status-report tests (4) |
+| `status = 'active'` conjunct | `denies a superadmin whose account is no longer active` |
+| `t.project_id = ?` predicate | `denies a task id that belongs to another project` |
+| Zero cache TTL for the dial | `sees a dial turned down by another isolate on the next call` |
+| override_task_state task-scope | `rejects a user-scoped (non-task) token before any state change` |
+| override_task_state task:write re-check | downgraded-role and removed-membership tests |
+| tools/list read-failure catch | `keeps tools/list working… when the setting read fails` |
+| tools/list project filter | other-project, runtime-change, read-failure tests |
+| tools/list mode filter | `lists incident tools but not Operations tools… while off` |
+| Dispatcher `OperationsAccessError` mapping | `returns INVALID_PARAMS with the denial reason…` |
+
+## Decisions
+
+- `operations.projectId` alias skipped: platform-config status, write and UI paths all key on `feedback.projectId`, so an alias is not trivial.
+- The gate checks the Operations project before the mode so other projects never learn the dial's value.
+- Audit rows have no foreign keys so evidence survives user/task deletion; the table is listed as a reviewed churning table for the deploy row-count gate.

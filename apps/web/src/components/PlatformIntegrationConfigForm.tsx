@@ -364,7 +364,7 @@ function FeedbackProjectSection({
       status={status}
     >
       <label className="block space-y-1.5">
-        <FieldLabel label="Operations project" field={status.fields.projectId} />
+        <FieldLabel label="Project" field={status.fields.projectId} />
         <select
           aria-label="Operations project"
           value={value}
