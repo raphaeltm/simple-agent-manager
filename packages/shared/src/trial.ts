@@ -56,7 +56,7 @@ export const TrialCreateRequestSchema = v.object({
   repoUrl: v.pipe(
     v.string(),
     v.trim(),
-    v.regex(GITHUB_REPO_URL_REGEX, 'Must be a public GitHub repository URL'),
+    v.regex(GITHUB_REPO_URL_REGEX, 'Must be a public GitHub repository URL')
   ),
 });
 

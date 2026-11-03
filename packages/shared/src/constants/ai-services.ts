@@ -190,11 +190,7 @@ export type ToolCallSupport = 'excellent' | 'good' | 'limited' | 'none';
 
 /** Intended role in the SAM agent hierarchy. */
 export type ModelIntendedRole =
-  | 'workspace-agent'
-  | 'sam-agent'
-  | 'project-agent'
-  | 'utility'
-  | 'any';
+  'workspace-agent' | 'sam-agent' | 'project-agent' | 'utility' | 'any';
 
 /** Scopes where a model is allowed. */
 export type ModelAllowedScope = 'workspace' | 'project' | 'top-level';

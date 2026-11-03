@@ -80,6 +80,7 @@ import {
   handleOpsSearchErrors,
   handleOpsTimeline,
 } from './ops-read-tools';
+import { handleOpsExecuteAction, handleOpsRequestAction } from './ops-action-tools';
 import { handleOpsGetNodeLogCapture, handleOpsWhyIsNodeAlive } from './ops-telemetry-tools';
 import { handleSendMessageToSubtask, handleStopSubtask } from './orchestration-comms';
 import {
@@ -179,6 +180,8 @@ export const OPERATIONS_TOOL_HANDLERS: ReadonlyMap<string, McpToolHandler> = new
   ['ops_capture_debug_package', handleOpsCaptureDebugPackage],
   ['ops_why_is_node_alive', handleOpsWhyIsNodeAlive],
   ['ops_get_node_log_capture', handleOpsGetNodeLogCapture],
+  ['ops_request_action', handleOpsRequestAction],
+  ['ops_execute_action', handleOpsExecuteAction],
 ]);
 
 export const MCP_TOOL_HANDLERS: ReadonlyMap<string, McpToolHandler> = new Map<

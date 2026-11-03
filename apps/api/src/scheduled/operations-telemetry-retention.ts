@@ -1,6 +1,7 @@
 /**
  * Daily retention for Operations telemetry: node lifecycle decisions, black box node log
- * captures (R2 object + index row) and sleep/wake step traces.
+ * captures (R2 object + index row), sleep/wake step traces, and settled action approvals
+ * (lapsed pending/approved rows are first marked expired).
  *
  * Runs from the `0 3 * * *` cron beside the Operations audit purge (policy b0950dd6: storage
  * cleanup is at most daily). Each store is purged in bounded batches and isolated from the
@@ -16,6 +17,11 @@ import {
   DEFAULT_NODE_LOG_CAPTURE_PURGE_BATCH,
   purgeExpiredNodeLogCaptures,
 } from '../services/node-log-capture-read';
+import {
+  DEFAULT_OPERATIONS_APPROVAL_PURGE_BATCH,
+  expireLapsedApprovals,
+  purgeSettledApprovals,
+} from '../services/operations-actions/approvals';
 import { resolveOperationsTelemetrySetting } from '../services/operations-telemetry-settings';
 import {
   DEFAULT_SNAPSHOT_TRACE_PURGE_BATCH,
@@ -30,6 +36,8 @@ export interface OperationsTelemetryRetentionResult {
   decisionsDeleted: number | null;
   capturesDeleted: number | null;
   tracesDeleted: number | null;
+  approvalsExpired: number | null;
+  approvalsDeleted: number | null;
 }
 
 /** Repeat a batch purge until a batch comes back short or the batch budget is spent. */
@@ -60,9 +68,10 @@ export async function runOperationsTelemetryRetention(
   cron: string,
   now: Date = new Date()
 ): Promise<OperationsTelemetryRetentionResult> {
-  const [decisionDays, traceDays] = await Promise.all([
+  const [decisionDays, traceDays, approvalDays] = await Promise.all([
     resolveOperationsTelemetrySetting(env, 'nodeDecisionLogRetentionDays'),
     resolveOperationsTelemetrySetting(env, 'snapshotTraceRetentionDays'),
+    resolveOperationsTelemetrySetting(env, 'actionApprovalRetentionDays'),
   ]);
   const result: OperationsTelemetryRetentionResult = {
     decisionsDeleted: await isolated('node_lifecycle_decisions', () =>
@@ -78,6 +87,15 @@ export async function runOperationsTelemetryRetention(
       drain(
         () => purgeSessionSnapshotTraces(env.DATABASE, traceDays, now),
         DEFAULT_SNAPSHOT_TRACE_PURGE_BATCH
+      )
+    ),
+    approvalsExpired: await isolated('operations_action_approvals_expiry', () =>
+      expireLapsedApprovals(env.DATABASE, now)
+    ),
+    approvalsDeleted: await isolated('operations_action_approvals', () =>
+      drain(
+        () => purgeSettledApprovals(env.DATABASE, approvalDays, now),
+        DEFAULT_OPERATIONS_APPROVAL_PURGE_BATCH
       )
     ),
   };

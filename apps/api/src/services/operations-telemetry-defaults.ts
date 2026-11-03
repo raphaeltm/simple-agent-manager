@@ -13,6 +13,7 @@ export const OPERATIONS_TELEMETRY_DEFAULTS = {
   snapshotTracesPerSession: 10,
   snapshotTraceRetentionDays: 30,
   actionApprovalTtlMs: 60 * 60 * 1000,
+  actionApprovalRetentionDays: 90,
 } as const;
 
 export type OperationsTelemetrySettingKey = keyof typeof OPERATIONS_TELEMETRY_DEFAULTS;
@@ -32,6 +33,7 @@ export const OPERATIONS_TELEMETRY_RANGES: Record<
   snapshotTracesPerSession: { min: 1, max: 100 },
   snapshotTraceRetentionDays: { min: 1, max: 365 },
   actionApprovalTtlMs: { min: 60_000, max: 7 * 24 * 60 * 60 * 1000 },
+  actionApprovalRetentionDays: { min: 1, max: 365 },
 };
 
 export const OPERATIONS_TELEMETRY_DESCRIPTIONS: Record<OperationsTelemetrySettingKey, string> = {
@@ -49,5 +51,8 @@ export const OPERATIONS_TELEMETRY_DESCRIPTIONS: Record<OperationsTelemetrySettin
     'A node must have sent a heartbeat this recently for teardown to attempt a log capture.',
   snapshotTracesPerSession: 'Sleep/wake step traces kept per chat session.',
   snapshotTraceRetentionDays: 'Days to keep sleep/wake step traces.',
-  actionApprovalTtlMs: 'Milliseconds an operations action approval stays valid.',
+  actionApprovalTtlMs:
+    'Milliseconds an Operations action request waits for a decision, and an approval then stays executable.',
+  actionApprovalRetentionDays:
+    'Days to keep decided, expired and executed Operations action approval records.',
 };

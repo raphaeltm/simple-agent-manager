@@ -1599,6 +1599,45 @@ export const sessionSnapshotTraces = sqliteTable(
   })
 );
 
+/** Server-side approval record for one Operations action; executed at most once (0221). */
+export const operationsActionApprovals = sqliteTable(
+  'operations_action_approvals',
+  {
+    id: text('id').primaryKey(),
+    action: text('action').notNull(),
+    targetType: text('target_type').notNull(),
+    targetId: text('target_id').notNull(),
+    reason: text('reason').notNull(),
+    evidenceSummary: text('evidence_summary'),
+    targetSummaryJson: text('target_summary_json'),
+    requestingProjectId: text('requesting_project_id').notNull(),
+    requestingTaskId: text('requesting_task_id').notNull(),
+    requestingAuthorityTaskId: text('requesting_authority_task_id').notNull(),
+    requestingSessionId: text('requesting_session_id'),
+    requesterUserId: text('requester_user_id').notNull(),
+    status: text('status').notNull(),
+    autoApproved: integer('auto_approved').notNull().default(0),
+    expiresAt: text('expires_at').notNull(),
+    decidedBy: text('decided_by'),
+    decidedAt: text('decided_at'),
+    decisionNote: text('decision_note'),
+    executedAt: text('executed_at'),
+    executionResultJson: text('execution_result_json'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => ({
+    statusCreatedIdx: index('idx_operations_action_approvals_status_created').on(
+      table.status,
+      table.createdAt
+    ),
+    taskIdx: index('idx_operations_action_approvals_task').on(
+      table.requestingTaskId,
+      table.createdAt
+    ),
+    createdIdx: index('idx_operations_action_approvals_created').on(table.createdAt),
+  })
+);
+
 export const nodes = sqliteTable(
   'nodes',
   {

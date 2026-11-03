@@ -13,7 +13,8 @@ import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from './workspace-resource-capacity';
 
-export type NodeLifecycleDecisionSource = 'node_lifecycle' | 'cleanup_sweep' | 'warm_handoff';
+export type NodeLifecycleDecisionSource =
+  'node_lifecycle' | 'cleanup_sweep' | 'warm_handoff' | 'operations_action';
 
 export type NodeLifecycleDecision =
   // NodeLifecycle DO
@@ -35,7 +36,9 @@ export type NodeLifecycleDecision =
   | 'handed_to_warm'
   | 'preserved_active'
   | 'handoff_skipped'
-  | 'handoff_failed';
+  | 'handoff_failed'
+  // Operations action (an approved or auto-safe `rerun_node_cleanup`)
+  | 'cleanup_rerun_requested';
 
 export type NodeLifecycleDecisionDetail = Record<
   string,
