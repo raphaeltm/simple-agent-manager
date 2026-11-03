@@ -469,6 +469,7 @@ export function useSessionLifecycle(
     isWaking: wake.isWaking,
     /** Current wake phase, or null before the replacement runner reports a step. */
     wakePhase: wake.wakePhase,
+    wakeWait: wake.wakeWait,
     staleNotice,
     dismissStaleNotice,
     currentPlan,

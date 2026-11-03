@@ -20,12 +20,17 @@
  * broadcast that race cannot disagree about what phase means.
  */
 
-import { isTaskExecutionStep, type SessionStateSnapshot } from '@simple-agent-manager/shared';
+import {
+  isTaskExecutionStep,
+  isWakeWaitReason,
+  type SessionStateSnapshot,
+} from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
 import { log } from '../../lib/logger';
+import { replacementDeletionRowVerdict } from '../../services/replacement-deletion-fence';
 
 type Db = DrizzleD1Database<typeof schema>;
 
@@ -81,16 +86,43 @@ export async function attachWakeState(
       .select({
         recoveryStatus: schema.sessionSnapshots.recoveryStatus,
         executionStep: schema.tasks.executionStep,
+        admissionReason: schema.tasks.admissionReason,
+        admissionNextRetryAt: schema.tasks.admissionNextRetryAt,
+        sleptWorkspaceId: schema.workspaces.id,
+        sleptWorkspaceStatus: schema.workspaces.status,
+        sleptWorkspaceDeletionConfirmedAt: schema.workspaces.runtimeDeletionConfirmedAt,
+        sleptNodeTerminationConfirmedAt: schema.nodes.runtimeTerminationConfirmedAt,
       })
       .from(schema.sessionSnapshots)
       .leftJoin(schema.tasks, eq(schema.tasks.id, schema.sessionSnapshots.recoveryTaskId))
+      .leftJoin(schema.workspaces, eq(schema.workspaces.id, schema.sessionSnapshots.workspaceId))
+      .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
       .where(eq(schema.sessionSnapshots.chatSessionId, args.sessionId))
       .limit(1);
 
     if (!row) return state;
 
+    // A wake may not claim while the slept workspace's deletion is unproven
+    // (`assertReplacementDeletionConfirmed`). This applies the fence's own row
+    // verdict, so the reason is shown only when the row alone proves the wake is
+    // blocked (rule 58). `unknown` (a deletion attempt only the node's lifecycle
+    // object can see) is not reported: that would cost a Durable Object call per
+    // poll, and the banner then shows the generic label rather than a wrong cause.
+    // The fence runs before the claim, so this only applies while recovery_status
+    // is not yet 'waking'.
+    const cleanupPending =
+      replacementDeletionRowVerdict({
+        workspaceId: row.sleptWorkspaceId,
+        workspaceStatus: row.sleptWorkspaceStatus,
+        runtimeDeletionConfirmedAt: row.sleptWorkspaceDeletionConfirmedAt,
+        runtimeTerminationConfirmedAt: row.sleptNodeTerminationConfirmedAt,
+      }) === 'blocked';
     const recoveryStatus = isRecoveryStatus(row.recoveryStatus) ? row.recoveryStatus : null;
-    if (!recoveryStatus) return state;
+    if (!recoveryStatus) {
+      return cleanupPending
+        ? { ...(state ?? EMPTY_STATE), waitReason: 'previous_workspace_cleanup', waitRetryAt: null }
+        : state;
+    }
 
     // Only a wake that is actually in flight has a meaningful phase. A 'restored'
     // or 'failed' snapshot keeps whatever step the finished recovery task last
@@ -99,8 +131,19 @@ export async function attachWakeState(
       recoveryStatus === 'waking' && isTaskExecutionStep(row.executionStep)
         ? row.executionStep
         : null;
-
-    return { ...(state ?? EMPTY_STATE), recoveryStatus, wakePhase };
+    // The admission reason is the wait's cause while the runner waits for a node
+    // (`services/vm-admission-control.ts`). Outside that step it is history.
+    const admissionWait =
+      wakePhase === 'waiting_for_node_capacity' && isWakeWaitReason(row.admissionReason)
+        ? row.admissionReason
+        : null;
+    return {
+      ...(state ?? EMPTY_STATE),
+      recoveryStatus,
+      wakePhase,
+      waitReason: admissionWait,
+      waitRetryAt: admissionWait ? (row.admissionNextRetryAt ?? null) : null,
+    };
   } catch (err) {
     log.warn('chat.recovery_status_lookup_failed', {
       projectId: args.projectId,

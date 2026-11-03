@@ -25,6 +25,7 @@ const mocks = vi.hoisted(() => ({
   listNodeEvents: vi.fn(),
   stopNode: vi.fn(),
   deleteNode: vi.fn(),
+  confirmNodeManualDeletion: vi.fn(),
   getNodeSystemInfo: vi.fn(),
   getNodeLogs: vi.fn().mockResolvedValue({ entries: [], nextCursor: null, hasMore: false }),
   getNodeLogStreamUrl: vi.fn().mockReturnValue('ws://localhost/logs/stream'),
@@ -45,6 +46,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   listNodeEvents: mocks.listNodeEvents,
   stopNode: mocks.stopNode,
   deleteNode: mocks.deleteNode,
+  confirmNodeManualDeletion: mocks.confirmNodeManualDeletion,
   getNodeSystemInfo: mocks.getNodeSystemInfo,
   getNodeLogs: mocks.getNodeLogs,
   getNodeLogStreamUrl: mocks.getNodeLogStreamUrl,
@@ -90,11 +92,15 @@ function renderNode(path: string) {
         <Routes>
           <Route path="/nodes/:id" element={<Node />} />
           <Route path="/nodes" element={<div data-testid="nodes-list-page">Nodes</div>} />
-          <Route path="/workspaces/new" element={<div data-testid="workspace-create-probe">probe</div>} />
+          <Route
+            path="/workspaces/new"
+            element={<div data-testid="workspace-create-probe">probe</div>}
+          />
         </Routes>
       </MemoryRouter>
-    </ToastProvider>
-  , { wrapper: QueryTestWrapper });
+    </ToastProvider>,
+    { wrapper: QueryTestWrapper }
+  );
 }
 
 describe('Node page', () => {
@@ -150,6 +156,7 @@ describe('Node page', () => {
     });
     mocks.stopNode.mockResolvedValue({ status: 'stopped' });
     mocks.deleteNode.mockResolvedValue({ success: true });
+    mocks.confirmNodeManualDeletion.mockResolvedValue({ success: true });
   });
 
   it('renders node details and controls', async () => {
@@ -190,19 +197,88 @@ describe('Node page', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /stop node/i }));
     await waitFor(() => {
-      expect(confirmSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Stop node "Node 1"?')
-      );
+      expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('Stop node "Node 1"?'));
       expect(mocks.stopNode).toHaveBeenCalledWith('node-1');
     });
 
     fireEvent.click(screen.getByRole('button', { name: /delete node/i }));
     await waitFor(() => {
-      expect(confirmSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Delete node "Node 1"?')
-      );
+      expect(confirmSpy).toHaveBeenCalledWith(expect.stringContaining('Delete node "Node 1"?'));
       expect(mocks.deleteNode).toHaveBeenCalledWith('node-1');
     });
+  });
+
+  it('lets the owner remove a node SAM failed to delete, after confirming', async () => {
+    mocks.getNode.mockResolvedValue({
+      ...(await mocks.getNode()),
+      status: 'destroying',
+      healthStatus: 'stale',
+      cloudProvider: 'hetzner',
+      errorMessage:
+        'Cannot strictly delete node node-1: exact provider credential binding is missing',
+    });
+    renderNode('/nodes/node-1');
+
+    const button = await screen.findByRole('button', { name: /i already deleted this server/i });
+
+    // Declining the confirmation must not touch the node.
+    confirmSpy.mockReturnValueOnce(false);
+    fireEvent.click(button);
+    expect(confirmSpy).toHaveBeenLastCalledWith(
+      expect.stringContaining('Only continue if you have already deleted it yourself')
+    );
+    expect(mocks.confirmNodeManualDeletion).not.toHaveBeenCalled();
+
+    fireEvent.click(button);
+    await waitFor(() => {
+      expect(mocks.confirmNodeManualDeletion).toHaveBeenCalledWith('node-1');
+    });
+    expect(await screen.findByTestId('nodes-list-page')).toBeInTheDocument();
+  });
+
+  it('warns a deployment node owner about hosted environments before manual removal', async () => {
+    mocks.getNode.mockResolvedValue({
+      ...(await mocks.getNode()),
+      status: 'destroying',
+      nodeRole: 'deployment',
+      cloudProvider: 'hetzner',
+      deploymentEnvironments: [{ id: 'env-1', name: 'production' }],
+    });
+    confirmSpy.mockReturnValue(false);
+    renderNode('/nodes/node-1');
+
+    fireEvent.click(await screen.findByRole('button', { name: /i already deleted this server/i }));
+
+    expect(confirmSpy).toHaveBeenLastCalledWith(
+      expect.stringContaining('deployment node hosting 1 deployment environment: production')
+    );
+    expect(mocks.confirmNodeManualDeletion).not.toHaveBeenCalled();
+  });
+
+  it('keeps the node page and shows the server refusal when the provider still has the server', async () => {
+    mocks.getNode.mockResolvedValue({
+      ...(await mocks.getNode()),
+      status: 'error',
+      cloudProvider: 'hetzner',
+    });
+    mocks.confirmNodeManualDeletion.mockRejectedValue(
+      new Error('Server 123 still exists at hetzner. Delete it there first, then try again.')
+    );
+    renderNode('/nodes/node-1');
+
+    fireEvent.click(await screen.findByRole('button', { name: /i already deleted this server/i }));
+
+    expect(await screen.findByText(/still exists at hetzner/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('nodes-list-page')).not.toBeInTheDocument();
+  });
+
+  it('does not offer manual removal for a running node', async () => {
+    renderNode('/nodes/node-1');
+
+    expect(await screen.findByRole('button', { name: /delete node/i })).toBeInTheDocument();
+    expect(
+      screen.queryByRole('button', { name: /i already deleted this server/i })
+    ).not.toBeInTheDocument();
   });
 
   it('shows error with retry when events fail to load', async () => {

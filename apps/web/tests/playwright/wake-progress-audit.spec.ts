@@ -42,6 +42,31 @@ const PHASES = [
   { phase: 'agent_session', label: 'Starting the agent...', name: 'agent' },
 ] as const;
 
+/**
+ * Admission wait reasons `routes/chat/wake-state.ts` reports while a claimed wake
+ * waits for a node, in the state the server sends them: `waking` +
+ * `waiting_for_node_capacity`. The last is the longest label plus a retry time,
+ * the overflow stress case. `previous_workspace_cleanup` is reported only before
+ * the claim and shows only after the user sends a message, which this viewer
+ * cannot do; `useSessionLifecycle.test.ts` drives that path through the real
+ * banner gate.
+ */
+const WAIT_REASONS = [
+  {
+    waitReason: 'provider_transient_capacity',
+    label: /^Your cloud provider has no capacity right now\. Retrying\.\.\. Next try at .+\.$/,
+    name: 'provider-capacity',
+    retry: true,
+  },
+  {
+    waitReason: 'capacity_pool_node_limit',
+    label:
+      /^This project's server limit is reached\. Waiting for a free slot\.\.\. Next try at .+\.$/,
+    name: 'pool-limit',
+    retry: true,
+  },
+] as const;
+
 function makeSleepingSession(overrides: Record<string, unknown> = {}) {
   return {
     id: 'session-1',
@@ -85,7 +110,12 @@ const MESSAGES = [
 
 async function setupApiMocks(
   page: Page,
-  options: { wakePhase: string | null; recoveryStatus?: string } = { wakePhase: null }
+  options: {
+    wakePhase: string | null;
+    recoveryStatus?: string;
+    waitReason?: string;
+    waitRetryAt?: string;
+  } = { wakePhase: null }
 ) {
   const recoveryStatus = options.recoveryStatus ?? 'waking';
   // The session's OWN task. Since PR #2230 a slept conversation keeps its
@@ -102,7 +132,12 @@ async function setupApiMocks(
     session: makeSleepingSession(),
     messages: MESSAGES,
     // Session detail state — the shape wake-state.ts produces mid-wake.
-    state: makeIdleSessionState({ recoveryStatus, wakePhase: options.wakePhase }),
+    state: makeIdleSessionState({
+      recoveryStatus,
+      wakePhase: options.wakePhase,
+      waitReason: options.waitReason ?? null,
+      waitRetryAt: options.waitRetryAt ?? null,
+    }),
     ownTask: {
       id: 'task-session-1',
       status: restored ? 'in_progress' : 'queued',
@@ -172,6 +207,35 @@ for (const viewport of [
         await screenshot(page, `wake-progress-${name}-${viewport.name.toLowerCase()}`);
       });
     }
+
+    for (const { waitReason, label, name, retry } of WAIT_REASONS) {
+      test(`says why the wake is waiting: ${name}`, async ({ page }) => {
+        await dismissOnboarding(page);
+        await setupApiMocks(page, {
+          wakePhase: 'waiting_for_node_capacity',
+          waitReason,
+          waitRetryAt: retry ? new Date(Date.now() + 10 * 60_000).toISOString() : undefined,
+        });
+        await gotoWakingChat(page);
+
+        // The reason replaces the generic phase label, which hid three causes.
+        await expect(page.getByTestId('wake-progress-label')).toHaveText(label);
+        await expect(page.getByText('Waiting for server capacity...')).toHaveCount(0);
+
+        await assertNoOverflow(page);
+        await screenshot(page, `wake-wait-${name}-${viewport.name.toLowerCase()}`);
+      });
+    }
+
+    test('falls back to the phase label when no wait reason is known', async ({ page }) => {
+      await dismissOnboarding(page);
+      await setupApiMocks(page, { wakePhase: 'waiting_for_node_capacity' });
+      await gotoWakingChat(page);
+      await expect(page.getByTestId('wake-progress-label')).toHaveText(
+        'Waiting for server capacity...'
+      );
+      await assertNoOverflow(page);
+    });
 
     test('hides the banner once the wake is restored', async ({ page }) => {
       // Discriminating control: proves the banner is driven by the wake signal

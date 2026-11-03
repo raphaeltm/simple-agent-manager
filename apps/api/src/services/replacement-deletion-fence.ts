@@ -7,6 +7,31 @@ export class WorkspaceDeletionUnconfirmedError extends Error {
   }
 }
 
+export interface ReplacementDeletionRow {
+  workspaceId: string | null;
+  workspaceStatus: string | null;
+  runtimeDeletionConfirmedAt: string | null;
+  runtimeTerminationConfirmedAt: string | null;
+}
+
+/**
+ * What the D1 row alone says about the fence below. `unknown` means the row
+ * neither proves deletion nor shows a deletion in progress, so only the node's
+ * lifecycle object can tell whether an attempt is still pending. Shared with the
+ * wake banner (`routes/chat/wake-state.ts`) so the two cannot disagree.
+ */
+export function replacementDeletionRowVerdict(
+  row: ReplacementDeletionRow | null
+): 'released' | 'blocked' | 'unknown' {
+  if (!row?.workspaceId || row.runtimeDeletionConfirmedAt || row.runtimeTerminationConfirmedAt) {
+    return 'released';
+  }
+  // A legacy `deleted` label is not deletion proof. Older teardown paths could
+  // write it after provider failure, so existing tombstones fail closed too.
+  if (row.workspaceStatus === 'stopping' || row.workspaceStatus === 'deleted') return 'blocked';
+  return 'unknown';
+}
+
 /**
  * Refuse linked replacement/recovery while its predecessor runtime may still
  * exist. The node lifecycle label is intentionally ignored; only the strict
@@ -39,26 +64,15 @@ export async function assertReplacementDeletionConfirmed(
       runtimeTerminationConfirmedAt: string | null;
     }>();
 
-  if (row?.workspaceId && (row.runtimeDeletionConfirmedAt || row.runtimeTerminationConfirmedAt)) {
-    return;
-  }
-  if (row?.workspaceId && row.nodeId && env.NODE_LIFECYCLE) {
+  const verdict = replacementDeletionRowVerdict(row ?? null);
+  if (verdict === 'released' || !row?.workspaceId) return;
+  if (verdict === 'blocked') throw new WorkspaceDeletionUnconfirmedError(row.workspaceId);
+  // Only the node's lifecycle object knows whether a deletion attempt is still pending.
+  if (row.nodeId && env.NODE_LIFECYCLE) {
     const stub = env.NODE_LIFECYCLE.get(
       env.NODE_LIFECYCLE.idFromName(row.nodeId)
     ) as DurableObjectStub<import('../durable-objects/node-lifecycle').NodeLifecycle>;
     const attempt = await stub.getWorkspaceDeletionAttemptState(row.workspaceId);
     if (attempt.pending) throw new WorkspaceDeletionUnconfirmedError(row.workspaceId);
-  }
-
-  if (!row?.workspaceId || row.runtimeDeletionConfirmedAt || row.runtimeTerminationConfirmedAt) {
-    return;
-  }
-  if (row.workspaceStatus === 'stopping') {
-    throw new WorkspaceDeletionUnconfirmedError(row.workspaceId);
-  }
-  // A legacy `deleted` label is not deletion proof. Older teardown paths could
-  // write it after provider failure, so existing tombstones fail closed too.
-  if (row.workspaceStatus === 'deleted') {
-    throw new WorkspaceDeletionUnconfirmedError(row.workspaceId);
   }
 }

@@ -432,6 +432,7 @@ export {
   saveCachedCommands,
 } from './misc';
 export {
+  confirmNodeManualDeletion,
   createNode,
   deleteNode,
   getNode,
