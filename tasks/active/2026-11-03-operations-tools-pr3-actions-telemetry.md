@@ -79,7 +79,7 @@ Debugging agents in the Operations project cannot answer "why is this node still
 - [x] Black box: teardown proceeds when node unreachable/slow (timeout); capture stored when reachable
 - [x] Decision log rows written on each lifecycle path through real triggers
 - [x] Go: step-trace tests + old-agent compatibility test
-- [x] Staging: one real node; decision rows + `ops_why_is_node_alive`; request → approve → `delete_workspace`; black box capture on teardown; snapshot trace on a sleep; VMs deleted
+- [ ] Staging (pending — blocked until PR2 merges; never concurrent with a sibling): one real node; decision rows + `ops_why_is_node_alive`; request → approve → `delete_workspace`; black box capture on teardown; snapshot trace on a sleep; VMs deleted
 
 ## References
 - Rules: 47, 53, 54, 56 (providers), 62, 67, 79, 28, 31, 44
