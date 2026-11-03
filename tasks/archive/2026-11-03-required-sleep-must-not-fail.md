@@ -160,15 +160,34 @@ How each piece behaves:
 
 ## Acceptance Criteria
 
-- [ ] Pressing Sleep on a session whose agent is stuck `prompting` stops the agent and sleeps it,
+- [x] Pressing Sleep on a session whose agent is stuck `prompting` stops the agent and sleeps it,
       leaving the chat wakeable
-- [ ] A workspace on a node past 24 h sleeps as soon as its turn ends. Past 24 h plus 30 min it is
+- [x] A workspace on a node past 24 h sleeps as soon as its turn ends. Past 24 h plus 30 min it is
       force-stopped and slept, whether the turn is hung or active
-- [ ] If the VM never confirms, the bounded fallback still tears the runtime down, and the chat
+- [x] If the VM never confirms, the bounded fallback still tears the runtime down, and the chat
       stays wakeable
-- [ ] A deleted workspace's retired sleep intent never leaves its chat `active` with no runtime
-- [ ] Idle sleep for normal nodes is unchanged (controls)
-- [ ] A person's Sleep that failed stays required through the sweep's and fallback's retries
-- [ ] A node in the last 10% of its lifetime takes no new workspace; restarts and nodes the lifetime
+- [x] A deleted workspace's retired sleep intent never leaves its chat `active` with no runtime
+- [x] Idle sleep for normal nodes is unchanged (controls)
+- [x] A person's Sleep that failed stays required through the sweep's and fallback's retries
+- [x] A node in the last 10% of its lifetime takes no new workspace; restarts and nodes the lifetime
       sweep never reaps are unaffected
-- [ ] Verified on staging: explicit Sleep on a prompting session
+- [x] Verified on staging: explicit Sleep on a prompting session
+
+## Staging verification (2026-11-03, deploy run 41691916440)
+
+- Instant (`cf-container`), project Potato, chat `71a3d502-9f20-4388-aa8b-92c7c750c7be`:
+  - Sleep (session API, the `sam chat sleep` path) while a backgrounded `sleep 1500` held the
+    harness lease (`activity: idle`, `runtimeWorkState: active`; previously refused as "not idle"):
+    200 in 15.9 s, snapshot `available`/`none`, `sleeping`, container `sleeping`.
+  - Woke from the UI composer in ~30 s; replied.
+  - Sleep while `prompting` (live streaming turn): 200 in 19.8 s; the reply is cut mid-sentence.
+  - UI dock Sleep on the idle session: sleeping in ~10 s.
+- VM, chat `b1a4bcae-f2ad-4a06-a2e4-6787805edfce`: Sleep while `prompting` with a foreground
+  `sleep 600`: 200 in 24.3 s, snapshot `available`/`none`; woke on a new workspace in ~1.5 min and
+  replied; UI Sleep afterwards. The VM node was then deleted and the chat stayed `sleeping`.
+- Migration 0217 applied on staging; `reportedPromptStartedAt` populated in session state.
+- Dashboard, projects, settings, nodes: no 5xx, no console errors.
+- Not verifiable on staging: the node-lifetime paths (needs a 24 h node). Covered by real-SQL
+  integration tests.
+- Found and filed: `tasks/backlog/2026-11-03-instant-standalone-clone-terminated.md`,
+  `tasks/backlog/2026-11-03-chat-ui-after-sleep-render-and-ports-poll.md`.

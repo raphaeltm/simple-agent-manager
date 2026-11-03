@@ -13,6 +13,8 @@ verifying `sam/required-sleep-must-not-fail`. Neither is caused by that branch (
 2. **Ports poll after sleep.** Every sleep (API or the dock's Sleep button) is followed by two
    console errors: a CORS-blocked `GET https://ws-<id>.sammy.party/workspaces/<id>/ports?token=…`
    and `net::ERR_FAILED`. The page keeps polling ports of a workspace that is now sleeping.
+   Waking a VM chat (which moves it to a new workspace) also logged four transient 404s from
+   requests against the old, deleted workspace; a fresh load afterwards showed none.
 
 ## Acceptance Criteria
 
