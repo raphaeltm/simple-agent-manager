@@ -67,6 +67,10 @@ A **provider** is the cloud your compute runs on. For running workspaces, SAM su
 
 You can set a **default provider** and **default location** per project, and the resource requirements new work inherits. The exact machine types, regions, and pricing are shown when you start work.
 
+## Accounts
+
+An **account** is what an agent or a cloud machine runs on: a subscription you signed in with, or an API key or token, encrypted at rest. You can connect several per agent or cloud, such as a work account, a personal one and a client's, and name them. One is your **default**; you can **pin** another to a project, and an agent account to a single profile. For an agent, SAM uses your account for the profile, then your account for the project, then your default, then SAM's platform account where there is one. Pins are personal: they change which of your accounts runs your work, never a teammate's. See [Connecting Agent Accounts](/docs/guides/agents/#connecting-agent-accounts).
+
 ## Compute Pools
 
 A **compute pool** (also called a node pool or capacity pool) is the set of cloud machines SAM is allowed to rent on your behalf. Pools exist at three scopes — **project**, **user**, and **installation** — and SAM uses the first one that exists, in that order.

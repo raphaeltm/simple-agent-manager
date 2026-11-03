@@ -157,8 +157,10 @@ the chat doesn't restart it:
 - **Blocked: provider limit wait budget exhausted.** Three waits in a row didn't get the work going.
 - **Blocked: provider limit reset outlives the saved snapshot…** The reset comes after SAM stops
   keeping the saved workspace, so the chat can't be woken where it left off.
-- **Blocked: selected provider credential changed…** The credential was replaced while the task
-  waited.
+- **Blocked: selected provider credential changed…** The account the task would run on changed
+  while it waited: the key was replaced, or someone chose **Make default**, pinned another account to
+  the project, or changed the profile's account. SAM stops rather than carry on with an account you
+  didn't start the task on.
 - Any other reason that starts with **Blocked:** means the same thing.
 
 **Don't reply in the blocked chat.** On a VM, a reply puts the task back in the queue, still
@@ -216,7 +218,11 @@ or in the failure card under the chat header (expand the card for the next step)
 
 - **A strip: "Agent connection missing."** The agent has no credential it can use for this chat. If
   you started the chat, select **Open agent accounts** and connect the agent under
-  **Settings → Agents**; otherwise ask the person who started it. Then start the work again —
+  **Settings → Agents**; otherwise ask the person who started it. It also appears when the account
+  pinned to the project or the profile is paused: the project's **Accounts** tab then says **Can't
+  run — its pinned account is paused**, or the profile's **Account** section says **Stops:**. Resume
+  the account in **Settings → Advanced**, or choose **Use my default** or **Use my usual account**
+  (see [Pausing an account](/docs/guides/agents/#pausing-an-account)). Then start the work again —
   **Retry** in the [session tool rail](/docs/guides/chat-features/#the-session-tool-rail), or a new
   chat.
 - **A failure card: "Agent connection rejected."** The provider refused the credential — usually an

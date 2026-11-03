@@ -443,6 +443,12 @@ account is paused, stops the run instead of falling back.
   `task:write` in the project. The project's agent credential routes
   (`PUT /api/projects/:id/credentials`, `DELETE /api/projects/:id/credentials/:agentType/:credentialKind`)
   use the same permission.
+- `POST /api/cc/attachments/default` with `{ configurationId }` makes one of your
+  agent accounts your default for its agent (`makeAgentAccountDefault` in
+  `apps/api/src/services/composable-credentials/make-default.ts`). Projects pinned to an
+  account keep it, and the previous default stays connected. Cloud accounts are refused
+  (`400`, "Only agent accounts can be made the default here"), and so is a paused account
+  (`400`, "This account is paused").
 - `GET /api/cc/profile-attachments` lists your profile pins with profile and project
   names.
 - `GET /api/cc/profile-attachments/profiles?agentType=` lists the profiles you can pin

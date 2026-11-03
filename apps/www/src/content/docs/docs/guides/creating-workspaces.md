@@ -59,6 +59,8 @@ SAM supports seven providers:
 3. Fill in that provider's form: use the linked provider console to create the credential, paste it in, and save. Hetzner's form can test the token first; Google Cloud offers **Connect with Google** or a service-account JSON key. SAM encrypts the credential at rest and validates it before the first VM is created.
 4. Name the account (for example, Work or Personal). It becomes your default for that provider. A previous default stays connected and shows as **Unattached**.
 
+To change your default cloud account later, connect the new one the same way (or select **Replace your … default** under the provider's accounts). **Make default** and **Use in projects…** are for agent accounts only; to give one project its own cloud account, open the project's **Settings → Accounts** and select **Use a cloud account only this project bills to**.
+
 Once a provider is connected, SAM uses it automatically when it provisions workspaces. You can connect more than one and set a default provider (and region) per project in project settings. For per-provider VM sizes, regions, and example pricing, see the [Self-Hosting guide](/docs/guides/self-hosting/#user-vm-costs).
 
 :::note
