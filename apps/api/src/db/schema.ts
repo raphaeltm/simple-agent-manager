@@ -5327,3 +5327,31 @@ export const ccProfileAttachments = sqliteTable(
 );
 
 export type CCProfileAttachmentRow = typeof ccProfileAttachments.$inferSelect;
+
+/**
+ * Operations debugger tool audit trail (migration 0217). No foreign keys: a row must
+ * outlive the actor, task and target it records. Purged by `purgeExpiredOperationsAudit`.
+ */
+export const operationsAuditLog = sqliteTable(
+  'operations_audit_log',
+  {
+    id: text('id').primaryKey(),
+    actorUserId: text('actor_user_id').notNull(),
+    taskId: text('task_id').notNull(),
+    tool: text('tool').notNull(),
+    targetType: text('target_type').notNull(),
+    targetId: text('target_id'),
+    outcome: text('outcome').notNull(),
+    detail: text('detail'),
+    approvalId: text('approval_id'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`(strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))`),
+  },
+  (table) => ({
+    createdAtIdx: index('idx_operations_audit_log_created_at').on(table.createdAt),
+    taskIdx: index('idx_operations_audit_log_task').on(table.taskId, table.createdAt),
+  })
+);
+
+export type OperationsAuditLogRow = typeof operationsAuditLog.$inferSelect;

@@ -69,6 +69,7 @@ export const DEFAULT_D1_MIGRATION_CHURNING_TABLES = [
   'DATABASE.diagnostic_reconciliation_state',
   'DATABASE.github_trigger_inbox',
   'DATABASE.github_webhook_deliveries',
+  'DATABASE.operations_audit_log',
   'DATABASE.project_files',
   'DATABASE.registry_credential_rate_limits',
   'DATABASE.session_snapshots',
