@@ -1,14 +1,4 @@
 import { Spinner } from '@simple-agent-manager/ui';
-import {
-  ArrowLeft,
-  ChevronRight,
-  FileText,
-  Folder,
-  Image,
-  RefreshCw,
-  Search,
-  X,
-} from 'lucide-react';
 import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
@@ -21,14 +11,21 @@ import {
   getSessionGitStatus,
   type GitStatusData,
 } from '../../lib/api';
-import { detectLanguage, formatFileSize, isImageFile } from '../../lib/file-utils';
+import { detectLanguage, isImageFile } from '../../lib/file-utils';
 import { fuzzyFilterFiles } from '../../lib/fuzzy-match';
 import { CODE_THEME_BG, RenderedMarkdown, SyntaxHighlightedCode } from '../MarkdownRenderer';
 import { DiffRenderer, ImageViewer } from '../shared-file-viewer';
 import { GlassSheet } from '../shell/GlassSheet';
-import { DownloadFileButton, type FileDownloadError } from './chat-file-panel-download';
-import { GitStatusList, HighlightedFilePath } from './chat-file-panel-rows';
-import { buildBreadcrumbs, isMarkdownFile } from './chat-file-panel-utils';
+import {
+  DirectoryListing,
+  FileBreadcrumbs,
+  FileSearchBar,
+  FileSearchResults,
+} from './chat-file-panel-browse';
+import type { FileDownloadError } from './chat-file-panel-download';
+import { ChatFilePanelHeader } from './chat-file-panel-header';
+import { GitStatusList } from './chat-file-panel-rows';
+import { isMarkdownFile } from './chat-file-panel-utils';
 
 export type FilePanelMode = 'browse' | 'view' | 'diff' | 'git-status';
 
@@ -282,6 +279,12 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
     }
   };
 
+  const openSearchResult = (path: string) => {
+    openFile(path);
+    setSearchActive(false);
+    setSearchQuery('');
+  };
+
   const handleEntryClick = (entry: FileEntry) => {
     const fullPath = currentPath === '.' ? entry.name : `${currentPath}/${entry.name}`;
     if (entry.type === 'dir') navigateDir(fullPath);
@@ -305,292 +308,71 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
       animated={false}
     >
         {/* Header */}
-        <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-[var(--sam-hairline)] px-3 py-2">
-          {(mode === 'view' || mode === 'diff') && (
-            <button
-              type="button"
-              onClick={goBack}
-              aria-label="Back"
-              className="p-3 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
-            >
-              <ArrowLeft size={16} />
-            </button>
-          )}
+        <ChatFilePanelHeader
+          mode={mode}
+          fileName={fileName}
+          filePath={filePath}
+          isMarkdown={isMd}
+          mdMode={mdMode}
+          onMdModeChange={setMdMode}
+          onBack={goBack}
+          onShowFiles={() => {
+            previousModeRef.current = 'browse';
+            setMode('browse');
+            loadListing(currentPath);
+          }}
+          onShowGit={() => {
+            previousModeRef.current = 'git-status';
+            setMode('git-status');
+            loadGitStatus();
+          }}
+          onSearch={activateSearch}
+          onRefresh={() => loadListing(currentPath)}
+          browseLoading={browseLoading}
+          projectId={projectId}
+          sessionId={sessionId}
+          onDownloadError={setDownloadError}
+          onClose={onClose}
+        />
 
-          <span className="text-sm font-medium text-fg-primary truncate flex-1 min-w-0 font-mono">
-            {mode === 'browse' && 'Files'}
-            {mode === 'git-status' && 'Git Changes'}
-            {mode === 'view' && fileName}
-            {mode === 'diff' && `Diff: ${fileName}`}
-          </span>
+        {mode === 'browse' && <FileBreadcrumbs path={currentPath} onNavigate={navigateDir} />}
 
-          {/* Mode toggle for git-status → browse */}
-          {(mode === 'browse' || mode === 'git-status') && (
-            <div className="sam-well flex shrink-0 gap-0.5 rounded-[var(--sam-radius-control)] p-0.5">
-              <button
-                type="button"
-                aria-pressed={mode === 'browse'}
-                onClick={() => {
-                  previousModeRef.current = 'browse';
-                  setMode('browse');
-                  loadListing(currentPath);
-                }}
-                className={`h-8 cursor-pointer rounded-[9px] border-none px-3 text-[13px] ${mode === 'browse' ? 'sam-raised font-medium text-fg-primary' : 'bg-transparent text-fg-muted hover:text-fg-primary'}`}
-              >
-                Files
-              </button>
-              <button
-                type="button"
-                aria-pressed={mode === 'git-status'}
-                onClick={() => {
-                  previousModeRef.current = 'git-status';
-                  setMode('git-status');
-                  loadGitStatus();
-                }}
-                className={`h-8 cursor-pointer rounded-[9px] border-none px-3 text-[13px] ${mode === 'git-status' ? 'sam-raised font-medium text-fg-primary' : 'bg-transparent text-fg-muted hover:text-fg-primary'}`}
-              >
-                Git
-              </button>
-            </div>
-          )}
-
-          {/* Markdown rendered/source toggle */}
-          {mode === 'view' && isMd && !isImageFile(filePath) && (
-            <div className="flex rounded-md overflow-hidden border border-border-default shrink-0">
-              <button
-                type="button"
-                onClick={() => setMdMode('rendered')}
-                className={`text-[11px] font-semibold px-2 py-1 border-none cursor-pointer ${mdMode === 'rendered' ? 'bg-info-tint text-fg-primary' : 'bg-transparent text-fg-muted'}`}
-              >
-                Rendered
-              </button>
-              <button
-                type="button"
-                onClick={() => setMdMode('source')}
-                className={`text-[11px] font-semibold px-2 py-1 border-none cursor-pointer ${mdMode === 'source' ? 'bg-info-tint text-fg-primary' : 'bg-transparent text-fg-muted'}`}
-              >
-                Source
-              </button>
-            </div>
-          )}
-
-          {mode === 'browse' && (
-            <>
-              <button
-                type="button"
-                onClick={activateSearch}
-                aria-label="Search files"
-                title="Search files (Cmd/Ctrl+P)"
-                className="p-3 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
-              >
-                <Search size={14} />
-              </button>
-              <button
-                type="button"
-                onClick={() => loadListing(currentPath)}
-                disabled={browseLoading}
-                aria-label="Refresh"
-                className="p-3 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
-                style={{ opacity: browseLoading ? 0.5 : 1 }}
-              >
-                <RefreshCw size={14} className={browseLoading ? 'animate-spin' : ''} />
-              </button>
-            </>
-          )}
-
-          {mode === 'view' && filePath && (
-            <DownloadFileButton
-              projectId={projectId}
-              sessionId={sessionId}
-              filePath={filePath}
-              onError={setDownloadError}
-            />
-          )}
-
-          <button
-            type="button"
-            onClick={onClose}
-            aria-label="Close file panel"
-            className="p-3 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
-          >
-            <X size={16} />
-          </button>
-        </header>
-
-        {/* Breadcrumbs (browse mode) */}
-        {mode === 'browse' && (
-          <div className="flex items-center gap-0.5 px-3 py-1.5 border-b border-border-default overflow-x-auto shrink-0">
-            {buildBreadcrumbs(currentPath).map((crumb, idx, arr) => (
-              <span key={crumb.path} className="flex items-center shrink-0">
-                {idx > 0 && <ChevronRight size={12} className="text-fg-muted mx-0.5" />}
-                <button
-                  type="button"
-                  onClick={() => navigateDir(crumb.path)}
-                  className={`bg-transparent border-none cursor-pointer px-1 py-0.5 rounded text-xs font-mono
-                    ${idx === arr.length - 1 ? 'text-fg-primary font-semibold' : 'text-fg-muted hover:text-fg-primary'}`}
-                >
-                  {crumb.label}
-                </button>
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* Search bar (browse mode, when active) */}
         {mode === 'browse' && searchActive && (
-          <div className="flex items-center gap-2 px-3 py-2 border-b border-border-default shrink-0">
-            <Search size={14} className="text-fg-muted shrink-0" />
-            <input
-              ref={searchInputRef}
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search files by name..."
-              aria-label="Search files"
-              className="flex-1 min-w-0 bg-transparent border-none outline-none text-xs font-mono text-fg-primary placeholder:text-fg-muted"
-              onKeyDown={(e) => {
-                if (e.key === 'Escape') {
-                  setSearchActive(false);
-                  setSearchQuery('');
-                }
-                if (e.key === 'Enter') {
-                  const firstResult = searchResults[0];
-                  if (firstResult) {
-                    openFile(firstResult.path);
-                    setSearchActive(false);
-                    setSearchQuery('');
-                  }
-                }
-              }}
-            />
-            {fileIndexLoading && <Spinner size="sm" />}
-            {searchQuery && (
-              <button
-                type="button"
-                onClick={() => {
-                  setSearchQuery('');
-                  searchInputRef.current?.focus();
-                }}
-                aria-label="Clear search"
-                className="p-2 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
-              >
-                <X size={12} />
-              </button>
-            )}
-          </div>
+          <FileSearchBar
+            inputRef={searchInputRef}
+            query={searchQuery}
+            onQueryChange={setSearchQuery}
+            loading={fileIndexLoading}
+            onCancel={() => {
+              setSearchActive(false);
+              setSearchQuery('');
+            }}
+            onSubmit={() => {
+              const firstResult = searchResults[0];
+              if (firstResult) openSearchResult(firstResult.path);
+            }}
+          />
         )}
 
         {/* Content area */}
         <div className="flex-1 overflow-auto min-h-0 bg-canvas">
-          {/* Browse mode — search results or directory listing */}
           {mode === 'browse' && searchActive && searchQuery.trim() && (
-            <>
-              {fileIndexError && (
-                <div
-                  className="m-4 p-3 bg-danger-tint rounded-lg text-xs"
-                  style={{ color: 'var(--sam-color-tn-red)' }}
-                >
-                  {fileIndexError}
-                </div>
-              )}
-              {!fileIndexError && searchResults.length === 0 && fileIndex !== null && (
-                <div className="flex justify-center p-12 text-fg-muted text-sm">
-                  No files matching &ldquo;{searchQuery}&rdquo;
-                </div>
-              )}
-              {searchResults.length > 0 && (
-                <div>
-                  {searchResults.map((result) => (
-                    <button
-                      key={result.path}
-                      type="button"
-                      aria-label={`Open ${result.path}`}
-                      onClick={() => {
-                        openFile(result.path);
-                        setSearchActive(false);
-                        setSearchQuery('');
-                      }}
-                      className="w-full flex items-center gap-2.5 px-4 py-2 min-h-[44px] text-left bg-transparent border-none cursor-pointer hover:bg-surface-hover"
-                    >
-                      {isImageFile(result.path) ? (
-                        <Image
-                          size={14}
-                          className="shrink-0"
-                          style={{ color: 'var(--sam-color-info, #3b82f6)' }}
-                        />
-                      ) : (
-                        <FileText size={14} className="shrink-0 text-fg-muted" />
-                      )}
-                      <span className="flex flex-col min-w-0 flex-1">
-                        <HighlightedFilePath path={result.path} matches={result.matches} />
-                        <span className="text-[10px] text-fg-muted truncate">{result.path}</span>
-                      </span>
-                    </button>
-                  ))}
-                </div>
-              )}
-            </>
+            <FileSearchResults
+              results={searchResults}
+              error={fileIndexError}
+              indexLoaded={fileIndex !== null}
+              query={searchQuery}
+              onOpen={openSearchResult}
+            />
           )}
 
-          {/* Browse mode — normal directory listing (when not searching) */}
           {mode === 'browse' && !(searchActive && searchQuery.trim()) && (
-            <>
-              {browseLoading && entries.length === 0 && (
-                <div className="flex justify-center p-8">
-                  <Spinner size="md" />
-                </div>
-              )}
-              {browseError && (
-                <div
-                  className="m-4 p-3 bg-danger-tint rounded-lg text-xs"
-                  style={{ color: 'var(--sam-color-tn-red)' }}
-                >
-                  {browseError}
-                </div>
-              )}
-              {!browseError && entries.length === 0 && !browseLoading && (
-                <div className="flex justify-center p-12 text-fg-muted text-sm">
-                  This directory is empty
-                </div>
-              )}
-              {entries.length > 0 && (
-                <div style={{ opacity: browseLoading ? 0.6 : 1, transition: 'opacity 0.15s' }}>
-                  {entries.map((entry) => (
-                    <button
-                      key={entry.name}
-                      type="button"
-                      onClick={() => handleEntryClick(entry)}
-                      className="w-full flex items-center gap-2.5 px-4 py-2 min-h-[44px] text-left bg-transparent border-none cursor-pointer hover:bg-surface-hover"
-                    >
-                      {entry.type === 'dir' ? (
-                        <Folder
-                          size={14}
-                          className="shrink-0"
-                          style={{ color: 'var(--sam-color-accent-primary)' }}
-                        />
-                      ) : isImageFile(entry.name) ? (
-                        <Image
-                          size={14}
-                          className="shrink-0"
-                          style={{ color: 'var(--sam-color-info, #3b82f6)' }}
-                        />
-                      ) : (
-                        <FileText size={14} className="shrink-0 text-fg-muted" />
-                      )}
-                      <span className="text-xs font-mono text-fg-primary truncate flex-1 min-w-0">
-                        {entry.name}
-                        {entry.type === 'dir' ? '/' : ''}
-                      </span>
-                      {entry.type !== 'dir' && entry.size > 0 && (
-                        <span className="text-[11px] font-mono text-fg-muted shrink-0">
-                          {formatFileSize(entry.size)}
-                        </span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </>
+            <DirectoryListing
+              entries={entries}
+              loading={browseLoading}
+              error={browseError}
+              onOpenEntry={handleEntryClick}
+            />
           )}
 
           {/* View mode */}
