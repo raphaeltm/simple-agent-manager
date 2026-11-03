@@ -253,6 +253,25 @@ describe('requireOperationsAccess', () => {
     );
   });
 
+  it('fails closed, granting nothing, when the Operations project cannot be read', async () => {
+    await setMode('read');
+    const prepare = env.DATABASE.prepare.bind(env.DATABASE);
+    env = {
+      ...env,
+      DATABASE: {
+        ...env.DATABASE,
+        prepare: (sql: string) => {
+          if (sql.includes('updated_by AS updatedBy FROM platform_settings WHERE key = ?'))
+            throw new Error('D1 unavailable');
+          return prepare(sql);
+        },
+      } as D1Database,
+    };
+    await expect(requireOperationsAccess(env, token(), { capability: 'read' })).rejects.toThrow(
+      'D1 unavailable'
+    );
+  });
+
   it('logs every denial with the identifiers needed to trace it', async () => {
     await denialOf(requireOperationsAccess(env, token(), { capability: 'act' }));
     expect(mocks.log.warn).toHaveBeenCalledWith('operations.access_denied', {

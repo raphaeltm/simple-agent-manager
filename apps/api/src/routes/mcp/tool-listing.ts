@@ -8,7 +8,8 @@
  */
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { isOperationsProject, resolveOperationsToolsMode } from '../../services/operations-access';
+import { resolveOperationsToolsMode } from '../../services/operations-access';
+import { resolvePlatformConfig } from '../../services/platform-config';
 import type { McpTokenData } from './_helpers';
 import { INCIDENT_TOOLS, MCP_TOOLS, OPERATIONS_TOOLS } from './tool-definitions';
 
@@ -30,7 +31,10 @@ export async function listMcpToolsForToken(
 ): Promise<readonly McpTool[]> {
   let operationsProject = false;
   try {
-    operationsProject = await isOperationsProject(env, tokenData.projectId);
+    // tools/list runs for every token, so it reads the Operations project through the
+    // per-isolate platform config cache. Tool calls use the uncached `isOperationsProject`.
+    const operationsProjectId = (await resolvePlatformConfig(env)).feedback.projectId.value?.trim();
+    operationsProject = Boolean(operationsProjectId) && operationsProjectId === tokenData.projectId;
   } catch (err) {
     // Hide the Operations-only groups rather than fail tools/list for everyone.
     log.warn('mcp.tools_list.operations_project_unavailable', {

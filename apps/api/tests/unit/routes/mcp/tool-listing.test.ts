@@ -15,6 +15,7 @@ import {
   updateAdminSettings,
 } from '../../../../src/services/admin-settings';
 import type { OperationsToolsMode } from '../../../../src/services/operations-access';
+import { __resetPlatformConfigCacheForTest } from '../../../../src/services/platform-config';
 import { createAdminSettingsEnv } from '../../../helpers/admin-settings-env';
 import { applySqliteMigration, createSchemaTables } from '../../../helpers/sqlite-d1';
 
@@ -82,6 +83,7 @@ async function callAccessStatus(token: string) {
 
 beforeEach(async () => {
   __resetAdminSettingsCacheForTest();
+  __resetPlatformConfigCacheForTest();
   ({ sqlite, env } = createAdminSettingsEnv({ PLATFORM_FEEDBACK_PROJECT_ID: OPS_PROJECT }));
   createSchemaTables(sqlite, [schema.users, schema.tasks]);
   applySqliteMigration(
@@ -147,8 +149,13 @@ describe('tools/list per project and mode', () => {
 
   it('follows a runtime change of the Operations project', async () => {
     sqlite
-      .prepare("INSERT INTO platform_settings (key, value) VALUES ('feedback.projectId', ?)")
-      .run('other-project');
+      .prepare(
+        "INSERT INTO platform_settings (key, value, updated_at, updated_by) VALUES ('feedback.projectId', ?, ?, 'superadmin')"
+      )
+      .run('other-project', new Date().toISOString());
+    // A runtime save invalidates the cache through the platform-config writer; this direct
+    // write stands in for another isolate, so model its cache expiring.
+    __resetPlatformConfigCacheForTest();
     expect(await listedNames('ops-admin')).not.toContain(INCIDENT_NAMES[0]);
     expect(await listedNames('other')).toContain(INCIDENT_NAMES[0]);
   });
@@ -203,6 +210,13 @@ describe('ops_get_access_status through the route', () => {
     expect(sqlite.prepare('SELECT outcome FROM operations_audit_log').all()).toEqual([
       { outcome: 'denied' },
     ]);
+  });
+
+  it('still answers when the audit write fails', async () => {
+    await setMode('read');
+    sqlite.exec('DROP TABLE operations_audit_log');
+    const status = await callAccessStatus('ops-admin');
+    expect(status.capabilities).toEqual({ read: true, act: false });
   });
 
   it('denies another project without revealing the mode or writing an audit row', async () => {
