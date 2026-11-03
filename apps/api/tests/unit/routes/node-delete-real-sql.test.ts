@@ -5,7 +5,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
-import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import {
+  applySqliteMigration,
+  createAllSchemaTables,
+  createSqliteD1,
+} from '../../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({
   requireNodeOwnership: vi.fn(),
@@ -91,6 +95,12 @@ describe('DELETE /api/nodes/:id managed-node proof predicates — real SQL verti
     vi.clearAllMocks();
     sqlite = new Database(':memory:');
     createAllSchemaTables(sqlite, schema);
+    // This route now relies on the shipped audit uniqueness constraint.
+    sqlite.exec('DROP TABLE node_health_events');
+    applySqliteMigration(
+      sqlite,
+      new URL('../../../src/db/migrations/0172_node_health_events.sql', import.meta.url)
+    );
     env = { DATABASE: createSqliteD1(sqlite) } as Env;
 
     mocks.requireNodeOwnership.mockResolvedValue({
@@ -98,6 +108,8 @@ describe('DELETE /api/nodes/:id managed-node proof predicates — real SQL verti
       userId: 'user-1',
       status: 'deleted',
       healthStatus: 'unhealthy',
+      createdAt: '2026-09-04T08:00:00.000Z',
+      lastHeartbeatAt: null,
       nodeRole: 'workspace',
       nodeClass: 'managed',
       runtimeIncarnationId: ORIGINAL_INCARNATION,
@@ -153,7 +165,7 @@ describe('DELETE /api/nodes/:id managed-node proof predicates — real SQL verti
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({
-      message: 'Managed node incarnation changed after deletion proof',
+      message: 'Node incarnation changed before deletion audit',
     });
     expect(
       sqlite.prepare('SELECT runtime_incarnation_id FROM nodes WHERE id = ?').get('node-1')

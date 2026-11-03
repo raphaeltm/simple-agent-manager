@@ -4,11 +4,7 @@ import type { DirectProvisioningIntent } from '../durable-objects/node-lifecycle
 import type { Env } from '../env';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { getTimeoutMs } from './fetch-timeout';
-import {
-  buildNodeProviderLabels,
-  resolveEnvironmentLabel,
-  resolveInstallationId,
-} from './node-provider-labels';
+import { SAM_NODE_LABEL_KEY } from './node-provider-labels';
 import { hasExactProviderCredentialGenerationProof } from './provider-credential-exact';
 import {
   createProviderForUser,
@@ -54,9 +50,6 @@ export async function confirmUnassignedWorkspaceAbsence(
   const snapshot = workspace.placement.capacityPlacementSnapshot;
   const binding = snapshot && exactProviderCredentialBindingFromPlacementSnapshot(snapshot);
   if (!binding || !hasExactProviderCredentialGenerationProof(binding)) return false;
-  const installationId = resolveInstallationId(env);
-  const environmentLabel = resolveEnvironmentLabel(env);
-  if (!installationId || !environmentLabel) return false;
 
   const stillOwned = async () =>
     Boolean(
@@ -96,13 +89,10 @@ export async function confirmUnassignedWorkspaceAbsence(
     );
   const provider = await resolve();
   if (!provider || provider.providerName !== 'hetzner') return false;
-  // Omit incarnation deliberately: any surviving allocation for this original node blocks.
-  const labels = buildNodeProviderLabels({
-    nodeId: input.nodeId,
-    isDeploymentNode: false,
-    installationId,
-    environmentLabel,
-  });
+  // Node IDs survive configuration changes. Broaden this read within the exact
+  // saved account: mutable installation/environment/role labels must never hide
+  // an original allocation, and any incarnation or ambiguous result blocks.
+  const labels = { [SAM_NODE_LABEL_KEY]: input.nodeId.toLowerCase() };
   const servers = await provider.provider.listVMs(labels, {
     signal: AbortSignal.timeout(getTimeoutMs(env.CF_API_TIMEOUT_MS)),
   });

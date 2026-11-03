@@ -11,7 +11,6 @@ import { errors } from '../../middleware/error';
 import { requireNodeOwnership } from '../../middleware/node-auth';
 import { collectEnvironmentRouteHostnames } from '../../services/deployment-routing';
 import { cleanupAppRouteDNSRecords } from '../../services/dns';
-import { recordNodeHealthEvent } from '../../services/node-health';
 import { finalizeDeletion as finalizeNodeLifecycleDeletion } from '../../services/node-lifecycle';
 import type { DeleteNodeResourcesResult } from '../../services/node-resource-deletion';
 import {
@@ -19,6 +18,7 @@ import {
   terminalizeStrandedNodeTasks,
 } from '../../services/node-stranded-tasks';
 import { deleteNodeResources, retireDeletedDeploymentNodeRecord } from '../../services/nodes';
+import { recordOwnerNodeDeletionAudit } from '../../services/owner-node-deletion-audit';
 
 type NodesDb = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -169,6 +169,7 @@ export async function deleteNodeRoute(c: Context<{ Bindings: Env }>) {
   // this node. The environment rows survive (nodeId is set null by the FK), but
   // their grey-cloud A records would otherwise point at the now-freed VM IP.
   await cleanupHostedDeploymentRouteDns(db, c.env, nodeId);
+  await recordOwnerNodeDeletionAudit(c.env, node, userId, cleanup);
   await removeDeletedNodeRecords({
     db,
     env: c.env,
@@ -181,20 +182,6 @@ export async function deleteNodeRoute(c: Context<{ Bindings: Env }>) {
 
   await finalizeNodeLifecycleDeletion(c.env, nodeId, userId);
 
-  try {
-    await recordNodeHealthEvent(c.env, {
-      nodeId,
-      episodeStartedAt: node.lastHeartbeatAt ?? node.createdAt,
-      event: 'deleted_by_owner',
-      reason: 'owner_requested_node_deletion',
-      createdAt: new Date().toISOString(),
-    });
-  } catch (error) {
-    log.error('node_delete.health_event_failed', {
-      nodeId,
-      error: error instanceof Error ? error.message : String(error),
-    });
-  }
   const transitionFailures = await terminalizeStrandedNodeTasks(
     c.env,
     nodeId,

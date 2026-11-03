@@ -337,9 +337,7 @@ describe('explicit unassigned workspace deletion after host owner deletion', () 
           const account = new Headers(init?.headers).get('Authorization') ?? '';
           inventoryAccounts.push(account);
           const selector = new URL(String(url)).searchParams.get('label_selector');
-          expect(selector).toContain(f.intentSnapshot.input.nodeId.toLowerCase());
-          expect(selector).toContain(f.testEnv.SAM_INSTALLATION_ID);
-          expect(selector).toContain('test');
+          expect(selector).toBe(`node=${f.intentSnapshot.input.nodeId.toLowerCase()}`);
           return Response.json({
             servers: account === 'Bearer provider-test-token' ? [f.survivingServer] : [],
             meta: { pagination: { next_page: null } },
@@ -349,6 +347,57 @@ describe('explicit unassigned workspace deletion after host owner deletion', () 
       expect(await f.stub.confirmUnassignedWorkspaceDeletion(f.identity)).toBe(false);
       expect(inventoryAccounts).toEqual(missing ? [] : ['Bearer provider-test-token']);
       expect(f.creates).toHaveLength(1);
+    }
+  );
+
+  it.each(
+    ['environment', 'installation', 'missing-configuration'].flatMap((drift) =>
+      [false, true].map((absent) => ({ drift, absent }))
+    )
+  )(
+    'uses node-wide inventory despite current configuration drift: $drift / absent=$absent',
+    async ({ drift, absent }) => {
+      const f = await orphanedDirectCreation();
+      await runInDurableObject(f.stub, async (instance) => {
+        const current = (instance as unknown as { env: Env }).env;
+        if (drift === 'environment') current.ENVIRONMENT = 'changed-environment';
+        if (drift === 'installation')
+          current.SAM_INSTALLATION_ID = 'fedcba9876543210fedcba9876543210';
+        if (drift === 'missing-configuration') {
+          delete current.ENVIRONMENT;
+          delete current.SAM_INSTALLATION_ID;
+        }
+      });
+      const original = fetch;
+      const selectors: string[] = [];
+      const accounts: string[] = [];
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+          if (!String(url).includes('/servers?')) return original(url, init);
+          const selector = new URL(String(url)).searchParams.get('label_selector') ?? '';
+          selectors.push(selector);
+          accounts.push(new Headers(init?.headers).get('Authorization') ?? '');
+          // Model actual provider filtering: querying current deployment labels would
+          // hide this original allocation and turn surviving inventory into false absence.
+          const originalServer = f.survivingServer!;
+          const labels = originalServer.labels as Record<string, string>;
+          const matches = selector.split(',').every((term) => {
+            const [key, value] = term.split('=');
+            return labels[key!] === value;
+          });
+          return Response.json({
+            servers: !absent && matches ? [originalServer] : [],
+            meta: { pagination: { next_page: null } },
+          });
+        })
+      );
+      // Legacy saved intents have credential generation but no immutable deployment labels.
+      expect(await f.stub.confirmUnassignedWorkspaceDeletion(f.identity)).toBe(absent);
+      expect(selectors).toEqual([`node=${f.intentSnapshot.input.nodeId.toLowerCase()}`]);
+      expect(accounts).toEqual(['Bearer provider-test-token']);
+      expect(f.creates).toHaveLength(1);
+      expect(f.dispatches).toHaveLength(0);
     }
   );
 
