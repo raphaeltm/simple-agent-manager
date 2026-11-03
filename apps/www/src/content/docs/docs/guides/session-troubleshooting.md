@@ -27,8 +27,9 @@ your work is safe and what to do next. Everything here applies to both
 - **The agent stops whenever it needs your approval, and no card appears.** Check whether agent
   requests are enabled on your instance. → [Check request settings](#the-agent-stops-for-approval-and-no-card-appears)
 - **A strip with a spinner**, such as **Waking and restoring session...** or, on a VM, a step like
-  **Finding a server...** or **Waiting for server capacity...**. A wake or a recovery is in
-  progress. → [Wait](#recovery-is-in-progress)
+  **Finding a server...**, or a reason it's waiting such as **Your cloud provider has no capacity
+  right now. Retrying...**. A wake or a recovery is in progress.
+  → [Wait, or clear what it's waiting for](#recovery-is-in-progress)
 - **"…delivery was interrupted and its execution outcome is unknown"** (Instant). Your prompt may
   or may not have run. → [Check, then decide](#your-prompt-may-or-may-not-have-run)
 - **"…could not restore its last safe checkpoint"** (Instant). SAM stopped the container; your
@@ -56,6 +57,11 @@ your work is safe and what to do next. Everything here applies to both
   → [See whether it was](#when-a-task-fails)
 - **A system message starting "SAM lost contact with node"** (VM). The machine behind the chat
   stopped responding. → [Wait for the chat to sleep, then wake it](#sam-lost-contact-with-the-machine)
+- **"Workspace disk was not preserved before automatic VM retirement"** on a chat that was asleep.
+  SAM retired its machine before it could confirm the chat's files were saved.
+  → [Why, and how to carry on](#a-node-wont-go-away)
+- **A node on the Nodes page won't go away**: it shows **Stopped**, **Error** or **Unknown**, or a
+  red line such as **Cleanup blocked since…**, for a long time. → [See why, then remove it](#a-node-wont-go-away)
 - **An archived chat shows a Fork box instead of the message box**, or a chat reads
   **"This session has ended."** or **This chat has ended**. There is nothing left to wake.
   → [Fork it or start a new chat](#the-session-has-ended)
@@ -112,7 +118,10 @@ there too. Open the chat and look for one of these:
   [When the Agent Needs You](/docs/guides/chat-features/#when-the-agent-needs-you).
 - **A question the agent asked with its `request_human_input` tool.** It shows as that tool's step
   in the chat, and as a notification — with answer buttons if the agent offered choices. Reply in
-  the composer, or pick an answer in the notification. If nobody answers for about two hours (longer
+  the composer, or answer from the notification, where **Read question & context** shows the whole
+  question and the messages before it (see
+  [Read and answer an agent's question](/docs/guides/notifications/#read-and-answer-an-agents-question)).
+  If nobody answers for about two hours (longer
   if the notification didn't reach you), the task fails but keeps its workspace, so you can still
   reply to carry on. See [Notifications](/docs/guides/notifications/#request_human_input).
 - **SAM's notice that it paused check-ins.** See
@@ -157,8 +166,10 @@ the chat doesn't restart it:
 - **Blocked: provider limit wait budget exhausted.** Three waits in a row didn't get the work going.
 - **Blocked: provider limit reset outlives the saved snapshot…** The reset comes after SAM stops
   keeping the saved workspace, so the chat can't be woken where it left off.
-- **Blocked: selected provider credential changed…** The credential was replaced while the task
-  waited.
+- **Blocked: selected provider credential changed…** The account the task would run on changed
+  while it waited: the key was replaced, or you (whoever started the task) chose **Make default**,
+  pinned another account to the project, or changed the profile's account. SAM stops rather than carry on with an account you
+  didn't start the task on.
 - Any other reason that starts with **Blocked:** means the same thing.
 
 **Don't reply in the blocked chat.** On a VM, a reply puts the task back in the queue, still
@@ -216,13 +227,19 @@ or in the failure card under the chat header (expand the card for the next step)
 
 - **A strip: "Agent connection missing."** The agent has no credential it can use for this chat. If
   you started the chat, select **Open agent accounts** and connect the agent under
-  **Settings → Agents**; otherwise ask the person who started it. Then start the work again —
+  **Settings → Agents**; otherwise ask the person who started it. It also appears when the account
+  pinned to the project or the profile is paused: the project's **Accounts** tab then says **Can't
+  run — its pinned account is paused**, or the profile's **Account** section reads **Needs attention: … (paused)**. Resume
+  the account in **Settings → Advanced**, or choose **Use my default** or **Use my usual account**
+  (see [Pausing an account](/docs/guides/agents/#pausing-an-account)). Then start the work again —
   **Retry** in the [session tool rail](/docs/guides/chat-features/#the-session-tool-rail), or a new
   chat.
 - **A failure card: "Agent connection rejected."** The provider refused the credential — usually an
   expired subscription sign-in or a revoked API key. Reconnect it under **Settings → Agents** (the
-  card's **Open agent accounts** button, for the person who started the chat), or in the project's
-  **Accounts** tab if the project uses its own account. The agent picks up the new connection only
+  card's **Open agent accounts** button, for the person who started the chat) with **Replace…** on your
+  default, or in the project's **Accounts** tab if the project uses its own account (see
+  [Refresh an expired sign-in or key, or a pinned account](/docs/guides/agents/#common-account-tasks)). Projects and
+  profiles pinned to the old account keep it until you move them. The agent picks up the new connection only
   when it starts again: in a **Task**, wait for the chat to go to
   sleep, then reply to wake it; in a **Chat**, select **Sleep** (the moon button above the message
   box), then send a message. The woken session keeps its recorded settings and task behavior.
@@ -259,8 +276,9 @@ in Manual, with the request switches in force at their first wake; see
 
 ## Recovery is in progress
 
-A strip with a spinner means SAM is waking the session or rebuilding it from its snapshot. **Do
-nothing.** When it finishes, the chat carries on.
+A strip with a spinner means SAM is waking the session or rebuilding it from its snapshot. Usually you
+need to do nothing: when it finishes, the chat carries on. If the strip names a reason it's waiting,
+the table below says what you can do.
 
 On Instant this finishes within two minutes. On a VM, the strip names the step it has reached —
 **Finding a server...**, **Provisioning a server...**, **Restoring your session...**, **Starting
@@ -272,15 +290,20 @@ created. That is normal.
 If a VM wake is waiting, the strip says why when SAM knows (`attachWakeState` in
 `apps/api/src/routes/chat/wake-state.ts`):
 
-| The strip says                                                         | What is happening                                                                     |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------- |
-| **Waiting for the previous workspace to finish shutting down...**      | SAM is still deleting the machine the chat slept on. The wake starts once it is gone. |
-| **Your cloud provider has no capacity right now. Retrying...**         | Your provider is out of that machine type in that location.                           |
-| **Your cloud account's server limit is reached. Retrying...**          | Your Hetzner (or other provider) account is at its server or vCPU limit.              |
-| **Your SAM server limit is reached. Waiting for a free slot...**       | You already have as many machines as SAM allows you (10 by default).                  |
-| **This project's server limit is reached. Waiting for a free slot...** | Your [compute pool](/docs/guides/compute-pools/) allows no more machines.             |
-| **Waiting for a new server to finish starting...**                     | SAM starts one new machine at a time for your account, and one is already starting.   |
-| **Waiting for a server that is still setting up...**                   | A machine that can take this chat is busy setting up another workspace.               |
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/chat-wake-waiting-mobile.png" />
+  <img src="/images/docs/chat-wake-waiting.png" alt="A sleeping chat titled Add tax columns to receipts. A strip with a spinner across the top reads: Your cloud provider has no capacity right now. Retrying... Next try at 02:34 PM. The last message, a follow-up question from the user, waits below, and the message box reads Waking the agent, your message will be delivered." loading="lazy" />
+</picture>
+
+| The strip says                                                         | What is happening                                                                                 | What you can do                                                                                                               |
+| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
+| **Waiting for the previous workspace to finish shutting down...**      | SAM is still deleting the machine the chat slept on. The wake starts once it is gone.             | Wait. If it lasts, check that node on the **Nodes** page (see [A node won't go away](#a-node-wont-go-away)).                  |
+| **Your cloud provider has no capacity right now. Retrying...**         | Your provider is out of that machine type in that location.                                       | Wait, or allow more machine types or locations in your [compute pool](/docs/guides/compute-pools/).                           |
+| **Your cloud account's server limit is reached. Retrying...**          | Your Hetzner (or other provider) account is at its server or vCPU limit.                          | Delete servers you no longer need in the provider's console or on the **Nodes** page, or ask the provider to raise the limit. |
+| **Your SAM server limit is reached. Waiting for a free slot...**       | You already have as many machines as SAM allows you (10 by default).                              | Delete machines you no longer need on the **Nodes** page.                                                                     |
+| **This project's server limit is reached. Waiting for a free slot...** | Your [compute pool](/docs/guides/compute-pools/) allows no more machines.                         | Delete an unused machine, or raise the pool's machine limit.                                                                  |
+| **Waiting for a new server to finish starting...**                     | SAM starts one new machine at a time for your account on each cloud, and one is already starting. | Wait; it usually takes a few minutes.                                                                                         |
+| **Waiting for a server that is still setting up...**                   | A machine that can take this chat is busy setting up another workspace.                           | Wait.                                                                                                                         |
 
 When SAM has scheduled its next attempt, the strip adds **Next try at** and the time. If it shows
 only **Waiting for server capacity...**, SAM has not recorded a reason yet. SAM keeps trying; if
@@ -585,20 +608,63 @@ instead, assume anything the agent had not pushed is gone. Check GitHub, then us
 If you delete a node yourself from the **Nodes** page, the tasks still running on it are marked
 **cancelled**, not failed — deleting it was your decision, not a malfunction.
 
+## A node won't go away
+
+A node is a machine your workspaces run on; the **Nodes** page is under **Infrastructure** in the main
+navigation. When SAM is removing one, it can sit there for a while. A red line on the node says why.
+
+**"Cleanup blocked since…"** followed by a time (in UTC) and one or more reasons means SAM is holding off on purpose,
+usually to keep something safe. Most of these clear by themselves:
+
+| Reason                                          | What it means                                                                                                                                                |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `active_workspace`                              | A workspace on it is still running.                                                                                                                          |
+| `unproven_workspace_deletion`                   | SAM hasn't yet confirmed that a deleted workspace's files are gone.                                                                                          |
+| `unproven_snapshot_source`                      | A sleeping chat's saved copy isn't confirmed yet.                                                                                                            |
+| `sleeping_container_retention`                  | It's kept for a sleeping chat that may wake on it.                                                                                                           |
+| `warm_placement_claim`                          | SAM is about to reuse it for new work.                                                                                                                       |
+| `idle_window`                                   | It was used recently.                                                                                                                                        |
+| `backoff`                                       | A removal attempt failed, and SAM is waiting before the next one.                                                                                            |
+| `provenance`                                    | SAM can't prove which cloud account the server belongs to (see below).                                                                                       |
+| `lost_race`                                     | The node changed while SAM was checking; it checks again shortly.                                                                                            |
+| `strict_provider_ownership_or_deletion_failure` | SAM tried to delete the server at your provider and couldn't, or couldn't prove the server is yours. See [SAM can't delete a node](#sam-cant-delete-a-node). |
+
+A workspace machine that is stopped or being deleted, and stays blocked for 30 minutes (the admin
+setting `operations.nodeCleanupBlockedRetirementMs`), is retired anyway so it isn't billed
+indefinitely, unless a workspace on it is still running, SAM is about to reuse it, or SAM can't prove
+who owns its server. Machines that host app deployments aren't retired this way.
+
+Before retiring it, SAM tries to make sure each sleeping chat's files are saved. If it couldn't for
+one of them, that chat can no longer be woken: it fails with **Workspace disk was not preserved before
+automatic VM retirement**, and you continue with **Fork** (see
+[The session has ended](#the-session-has-ended)). Its transcript, and anything the agent pushed, are
+kept.
+
 ### SAM can't delete a node
 
-A node can stay in **Destroying** or **Error** when SAM cannot prove which cloud account its server
-belongs to, for example a machine created before SAM recorded that. SAM then refuses to delete it and
-retries every hour. If you have already deleted the server in your provider's console, open the node
-and select **I already deleted this server**. Check in your provider's console that it is really gone
-first: SAM cannot prove that for you. It asks your provider with your saved cloud account and refuses
-only if the server turns up. If the lookup fails for a temporary reason, it asks you to try again. If
-the account cannot see the server at all (it was removed, or belongs to a different account), SAM
-takes your word for it. It then stops tracking the node and removes its records, the same way
-**Delete Node** does, without deleting anything at your provider (`recordManualNodeDeletion` in
+A node can stay in **Error** (or show **Unknown** while SAM is deleting it) when SAM cannot prove
+which cloud account its server belongs to, for example a machine created before SAM recorded that.
+SAM then refuses to delete it and retries every hour. If you have already deleted the server in your
+provider's console:
+
+1. Check in the provider's console that the server is really gone. SAM can't prove that for you.
+2. Open the node and select **I already deleted this server**, then confirm. The button appears only
+   once SAM's own deletion has failed (the node shows **Error**, or **Unknown** while SAM is deleting
+   it). On a **Stopped** node, select **Delete Node** first. If SAM still can't delete it, you'll see
+   an error saying the node's termination isn't confirmed; within a few seconds the node shows
+   **Unknown** and the button appears.
+
+SAM asks your provider with your saved cloud account and refuses if the server turns up
+(**Server … still exists at …. Delete it there first, then try again.**). If the lookup fails for a
+temporary reason, it asks you to try again in a minute. If the account cannot see the server at all
+(it was removed, or belongs to a different account), SAM takes your word for it. It then stops
+tracking the node and removes its records, the same way **Delete Node** does, without deleting
+anything at your provider (`recordManualNodeDeletion` in
 `apps/api/src/services/node-manual-deletion.ts`). For a deployment node this affects every
-environment it hosts. The option is not offered for machines you enrolled yourself, and machines on
-SAM's own cloud account need an operator.
+environment it hosts.
+
+**I already deleted this server** isn't offered for machines you enrolled yourself (use **Delete** for those). On a machine that runs on SAM's own cloud account, SAM refuses
+with **This server runs on SAM-managed capacity; contact an operator**, so ask your administrator.
 
 ## The session has ended
 

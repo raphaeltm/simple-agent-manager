@@ -366,6 +366,8 @@ A chat's creator can give another project member the same controls in that one c
 
 Comment threads and replies accept an optional `mentions: [{ "userId": "..." }]`. The server keeps active project members only, stores each person's display name at the time, and returns `400` above `collaboration.commentMentionsMax`.
 
+`GET /api/projects/:id/sessions/:sessionId/attention/:markerId` returns the full saved question an agent asked with `request_human_input`, for the [question reader](/docs/guides/notifications/#read-and-answer-an-agents-question) (`apps/api/src/routes/chat-attention.ts`): the request (its text, choices, whether it is resolved or expired, and `canAnswer`) and the session's id and topic. It needs `task:read`. `canAnswer` is true only for the chat's owner, or a teammate it is shared with, while the question is open. Add `?context=true` for the messages before it: `collaboration.commentContextMessages` of them by default, or `limit`, capped by the session message limit. A question from another chat, or one that isn't an agent question, returns `404`. Answer it with `POST .../attention/:markerId/resolve`.
+
 `GET /api/projects/:id/sessions/:sessionId/comments/:threadId/context` returns one comment thread with the chat around the message it is on, for [reading a comment in its conversation](/docs/guides/collaboration/#read-a-comment-in-its-conversation): `{ thread, session: { id, topic }, viewerAccess, anchor: { messageId, found }, messages, hasMoreBefore, hasMoreAfter }`. It needs `task:read`. `messages` is in transcript order and holds the whole commented message (an agent reply is stored as many streamed rows, and a comment can be on any of them) plus `collaboration.commentContextMessages` messages each side, reading at most `collaboration.commentContextMaxRows` rows each side. Page further with `GET .../sessions/:sessionId/messages` and `before`/`after` cursors from the first and last rows. When the commented message is no longer in the chat, `anchor.found` is `false` and `messages` is empty. A thread from another chat or another project returns `404`.
 
 ## Nodes
@@ -443,6 +445,12 @@ account is paused, stops the run instead of falling back.
   `task:write` in the project. The project's agent credential routes
   (`PUT /api/projects/:id/credentials`, `DELETE /api/projects/:id/credentials/:agentType/:credentialKind`)
   use the same permission.
+- `POST /api/cc/attachments/default` with `{ configurationId }` makes one of your
+  agent accounts your default for its agent (`makeAgentAccountDefault` in
+  `apps/api/src/services/composable-credentials/make-default.ts`). Projects pinned to an
+  account keep it, and the previous default stays connected. Cloud accounts are refused
+  (`400`, "Only agent accounts can be made the default here"), and so is a paused account
+  (`400`, "This account is paused").
 - `GET /api/cc/profile-attachments` lists your profile pins with profile and project
   names.
 - `GET /api/cc/profile-attachments/profiles?agentType=` lists the profiles you can pin
@@ -661,7 +669,9 @@ Create a new project linked to a GitHub repository.
 
 ### `GET /api/projects/:id`
 
-Get project details.
+Get project details. `recentSessions` and `recentActivity` are empty unless you ask for them with
+`?include=recent` (`apps/api/src/routes/projects/project-detail.ts`); that read is bounded by the
+admin setting `performance.projectRecentTimeoutMs`.
 
 ### `POST /api/projects/:id/tasks`
 

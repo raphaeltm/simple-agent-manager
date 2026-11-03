@@ -14,12 +14,11 @@ import { type AccountRows, accountRows, mergeRows } from '../unit/components/acc
 import {
   assertNoOverflow,
   type AuditResponder,
-  makeMockProject,
   makeMockUser,
-  respondToAppShellRoute,
   screenshot,
   setupAuditRoutes,
 } from './audit-helpers';
+import { makeAgentProfile, respondToProfilePageRoute } from './profile-account-fixtures';
 
 const USER = makeMockUser({
   email: 'raphael@example.com',
@@ -114,32 +113,6 @@ function pinOn(profileId: string, configurationId: string): CCProfileAttachmentI
   };
 }
 
-function profile(id: string, name: string, projectId: string | null) {
-  return {
-    id,
-    projectId,
-    userId: USER.user.id,
-    name,
-    description: null,
-    agentType: 'claude-code',
-    model: null,
-    effort: 'auto',
-    permissionMode: null,
-    systemPromptAppend: null,
-    maxTurns: null,
-    timeoutMinutes: null,
-    vmSizeOverride: null,
-    provider: null,
-    vmLocation: null,
-    workspaceProfile: null,
-    devcontainerConfigName: null,
-    taskMode: null,
-    isBuiltin: false,
-    createdAt: '2026-10-01T00:00:00Z',
-    updatedAt: '2026-10-01T00:00:00Z',
-  };
-}
-
 function member(userId: string, role: string) {
   return {
     projectId: 'p-web',
@@ -211,27 +184,14 @@ function handler(scenario: Scenario) {
     if (/^\/api\/projects\/[^/]+\/skills$/.test(path)) {
       return respond(200, { items: scenario.skills ?? [] });
     }
-    if (/^\/api\/projects\/[^/]+\/agent-profiles$/.test(path)) {
-      return respond(200, {
-        items: [
-          profile('prof-deep', 'Opus deep work', 'p-web'),
-          profile('prof-global', 'Everyday', null),
-        ],
-      });
-    }
-    if (/\/agent-profiles\/[^/]+\/runtime\/env-vars$/.test(path))
-      return respond(200, { envVars: [] });
-    if (/\/agent-profiles\/[^/]+\/runtime\/files$/.test(path)) return respond(200, { files: [] });
-    if (/^\/api\/projects\/[^/]+\/agent-profiles\/picker$/.test(path)) {
-      return respond(200, { usage: [], hiddenProfileIds: [], usageWindowDays: 30 });
-    }
-    if (path === '/api/projects') return respond(200, { projects: PROJECTS });
-    const project = path.match(/^\/api\/projects\/([^/]+)$/);
-    if (project) {
-      const found = PROJECTS.find((each) => each.id === project[1]);
-      return respond(200, makeMockProject({ ...found, userId: USER.user.id }));
-    }
-    return respondToAppShellRoute(path, respond, { user: USER, projects: PROJECTS });
+    return respondToProfilePageRoute(path, respond, {
+      user: USER,
+      projects: PROJECTS,
+      profiles: [
+        makeAgentProfile('prof-deep', 'Opus deep work', 'p-web', USER.user.id),
+        makeAgentProfile('prof-global', 'Everyday', null, USER.user.id),
+      ],
+    });
   };
 }
 

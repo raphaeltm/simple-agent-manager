@@ -43,6 +43,45 @@ runs out (see [What your teammate sees](/docs/guides/collaboration/#what-your-te
 To stop a kind of notification, switch it off in **Settings → Notifications**; the newer ones are
 **Mentions**, **Comments on your sessions**, and **Shared sessions**.
 
+### Read and answer an agent's question
+
+When an agent asks you something with `request_human_input`, it lands under **Attention** as
+**Input needed:** (or **Decision needed:**, **Approval needed:** and similar) followed by the task's
+title. The notification shows only the start of
+the question.
+
+![An agent's question in the notification bell, under Attention. It reads "Input needed: add tax columns to receipts", the start of the question, a "Read question & context" link, and two answer buttons: Migrate in place and Add a new table.](/images/docs/notification-question-bell.png)
+
+1. Open the bell, or the project's **Notifications** page in its navigation.
+2. In the bell, if the answer is obvious from the preview, select one of its buttons. Your choice goes
+   straight to the agent.
+3. Otherwise select **Read question & context** (or the question itself; on the project's
+   **Notifications** page, select the notification) to read the whole question in its own window. On
+   a phone it fills most of the screen.
+4. Select **Show earlier context** to see the last few messages before the question, without leaving
+   the notification.
+5. Answer with one of the buttons at the bottom, which stay in place while the question scrolls. When
+   the agent offered no choices, type in **Your answer** and select **Send answer**.
+
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/notification-question-reader-mobile.png" />
+  <img src="/images/docs/notification-question-reader.png" alt="The question reader titled Question from your agent, for the chat Add tax columns to receipts. On a desktop, earlier context is open above the question, showing the user's request and the agent's last message; on a phone it is collapsed behind Show earlier context. Then the full question, marked Needs your answer: Migrate receipts in place, or add a new table?, with both options explained in a numbered list. The answer buttons Migrate in place and Add a new table sit at the bottom, above an Open in conversation link." loading="lazy" />
+</picture>
+
+The badge beside the question says where it stands: **Needs your answer**, **Answer being
+delivered** (select **Check delivery status** to refresh it), **Answered** with the answer, or
+**Expired**. (If someone answered by typing in the chat, the window says the question was already
+resolved, without the answer.) **Open in conversation** takes you to the chat; after you load the earlier context, it
+opens at the last of those messages. You can also just reply in the chat: a typed reply answers the
+question too.
+
+The notification goes to the person who started the chat. A teammate the chat is
+[shared with](/docs/guides/collaboration/#work-together-in-a-chat) can answer by replying in the chat.
+If you no longer have permission to run tasks in the project, the window shows the question without
+answer buttons. If the question can't be loaded (it was removed, or you lost access), the window
+shows the notification's text labelled **Notification preview · may be incomplete**, with **Try
+again**, and offers no answers.
+
 ## Delivery Channels
 
 Notifications are delivered via WebSocket for instant updates. The number on the bell counts unread **Attention** notifications and updates in real time without a page refresh.
@@ -79,18 +118,11 @@ SAM waits for your answer. Ordinary typed replies continue to resolve the reques
 agent supplies choices, the notification also renders touch-sized answer buttons; choosing
 one records the exact answer and forwards it to the agent.
 
-Select the question text or **Read question & context** to open the full saved question in a
-focused dialog. On a phone, it fills most of the screen. The question scrolls independently of
-the answer area, so its choices stay available while you read. **Show earlier context** loads a
-small set of earlier messages assembled from their streamed parts, even if the question is outside the chat's
-currently loaded page. A very long or scan-limited excerpt is labelled; open the conversation to read more. The number of earlier messages shares the **Collaboration** context setting in **Admin → Settings** with the comment reader. **Open in conversation** takes you to the chat; after loading context,
-it opens at the last preceding excerpt.
-
-The same reader opens from project notifications. Quick choice buttons still work directly in
-the bell panel. Requests without fixed choices provide a text field in the reader. Resolved,
-expired, or currently delivering requests cannot be answered again there. If the saved request
-cannot be loaded, the reader labels the notification text as an incomplete preview and offers
-a retry instead of presenting it as the whole question.
+To read the whole question, see its earlier context, and answer it from the notification, see
+[Read and answer an agent's question](#read-and-answer-an-agents-question). The reader loads the
+saved question, not the notification text, and earlier messages even when the question is outside
+the chat's loaded page. How many earlier messages it shows is the **Collaboration** context setting
+in **Admin → Settings**, shared with the comment reader.
 
 SAM sends bounded reminders during the initial response window. At the original deadline,
 the task is failed only when push delivery was confirmed. If no out-of-band channel
@@ -110,21 +142,22 @@ When agents call `update_task_status`, SAM creates progress notifications. To av
 
 ### API Endpoints
 
-| Endpoint                                                                   | Method | Description                                     |
-| -------------------------------------------------------------------------- | ------ | ----------------------------------------------- |
-| `/api/notifications`                                                       | GET    | List notifications (paginated)                  |
-| `/api/notifications/unread-count`                                          | GET    | Get unread count                                |
-| `/api/notifications/:id/read`                                              | POST   | Mark as read                                    |
-| `/api/notifications/read-all`                                              | POST   | Mark all as read                                |
-| `/api/notifications/:id/dismiss`                                           | POST   | Dismiss a notification                          |
-| `/api/notifications/preferences`                                           | GET    | Get notification preferences                    |
-| `/api/notifications/preferences`                                           | PUT    | Update preferences                              |
-| `/api/notifications/push/subscriptions`                                    | POST   | Add or refresh this browser's push subscription |
-| `/api/notifications/push/subscriptions`                                    | GET    | List the user's push subscriptions              |
-| `/api/notifications/push/subscriptions`                                    | DELETE | Remove this browser's push subscription         |
-| `/api/notifications/ws`                                                    | GET    | WebSocket for real-time delivery                |
-| `/api/config/vapid-public-key`                                             | GET    | Read the deployment's public VAPID key          |
-| `/api/projects/:projectId/sessions/:sessionId/attention/:markerId/resolve` | POST   | Record and forward a structured answer          |
+| Endpoint                                                                   | Method | Description                                                          |
+| -------------------------------------------------------------------------- | ------ | -------------------------------------------------------------------- |
+| `/api/notifications`                                                       | GET    | List notifications (paginated)                                       |
+| `/api/notifications/unread-count`                                          | GET    | Get unread count                                                     |
+| `/api/notifications/:id/read`                                              | POST   | Mark as read                                                         |
+| `/api/notifications/read-all`                                              | POST   | Mark all as read                                                     |
+| `/api/notifications/:id/dismiss`                                           | POST   | Dismiss a notification                                               |
+| `/api/notifications/preferences`                                           | GET    | Get notification preferences                                         |
+| `/api/notifications/preferences`                                           | PUT    | Update preferences                                                   |
+| `/api/notifications/push/subscriptions`                                    | POST   | Add or refresh this browser's push subscription                      |
+| `/api/notifications/push/subscriptions`                                    | GET    | List the user's push subscriptions                                   |
+| `/api/notifications/push/subscriptions`                                    | DELETE | Remove this browser's push subscription                              |
+| `/api/notifications/ws`                                                    | GET    | WebSocket for real-time delivery                                     |
+| `/api/config/vapid-public-key`                                             | GET    | Read the deployment's public VAPID key                               |
+| `/api/projects/:projectId/sessions/:sessionId/attention/:markerId`         | GET    | Read the full saved question (`?context=true` adds earlier messages) |
+| `/api/projects/:projectId/sessions/:sessionId/attention/:markerId/resolve` | POST   | Record and forward a structured answer                               |
 
 ### Deduplication
 

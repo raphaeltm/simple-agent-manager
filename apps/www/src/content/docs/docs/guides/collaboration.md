@@ -37,6 +37,7 @@ Two roles are in use today: **owner** and **admin**. (Throughout this guide, _me
 | Approve or deny access requests                    | Yes   | Yes   |
 | Remove other members (anyone except the owner)     | Yes   | Yes   |
 | Manage connections, secrets, and infrastructure    | Yes   | Yes   |
+| Pin your own agent account to the project          | Yes   | Yes   |
 | Transfer ownership                                 | Yes   | No    |
 | Delete the project                                 | Yes   | No    |
 
@@ -375,7 +376,7 @@ By default, a resource runs on the **personal** keys of the member who set it up
 
 You have two levers, depending on your goal:
 
-- **Move the cost onto a shared key** — click **Fix** on a personal-key row to go to the project's **Accounts** tab and attach a project-scoped credential (**Use another account here** for an agent, or **Use a cloud account only this project bills to** under **Compute**). Agent account pins are per member: the member whose work it is pins their own agent account there, and their sessions in the project then use it instead of their personal default. Pinning an account never changes another member's runs. (If you pin your _own_ key, you are still the one paying.)
+- **Move the cost onto another account** — click **Fix** on a personal-key row to go to the project's **Accounts** tab. For machines, **Use a cloud account only this project bills to** (under **Compute**) gives the project its own cloud account. Agent accounts work differently: a pin only changes the runs of the member who sets it, so the member whose work it is pins the account that should pay (**Use another account here**), for example a client's key, and their sessions in the project then use it instead of their personal default. A profile they pinned to another account still wins over the project pin, so they change that profile's account too. You can't move a teammate's agent work onto another account for them. (If you pin your _own_ key, you are still the one paying.)
 - **Stop the work entirely** — pause or delete the trigger from the **Automation** page, or stop the task (or the resource itself). Attaching a credential changes _who_ pays; it does not stop the automation.
 
 ![The Credential Attribution panel, showing a nightly trigger running on a member's personal Claude Code key flagged for review with a Fix link, and a staging deployment covered by a shared project Hetzner credential.](/images/docs/collaboration-credentials.png)
@@ -401,6 +402,8 @@ The key thing to understand: **personal credentials leave with their owner.** A 
 - **Defer** — postpone a resource instead of resolving it now. Deferring does not clear a block, so any resource that blocks removal (see below) still has to be disabled, reattached, or deleted before you can finish.
 
 Some resources **block removal** until they are resolved, so you can't accidentally remove a member out from under running work, and each type clears the block differently: a **trigger** clears it when you disable it or reattach it to a project credential; a **task** clears it only by stopping its future work (tasks can't be reattached); a **node or deployment** clears it only by reattaching to a project credential. If no compatible project credential is available for a node or deployment, stop or delete it separately before finishing the removal.
+
+A departing member's own account choices on the project's profiles are removed with them (see [Using another account for one profile](/docs/guides/agents/#using-another-account-for-one-profile)); other members' choices are untouched.
 
 Combined with the credential-attribution indicator above, this keeps a member's exit from unexpectedly cutting off the team's automation — you decide, up front, what survives.
 
