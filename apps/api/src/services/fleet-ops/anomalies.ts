@@ -15,6 +15,7 @@
  */
 import { WORKSPACE_DELETION_QUARANTINE_MESSAGE } from '../../durable-objects/node-lifecycle-workspace-deletion';
 import type { Env } from '../../env';
+import { chunk, D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
 import { log } from '../../lib/logger';
 import { resolveCleanupConfig } from '../../scheduled/node-cleanup/config';
 import { deriveNodeHealth } from '../node-health';
@@ -329,12 +330,17 @@ async function deletionQuarantine(ctx: SweepContext): Promise<AnomalyClassResult
   const reported = rows.results ?? [];
   const ids = reported.map((row) => text(row.workspace_id)).filter((id): id is string => !!id);
   const statuses = new Map<string, string>();
-  if (ids.length > 0) {
-    const current = await ctx.env.DATABASE.prepare(
-      `SELECT id, status FROM workspaces WHERE id IN (${ids.map(() => '?').join(', ')})`
+  // `anomalyMaxPerClass` may exceed D1's bound-parameter ceiling, so look statuses up in chunks.
+  const lookups = await Promise.all(
+    chunk(ids, D1_MAX_BOUND_PARAMETERS).map((part) =>
+      ctx.env.DATABASE.prepare(
+        `SELECT id, status FROM workspaces WHERE id IN (${part.map(() => '?').join(', ')})`
+      )
+        .bind(...part)
+        .all<Row>()
     )
-      .bind(...ids)
-      .all<Row>();
+  );
+  for (const current of lookups) {
     for (const row of current.results ?? []) statuses.set(String(row.id), String(row.status));
   }
   const open = reported.filter((row) => statuses.get(String(row.workspace_id)) !== 'deleted');

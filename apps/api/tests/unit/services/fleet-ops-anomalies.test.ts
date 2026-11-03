@@ -12,7 +12,11 @@ import type { Env } from '../../../src/env';
 import { resolveCleanupConfig } from '../../../src/scheduled/node-cleanup/config';
 import { findAnomalies } from '../../../src/services/fleet-ops/anomalies';
 import { FLEET_OPS_DEFAULTS } from '../../../src/services/fleet-ops/settings-definitions';
-import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import {
+  createSchemaTables,
+  createSqliteD1,
+  createSqliteD1WithBindLimit,
+} from '../../helpers/sqlite-d1';
 
 const NOW = Date.parse('2026-11-03T12:00:00.000Z');
 const MIN = 60_000;
@@ -324,6 +328,36 @@ describe('findAnomalies', () => {
     expect(entry.returned).toBe(2);
     expect(entry.truncated).toBe(true);
     expect(entry.findings.map((f) => f.ids.nodeId)).toEqual(['node-stale-4', 'node-stale-3']);
+  });
+
+  it('reports more quarantined workspaces than D1 can bind in one statement', async () => {
+    // D1 rejects statements with more than 100 bound parameters; the in-memory engine does not.
+    env = { ...env, DATABASE: createSqliteD1WithBindLimit(main, 100) } as Env;
+    node('node-1');
+    for (let i = 0; i < 150; i++) {
+      const id = `ws-q-${String(i).padStart(3, '0')}`;
+      workspace(id, 'node-1', { status: i === 0 ? 'deleted' : 'stopping' });
+      insert(obs, 'platform_errors', {
+        id: `e-${id}`,
+        source: 'api',
+        level: 'error',
+        message: WORKSPACE_DELETION_QUARANTINE_MESSAGE,
+        workspace_id: id,
+        node_id: 'node-1',
+        timestamp: NOW - MIN - i,
+        created_at: NOW - MIN - i,
+      });
+    }
+
+    const entry = findingIds(
+      await findAnomalies(env, { ...FLEET_OPS_DEFAULTS, anomalyMaxPerClass: 200 }, { now: NOW }),
+      'workspace_deletion_quarantine'
+    );
+
+    // The one deleted since is dropped, which needs a status from both lookup chunks.
+    expect(entry.returned).toBe(149);
+    expect(entry.findings.map((f) => f.ids.workspaceId)).not.toContain('ws-q-000');
+    expect(entry.findings.at(-1)?.ids.workspaceId).toBe('ws-q-149');
   });
 
   it('isolates a failing class: the others still report', async () => {
