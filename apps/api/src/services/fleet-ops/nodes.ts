@@ -6,6 +6,7 @@
  */
 import type { Env } from '../../env';
 import { maybeJsonRecord } from '../../lib/runtime-validation';
+import { neutralizeUntrustedText } from '../../operations/untrusted-text';
 import { deriveNodeHealth } from '../node-health';
 import { getStatus as getNodeLifecycleStatus } from '../node-lifecycle';
 import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from '../workspace-resource-capacity';
@@ -158,7 +159,9 @@ export async function getFleetNode(env: Env, nodeId: string, limit: number, now 
       .all<Row>(),
     getNodeLifecycleStatus(env, nodeId).then(
       (state) => ({ state }),
-      (error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })
+      (error: unknown) => ({
+        error: neutralizeUntrustedText(error instanceof Error ? error.message : String(error)),
+      })
     ),
   ]);
 

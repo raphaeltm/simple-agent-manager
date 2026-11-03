@@ -28,7 +28,11 @@ import {
   queryErrors,
 } from '../../services/observability';
 import { runPlatformFeedbackTriage } from '../../services/platform-feedback-triage';
-import { queryWorkerLogs } from '../../services/worker-log-query';
+import {
+  queryWorkerLogs,
+  WORKER_LOG_RATE_KEY_PREFIX,
+  WORKER_LOG_RATE_WINDOW_SECONDS,
+} from '../../services/worker-log-query';
 import { registerAdminDiagnosisRoutes } from './diagnoses';
 
 /**
@@ -287,8 +291,8 @@ adminObservabilityRoutes.post(
   async (c, next) => {
     const limiter = rateLimit({
       limit: getLogQueryRateLimit(c.env),
-      keyPrefix: 'cf-log-query',
-      windowSeconds: 60,
+      keyPrefix: WORKER_LOG_RATE_KEY_PREFIX,
+      windowSeconds: WORKER_LOG_RATE_WINDOW_SECONDS,
     });
     return limiter(c, next);
   },

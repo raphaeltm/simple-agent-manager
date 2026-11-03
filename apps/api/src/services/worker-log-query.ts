@@ -6,6 +6,10 @@ import { queryCloudflareLogs } from './observability-logs';
 
 export const WORKER_LOG_LEVELS = ['error', 'warn', 'info', 'debug', 'log'] as const;
 
+/** Per-user rate-limit bucket shared by Admin → Logs and `ops_query_worker_logs`. */
+export const WORKER_LOG_RATE_KEY_PREFIX = 'cf-log-query';
+export const WORKER_LOG_RATE_WINDOW_SECONDS = 60;
+
 export interface WorkerLogQuery {
   timeRange: { start: string; end: string };
   levels?: string[];

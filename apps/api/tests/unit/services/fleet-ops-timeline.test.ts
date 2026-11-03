@@ -138,6 +138,8 @@ const request = (overrides: Partial<Parameters<typeof buildTimeline>[1]> = {}) =
   entityType: null,
   limit: 100,
   perSourceLimit: 50,
+  defaultWindowMs: 7 * 24 * 3_600_000,
+  fanoutLimit: 2,
   graphRowCap: 25,
   textMaxLength: 2_000,
   nodeAccess: operatorNodeAccess({ userId: 'admin', taskId: 'ops-task' }),
@@ -176,7 +178,9 @@ describe('buildTimeline', () => {
     expect(result.events.map((e) => e.at)).toEqual([...result.events.map((e) => e.at)].sort());
     expect(JSON.stringify(result.events)).not.toContain('unrelated');
     expect(JSON.stringify(result.events)).not.toContain('task-other');
-    expect(result.events.find((e) => e.kind === 'error.error')?.text).toBe('docker exploded');
+    const errorText = result.events.find((e) => e.kind === 'error.error')?.text ?? '';
+    expect(errorText).toContain('BEGIN UNTRUSTED PLATFORM_ERRORS');
+    expect(errorText).toContain('docker exploded');
     expect(result.truncated).toBe(false);
   });
 

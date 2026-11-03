@@ -16,7 +16,7 @@ import { getBootLogs } from '../boot-log';
 import { getWorkspaceDeletionAttemptState } from '../node-lifecycle';
 import { getSession, getSessionState, listAcpSessions } from '../project-data';
 import {
-  capIds,
+  anyIdIn,
   ENTITY_TEXT_COLUMNS,
   type EntityGraph,
   type OpsEntityType,
@@ -70,6 +70,10 @@ function primaryChatSessionId(graph: EntityGraph): string | null {
   return graph.chatSessionIds[0] ?? null;
 }
 
+/**
+ * The workspace the story centres on: the one asked for, else the task's own workspace, else
+ * the most recently created related workspace. Every related workspace is still returned.
+ */
 function primaryWorkspace(graph: EntityGraph): Row | null {
   if (graph.entityType === 'workspace') {
     return graph.workspaces.find((w) => w.id === graph.entityId) ?? null;
@@ -78,22 +82,26 @@ function primaryWorkspace(graph: EntityGraph): Row | null {
   return graph.workspaces.find((w) => w.id === taskWorkspace) ?? graph.workspaces[0] ?? null;
 }
 
+/**
+ * Errors tied to this story's tasks, workspaces or chat sessions. Node-level errors are left out
+ * on purpose: a node hosts other users' sessions too (read them with `ops_timeline` on the node
+ * or `ops_search_errors` with `nodeId`).
+ */
 async function relatedErrors(env: Env, graph: EntityGraph, limit: number): Promise<Row[]> {
-  const clauses: [string, readonly string[]][] = [
-    ['task_id', capIds(graph.taskIds)],
-    ['workspace_id', capIds(graph.workspaceIds)],
-    ['session_id', capIds(graph.chatSessionIds)],
-  ];
-  const used = clauses.filter(([, values]) => values.length > 0);
-  if (used.length === 0) return [];
+  const where = anyIdIn([
+    ['task_id', graph.taskIds],
+    ['workspace_id', graph.workspaceIds],
+    ['session_id', graph.chatSessionIds],
+  ]);
+  if (where.binds.length === 0) return [];
   const rows = await env.OBSERVABILITY_DATABASE.prepare(
     `SELECT id, source, level, message, task_id, workspace_id, node_id, session_id, timestamp
      FROM platform_errors
-     WHERE ${used.map(([col, values]) => `${col} IN (${values.map(() => '?').join(', ')})`).join(' OR ')}
+     WHERE ${where.sql}
      ORDER BY timestamp DESC, id DESC
      LIMIT ?`
   )
-    .bind(...used.flatMap(([, values]) => [...values]), limit)
+    .bind(...where.binds, limit)
     .all<Row>();
   return rows.results ?? [];
 }

@@ -104,6 +104,44 @@ export const FLEET_OPS_SETTINGS = [
     range: { min: 5, max: 500 },
   },
   {
+    name: 'operations.opsTimelineDefaultWindowHours',
+    key: 'timelineDefaultWindowHours',
+    defaultValue: 7 * 24,
+    description: 'Hours an Operations timeline looks back when the caller gives no start time.',
+    range: { min: 1, max: 90 * 24 },
+  },
+  {
+    name: 'operations.opsTimelineFanoutLimit',
+    key: 'timelineFanoutLimit',
+    defaultValue: 2,
+    description:
+      'Chat sessions, workspaces and running nodes per timeline that get their own activity, boot log and live node event reads. Each one costs a Durable Object, KV or node request.',
+    range: { min: 1, max: 5 },
+  },
+  {
+    name: 'operations.opsEntityGraphRowCap',
+    key: 'entityGraphRowCap',
+    defaultValue: 25,
+    description:
+      'Most related tasks, workspaces, agent sessions, snapshots or nodes a session story or timeline reads per table.',
+    range: { min: 1, max: 100 },
+  },
+  {
+    name: 'operations.opsWorkerLogDefaultWindowMinutes',
+    key: 'workerLogDefaultWindowMinutes',
+    defaultValue: 60,
+    description:
+      'Minutes of Worker logs an Operations log query covers when the caller gives no start time.',
+    range: { min: 1, max: 24 * 60 },
+  },
+  {
+    name: 'operations.debugPackageCapturesPerHour',
+    key: 'debugPackageCapturesPerHour',
+    defaultValue: 20,
+    description: 'Debug packages one superadmin may capture per hour across all Operations tasks.',
+    range: { min: 1, max: 200 },
+  },
+  {
     name: 'operations.opsListMaxRows',
     key: 'listMaxRows',
     defaultValue: 100,

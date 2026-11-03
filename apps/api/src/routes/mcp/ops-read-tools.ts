@@ -11,7 +11,7 @@ import {
   createRateLimitKey,
   getCurrentWindowStart,
 } from '../../middleware/rate-limit';
-import { neutralizeUntrustedText } from '../../operations/untrusted-text';
+import { untrustedTextBlock } from '../../operations/untrusted-text';
 import {
   ANOMALY_CLASSES,
   type AnomalyClass,
@@ -23,7 +23,12 @@ import { getSessionStory } from '../../services/fleet-ops/session-story';
 import { buildTimeline } from '../../services/fleet-ops/timeline';
 import { operatorNodeAccess } from '../../services/node-diagnostics-access';
 import { getLogQueryRateLimit, queryErrors } from '../../services/observability';
-import { queryWorkerLogs, WORKER_LOG_LEVELS } from '../../services/worker-log-query';
+import {
+  queryWorkerLogs,
+  WORKER_LOG_LEVELS,
+  WORKER_LOG_RATE_KEY_PREFIX,
+  WORKER_LOG_RATE_WINDOW_SECONDS,
+} from '../../services/worker-log-query';
 import type { JsonRpcResponse, McpTokenData } from './_helpers';
 import {
   OpsToolInputError,
@@ -44,15 +49,16 @@ type Handler = (
 
 const ERROR_SOURCES = ['client', 'vm-agent', 'api'] as const;
 const ERROR_LEVELS = ['error', 'warn', 'info'] as const;
-/** Kept short so Worker log reads stay inside one admin rate-limit window. */
-const WORKER_LOG_RATE_WINDOW_SECONDS = 60;
-const DEFAULT_WORKER_LOG_WINDOW_MS = 60 * 60 * 1000;
+const MINUTE_MS = 60_000;
+const HOUR_MS = 60 * MINUTE_MS;
 
-function bounded(text: unknown, max: number): string {
-  const clean = neutralizeUntrustedText(
-    typeof text === 'string' ? text : JSON.stringify(text ?? '')
-  );
-  return clean.length > max ? `${clean.slice(0, max)} [truncated by SAM]` : clean;
+/** One free-text field, capped and fenced in its own untrusted envelope. */
+function bounded(kind: string, text: unknown, max: number): string {
+  return untrustedTextBlock({
+    kind,
+    text: typeof text === 'string' ? text : JSON.stringify(text ?? ''),
+    maxLength: max,
+  }).text;
 }
 
 export const handleOpsFindAnomalies: Handler = (requestId, params, tokenData, env) => {
@@ -130,7 +136,7 @@ export const handleOpsGetSessionStory: Handler = (requestId, params, tokenData, 
       const story = await getSessionStory(env, {
         id: requiredString(params, 'id', 128),
         entityType,
-        rowCap: Math.min(settings.listMaxRows, 25),
+        rowCap: settings.entityGraphRowCap,
         textMaxLength: settings.textFieldMaxLength * 4,
       });
       return { result: { ...story } };
@@ -151,10 +157,12 @@ export const handleOpsTimeline: Handler = (requestId, params, tokenData, env) =>
         entityType: entityTypeParam(params),
         sinceMs: optionalTime(params, 'since'),
         untilMs: optionalTime(params, 'until'),
+        defaultWindowMs: settings.timelineDefaultWindowHours * HOUR_MS,
+        fanoutLimit: settings.timelineFanoutLimit,
         limit:
           optionalLimit(params, 'limit', settings.timelineMaxEvents) ?? settings.timelineMaxEvents,
         perSourceLimit: settings.timelinePerSourceLimit,
-        graphRowCap: Math.min(settings.listMaxRows, 25),
+        graphRowCap: settings.entityGraphRowCap,
         textMaxLength: settings.textFieldMaxLength,
         nodeAccess: operatorNodeAccess(grant),
       });
@@ -203,8 +211,8 @@ export const handleOpsSearchErrors: Handler = (requestId, params, tokenData, env
             workspaceId: e.workspaceId,
             taskId: e.taskId,
             sessionId: e.sessionId,
-            message: bounded(e.message, max),
-            context: e.context ? bounded(e.context, max) : null,
+            message: bounded('error message', e.message, max),
+            context: e.context ? bounded('error context', e.context, max) : null,
             hasStack: Boolean(e.stack),
           })),
         },
@@ -225,7 +233,7 @@ export const handleOpsQueryWorkerLogs: Handler = (requestId, params, tokenData, 
       const limit = getLogQueryRateLimit(env);
       const rate = await checkRateLimit(
         env.KV,
-        createRateLimitKey('cf-log-query', grant.userId, window),
+        createRateLimitKey(WORKER_LOG_RATE_KEY_PREFIX, grant.userId, window),
         limit,
         WORKER_LOG_RATE_WINDOW_SECONDS
       );
@@ -235,7 +243,8 @@ export const handleOpsQueryWorkerLogs: Handler = (requestId, params, tokenData, 
         );
       }
       const until = optionalTime(params, 'until') ?? Date.now();
-      const since = optionalTime(params, 'since') ?? until - DEFAULT_WORKER_LOG_WINDOW_MS;
+      const since =
+        optionalTime(params, 'since') ?? until - settings.workerLogDefaultWindowMinutes * MINUTE_MS;
       const levels = Array.isArray(params.levels) ? params.levels : [];
       for (const level of levels) {
         if (
@@ -265,8 +274,8 @@ export const handleOpsQueryWorkerLogs: Handler = (requestId, params, tokenData, 
             level: entry.level,
             event: entry.event,
             invocationId: entry.invocationId,
-            message: bounded(entry.message, max),
-            details: bounded(entry.details, max),
+            message: bounded('worker log message', entry.message, max),
+            details: bounded('worker log details', entry.details, max),
           })),
         },
         detail: { returned: result.logs.length },

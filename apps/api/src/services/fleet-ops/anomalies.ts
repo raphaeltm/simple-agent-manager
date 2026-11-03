@@ -17,6 +17,7 @@ import { WORKSPACE_DELETION_QUARANTINE_MESSAGE } from '../../durable-objects/nod
 import type { Env } from '../../env';
 import { chunk, D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
 import { log } from '../../lib/logger';
+import { neutralizeUntrustedText } from '../../operations/untrusted-text';
 import { resolveCleanupConfig } from '../../scheduled/node-cleanup/config';
 import { deriveNodeHealth } from '../node-health';
 import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from '../workspace-resource-capacity';
@@ -382,7 +383,8 @@ async function pendingIncidents(ctx: SweepContext): Promise<AnomalyClassResult> 
   return result('pending_incident', rows.results ?? [], (row) => {
     const lastSeen = int(row.last_seen_at);
     return {
-      ids: { signature: text(row.signature) },
+      // Signatures derive from reported error text; strip control characters and markers.
+      ids: { signature: neutralizeUntrustedText(text(row.signature) ?? '') || null },
       reason:
         `Pending ${text(row.severity) ?? 'unknown'} incident from ${text(row.source) ?? 'unknown'} ` +
         `seen ${int(row.occurrence_count)} time(s) (read with get_incident).`,

@@ -11,7 +11,7 @@ import { getBootLogs } from '../boot-log';
 import { listNodeEventsOnNode } from '../node-agent';
 import { type NodeAccess, runNodeDiagnostic } from '../node-diagnostics-access';
 import { listActivityEvents } from '../project-data';
-import type { EntityGraph, OpsEntityType } from './entity-graph';
+import { anyIdIn, type EntityGraph, type OpsEntityType, placeholders } from './entity-graph';
 
 export interface TimelineScope {
   readonly entityType: OpsEntityType;
@@ -27,6 +27,11 @@ export interface TimelineScope {
   readonly graph: EntityGraph;
   /** Gated operator access, for sources that call node agents. */
   readonly nodeAccess: NodeAccess;
+  /**
+   * Most chat sessions, workspaces or running nodes a source reads one by one (a Durable Object,
+   * KV or node request each). Admin setting `operations.opsTimelineFanoutLimit`.
+   */
+  readonly fanoutLimit: number;
 }
 
 export interface TimelineEvent {
@@ -63,10 +68,6 @@ function inWindow(scope: TimelineScope, ms: number | null): ms is number {
 
 function str(value: unknown): string | null {
   return typeof value === 'string' && value ? value : null;
-}
-
-function placeholders(values: readonly unknown[]): string {
-  return values.map(() => '?').join(', ');
 }
 
 /** Lifecycle timestamps already on the resolved D1 rows. */
@@ -199,23 +200,21 @@ const taskStatusSource: TimelineSource = {
 const platformErrorSource: TimelineSource = {
   name: 'platform_errors',
   async collect(env, scope, limit) {
-    const clauses: [string, readonly string[]][] = [
+    const where = anyIdIn([
       ['task_id', scope.taskIds],
       ['workspace_id', scope.workspaceIds],
       ['node_id', scope.nodeIds],
       ['session_id', scope.chatSessionIds],
-    ];
-    const used = clauses.filter(([, values]) => values.length > 0);
-    if (used.length === 0) return [];
+    ]);
+    if (where.binds.length === 0) return [];
     const rows = await env.OBSERVABILITY_DATABASE.prepare(
       `SELECT id, source, level, message, task_id, workspace_id, node_id, session_id, timestamp
        FROM platform_errors
-       WHERE (${used.map(([col, values]) => `${col} IN (${placeholders(values)})`).join(' OR ')})
-         AND timestamp BETWEEN ? AND ?
+       WHERE (${where.sql}) AND timestamp BETWEEN ? AND ?
        ORDER BY timestamp DESC, id DESC
        LIMIT ?`
     )
-      .bind(...used.flatMap(([, values]) => [...values]), scope.sinceMs, scope.untilMs, limit)
+      .bind(...where.binds, scope.sinceMs, scope.untilMs, limit)
       .all<Row>();
     return (rows.results ?? []).map((row) => ({
       at: new Date(Number(row.timestamp)).toISOString(),
@@ -267,9 +266,6 @@ const nodeHealthSource: TimelineSource = {
   },
 };
 
-/** At most this many chat sessions, workspaces or nodes get a per-entity fan-out read. */
-export const TIMELINE_FANOUT_LIMIT = 3;
-
 const activitySource: TimelineSource = {
   name: 'activity_events',
   async collect(env, scope, limit) {
@@ -277,7 +273,7 @@ const activitySource: TimelineSource = {
     const projectId = scope.projectId;
     const pages = await Promise.all(
       scope.chatSessionIds
-        .slice(0, TIMELINE_FANOUT_LIMIT)
+        .slice(0, scope.fanoutLimit)
         .map((sessionId) =>
           listActivityEvents(env, projectId, null, limit, scope.untilMs + 1, sessionId)
         )
@@ -309,7 +305,7 @@ const bootLogSource: TimelineSource = {
   name: 'boot_log',
   async collect(env, scope, limit) {
     const logs = await Promise.all(
-      scope.workspaceIds.slice(0, TIMELINE_FANOUT_LIMIT).map(async (workspaceId) => ({
+      scope.workspaceIds.slice(0, scope.fanoutLimit).map(async (workspaceId) => ({
         workspaceId,
         entries: await getBootLogs(env.KV, workspaceId, env),
       }))
@@ -341,7 +337,7 @@ const nodeAgentEventSource: TimelineSource = {
   async collect(env, scope, limit) {
     const nodes = scope.graph.nodes
       .filter((n) => n.status === 'running')
-      .slice(0, TIMELINE_FANOUT_LIMIT);
+      .slice(0, scope.fanoutLimit);
     const pages = await Promise.all(
       nodes.map(async (node) => {
         const outcome = await runNodeDiagnostic(

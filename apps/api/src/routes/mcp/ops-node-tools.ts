@@ -7,6 +7,11 @@
  * grant. Raw node output is returned only inside untrusted-data envelopes.
  */
 import type { Env } from '../../env';
+import {
+  checkRateLimit,
+  createRateLimitKey,
+  getCurrentWindowStart,
+} from '../../middleware/rate-limit';
 import { untrustedTextBlock } from '../../operations/untrusted-text';
 import { captureDebugPackage } from '../../services/fleet-ops/debug-packages';
 import {
@@ -44,8 +49,9 @@ type Handler = (
   env: Env
 ) => Promise<JsonRpcResponse>;
 
-/** Node events one call returns at most (the VM agent's own page cap is 500). */
+/** Node events one call returns at most. Mirrors the VM agent's fixed page cap (`parseEventLimit`). */
 const NODE_EVENT_PAGE_MAX = 500;
+const DEBUG_PACKAGE_RATE_WINDOW_SECONDS = 3_600;
 
 async function operatorNode(env: Env, grant: OperationsAccessContext, nodeId: string) {
   const access = operatorNodeAccess(grant);
@@ -254,11 +260,24 @@ export const handleOpsCaptureDebugPackage: Handler = (requestId, params, tokenDa
       targetId: idParam(params, 'nodeId') || null,
     },
     async ({ grant, settings }) => {
-      const { node, access } = await operatorNode(
-        env,
-        grant,
-        requiredString(params, 'nodeId', 128)
+      const nodeId = requiredString(params, 'nodeId', 128);
+      // Bounds node egress and library storage from a runaway capture loop.
+      const rate = await checkRateLimit(
+        env.KV,
+        createRateLimitKey(
+          'ops-debug-package',
+          grant.userId,
+          getCurrentWindowStart(DEBUG_PACKAGE_RATE_WINDOW_SECONDS)
+        ),
+        settings.debugPackageCapturesPerHour,
+        DEBUG_PACKAGE_RATE_WINDOW_SECONDS
       );
+      if (!rate.allowed) {
+        throw new OpsToolInputError(
+          `Debug package capture limit reached (${settings.debugPackageCapturesPerHour} per hour, operations.debugPackageCapturesPerHour); retry after ${new Date(rate.resetAt * 1000).toISOString()}`
+        );
+      }
+      const { node, access } = await operatorNode(env, grant, nodeId);
       const outcome = await captureDebugPackage(env, node, access, {
         // The gate proved the caller's project is the Operations project.
         operationsProjectId: grant.projectId,

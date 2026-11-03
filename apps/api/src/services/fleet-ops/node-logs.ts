@@ -13,7 +13,11 @@ import { untrustedTextBlock } from '../../operations/untrusted-text';
 import { getNodeLogsFromNode } from '../node-agent-diagnostics';
 import { type NodeAccess, runNodeDiagnostic } from '../node-diagnostics-access';
 
-/** The VM agent's own maximum page (`logreader.MaxLimit` default). */
+/**
+ * Page requested when filtering with `contains`: the VM agent's default maximum page
+ * (`logreader` `defaultMaxLimit`). A node configured with a larger `LOG_RETRIEVAL_MAX_LIMIT`
+ * still serves this page; one configured smaller clamps it.
+ */
 export const VM_LOG_SCAN_PAGE = 1000;
 
 export const NODE_LOG_SOURCES = ['all', 'agent', 'cloud-init', 'docker', 'systemd'] as const;

@@ -77,7 +77,7 @@ export function capIds(values: readonly string[]): string[] {
   return values.slice(0, OPS_ID_LIST_CAP);
 }
 
-function placeholders(values: readonly unknown[]): string {
+export function placeholders(values: readonly unknown[]): string {
   return values.map(() => '?').join(', ');
 }
 
@@ -89,8 +89,11 @@ function unique(...lists: (readonly string[])[]): string[] {
   return [...new Set(lists.flat())];
 }
 
-/** `col IN (...)` for each non-empty list, OR-ed; `0` (no rows) when every list is empty. */
-function anyIn(clauses: [string, readonly string[]][]): { sql: string; binds: string[] } {
+/**
+ * `col IN (...)` for each non-empty list, each capped by `capIds`, OR-ed; `0` (no rows) with no
+ * binds when every list is empty. Shared by every Operations query over related IDs.
+ */
+export function anyIdIn(clauses: [string, readonly string[]][]): { sql: string; binds: string[] } {
   const parts = clauses
     .map(([column, values]): [string, string[]] => [column, capIds(values)])
     .filter(([, values]) => values.length > 0);
@@ -145,7 +148,7 @@ export async function resolveEntityGraph(
           env,
           'tasks',
           TASK_COLUMNS,
-          anyIn([
+          anyIdIn([
             ['id', seed.taskIds],
             ['recovery_source_task_id', seed.taskIds],
             ['workspace_id', seed.workspaceIds],
@@ -160,7 +163,7 @@ export async function resolveEntityGraph(
     env,
     'workspaces',
     WORKSPACE_COLUMNS,
-    anyIn([
+    anyIdIn([
       ['id', unique(seed.workspaceIds, strings(tasks, 'workspace_id'))],
       ['chat_session_id', type === 'node' ? [] : chatFromTasks],
       ['node_id', seed.nodeIds],
@@ -183,7 +186,7 @@ export async function resolveEntityGraph(
       env,
       'session_snapshots',
       SNAPSHOT_COLUMNS,
-      anyIn([
+      anyIdIn([
         ['chat_session_id', chatSessionIds],
         ['workspace_id', workspaceIds],
       ]),
@@ -195,7 +198,7 @@ export async function resolveEntityGraph(
       env,
       'agent_sessions',
       AGENT_SESSION_COLUMNS,
-      anyIn([['workspace_id', workspaceIds]]),
+      anyIdIn([['workspace_id', workspaceIds]]),
       'created_at DESC, id ASC',
       rowCap,
       capped
@@ -210,7 +213,7 @@ export async function resolveEntityGraph(
     env,
     'nodes',
     NODE_COLUMNS,
-    anyIn([['id', nodeIds]]),
+    anyIdIn([['id', nodeIds]]),
     'created_at DESC, id ASC',
     rowCap,
     capped

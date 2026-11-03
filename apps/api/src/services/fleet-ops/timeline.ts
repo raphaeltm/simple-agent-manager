@@ -8,7 +8,7 @@
  */
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { neutralizeUntrustedText } from '../../operations/untrusted-text';
+import { untrustedTextBlock } from '../../operations/untrusted-text';
 import type { NodeAccess } from '../node-diagnostics-access';
 import { type EntityGraph, type OpsEntityType, resolveEntityGraph } from './entity-graph';
 import {
@@ -18,14 +18,15 @@ import {
   type TimelineSource,
 } from './timeline-sources';
 
-/** Default window when the caller gives no `since`. */
-export const DEFAULT_TIMELINE_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
-
 export interface TimelineRequest {
   readonly entityId: string;
   readonly entityType: OpsEntityType | null;
   readonly sinceMs?: number;
   readonly untilMs?: number;
+  /** Window when the caller gives no `since`. */
+  readonly defaultWindowMs: number;
+  /** Related entities that get a per-entity fan-out read (`TimelineScope.fanoutLimit`). */
+  readonly fanoutLimit: number;
   readonly limit: number;
   readonly perSourceLimit: number;
   readonly graphRowCap: number;
@@ -59,7 +60,8 @@ function scopeFor(
   graph: EntityGraph,
   sinceMs: number,
   untilMs: number,
-  nodeAccess: NodeAccess
+  nodeAccess: NodeAccess,
+  fanoutLimit: number
 ): TimelineScope {
   return {
     entityType: graph.entityType,
@@ -73,15 +75,16 @@ function scopeFor(
     untilMs,
     graph,
     nodeAccess,
+    fanoutLimit,
   };
 }
 
+/** Fences each event's free text in its own untrusted envelope, capped at `maxLength`. */
 function boundText(event: TimelineEvent, maxLength: number): TimelineEvent {
   if (event.text === undefined) return event;
-  const text = neutralizeUntrustedText(event.text);
   return {
     ...event,
-    text: text.length > maxLength ? `${text.slice(0, maxLength)} [truncated by SAM]` : text,
+    text: untrustedTextBlock({ kind: event.source, text: event.text, maxLength }).text,
   };
 }
 
@@ -92,14 +95,14 @@ export async function buildTimeline(
 ): Promise<TimelineResult> {
   const now = request.now ?? Date.now();
   const untilMs = request.untilMs ?? now;
-  const sinceMs = request.sinceMs ?? untilMs - DEFAULT_TIMELINE_WINDOW_MS;
+  const sinceMs = request.sinceMs ?? untilMs - request.defaultWindowMs;
   const graph = await resolveEntityGraph(
     env,
     request.entityId,
     request.entityType,
     request.graphRowCap
   );
-  const scope = scopeFor(graph, sinceMs, untilMs, request.nodeAccess);
+  const scope = scopeFor(graph, sinceMs, untilMs, request.nodeAccess, request.fanoutLimit);
 
   const settled = await Promise.allSettled(
     sources.map((source) => source.collect(env, scope, request.perSourceLimit))
