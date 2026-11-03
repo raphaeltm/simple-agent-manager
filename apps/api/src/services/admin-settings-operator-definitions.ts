@@ -15,7 +15,7 @@ export const OPERATOR_SETTINGS: AdminSettingDefinition[] = [
     'off',
     OPERATIONS_TOOLS_MODES,
     'Operations',
-    'Debugger tools for agents in the Operations project. off: none. read: read-only fleet and node diagnostics, including raw node logs. read_ask: read, plus actions that each need a human approval. read_auto_safe: read_ask, but retrying a snapshot and re-running node cleanup run without approval. Only tasks owned by a current superadmin can use them.'
+    'Which debugger tools agents in the Operations project may use. off: none. read: read-only tools. read_ask: read-only tools, plus actions that each need a human approval. read_auto_safe: like read_ask, but low-risk actions run without approval. Only tasks owned by an active superadmin can use them.'
   ),
   integerDefinition(
     'operations.auditRetentionDays',

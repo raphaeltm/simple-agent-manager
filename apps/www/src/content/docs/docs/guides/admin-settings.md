@@ -142,7 +142,7 @@ Every card shows its own description, default, and range, so the tables below co
 you're most likely to change rather than every one.
 
 The Connector's protocol limits (registration rates, request and response sizes, how long an unused
-client lasts) are set only by GitHub Environment variables, and the GitHub App itself and the private feedback project stay on
+client lasts) are set only by GitHub Environment variables, and the GitHub App itself and the Operations project stay on
 their existing pages; see [SAM Connector](/docs/reference/configuration/#sam-connector) and
 [Platform integrations after deploy](/docs/guides/self-hosting/#platform-integrations-after-deploy).
 
@@ -293,6 +293,45 @@ These limit [email triggers](/docs/guides/email-triggers/) (preview). Every valu
 | `agentEmail.retryBaseSeconds`         | 60        | 10–3,600         | Seconds before the first retry; each later retry waits twice as long                                                               |
 | `agentEmail.retryMaxSeconds`          | 900       | 60–86,400        | Longest wait between two retries of one email                                                                                      |
 | `agentEmail.recoveryBatchSize`        | 10        | 1–100            | Emails one 5-minute recovery sweep retries                                                                                         |
+
+## Operations debugger tools
+
+The **Operations project** is the private project you select in **Admin → Integrations**
+(it receives Report Issue drafts and automated triage; see
+[Reporting Issues](/docs/guides/reporting-issues/#for-operators-where-reports-land)). Its agents can
+be given debugger tools that look across every user's nodes, workspaces and sessions. One
+**Operations** setting controls them:
+
+| Setting                         | Default | Values                                        | What it controls                                                                                         |
+| ------------------------------- | ------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
+| `operations.debuggerTools`      | `off`   | `off`, `read`, `read_ask`, `read_auto_safe`   | Which debugger tools Operations agents may use. `off` hides and refuses all of them                      |
+| `operations.auditRetentionDays` | 90      | 1–3,650                                       | Days each debugger tool audit record is kept before the daily 03:00 UTC cleanup deletes it               |
+
+What each value allows:
+
+- `off`: none. This is the default on new and updated installations.
+- `read`: read-only tools.
+- `read_ask`: read-only tools, plus actions that each need a person to approve them.
+- `read_auto_safe`: like `read_ask`, but low-risk actions run without approval. Deleting things
+  always needs approval.
+
+Read-only debugger tools can return **raw** node diagnostics, such as unredacted logs, so only turn
+this on for an installation whose superadmins you trust. A debugger tool works only when **all** of
+these are true, and SAM checks every one again on every call:
+
+1. this setting allows what the tool does (`read`, or an action);
+2. the agent is running in the Operations project;
+3. the agent is running a task (a task-scoped token), not a token without a task;
+4. the person who owns that task is an active superadmin **at the time of the call**. Demoting or
+   suspending them stops their running tasks' access on the next call.
+
+Turning the setting down applies to the next call; it is not cached. Agents in other projects never
+see these tools, and the private incident tools (`list_incident_queue` and the rest) are now listed
+only to the Operations project too. Every debugger tool call, allowed or refused, is recorded in an
+audit log with the acting user, task, tool and target.
+
+An Operations agent can call `ops_get_access_status` to see the current value, which capabilities
+it has, and why any are refused.
 
 ## If the database can't be read
 

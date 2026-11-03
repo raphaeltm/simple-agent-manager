@@ -359,14 +359,14 @@ function FeedbackProjectSection({
 
   return (
     <IntegrationSection
-      title="Private feedback project"
-      description="Select the project that receives Report Issue draft Ideas, automated platform triage, incident trigger agents, and private incident MCP tools."
+      title="Operations project"
+      description="Select the private project that receives Report Issue draft Ideas, automated platform triage and incident trigger agents. Its agents get the incident MCP tools and, when operations.debuggerTools is on, the Operations debugger tools."
       status={status}
     >
       <label className="block space-y-1.5">
-        <FieldLabel label="Feedback project" field={status.fields.projectId} />
+        <FieldLabel label="Operations project" field={status.fields.projectId} />
         <select
-          aria-label="Feedback project"
+          aria-label="Operations project"
           value={value}
           onChange={(event) => onChange(event.target.value)}
           className="w-full min-h-11 rounded-sm border border-border-default bg-inset px-3 py-2 text-sm text-fg-primary"

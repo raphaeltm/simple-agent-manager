@@ -59,7 +59,7 @@ export async function runPlatformFeedbackTriage(
     .bind(projectId)
     .first<{ id: string; user_id: string }>();
   if (!project)
-    throw new Error('Configured feedback project does not reference an existing project');
+    throw new Error('Configured Operations project does not reference an existing project');
   const now = deps.now?.() ?? Date.now();
   const windowMinutes = positive(
     env.PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES,

@@ -34,6 +34,15 @@ Admin setting overrides take precedence over registry defaults. The disabled set
 
 Sources: `apps/api/src/services/operator-settings.ts`, `admin-settings-registry.ts`, and `apps/api/src/durable-objects/sam-session/operator/work.ts`.
 
+## Operations debugger tools
+
+| Admin setting key               | Default | Permitted range and meaning                                                                                                     |
+| ------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| `operations.debuggerTools`      | `off`   | `off`, `read`, `read_ask` or `read_auto_safe`; which debugger tools Operations-project agents may use. Read with no cache.      |
+| `operations.auditRetentionDays` | `90`    | Integer `1`–`3650`; days an `operations_audit_log` row is kept before the daily `0 3 * * *` cron deletes it.                    |
+
+Every debugger tool checks, on each call, that the setting allows the capability, the MCP token belongs to the Operations project, the token is task-scoped, and the task's owner is an active superadmin in D1 (`requireOperationsAccess` in `apps/api/src/services/operations-access.ts`). A settings outage resolves the mode to `off`. See [Admin Settings](/docs/guides/admin-settings/#operations-debugger-tools).
+
 The assistant reuses existing `SAM_MODEL` (the deployed `wrangler.toml` value is `@cf/zai-org/glm-5.3-flash`, which needs the Workers Paid plan or prepaid AI Gateway credits, like the rest of SAM; code default `claude-sonnet-5`), context/window, tool-result and model-step limits from `resolveSamConfig`, plus `SAM_LLM_TIMEOUT_MS` (operator fallback `120000`). Operator turn admission uses `SAM_MESSAGE_MAX_LENGTH` with a `16000`-character fallback; legacy subtask-message readers can have a different fallback. No new provider API key is required specifically for enabling the assistant: it uses the installation's supported platform AI configuration and usage gate.
 
 ## Platform Secrets
@@ -518,7 +527,7 @@ Automated triage and superadmin-initiated diagnosis read the same `DEBUG_AGENT_D
 
 ### Report an Issue
 
-The in-app **Report an Issue** flow files user-submitted reports as draft Ideas in the effective private feedback project. Configure it from **Admin → Integrations** when possible; `PLATFORM_FEEDBACK_PROJECT_ID` remains the environment fallback when no runtime setting is saved. The feature is **hidden entirely** — both UI entry points disappear and `GET /api/report-issue/config` returns `enabled: false` — when no effective project exists or the effective project does not exist in this deployment's database.
+The in-app **Report an Issue** flow files user-submitted reports as draft Ideas in the effective private Operations project (the `feedback.projectId` platform setting). Configure it from **Admin → Integrations** when possible; `PLATFORM_FEEDBACK_PROJECT_ID` remains the environment fallback when no runtime setting is saved. The feature is **hidden entirely** — both UI entry points disappear and `GET /api/report-issue/config` returns `enabled: false` — when no effective project exists or the effective project does not exist in this deployment's database.
 
 | Variable                              | Default | Description                                                       |
 | ------------------------------------- | ------- | ----------------------------------------------------------------- |

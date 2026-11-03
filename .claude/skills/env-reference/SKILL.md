@@ -82,6 +82,13 @@ Use the typed **Operations** admin settings below for live configuration. All ei
 | `operations.samOperatorStreamHeartbeatMs`    | `15000`    | Integer `1000`–`120000`; keep-alive interval on a live answer stream.                                                               |
 | `operations.samOperatorStreamMaxSubscribers` | `4`        | Integer `1`–`20`; browser tabs that can follow one answer live at the same time.                                                    |
 
+Operations debugger tools (`apps/api/src/services/operations-access.ts`):
+
+| Admin setting key               | Default | Meaning                                                                                                   |
+| ------------------------------- | ------- | --------------------------------------------------------------------------------------------------------- |
+| `operations.debuggerTools`      | `off`   | `off` / `read` / `read_ask` / `read_auto_safe`; gate for `ops_*` MCP tools in the Operations project. No cache. |
+| `operations.auditRetentionDays` | `90`    | Integer `1`–`3650`; days `operations_audit_log` rows are kept (daily `0 3 * * *` purge).                   |
+
 Each refresh selects at most 25 watches and reads at most 25 events per watch: at most 325 caller D1 reads, 75 cold ProjectData RPCs, and 625 local event-reference inserts, plus fixed alarm setup. A work-card read performs at most 75 D1 reads. Each watch persists its next check and charges an attempt before I/O; the alarm uses the earliest watch deadline. Failed watches defer until that deadline and stop after the retry limit, with a visible update warning. The watch lifetime also stops observation independently; neither condition cancels project work.
 
 Admin setting overrides take precedence over registry defaults. The disabled setting is read without the normal settings cache before effects and fails closed when settings storage is unavailable. These controls use the typed settings registry only; no Worker bindings or deployment variables are needed.

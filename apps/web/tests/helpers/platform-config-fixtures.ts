@@ -31,7 +31,7 @@ export function makeStatus(
     state: 'unset',
     projectId: null,
     project: null,
-    message: 'No feedback project is configured.',
+    message: 'No Operations project is configured.',
     fields: {
       projectId: { configured: false, source: 'unset', updatedAt: null, updatedBy: null },
     },

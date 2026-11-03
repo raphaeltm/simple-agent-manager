@@ -38,7 +38,9 @@ The old `POST /api/sam/chat` inference path is closed: enabled clients receive `
 
 Task agents can call `wait_for_subtasks` with a stable workflow-step `waitKey`, unique same-project task IDs, an optional `condition` of `all` (the default) or `any`, and an optional bounded `wakeAfterSeconds`. The agent must persist the workflow state and key before calling, reuse the key after a lost response, and end its turn after registration. ProjectData then reconciles selected task terminal state and durably wakes the same canonical caller session exactly once, including after session sleep and runtime replacement. Automatic wake prompts carry only trusted task IDs and statuses; agents fetch peer-authored output explicitly as untrusted data. Servers without durable prompt delivery reject registration so clients can use bounded foreground polling as a compatibility fallback.
 
-Private feedback-project agents can also call `list_incident_queue`, `get_incident`, `claim_incident`, and `resolve_incident`. Use the full incident ID returned by `list_incident_queue` or the generated backlog prompt; abbreviated display references are not tool identifiers. These tools are scoped server-side to the effective private feedback project setting (Admin → Integrations runtime value first, then `PLATFORM_FEEDBACK_PROJECT_ID` fallback); callers cannot provide a project id. `claim_incident` and `resolve_incident` require a task-scoped MCP token, use bounded leases/CAS tokens, and return only private redacted incident evidence labelled as untrusted. `resolve_incident` accepts structured ship-or-track fields for resolved outcomes: `fixPrUrl`, `dispatchedTaskId`, or `linkedRecordId`; rejected outcomes require a justification note instead.
+Operations-project agents can also call `list_incident_queue`, `get_incident`, `claim_incident`, and `resolve_incident`; `tools/list` shows them only to tokens for the Operations project. Use the full incident ID returned by `list_incident_queue` or the generated backlog prompt; abbreviated display references are not tool identifiers. These tools are scoped server-side to the effective Operations project setting (`feedback.projectId`: the Admin → Integrations runtime value first, then the `PLATFORM_FEEDBACK_PROJECT_ID` fallback); callers cannot provide a project id. `claim_incident` and `resolve_incident` require a task-scoped MCP token, use bounded leases/CAS tokens, and return only private redacted incident evidence labelled as untrusted. `resolve_incident` accepts structured ship-or-track fields for resolved outcomes: `fixPrUrl`, `dispatchedTaskId`, or `linkedRecordId`; rejected outcomes require a justification note instead.
+
+Operations debugger tools (`ops_*`) are listed only to the Operations project while the `operations.debuggerTools` admin setting is not `off`. Each call is refused with JSON-RPC `-32602` and `data.reason` (`not_operations_project`, `mode_off`, `mode_read_only`, `not_task_scoped`, `task_not_found`, `task_owner_mismatch` or `not_superadmin`) unless the setting allows the capability, the token is a task token in the Operations project, and the task's owner is an active superadmin at call time. `ops_get_access_status` reports the mode, the allowed capabilities (`read`, `act`) and any denial reason without failing. Calls are recorded in `operations_audit_log`.
 
 Project eventing uses a pull loop over the canonical ProjectData `project_event_*` tables. Agents create a short-lived subscription with `create_project_event_subscription`, using v1 exact/set filters for `source`, `eventType`, `subjectType`, `subjectId`, and `severity`; recover existing subscriptions with `list_project_event_subscriptions`; inspect or cancel with `get_project_event_subscription` and `cancel_project_event_subscription`. Project, task, session, workspace, owner, and agent identity come from the verified MCP token, not tool arguments.
 
@@ -871,7 +873,7 @@ See [Reporting Issues](/docs/guides/reporting-issues/) for the user-facing flow 
 
 ### `GET /api/report-issue/config`
 
-Report whether in-app issue reporting is available on this deployment. Returns `{ "enabled": false }` when no effective private feedback project is configured, or when the effective setting does not name an existing project — the UI hides both entry points in that case.
+Report whether in-app issue reporting is available on this deployment. Returns `{ "enabled": false }` when no effective Operations project is configured, or when the effective setting does not name an existing project — the UI hides both entry points in that case.
 
 ### `POST /api/report-issue`
 
@@ -883,7 +885,7 @@ Rate-limited to 20 submissions per clock hour per user (`RATE_LIMIT_REPORT_ISSUE
 
 ### `POST /api/admin/observability/feedback-triage`
 
-Superadmin only. Runs a platform-error triage sweep immediately instead of waiting for the hourly cron. The feedback project itself is configured from **Admin → Integrations** or the environment fallback; this endpoint remains the manual way to verify automated triage without waiting up to an hour.
+Superadmin only. Runs a platform-error triage sweep immediately instead of waiting for the hourly cron. The Operations project itself is configured from **Admin → Integrations** or the environment fallback; this endpoint remains the manual way to verify automated triage without waiting up to an hour.
 
 ## Admin Settings
 

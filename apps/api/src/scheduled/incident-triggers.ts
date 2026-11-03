@@ -258,7 +258,7 @@ export async function runIncidentTriggerSweep(
     .bind(projectId)
     .first<ProjectRow>();
   if (!project)
-    throw new Error('Configured feedback project does not reference an existing project');
+    throw new Error('Configured Operations project does not reference an existing project');
 
   const now = deps.now?.() ?? Date.now();
   const config = getIncidentConfig(env);

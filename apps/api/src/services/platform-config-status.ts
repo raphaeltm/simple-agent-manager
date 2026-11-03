@@ -104,7 +104,7 @@ async function feedbackProjectStatus(
       projectId: null,
       project: null,
       message:
-        'No feedback project is configured. Report Issue and private incident trigger sweeps are hidden.',
+        'No Operations project is configured. Report Issue and private incident trigger sweeps are hidden.',
       fields: { projectId: baseField },
     };
   }
@@ -119,7 +119,7 @@ async function feedbackProjectStatus(
       projectId,
       project: null,
       message:
-        'The configured feedback project does not exist in this deployment. Report Issue remains hidden until an accessible project is selected.',
+        'The configured Operations project does not exist in this deployment. Report Issue remains hidden until an accessible project is selected.',
       fields: { projectId: baseField },
     };
   }
@@ -133,7 +133,7 @@ async function feedbackProjectStatus(
       projectId,
       project: { id: project.id, name: project.name, status: project.status },
       message:
-        'The configured feedback project exists, but this admin account is not an active member. Select an accessible project before saving changes.',
+        'The configured Operations project exists, but this admin account is not an active member. Select an accessible project before saving changes.',
       fields: { projectId: baseField },
     };
   }
