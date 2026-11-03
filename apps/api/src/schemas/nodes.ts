@@ -32,3 +32,8 @@ export const UpdateNodeLabelSchema = v.object({
 export const PatchNodeSchema = v.object({
   label: v.optional(v.string()),
 });
+
+/** The owner's explicit statement that they deleted the server at their provider. */
+export const ConfirmManualNodeDeletionSchema = v.object({
+  confirmed: v.literal(true),
+});

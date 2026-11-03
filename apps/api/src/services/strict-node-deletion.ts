@@ -545,13 +545,20 @@ async function markWorkspaceRuntimeTerminationConfirmed(
     );
 }
 
-async function markRuntimeTerminationConfirmed(db: NodeDb, node: NodeRow): Promise<string> {
+async function markRuntimeTerminationConfirmed(
+  db: NodeDb,
+  node: NodeRow,
+  provenance: 'strict' | 'owner_attested' = 'strict'
+): Promise<string> {
   await requireSameNodeIncarnation(db, node, 'termination proof write');
   const confirmedAt = new Date().toISOString();
   const result = await db
     .update(schema.nodes)
     .set({
       runtimeTerminationConfirmedAt: confirmedAt,
+      // Written in the same CAS as the proof, so a reader can never see the proof
+      // without its provenance. See `isOwnerAttestedTermination`.
+      runtimeTerminationAttestedAt: provenance === 'owner_attested' ? confirmedAt : null,
     })
     .where(exactNodeIncarnationPredicate(node))
     .run();
@@ -565,6 +572,35 @@ async function markRuntimeTerminationConfirmed(db: NodeDb, node: NodeRow): Promi
   );
   await markWorkspaceRuntimeTerminationConfirmed(db, node, confirmedAt);
   return confirmedAt;
+}
+
+/**
+ * The owner states they deleted the server at their provider after SAM's strict
+ * teardown could not. Writes the same proof markers as a strict delete, fenced on
+ * the exact incarnation the caller loaded, so every proof reader and the shared
+ * removal tail treat the node uniformly. Callers must first refuse when the
+ * provider positively reports the server still exists (`services/node-manual-deletion.ts`).
+ */
+export async function recordOwnerAttestedRuntimeTermination(
+  db: NodeDb,
+  node: NodeRow
+): Promise<string> {
+  return await markRuntimeTerminationConfirmed(db, node, 'owner_attested');
+}
+
+/**
+ * True when the node's current termination proof is the owner's attestation, not
+ * SAM's strict deletion. Keyed on equality with the proof itself, so any later
+ * writer that replaces or clears the proof (re-provisioning, a strict delete,
+ * container recovery) ends the attestation without having to know about it.
+ */
+export function isOwnerAttestedTermination(
+  node: Pick<NodeRow, 'runtimeTerminationConfirmedAt' | 'runtimeTerminationAttestedAt'>
+): boolean {
+  return (
+    node.runtimeTerminationConfirmedAt !== null &&
+    node.runtimeTerminationAttestedAt === node.runtimeTerminationConfirmedAt
+  );
 }
 
 async function claimManagedNodeDeletion(db: NodeDb, node: NodeRow): Promise<NodeRow> {

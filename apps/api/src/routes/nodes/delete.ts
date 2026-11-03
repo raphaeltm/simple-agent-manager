@@ -19,6 +19,7 @@ import {
   terminalizeStrandedNodeTasks,
 } from '../../services/node-stranded-tasks';
 import { deleteNodeResources, retireDeletedDeploymentNodeRecord } from '../../services/nodes';
+import { isOwnerAttestedTermination } from '../../services/strict-node-deletion';
 
 type NodesDb = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -165,13 +166,71 @@ export async function deleteNodeRoute(c: Context<{ Bindings: Env }>) {
     );
   }
 
+  await completeOwnerNodeRemoval({
+    env: c.env,
+    db,
+    node,
+    userId,
+    cleanup,
+    strandedTasks,
+    reason: await ownerRemovalReason(db, nodeId, cleanup.runtimeTerminationConfirmedAt),
+  });
+  return c.json({ success: true });
+}
+
+/**
+ * A Delete can consume proof the owner attested earlier (a manual removal that
+ * stopped before its removal finished). Its audit reason must still say so, or the
+ * attestation would read as strict proof to anything that trusts
+ * `owner_requested_node_deletion`.
+ */
+async function ownerRemovalReason(
+  db: NodesDb,
+  nodeId: string,
+  proofAt: string | null
+): Promise<string> {
+  const [row] = await db
+    .select({
+      runtimeTerminationConfirmedAt: schema.nodes.runtimeTerminationConfirmedAt,
+      runtimeTerminationAttestedAt: schema.nodes.runtimeTerminationAttestedAt,
+    })
+    .from(schema.nodes)
+    .where(eq(schema.nodes.id, nodeId))
+    .limit(1);
+  const attested =
+    row !== undefined &&
+    row.runtimeTerminationConfirmedAt === proofAt &&
+    isOwnerAttestedTermination(row);
+  return attested ? OWNER_ATTESTED_REMOVAL_REASON : 'owner_requested_node_deletion';
+}
+
+export const OWNER_ATTESTED_REMOVAL_REASON = 'owner_attested_manual_deletion';
+
+/**
+ * Everything an owner's node removal does once runtime termination is proven, by
+ * strict deletion or by the owner's own attestation (`manual-deletion.ts`).
+ */
+export async function completeOwnerNodeRemoval(input: {
+  env: Env;
+  db: NodesDb;
+  node: Pick<
+    typeof schema.nodes.$inferSelect,
+    'id' | 'nodeRole' | 'nodeClass' | 'lastHeartbeatAt' | 'createdAt'
+  >;
+  userId: string;
+  cleanup: DeleteNodeResourcesResult;
+  strandedTasks: Awaited<ReturnType<typeof listStrandedNodeTasks>>;
+  reason: string;
+}): Promise<void> {
+  const { env, db, node, userId, cleanup } = input;
+  const nodeId = node.id;
   // Deprovision app-route DNS records for any deployment environments hosted on
   // this node. The environment rows survive (nodeId is set null by the FK), but
   // their grey-cloud A records would otherwise point at the now-freed VM IP.
-  await cleanupHostedDeploymentRouteDns(db, c.env, nodeId);
+  await cleanupHostedDeploymentRouteDns(db, env, nodeId);
   await removeDeletedNodeRecords({
     db,
-    env: c.env,
+    env,
     nodeId,
     userId,
     nodeRole: node.nodeRole,
@@ -179,14 +238,14 @@ export async function deleteNodeRoute(c: Context<{ Bindings: Env }>) {
     cleanup,
   });
 
-  await finalizeNodeLifecycleDeletion(c.env, nodeId, userId);
+  await finalizeNodeLifecycleDeletion(env, nodeId, userId);
 
   try {
-    await recordNodeHealthEvent(c.env, {
+    await recordNodeHealthEvent(env, {
       nodeId,
       episodeStartedAt: node.lastHeartbeatAt ?? node.createdAt,
       event: 'deleted_by_owner',
-      reason: 'owner_requested_node_deletion',
+      reason: input.reason,
       createdAt: new Date().toISOString(),
     });
   } catch (error) {
@@ -196,14 +255,12 @@ export async function deleteNodeRoute(c: Context<{ Bindings: Env }>) {
     });
   }
   const transitionFailures = await terminalizeStrandedNodeTasks(
-    c.env,
+    env,
     nodeId,
-    strandedTasks,
+    input.strandedTasks,
     'owner_deleted'
   );
   if (transitionFailures > 0) {
     log.error('node_delete.stranded_task_cancel_failed', { nodeId, transitionFailures });
   }
-
-  return c.json({ success: true });
 }

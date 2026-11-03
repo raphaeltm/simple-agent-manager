@@ -4,6 +4,7 @@ import type {
   SessionViewerAccess,
   TaskAttachment,
   TaskExecutionStep,
+  WakeWaitReason,
 } from '@simple-agent-manager/shared';
 
 import { recordServerTime } from '../server-clock';
@@ -140,6 +141,9 @@ export interface SessionStateSnapshot {
    * phase-level wake progress; null when no wake is in flight.
    */
   wakePhase?: TaskExecutionStep | null;
+  /** Why the wake is waiting, when the server knows (mirrors the shared snapshot). */
+  waitReason?: WakeWaitReason | null;
+  waitRetryAt?: string | null;
 }
 
 export interface ChatSessionDetailResponse {

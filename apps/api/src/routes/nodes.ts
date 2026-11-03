@@ -15,7 +15,7 @@ import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireNodeOwnership } from '../middleware/node-auth';
-import { CreateNodeSchema, jsonValidator } from '../schemas';
+import { ConfirmManualNodeDeletionSchema, CreateNodeSchema, jsonValidator } from '../schemas';
 import { resolveCanonicalVmAllocationPlan } from '../services/canonical-vm-allocation';
 import { scheduleDirectProvisioning } from '../services/direct-provisioning';
 import { getRuntimeLimits } from '../services/limits';
@@ -24,6 +24,7 @@ import { createNodeRecord, stopNodeResources } from '../services/nodes';
 import { recordNodeRoutingMetric } from '../services/telemetry';
 import { deleteNodeRoute } from './nodes/delete';
 import { nodeDiagnosticsRoutes } from './nodes/diagnostics';
+import { confirmManualNodeDeletionRoute } from './nodes/manual-deletion';
 import {
   loadDeploymentEnvironmentSummaries,
   refreshNodeHealth,
@@ -264,6 +265,11 @@ nodesRoutes.post('/:id/stop', async (c) => {
 });
 
 nodesRoutes.delete('/:id', deleteNodeRoute);
+nodesRoutes.post(
+  '/:id/manual-deletion',
+  jsonValidator(ConfirmManualNodeDeletionSchema),
+  confirmManualNodeDeletionRoute
+);
 
 nodesRoutes.route('/', nodeDiagnosticsRoutes);
 

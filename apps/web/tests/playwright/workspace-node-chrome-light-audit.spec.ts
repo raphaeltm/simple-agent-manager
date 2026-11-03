@@ -287,6 +287,8 @@ async function setupMocks(page: Page) {
     if (path === '/api/trial/status') return fulfill(route, { available: false });
     if (path === '/api/agents') return fulfill(route, { agents: [] });
     if (path === '/api/github/installations') return fulfill(route, []);
+    if (path === '/api/credentials') return fulfill(route, []);
+    if (path === '/api/credentials/agent') return fulfill(route, { credentials: [] });
 
     return fulfill(route, {});
   });

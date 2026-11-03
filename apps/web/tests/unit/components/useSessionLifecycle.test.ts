@@ -11,7 +11,7 @@ import {
   DEFAULT_CHAT_SESSION_MESSAGE_MAX,
 } from '@simple-agent-manager/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, renderHook, waitFor } from '@testing-library/react';
+import { act, render, renderHook, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -102,6 +102,7 @@ vi.mock('../../../src/components/project-message-view/types', async (importOrigi
   CHAT_FALLBACK_POLL_MS: 1,
 }));
 
+import { SessionStatusBanners } from '../../../src/components/project-message-view/SessionStatusBanners';
 import { useSessionLifecycle } from '../../../src/components/project-message-view/useSessionLifecycle';
 import { chatQueryKeys } from '../../../src/lib/query-options';
 import { CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS } from '../../../src/lib/query-persist-config';
@@ -743,6 +744,75 @@ describe('useSessionLifecycle loading semantics', () => {
     await waitFor(() => expect(mocks.wsOptions.at(-1)?.enabled).toBe(true));
     // The pre-existing guard must still do its job: activity is not reset to idle.
     expect(result.current.agentActivity).not.toBe('idle');
+  });
+
+  it('names the wait while a USER-TRIGGERED wake is blocked, through the real banner gate', async () => {
+    // Production 2026-11-02 (chat 26f76165): after the user typed into a sleeping
+    // chat, the wake waited first on the old workspace's deletion (before any claim,
+    // so recoveryStatus is still null), then on provider capacity. The server shapes
+    // below are what `attachWakeState` returns in each state (its worker test,
+    // `apps/api/tests/workers/wake-wait-reason.test.ts`, drives the real writers).
+    const sleeping = detail([msg('a', 1000)], false, 'sleeping');
+    const cleanupPending = {
+      ...sleeping,
+      state: { ...sleeping.state, waitReason: 'previous_workspace_cleanup', waitRetryAt: null },
+    };
+    const retryAt = new Date(Date.now() + 10 * 60_000).toISOString();
+    const capacityWait = {
+      ...sleeping,
+      state: {
+        ...sleeping.state,
+        recoveryStatus: 'waking',
+        wakePhase: 'waiting_for_node_capacity',
+        waitReason: 'provider_transient_capacity',
+        waitRetryAt: retryAt,
+      },
+    };
+    let serverState: 'sleeping' | 'cleanup' | 'capacity' = 'sleeping';
+    mocks.getChatSession.mockImplementation(async () =>
+      serverState === 'cleanup'
+        ? cleanupPending
+        : serverState === 'capacity'
+          ? capacityWait
+          : sleeping
+    );
+    mocks.sendFollowUpPrompt.mockResolvedValue({ accepted: true, status: 'queued' });
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.sessionState).toBe('sleeping'));
+
+    act(() => result.current.setFollowUp('Wake and continue'));
+    await act(async () => {
+      await result.current.handleSendFollowUp();
+    });
+    serverState = 'cleanup';
+
+    await waitFor(() =>
+      expect(result.current.wakeWait).toEqual({
+        reason: 'previous_workspace_cleanup',
+        retryAt: null,
+      })
+    );
+    // Not claimed yet, so no wake is in flight; the banner is open only because
+    // the send left the agent working. That gate is what makes the reason visible.
+    expect(result.current.isWaking).toBe(false);
+    const banners = render(createElement(SessionStatusBanners, { lc: result.current }));
+    expect(screen.getByTestId('wake-progress-label').textContent).toBe(
+      'Waiting for the previous workspace to finish shutting down...'
+    );
+    banners.unmount();
+
+    serverState = 'capacity';
+    await waitFor(() =>
+      expect(result.current.wakeWait?.reason).toBe('provider_transient_capacity')
+    );
+    expect(result.current.isWaking).toBe(true);
+    render(createElement(SessionStatusBanners, { lc: result.current }));
+    expect(screen.getByTestId('wake-progress-label').textContent).toMatch(
+      /^Your cloud provider has no capacity right now\. Retrying\.\.\. Next try at .+\.$/
+    );
   });
 
   it('returns a failed wake attempt to a retryable sleeping state', async () => {

@@ -424,6 +424,8 @@ export {
   WAKE_PHASE_PENDING_LABEL,
   wakePhaseLabel,
 } from './task';
+export type { WakeWaitReason } from './wake-wait';
+export { isWakeWaitReason, WAKE_WAIT_REASON_LABELS, WAKE_WAIT_REASONS } from './wake-wait';
 
 // Session (Chat, Agent, ACP)
 export type {

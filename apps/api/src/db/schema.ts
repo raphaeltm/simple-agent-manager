@@ -1599,6 +1599,11 @@ export const nodes = sqliteTable(
     errorMessage: text('error_message'),
     /** Durable runtime absence proof; cleared before any provider create request. */
     runtimeTerminationConfirmedAt: text('runtime_termination_confirmed_at'),
+    /**
+     * Equals runtimeTerminationConfirmedAt when that proof came from the owner's
+     * attestation rather than SAM's strict deletion (`isOwnerAttestedTermination`).
+     */
+    runtimeTerminationAttestedAt: text('runtime_termination_attested_at'),
     /** Server-written identity rotated whenever the runtime behind this node row is replaced. */
     runtimeIncarnationId: text('runtime_incarnation_id'),
     /**

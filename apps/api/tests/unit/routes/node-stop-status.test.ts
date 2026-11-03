@@ -296,7 +296,17 @@ describe('DELETE /api/nodes/:id', () => {
     });
 
     let selectIndex = 0;
-    const selectResults = [[], [{ id: 'workspace-node-1' }]];
+    const selectResults = [
+      // The Delete route reads the consumed proof's provenance first; strict here.
+      [
+        {
+          runtimeTerminationConfirmedAt: '2026-09-04T09:00:00.000Z',
+          runtimeTerminationAttestedAt: null,
+        },
+      ],
+      [],
+      [{ id: 'workspace-node-1' }],
+    ];
     const deleteRun = vi.fn(async () => ({ meta: { changes: 1 } }));
     const deleteWhere = vi.fn(() => {
       operations.push('d1-delete');
@@ -307,7 +317,9 @@ describe('DELETE /api/nodes/:id', () => {
         const result = selectResults[selectIndex++] ?? [];
         const chain: any = {};
         chain.from = vi.fn(() => chain);
-        chain.where = vi.fn(async () => result);
+        chain.where = vi.fn(() =>
+          Object.assign(Promise.resolve(result), { limit: vi.fn(async () => result) })
+        );
         return chain;
       }),
       update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn(async () => undefined) })) })),

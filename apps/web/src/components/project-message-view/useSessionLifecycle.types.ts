@@ -19,6 +19,7 @@ import type { ChatMessageResponse, ChatSessionResponse, SessionStateSnapshot } f
 import type { HistoryTarget } from '../../lib/message-paging';
 import type { FilePanelState } from './session-lifecycle-helpers';
 import type { AgentActivityState, SessionState } from './types';
+import type { WakeWait } from './useWakeProgress';
 
 export interface UseSessionLifecycleResult {
   session: ChatSessionResponse | null;
@@ -51,6 +52,8 @@ export interface UseSessionLifecycleResult {
   isWaking: boolean;
   /** Current wake phase, or null before the replacement runner reports a step. */
   wakePhase: TaskExecutionStep | null;
+  /** Why the wake is waiting, when the server knows. */
+  wakeWait: WakeWait | null;
   staleNotice: boolean;
   dismissStaleNotice: () => void;
   currentPlan: SessionStateSnapshot['currentPlan'];

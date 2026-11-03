@@ -1,4 +1,5 @@
 import type { TaskExecutionStep, TaskMode, TaskStatus } from './task';
+import type { WakeWaitReason } from './wake-wait';
 
 // =============================================================================
 // Chat Sessions
@@ -368,6 +369,13 @@ export interface SessionStateSnapshot {
    * the recovery task has not reported a step yet.
    */
   wakePhase?: TaskExecutionStep | null;
+  /**
+   * Why an in-flight wake is waiting, when the server knows (`wake-wait.ts`).
+   * Null when the wake is not waiting on anything it can name.
+   */
+  waitReason?: WakeWaitReason | null;
+  /** When the waiting wake next retries (ISO 8601), if scheduled. */
+  waitRetryAt?: string | null;
 }
 
 /** Which end of the system produced the authoritative activity value. */
