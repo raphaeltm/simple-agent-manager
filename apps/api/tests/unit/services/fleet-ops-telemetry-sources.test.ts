@@ -134,6 +134,8 @@ const request = {
   entityType: null,
   limit: 100,
   perSourceLimit: 50,
+  defaultWindowMs: 7 * 24 * 3_600_000,
+  fanoutLimit: 2,
   graphRowCap: 25,
   textMaxLength: 2_000,
   nodeAccess: operatorNodeAccess({ userId: 'admin', taskId: 'ops-task' }),
@@ -145,6 +147,7 @@ describe('telemetry timeline sources', () => {
     const result = await buildTimeline(env, request, TELEMETRY_SOURCES);
 
     expect(result.sources.filter((s) => s.error)).toEqual([]);
+    expect(result.found).toBe(true);
     expect(result.events.map((e) => e.kind)).toEqual([
       'node.decision.handed_to_warm',
       'session.sleep.error',

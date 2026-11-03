@@ -12,7 +12,6 @@ import { listNodeEventsOnNode } from '../node-agent';
 import { type NodeAccess, runNodeDiagnostic } from '../node-diagnostics-access';
 import { listActivityEvents } from '../project-data';
 import { anyIdIn, type EntityGraph, type OpsEntityType, placeholders } from './entity-graph';
-import type { EntityGraph, OpsEntityType } from './entity-graph';
 import { TELEMETRY_TIMELINE_SOURCES } from './timeline-sources-telemetry';
 
 export interface TimelineScope {

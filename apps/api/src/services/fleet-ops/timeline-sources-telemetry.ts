@@ -4,16 +4,15 @@
  * (./timeline-sources.ts). Each reads one indexed D1 table bounded by the scope's IDs, window
  * and limit; error output from the VM goes in `text`, where it is treated as untrusted.
  */
+import { anyIdIn } from './entity-graph';
+// Type-only: `timeline-sources.ts` imports this module's array at load time, so a value import
+// back from it would be a load-order cycle.
 import type { TimelineEvent, TimelineScope, TimelineSource } from './timeline-sources';
 
 type Row = Record<string, unknown>;
 
 function str(value: unknown): string | null {
   return typeof value === 'string' && value ? value : null;
-}
-
-function placeholders(values: readonly unknown[]): string {
-  return values.map(() => '?').join(', ');
 }
 
 /** The rows of `table` whose `column` is in `ids` and whose `created_at` is in the window. */
@@ -24,15 +23,17 @@ async function windowRows(
   query: { table: string; column: string; ids: readonly string[]; select: string }
 ): Promise<Row[]> {
   if (query.ids.length === 0) return [];
+  // `anyIdIn` caps the ID list under D1's bound-parameter limit.
+  const where = anyIdIn([[query.column, query.ids]]);
   const rows = await env.DATABASE.prepare(
     `SELECT ${query.select} FROM ${query.table}
-      WHERE ${query.column} IN (${placeholders(query.ids)})
+      WHERE (${where.sql})
         AND created_at BETWEEN ? AND ?
       ORDER BY created_at DESC, id DESC
       LIMIT ?`
   )
     .bind(
-      ...query.ids,
+      ...where.binds,
       new Date(scope.sinceMs).toISOString(),
       new Date(scope.untilMs).toISOString(),
       limit
