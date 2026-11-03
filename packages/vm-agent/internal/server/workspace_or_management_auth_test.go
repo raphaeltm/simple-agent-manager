@@ -1,14 +1,39 @@
 package server
 
 import (
+	"crypto/rsa"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/workspace/vm-agent/internal/agentsessions"
+	"github.com/workspace/vm-agent/internal/auth"
 )
+
+// signWorkspaceTerminalToken signs a browser-style workspace token (audience workspace-terminal).
+func signWorkspaceTerminalToken(t *testing.T, key *rsa.PrivateKey, workspaceID string) string {
+	t.Helper()
+	token := jwt.NewWithClaims(jwt.SigningMethodRS256, auth.Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    "test-issuer",
+			Subject:   "user-alpha",
+			Audience:  jwt.ClaimStrings{"workspace-terminal"},
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+		Workspace: workspaceID,
+	})
+	token.Header["kid"] = "diagnostic-test-key"
+	signed, err := token.SignedString(key)
+	if err != nil {
+		t.Fatalf("sign workspace token: %v", err)
+	}
+	return signed
+}
 
 // The control plane reads a workspace's live agent sessions and tabs with a node-management
 // token (session-activity probe, task host probe, Operations tools). These routes also accept
@@ -43,6 +68,16 @@ func TestWorkspaceReadRoutesAcceptManagementToken(t *testing.T) {
 		}, wantCode: http.StatusOK},
 		{name: "workspace cookie", apply: func(r *http.Request) { r.AddCookie(fx.workspaceCookieA) }, wantCode: http.StatusOK},
 		{name: "no credentials", apply: func(*http.Request) {}, wantCode: http.StatusUnauthorized},
+		{name: "workspace token", apply: func(r *http.Request) {
+			r.Header.Set("Authorization", "Bearer "+signWorkspaceTerminalToken(t, fx.signingKey, workspaceAID))
+		}, wantCode: http.StatusOK},
+		{name: "workspace token for another workspace", apply: func(r *http.Request) {
+			r.Header.Set("Authorization", "Bearer "+signWorkspaceTerminalToken(t, fx.signingKey, workspaceBID))
+		}, wantCode: http.StatusUnauthorized},
+		{name: "node-wide management token without workspace claim", apply: func(r *http.Request) {
+			r.Header.Set("Authorization", "Bearer "+fx.nodeToken)
+			r.Header.Set("X-SAM-Workspace-Id", workspaceAID)
+		}, wantCode: http.StatusUnauthorized},
 		{name: "management token for another workspace", apply: func(r *http.Request) {
 			r.Header.Set("Authorization", "Bearer "+signServerTestToken(t, fx.signingKey, diagnosticAuthNodeID, workspaceBID))
 			r.Header.Set("X-SAM-Workspace-Id", workspaceAID)
