@@ -94,4 +94,19 @@ docs-screenshots.spec.ts.
 
 ## Review log
 
-_(rounds recorded here)_
+Round 1 (two local general-purpose reviewers, read-only; user-journey critique + code fact-check):
+
+- **Accounts**: 0 HIGH, 5 MEDIUM, 5 LOW. Fixed in d543c3f3d: paused default is skipped (not
+  halted); Disconnect deletes the account; guided sign-in moved right after the connect steps (new
+  H2 "Managing agent accounts" for tasks/actions/pins, anchors unchanged); new "refresh a pinned
+  account" task; troubleshooting Replace…; "Needs attention: … (paused)"; any-member wording;
+  Pinned-vs-Unattached nuance; Skip; picker tiles; screenshot margin. Pushback: kept per-person
+  pin note in each entry point (readers land on sections directly).
+- **Infra**: 3 HIGH, 5 MEDIUM, 6 LOW. Fixed in f2bc933f3: See the server opens Behind the scenes
+  (not the node); manual-removal button needs a failed SAM deletion (Delete Node first on Stopped);
+  Admin → Errors alert is not only ownership (read reasons before deleting); only the chat's starter
+  is notified; retirement exceptions; strict_provider_… code; lost-workspace message indexed;
+  category titles; release bullets; fixtures use apps.example.com.
+
+Validation after round 1: www build, lint, check:links (0 broken), www unit 94/94, www browser
+332 passed / 26 skipped, format ratchet, type boundaries, deployments audit 44/44.
