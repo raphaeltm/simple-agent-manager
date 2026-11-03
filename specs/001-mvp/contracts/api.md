@@ -35,6 +35,36 @@ Authorization: Bearer {API_TOKEN}
 
 ## Endpoints
 
+### Owner retained session snapshot downloads
+
+The same artifact path supports authenticated `HEAD` with the same ownership, integrity
+and private attachment headers, but no response body. The browser checks availability
+with `HEAD`, then uses a native `GET` download to avoid buffering WIP in phone memory.
+A capture/expiry change between requests can still make the final GET fail safely.
+
+`GET /api/projects/:projectId/sessions/:sessionId/retained-snapshot/:artifact`
+accepts only `manifest` or `wip`. This is a browser-session route: active approved account,
+active original-project access, original session creator, and retained snapshot owner must
+all match. Project admin/owner membership alone grants no access to another user's snapshot.
+Callback JWTs and agent tokens are not browser authentication. No query selectors, snapshot
+listing, HOME export, raw object keys, or public/signed download URLs are supported.
+
+The server resolves the session's canonical retained generation and checks manifest identity,
+canonical artifact key, finite unexpired retention, length, and SHA-256 before returning an
+ETag-pinned binary stream. Ownership, project access, capture metadata, and expiry are rechecked
+before delivery. Stopped sessions and archived transcripts need no live workspace/runtime;
+explicit archive/delete may already have removed artifacts, which then remain unavailable.
+No export changes session/task/snapshot lifecycle state or retention.
+
+Success: `200`, `Content-Disposition: attachment`, `Cache-Control: private, no-store`,
+`X-Content-Type-Options: nosniff`, exact `Content-Length`; manifest uses `application/json`,
+WIP uses `application/octet-stream`. Foreign, missing, expired, inconsistent or corrupt retained
+resources return the same `404 {"error":"NOT_FOUND","message":"Retained snapshot not found"}`.
+Authentication/approval failures use `401`/`403`; infrastructure failures use a generic private
+`500` with no object keys or private content. There are no redirects or range/conditional client
+exports. Existing `SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES`, `SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES`
+and `SESSION_SNAPSHOT_TRANSFER_IDLE_TIMEOUT_MS` bound export validation; no new settings/migrations.
+
 ### ACP interaction foundation and runtime permission bridge
 
 These routes exist for the durable ACP interaction foundation. New interaction creation remains

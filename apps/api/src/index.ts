@@ -131,6 +131,7 @@ import { nodesRoutes } from './routes/nodes';
 import { notificationRoutes } from './routes/notifications';
 import { observabilityIngestRoutes } from './routes/observability-ingest';
 import { orchestratorRoutes } from './routes/orchestrator';
+import { ownerSessionSnapshotRoutes } from './routes/owner-session-snapshots';
 import { policyRoutes } from './routes/policies';
 import { profileRuntimeRoutes } from './routes/profile-runtime';
 import { projectAgentRoutes } from './routes/project-agent';
@@ -859,6 +860,8 @@ app.route('/api/projects/:projectId/tasks', tasksRoutes);
 app.route('/api/projects/:projectId/operation-receipts', cliOperationReceiptRoutes);
 app.route('/api/projects/:projectId/cli', cliProjectMetadataRoutes);
 app.route('/api/projects/:projectId/sessions', chatStartRoutes);
+// Human-owner retained exports are independent of workspace callback JWT routes.
+app.route('/api/projects/:projectId/sessions', ownerSessionSnapshotRoutes);
 app.route('/api/projects/:projectId/sessions', chatRoutes);
 app.route('/api/projects/:projectId/ideas', ideaUpdateRoutes);
 app.route('/api/projects/:projectId/comments', projectCommentRoutes);
