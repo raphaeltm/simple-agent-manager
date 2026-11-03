@@ -80,7 +80,6 @@ func Load() (*Config, error) {
 		JWTIssuer:   getEnv("JWT_ISSUER", ""), // Will be derived from ControlPlaneURL if not set
 
 		WorkspaceDeletionTombstoneRetention: getEnvDuration("WORKSPACE_DELETION_TOMBSTONE_RETENTION", DefaultWorkspaceDeletionTombstoneRetention),
-		WorkspaceDeletionMaxEntries:         getEnvInt("WORKSPACE_DELETION_MAX_ENTRIES", DefaultWorkspaceDeletionMaxEntries),
 		WorkspaceDeletionBatchSize:          getEnvInt("WORKSPACE_DELETION_BATCH_SIZE", DefaultWorkspaceDeletionBatchSize),
 		WorkspaceDeletionAttemptTimeout:     getEnvDuration("WORKSPACE_DELETION_ATTEMPT_TIMEOUT", DefaultWorkspaceDeletionAttemptTimeout),
 		WorkspaceDeletionRetryInterval:      getEnvDuration("WORKSPACE_DELETION_RETRY_INTERVAL", DefaultWorkspaceDeletionRetryInterval),
