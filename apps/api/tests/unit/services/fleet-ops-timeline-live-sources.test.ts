@@ -65,6 +65,10 @@ beforeEach(() => {
     schema.nodes,
     schema.taskStatusEvents,
     schema.nodeHealthEvents,
+    // The telemetry sources in DEFAULT_TIMELINE_SOURCES read these.
+    schema.nodeLifecycleDecisions,
+    schema.nodeLogCaptures,
+    schema.sessionSnapshotTraces,
   ]);
   createSchemaTables(obs, [platformErrors]);
   env = {

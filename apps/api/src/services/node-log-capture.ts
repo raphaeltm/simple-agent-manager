@@ -91,9 +91,12 @@ export function boundCapturePayload(payload: NodeLogCapturePayload, maxBytes: nu
   const size = (text: string) => new TextEncoder().encode(text).byteLength;
   let json = JSON.stringify(payload);
   while (size(json) > maxBytes) {
-    const largest = NODE_LOG_CAPTURE_SOURCES.map((source) => payload.sources[source]).reduce(
-      (best, current) => (current.entries.length > best.entries.length ? current : best)
-    );
+    let largest = payload.sources[NODE_LOG_CAPTURE_SOURCES[0]];
+    for (const source of NODE_LOG_CAPTURE_SOURCES) {
+      if (payload.sources[source].entries.length > largest.entries.length) {
+        largest = payload.sources[source];
+      }
+    }
     if (largest.entries.length === 0) break;
     // Drop about enough of the oldest lines in one step (at least one) so the loop stays short.
     const averageLineBytes = Math.max(1, Math.floor(size(json) / countEntries(payload)));
