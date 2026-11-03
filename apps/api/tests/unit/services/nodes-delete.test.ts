@@ -299,7 +299,11 @@ describe('node resource deletion services', () => {
 
     expect(destroyVmAgentContainer).toHaveBeenCalledWith(ENV, 'cf-1');
     expect(result.runtimeTerminationConfirmed).toBe(true);
-    expect(updateCalls).toContainEqual({ runtimeTerminationConfirmedAt: expect.any(String) });
+    expect(updateCalls).toContainEqual({
+      runtimeTerminationConfirmedAt: expect.any(String),
+      // Strict proof is never owner-attested (`isOwnerAttestedTermination`).
+      runtimeTerminationAttestedAt: null,
+    });
   });
 
   it('stopNodeResources deletes a pool-provisioned VM with its exact placement credential', async () => {
@@ -322,7 +326,11 @@ describe('node resource deletion services', () => {
       }
     );
     expect(providerDeleteVM).toHaveBeenCalledWith('vm-pool-1');
-    expect(updateCalls).toContainEqual({ runtimeTerminationConfirmedAt: expect.any(String) });
+    expect(updateCalls).toContainEqual({
+      runtimeTerminationConfirmedAt: expect.any(String),
+      // Strict proof is never owner-attested (`isOwnerAttestedTermination`).
+      runtimeTerminationAttestedAt: null,
+    });
     expect(updateCalls).toContainEqual(
       expect.objectContaining({ status: 'deleted', healthStatus: 'stale' })
     );
@@ -375,7 +383,11 @@ describe('node resource deletion services', () => {
       }
     );
     expect(providerDeleteVM).toHaveBeenCalledWith('vm-pool-1');
-    expect(updateCalls).toContainEqual({ runtimeTerminationConfirmedAt: expect.any(String) });
+    expect(updateCalls).toContainEqual({
+      runtimeTerminationConfirmedAt: expect.any(String),
+      // Strict proof is never owner-attested (`isOwnerAttestedTermination`).
+      runtimeTerminationAttestedAt: null,
+    });
   });
 
   it('quarantines managed records when provider deletion fails', async () => {
@@ -513,6 +525,7 @@ describe('node resource deletion services', () => {
     expect(destroyVmAgentContainer).toHaveBeenCalledWith(ENV, 'cf-strict');
     expect(updateCalls).toContainEqual({
       runtimeTerminationConfirmedAt: expect.any(String),
+      runtimeTerminationAttestedAt: null,
     });
 
     nodeRows[0] = {
@@ -934,6 +947,7 @@ describe('node resource deletion services', () => {
     expect(deleteDNSRecord).toHaveBeenCalledWith('dns-1', ENV);
     expect(updateCalls).toContainEqual({
       runtimeTerminationConfirmedAt: expect.any(String),
+      runtimeTerminationAttestedAt: null,
     });
     expect(persistError).toHaveBeenCalledWith(
       undefined,
