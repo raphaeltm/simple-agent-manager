@@ -8,6 +8,7 @@
  * (`tool-handler-table.ts`); a test fails if the two drift apart.
  */
 import { OPS_READ_TOOLS } from './tool-definitions-ops-read-tools';
+import { OPS_TELEMETRY_TOOLS } from './tool-definitions-ops-telemetry-tools';
 
 export const OPERATIONS_TOOLS = [
   {
@@ -23,4 +24,5 @@ export const OPERATIONS_TOOLS = [
     },
   },
   ...OPS_READ_TOOLS,
+  ...OPS_TELEMETRY_TOOLS,
 ];

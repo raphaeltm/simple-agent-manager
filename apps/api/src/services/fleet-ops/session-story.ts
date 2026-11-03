@@ -7,7 +7,8 @@
  *
  * Reads: the entity graph (4-6 D1), ProjectData session + state + ACP sessions for the primary
  * chat session (3 DO RPCs), the primary workspace's boot log (1 DO) and deletion state (1 DO),
- * related platform errors (1 observability D1).
+ * related platform errors (1 observability D1), and the primary chat session's sleep/wake step
+ * traces (1 D1).
  */
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
@@ -15,6 +16,7 @@ import { untrustedTextBlock } from '../../operations/untrusted-text';
 import { getBootLogs } from '../boot-log';
 import { getWorkspaceDeletionAttemptState } from '../node-lifecycle';
 import { getSession, getSessionState, listAcpSessions } from '../project-data';
+import { listSessionSnapshotTraces } from '../session-snapshot-traces';
 import {
   anyIdIn,
   ENTITY_TEXT_COLUMNS,
@@ -131,7 +133,7 @@ export async function getSessionStory(env: Env, request: SessionStoryRequest) {
   const nodeId = typeof workspace?.node_id === 'string' ? workspace.node_id : null;
   const projectId = graph.projectId;
 
-  const [chatSession, sessionState, acpSessions, bootLog, deletionState, errors] =
+  const [chatSession, sessionState, acpSessions, bootLog, deletionState, errors, traces] =
     await Promise.all([
       projectId && chatSessionId
         ? settle('chat_session', failures, () => getSession(env, projectId, chatSessionId))
@@ -153,12 +155,24 @@ export async function getSessionStory(env: Env, request: SessionStoryRequest) {
           )
         : null,
       settle('platform_errors', failures, () => relatedErrors(env, graph, request.rowCap)),
+      chatSessionId
+        ? settle('snapshot_traces', failures, () =>
+            listSessionSnapshotTraces(env.DATABASE, chatSessionId, request.rowCap)
+          )
+        : null,
     ]);
 
   const tasks = graph.tasks.map((row) => splitRow(row, 'task', texts));
   const workspaces = graph.workspaces.map((row) => splitRow(row, 'workspace', texts));
   const agentSessions = graph.agentSessions.map((row) => splitRow(row, 'agent_session', texts));
   const snapshots = graph.snapshots.map((row) => splitRow(row, 'snapshot', texts));
+
+  // Step traces: phases and timings are structured; the VM's error tail is untrusted text.
+  const snapshotTraces = (traces ?? []).map(({ errorTail, ...trace }) => {
+    if (errorTail)
+      texts.push(`[snapshot_trace ${trace.id} ${trace.failedPhase ?? ''}] ${errorTail}`);
+    return { ...trace, hasErrorTail: Boolean(errorTail) };
+  });
 
   const errorRows = errors ?? [];
   for (const row of errorRows) {
@@ -183,6 +197,7 @@ export async function getSessionStory(env: Env, request: SessionStoryRequest) {
     workspaces,
     agentSessions,
     snapshots,
+    snapshotTraces,
     nodes: graph.nodes,
     deletionState: deletionState ?? null,
     platformErrors: errorRows.map((row) => ({

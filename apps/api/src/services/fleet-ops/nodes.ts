@@ -9,6 +9,7 @@ import { maybeJsonRecord } from '../../lib/runtime-validation';
 import { neutralizeUntrustedText } from '../../operations/untrusted-text';
 import { deriveNodeHealth } from '../node-health';
 import { getStatus as getNodeLifecycleStatus } from '../node-lifecycle';
+import { listNodeLogCaptures } from '../node-log-capture-read';
 import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from '../workspace-resource-capacity';
 
 type Row = Record<string, unknown>;
@@ -143,7 +144,7 @@ export async function getFleetNode(env: Env, nodeId: string, limit: number, now 
     .first<Row>();
   if (!node) return null;
 
-  const [workspaces, healthEvents, incidents, lifecycle] = await Promise.all([
+  const [workspaces, healthEvents, incidents, lifecycle, logCaptures] = await Promise.all([
     env.DATABASE.prepare(
       `SELECT id, project_id, user_id, chat_session_id, status, last_activity_at, dispatched_at,
               created_at, updated_at, COUNT(*) OVER () AS total
@@ -178,6 +179,11 @@ export async function getFleetNode(env: Env, nodeId: string, limit: number, now 
         error: neutralizeUntrustedText(error instanceof Error ? error.message : String(error)),
       })
     ),
+    // Black box captures survive the node; read one with ops_get_node_log_capture.
+    listNodeLogCaptures(env.DATABASE, nodeId, limit).then(
+      (items) => ({ items }),
+      (error: unknown) => ({ error: error instanceof Error ? error.message : String(error) })
+    ),
   ]);
 
   const listed = (result: { results?: Row[] }) => {
@@ -197,5 +203,6 @@ export async function getFleetNode(env: Env, nodeId: string, limit: number, now 
     workspaces: listed(workspaces),
     healthEvents: listed(healthEvents),
     diagnosticIncidents: listed(incidents),
+    logCaptures,
   });
 }
