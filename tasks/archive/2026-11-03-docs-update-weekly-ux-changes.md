@@ -2,7 +2,7 @@
 
 Branch: `sam/docs-update-8a9xxv`
 Task: `01M6FSKY5RD1G2AM031N8A9XXV`
-PR: _not yet opened_
+PR: https://github.com/raphaeltm/simple-agent-manager/pull/2498
 
 ## Goal
 
@@ -107,6 +107,15 @@ Round 1 (two local general-purpose reviewers, read-only; user-journey critique +
   Admin → Errors alert is not only ownership (read reasons before deleting); only the chat's starter
   is notified; retirement exceptions; strict_provider_… code; lost-workspace message indexed;
   category titles; release bullets; fixtures use apps.example.com.
+
+Round 2: accounts 1 HIGH (pausing the default isn't a reliable stop without a platform account:
+the legacy key still resolves; added to the idea) + 3 LOW, fixed in 87293c4a1; infra 1 MEDIUM
+(Delete Node on a Stopped node shows an error before the button appears) + 3 LOW, fixed in
+35444446f. Round 3: accounts "No actionable findings"; infra 1 LOW, fixed in 4028cf61d. Round 4:
+infra "No actionable findings". Review loop complete.
+
+task-completion-validator: PASS; one LOW (move Blocked VM cleanup next to Eviction recovery in
+admin-settings.md), done.
 
 Validation after round 1: www build, lint, check:links (0 broken), www unit 94/94, www browser
 332 passed / 26 skipped, format ratchet, type boundaries, deployments audit 44/44.
