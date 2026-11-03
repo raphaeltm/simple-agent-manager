@@ -15,7 +15,13 @@ import { expect, type Page, test } from '@playwright/test';
 import type { CCProfileAttachmentItem } from '@simple-agent-manager/shared';
 
 import { accountRows, mergeRows } from '../unit/components/accounts/fixtures';
-import { type AuditResponder, makeMockUser, seedTheme, setupAuditRoutes } from './audit-helpers';
+import {
+  assertNoOverflow,
+  type AuditResponder,
+  makeMockUser,
+  seedTheme,
+  setupAuditRoutes,
+} from './audit-helpers';
 import { docsShot, opaqueBackdrop } from './docs-shot';
 import { makeAgentProfile, respondToProfilePageRoute } from './profile-account-fixtures';
 
@@ -214,6 +220,7 @@ test('docs: agent accounts with a default, a pinned and an unattached account', 
   const box = await page.locator('section[aria-labelledby="accounts-section-title"]').boundingBox();
   if (!box) throw new Error('accounts section has no geometry');
   const pad = 12;
+  await assertNoOverflow(page);
   await docsShot(page, isMobile(page) ? 'accounts-agents-mobile' : 'accounts-agents', {
     clip: {
       x: Math.max(0, box.x - pad),
@@ -233,6 +240,7 @@ test('docs: make another account your default', async ({ page }) => {
   await expect(dialog).toContainText('Make Personal Pro plan your default?');
   await expect(dialog).toContainText('3 projects using Work Max plan will switch');
   await opaqueBackdrop(page);
+  await assertNoOverflow(page);
   await docsShot(page, 'accounts-make-default', dialog.locator('.glass-panel-container'));
 });
 
@@ -249,6 +257,7 @@ test('docs: pick an existing account for one project', async ({ page }) => {
   await expect(picker.getByRole('button', { name: 'Connect a new account' })).toBeVisible();
   await page.mouse.move(2, 2);
   await claude.scrollIntoViewIfNeeded();
+  await assertNoOverflow(page);
   await docsShot(
     page,
     isMobile(page) ? 'accounts-project-picker-mobile' : 'accounts-project-picker',
@@ -269,6 +278,7 @@ test('docs: choose the account a profile runs on', async ({ page }) => {
   );
   await section.scrollIntoViewIfNeeded();
   await page.mouse.move(2, 2);
+  await assertNoOverflow(page);
   await docsShot(page, 'accounts-profile-account', section);
 });
 
@@ -286,5 +296,6 @@ test('docs: guided subscription sign-in modal (Claude Code)', async ({ page }) =
   await expect(modal).toContainText('saved as your personal default');
   await expect(modal.getByRole('button', { name: 'Continue sign-in' })).toBeDisabled();
   await opaqueBackdrop(page);
+  await assertNoOverflow(page);
   await docsShot(page, 'agent-guided-login', modal.locator('.glass-panel-container'));
 });

@@ -16,8 +16,8 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
   **Use in profiles…** on a card) runs one profile on a different account. Your choices only ever
   change your own work, even in a shared project. → [Common account tasks](/docs/guides/agents/#common-account-tasks)
 - **Subscription sign-in from a project.** The project's **Accounts** tab offers the same guided
-  Claude Code and Codex sign-in as your settings, and the account it connects is used only by that
-  project. Any member of a shared project can pin their own account there.
+  Claude Code and Codex sign-in as your settings. The account it connects starts out used only by
+  that project, and you can pin it to others later. Any member of a shared project can pin their own account there.
   → [Using another account in one project](/docs/guides/agents/#using-another-account-in-one-project)
 - **Clearer Claude sign-in failures.** An incomplete code, a code from an older sign-in tab, a
   rejected code, a timeout and a network problem each say what happened, with **Try again**.

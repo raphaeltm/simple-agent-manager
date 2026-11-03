@@ -46,7 +46,8 @@ export interface PolicyWrite {
 }
 
 export async function mockApi(page: Page, opts: MockOptions = {}): Promise<PolicyWrite[]> {
-  const environments = opts.environments ?? ENVIRONMENTS;
+  // Copied so an environment created through POST is listed and readable afterwards.
+  const environments = [...(opts.environments ?? ENVIRONMENTS)];
   const failing = new Set(opts.failing ?? []);
   const policyWrites: PolicyWrite[] = [];
   await seedTheme(page, 'dark');
@@ -87,8 +88,11 @@ export async function mockApi(page: Page, opts: MockOptions = {}): Promise<Polic
       if (path === `/api/projects/${PROJECT_ID}/environments`) {
         if (failing.has('list'))
           return json(route, { error: 'INTERNAL_ERROR', message: 'D1 is unavailable' }, 500);
-        if (method === 'POST')
-          return json(route, { ...ENVIRONMENTS[6], id: 'env-new', name: 'staging-eu' });
+        if (method === 'POST') {
+          const created = { ...ENVIRONMENTS[6], id: 'env-new', name: 'staging-eu' };
+          environments.push(created);
+          return json(route, created);
+        }
         return json(route, { environments: withRoutedHostnames(environments) });
       }
       if (envMatch) {
