@@ -177,7 +177,7 @@ function policy(enabled: boolean, allowed: string[] = []) {
 
 const hosts = (envKey: string, ...services: Array<[string, number]>) =>
   services.map(
-    ([service, port], index) => `r${index + 1}-${service}-${port}-env-${envKey}.apps.sammy.party`
+    ([service, port], index) => `r${index + 1}-${service}-${port}-env-${envKey}.apps.example.com`
   );
 
 export const PREVIEW_NAME = 'preview-pr-2417-new-product-page-with-a-really-long-branch-name';
@@ -449,7 +449,7 @@ function route(envKey: string, service: string, port: number, index: number) {
     id: `${service}:${port}:${index}`,
     service,
     port,
-    hostname: `r${index + 1}-${service}-${port}-env-${envKey}.apps.sammy.party`,
+    hostname: `r${index + 1}-${service}-${port}-env-${envKey}.apps.example.com`,
     hostPort: 36120 + index,
     routeIndex: index,
   };
@@ -487,7 +487,7 @@ function domain(
     verificationStatus: 'verified',
     verificationError: null,
     verifiedAt: daysAgo(10),
-    verifiedCnameTarget: `r${index + 1}-${service}-${port}-env-${envKey}.apps.sammy.party`,
+    verifiedCnameTarget: `r${index + 1}-${service}-${port}-env-${envKey}.apps.example.com`,
     desiredState: 'active',
     routingStatus: 'active',
     servingStatus: 'active',
@@ -496,7 +496,7 @@ function domain(
     deletedAt: null,
     createdBy: USER_ID,
     createdAt: daysAgo(10),
-    cnameTarget: `r${index + 1}-${service}-${port}-env-${envKey}.apps.sammy.party`,
+    cnameTarget: `r${index + 1}-${service}-${port}-env-${envKey}.apps.example.com`,
     routeTargetChanged: false,
     environmentStatus: 'active',
     desiredRoutingRevision: 2,

@@ -57,8 +57,11 @@ your work is safe and what to do next. Everything here applies to both
   → [See whether it was](#when-a-task-fails)
 - **A system message starting "SAM lost contact with node"** (VM). The machine behind the chat
   stopped responding. → [Wait for the chat to sleep, then wake it](#sam-lost-contact-with-the-machine)
-- **A node on the Nodes page won't go away**: it shows **Error** or **Unknown**, or a red line such
-  as **Cleanup blocked since…**, for a long time. → [See why, then remove it](#a-node-wont-go-away)
+- **"Workspace disk was not preserved before automatic VM retirement"** on a chat that was asleep.
+  SAM retired its machine before it could confirm the chat's files were saved.
+  → [Fork it](#a-node-wont-go-away)
+- **A node on the Nodes page won't go away**: it shows **Stopped**, **Error** or **Unknown**, or a
+  red line such as **Cleanup blocked since…**, for a long time. → [See why, then remove it](#a-node-wont-go-away)
 - **An archived chat shows a Fork box instead of the message box**, or a chat reads
   **"This session has ended."** or **This chat has ended**. There is nothing left to wake.
   → [Fork it or start a new chat](#the-session-has-ended)
@@ -273,8 +276,9 @@ in Manual, with the request switches in force at their first wake; see
 
 ## Recovery is in progress
 
-A strip with a spinner means SAM is waking the session or rebuilding it from its snapshot. **Do
-nothing.** When it finishes, the chat carries on.
+A strip with a spinner means SAM is waking the session or rebuilding it from its snapshot. Usually you
+need to do nothing: when it finishes, the chat carries on. If the strip names a reason it's waiting,
+the table below says what you can do.
 
 On Instant this finishes within two minutes. On a VM, the strip names the step it has reached —
 **Finding a server...**, **Provisioning a server...**, **Restoring your session...**, **Starting
@@ -609,28 +613,32 @@ If you delete a node yourself from the **Nodes** page, the tasks still running o
 A node is a machine your workspaces run on; the **Nodes** page is under **Infrastructure** in the main
 navigation. When SAM is removing one, it can sit there for a while. A red line on the node says why.
 
-**"Cleanup blocked since…"** followed by one or more reasons means SAM is holding off on purpose,
+**"Cleanup blocked since…"** followed by a time (in UTC) and one or more reasons means SAM is holding off on purpose,
 usually to keep something safe. Most of these clear by themselves:
 
-| Reason                         | What it means                                                          |
-| ------------------------------ | ---------------------------------------------------------------------- |
-| `active_workspace`             | A workspace on it is still running.                                    |
-| `unproven_workspace_deletion`  | SAM hasn't yet confirmed that a deleted workspace's files are gone.    |
-| `unproven_snapshot_source`     | A sleeping chat's saved copy isn't confirmed yet.                      |
-| `sleeping_container_retention` | It's kept for a sleeping chat that may wake on it.                     |
-| `warm_placement_claim`         | SAM is about to reuse it for new work.                                 |
-| `idle_window`                  | It was used recently.                                                  |
-| `backoff`                      | A removal attempt failed, and SAM is waiting before the next one.      |
-| `provenance`                   | SAM can't prove which cloud account the server belongs to (see below). |
-| `lost_race`                    | The node changed while SAM was checking; it checks again shortly.      |
+| Reason                                          | What it means                                                                                                                                                |
+| ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `active_workspace`                              | A workspace on it is still running.                                                                                                                          |
+| `unproven_workspace_deletion`                   | SAM hasn't yet confirmed that a deleted workspace's files are gone.                                                                                          |
+| `unproven_snapshot_source`                      | A sleeping chat's saved copy isn't confirmed yet.                                                                                                            |
+| `sleeping_container_retention`                  | It's kept for a sleeping chat that may wake on it.                                                                                                           |
+| `warm_placement_claim`                          | SAM is about to reuse it for new work.                                                                                                                       |
+| `idle_window`                                   | It was used recently.                                                                                                                                        |
+| `backoff`                                       | A removal attempt failed, and SAM is waiting before the next one.                                                                                            |
+| `provenance`                                    | SAM can't prove which cloud account the server belongs to (see below).                                                                                       |
+| `lost_race`                                     | The node changed while SAM was checking; it checks again shortly.                                                                                            |
+| `strict_provider_ownership_or_deletion_failure` | SAM tried to delete the server at your provider and couldn't, or couldn't prove the server is yours. See [SAM can't delete a node](#sam-cant-delete-a-node). |
 
-A stopped workspace machine that stays blocked for 30 minutes (the admin setting
-`operations.nodeCleanupBlockedRetirementMs`) is retired anyway, so it isn't billed indefinitely.
-SAM first tries to make sure each sleeping chat's files are saved. If it couldn't for one of them,
-that chat can no longer be woken: it ends, and you continue with **Fork** (see
+A workspace machine that is stopped or being deleted, and stays blocked for 30 minutes (the admin
+setting `operations.nodeCleanupBlockedRetirementMs`), is retired anyway so it isn't billed
+indefinitely, unless a workspace on it is still running, SAM is about to reuse it, or SAM can't prove
+who owns its server. Machines that host app deployments aren't retired this way.
+
+Before retiring it, SAM tries to make sure each sleeping chat's files are saved. If it couldn't for
+one of them, that chat can no longer be woken: it fails with **Workspace disk was not preserved before
+automatic VM retirement**, and you continue with **Fork** (see
 [The session has ended](#the-session-has-ended)). Its transcript, and anything the agent pushed, are
-kept. Retiring a machine still needs proof of which cloud account owns its server; without it, SAM
-leaves the machine and alerts an operator (see below).
+kept.
 
 ### SAM can't delete a node
 
@@ -640,7 +648,9 @@ SAM then refuses to delete it and retries every hour. If you have already delete
 provider's console:
 
 1. Check in the provider's console that the server is really gone. SAM can't prove that for you.
-2. Open the node and select **I already deleted this server**, then confirm.
+2. Open the node and select **I already deleted this server**, then confirm. The button appears only
+   once SAM's own deletion has failed (the node shows **Error**, or **Unknown** while SAM is deleting
+   it). On a **Stopped** node, select **Delete Node** first.
 
 SAM asks your provider with your saved cloud account and refuses if the server turns up
 (**Server … still exists at …. Delete it there first, then try again.**). If the lookup fails for a

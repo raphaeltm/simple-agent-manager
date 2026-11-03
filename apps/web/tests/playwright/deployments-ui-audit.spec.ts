@@ -279,7 +279,7 @@ for (const vp of VIEWPORTS) {
       await dialog
         .getByText('Points to')
         .evaluate((element) => element.closest('div')?.scrollIntoView({ block: 'center' }));
-      await expect(dialog.getByText('r1-web-3000-env-01m5prod.apps.sammy.party')).toBeInViewport();
+      await expect(dialog.getByText('r1-web-3000-env-01m5prod.apps.example.com')).toBeInViewport();
       await assertLayout(page);
       await capture(page, 'add-domain');
     });

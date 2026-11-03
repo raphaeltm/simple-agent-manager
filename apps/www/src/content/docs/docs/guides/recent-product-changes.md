@@ -31,8 +31,9 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 - **Remove a node SAM can't delete.** If SAM can't prove which cloud account owns a server and you
   already deleted it in the provider's console, **I already deleted this server** on the node's page
   removes the node. → [A node won't go away](/docs/guides/session-troubleshooting/#a-node-wont-go-away)
-- **Stuck machines stop billing.** A stopped workspace machine whose cleanup stays blocked is retired
-  after 30 minutes, and the node shows **Cleanup blocked since…** with the reason meanwhile.
+- **Stopped machines no longer stay billed indefinitely.** A stopped workspace machine whose cleanup
+  stays blocked is retired after 30 minutes, unless something on it still needs it, and the node
+  shows **Cleanup blocked since…** with the reason meanwhile.
   → [A node won't go away](/docs/guides/session-troubleshooting/#a-node-wont-go-away)
 - **A pause that didn't finish stays visible.** A deployment whose pause stopped partway says **Pause
   didn't finish** and offers **Pause again**, instead of claiming it's paused.
@@ -47,13 +48,17 @@ Also changed this week:
 
 ### For self-hosters & admins
 
-Releases: the 80% disk limit in **v2026.10.28**; deployment teardown recovery, the GitHub webhook
-change and eviction recovery settings in **v2026.10.29**; one accounts experience and Claude sign-in
-fixes in **v2026.10.30**; project sign-in, stranded VM retirement, API Worker tracing, read deadlines
-and `include=recent` in **v2026.10.31**; existing accounts in projects,
-OpenCode v2.2.5 and Gemini tool schemas in **v2026.11.01**; **Make default**, profile accounts and the
-question reader in **v2026.11.02**. **I already deleted this server** and the wake wait reasons come
-in the first release after v2026.11.02.
+Which release brought what, if you update a self-hosted instance:
+
+- **v2026.10.28**: the 80% disk limit.
+- **v2026.10.29**: deployment teardown recovery, the GitHub webhook change, eviction recovery settings.
+- **v2026.10.30**: one accounts experience, Claude sign-in fixes.
+- **v2026.10.31**: project sign-in, stranded VM retirement, API Worker tracing, read deadlines,
+  `include=recent`.
+- **v2026.11.01**: existing accounts in projects, OpenCode v2.2.5, Gemini tool schemas.
+- **v2026.11.02**: **Make default**, profile accounts, the question reader.
+- **The first release after v2026.11.02**: **I already deleted this server** and the wake wait
+  reasons.
 
 - **API Worker tracing is on at 100% sampling.** From 1 December 2026, Cloudflare counts stored
   traces toward your account's observability allowances, so decide on a sampling rate before then.
@@ -65,8 +70,8 @@ in the first release after v2026.11.02.
 - **A failed GitHub webhook now fails** instead of being acknowledged and lost. GitHub doesn't retry
   it, so after an outage use **Redeliver** in the GitHub App's webhook log.
   → [Triggers](/docs/guides/triggers/)
-- **API change:** `GET /api/projects/:id` returns `recentSessions` and `recentActivity` only with
-  `?include=recent`. → [API reference](/docs/reference/api/)
+- **API change:** `GET /api/projects/:id` returns empty `recentSessions` and `recentActivity` unless
+  you add `?include=recent`. → [API reference](/docs/reference/api/)
 
 Database migrations run in the deploy pipeline, and there are no new secrets.
 
