@@ -78,6 +78,8 @@ vi.mock('../../src/services/node-agent', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/services/node-agent')>()),
   hibernateAgentSessionOnNode: (...args: unknown[]) => mocks.hibernateAgentSessionOnNode(...args),
   stopWorkspaceOnNode: (...args: unknown[]) => mocks.stopWorkspaceOnNode(...args),
+  // A person's Sleep always asks the agent to cancel; here no prompt is in flight.
+  cancelAgentSessionOnNode: () => Promise.resolve({ success: false, status: 409 }),
 }));
 
 vi.mock('../../src/services/project-data', () => ({
