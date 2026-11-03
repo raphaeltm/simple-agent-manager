@@ -19,18 +19,18 @@ import * as projectDataService from './project-data';
 import { finishConfirmedSleepAttention } from './session-sleep-attention';
 import { finishSleepingWorkspaceComputeCleanup } from './session-sleep-cleanup';
 import { sessionSleepDeferralReason, sleepTeardownSafetyGate } from './session-sleep-eligibility';
-import type { SleepRequirement } from './session-sleep-requirement';
 import { sleptFallbackRecord } from './session-sleep-episode';
+import type { SleepRequirement } from './session-sleep-requirement';
 import {
   sessionSleepRuntimeChanged,
   SessionSleepRuntimeChangedError,
 } from './session-sleep-runtime-identity';
+import type { SleepWorkspace } from './session-sleep-workspace';
 import {
   finalizeSessionSnapshotSleeping,
   getRestorableSessionSnapshot,
   isSessionSnapshotSleepReleasable,
 } from './session-snapshots';
-import type { SleepWorkspace } from './session-sleep-workspace';
 import { sleepVmAgentContainer } from './vm-agent-container';
 
 export interface SleepWorkspaceSessionResult {

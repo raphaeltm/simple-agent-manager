@@ -14,9 +14,8 @@ vi.mock('../../../src/services/project-data', () => ({
   recordSessionTurnEnd: (...args: unknown[]) => mocks.recordSessionTurnEnd(...args),
 }));
 
-const { endAgentTurnForRequiredSleep } = await import(
-  '../../../src/services/session-sleep-required-turn-end'
-);
+const { endAgentTurnForRequiredSleep } =
+  await import('../../../src/services/session-sleep-required-turn-end');
 
 const env = {} as never;
 const workspace = {
@@ -59,14 +58,17 @@ describe('endAgentTurnForRequiredSleep', () => {
     expect(mocks.cancelAgentSessionOnNode).toHaveBeenCalledTimes(1);
   });
 
-  it.each(['idle', 'error', 'stopped'])('does nothing when the activity is %s', async (activity) => {
-    mocks.getSessionState.mockResolvedValue({ activity });
-    await expect(
-      endAgentTurnForRequiredSleep(env, workspace, 'agent-1', { reason: 'test' })
-    ).resolves.toBe(false);
-    expect(mocks.cancelAgentSessionOnNode).not.toHaveBeenCalled();
-    expect(mocks.recordSessionTurnEnd).not.toHaveBeenCalled();
-  });
+  it.each(['idle', 'error', 'stopped'])(
+    'does nothing when the activity is %s',
+    async (activity) => {
+      mocks.getSessionState.mockResolvedValue({ activity });
+      await expect(
+        endAgentTurnForRequiredSleep(env, workspace, 'agent-1', { reason: 'test' })
+      ).resolves.toBe(false);
+      expect(mocks.cancelAgentSessionOnNode).not.toHaveBeenCalled();
+      expect(mocks.recordSessionTurnEnd).not.toHaveBeenCalled();
+    }
+  );
 
   it('never cancels a sleeping Instant container, which a cancel would wake', async () => {
     await endAgentTurnForRequiredSleep(

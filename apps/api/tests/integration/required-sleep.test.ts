@@ -13,7 +13,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
-import { queueWorkspaceSessionSleep, sleepWorkspaceSession } from '../../src/services/session-sleep';
+import {
+  queueWorkspaceSessionSleep,
+  sleepWorkspaceSession,
+} from '../../src/services/session-sleep';
 import type { SleepActivity } from '../helpers/session-sleep-fixture';
 
 const {

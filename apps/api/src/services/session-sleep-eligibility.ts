@@ -93,7 +93,9 @@ export function sleepStateChanged(
   requirement: SleepRequirement
 ): boolean {
   if (requirement === 'required') {
-    return isRequiredSleepTurnRunning(after?.activity) && !isRequiredSleepTurnRunning(before?.activity);
+    return (
+      isRequiredSleepTurnRunning(after?.activity) && !isRequiredSleepTurnRunning(before?.activity)
+    );
   }
   if (!before || !after) return before !== after;
   return idlenessStateChanged(before, after);

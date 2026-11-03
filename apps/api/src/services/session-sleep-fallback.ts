@@ -7,8 +7,8 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import * as projectDataService from './project-data';
 import {
-  sleepStateChanged,
   sessionSleepDeferralReason,
+  sleepStateChanged,
   sleepTeardownSafetyGate,
 } from './session-sleep-eligibility';
 import {

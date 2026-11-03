@@ -12,6 +12,7 @@ import {
   checkAutomaticSessionSleepEligibility,
   sleepWorkspaceSession,
 } from '../services/session-sleep';
+import { closeChatOfDeletedSleepWorkspace } from '../services/session-sleep-deleted-workspace';
 import {
   parseSessionSleepFallbackRecord,
   sessionSleepEpisodeConfig,
@@ -27,7 +28,6 @@ import {
   rearmPreservationBlockedSleep,
   retireDeadWorkspaceSleepIntent,
 } from '../services/session-sleep-fallback-state';
-import { closeChatOfDeletedSleepWorkspace } from '../services/session-sleep-deleted-workspace';
 import { sessionSleepRuntimeChanged } from '../services/session-sleep-runtime-identity';
 import {
   reconcileUnconfirmedSleepBlock,

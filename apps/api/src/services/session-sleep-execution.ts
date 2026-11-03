@@ -236,7 +236,8 @@ export async function sleepWorkspaceSession(
         await endAgentTurnForRequiredSleep(env, workspace, agentSession.id, {
           reason: input.reason,
           confirmWithoutAgent: Boolean(
-            snapshot && sessionSleepEpisodeTrigger(snapshot, new Date(), sessionSleepEpisodeConfig(env))
+            snapshot &&
+            sessionSleepEpisodeTrigger(snapshot, new Date(), sessionSleepEpisodeConfig(env))
           ),
         });
       }
