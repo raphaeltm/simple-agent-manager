@@ -17,8 +17,9 @@ import {
 import type { WorkspaceDeletionIdentity } from './workspace-deletion';
 
 /** Reconcile only an explicit orphan deletion whose original owner already deleted its host.
- * This shares strict-node-deletion's complete Hetzner inventory absence contract, including
- * its provider late-completion assumption; age or missing D1 rows alone are never proof.
+ * A strict owner-deletion audit establishes completed host teardown; the sealed terminal
+ * intent prevents replay, and fresh complete inventory checks the original account again.
+ * Empty inventory alone, age, or missing D1 rows are never sufficient proof.
  * The caller holds the provisioning controller lock, excluding alarm/start/replay.
  */
 export async function confirmUnassignedWorkspaceAbsence(

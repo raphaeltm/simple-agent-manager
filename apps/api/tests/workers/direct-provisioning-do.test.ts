@@ -194,9 +194,12 @@ async function setup(interrupt: boolean, interruptDispatch = false, directNode =
   const body = (await response.json()) as { id: string; error?: string };
   expect(response.status, body.error).toBe(201);
   await Promise.all(requestBackground);
-  async function tick() {
+  async function tick(onlyInitialAttempt = false) {
     await runInDurableObject(stub, async (instance, state) => {
       const intent = await state.storage.get<DirectProvisioningIntent>(DIRECT_PROVISIONING_KEY);
+      // An automatically delivered first alarm can win the caller's read race.
+      // Do not accidentally run recovery while building an interrupted-create fixture.
+      if (onlyInitialAttempt && intent?.attempts !== 0) return;
       if (intent?.status === 'pending')
         await state.storage.put(DIRECT_PROVISIONING_KEY, { ...intent, nextAttemptAt: 0 });
       await instance.alarm();
@@ -225,7 +228,7 @@ async function setup(interrupt: boolean, interruptDispatch = false, directNode =
 
 async function orphanedDirectCreation() {
   const f = await setup(true);
-  if ((await f.intent())?.attempts === 0) await f.tick();
+  await f.tick(true);
   await vi.waitFor(async () => expect((await f.intent())?.lastError).toMatch(/unresolved/));
   const intent = (await f.intent())!;
   await runInDurableObject(f.stub, async (instance, state) => {
@@ -260,6 +263,95 @@ async function orphanedDirectCreation() {
 }
 
 describe('explicit unassigned workspace deletion after host owner deletion', () => {
+  it('keeps terminal intent sealed against start and alarm replay after confirmation and controller restart', async () => {
+    const f = await orphanedDirectCreation();
+    const sealed = await f.intent();
+    expect(await f.stub.confirmUnassignedWorkspaceDeletion(f.identity)).toBe(true);
+    for (const restart of [false, true]) {
+      if (restart)
+        await runInDurableObject(f.stub, async (instance) => {
+          (instance as unknown as { provisioningController: unknown }).provisioningController =
+            undefined;
+        });
+      await f.stub.startProvisioning(sealed!.input);
+      await runInDurableObject(f.stub, (instance) => instance.alarm());
+      expect(await f.intent()).toEqual(sealed);
+      expect(
+        await runInDurableObject(f.stub, (_instance, state) => state.storage.getAlarm())
+      ).toBeNull();
+    }
+    expect(f.creates).toHaveLength(1);
+    expect(f.dispatches).toHaveLength(0);
+  });
+
+  it('rejects proof while the provisioning controller has live work in flight', async () => {
+    const f = await orphanedDirectCreation();
+    // Set only the live-work flag: this isolates the guard without inventing a
+    // provider timeout or leaving an unresolved network promise in the test pool.
+    await runInDurableObject(f.stub, async (instance) => {
+      const controller = (
+        instance as unknown as {
+          provisioning(): { inFlight: boolean };
+        }
+      ).provisioning();
+      controller.inFlight = true;
+    });
+    const before = vi.mocked(fetch).mock.calls.length;
+    expect(await f.stub.confirmUnassignedWorkspaceDeletion(f.identity)).toBe(false);
+    expect(vi.mocked(fetch).mock.calls).toHaveLength(before);
+    await runInDurableObject(f.stub, async (instance) => {
+      (instance as unknown as { provisioning(): { inFlight: boolean } }).provisioning().inFlight =
+        false;
+    });
+    expect(await f.stub.confirmUnassignedWorkspaceDeletion(f.identity)).toBe(true);
+  });
+
+  it.each([false, true])(
+    'uses the saved account, never a different empty account (saved missing: %s)',
+    async (missing) => {
+      const f = await orphanedDirectCreation();
+      const second = await encrypt('different-account-token', f.testEnv.ENCRYPTION_KEY);
+      await env.DATABASE.prepare(
+        `INSERT INTO credentials(id,user_id,provider,credential_type,credential_kind,is_active,encrypted_token,iv,created_at,updated_at)
+      VALUES(?,?,'hetzner','cloud-provider','api-key',1,?,?,?,?)`
+      )
+        .bind(
+          'other-' + f.userId,
+          f.userId,
+          second.ciphertext,
+          second.iv,
+          new Date().toISOString(),
+          new Date().toISOString()
+        )
+        .run();
+      if (missing)
+        await env.DATABASE.prepare('DELETE FROM credentials WHERE id=?')
+          .bind('credential-' + f.userId)
+          .run();
+      const original = fetch;
+      const inventoryAccounts: string[] = [];
+      vi.stubGlobal(
+        'fetch',
+        vi.fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+          if (!String(url).includes('/servers?')) return original(url, init);
+          const account = new Headers(init?.headers).get('Authorization') ?? '';
+          inventoryAccounts.push(account);
+          const selector = new URL(String(url)).searchParams.get('label_selector');
+          expect(selector).toContain(f.intentSnapshot.input.nodeId.toLowerCase());
+          expect(selector).toContain(f.testEnv.SAM_INSTALLATION_ID);
+          expect(selector).toContain('test');
+          return Response.json({
+            servers: account === 'Bearer provider-test-token' ? [f.survivingServer] : [],
+            meta: { pagination: { next_page: null } },
+          });
+        })
+      );
+      expect(await f.stub.confirmUnassignedWorkspaceDeletion(f.identity)).toBe(false);
+      expect(inventoryAccounts).toEqual(missing ? [] : ['Bearer provider-test-token']);
+      expect(f.creates).toHaveLength(1);
+    }
+  );
+
   it.each([true, false])(
     'authenticated HTTP DELETE confirms only absent inventory: %s',
     async (absent) => {
@@ -340,6 +432,7 @@ describe('explicit unassigned workspace deletion after host owner deletion', () 
     'owner',
     'generation',
     'audit',
+    'owner-attested-audit',
     'intent',
     'pending-intent',
     'provider-failure',
@@ -347,6 +440,9 @@ describe('explicit unassigned workspace deletion after host owner deletion', () 
     'credential-during-inventory',
     'generation-during-inventory',
     'node-during-inventory',
+    'owner-during-inventory',
+    'project-during-inventory',
+    'chat-during-inventory',
   ])('keeps deletion pending when proof changes: %s', async (failure) => {
     const f = await orphanedDirectCreation();
     if (failure === 'runtime') f.inventory.push(f.survivingServer!);
@@ -360,6 +456,12 @@ describe('explicit unassigned workspace deletion after host owner deletion', () 
     if (failure === 'generation') f.identity.workspaceGeneration = 'later-generation';
     if (failure === 'audit')
       await env.DATABASE.prepare('DELETE FROM node_health_events WHERE node_id=?')
+        .bind(f.intentSnapshot.input.nodeId)
+        .run();
+    if (failure === 'owner-attested-audit')
+      await env.DATABASE.prepare(
+        "UPDATE node_health_events SET reason='owner_attested_manual_deletion' WHERE node_id=?"
+      )
         .bind(f.intentSnapshot.input.nodeId)
         .run();
     if (failure === 'intent')
@@ -398,6 +500,21 @@ describe('explicit unassigned workspace deletion after host owner deletion', () 
               .run();
           if (failure === 'node-during-inventory')
             await seedNode(f.intentSnapshot.input.nodeId, f.userId);
+          if (failure === 'owner-during-inventory') {
+            const otherOwner = 'new-owner-' + crypto.randomUUID();
+            await seedUser(otherOwner);
+            await env.DATABASE.prepare('UPDATE workspaces SET user_id=? WHERE id=?')
+              .bind(otherOwner, f.workspaceId)
+              .run();
+          }
+          if (failure === 'project-during-inventory')
+            await env.DATABASE.prepare('UPDATE workspaces SET project_id=NULL WHERE id=?')
+              .bind(f.workspaceId)
+              .run();
+          if (failure === 'chat-during-inventory')
+            await env.DATABASE.prepare('UPDATE workspaces SET chat_session_id=NULL WHERE id=?')
+              .bind(f.workspaceId)
+              .run();
           return response;
         })
       );
