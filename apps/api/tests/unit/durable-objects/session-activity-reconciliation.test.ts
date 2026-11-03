@@ -30,6 +30,7 @@ import {
   type StaleActivityCandidate,
 } from '../../../src/durable-objects/project-data/session-activity-reconciliation';
 import {
+  getSessionState,
   recordTurnEnd,
   upsertActivityState,
 } from '../../../src/durable-objects/project-data/session-state';
@@ -243,6 +244,21 @@ describe('session activity reconciliation', () => {
         activity_probe_attempts: 0,
       });
       expect(candidates()).toEqual([]);
+    });
+
+    it('refreshes the staleness clock on a working probe but not the work clock', () => {
+      // A hung turn answers `working` forever; that is not progress, so it must not
+      // keep a completed task's drain open (`session-work-clock.ts`).
+      seedLiveSession();
+      const turnStartedAt = now - 4 * 60 * 60 * 1000;
+      wedgePrompting(turnStartedAt);
+
+      const [candidate] = candidates();
+      expect(applyProbeOutcome(sql, candidate!, { kind: 'working' }, { maxAttempts: 3 })).toBe(
+        false
+      );
+      expect(readState()).toMatchObject({ activity: 'prompting', activity_at: now });
+      expect(getSessionState(sql, ACP_SESSION)?.workAt).toBe(turnStartedAt);
     });
 
     it('does not select a fresh error or clear one on unreachable inventory', () => {
