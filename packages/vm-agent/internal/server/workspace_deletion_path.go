@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,6 +65,11 @@ func validateDeletionRoot(path string) error {
 
 // errDeletionAttemptInterrupted marks a walk stopped by its attempt deadline or
 // cancellation. Removal is idempotent, so the next attempt resumes where it stopped.
+// deletionDirReadBatch bounds memory per directory read. It is a buffer size, not a
+// work limit: an attempt keeps reading batches until the directory is empty or its
+// deadline expires.
+const deletionDirReadBatch = 4096
+
 var errDeletionAttemptInterrupted = errors.New("workspace filesystem cleanup interrupted; retry required")
 
 // Each attempt is bounded by its context deadline (WORKSPACE_DELETION_ATTEMPT_TIMEOUT)
@@ -105,39 +111,45 @@ func removeDeletionRootWithOpener(ctx context.Context, path string, device, inod
 		if err := validateDeletionRoot(filepath.Join(path, dir)); err != nil {
 			return err
 		}
-		file, err := root.Open(dir)
-		if err != nil {
-			return err
-		}
-		// Read the whole directory before removing from it: entries unlinked during
-		// a partial read may or may not be returned by later reads.
-		entries, err := file.ReadDir(-1)
-		file.Close()
-		if err != nil {
-			return err
-		}
-		for _, entry := range entries {
-			if err := interrupted(); err != nil {
-				return err
-			}
-			name := filepath.Join(dir, entry.Name())
-			info, err := root.Lstat(name)
-			if os.IsNotExist(err) {
-				continue
-			}
+		// Read in bounded batches, reopening the directory after each batch is
+		// removed: entries unlinked during a partial read on one handle may or may
+		// not be returned by later reads, and one unbounded read of a huge
+		// directory would spike agent memory.
+		for {
+			file, err := root.Open(dir)
 			if err != nil {
 				return err
 			}
-			if info.IsDir() {
-				if err := removeChildren(name); err != nil {
+			entries, err := file.ReadDir(deletionDirReadBatch)
+			file.Close()
+			if err != nil && err != io.EOF {
+				return err
+			}
+			for _, entry := range entries {
+				if err := interrupted(); err != nil {
+					return err
+				}
+				name := filepath.Join(dir, entry.Name())
+				info, err := root.Lstat(name)
+				if os.IsNotExist(err) {
+					continue
+				}
+				if err != nil {
+					return err
+				}
+				if info.IsDir() {
+					if err := removeChildren(name); err != nil {
+						return err
+					}
+				}
+				if err := root.Remove(name); err != nil && !os.IsNotExist(err) {
 					return err
 				}
 			}
-			if err := root.Remove(name); err != nil && !os.IsNotExist(err) {
-				return err
+			if len(entries) < deletionDirReadBatch {
+				return nil
 			}
 		}
-		return nil
 	}
 	if err := removeChildren("."); err != nil {
 		return err

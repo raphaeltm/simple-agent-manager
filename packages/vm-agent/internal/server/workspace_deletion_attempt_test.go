@@ -139,3 +139,28 @@ func TestWorkspaceDeletionPendingInlineAttemptWakesReconciler(t *testing.T) {
 	commands, _ := os.ReadFile(filepath.Join(f.state, "commands"))
 	t.Fatalf("reconciler was not woken; commands:\n%s", commands)
 }
+
+// A directory larger than one read batch is drained across reopened batches in the
+// same attempt.
+func TestWorkspaceDeletionDrainsDirectoryLargerThanOneReadBatch(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "owned")
+	flat := filepath.Join(root, "cache")
+	if err := os.MkdirAll(flat, 0755); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < deletionDirReadBatch+5; i++ {
+		if err := os.WriteFile(filepath.Join(flat, fmt.Sprintf("entry-%05d", i)), nil, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dev, ino, err := deletionRootIdentity(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := removeDeletionRoot(t.Context(), root, dev, ino); err != nil {
+		t.Fatalf("multi-batch directory failed: %v", err)
+	}
+	if _, err := os.Lstat(root); !os.IsNotExist(err) {
+		t.Fatal("root survived a multi-batch attempt", err)
+	}
+}
