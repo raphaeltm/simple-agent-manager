@@ -94,7 +94,7 @@ How each piece behaves:
       skips sleeping containers)
 - [ ] Gate and abort check take the requirement: `sleepTeardownSafetyGate`, the
       `idlenessStateChanged` variant, `completeSleepTeardown`, `verifyAndBeginSleepTeardown`
-- [ ] `sleepWorkspaceSession` resolves the requirement and ends the turn before the claim/verify
+- [ ] `sleepWorkspaceSession` resolves the requirement and ends the turn after the claim, before verify/capture
 - [ ] Sweep eligibility (`checkAutomaticSessionSleepEligibility`) honours deadline and required
 - [ ] Fallback honours required (forces the turn end, skips the activity gate)
 - [ ] `sweepMaxLifetimeNodes`: past the absolute ceiling, active workspaces are not exempt

@@ -5,6 +5,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { getNodeAgentBackgroundRequestTimeoutMs } from './node-agent';
 import * as projectDataService from './project-data';
 import {
   sessionSleepDeferralReason,
@@ -237,6 +238,7 @@ export async function runSessionSleepFallback(
       await endAgentTurnForRequiredSleep(env, workspace, agentSession.id, {
         reason: SESSION_SLEEP_FALLBACK_REASON,
         confirmWithoutAgent: true,
+        requestTimeoutMs: getNodeAgentBackgroundRequestTimeoutMs(env),
       });
     }
     const classify = sleepTeardownSafetyGate(env, workspace, requirement);

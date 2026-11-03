@@ -15,7 +15,6 @@ import {
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
-import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { resolveAdminSetting } from './admin-settings-resolution';
 
@@ -55,17 +54,10 @@ export function classifySleepRequirement(
   return 'normal';
 }
 
+/** `resolveAdminSetting` answers its code default during a settings outage, so a deadline holds. */
 async function resolveForceSleepAfterMs(env: Env): Promise<number> {
-  try {
-    return Number(await resolveAdminSetting(env, 'operations.nodeLifetimeForceSleepAfterMs'));
-  } catch (error) {
-    // A settings outage must not stop a deadline from being enforced.
-    log.warn('session_sleep_requirement.leeway_setting_unavailable', {
-      error: error instanceof Error ? error.message : String(error),
-      fallbackMs: DEFAULT_NODE_LIFETIME_FORCE_SLEEP_AFTER_MS,
-    });
-    return DEFAULT_NODE_LIFETIME_FORCE_SLEEP_AFTER_MS;
-  }
+  const value = Number(await resolveAdminSetting(env, 'operations.nodeLifetimeForceSleepAfterMs'));
+  return Number.isFinite(value) && value > 0 ? value : DEFAULT_NODE_LIFETIME_FORCE_SLEEP_AFTER_MS;
 }
 
 export async function resolveSleepRequirement(

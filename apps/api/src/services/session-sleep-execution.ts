@@ -5,6 +5,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
+import { getNodeAgentBackgroundRequestTimeoutMs } from './node-agent';
 import * as projectDataService from './project-data';
 import {
   sessionSleepDeferralReason,
@@ -235,6 +236,9 @@ export async function sleepWorkspaceSession(
         // confirm it, so the bounded fallback can tear the runtime down.
         await endAgentTurnForRequiredSleep(env, workspace, agentSession.id, {
           reason: input.reason,
+          requestTimeoutMs: requestedByPerson
+            ? undefined
+            : getNodeAgentBackgroundRequestTimeoutMs(env),
           confirmWithoutAgent: Boolean(
             snapshot &&
             sessionSleepEpisodeTrigger(snapshot, new Date(), sessionSleepEpisodeConfig(env))

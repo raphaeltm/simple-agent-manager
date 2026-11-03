@@ -44,12 +44,28 @@ describe('endAgentTurnForRequiredSleep', () => {
       'workspace-1',
       'agent-1',
       env,
-      'user-1'
+      'user-1',
+      { requestTimeoutMs: undefined }
     );
     expect(mocks.recordSessionTurnEnd).toHaveBeenCalledWith(env, 'project-1', 'agent-1', {
       reason: 'cancelled',
       observedAt: expect.any(Number),
     });
+  });
+
+  it('passes a control-loop timeout through to the agent call', async () => {
+    await endAgentTurnForRequiredSleep(env, workspace, 'agent-1', {
+      reason: 'test',
+      requestTimeoutMs: 5000,
+    });
+    expect(mocks.cancelAgentSessionOnNode).toHaveBeenCalledWith(
+      'node-1',
+      'workspace-1',
+      'agent-1',
+      env,
+      'user-1',
+      { requestTimeoutMs: 5000 }
+    );
   });
 
   it('also ends a turn that is recovering', async () => {

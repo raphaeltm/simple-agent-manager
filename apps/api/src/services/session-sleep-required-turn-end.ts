@@ -51,7 +51,15 @@ export async function endAgentTurnForRequiredSleep(
   env: Env,
   workspace: RequiredSleepTurnTarget,
   agentSessionId: string,
-  options: { reason: string; confirmWithoutAgent?: boolean }
+  options: {
+    reason: string;
+    confirmWithoutAgent?: boolean;
+    /**
+     * Control loops (the sweep, the fallback) pass the background node-agent timeout
+     * (.claude/rules/47); a person's Sleep keeps the interactive default.
+     */
+    requestTimeoutMs?: number;
+  }
 ): Promise<boolean> {
   const state = await projectDataService.getSessionState(env, workspace.projectId, agentSessionId);
   if (!isRequiredSleepTurnRunning(state?.activity)) return false;
@@ -67,7 +75,8 @@ export async function endAgentTurnForRequiredSleep(
         workspace.id,
         agentSessionId,
         env,
-        workspace.userId
+        workspace.userId,
+        { requestTimeoutMs: options.requestTimeoutMs }
       ).catch((error: unknown) => {
         log.warn('session_sleep.required_turn_cancel_failed', {
           workspaceId: workspace.id,
