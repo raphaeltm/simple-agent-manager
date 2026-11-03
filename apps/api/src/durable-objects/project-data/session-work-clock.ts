@@ -92,10 +92,7 @@ export function isSameTurnRereport(
   // cannot be used: `markPromptAccepted` stores the control plane's accept time there,
   // which is earlier than the VM's turn start, so every re-report would look newer.
   // The VM repeats one turn's start unchanged, so any different value is another turn.
-  if (
-    update.promptStartedAt !== null &&
-    update.promptStartedAt !== prior.reportedPromptStartedAt
-  ) {
+  if (update.promptStartedAt !== null && update.promptStartedAt !== prior.reportedPromptStartedAt) {
     return false;
   }
   if (update.hasRuntimeWorkUpdate && runtimeWorkUpdateApplies(prior, update)) {
