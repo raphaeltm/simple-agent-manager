@@ -140,6 +140,7 @@ type Server struct {
 
 	workspaceDeletionCancel context.CancelFunc
 	workspaceDeletionDone   chan struct{}
+	workspaceDeletionWake   chan struct{}
 	workspaceLifecycleMu    sync.Mutex
 	workspaceLifecycleLocks map[string]*workspaceLifecycleEntry
 

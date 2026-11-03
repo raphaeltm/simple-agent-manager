@@ -195,7 +195,6 @@ type Config struct {
 
 	// Workspace settings
 	WorkspaceDeletionTombstoneRetention time.Duration
-	WorkspaceDeletionMaxEntries         int
 	WorkspaceDeletionBatchSize          int
 	WorkspaceDeletionAttemptTimeout     time.Duration
 	WorkspaceDeletionRetryInterval      time.Duration
