@@ -32,6 +32,14 @@ export interface WorkspaceAdmissionPolicy {
   memoryScoreWeightPercent: number;
 }
 
+/**
+ * The policy of a NEW placement. The lifetime cutoff must have been resolved
+ * (`resolvePlacementAdmissionPolicy`), so a placement path cannot forget it; null disables it.
+ */
+export type PlacementAdmissionPolicy = WorkspaceAdmissionPolicy & {
+  lifetimeAdmissionCutoffAgeMs: number | null;
+};
+
 export interface WorkspaceAdmissionMetrics {
   cpuLoadAvg1: number | null;
   cpuPercent: number | null;

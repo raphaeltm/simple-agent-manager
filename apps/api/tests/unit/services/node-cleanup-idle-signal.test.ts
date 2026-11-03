@@ -279,6 +279,46 @@ describe('idle reaping is immune to heartbeat activity', () => {
     expect(deleteCalls).not.toContain('absolute-recent');
   });
 
+  it('starts lifetime preservation for a busy node past the 24h ceiling (policy a3780107)', async () => {
+    // Option (a): recent activity no longer exempts a node past the absolute ceiling. Its
+    // sessions are queued to sleep; the node itself is still never deleted while occupied.
+    seedNode({ id: 'absolute-busy', createdAt: ago(25 * HOUR), updatedAt: ago(1000) });
+    seedAutoProvisionedTask('absolute-busy', 'in_progress', ago(25 * HOUR));
+    seedWorkspace({
+      id: 'ws-absolute-busy',
+      nodeId: 'absolute-busy',
+      status: 'running',
+      updatedAt: ago(5 * MINUTE),
+    });
+    seedNode({ id: 'young-busy', createdAt: ago(5 * HOUR), updatedAt: ago(1000) });
+    seedAutoProvisionedTask('young-busy', 'in_progress', ago(5 * HOUR));
+    seedWorkspace({
+      id: 'ws-young-busy',
+      nodeId: 'young-busy',
+      status: 'running',
+      updatedAt: ago(5 * MINUTE),
+    });
+    const env = {
+      ...makeEnv(),
+      MAX_AUTO_NODE_LIFETIME_MS: String(4 * HOUR),
+      NODE_WORKSPACE_IDLE_TIMEOUT_MS: String(30 * MINUTE),
+    } as Env;
+
+    await runNodeCleanupSweep(env);
+
+    const requested = (nodeId: string) =>
+      sqlite
+        ?.prepare(
+          `SELECT reason FROM node_health_events
+           WHERE node_id = ? AND event = 'absolute_lifetime_preservation_requested'`
+        )
+        .all(nodeId);
+    expect(requested('absolute-busy')).toEqual([{ reason: 'ws-absolute-busy' }]);
+    // Control: a busy node inside its absolute lifetime is still left alone.
+    expect(requested('young-busy')).toEqual([]);
+    expect(deleteCalls).not.toContain('absolute-busy');
+  });
+
   it('does NOT reap a freshly provisioned node that has no workspace yet', async () => {
     // No workspace rows at all, so idleness falls back to created_at. A node still
     // waiting for its first workspace must not be reaped out from under the task

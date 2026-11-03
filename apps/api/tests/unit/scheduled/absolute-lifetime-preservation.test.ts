@@ -255,6 +255,38 @@ describe('absolute lifetime active-workspace preservation', () => {
     ).toEqual(expect.any(String));
   });
 
+  it('reaches a busy node past the ceiling even when empty nodes fill the page', async () => {
+    seed(sqlite, 9, 'failed');
+    // An empty node past the ordinary lifetime but not the ceiling sorts first and fills a
+    // one-node page; the busy node past the ceiling must still have its sessions slept.
+    sqlite
+      .prepare(
+        `INSERT INTO nodes (id, user_id, status, node_role, node_class, created_at, updated_at)
+         VALUES ('empty-young', 'user-1', 'running', 'workspace', 'managed', ?, ?)`
+      )
+      .run('2026-09-30T20:00:00.000Z', '2026-09-30T20:00:00.000Z');
+    sqlite
+      .prepare(
+        `INSERT INTO tasks (id, auto_provisioned_node_id, created_at, updated_at)
+         VALUES ('task-empty-young', 'empty-young', ?, ?)`
+      )
+      .run(node.created_at, node.created_at);
+    const config = { ...resolveCleanupConfig(env), nodeSweepLimit: 1 };
+    expect(
+      '2026-09-30T20:00:00.000Z' >
+        new Date(now.getTime() - config.absoluteMaxLifetimeMs).toISOString()
+    ).toBe(true);
+
+    await sweepMaxLifetimeNodes(drizzle(env.DATABASE, { schema }), env, now, config, emptyResult());
+
+    expect(mocks.queue).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ workspaceId: 'old-workspace', reason: 'absolute_node_lifetime' })
+    );
+    // The empty node on the ordinary page was handled too.
+    expect(mocks.delete.mock.calls.map((call) => call[0])).toEqual(['empty-young']);
+  });
+
   it('holds a shared node while any of its active workspaces still needs preservation', async () => {
     seed(sqlite, 9, 'failed');
     sqlite

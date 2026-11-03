@@ -2120,6 +2120,11 @@ export const sessionSnapshots = sqliteTable(
      */
     sleepEpisodeStartedAt: text('sleep_episode_started_at'),
     sleepEpisodeFailures: integer('sleep_episode_failures').notNull().default(0),
+    /**
+     * The episode a person's Sleep made required: equal to `sleepEpisodeStartedAt` while that
+     * episode lasts, stale once it ends (migration 0217, `isPersonRequiredSleepEpisode`).
+     */
+    sleepRequiredEpisodeStartedAt: text('sleep_required_episode_started_at'),
     /** The bounded-failure decision record (`SessionSleepFallbackRecord`), or NULL. */
     sleepFallbackJson: text('sleep_fallback_json'),
     cleanupIdentityJson: text('cleanup_identity_json'),

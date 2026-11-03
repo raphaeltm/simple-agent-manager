@@ -6,7 +6,7 @@
  * workspace through the same idempotent lifecycle. Split out of
  * `session-sleep-execution.ts` (`.claude/rules/18-file-size-limits.md`).
  */
-import { and, desc, eq, exists, inArray, isNull, or, sql } from 'drizzle-orm';
+import { and, desc, eq, exists, inArray, isNull, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -20,10 +20,12 @@ import { finishConfirmedSleepAttention } from './session-sleep-attention';
 import { finishSleepingWorkspaceComputeCleanup } from './session-sleep-cleanup';
 import { sessionSleepDeferralReason, sleepTeardownSafetyGate } from './session-sleep-eligibility';
 import { sleptFallbackRecord } from './session-sleep-episode';
+import type { SleepRequirement } from './session-sleep-requirement';
 import {
   sessionSleepRuntimeChanged,
   SessionSleepRuntimeChangedError,
 } from './session-sleep-runtime-identity';
+import type { SleepWorkspace } from './session-sleep-workspace';
 import {
   finalizeSessionSnapshotSleeping,
   getRestorableSessionSnapshot,
@@ -38,63 +40,7 @@ export interface SleepWorkspaceSessionResult {
   snapshotExpiresAt: string;
 }
 
-export async function loadSleepWorkspace(env: Env, workspaceId: string, userId: string) {
-  const db = drizzle(env.DATABASE, { schema });
-  const [workspace] = await db
-    .select({
-      id: schema.workspaces.id,
-      userId: schema.workspaces.userId,
-      projectId: schema.workspaces.projectId,
-      chatSessionId: schema.workspaces.chatSessionId,
-      status: schema.workspaces.status,
-      evictionGeneration: schema.workspaces.evictionGeneration,
-      nodeId: schema.workspaces.nodeId,
-      nodeRuntime: schema.nodes.runtime,
-      taskId: schema.tasks.id,
-      taskStatus: schema.tasks.status,
-      taskCompletedAt: sql<
-        string | null
-      >`COALESCE(${schema.tasks.completedAt}, ${schema.tasks.updatedAt})`,
-      warmNodeTimeoutMs: schema.projects.warmNodeTimeoutMs,
-    })
-    .from(schema.workspaces)
-    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
-    .leftJoin(
-      schema.sessionSummaries,
-      eq(schema.sessionSummaries.id, schema.workspaces.chatSessionId)
-    )
-    .leftJoin(
-      schema.tasks,
-      or(
-        eq(schema.tasks.id, schema.sessionSummaries.taskId),
-        and(
-          isNull(schema.sessionSummaries.taskId),
-          eq(schema.tasks.chatSessionId, schema.workspaces.chatSessionId)
-        )
-      )
-    )
-    .leftJoin(schema.projects, eq(schema.projects.id, schema.workspaces.projectId))
-    .where(and(eq(schema.workspaces.id, workspaceId), eq(schema.workspaces.userId, userId)))
-    .limit(1);
-  if (
-    !workspace?.projectId ||
-    !workspace.chatSessionId ||
-    !workspace.nodeId ||
-    !workspace.nodeRuntime
-  ) {
-    throw new Error('Workspace is missing persistent-session ownership metadata');
-  }
-
-  return {
-    ...workspace,
-    projectId: workspace.projectId,
-    chatSessionId: workspace.chatSessionId,
-    nodeId: workspace.nodeId,
-    nodeRuntime: workspace.nodeRuntime,
-  };
-}
-
-export type SleepWorkspace = Awaited<ReturnType<typeof loadSleepWorkspace>>;
+export { loadSleepWorkspace, type SleepWorkspace } from './session-sleep-workspace';
 
 function sleepRuntimeIdentity(workspace: SleepWorkspace) {
   return and(
@@ -253,7 +199,7 @@ export async function completeSleepTeardown(
   agentSession: { id: string },
   claimId: string,
   verified: Awaited<ReturnType<typeof getRestorableSessionSnapshot>>,
-  options: { fallback?: boolean; requestTimeoutMs?: number } = {}
+  options: { fallback?: boolean; requestTimeoutMs?: number; requirement?: SleepRequirement } = {}
 ) {
   const db = drizzle(env.DATABASE, { schema });
   await assertSleepRuntimeIdentity(env, workspace);
@@ -262,7 +208,7 @@ export async function completeSleepTeardown(
     workspace.projectId,
     agentSession.id
   );
-  const safe = sleepTeardownSafetyGate(env, workspace)(activity);
+  const safe = sleepTeardownSafetyGate(env, workspace, options.requirement)(activity);
   if (!safe.idle) throw new Error(sessionSleepDeferralReason(safe, activity));
   await ensureProjectDataSleeping(env, workspace, claimId);
 

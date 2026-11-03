@@ -108,6 +108,18 @@ const LEGACY_ALLOWED_DUPLICATE_FILES = new Map<string, Map<string, Set<string>>>
       // Wrangler keys applied migrations by exact filename, so renumbering this file
       // would replay its CREATE TABLE statements against staging.
       ['0204', new Set(['0204_agent_email_triggers.sql', '0204_agent_model_access.sql'])],
+      // PR "required sleep must not fail" applied its session_snapshots marker to staging on
+      // 2026-11-03 as d1_migrations id 247, right after #2501 applied
+      // 0217_operations_audit_log.sql as id 246 under the same prefix. Wrangler keys applied
+      // migrations by exact filename, so renumbering this file would replay
+      // ALTER TABLE session_snapshots ADD COLUMN sleep_required_episode_started_at against staging.
+      [
+        '0217',
+        new Set([
+          '0217_operations_audit_log.sql',
+          '0217_session_snapshot_sleep_required_episode.sql',
+        ]),
+      ],
     ]),
   ],
 ]);

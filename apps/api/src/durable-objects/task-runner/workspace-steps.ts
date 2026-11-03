@@ -13,16 +13,18 @@ import {
 
 import { log } from '../../lib/logger';
 import type { DevcontainerCacheCredentials } from '../../services/devcontainer-cache';
+import {
+  isNodePastLifetimeAdmissionCutoff,
+  LIFETIME_ADMISSION_CUTOFF_REASON,
+  resolvePlacementAdmissionPolicy,
+} from '../../services/node-lifetime-admission';
 import { SessionRecoveryAuthorityRevokedError } from '../../services/session-recovery-authority';
 import {
   markVmAdmissionPlaced,
   releaseVmProvisioningLease,
 } from '../../services/vm-admission-control';
 import { reserveWorkspacePlacement } from '../../services/workspace-placement';
-import {
-  isResolvedResourceReservation,
-  resolveWorkspaceAdmissionPolicy,
-} from '../../services/workspace-resource-capacity';
+import { isResolvedResourceReservation } from '../../services/workspace-resource-capacity';
 import { computeBackoffMs, getRecoverySourceTaskGuard, isTransientError } from './helpers';
 import { persistPlacementDiagnostics, updatePlacementDiagnostics } from './placement-diagnostics';
 import { ensureSessionLinked } from './state-machine';
@@ -185,7 +187,10 @@ async function createAndProvisionWorkspace(
     state.config.resolvedReservation = resolvedReservation;
     await rc.ctx.storage.put('state', state);
   }
-  const admissionPolicy = resolveWorkspaceAdmissionPolicy(rc.env, state.config.projectScaling);
+  const admissionPolicy = await resolvePlacementAdmissionPolicy(
+    rc.env,
+    state.config.projectScaling
+  );
   admissionPolicy.allowBusyBuildQueue = await isUserConversationStart(state, rc);
   updatePlacementDiagnostics(state, { queue: {} });
   const placementReserved = await reserveWorkspacePlacement(
@@ -244,8 +249,17 @@ async function createAndProvisionWorkspace(
       preferredNode: state.config.preferredNodeId === nodeId,
     });
     if (state.config.preferredNodeId === nodeId) {
+      const pastCutoff = await isNodePastLifetimeAdmissionCutoff(
+        rc.env.DATABASE,
+        nodeId,
+        admissionPolicy.lifetimeAdmissionCutoffAgeMs
+      );
       throw Object.assign(
-        new Error('Specified node lost capacity or became unavailable before workspace creation'),
+        new Error(
+          pastCutoff
+            ? `Specified node: ${LIFETIME_ADMISSION_CUTOFF_REASON}`
+            : 'Specified node lost capacity or became unavailable before workspace creation'
+        ),
         { permanent: true }
       );
     }

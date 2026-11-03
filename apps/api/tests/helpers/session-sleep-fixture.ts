@@ -18,10 +18,12 @@ const sleepBoundaryMocks = vi.hoisted(() => ({
   stopSession: vi.fn(),
   sendPrompt: vi.fn(),
   nodeAgentRequest: vi.fn(),
+  cancelAgentSession: vi.fn(),
   stopAgent: vi.fn(),
   getAcpSession: vi.fn(),
   getSession: vi.fn(),
   getSessionState: vi.fn(),
+  recordSessionTurnEnd: vi.fn(),
   hibernateAgentSessionOnNode: vi.fn(),
   sleepVmAgentContainer: vi.fn(),
   markIdle: vi.fn(),
@@ -38,6 +40,7 @@ vi.mock('../../src/services/node-agent', async (importOriginal) => ({
   nodeAgentRequest: (...args: unknown[]) => sleepBoundaryMocks.nodeAgentRequest(...args),
   sendPromptToAgentOnNode: (...args: unknown[]) => sleepBoundaryMocks.sendPrompt(...args),
   stopAgentSessionOnNode: (...args: unknown[]) => sleepBoundaryMocks.stopAgent(...args),
+  cancelAgentSessionOnNode: (...args: unknown[]) => sleepBoundaryMocks.cancelAgentSession(...args),
   hibernateAgentSessionOnNode: (...args: unknown[]) =>
     sleepBoundaryMocks.hibernateAgentSessionOnNode(...args),
   stopWorkspaceOnNode: (...args: unknown[]) => sleepBoundaryMocks.stopWorkspaceOnNode(...args),
@@ -55,6 +58,7 @@ vi.mock('../../src/services/project-data', () => ({
   getAcpSession: (...args: unknown[]) => sleepBoundaryMocks.getAcpSession(...args),
   getSession: (...args: unknown[]) => sleepBoundaryMocks.getSession(...args),
   getSessionState: (...args: unknown[]) => sleepBoundaryMocks.getSessionState(...args),
+  recordSessionTurnEnd: (...args: unknown[]) => sleepBoundaryMocks.recordSessionTurnEnd(...args),
   sleepSession: (...args: unknown[]) => sleepBoundaryMocks.sleepSession(...args),
   stopSession: (...args: unknown[]) => sleepBoundaryMocks.stopSession(...args),
   acceptPromptDelivery: (...args: unknown[]) => sleepBoundaryMocks.acceptPromptDelivery(...args),
@@ -193,6 +197,8 @@ export function createSessionSleepFixture(taskStatus: string, getActivity: () =>
     return Promise.resolve();
   });
   mocks.getAcpSession.mockResolvedValue(null);
+  mocks.recordSessionTurnEnd.mockResolvedValue(true);
+  mocks.cancelAgentSession.mockResolvedValue({ success: true, status: 200 });
   mocks.stopWorkspaceOnNode.mockImplementation(() => {
     order.push('stop-workspace');
     return Promise.resolve();
