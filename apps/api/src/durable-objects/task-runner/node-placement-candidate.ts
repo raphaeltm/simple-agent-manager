@@ -1,5 +1,6 @@
 import { type ResolvedResourceReservation } from '@simple-agent-manager/shared';
 
+import { LIFETIME_ADMISSION_CUTOFF_REASON } from '../../services/node-lifetime-admission';
 import type { PlacementHostDiagnosticInput } from '../../services/placement-diagnostics';
 import {
   normalizePlacementHostSignals,
@@ -44,6 +45,11 @@ type ReusableNodeCandidateInput = {
   agentCompatible: boolean;
   satisfiesTaskResources: boolean;
   authoritative: boolean;
+  /**
+   * The node is in the last part of its lifetime (`node-lifetime-admission.ts`). Checked first and
+   * never deferrable: waiting for, or draining, a node about to be reaped gains nothing.
+   */
+  pastLifetimeAdmissionCutoff?: boolean;
 };
 
 function candidateSignals(input: ReusableNodeCandidateInput): PlacementHostSignals {
@@ -57,6 +63,7 @@ function candidateSignals(input: ReusableNodeCandidateInput): PlacementHostSigna
 }
 
 function reusableNodeExclusion(input: ReusableNodeCandidateInput): string | null {
+  if (input.pastLifetimeAdmissionCutoff) return LIFETIME_ADMISSION_CUTOFF_REASON;
   if (!input.agentCompatible) return 'Host agent version is incompatible';
   const capacity = resolveTrustedWorkspaceNodeCapacity(input.node);
   if (

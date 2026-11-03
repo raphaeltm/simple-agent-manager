@@ -236,11 +236,16 @@ describe('findNodeWithCapacity skips nodes in the last 10% of their lifetime (po
     expect(result?.nodeId).toBe('young-node');
   });
 
-  it('selects nothing when the only node is past the cutoff', async () => {
+  it('selects nothing when the only node is past the cutoff, and records why', async () => {
     insertNode(sqlite, { id: 'old-node', createdAt: ageOf(23 * HOUR) });
     autoProvision('old-node');
+    const state = createState();
 
-    expect(await findNodeWithCapacity(createState(), createContext(database))).toBeNull();
+    expect(await findNodeWithCapacity(state, createContext(database))).toBeNull();
+    // Rule 74: the refusal names its own condition in the placement diagnostics.
+    expect(JSON.stringify(state.stepResults.placementDiagnostics)).toContain(
+      'Host is in the last part of its lifetime and takes no new workspaces'
+    );
   });
 
   it('still reuses an equally old node no task auto-provisioned (control)', async () => {

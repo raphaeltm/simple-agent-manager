@@ -56,6 +56,22 @@ export async function resolvePlacementAdmissionPolicy(
   };
 }
 
+/** The node row aliased `alias` is past the cutoff: the lifetime sweep's population and age test. */
+function pastCutoffCondition(alias: string): string {
+  return `(
+             ${alias}.node_class != 'user-owned'
+             AND EXISTS (
+               SELECT 1 FROM tasks lifetime_task
+               WHERE lifetime_task.auto_provisioned_node_id = ${alias}.id
+             )
+             AND ${alias}.created_at < ?
+           )`;
+}
+
+function cutoffThreshold(cutoffAgeMs: number, now: Date): string {
+  return new Date(now.getTime() - cutoffAgeMs).toISOString();
+}
+
 /**
  * `AND NOT (<node is past the cutoff>)` for a query over `nodes` aliased `alias`, or nothing
  * when the cutoff is disabled. The age test is the lifetime sweep's own `created_at < ?`.
@@ -67,14 +83,27 @@ export function lifetimeAdmissionCutoffSql(
 ): { sql: string; binds: string[] } {
   if (cutoffAgeMs == null) return { sql: '', binds: [] };
   return {
-    sql: `AND NOT (
-             ${alias}.node_class != 'user-owned'
-             AND EXISTS (
-               SELECT 1 FROM tasks lifetime_task
-               WHERE lifetime_task.auto_provisioned_node_id = ${alias}.id
-             )
-             AND ${alias}.created_at < ?
-           )`,
-    binds: [new Date(now.getTime() - cutoffAgeMs).toISOString()],
+    sql: `AND NOT ${pastCutoffCondition(alias)}`,
+    binds: [cutoffThreshold(cutoffAgeMs, now)],
   };
 }
+
+/**
+ * A select-list column `pastLifetimeAdmissionCutoff` (1 or 0), for selection that must record
+ * why it passed a node over (`.claude/rules/74`) rather than silently filter it out.
+ */
+export function pastLifetimeAdmissionCutoffColumnSql(
+  alias: string,
+  cutoffAgeMs: number | null | undefined,
+  now: Date
+): { sql: string; binds: string[] } {
+  if (cutoffAgeMs == null) return { sql: '0 AS pastLifetimeAdmissionCutoff', binds: [] };
+  return {
+    sql: `CASE WHEN ${pastCutoffCondition(alias)} THEN 1 ELSE 0 END AS pastLifetimeAdmissionCutoff`,
+    binds: [cutoffThreshold(cutoffAgeMs, now)],
+  };
+}
+
+/** The placement-diagnostics reason for a node passed over by the cutoff. */
+export const LIFETIME_ADMISSION_CUTOFF_REASON =
+  'Host is in the last part of its lifetime and takes no new workspaces';

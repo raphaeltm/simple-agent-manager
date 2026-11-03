@@ -339,8 +339,13 @@ describe('reserveWorkspacePlacement', () => {
     const snapshot = capacitySnapshot();
     seedNode();
 
+    // With the lifetime cutoff on, as it is by default, which adds a bind.
     await expect(
-      reserveWorkspacePlacement(database, reserveInput(snapshot), admissionPolicy())
+      reserveWorkspacePlacement(
+        database,
+        reserveInput(snapshot),
+        admissionPolicy({ lifetimeAdmissionCutoffAgeMs: 0.9 * 24 * 60 * 60 * 1000 })
+      )
     ).resolves.toBe(true);
   });
 

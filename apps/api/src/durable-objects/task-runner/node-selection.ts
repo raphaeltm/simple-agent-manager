@@ -8,7 +8,7 @@
 import { log } from '../../lib/logger';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import {
-  lifetimeAdmissionCutoffSql,
+  pastLifetimeAdmissionCutoffColumnSql,
   resolvePlacementAdmissionPolicy,
 } from '../../services/node-lifetime-admission';
 import type { PlacementHostDiagnosticInput } from '../../services/placement-diagnostics';
@@ -81,8 +81,9 @@ export async function findReusableNodePlacement(
   const policy = await resolvePlacementAdmissionPolicy(rc.env, scaling);
   policy.allowBusyBuildQueue = await isUserConversationStart(state, rc);
   const requestedReservation = getTaskReservation(state);
-  // A hint only: the final reservation repeats the cutoff (`workspace-admission-sql.ts`).
-  const lifetimeCutoff = lifetimeAdmissionCutoffSql(
+  // A hint that records its refusal: the final reservation repeats the cutoff
+  // (`workspace-admission-sql.ts`).
+  const lifetimeCutoff = pastLifetimeAdmissionCutoffColumnSql(
     'nodes',
     policy.lifetimeAdmissionCutoffAgeMs,
     new Date()
@@ -120,13 +121,13 @@ export async function findReusableNodePlacement(
        health_status AS healthStatus,
        last_metrics AS lastMetrics,
        last_heartbeat_at AS lastHeartbeatAt,
-       agent_version AS agentVersion
+       agent_version AS agentVersion,
+       ${lifetimeCutoff.sql}
      FROM nodes
      WHERE user_id = ? AND status = 'running' AND health_status != 'unhealthy' AND node_role = 'workspace'
-       AND (runtime IS NULL OR runtime != 'cf-container')
-       ${lifetimeCutoff.sql}`
+       AND (runtime IS NULL OR runtime != 'cf-container')`
   )
-    .bind(state.userId, ...lifetimeCutoff.binds)
+    .bind(...lifetimeCutoff.binds, state.userId)
     .all<{
       id: string;
       vmSize: string;
@@ -165,6 +166,7 @@ export async function findReusableNodePlacement(
       lastMetrics: string | null;
       lastHeartbeatAt: string | null;
       agentVersion: string | null;
+      pastLifetimeAdmissionCutoff: number;
     }>();
 
   if (!nodes.results.length) return null;
@@ -193,6 +195,7 @@ export async function findReusableNodePlacement(
       ),
       satisfiesTaskResources: nodeSatisfiesTaskResources(node, state),
       authoritative: authoritativeNodes.has(node.id),
+      pastLifetimeAdmissionCutoff: node.pastLifetimeAdmissionCutoff === 1,
     });
     diagnosticHosts.push(evaluation.diagnosticHost);
     if (evaluation.candidate) candidates.push(evaluation.candidate);
