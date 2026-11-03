@@ -400,8 +400,8 @@ describe('ops read tools — through the real MCP route', () => {
     );
 
     expect(result.found).toBe(true);
-    const sources = new Set(result.events.map((e: { source: string }) => e.source));
-    expect(sources).toContain('node_agent_events');
+    const eventOrigins = result.events.map((e: { source: string }) => e.source);
+    expect(eventOrigins).toContain('node_agent_events');
     expect(nodeCalls.map((c) => c.path)).toContain('/events');
     expect(auditRows()).toEqual([
       expect.objectContaining({ tool: 'ops_timeline', outcome: 'succeeded', targetId: NODE }),
