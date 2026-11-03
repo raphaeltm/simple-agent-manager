@@ -28,13 +28,13 @@ import type { Env } from '../../env';
 import { AppError } from '../../middleware/error';
 import { deleteOwnedNode } from '../../routes/nodes/delete';
 import { cancelTask } from '../cancel-task';
-import { recordNodeLifecycleDecision } from '../node-lifecycle-decisions';
 import {
   getNodeAgentBackgroundRequestTimeoutMs,
   hibernateAgentSessionOnNode,
   NodeAgentHttpError,
   nodeAgentRequest,
 } from '../node-agent';
+import { recordNodeLifecycleDecision } from '../node-lifecycle-decisions';
 import { handOffEmptyWorkspaceNode } from '../node-warm-handoff';
 import type { OperationsAccessContext } from '../operations-access';
 import { listAcpSessions } from '../project-data';

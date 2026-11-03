@@ -63,6 +63,7 @@ import {
   handlePublishMissionState,
 } from './mission-tools';
 import { handleOpsGetAccessStatus } from './operations-tools';
+import { handleOpsExecuteAction, handleOpsRequestAction } from './ops-action-tools';
 import {
   handleOpsCaptureDebugPackage,
   handleOpsNodeContainers,
@@ -80,7 +81,6 @@ import {
   handleOpsSearchErrors,
   handleOpsTimeline,
 } from './ops-read-tools';
-import { handleOpsExecuteAction, handleOpsRequestAction } from './ops-action-tools';
 import { handleOpsGetNodeLogCapture, handleOpsWhyIsNodeAlive } from './ops-telemetry-tools';
 import { handleSendMessageToSubtask, handleStopSubtask } from './orchestration-comms';
 import {

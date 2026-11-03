@@ -6,14 +6,14 @@
  * shared service functions re-check ownership against it.
  */
 import {
-  type OperationsAction,
   OPERATIONS_ACTION_TARGET_TYPES,
+  type OperationsAction,
 } from '@simple-agent-manager/shared';
 
 import type { Node } from '../../db/schema';
 import type { Env } from '../../env';
-import type { OperationsAccessContext } from '../operations-access';
 import { findAccessibleNode, operatorNodeAccess } from '../node-diagnostics-access';
+import type { OperationsAccessContext } from '../operations-access';
 
 export type TargetSummary = Record<string, string | number | boolean | null>;
 

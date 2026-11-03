@@ -129,7 +129,8 @@ function toApproval(row: ApprovalRow): StoredOperationsApproval | null {
 
 /** The public shape, without the internal authority column. */
 export function publicApproval(approval: StoredOperationsApproval): OperationsActionApproval {
-  const { requestingAuthorityTaskId: _authority, ...rest } = approval;
+  const { requestingAuthorityTaskId, ...rest } = approval;
+  void requestingAuthorityTaskId;
   return rest;
 }
 

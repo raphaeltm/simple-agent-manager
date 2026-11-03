@@ -1,5 +1,5 @@
-import type { OperationsActionApproval } from '@simple-agent-manager/shared';
 import { expect, type Page, test } from '@playwright/test';
+import type { OperationsActionApproval } from '@simple-agent-manager/shared';
 
 import { assertNoOverflow, makeMockUser, screenshot, setupAuditRoutes } from './audit-helpers';
 
