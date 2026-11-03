@@ -96,13 +96,15 @@ export function SessionItem({
           <span className="sr-only">{iconConfig.label}</span>
         </span>
 
-        <span
-          className={`min-w-0 truncate text-[14.5px] text-fg-primary ${isSelected ? 'font-semibold' : 'font-medium'}`}
-        >
+        <span className="flex min-w-0 items-center gap-1.5">
           {attentionState === 'expired' && (
-            <span className="mr-1.5 text-xs font-normal text-fg-muted">Expired</span>
+            <span className="shrink-0 text-xs text-fg-muted">Expired</span>
           )}
-          {title}
+          <span
+            className={`min-w-0 truncate text-[14.5px] text-fg-primary ${isSelected ? 'font-semibold' : 'font-medium'}`}
+          >
+            {title}
+          </span>
         </span>
 
         <span className="flex items-center gap-1.5">

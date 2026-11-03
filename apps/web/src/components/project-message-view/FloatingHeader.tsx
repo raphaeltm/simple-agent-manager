@@ -68,7 +68,12 @@ export function FloatingHeader({
   }`;
 
   return (
-    <div className="relative z-10 flex shrink-0 flex-col gap-2" data-testid="session-floating-header">
+    <div
+      // Shrinks (with the details panel scrolling inside the slab) rather than squeezing the
+      // conversation below its minimum height on a short phone screen.
+      className="relative z-10 flex min-h-0 shrink flex-col gap-2"
+      data-testid="session-floating-header"
+    >
       <SessionHeader
         projectId={projectId}
         session={lc.session}

@@ -124,6 +124,7 @@ function ToolBadge({
     <Count
       value={`${count}${isLowerBound ? '+' : ''}`}
       tone={needsAttention ? 'attention' : 'muted'}
+      asText
       className="ml-auto"
     />
   );

@@ -205,8 +205,8 @@ export function SessionHeader({
   const people = sessionPeople(session.access, viewerId);
 
   return (
-    <div data-testid="session-header" className={`${paneClassName('slab')} shrink-0`}>
-      <div className="space-y-2.5 px-4 pt-3 pb-3.5 md:px-6 md:pt-4">
+    <div data-testid="session-header" className={`${paneClassName('slab')} flex min-h-0 shrink flex-col overflow-hidden`}>
+      <div className="shrink-0 space-y-2.5 px-4 pt-3 pb-3.5 md:px-6 md:pt-4">
         <div className="flex items-start gap-3">
           {/* Retry / Fork / the details chevron live in `SessionToolRail`, so the title
               gets the full width. */}

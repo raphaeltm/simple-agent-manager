@@ -32,18 +32,18 @@ surface in light and dark, desktop and mobile, uploaded to the PR.
 
 ## Implementation checklist
 
-- [ ] packages/ui SAM Glass components (Pane, IconButton+Count, Chip, PersonAvatar, SegmentedControl, NavItem, SearchField) with stories and exports; missing tokens added to sam-glass.css in both themes
-- [ ] AppShell: void, 16px frame, 14px gutters, sidebar pane, content pane for non-chat routes, bare main for chat
-- [ ] NavSidebar + FocusModeToggle + user row in SAM Glass
-- [ ] Mobile app bar slab (menu, logo, project name, recent chats + notifications well, screen toggle) and menu drawer overlay (with search + project settings)
-- [ ] Chat list pane: header, New Chat, search well, Mine/All segmented with counts, session rows
-- [ ] Conversation column: header slab, quiet message pane, composer slab, full-height tool rail pane
-- [ ] Message bubbles, new-chat state and composer (ChatInput) restyled
-- [ ] Mobile chat-list drawer (overlay with live blur, from the right)
-- [ ] Shared drawer/dialog shell applied to every chat-attached drawer and dialog
+- [x] packages/ui SAM Glass components (Pane, IconButton+Count, Chip, PersonAvatar, SegmentedControl, NavItem, SearchField) with stories and exports; missing tokens added to sam-glass.css in both themes
+- [x] AppShell: void, 16px frame, 14px gutters, sidebar pane, content pane for non-chat routes, bare main for chat
+- [x] NavSidebar + FocusModeToggle + user row in SAM Glass
+- [x] Mobile app bar slab (menu, logo, project name, recent chats + notifications well, screen toggle) and menu drawer overlay (with search + project settings)
+- [x] Chat list pane: header, New Chat, search well, Mine/All segmented with counts, session rows
+- [x] Conversation column: header slab, quiet message pane, composer slab, full-height tool rail pane
+- [x] Message bubbles, new-chat state and composer (ChatInput) restyled
+- [x] Mobile chat-list drawer (overlay with live blur, from the right)
+- [x] Shared drawer/dialog shell applied to every chat-attached drawer and dialog
 - [ ] Existing unit and Playwright audits updated where structure changed
-- [ ] New audit spec capturing every modified surface: dark/light × desktop/mobile
-- [ ] Docs: guide/skill updated for the components built; public docs if behaviour changed
+- [x] New audit spec capturing every modified surface: dark/light × desktop/mobile
+- [x] Docs: guide/skill updated for the components built; public docs if behaviour changed
 
 ## Acceptance criteria
 
@@ -51,3 +51,13 @@ surface in light and dark, desktop and mobile, uploaded to the PR.
 - [ ] At most one live blur on screen; panes separated by gutters; elements solid
 - [ ] All chat-attached panels and dialogs use the SAM Glass overlay
 - [ ] CI green on the draft PR; screenshots posted to the PR
+
+## Implementation notes
+
+- `isFullBleedRoute()` (lib/shell-routes.ts) decides bare vs content-pane main; shared with Project.tsx.
+- The floating session header became a static slab; the message list no longer pads for it.
+- On desktop the tool rail is its own pane beside the whole conversation column; on phones it stays inside the quiet message pane so header and composer keep full width.
+- Counts render from `data-count` via `::before` (axe label-content-name-mismatch).
+- Overlays use the full pane fill + live blur; light-mode chrome fill was too see-through.
+- Hierarchy modal closes the phone chat-list drawer first (two live blurs otherwise).
+- Docs screenshots under apps/www/public/images/docs predate SAM Glass; regenerating them is a separate pass.

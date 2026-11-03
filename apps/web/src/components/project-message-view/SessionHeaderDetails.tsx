@@ -64,7 +64,7 @@ export function SessionHeaderDetails({
   onShowHierarchy?: (taskId: string) => void;
 }>) {
   return (
-    <div className="max-h-[45vh] space-y-2 overflow-y-auto border-t border-[var(--sam-hairline)] px-4 py-3 md:px-6">
+    <div className="min-h-0 flex-1 space-y-2 overflow-y-auto border-t border-[var(--sam-hairline)] px-4 py-3 md:max-h-[45vh] md:px-6">
       <div className="space-y-1.5">
         <div className="flex items-center gap-1 text-[10px] font-medium text-fg-muted uppercase tracking-wide">
           <Tag size={10} />

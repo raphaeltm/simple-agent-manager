@@ -152,7 +152,7 @@ export function MobileNavDrawer({
           <button
             onClick={onToggleGlobalNav}
             data-testid="mobile-nav-toggle"
-            className={`flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-[11px] border-none bg-transparent px-3 text-left text-[15px] text-fg-muted transition-colors hover:bg-[var(--sam-glass-v2-raised)] hover:text-fg-primary ${FOCUS_RING}`}
+            className={`flex min-h-11 w-full shrink-0 cursor-pointer items-center gap-3 rounded-[11px] border-none bg-transparent px-3 text-left text-[15px] text-fg-muted transition-colors hover:bg-[var(--sam-glass-v2-raised)] hover:text-fg-primary ${FOCUS_RING}`}
             aria-label={showGlobalNav ? `Back to ${projectName} navigation` : 'Show global navigation'}
           >
             {showGlobalNav ? (

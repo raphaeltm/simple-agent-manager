@@ -489,6 +489,7 @@ export async function setupGlassChatMocks(page: Page, options: { theme: 'dark' |
     if (sub.endsWith('/files/list')) return respond(FILE_LIST);
     if (sub.endsWith('/git/status')) return respond(GIT_STATUS);
     if (sub === '/agent-profiles' || sub === '/skills') return respond({ items: [] });
+    if (sub === '/triggers') return respond({ triggers: [] });
     if (/\/commands|\/cached-commands/.test(sub)) return respond({ commands: [] });
     if (sub === '/credential-attribution-health') {
       return respond({
@@ -503,6 +504,9 @@ export async function setupGlassChatMocks(page: Page, options: { theme: 'dark' |
       });
     }
     if (sub === '') return respond(GLASS_PROJECT);
-    return respond({});
+    // Empty bounded lists for the project's remaining list endpoints (automation schedules,
+    // watches, subscriptions, triggers), so panels render their empty states instead of
+    // reading fields off a bare object.
+    return respond({ items: [], subscriptions: [], nextCursor: null, total: 0, hasMore: false });
   });
 }

@@ -71,7 +71,11 @@ export interface PersonAvatarProps extends HTMLAttributes<HTMLSpanElement> {
   decorative?: boolean;
 }
 
-/** A solid avatar in the person's colour with initials in `--sam-person-ink`. Never faded. */
+/**
+ * A solid avatar in the person's colour with initials in `--sam-person-ink`. Never faded.
+ * Not a control: an avatar that acts (a person filter) goes inside a 44px button, because the
+ * 14px and 20px sizes are far below a touch target.
+ */
 export function PersonAvatar({
   name,
   person: slot,

@@ -37,7 +37,8 @@ interface ConversationPaneProps {
  * The quiet pane the conversation sits in. `overflow-hidden` keeps the virtual list inside the
  * pane's rounded corners; the list scrolls itself.
  */
-const PANE_CLASS_NAME = 'relative flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden';
+const PANE_CLASS_NAME =
+  'relative flex min-h-[min(220px,35dvh)] min-w-0 flex-1 flex-row overflow-hidden';
 
 /** Keys that scroll a focused conversation toward older messages. */
 const SCROLL_UP_KEYS: ReadonlySet<string> = new Set(['ArrowUp', 'PageUp', 'Home']);

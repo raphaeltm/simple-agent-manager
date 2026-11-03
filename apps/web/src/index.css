@@ -234,6 +234,14 @@
     backdrop-filter: none;
   }
 
+  /* Legacy glass inside a SAM Glass pane (an ordinary page in the shell's content pane) drops
+     its live blur: the pane already separates it from the void, and SAM Glass allows one live
+     blur on screen, reserved for the open overlay (apps/web/.claude/rules/80-sam-glass.md). */
+  .sam-glass :is(.glass-chrome, .glass-surface, .glass-modal, .glass-backdrop-dim) {
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
   .glass-panel-container {
     contain: paint;
   }

@@ -276,7 +276,7 @@ export function AppShell({ children }: AppShellProps) {
   const bareMain = isFullBleedRoute(location.pathname);
   const mainFrameClassName = bareMain
     ? 'contents'
-    : 'sam-glass sam-glass-rim rounded-[var(--sam-radius-pane)] flex min-h-0 min-w-0 flex-col overflow-hidden';
+    : 'sam-glass sam-glass-rim rounded-[var(--sam-radius-pane)] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden';
   const mainClassName = `sam-main-content relative flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden ${
     bareMain ? 'overflow-y-hidden' : 'overflow-y-auto'
   }`;

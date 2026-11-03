@@ -20,7 +20,7 @@ export interface NavItemProps {
 }
 
 const BASE =
-  'group/nav flex w-full items-center gap-3 rounded-[11px] border-0 text-left no-underline transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
+  'group/nav flex w-full shrink-0 items-center gap-3 rounded-[11px] border-0 text-left no-underline transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
 const CURRENT =
   'font-medium text-fg-primary bg-[linear-gradient(180deg,var(--sam-nav-active-top),var(--sam-nav-active-bottom))] shadow-[inset_0_1px_0_var(--sam-glass-v2-raised-edge),inset_0_-1px_0_var(--sam-glass-v2-rim-bottom),var(--sam-shadow-glow-active)]';
 const RESTING =
@@ -102,7 +102,7 @@ export function NavItem({
 export function NavLabel({ children, className = '' }: { children: ReactNode; className?: string }) {
   return (
     <div
-      className={`truncate px-3 pt-3 pb-1 font-mono text-[11px] uppercase tracking-[0.12em] text-fg-muted ${className}`}
+      className={`shrink-0 truncate px-3 pt-3 pb-1 font-mono text-[11px] uppercase tracking-[0.12em] text-fg-muted ${className}`}
     >
       {children}
     </div>
