@@ -3,6 +3,7 @@ import { bodyLimit } from 'hono/body-limit';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { maybeJsonRecord } from '../../lib/runtime-validation';
 import { errors } from '../../middleware/error';
 import {
   boundedLifecycleTimings,
@@ -100,7 +101,8 @@ lifecycleTimingsRoutes.post(
       await recordSnapshotTraceForCallback(c.env, workspace, {
         operation,
         outcome,
-        body: body as Record<string, unknown>,
+        // The optional trace fields are read defensively by the trace writer (rule 54).
+        body: maybeJsonRecord(body) ?? {},
       });
     }
     return c.json({ accepted: true });
