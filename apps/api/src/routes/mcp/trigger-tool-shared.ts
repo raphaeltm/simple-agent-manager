@@ -105,7 +105,8 @@ function validateTriggerOwnership(
 }
 
 type OwnedTriggerResult =
-  { ok: true; triggerId: string; trigger: TriggerDbRow } | { ok: false; response: JsonRpcResponse };
+  | { ok: true; triggerId: string; trigger: TriggerDbRow }
+  | { ok: false; response: JsonRpcResponse };
 
 export async function resolveOwnedTrigger(
   requestId: string | number | null,

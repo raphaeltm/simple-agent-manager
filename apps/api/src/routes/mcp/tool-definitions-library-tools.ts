@@ -7,7 +7,7 @@ export const LIBRARY_TOOLS = [
   {
     name: 'list_library_files',
     description:
-      "Browse your project's file library. Returns file metadata (not content) so you can decide what to download. " +
+      'Browse your project\'s file library. Returns file metadata (not content) so you can decide what to download. ' +
       'Supports filtering by tags, file type (MIME prefix), and upload source.',
     inputSchema: {
       type: 'object' as const,
@@ -33,13 +33,11 @@ export const LIBRARY_TOOLS = [
         },
         directory: {
           type: 'string',
-          description:
-            'Filter to a specific directory path (e.g., "/marketing/brand/"). Default: "/" (root). Use "/" as prefix with recursive=true to list all files.',
+          description: 'Filter to a specific directory path (e.g., "/marketing/brand/"). Default: "/" (root). Use "/" as prefix with recursive=true to list all files.',
         },
         recursive: {
           type: 'boolean',
-          description:
-            'If true, include files in subdirectories of the specified directory. Default: false.',
+          description: 'If true, include files in subdirectories of the specified directory. Default: false.',
         },
         limit: {
           type: 'number',
@@ -63,8 +61,7 @@ export const LIBRARY_TOOLS = [
         },
         targetPath: {
           type: 'string',
-          description:
-            'Custom path within the workspace to place the file (default: .library/<filename>)',
+          description: 'Custom path within the workspace to place the file (default: .library/<filename>)',
         },
       },
       required: ['fileId'],
@@ -85,8 +82,7 @@ export const LIBRARY_TOOLS = [
         },
         directory: {
           type: 'string',
-          description:
-            'Library directory to upload into (e.g., "/marketing/brand/"). Default: "/" (root). Directories are created implicitly.',
+          description: 'Library directory to upload into (e.g., "/marketing/brand/"). Default: "/" (root). Directories are created implicitly.',
         },
         description: {
           type: 'string',
@@ -118,8 +114,7 @@ export const LIBRARY_TOOLS = [
         },
         caption: {
           type: 'string',
-          description:
-            'Optional short context shown with the card (e.g. "Section 3 covers your question about token refresh")',
+          description: 'Optional short context shown with the card (e.g. "Section 3 covers your question about token refresh")',
         },
       },
       required: ['fileId'],
@@ -136,8 +131,7 @@ export const LIBRARY_TOOLS = [
       properties: {
         fileId: {
           type: 'string',
-          description:
-            'The file ID to replace (from list_library_files or upload_to_library FILE_EXISTS error)',
+          description: 'The file ID to replace (from list_library_files or upload_to_library FILE_EXISTS error)',
         },
         filePath: {
           type: 'string',

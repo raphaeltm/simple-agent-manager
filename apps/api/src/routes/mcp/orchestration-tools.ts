@@ -423,7 +423,11 @@ export async function handleRetrySubtask(
     );
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await markTaskFailedIfNonTerminal(env.DATABASE, taskId, `Session creation failed: ${errorMsg}`);
+    await markTaskFailedIfNonTerminal(
+      env.DATABASE,
+      taskId,
+      `Session creation failed: ${errorMsg}`
+    );
     return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to create chat session: ${errorMsg}`);
   }
 
@@ -520,4 +524,7 @@ export async function handleRetrySubtask(
 // `add_dependency` and `remove_pending_subtask` live in
 // `orchestration-dependency-tools.ts` (rule 18 file-size ceiling); re-exported
 // here so importers keep one entry point for the orchestration tool family.
-export { handleAddDependency, handleRemovePendingSubtask } from './orchestration-dependency-tools';
+export {
+  handleAddDependency,
+  handleRemovePendingSubtask,
+} from './orchestration-dependency-tools';

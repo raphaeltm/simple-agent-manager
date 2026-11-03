@@ -34,7 +34,8 @@ export const MISSION_TOOLS = [
   },
   {
     name: 'get_mission',
-    description: 'Get details for a mission including its current status and task summary.',
+    description:
+      'Get details for a mission including its current status and task summary.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -51,7 +52,7 @@ export const MISSION_TOOLS = [
     name: 'publish_mission_state',
     description:
       'Publish a structured state entry (decision, assumption, fact, contract, artifact_ref, risk, todo) ' +
-      "to the mission's shared state. Visible to all tasks within the mission.",
+      'to the mission\'s shared state. Visible to all tasks within the mission.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -117,8 +118,7 @@ export const MISSION_TOOLS = [
         },
         summary: {
           type: 'string',
-          description:
-            'Executive summary of what was accomplished and what remains (max 5000 chars)',
+          description: 'Executive summary of what was accomplished and what remains (max 5000 chars)',
         },
         facts: {
           type: 'array',
