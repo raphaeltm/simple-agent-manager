@@ -35,6 +35,8 @@ import { createRequire } from 'node:module';
 import { EventEmitter } from 'node:events';
 import { dirname, join } from 'node:path';
 import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 test('pinned Wrangler passes host networking to its actual Docker build command', async () => {
   const require = createRequire(new URL('../../apps/installer/package.json', import.meta.url));
   const root = dirname(require.resolve('wrangler/package.json'));
@@ -109,4 +111,41 @@ test('engine launcher uses the running Node and repository-local tsx without PAT
   assert.ok(source.includes('process.execPath'));
   assert.ok(source.includes("new URL('../../node_modules/tsx/dist/cli.mjs', import.meta.url)"));
   assert.ok(!source.includes("spawn(\n    'pnpm'"));
+});
+
+test('builder failures name the failing bootstrap line on stderr', () => {
+  // Tool stdout is discarded in the builder, so stderr is the only failure evidence.
+  // An invalid commit fails the validation line before any network or filesystem work.
+  const script = fileURLToPath(new URL('./installer-builder-bootstrap.sh', import.meta.url));
+  const result = spawnSync('bash', [script], {
+    encoding: 'utf8',
+    env: {
+      PATH: process.env.PATH,
+      SAM_SOURCE_COMMIT: 'not-a-commit',
+      SAM_JOB_DIRECTORY: '/sam/job',
+      SAM_BUILD_FIT_ONLY: '1',
+    },
+  });
+  const line =
+    readFileSync(script, 'utf8')
+      .split('\n')
+      .findIndex((text) => text.includes('"$SAM_SOURCE_COMMIT" =~')) + 1;
+  assert.notEqual(result.status, 0);
+  assert.ok(line > 0);
+  assert.equal(result.stderr.trim(), `installer-builder-bootstrap.sh failed at line ${line}`);
+});
+
+test('every checksum-pinned builder download names an immutable version', () => {
+  // A moving URL behind a fixed checksum fails silently on the next upstream release.
+  const scripts = ['./installer-builder-bootstrap.sh', './installer-builder-bootstrap-fit.sh'];
+  const urls = scripts.flatMap((path) =>
+    [
+      ...readFileSync(new URL(path, import.meta.url), 'utf8').matchAll(
+        /curl [^\n]*?(https:\/\/\S+)/g
+      ),
+    ].map((match) => match[1])
+  );
+  assert.ok(urls.length >= 3);
+  for (const url of urls) assert.match(url, /\/v?\d+\.\d+\.\d+[/-]|go\d+\.\d+\.\d+\./, url);
+  assert.ok(!urls.some((url) => url.includes('/rustup/dist/')));
 });

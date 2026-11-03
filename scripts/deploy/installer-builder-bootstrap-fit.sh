@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Cold build proof only: no account API tokens exist inside this container.
 set -euo pipefail
+trap 'echo "installer-builder-bootstrap-fit.sh failed at line $LINENO" >&2' ERR
 [[ ${SAM_BUILD_FIT_ONLY:-} == 1 && "$PWD" == /sam/source ]]
 for name in CF_API_TOKEN CF_RUNTIME_API_TOKEN CLOUDFLARE_API_TOKEN R2_SECRET_ACCESS_KEY; do
   [[ -z ${!name:-} ]] || { echo 'Build-fit proof must have no cloud credentials' >&2; exit 1; }

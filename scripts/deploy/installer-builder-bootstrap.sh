@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Runs only inside the user-owned managed Debian builder. Never print tool output.
 set -euo pipefail
+# Tool output is discarded, so name the failing step without echoing command text.
+trap 'echo "installer-builder-bootstrap.sh failed at line $LINENO" >&2' ERR
 umask 077
 : "${SAM_SOURCE_COMMIT:?}" "${SAM_JOB_DIRECTORY:?}"
 [[ ${SAM_BUILD_FIT_ONLY:-} == 1 ]] || : "${SAM_ENGINE_CONFIG:?}"
@@ -20,7 +22,7 @@ curl --fail --silent --show-error --location --proto '=https' --proto-redir '=ht
 printf '%s  %s\n' ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5 /sam/go.tar.gz | sha256sum --check --status
 tar -xzf /sam/go.tar.gz -C /usr/local
 rm /sam/go.tar.gz
-curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' https://static.rust-lang.org/rustup/dist/x86_64-unknown-linux-gnu/rustup-init -o /sam/rustup-init
+curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' https://static.rust-lang.org/rustup/archive/1.29.2/x86_64-unknown-linux-gnu/rustup-init -o /sam/rustup-init
 printf '%s  %s\n' 5be191e8c70a5007074254cb74d78dbfdd25cd5a61c27de7b8e5410122ec24f4 /sam/rustup-init | sha256sum --check --status
 chmod 700 /sam/rustup-init
 /sam/rustup-init -y --profile minimal --default-toolchain 1.95.0
