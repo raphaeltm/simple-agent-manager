@@ -7,7 +7,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import * as projectDataService from './project-data';
 import {
-  idlenessStateChanged,
+  sleepStateChanged,
   sessionSleepDeferralReason,
   sleepTeardownSafetyGate,
 } from './session-sleep-eligibility';
@@ -33,6 +33,8 @@ import {
   revertSessionSnapshotFallbackStopping,
 } from './session-sleep-fallback-state';
 import { assessSessionSleepRecoveryPoint } from './session-sleep-recovery-point';
+import { endAgentTurnForRequiredSleep } from './session-sleep-required-turn-end';
+import { resolveSleepRequirement } from './session-sleep-requirement';
 import { sessionSleepRuntimeChanged } from './session-sleep-runtime-identity';
 import {
   completeSleepTeardown,
@@ -226,14 +228,26 @@ export async function runSessionSleepFallback(
     }
     const fallbackTrigger = currentTrigger ?? input.trigger;
     const agentSession = await loadResumableAgentSession(db, workspace.id);
-    const classify = sleepTeardownSafetyGate(env, workspace);
+    const requirement = await resolveSleepRequirement(env, workspace, now, {
+      requestedByPerson: false,
+    });
+    if (requirement === 'required') {
+      // The attempt budget is spent and the runtime is about to be torn down, so the turn
+      // end is recorded even when the agent cannot confirm it (policy a3780107).
+      await endAgentTurnForRequiredSleep(env, workspace, agentSession.id, {
+        reason: SESSION_SLEEP_FALLBACK_REASON,
+        confirmWithoutAgent: true,
+      });
+    }
+    const classify = sleepTeardownSafetyGate(env, workspace, requirement);
     const stateBefore = await projectDataService.getSessionState(
       env,
       workspace.projectId,
       agentSession.id
     );
     const idlenessBefore = classify(stateBefore);
-    if (!stateBefore || !idlenessBefore.idle) {
+    const stateMissingBlocks = requirement !== 'required';
+    if ((!stateBefore && stateMissingBlocks) || !idlenessBefore.idle) {
       await deferSessionSnapshotSleepBeforeClaim(
         db,
         env,
@@ -287,9 +301,9 @@ export async function runSessionSleepFallback(
       agentSession.id
     );
     if (
-      !stateAfter ||
+      (!stateAfter && stateMissingBlocks) ||
       !classify(stateAfter).idle ||
-      idlenessStateChanged(stateBefore, stateAfter)
+      sleepStateChanged(stateBefore, stateAfter, requirement)
     ) {
       await deferSessionSnapshotSleepBeforeClaim(
         db,
@@ -372,6 +386,7 @@ export async function runSessionSleepFallback(
     pointOfNoReturn = true;
     const slept = await completeSleepTeardown(env, workspace, agentSession, claimId, snapshot, {
       fallback: true,
+      requirement,
     });
     await finishSleepCleanup(
       db,

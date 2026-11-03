@@ -4,6 +4,7 @@ import {
   DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING_LIMIT,
   DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS_LIMIT,
   DEFAULT_NODE_CLEANUP_BLOCKED_RETIREMENT_MS,
+  DEFAULT_NODE_LIFETIME_FORCE_SLEEP_AFTER_MS,
   DEFAULT_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
   MAX_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
 } from '@simple-agent-manager/shared';
@@ -38,6 +39,13 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     DEFAULT_NODE_CLEANUP_BLOCKED_RETIREMENT_MS,
     'Operations',
     'Maximum continuous node cleanup refusal in milliseconds before automatic VM retirement or ownership alert.',
+    { min: 1, max: 86400000 }
+  ),
+  integerDefinition(
+    'operations.nodeLifetimeForceSleepAfterMs',
+    DEFAULT_NODE_LIFETIME_FORCE_SLEEP_AFTER_MS,
+    'Operations',
+    'Leeway in milliseconds after a node reaches its absolute lifetime before any session whose agent turn is still running is stopped and force-slept.',
     { min: 1, max: 86400000 }
   ),
 

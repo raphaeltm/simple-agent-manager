@@ -7,8 +7,8 @@ import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import * as projectDataService from './project-data';
 import {
-  idlenessStateChanged,
   sessionSleepDeferralReason,
+  sleepStateChanged,
   sleepTeardownSafetyGate,
 } from './session-sleep-eligibility';
 import {
@@ -18,6 +18,8 @@ import {
 } from './session-sleep-episode';
 import { persistSessionSleepFallbackNotice } from './session-sleep-fallback-notices';
 import { confirmSessionSleepFallbackStopping } from './session-sleep-recovery-point';
+import { endAgentTurnForRequiredSleep } from './session-sleep-required-turn-end';
+import { resolveSleepRequirement, type SleepRequirement } from './session-sleep-requirement';
 import { sessionSleepRuntimeChanged } from './session-sleep-runtime-identity';
 import { waitForFinalSessionSnapshot } from './session-sleep-snapshot-wait';
 import {
@@ -47,7 +49,8 @@ async function verifyAndBeginSleepTeardown(
   env: Env,
   workspace: SleepWorkspace,
   agentSession: { id: string; agentType: string | null },
-  claimId: string
+  claimId: string,
+  requirement: SleepRequirement
 ) {
   const db = drizzle(env.DATABASE, { schema });
   const stateBefore = await projectDataService.getSessionState(
@@ -55,9 +58,11 @@ async function verifyAndBeginSleepTeardown(
     workspace.projectId,
     agentSession.id
   );
-  const classifyGate = sleepTeardownSafetyGate(env, workspace);
+  const classifyGate = sleepTeardownSafetyGate(env, workspace, requirement);
+  // A required sleep has already ended the turn; an unknown state must not block it.
+  const stateMissingBlocks = requirement !== 'required';
   const idlenessBefore = classifyGate(stateBefore);
-  if (!stateBefore || !idlenessBefore.idle) {
+  if ((!stateBefore && stateMissingBlocks) || !idlenessBefore.idle) {
     throw new Error(sessionSleepDeferralReason(idlenessBefore, stateBefore));
   }
   const acpSessionBefore = await projectDataService
@@ -97,9 +102,9 @@ async function verifyAndBeginSleepTeardown(
     agentSession.id
   );
   if (
-    !stateAfter ||
+    (!stateAfter && stateMissingBlocks) ||
     !classifyGate(stateAfter).idle ||
-    idlenessStateChanged(stateBefore, stateAfter)
+    sleepStateChanged(stateBefore, stateAfter, requirement)
   ) {
     throw new Error('Workspace activity changed while the final snapshot was captured');
   }
@@ -116,9 +121,9 @@ async function verifyAndBeginSleepTeardown(
     agentSession.id
   );
   if (
-    !stateAtStop ||
+    (!stateAtStop && stateMissingBlocks) ||
     !classifyGate(stateAtStop).idle ||
-    idlenessStateChanged(stateAfter, stateAtStop)
+    sleepStateChanged(stateAfter, stateAtStop, requirement)
   ) {
     throw new Error('Workspace activity changed during snapshot artifact verification');
   }
@@ -161,6 +166,11 @@ export async function sleepWorkspaceSession(
 ): Promise<SleepWorkspaceSessionResult> {
   const db = drizzle(env.DATABASE, { schema });
   const workspace = await loadSleepWorkspace(env, input.workspaceId, input.userId);
+  // Only the explicit sleep route (the Sleep button) calls without a claim id.
+  const requestedByPerson = !input.sleepClaimId;
+  const requirement = await resolveSleepRequirement(env, workspace, new Date(), {
+    requestedByPerson,
+  });
   const snapshot = await getRestorableSessionSnapshot(db, workspace.chatSessionId, new Date(), {
     includeIncomplete: true,
   });
@@ -202,8 +212,6 @@ export async function sleepWorkspaceSession(
   });
 
   const claimId = input.sleepClaimId ?? ulid();
-  // Only the explicit sleep route (the Sleep button) calls without a claim id.
-  const requestedByPerson = !input.sleepClaimId;
   const claim = await claimSessionSnapshotSleep(db, env, {
     chatSessionId: workspace.chatSessionId,
     claimId,
@@ -221,7 +229,24 @@ export async function sleepWorkspaceSession(
   let fallback = false;
   try {
     if (!pointOfNoReturn) {
-      verified = await verifyAndBeginSleepTeardown(env, workspace, agentSession, claimId);
+      if (requirement === 'required') {
+        // A required sleep must not wait for a turn that may never return (policy a3780107).
+        // Once the attempt budget is spent, the turn end is recorded even if the agent cannot
+        // confirm it, so the bounded fallback can tear the runtime down.
+        await endAgentTurnForRequiredSleep(env, workspace, agentSession.id, {
+          reason: input.reason,
+          confirmWithoutAgent: Boolean(
+            snapshot && sessionSleepEpisodeTrigger(snapshot, new Date(), sessionSleepEpisodeConfig(env))
+          ),
+        });
+      }
+      verified = await verifyAndBeginSleepTeardown(
+        env,
+        workspace,
+        agentSession,
+        claimId,
+        requirement
+      );
       pointOfNoReturn = true;
     } else {
       // A stopping claim can survive a Worker crash or an older deployment.
@@ -311,6 +336,7 @@ export async function sleepWorkspaceSession(
     verified = await completeSleepTeardown(env, workspace, agentSession, claimId, verified, {
       fallback,
       requestTimeoutMs: input.stopRequestTimeoutMs,
+      requirement,
     });
     log.info('session_lifecycle.sleep_phase', {
       workspaceId: workspace.id,

@@ -19,6 +19,7 @@ import * as projectDataService from './project-data';
 import { finishConfirmedSleepAttention } from './session-sleep-attention';
 import { finishSleepingWorkspaceComputeCleanup } from './session-sleep-cleanup';
 import { sessionSleepDeferralReason, sleepTeardownSafetyGate } from './session-sleep-eligibility';
+import type { SleepRequirement } from './session-sleep-requirement';
 import { sleptFallbackRecord } from './session-sleep-episode';
 import {
   sessionSleepRuntimeChanged,
@@ -50,6 +51,13 @@ export async function loadSleepWorkspace(env: Env, workspaceId: string, userId: 
       evictionGeneration: schema.workspaces.evictionGeneration,
       nodeId: schema.workspaces.nodeId,
       nodeRuntime: schema.nodes.runtime,
+      nodeStatus: schema.nodes.status,
+      // Sleep-requirement inputs (`session-sleep-requirement.ts`).
+      nodeCreatedAt: schema.nodes.createdAt,
+      nodeRole: schema.nodes.nodeRole,
+      nodeClass: schema.nodes.nodeClass,
+      nodeAutoProvisioned: sql<number>`EXISTS (SELECT 1 FROM tasks auto_task
+        WHERE auto_task.auto_provisioned_node_id = ${schema.workspaces.nodeId})`,
       taskId: schema.tasks.id,
       taskStatus: schema.tasks.status,
       taskCompletedAt: sql<
@@ -253,7 +261,7 @@ export async function completeSleepTeardown(
   agentSession: { id: string },
   claimId: string,
   verified: Awaited<ReturnType<typeof getRestorableSessionSnapshot>>,
-  options: { fallback?: boolean; requestTimeoutMs?: number } = {}
+  options: { fallback?: boolean; requestTimeoutMs?: number; requirement?: SleepRequirement } = {}
 ) {
   const db = drizzle(env.DATABASE, { schema });
   await assertSleepRuntimeIdentity(env, workspace);
@@ -262,7 +270,7 @@ export async function completeSleepTeardown(
     workspace.projectId,
     agentSession.id
   );
-  const safe = sleepTeardownSafetyGate(env, workspace)(activity);
+  const safe = sleepTeardownSafetyGate(env, workspace, options.requirement)(activity);
   if (!safe.idle) throw new Error(sessionSleepDeferralReason(safe, activity));
   await ensureProjectDataSleeping(env, workspace, claimId);
 

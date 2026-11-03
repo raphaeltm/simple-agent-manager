@@ -13,6 +13,8 @@ import {
   type SessionIdlenessClassification,
   sessionWorkAnchor,
 } from './session-idleness';
+import { isRequiredSleepTurnRunning } from './session-sleep-required-turn-end';
+import { resolveSleepRequirement, type SleepRequirement } from './session-sleep-requirement';
 import {
   DEFAULT_SESSION_SLEEP_AFTER_MS,
   deferSessionSnapshotSleepBeforeClaim,
@@ -47,8 +49,10 @@ export function sessionSleepDeferralReason(
  */
 export function sleepTeardownSafetyGate(
   env: Env,
-  task: { taskStatus: string | null; taskCompletedAt: string | null }
+  task: { taskStatus: string | null; taskCompletedAt: string | null },
+  requirement: SleepRequirement = 'normal'
 ): (state: SessionIdlenessActivityState | null) => SessionIdlenessClassification {
+  if (requirement === 'required') return classifyRequiredSleepTurn;
   const idleAfterMs = parsePositiveInt(env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS);
   const harnessWorkConfig = parseHarnessWorkConfig(env);
   return (state) =>
@@ -61,6 +65,38 @@ export function sleepTeardownSafetyGate(
       harnessWorkConfig,
       policy: 'prompt-turn-ended',
     });
+}
+
+/**
+ * The gate for a REQUIRED sleep (`session-sleep-requirement.ts`), asked after
+ * `endAgentTurnForRequiredSleep` has ended the turn. Only a running turn blocks it: a harness
+ * lease, the idle interval, a completed task's drain and an unknown state do not, because a
+ * required sleep must not fail (policy a3780107).
+ */
+export function classifyRequiredSleepTurn(
+  state: SessionIdlenessActivityState | null
+): SessionIdlenessClassification {
+  const activity = state?.activity ?? null;
+  if (isRequiredSleepTurnRunning(activity)) {
+    return { idle: false, conclusive: true, reason: 'prompt_turn_active', activity };
+  }
+  return { idle: true, conclusive: true, reason: 'idle', activity };
+}
+
+/**
+ * Did something between two reads invalidate the sleep? A required sleep is aborted only by a
+ * NEW turn: harness and work-clock changes are expected while the stopped agent restarts.
+ */
+export function sleepStateChanged(
+  before: SessionIdlenessActivityState | null,
+  after: SessionIdlenessActivityState | null,
+  requirement: SleepRequirement
+): boolean {
+  if (requirement === 'required') {
+    return isRequiredSleepTurnRunning(after?.activity) && !isRequiredSleepTurnRunning(before?.activity);
+  }
+  if (!before || !after) return before !== after;
+  return idlenessStateChanged(before, after);
 }
 
 /**
@@ -109,8 +145,14 @@ export async function checkAutomaticSessionSleepEligibility(
       taskCompletedAt: sql<
         string | null
       >`COALESCE(${schema.tasks.completedAt}, ${schema.tasks.updatedAt})`,
+      nodeCreatedAt: schema.nodes.createdAt,
+      nodeRole: schema.nodes.nodeRole,
+      nodeClass: schema.nodes.nodeClass,
+      nodeAutoProvisioned: sql<number>`EXISTS (SELECT 1 FROM tasks auto_task
+        WHERE auto_task.auto_provisioned_node_id = ${schema.workspaces.nodeId})`,
     })
     .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
     .leftJoin(
       schema.sessionSummaries,
       eq(schema.sessionSummaries.id, schema.workspaces.chatSessionId)
@@ -132,6 +174,12 @@ export async function checkAutomaticSessionSleepEligibility(
   if (!workspace?.projectId || !workspace.chatSessionId) {
     return { eligible: false, reason: 'workspace_metadata_missing' };
   }
+  // Past the node's absolute lifetime plus the leeway, the sleep is required: the claimed
+  // sleep ends the turn itself (`sleepWorkspaceSession`), so nothing here may defer it.
+  const requirement = await resolveSleepRequirement(env, workspace, now, {
+    requestedByPerson: false,
+  });
+  if (requirement === 'required') return { eligible: true };
   const [agentSession] = await db
     .select({ id: schema.agentSessions.id })
     .from(schema.agentSessions)
@@ -160,15 +208,17 @@ export async function checkAutomaticSessionSleepEligibility(
     // interval before reclaiming a session on its own initiative.
     // Only long known resets (or blocked/unknown waits) request immediate sleep.
     // Short resets retain the ordinary idle interval; safety gates always apply.
+    // Past the node's absolute lifetime the session sleeps as soon as its turn ends.
     policy:
-      ['provider_limit_waiting', 'provider_limit_blocked'].includes(
+      requirement === 'deadline' ||
+      (['provider_limit_waiting', 'provider_limit_blocked'].includes(
         workspace.admissionState ?? ''
       ) &&
-      providerLimitNeedsImmediateSleep(
-        parseProviderLimitWait(workspace.providerLimitWaitJson),
-        now.getTime(),
-        idleAfterMs
-      )
+        providerLimitNeedsImmediateSleep(
+          parseProviderLimitWait(workspace.providerLimitWaitJson),
+          now.getTime(),
+          idleAfterMs
+        ))
         ? 'prompt-turn-ended'
         : 'idle-interval-elapsed',
   });

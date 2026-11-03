@@ -181,7 +181,11 @@ export async function sweepMaxLifetimeNodes(
     const pastAbsoluteCeiling = node.created_at < absoluteThreshold;
     const workspacesIdle = node.last_activity < idleThreshold;
 
-    if (node.active_ws_count > 0 && !workspacesIdle) {
+    // Past the absolute ceiling, recent activity no longer exempts the node: every session on it
+    // must sleep, busy or not (policy a3780107, option (a)). `prepareAbsoluteLifetimeRelease`
+    // queues the sleeps; the sweep sleeps each as soon as its turn ends and force-stops any turn
+    // still running after `operations.nodeLifetimeForceSleepAfterMs`.
+    if (node.active_ws_count > 0 && !workspacesIdle && !pastAbsoluteCeiling) {
       // Recent workspace activity means the hardware is still within the bounded
       // reuse/placement window even if the task has already aged past max lifetime.
       log.info('node_cleanup.max_lifetime_skipped_recent_workspace_activity', {
