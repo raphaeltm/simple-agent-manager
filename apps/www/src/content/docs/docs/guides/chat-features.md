@@ -55,7 +55,7 @@ For every kind of request:
   [shared project](/docs/guides/collaboration/), other members see that the agent is waiting, but
   not what it asked or what was answered.
 - **No notification is sent.** Watch the session list for **Needs input**; on a phone, open the list
-  with the list icon at the right of the project-name bar. (Notifications cover a different kind of
+  with the chat list button at the right end of the app bar. (Notifications cover a different kind of
   question, the one agents ask with their `request_human_input` tool — see
   [Notifications](/docs/guides/notifications/).)
 - **You don't have to stay on the page.** A request waits in SAM, not in your browser tab, so you can
@@ -648,7 +648,7 @@ An unsent message in the composer stays with its chat when you switch to another
 
 ## Session Filters (Shared Projects)
 
-In a project shared with teammates, everyone's chat sessions appear in the same session list. A filter near the session search switches between **My sessions**, the chats you started, and **All sessions**, everything happening in the project. A chat a teammate [shared with you](/docs/guides/collaboration/#share-a-chat) isn't yours, so it's only under **All sessions**; its notification also opens it.
+In a project shared with teammates, everyone's chat sessions appear in the same session list. A filter under the session search switches between **Mine**, the chats you started, and **All**, everything happening in the project; each choice shows how many chats it holds. Rows a teammate started carry a thin line in that person's colour on their left edge, with their name under the title. A chat a teammate [shared with you](/docs/guides/collaboration/#share-a-chat) isn't yours, so it's only under **All**; its notification also opens it.
 
 For the full team workflow — inviting people, approving access, roles, and shared resources — see [Collaboration & Shared Projects](/docs/guides/collaboration/). To comment on a teammate's chat, mention someone, or drive a chat together, see [Work together in a chat](/docs/guides/collaboration/#work-together-in-a-chat).
 

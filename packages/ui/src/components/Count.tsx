@@ -19,16 +19,20 @@ export interface CountProps {
   className?: string;
 }
 
+/**
+ * The number is drawn by a pseudo-element from `data-count`, so it never becomes text inside
+ * the owning control: its accessible name already carries the count, and visible digits that
+ * are not in that name fail WCAG 2.5.3 (label in name).
+ */
 export function Count({ value, tone = 'active', floating = false, className = '' }: CountProps) {
   return (
     <span
       aria-hidden="true"
       data-tone={tone}
-      className={`inline-grid h-4 min-w-4 place-items-center rounded-full px-1 text-[10px] font-bold leading-none tabular-nums ${toneClasses[tone]} ${
+      data-count={value}
+      className={`inline-grid h-4 min-w-4 place-items-center rounded-full px-1 text-[10px] font-bold leading-none tabular-nums before:content-[attr(data-count)] ${toneClasses[tone]} ${
         floating ? 'absolute top-1 right-0.5 shadow-[0_0_0_2px_var(--sam-separator)]' : ''
       } ${className}`}
-    >
-      {value}
-    </span>
+    />
   );
 }

@@ -90,7 +90,7 @@ const SESSION_SPECS: SessionSpec[] = [
     owner: RAPH,
     ageMinutes: 8,
     mode: 'conversation',
-    state: 'idle',
+    state: 'running',
   },
   {
     id: 'sess-glass-stuck',
@@ -250,7 +250,7 @@ function sessionFor(spec: SessionSpec) {
 
 export const GLASS_SESSIONS = SESSION_SPECS.map(sessionFor);
 
-const GLASS_TASKS = SESSION_SPECS.map((spec) => ({
+const SESSION_TASKS = SESSION_SPECS.map((spec) => ({
   id: taskIdFor(spec),
   projectId: GLASS_PROJECT_ID,
   title: spec.topic,
@@ -263,6 +263,18 @@ const GLASS_TASKS = SESSION_SPECS.map((spec) => ({
   createdAt: new Date(GLASS_NOW - spec.ageMinutes * MINUTE).toISOString(),
   updatedAt: new Date(GLASS_NOW - spec.ageMinutes * MINUTE).toISOString(),
 }));
+
+/** A sub-task the MPTCP task dispatched, so its row shows the hierarchy badge. */
+const GLASS_TASKS = [
+  ...SESSION_TASKS,
+  {
+    ...SESSION_TASKS[3]!,
+    id: 'task-glass-mptcp-subtask',
+    title: 'Measure socket latency with MPTCP off',
+    triggeredBy: 'mcp',
+    parentTaskId: SESSION_TASKS[3]!.id,
+  },
+];
 
 const ASSISTANT_REPLY = [
   'Here is how the other orchestrators lay out their session panels.',
@@ -370,6 +382,27 @@ const WORKSPACE = {
   updatedAt: new Date(GLASS_NOW - 2 * MINUTE).toISOString(),
 };
 
+const FILE_LIST = {
+  path: '.',
+  entries: [
+    { name: 'apps', type: 'dir', size: 0, modifiedAt: '2026-11-03T13:40:00Z' },
+    { name: 'packages', type: 'dir', size: 0, modifiedAt: '2026-11-03T13:40:00Z' },
+    { name: 'docs', type: 'dir', size: 0, modifiedAt: '2026-11-03T12:10:00Z' },
+    { name: 'CLAUDE.md', type: 'file', size: 18_442, modifiedAt: '2026-11-03T11:02:00Z' },
+    { name: 'package.json', type: 'file', size: 2_310, modifiedAt: '2026-11-02T09:15:00Z' },
+    { name: 'competitor-ui-research-t3-code-conductor-sculptor-session-panels-synthesis.md', type: 'file', size: 31_904, modifiedAt: '2026-11-03T14:12:00Z' },
+  ],
+};
+
+const GIT_STATUS = {
+  staged: [{ path: 'docs/research/competitor-ui.md', status: 'A' }],
+  unstaged: [
+    { path: 'apps/web/src/pages/project-chat/SessionItem.tsx', status: 'M' },
+    { path: 'apps/web/src/components/shell/GlassSheet.tsx', status: 'M' },
+  ],
+  untracked: [{ path: 'notes/needs-you-section-prototype.md', status: '?' }],
+};
+
 /** Registers every API route the chat, its panels and the app shell read. */
 export async function setupGlassChatMocks(page: Page, options: { theme: 'dark' | 'light' }) {
   await page.clock.setFixedTime(GLASS_NOW);
@@ -411,6 +444,8 @@ export async function setupGlassChatMocks(page: Page, options: { theme: 'dark' |
       return respond([{ id: 'inst-1', accountName: 'raphaeltm', accountType: 'User' }]);
     }
     if (path === '/api/agents') return respond({ agents: [] });
+    if (path === '/api/nodes') return respond([]);
+    if (path === '/api/report-issue/config') return respond({ enabled: true });
     if (path === '/api/trial/status') return respond({ available: false });
     if (path === '/api/workspaces') return respond([WORKSPACE]);
     if (path.startsWith('/api/workspaces/')) return respond(WORKSPACE);
@@ -451,6 +486,8 @@ export async function setupGlassChatMocks(page: Page, options: { theme: 'dark' |
       return respond({ messages: GLASS_MESSAGES, hasMore: false });
     }
     if (sub === '/tasks') return respond({ tasks: GLASS_TASKS, nextCursor: null });
+    if (sub.endsWith('/files/list')) return respond(FILE_LIST);
+    if (sub.endsWith('/git/status')) return respond(GIT_STATUS);
     if (sub === '/agent-profiles' || sub === '/skills') return respond({ items: [] });
     if (/\/commands|\/cached-commands/.test(sub)) return respond({ commands: [] });
     if (sub === '/credential-attribution-health') {

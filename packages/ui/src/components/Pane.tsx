@@ -14,7 +14,9 @@ const variantClasses: Record<PaneVariant, string> = {
   pane: 'sam-glass sam-glass-rim rounded-[var(--sam-radius-pane)]',
   quiet: 'sam-glass sam-glass--quiet sam-glass-rim rounded-[var(--sam-radius-pane)]',
   slab: 'sam-glass sam-glass--slab sam-glass-rim rounded-[var(--sam-radius-slab)]',
-  overlay: 'sam-glass sam-glass--chrome sam-glass-live sam-glass-rim rounded-[var(--sam-radius-pane)]',
+  // The normal pane fill under the blur: text on a drawer must stay 4.5:1 whatever passes
+  // behind it, and a thinner fill let busy content read through in the light theme.
+  overlay: 'sam-glass sam-glass-live sam-glass-rim rounded-[var(--sam-radius-pane)]',
 };
 
 /**

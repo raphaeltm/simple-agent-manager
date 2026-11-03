@@ -2880,7 +2880,7 @@ describe('ProjectMessageView — inline idle indicator', () => {
     expect(screen.queryByRole('button', { name: 'Interrupt agent' })).toBeNull();
   });
 
-  it('renders error banner with glass-chrome styling when task has errorMessage', async () => {
+  it('renders error banner in a SAM Glass slab when task has errorMessage', async () => {
     const session = {
       ...makeSession('sess-err'),
       task: {
@@ -2910,9 +2910,11 @@ describe('ProjectMessageView — inline idle indicator', () => {
       expect(screen.getByText('Provisioning failed')).toBeTruthy();
     });
 
-    // The failure card wrapper keeps the glass-chrome header treatment
-    const errorWrapper = screen.getByText('Provisioning failed').closest('.glass-chrome');
-    expect(errorWrapper).toBeTruthy();
+    // The failure card sits in its own SAM Glass slab under the session header
+    const errorWrapper = screen
+      .getByText('Provisioning failed')
+      .closest('[data-testid="failure-card-shell"]');
+    expect(errorWrapper?.classList.contains('sam-glass--slab')).toBe(true);
 
     // Expanding the card reveals the raw error message
     fireEvent.click(screen.getByRole('button', { name: /Provisioning failed/ }));
@@ -2920,10 +2922,9 @@ describe('ProjectMessageView — inline idle indicator', () => {
       expect(screen.getByText('Node provisioning failed')).toBeTruthy();
     });
 
-    // SessionHeader should have hasContentBelow (no rounded-b-2xl)
-    const headerEl = container.querySelector('.glass-chrome.border-t-0');
-    expect(headerEl).toBeTruthy();
-    expect(headerEl!.className).not.toContain('rounded-b-2xl');
+    // The session header stays its own slab above the failure slab (SAM Glass gutters).
+    const headerEl = container.querySelector('[data-testid="session-header"]');
+    expect(headerEl?.classList.contains('sam-glass--slab')).toBe(true);
   });
 });
 

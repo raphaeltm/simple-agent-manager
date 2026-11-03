@@ -29,7 +29,7 @@ export function personColorVar(slot: PersonSlot): string {
 
 /** Text in a person's colour (their name beside an avatar). */
 export function personTextClassName(slot: PersonSlot): string {
-  return slotText[String(slot)] ?? slotText['1']!;
+  return slotText[String(slot)] ?? 'text-[var(--sam-person-1)]';
 }
 
 /**

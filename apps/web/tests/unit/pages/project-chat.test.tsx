@@ -603,7 +603,7 @@ describe('ProjectChat new chat button', () => {
     });
 
     // Click the "+ New Chat" button in the sidebar
-    fireEvent.click(screen.getByRole('button', { name: '+ New Chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New Chat', exact: true }));
 
     // Should show the new chat input
     await waitFor(() => {
@@ -764,7 +764,7 @@ describe('ProjectChat new chat button', () => {
     });
 
     // Click "+ New Chat"
-    fireEvent.click(screen.getByRole('button', { name: '+ New Chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New Chat', exact: true }));
 
     await waitFor(() => {
       expect(screen.getByText('What do you want to build?')).toBeInTheDocument();
@@ -1085,7 +1085,7 @@ describe('ProjectChat new chat button', () => {
     });
 
     // Click New Chat — should clear the banner
-    fireEvent.click(screen.getByRole('button', { name: '+ New Chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New Chat', exact: true }));
 
     await waitFor(() => {
       expect(screen.getByText('What do you want to build?')).toBeInTheDocument();

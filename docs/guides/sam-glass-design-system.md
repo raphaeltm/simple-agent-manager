@@ -53,6 +53,8 @@ Contrast: `--sam-color-fg-primary` and `--sam-color-fg-muted` meet 4.5:1 on pane
 
 Build these in `packages/ui/src/components/` with Tailwind and the tokens above, a story each, exported from `src/index.ts`. The design system artifact has a working CSS version of each (copied in `.claude/skills/sam-glass/reference/components.css`); use it for exact values, not as a stylesheet to import.
 
+**Built so far** (the chat and navigation pass): `Pane` + `PaneSeparator` + `paneClassName()`, `IconButton`, `Count`, `Chip` + `chipClassName()`, `PersonAvatar` + `AvatarStack` + `personSlotFor()`, `SegmentedControl`, `NavItem` + `NavLabel`, `SearchField`, and the `accent` and `raised` `Button` variants. In the app: the shell (`apps/web/src/components/AppShell.tsx`, `shell/DesktopSidebar.tsx`, `shell/MobileAppBar.tsx`), the session row (`pages/project-chat/SessionItem.tsx`) and `shell/GlassSheet.tsx`, the overlay every drawer and side panel uses. Still to build: `PageHeader`, `Tabs`, `Field`, `Switch`, `SettingRow`, `DataTable`, `Notice`.
+
 | Component                                         | Replaces or extends                       | Notes                                                                                                                      |
 | ------------------------------------------------- | ----------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `Pane` (`variant`: default, quiet, slab, overlay) | `page-kit` `Panel`, `.glass-surface`      | Optional `title`, `hint`, `actions`; hairline separator helper.                                                            |
@@ -74,7 +76,7 @@ Build these in `packages/ui/src/components/` with Tailwind and the tokens above,
 
 ## Screens
 
-**Desktop chat (A1).** Four panes over the void: sidebar, chat list, conversation column, tool rail. The conversation column is three panes: a slab for the session info, the message history, and a slab for the message box.
+**Desktop chat (A1).** Four panes over the void: sidebar, chat list, conversation column, tool rail. The conversation column is three panes: a slab for the session info, the message history, and a slab for the message box. Routed pages that are not chat surfaces sit in one content pane the shell provides (`isFullBleedRoute()` in `apps/web/src/lib/shell-routes.ts` lists the chat surfaces, which lay out their own panes).
 
 **Chat list.** Each row: status icon (spinning green when working, moon when idle, amber when it needs you), one-line title, "shared with" avatars and a pull request badge on the right, then a meta line with the owner's 14px avatar and name ("You" for yours) and the age in mono. Rows someone else started get a thin light on the left edge in the owner's colour, so your own rows are the plain ones. Above the list: a segmented control (Mine / Others / All, with counts) and, beside it, small teammate avatars that filter to one person's sessions.
 
@@ -90,7 +92,7 @@ Build these in `packages/ui/src/components/` with Tailwind and the tokens above,
 | Mine / All filter                             | Exists (`scope=my` or `scope=all`).                                                               |
 | Others, and one person's sessions             | Needs an API option; filtering "all" in the browser can miss sessions because the list is capped. |
 | "Shared with" avatars on rows                 | Grants exist (`SessionAccessSummary`), but the list response doesn't include them yet.            |
-| Stable person colours                         | Needs a per-project join order (or a stored colour index per member).                             |
+| Stable person colours                         | Needs a per-project join order (or a stored colour index per member). Until then `personSlotFor()` hashes the user id, so a person keeps one colour on every screen. |
 | "Jonas is writing", live cursors              | New realtime presence. Not designed into data yet.                                                |
 
 ## Writing

@@ -64,8 +64,10 @@ export function Dialog({
       aria-describedby={ariaDescribedby}
     >
       {!ariaLabel && !ariaLabelledby && <span id={generatedLabelId} className="sr-only">Dialog</span>}
+      {/* SAM Glass scrim: it only dims. The dialog pane above is the screen's one live blur. */}
       {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- backdrop overlay; keyboard dismiss handled by Escape listener above */}
       <div
+        data-dialog-backdrop=""
         className="fixed inset-0 bg-[var(--sam-scrim)] transition-opacity duration-150 ease-in-out"
         onClick={onClose}
       />

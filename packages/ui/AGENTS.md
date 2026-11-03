@@ -27,6 +27,7 @@ The app's visual language: glass panes over a dark green void. Guide: `docs/guid
 - One live blur at a time (`.sam-glass-live` on a single overlay).
 - People colours (`--sam-person-*`) mean who; amber means waiting on you.
 - New components go in `src/components/` with a story; the table of components to build is in the guide.
+- Built: `Pane` (`paneClassName()`), `IconButton`, `Count`, `Chip` (`chipClassName()`), `PersonAvatar`/`AvatarStack` (`personSlotFor()`), `SegmentedControl`, `NavItem`/`NavLabel`, `SearchField`, and the `accent`/`raised` `Button` variants. Stories live under "SAM Glass/" in Storybook.
 
 ## Commands
 
