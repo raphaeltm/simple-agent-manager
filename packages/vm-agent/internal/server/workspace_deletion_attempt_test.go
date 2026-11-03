@@ -118,6 +118,14 @@ func TestWorkspaceDeletionPendingInlineAttemptWakesReconciler(t *testing.T) {
 	// The reconciler's startup pass also fails; afterwards it is parked on an
 	// hour-long ticker, so only a wake can run another pass.
 	waitForDeletionCommand(t, f, "volume rm", 2)
+	// The fake docker logs a command before acting on it. The reconciler holds the
+	// lifecycle lock for its whole pass, so taking the lock proves the startup pass
+	// has finished and cannot consume the marker written below.
+	lock := f.server.workspaceLifecycleLock("workspace-1")
+	if err := lock.Lock(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	lock.Unlock()
 
 	// The next inline attempt fails once more, then the volume becomes removable.
 	if err := os.WriteFile(filepath.Join(f.state, "fail-volume-once"), nil, 0600); err != nil {

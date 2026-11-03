@@ -25,8 +25,8 @@ WARN resourcemon: critical pressure event had no evictable workspace type=contai
 
 That case was harmless only because the removed devcontainer had no
 `sam.workspace.id` label. A labelled container killed by SIGKILL would be reported as a
-critical OOM for that workspace, which can drive eviction and pollute resource history
-(`resourcehistory/collector.go` counts `oom` events).
+critical OOM for that workspace, which can drive eviction. (Resource history OOM counts come
+from cgroup `memory.events`, not Docker events, so they are unaffected.)
 
 ## Acceptance Criteria
 
@@ -35,4 +35,3 @@ critical OOM for that workspace, which can drive eviction and pollute resource h
 - [ ] `docker rm -f` during workspace deletion produces no `container_oom` pressure event
       (test through the real event parser and eviction path)
 - [ ] A real `oom` event still reaches the eviction controller (convergence control)
-- [ ] Resource history OOM counts no longer include intentional kills
