@@ -1,0 +1,4 @@
+interface:
+  display_name: "SAM Glass"
+  short_description: "Build screens in SAM's glass design system"
+  default_prompt: "Use $sam-glass to build or restyle this screen in the SAM Glass style."
