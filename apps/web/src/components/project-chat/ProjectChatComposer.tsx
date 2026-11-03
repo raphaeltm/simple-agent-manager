@@ -11,10 +11,11 @@ import {
 } from '@simple-agent-manager/acp-client';
 import type { AgentProfile, AgentSkill } from '@simple-agent-manager/shared';
 import { formatMentionName, getMentionQuery } from '@simple-agent-manager/shared';
-import { Paperclip, X } from 'lucide-react';
+import { ArrowRight, ArrowUp, Paperclip, X } from 'lucide-react';
 import type { MutableRefObject } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+import { useIsMobile } from '../../hooks/useIsMobile';
 import { formatFileSize } from '../../lib/file-utils';
 import {
   getSendButtonTitle,
@@ -184,6 +185,9 @@ export function ProjectChatComposer({
     [onFilesSelected]
   );
 
+  // Phones get the design's square arrow button; the label stays as its accessible name.
+  const isMobile = useIsMobile();
+  const iconOnlySend = isMobile && submitLabel === 'Send';
   const sendDisabled =
     sending ||
     disabled ||
@@ -315,11 +319,11 @@ export function ProjectChatComposer({
                 type="button"
                 onClick={() => internalFileInputRef.current?.click()}
                 disabled={sending || disabled || uploading}
-                className="shrink-0 p-2 min-h-[44px] min-w-[44px] flex items-center justify-center bg-transparent border border-[rgba(34,197,94,0.12)] rounded-md text-fg-muted hover:text-fg-primary hover:border-[rgba(34,197,94,0.25)] hover:shadow-[0_0_8px_rgba(22,163,74,0.1)] cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="sam-raised flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center rounded-[14px] border-0 text-fg-muted transition-colors hover:text-fg-primary disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
                 aria-label={attachTitle}
                 title={attachTitle}
               >
-                <Paperclip size={18} className={uploading ? 'animate-pulse' : ''} />
+                <Paperclip size={20} strokeWidth={1.75} className={uploading ? 'animate-pulse' : ''} />
               </button>
             )}
           </>
@@ -370,7 +374,7 @@ export function ProjectChatComposer({
                 ? mentionPaletteRef.current?.activeDescendantId
                 : undefined
           }
-          className="min-w-0 flex-1 p-2 px-3 bg-[var(--sam-form-bg)] border border-[rgba(34,197,94,0.12)] rounded-md text-fg-primary text-base outline-none resize-none font-[inherit] leading-[1.5] min-h-[38px] max-h-[120px] overflow-y-auto focus:border-[rgba(34,197,94,0.35)] focus:shadow-[0_0_0_3px_rgba(34,197,94,0.08),0_0_20px_rgba(22,163,74,0.08)] transition-all"
+          className="sam-well min-h-12 max-h-[160px] min-w-0 flex-1 resize-none overflow-y-auto rounded-[14px] border-0 bg-[var(--sam-form-bg)] px-4 py-3 font-[inherit] text-base leading-[1.5] text-fg-primary outline-none transition-shadow placeholder:text-fg-muted focus:shadow-[inset_0_1px_2px_var(--sam-glass-v2-well-shade),inset_0_0_0_1px_var(--sam-form-border-focus),0_0_0_3px_var(--sam-form-focus-ring)]"
         />
         <VoiceButton
           onTranscription={handleTranscription}
@@ -383,17 +387,27 @@ export function ProjectChatComposer({
           disabled={sendDisabled}
           title={sendButtonTitle}
           aria-keyshortcuts={sendShortcutAriaKey}
-          className={`px-3 py-2 ${submitLabel === 'Fork' ? 'min-h-[56px]' : 'min-h-[44px]'} border-none rounded-md text-base font-medium whitespace-nowrap transition-all ${
-            sendDisabled
-              ? 'bg-inset text-fg-muted cursor-default opacity-50'
-              : 'bg-[linear-gradient(135deg,var(--sam-color-accent-primary),#22c55e)] text-white cursor-pointer shadow-[0_0_16px_rgba(22,163,74,0.3)] hover:shadow-[0_0_24px_rgba(22,163,74,0.4)] hover:scale-[1.03]'
-          }`}
+          aria-label={iconOnlySend ? (sending ? 'Sending...' : submitLabel) : undefined}
+          className={`flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-[14px] border-0 text-base font-semibold text-[var(--sam-on-accent)] transition-[filter,opacity] ${
+            submitLabel === 'Fork' ? 'min-h-[56px]' : 'min-h-12'
+          } ${iconOnlySend ? 'w-12' : 'px-5'} bg-[linear-gradient(180deg,var(--sam-accent-top),var(--sam-accent-bottom))] shadow-[inset_0_1px_0_rgb(255_255_255/0.32),inset_0_-1px_0_rgb(0_0_0/0.2),var(--sam-shadow-accent)] ${
+            sendDisabled ? 'cursor-default opacity-45 shadow-none' : 'cursor-pointer hover:brightness-105'
+          } focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring`}
         >
-          {sending ? (submitLabel === 'Fork' ? 'Forking...' : 'Sending...') : submitLabel}
+          {iconOnlySend ? (
+            <ArrowUp size={22} strokeWidth={2.25} aria-hidden="true" />
+          ) : (
+            <>
+              {sending ? (submitLabel === 'Fork' ? 'Forking...' : 'Sending...') : submitLabel}
+              {submitLabel === 'Send' && !sending && (
+                <ArrowRight size={18} strokeWidth={2.25} aria-hidden="true" />
+              )}
+            </>
+          )}
         </button>
       </div>
       {showShortcutHint && (
-        <div className="sam-type-caption text-fg-muted mt-1">{sendShortcutHint}</div>
+        <div className="mt-1.5 px-1 text-xs text-fg-muted">{sendShortcutHint}</div>
       )}
     </>
   );

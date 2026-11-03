@@ -1,3 +1,4 @@
+import { Pane } from '@simple-agent-manager/ui';
 import { ChevronDown } from 'lucide-react';
 import {
   type KeyboardEvent,
@@ -18,9 +19,6 @@ import type { UseSessionLifecycleResult } from './useSessionLifecycle.types';
 interface ConversationPaneProps {
   lc: UseSessionLifecycleResult;
   displayItems: DisplayItem[];
-  /** The floating session header, laid over the top of the pane. */
-  header: ReactNode;
-  headerHeight: number;
   chatLogRef: RefObject<HTMLDivElement | null>;
   virtuosoRef: RefObject<VirtuosoHandle | null>;
   renderItem: (index: number, item: DisplayItem) => ReactNode;
@@ -29,11 +27,17 @@ interface ConversationPaneProps {
   selectionControls: ReactNode;
   /** Docked desktop comments rail, beside the conversation. */
   commentRail: ReactNode;
-  /** Session tool rail on the pane's right edge. */
+  /** Session tool rail on the pane's right edge (phones; desktop puts it in its own pane). */
   toolRail: ReactNode;
   /** Requests without a matching tool call render at the live conversation tail. */
   tail: ReactNode;
 }
+
+/**
+ * The quiet pane the conversation sits in. `overflow-hidden` keeps the virtual list inside the
+ * pane's rounded corners; the list scrolls itself.
+ */
+const PANE_CLASS_NAME = 'relative flex min-h-0 min-w-0 flex-1 flex-row overflow-hidden';
 
 /** Keys that scroll a focused conversation toward older messages. */
 const SCROLL_UP_KEYS: ReadonlySet<string> = new Set(['ArrowUp', 'PageUp', 'Home']);
@@ -77,8 +81,6 @@ function useReaderScrolledUp() {
 export function ConversationPane({
   lc,
   displayItems,
-  header,
-  headerHeight,
   chatLogRef,
   virtuosoRef,
   renderItem,
@@ -92,19 +94,13 @@ export function ConversationPane({
 
   if (displayItems.length === 0) {
     return (
-      <div className="relative flex flex-1 min-h-0 min-w-0 flex-row">
+      <Pane variant="quiet" className={PANE_CLASS_NAME}>
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
           <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
-            {header}
             {tail ? (
-              <div className="min-h-0 flex-1 overflow-y-auto" style={{ paddingTop: headerHeight }}>
-                {tail}
-              </div>
+              <div className="min-h-0 flex-1 overflow-y-auto pt-3">{tail}</div>
             ) : (
-              <div
-                className="flex flex-1 items-center justify-center"
-                style={{ paddingTop: headerHeight }}
-              >
+              <div className="flex flex-1 items-center justify-center">
                 <span className="text-fg-muted text-sm">
                   {lc.sessionState === 'active'
                     ? 'Waiting for messages...'
@@ -116,12 +112,12 @@ export function ConversationPane({
           {commentRail}
         </div>
         {toolRail}
-      </div>
+      </Pane>
     );
   }
 
   return (
-    <div className="flex-1 min-h-0 min-w-0 relative flex flex-row">
+    <Pane variant="quiet" className={PANE_CLASS_NAME}>
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
         <div
           ref={chatLogRef}
@@ -131,7 +127,6 @@ export function ConversationPane({
           aria-label="Conversation"
           {...scrollIntentHandlers}
         >
-          {header}
           <div className="flex-1 min-h-0">
             <Virtuoso
               ref={virtuosoRef}
@@ -168,7 +163,7 @@ export function ConversationPane({
                   behavior: 'smooth',
                 });
               }}
-              className="sam-scroll-button absolute right-4 z-10 flex items-center justify-center w-11 h-11 rounded-full border border-[var(--sam-form-border)] bg-[var(--sam-form-bg)] shadow-md cursor-pointer hover:bg-page"
+              className="sam-scroll-button sam-raised absolute right-4 z-10 flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border-0 shadow-[var(--sam-glass-v2-depth-slab)] hover:brightness-110"
               data-agent-active={lc.agentActivity !== 'idle'}
               aria-label="Scroll to bottom"
             >
@@ -181,6 +176,6 @@ export function ConversationPane({
         {commentRail}
       </div>
       {toolRail}
-    </div>
+    </Pane>
   );
 }

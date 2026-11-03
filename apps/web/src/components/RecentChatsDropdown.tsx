@@ -1,3 +1,4 @@
+import { IconButton, paneClassName } from '@simple-agent-manager/ui';
 import { Loader2, MessageSquare } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -80,21 +81,17 @@ export function RecentChatsDropdown() {
   return (
     <div className="relative">
       {/* Trigger Button */}
-      <button
+      <IconButton
         ref={buttonRef}
         onClick={() => setIsOpen(!isOpen)}
-        aria-label={`Recent chats${activeCount > 0 ? ` (${activeCount} active)` : ''}`}
+        label={`Recent chats${activeCount > 0 ? ` (${activeCount} active)` : ''}`}
         aria-expanded={isOpen}
         aria-haspopup="true"
-        className="relative flex items-center justify-center w-11 h-11 bg-transparent border-none text-fg-muted cursor-pointer hover:text-fg-primary transition-colors"
-      >
-        <MessageSquare size={18} />
-        {activeCount > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-accent text-fg-on-accent text-[10px] font-bold leading-none">
-            {activeCount > 99 ? '99+' : activeCount}
-          </span>
-        )}
-      </button>
+        icon={<MessageSquare size={20} strokeWidth={1.75} />}
+        count={activeCount > 99 ? '99+' : activeCount || undefined}
+        countTone="active"
+        showTooltip={false}
+      />
 
       {/* Dropdown Panel — portaled to body */}
       {isOpen &&
@@ -104,11 +101,11 @@ export function RecentChatsDropdown() {
             role="menu"
             aria-label="Recent chats"
             style={panelStyle}
-            className="glass-panel-container glass-composited fixed inset-x-4 sm:inset-x-auto sm:w-[340px] max-h-[calc(100vh-5rem)] sm:max-h-[480px] glass-surface rounded-lg shadow-lg flex flex-col z-[100] overflow-hidden"
+            className={`${paneClassName('overlay')} fixed inset-x-4 sm:inset-x-auto sm:w-[340px] max-h-[calc(100vh-5rem)] sm:max-h-[480px] flex flex-col z-[100] overflow-hidden`}
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
-              <h3 className="text-sm font-semibold text-fg-primary">Recent Chats</h3>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--sam-hairline)]">
+              <h3 className="text-[15px] font-semibold text-fg-primary">Recent Chats</h3>
               {activeCount > 0 && (
                 <span className="text-xs text-fg-muted">
                   {activeCount} active
@@ -154,7 +151,7 @@ export function RecentChatsDropdown() {
                       role="menuitem"
                       onClick={() => handleChatClick(chat.projectId, chat.id)}
                       aria-label={`${topic}, ${chat.projectName}, ${stateLabel}, ${formatRelativeTime(lastActivity)}`}
-                      className="flex items-center gap-3 w-full px-4 py-2.5 min-h-[44px] bg-transparent border-none border-b border-border-default text-left cursor-pointer hover:bg-[linear-gradient(100deg,rgba(255,255,255,0.03),rgba(34,197,94,0.06),rgba(255,255,255,0.02))] transition-colors duration-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+                      className="flex items-center gap-3 w-full px-4 py-2.5 min-h-[44px] bg-transparent border-none border-b border-[var(--sam-hairline)] text-left cursor-pointer hover:bg-[var(--sam-glass-v2-raised)] transition-colors duration-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
                     >
                       {/* State dot */}
                       <span
@@ -188,7 +185,7 @@ export function RecentChatsDropdown() {
 
             {/* Footer — View All link */}
             {chats.length > 0 && (
-              <div className="border-t border-border-default">
+              <div className="border-t border-[var(--sam-hairline)]">
                 <button
                   onClick={handleViewAll}
                   className="w-full min-h-[44px] py-2.5 text-xs text-accent font-medium bg-transparent border-none cursor-pointer hover:bg-[linear-gradient(100deg,rgba(255,255,255,0.03),rgba(34,197,94,0.06),rgba(255,255,255,0.02))] transition-colors focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"

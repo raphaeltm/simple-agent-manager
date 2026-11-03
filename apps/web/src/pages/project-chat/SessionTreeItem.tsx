@@ -70,29 +70,16 @@ export const SessionTreeItem = memo(function SessionTreeItem({
     ) : null;
 
   return (
-    <div
-      style={{
-        background: isSelected ? 'var(--sam-color-bg-inset, #0d1816)' : 'transparent',
-        borderBottom: '1px solid var(--sam-color-border-default, #29423b)',
-      }}
-      className={
-        isSelected
-          ? 'transition-colors'
-          : 'transition-colors hover:bg-[var(--sam-color-bg-surface-hover)]'
-      }
-    >
-      <SessionItem
-        session={enrichedSession}
-        isSelected={isSelected}
-        onSelect={onSelect}
-        variant="default"
-        badge={badge}
-        blockedBadge={taskInfo?.blocked}
-        blockedByTitle={blockedByTitle}
-        lineageText={lineageText}
-        showOwnership={showOwnership}
-      />
-    </div>
+    <SessionItem
+      session={enrichedSession}
+      isSelected={isSelected}
+      onSelect={onSelect}
+      badge={badge}
+      blockedBadge={taskInfo?.blocked}
+      blockedByTitle={blockedByTitle}
+      lineageText={lineageText}
+      showOwnership={showOwnership}
+    />
   );
 });
 

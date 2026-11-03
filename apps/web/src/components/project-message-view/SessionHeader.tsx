@@ -5,15 +5,23 @@ import type {
   WorkspaceResponse,
 } from '@simple-agent-manager/shared';
 import { isExpiredTask } from '@simple-agent-manager/shared';
-import { Spinner } from '@simple-agent-manager/ui';
+import {
+  AvatarStack,
+  Chip,
+  chipClassName,
+  paneClassName,
+  Spinner,
+} from '@simple-agent-manager/ui';
 import { CheckCircle2, Clock, Globe, Hash, MessageSquare, Tag, Timer, User2 } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ChatSessionResponse } from '../../lib/api';
 import { getPortAccessUrl, getProjectTask, listChatMessages } from '../../lib/api';
+import { sessionPeople } from '../../lib/session-people';
 import { stripMarkdown } from '../../lib/text-utils';
 import { sanitizeUrl } from '../../lib/url-utils';
 import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils';
+import { useAuth } from '../AuthProvider';
 import { SessionCredentialLimitChip } from '../credential-limits/SessionCredentialLimitChip';
 import { CopyableId } from './CopyableId';
 import { PublicPortsToggleRow } from './PublicPortsToggleRow';
@@ -72,11 +80,9 @@ export function SessionHeader({
   lineageText,
   initialPromptFallback = null,
   sourceContext,
-  hasContentBelow = false,
   onShowHierarchy,
   expanded,
   onExpandedChange,
-  flushRight = false,
   completeError = null,
   onDismissCompleteError,
   linkedWork,
@@ -101,8 +107,6 @@ export function SessionHeader({
   initialPromptFallback?: string | null;
   /** Parent/source details for forked or retried sessions. */
   sourceContext?: SessionSourceContext;
-  /** When true, suppress bottom rounding and glow (content follows below). */
-  hasContentBelow?: boolean;
   /** Open hierarchy modal for the given task. */
   onShowHierarchy?: (taskId: string) => void;
   /**
@@ -111,15 +115,6 @@ export function SessionHeader({
    */
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
-  /**
-   * True when the tool rail sits directly to the right of this card.
-   *
-   * The card's bottom corners are rounded so it reads as a panel hanging from the top of
-   * the conversation. Against the rail that curve is wrong: it leaves a lens-shaped gap
-   * between the card's rounded corner and the rail's straight edge. Squaring the right
-   * side lets the two butt flush and read as one continuous piece of chrome.
-   */
-  flushRight?: boolean;
   /** Surfaced by the owner's mark-complete flow, which lives with the rail. */
   completeError?: string | null;
   onDismissCompleteError?: () => void;
@@ -130,6 +125,7 @@ export function SessionHeader({
    */
   linkedWork?: SessionLinkedWork | null;
 }) {
+  const viewerId = useAuth().user?.id ?? null;
   const [initialPrompt, setInitialPrompt] = useState<string | null>(initialPromptFallback);
   const [initialPromptLoading, setInitialPromptLoading] = useState(false);
   const [initialPromptError, setInitialPromptError] = useState<string | null>(null);
@@ -215,68 +211,49 @@ export function SessionHeader({
   const sortedPorts = detectedPorts.slice().sort((a, b) => a.port - b.port);
   const firstPort = sortedPorts[0];
   const extraPortCount = Math.max(0, sortedPorts.length - 1);
+  // Green is working; amber is reserved for "waiting on you", so a resting agent is neutral.
+  const stateTone =
+    sessionState === 'active' ? 'success' : sessionState === 'sleeping' ? 'info' : 'muted';
+  const people = sessionPeople(session.access, viewerId);
 
   return (
-    <div
-      data-testid="session-header"
-      className={`relative glass-chrome border-t-0 shrink-0${hasContentBelow ? '' : `${flushRight ? ' rounded-bl-2xl' : ' rounded-b-2xl'}` + " after:content-[''] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10"}`}
-      style={{
-        boxShadow: hasContentBelow
-          ? '0 4px 24px rgba(0, 0, 0, 0.4)'
-          : '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(34, 197, 94, 0.08)',
-      }}
-    >
-      {/* Opacity scrim: Chromium does not sample composited scroll-container
-          content for backdrop-filter, so the glass blur silently no-ops over
-          the message list and scrolled messages collide with the header text.
-          This underlay keeps the header legible without depending on blur. */}
-      <div
-        aria-hidden="true"
-        className="absolute inset-0 rounded-[inherit] -z-10 pointer-events-none"
-        style={{
-          backgroundColor: 'color-mix(in srgb, var(--sam-color-bg-canvas) 78%, transparent)',
-        }}
-      />
-      <div className="px-4 py-2 min-h-[54px] space-y-1.5">
-        {/* Retry / Fork / the details chevron used to sit to the right of this title as
-            unlabeled 14px icons. They are now named, grouped controls in
-            `SessionToolRail`, so the title gets the full width. */}
-        <div
-          // Focus target after an in-chat link opens another chat (session-focus-handoff).
-          data-session-title
-          tabIndex={-1}
-          className="text-sm font-semibold text-fg-primary min-w-0 leading-snug rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
-          title={sessionTitle}
-          style={{
-            display: '-webkit-box',
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
-            overflowWrap: 'anywhere',
-          }}
-        >
-          {sessionTitle}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
-          <span
-            className="inline-flex items-center gap-1 text-xs font-medium shrink-0"
+    <div data-testid="session-header" className={`${paneClassName('slab')} shrink-0`}>
+      <div className="space-y-2.5 px-4 pt-3 pb-3.5 md:px-6 md:pt-4">
+        <div className="flex items-start gap-3">
+          {/* Retry / Fork / the details chevron live in `SessionToolRail`, so the title
+              gets the full width. */}
+          <div
+            // Focus target after an in-chat link opens another chat (session-focus-handoff).
+            data-session-title
+            tabIndex={-1}
+            className="min-w-0 flex-1 rounded-sm text-[17px] leading-snug font-semibold text-fg-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring md:text-[19px]"
+            title={sessionTitle}
             style={{
-              color:
-                sessionState === 'active'
-                  ? 'var(--sam-color-success)'
-                  : sessionState === 'idle'
-                    ? 'var(--sam-color-warning, #f59e0b)'
-                    : sessionState === 'sleeping'
-                      ? 'var(--sam-color-info, #3b82f6)'
-                      : 'var(--sam-color-fg-muted)',
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+              overflowWrap: 'anywhere',
             }}
           >
-            <span className="w-[6px] h-[6px] rounded-full bg-current" />
+            {sessionTitle}
+          </div>
+          {people.length > 1 && (
+            <AvatarStack
+              people={people}
+              size={26}
+              label={`People with access: ${people.map((person) => person.name).join(', ')}`}
+              className="mt-0.5 shrink-0"
+            />
+          )}
+        </div>
+
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <Chip tone={stateTone} dot>
             {isExpiredTask(taskEmbed)
               ? 'Expired'
               : (SESSION_STATE_LABELS[sessionState] ?? 'Stopped')}
-          </span>
+          </Chip>
 
           {workspace && <WorkspaceProfileBadge workspace={workspace} />}
 
@@ -286,15 +263,14 @@ export function SessionHeader({
           />
 
           {creatorLabel && (
-            <span
-              className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${
-                session.isMine ? 'text-fg-secondary bg-surface' : 'text-fg-muted bg-surface'
-              }`}
+            <Chip
+              icon={<User2 size={14} strokeWidth={1.75} aria-hidden="true" />}
               title={session.isMine ? 'Created by you' : `Created by ${creatorLabel}`}
+              // Phones keep the chip row to one line; the owner is on the chat list row.
+              className="max-md:hidden"
             >
-              <User2 size={10} aria-hidden="true" />
-              <span>{session.isMine ? 'Your session' : creatorLabel}</span>
-            </span>
+              {session.isMine ? 'Your session' : creatorLabel}
+            </Chip>
           )}
 
           {firstPort && (
@@ -302,14 +278,10 @@ export function SessionHeader({
               href={getWorkspacePortHref(firstPort)}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-0.5 text-[10px] font-mono font-medium px-1.5 py-0.5 rounded no-underline shrink-0"
-              style={{
-                backgroundColor: 'var(--sam-color-accent-tint, rgba(59, 130, 246, 0.1))',
-                color: 'var(--sam-color-accent-primary)',
-              }}
+              className={`${chipClassName({ tone: 'success' })} transition-[filter] hover:brightness-110`}
               title={`${firstPort.label} — ${firstPort.url}`}
             >
-              <Globe size={10} aria-hidden="true" />
+              <Globe size={14} strokeWidth={1.75} aria-hidden="true" />
               {firstPort.port}
             </a>
           )}
@@ -318,11 +290,7 @@ export function SessionHeader({
             <button
               type="button"
               onClick={() => onExpandedChange(true)}
-              className="text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 bg-transparent border cursor-pointer whitespace-nowrap hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary"
-              style={{
-                color: 'var(--sam-color-fg-muted)',
-                borderColor: 'var(--sam-color-border-default)',
-              }}
+              className={`${chipClassName()} cursor-pointer transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring`}
               aria-label={`Show ${extraPortCount} more forwarded ${extraPortCount === 1 ? 'port' : 'ports'}`}
             >
               +{extraPortCount} more
@@ -342,13 +310,9 @@ export function SessionHeader({
           )}
 
           {lineageText && (
-            <span
-              className="text-[10px] font-medium shrink-0"
-              style={{ color: 'var(--sam-color-fg-muted)' }}
-              title={lineageText}
-            >
+            <Chip tone="muted" title={lineageText}>
               {lineageText.startsWith('⑂') ? '⑂ fork' : lineageText}
-            </span>
+            </Chip>
           )}
         </div>
       </div>
@@ -357,7 +321,7 @@ export function SessionHeader({
           produces this error now lives in the tool rail, so the user has no reason to
           have the details panel open when it fails. */}
       {completeError && (
-        <div className="flex items-center gap-2 border-t border-[rgba(239,68,68,0.16)] px-4 py-1.5">
+        <div className="flex items-center gap-2 border-t border-[var(--sam-danger-edge)] px-4 py-1.5 md:px-6">
           <span className="text-xs" style={{ color: 'var(--sam-color-danger)' }}>
             {completeError}
           </span>
@@ -384,7 +348,7 @@ export function SessionHeader({
       )}
 
       {expanded && (
-        <div className="border-t border-[rgba(34,197,94,0.08)] px-4 py-2 space-y-2">
+        <div className="max-h-[45vh] space-y-2 overflow-y-auto border-t border-[var(--sam-hairline)] px-4 py-3 md:px-6">
           <div className="space-y-1.5">
             <div className="flex items-center gap-1 text-[10px] font-medium text-fg-muted uppercase tracking-wide">
               <Tag size={10} />

@@ -1,3 +1,4 @@
+import { paneClassName } from '@simple-agent-manager/ui';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowRight, FolderKanban, MessageSquare, Search, Server } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -238,7 +239,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
       <div
         onClick={onClose}
         aria-hidden="true"
-        className="fixed inset-0 glass-backdrop-dim border-0 z-dialog-backdrop"
+        className="fixed inset-0 sam-scrim border-0 z-dialog-backdrop"
       />
 
       {/* Palette dialog */}
@@ -247,7 +248,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
         role="dialog"
         aria-label="Command palette"
         aria-modal="true"
-        className="glass-panel-container fixed top-[20%] left-1/2 -translate-x-1/2 w-[90vw] max-w-[480px] glass-modal rounded-lg shadow-overlay z-command-palette flex flex-col overflow-hidden"
+        className={`${paneClassName('overlay')} fixed top-[20%] left-1/2 -translate-x-1/2 w-[90vw] max-w-[480px] z-command-palette flex flex-col overflow-hidden`}
       >
         {/* Search input */}
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border-default bg-[rgba(0,0,0,0.2)]">

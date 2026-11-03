@@ -10,7 +10,6 @@ import {
   X,
 } from 'lucide-react';
 import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 
 import {
   type FileEntry,
@@ -26,6 +25,7 @@ import { detectLanguage, formatFileSize, isImageFile } from '../../lib/file-util
 import { fuzzyFilterFiles } from '../../lib/fuzzy-match';
 import { CODE_THEME_BG, RenderedMarkdown, SyntaxHighlightedCode } from '../MarkdownRenderer';
 import { DiffRenderer, ImageViewer } from '../shared-file-viewer';
+import { GlassSheet } from '../shell/GlassSheet';
 import { DownloadFileButton, type FileDownloadError } from './chat-file-panel-download';
 import { GitStatusList, HighlightedFilePath } from './chat-file-panel-rows';
 import { buildBreadcrumbs, isMarkdownFile } from './chat-file-panel-utils';
@@ -292,29 +292,20 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
   const isMd = isMarkdownFile(filePath);
   const language = detectLanguage(filePath);
 
-  return createPortal(
-    <>
-      {/* Backdrop — visible only on desktop */}
-      <div
-        className="hidden md:block fixed inset-0 glass-backdrop-dim z-40"
-        onClick={onClose}
-        aria-hidden
-      />
-
-      {/* Panel */}
-      <div
-        className="glass-panel-container glass-composited fixed z-50 glass-modal rounded-l-[20px] rounded-r-none border-y-0 border-r-0 flex flex-col shadow-xl overflow-hidden
-          inset-0
-          md:inset-y-0 md:left-auto md:right-0 md:w-[min(560px,50vw)]
-          before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-[3px] before:bg-[linear-gradient(to_bottom,transparent_0%,rgba(34,197,94,0.55)_50%,transparent_100%)] before:pointer-events-none before:blur-[1px]"
-        ref={panelRef}
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-label="File viewer"
-      >
+  return (
+    <GlassSheet
+      label="File viewer"
+      panelRef={panelRef}
+      onBackdropClick={onClose}
+      backdrop="desktop"
+      mobile="full"
+      widthClassName="w-full md:w-[min(560px,50vw)]"
+      zClassName="z-50"
+      backdropZClassName="z-40"
+      animated={false}
+    >
         {/* Header */}
-        <header className="flex items-center gap-2 px-3 py-2 border-b border-border-default shrink-0 min-h-[44px]">
+        <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-[var(--sam-hairline)] px-3 py-2">
           {(mode === 'view' || mode === 'diff') && (
             <button
               type="button"
@@ -335,7 +326,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
 
           {/* Mode toggle for git-status → browse */}
           {(mode === 'browse' || mode === 'git-status') && (
-            <div className="flex gap-1 shrink-0">
+            <div className="sam-well flex shrink-0 gap-0.5 rounded-[var(--sam-radius-control)] p-0.5">
               <button
                 type="button"
                 aria-pressed={mode === 'browse'}
@@ -344,7 +335,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
                   setMode('browse');
                   loadListing(currentPath);
                 }}
-                className={`text-xs px-2 py-1 rounded border-none cursor-pointer ${mode === 'browse' ? 'bg-accent-primary text-fg-on-accent' : 'bg-transparent text-fg-muted hover:text-fg-primary'}`}
+                className={`h-8 cursor-pointer rounded-[9px] border-none px-3 text-[13px] ${mode === 'browse' ? 'sam-raised font-medium text-fg-primary' : 'bg-transparent text-fg-muted hover:text-fg-primary'}`}
               >
                 Files
               </button>
@@ -356,7 +347,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
                   setMode('git-status');
                   loadGitStatus();
                 }}
-                className={`text-xs px-2 py-1 rounded border-none cursor-pointer ${mode === 'git-status' ? 'bg-accent-primary text-fg-on-accent' : 'bg-transparent text-fg-muted hover:text-fg-primary'}`}
+                className={`h-8 cursor-pointer rounded-[9px] border-none px-3 text-[13px] ${mode === 'git-status' ? 'sam-raised font-medium text-fg-primary' : 'bg-transparent text-fg-muted hover:text-fg-primary'}`}
               >
                 Git
               </button>
@@ -705,8 +696,6 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
             </>
           )}
         </div>
-      </div>
-    </>,
-    document.body
+    </GlassSheet>
   );
 };

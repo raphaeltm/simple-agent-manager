@@ -4,7 +4,7 @@ import type {
   SessionAccessGrant,
   SessionAccessSummary,
 } from '@simple-agent-manager/shared';
-import { Avatar, useModalInteraction } from '@simple-agent-manager/ui';
+import { Avatar, paneClassName, useModalInteraction } from '@simple-agent-manager/ui';
 import { useMutation } from '@tanstack/react-query';
 import { Users, X } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
@@ -189,7 +189,7 @@ export function SessionShareDialog({
       className="fixed inset-0 z-dialog-backdrop flex items-end justify-center sm:items-center sm:p-4"
     >
       <div
-        className="fixed inset-0 bg-overlay glass-backdrop-dim"
+        className="fixed inset-0 sam-scrim"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -200,9 +200,9 @@ export function SessionShareDialog({
         aria-labelledby={titleId}
         aria-describedby={introId}
         tabIndex={-1}
-        className="glass-panel-container glass-composited glass-modal relative flex max-h-[92dvh] w-full min-w-0 flex-col overflow-hidden rounded-t-2xl shadow-overlay focus:outline-none sm:max-h-[min(44rem,calc(100dvh-2rem))] sm:max-w-[30rem] sm:rounded-2xl"
+        className={`${paneClassName('overlay', { rounded: false })} relative flex max-h-[92dvh] w-full min-w-0 flex-col overflow-hidden rounded-t-[var(--sam-radius-pane)] focus:outline-none sm:max-h-[min(44rem,calc(100dvh-2rem))] sm:max-w-[30rem] sm:rounded-[var(--sam-radius-pane)]`}
       >
-        <header className="flex min-h-[52px] shrink-0 items-center gap-2 border-b border-border-default px-4 py-2">
+        <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-[var(--sam-hairline)] px-4 py-2">
           <Users size={16} className="shrink-0 text-fg-muted" aria-hidden="true" />
           <div className="min-w-0 flex-1">
             <h2 id={titleId} className="m-0 text-base font-semibold text-fg-primary">

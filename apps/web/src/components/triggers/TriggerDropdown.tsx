@@ -5,6 +5,7 @@
  * Fetches trigger list on open (not on page load) to stay lightweight.
  */
 import type { TriggerResponse } from '@simple-agent-manager/shared';
+import { IconButton, paneClassName } from '@simple-agent-manager/ui';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, Clock, Plus } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
@@ -211,26 +212,22 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
 
   return (
     <div className="relative" ref={dropdownRef}>
-      <button
+      <IconButton
         ref={triggerBtnRef}
-        type="button"
         onClick={onToggle}
-        title="Automation triggers"
-        aria-label="Automation triggers"
+        label="Automation triggers"
         aria-haspopup="true"
         aria-controls={open ? popoverId : undefined}
         aria-expanded={open}
-        className={`shrink-0 p-1 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary transition-colors ${FOCUS_RING}`}
-      >
-        <Clock size={15} aria-hidden="true" />
-      </button>
+        icon={<Clock size={20} strokeWidth={1.75} aria-hidden="true" />}
+      />
 
       {open &&
         createPortal(
           <section
             id={popoverId}
             ref={contentRef}
-            className="w-72 max-w-[calc(100vw-16px)] rounded-lg glass-surface shadow-lg overflow-hidden"
+            className={`${paneClassName('overlay')} w-72 max-w-[calc(100vw-16px)] overflow-hidden`}
             style={{
               position: 'fixed',
               zIndex: 50,
@@ -240,7 +237,7 @@ export const TriggerDropdown: FC<TriggerDropdownProps> = ({ projectId, open, onT
             aria-label="Automation triggers"
           >
             {/* Header */}
-            <div className="px-3 py-2 border-b border-border-default">
+            <div className="px-3 py-2 border-b border-[var(--sam-hairline)]">
               <h4 className="text-xs font-semibold text-fg-primary m-0 uppercase tracking-wider">
                 Recurring and reacting
               </h4>

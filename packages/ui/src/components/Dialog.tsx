@@ -2,6 +2,7 @@ import { type ReactNode, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useModalInteraction } from '../hooks/useModalInteraction';
+import { paneClassName } from './Pane';
 
 interface DialogProps {
   isOpen: boolean;
@@ -65,11 +66,11 @@ export function Dialog({
       {!ariaLabel && !ariaLabelledby && <span id={generatedLabelId} className="sr-only">Dialog</span>}
       {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- backdrop overlay; keyboard dismiss handled by Escape listener above */}
       <div
-        className="fixed inset-0 bg-overlay glass-backdrop-dim transition-opacity duration-150 ease-in-out"
+        className="fixed inset-0 bg-[var(--sam-scrim)] transition-opacity duration-150 ease-in-out"
         onClick={onClose}
       />
       <div
-        className={`glass-panel-container glass-composited relative w-full max-h-[calc(100dvh-2rem)] flex flex-col rounded-lg glass-modal shadow-overlay ${maxWidthClasses[maxWidth]}`}
+        className={`${paneClassName('overlay')} relative w-full max-h-[calc(100dvh-2rem)] flex flex-col ${maxWidthClasses[maxWidth]}`}
       >
         {stickyHeader && (
           <div className="flex-shrink-0">

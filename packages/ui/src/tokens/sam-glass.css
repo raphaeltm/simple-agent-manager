@@ -39,6 +39,26 @@
   --sam-radius-pane: 20px;
   --sam-radius-slab: 22px;
   --sam-hairline: rgb(255 255 255 / 0.06);
+
+  /* Primary buttons: a lit green gradient with dark ink, so the label reads 4.5:1 on it. */
+  --sam-accent-top: #4ade80;
+  --sam-accent-bottom: #16a34a;
+  --sam-on-accent: #04120b;
+
+  /* Chips: solid tints, never glass. Edges per status tone. */
+  --sam-chip-bg: #0c1613;
+  --sam-chip-edge: rgb(255 255 255 / 0.12);
+  --sam-success-edge: rgb(74 222 128 / 0.35);
+  --sam-info-edge: rgb(96 165 250 / 0.35);
+  --sam-warning-edge: rgb(251 191 36 / 0.4);
+  --sam-danger-edge: rgb(248 113 113 / 0.4);
+
+  /* Switch knob and the resting nav label. */
+  --sam-knob: #e6f2ee;
+  --sam-nav-fg: rgb(230 242 238 / 0.84);
+
+  /* The dimmed void behind an open drawer or sheet. Dims only; the overlay itself is the one blur. */
+  --sam-scrim: rgb(1 4 3 / 0.55);
 }
 
 [data-ui-theme='sam-light'] {
@@ -57,4 +77,16 @@
   --sam-shadow-glow-active: 0 6px 14px -6px rgb(21 128 61 / 0.35);
   --sam-shadow-accent: 0 8px 20px -8px rgb(21 128 61 / 0.5);
   --sam-hairline: rgb(17 39 29 / 0.08);
+  --sam-accent-top: #15803d;
+  --sam-accent-bottom: #166534;
+  --sam-on-accent: #ffffff;
+  --sam-chip-bg: #ffffff;
+  --sam-chip-edge: rgb(17 39 29 / 0.14);
+  --sam-success-edge: rgb(21 128 61 / 0.3);
+  --sam-info-edge: rgb(37 99 235 / 0.28);
+  --sam-warning-edge: rgb(180 83 9 / 0.32);
+  --sam-danger-edge: rgb(185 28 28 / 0.28);
+  --sam-knob: #ffffff;
+  --sam-nav-fg: #23362d;
+  --sam-scrim: rgb(16 40 28 / 0.22);
 }

@@ -139,7 +139,7 @@ export function ArchivedForkComposer({
   };
 
   return (
-    <div className="shrink-0 glass-chrome px-4 py-3 border-t border-border-default">
+    <div className="shrink-0 px-4 py-3">
       <p className="sam-type-caption text-fg-muted mb-2 mt-0">
         {workspaceExpired &&
           'The saved workspace has expired. Your transcript is still available. '}

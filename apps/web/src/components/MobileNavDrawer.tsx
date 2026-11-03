@@ -1,9 +1,16 @@
+import {
+  IconButton,
+  NavItem,
+  NavLabel,
+  PaneSeparator,
+  PersonAvatar,
+} from '@simple-agent-manager/ui';
 import { useModalInteraction } from '@simple-agent-manager/ui/hooks/useModalInteraction';
-import { ArrowLeft, ArrowRight, LogOut } from 'lucide-react';
+import { ArrowLeft, ArrowRight, LogOut, Search, X } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { useCallback, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 
+import { GlassSheet } from './shell/GlassSheet';
 import { ThemeSwitcher } from './ThemeSwitcher';
 
 const FOCUS_RING =
@@ -29,6 +36,8 @@ interface MobileNavDrawerProps {
   projectHealthElement?: ReactNode;
   showGlobalNav?: boolean;
   onToggleGlobalNav?: () => void;
+  /** Opens the command palette; search lives in the menu on phones. */
+  onOpenSearch?: () => void;
 }
 
 function isNavItemActive(path: string, pathname: string): boolean {
@@ -51,6 +60,7 @@ export function MobileNavDrawer({
   projectHealthElement,
   showGlobalNav,
   onToggleGlobalNav,
+  onOpenSearch,
 }: MobileNavDrawerProps) {
   const [isClosing, setIsClosing] = useState(false);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -75,195 +85,160 @@ export function MobileNavDrawer({
     ? navItems.filter((item) => item.label !== 'Back to Projects')
     : navItems;
 
-  return createPortal(
-    <>
-      {/* Backdrop */}
-      <div
-        role="presentation"
-        data-testid="mobile-nav-backdrop"
-        onClick={handleClose}
-        className="sam-glass-drawer-backdrop fixed inset-0 glass-backdrop-dim border-0 z-drawer-backdrop"
-        data-state={isClosing ? 'closing' : 'open'}
+  const renderItems = (items: MobileNavItem[]) =>
+    items.map((item) => (
+      <NavItem
+        key={item.path}
+        label={item.label}
+        icon={item.icon}
+        current={isNavItemActive(item.path, currentPath)}
+        onClick={() => onNavigate(item.path)}
+        size="lg"
       />
+    ));
 
-      {/* Panel */}
-      <div
-        ref={panelRef}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Navigation menu"
-        tabIndex={-1}
-        data-sam-modal-root=""
-        data-testid="mobile-nav-panel"
-        className="sam-glass-drawer-panel glass-panel-container fixed top-0 right-0 bottom-0 w-[85vw] max-w-80 glass-modal border-r-0 rounded-l-[20px] rounded-r-none z-drawer flex flex-col overflow-hidden before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-[3px] before:bg-[linear-gradient(to_bottom,transparent_0%,var(--sam-chrome-drawer-edge-glow)_50%,transparent_100%)] before:pointer-events-none before:blur-[1px]"
-        data-state={isClosing ? 'closing' : 'open'}
-      >
-        {/* Header: user info + close */}
-        <div className="flex items-center gap-3 px-5 py-4 border-b border-border-default">
-          {user.image ? (
-            <img
-              src={user.image}
-              alt={user.name || user.email}
-              className="h-9 w-9 rounded-full shrink-0"
-            />
-          ) : (
-            <div className="h-9 w-9 rounded-full bg-accent flex items-center justify-center text-fg-on-accent text-sm font-medium shrink-0">
-              {(user.name || user.email).charAt(0).toUpperCase()}
-            </div>
-          )}
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-fg-primary m-0 overflow-hidden text-ellipsis whitespace-nowrap">
-              {user.name || 'User'}
-            </p>
-            <p className="text-xs text-fg-muted m-0 overflow-hidden text-ellipsis whitespace-nowrap">
-              {user.email}
-            </p>
-          </div>
+  return (
+    <GlassSheet
+      label="Navigation menu"
+      edge="left"
+      onBackdropClick={handleClose}
+      closing={isClosing}
+      panelRef={panelRef}
+      testId="mobile-nav-panel"
+      backdropTestId="mobile-nav-backdrop"
+      widthClassName="w-[85vw] max-w-80"
+    >
+      {/* Header: the signed-in person + close */}
+      <div className="flex shrink-0 items-center gap-3 px-4 pt-4 pb-3">
+        {user.image ? (
+          <img
+            src={user.image}
+            alt={user.name || user.email}
+            className="h-8 w-8 shrink-0 rounded-full shadow-[0_0_0_2px_var(--sam-separator)]"
+          />
+        ) : (
+          <PersonAvatar name={user.name || user.email} person="you" size={32} />
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="m-0 truncate text-sm font-semibold text-fg-primary">{user.name || 'User'}</p>
+          <p className="m-0 truncate text-xs text-fg-muted">{user.email}</p>
+        </div>
+        <IconButton
+          label="Close navigation"
+          icon={<X size={20} strokeWidth={1.75} />}
+          onClick={handleClose}
+          showTooltip={false}
+        />
+      </div>
+
+      {/* Search moved here from the app bar, which keeps only cross-project buttons. */}
+      {onOpenSearch && (
+        <div className="shrink-0 px-4 pb-2">
           <button
-            onClick={handleClose}
-            aria-label="Close navigation"
-            className={`flex items-center justify-center w-10 h-10 bg-transparent border-none text-fg-muted cursor-pointer shrink-0 rounded-sm ${FOCUS_RING}`}
+            type="button"
+            onClick={onOpenSearch}
+            aria-label="Open command palette"
+            className={`sam-well flex h-11 w-full cursor-pointer items-center gap-2.5 rounded-[var(--sam-radius-control)] border-0 px-3 text-left text-base text-fg-muted ${FOCUS_RING}`}
           >
-            <svg width="18" height="18" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <Search size={18} strokeWidth={1.75} aria-hidden="true" />
+            <span>Search...</span>
           </button>
         </div>
+      )}
 
-        {/* Toggle header: Back to Projects / Back to Project Name */}
-        {canToggle && (
+      {/* Toggle header: Back to Projects / Back to Project Name */}
+      {canToggle && (
+        <div className="shrink-0 px-2">
           <button
-              onClick={onToggleGlobalNav}
-              data-testid="mobile-nav-toggle"
-              className={`flex items-center gap-3 w-full px-5 py-3 bg-transparent border-none border-b border-border-default cursor-pointer text-left text-sm font-medium text-fg-muted hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)] transition-all duration-150 ${FOCUS_RING}`}
+            onClick={onToggleGlobalNav}
+            data-testid="mobile-nav-toggle"
+            className={`flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-[11px] border-none bg-transparent px-3 text-left text-[15px] text-fg-muted transition-colors hover:bg-[var(--sam-glass-v2-raised)] hover:text-fg-primary ${FOCUS_RING}`}
             aria-label={showGlobalNav ? `Back to ${projectName} navigation` : 'Show global navigation'}
           >
             {showGlobalNav ? (
               <>
-                <ArrowRight size={16} className="shrink-0" />
+                <ArrowRight size={18} strokeWidth={1.75} className="shrink-0" />
                 <span className="truncate">Back to {projectName}</span>
               </>
             ) : (
               <>
-                <ArrowLeft size={16} className="shrink-0" />
+                <ArrowLeft size={18} strokeWidth={1.75} className="shrink-0" />
                 <span>Back to Projects</span>
               </>
             )}
           </button>
-        )}
+        </div>
+      )}
 
-        {/* Project name header when in project context and showing project nav */}
-        {projectName && !showGlobalNav && !canToggle && (
-          <div className="px-5 py-2 text-xs font-semibold text-fg-muted uppercase tracking-wider truncate border-b border-border-default" title={projectName}>
-            {projectName}
-          </div>
-        )}
+      {/* Project name label when showing the project's own nav */}
+      {projectName && !showGlobalNav && (
+        <NavLabel className="shrink-0 px-5">
+          <span title={projectName}>{projectName}</span>
+        </NavLabel>
+      )}
 
-        {/* Project name under toggle button when showing project nav */}
-        {canToggle && !showGlobalNav && (
-          <div className="px-5 py-2 text-xs font-semibold text-fg-muted uppercase tracking-wider truncate border-b border-border-default" title={projectName}>
-            {projectName}
-          </div>
-        )}
-
-        {/* Nav items with slide transition */}
-        {/* `data-intentional-clip`: two-panel carousel — both panels sit side by
-            side (2x width) and are translated into view, so the content is
-            deliberately wider than the box. See NavSidebar for the twin. */}
-        <nav
-          data-intentional-clip
-          aria-label={showGlobalNav ? 'Primary navigation' : 'Project navigation'}
-          className="flex-1 overflow-hidden relative"
+      {/* Nav items with slide transition */}
+      {/* `data-intentional-clip`: two-panel carousel — both panels sit side by
+          side (2x width) and are translated into view, so the content is
+          deliberately wider than the box. See NavSidebar for the twin. */}
+      <nav
+        data-intentional-clip
+        aria-label={showGlobalNav ? 'Primary navigation' : 'Project navigation'}
+        className="relative min-h-0 flex-1 overflow-hidden"
+      >
+        <div
+          className="flex h-full transition-transform duration-200 ease-out motion-reduce:transition-none"
+          style={{ transform: canToggle && showGlobalNav ? 'translateX(-100%)' : 'translateX(0)' }}
         >
+          {/* Panel 1: Project / default nav items */}
           <div
-            className="flex transition-transform duration-200 ease-out motion-reduce:transition-none h-full"
-            style={{ transform: canToggle && showGlobalNav ? 'translateX(-100%)' : 'translateX(0)' }}
+            className="flex w-full shrink-0 flex-col gap-0.5 overflow-y-auto px-2 pt-1 pb-2"
+            aria-hidden={(canToggle && showGlobalNav) || undefined}
+            inert={canToggle && showGlobalNav ? true : undefined}
           >
-            {/* Panel 1: Project / default nav items */}
-            <div
-              className="w-full shrink-0 pt-2 overflow-y-auto"
-              aria-hidden={(canToggle && showGlobalNav) || undefined}
-              inert={canToggle && showGlobalNav ? true : undefined}
-            >
-              {projectHealthElement && !showGlobalNav && (
-                <div className="px-5 pb-2">
-                  {projectHealthElement}
-                </div>
-              )}
-
-              {(canToggle ? projectItems : navItems).map((item) => {
-                const active = isNavItemActive(item.path, currentPath);
-                return (
-                  <button
-                    key={item.path}
-                    aria-current={active ? 'page' : undefined}
-                    className={`flex items-center gap-3 w-full min-h-11 px-5 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 transition-all duration-[120ms] ${FOCUS_RING} ${
-                      active
-                        ? 'text-accent border-l-accent bg-[var(--sam-chrome-accent-active-subtle)]'
-                        : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)]'
-                    }`}
-                    onClick={() => onNavigate(item.path)}
-                  >
-                    {item.icon && <span className="shrink-0">{item.icon}</span>}
-                    {item.label}
-                  </button>
-                );
-              })}
-
-              {/* Project list — only in non-toggle mode (global nav) */}
-              {!canToggle && projectListSection}
-            </div>
-
-            {/* Panel 2: Global nav items (only rendered when toggle is available) */}
-            {canToggle && (
-              <div
-                className="w-full shrink-0 pt-2 overflow-y-auto"
-                aria-hidden={!showGlobalNav || undefined}
-                inert={!showGlobalNav ? true : undefined}
-              >
-                {(globalNavItems ?? []).map((item) => {
-                  const active = isNavItemActive(item.path, currentPath);
-                  return (
-                    <button
-                      key={item.path}
-                      aria-current={active ? 'page' : undefined}
-                      className={`flex items-center gap-3 w-full min-h-11 px-5 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 transition-all duration-[120ms] ${FOCUS_RING} ${
-                        active
-                          ? 'text-accent border-l-accent bg-[var(--sam-chrome-accent-active-subtle)]'
-                          : 'text-fg-muted border-l-transparent hover:text-fg-primary hover:bg-[var(--sam-chrome-accent-hover-subtle)]'
-                      }`}
-                      onClick={() => onNavigate(item.path)}
-                    >
-                      {item.icon && <span className="shrink-0">{item.icon}</span>}
-                      {item.label}
-                    </button>
-                  );
-                })}
-
-                {/* Project list — in global view within project context */}
-                {projectListSection}
-              </div>
+            {projectHealthElement && !showGlobalNav && (
+              <div className="px-2 pb-2">{projectHealthElement}</div>
             )}
+
+            {renderItems(canToggle ? projectItems : navItems)}
+
+            {/* Project list — only in non-toggle mode (global nav) */}
+            {!canToggle && projectListSection}
           </div>
-        </nav>
 
-        {/* Theme switcher */}
-        <div className="border-t border-border-default px-5 py-3">
-          <ThemeSwitcher />
-        </div>
+          {/* Panel 2: Global nav items (only rendered when toggle is available) */}
+          {canToggle && (
+            <div
+              className="flex w-full shrink-0 flex-col gap-0.5 overflow-y-auto px-2 pt-1 pb-2"
+              aria-hidden={!showGlobalNav || undefined}
+              inert={!showGlobalNav ? true : undefined}
+            >
+              {renderItems(globalNavItems ?? [])}
 
-        {/* Sign out */}
-        <div className="border-t border-border-default py-2">
-          <button
-            onClick={onSignOut}
-            className={`flex items-center gap-3 w-full min-h-11 px-5 py-2.5 text-base font-medium bg-transparent border-none cursor-pointer text-left border-l-3 border-l-transparent text-danger-fg hover:bg-[var(--sam-chrome-accent-hover-subtle)] transition-all duration-[120ms] ${FOCUS_RING}`}
-          >
-            <LogOut size={18} />
-            Sign out
-          </button>
+              {/* Project list — in global view within project context */}
+              {projectListSection}
+            </div>
+          )}
         </div>
+      </nav>
+
+      <PaneSeparator className="mx-4" />
+
+      {/* Theme switcher */}
+      <div className="shrink-0 px-4 pt-3">
+        <ThemeSwitcher />
       </div>
-    </>,
-    document.body,
+
+      {/* Sign out */}
+      <div className="shrink-0 px-2 py-2">
+        <button
+          onClick={onSignOut}
+          className={`flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-[11px] border-none bg-transparent px-3 text-left text-base font-medium text-danger-fg transition-colors hover:bg-[var(--sam-glass-v2-raised)] ${FOCUS_RING}`}
+        >
+          <LogOut size={18} strokeWidth={1.75} />
+          Sign out
+        </button>
+      </div>
+    </GlassSheet>
   );
 }
