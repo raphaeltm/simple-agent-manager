@@ -116,7 +116,7 @@ How each piece behaves:
       `/cancel` (kill, idle restart, chat usable on failure) and let the required gate count only
       `prompting` as a turn (`classifyRequiredSleepTurn`); `sleepStateChanged` adds nothing for
       required sleeps.
-- [x] H2: a person's Sleep was required only for its first attempt. Migration 0217 adds
+- [x] H2: a person's Sleep was required only for its first attempt. Migration 0218 adds
       `session_snapshots.sleep_required_episode_started_at`; required while equal to
       `sleep_episode_started_at`, so every episode-ending writer clears it for free.
 - [x] H3: nodes past their lifetime still took placements. `node-lifetime-admission.ts`: no new

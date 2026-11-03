@@ -5,7 +5,7 @@
  * - `normal`: unattended idle sleep. Waits for canonical idleness (policy 0f05422d).
  * - `deadline`: the node is past its absolute lifetime. The session sleeps as soon as its turn
  *   ends, without waiting out the idle interval, but nothing is killed.
- * - `required`: a person pressed Sleep (and every retry of that episode, migration 0217), or
+ * - `required`: a person pressed Sleep (and every retry of that episode, migration 0218), or
  *   the node is past its absolute lifetime plus the force-sleep leeway. The agent's turn is
  *   ended first (`endAgentTurnForRequiredSleep`), and neither a running turn nor a harness
  *   lease may block the sleep.
@@ -92,7 +92,7 @@ export async function resolveSleepRequirement(
 
 /**
  * Whether a person's Sleep made the row's current episode required. The claim records the
- * episode it marked; once that episode ends or restarts the columns differ (migration 0217).
+ * episode it marked; once that episode ends or restarts the columns differ (migration 0218).
  */
 export function isPersonRequiredSleepEpisode(
   row: {

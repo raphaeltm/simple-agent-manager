@@ -50,7 +50,7 @@ export async function claimSessionSnapshotSleep(
     reopenBlockedEpisode?: boolean;
     /**
      * A person asked for this sleep, so its episode is required and stays required for the
-     * sweep's and the fallback's retries (migration 0217).
+     * sweep's and the fallback's retries (migration 0218).
      */
     markRequired?: boolean;
   }
