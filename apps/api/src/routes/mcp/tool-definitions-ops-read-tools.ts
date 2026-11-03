@@ -79,7 +79,7 @@ export const OPS_READ_TOOLS = [
   ),
   tool(
     'ops_timeline',
-    'One time-ordered event list for a task, chat session, workspace or node, merged from task records and status events, activity events, platform errors, node health events, boot logs and live node agent events. Keeps the most recent events; when truncated, pass continueUntil as until to read further back.',
+    'One time-ordered event list for a task, chat session, workspace or node, merged from task records and status events, activity events, platform errors, node health events, boot logs and live node agent events. Keeps the most recent events; when truncated, pass continueUntil as until to read further back. Per-entity reads are limited by operations.opsTimelineFanoutLimit; an unreachable running node can add up to the node request timeout (about 30 s).',
     {
       id: id('Task, chat session, workspace or node ID.'),
       entityType: {
@@ -168,7 +168,7 @@ export const OPS_READ_TOOLS = [
   ),
   tool(
     'ops_capture_debug_package',
-    'Capture a running node’s full debug package (cloud-init, journal, vm-agent log, docker state, events and metrics databases) into this Operations project’s library at /debug-packages/<nodeId>/<timestamp>.tar.gz. Returns the fileId; fetch it with download_library_file. Raw and unredacted: deleted automatically after operations.debugPackageRetentionDays (default 7). Size-capped by operations.debugPackageMaxBytes.',
+    'Capture a running node’s full debug package (cloud-init, journal, vm-agent log, docker state, events and metrics databases) into this Operations project’s library at /debug-packages/<nodeId>/<timestamp>.tar.gz. Returns the fileId; fetch it with download_library_file. Raw and unredacted: deleted automatically after operations.debugPackageRetentionDays (default 7). Size-capped by operations.debugPackageMaxBytes and rate-limited by operations.debugPackageCapturesPerHour.',
     { nodeId: id('Node ID.') },
     ['nodeId']
   ),

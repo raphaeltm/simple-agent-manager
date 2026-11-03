@@ -84,10 +84,12 @@ Use the typed **Operations** admin settings below for live configuration. All ei
 
 Operations debugger tools (`apps/api/src/services/operations-access.ts`):
 
-| Admin setting key               | Default | Meaning                                                                                                   |
-| ------------------------------- | ------- | --------------------------------------------------------------------------------------------------------- |
+| Admin setting key               | Default | Meaning                                                                                                         |
+| ------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------- |
 | `operations.debuggerTools`      | `off`   | `off` / `read` / `read_ask` / `read_auto_safe`; gate for `ops_*` MCP tools in the Operations project. No cache. |
-| `operations.auditRetentionDays` | `90`    | Integer `1`–`3650`; days `operations_audit_log` rows are kept (daily `0 3 * * *` purge).                   |
+| `operations.auditRetentionDays` | `90`    | Integer `1`–`3650`; days `operations_audit_log` rows are kept (daily `0 3 * * *` purge).                        |
+
+Read-tool limits for the `ops_*` tools (`apps/api/src/services/fleet-ops/settings-definitions.ts`, resolved once per call by `resolveFleetOpsSettings`): `operations.debugPackageRetentionDays` (7), `operations.debugPackageMaxBytes` (20 MiB, max 32 MiB), `operations.debugPackagePurgeBatchSize` (50, max 90), `operations.debugPackageCapturesPerHour` (20), `operations.opsAnomalyEmptyNodeGraceMs` (900000), `operations.opsAnomalyTerminalTaskGraceMs` (900000), `operations.opsAnomalyIdleTaskMinutes` (60), `operations.opsAnomalyLookbackHours` (24), `operations.opsAnomalyMaxPerClass` (25), `operations.opsNodeLogMaxLines` (200), `operations.opsNodeLogMaxBytes` (65536), `operations.opsTimelineMaxEvents` (200), `operations.opsTimelinePerSourceLimit` (100), `operations.opsTimelineDefaultWindowHours` (168), `operations.opsTimelineFanoutLimit` (2), `operations.opsEntityGraphRowCap` (25), `operations.opsWorkerLogDefaultWindowMinutes` (60), `operations.opsListMaxRows` (100), `operations.opsTextFieldMaxLength` (2000). Defaults, ranges and meanings: public docs `guides/admin-settings.md#read-tool-limits`.
 
 Each refresh selects at most 25 watches and reads at most 25 events per watch: at most 325 caller D1 reads, 75 cold ProjectData RPCs, and 625 local event-reference inserts, plus fixed alarm setup. A work-card read performs at most 75 D1 reads. Each watch persists its next check and charges an attempt before I/O; the alarm uses the earliest watch deadline. Failed watches defer until that deadline and stop after the retry limit, with a visible update warning. The watch lifetime also stops observation independently; neither condition cancels project work.
 

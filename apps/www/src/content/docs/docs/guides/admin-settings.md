@@ -439,26 +439,32 @@ log, Docker state, the agent's event and metrics databases) as
 [library](/docs/guides/project-files/). The agent downloads it into its own workspace with
 `download_library_file`. Packages are **raw and unredacted**: they can contain anything the node
 logged. They stay in that private library only, and a daily 03:00 UTC cleanup deletes them after
-the retention period. Capture stops and stores nothing if a package is larger than the size cap.
+the retention period. Capture stops and stores nothing if a package is larger than the size cap,
+and each superadmin may capture a limited number of packages per hour.
 
 ### Read tool limits
 
-| Setting                                    | Default    | Range        | What it controls                                                                              |
-| ------------------------------------------ | ---------- | ------------ | --------------------------------------------------------------------------------------------- |
-| `operations.debugPackageRetentionDays`     | 7          | 1–90         | Days a debug package stays in the Operations library before the daily cleanup deletes it      |
-| `operations.debugPackageMaxBytes`          | 26,214,400 | 1 MiB–50 MiB | Largest debug package capture accepts (also limited by the library's upload limit)            |
-| `operations.debugPackagePurgeBatchSize`    | 100        | 1–1,000      | Expired debug packages one daily cleanup deletes                                              |
-| `operations.opsAnomalyEmptyNodeGraceMs`    | 900,000    | 0–7 days     | Extra time past the warm-node cleanup grace before an empty running node is reported          |
-| `operations.opsAnomalyTerminalTaskGraceMs` | 900,000    | 0–7 days     | Time after a task ends before its still-running workspace is reported                         |
-| `operations.opsAnomalyIdleTaskMinutes`     | 60         | 1–10,080     | Minutes without task or workspace activity before an in-progress task is reported             |
-| `operations.opsAnomalyLookbackHours`       | 24         | 1–720        | Hours of snapshot failures and deletion-quarantine reports the anomaly check looks at         |
-| `operations.opsAnomalyMaxPerClass`         | 25         | 1–200        | Findings returned per anomaly type; each type still reports its total                         |
-| `operations.opsNodeLogMaxLines`            | 200        | 1–1,000      | Most log lines one `ops_node_logs` call returns                                               |
-| `operations.opsNodeLogMaxBytes`            | 65,536     | 1 KiB–1 MiB  | Most bytes of log text one `ops_node_logs` call returns                                       |
-| `operations.opsTimelineMaxEvents`          | 200        | 10–1,000     | Most events one timeline returns; older ones are dropped and the answer says how to read them |
-| `operations.opsTimelinePerSourceLimit`     | 100        | 5–500        | Most events one store contributes to a timeline                                               |
-| `operations.opsListMaxRows`                | 100        | 1–500        | Most nodes, errors or log lines one list returns                                              |
-| `operations.opsTextFieldMaxLength`         | 2,000      | 100–20,000   | Characters of one free-text field (an error message, for example) a tool returns              |
+| Setting                                       | Default    | Range        | What it controls                                                                                                                                                                                                |
+| --------------------------------------------- | ---------- | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `operations.debugPackageRetentionDays`        | 7          | 1–90         | Days a debug package stays in the Operations library before the daily cleanup deletes it                                                                                                                        |
+| `operations.debugPackageMaxBytes`             | 20,971,520 | 1 MiB–32 MiB | Largest debug package capture accepts (also limited by the library's upload limit). Capture holds the package and its encrypted copy in Worker memory, so the maximum leaves room under the 128 MB Worker limit |
+| `operations.debugPackagePurgeBatchSize`       | 50         | 1–90         | Expired debug packages one daily cleanup deletes, in one batch                                                                                                                                                  |
+| `operations.debugPackageCapturesPerHour`      | 20         | 1–200        | Debug packages one superadmin may capture per hour                                                                                                                                                              |
+| `operations.opsAnomalyEmptyNodeGraceMs`       | 900,000    | 0–7 days     | Extra time past the warm-node cleanup grace before an empty running node is reported                                                                                                                            |
+| `operations.opsAnomalyTerminalTaskGraceMs`    | 900,000    | 0–7 days     | Time after a task ends before its still-running workspace is reported                                                                                                                                           |
+| `operations.opsAnomalyIdleTaskMinutes`        | 60         | 1–10,080     | Minutes without task or workspace activity before an in-progress task is reported                                                                                                                               |
+| `operations.opsAnomalyLookbackHours`          | 24         | 1–720        | Hours of snapshot failures and deletion-quarantine reports the anomaly check looks at                                                                                                                           |
+| `operations.opsAnomalyMaxPerClass`            | 25         | 1–200        | Findings returned per anomaly type; each type still reports its total                                                                                                                                           |
+| `operations.opsNodeLogMaxLines`               | 200        | 1–1,000      | Most log lines one `ops_node_logs` call returns                                                                                                                                                                 |
+| `operations.opsNodeLogMaxBytes`               | 65,536     | 1 KiB–1 MiB  | Most bytes of log text one `ops_node_logs` call returns                                                                                                                                                         |
+| `operations.opsTimelineMaxEvents`             | 200        | 10–1,000     | Most events one timeline returns; older ones are dropped and the answer says how to read them                                                                                                                   |
+| `operations.opsTimelinePerSourceLimit`        | 100        | 5–500        | Most events one store contributes to a timeline                                                                                                                                                                 |
+| `operations.opsTimelineDefaultWindowHours`    | 168        | 1–2,160      | Hours a timeline looks back when no start time is given                                                                                                                                                         |
+| `operations.opsTimelineFanoutLimit`           | 2          | 1–5          | Chat sessions, workspaces and running nodes per timeline that get their own activity, boot log and live node event reads                                                                                        |
+| `operations.opsEntityGraphRowCap`             | 25         | 1–100        | Related tasks, workspaces, sessions, snapshots or nodes a session story or timeline reads per table                                                                                                             |
+| `operations.opsWorkerLogDefaultWindowMinutes` | 60         | 1–1,440      | Minutes of Worker logs `ops_query_worker_logs` covers when no start time is given                                                                                                                               |
+| `operations.opsListMaxRows`                   | 100        | 1–500        | Most nodes, errors or log lines one list returns                                                                                                                                                                |
+| `operations.opsTextFieldMaxLength`            | 2,000      | 100–20,000   | Characters of one free-text field (an error message, for example) a tool returns                                                                                                                                |
 
 ## If the database can't be read
 
