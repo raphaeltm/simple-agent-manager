@@ -329,8 +329,9 @@ these are true, and SAM checks every one again on every call:
 
 Turning the setting down applies to the next call; it is not cached. Agents in other projects never
 see these tools, and the private incident tools (`list_incident_queue` and the rest) are now listed
-only to the Operations project too. Every debugger tool call, allowed or refused, is recorded in an
-audit log with the acting user, task, tool and target.
+only to the Operations project too. Debugger tool calls are recorded in an audit log with the acting
+user, task, tool and target. `ops_get_access_status` records only calls made by a task inside the
+Operations project.
 
 ## If the database can't be read
 

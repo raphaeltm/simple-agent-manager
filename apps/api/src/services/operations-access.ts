@@ -21,7 +21,7 @@
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
-import { resolveAdminSetting } from './admin-settings';
+import { resolveAdminSetting, resolveAdminSettingDetails } from './admin-settings';
 import { OPERATIONS_TOOLS_MODES } from './admin-settings-operator-definitions';
 import { configuredFeedbackProjectId } from './platform-feedback-incident-config';
 
@@ -282,12 +282,19 @@ export async function recordOperationsAudit(
   }
 }
 
-/** Deletes audit rows older than `operations.auditRetentionDays`. Runs from the daily cron. */
+/**
+ * Deletes audit rows older than `operations.auditRetentionDays`. Runs from the daily cron.
+ * The retention is read through the throwing resolver: on a settings outage
+ * `resolveAdminSetting` would fall back to the code default, which could delete rows that a
+ * longer configured retention keeps. A failed read skips the purge until the next run.
+ */
 export async function purgeExpiredOperationsAudit(
   env: Env,
   now: Date = new Date()
 ): Promise<{ retentionDays: number; deleted: number }> {
-  const retentionDays = Number(await resolveAdminSetting(env, 'operations.auditRetentionDays'));
+  const retentionDays = Number(
+    (await resolveAdminSettingDetails(env, 'operations.auditRetentionDays')).value
+  );
   if (!Number.isInteger(retentionDays) || retentionDays < 1) return { retentionDays, deleted: 0 };
   const cutoff = new Date(now.getTime() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
   const result = await env.DATABASE.prepare('DELETE FROM operations_audit_log WHERE created_at < ?')

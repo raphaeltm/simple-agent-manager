@@ -39,7 +39,7 @@ Sources: `apps/api/src/services/operator-settings.ts`, `admin-settings-registry.
 | Admin setting key               | Default | Permitted range and meaning                                                                                                     |
 | ------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------- |
 | `operations.debuggerTools`      | `off`   | `off`, `read`, `read_ask` or `read_auto_safe`; which debugger tools Operations-project agents may use. Read with no cache.      |
-| `operations.auditRetentionDays` | `90`    | Integer `1`–`3650`; days an `operations_audit_log` row is kept before the daily `0 3 * * *` cron deletes it.                    |
+| `operations.auditRetentionDays` | `90`    | Integer `1`–`3650`; days an `operations_audit_log` row is kept before the daily `0 3 * * *` cron deletes it. If the setting cannot be read, that day's purge is skipped.                    |
 
 Every debugger tool checks, on each call, that the setting allows the capability, the MCP token belongs to the Operations project, the token is task-scoped, and the task's owner is an active superadmin in D1 (`requireOperationsAccess` in `apps/api/src/services/operations-access.ts`). A settings outage resolves the mode to `off`. See [Admin Settings](/docs/guides/admin-settings/#operations-debugger-tools).
 

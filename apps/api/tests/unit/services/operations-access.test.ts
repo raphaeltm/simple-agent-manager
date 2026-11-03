@@ -368,6 +368,36 @@ describe('operations audit', () => {
     );
   });
 
+  it('keeps every row when the retention setting cannot be read', async () => {
+    await updateAdminSettings(env, {
+      actorUserId: SUPERADMIN,
+      changes: [{ name: 'operations.auditRetentionDays', value: 365 }],
+    });
+    sqlite
+      .prepare(
+        `INSERT INTO operations_audit_log (id, actor_user_id, task_id, tool, target_type, outcome, created_at)
+         VALUES ('kept', ?, ?, 'ops_get_access_status', 'installation', 'allowed', '2026-06-01T00:00:00.000Z')`
+      )
+      .run(SUPERADMIN, OPS_TASK);
+    __resetAdminSettingsCacheForTest();
+    const prepare = env.DATABASE.prepare.bind(env.DATABASE);
+    env = {
+      ...env,
+      DATABASE: {
+        ...env.DATABASE,
+        prepare: (sql: string) => {
+          if (sql.includes('FROM platform_settings')) throw new Error('D1 unavailable');
+          return prepare(sql);
+        },
+      } as D1Database,
+    };
+    // 155 days old: inside the configured 365, outside the 90-day code default.
+    await expect(
+      purgeExpiredOperationsAudit(env, new Date('2026-11-03T00:00:00.000Z'))
+    ).rejects.toThrow();
+    expect(sqlite.prepare('SELECT id FROM operations_audit_log').all()).toEqual([{ id: 'kept' }]);
+  });
+
   it('purges only rows older than the configured retention', async () => {
     await updateAdminSettings(env, {
       actorUserId: SUPERADMIN,

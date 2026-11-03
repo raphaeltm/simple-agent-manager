@@ -1,6 +1,8 @@
 /**
  * Operations-project debugger tool handlers. Every handler except `ops_get_access_status`
- * must start with `requireOperationsAccess` and record its call with `recordOperationsAudit`
+ * must start with `requireOperationsAccess` and record its call with `recordOperationsAudit`.
+ * `ops_get_access_status` cannot throw and records only task-scoped calls inside the
+ * Operations project (outcome allowed/denied), since other callers have no audit identity
  * (`services/operations-access.ts`). Tool results that echo node, log or user content are
  * untrusted data and must be marked as such.
  */

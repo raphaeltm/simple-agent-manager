@@ -67,7 +67,7 @@ project, and `override_task_state` lacks the current-capability re-check and tas
 - [x] tools/list: Operations project sees incident tools (+ ops tools when mode ≠ off); other projects see neither
 - [x] `override_task_state` rejects stale capability and non-task tokens; legitimate path works
 - [x] Superadmin can edit `operations.debuggerTools` in Admin → Settings
-- [ ] Staging: `ops_get_access_status` + tools/list verified for superadmin and non-superadmin tokens in the
+- [x] Staging: `ops_get_access_status` + tools/list verified for superadmin and non-superadmin tokens in the
       Operations project vs another project
 
 ## Notes
@@ -101,3 +101,20 @@ Each guard was deleted once; the named tests went red, then the guard was restor
 - `operations.projectId` alias skipped: platform-config status, write and UI paths all key on `feedback.projectId`, so an alias is not trivial.
 - The gate checks the Operations project before the mode so other projects never learn the dial's value.
 - Audit rows have no foreign keys so evidence survives user/task deletion; the table is listed as a reviewed churning table for the deploy row-count gate.
+
+## Staging evidence (Deploy Staging run 41640030698, head 8da3f32a7)
+
+- Migration `0217_operations_audit_log.sql` applied on staging D1.
+- Admin UI (real browser, superadmin): Integrations → Operations project = Test Project 1, Settings →
+  `operations.debuggerTools` = `read_ask`; both saves 200, no overflow, no page errors at 1280 and 375.
+- Real Instant agent chat as the superadmin in the Operations project (task `01M6GXN9VMPZ4BMV497BGRBXKT`):
+  both `ops_get_access_status` and `list_incident_queue` listed; the call returned
+  `{"operationsProject":true,"mode":"read_ask","capabilities":{"read":true,"act":true},"denials":{}}`;
+  one `operations_audit_log` row (`allowed`, detail `{"mode":"read_ask","read":true,"act":true,"denial":null}`).
+- Real Instant agent chat as the superadmin in another project ("hono", task `01M6GY9DH7J0KEATJAESG1XXQ3`):
+  neither tool listed; the harness refused the unlisted call.
+- Not exercised on staging: a non-superadmin owner's call. The staging member account cannot start a chat in
+  the Operations project (`GITHUB_API_ERROR 404`, no repo access), and the staging CF token cannot write KV to
+  mint a token. Covered by the real-SQL route tests (`tool-listing.test.ts`, `operations-access.test.ts`).
+- Restored afterwards: `feedback.projectId` unset, `operations.debuggerTools` = `off`, both test tasks cancelled
+  (Instant containers only; no VMs).
