@@ -22,17 +22,18 @@ export const FLEET_OPS_SETTINGS = [
   {
     name: 'operations.debugPackageMaxBytes',
     key: 'debugPackageMaxBytes',
-    defaultValue: 25 * MIB,
+    defaultValue: 20 * MIB,
     description:
-      'Largest node debug package, in bytes, an Operations agent may capture. Capture stops reading and fails past this size.',
-    range: { min: MIB, max: 50 * MIB },
+      'Largest node debug package, in bytes, an Operations agent may capture. Capture stops reading and fails past this size. Capture holds the package and its encrypted copy in Worker memory, so the maximum leaves headroom under the 128 MB Worker limit.',
+    range: { min: MIB, max: 32 * MIB },
   },
   {
     name: 'operations.debugPackagePurgeBatchSize',
     key: 'debugPackagePurgeBatchSize',
-    defaultValue: 100,
-    description: 'Expired debug packages the daily purge deletes per run.',
-    range: { min: 1, max: 1_000 },
+    defaultValue: 50,
+    description:
+      'Expired debug packages the daily purge deletes per run. Deleted in one batch, so the maximum stays under the database statement parameter limit.',
+    range: { min: 1, max: 90 },
   },
   {
     name: 'operations.opsAnomalyEmptyNodeGraceMs',

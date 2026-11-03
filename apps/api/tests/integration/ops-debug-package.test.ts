@@ -58,8 +58,9 @@ function memoryR2(): R2Bucket {
       if (!object) return null;
       return { customMetadata: object.customMetadata, arrayBuffer: async () => object.data };
     },
-    delete: async (key: string) => {
-      r2Objects.delete(key);
+    // R2's binding accepts one key or an array of keys.
+    delete: async (keys: string | string[]) => {
+      for (const key of Array.isArray(keys) ? keys : [keys]) r2Objects.delete(key);
     },
   } as unknown as R2Bucket;
 }
@@ -200,6 +201,23 @@ describe('ops_capture_debug_package', () => {
       updated_at: new Date().toISOString(),
     });
 
+    // Attack control: an expired debug-package-shaped file in another project is never touched.
+    insert('project_files', {
+      id: 'other-project-package',
+      project_id: 'proj-other',
+      filename: 'old.tar.gz',
+      mime_type: 'application/gzip',
+      size_bytes: 1,
+      uploaded_by: 'admin',
+      upload_source: 'agent',
+      status: 'ready',
+      r2_key: 'other-project-key',
+      directory: `/debug-packages/${NODE}/`,
+      created_at: new Date(Date.now() - 30 * DAY).toISOString(),
+      updated_at: new Date().toISOString(),
+    });
+    r2Objects.set('other-project-key', { data: new ArrayBuffer(1) });
+
     const early = await purgeExpiredDebugPackages(env, FLEET_OPS_DEFAULTS, Date.now() + DAY);
     expect(early.deleted).toBe(0);
 
@@ -209,9 +227,9 @@ describe('ops_capture_debug_package', () => {
       Date.now() + (FLEET_OPS_DEFAULTS.debugPackageRetentionDays + 1) * DAY
     );
     expect(later.deleted).toBe(1);
-    expect(r2Objects.size).toBe(0);
+    expect([...r2Objects.keys()]).toEqual(['other-project-key']);
     const remaining = main.prepare('SELECT id FROM project_files ORDER BY id').all();
-    expect(remaining).toEqual([{ id: 'keep-me' }]);
+    expect(remaining).toEqual([{ id: 'keep-me' }, { id: 'other-project-package' }]);
 
     const audit = main
       .prepare(

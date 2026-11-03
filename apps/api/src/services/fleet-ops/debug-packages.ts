@@ -16,7 +16,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { deleteFile, uploadFile } from '../file-library';
+import { deleteFiles, uploadFile } from '../file-library';
 import { getUploadMaxBytes } from '../file-library-config';
 import { openNodeDiagnosticDownload } from '../node-agent-diagnostics';
 import { type NodeAccess, runNodeDiagnostic } from '../node-diagnostics-access';
@@ -144,8 +144,9 @@ export async function captureDebugPackage(
 
 /**
  * Deletes debug packages older than `operations.debugPackageRetentionDays` from the Operations
- * project library, oldest first, at most `debugPackagePurgeBatchSize` per run. Each delete is
- * isolated so one failure does not stop the rest.
+ * project library, oldest first, at most `debugPackagePurgeBatchSize` per run, in a fixed number
+ * of round trips (one select, then `deleteFiles`). A failed batch is logged and retried by the
+ * next daily run.
  */
 export async function purgeExpiredDebugPackages(
   env: Env,
@@ -173,18 +174,22 @@ export async function purgeExpiredDebugPackages(
 
   let deleted = 0;
   let failed = 0;
-  for (const row of expired) {
-    try {
-      await deleteFile(db, env.R2, projectId, row.id);
-      deleted += 1;
-    } catch (error) {
-      failed += 1;
-      log.error('fleet_ops.debug_package_purge_failed', {
+  try {
+    deleted = (
+      await deleteFiles(
+        db,
+        env.R2,
         projectId,
-        fileId: row.id,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
+        expired.map((row) => row.id)
+      )
+    ).length;
+  } catch (error) {
+    failed = expired.length;
+    log.error('fleet_ops.debug_package_purge_failed', {
+      projectId,
+      files: expired.length,
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
   return {
     retentionDays: settings.debugPackageRetentionDays,

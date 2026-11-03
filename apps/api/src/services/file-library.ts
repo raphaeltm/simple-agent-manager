@@ -669,32 +669,7 @@ export async function downloadFile(
 // Delete
 // ---------------------------------------------------------------------------
 
-export async function deleteFile(
-  db: AppDb,
-  r2: R2Bucket,
-  projectId: string,
-  fileId: string
-): Promise<void> {
-  const rows = await db
-    .select()
-    .from(schema.projectFiles)
-    .where(and(eq(schema.projectFiles.id, fileId), eq(schema.projectFiles.projectId, projectId)))
-    .limit(1);
-
-  if (!rows[0]) {
-    throw errors.notFound('File');
-  }
-
-  // Delete D1 first (safer order — orphaned R2 objects are benign, orphaned D1 rows are errors)
-  // Explicitly delete tags since D1 may not have PRAGMA foreign_keys = ON
-  await db.delete(schema.projectFileTags).where(eq(schema.projectFileTags.fileId, fileId));
-  await db.delete(schema.projectFiles).where(eq(schema.projectFiles.id, fileId));
-
-  // Then delete R2 object (best-effort)
-  await r2.delete(rows[0].r2Key);
-
-  log.info('file_library_delete', { projectId, fileId, filename: rows[0].filename });
-}
+export { deleteFile, deleteFiles } from './file-library-delete';
 
 // ---------------------------------------------------------------------------
 // Tag management
