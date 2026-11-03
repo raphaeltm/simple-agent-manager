@@ -21,8 +21,8 @@ import { runScheduledComposeImageArtifactCleanup } from './compose-image-artifac
 import { runComputeUsageCleanup } from './compute-usage-cleanup';
 import { runCronTriggerSweep } from './cron-triggers';
 import { runScheduledDeploymentReleaseRetention } from './d1-retention';
-import { runDeploymentNodeCleanup } from './deployment-node-cleanup';
 import { runDebugPackagePurge } from './debug-package-purge';
+import { runDeploymentNodeCleanup } from './deployment-node-cleanup';
 import { notifyFailedSweeps } from './failed-sweep-notifications';
 import { runIncidentTriggerSweep } from './incident-triggers';
 import { runNodeCleanupSweep } from './node-cleanup';

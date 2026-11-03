@@ -3,6 +3,8 @@
  * and Worker logs. Each is a thin adapter over a `services/fleet-ops/*` operation and runs
  * through `runOpsReadTool` (gate + audit + untrusted envelope).
  */
+import type { PlatformErrorLevel, PlatformErrorSource } from '@simple-agent-manager/shared';
+
 import type { Env } from '../../env';
 import {
   checkRateLimit,
@@ -21,15 +23,14 @@ import { getSessionStory } from '../../services/fleet-ops/session-story';
 import { buildTimeline } from '../../services/fleet-ops/timeline';
 import { operatorNodeAccess } from '../../services/node-diagnostics-access';
 import { getLogQueryRateLimit, queryErrors } from '../../services/observability';
-import type { PlatformErrorLevel, PlatformErrorSource } from '@simple-agent-manager/shared';
-import { WORKER_LOG_LEVELS, queryWorkerLogs } from '../../services/worker-log-query';
+import { queryWorkerLogs,WORKER_LOG_LEVELS } from '../../services/worker-log-query';
 import type { JsonRpcResponse, McpTokenData } from './_helpers';
 import {
+  OpsToolInputError,
   optionalEnum,
   optionalLimit,
   optionalString,
   optionalTime,
-  OpsToolInputError,
   requiredString,
   runOpsReadTool,
 } from './ops-tool-runner';
