@@ -121,7 +121,8 @@ How each piece behaves:
 - [x] M3 close before retire; M5 404 is no turn; L1 widen serving statuses to "not deleted";
       L2 lifetime notice text; L3 explicit sleep documented in the API reference; L4 test no longer
       swallows its failure.
-- [ ] M4 (finalize `stopping` snapshots as sleeping on deletion): deferred, see PR body.
+- [x] M4 (finalize `stopping` snapshots as sleeping on deletion): deferred to
+      `tasks/backlog/2026-11-03-finalize-stopping-snapshot-on-workspace-deletion.md`.
 - Rule 18 splits: `workspace-admission-sql.ts`, `node-selection-shared.ts`, `warm-node-claim.ts`,
   `session-sleep-workspace.ts`.
 
