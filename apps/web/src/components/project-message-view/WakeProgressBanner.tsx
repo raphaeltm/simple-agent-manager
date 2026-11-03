@@ -52,12 +52,22 @@ import type { WakeWait } from './useWakeProgress';
  * The phase says where a wake is; a known wait reason says why it is not moving.
  * "Waiting for server capacity..." alone hid three different causes.
  */
+/**
+ * A reason is pulled by the poll, while phases can also arrive by push. Show a
+ * reason only for the phase it describes, so a pushed phase change never keeps
+ * an older cause on screen until the next poll.
+ */
+function wakeWaitAppliesTo(wakePhase: TaskExecutionStep | null, wakeWait: WakeWait): boolean {
+  if (wakeWait.reason === 'previous_workspace_cleanup') return wakePhase === null;
+  return wakePhase === 'waiting_for_node_capacity';
+}
+
 export function wakeProgressLabel(
   wakePhase: TaskExecutionStep | null,
   wakeWait: WakeWait | null | undefined,
   now = Date.now()
 ): string {
-  if (!wakeWait) return wakePhaseLabel(wakePhase);
+  if (!wakeWait || !wakeWaitAppliesTo(wakePhase, wakeWait)) return wakePhaseLabel(wakePhase);
   const label = WAKE_WAIT_REASON_LABELS[wakeWait.reason];
   const retryAt = wakeWait.retryAt ? Date.parse(wakeWait.retryAt) : Number.NaN;
   if (!Number.isFinite(retryAt) || retryAt <= now) return label;

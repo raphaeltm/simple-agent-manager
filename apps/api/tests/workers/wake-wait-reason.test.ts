@@ -219,6 +219,18 @@ describe('a waiting wake reports why it is waiting', () => {
     expect(state?.waitReason ?? null).toBeNull();
   });
 
+  it('names no cleanup cause when the row does not show a deletion in progress', async () => {
+    // No proof, but the slept workspace is neither stopping nor a legacy tombstone:
+    // the fence releases the wake unless the node's lifecycle object reports a
+    // pending attempt, so the banner must not claim the wake is blocked on cleanup.
+    const seeded = await seedSleepingSession('stopped-unproven', {
+      recoveryStatus: null,
+      sleptWorkspaceStatus: 'stopped',
+    });
+    const state = await readWakeStateOverHttp(seeded);
+    expect(state?.waitReason ?? null).toBeNull();
+  });
+
   it('accepts node termination proof as the fence does', async () => {
     const seeded = await seedSleepingSession('node-proof', {
       recoveryStatus: null,

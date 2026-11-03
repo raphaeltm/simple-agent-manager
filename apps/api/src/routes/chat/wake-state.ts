@@ -30,6 +30,7 @@ import type { DrizzleD1Database } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
 import { log } from '../../lib/logger';
+import { replacementDeletionRowVerdict } from '../../services/replacement-deletion-fence';
 
 type Db = DrizzleD1Database<typeof schema>;
 
@@ -88,6 +89,7 @@ export async function attachWakeState(
         admissionReason: schema.tasks.admissionReason,
         admissionNextRetryAt: schema.tasks.admissionNextRetryAt,
         sleptWorkspaceId: schema.workspaces.id,
+        sleptWorkspaceStatus: schema.workspaces.status,
         sleptWorkspaceDeletionConfirmedAt: schema.workspaces.runtimeDeletionConfirmedAt,
         sleptNodeTerminationConfirmedAt: schema.nodes.runtimeTerminationConfirmedAt,
       })
@@ -100,16 +102,21 @@ export async function attachWakeState(
 
     if (!row) return state;
 
-    // A wake may not claim until the slept workspace's deletion is proven
-    // (`assertReplacementDeletionConfirmed` in services/replacement-deletion-fence.ts).
-    // This reads the same proof columns that fence reads, not `workspaces.status`,
-    // so the label cannot disagree with what actually releases the wake (rule 58).
+    // A wake may not claim while the slept workspace's deletion is unproven
+    // (`assertReplacementDeletionConfirmed`). This applies the fence's own row
+    // verdict, so the reason is shown only when the row alone proves the wake is
+    // blocked (rule 58). `unknown` (a deletion attempt only the node's lifecycle
+    // object can see) is not reported: that would cost a Durable Object call per
+    // poll, and the banner then shows the generic label rather than a wrong cause.
     // The fence runs before the claim, so this only applies while recovery_status
     // is not yet 'waking'.
     const cleanupPending =
-      row.sleptWorkspaceId !== null &&
-      !row.sleptWorkspaceDeletionConfirmedAt &&
-      !row.sleptNodeTerminationConfirmedAt;
+      replacementDeletionRowVerdict({
+        workspaceId: row.sleptWorkspaceId,
+        workspaceStatus: row.sleptWorkspaceStatus,
+        runtimeDeletionConfirmedAt: row.sleptWorkspaceDeletionConfirmedAt,
+        runtimeTerminationConfirmedAt: row.sleptNodeTerminationConfirmedAt,
+      }) === 'blocked';
     const recoveryStatus = isRecoveryStatus(row.recoveryStatus) ? row.recoveryStatus : null;
     if (!recoveryStatus) {
       return cleanupPending

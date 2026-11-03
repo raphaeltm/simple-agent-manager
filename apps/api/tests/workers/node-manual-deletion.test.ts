@@ -314,6 +314,48 @@ describe('owner-confirmed removal of a node SAM cannot delete', () => {
     expect((await readNode(seeded.nodeId))?.status).toBe('deleted');
   });
 
+  it('asks the owner to retry when the provider lookup fails, and changes nothing', async () => {
+    const seeded = await seedStuckDeploymentNode('provider-down');
+    await seedHetznerCredential(seeded.userId);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json(
+          { error: { code: 'server_error', message: 'internal server error' } },
+          { status: 500 }
+        )
+      )
+    );
+
+    const response = await confirmManualDeletion(seeded.userId, seeded.nodeId);
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toMatchObject({
+      message: expect.stringContaining('Could not check with hetzner'),
+    });
+    expect(await readNode(seeded.nodeId)).toMatchObject({
+      status: 'destroying',
+      runtime_termination_confirmed_at: null,
+    });
+  });
+
+  it('proceeds when the provider rejects the credential, which can never see the server', async () => {
+    const seeded = await seedStuckDeploymentNode('credential-rejected');
+    await seedHetznerCredential(seeded.userId);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () =>
+        Response.json(
+          { error: { code: 'unauthorized', message: 'unable to authenticate' } },
+          { status: 401 }
+        )
+      )
+    );
+
+    const response = await confirmManualDeletion(seeded.userId, seeded.nodeId);
+    expect(response.status).toBe(200);
+    expect((await readNode(seeded.nodeId))?.status).toBe('deleted');
+  });
+
   it('removes a legacy node that never got a provider instance without asking the provider', async () => {
     const seeded = await seedStuckDeploymentNode('no-instance');
     await seedHetznerCredential(seeded.userId);

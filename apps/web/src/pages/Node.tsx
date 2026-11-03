@@ -137,16 +137,17 @@ export function Node() {
     }
   };
 
+  const deploymentEnvSummary =
+    deploymentEnvironments.length > 0
+      ? `${deploymentEnvironments.length} deployment environment${deploymentEnvironments.length === 1 ? '' : 's'}: ${deploymentEnvironments.map((env) => env.name).join(', ')}`
+      : 'deployment environments currently listed on this node';
+
   const handleDelete = async () => {
     if (!id || !node) return;
 
     if (isDeploymentNode) {
-      const envSummary =
-        deploymentEnvironments.length > 0
-          ? `${deploymentEnvironments.length} deployment environment${deploymentEnvironments.length === 1 ? '' : 's'}: ${deploymentEnvironments.map((env) => env.name).join(', ')}`
-          : 'deployment environments currently listed on this node';
       const confirmed = window.confirm(
-        `This is a deployment node ("${node.name}") hosting ${envSummary}. Deleting it here destroys the node infrastructure and affects ALL hosted environments, but it does not perform each environment's volume teardown.\n\nFor full per-environment teardown, use Destroy on the project Deployments page.\n\nContinue with node-only deletion?`
+        `This is a deployment node ("${node.name}") hosting ${deploymentEnvSummary}. Deleting it here destroys the node infrastructure and affects ALL hosted environments, but it does not perform each environment's volume teardown.\n\nFor full per-environment teardown, use Destroy on the project Deployments page.\n\nContinue with node-only deletion?`
       );
       if (!confirmed) return;
     } else {
@@ -172,8 +173,13 @@ export function Node() {
     const server = node.cloudProvider
       ? `this node's ${node.cloudProvider} server`
       : "this node's server";
+    // Removal runs the same cleanup as node-only deletion, so a deployment node's
+    // owner gets the same warning about the environments it hosts.
+    const deploymentImpact = isDeploymentNode
+      ? `\n\nThis is a deployment node hosting ${deploymentEnvSummary}. Removing it affects ALL hosted environments and does not perform each environment's volume teardown; use Destroy on the project Deployments page for that.`
+      : '';
     const confirmed = window.confirm(
-      `SAM could not delete ${server}. Only continue if you have already deleted it yourself in your cloud provider's console.\n\nSAM will stop tracking this node. It will not delete anything at your provider.\n\nContinue and stop tracking it?`
+      `SAM could not delete ${server}. Only continue if you have already deleted it yourself in your cloud provider's console.\n\nSAM will stop tracking this node. It will not delete anything at your provider.${deploymentImpact}\n\nContinue and stop tracking it?`
     );
     if (!confirmed) return;
     try {

@@ -590,11 +590,15 @@ If you delete a node yourself from the **Nodes** page, the tasks still running o
 A node can stay in **Destroying** or **Error** when SAM cannot prove which cloud account its server
 belongs to, for example a machine created before SAM recorded that. SAM then refuses to delete it and
 retries every hour. If you have already deleted the server in your provider's console, open the node
-and select **I already deleted this server**. SAM checks with your provider first: if the server is
-still there, it says so and changes nothing. Otherwise it stops tracking the node and removes its
-records, the same way **Delete Node** does, without deleting anything at your provider
-(`recordManualNodeDeletion` in `apps/api/src/services/node-manual-deletion.ts`). The option is not
-offered for machines you enrolled yourself, and machines on SAM's own cloud account need an operator.
+and select **I already deleted this server**. Check in your provider's console that it is really gone
+first: SAM cannot prove that for you. It asks your provider with your saved cloud account and refuses
+only if the server turns up. If the lookup fails for a temporary reason, it asks you to try again. If
+the account cannot see the server at all (it was removed, or belongs to a different account), SAM
+takes your word for it. It then stops tracking the node and removes its records, the same way
+**Delete Node** does, without deleting anything at your provider (`recordManualNodeDeletion` in
+`apps/api/src/services/node-manual-deletion.ts`). For a deployment node this affects every
+environment it hosts. The option is not offered for machines you enrolled yourself, and machines on
+SAM's own cloud account need an operator.
 
 ## The session has ended
 

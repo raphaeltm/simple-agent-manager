@@ -111,6 +111,7 @@ export function useWakeProgress(sessionId: string | undefined): UseWakeProgressR
         if (status === 'restored' || status === 'failed') settledRef.current = true;
         setIsWaking(false);
         setWakePhase(null);
+        setWakeWait(null);
         return;
       }
       // A late 'waking' snapshot cannot un-finish a wake that already settled.
@@ -125,7 +126,8 @@ export function useWakeProgress(sessionId: string | undefined): UseWakeProgressR
     (state: SessionStateSnapshot | null | undefined) => {
       if (!state) return;
       applyStatus(state.recoveryStatus ?? null, state.wakePhase ?? null);
-      // Only the pull path carries the reason; pushed phase deltas leave it alone.
+      // Only the pull path carries the reason. A pushed phase can outdate it, so the
+      // banner shows it only for the phase it describes (`WakeProgressBanner`).
       setWakeWait(
         state.waitReason ? { reason: state.waitReason, retryAt: state.waitRetryAt ?? null } : null
       );

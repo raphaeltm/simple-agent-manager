@@ -1,3 +1,4 @@
+import { ProviderError } from '@simple-agent-manager/providers';
 import { type CredentialProvider, isUserOwnedNodeClass } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
@@ -40,14 +41,17 @@ function isOnSamCapacity(node: NodeRow): boolean {
 
 /**
  * Asks the provider whether the server still exists. Only a returned server is
- * evidence: a lookup that fails, or a 404 from a credential that may belong to a
- * different account, proves nothing either way (`deployment-legacy-binding.ts`).
+ * evidence it exists. A credential SAM cannot resolve, or one the provider
+ * rejects, cannot see the server either way: that is the legacy mis-bound case
+ * this escape exists for, so it proceeds on the owner's word. Any other lookup
+ * failure leaves the answer unknown, and the owner is asked to retry instead.
  */
 async function providerStillHasServer(db: NodeDb, env: Env, node: NodeRow): Promise<boolean> {
   const targetProvider = node.cloudProvider as CredentialProvider | null;
   if (!node.providerInstanceId || !targetProvider) return false;
+  let providerResult: Awaited<ReturnType<typeof createProviderForUser>>;
   try {
-    const providerResult = await createProviderForUser(
+    providerResult = await createProviderForUser(
       db,
       node.credentialAttributionUserId ?? node.userId,
       getCredentialEncryptionKey(env),
@@ -58,16 +62,46 @@ async function providerStillHasServer(db: NodeDb, env: Env, node: NodeRow): Prom
         : null,
       exactProviderCredentialBindingFromPlacementSnapshot(node) ?? undefined
     );
-    if (!providerResult || providerResult.providerName !== targetProvider) return false;
-    return (await providerResult.provider.getVM(node.providerInstanceId)) !== null;
   } catch (error) {
-    log.warn('node_manual_deletion.provider_check_unavailable', {
+    log.warn('node_manual_deletion.provider_credential_unavailable', {
       nodeId: node.id,
       provider: targetProvider,
       error: serializeError(error),
     });
     return false;
   }
+  if (!providerResult || providerResult.providerName !== targetProvider) return false;
+  try {
+    return (await providerResult.provider.getVM(node.providerInstanceId)) !== null;
+  } catch (error) {
+    if (isCredentialRejection(error)) {
+      log.warn('node_manual_deletion.provider_credential_rejected', {
+        nodeId: node.id,
+        provider: targetProvider,
+        error: serializeError(error),
+      });
+      return false;
+    }
+    log.warn('node_manual_deletion.provider_check_unavailable', {
+      nodeId: node.id,
+      provider: targetProvider,
+      error: serializeError(error),
+    });
+    throw errors.serviceUnavailable(
+      `Could not check with ${targetProvider} whether server ${node.providerInstanceId} still exists. Try again in a minute.`
+    );
+  }
+}
+
+/**
+ * The provider refused this credential, so it can never answer for this server.
+ * 401 and 403 are the only statuses that mean that; the categorised `auth_error`
+ * covers providers that report it without a status. Rate limits, capacity and
+ * server errors are temporary, so they are not included (rule 72).
+ */
+function isCredentialRejection(error: unknown): boolean {
+  if (!(error instanceof ProviderError)) return false;
+  return error.statusCode === 401 || error.statusCode === 403 || error.category === 'auth_error';
 }
 
 /**

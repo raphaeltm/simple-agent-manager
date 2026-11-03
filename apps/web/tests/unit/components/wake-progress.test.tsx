@@ -322,11 +322,59 @@ describe('wake wait reasons (production 2026-11-02: one label hid three causes)'
     // A retry time already in the past is not a promise worth showing.
     expect(
       wakeProgressLabel(
-        null,
+        'waiting_for_node_capacity',
         { reason: 'provider_transient_capacity', retryAt: '2026-11-02T08:30:00.000Z' },
         now
       )
     ).toBe('Your cloud provider has no capacity right now. Retrying...');
+  });
+
+  it('drops a polled reason the moment a pushed phase moves past it', () => {
+    // CodeRabbit on #2494: the poll set "no capacity", then a push reported the
+    // wake provisioning. The banner kept the old cause until the next poll.
+    const { result } = renderHook(() => useWakeProgress('s1'));
+    act(() =>
+      result.current.hydrateWakeProgress(
+        snapshot({
+          recoveryStatus: 'waking',
+          wakePhase: 'waiting_for_node_capacity',
+          waitReason: 'provider_transient_capacity',
+          waitRetryAt: null,
+        })
+      )
+    );
+    act(() =>
+      result.current.applyWakeProgress({ recoveryStatus: 'waking', wakePhase: 'node_provisioning' })
+    );
+    render(
+      <WakeProgressBanner wakePhase={result.current.wakePhase} wakeWait={result.current.wakeWait} />
+    );
+    expect(screen.getByTestId('wake-progress-label').textContent).toBe('Provisioning a server...');
+  });
+
+  it('shows the previous-workspace reason only before the wake has a phase', () => {
+    const wait = { reason: 'previous_workspace_cleanup' as const, retryAt: null };
+    expect(wakeProgressLabel(null, wait)).toBe(
+      'Waiting for the previous workspace to finish shutting down...'
+    );
+    expect(wakeProgressLabel('node_provisioning', wait)).toBe('Provisioning a server...');
+  });
+
+  it('forgets the reason when the wake settles', () => {
+    const { result } = renderHook(() => useWakeProgress('s1'));
+    act(() =>
+      result.current.hydrateWakeProgress(
+        snapshot({
+          recoveryStatus: 'waking',
+          wakePhase: 'waiting_for_node_capacity',
+          waitReason: 'user_node_limit',
+        })
+      )
+    );
+    act(() =>
+      result.current.applyWakeProgress({ recoveryStatus: 'restored', wakePhase: 'running' })
+    );
+    expect(result.current.wakeWait).toBeNull();
   });
 
   it('renders the reason in the live region', () => {
