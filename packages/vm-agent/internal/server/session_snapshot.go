@@ -213,7 +213,9 @@ func (s *Server) handleHibernateAgentSession(w http.ResponseWriter, r *http.Requ
 
 func (s *Server) hibernateSessionSnapshot(ctx context.Context, input *sessionSnapshotHandlerInput) (result map[string]interface{}, resultErr error) {
 	ctx, timings := startLifecycleTimings(ctx, "prepare")
-	defer func() { s.finishLifecycleTimings(timings, "sleep", input.runtime.ID, input.callbackToken, resultErr) }()
+	defer func() {
+		s.finishLifecycleTimings(timings, "sleep", input.runtime.ID, input.chatSessionID, input.callbackToken, resultErr)
+	}()
 	runtime := input.runtime
 	sessionID, chatSessionID := input.sessionID, input.chatSessionID
 	runtimeName, callbackToken := input.runtimeName, input.callbackToken
