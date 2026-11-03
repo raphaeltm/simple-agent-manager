@@ -236,9 +236,9 @@ or in the failure card under the chat header (expand the card for the next step)
   chat.
 - **A failure card: "Agent connection rejected."** The provider refused the credential — usually an
   expired subscription sign-in or a revoked API key. Reconnect it under **Settings → Agents** (the
-  card's **Open agent accounts** button, for the person who started the chat) with **Replace…** on the
-  account, or in the project's **Accounts** tab if the project uses its own account (see
-  [Refresh an expired sign-in or key](/docs/guides/agents/#common-account-tasks)). Projects and
+  card's **Open agent accounts** button, for the person who started the chat) with **Replace…** on your
+  default, or in the project's **Accounts** tab if the project uses its own account (see
+  [Refresh an expired sign-in or key, or a pinned account](/docs/guides/agents/#common-account-tasks)). Projects and
   profiles pinned to the old account keep it until you move them. The agent picks up the new connection only
   when it starts again: in a **Task**, wait for the chat to go to
   sleep, then reply to wake it; in a **Chat**, select **Sleep** (the moon button above the message
