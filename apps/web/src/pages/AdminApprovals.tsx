@@ -131,7 +131,7 @@ function ApprovalItem({
       {result && <div className="break-words text-xs text-fg-primary">Result: {result}</div>}
 
       {pending && (
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 gap-3 sm:max-w-md">
           <Button
             variant="primary"
             className="min-h-11"
@@ -141,7 +141,7 @@ function ApprovalItem({
             {deciding === 'approve' ? 'Approving…' : 'Approve'}
           </Button>
           <Button
-            variant="danger"
+            variant="secondary"
             className="min-h-11"
             disabled={deciding !== null}
             onClick={() => onDecide('deny')}
