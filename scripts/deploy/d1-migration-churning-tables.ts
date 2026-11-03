@@ -1,6 +1,8 @@
 /**
  * Code-reviewed tables that legitimately shrink between deploys (retention purges, TTL
- * cleanup), so the post-migration row-count gate allows a bounded decrease for them.
+ * cleanup), so the post-migration row-count gate allows a bounded decrease for them. The
+ * Operations telemetry and approval tables are purged daily by
+ * `apps/api/src/scheduled/operations-telemetry-retention.ts`.
  * Every other business table keeps zero decrease tolerance. Split out of
  * `d1-migration-safety.ts` (`.claude/rules/18-file-size-limits.md`).
  */
@@ -11,9 +13,13 @@ export const DEFAULT_D1_MIGRATION_CHURNING_TABLES = [
   'DATABASE.github_webhook_deliveries',
   'DATABASE.lifecycle_state_episodes',
   'DATABASE.lifecycle_state_observations',
+  'DATABASE.node_lifecycle_decisions',
+  'DATABASE.node_log_captures',
+  'DATABASE.operations_action_approvals',
   'DATABASE.operations_audit_log',
   'DATABASE.project_files',
   'DATABASE.registry_credential_rate_limits',
+  'DATABASE.session_snapshot_traces',
   'DATABASE.session_snapshots',
   'DATABASE.sessions',
   'DATABASE.trial_waitlist',
