@@ -29,6 +29,12 @@ vi.mock('../../../src/operations/link-core', () => ({ listLinks: mocks.listLinks
 vi.mock('../../../src/services/admin-settings', () => ({
   resolveAdminSettingDetails: mocks.resolveAdminSettingDetails,
 }));
+// The Operations gate's two inputs; the real playbook resolver runs on top of them.
+const operations = vi.hoisted(() => ({
+  isOperationsProject: vi.fn(),
+  resolveOperationsToolsMode: vi.fn(),
+}));
+vi.mock('../../../src/services/operations-access', () => operations);
 
 import { handleGetInstructions } from '../../../src/routes/mcp/instruction-tools';
 import type { McpTokenData } from '../../../src/services/mcp-token';
@@ -146,6 +152,8 @@ describe('get_instructions idea block', () => {
     mocks.projectData.getActivePolicies.mockResolvedValue([]);
     mocks.resolveAdminSettingDetails.mockResolvedValue({ value: 20_000 });
     mocks.listLinks.mockResolvedValue([]);
+    operations.isOperationsProject.mockResolvedValue(false);
+    operations.resolveOperationsToolsMode.mockResolvedValue('off');
   });
 
   it('includes the idea, enveloped, for a chat started from one', async () => {
@@ -312,5 +320,52 @@ describe('get_instructions idea block', () => {
     } finally {
       sqlite.close();
     }
+  });
+});
+
+describe('get_instructions Operations playbook', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.selectRows = [[task], [project]];
+    mocks.drizzle.mockReturnValue(makeMockDb());
+    mocks.projectData.getSession.mockResolvedValue(null);
+    mocks.projectData.getAllHighConfidenceKnowledge.mockResolvedValue([]);
+    mocks.projectData.getKnowledgeEntityIndex.mockResolvedValue({ entries: [], totalEntities: 0 });
+    mocks.projectData.getActivePolicies.mockResolvedValue([]);
+    mocks.resolveAdminSettingDetails.mockResolvedValue({ value: 20_000 });
+    mocks.listLinks.mockResolvedValue([]);
+  });
+
+  async function playbookFor(isOps: boolean, mode: string) {
+    operations.isOperationsProject.mockResolvedValue(isOps);
+    operations.resolveOperationsToolsMode.mockResolvedValue(mode);
+    mocks.selectRows = [[task], [project]];
+    const { sqlite, d1 } = makeIdeaDatabase();
+    try {
+      return payloadOf(await handleGetInstructions(1, token, makeEnv(d1))) as ReturnType<
+        typeof payloadOf
+      > & { operationsPlaybook?: string[] };
+    } finally {
+      sqlite.close();
+    }
+  }
+
+  it('gives the Operations project the playbook while the tools are on', async () => {
+    const payload = await playbookFor(true, 'read');
+
+    expect(operations.isOperationsProject).toHaveBeenCalledWith(expect.anything(), 'project-1');
+    expect(payload.operationsPlaybook?.join('\n')).toContain('ops_find_anomalies');
+    expect(payload.instructions.join('\n')).toContain('This is the Operations project');
+  });
+
+  it('omits it when the tools are off, and outside the Operations project', async () => {
+    const off = await playbookFor(true, 'off');
+    const elsewhere = await playbookFor(false, 'read');
+
+    expect(off.operationsPlaybook).toBeUndefined();
+    expect(elsewhere.operationsPlaybook).toBeUndefined();
+    expect(elsewhere.instructions.join('\n')).not.toContain('This is the Operations project');
+    // Liveness: the rest of the payload still rendered.
+    expect(elsewhere.instructions.length).toBeGreaterThan(0);
   });
 });

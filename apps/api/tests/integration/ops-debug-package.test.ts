@@ -284,4 +284,22 @@ describe('ops_capture_debug_package', () => {
     expect(body).toMatchObject({ status: 'not_running', nodeStatus: 'stopped' });
     expect(boundary.fetch).not.toHaveBeenCalled();
   });
+
+  it('rate-limits captures per superadmin, refusing before the node is called', async () => {
+    insert('platform_settings', {
+      key: 'operations.debugPackageCapturesPerHour',
+      value: '1',
+      updated_at: '2026-11-03T00:00:00Z',
+    });
+
+    expect((await capture()).status).toBe('ok');
+    boundary.fetch.mockClear();
+    const second = await callMcpTool(app, env, 'tok-admin', 'ops_capture_debug_package', {
+      nodeId: NODE,
+    });
+
+    expect(second.error?.message).toContain('operations.debugPackageCapturesPerHour');
+    expect(boundary.fetch).not.toHaveBeenCalled();
+    expect(main.prepare('SELECT COUNT(*) AS n FROM project_files').get()).toEqual({ n: 1 });
+  });
 });
