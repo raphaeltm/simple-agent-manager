@@ -27,27 +27,41 @@ Debugging agents in the Operations project guess because node diagnostics are ow
 
 ## Implementation checklist
 
-- [ ] Ops-tool admin settings (thresholds, caps, retention days default 7) in one module, registered in the registry
-- [ ] Shared node diagnostics access service (owner | gated operator) + refactor `routes/nodes/diagnostics.ts` and `requireNodeOwnership` onto it
-- [ ] `ops_find_anomalies` service (7 classes, configurable thresholds, IDs + reason, per-class cap with disclosure)
-- [ ] `ops_list_nodes` / `ops_get_node` services
-- [ ] Entity resolver + `ops_get_session_story`
-- [ ] `ops_timeline` with pluggable sources + truncation disclosure (rule 65)
-- [ ] `ops_search_errors` (reuse `queryErrors`)
-- [ ] `ops_query_worker_logs` (shared operation extracted from admin route)
-- [ ] Node reach-in tools: `ops_node_logs` (contains filter + line/byte caps), `ops_node_system_info`, `ops_node_events`, `ops_node_containers`, `ops_workspace_agent_sessions`
-- [ ] `ops_capture_debug_package` (byte cap, capped streaming read, library `/debug-packages/<nodeId>/<ts>.tar.gz`) + daily purge
-- [ ] MCP tool definitions + handlers wired through PR1's `requireOperationsAccess` / `recordOperationsAudit`, untrusted text fenced
-- [ ] Playbook in `get_instructions` for the Operations project when mode is not off
-- [ ] Public docs for the tools
-- [ ] Tests: real-SQL anomaly tests (each class + healthy control), vertical slice MCP → gate → node proxy (mock node enforcing JWT contract), debug package → library → purge, tools/list + gate denial
+- [x] Ops-tool admin settings (thresholds, caps, retention days default 7) in one module, registered in the registry
+- [x] Shared node diagnostics access service (owner | gated operator) + refactor `routes/nodes/diagnostics.ts` and `requireNodeOwnership` onto it
+- [x] `ops_find_anomalies` service (7 classes, configurable thresholds, IDs + reason, per-class cap with disclosure)
+- [x] `ops_list_nodes` / `ops_get_node` services
+- [x] Entity resolver + `ops_get_session_story`
+- [x] `ops_timeline` with pluggable sources + truncation disclosure (rule 65)
+- [x] `ops_search_errors` (reuse `queryErrors`)
+- [x] `ops_query_worker_logs` (shared operation extracted from admin route)
+- [x] Node reach-in tools: `ops_node_logs` (contains filter + line/byte caps), `ops_node_system_info`, `ops_node_events`, `ops_node_containers`, `ops_workspace_agent_sessions`
+- [x] `ops_capture_debug_package` (byte cap, capped streaming read, library `/debug-packages/<nodeId>/<ts>.tar.gz`) + daily purge
+- [x] MCP tool definitions + handlers wired through PR1's `requireOperationsAccess` / `recordOperationsAudit`, untrusted text fenced
+- [x] Playbook in `get_instructions` for the Operations project when mode is not off
+- [x] Public docs for the tools
+- [x] Tests: real-SQL anomaly tests (each class + healthy control), vertical slice MCP → gate → node proxy (mock node enforcing JWT contract), debug package → library → purge, tools/list + gate denial
 - [ ] PR body: per-tool round-trip counts (rule 60)
 
 ## Acceptance criteria
 
-- [ ] Every ops tool rejects calls that fail the PR1 gate and records an audit row on success and failure
-- [ ] Anomaly sweep returns each class with IDs + reason, and nothing for a healthy fleet
-- [ ] Node reach-in uses the same service as the owner UI path
-- [ ] Debug package lands in the Operations library, is downloadable with `download_library_file`, and is purged after N days
-- [ ] Playbook appears only in the Operations project with mode not off
+- [x] Every ops tool rejects calls that fail the PR1 gate and records an audit row on success and failure
+- [x] Anomaly sweep returns each class with IDs + reason, and nothing for a healthy fleet
+- [x] Node reach-in uses the same service as the owner UI path
+- [x] Debug package lands in the Operations library, is downloadable with `download_library_file`, and is purged after N days
+- [x] Playbook appears only in the Operations project with mode not off
 - [ ] Staging: anomalies, session story on a real task, node logs with `contains`, debug package capture + download on a real node; VM cleaned up
+
+## Review fixes (replacement task 01M6GW24EQR0KP6M77YPHYY6R9, 2026-11-03)
+
+Fresh Phase 5 review of 8 local reviewers on d826b6cbe. Fixed:
+- [x] Quarantine anomaly lookup exceeded D1's 100-bind limit at opsAnomalyMaxPerClass > 100 → chunked (cloudflare HIGH)
+- [x] Daily purge did ~300 D1 queries → bulk `deleteFiles` (services/file-library-delete.ts), batch 50/max 90 (performance HIGH)
+- [x] debugPackageMaxBytes 20 MiB default / 32 MiB max for Worker memory headroom
+- [x] Settings for every remaining cap: timeline default window, fan-out (default 2), entity-graph row cap, Worker log window, captures per hour; shared Worker-log rate-limit constants
+- [x] Per-field untrusted fencing in ops_search_errors, ops_query_worker_logs, ops_timeline; neutralized lifecycle error and incident signature
+- [x] Shared `anyIdIn` for platform_errors lookups
+- [x] Capture rate limit per superadmin
+- [x] Tests: route-level for every read tool, failed-after-gate audit, cross-project purge control, live timeline sources, get_instructions playbook, rate limit
+- [x] Docs: env-reference skill, security architecture exception, admin-settings table
+- [x] mcp-library-file-comments test logger mock (broken by PR2's import graph)
