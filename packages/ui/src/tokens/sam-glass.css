@@ -57,8 +57,30 @@
   --sam-knob: #e6f2ee;
   --sam-nav-fg: rgb(230 242 238 / 0.84);
 
-  /* The dimmed void behind an open drawer or sheet. Dims only; the overlay itself is the one blur. */
+  /* The dimmed void behind an open drawer or sheet. Dims only; the overlay blurs what it covers. */
   --sam-scrim: rgb(1 4 3 / 0.55);
+
+  /* Frosted panes. The app's panes are see-through: the void's edge glow shows through each
+     one, blurred. These override the shared glass.css fills (which the marketing site keeps nearly
+     opaque) because glass.css is imported into a cascade layer and these tokens are not. */
+  --sam-glass-v2-fill: rgb(8 15 12 / 0.42);
+  --sam-glass-v2-fill-quiet: rgb(8 15 12 / 0.3);
+  --sam-glass-v2-fill-chrome: rgb(8 15 12 / 0.58);
+  --sam-pane-blur: 28px;
+  --sam-pane-saturate: 1.5;
+
+  /* The same edge glow, carried further in so it reaches under the panes, with a softer core
+     and lighter pane shadows (a pane's shadow lands under its neighbours and dims what they
+     show through). */
+  --sam-void-edge: rgb(74 222 128 / 0.42);
+  --sam-void-edge-soft: rgb(34 197 94 / 0.26);
+  --sam-void-wall: rgb(22 163 74 / 0.16);
+  --sam-void-core-fade: rgb(1 3 2 / 0.6);
+  --sam-glass-v2-depth:
+    0 1px 1px rgb(0 0 0 / 0.25), 0 12px 24px -10px rgb(0 0 0 / 0.42),
+    0 30px 60px -30px rgb(0 0 0 / 0.4);
+  --sam-glass-v2-depth-quiet:
+    0 12px 24px -10px rgb(0 0 0 / 0.32), 0 30px 60px -30px rgb(0 0 0 / 0.36);
 }
 
 [data-ui-theme='sam-light'] {
@@ -89,4 +111,39 @@
   --sam-knob: #ffffff;
   --sam-nav-fg: #23362d;
   --sam-scrim: rgb(16 40 28 / 0.22);
+
+  --sam-glass-v2-fill: rgb(250 253 251 / 0.5);
+  --sam-glass-v2-fill-quiet: rgb(250 253 251 / 0.36);
+  --sam-glass-v2-fill-chrome: rgb(250 253 251 / 0.66);
+  --sam-void-edge: rgb(21 128 61 / 0.3);
+  --sam-void-edge-soft: rgb(34 197 94 / 0.2);
+  --sam-void-wall: rgb(74 222 128 / 0.16);
+  --sam-void-core-fade: rgb(255 255 255 / 0.7);
+}
+
+/*
+ * Frosted panes: every pane blurs the void behind it. The void is static gradients, so the
+ * browser can keep each pane's backdrop; nothing animates behind a pane. A pane inside another
+ * pane does not blur again (the outer one already did), except an overlay laid over content.
+ * In the components layer, so a Tailwind utility on a pane still wins.
+ */
+@layer components {
+  @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
+    :where(.sam-glass) {
+      -webkit-backdrop-filter: blur(var(--sam-pane-blur)) saturate(var(--sam-pane-saturate));
+      backdrop-filter: blur(var(--sam-pane-blur)) saturate(var(--sam-pane-saturate));
+    }
+
+    :where(.sam-glass .sam-glass:not(.sam-glass-live)) {
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
+
+  @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+    :where(.sam-glass) {
+      -webkit-backdrop-filter: none;
+      backdrop-filter: none;
+    }
+  }
 }

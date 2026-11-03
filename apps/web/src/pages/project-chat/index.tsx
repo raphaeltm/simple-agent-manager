@@ -130,7 +130,7 @@ export function ProjectChat() {
   const handleShowHierarchy = useCallback(
     (taskId: string) => {
       // The hierarchy modal replaces the phone's chat-list drawer rather than stacking on it:
-      // SAM Glass allows one live blur on screen, and both are overlays.
+      // both are SAM Glass overlays, and one blurred over the other is unreadable.
       setSidebarOpen(false);
       navigate(location.pathname + location.search + `#hierarchy-${taskId}`);
     },

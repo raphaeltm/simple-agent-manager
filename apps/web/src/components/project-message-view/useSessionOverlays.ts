@@ -37,8 +37,8 @@ export interface SessionOverlays {
 
 /**
  * The drawers and dialogs the rail opens are exclusive: opening one closes the others, because
- * each is a SAM Glass overlay and only one live blur may be on screen at a time
- * (`apps/web/.claude/rules/80-sam-glass.md`). Comments stay independent: on desktop they are a
+ * each is a SAM Glass overlay over the chat, and two stacked overlays would blur one another
+ * into an unreadable smear (`apps/web/.claude/rules/80-sam-glass.md`). Comments stay independent: on desktop they are a
  * rail docked inside the conversation, not an overlay, and must survive opening Timeline.
  */
 type ExclusivePanel = 'timeline' | 'resources' | 'automation' | 'related' | 'share';

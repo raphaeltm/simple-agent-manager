@@ -3,16 +3,18 @@ import type { HTMLAttributes, ReactNode } from 'react';
 /** Status and metadata chips: solid tints in mono text, never glass. */
 export type ChipTone = 'neutral' | 'success' | 'info' | 'warning' | 'danger' | 'muted';
 
+// Each tint is laid over the solid chip fill, so a chip on a frosted pane never lets the
+// void's glow through (the tints themselves are translucent).
 const toneClasses: Record<ChipTone, string> = {
   neutral: 'text-fg-primary bg-[var(--sam-chip-bg)] border-[var(--sam-chip-edge)]',
   success:
-    'text-[var(--sam-status-success-fg)] bg-[var(--sam-status-success-bg)] border-[var(--sam-success-edge)]',
-  info: 'text-[var(--sam-status-info-fg)] bg-[var(--sam-status-info-bg)] border-[var(--sam-info-edge)]',
+    'text-[var(--sam-status-success-fg)] bg-[var(--sam-chip-bg)] bg-[image:linear-gradient(var(--sam-status-success-bg),var(--sam-status-success-bg))] border-[var(--sam-success-edge)]',
+  info: 'text-[var(--sam-status-info-fg)] bg-[var(--sam-chip-bg)] bg-[image:linear-gradient(var(--sam-status-info-bg),var(--sam-status-info-bg))] border-[var(--sam-info-edge)]',
   warning:
-    'text-[var(--sam-status-warning-fg)] bg-[var(--sam-status-warning-bg)] border-[var(--sam-warning-edge)]',
+    'text-[var(--sam-status-warning-fg)] bg-[var(--sam-chip-bg)] bg-[image:linear-gradient(var(--sam-status-warning-bg),var(--sam-status-warning-bg))] border-[var(--sam-warning-edge)]',
   danger:
-    'text-[var(--sam-status-danger-fg)] bg-[var(--sam-status-danger-bg)] border-[var(--sam-danger-edge)]',
-  muted: 'text-[var(--sam-status-muted-fg)] bg-[var(--sam-status-muted-bg)] border-[var(--sam-chip-edge)]',
+    'text-[var(--sam-status-danger-fg)] bg-[var(--sam-chip-bg)] bg-[image:linear-gradient(var(--sam-status-danger-bg),var(--sam-status-danger-bg))] border-[var(--sam-danger-edge)]',
+  muted: 'text-[var(--sam-status-muted-fg)] bg-[var(--sam-chip-bg)] bg-[image:linear-gradient(var(--sam-status-muted-bg),var(--sam-status-muted-bg))] border-[var(--sam-chip-edge)]',
 };
 
 export interface ChipProps extends HTMLAttributes<HTMLSpanElement> {

@@ -23,7 +23,8 @@
  *   .sam-raised           a raised control on glass (secondary button, chosen segment, current tab)
  *
  * Surfaces are glass; elements on them (avatars, buttons, chips, counts) are solid.
- * One live blur at a time: only an overlay (drawer, sheet) gets .sam-glass-live.
+ * Here panes do not blur; the app frosts every pane in tokens/sam-glass.css (lower fills plus a
+ * backdrop blur), and an overlay (drawer, sheet) gets .sam-glass-live.
  *
  * The material rules use :where() so they carry no specificity: a consumer's own layout and
  * surface rules (position, background, shadow) always win, whatever order stylesheets load in.

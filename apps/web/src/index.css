@@ -179,7 +179,7 @@
 }
 
 /* ── SAM Glass: the scrim behind an open drawer or sheet. It only dims; the overlay pane above
-   it carries the screen's one live blur (docs/guides/sam-glass-design-system.md). ── */
+   it blurs what it covers (docs/guides/sam-glass-design-system.md). ── */
 @layer utilities {
   .sam-scrim {
     background: var(--sam-scrim);
@@ -235,8 +235,8 @@
   }
 
   /* Legacy glass inside a SAM Glass pane (an ordinary page in the shell's content pane) drops
-     its live blur: the pane already separates it from the void, and SAM Glass allows one live
-     blur on screen, reserved for the open overlay (apps/web/.claude/rules/80-sam-glass.md). */
+     its own blur: the frosted pane already blurred the void behind it, and blurring that again
+     only costs (apps/web/.claude/rules/80-sam-glass.md). */
   .sam-glass :is(.glass-chrome, .glass-surface, .glass-modal, .glass-backdrop-dim) {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;

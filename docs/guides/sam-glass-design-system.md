@@ -12,7 +12,7 @@ SAM Glass is how the app looks: glass surfaces floating over an open, dark green
 2. **Surfaces are glass; elements are solid.** Panes are the only translucent things. Avatars, buttons, chips, counts, switches and inputs are solid, or recessed into the glass as wells. Never fade an avatar or make a button see-through.
 3. **Light comes from the edges.** A pane has rim light on its top edge, green bounce on its bottom edge, a sheen and a shadow deep enough to float (`.sam-glass .sam-glass-rim`). Something laid on another pane is a slab (`.sam-glass--slab`) with a deeper shadow and green light underneath.
 4. **Leave gaps.** Panes are separated by `--sam-space-gutter` (14px) so the void shows between them. Don't merge columns into one block with borders.
-5. **One blur at a time.** Regular panes don't blur what's behind them; their fill keeps text readable. Only one overlay at a time (a drawer, a sheet) gets `.sam-glass-live`. Several blurred panes over animated content made Chrome on macOS flicker the whole page.
+5. **Panes are frosted glass.** Every pane blurs the void behind it, so the edge glow shows through each one, softened, and you can tell the panes are glass. A pane inside a pane doesn't blur again; an overlay (a drawer, a sheet, `.sam-glass-live`) blurs the content it covers. The void stays plain static gradients: blurred panes over animated or layered backgrounds made Chrome on macOS flicker the whole page.
 6. **People have colours.** You are green (`--sam-person-you`). Teammates get cyan, violet and rose in the order they joined the project (`--sam-person-1` to `-3`), stable per project. Automations are grey (`--sam-person-auto`). A colour says who, never what state.
 7. **Amber means it's waiting on you.** `--sam-color-warning` is for "needs input", notification counts and attention. Green is for things working. Neither is decoration.
 
@@ -47,7 +47,9 @@ All existing tokens keep their names and values. New ones:
 | `--sam-nav-active-top`, `-bottom`, `--sam-shadow-glow-active`, `--sam-shadow-accent` | `sam-glass.css` | Current nav item, open chat, primary glow.                  |
 | `--sam-space-gutter`, `--sam-radius-control`, `-pane`, `-slab`, `--sam-hairline`     | `sam-glass.css` | Layout and dividers inside panes.                           |
 
-Contrast: `--sam-color-fg-primary` and `--sam-color-fg-muted` meet 4.5:1 on panes in both themes. That's why panes keep a 0.74 fill without blur.
+Frosted panes: the app overrides the shared fills in `sam-glass.css` (dark 0.42, quiet 0.3; light 0.5, quiet 0.36) and carries the void's edge glow further in (`--sam-void-edge`, `-edge-soft`, `-wall`, `-core-fade`) so it reaches under the panes. Every `.sam-glass` gets `backdrop-filter: blur(var(--sam-pane-blur)) saturate(var(--sam-pane-saturate))`, except a pane nested in another pane. The marketing site keeps the shared, nearly opaque fills.
+
+Contrast: `--sam-color-fg-primary` and `--sam-color-fg-muted` meet 4.5:1 on frosted panes in both themes, measured behind the text in the chat and settings screens. Chips lay their status tint over the solid `--sam-chip-bg`, so a chip never picks up the glow.
 
 ## Components to build
 
@@ -80,7 +82,7 @@ Build these in `packages/ui/src/components/` with Tailwind and the tokens above,
 
 **Chat list.** Each row: status icon (spinning green when working, moon when idle, amber when it needs you), one-line title, "shared with" avatars and a pull request badge on the right, then a meta line with the owner's 14px avatar and name ("You" for yours) and the age in mono. Rows someone else started get a thin light on the left edge in the owner's colour, so your own rows are the plain ones. Above the list: a segmented control (Mine / Others / All, with counts) and, beside it, small teammate avatars that filter to one person's sessions.
 
-**Mobile (767px and below, as `useIsMobile`).** One floating app bar slab replaces today's two bars: menu on the left (its drawer slides from the left); project name; Recent chats and Notifications grouped in a well, because both work across projects; and the chat list button raised at the right edge, where its drawer slides in. The chat list drawer is the one overlay with live blur. Search and project settings move into the menu drawer.
+**Mobile (767px and below, as `useIsMobile`).** One floating app bar slab replaces today's two bars: menu on the left (its drawer slides from the left); project name; Recent chats and Notifications grouped in a well, because both work across projects; and the chat list button raised at the right edge, where its drawer slides in. The chat list drawer is an overlay: it blurs the chat it covers. Search and project settings move into the menu drawer.
 
 **Settings, project and admin pages.** A page header slab with tabs, then panes for each group of settings using `SettingRow` and `DataTable`. Admin's 18 sections go in a side pane grouped as People (Users, Trials, Quotas), Platform (Settings, Integrations, Credentials, Infrastructure, Storage, AI Proxy), Spend (Costs, Usage) and Health (Overview, Errors, Diagnoses, Logs, Stream, Analytics, Eventing). Examples on the canvas: Project settings → Access, Automation, Settings → Agents, Settings → Infrastructure, Admin → Shared compute pool, Admin → Users.
 

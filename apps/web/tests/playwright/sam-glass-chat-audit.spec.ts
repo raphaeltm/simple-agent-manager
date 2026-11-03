@@ -37,22 +37,38 @@ async function openChat(page: Page, theme: Theme, path = `chat/${GLASS_SESSION_I
   }
 }
 
-/** Count of elements with a live backdrop blur: SAM Glass allows at most one. */
-async function liveBlurCount(page: Page): Promise<number> {
-  return page.evaluate(
-    () =>
-      Array.from(document.querySelectorAll<HTMLElement>('body *')).filter((el) => {
-        const style = getComputedStyle(el);
-        const filter = style.backdropFilter || style.getPropertyValue('-webkit-backdrop-filter');
-        return Boolean(filter && filter !== 'none' && el.getClientRects().length > 0);
-      }).length
-  );
+/**
+ * Panes are frosted: each one blurs the void behind it. Returns how many visible panes blur,
+ * and how many blurring elements sit inside another blurring element without being an
+ * overlay; those would blur the same backdrop twice.
+ */
+async function frostedPanes(page: Page): Promise<{ frosted: number; nested: string[] }> {
+  return page.evaluate(() => {
+    const blurs = (el: Element) => {
+      const style = getComputedStyle(el);
+      const filter = style.backdropFilter || style.getPropertyValue('-webkit-backdrop-filter');
+      return Boolean(filter && filter !== 'none' && filter.includes('blur'));
+    };
+    const visible = (el: Element) => el.getClientRects().length > 0;
+    const frosted = Array.from(document.querySelectorAll('.sam-glass')).filter(
+      (el) => visible(el) && blurs(el)
+    ).length;
+    const nested = Array.from(document.querySelectorAll<HTMLElement>('body *'))
+      .filter((el) => visible(el) && blurs(el) && !el.classList.contains('sam-glass-live'))
+      .filter((el) => {
+        for (let p = el.parentElement; p; p = p.parentElement) if (blurs(p)) return true;
+        return false;
+      })
+      .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).slice(0, 60)}`);
+    return { frosted, nested };
+  });
 }
 
 async function capture(page: Page, name: string, theme: Theme, surface?: Locator) {
   if (surface) await expect(surface).toBeVisible({ timeout: 15_000 });
-  // One live blur at a time: the open overlay, or none.
-  expect(await liveBlurCount(page)).toBeLessThanOrEqual(1);
+  const { frosted, nested } = await frostedPanes(page);
+  expect(frosted).toBeGreaterThan(0);
+  expect(nested).toEqual([]);
   await screenshot(page, `glass-${name}-${theme}`, { scopeToProject: true });
 }
 
