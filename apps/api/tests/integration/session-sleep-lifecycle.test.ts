@@ -133,7 +133,7 @@ describe('terminal session sleep lifecycle integration', () => {
       userId: 'user-1',
       reason: 'explicit test sleep',
     });
-    expect(mocks.cancelAgentSession).toHaveBeenCalledTimes(1);
+    expect(mocks.stopAgent).toHaveBeenCalledTimes(1);
     expect(mocks.stopWorkspaceOnNode).toHaveBeenCalled();
   });
 
