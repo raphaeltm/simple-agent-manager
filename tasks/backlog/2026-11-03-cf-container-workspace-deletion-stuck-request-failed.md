@@ -22,7 +22,7 @@ time.) A separate `stopping` row, `01M2CX7BFQ64E1KY2E91148Y5C`, has had no node 
 ## Context
 
 Found while fixing slow VM workspace deletion
-(`tasks/active/2026-11-03-fast-workspace-physical-deletion.md`). For a cf-container node
+(`tasks/archive/2026-11-03-fast-workspace-physical-deletion.md`). For a cf-container node
 whose status is not `running`, `requestWorkspaceDeletion` in
 `apps/api/src/services/workspace-deletion.ts` destroys through the container DO
 (`stopNodeResources` with `workspaceDeletion`). Something on that path, or the

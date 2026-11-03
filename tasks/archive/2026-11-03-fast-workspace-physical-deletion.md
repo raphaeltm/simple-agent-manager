@@ -95,11 +95,18 @@ The API side is unchanged: its next retry (1 min) now finds the deletion finaliz
 
 ## Acceptance Criteria
 
-- [ ] A workspace with more than 512 entries is physically deleted in a single attempt
-- [ ] Cancelling the delete request after the lock is held does not cancel deletion
-- [ ] A pending inline deletion is resumed by the reconciler without waiting for the ticker
-- [ ] Safety tests from #2463 (symlinks, root swap, mounts, fences) still pass
-- [ ] Staging: a stopped workspace on a fresh node reaches `deleted` within ~2 minutes
+- [x] A workspace with more than 512 entries is physically deleted in a single attempt
+- [x] Cancelling the delete request after the lock is held does not cancel deletion
+- [x] A pending inline deletion is resumed by the reconciler without waiting for the ticker
+- [x] Safety tests from #2463 (symlinks, root swap, mounts, fences) still pass
+- [x] Staging: a stopped workspace on a fresh node reaches `deleted` within ~2 minutes
+
+## Staging Evidence
+
+Fresh node `01M6HKK872S2WQWW3NTDVD2SAS` (agent `7069e6030`), project `hono` (>512 entries).
+Explicit `DELETE /api/workspaces/01M6HKK8FE2903WEPBA4FADBK5` returned
+`200 {"deletionStatus":"confirmed"}` within seconds, and the workspace was gone at the first poll.
+Node deleted afterwards.
 
 ## References
 
