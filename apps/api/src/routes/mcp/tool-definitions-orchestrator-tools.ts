@@ -16,8 +16,7 @@ export const ORCHESTRATOR_LIFECYCLE_TOOLS = [
   },
   {
     name: 'get_scheduling_queue',
-    description:
-      'Get the scheduling queue showing tasks pending dispatch by the orchestrator.',
+    description: 'Get the scheduling queue showing tasks pending dispatch by the orchestrator.',
     inputSchema: {
       type: 'object' as const,
       properties: {},
@@ -78,7 +77,7 @@ export const ORCHESTRATOR_LIFECYCLE_TOOLS = [
   {
     name: 'override_task_state',
     description:
-      'Override a task\'s scheduler state manually. Use when the orchestrator\'s computed state ' +
+      "Override a task's scheduler state manually. Use when the orchestrator's computed state " +
       'is incorrect or when you need to force a task into a specific state. ' +
       'Allowed states: schedulable, blocked_human, blocked_resource, cancelled.',
     inputSchema: {
