@@ -142,6 +142,17 @@ describe('required sleep', () => {
       expect(mocks.stopWorkspaceOnNode).toHaveBeenCalled();
     });
 
+    it('stops a turn the VM is running before its prompting report reaches ProjectData', async () => {
+      // ProjectData still reads idle; only the agent knows the turn has started.
+      activity = { activity: 'idle', activityAt: START.getTime() - MINUTE };
+      cancelOutcome = 'ok';
+      await explicitSleep();
+      expect(cancelCalls()).toHaveLength(1);
+      expect(mocks.recordSessionTurnEnd).toHaveBeenCalled();
+      expect(order.indexOf('cancel')).toBeLessThan(order.indexOf('final-snapshot:chat-1'));
+      expect(snapshotRow()).toMatchObject({ sleep_status: 'sleeping' });
+    });
+
     it('is aborted by a whole new turn that starts and ends during capture', async () => {
       mocks.recordSessionTurnEnd.mockImplementation(() => {
         order.push('turn-end');
@@ -180,6 +191,34 @@ describe('required sleep', () => {
       expect(mocks.recordSessionTurnEnd).not.toHaveBeenCalled();
       expect(mocks.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
       expect(snapshotRow()).toMatchObject({ sleep_status: 'failed', sleep_episode_failures: 1 });
+    });
+
+    it('does not skip the agent on the first attempt of a reopened blocked episode', async () => {
+      cancelOutcome = 'fail';
+      // The previous episode spent its budget and ended blocked; pressing Sleep reopens it.
+      sqlite
+        .prepare(
+          `UPDATE session_snapshots SET sleep_status = 'terminal_failed', sleep_episode_failures = 3,
+             sleep_episode_started_at = ?, sleep_fallback_json = ?
+           WHERE chat_session_id = 'chat-1'`
+        )
+        .run(
+          new Date(START.getTime() - 20 * MINUTE).toISOString(),
+          JSON.stringify({
+            version: 1,
+            outcome: 'blocked',
+            blockedReason: 'no_git_baseline',
+            trigger: 'attempt_budget',
+            failedAttempts: 3,
+            episodeStartedAt: new Date(START.getTime() - 20 * MINUTE).toISOString(),
+            recoveryPoint: null,
+            lastError: null,
+            decidedAt: new Date(START.getTime() - 5 * MINUTE).toISOString(),
+          })
+        );
+      await expect(explicitSleep()).rejects.toThrow(/could not stop the agent turn/);
+      expect(mocks.recordSessionTurnEnd).not.toHaveBeenCalled();
+      expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
     });
 
     it('records the turn end without the agent once the attempt budget is spent', async () => {
@@ -235,10 +274,12 @@ describe('required sleep', () => {
       expect(cancelCalls()).toHaveLength(1);
     });
 
-    it('does not stop anything when the turn has already ended (control)', async () => {
+    it('records no turn end when the turn has already ended on both sides (control)', async () => {
       activity = { activity: 'idle', activityAt: START.getTime() - MINUTE };
+      cancelOutcome = '409';
       await explicitSleep();
-      expect(cancelCalls()).toHaveLength(0);
+      // The agent is always asked, and it answers that nothing is in flight.
+      expect(cancelCalls()).toHaveLength(1);
       expect(mocks.recordSessionTurnEnd).not.toHaveBeenCalled();
       expect(snapshotRow()).toMatchObject({ sleep_status: 'sleeping' });
     });
@@ -360,23 +401,35 @@ describe('required sleep', () => {
       expect(fixture.sessionStatus).toBe('stopped');
     });
 
-    it('retries a failing close for the sleep-failure window from its FIRST failure', async () => {
+    it('never retires a failing close; it backs off and retries until the chat closes', async () => {
       strand('deleted');
       mocks.stopSession.mockRejectedValue(new Error('ProjectData unavailable'));
-      // The intent was armed long before the workspace was deleted.
-      sqlite
-        .prepare(`UPDATE session_snapshots SET updated_at = ? WHERE chat_session_id = 'chat-1'`)
-        .run(new Date(START.getTime() - 3 * HOUR).toISOString());
-      // The first failure starts the window instead of finding it spent.
       expect(await runSessionSleepSweep(env, START)).toMatchObject({ retired: 0 });
-      expect(await runSessionSleepSweep(env, new Date(START.getTime() + 5 * MINUTE))).toMatchObject(
-        { retired: 0 }
-      );
-      expect(mocks.stopSession).toHaveBeenCalledTimes(2);
-      // Past the window the intent is retired anyway, so it stops taking a sweep slot.
-      expect(
-        await runSessionSleepSweep(env, new Date(START.getTime() + 20 * MINUTE))
-      ).toMatchObject({ retired: 1 });
+      const waiting = sqlite
+        .prepare(
+          `SELECT sleep_status, sleep_after, sleep_error FROM session_snapshots
+           WHERE chat_session_id = 'chat-1'`
+        )
+        .get() as Record<string, string>;
+      // Backed off by the sleep retry delay (60 s in this fixture), so it does not take a
+      // sweep slot on every tick.
+      expect(waiting).toMatchObject({
+        sleep_status: 'failed',
+        sleep_after: new Date(START.getTime() + MINUTE).toISOString(),
+        sleep_error: expect.stringMatching(/retrying/),
+      });
+      // Not due yet: not selected, not retried.
+      await runSessionSleepSweep(env, new Date(START.getTime() + 30_000));
+      expect(mocks.stopSession).toHaveBeenCalledTimes(1);
+      // Hours later it is still waiting, never retired unclosed...
+      expect(await runSessionSleepSweep(env, new Date(START.getTime() + 5 * HOUR))).toMatchObject({
+        retired: 0,
+      });
+      // ...and once ProjectData answers, it closes the chat and only then retires.
+      mocks.stopSession.mockImplementation(() => Promise.resolve(true));
+      expect(await runSessionSleepSweep(env, new Date(START.getTime() + 6 * HOUR))).toMatchObject({
+        retired: 1,
+      });
     });
 
     it('keeps the chat while a stopped sibling workspace can still be restarted (control)', async () => {

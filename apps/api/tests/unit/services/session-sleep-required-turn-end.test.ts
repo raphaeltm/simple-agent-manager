@@ -75,16 +75,41 @@ describe('endAgentTurnForRequiredSleep', () => {
   });
 
   it.each(['idle', 'error', 'stopped'])(
-    'does nothing when the activity is %s',
+    'still asks the agent when ProjectData reads %s, and ends a turn it cancels',
     async (activity) => {
+      // The VM marks a turn started before its `prompting` report lands.
       mocks.getSessionState.mockResolvedValue({ activity });
       await expect(
         endAgentTurnForRequiredSleep(env, workspace, 'agent-1', { reason: 'test' })
+      ).resolves.toBe(true);
+      expect(mocks.cancelAgentSessionOnNode).toHaveBeenCalledTimes(1);
+      expect(mocks.recordSessionTurnEnd).toHaveBeenCalledTimes(1);
+    }
+  );
+
+  it.each([404, 409])(
+    'records nothing for an idle session the agent reports idle too (%s)',
+    async (status) => {
+      mocks.getSessionState.mockResolvedValue({ activity: 'idle' });
+      mocks.cancelAgentSessionOnNode.mockResolvedValue({ success: false, status });
+      await expect(
+        endAgentTurnForRequiredSleep(env, workspace, 'agent-1', { reason: 'test' })
       ).resolves.toBe(false);
-      expect(mocks.cancelAgentSessionOnNode).not.toHaveBeenCalled();
       expect(mocks.recordSessionTurnEnd).not.toHaveBeenCalled();
     }
   );
+
+  it('records nothing for an idle session even when the agent cannot be reached at the fallback', async () => {
+    mocks.getSessionState.mockResolvedValue({ activity: 'idle' });
+    mocks.cancelAgentSessionOnNode.mockResolvedValue({ success: false, status: 500 });
+    await expect(
+      endAgentTurnForRequiredSleep(env, workspace, 'agent-1', {
+        reason: 'test',
+        confirmWithoutAgent: true,
+      })
+    ).resolves.toBe(false);
+    expect(mocks.recordSessionTurnEnd).not.toHaveBeenCalled();
+  });
 
   it('never calls a sleeping Instant container, which a cancel would wake', async () => {
     await endAgentTurnForRequiredSleep(

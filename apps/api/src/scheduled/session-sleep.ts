@@ -294,10 +294,8 @@ export async function runSessionSleepSweep(
               return false;
             }
           );
-          if (
-            !closed &&
-            (await deferDeletedWorkspaceChatClose(db, candidate, now, episodeConfig))
-          ) {
+          if (!closed) {
+            await deferDeletedWorkspaceChatClose(db, env, candidate.snapshotId, now);
             continue;
           }
         }

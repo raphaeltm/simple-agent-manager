@@ -204,8 +204,9 @@ These **Operations** settings bound automatic retries after an eviction wake fai
 
 ## Node lifetime
 
-A VM that SAM created for tasks runs for at most 24 hours (`NODE_ABSOLUTE_MAX_LIFETIME_MS`). After
-that, every session on it sleeps as soon as its agent's turn ends.
+A VM that SAM created for tasks starts retiring when it is 24 hours old
+(`NODE_ABSOLUTE_MAX_LIFETIME_MS`). From then on, every session on it sleeps as soon as its agent's
+turn ends, and SAM removes the VM once its sessions have slept.
 `operations.nodeLifetimeForceSleepAfterMs` sets how long SAM waits for a turn that is still running
 before it stops the agent and sleeps the session anyway. The default is 1,800,000 milliseconds
 (30 minutes); admins can set a whole number from 1 to 86,400,000 milliseconds. The chat keeps its
@@ -318,10 +319,10 @@ The **Operations project** is the private project you select in **Admin → Inte
 debugger tools that let its agents look across every user's nodes, workspaces and sessions. Two
 **Operations** settings control them:
 
-| Setting                         | Default | Values                                        | What it controls                                                                                         |
-| ------------------------------- | ------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `operations.debuggerTools`      | `off`   | `off`, `read`, `read_ask`, `read_auto_safe`   | Which debugger tools Operations agents may use. `off` hides and refuses all of them                      |
-| `operations.auditRetentionDays` | 90      | 1–3,650                                       | Days each debugger tool audit record is kept before the daily 03:00 UTC cleanup deletes it               |
+| Setting                         | Default | Values                                      | What it controls                                                                           |
+| ------------------------------- | ------- | ------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `operations.debuggerTools`      | `off`   | `off`, `read`, `read_ask`, `read_auto_safe` | Which debugger tools Operations agents may use. `off` hides and refuses all of them        |
+| `operations.auditRetentionDays` | 90      | 1–3,650                                     | Days each debugger tool audit record is kept before the daily 03:00 UTC cleanup deletes it |
 
 Today the only debugger tool is `ops_get_access_status`, which reports this setting, the
 capabilities a task has, and why any are refused. Read tools and approved actions arrive in later

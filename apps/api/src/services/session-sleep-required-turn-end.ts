@@ -51,10 +51,11 @@ export interface RequiredSleepTurnTarget {
 }
 
 /**
- * Returns whether a running turn was found and ended. Throws `RequiredSleepTurnEndError` when
- * the agent did not confirm, so the attempt counts toward the bounded fallback. With
- * `confirmWithoutAgent` (the fallback, once that budget is spent) the turn end is recorded even
- * when the agent cannot be reached: the runtime is about to be torn down regardless.
+ * Always asks the agent to cancel, and returns whether a turn was ended: one the agent cancelled,
+ * or one ProjectData still records as running. Throws `RequiredSleepTurnEndError` when the agent
+ * did not confirm, so the attempt counts toward the bounded fallback. With
+ * `confirmWithoutAgent` (the fallback, once that budget is spent) a recorded running turn is
+ * ended even when the agent cannot be reached: the runtime is about to be torn down regardless.
  */
 export async function endAgentTurnForRequiredSleep(
   env: Env,
@@ -71,7 +72,7 @@ export async function endAgentTurnForRequiredSleep(
   }
 ): Promise<boolean> {
   const state = await projectDataService.getSessionState(env, workspace.projectId, agentSessionId);
-  if (!isRequiredSleepTurnRunning(state?.activity)) return false;
+  const reportedRunning = isRequiredSleepTurnRunning(state?.activity);
 
   // Captured before the VM call, so a turn that starts during the call is never ended by
   // this call's result (.claude/rules/49).
@@ -89,7 +90,11 @@ export async function endAgentTurnForRequiredSleep(
         { requestTimeoutMs: options.requestTimeoutMs }
       );
   const status = result.status;
-  const confirmed = result.success || NO_TURN_STATUSES.has(status);
+  // Asked even when ProjectData reads idle: the VM marks a turn started before its `prompting`
+  // report lands, and only the VM's own answer covers that window. It checks `IsPrompting` and
+  // answers 409 without touching an idle agent.
+  const cancelledOnAgent = result.success;
+  const confirmed = cancelledOnAgent || NO_TURN_STATUSES.has(status);
   if (!confirmed) {
     log.warn('session_sleep.required_turn_cancel_unconfirmed', {
       workspaceId: workspace.id,
@@ -99,6 +104,8 @@ export async function endAgentTurnForRequiredSleep(
     });
     if (!options.confirmWithoutAgent) throw new RequiredSleepTurnEndError(status);
   }
+  // Nothing was cancelled and nothing is recorded as running: an idle session gets no turn end.
+  if (!cancelledOnAgent && !reportedRunning) return false;
 
   await projectDataService.recordSessionTurnEnd(env, workspace.projectId, agentSessionId, {
     reason: 'cancelled',
@@ -111,6 +118,7 @@ export async function endAgentTurnForRequiredSleep(
     reason: options.reason,
     activity: state?.activity ?? null,
     agentStatus: status,
+    cancelledOnAgent,
     confirmedByAgent: confirmed,
   });
   return true;

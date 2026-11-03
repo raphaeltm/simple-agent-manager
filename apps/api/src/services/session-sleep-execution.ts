@@ -13,6 +13,7 @@ import {
   sleepTeardownSafetyGate,
 } from './session-sleep-eligibility';
 import {
+  isBlockedSleepEpisode,
   serializeSessionSleepFallbackRecord,
   sessionSleepEpisodeConfig,
   sessionSleepEpisodeTrigger,
@@ -245,8 +246,11 @@ export async function sleepWorkspaceSession(
           requestTimeoutMs: requestedByPerson
             ? undefined
             : getNodeAgentBackgroundRequestTimeoutMs(env),
+          // A person's claim reopens a blocked episode with a fresh budget, which this
+          // pre-claim read does not show yet; such an attempt is not past its budget.
           confirmWithoutAgent: Boolean(
             snapshot &&
+            !(requestedByPerson && isBlockedSleepEpisode(snapshot)) &&
             sessionSleepEpisodeTrigger(snapshot, new Date(), sessionSleepEpisodeConfig(env))
           ),
         });

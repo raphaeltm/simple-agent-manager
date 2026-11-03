@@ -64,6 +64,42 @@ describe('session work clock', () => {
     });
   }
 
+  it("keeps a new turn's start when its prompting report lands after its idle report", () => {
+    // Turn 1, then turn 2 whose `prompting` report (start T0 + 2m) is applied after its
+    // own `idle` report (T0 + 3m): the activity write is dropped as stale.
+    prompting(T0);
+    upsertActivityState(sql, ACP_SESSION, {
+      activity: 'idle',
+      observedAt: T0 + MINUTE,
+      now: T0 + MINUTE,
+    });
+    upsertActivityState(sql, ACP_SESSION, {
+      activity: 'idle',
+      observedAt: T0 + 3 * MINUTE,
+      now: T0 + 3 * MINUTE,
+    });
+    expect(
+      prompting(T0 + 2 * MINUTE, { promptStartedAt: T0 + 2 * MINUTE, now: T0 + 3 * MINUTE + 1 })
+    ).toBe(false);
+
+    const state = getSessionState(sql, ACP_SESSION);
+    // The stale report changes nothing else...
+    expect(state).toMatchObject({ activity: 'idle', activityAt: T0 + 3 * MINUTE });
+    // ...but the VM's evidence that a new turn ran survives.
+    expect(state?.reportedPromptStartedAt).toBe(T0 + 2 * MINUTE);
+  });
+
+  it('never moves the kept turn start backwards for an older stale report (control)', () => {
+    prompting(T0 + 5 * MINUTE, { promptStartedAt: T0 + 5 * MINUTE });
+    upsertActivityState(sql, ACP_SESSION, {
+      activity: 'idle',
+      observedAt: T0 + 6 * MINUTE,
+      now: T0 + 6 * MINUTE,
+    });
+    prompting(T0 + 2 * MINUTE, { promptStartedAt: T0 + 2 * MINUTE, now: T0 + 7 * MINUTE });
+    expect(getSessionState(sql, ACP_SESSION)?.reportedPromptStartedAt).toBe(T0 + 5 * MINUTE);
+  });
+
   it('keeps the work clock across same-turn re-reports while activity_at advances', () => {
     expect(prompting(T0)).toBe('work_edge');
     for (let minute = 1; minute <= 30; minute++) {

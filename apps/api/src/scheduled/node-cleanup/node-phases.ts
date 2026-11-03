@@ -17,6 +17,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { preservedVmRetirementActivitySql } from '../../services/preserved-vm-retirement';
 import { prepareAbsoluteLifetimeRelease } from './absolute-lifetime-preservation';
+import { selectMaxLifetimeCandidates } from './max-lifetime-candidates';
 import {
   boundedWarmPlacementClaimGuardSql,
   type CleanupConfig,
@@ -27,7 +28,6 @@ import {
   LAST_WORKSPACE_ACTIVITY_SQL,
   markNodeCleanupBackoff,
   type NodeCleanupResult,
-  sleepingContainerRetentionGuardSql,
 } from './shared';
 
 /**
@@ -145,39 +145,13 @@ export async function sweepMaxLifetimeNodes(
   const absoluteThreshold = new Date(now.getTime() - config.absoluteMaxLifetimeMs).toISOString();
   const idleThreshold = getNodeWorkspaceIdleThresholdIso(now, config);
 
-  const candidates = await env.DATABASE.prepare(
-    `SELECT n.id, n.user_id, n.status, n.created_at, n.runtime_incarnation_id,
-            COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count,
-            ${LAST_WORKSPACE_ACTIVITY_SQL} as last_activity
-     FROM nodes n
-     LEFT JOIN workspaces w ON w.node_id = n.id
-     WHERE n.status NOT IN ('stopped', 'destroying', 'deleted')
-       AND n.node_role = 'workspace'
-       AND n.node_class != 'user-owned'
-       AND EXISTS (
-         SELECT 1 FROM tasks t
-         WHERE t.auto_provisioned_node_id = n.id
-       )
-       AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
-       ${boundedWarmPlacementClaimGuardSql('n.id')}
-       ${sleepingContainerRetentionGuardSql('n')}
-       AND n.created_at < ?
-     GROUP BY n.id, n.user_id, n.status, n.created_at
-     ORDER BY active_ws_count ASC, n.created_at ASC
-     LIMIT ?`
-  )
-    .bind(now.toISOString(), idleThreshold, lifetimeThreshold, config.nodeSweepLimit)
-    .all<{
-      id: string;
-      user_id: string;
-      status: string;
-      created_at: string;
-      runtime_incarnation_id: string | null;
-      active_ws_count: number;
-      last_activity: string;
-    }>();
+  const candidates = await selectMaxLifetimeCandidates(env, now, config, {
+    lifetimeThreshold,
+    absoluteThreshold,
+    idleThreshold,
+  });
 
-  for (const node of candidates.results) {
+  for (const node of candidates) {
     const pastAbsoluteCeiling = node.created_at < absoluteThreshold;
     const workspacesIdle = node.last_activity < idleThreshold;
 

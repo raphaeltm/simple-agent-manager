@@ -17,7 +17,9 @@ import type { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { parsePositiveInt } from '../lib/route-helpers';
 import * as projectDataService from './project-data';
+import { DEFAULT_SESSION_SLEEP_RETRY_DELAY_MS } from './session-snapshot-artifacts';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -64,49 +66,40 @@ export async function closeChatOfDeletedSleepWorkspace(
   return true;
 }
 
-/** `sleep_error` while a failed close is retried; its `updated_at` is when retrying began. */
+/** `sleep_error` while a failed close waits for its next try. */
 export const DELETED_WORKSPACE_CHAT_CLOSE_RETRYING =
   'Closing the chat of the deleted workspace failed; retrying';
 
 /**
- * After a failed close, whether to keep the intent for another try. Retries last the bounded
- * sleep-failure window, counted from the first failure, which this stamps on the row: the row's
- * own `updated_at` is usually when the intent was armed, long before. Past the window the intent
- * is retired anyway, so it stops taking a sweep slot and a failed task is released.
+ * After a failed close, keep the intent and try again later. It is never retired unclosed: a
+ * retired intent is never selected again, so the chat would stay `active` with no runtime and
+ * no wake path for good. The retry waits the ordinary sleep retry delay, as a `failed` intent
+ * the sweep selects by `sleep_after`, so a close that keeps failing costs one sweep slot per
+ * delay rather than one per tick. Any status may be rewritten: with the workspace deleted the
+ * intent is dead whatever its status (`isDeadSleepIntentWorkspace`).
  */
 export async function deferDeletedWorkspaceChatClose(
   db: Db,
-  candidate: {
-    snapshotId: string;
-    chatSessionId: string;
-    sleepError?: string | null;
-    updatedAt?: string | null;
-  },
-  now: Date,
-  config: { failureMaxElapsedMs: number }
-): Promise<boolean> {
-  if (candidate.sleepError !== DELETED_WORKSPACE_CHAT_CLOSE_RETRYING) {
-    await db
-      .update(schema.sessionSnapshots)
-      .set({ sleepError: DELETED_WORKSPACE_CHAT_CLOSE_RETRYING, updatedAt: now.toISOString() })
-      .where(
-        and(
-          eq(schema.sessionSnapshots.id, candidate.snapshotId),
-          isNull(schema.sessionSnapshots.sleepingAt)
-        )
-      );
-    return true;
-  }
-  const retryingSince = Date.parse(candidate.updatedAt ?? '');
-  if (
-    Number.isFinite(retryingSince) &&
-    now.getTime() - retryingSince < config.failureMaxElapsedMs
-  ) {
-    return true;
-  }
-  log.error('session_sleep_sweep.deleted_workspace_chat_close_abandoned', {
-    snapshotId: candidate.snapshotId,
-    chatSessionId: candidate.chatSessionId,
-  });
-  return false;
+  env: Env,
+  snapshotId: string,
+  now: Date
+): Promise<void> {
+  const retryDelayMs = parsePositiveInt(
+    env.SESSION_SLEEP_RETRY_DELAY_MS,
+    DEFAULT_SESSION_SLEEP_RETRY_DELAY_MS
+  );
+  await db
+    .update(schema.sessionSnapshots)
+    .set({
+      sleepStatus: 'failed',
+      sleepAfter: new Date(now.getTime() + retryDelayMs).toISOString(),
+      sleepError: DELETED_WORKSPACE_CHAT_CLOSE_RETRYING,
+      sleepClaimId: null,
+      sleepClaimedAt: null,
+      sleepStoppingSince: null,
+      updatedAt: now.toISOString(),
+    })
+    .where(
+      and(eq(schema.sessionSnapshots.id, snapshotId), isNull(schema.sessionSnapshots.sleepingAt))
+    );
 }
