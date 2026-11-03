@@ -228,20 +228,14 @@ describe('black box recorder on unhealthy transition and retention', () => {
     expect(await env.R2.head(key)).not.toBeNull();
 
     // Not yet expired: retention keeps it.
-    await env.KV.delete('cleanup:operations-telemetry:last-run');
-    await runOperationsTelemetryRetention(env as Env);
+    await runOperationsTelemetryRetention(env as Env, '0 3 * * *');
     expect(await listNodeLogCaptures(env.DATABASE, 'node-blackbox-unhealthy-a')).toHaveLength(1);
 
-    // Past expiry: the next daily run deletes the R2 object, then the index row.
-    await env.KV.delete('cleanup:operations-telemetry:last-run');
+    // Past expiry: the daily run deletes the R2 object, then the index row.
     const later = new Date(Date.now() + 8 * 24 * 60 * 60 * 1000);
-    const purge = await runOperationsTelemetryRetention(env as Env, later);
+    const purge = await runOperationsTelemetryRetention(env as Env, '0 3 * * *', later);
     expect(purge.capturesDeleted).toBeGreaterThanOrEqual(2);
     expect(await env.R2.head(key)).toBeNull();
     expect(await listNodeLogCaptures(env.DATABASE, 'node-blackbox-unhealthy-a')).toEqual([]);
-
-    // The interval gate holds a second run on the same day.
-    const gated = await runOperationsTelemetryRetention(env as Env, later);
-    expect(gated).toMatchObject({ skipped: true, skipReason: 'interval-not-elapsed' });
   });
 });

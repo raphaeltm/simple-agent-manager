@@ -97,6 +97,7 @@ export async function scheduled(
     // Separate promise: an analytics failure must not skip the audit retention purge.
     ctx.waitUntil(runOperationsAuditPurge(env, controller.cron));
     ctx.waitUntil(runDebugPackagePurge(env, controller.cron));
+    ctx.waitUntil(runOperationsTelemetryRetention(env, controller.cron));
     // Separate promise again, so none of the jobs above can suppress the latency check.
     ctx.waitUntil(
       runLifecycleLatencyDailyEvaluation(env).catch((err) => {
@@ -212,9 +213,6 @@ export async function scheduled(
   // Retire superseded releases before compose cleanup re-derives referenced artifacts.
   const deploymentReleaseRetention = await sweeps.isolate('deployment_release_retention', () =>
     runScheduledDeploymentReleaseRetention(env)
-  );
-  const operationsTelemetryRetention = await sweeps.isolate('operations_telemetry_retention', () =>
-    runOperationsTelemetryRetention(env)
   );
   // The D1 sweep owns exact snapshot expiry and deletes the matching R2 objects.
   const sessionSnapshotPurge = await sweeps.isolate('session_snapshot_purge', () =>
@@ -414,10 +412,6 @@ export async function scheduled(
     sessionSleepBlocked: sessionSleep?.blocked,
     sessionSleepRetired: sessionSleep?.retired,
     sessionSleepBudgetExhausted: sessionSleep?.budgetExhausted,
-    operationsTelemetryRetentionSkipped: operationsTelemetryRetention?.skipped,
-    operationsTelemetryDecisionsDeleted: operationsTelemetryRetention?.decisionsDeleted,
-    operationsTelemetryCapturesDeleted: operationsTelemetryRetention?.capturesDeleted,
-    operationsTelemetryTracesDeleted: operationsTelemetryRetention?.tracesDeleted,
     deploymentReleaseRetentionSkipped: deploymentReleaseRetention?.skipped,
     deploymentReleaseRetentionSkipReason: deploymentReleaseRetention?.skipReason,
     deploymentReleaseRetentionDeleted: deploymentReleaseRetention?.deletedReleases,
