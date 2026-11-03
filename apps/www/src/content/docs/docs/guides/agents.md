@@ -87,13 +87,13 @@ To connect an account:
 
 1. Go to **Settings → Agents** and click **Connect account**.
 2. Pick the agent.
-3. Connect it: [guided sign-in](#connecting-a-subscription-with-guided-sign-in) for a Claude Code or
-   Codex subscription, or paste an API key. OpenCode uses an OpenCode Zen or Go key. Your
-   credentials are encrypted at rest.
-4. Name the account (for example, Work or Personal) so you can tell it apart later.
+3. Connect it. For a Claude Code or Codex subscription, keep the subscription option and sign in from
+   your browser ([guided sign-in](#connecting-a-subscription-with-guided-sign-in), next). Otherwise
+   paste an API key; OpenCode uses an OpenCode Zen or Go key. Your credentials are encrypted at rest.
+4. Name the account (for example, Work or Personal) so you can tell it apart later, or **Skip**.
 
 The account you connect becomes your default for that agent. If you already had a default, it stays
-connected and moves to **Unattached**. To connect an account for one project only, without changing
+connected and moves to **Unattached** (or stays under **Pinned** if projects or profiles use it). To connect an account for one project only, without changing
 your default, start from the project instead (see
 [Using another account in one project](#using-another-account-in-one-project)).
 
@@ -111,7 +111,8 @@ lanes:
   choose.
 - **Unattached**: connected, but nothing uses it.
 
-Agents you haven't connected are listed after **Not connected:**; select one to connect it.
+Agents you haven't connected are listed after **Not connected:**; select one to connect it. (On a
+project's **Accounts** tab, the same list connects the agent for that project only.)
 
 SAM picks the account for a run in this order, most specific first (`explainResolution` in
 `packages/shared/src/composable-credentials/resolver.ts`):
@@ -124,141 +125,6 @@ SAM picks the account for a run in this order, most specific first (`explainReso
 Pins are per person. Yours change which of your accounts runs your work; they never change a
 teammate's.
 
-### Common account tasks
-
-**Use a client's account in one project, and your own everywhere else.** Keep your own account as
-the default. Open the client project's **Settings → Accounts**, select **Use another account here** on
-the agent, and pick the client's account with **Use here**, or **Connect a new account** to add it.
-Your other projects keep your default.
-
-**Switch your default account.** In **Settings → Agents**, choose **Make default** on the account you
-want, from its card's **⋯** menu or the button on an unattached card. The confirmation says how
-many projects switch. Projects pinned to another account keep it, and the old default stays
-connected.
-
-![The Make default confirmation. It reads "Make Personal Pro plan your default?" and "3 projects using Work Max plan will switch to Personal Pro plan, and so will new projects. Projects pinned to an account keep it. Work Max plan stays connected." with Cancel and Make default buttons.](/images/docs/accounts-make-default.png)
-
-**Run one profile on a different account.** For example, run _Opus deep work_ on your Claude Max
-account and everything else on a cheaper key: see
-[Using another account for one profile](#using-another-account-for-one-profile).
-
-**Point several projects at one account.** On the account's card in **Settings → Agents**, choose
-**Use in projects…** (on an unattached card, **Use in a project**; on a pinned card, **Add project**),
-check the projects, and save. One account can be pinned to any number of projects. Unchecking a
-project moves it back to your default.
-
-**Refresh an expired sign-in or key.** Choose **Replace…** on your default (or **Replace your …
-default** under the lanes), and sign in again or paste the new key. This connects a new account and
-makes it your default; the old one moves to **Unattached**, where you can **Remove** it. Projects
-pinned to the old account, and profiles that use it, keep using it: move them with **Use in
-projects…** and **Use in profiles…** on the new card, or replace the pinned account from the project's
-**Accounts** tab. A chat that's already running picks up the new account only when its agent starts
-again (see [The agent or a tool can't sign in](/docs/guides/session-troubleshooting/#the-agent-or-a-tool-cant-sign-in)).
-
-**Work in a teammate's project.** Your work there runs on your own accounts: your default, or one you
-pin in that project's **Accounts** tab. Any member who can run tasks in the project can pin their own
-account there, and it never changes which account a teammate's work uses. A chat a teammate
-[shares with you](/docs/guides/collaboration/#work-together-in-a-chat) is different: it runs on their
-accounts.
-
-Changing which account a project or profile uses while a task is
-[waiting for a provider limit reset](/docs/guides/session-troubleshooting/#waiting-for-a-provider-limit-reset)
-stops that task with **Blocked: selected provider credential changed**, so it never carries on
-silently on a different account.
-
-### Account card actions
-
-| Action                       | Where                                     | What it does                                                                                                                          |
-| ---------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------- |
-| **Make default**             | **⋯** menu; button on unattached cards    | Makes this account your default. Pinned projects keep theirs.                                                                         |
-| **Rename**                   | **⋯** menu                                | Changes the name you see.                                                                                                             |
-| **Use in projects…**         | **⋯** menu on pinned and unattached cards | Pins this account to the projects you check; unchecked projects go back to your default.                                              |
-| **Use in profiles…**         | **⋯** menu on any active account          | Makes the profiles you check run on this account, grouped by project. Only your own runs change.                                      |
-| **Replace…**                 | **⋯** menu on your default                | Connects a new account as your default. The old one moves to **Unattached**.                                                          |
-| **Disconnect**               | **⋯** menu on your default                | Stops using it as your default. SAM falls back to an earlier credential for that agent if you saved one; otherwise connect a new one. |
-| **Use default in** _project_ | **⋯** menu on a pinned account            | Moves that project back to your default.                                                                                              |
-| **Manage in Advanced**       | **⋯** menu, some account types            | Shown instead of **Disconnect** for accounts such as an OpenAI-compatible endpoint, which you manage in **Settings → Advanced**.      |
-| **Remove**                   | Unattached cards                          | Deletes an account nothing uses. An account that only profiles use counts as in use and shows under **Pinned**.                       |
-
-**Make default**, **Use in projects…** and **Use in profiles…** are for agent accounts only. For cloud
-accounts in **Settings → Infrastructure**, connect a new account to change your default, and use the
-project's **Accounts** tab to give a project its own cloud account.
-
-### Pausing an account
-
-You can pause an account without removing it: in **Settings → Advanced**, select **Deactivate** on its
-credential (or on one project's attachment, to pause only that pin). Resume it there with
-**Activate**. The account cards link to **Advanced** when something is paused.
-
-A paused account doesn't fall back to another one. A project or profile pinned to it **stops** instead:
-the project's **Accounts** tab says **Can't run — its pinned account is paused**, the profile's
-**Account** section says **Stops:**, and a chat started there shows **Agent connection missing**. That
-way your work never runs on an account you didn't choose. Resume the account, or pick **Use my
-default** (project) or **Use my usual account** (profile). Paused accounts can't be made the default or
-pinned anywhere new.
-
-### Using another account in one project
-
-A project's **Accounts** tab (in its settings) shows, for each agent, whether the project uses
-**your default** or an account pinned to that project.
-
-1. Open the project's **Settings → Accounts** and expand the agent.
-2. Select **Use another account here** (it reads **Use a different account here** once the project
-   has a pin).
-3. Pick one of the accounts you already connected and select **Use here**, or select **Connect a new
-   account** to connect one now, with guided sign-in or a key. A new account connected here is pinned
-   only to this project; your default stays the same.
-
-<picture>
-  <source media="(max-width: 40em)" srcset="/images/docs/accounts-project-picker-mobile.png" />
-  <img src="/images/docs/accounts-project-picker.png" alt="Project settings, Accounts, the Claude Code row for the Labs project. It says Your default, with two choices: Use my default (Work Max plan, follows your settings) and Use another account here. The picker below lists Acme client key (API key, pinned in Acme client portal) and Personal Pro plan (subscription, not used by any project), each with Use here, and a Connect a new account link." loading="lazy" />
-</picture>
-
-The picker lists your accounts for that agent except your default, the current pin and paused
-accounts. The same account can stay pinned to other projects. **Use my default** removes the pin. A
-pin is yours alone: it changes which of your accounts runs your work in the project, never another
-member's, so any member who can run tasks there can set one. On the project's **Agents** tab, each
-agent card shows which account it uses, with a **Manage in Accounts** link. When some of your
-profiles run on their own account in this project, the Accounts tab lists them under the agent.
-
-### Using another account for one profile
-
-You can also choose which of your accounts a profile runs on, for example "when I run _Opus deep
-work_, use my Claude Max account".
-
-1. Open the project's **Profiles** page and edit the profile. (A new profile gets this section after
-   its first save.)
-2. Expand **Account** and pick one of your accounts for the profile's agent, or **Use my usual
-   account** to follow your project pin or default.
-
-The choice saves as soon as you pick it, separately from **Save Changes**, and needs only permission
-to run tasks in the project, not to edit the profile. Paused accounts are listed but can't be picked.
-From **Settings → Agents**, **Use in profiles…** on an account card does the same for many profiles at
-once.
-
-![The Account section of the profile editor. It reads "Which Claude Code account this profile runs on when you use it. Saved as soon as you pick it, separately from Save Changes." with an "Only you see this" badge. Radio options: Use my usual account (right now Work Max plan), Work Max plan (your default), Acme client key, and Personal Pro plan, which is selected. Below: "Other members pick their own account for this profile. Yours never runs their work." and "Runs Claude Code on Personal Pro plan." with a "How SAM picks the account" disclosure.](/images/docs/accounts-profile-account.png)
-
-The choice is private. In a shared project, each member picks their own account for the same profile,
-and the editor marks the section **Only you see this**. For one of your own global profiles, the
-choice applies in every project.
-
-A profile choice applies only when the run starts the profile's agent. If a skill switches a run to
-another agent, that run uses the other agent's usual account, and the editor warns about it. A choice
-whose account is paused stops the run rather than switching to another account (see
-[Pausing an account](#pausing-an-account)). The editor's **Account** section shows one line, **Runs
-Claude Code on …**, with **How SAM picks the account** behind it. The breakdown opens on its own when a
-choice is skipped or stops the run, or when no account is available. A chat's session details show
-the account its agent ran on and which step chose it. Other members see only the step, not your
-account's name. When a member leaves a project, their choices on its profiles are removed.
-
-### Agent defaults
-
-Under **Settings → Agents → Agent settings**, each agent you can run has one card: **Model**,
-**Permissions** (see [Permission mode](#permission-mode)), **Billing** (Claude Code and Codex only;
-see [AI Provider Modes](#ai-provider-modes)), and, for OpenCode, the **OpenCode provider** (Zen, Go, or
-custom). Defaults belong to the agent, not to an account: they apply whichever account a project
-uses, and project profiles can override them.
-
 ## Connecting a subscription with guided sign-in
 
 If you pay for **Claude Max/Pro** or a **ChatGPT** plan, you can connect that subscription instead of
@@ -269,14 +135,14 @@ Claude Code or OpenAI Codex on a subscription.
    connect only for one project, open the project's **Settings → Accounts**, select **Use another
    account here** on the agent, and then **Connect a new account** if the picker lists accounts you
    already have.
-2. Choose the subscription method (**Claude subscription** or **ChatGPT sign-in**) rather than API
-   key, then click **Connect with Claude Code** or **Connect with Codex**.
+2. Keep the subscription method (**Claude subscription** or **ChatGPT sign-in**), which is selected
+   by default, and click **Connect with Claude Code** or **Connect with Codex**.
 3. Click **Open Claude sign-in** or **Open OpenAI sign-in** and approve access on the provider's page.
    For Codex, enter the short code SAM displays when the provider asks. For Claude Code, copy the
    `code#state` value Claude displays, return to SAM, paste the complete value into the dialog, and
    click **Continue sign-in**.
 4. Leave the SAM window open; it updates on its own. When the provider confirms, your subscription
-   credential is saved, encrypted at rest. Name the account to finish.
+   credential is saved, encrypted at rest. Name the account, or **Skip**.
 
 ![The guided sign-in dialog for Claude Code. It says "This account will be saved as your personal default." and "Waiting for sign-in", with an "Open Claude sign-in" button, a field labelled "Paste the code Claude shows you" with the placeholder code#state, a disabled "Continue sign-in" button, and a note that the window updates automatically. No terminal is shown.](/images/docs/agent-guided-login.png)
 
@@ -305,6 +171,154 @@ The common messages:
 | **The Claude sign-in process stopped before returning a token.** | Try again. If it keeps happening, report it.                                   |
 
 When reporting a failure, include the message and approximate time; never share the code or token.
+
+## Managing agent accounts
+
+### Common account tasks
+
+**Use a client's account in one project, and your own everywhere else.** Keep your own account as
+the default. Open the client project's **Settings → Accounts**, select **Use another account here** on
+the agent, and pick the client's account with **Use here**, or **Connect a new account** to add it.
+Your other projects keep your default.
+
+**Switch your default account.** In **Settings → Agents**, choose **Make default** on the account you
+want, from its card's **⋯** menu or the button on an unattached card. The confirmation says how
+many projects switch. Projects pinned to another account keep it, and the old default stays
+connected.
+
+![The Make default confirmation. It reads "Make Personal Pro plan your default?" and "3 projects using Work Max plan will switch to Personal Pro plan, and so will new projects. Projects pinned to an account keep it. Work Max plan stays connected." with Cancel and Make default buttons.](/images/docs/accounts-make-default.png)
+
+**Run one profile on a different account.** For example, run _Opus deep work_ on your Claude Max
+account and everything else on a cheaper key: see
+[Using another account for one profile](#using-another-account-for-one-profile).
+
+**Point several projects at one account.** On the account's card in **Settings → Agents**, choose
+**Use in projects…** (on an unattached card, **Use in a project**; on a pinned card, **Add project**),
+check the projects, and save. One account can be pinned to any number of projects. Unchecking a
+project moves it back to your default.
+
+**Refresh an expired sign-in or key on your default.** Choose **Replace…** on your default (or **Replace your …
+default** under the lanes), and sign in again or paste the new key. This connects a new account and
+makes it your default; the old one moves to **Unattached** (or **Pinned**, if projects or profiles still
+use it), where you can **Remove** it once nothing does. Projects
+pinned to the old account, and profiles that use it, keep using it: move them with **Use in
+projects…** and **Use in profiles…** on the new card, or replace the pinned account from the project's
+**Accounts** tab. A chat that's already running picks up the new account only when its agent starts
+again (see [The agent or a tool can't sign in](/docs/guides/session-troubleshooting/#the-agent-or-a-tool-cant-sign-in)).
+
+**Refresh a pinned account, such as a client's key.** Don't use **Connect account** in **Settings →
+Agents** for this: that would make the new key your default. Instead, open one of the projects it is
+pinned to, go to **Settings → Accounts → Use a different account here → Connect a new account**, and
+connect the new key there. Then, on the new card in **Settings → Agents**, use **Use in projects…** and
+**Use in profiles…** to move the account's other projects and profiles, and **Remove** the old card
+once it shows under **Unattached**.
+
+**Work in a teammate's project.** Your work there runs on your own accounts: your default, or one you
+pin in that project's **Accounts** tab. Any member can pin their own account there, and it never
+changes which account a teammate's work uses. A chat a teammate
+[shares with you](/docs/guides/collaboration/#work-together-in-a-chat) is different: it runs on their
+accounts.
+
+Changing your default, or which account a project or profile uses, while a task is
+[waiting for a provider limit reset](/docs/guides/session-troubleshooting/#waiting-for-a-provider-limit-reset)
+stops that task with **Blocked: selected provider credential changed**, so it never carries on
+silently on a different account.
+
+### Account card actions
+
+| Action                       | Where                                     | What it does                                                                                                                                                                                                                                                 |
+| ---------------------------- | ----------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Make default**             | **⋯** menu; button on unattached cards    | Makes this account your default. Pinned projects keep theirs.                                                                                                                                                                                                |
+| **Rename**                   | **⋯** menu                                | Changes the name you see.                                                                                                                                                                                                                                    |
+| **Use in projects…**         | **⋯** menu on pinned and unattached cards | Pins this account to the projects you check; unchecked projects go back to your default.                                                                                                                                                                     |
+| **Use in profiles…**         | **⋯** menu on any active account          | Makes the profiles you check run on this account, grouped by project. Only your own runs change.                                                                                                                                                             |
+| **Replace…**                 | **⋯** menu on your default                | Connects a new account as your default. The old one moves to **Unattached**.                                                                                                                                                                                 |
+| **Disconnect**               | **⋯** menu on your default                | Deletes the account (it is kept only while a project still uses it). Unpinned projects use an earlier saved credential for that agent if there is one; otherwise connect a new account. To keep the account, choose **Make default** on another one instead. |
+| **Use default in** _project_ | **⋯** menu on a pinned account            | Moves that project back to your default.                                                                                                                                                                                                                     |
+| **Manage in Advanced**       | **⋯** menu, some account types            | Shown instead of **Disconnect** for accounts such as an OpenAI-compatible endpoint, which you manage in **Settings → Advanced**.                                                                                                                             |
+| **Remove**                   | Unattached cards                          | Deletes an account nothing uses. An account that only profiles use counts as in use and shows under **Pinned**.                                                                                                                                              |
+
+**Make default**, **Use in projects…** and **Use in profiles…** are for agent accounts only. For cloud
+accounts in **Settings → Infrastructure**, connect a new account to change your default, and use the
+project's **Accounts** tab to give a project its own cloud account.
+
+### Pausing an account
+
+You can pause an account without removing it: in **Settings → Advanced**, select **Deactivate** on its
+credential (or on one project's attachment, to pause only that pin). Resume it there with
+**Activate**. The account cards link to **Advanced** when something is paused.
+
+A project or profile pinned to a paused account doesn't fall back to another one; it **stops**: the
+project's **Accounts** tab says **Can't run — its pinned account is paused**, the profile's **Account**
+section reads **Needs attention: … (paused)** (expanded, it says **Stops:**), and a chat started there
+shows **Agent connection missing**. That way your work never runs on an account you didn't choose.
+Resume the account, or pick **Use my default** (project) or **Use my usual account** (profile).
+
+Pausing your **default** works differently: SAM skips it, so your projects without a pin use SAM's
+platform account where the agent has one. Where there is none, they can't run until you resume it or
+make another account the default. Paused accounts can't be made the default or pinned anywhere new.
+
+### Using another account in one project
+
+A project's **Accounts** tab (in its settings) shows, for each agent, whether the project uses
+**your default** or an account pinned to that project.
+
+1. Open the project's **Settings → Accounts** and expand the agent.
+2. Select **Use another account here** (it reads **Use a different account here** once the project
+   has a pin).
+3. Pick one of the accounts you already connected and select **Use here**, or select **Connect a new
+   account** to connect one now, with guided sign-in or a key. A new account connected here is pinned
+   only to this project; your default stays the same.
+
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/accounts-project-picker-mobile.png" />
+  <img src="/images/docs/accounts-project-picker.png" alt="Project settings, Accounts, the Claude Code row for the Labs project. It says Your default, with two choices: Use my default (Work Max plan, follows your settings) and Use another account here. The picker below lists Acme client key (API key, pinned in Acme client portal) and Personal Pro plan (subscription, not used by any project), each with Use here, and a Connect a new account link. Both choice tiles are highlighted while the picker is open." loading="lazy" />
+</picture>
+
+Opening the picker highlights both choices; the project stays on your default until you select
+**Use here**. The picker lists your accounts for that agent except your default, the current pin and paused
+accounts. The same account can stay pinned to other projects. **Use my default** removes the pin. A
+pin is yours alone: it changes which of your accounts runs your work in the project, never another
+member's, so any member can set one. On the project's **Agents** tab, each
+agent card shows which account it uses, with a **Manage in Accounts** link. When some of your
+profiles run on their own account in this project, the Accounts tab lists them under the agent.
+
+### Using another account for one profile
+
+You can also choose which of your accounts a profile runs on, for example "when I run _Opus deep
+work_, use my Claude Max account".
+
+1. Open the project's **Profiles** page and edit the profile. (A new profile gets this section after
+   its first save.)
+2. Expand **Account** and pick one of your accounts for the profile's agent, or **Use my usual
+   account** to follow your project pin or default.
+
+The choice saves as soon as you pick it, separately from **Save Changes**. Paused accounts are listed but can't be picked.
+From **Settings → Agents**, **Use in profiles…** on an account card does the same for many profiles at
+once.
+
+![The Account section of the profile editor. It reads "Which Claude Code account this profile runs on when you use it. Saved as soon as you pick it, separately from Save Changes." with an "Only you see this" badge. Radio options: Use my usual account (right now Work Max plan), Work Max plan (your default), Acme client key, and Personal Pro plan, which is selected. Below: "Other members pick their own account for this profile. Yours never runs their work." and "Runs Claude Code on Personal Pro plan." with a "How SAM picks the account" disclosure.](/images/docs/accounts-profile-account.png)
+
+The choice is private. In a shared project, each member picks their own account for the same profile,
+and the editor marks the section **Only you see this**. For one of your own global profiles, the
+choice applies in every project.
+
+A profile choice applies only when the run starts the profile's agent. If a skill switches a run to
+another agent, that run uses the other agent's usual account, and the editor warns about it. A choice
+whose account is paused stops the run rather than switching to another account (see
+[Pausing an account](#pausing-an-account)). The editor's **Account** section shows one line, **Runs
+Claude Code on …**, with **How SAM picks the account** behind it. The breakdown opens on its own when a
+choice is skipped or stops the run, or when no account is available. A chat's session details show
+the account its agent ran on and which step chose it. Other members see only the step, not your
+account's name. When a member leaves a project, their choices on its profiles are removed.
+
+### Agent defaults
+
+Under **Settings → Agents → Agent settings**, each agent you can run has one card: **Model**,
+**Permissions** (see [Permission mode](#permission-mode)), **Billing** (Claude Code and Codex only;
+see [AI Provider Modes](#ai-provider-modes)), and, for OpenCode, the **OpenCode provider** (Zen, Go, or
+custom). Defaults belong to the agent, not to an account: they apply whichever account a project
+uses, and project profiles can override them.
 
 ## Usage Limits
 

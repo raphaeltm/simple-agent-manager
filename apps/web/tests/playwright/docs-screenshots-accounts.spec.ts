@@ -256,8 +256,18 @@ test('docs: agent accounts with a default, a pinned and an unattached account', 
     'Connected, but nothing uses it.'
   );
   await page.mouse.move(2, 2);
-  const section = page.locator('section[aria-labelledby="accounts-section-title"]');
-  await docsShot(page, isMobile(page) ? 'accounts-agents-mobile' : 'accounts-agents', section);
+  // The section with a little margin, so its heading and footer don't touch the image edge.
+  const box = await page.locator('section[aria-labelledby="accounts-section-title"]').boundingBox();
+  if (!box) throw new Error('accounts section has no geometry');
+  const pad = 12;
+  await docsShot(page, isMobile(page) ? 'accounts-agents-mobile' : 'accounts-agents', {
+    clip: {
+      x: Math.max(0, box.x - pad),
+      y: Math.max(0, box.y - pad),
+      width: box.width + 2 * pad,
+      height: box.height + 2 * pad,
+    },
+  });
 });
 
 test('docs: make another account your default', async ({ page }) => {

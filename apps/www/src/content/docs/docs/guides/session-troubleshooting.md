@@ -164,8 +164,8 @@ the chat doesn't restart it:
 - **Blocked: provider limit reset outlives the saved snapshot…** The reset comes after SAM stops
   keeping the saved workspace, so the chat can't be woken where it left off.
 - **Blocked: selected provider credential changed…** The account the task would run on changed
-  while it waited: the key was replaced, or someone chose **Make default**, pinned another account to
-  the project, or changed the profile's account. SAM stops rather than carry on with an account you
+  while it waited: the key was replaced, or you (whoever started the task) chose **Make default**,
+  pinned another account to the project, or changed the profile's account. SAM stops rather than carry on with an account you
   didn't start the task on.
 - Any other reason that starts with **Blocked:** means the same thing.
 
@@ -226,15 +226,17 @@ or in the failure card under the chat header (expand the card for the next step)
   you started the chat, select **Open agent accounts** and connect the agent under
   **Settings → Agents**; otherwise ask the person who started it. It also appears when the account
   pinned to the project or the profile is paused: the project's **Accounts** tab then says **Can't
-  run — its pinned account is paused**, or the profile's **Account** section says **Stops:**. Resume
+  run — its pinned account is paused**, or the profile's **Account** section reads **Needs attention: … (paused)**. Resume
   the account in **Settings → Advanced**, or choose **Use my default** or **Use my usual account**
   (see [Pausing an account](/docs/guides/agents/#pausing-an-account)). Then start the work again —
   **Retry** in the [session tool rail](/docs/guides/chat-features/#the-session-tool-rail), or a new
   chat.
 - **A failure card: "Agent connection rejected."** The provider refused the credential — usually an
   expired subscription sign-in or a revoked API key. Reconnect it under **Settings → Agents** (the
-  card's **Open agent accounts** button, for the person who started the chat), or in the project's
-  **Accounts** tab if the project uses its own account. The agent picks up the new connection only
+  card's **Open agent accounts** button, for the person who started the chat) with **Replace…** on the
+  account, or in the project's **Accounts** tab if the project uses its own account (see
+  [Refresh an expired sign-in or key](/docs/guides/agents/#common-account-tasks)). Projects and
+  profiles pinned to the old account keep it until you move them. The agent picks up the new connection only
   when it starts again: in a **Task**, wait for the chat to go to
   sleep, then reply to wake it; in a **Chat**, select **Sleep** (the moon button above the message
   box), then send a message. The woken session keeps its recorded settings and task behavior.
