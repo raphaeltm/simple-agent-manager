@@ -99,9 +99,11 @@ export function upsertActivityState(
     : (update.reason ?? (update.activity === 'idle' ? 'completed' : null));
   const hasRuntimeWorkUpdate = update.runtimeWorkState !== undefined;
   // Read before the write: no await separates the two, so the DO cannot interleave.
+  // The RAW reported turn start: a report without one must not look like a new turn.
+  const reportedPromptStartedAt = update.promptStartedAt ?? null;
   const sameTurnRereport = isSameTurnRereport(readPriorActivityForWorkClock(sql, sessionId), {
     activity: update.activity,
-    promptStartedAt,
+    promptStartedAt: reportedPromptStartedAt,
     hasRuntimeWorkUpdate,
     runtimeWorkState: update.runtimeWorkState,
     runtimeWorkCount: update.runtimeWorkCount,
@@ -114,9 +116,9 @@ export function upsertActivityState(
        agent_type, restart_count, status_error,
        activity_source, activity_reason, activity_probe_attempts,
        runtime_work_state, runtime_work_count, runtime_work_source,
-       runtime_work_updated_at, runtime_work_progress_at, work_at
+       runtime_work_updated_at, runtime_work_progress_at, work_at, reported_prompt_started_at
      )
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
 	     ON CONFLICT(session_id) DO UPDATE SET
 	       activity_source = excluded.activity_source,
 	       activity_reason = excluded.activity_reason,
@@ -156,7 +158,10 @@ export function upsertActivityState(
 		   runtime_work_progress_at = CASE
 		     WHEN ? = 1 AND (session_state.runtime_work_progress_at IS NULL OR excluded.runtime_work_progress_at >= session_state.runtime_work_progress_at)
 		       THEN excluded.runtime_work_progress_at ELSE session_state.runtime_work_progress_at END,
-		   work_at = CASE WHEN ? = 1 THEN session_state.work_at ELSE excluded.work_at END
+		   work_at = CASE WHEN ? = 1 THEN session_state.work_at ELSE excluded.work_at END,
+		   reported_prompt_started_at = COALESCE(
+		     excluded.reported_prompt_started_at, session_state.reported_prompt_started_at
+		   )
 	     WHERE session_state.activity_at IS NULL
 	        OR session_state.activity_at < excluded.activity_at
 	        OR (
@@ -193,6 +198,7 @@ export function upsertActivityState(
     hasRuntimeWorkUpdate ? activityAt : null,
     hasRuntimeWorkUpdate ? (update.runtimeWorkProgressAt ?? null) : null,
     activityAt,
+    reportedPromptStartedAt,
     ...Array(5).fill(hasRuntimeWorkUpdate ? 1 : 0),
     sameTurnRereport ? 1 : 0
   );
@@ -437,18 +443,24 @@ const CHAT_SESSION_STATE_IDS_SQL = `SELECT id FROM acp_sessions WHERE chat_sessi
  */
 const CHAT_SESSION_STATE_WHERE = `session_id IN (${CHAT_SESSION_STATE_IDS_SQL})`;
 
+/**
+ * A persisted message is work. `now` stamps the last-report clock (callers may pass the
+ * message time); `workAt` stamps the work clock on the DO's own clock and never moves it
+ * backwards, so a delayed outbox batch or a skewed VM clock cannot shorten a drain.
+ */
 export function refreshWorkingActivityForChatSession(
   sql: SqlStorage,
   chatSessionId: string,
-  now = Date.now()
+  now = Date.now(),
+  workAt = Date.now()
 ): void {
   const whereClause = `activity IN ('prompting', 'recovering') AND ${CHAT_SESSION_STATE_WHERE}`;
   sql.exec(
     `UPDATE session_state
-     SET activity_at = ?, work_at = ?
+     SET activity_at = ?, work_at = MAX(COALESCE(work_at, 0), ?)
      WHERE ${whereClause}`,
     now,
-    now,
+    workAt,
     chatSessionId,
     chatSessionId
   );

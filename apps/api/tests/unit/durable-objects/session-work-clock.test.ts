@@ -104,14 +104,54 @@ describe('session work clock', () => {
   it('moves the work clock when a message is persisted during the turn', () => {
     prompting(T0);
     prompting(T0 + MINUTE);
-    refreshWorkingActivityForChatSession(sql, CHAT_SESSION, T0 + 2 * MINUTE);
+    refreshWorkingActivityForChatSession(sql, CHAT_SESSION, T0 + 2 * MINUTE, T0 + 2 * MINUTE);
     expect(getSessionState(sql, ACP_SESSION)?.workAt).toBe(T0 + 2 * MINUTE);
   });
 
-  it('moves the work clock on a new turn even when the idle edge was lost', () => {
+  it('never moves the work clock backwards for a delayed message batch', () => {
+    prompting(T0);
+    refreshWorkingActivityForChatSession(sql, CHAT_SESSION, T0 + 5 * MINUTE, T0 + 5 * MINUTE);
+    refreshWorkingActivityForChatSession(sql, CHAT_SESSION, T0 + 2 * MINUTE, T0 + 2 * MINUTE);
+    expect(getSessionState(sql, ACP_SESSION)?.workAt).toBe(T0 + 5 * MINUTE);
+  });
+
+  it('moves the work clock once for a new turn whose idle edge was lost, then holds it', () => {
     prompting(T0);
     expect(prompting(T0 + 5 * MINUTE, { promptStartedAt: T0 + 5 * MINUTE })).toBe('work_edge');
+    expect(prompting(T0 + 6 * MINUTE, { promptStartedAt: T0 + 5 * MINUTE })).toBe(
+      'same_turn_rereport'
+    );
+    expect(prompting(T0 + 7 * MINUTE, { promptStartedAt: T0 + 5 * MINUTE })).toBe(
+      'same_turn_rereport'
+    );
     expect(getSessionState(sql, ACP_SESSION)?.workAt).toBe(T0 + 5 * MINUTE);
+  });
+
+  it('holds the clock after a durable delivery whose accept time precedes the VM turn start', () => {
+    // Durable delivery: the control plane records the accept time first, the VM's own
+    // turn start is a little later, and every re-report repeats the VM's value.
+    const acceptedAt = T0;
+    const vmTurnStart = T0 + 5;
+    expect(markPromptAccepted(sql, ACP_SESSION, acceptedAt, acceptedAt)).toBe(true);
+    expect(prompting(T0 + 1_000, { promptStartedAt: vmTurnStart })).toBe('work_edge');
+    for (let minute = 1; minute <= 20; minute++) {
+      expect(prompting(T0 + minute * MINUTE, { promptStartedAt: vmTurnStart })).toBe(
+        'same_turn_rereport'
+      );
+    }
+    expect(getSessionState(sql, ACP_SESSION)?.workAt).toBe(T0 + 1_000);
+  });
+
+  it('does not treat a report without a turn start as a new turn', () => {
+    prompting(T0);
+    expect(
+      upsertActivityState(sql, ACP_SESSION, {
+        activity: 'prompting',
+        observedAt: T0 + MINUTE,
+        now: T0 + MINUTE,
+      })
+    ).toBe('same_turn_rereport');
+    expect(getSessionState(sql, ACP_SESSION)?.workAt).toBe(T0);
   });
 
   it('moves the work clock on control-plane turn transitions', () => {
@@ -145,7 +185,7 @@ describe('session work clock', () => {
       isSameTurnRereport(
         {
           activity: 'prompting',
-          promptStartedAt: T0,
+          reportedPromptStartedAt: T0,
           runtimeWorkState: 'active',
           runtimeWorkCount: 1,
           runtimeWorkProgressAt: T0 + MINUTE,
@@ -184,7 +224,7 @@ describe('session work clock', () => {
     it('detects a persisted message between two reads (control)', () => {
       prompting(T0);
       const before = getSessionState(sql, ACP_SESSION)!;
-      refreshWorkingActivityForChatSession(sql, CHAT_SESSION, T0 + MINUTE);
+      refreshWorkingActivityForChatSession(sql, CHAT_SESSION, T0 + MINUTE, T0 + MINUTE);
       expect(idlenessStateChanged(before, getSessionState(sql, ACP_SESSION)!)).toBe(true);
     });
 

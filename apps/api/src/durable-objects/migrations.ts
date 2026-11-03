@@ -2590,12 +2590,20 @@ export const MIGRATIONS: Migration[] = [
     // (an activity edge, a new turn, harness progress, a persisted message) and is what
     // idleness reads (`session-work-clock.ts`). NULL on existing rows falls back to
     // `prompt_started_at`, so a turn wedged before this migration still ages out.
+    // `reported_prompt_started_at` is the VM's own turn start, kept apart from
+    // `prompt_started_at` (which `markPromptAccepted` sets to the accept time), so a
+    // same-turn re-report can be recognised.
     name: '071-session-state-work-clock',
     run(sql) {
-      try {
-        sql.exec('ALTER TABLE session_state ADD COLUMN work_at INTEGER');
-      } catch {
-        // Column already exists from a partial previous run — safe to ignore.
+      for (const statement of [
+        'ALTER TABLE session_state ADD COLUMN work_at INTEGER',
+        'ALTER TABLE session_state ADD COLUMN reported_prompt_started_at INTEGER',
+      ]) {
+        try {
+          sql.exec(statement);
+        } catch {
+          // Column already exists from a partial previous run — safe to ignore.
+        }
       }
     },
   },

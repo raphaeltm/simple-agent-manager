@@ -230,6 +230,9 @@ export function classifySessionIdleness(input: {
         activity,
       };
     }
+    // Silence is bounded by the idle interval. A Claude Code foreground Bash call is capped
+    // at 10 min (SAM does not raise BASH_MAX_TIMEOUT_MS), background tasks and Codex /
+    // OpenCode tool calls hold the session as harness work, and the sleep keeps a snapshot.
     const eligibleAt = drainAnchor + input.idleAfterMs;
     if (eligibleAt > input.now.getTime()) {
       return {

@@ -20,7 +20,8 @@ export type ActivityReportOutcome = false | 'work_edge' | 'same_turn_rereport';
 
 export interface PriorActivityForWorkClock {
   activity: string;
-  promptStartedAt: number | null;
+  /** The VM's last reported turn start, not the control plane's accept time. */
+  reportedPromptStartedAt: number | null;
   runtimeWorkState: string | null;
   runtimeWorkCount: number | null;
   runtimeWorkProgressAt: number | null;
@@ -28,6 +29,7 @@ export interface PriorActivityForWorkClock {
 
 export interface WorkClockUpdate {
   activity: string;
+  /** The raw reported turn start; absent when the reporter did not send one. */
   promptStartedAt: number | null;
   hasRuntimeWorkUpdate: boolean;
   runtimeWorkState?: string;
@@ -45,7 +47,7 @@ export function readPriorActivityForWorkClock(
 ): PriorActivityForWorkClock | null {
   const row = sql
     .exec(
-      `SELECT activity, prompt_started_at, runtime_work_state, runtime_work_count,
+      `SELECT activity, reported_prompt_started_at, runtime_work_state, runtime_work_count,
               runtime_work_progress_at
        FROM session_state WHERE session_id = ?`,
       sessionId
@@ -54,7 +56,7 @@ export function readPriorActivityForWorkClock(
   if (!row || typeof row.activity !== 'string') return null;
   return {
     activity: row.activity,
-    promptStartedAt: numberOrNull(row.prompt_started_at),
+    reportedPromptStartedAt: numberOrNull(row.reported_prompt_started_at),
     runtimeWorkState: typeof row.runtime_work_state === 'string' ? row.runtime_work_state : null,
     runtimeWorkCount: numberOrNull(row.runtime_work_count),
     runtimeWorkProgressAt: numberOrNull(row.runtime_work_progress_at),
@@ -86,9 +88,13 @@ export function isSameTurnRereport(
 ): boolean {
   if (!prior) return false;
   if (prior.activity !== update.activity) return false;
+  // A newer turn is judged against the VM's own previous report. `prompt_started_at`
+  // cannot be used: `markPromptAccepted` stores the control plane's accept time there,
+  // which is earlier than the VM's turn start, so every re-report would look newer.
   if (
     update.promptStartedAt !== null &&
-    (prior.promptStartedAt === null || update.promptStartedAt > prior.promptStartedAt)
+    (prior.reportedPromptStartedAt === null ||
+      update.promptStartedAt > prior.reportedPromptStartedAt)
   ) {
     return false;
   }

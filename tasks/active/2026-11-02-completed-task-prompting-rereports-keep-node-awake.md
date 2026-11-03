@@ -103,16 +103,25 @@ A same-turn re-report keeps it. NULL on legacy rows falls back to `prompt_starte
 
 ## Acceptance Criteria
 
-- [ ] Drain anchor and `idlenessStateChanged` ignore bare re-reports and follow persisted work
-- [ ] Worker test: real re-reports with no messages → the real sleep sweep sleeps the session
+- [x] Drain anchor and `idlenessStateChanged` ignore bare re-reports and follow persisted work
+- [x] Worker test: real re-reports with no messages → the real sleep sweep sleeps the session
       (not just eligibility); proven red on current code
-- [ ] Control: a Claude Code agent persisting tool-call messages after `complete_task` keeps draining
-- [ ] Existing `failed-task-preservation` and `session-sleep-bounded-fallback` suites stay green
+- [x] Control: a Claude Code agent persisting tool-call messages after `complete_task` keeps draining
+- [x] Existing `failed-task-preservation` and `session-sleep-bounded-fallback` suites stay green
 
 ## Implementation Notes (2026-11-03)
 
-- `markPromptAccepted`, `recordTurnEnd` and `terminalizeChatSessionActivity` also stamp `work_at`
-  (every `activity_at` writer is in `session-state.ts`; enumerated per rule 49).
+- `markPromptAccepted`, `recordTurnEnd` and `terminalizeChatSessionActivity` also stamp `work_at`.
+  The one `activity_at` writer outside `session-state.ts` is the probe's `working` branch
+  (`session-activity-reconciliation.ts:applyProbeOutcome`); it deliberately leaves `work_at` alone,
+  because "the VM still has the turn open" is re-report evidence, not progress (pinned by test).
+- Review round 1 (adversarial): new-turn detection compared against `prompt_started_at`, which
+  `markPromptAccepted` sets to the accept time, so on durable delivery every re-report looked like a
+  new turn. Fixed with `reported_prompt_started_at` (same migration 071), the raw reported value,
+  and a monotonic server-time `work_at` on the message path.
+- Residual, accepted: a silent foreground tool call longer than 15 min after `complete_task` (Claude
+  Code Bash is capped at 10 min; background tasks and Codex/OpenCode tool calls are harness work).
+  Tracked in idea `01M5VG7QCDGW77VY1N4QCDJRQK`.
 - `same_turn_rereport` mirrors the upsert's runtime-work apply guard, so a runtime-work difference
   the upsert will not write cannot move the clock.
 - Behaviour change, intended: a FAILED task whose turn only re-reports now sleeps (keeping its
