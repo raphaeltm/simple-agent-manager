@@ -40,8 +40,10 @@ describe('ATTENTION_TYPES — notification badge classification', () => {
     expect(ATTENTION_TYPES.has('session_access')).toBe(false);
   });
 
-  it('contains exactly 4 attention types', () => {
-    expect(ATTENTION_TYPES.size).toBe(4);
+  it('contains exactly 5 attention types', () => {
+    expect(ATTENTION_TYPES.size).toBe(5);
+    // An Operations approval waits on the superadmin's tap, so it counts in the badge.
+    expect(ATTENTION_TYPES.has('operations_approval')).toBe(true);
   });
 });
 
