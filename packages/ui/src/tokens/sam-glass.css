@@ -11,7 +11,7 @@
 :root {
   /* People: who did something. Never a status. You are green; teammates get cyan, violet
      and rose in the order they joined the project (stable per project); automations are grey.
-     Initials sit on these in --sam-person-ink (6:1 or better on every person colour). */
+     Initials sit on these in --sam-person-ink (4.5:1 or better on every person colour, both themes). */
   --sam-person-you: #4ade80;
   --sam-person-1: #22d3ee;
   --sam-person-2: #a78bfa;
