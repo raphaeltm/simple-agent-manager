@@ -6,7 +6,11 @@ import * as schema from '../../src/db/schema';
 import { upsertActivityState } from '../../src/durable-objects/project-data/session-state';
 import type { Env } from '../../src/env';
 import { runTerminalSessionLedgerReconciliation } from '../../src/scheduled/terminal-session-ledger-reconciliation';
-import { cancelSleepForActiveActivity } from '../../src/services/acp-activity-callback-flush';
+import { getAcpActivityAdmissionConfig } from '../../src/services/acp-activity-admission';
+import {
+  cancelSleepForActiveActivity,
+  persistIntermediateActivity,
+} from '../../src/services/acp-activity-callback-flush';
 import * as projectData from '../../src/services/project-data';
 import { cancelScheduledSessionSleep } from '../../src/services/session-snapshots';
 import {
@@ -73,6 +77,48 @@ async function assertOpen(id: string, sessionId: string) {
 }
 
 describe('completion response survives terminal ledger cleanup', () => {
+  it('keeps an in-flight sleep claim through same-turn re-reports, and fences a new turn', async () => {
+    // Production 2026-11-03: the hung turn re-reported `prompting` every minute, and each
+    // report reset the completed task's `preparing` claim, so its sleep could never reach
+    // teardown. Driven through the real callback persistence and ProjectData DO.
+    const { id, sessionId } = await setup();
+    const acpSessionId = `acp-${id}`;
+    const turnStartedAt = Date.parse(completedAt) - 10 * 60_000;
+    const report = (observedAt: number, promptStartedAt: number) =>
+      persistIntermediateActivity({
+        env: bindings,
+        config: getAcpActivityAdmissionConfig(bindings),
+        projectId: id,
+        sessionId: acpSessionId,
+        binding: {
+          sessionId: acpSessionId,
+          chatSessionId: sessionId,
+          workspaceId: id,
+          nodeId: id,
+          acpSdkSessionId: null,
+          status: 'running',
+          agentType: 'claude-code',
+        },
+        body: { activity: 'prompting', nodeId: id, promptStartedAt },
+        observedAt,
+        admissionReason: 'test',
+        waitUntil: () => undefined,
+        flush: async () => ({ action: 'flushed' }),
+      });
+
+    await report(turnStartedAt, turnStartedAt);
+    await seedIntent(id, sessionId, 'preparing');
+    expect(await report(turnStartedAt + 60_000, turnStartedAt)).toBe('persisted');
+    expect(await intent(id)).toMatchObject({
+      sleep_status: 'preparing',
+      sleep_claim_id: 'old-claim',
+    });
+
+    // Control: a new turn is new work and still fences the claim.
+    await report(turnStartedAt + 120_000, turnStartedAt + 120_000);
+    expect(await intent(id)).toMatchObject({ sleep_status: 'scheduled', sleep_claim_id: null });
+  });
+
   it.each(['scheduled', 'preparing'])(
     'preserves the %s completion intent during a working callback and accepts final text',
     async (status) => {

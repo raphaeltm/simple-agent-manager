@@ -11,6 +11,7 @@ import {
   parseHarnessWorkConfig,
   type SessionIdlenessActivityState,
   type SessionIdlenessClassification,
+  sessionWorkAnchor,
 } from './session-idleness';
 import {
   DEFAULT_SESSION_SLEEP_AFTER_MS,
@@ -62,17 +63,22 @@ export function sleepTeardownSafetyGate(
     });
 }
 
+/**
+ * Did the session do real work between two reads? Compares the work clock, never the
+ * last-report clocks `activityAt` and `runtimeWorkUpdatedAt`: the VM agent re-reports an
+ * open turn every minute, so comparing those aborted every sleep of a turn that never
+ * returns. A fresh harness lease still blocks through the idleness gate itself.
+ */
 export function idlenessStateChanged(
   before: SessionIdlenessActivityState,
   after: SessionIdlenessActivityState
 ): boolean {
   return (
     after.activity !== before.activity ||
-    after.activityAt !== before.activityAt ||
+    sessionWorkAnchor(after) !== sessionWorkAnchor(before) ||
     after.runtimeWorkState !== before.runtimeWorkState ||
     after.runtimeWorkCount !== before.runtimeWorkCount ||
     after.runtimeWorkSource !== before.runtimeWorkSource ||
-    after.runtimeWorkUpdatedAt !== before.runtimeWorkUpdatedAt ||
     after.runtimeWorkProgressAt !== before.runtimeWorkProgressAt
   );
 }

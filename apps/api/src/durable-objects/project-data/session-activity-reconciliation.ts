@@ -372,6 +372,12 @@ export function applyProbeOutcome(
     // Bumping `activity_at` unconditionally would push the idle clock that
     // `session-sleep.ts` reads forward on an already-idle session, delaying
     // sleep — a regression in one of the three consumers this fixes.
+    //
+    // Deliberately leaves `work_at` alone. "The VM still has the turn open" is the
+    // same evidence a same-turn re-report carries, not progress: a turn that never
+    // returns answers `working` forever, which is exactly the hang the work clock
+    // exists to age out (`session-work-clock.ts`). Real work reaches `work_at` through
+    // persisted messages and activity edges.
     const placeholders = PROBE_RECONCILIABLE_ACTIVITIES.map(() => '?').join(', ');
     sql.exec(
       `UPDATE session_state

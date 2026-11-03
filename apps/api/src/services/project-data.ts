@@ -164,6 +164,7 @@ import type {
   AcceptedPromptDelivery,
   AcceptPromptDeliveryInput,
 } from '../durable-objects/project-data/prompt-delivery';
+import type { ActivityReportOutcome } from '../durable-objects/project-data/session-work-clock';
 import type {
   CreateReservedTaskSessionWithInitialMessageInput,
   CreateReservedTaskSessionWithInitialMessageResult,
@@ -2701,7 +2702,7 @@ export async function reportAcpSessionActivity(
     runtimeWorkSource?: string;
     runtimeWorkProgressAt?: number | null;
   }
-): Promise<boolean> {
+): Promise<ActivityReportOutcome> {
   const stub = await getStub(env, projectId);
   return stub.reportActivity(sessionId, activity, extra);
 }

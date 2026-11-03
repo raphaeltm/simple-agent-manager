@@ -16,6 +16,7 @@ import * as delivery from './prompt-delivery';
 import { runPromptDeliveryClaim } from './prompt-delivery-runner';
 import { resetReconciliationEpisode } from './reconciliation-episode';
 import * as sessionState from './session-state';
+import type { ActivityReportOutcome } from './session-work-clock';
 import type { Env } from './types';
 import { raiseSessionWakeFailure } from './wake-failure';
 
@@ -147,7 +148,7 @@ export async function reportActivity(
     runtimeWorkSource?: string;
     runtimeWorkProgressAt?: number | null;
   }
-): Promise<boolean> {
+): Promise<ActivityReportOutcome> {
   const applied = sessionState.upsertActivityState(sql, sessionId, {
     activity: currentActivity,
     observedAt: extra?.observedAt,
@@ -189,7 +190,7 @@ export async function reportActivity(
   ) {
     await hooks.recalculateAlarm();
   }
-  return true;
+  return applied;
 }
 
 export function createCheckpointEpisode(

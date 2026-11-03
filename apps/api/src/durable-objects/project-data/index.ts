@@ -115,6 +115,7 @@ import * as sessionState from './session-state';
 import * as sessionSummarySync from './session-summary-sync';
 import * as sessionWakeProgress from './session-wake-progress';
 import * as sessionWakeReady from './session-wake-ready';
+import type { ActivityReportOutcome } from './session-work-clock';
 import * as sessions from './sessions';
 import * as storageReliefMeasurement from './storage-relief-measurement';
 import * as storageSafety from './storage-safety';
@@ -2715,7 +2716,7 @@ export class ProjectData extends DurableObject<Env> {
       runtimeWorkSource?: string;
       runtimeWorkProgressAt?: number | null;
     }
-  ): Promise<boolean> {
+  ): Promise<ActivityReportOutcome> {
     return durability.reportActivity(this.sql, this.durabilityHooks(), sessionId, activity, extra);
   }
 

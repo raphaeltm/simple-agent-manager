@@ -99,7 +99,7 @@ export async function runPersistedMessageSideEffects(
     }
   }
 
-  sessionState.refreshWorkingActivityForChatSession(sql, sessionId, result.now);
+  sessionState.refreshWorkingActivityForChatSession(sql, sessionId, result.now, result.now);
 
   if (result.workspaceId) activity.updateMessageActivity(sql, result.workspaceId, sessionId);
   hooks.scheduleSummarySync();

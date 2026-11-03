@@ -2584,6 +2584,34 @@ export const MIGRATIONS: Migration[] = [
       );
     },
   },
+  {
+    // `session_state.activity_at` is a last-REPORT clock: the VM agent re-reports `prompting`
+    // every minute while a turn is open, so it never ages. `work_at` moves only on real work
+    // (an activity edge, a new turn, harness progress, a persisted message) and is what
+    // idleness reads (`session-work-clock.ts`). On an existing row the first report after
+    // this migration is a work edge and the clock holds from there; a row that never
+    // reports again falls back to `prompt_started_at`.
+    // `reported_prompt_started_at` is the VM's own turn start, kept apart from
+    // `prompt_started_at` (which `markPromptAccepted` sets to the accept time), so a
+    // same-turn re-report can be recognised.
+    name: '071-session-state-work-clock',
+    run(sql) {
+      // Add only the missing columns and let any other failure throw, so the migration
+      // run rolls back instead of recording 071 without its columns.
+      const existing = new Set(
+        sql
+          .exec('PRAGMA table_info(session_state)')
+          .toArray()
+          .map((column) => column.name)
+      );
+      if (!existing.has('work_at')) {
+        sql.exec('ALTER TABLE session_state ADD COLUMN work_at INTEGER');
+      }
+      if (!existing.has('reported_prompt_started_at')) {
+        sql.exec('ALTER TABLE session_state ADD COLUMN reported_prompt_started_at INTEGER');
+      }
+    },
+  },
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects
   // that ran it keep an unused `message_upload_parts` table, since DO migrations
   // never drop tables, so neither that migration name nor that table name may be reused.

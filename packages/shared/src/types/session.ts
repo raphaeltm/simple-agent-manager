@@ -360,6 +360,12 @@ export interface SessionStateSnapshot {
   runtimeWorkUpdatedAt: number | null;
   /** Harness lifecycle progress time reported by the VM Agent. */
   runtimeWorkProgressAt: number | null;
+  /**
+   * Last evidence of real work: an activity edge, a new turn, harness progress or a
+   * persisted message. Unlike `activityAt`, a same-turn re-report does not move it.
+   * Null on rows written before the clock existed.
+   */
+  workAt?: number | null;
   /** D1-sourced recovery status from session_snapshots (sleep/wake lifecycle). */
   recoveryStatus?: 'waking' | 'restored' | 'failed' | null;
   /**
