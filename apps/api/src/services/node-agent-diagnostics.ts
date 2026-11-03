@@ -16,12 +16,14 @@ export async function getNodeLogsFromNode(
   nodeId: string,
   env: Env,
   userId: string,
-  queryString: string
+  queryString: string,
+  options: { requestTimeoutMs?: number } = {}
 ): Promise<unknown> {
   const path = queryString ? `/logs?${queryString}` : '/logs';
   return nodeAgentRequest(nodeId, env, path, {
     method: 'GET',
     userId,
+    ...(options.requestTimeoutMs ? { requestTimeoutMs: options.requestTimeoutMs } : {}),
   });
 }
 

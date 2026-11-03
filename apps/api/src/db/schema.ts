@@ -1548,6 +1548,57 @@ export const nodeLifecycleDecisions = sqliteTable(
   })
 );
 
+/** Black box recorder index; the gzipped capture lives in R2 at `r2Key`. No FK: outlives the node. */
+export const nodeLogCaptures = sqliteTable(
+  'node_log_captures',
+  {
+    id: text('id').primaryKey(),
+    nodeId: text('node_id').notNull(),
+    userId: text('user_id').notNull(),
+    captureTrigger: text('capture_trigger').notNull(),
+    status: text('status').notNull(),
+    r2Key: text('r2_key'),
+    sourcesJson: text('sources_json'),
+    entryCount: integer('entry_count').notNull().default(0),
+    rawBytes: integer('raw_bytes').notNull().default(0),
+    storedBytes: integer('stored_bytes').notNull().default(0),
+    error: text('error'),
+    durationMs: integer('duration_ms'),
+    createdAt: text('created_at').notNull(),
+    expiresAt: text('expires_at').notNull(),
+  },
+  (table) => ({
+    nodeCreatedIdx: index('idx_node_log_captures_node_created').on(table.nodeId, table.createdAt),
+    expiresIdx: index('idx_node_log_captures_expires').on(table.expiresAt),
+  })
+);
+
+/** Per-step sleep/wake trace from the VM agent; bounded per chat and by age. */
+export const sessionSnapshotTraces = sqliteTable(
+  'session_snapshot_traces',
+  {
+    id: text('id').primaryKey(),
+    chatSessionId: text('chat_session_id').notNull(),
+    projectId: text('project_id'),
+    workspaceId: text('workspace_id').notNull(),
+    nodeId: text('node_id'),
+    operation: text('operation').notNull(),
+    outcome: text('outcome').notNull(),
+    failedPhase: text('failed_phase'),
+    phasesJson: text('phases_json').notNull(),
+    errorTail: text('error_tail'),
+    totalMs: integer('total_ms').notNull().default(0),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => ({
+    chatCreatedIdx: index('idx_session_snapshot_traces_chat_created').on(
+      table.chatSessionId,
+      table.createdAt
+    ),
+    createdIdx: index('idx_session_snapshot_traces_created').on(table.createdAt),
+  })
+);
+
 export const nodes = sqliteTable(
   'nodes',
   {

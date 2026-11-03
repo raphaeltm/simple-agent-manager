@@ -17,7 +17,7 @@ export const DEFAULT_DEPLOYMENT_RELEASE_RECONCILIATION_BATCH_SIZE = 50;
 export const DEFAULT_DEPLOYMENT_RELEASE_RECONCILIATION_STALE_HOURS = 168;
 export const DEFAULT_DEPLOYMENT_RELEASE_RECONCILIATION_ACTIVITY_GRACE_HOURS = 6;
 
-interface IntervalGateOptions<T extends ScheduledSweepResult> {
+export interface IntervalGateOptions<T extends ScheduledSweepResult> {
   env: Env;
   now: Date;
   intervalHours: number;
@@ -41,7 +41,7 @@ function lastRunKey(value: string | undefined, fallback: string): string {
   return value?.trim() || fallback;
 }
 
-async function runIntervalGatedSweep<T extends ScheduledSweepResult>(
+export async function runIntervalGatedSweep<T extends ScheduledSweepResult>(
   options: IntervalGateOptions<T>
 ): Promise<T> {
   const lastRun = await options.env.KV.get(options.lastRunKey);

@@ -28,6 +28,7 @@ import { runIncidentTriggerSweep } from './incident-triggers';
 import { runNodeCleanupSweep } from './node-cleanup';
 import { runObservabilityPurge } from './observability-purge';
 import { runOperationsAuditPurge } from './operations-audit-purge';
+import { runOperationsTelemetryRetention } from './operations-telemetry-retention';
 import {
   isHourlyPlatformMaintenanceCron,
   scheduleHourlyPlatformMaintenance,
@@ -211,6 +212,9 @@ export async function scheduled(
   // Retire superseded releases before compose cleanup re-derives referenced artifacts.
   const deploymentReleaseRetention = await sweeps.isolate('deployment_release_retention', () =>
     runScheduledDeploymentReleaseRetention(env)
+  );
+  const operationsTelemetryRetention = await sweeps.isolate('operations_telemetry_retention', () =>
+    runOperationsTelemetryRetention(env)
   );
   // The D1 sweep owns exact snapshot expiry and deletes the matching R2 objects.
   const sessionSnapshotPurge = await sweeps.isolate('session_snapshot_purge', () =>
@@ -410,6 +414,10 @@ export async function scheduled(
     sessionSleepBlocked: sessionSleep?.blocked,
     sessionSleepRetired: sessionSleep?.retired,
     sessionSleepBudgetExhausted: sessionSleep?.budgetExhausted,
+    operationsTelemetryRetentionSkipped: operationsTelemetryRetention?.skipped,
+    operationsTelemetryDecisionsDeleted: operationsTelemetryRetention?.decisionsDeleted,
+    operationsTelemetryCapturesDeleted: operationsTelemetryRetention?.capturesDeleted,
+    operationsTelemetryTracesDeleted: operationsTelemetryRetention?.tracesDeleted,
     deploymentReleaseRetentionSkipped: deploymentReleaseRetention?.skipped,
     deploymentReleaseRetentionSkipReason: deploymentReleaseRetention?.skipReason,
     deploymentReleaseRetentionDeleted: deploymentReleaseRetention?.deletedReleases,

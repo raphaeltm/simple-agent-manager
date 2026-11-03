@@ -11,6 +11,7 @@ export const OPERATIONS_TELEMETRY_DEFAULTS = {
   nodeLogCaptureMaxBytes: 1_000_000,
   nodeLogCaptureHeartbeatFreshnessMs: 10 * 60 * 1000,
   snapshotTracesPerSession: 10,
+  snapshotTraceRetentionDays: 30,
   actionApprovalTtlMs: 60 * 60 * 1000,
 } as const;
 
@@ -29,6 +30,7 @@ export const OPERATIONS_TELEMETRY_RANGES: Record<
   nodeLogCaptureMaxBytes: { min: 10_000, max: 10_000_000 },
   nodeLogCaptureHeartbeatFreshnessMs: { min: 60_000, max: 24 * 60 * 60 * 1000 },
   snapshotTracesPerSession: { min: 1, max: 100 },
+  snapshotTraceRetentionDays: { min: 1, max: 365 },
   actionApprovalTtlMs: { min: 60_000, max: 7 * 24 * 60 * 60 * 1000 },
 };
 
@@ -46,5 +48,6 @@ export const OPERATIONS_TELEMETRY_DESCRIPTIONS: Record<OperationsTelemetrySettin
   nodeLogCaptureHeartbeatFreshnessMs:
     'A node must have sent a heartbeat this recently for teardown to attempt a log capture.',
   snapshotTracesPerSession: 'Sleep/wake step traces kept per chat session.',
+  snapshotTraceRetentionDays: 'Days to keep sleep/wake step traces.',
   actionApprovalTtlMs: 'Milliseconds an operations action approval stays valid.',
 };
