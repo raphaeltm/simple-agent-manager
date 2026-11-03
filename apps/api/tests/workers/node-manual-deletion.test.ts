@@ -10,15 +10,18 @@
  * tail, migrated D1 foreign keys, and the real hourly deployment-node cron.
  */
 import { env } from 'cloudflare:test';
+import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { getCredentialEncryptionKey } from '../../src/lib/secrets';
 import { AppError } from '../../src/middleware/error';
 import { nodesRoutes } from '../../src/routes/nodes';
 import { runDeploymentNodeCleanup } from '../../src/scheduled/deployment-node-cleanup';
 import { encrypt } from '../../src/services/encryption';
+import { recordManualNodeDeletion } from '../../src/services/node-manual-deletion';
 import {
   seedInstallation,
   seedNode,
@@ -126,13 +129,15 @@ async function seedHetznerCredential(userId: string) {
 
 async function readNode(nodeId: string) {
   return env.DATABASE.prepare(
-    `SELECT status, runtime_termination_confirmed_at, error_message, provider_instance_id
+    `SELECT status, runtime_termination_confirmed_at, runtime_termination_attested_at,
+            error_message, provider_instance_id
        FROM nodes WHERE id = ?`
   )
     .bind(nodeId)
     .first<{
       status: string;
       runtime_termination_confirmed_at: string | null;
+      runtime_termination_attested_at: string | null;
       error_message: string | null;
       provider_instance_id: string | null;
     }>();
@@ -184,6 +189,71 @@ describe('owner-confirmed removal of a node SAM cannot delete', () => {
     await runDeploymentNodeCleanup(env as unknown as Env);
     expect(await readNode(seeded.nodeId)).toEqual(node);
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  // A manual removal records its proof first and finishes the removal after it.
+  // If it stops in between, the owner's next Delete consumes that proof. Its audit
+  // reason must still say the proof was attested, not strict: readers that trust
+  // `owner_requested_node_deletion` would otherwise accept the weaker evidence.
+  async function deleteViaRoute(userId: string, nodeId: string) {
+    return appFor(userId).request(`/nodes/${nodeId}`, { method: 'DELETE' }, env as unknown as Env);
+  }
+  async function ownerRemovalReason(nodeId: string) {
+    return (
+      await env.DATABASE.prepare(
+        `SELECT reason FROM node_health_events WHERE node_id = ? AND event = 'deleted_by_owner'`
+      )
+        .bind(nodeId)
+        .first<{ reason: string }>()
+    )?.reason;
+  }
+
+  it('keeps the attested provenance when a Delete finishes an interrupted manual removal', async () => {
+    const seeded = await seedStuckDeploymentNode('interrupted');
+    // The route's first step, then nothing: the request stopped before removal.
+    await recordManualNodeDeletion(
+      drizzle(env.DATABASE, { schema }),
+      env as unknown as Env,
+      seeded.nodeId,
+      seeded.userId
+    );
+    const attested = await readNode(seeded.nodeId);
+    expect(attested?.status).toBe('destroying');
+    expect(attested?.runtime_termination_attested_at).toBe(
+      attested?.runtime_termination_confirmed_at
+    );
+
+    const response = await deleteViaRoute(seeded.userId, seeded.nodeId);
+    expect(response.status).toBe(200);
+    expect((await readNode(seeded.nodeId))?.status).toBe('deleted');
+    expect(await ownerRemovalReason(seeded.nodeId)).toBe('owner_attested_manual_deletion');
+  });
+
+  it('records the owner request when a Delete consumes strict proof (control)', async () => {
+    const seeded = await seedStuckDeploymentNode('strict-proof');
+    await env.DATABASE.prepare(
+      `UPDATE nodes SET runtime_termination_confirmed_at = '2026-11-02T10:00:00.000Z' WHERE id = ?`
+    )
+      .bind(seeded.nodeId)
+      .run();
+
+    const response = await deleteViaRoute(seeded.userId, seeded.nodeId);
+    expect(response.status).toBe(200);
+    expect(await ownerRemovalReason(seeded.nodeId)).toBe('owner_requested_node_deletion');
+  });
+
+  it('treats an attestation as ended once a later proof replaced it', async () => {
+    const seeded = await seedStuckDeploymentNode('stale-attestation');
+    await env.DATABASE.prepare(
+      `UPDATE nodes SET runtime_termination_attested_at = '2026-11-01T10:00:00.000Z',
+         runtime_termination_confirmed_at = '2026-11-02T10:00:00.000Z' WHERE id = ?`
+    )
+      .bind(seeded.nodeId)
+      .run();
+
+    const response = await deleteViaRoute(seeded.userId, seeded.nodeId);
+    expect(response.status).toBe(200);
+    expect(await ownerRemovalReason(seeded.nodeId)).toBe('owner_requested_node_deletion');
   });
 
   it('refuses while the provider still reports the server, and changes nothing', async () => {

@@ -545,13 +545,20 @@ async function markWorkspaceRuntimeTerminationConfirmed(
     );
 }
 
-async function markRuntimeTerminationConfirmed(db: NodeDb, node: NodeRow): Promise<string> {
+async function markRuntimeTerminationConfirmed(
+  db: NodeDb,
+  node: NodeRow,
+  provenance: 'strict' | 'owner_attested' = 'strict'
+): Promise<string> {
   await requireSameNodeIncarnation(db, node, 'termination proof write');
   const confirmedAt = new Date().toISOString();
   const result = await db
     .update(schema.nodes)
     .set({
       runtimeTerminationConfirmedAt: confirmedAt,
+      // Written in the same CAS as the proof, so a reader can never see the proof
+      // without its provenance. See `isOwnerAttestedTermination`.
+      runtimeTerminationAttestedAt: provenance === 'owner_attested' ? confirmedAt : null,
     })
     .where(exactNodeIncarnationPredicate(node))
     .run();
@@ -578,7 +585,22 @@ export async function recordOwnerAttestedRuntimeTermination(
   db: NodeDb,
   node: NodeRow
 ): Promise<string> {
-  return await markRuntimeTerminationConfirmed(db, node);
+  return await markRuntimeTerminationConfirmed(db, node, 'owner_attested');
+}
+
+/**
+ * True when the node's current termination proof is the owner's attestation, not
+ * SAM's strict deletion. Keyed on equality with the proof itself, so any later
+ * writer that replaces or clears the proof (re-provisioning, a strict delete,
+ * container recovery) ends the attestation without having to know about it.
+ */
+export function isOwnerAttestedTermination(
+  node: Pick<NodeRow, 'runtimeTerminationConfirmedAt' | 'runtimeTerminationAttestedAt'>
+): boolean {
+  return (
+    node.runtimeTerminationConfirmedAt !== null &&
+    node.runtimeTerminationAttestedAt === node.runtimeTerminationConfirmedAt
+  );
 }
 
 async function claimManagedNodeDeletion(db: NodeDb, node: NodeRow): Promise<NodeRow> {

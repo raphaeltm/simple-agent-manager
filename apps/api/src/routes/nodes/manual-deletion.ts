@@ -10,7 +10,7 @@ import { requireNodeOwnership } from '../../middleware/node-auth';
 import { deleteDNSRecord } from '../../services/dns';
 import { recordManualNodeDeletion } from '../../services/node-manual-deletion';
 import { listStrandedNodeTasks } from '../../services/node-stranded-tasks';
-import { completeOwnerNodeRemoval } from './delete';
+import { completeOwnerNodeRemoval, OWNER_ATTESTED_REMOVAL_REASON } from './delete';
 
 /**
  * POST /api/nodes/:id/manual-deletion — the owner confirms they deleted the
@@ -62,7 +62,7 @@ export async function confirmManualNodeDeletionRoute(c: Context<{ Bindings: Env 
       errors: [],
     },
     strandedTasks,
-    reason: 'owner_attested_manual_deletion',
+    reason: OWNER_ATTESTED_REMOVAL_REASON,
   });
   return c.json({ success: true });
 }

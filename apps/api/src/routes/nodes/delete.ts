@@ -19,6 +19,7 @@ import {
   terminalizeStrandedNodeTasks,
 } from '../../services/node-stranded-tasks';
 import { deleteNodeResources, retireDeletedDeploymentNodeRecord } from '../../services/nodes';
+import { isOwnerAttestedTermination } from '../../services/strict-node-deletion';
 
 type NodesDb = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -172,10 +173,38 @@ export async function deleteNodeRoute(c: Context<{ Bindings: Env }>) {
     userId,
     cleanup,
     strandedTasks,
-    reason: 'owner_requested_node_deletion',
+    reason: await ownerRemovalReason(db, nodeId, cleanup.runtimeTerminationConfirmedAt),
   });
   return c.json({ success: true });
 }
+
+/**
+ * A Delete can consume proof the owner attested earlier (a manual removal that
+ * stopped before its removal finished). Its audit reason must still say so, or the
+ * attestation would read as strict proof to anything that trusts
+ * `owner_requested_node_deletion`.
+ */
+async function ownerRemovalReason(
+  db: NodesDb,
+  nodeId: string,
+  proofAt: string | null
+): Promise<string> {
+  const [row] = await db
+    .select({
+      runtimeTerminationConfirmedAt: schema.nodes.runtimeTerminationConfirmedAt,
+      runtimeTerminationAttestedAt: schema.nodes.runtimeTerminationAttestedAt,
+    })
+    .from(schema.nodes)
+    .where(eq(schema.nodes.id, nodeId))
+    .limit(1);
+  const attested =
+    row !== undefined &&
+    row.runtimeTerminationConfirmedAt === proofAt &&
+    isOwnerAttestedTermination(row);
+  return attested ? OWNER_ATTESTED_REMOVAL_REASON : 'owner_requested_node_deletion';
+}
+
+export const OWNER_ATTESTED_REMOVAL_REASON = 'owner_attested_manual_deletion';
 
 /**
  * Everything an owner's node removal does once runtime termination is proven, by
