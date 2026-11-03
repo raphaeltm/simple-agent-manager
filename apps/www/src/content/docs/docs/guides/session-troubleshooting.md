@@ -59,7 +59,7 @@ your work is safe and what to do next. Everything here applies to both
   stopped responding. → [Wait for the chat to sleep, then wake it](#sam-lost-contact-with-the-machine)
 - **"Workspace disk was not preserved before automatic VM retirement"** on a chat that was asleep.
   SAM retired its machine before it could confirm the chat's files were saved.
-  → [Fork it](#a-node-wont-go-away)
+  → [Why, and how to carry on](#a-node-wont-go-away)
 - **A node on the Nodes page won't go away**: it shows **Stopped**, **Error** or **Unknown**, or a
   red line such as **Cleanup blocked since…**, for a long time. → [See why, then remove it](#a-node-wont-go-away)
 - **An archived chat shows a Fork box instead of the message box**, or a chat reads
@@ -650,7 +650,9 @@ provider's console:
 1. Check in the provider's console that the server is really gone. SAM can't prove that for you.
 2. Open the node and select **I already deleted this server**, then confirm. The button appears only
    once SAM's own deletion has failed (the node shows **Error**, or **Unknown** while SAM is deleting
-   it). On a **Stopped** node, select **Delete Node** first.
+   it). On a **Stopped** node, select **Delete Node** first. If SAM still can't delete it, you'll see
+   an error saying the node's termination isn't confirmed; within a few seconds the node shows
+   **Unknown** and the button appears.
 
 SAM asks your provider with your saved cloud account and refuses if the server turns up
 (**Server … still exists at …. Delete it there first, then try again.**). If the lookup fails for a
@@ -661,8 +663,7 @@ anything at your provider (`recordManualNodeDeletion` in
 `apps/api/src/services/node-manual-deletion.ts`). For a deployment node this affects every
 environment it hosts.
 
-The button shows on a node SAM is deleting or that shows an error. It isn't offered for machines you enrolled
-yourself (use **Delete** for those). On a machine that runs on SAM's own cloud account, SAM refuses
+It isn't offered for machines you enrolled yourself (use **Delete** for those). On a machine that runs on SAM's own cloud account, SAM refuses
 with **This server runs on SAM-managed capacity; contact an operator**, so ask your administrator.
 
 ## The session has ended
