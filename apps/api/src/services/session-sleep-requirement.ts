@@ -76,12 +76,23 @@ export async function resolveSleepRequirement(
 ): Promise<SleepRequirement> {
   if (options.requestedByPerson) return 'required';
   if (!isLifetimeGovernedNode(node)) return 'normal';
+  const absoluteMaxLifetimeMs = parsePositiveInt(
+    env.NODE_ABSOLUTE_MAX_LIFETIME_MS,
+    DEFAULT_NODE_ABSOLUTE_MAX_LIFETIME_MS
+  );
+  // Read the leeway setting only for a node already past its lifetime: every other sleep
+  // check stays free of the extra lookup.
+  const forceSleepAfterMs =
+    classifySleepRequirement(node, now, {
+      absoluteMaxLifetimeMs,
+      forceSleepAfterMs: Number.POSITIVE_INFINITY,
+      requestedByPerson: false,
+    }) === 'normal'
+      ? Number.POSITIVE_INFINITY
+      : await resolveForceSleepAfterMs(env);
   return classifySleepRequirement(node, now, {
-    absoluteMaxLifetimeMs: parsePositiveInt(
-      env.NODE_ABSOLUTE_MAX_LIFETIME_MS,
-      DEFAULT_NODE_ABSOLUTE_MAX_LIFETIME_MS
-    ),
-    forceSleepAfterMs: await resolveForceSleepAfterMs(env),
+    absoluteMaxLifetimeMs,
+    forceSleepAfterMs,
     requestedByPerson: false,
   });
 }

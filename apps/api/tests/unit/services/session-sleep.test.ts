@@ -847,6 +847,38 @@ describe('sleepWorkspaceSession', () => {
     expect(mocks.failSessionSnapshotSleepBeforeTeardown).toHaveBeenCalledTimes(1);
   });
 
+  it('does not abort a person-initiated Sleep when harness work begins during capture', async () => {
+    // A person's Sleep is required (policy a3780107): only a new turn may stop it.
+    let harnessActive = false;
+    mocks.getSessionState.mockImplementation(async () => ({
+      activity: 'idle',
+      activityAt: 100,
+      runtimeWorkState: harnessActive ? 'active' : 'inactive',
+      runtimeWorkCount: harnessActive ? 1 : 0,
+      runtimeWorkUpdatedAt: harnessActive ? Date.now() : 90,
+      runtimeWorkProgressAt: harnessActive ? Date.now() : 90,
+    }));
+    mocks.getRestorableSessionSnapshot.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      status: 'available',
+      degradation: 'none',
+      expiresAt: '2026-08-19T00:00:00.000Z',
+    });
+    mocks.verifySessionSnapshotArtifactsForSleep.mockImplementation(async () => {
+      harnessActive = true;
+      return true;
+    });
+    const { sleepWorkspaceSession } = await import('../../../src/services/session-sleep');
+
+    await sleepWorkspaceSession(buildEnv(), {
+      workspaceId: 'workspace-1',
+      userId: 'user-1',
+      reason: 'test',
+    }).catch(() => undefined);
+
+    expect(mocks.beginSessionSnapshotStopping).toHaveBeenCalled();
+    expect(mocks.stopWorkspaceOnNode).toHaveBeenCalled();
+  });
+
   it('aborts when harness work begins across the artifact-verification barrier', async () => {
     let harnessActive = false;
     mocks.getSessionState.mockImplementation(async () => ({
@@ -873,6 +905,8 @@ describe('sleepWorkspaceSession', () => {
         workspaceId: 'workspace-1',
         userId: 'user-1',
         reason: 'test',
+        // A sweep-claimed sleep: a person's Sleep is required and ignores harness work.
+        sleepClaimId: 'sweep-claim',
       })
     ).rejects.toThrow('activity changed during snapshot artifact verification');
 
@@ -1188,6 +1222,8 @@ describe('sleepWorkspaceSession', () => {
         workspaceId: 'workspace-1',
         userId: 'user-1',
         reason: 'test',
+        // A sweep-claimed sleep: a person's Sleep is required and ignores harness work.
+        sleepClaimId: 'sweep-claim',
       })
     ).rejects.toThrow('Workspace activity changed');
 
@@ -1226,6 +1262,8 @@ describe('sleepWorkspaceSession', () => {
         workspaceId: 'workspace-1',
         userId: 'user-1',
         reason: 'test',
+        // A sweep-claimed sleep: a person's Sleep is required and ignores harness work.
+        sleepClaimId: 'sweep-claim',
       })
     ).rejects.toThrow('Harness-owned background work is active');
 
@@ -1355,6 +1393,8 @@ describe('sleepWorkspaceSession', () => {
         workspaceId: 'workspace-1',
         userId: 'user-1',
         reason: 'test',
+        // A sweep-claimed sleep: a person's Sleep is required and ignores harness work.
+        sleepClaimId: 'sweep-claim',
       })
     ).rejects.toThrow('Workspace activity changed while the final snapshot was captured');
 
