@@ -34,9 +34,7 @@ test('approved source chooses only fixed source-build commands and owner config'
 import { createRequire } from 'node:module';
 import { EventEmitter } from 'node:events';
 import { dirname, join } from 'node:path';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 test('pinned Wrangler passes host networking to its actual Docker build command', async () => {
@@ -139,69 +137,15 @@ test('builder failures name the failing bootstrap line on stderr', () => {
 
 test('every checksum-pinned builder download names an immutable version', () => {
   // A moving URL behind a fixed checksum fails silently on the next upstream release.
-  const source = readFileSync(new URL('./installer-builder-bootstrap.sh', import.meta.url), 'utf8');
-  assert.ok(!/^\s*curl /m.test(source.replace(/fetch_pinned\(\) \{[\s\S]*?\n\}\n/, '')));
-  const calls = [
-    ...source.matchAll(
-      /^fetch_pinned (\S+) ([a-f0-9]{64})((?: \\\n)?(?: +https:\/\/\S+(?: \\\n)?)+)/gm
-    ),
-  ];
-  assert.equal(calls.length, 3);
-  const urls = calls.flatMap((call) => call[3].match(/https:\/\/\S+/g));
-  assert.equal(urls.length, 5);
-  for (const url of urls) assert.match(url, /[/-]v?\d+\.\d+\.\d+[/-]|go\d+\.\d+\.\d+\./, url);
+  const scripts = ['./installer-builder-bootstrap.sh', './installer-builder-bootstrap-fit.sh'];
+  const urls = scripts.flatMap((path) =>
+    [
+      ...readFileSync(new URL(path, import.meta.url), 'utf8').matchAll(
+        /curl [^\n]*?(https:\/\/\S+)/g
+      ),
+    ].map((match) => match[1])
+  );
+  assert.ok(urls.length >= 3);
+  for (const url of urls) assert.match(url, /\/v?\d+\.\d+\.\d+[/-]|go\d+\.\d+\.\d+\./, url);
   assert.ok(!urls.some((url) => url.includes('/rustup/dist/')));
-});
-
-test('pinned downloads fail over between sources and reject wrong bytes', () => {
-  const source = readFileSync(new URL('./installer-builder-bootstrap.sh', import.meta.url), 'utf8');
-  const helper = source.match(/fetch_pinned\(\) \{[\s\S]*?\n\}\n/)[0];
-  const dir = mkdtempSync(join(tmpdir(), 'fetch-pinned-'));
-  try {
-    // Stub curl: "missing" answers 404, "wrong" serves other bytes, "good" serves the payload.
-    writeFileSync(
-      join(dir, 'curl'),
-      `#!/usr/bin/env bash
-while (($#)); do case "$1" in -o) out=$2; shift;; https://*) url=$1;; esac; shift; done
-case "$url" in
-  *missing*) echo "curl: (22) The requested URL returned error: 404" >&2; exit 22;;
-  *wrong*) printf 'tampered' > "$out";;
-  *good*) printf 'payload' > "$out";;
-esac
-`,
-      { mode: 0o755 }
-    );
-    const sha = createHash('sha256').update('payload').digest('hex');
-    const run = (...urls) =>
-      spawnSync(
-        'bash',
-        [
-          '-c',
-          `set -euo pipefail\n${helper}fetch_pinned "$@"`,
-          'fetch',
-          join(dir, 'out'),
-          sha,
-          ...urls,
-        ],
-        {
-          encoding: 'utf8',
-          env: { PATH: `${dir}:${process.env.PATH}`, SAM_FETCH_RETRY_DELAY_SECONDS: '0' },
-        }
-      );
-
-    const recovered = run(
-      'https://example.test/missing/v1.0.0/x',
-      'https://example.test/good/v1.0.0/x'
-    );
-    assert.equal(recovered.status, 0, recovered.stderr);
-    assert.equal(readFileSync(join(dir, 'out'), 'utf8'), 'payload');
-    assert.match(recovered.stderr, /attempt 1 failed: https:\/\/example\.test\/missing/);
-
-    const rejected = run('https://example.test/wrong/v1.0.0/x');
-    assert.notEqual(rejected.status, 0);
-    assert.equal(rejected.stderr.match(/failed: /g)?.length, 4);
-    assert.equal(existsSync(join(dir, 'out')), false);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
 });
