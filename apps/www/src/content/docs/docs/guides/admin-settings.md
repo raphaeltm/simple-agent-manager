@@ -202,6 +202,15 @@ These **Operations** settings bound automatic retries after an eviction wake fai
 | `operations.evictionRecoveryRetryWallMs`    | 10,000  | 1–30,000     | Milliseconds before starting another retry; an in-flight durable wake may finish afterward                                          |
 | `operations.evictionRecoveryRetryDelayMs`   | 60,000  | 1–86,400,000 | Minimum interval after failure or preclaim deferral; deferrals rotate fairly without resetting the failure anchor or attempt budget |
 
+## Node lifetime
+
+A VM that SAM created for tasks runs for at most 24 hours (`NODE_ABSOLUTE_MAX_LIFETIME_MS`). After
+that, every session on it sleeps as soon as its agent's turn ends.
+`operations.nodeLifetimeForceSleepAfterMs` sets how long SAM waits for a turn that is still running
+before it stops the agent and sleeps the session anyway. The default is 1,800,000 milliseconds
+(30 minutes); admins can set a whole number from 1 to 86,400,000 milliseconds. The chat keeps its
+transcript and checkpoint, and the next message wakes it on another machine.
+
 ## Blocked VM cleanup
 
 `operations.nodeCleanupBlockedRetirementMs` controls how long automatic cleanup may remain blocked before SAM retires a stopped workspace VM. The default is 1,800,000 milliseconds (30 minutes); admins can set a whole number from 1 to 86,400,000 milliseconds.
