@@ -15,15 +15,9 @@ import { expect, type Page, test } from '@playwright/test';
 import type { CCProfileAttachmentItem } from '@simple-agent-manager/shared';
 
 import { accountRows, mergeRows } from '../unit/components/accounts/fixtures';
-import {
-  type AuditResponder,
-  makeMockProject,
-  makeMockUser,
-  respondToAppShellRoute,
-  seedTheme,
-  setupAuditRoutes,
-} from './audit-helpers';
+import { type AuditResponder, makeMockUser, seedTheme, setupAuditRoutes } from './audit-helpers';
 import { docsShot, opaqueBackdrop } from './docs-shot';
+import { makeAgentProfile, respondToProfilePageRoute } from './profile-account-fixtures';
 
 const USER = makeMockUser({
   email: 'dana@example.com',
@@ -103,32 +97,6 @@ const DEEP_WORK_PIN: CCProfileAttachmentItem = {
   updatedAt: '2026-11-01T00:00:00.000Z',
 };
 
-function profile(id: string, name: string, projectId: string | null) {
-  return {
-    id,
-    projectId,
-    userId: USER.user.id,
-    name,
-    description: null,
-    agentType: 'claude-code',
-    model: null,
-    effort: 'auto',
-    permissionMode: null,
-    systemPromptAppend: null,
-    maxTurns: null,
-    timeoutMinutes: null,
-    vmSizeOverride: null,
-    provider: null,
-    vmLocation: null,
-    workspaceProfile: null,
-    devcontainerConfigName: null,
-    taskMode: null,
-    isBuiltin: false,
-    createdAt: '2026-10-01T00:00:00Z',
-    updatedAt: '2026-10-01T00:00:00Z',
-  };
-}
-
 const MEMBERS = [
   { id: USER.user.id, name: 'Dana Reyes', role: 'owner' },
   { id: 'user-ben', name: 'Ben Okafor', role: 'admin' },
@@ -205,28 +173,14 @@ function handler(profilePins: CCProfileAttachmentItem[]) {
       });
     }
     if (/^\/api\/projects\/[^/]+\/skills$/.test(path)) return respond(200, { items: [] });
-    if (/^\/api\/projects\/[^/]+\/agent-profiles$/.test(path)) {
-      return respond(200, {
-        items: [
-          profile('prof-deep', 'Opus deep work', 'p-web'),
-          profile('prof-review', 'Careful reviewer', 'p-web'),
-        ],
-      });
-    }
-    if (/\/agent-profiles\/[^/]+\/runtime\/env-vars$/.test(path)) {
-      return respond(200, { envVars: [] });
-    }
-    if (/\/agent-profiles\/[^/]+\/runtime\/files$/.test(path)) return respond(200, { files: [] });
-    if (/^\/api\/projects\/[^/]+\/agent-profiles\/picker$/.test(path)) {
-      return respond(200, { usage: [], hiddenProfileIds: [], usageWindowDays: 30 });
-    }
-    if (path === '/api/projects') return respond(200, { projects: PROJECTS });
-    const project = path.match(/^\/api\/projects\/([^/]+)$/);
-    if (project) {
-      const found = PROJECTS.find((each) => each.id === project[1]);
-      return respond(200, makeMockProject({ ...found, userId: USER.user.id }));
-    }
-    return respondToAppShellRoute(path, respond, { user: USER, projects: PROJECTS });
+    return respondToProfilePageRoute(path, respond, {
+      user: USER,
+      projects: PROJECTS,
+      profiles: [
+        makeAgentProfile('prof-deep', 'Opus deep work', 'p-web', USER.user.id),
+        makeAgentProfile('prof-review', 'Careful reviewer', 'p-web', USER.user.id),
+      ],
+    });
   };
 }
 
