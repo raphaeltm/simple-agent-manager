@@ -39,7 +39,7 @@ export const DEFAULT_RATE_LIMITS = {
   IDENTITY_TOKEN: 60,
   ANALYTICS_INGEST: 60,
   // Authenticated Report Issue submissions create draft Ideas in the
-  // maintainer feedback project. Keep normal user retries possible while
+  // maintainer Operations project. Keep normal user retries possible while
   // bounding abuse of the externally reachable POST endpoint.
   REPORT_ISSUE_POST: 20,
   PUSH_SUBSCRIPTION: 30,

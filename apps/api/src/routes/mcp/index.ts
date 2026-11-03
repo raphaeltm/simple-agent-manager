@@ -13,17 +13,18 @@ import * as v from 'valibot';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { formatIssues, JsonRpcEnvelopeSchema } from '../../schemas';
+import { OperationsAccessError } from '../../services/operations-access';
 import {
   authenticateMcpRequest,
   checkMcpRateLimit,
   getMcpRateLimit,
   INTERNAL_ERROR,
+  INVALID_PARAMS,
   jsonRpcError,
   jsonRpcSuccess,
   MCP_PROTOCOL_VERSION,
   MCP_SERVER_NAME,
   MCP_SERVER_VERSION,
-  MCP_TOOLS,
   METHOD_NOT_FOUND,
 } from './_helpers';
 import { isAutoLinkTool, scheduleToolAutoLink } from './auto-link-tools';
@@ -64,6 +65,7 @@ import { handleGetArchivedToolPayloads } from './session-tools';
 import { handleTaskPullRequestAssociation } from './task-pr-association-tools';
 import { handleCompleteTask } from './task-tools';
 import { MCP_TOOL_HANDLERS } from './tool-handler-table';
+import { listMcpToolsForToken } from './tool-listing';
 import { webhookClaimRoutes } from './webhook-claims';
 import {
   handleGetCredentialStatus,
@@ -169,7 +171,9 @@ mcpRoutes.post('/', async (c) => {
   switch (rpc.method) {
     // MCP protocol: list available tools
     case 'tools/list': {
-      return c.json(jsonRpcSuccess(requestId, { tools: MCP_TOOLS }));
+      return c.json(
+        jsonRpcSuccess(requestId, { tools: await listMcpToolsForToken(c.env, tokenData) })
+      );
     }
 
     // MCP protocol: call a tool
@@ -377,6 +381,15 @@ mcpRoutes.post('/', async (c) => {
           }
         }
       } catch (err) {
+        if (err instanceof OperationsAccessError) {
+          // Already logged by requireOperationsAccess with every identifier.
+          return c.json(
+            jsonRpcError(requestId, INVALID_PARAMS, err.message, {
+              reason: err.reason,
+              capability: err.capability,
+            })
+          );
+        }
         const message = err instanceof Error ? err.message : 'Tool execution failed';
         const name = toolName ?? '<unknown>';
         log.error('mcp.tool_call_failed', { tool: name, error: String(err) });

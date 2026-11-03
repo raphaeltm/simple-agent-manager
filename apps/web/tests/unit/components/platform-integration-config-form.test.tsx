@@ -30,9 +30,7 @@ describe('PlatformIntegrationConfigForm Google infrastructure OAuth', () => {
     expect(
       screen.queryByRole('heading', { name: 'Google infrastructure OAuth' })
     ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('heading', { name: 'Private feedback project' })
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Operations project' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Google sign-in (OAuth)' })).toBeInTheDocument();
   });
 
@@ -153,7 +151,7 @@ describe('PlatformIntegrationConfigForm Google infrastructure OAuth', () => {
       { id: 'feedback-project-2', name: 'Operator Feedback', status: 'active' },
     ]);
 
-    fireEvent.change(screen.getByLabelText('Feedback project'), {
+    fireEvent.change(screen.getByLabelText('Operations project'), {
       target: { value: 'feedback-project-2' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save integrations' }));
@@ -164,7 +162,7 @@ describe('PlatformIntegrationConfigForm Google infrastructure OAuth', () => {
       });
     });
 
-    fireEvent.change(screen.getByLabelText('Feedback project'), {
+    fireEvent.change(screen.getByLabelText('Operations project'), {
       target: { value: '' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Save integrations' }));

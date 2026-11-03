@@ -62,6 +62,7 @@ import {
   handlePublishHandoff,
   handlePublishMissionState,
 } from './mission-tools';
+import { handleOpsGetAccessStatus } from './operations-tools';
 import { handleSendMessageToSubtask, handleStopSubtask } from './orchestration-comms';
 import {
   handleAddDependency,
@@ -135,10 +136,21 @@ export type McpToolHandler = (
   env: Env
 ) => Promise<JsonRpcResponse>;
 
+/**
+ * Operations-project debugger tools (`OPERATIONS_TOOLS`). Add one entry per tool here, next to
+ * its definition in `tool-definitions-operations-tools.ts`. Each handler must call
+ * `requireOperationsAccess` itself; this table and `tools/list` filtering are not the boundary.
+ */
+export const OPERATIONS_TOOL_HANDLERS: ReadonlyMap<string, McpToolHandler> = new Map<
+  string,
+  McpToolHandler
+>([['ops_get_access_status', handleOpsGetAccessStatus]]);
+
 export const MCP_TOOL_HANDLERS: ReadonlyMap<string, McpToolHandler> = new Map<
   string,
   McpToolHandler
 >([
+  ...OPERATIONS_TOOL_HANDLERS,
   ['list_ai_models', handleListAiModels],
   ['run_ai_model', handleRunAiModel],
   ['update_task_status', handleUpdateTaskStatus],

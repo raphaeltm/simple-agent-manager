@@ -1,9 +1,9 @@
 /**
  * Private incident backlog MCP tools.
  *
- * These tools are intentionally scoped to the configured private feedback
- * project. Callers cannot provide a project id; the MCP token's project must
- * match the effective feedback project setting before any incident state is
+ * These tools are intentionally scoped to the configured private Operations
+ * project (the `feedback.projectId` setting). Callers cannot provide a project id; the MCP token's project must
+ * match the effective Operations project setting before any incident state is
  * read or mutated.
  */
 import type { Env } from '../../env';
@@ -41,7 +41,7 @@ async function requireFeedbackProjectScope(
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      'Incident tools are available only inside the configured private feedback project'
+      'Incident tools are available only inside the configured private Operations project'
     );
   }
   return null;

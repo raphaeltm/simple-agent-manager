@@ -60,7 +60,7 @@ Two things happen server-side regardless of what you tick:
 
 ## After you submit
 
-You get a confirmation with a **report ID**, a status of `draft`, and the list of references that were actually attached. The report becomes a **draft [Idea](/docs/guides/ideas/)** in the platform's feedback project, where a maintainer picks it up.
+You get a confirmation with a **report ID**, a status of `draft`, and the list of references that were actually attached. The report becomes a **draft [Idea](/docs/guides/ideas/)** in the platform's Operations project, where a maintainer picks it up.
 
 Reports are rate-limited to **20 per hour** per account (`RATE_LIMIT_REPORT_ISSUE_POST`). Exceeding that returns a `429`. The window is a fixed clock hour rather than a rolling sixty minutes, so the allowance resets at the top of the next hour — which may be in five minutes or fifty-five.
 
@@ -68,7 +68,7 @@ Length limits: title **200** characters, description **5,000** characters. The d
 
 ## Don't see a Report button?
 
-The feature is **hidden entirely** unless the deployment has been configured with a feedback project. If neither entry point appears, this deployment hasn't set one up — report through whatever channel your operator uses instead. On a self-hosted SAM, that operator is you; see below.
+The feature is **hidden entirely** unless the deployment has been configured with an Operations project. If neither entry point appears, this deployment hasn't set one up — report through whatever channel your operator uses instead. On a self-hosted SAM, that operator is you; see below.
 
 ---
 
@@ -76,9 +76,9 @@ The feature is **hidden entirely** unless the deployment has been configured wit
 
 Reports are filed as draft Ideas in one project you nominate:
 
-1. Create or choose a project for platform feedback.
+1. Create or choose a private project for platform feedback. SAM calls it the **Operations project**.
 2. Open **Admin → Integrations** (`/admin/integrations`).
-3. Choose that project under **Private feedback project** and save.
+3. Choose that project under **Operations project** and save.
 
 The saved runtime setting is stored in `platform_settings` and takes precedence without a redeploy. `PLATFORM_FEEDBACK_PROJECT_ID=<project id>` remains available as a bootstrap/environment fallback for first deploys and automation. SAM validates the effective project on every check — if no runtime setting or environment fallback exists, or the effective project doesn't exist, `GET /api/report-issue/config` returns `enabled: false` and both entry points disappear from the UI. This is deliberate: an unconfigured deployment shows no button rather than a button that errors.
 
@@ -88,7 +88,7 @@ The same project also receives [automated error triage](#for-operators-automated
 
 | Variable                              | Default | Description                                                                                                                        |
 | ------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
-| `PLATFORM_FEEDBACK_PROJECT_ID`        | unset   | Bootstrap/environment fallback for the feedback project. The Admin → Integrations runtime selection is preferred and overrides it. |
+| `PLATFORM_FEEDBACK_PROJECT_ID`        | unset   | Bootstrap/environment fallback for the Operations project. The Admin → Integrations runtime selection is preferred and overrides it. |
 | `REPORT_ISSUE_TITLE_MAX_LENGTH`       | `200`   | Truncation ceiling for the stored title — see below                                                                                |
 | `REPORT_ISSUE_DESCRIPTION_MAX_LENGTH` | `5000`  | Truncation ceiling for the stored description — see below                                                                          |
 | `REPORT_ISSUE_CONTENT_MAX_LENGTH`     | `65536` | Max stored Idea body, including attached references                                                                                |
@@ -114,11 +114,11 @@ That fence matters when you point an agent at the resulting Idea. The reporter's
 
 ## For operators: automated error triage
 
-Beyond user-submitted reports, SAM files its **own** reports. Once an hour it groups recent platform errors and warnings, prioritizes severe and novel signatures ahead of low-severity repeat floods, runs the [deployment diagnosis agent](#for-superadmins-diagnosing-errors-with-an-agent) on a representative error from each eligible group, and writes a grouped incident plus draft Idea into the same feedback project.
+Beyond user-submitted reports, SAM files its **own** reports. Once an hour it groups recent platform errors and warnings, prioritizes severe and novel signatures ahead of low-severity repeat floods, runs the [deployment diagnosis agent](#for-superadmins-diagnosing-errors-with-an-agent) on a representative error from each eligible group, and writes a grouped incident plus draft Idea into the same Operations project.
 
-Grouping is by a redacted content signature, so a recurring error updates its existing incident/Idea instead of filing a new one every hour. A group that fails triage repeatedly is rejected rather than retried forever. Budget exhaustion is different: daily token exhaustion, per-run token exhaustion, and similar capacity blocks are persisted as retryable deferrals. Deferred signatures stay pending, are skipped until their retry time, and become eligible again after the budget refresh instead of being permanently rejected. Errors emitted by tasks in the feedback project are excluded from the hourly grouping pass so an incident-handling agent cannot recursively file incidents about its own failures.
+Grouping is by a redacted content signature, so a recurring error updates its existing incident/Idea instead of filing a new one every hour. A group that fails triage repeatedly is rejected rather than retried forever. Budget exhaustion is different: daily token exhaustion, per-run token exhaustion, and similar capacity blocks are persisted as retryable deferrals. Deferred signatures stay pending, are skipped until their retry time, and become eligible again after the budget refresh instead of being permanently rejected. Errors emitted by tasks in the Operations project are excluded from the hourly grouping pass so an incident-handling agent cannot recursively file incidents about its own failures.
 
-The private incident backlog has its own queue state (`pending`, `dispatched`, `claimed`, `resolved`, `rejected`, `expired`). By default, when dispatchable incidents exist and no incident trigger exists in the feedback project, SAM creates one private incident trigger automatically. Existing operator-created incident triggers, including paused ones, are respected. Incident triggers dispatch one investigation-only agent for a bounded backlog summary, not one agent per occurrence. Pending signatures already associated with open tracked work (`idea_id`, a diagnosis-linked Idea, or `resolved_by_task_id`) stay attached to that work and are skipped by automatic dispatch. Warning-only signatures stay available for linkage/review but do not consume VM dispatches unless the severity floor is lowered. Agents then use private MCP tools (`list_incident_queue`, `get_incident`, `claim_incident`, `resolve_incident`) to claim and terminally resolve incidents. A resolved incident must carry a structured ship-or-track reference: `fixPrUrl` for a merged/open PR, `dispatchedTaskId` for a separate implementation task, or `linkedRecordId` for an existing Idea/task. Rejections require a justification note instead. Those tools are server-scoped to the effective feedback project setting; they return only bounded, redacted evidence and explicitly label report/log/diagnosis text as untrusted. Machine-generated feedback and diagnostics should stay private and must not be copied into public GitHub issues.
+The private incident backlog has its own queue state (`pending`, `dispatched`, `claimed`, `resolved`, `rejected`, `expired`). By default, when dispatchable incidents exist and no incident trigger exists in the Operations project, SAM creates one private incident trigger automatically. Existing operator-created incident triggers, including paused ones, are respected. Incident triggers dispatch one investigation-only agent for a bounded backlog summary, not one agent per occurrence. Pending signatures already associated with open tracked work (`idea_id`, a diagnosis-linked Idea, or `resolved_by_task_id`) stay attached to that work and are skipped by automatic dispatch. Warning-only signatures stay available for linkage/review but do not consume VM dispatches unless the severity floor is lowered. Agents then use private MCP tools (`list_incident_queue`, `get_incident`, `claim_incident`, `resolve_incident`) to claim and terminally resolve incidents. A resolved incident must carry a structured ship-or-track reference: `fixPrUrl` for a merged/open PR, `dispatchedTaskId` for a separate implementation task, or `linkedRecordId` for an existing Idea/task. Rejections require a justification note instead. Those tools are listed only to, and server-scoped to, the effective Operations project setting; they return only bounded, redacted evidence and explicitly label report/log/diagnosis text as untrusted. Machine-generated feedback and diagnostics should stay private and must not be copied into public GitHub issues.
 
 There is no UI button for triage yet. A superadmin can `POST /api/admin/observability/feedback-triage` to sweep immediately rather than waiting for the next hourly run. Note that a manual sweep still only looks back over `PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES` (60 minutes by default), so it will not surface older errors — to test a fresh configuration, trigger it while a recent error is still inside that window.
 

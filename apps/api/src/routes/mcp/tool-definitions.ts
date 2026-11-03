@@ -15,7 +15,8 @@ import { WORKFLOW_TOOLS } from './tool-definitions-workflow-tools';
  *   - tool-definitions-orchestration-tools.ts (agent-to-agent communication & control)
  *   - tool-definitions-comment-tools.ts       (message comment threads)
  *   - tool-definitions-trigger-tools.ts       (trigger management — cron automation)
- *   - tool-definitions-incident-tools.ts      (private feedback incident backlog)
+ *   - tool-definitions-incident-tools.ts      (private Operations-project incident backlog)
+ *   - tool-definitions-operations-tools.ts    (Operations-project debugger tools)
  *   - tool-definitions-event-subscription-tools.ts (ProjectData event subscriptions)
  *   - tool-definitions-project-event-tools.ts (ProjectData event retrieval + ack)
  */
@@ -28,6 +29,7 @@ export { KNOWLEDGE_TOOLS } from './tool-definitions-knowledge-tools';
 export { LIBRARY_FILE_COMMENT_TOOLS } from './tool-definitions-library-file-comment-tools';
 export { LIBRARY_TOOLS } from './tool-definitions-library-tools';
 export { MISSION_TOOLS } from './tool-definitions-mission-tools';
+export { OPERATIONS_TOOLS } from './tool-definitions-operations-tools';
 export { ORCHESTRATION_TOOLS } from './tool-definitions-orchestration-tools';
 export { ORCHESTRATOR_LIFECYCLE_TOOLS } from './tool-definitions-orchestrator-tools';
 export { POLICY_TOOLS } from './tool-definitions-policy-tools';
@@ -49,6 +51,7 @@ import { KNOWLEDGE_TOOLS } from './tool-definitions-knowledge-tools';
 import { LIBRARY_FILE_COMMENT_TOOLS } from './tool-definitions-library-file-comment-tools';
 import { LIBRARY_TOOLS } from './tool-definitions-library-tools';
 import { MISSION_TOOLS } from './tool-definitions-mission-tools';
+import { OPERATIONS_TOOLS } from './tool-definitions-operations-tools';
 import { ORCHESTRATION_TOOLS } from './tool-definitions-orchestration-tools';
 import { ORCHESTRATOR_LIFECYCLE_TOOLS } from './tool-definitions-orchestrator-tools';
 import { POLICY_TOOLS } from './tool-definitions-policy-tools';
@@ -82,6 +85,7 @@ export const MCP_TOOLS = [
   ...TRIGGER_TOOLS,
   ...AGENT_EMAIL_TOOLS,
   ...INCIDENT_TOOLS,
+  ...OPERATIONS_TOOLS,
   ...PROFILE_TOOLS,
   ...SKILL_TOOLS,
   ...KNOWLEDGE_TOOLS,

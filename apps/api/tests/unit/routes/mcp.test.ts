@@ -891,11 +891,11 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('list_deployment_environment_config');
       expect(toolNames).toContain('set_deployment_environment_config');
       expect(toolNames).toContain('wait_for_subtasks');
-      // Private incident backlog tools
-      expect(toolNames).toContain('list_incident_queue');
-      expect(toolNames).toContain('get_incident');
-      expect(toolNames).toContain('claim_incident');
-      expect(toolNames).toContain('resolve_incident');
+      // Incident and Operations tools are listed only to the Operations project
+      // (tests/unit/routes/mcp/tool-listing.test.ts); this token is an ordinary project.
+      for (const name of ['list_incident_queue', 'claim_incident', 'ops_get_access_status']) {
+        expect(toolNames).not.toContain(name);
+      }
       // Library file comment tools
       expect(toolNames).toContain('list_library_file_comment_threads');
       expect(toolNames).toContain('create_library_file_comment_thread');

@@ -66,6 +66,8 @@ export type AdminSettingName =
   | 'operations.doAlarmsEnabled'
   | 'operations.stalledTaskClassifierEnabled'
   | 'operations.samOperatorDisabled'
+  | 'operations.debuggerTools'
+  | 'operations.auditRetentionDays'
   | 'operations.samOperatorWatchLifetimeMs'
   | 'operations.samOperatorEventPageSize'
   | 'operations.samOperatorWorkRefreshMs'
@@ -273,6 +275,26 @@ export function integerDefinition(
       Number.isInteger(value) &&
       value >= range.min &&
       value <= range.max,
+  };
+}
+
+export function choiceDefinition(
+  name: AdminSettingName,
+  defaultValue: string,
+  choices: readonly string[],
+  category: AdminSettingDefinition['category'],
+  description: string
+): AdminSettingDefinition {
+  return {
+    name,
+    type: 'enum',
+    defaultValue,
+    category,
+    description,
+    secret: false,
+    risky: true,
+    choices,
+    validate: (value) => typeof value === 'string' && choices.includes(value),
   };
 }
 

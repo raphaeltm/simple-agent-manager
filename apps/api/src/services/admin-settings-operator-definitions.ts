@@ -1,10 +1,29 @@
 import {
   type AdminSettingDefinition,
+  choiceDefinition,
   integerDefinition,
   MAX_SAM_OPERATOR_EVENT_PAGE_SIZE,
   OPERATOR_DEFAULTS,
 } from './admin-setting-definitions';
+/** Operations-project debugger tools dial (idea 01M6GGY1QPGG4D40HG0PVGQS3R, policy a35180d5). */
+export const OPERATIONS_TOOLS_MODES = ['off', 'read', 'read_ask', 'read_auto_safe'] as const;
+export const DEFAULT_OPERATIONS_AUDIT_RETENTION_DAYS = 90;
+
 export const OPERATOR_SETTINGS: AdminSettingDefinition[] = [
+  choiceDefinition(
+    'operations.debuggerTools',
+    'off',
+    OPERATIONS_TOOLS_MODES,
+    'Operations',
+    'Which debugger tools agents in the Operations project may use. off: none. read: read-only tools. read_ask: read-only tools, plus actions that each need a human approval. read_auto_safe: like read_ask, but low-risk actions run without approval. Only tasks owned by an active superadmin can use them.'
+  ),
+  integerDefinition(
+    'operations.auditRetentionDays',
+    DEFAULT_OPERATIONS_AUDIT_RETENTION_DAYS,
+    'Operations',
+    'Days an Operations debugger tool audit row is kept before the daily purge deletes it.',
+    { min: 1, max: 3_650 }
+  ),
   integerDefinition(
     'operations.samOperatorWatchLifetimeMs',
     OPERATOR_DEFAULTS.watchLifetimeMs,

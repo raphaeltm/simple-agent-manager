@@ -22,6 +22,7 @@ import { notifyFailedSweeps } from './failed-sweep-notifications';
 import { runIncidentTriggerSweep } from './incident-triggers';
 import { runNodeCleanupSweep } from './node-cleanup';
 import { runObservabilityPurge } from './observability-purge';
+import { runOperationsAuditPurge } from './operations-audit-purge';
 import {
   isHourlyPlatformMaintenanceCron,
   scheduleHourlyPlatformMaintenance,
@@ -87,6 +88,8 @@ export async function scheduled(
         });
       })()
     );
+    // Separate promise: an analytics failure must not skip the audit retention purge.
+    ctx.waitUntil(runOperationsAuditPurge(env, controller.cron));
     return;
   }
 

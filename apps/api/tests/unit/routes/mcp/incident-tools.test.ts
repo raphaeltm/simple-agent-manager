@@ -83,8 +83,8 @@ describe('MCP incident tools', () => {
       env
     );
 
-    expect(listed.error?.message).toContain('configured private feedback project');
-    expect(detail.error?.message).toContain('configured private feedback project');
+    expect(listed.error?.message).toContain('configured private Operations project');
+    expect(detail.error?.message).toContain('configured private Operations project');
     expect(JSON.stringify(listed)).not.toContain('incident-a');
     expect(JSON.stringify(detail)).not.toContain('incident-a');
   });
@@ -118,7 +118,7 @@ describe('MCP incident tools', () => {
       await handleListIncidentQueue('2', {}, token({ projectId: 'runtime-feedback-project' }), env)
     );
 
-    expect(fallbackToken.error?.message).toContain('configured private feedback project');
+    expect(fallbackToken.error?.message).toContain('configured private Operations project');
     expect(runtimeToken.projectId).toBe('runtime-feedback-project');
     expect(runtimeToken.count).toBe(1);
   });

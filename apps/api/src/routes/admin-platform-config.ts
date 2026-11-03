@@ -37,7 +37,7 @@ async function assertFeedbackProjectSelection(
     .bind(projectId, userId)
     .first<{ id: string }>();
   if (!row) {
-    throw errors.badRequest('Feedback project must exist and be a project you can access');
+    throw errors.badRequest('Operations project must exist and be a project you can access');
   }
 }
 
@@ -55,7 +55,9 @@ adminPlatformConfigRoutes.put(
       await enforceCredentialMutationRateLimit(c.env, userId, 'google-infra-oauth');
     }
     if (config.feedback?.remove && config.feedback.projectId?.trim()) {
-      throw errors.badRequest('Choose a feedback project or clear the runtime selection, not both');
+      throw errors.badRequest(
+        'Choose an Operations project or clear the runtime selection, not both'
+      );
     }
     const feedbackProjectId = config.feedback?.projectId?.trim();
     if (feedbackProjectId) {

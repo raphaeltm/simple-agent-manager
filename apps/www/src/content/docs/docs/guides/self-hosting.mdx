@@ -131,7 +131,17 @@ To let people sign in with GitLab and create projects from GitLab repositories:
 
 ### Let users report problems
 
-SAM's in-app **Report an Issue** flow is off until you nominate a project to receive reports. Create a project for feedback, then open **Admin → Integrations** (`/admin/integrations`) and select it under **Private feedback project**. `PLATFORM_FEEDBACK_PROJECT_ID` is still supported as a bootstrap/environment fallback, but the in-app runtime setting is preferred and overrides it. Until an effective project exists, the Report button and the crash-screen report link are hidden from every user — so if people tell you there's no Report button, this is why. The same setting enables hourly automated triage of platform errors into that project. See [Reporting Issues](/docs/guides/reporting-issues/#for-operators-where-reports-land).
+SAM's in-app **Report an Issue** flow is off until you nominate a project to receive reports. Create a private project for this (SAM calls it the **Operations project**), then open **Admin → Integrations** (`/admin/integrations`) and select it under **Operations project**. `PLATFORM_FEEDBACK_PROJECT_ID` is still supported as a bootstrap/environment fallback, but the in-app runtime setting is preferred and overrides it. Until an effective project exists, the Report button and the crash-screen report link are hidden from every user — so if people tell you there's no Report button, this is why. The same setting enables hourly automated triage of platform errors into that project. See [Reporting Issues](/docs/guides/reporting-issues/#for-operators-where-reports-land).
+
+### Let an agent debug your installation
+
+SAM is adding debugger tools that let agents in the Operations project read across every user's
+nodes, workspaces and sessions, including raw node logs, and later act on them with approval. Today
+only `ops_get_access_status` ships; it reports what a task may do. The tools are off by default. To turn them on, set
+`operations.debuggerTools` in [**Admin → Settings**](/docs/guides/admin-settings/#operations-debugger-tools)
+under **Operations**. Only tasks owned by an active superadmin can use them, checked on every call,
+and every call is audited. Leave the setting `off` if you do not want any agent to see other users'
+infrastructure.
 
 ### Let agents ask in chat
 

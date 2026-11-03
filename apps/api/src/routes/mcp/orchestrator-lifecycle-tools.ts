@@ -3,7 +3,9 @@
  */
 import type { SchedulerState } from '@simple-agent-manager/shared';
 import { OVERRIDABLE_SCHEDULER_STATES } from '@simple-agent-manager/shared';
+import { drizzle } from 'drizzle-orm/d1';
 
+import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import * as orchestratorService from '../../services/project-orchestrator';
@@ -15,6 +17,7 @@ import {
   type McpTokenData,
   sanitizeUserInput,
 } from './_helpers';
+import { denyWhenMcpActorLacksCurrentProjectCapability } from './orchestration-authority';
 
 // ─── get_orchestrator_status ─────────────────────────────────────────────────
 
@@ -123,6 +126,20 @@ export async function handleOverrideTaskState(
     return jsonRpcError(requestId, INVALID_PARAMS,
       `Invalid state: ${newState}. Must be one of: ${OVERRIDABLE_SCHEDULER_STATES.join(', ')}`);
   }
+
+  // Same two gates as stop_subtask (rule 61): a task-scoped token, and the actor's CURRENT
+  // task:write capability re-derived from D1. A token outlives membership changes.
+  if (!tokenData.taskId) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'Only task agents can use orchestration tools');
+  }
+  const staleActor = await denyWhenMcpActorLacksCurrentProjectCapability(
+    requestId,
+    drizzle(env.DATABASE, { schema }),
+    tokenData,
+    'task:write',
+    'override_task_state',
+  );
+  if (staleActor) return staleActor;
 
   const targetTask = await env.DATABASE.prepare(
     `SELECT project_id AS projectId

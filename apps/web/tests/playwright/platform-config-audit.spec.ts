@@ -253,8 +253,8 @@ test.describe('Platform config first-run and admin UI', () => {
     await expect(page.getByTestId('google-infrastructure-audit')).toContainText(
       'admin-platform-config'
     );
-    await expect(page.getByRole('heading', { name: 'Private feedback project' })).toBeVisible();
-    await expect(page.getByLabel('Feedback project')).toHaveValue('feedback-project-1');
+    await expect(page.getByRole('heading', { name: 'Operations project' })).toBeVisible();
+    await expect(page.getByLabel('Operations project')).toHaveValue('feedback-project-1');
     await expect(page.getByTestId('feedback-project-status')).toContainText(
       'Report Issue, automated platform triage'
     );
@@ -264,7 +264,7 @@ test.describe('Platform config first-run and admin UI', () => {
     await expect(page.getByRole('button', { name: 'Load more projects' })).toBeVisible();
     await assertNoOverflow(page);
     await screenshot(page, 'platform-config-admin');
-    await page.getByRole('heading', { name: 'Private feedback project' }).scrollIntoViewIfNeeded();
+    await page.getByRole('heading', { name: 'Operations project' }).scrollIntoViewIfNeeded();
     await assertNoOverflow(page);
     await screenshot(page, 'platform-config-admin-feedback');
   });
@@ -274,7 +274,7 @@ test.describe('Platform config first-run and admin UI', () => {
   }) => {
     await setupMocks(page);
     await page.goto('/admin/integrations');
-    await page.getByLabel('Feedback project').selectOption('feedback-project-2');
+    await page.getByLabel('Operations project').selectOption('feedback-project-2');
     const saveRequest = page.waitForRequest(
       (request) =>
         new URL(request.url()).pathname === '/api/admin/platform-config' &&

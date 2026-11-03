@@ -414,7 +414,7 @@ describe('admin platform config routes', () => {
     expect(res.status).toBe(400);
     await expect(res.json()).resolves.toMatchObject({
       error: 'BAD_REQUEST',
-      message: 'Feedback project must exist and be a project you can access',
+      message: 'Operations project must exist and be a project you can access',
     });
   });
 

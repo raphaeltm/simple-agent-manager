@@ -208,6 +208,8 @@ function isOperationalSetting(name: AdminSettingName): boolean {
 export function adminSettingCacheMs(env: Env, name: AdminSettingName): number {
   // A long-lived SamSession must observe an installation stop before its next effect.
   if (name === 'operations.samOperatorDisabled') return 0;
+  // The debugger-tools dial is a trust boundary: turning it down must apply to the next call.
+  if (name === 'operations.debuggerTools') return 0;
   const ceiling =
     name === 'trials.enabled' ||
     name === 'operations.cronSweepsEnabled' ||
