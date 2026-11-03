@@ -1,7 +1,11 @@
 /** Reads every Operations-tool setting (definitions in ./settings-definitions.ts). */
 import type { Env } from '../../env';
 import { resolveAdminSettingDetailsMany } from '../admin-settings-resolution';
-import { FLEET_OPS_DEFAULTS, FLEET_OPS_SETTINGS, type FleetOpsSettings } from './settings-definitions';
+import {
+  FLEET_OPS_DEFAULTS,
+  FLEET_OPS_SETTINGS,
+  type FleetOpsSettings,
+} from './settings-definitions';
 
 export { FLEET_OPS_DEFAULTS, type FleetOpsSettings } from './settings-definitions';
 
