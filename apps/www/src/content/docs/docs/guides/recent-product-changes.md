@@ -5,7 +5,72 @@ description: User-facing SAM changes from the latest development cycles, with pr
 
 This page summarizes recent changes that affect how people use SAM. Use it as a quick orientation when returning to the product after a week away, then follow the linked guides for the full workflow.
 
-## This cycle: 20 – 27 October 2026
+## This cycle: 27 October – 3 November 2026
+
+### For everyone
+
+- **Choose which account each project and profile runs on.** Accounts you already connected can now
+  be used anywhere: pin one to several projects with **Use in projects…** on its card in **Settings →
+  Agents**, or pick it from a project's **Accounts** tab with **Use another account here**. **Make
+  default** switches your default without signing in again, and a profile's **Account** section (or
+  **Use in profiles…** on a card) runs one profile on a different account. Your choices only ever
+  change your own work, even in a shared project. → [Common account tasks](/docs/guides/agents/#common-account-tasks)
+- **Subscription sign-in from a project.** The project's **Accounts** tab offers the same guided
+  Claude Code and Codex sign-in as your settings, and the account it connects is used only by that
+  project. Any member who can run tasks in a shared project can pin their own account there.
+  → [Using another account in one project](/docs/guides/agents/#using-another-account-in-one-project)
+- **Clearer Claude sign-in failures.** An incomplete code, a code from an older sign-in tab, a
+  rejected code, a timeout and a network problem each say what happened, with **Try again**.
+  → [Connecting a subscription with guided sign-in](/docs/guides/agents/#connecting-a-subscription-with-guided-sign-in)
+- **Read an agent's whole question from a notification.** **Read question & context** opens the full
+  question with the messages before it, and you can answer it right there.
+  → [Read and answer an agent's question](/docs/guides/notifications/#read-and-answer-an-agents-question)
+- **A waking chat says why it is waiting**, for example that the cloud provider is out of capacity or
+  your account is at its server limit, and when SAM tries next.
+  → [Recovery is in progress](/docs/guides/session-troubleshooting/#recovery-is-in-progress)
+- **Remove a node SAM can't delete.** If SAM can't prove which cloud account owns a server and you
+  already deleted it in the provider's console, **I already deleted this server** on the node's page
+  removes the node. → [A node won't go away](/docs/guides/session-troubleshooting/#a-node-wont-go-away)
+- **Stuck machines stop billing.** A stopped workspace machine whose cleanup stays blocked is retired
+  after 30 minutes, and the node shows **Cleanup blocked since…** with the reason meanwhile.
+  → [A node won't go away](/docs/guides/session-troubleshooting/#a-node-wont-go-away)
+- **A pause that didn't finish stays visible.** A deployment whose pause stopped partway says **Pause
+  didn't finish** and offers **Pause again**, instead of claiming it's paused.
+  → [If pausing doesn't finish](/docs/guides/app-deployments/#if-pausing-doesnt-finish)
+
+Also changed this week:
+
+- **OpenCode is now v2.2.5**, and OpenCode chats on Gemini models work with SAM's tools instead of
+  failing every prompt. → [OpenCode](/docs/guides/agents/#opencode)
+- **A machine at 80% disk takes no new work** (it was 90%), so SAM may start a new machine instead.
+  → [Compute pools troubleshooting](/docs/guides/compute-pools/#troubleshooting)
+
+### For self-hosters & admins
+
+Releases: the 80% disk limit in **v2026.10.28**; deployment teardown recovery, the GitHub webhook
+change and eviction recovery settings in **v2026.10.29**; one accounts experience and Claude sign-in
+fixes in **v2026.10.30**; project sign-in, stranded VM retirement, API Worker tracing, read deadlines
+and `include=recent` in **v2026.10.31**; existing accounts in projects,
+OpenCode v2.2.5 and Gemini tool schemas in **v2026.11.01**; **Make default**, profile accounts and the
+question reader in **v2026.11.02**. **I already deleted this server** and the wake wait reasons come
+in the first release after v2026.11.02.
+
+- **API Worker tracing is on at 100% sampling.** From 1 December 2026, Cloudflare counts stored
+  traces toward your account's observability allowances, so decide on a sampling rate before then.
+  → [API Worker tracing](/docs/guides/self-hosting/#api-worker-tracing)
+- **New Admin Settings**: blocked VM cleanup (`operations.nodeCleanupBlockedRetirementMs` and two
+  alert intervals), eviction recovery retries, and **Read deadlines** (`performance.*`). A node SAM
+  keeps because it can't prove who owns it shows up in **Admin → Errors**.
+  → [Blocked VM cleanup](/docs/guides/admin-settings/#blocked-vm-cleanup)
+- **A failed GitHub webhook now fails** instead of being acknowledged and lost. GitHub doesn't retry
+  it, so after an outage use **Redeliver** in the GitHub App's webhook log.
+  → [Triggers](/docs/guides/triggers/)
+- **API change:** `GET /api/projects/:id` returns `recentSessions` and `recentActivity` only with
+  `?include=recent`. → [API reference](/docs/reference/api/)
+
+Database migrations run in the deploy pipeline, and there are no new secrets.
+
+## Previous cycle: 20 – 27 October 2026
 
 ### For everyone
 
@@ -123,7 +188,7 @@ Argon**, **Kimi K3.1 Pro** and **MiniMax M3.1 Flash** and drops **LongCat 2.5 Pr
 31 October 2026. A profile set to a model that left the list keeps it as a custom model, so choose
 again if the provider no longer offers it. See [Choosing a model](/docs/guides/agents/#choosing-a-model).
 
-## Previous cycle: 13 – 20 October 2026
+## Earlier: 13 – 20 October 2026
 
 ### For everyone
 

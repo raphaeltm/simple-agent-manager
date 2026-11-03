@@ -178,6 +178,26 @@ A deployment environment can be stopped to release its compute while preserving 
 
 From the user's perspective, **Pause** (stop) is the safe way to tear down compute without deleting the deployment environment. Use it when a preview app is idle but you may need its latest release, variables, secrets, domains, or volumes again. Use destructive delete controls only when the environment and its managed resources are no longer needed.
 
+### If pausing doesn't finish
+
+When SAM can't finish a pause (most often because the cloud provider didn't delete the server), the
+environment says **Pause didn't finish. SAM stopped partway, so the app may still be running.**, with
+a **Pausing didn't finish** problem below it. The environment stays linked to its server, so nothing
+is forgotten.
+
+<picture>
+  <source media="(max-width: 40em)" srcset="/images/docs/deployment-pause-failed-mobile.png" />
+  <img src="/images/docs/deployment-pause-failed.png" alt="The load-test environment page. Under its name, in red: Pause didn't finish. SAM stopped partway, so the app may still be running. Under Needs your attention, a problem card reads Pausing didn't finish: The app may still be running, and its disks may still be attached. Pause again to finish. It has Show the error, Pause again and See the server. A second card says the server hasn't checked in for 14 minutes." loading="lazy" />
+</picture>
+
+1. Select **Pause again**. SAM picks up the cleanup where it stopped; it also retries on its own
+   from time to time.
+2. If it keeps failing, select **Show the error** to see why, then **See the server** to open the
+   node. When the node reports that SAM can't delete it and you have already deleted the server in
+   your provider's console, use **I already deleted this server** there (see
+   [SAM can't delete a node](/docs/guides/session-troubleshooting/#sam-cant-delete-a-node)). That
+   removes the node for every environment on it, so check what else it hosts first.
+
 ## Recovering from a failed release
 
 If a release cannot be placed (for example, the cloud provider has no room for that server type in that region right now), the environment page says SAM couldn't get a server for that version, with the reason under **Show the error**. Either of these recovers it:

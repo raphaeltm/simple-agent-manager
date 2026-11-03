@@ -121,6 +121,14 @@ Restarting starts from a clean checkout. Any uncommitted changes from the previo
 
 **Delete** permanently removes a workspace and cleans up everything associated with it.
 
+### Removing a machine
+
+A machine's page also has **Stop Node** and **Delete Node** (**Delete Node Only** on a machine that
+hosts [app deployments](/docs/guides/app-deployments/)). Deleting a machine deletes its server at
+your cloud provider. SAM can take a while to finish, and it waits on purpose while something on the
+machine still needs keeping; a red line on the machine says why. If a machine stays for a long time,
+see [A node won't go away](/docs/guides/session-troubleshooting/#a-node-wont-go-away).
+
 ## Machine sizing
 
 You do not pick a server. You state what the work needs — **vCPU**, **memory**, **disk**, and

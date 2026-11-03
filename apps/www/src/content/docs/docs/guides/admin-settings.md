@@ -312,7 +312,9 @@ SAM first attempts to preserve existing recovery sources. At the deadline, it re
 
 Two related settings control warning and alert frequency: `operations.nodeCleanupRefusalWarnAfterMs` defaults to 300,000 milliseconds (five minutes), and `operations.nodeCleanupOwnershipAlertIntervalMs` defaults to 86,400,000 milliseconds (one day).
 
-Active workspaces and provider ownership checks remain protected. When ownership cannot be proved, SAM keeps the VM and raises an admin-visible error, deduplicated to once per node per day. Blocked nodes show the time and reason in their existing error message on the node list and detail page.
+Active workspaces and provider ownership checks remain protected. When ownership cannot be proved, SAM keeps the VM and records an error in **Admin → Errors**, at most once per node per day: **VM may still exist at provider: _provider_ _server id_; cleanup requires ownership/operator resolution**. To resolve it, look the server up in that provider's console. If it is still there and belongs to your installation, delete it there. Once it is gone, the node's owner can remove the node with **I already deleted this server** on its page (see [SAM can't delete a node](/docs/guides/session-troubleshooting/#sam-cant-delete-a-node)). That button refuses nodes on the installation's own cloud account, and the app has no other way to remove such a node yet.
+
+Blocked nodes show the time and reason in their error message on the node list and detail page, as **Cleanup blocked since** _time_ followed by reason codes; [A node won't go away](/docs/guides/session-troubleshooting/#a-node-wont-go-away) explains each one.
 
 ## Read deadlines
 
