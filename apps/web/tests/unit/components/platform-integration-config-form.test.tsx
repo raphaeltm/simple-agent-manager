@@ -30,9 +30,7 @@ describe('PlatformIntegrationConfigForm Google infrastructure OAuth', () => {
     expect(
       screen.queryByRole('heading', { name: 'Google infrastructure OAuth' })
     ).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole('heading', { name: 'Operations project' })
-    ).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Operations project' })).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Google sign-in (OAuth)' })).toBeInTheDocument();
   });
 
