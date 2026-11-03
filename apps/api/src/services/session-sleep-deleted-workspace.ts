@@ -63,3 +63,50 @@ export async function closeChatOfDeletedSleepWorkspace(
   });
   return true;
 }
+
+/** `sleep_error` while a failed close is retried; its `updated_at` is when retrying began. */
+export const DELETED_WORKSPACE_CHAT_CLOSE_RETRYING =
+  'Closing the chat of the deleted workspace failed; retrying';
+
+/**
+ * After a failed close, whether to keep the intent for another try. Retries last the bounded
+ * sleep-failure window, counted from the first failure, which this stamps on the row: the row's
+ * own `updated_at` is usually when the intent was armed, long before. Past the window the intent
+ * is retired anyway, so it stops taking a sweep slot and a failed task is released.
+ */
+export async function deferDeletedWorkspaceChatClose(
+  db: Db,
+  candidate: {
+    snapshotId: string;
+    chatSessionId: string;
+    sleepError?: string | null;
+    updatedAt?: string | null;
+  },
+  now: Date,
+  config: { failureMaxElapsedMs: number }
+): Promise<boolean> {
+  if (candidate.sleepError !== DELETED_WORKSPACE_CHAT_CLOSE_RETRYING) {
+    await db
+      .update(schema.sessionSnapshots)
+      .set({ sleepError: DELETED_WORKSPACE_CHAT_CLOSE_RETRYING, updatedAt: now.toISOString() })
+      .where(
+        and(
+          eq(schema.sessionSnapshots.id, candidate.snapshotId),
+          isNull(schema.sessionSnapshots.sleepingAt)
+        )
+      );
+    return true;
+  }
+  const retryingSince = Date.parse(candidate.updatedAt ?? '');
+  if (
+    Number.isFinite(retryingSince) &&
+    now.getTime() - retryingSince < config.failureMaxElapsedMs
+  ) {
+    return true;
+  }
+  log.error('session_sleep_sweep.deleted_workspace_chat_close_abandoned', {
+    snapshotId: candidate.snapshotId,
+    chatSessionId: candidate.chatSessionId,
+  });
+  return false;
+}

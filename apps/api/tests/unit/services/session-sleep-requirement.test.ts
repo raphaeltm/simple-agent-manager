@@ -119,7 +119,24 @@ describe('classifyRequiredSleepTurn', () => {
 describe('sleepStateChanged', () => {
   const idle = { activity: 'idle', activityAt: 1, workAt: 1 };
 
-  it('never aborts a required sleep on its own; the required gate refuses a new turn', () => {
+  it('aborts a required sleep when the VM reports a new turn start, even one already over', () => {
+    expect(
+      sleepStateChanged(
+        { ...idle, reportedPromptStartedAt: 10 },
+        { ...idle, reportedPromptStartedAt: 20 },
+        'required'
+      )
+    ).toBe(true);
+    expect(
+      sleepStateChanged(
+        { ...idle, reportedPromptStartedAt: 10 },
+        { ...idle, activity: 'recovering', reportedPromptStartedAt: 10 },
+        'required'
+      )
+    ).toBe(false);
+  });
+
+  it('is not aborted by a running turn read alone; the required gate refuses that', () => {
     expect(
       sleepStateChanged(idle, { ...idle, runtimeWorkState: 'inactive', workAt: 2 }, 'required')
     ).toBe(false);

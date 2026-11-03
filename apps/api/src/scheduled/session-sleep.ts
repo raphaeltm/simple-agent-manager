@@ -12,7 +12,10 @@ import {
   checkAutomaticSessionSleepEligibility,
   sleepWorkspaceSession,
 } from '../services/session-sleep';
-import { closeChatOfDeletedSleepWorkspace } from '../services/session-sleep-deleted-workspace';
+import {
+  closeChatOfDeletedSleepWorkspace,
+  deferDeletedWorkspaceChatClose,
+} from '../services/session-sleep-deleted-workspace';
 import {
   parseSessionSleepFallbackRecord,
   sessionSleepEpisodeConfig,
@@ -291,23 +294,11 @@ export async function runSessionSleepSweep(
               return false;
             }
           );
-          // Retry the close on later ticks, but only for the bounded sleep-failure window: the
-          // row is not written while it waits, so its `updated_at` is when it started. Past that,
-          // retire anyway so the intent stops taking a sweep slot and a failed task is released.
-          const closeRetryStartedAt = Date.parse(candidate.updatedAt ?? '');
           if (
             !closed &&
-            Number.isFinite(closeRetryStartedAt) &&
-            now.getTime() - closeRetryStartedAt < episodeConfig.failureMaxElapsedMs
+            (await deferDeletedWorkspaceChatClose(db, candidate, now, episodeConfig))
           ) {
             continue;
-          }
-          if (!closed) {
-            log.error('session_sleep_sweep.deleted_workspace_chat_close_abandoned', {
-              snapshotId: candidate.snapshotId,
-              chatSessionId: candidate.chatSessionId,
-              workspaceId,
-            });
           }
         }
         const retired = await retireDeadWorkspaceSleepIntent(db, {

@@ -142,6 +142,22 @@ describe('required sleep', () => {
       expect(mocks.stopWorkspaceOnNode).toHaveBeenCalled();
     });
 
+    it('is aborted by a whole new turn that starts and ends during capture', async () => {
+      mocks.recordSessionTurnEnd.mockImplementation(() => {
+        order.push('turn-end');
+        activity = { activity: 'idle', activityAt: Date.now(), reportedPromptStartedAt: 1_000 };
+        return Promise.resolve(true);
+      });
+      // Idle at every read, but the VM's own turn-start clock moved: a turn ran in between.
+      const capture = mocks.hibernateAgentSessionOnNode.getMockImplementation()!;
+      mocks.hibernateAgentSessionOnNode.mockImplementation((...args: unknown[]) => {
+        activity = { activity: 'idle', activityAt: Date.now(), reportedPromptStartedAt: 2_000 };
+        return capture(...(args as Parameters<typeof capture>));
+      });
+      await expect(explicitSleep()).rejects.toThrow(/activity changed/);
+      expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+    });
+
     it('is aborted by a NEW prompt turn that starts during capture (control)', async () => {
       mocks.recordSessionTurnEnd.mockImplementation(() => {
         order.push('turn-end');
@@ -344,19 +360,23 @@ describe('required sleep', () => {
       expect(fixture.sessionStatus).toBe('stopped');
     });
 
-    it('stops retrying a close that keeps failing after the sleep-failure window', async () => {
+    it('retries a failing close for the sleep-failure window from its FIRST failure', async () => {
       strand('deleted');
       mocks.stopSession.mockRejectedValue(new Error('ProjectData unavailable'));
+      // The intent was armed long before the workspace was deleted.
       sqlite
         .prepare(`UPDATE session_snapshots SET updated_at = ? WHERE chat_session_id = 'chat-1'`)
-        .run(START.toISOString());
-      // Inside the window the intent waits for the close to succeed.
-      expect(await runSessionSleepSweep(env, new Date(START.getTime() + MINUTE))).toMatchObject({
-        retired: 0,
-      });
-      // Past it the intent is retired anyway, so it stops taking a sweep slot.
-      const pastWindow = new Date(START.getTime() + 25 * HOUR);
-      expect(await runSessionSleepSweep(env, pastWindow)).toMatchObject({ retired: 1 });
+        .run(new Date(START.getTime() - 3 * HOUR).toISOString());
+      // The first failure starts the window instead of finding it spent.
+      expect(await runSessionSleepSweep(env, START)).toMatchObject({ retired: 0 });
+      expect(await runSessionSleepSweep(env, new Date(START.getTime() + 5 * MINUTE))).toMatchObject(
+        { retired: 0 }
+      );
+      expect(mocks.stopSession).toHaveBeenCalledTimes(2);
+      // Past the window the intent is retired anyway, so it stops taking a sweep slot.
+      expect(
+        await runSessionSleepSweep(env, new Date(START.getTime() + 20 * MINUTE))
+      ).toMatchObject({ retired: 1 });
     });
 
     it('keeps the chat while a stopped sibling workspace can still be restarted (control)', async () => {

@@ -85,17 +85,20 @@ export function classifyRequiredSleepTurn(
 }
 
 /**
- * Did something between two reads invalidate the sleep? For a required sleep nothing here does:
- * the only thing that may abort it is a new prompt turn, and the required gate
- * (`classifyRequiredSleepTurn`) already refuses every read that shows one. Harness, work-clock
- * and `recovering` changes are expected while the cancelled agent restarts.
+ * Did something between two reads invalidate the sleep? A required sleep is aborted only by a
+ * NEW prompt turn. A turn still running at a read is refused by the required gate
+ * (`classifyRequiredSleepTurn`); a turn that started AND ended between two reads is caught here,
+ * by the VM's own turn-start clock, which only a new prompt moves. Harness, work-clock and
+ * `recovering` changes are expected while the cancelled agent restarts.
  */
 export function sleepStateChanged(
   before: SessionIdlenessActivityState | null,
   after: SessionIdlenessActivityState | null,
   requirement: SleepRequirement
 ): boolean {
-  if (requirement === 'required') return false;
+  if (requirement === 'required') {
+    return (after?.reportedPromptStartedAt ?? 0) > (before?.reportedPromptStartedAt ?? 0);
+  }
   if (!before || !after) return before !== after;
   return idlenessStateChanged(before, after);
 }

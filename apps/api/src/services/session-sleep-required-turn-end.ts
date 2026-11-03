@@ -77,6 +77,7 @@ export async function endAgentTurnForRequiredSleep(
   // this call's result (.claude/rules/49).
   const observedAt = Date.now();
   // A sleeping Instant container has no turn in flight, and a cancel would wake it.
+  // `cancelAgentSessionOnNode` never throws: a timeout or network failure is a status.
   const result = isSleepingContainerRuntime(workspace)
     ? { success: false, status: 409 }
     : await cancelAgentSessionOnNode(
@@ -86,18 +87,17 @@ export async function endAgentTurnForRequiredSleep(
         env,
         workspace.userId,
         { requestTimeoutMs: options.requestTimeoutMs }
-      ).catch((error: unknown) => {
-        log.warn('session_sleep.required_turn_cancel_failed', {
-          workspaceId: workspace.id,
-          agentSessionId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return { success: false, status: 0 };
-      });
+      );
   const status = result.status;
   const confirmed = result.success || NO_TURN_STATUSES.has(status);
-  if (!confirmed && !options.confirmWithoutAgent) {
-    throw new RequiredSleepTurnEndError(status);
+  if (!confirmed) {
+    log.warn('session_sleep.required_turn_cancel_unconfirmed', {
+      workspaceId: workspace.id,
+      agentSessionId,
+      agentStatus: status,
+      confirmWithoutAgent: options.confirmWithoutAgent === true,
+    });
+    if (!options.confirmWithoutAgent) throw new RequiredSleepTurnEndError(status);
   }
 
   await projectDataService.recordSessionTurnEnd(env, workspace.projectId, agentSessionId, {

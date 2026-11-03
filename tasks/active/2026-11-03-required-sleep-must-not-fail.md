@@ -145,6 +145,14 @@ How each piece behaves:
       bounded by `user_id`/`id`), noted
 - [x] Selection records the cutoff as a named, non-deferrable rejection (rule 74)
 
+### Adversarial review round 3
+
+- [x] MEDIUM close-retry window measured from the intent's arming time, so usually already spent:
+      the first failure now stamps `sleep_error` and `updated_at` (`deferDeletedWorkspaceChatClose`)
+- [x] LOW a whole turn between two reads went unnoticed: ProjectData exposes the VM's own
+      `reportedPromptStartedAt`; a required sleep aborts when it grows
+- [x] Dead `.catch` in the turn end removed (`cancelAgentSessionOnNode` never throws)
+
 - [x] M4 (finalize `stopping` snapshots as sleeping on deletion): deferred to
       `tasks/backlog/2026-11-03-finalize-stopping-snapshot-on-workspace-deletion.md`.
 - Rule 18 splits: `workspace-admission-sql.ts`, `node-selection-shared.ts`, `warm-node-claim.ts`,

@@ -127,16 +127,16 @@ describe('endAgentTurnForRequiredSleep', () => {
     expect(mocks.recordSessionTurnEnd).not.toHaveBeenCalled();
   });
 
-  it('throws on a transport failure too (no status)', async () => {
-    mocks.cancelAgentSessionOnNode.mockRejectedValue(new Error('network down'));
+  it('throws on a timeout or network failure, which the cancel reports as 500', async () => {
+    mocks.cancelAgentSessionOnNode.mockResolvedValue({ success: false, status: 500 });
     await expect(
       endAgentTurnForRequiredSleep(env, workspace, 'agent-1', { reason: 'test' })
-    ).rejects.toThrow('agent responded 0');
+    ).rejects.toThrow('agent responded 500');
     expect(mocks.recordSessionTurnEnd).not.toHaveBeenCalled();
   });
 
   it('records the turn end without the agent when told to', async () => {
-    mocks.cancelAgentSessionOnNode.mockRejectedValue(new Error('network down'));
+    mocks.cancelAgentSessionOnNode.mockResolvedValue({ success: false, status: 500 });
     await expect(
       endAgentTurnForRequiredSleep(env, workspace, 'agent-1', {
         reason: 'test',
