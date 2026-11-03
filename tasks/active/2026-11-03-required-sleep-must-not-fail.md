@@ -1,4 +1,4 @@
-# A required sleep must not fail (PR 1 of 2)
+# A required sleep must not fail
 
 ## Problem
 
@@ -88,21 +88,42 @@ How each piece behaves:
 
 ## Checklist
 
-- [ ] `session-sleep-requirement.ts`: `resolveSleepRequirement` plus the admin setting
+- [x] `session-sleep-requirement.ts`: `resolveSleepRequirement` plus the admin setting
       `operations.nodeLifetimeForceSleepAfterMs` (definition, name union, docs)
-- [ ] `endAgentTurnForRequiredSleep` (reuses `cancelAgentSessionOnNode` and `recordSessionTurnEnd`;
-      skips sleeping containers)
-- [ ] Gate and abort check take the requirement: `sleepTeardownSafetyGate`, the
-      `idlenessStateChanged` variant, `completeSleepTeardown`, `verifyAndBeginSleepTeardown`
-- [ ] `sleepWorkspaceSession` resolves the requirement and ends the turn after the claim, before verify/capture
-- [ ] Sweep eligibility (`checkAutomaticSessionSleepEligibility`) honours deadline and required
-- [ ] Fallback honours required (forces the turn end, skips the activity gate)
-- [ ] `sweepMaxLifetimeNodes`: past the absolute ceiling, active workspaces are not exempt
-- [ ] Stranded-chat convergence after the dead-intent retirement of a deleted workspace
-- [ ] Tests: explicit Sleep on a prompting agent (VM success, 409, failure); lifetime deadline vs
-      required; fallback required; stranded convergence with a live-workspace control; a
+- [x] `endAgentTurnForRequiredSleep` (`stopAgentSessionOnNode` and `recordSessionTurnEnd`; 404 means
+      no turn; skips sleeping containers)
+- [x] Gate and abort check take the requirement: `sleepTeardownSafetyGate`, `sleepStateChanged`,
+      `completeSleepTeardown`, `verifyAndBeginSleepTeardown`
+- [x] `sleepWorkspaceSession` resolves the requirement and ends the turn after the claim, before verify/capture
+- [x] Sweep eligibility (`checkAutomaticSessionSleepEligibility`) honours deadline and required
+- [x] Fallback honours required (forces the turn end, skips the activity gate)
+- [x] `sweepMaxLifetimeNodes`: past the absolute ceiling, active workspaces are not exempt
+- [x] Stranded-chat convergence for a deleted workspace, closed BEFORE the intent is retired so a
+      failed close is retried; any non-deleted sibling workspace keeps the chat
+- [x] Tests: explicit Sleep on a prompting agent (VM success, 404, failure); lifetime deadline vs
+      required; fallback required; stranded convergence with live and stopped sibling controls; a
       cf-container sleeping skip; discrimination for each guard
-- [ ] Docs: the sleep behaviour pages and the admin settings page
+- [x] Docs: the sleep behaviour pages, the admin settings page, the API reference (explicit sleep)
+
+### Adversarial review round 1 (all addressed)
+
+- [x] H1: `/cancel` restarts the agent, which reports `recovering` and can start turns during
+      capture. Required sleep now calls `/stop` (`SessionHost.Stop` completes the prompt as
+      cancelled, no restart; the session record keeps its ACP id for the snapshot).
+- [x] H2: a person's Sleep was required only for its first attempt. Migration 0217 adds
+      `session_snapshots.sleep_required_episode_started_at`; required while equal to
+      `sleep_episode_started_at`, so every episode-ending writer clears it for free.
+- [x] H3: nodes past their lifetime still took placements. `node-lifetime-admission.ts`: no new
+      placement in the last `operations.nodeLifetimeAdmissionCutoffPercent` (default 10) of the
+      lifetime, enforced in the final reservation (insert and attach; restart exempt) and as a hint
+      in the task runner's candidate queries. `PlacementAdmissionPolicy` makes the compiler
+      enumerate every new-placement path.
+- [x] M3 close before retire; M5 404 is no turn; L1 widen serving statuses to "not deleted";
+      L2 lifetime notice text; L3 explicit sleep documented in the API reference; L4 test no longer
+      swallows its failure.
+- [ ] M4 (finalize `stopping` snapshots as sleeping on deletion): deferred, see PR body.
+- Rule 18 splits: `workspace-admission-sql.ts`, `node-selection-shared.ts`, `warm-node-claim.ts`,
+  `session-sleep-workspace.ts`.
 
 ## Acceptance Criteria
 
@@ -114,4 +135,7 @@ How each piece behaves:
       stays wakeable
 - [ ] A deleted workspace's retired sleep intent never leaves its chat `active` with no runtime
 - [ ] Idle sleep for normal nodes is unchanged (controls)
+- [ ] A person's Sleep that failed stays required through the sweep's and fallback's retries
+- [ ] A node in the last 10% of its lifetime takes no new workspace; restarts and nodes the lifetime
+      sweep never reaps are unaffected
 - [ ] Verified on staging: explicit Sleep on a prompting session
