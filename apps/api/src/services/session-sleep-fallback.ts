@@ -232,7 +232,7 @@ export async function runSessionSleepFallback(
     const fallbackTrigger = currentTrigger ?? input.trigger;
     const agentSession = await loadResumableAgentSession(db, workspace.id);
     const requirement = await resolveSleepRequirement(env, workspace, now, {
-      // The fallback of a person's failed Sleep is still required (migration 0218).
+      // The fallback of a person's failed Sleep is still required (migration 0217).
       requestedByPerson: isPersonRequiredSleepEpisode(await loadEpisode(db, chatSessionId)),
     });
     if (requirement === 'required') {
