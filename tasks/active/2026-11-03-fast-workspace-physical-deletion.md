@@ -13,12 +13,12 @@ before it finally reaches `deleted`.
 
 Debug package for node `01M6H35EAR5TD0VA361PXXFWT5` (agent `970edd0`) and production D1:
 
-| Workspace | VM stop (agent log) | VM cleanup finished | D1 `deleted` |
-| --- | --- | --- | --- |
-| 01M6H3CSV3Q6WGAB5MZCCM9RZA | 16:46:12 | ~17:02 | 17:17:59 |
-| 01M6H6NZBZFZNK5H83DGGGBHKH | 17:41:12 | ~17:57 | 18:13:47 |
-| 01M6H6W12KAJKRDK20NR3D5VGV | 19:05:53 | ~19:21 | 19:37:28 |
-| 01M6H6CAZ6DSMFFKMWAG7S9F6Z | 19:41:16 | pending at 19:47 | still `stopping`, attempt 4 |
+| Workspace                  | VM stop (agent log) | VM cleanup finished | D1 `deleted`                |
+| -------------------------- | ------------------- | ------------------- | --------------------------- |
+| 01M6H3CSV3Q6WGAB5MZCCM9RZA | 16:46:12            | ~17:02              | 17:17:59                    |
+| 01M6H6NZBZFZNK5H83DGGGBHKH | 17:41:12            | ~17:57              | 18:13:47                    |
+| 01M6H6W12KAJKRDK20NR3D5VGV | 19:05:53            | ~19:21              | 19:37:28                    |
+| 01M6H6CAZ6DSMFFKMWAG7S9F6Z | 19:41:16            | pending at 19:47    | still `stopping`, attempt 4 |
 
 The agent logs `Workspace physical cleanup remains pending ... workspace filesystem cleanup
 budget exhausted; retry required` once a minute for ~15 minutes per workspace.
