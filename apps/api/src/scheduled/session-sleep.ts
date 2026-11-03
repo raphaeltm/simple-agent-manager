@@ -269,6 +269,29 @@ export async function runSessionSleepSweep(
         candidate.workspaceStatus &&
         isDeadSleepIntentWorkspace(candidate.sleepStatus, candidate.workspaceStatus)
       ) {
+        // A deleted workspace can never finish this sleep, so its chat would stay open with no
+        // runtime and no wake path. Close it BEFORE retiring the intent: a retired intent is never
+        // selected again, so a close that failed after retirement would never be retried.
+        // Stopped and errored workspaces can still be restarted and keep their chat.
+        if (candidate.workspaceStatus === 'deleted') {
+          const closed = await closeChatOfDeletedSleepWorkspace(env, db, {
+            snapshotId: candidate.snapshotId,
+            chatSessionId: candidate.chatSessionId,
+            workspaceId,
+          }).then(
+            () => true,
+            (error: unknown) => {
+              log.warn('session_sleep_sweep.deleted_workspace_chat_close_failed', {
+                snapshotId: candidate.snapshotId,
+                chatSessionId: candidate.chatSessionId,
+                workspaceId,
+                error: sessionLifecycleError(env, error),
+              });
+              return false;
+            }
+          );
+          if (!closed) continue;
+        }
         const retired = await retireDeadWorkspaceSleepIntent(db, {
           snapshotId: candidate.snapshotId,
           workspaceId,
@@ -286,22 +309,6 @@ export async function runSessionSleepSweep(
             workspaceStatus: candidate.workspaceStatus,
             sleepStatus: candidate.sleepStatus,
           });
-          // A deleted workspace can never finish this sleep, so its chat would stay open with no
-          // runtime and no wake path. Stopped and errored workspaces can still be restarted.
-          if (candidate.workspaceStatus === 'deleted') {
-            await closeChatOfDeletedSleepWorkspace(env, db, {
-              snapshotId: candidate.snapshotId,
-              chatSessionId: candidate.chatSessionId,
-              workspaceId,
-            }).catch((error: unknown) => {
-              log.warn('session_sleep_sweep.deleted_workspace_chat_close_failed', {
-                snapshotId: candidate.snapshotId,
-                chatSessionId: candidate.chatSessionId,
-                workspaceId,
-                error: sessionLifecycleError(env, error),
-              });
-            });
-          }
           // A failed task whose workspace is gone still gets its release and notice.
           await settleInBackground(candidate, 'deferred');
         }

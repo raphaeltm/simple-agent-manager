@@ -858,11 +858,20 @@ describe('sleepWorkspaceSession', () => {
       runtimeWorkUpdatedAt: harnessActive ? Date.now() : 90,
       runtimeWorkProgressAt: harnessActive ? Date.now() : 90,
     }));
-    mocks.getRestorableSessionSnapshot.mockResolvedValueOnce(null).mockResolvedValueOnce({
-      status: 'available',
-      degradation: 'none',
-      expiresAt: '2026-08-19T00:00:00.000Z',
-    });
+    mocks.getRestorableSessionSnapshot
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        status: 'available',
+        degradation: 'none',
+        expiresAt: '2026-08-19T00:00:00.000Z',
+      })
+      .mockResolvedValue({
+        status: 'available',
+        degradation: 'none',
+        sleepingAt: '2026-08-12T00:00:00.000Z',
+        sleepStatus: 'sleeping',
+        expiresAt: '2026-08-19T00:00:00.000Z',
+      });
     mocks.verifySessionSnapshotArtifactsForSleep.mockImplementation(async () => {
       harnessActive = true;
       return true;
@@ -873,7 +882,7 @@ describe('sleepWorkspaceSession', () => {
       workspaceId: 'workspace-1',
       userId: 'user-1',
       reason: 'test',
-    }).catch(() => undefined);
+    });
 
     expect(mocks.beginSessionSnapshotStopping).toHaveBeenCalled();
     expect(mocks.stopWorkspaceOnNode).toHaveBeenCalled();

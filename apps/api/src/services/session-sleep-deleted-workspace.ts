@@ -11,7 +11,7 @@
  * This finishes what the finalizer deferred, with the outcome it gives every other workspace
  * that node deletion removes: the ProjectData session is stopped and its transcript kept.
  */
-import { and, eq, inArray, isNull } from 'drizzle-orm';
+import { and, eq, isNull, ne } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -20,9 +20,6 @@ import { log } from '../lib/logger';
 import * as projectDataService from './project-data';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
-
-/** Workspace states that still serve, or can still serve, the chat. */
-const LIVE_CHAT_WORKSPACE_STATUSES = ['pending', 'creating', 'running', 'recovery', 'sleeping'];
 
 export async function closeChatOfDeletedSleepWorkspace(
   env: Env,
@@ -49,7 +46,9 @@ export async function closeChatOfDeletedSleepWorkspace(
     .where(
       and(
         eq(schema.workspaces.chatSessionId, input.chatSessionId),
-        inArray(schema.workspaces.status, LIVE_CHAT_WORKSPACE_STATUSES)
+        // Every other state still serves the chat, or can be restarted, recovered or woken
+        // to serve it. Excluding only `deleted` keeps any future state on the safe side.
+        ne(schema.workspaces.status, 'deleted')
       )
     )
     .get();

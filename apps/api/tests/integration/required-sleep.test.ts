@@ -261,6 +261,32 @@ describe('required sleep', () => {
       expect(mocks.stopSession).not.toHaveBeenCalled();
     });
 
+    it('retries a close that failed, because a retired intent is never selected again', async () => {
+      strand('deleted');
+      mocks.stopSession.mockRejectedValueOnce(new Error('ProjectData unavailable'));
+      const first = await runSessionSleepSweep(env, START);
+      expect(first).toMatchObject({ retired: 0 });
+      expect(fixture.sessionStatus).not.toBe('stopped');
+
+      const second = await runSessionSleepSweep(env, new Date(START.getTime() + MINUTE));
+      expect(second).toMatchObject({ retired: 1 });
+      expect(mocks.stopSession).toHaveBeenCalledTimes(2);
+      expect(fixture.sessionStatus).toBe('stopped');
+    });
+
+    it('keeps the chat while a stopped sibling workspace can still be restarted (control)', async () => {
+      strand('deleted');
+      sqlite
+        .prepare(
+          `INSERT INTO workspaces (id, node_id, project_id, user_id, chat_session_id, status, updated_at)
+           VALUES ('workspace-2', 'node-1', 'project-1', 'user-1', 'chat-1', 'stopped', ?)`
+        )
+        .run(START.toISOString());
+      const sweep = await runSessionSleepSweep(env, START);
+      expect(sweep).toMatchObject({ retired: 1 });
+      expect(mocks.stopSession).not.toHaveBeenCalled();
+    });
+
     it('keeps the chat when another workspace already serves it (control)', async () => {
       strand('deleted');
       sqlite
