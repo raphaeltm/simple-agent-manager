@@ -6,6 +6,7 @@ import Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
+import { isNodePastLifetimeAdmissionCutoff } from '../../../src/services/node-lifetime-admission';
 import {
   attachPrecreatedWorkspacePlacement,
   reserveWorkspacePlacement,
@@ -1334,6 +1335,21 @@ describe('lifetime admission cutoff at every new-placement atomic admission (pol
     seedNode();
     ageNode(48 * HOUR);
     expect(await admitter(database, 'insert')()).toBe(true);
+  });
+
+  it('names the cutoff as the refusal reason only for a node past it', async () => {
+    const database = createDb();
+    seedNode();
+    autoProvision();
+    ageNode(CUTOFF_AGE_MS + HOUR);
+    await expect(
+      isNodePastLifetimeAdmissionCutoff(database, 'node-1', CUTOFF_AGE_MS)
+    ).resolves.toBe(true);
+    ageNode(CUTOFF_AGE_MS - HOUR);
+    await expect(
+      isNodePastLifetimeAdmissionCutoff(database, 'node-1', CUTOFF_AGE_MS)
+    ).resolves.toBe(false);
+    await expect(isNodePastLifetimeAdmissionCutoff(database, 'node-1', null)).resolves.toBe(false);
   });
 
   it('admits past the cutoff when the cutoff is disabled', async () => {

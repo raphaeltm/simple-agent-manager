@@ -344,6 +344,21 @@ describe('required sleep', () => {
       expect(fixture.sessionStatus).toBe('stopped');
     });
 
+    it('stops retrying a close that keeps failing after the sleep-failure window', async () => {
+      strand('deleted');
+      mocks.stopSession.mockRejectedValue(new Error('ProjectData unavailable'));
+      sqlite
+        .prepare(`UPDATE session_snapshots SET updated_at = ? WHERE chat_session_id = 'chat-1'`)
+        .run(START.toISOString());
+      // Inside the window the intent waits for the close to succeed.
+      expect(await runSessionSleepSweep(env, new Date(START.getTime() + MINUTE))).toMatchObject({
+        retired: 0,
+      });
+      // Past it the intent is retired anyway, so it stops taking a sweep slot.
+      const pastWindow = new Date(START.getTime() + 25 * HOUR);
+      expect(await runSessionSleepSweep(env, pastWindow)).toMatchObject({ retired: 1 });
+    });
+
     it('keeps the chat while a stopped sibling workspace can still be restarted (control)', async () => {
       strand('deleted');
       sqlite

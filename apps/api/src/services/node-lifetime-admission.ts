@@ -107,3 +107,22 @@ export function pastLifetimeAdmissionCutoffColumnSql(
 /** The placement-diagnostics reason for a node passed over by the cutoff. */
 export const LIFETIME_ADMISSION_CUTOFF_REASON =
   'Host is in the last part of its lifetime and takes no new workspaces';
+
+/**
+ * Whether the cutoff is why a final reservation refused `nodeId`. Read only after a refusal, so a
+ * person who chose that node is told the reason (`.claude/rules/74`) instead of a generic one.
+ */
+export async function isNodePastLifetimeAdmissionCutoff(
+  database: D1Database,
+  nodeId: string,
+  cutoffAgeMs: number | null,
+  now = new Date()
+): Promise<boolean> {
+  if (cutoffAgeMs === null) return false;
+  const column = pastLifetimeAdmissionCutoffColumnSql('n', cutoffAgeMs, now);
+  const row = await database
+    .prepare(`SELECT ${column.sql} FROM nodes n WHERE n.id = ?`)
+    .bind(...column.binds, nodeId)
+    .first<{ pastLifetimeAdmissionCutoff: number }>();
+  return row?.pastLifetimeAdmissionCutoff === 1;
+}

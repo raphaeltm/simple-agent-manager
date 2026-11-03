@@ -29,7 +29,11 @@ import { toCapacityPlacementSnapshot } from '../../services/capacity-pools';
 import { scheduleDirectProvisioning } from '../../services/direct-provisioning';
 import { getRuntimeLimits } from '../../services/limits';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
-import { resolvePlacementAdmissionPolicy } from '../../services/node-lifetime-admission';
+import {
+  isNodePastLifetimeAdmissionCutoff,
+  LIFETIME_ADMISSION_CUTOFF_REASON,
+  resolvePlacementAdmissionPolicy,
+} from '../../services/node-lifetime-admission';
 import { assertNodeAllocationPlanCurrent, createNodeRecord } from '../../services/nodes';
 import {
   PlacementResolutionError,
@@ -409,7 +413,13 @@ export function registerWorkspaceCreateRoute(crudRoutes: Hono<{ Bindings: Env }>
         );
         if (!placementReserved) {
           throw errors.conflict(
-            'Selected node lost capacity or placement authority before workspace creation'
+            (await isNodePastLifetimeAdmissionCutoff(
+              c.env.DATABASE,
+              targetNodeId,
+              admissionPolicy.lifetimeAdmissionCutoffAgeMs
+            ))
+              ? `Selected node: ${LIFETIME_ADMISSION_CUTOFF_REASON}`
+              : 'Selected node lost capacity or placement authority before workspace creation'
           );
         }
       }

@@ -131,12 +131,16 @@ How each piece behaves:
 ### Adversarial review round 2
 
 - [x] HIGH `/stop` strands the chat when the sleep fails: reverted to `/cancel` (see H1).
-- [ ] MEDIUM persisted warm claim skips the cutoff and can loop
-- [ ] MEDIUM trial orchestrator candidate query ignores the cutoff and can hot-loop
-- [ ] MEDIUM a close that keeps failing stalls retirement and the failed-task release
-- [ ] LOW preferred/explicit node refusals do not name the cutoff
+- [x] MEDIUM persisted warm claim skips the cutoff and can loop: the claim read selects the cutoff
+      flag and releases a claim on a node past it
+- [x] MEDIUM trial orchestrator candidate query ignores the cutoff and can hot-loop: cutoff added
+- [x] MEDIUM a close that keeps failing stalls retirement and the failed-task release: retried only
+      within `SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS`, then retired with an error log
+- [x] LOW preferred/explicit node refusals do not name the cutoff: `isNodePastLifetimeAdmissionCutoff`
+      on the refusal path
 - [x] LOW `/stop` slow under lock: gone with the revert
-- [ ] LOW marker never cleared, only made stale (timestamp collision, speculative)
+- [x] LOW marker collision: real (snapshot row created in the claim's millisecond); the re-arm writer
+      drops the mark whenever it rebuilds the clock from `created_at`
 - [x] Cloudflare HIGH bind-limit test with the cutoff on; MEDIUM `nodes.created_at` index (pre-existing,
       bounded by `user_id`/`id`), noted
 - [x] Selection records the cutoff as a named, non-deferrable rejection (rule 74)

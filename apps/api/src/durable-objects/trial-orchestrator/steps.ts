@@ -47,7 +47,10 @@ import {
   createWorkspaceOnNode,
   startAgentSessionOnNode,
 } from '../../services/node-agent';
-import { resolvePlacementAdmissionPolicy } from '../../services/node-lifetime-admission';
+import {
+  lifetimeAdmissionCutoffSql,
+  resolvePlacementAdmissionPolicy,
+} from '../../services/node-lifetime-admission';
 import { createNodeRecord, provisionNode } from '../../services/nodes';
 import { buildPlacementAuthoritySqlPredicate } from '../../services/placement-authority';
 import * as projectDataService from '../../services/project-data';
@@ -417,6 +420,14 @@ export async function handleNodeSelection(
     requireProjectMembership: true,
   });
   const requiredAgentVersion = rc.env.VM_AGENT_REQUIRED_VERSION || null;
+  const admissionPolicy = await resolvePlacementAdmissionPolicy(rc.env);
+  // A node past its lifetime cutoff is refused by the final reservation; selecting it again on
+  // every pass would loop until the trial times out.
+  const lifetimeCutoff = lifetimeAdmissionCutoffSql(
+    'n',
+    admissionPolicy.lifetimeAdmissionCutoffAgeMs,
+    new Date()
+  );
   const existing = await rc.env.DATABASE.prepare(
     `SELECT
         n.id,
@@ -441,6 +452,7 @@ export async function handleNodeSelection(
         AND n.provider_instance_image IS ?
         AND n.provider_instance_architecture IS ?
         ${authority.sql}
+        ${lifetimeCutoff.sql}
       ORDER BY n.id ASC`
   )
     .bind(
@@ -453,7 +465,8 @@ export async function handleNodeSelection(
       allocation.providerInstanceBootDiskSizeGb,
       allocation.providerInstanceImage,
       allocation.providerInstanceArchitecture,
-      ...authority.binds
+      ...authority.binds,
+      ...lifetimeCutoff.binds
     )
     .all<WorkspaceResourceNode>();
 
@@ -462,7 +475,6 @@ export async function handleNodeSelection(
     rc.env.DATABASE,
     candidates.map((node) => node.id)
   );
-  const admissionPolicy = await resolvePlacementAdmissionPolicy(rc.env);
 
   for (const candidate of candidates) {
     if (

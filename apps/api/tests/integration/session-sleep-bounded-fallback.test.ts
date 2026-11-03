@@ -844,6 +844,43 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
         expect(captureCount).toBe(3);
       }
     );
+
+    it('drops a stale required mark when re-arming rebuilds the episode clock', async () => {
+      seedSession({ id: 'a', taskStatus: 'in_progress' });
+      capture = 'old-agent-rejected';
+      await spendFullBudget();
+      // A person's claim that landed in the millisecond the row was created marked the episode;
+      // that episode has since ended, so the clock is NULL and the mark equals `created_at`.
+      sqlite
+        .prepare(
+          `UPDATE session_snapshots SET sleep_status = 'terminal_failed', sleep_after = NULL,
+             sleep_episode_started_at = NULL, sleep_required_episode_started_at = created_at,
+             sleep_fallback_json = ? WHERE chat_session_id = 'chat-a'`
+        )
+        .run(
+          JSON.stringify({
+            version: 1,
+            outcome: 'blocked',
+            blockedReason: 'no_git_baseline',
+            trigger: 'attempt_budget',
+            failedAttempts: 3,
+            episodeStartedAt: tick(0).toISOString(),
+            recoveryPoint: null,
+            lastError: 'snapshot did not complete',
+            decidedAt: tick(2).toISOString(),
+          })
+        );
+      activity = { activity: 'prompting', activityAt: tick(2).getTime() - 60 * 60 * 1000 };
+      await sweepAt(tick(3));
+      const rearmed = sqlite
+        .prepare(
+          `SELECT sleep_episode_started_at = created_at AS rebuilt,
+             sleep_required_episode_started_at AS mark
+           FROM session_snapshots WHERE chat_session_id = 'chat-a'`
+        )
+        .get();
+      expect(rearmed).toEqual({ rebuilt: 1, mark: null });
+    });
   });
 
   describe('non-degraded exhaustion', () => {

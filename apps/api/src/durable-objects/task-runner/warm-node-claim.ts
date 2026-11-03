@@ -7,6 +7,7 @@ import { log } from '../../lib/logger';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import {
   lifetimeAdmissionCutoffSql,
+  pastLifetimeAdmissionCutoffColumnSql,
   resolvePlacementAdmissionPolicy,
 } from '../../services/node-lifetime-admission';
 import {
@@ -127,11 +128,20 @@ export async function tryClaimWarmNode(
 ): Promise<ReusableNodeSelection | null> {
   if (!rc.env.NODE_LIFECYCLE) return null;
 
+  const warmPolicy = await resolvePlacementAdmissionPolicy(rc.env, state.config.projectScaling);
+  const now = new Date();
   // Recover a claim persisted by NodeLifecycle if the TaskRunner crashed after
-  // the DO mutation but before its own storage.put.
+  // the DO mutation but before its own storage.put. A claim on a node that has since passed
+  // its lifetime cutoff is released: the final reservation would refuse it on every pass.
+  const persistedCutoff = pastLifetimeAdmissionCutoffColumnSql(
+    'n',
+    warmPolicy.lifetimeAdmissionCutoffAgeMs,
+    now
+  );
   const persistedClaim = await rc.env.DATABASE.prepare(
     `SELECT
        t.claimed_warm_node_id AS claimedWarmNodeId,
+       ${persistedCutoff.sql},
        n.id,
        n.vm_size AS vmSize,
        n.vm_location AS vmLocation,
@@ -165,12 +175,19 @@ export async function tryClaimWarmNode(
      LEFT JOIN nodes n ON n.id = t.claimed_warm_node_id
      WHERE t.id = ?`
   )
-    .bind(state.taskId)
-    .first<(NodePlacementFields & { claimedWarmNodeId: string | null }) | null>();
+    .bind(...persistedCutoff.binds, state.taskId)
+    .first<
+      | (NodePlacementFields & {
+          claimedWarmNodeId: string | null;
+          pastLifetimeAdmissionCutoff: number;
+        })
+      | null
+    >();
   if (persistedClaim?.claimedWarmNodeId) {
-    const selection = persistedClaim.id
-      ? resolveReusableNodeSelection(state, persistedClaim)
-      : null;
+    const selection =
+      persistedClaim.id && persistedClaim.pastLifetimeAdmissionCutoff !== 1
+        ? resolveReusableNodeSelection(state, persistedClaim)
+        : null;
     if (selection && (await claimWarmNodeCandidate(state, rc, selection))) {
       if (await hasReusableNodeReservationCapacity(rc, state, persistedClaim)) {
         return selection;
@@ -191,12 +208,11 @@ export async function tryClaimWarmNode(
       .run();
   }
 
-  const warmPolicy = await resolvePlacementAdmissionPolicy(rc.env, state.config.projectScaling);
   // A hint only: the final reservation repeats the cutoff (`workspace-admission-sql.ts`).
   const warmLifetimeCutoff = lifetimeAdmissionCutoffSql(
     'nodes',
     warmPolicy.lifetimeAdmissionCutoffAgeMs,
-    new Date()
+    now
   );
   const warmNodes = await rc.env.DATABASE.prepare(
     `SELECT
