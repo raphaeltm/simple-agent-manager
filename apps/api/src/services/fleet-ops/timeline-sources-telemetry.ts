@@ -82,7 +82,7 @@ export const nodeLogCaptureSource: TimelineSource = {
       table: 'node_log_captures',
       column: 'node_id',
       ids: scope.nodeIds,
-      select: 'id, node_id, trigger, status, entry_count, error, created_at',
+      select: 'id, node_id, capture_trigger, status, entry_count, error, created_at',
     });
     return rows.flatMap((row): TimelineEvent[] => {
       const time = at(row);
@@ -92,7 +92,7 @@ export const nodeLogCaptureSource: TimelineSource = {
           at: time,
           source: 'node_log_captures',
           kind: `node.log_capture.${str(row.status) ?? 'unknown'}`,
-          summary: `Black box log capture (${str(row.trigger) ?? 'unknown trigger'}): ${
+          summary: `Black box log capture (${str(row.capture_trigger) ?? 'unknown trigger'}): ${
             str(row.status) ?? 'unknown'
           }, ${Number(row.entry_count ?? 0)} lines. Read with ops_get_node_log_capture.`,
           ids: { nodeId: str(row.node_id), captureId: str(row.id) },
