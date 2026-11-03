@@ -11,6 +11,7 @@ import {
 import {
   classifySleepRequirement,
   isLifetimeGovernedNode,
+  isPersonRequiredSleepEpisode,
   resolveSleepRequirement,
 } from '../../../src/services/session-sleep-requirement';
 
@@ -126,5 +127,30 @@ describe('sleepStateChanged', () => {
     expect(sleepStateChanged(idle, { ...idle, workAt: 2 }, 'normal')).toBe(true);
     expect(sleepStateChanged(idle, { ...idle, workAt: 2 }, 'deadline')).toBe(true);
     expect(sleepStateChanged(idle, { ...idle }, 'normal')).toBe(false);
+  });
+});
+
+describe('isPersonRequiredSleepEpisode', () => {
+  const episode = '2026-11-03T11:00:00.000Z';
+
+  it('is required while the marked episode lasts', () => {
+    expect(
+      isPersonRequiredSleepEpisode({
+        sleepEpisodeStartedAt: episode,
+        sleepRequiredEpisodeStartedAt: episode,
+      })
+    ).toBe(true);
+  });
+
+  it.each([
+    ['the episode ended', { sleepEpisodeStartedAt: null, sleepRequiredEpisodeStartedAt: episode }],
+    [
+      'a new episode started',
+      { sleepEpisodeStartedAt: '2026-11-03T11:30:00.000Z', sleepRequiredEpisodeStartedAt: episode },
+    ],
+    ['no person asked', { sleepEpisodeStartedAt: episode, sleepRequiredEpisodeStartedAt: null }],
+    ['there is no row', null],
+  ])('is not required when %s', (_label, row) => {
+    expect(isPersonRequiredSleepEpisode(row)).toBe(false);
   });
 });

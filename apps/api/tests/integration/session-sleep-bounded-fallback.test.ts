@@ -380,7 +380,7 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
     /^update "session_snapshots" set "sleep_status" = \?, "sleep_after" = \?, "sleep_claimed_at" = \?, "sleep_stopping_since" = COALESCE\("session_snapshots"\."sleep_stopping_since", \?\), "sleep_fallback_json"/i;
   /** The fallback's first read after its claim: well before its point of no return. */
   const FALLBACK_EPISODE_READ =
-    /"sleep_episode_started_at", "sleep_episode_failures", "capture_generation" from "session_snapshots"/i;
+    /"sleep_episode_started_at", "sleep_required_episode_started_at", "sleep_episode_failures", "capture_generation" from "session_snapshots"/i;
 
   beforeEach(() => {
     vi.useFakeTimers();

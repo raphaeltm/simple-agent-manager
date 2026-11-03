@@ -133,6 +133,8 @@ export async function checkAutomaticSessionSleepEligibility(
     userId: string;
     sleepStatus?: string | null;
     sleepClaimId?: string | null;
+    /** The episode is the retry of a person's failed Sleep (`isPersonRequiredSleepEpisode`). */
+    requiredByPerson?: boolean;
   },
   now = new Date()
 ): Promise<AutomaticSessionSleepEligibility> {
@@ -176,10 +178,10 @@ export async function checkAutomaticSessionSleepEligibility(
   if (!workspace?.projectId || !workspace.chatSessionId) {
     return { eligible: false, reason: 'workspace_metadata_missing' };
   }
-  // Past the node's absolute lifetime plus the leeway, the sleep is required: the claimed
+  // A person's failed Sleep, or a node past its absolute lifetime plus the leeway: the claimed
   // sleep ends the turn itself (`sleepWorkspaceSession`), so nothing here may defer it.
   const requirement = await resolveSleepRequirement(env, workspace, now, {
-    requestedByPerson: false,
+    requestedByPerson: input.requiredByPerson === true,
   });
   if (requirement === 'required') return { eligible: true };
   const [agentSession] = await db

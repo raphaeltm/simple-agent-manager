@@ -20,7 +20,11 @@ import {
 import { persistSessionSleepFallbackNotice } from './session-sleep-fallback-notices';
 import { confirmSessionSleepFallbackStopping } from './session-sleep-recovery-point';
 import { endAgentTurnForRequiredSleep } from './session-sleep-required-turn-end';
-import { resolveSleepRequirement, type SleepRequirement } from './session-sleep-requirement';
+import {
+  isPersonRequiredSleepEpisode,
+  resolveSleepRequirement,
+  type SleepRequirement,
+} from './session-sleep-requirement';
 import { sessionSleepRuntimeChanged } from './session-sleep-runtime-identity';
 import { waitForFinalSessionSnapshot } from './session-sleep-snapshot-wait';
 import {
@@ -169,11 +173,12 @@ export async function sleepWorkspaceSession(
   const workspace = await loadSleepWorkspace(env, input.workspaceId, input.userId);
   // Only the explicit sleep route (the Sleep button) calls without a claim id.
   const requestedByPerson = !input.sleepClaimId;
-  const requirement = await resolveSleepRequirement(env, workspace, new Date(), {
-    requestedByPerson,
-  });
   const snapshot = await getRestorableSessionSnapshot(db, workspace.chatSessionId, new Date(), {
     includeIncomplete: true,
+  });
+  // A sweep or fallback retry of a person's failed Sleep is still required.
+  const requirement = await resolveSleepRequirement(env, workspace, new Date(), {
+    requestedByPerson: requestedByPerson || isPersonRequiredSleepEpisode(snapshot),
   });
   const alreadySleeping = await finishAlreadySleeping(db, env, workspace, snapshot);
   if (alreadySleeping) return alreadySleeping;
@@ -218,6 +223,7 @@ export async function sleepWorkspaceSession(
     claimId,
     force: requestedByPerson,
     reopenBlockedEpisode: requestedByPerson,
+    markRequired: requestedByPerson,
   });
   if (claim.status === 'unavailable') {
     throw new Error(`Workspace sleep claim unavailable: ${claim.reason}`);

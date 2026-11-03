@@ -28,6 +28,7 @@ import {
   rearmPreservationBlockedSleep,
   retireDeadWorkspaceSleepIntent,
 } from '../services/session-sleep-fallback-state';
+import { isPersonRequiredSleepEpisode } from '../services/session-sleep-requirement';
 import { sessionSleepRuntimeChanged } from '../services/session-sleep-runtime-identity';
 import {
   reconcileUnconfirmedSleepBlock,
@@ -325,6 +326,7 @@ export async function runSessionSleepSweep(
           userId: candidate.userId,
           sleepStatus: candidate.sleepStatus,
           sleepClaimId: candidate.sleepClaimId,
+          requiredByPerson: isPersonRequiredSleepEpisode(candidate),
         });
         if (!eligibility.eligible) {
           if (eligibility.reason === 'workspace_metadata_missing') {

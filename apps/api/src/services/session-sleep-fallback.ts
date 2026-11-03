@@ -35,7 +35,7 @@ import {
 } from './session-sleep-fallback-state';
 import { assessSessionSleepRecoveryPoint } from './session-sleep-recovery-point';
 import { endAgentTurnForRequiredSleep } from './session-sleep-required-turn-end';
-import { resolveSleepRequirement } from './session-sleep-requirement';
+import { isPersonRequiredSleepEpisode, resolveSleepRequirement } from './session-sleep-requirement';
 import { sessionSleepRuntimeChanged } from './session-sleep-runtime-identity';
 import {
   completeSleepTeardown,
@@ -78,6 +78,7 @@ async function loadEpisode(
   projectId: string | null;
   runtime: string;
   sleepEpisodeStartedAt: string | null;
+  sleepRequiredEpisodeStartedAt: string | null;
   sleepEpisodeFailures: number | null;
   captureGeneration: string | null;
 } | null> {
@@ -87,6 +88,7 @@ async function loadEpisode(
         projectId: schema.sessionSnapshots.projectId,
         runtime: schema.sessionSnapshots.runtime,
         sleepEpisodeStartedAt: schema.sessionSnapshots.sleepEpisodeStartedAt,
+        sleepRequiredEpisodeStartedAt: schema.sessionSnapshots.sleepRequiredEpisodeStartedAt,
         sleepEpisodeFailures: schema.sessionSnapshots.sleepEpisodeFailures,
         captureGeneration: schema.sessionSnapshots.captureGeneration,
       })
@@ -230,7 +232,8 @@ export async function runSessionSleepFallback(
     const fallbackTrigger = currentTrigger ?? input.trigger;
     const agentSession = await loadResumableAgentSession(db, workspace.id);
     const requirement = await resolveSleepRequirement(env, workspace, now, {
-      requestedByPerson: false,
+      // The fallback of a person's failed Sleep is still required (migration 0217).
+      requestedByPerson: isPersonRequiredSleepEpisode(await loadEpisode(db, chatSessionId)),
     });
     if (requirement === 'required') {
       // The attempt budget is spent and the runtime is about to be torn down, so the turn

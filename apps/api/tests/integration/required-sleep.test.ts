@@ -11,6 +11,9 @@
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { drizzle } from 'drizzle-orm/d1';
+
+import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import { NodeAgentHttpError } from '../../src/services/node-agent';
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
@@ -18,6 +21,7 @@ import {
   queueWorkspaceSessionSleep,
   sleepWorkspaceSession,
 } from '../../src/services/session-sleep';
+import { cancelScheduledSessionSleep } from '../../src/services/session-snapshot-sleep-cancel';
 import type { SleepActivity } from '../helpers/session-sleep-fixture';
 
 const {
@@ -147,6 +151,45 @@ describe('required sleep', () => {
       expect(stopCalls()).toHaveLength(1);
       expect(mocks.recordSessionTurnEnd).toHaveBeenCalled();
       expect(snapshotRow()).toMatchObject({ sleep_status: 'sleeping' });
+    });
+
+    it('stays required when the sweep retries it, so a reachable agent is stopped then', async () => {
+      stopOutcome = 'fail';
+      await expect(explicitSleep()).rejects.toThrow(/could not stop the agent turn/);
+      const failed = sqlite
+        .prepare(
+          `SELECT sleep_after, sleep_episode_started_at, sleep_required_episode_started_at
+           FROM session_snapshots WHERE chat_session_id = 'chat-1'`
+        )
+        .get() as Record<string, string>;
+      expect(failed.sleep_required_episode_started_at).toBe(failed.sleep_episode_started_at);
+
+      // The turn is still `prompting`; a normal sleep would defer it forever.
+      stopOutcome = 'ok';
+      const sweep = await runSessionSleepSweep(env, new Date(failed.sleep_after));
+
+      expect(sweep).toMatchObject({ claimed: 1, slept: 1 });
+      expect(stopCalls()).toHaveLength(2);
+      expect(snapshotRow()).toMatchObject({ sleep_status: 'sleeping' });
+    });
+
+    it('is no longer required once a person follows up in the chat (control)', async () => {
+      stopOutcome = 'fail';
+      await expect(explicitSleep()).rejects.toThrow(/could not stop the agent turn/);
+      // A human follow-up ends the episode; the next sleep is an ordinary idle sleep.
+      await cancelScheduledSessionSleep(drizzle(env.DATABASE, { schema }), 'chat-1');
+      await queueWorkspaceSessionSleep(env, {
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        reason: 'idle',
+        sleepAfterMs: 0,
+      });
+
+      stopOutcome = 'ok';
+      const sweep = await runSessionSleepSweep(env, new Date(START.getTime() + HOUR));
+
+      expect(sweep).toMatchObject({ claimed: 0, deferred: 1 });
+      expect(stopCalls()).toHaveLength(1);
     });
 
     it('does not stop anything when the turn has already ended (control)', async () => {
