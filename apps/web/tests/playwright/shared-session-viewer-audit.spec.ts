@@ -330,7 +330,14 @@ async function scrollConversationUntil(page: Page, text: string) {
     el.dispatchEvent(new Event('scroll', { bubbles: true }));
   });
   for (let step = 0; step < 20; step += 1) {
-    if (await page.getByText(text, { exact: false }).count()) return;
+    const found = page.getByText(text, { exact: false }).first();
+    if (await found.count()) {
+      // Pin it into view: in the shorter SAM Glass conversation pane the virtual list can
+      // re-measure after a scroll and drop a row that was only in the overscan band.
+      await found.scrollIntoViewIfNeeded().catch(() => undefined);
+      await page.waitForTimeout(150);
+      if (await page.getByText(text, { exact: false }).count()) return;
+    }
     await scroller.evaluate((el) => {
       el.scrollTop += Math.max(120, el.clientHeight * 0.6);
       el.dispatchEvent(new Event('scroll', { bubbles: true }));

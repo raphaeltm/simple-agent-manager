@@ -319,7 +319,8 @@ async function assertCardsReadable(page: Page, minWidthPx = 140) {
 async function composerShareOfViewport(page: Page): Promise<number> {
   return page.evaluate(() => {
     const textarea = document.querySelector('textarea[role="combobox"]');
-    const root = textarea?.closest('.glass-chrome');
+    // The new-chat message box is a SAM Glass slab.
+    const root = textarea?.closest('.sam-glass--slab');
     const box = root?.getBoundingClientRect();
     return box ? box.height / window.innerHeight : 1;
   });
