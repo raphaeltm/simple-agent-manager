@@ -320,10 +320,9 @@ function recordTurnEndFromActivities(
   const whereClause = `session_id = ?
        AND activity IN (${placeholders})
        AND ${guardSql} <= ?`;
-  const before = sql.exec(
-    `SELECT activity FROM session_state WHERE session_id = ?`,
-    sessionId,
-  ).toArray()[0];
+  const before = sql
+    .exec(`SELECT activity FROM session_state WHERE session_id = ?`, sessionId)
+    .toArray()[0];
   if (
     !before ||
     typeof before.activity !== 'string' ||
@@ -507,9 +506,7 @@ export function updateCurrentPlan(sql: SqlStorage, sessionId: string, planJson: 
 export function terminalizeChatSessionActivity(
   sql: SqlStorage,
   chatSessionId: string,
-  outcome:
-    | { activity: 'stopped'; reason: string }
-    | { activity: 'error'; statusError: string },
+  outcome: { activity: 'stopped'; reason: string } | { activity: 'error'; statusError: string },
   now = Date.now()
 ): number {
   const placeholders = WORKING_ACTIVITIES.map(() => '?').join(', ');
@@ -559,9 +556,7 @@ export function listSessionStateIdsForChatSession(
   sql: SqlStorage,
   chatSessionId: string
 ): string[] {
-  const rows = sql
-    .exec(CHAT_SESSION_STATE_IDS_SQL, chatSessionId, chatSessionId)
-    .toArray();
+  const rows = sql.exec(CHAT_SESSION_STATE_IDS_SQL, chatSessionId, chatSessionId).toArray();
   return rows
     .map((row) => row.id)
     .filter((id): id is string => typeof id === 'string' && id.length > 0);

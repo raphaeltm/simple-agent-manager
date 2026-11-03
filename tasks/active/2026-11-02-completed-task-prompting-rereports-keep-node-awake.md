@@ -83,21 +83,23 @@ A same-turn re-report keeps it. NULL on legacy rows falls back to `prompt_starte
 
 ## Checklist
 
-- [ ] DO migration `071-session-state-work-clock` adds `work_at INTEGER`
-- [ ] `upsertActivityState` computes work edge vs same-turn re-report; sets `work_at` only on edges;
+- [x] DO migration `071-session-state-work-clock` adds `work_at INTEGER`
+- [x] `upsertActivityState` computes work edge vs same-turn re-report; sets `work_at` only on edges;
       returns the outcome
-- [ ] `refreshWorkingActivityForChatSession` also sets `work_at`
-- [ ] `getSessionState` returns `workAt` (split read section out of `session-state.ts`, rule 18)
-- [ ] `classifySessionIdleness` terminal drain anchors on `max(completedAt, workAt ?? promptStartedAt
+- [x] `refreshWorkingActivityForChatSession` also sets `work_at`
+- [x] `getSessionState` returns `workAt` (split read section out of `session-state.ts`, rule 18)
+- [x] `classifySessionIdleness` terminal drain anchors on `max(completedAt, workAt ?? promptStartedAt
       ?? activityAt, runtimeWorkProgressAt)`
-- [ ] `idlenessStateChanged` compares `workAt` instead of `activityAt` / `runtimeWorkUpdatedAt`
-- [ ] DO `reportActivity` surfaces `'same_turn_rereport'`; `cancelSleepForActiveActivity` skips it
-- [ ] Worker test: completed task + real re-reports, no messages → real sweep sleeps the session;
+- [x] `idlenessStateChanged` compares `workAt` instead of `activityAt` / `runtimeWorkUpdatedAt`
+- [x] DO `reportActivity` surfaces `'same_turn_rereport'`; `cancelSleepForActiveActivity` skips it
+- [x] Worker test: completed task + real re-reports, no messages → real sweep sleeps the session;
       proven red on current code
-- [ ] Control: messages persisted after `complete_task` keep it draining
-- [ ] Control: a new turn (edge) still cancels/fences the sleep
-- [ ] Docs: update session-sleep docs if they describe the drain clock
-- [ ] SAM Idea: hung ACP turns that never return (VM side) + bounding non-terminal hung turns
+- [x] Control: messages persisted after `complete_task` keep it draining
+- [x] Control: a new turn (edge) still cancels/fences the sleep
+- [x] Docs: update session-sleep docs if they describe the drain clock
+- [x] SAM Idea: tracked in existing idea `01M5VG7QCDGW77VY1N4QCDJRQK` (hung final turn; items 2-3:
+      idle sweep releasing a terminal task's workspace, capture the hang's debug package) and
+      `01M4JMDPRP7FCY6CVJEDQ0TW5A` (hung turn on a live conversation). Progress note posted.
 
 ## Acceptance Criteria
 
@@ -106,3 +108,18 @@ A same-turn re-report keeps it. NULL on legacy rows falls back to `prompt_starte
       (not just eligibility); proven red on current code
 - [ ] Control: a Claude Code agent persisting tool-call messages after `complete_task` keeps draining
 - [ ] Existing `failed-task-preservation` and `session-sleep-bounded-fallback` suites stay green
+
+## Implementation Notes (2026-11-03)
+
+- `markPromptAccepted`, `recordTurnEnd` and `terminalizeChatSessionActivity` also stamp `work_at`
+  (every `activity_at` writer is in `session-state.ts`; enumerated per rule 49).
+- `same_turn_rereport` mirrors the upsert's runtime-work apply guard, so a runtime-work difference
+  the upsert will not write cannot move the clock.
+- Behaviour change, intended: a FAILED task whose turn only re-reports now sleeps (keeping its
+  snapshot) after the drain, instead of waiting for `FAILED_TASK_PRESERVATION_MAX_WAIT_MS` and
+  posting a work-loss notice. The max-wait tests now model a turn that keeps producing work.
+- Discrimination: reverting only the abort check reddens the vertical slice and
+  "ignores a same-turn re-report between two reads"; reverting only the drain anchor reddens 5
+  tests (3 classifier cases, hung failed task, vertical slice); removing the fence skip reddens
+  "keeps an in-flight sleep claim through same-turn re-reports".
+- Raphaël waived staging for this fix (2026-11-03): "Get it into prod ASAP, skip staging."

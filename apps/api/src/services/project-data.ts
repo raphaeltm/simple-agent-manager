@@ -164,12 +164,12 @@ import type {
   AcceptedPromptDelivery,
   AcceptPromptDeliveryInput,
 } from '../durable-objects/project-data/prompt-delivery';
+import type { ActivityReportOutcome } from '../durable-objects/project-data/session-work-clock';
 import type {
   CreateReservedTaskSessionWithInitialMessageInput,
   CreateReservedTaskSessionWithInitialMessageResult,
   SessionIdentityGuard as ProjectDataSessionIdentityGuard,
 } from '../durable-objects/project-data/sessions';
-import type { ActivityReportOutcome } from '../durable-objects/project-data/session-work-clock';
 import type { RegisterTaskWaitInput } from '../durable-objects/project-data/task-waits';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
