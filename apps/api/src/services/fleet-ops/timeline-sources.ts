@@ -309,12 +309,10 @@ const bootLogSource: TimelineSource = {
   name: 'boot_log',
   async collect(env, scope, limit) {
     const logs = await Promise.all(
-      scope.workspaceIds
-        .slice(0, TIMELINE_FANOUT_LIMIT)
-        .map(async (workspaceId) => ({
-          workspaceId,
-          entries: await getBootLogs(env.KV, workspaceId, env),
-        }))
+      scope.workspaceIds.slice(0, TIMELINE_FANOUT_LIMIT).map(async (workspaceId) => ({
+        workspaceId,
+        entries: await getBootLogs(env.KV, workspaceId, env),
+      }))
     );
     return logs
       .flatMap(({ workspaceId, entries }) =>
