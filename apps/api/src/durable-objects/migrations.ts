@@ -2588,8 +2588,9 @@ export const MIGRATIONS: Migration[] = [
     // `session_state.activity_at` is a last-REPORT clock: the VM agent re-reports `prompting`
     // every minute while a turn is open, so it never ages. `work_at` moves only on real work
     // (an activity edge, a new turn, harness progress, a persisted message) and is what
-    // idleness reads (`session-work-clock.ts`). NULL on existing rows falls back to
-    // `prompt_started_at`, so a turn wedged before this migration still ages out.
+    // idleness reads (`session-work-clock.ts`). On an existing row the first report after
+    // this migration is a work edge and the clock holds from there; a row that never
+    // reports again falls back to `prompt_started_at`.
     // `reported_prompt_started_at` is the VM's own turn start, kept apart from
     // `prompt_started_at` (which `markPromptAccepted` sets to the accept time), so a
     // same-turn re-report can be recognised.

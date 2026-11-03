@@ -88,13 +88,13 @@ export function isSameTurnRereport(
 ): boolean {
   if (!prior) return false;
   if (prior.activity !== update.activity) return false;
-  // A newer turn is judged against the VM's own previous report. `prompt_started_at`
+  // A new turn is judged against the VM's own previous report. `prompt_started_at`
   // cannot be used: `markPromptAccepted` stores the control plane's accept time there,
   // which is earlier than the VM's turn start, so every re-report would look newer.
+  // The VM repeats one turn's start unchanged, so any different value is another turn.
   if (
     update.promptStartedAt !== null &&
-    (prior.reportedPromptStartedAt === null ||
-      update.promptStartedAt > prior.reportedPromptStartedAt)
+    update.promptStartedAt !== prior.reportedPromptStartedAt
   ) {
     return false;
   }

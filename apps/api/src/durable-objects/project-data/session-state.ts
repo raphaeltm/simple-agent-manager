@@ -158,7 +158,8 @@ export function upsertActivityState(
 		   runtime_work_progress_at = CASE
 		     WHEN ? = 1 AND (session_state.runtime_work_progress_at IS NULL OR excluded.runtime_work_progress_at >= session_state.runtime_work_progress_at)
 		       THEN excluded.runtime_work_progress_at ELSE session_state.runtime_work_progress_at END,
-		   work_at = CASE WHEN ? = 1 THEN session_state.work_at ELSE excluded.work_at END,
+		   work_at = CASE WHEN ? = 1 THEN session_state.work_at
+		     ELSE MAX(COALESCE(session_state.work_at, 0), excluded.work_at) END,
 		   reported_prompt_started_at = COALESCE(
 		     excluded.reported_prompt_started_at, session_state.reported_prompt_started_at
 		   )
