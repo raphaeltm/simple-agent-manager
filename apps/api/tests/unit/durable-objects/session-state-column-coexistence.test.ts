@@ -122,7 +122,8 @@ describe('session_state: #1840 reconciliation columns coexist with harness-work 
       runtimeWorkState: 'active',
       runtimeWorkCount: 4,
       runtimeWorkSource: 'claude_sdk',
-      runtimeWorkProgressAt: now - 10_000,
+      // Progress precedes receipt: progress reported ahead of receipt is clamped.
+      runtimeWorkProgressAt: now - 11 * 60 * 1000,
       now: now - 10 * 60 * 1000,
     });
 
@@ -138,7 +139,7 @@ describe('session_state: #1840 reconciliation columns coexist with harness-work 
     expect(state!.runtimeWorkState).toBe('active');
     expect(state!.runtimeWorkCount).toBe(4);
     expect(state!.runtimeWorkSource).toBe('claude_sdk');
-    expect(state!.runtimeWorkProgressAt).toBe(now - 10_000);
+    expect(state!.runtimeWorkProgressAt).toBe(now - 11 * 60 * 1000);
   });
 
   it('migration 030/031 columns all exist alongside migration 029 columns', () => {

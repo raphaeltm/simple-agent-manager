@@ -98,6 +98,13 @@ export function upsertActivityState(
     ? null
     : (update.reason ?? (update.activity === 'idle' ? 'completed' : null));
   const hasRuntimeWorkUpdate = update.runtimeWorkState !== undefined;
+  // Harness progress is reported on the VM's clock. A value ahead of receipt would pin the
+  // work clock and the harness lease into the future, and the monotonic guards would keep
+  // it there, so it is clamped to the time this report is applied.
+  const runtimeWorkProgressAt =
+    typeof update.runtimeWorkProgressAt === 'number'
+      ? Math.min(update.runtimeWorkProgressAt, now)
+      : update.runtimeWorkProgressAt;
   // Read before the write: no await separates the two, so the DO cannot interleave.
   // The RAW reported turn start: a report without one must not look like a new turn.
   const reportedPromptStartedAt = update.promptStartedAt ?? null;
@@ -107,7 +114,7 @@ export function upsertActivityState(
     hasRuntimeWorkUpdate,
     runtimeWorkState: update.runtimeWorkState,
     runtimeWorkCount: update.runtimeWorkCount,
-    runtimeWorkProgressAt: update.runtimeWorkProgressAt,
+    runtimeWorkProgressAt,
   });
 
   const cursor = sql.exec(
@@ -160,8 +167,9 @@ export function upsertActivityState(
 		       THEN excluded.runtime_work_progress_at ELSE session_state.runtime_work_progress_at END,
 		   work_at = CASE WHEN ? = 1 THEN session_state.work_at
 		     ELSE MAX(COALESCE(session_state.work_at, 0), excluded.work_at) END,
-		   reported_prompt_started_at = COALESCE(
-		     excluded.reported_prompt_started_at, session_state.reported_prompt_started_at
+		   reported_prompt_started_at = MAX(
+		     COALESCE(excluded.reported_prompt_started_at, 0),
+		     COALESCE(session_state.reported_prompt_started_at, 0)
 		   )
 	     WHERE session_state.activity_at IS NULL
 	        OR session_state.activity_at < excluded.activity_at
@@ -197,7 +205,7 @@ export function upsertActivityState(
     hasRuntimeWorkUpdate ? (update.runtimeWorkCount ?? 0) : null,
     hasRuntimeWorkUpdate ? (update.runtimeWorkSource ?? null) : null,
     hasRuntimeWorkUpdate ? activityAt : null,
-    hasRuntimeWorkUpdate ? (update.runtimeWorkProgressAt ?? null) : null,
+    hasRuntimeWorkUpdate ? (runtimeWorkProgressAt ?? null) : null,
     activityAt,
     reportedPromptStartedAt,
     ...Array(5).fill(hasRuntimeWorkUpdate ? 1 : 0),
@@ -395,7 +403,7 @@ export function markPromptAccepted(
      ON CONFLICT(session_id) DO UPDATE SET
        activity = 'prompting',
        activity_at = excluded.activity_at,
-       work_at = excluded.work_at,
+       work_at = MAX(COALESCE(session_state.work_at, 0), excluded.work_at),
        prompt_started_at = excluded.prompt_started_at,
        prompt_epoch = excluded.prompt_epoch,
        status_error = NULL,

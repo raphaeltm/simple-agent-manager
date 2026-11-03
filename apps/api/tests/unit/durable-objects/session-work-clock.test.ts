@@ -154,6 +154,35 @@ describe('session work clock', () => {
     expect(getSessionState(sql, ACP_SESSION)?.workAt).toBe(T0);
   });
 
+  it('ignores a delayed report from an older turn and keeps the newer turn start', () => {
+    prompting(T0, { promptStartedAt: T0 + 5 * MINUTE });
+    // A late report naming the previous turn (newer observedAt, older turn start).
+    expect(prompting(T0 + MINUTE, { promptStartedAt: T0 })).toBe('same_turn_rereport');
+    // The next current-turn re-report is still recognised as the same turn.
+    expect(prompting(T0 + 2 * MINUTE, { promptStartedAt: T0 + 5 * MINUTE })).toBe(
+      'same_turn_rereport'
+    );
+    expect(getSessionState(sql, ACP_SESSION)?.workAt).toBe(T0);
+  });
+
+  it('never lets an earlier prompt acceptance move the work clock backwards', () => {
+    prompting(T0);
+    refreshWorkingActivityForChatSession(sql, CHAT_SESSION, T0 + 5 * MINUTE, T0 + 5 * MINUTE);
+    markPromptAccepted(sql, ACP_SESSION, T0 + 6 * MINUTE, T0 + 2 * MINUTE);
+    expect(getSessionState(sql, ACP_SESSION)?.workAt).toBe(T0 + 5 * MINUTE);
+  });
+
+  it('clamps harness progress reported ahead of receipt to the receipt time', () => {
+    const runtime = {
+      runtimeWorkState: 'active' as const,
+      runtimeWorkCount: 1,
+      runtimeWorkSource: 'claude-background-tasks',
+    };
+    prompting(T0, { ...runtime, runtimeWorkProgressAt: T0 + 24 * 60 * MINUTE });
+    expect(getSessionState(sql, ACP_SESSION)?.runtimeWorkProgressAt).toBe(T0);
+    expect(sessionWorkAnchor(getSessionState(sql, ACP_SESSION))).toBe(T0);
+  });
+
   it('moves the work clock on control-plane turn transitions', () => {
     prompting(T0);
     recordTurnEnd(sql, ACP_SESSION, {

@@ -2596,15 +2596,19 @@ export const MIGRATIONS: Migration[] = [
     // same-turn re-report can be recognised.
     name: '071-session-state-work-clock',
     run(sql) {
-      for (const statement of [
-        'ALTER TABLE session_state ADD COLUMN work_at INTEGER',
-        'ALTER TABLE session_state ADD COLUMN reported_prompt_started_at INTEGER',
-      ]) {
-        try {
-          sql.exec(statement);
-        } catch {
-          // Column already exists from a partial previous run — safe to ignore.
-        }
+      // Add only the missing columns and let any other failure throw, so the migration
+      // run rolls back instead of recording 071 without its columns.
+      const existing = new Set(
+        sql
+          .exec('PRAGMA table_info(session_state)')
+          .toArray()
+          .map((column) => column.name)
+      );
+      if (!existing.has('work_at')) {
+        sql.exec('ALTER TABLE session_state ADD COLUMN work_at INTEGER');
+      }
+      if (!existing.has('reported_prompt_started_at')) {
+        sql.exec('ALTER TABLE session_state ADD COLUMN reported_prompt_started_at INTEGER');
       }
     },
   },

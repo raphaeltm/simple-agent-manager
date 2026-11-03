@@ -91,8 +91,13 @@ export function isSameTurnRereport(
   // A new turn is judged against the VM's own previous report. `prompt_started_at`
   // cannot be used: `markPromptAccepted` stores the control plane's accept time there,
   // which is earlier than the VM's turn start, so every re-report would look newer.
-  // The VM repeats one turn's start unchanged, so any different value is another turn.
-  if (update.promptStartedAt !== null && update.promptStartedAt !== prior.reportedPromptStartedAt) {
+  // Only a NEWER start is a new turn: a delayed report from an older turn is not work,
+  // and the stored value never moves backwards (`upsertActivityState`).
+  if (
+    update.promptStartedAt !== null &&
+    (prior.reportedPromptStartedAt === null ||
+      update.promptStartedAt > prior.reportedPromptStartedAt)
+  ) {
     return false;
   }
   if (update.hasRuntimeWorkUpdate && runtimeWorkUpdateApplies(prior, update)) {
