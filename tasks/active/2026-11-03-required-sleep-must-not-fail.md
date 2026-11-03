@@ -6,6 +6,7 @@ Raphaël, 2026-11-03: "I want it to be as close to impossible as possible for a 
 fail to take place." Policy `a3780107` items 2–3 record the decision.
 
 **Production evidence.** Chat `ba36fd60-6b16-4001-a019-173cb8b2e9aa`:
+
 - Its ACP turn hung at about 02:51Z. Activity stayed `prompting`, so every sleep check deferred.
 - Node `01M6DPQANHDKK2JA5HE83W506G` hit its 24 h absolute lifetime at about 09:45Z.
   `prepareAbsoluteLifetimeRelease` queued an ordinary sleep, which kept deferring. After the hold it
@@ -60,6 +61,7 @@ fail to take place." Policy `a3780107` items 2–3 record the decision.
 
 A sleep requirement level, `normal | deadline | required`. A new
 `services/session-sleep-requirement.ts` resolves it in one place:
+
 - **required:** a person-initiated sleep, OR the workspace's managed VM node is older than the
   absolute lifetime plus the leeway (`operations.nodeLifetimeForceSleepAfterMs`, default 30 min).
 - **deadline:** the node is past the absolute lifetime but still within the leeway. The session
@@ -67,6 +69,7 @@ A sleep requirement level, `normal | deadline | required`. A new
 - **normal:** everything else, unchanged.
 
 How each piece behaves:
+
 1. **Required sleep ends the turn first** (`endAgentTurnForRequiredSleep`). It reads ProjectData
    state. If a turn is working, it calls `cancelAgentSessionOnNode` (skipped for a sleeping Instant
    container) and then `recordSessionTurnEnd` (`cancelled`, observedAt captured before the call),
@@ -124,6 +127,7 @@ How each piece behaves:
 - [x] M3 close before retire; M5 404 is no turn; L1 widen serving statuses to "not deleted";
       L2 lifetime notice text; L3 explicit sleep documented in the API reference; L4 test no longer
       swallows its failure.
+
 ### Adversarial review round 2
 
 - [x] HIGH `/stop` strands the chat when the sleep fails: reverted to `/cancel` (see H1).
