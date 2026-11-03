@@ -273,3 +273,26 @@ Staging assets deployed from `b18b263e5d687240034baf82b6bfb8cfb42a923a`; `/healt
 Final staging browser smoke caught the homepage footer's inherited inline image radius being blocked by installer CSP. It moved unchanged into shared footer CSS; no CSP was loosened. Static output forbids style attributes and the full browser audit now fails on CSP console errors. The 126-capture audit and 106 tests pass again; independent security re-review confirms the fix. Actual handoff HTML/CSP is rendered by InstallerSession in the browser harness, and maintenance theme captures explicitly select and settle their colors.
 
 CodeRabbit final-head review returned five actionable comments and three nits. Valid feedback is addressed: build-input/deployment-asset path filters; real Astro template checks for both installer pages and shared UI components (zero diagnostics), with explicit Astro lint coverage; required glass stylesheet docs; literal-safe asset replacement and original script attributes; minified/relative import guards; filtered/local-wrapper package validation guards. The 44px toggle recommendation is explicitly rejected because it contradicts Raphaël's task instruction. No minimum target was added.
+
+## Cold-build proof passed — 2026-11-03
+
+Raphaël approved the paid cold build, then asked for iteration until it works. All runs used `scripts/deploy/installer-builder-proof.ts` on standard-3 (2 vCPU / 8 GiB / 16 GB disk) with the durable 60-minute stop. The launcher ran detached via SAM `exec_with_secrets`, because those jobs are capped at 60 minutes and the workflow is not dispatchable until it exists on main. Every run's Worker and container application were deleted and verified absent.
+
+1. `2553a1fe` (`sam-build-proof-5ecb3919e02d`): failed in bootstrap after ~2.5 min with no error text. `rustup-init` came from the moving `/rustup/dist/` URL against a pinned 1.29.2 checksum, and rustup 1.29.3 had shipped. `sha256sum --status` failed silently.
+2. `91835aec` (`sam-build-proof-0a64bf109964`): pinned rustup to its versioned archive and added ERR traps that name the failing script line. The trap then showed `curl: (22) ... 404` on the Go download at line 21.
+3. Throwaway probe `7283f0b3` (`sam-build-proof-87bf18007091`, branch deleted): every download source returned 2xx from the container egress (AMS, IPv6), so the 404 was a transient CDN error.
+4. `601bb681` (`sam-build-proof-53fbd16d2b0f`): `fetch_pinned` retries versioned sources with failover; the checksum decides acceptance. **Completed every phase in 29m33s**:
+
+| Phase | Duration |
+|---|---|
+| Bootstrap (OS, Go, Rust, pnpm, Pulumi, Docker, `pnpm install`) | ~3m00s |
+| Codex runtime from source | 16m41s |
+| `pnpm build` | 1m37s |
+| CLI `build-all` | 1m33s |
+| VM agent `prepare-container` + `build-all` | 3m32s |
+| VM-agent runtime image build + compiled-Codex verify | 1m50s |
+| Sandbox image build | 0m55s |
+
+Peak disk 7.9 GB, 7.7 GB free at the end. Memory peak is unobserved: cgroup `memory.peak` is not readable inside the managed container. No OOM kill occurred on the 8 GiB instance. The elapsed-time compute estimate is about $0.11, about $0.14 across all four runs, before allowances; actual billing is not reconciled. Evidence: `tasks/evidence/2026-11-03-installer-cold-build/result.json` and `progress.jsonl`.
+
+This proves the fit-only cold build (artifacts, no tests). It does not prove a full install. Deployment, OAuth sign-in and revocation still need the OAuth client. PRs #2465/#2475 stay draft and unmerged.
