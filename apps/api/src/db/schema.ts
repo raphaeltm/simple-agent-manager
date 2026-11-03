@@ -1526,6 +1526,28 @@ export const nodeHealthEvents = sqliteTable(
   })
 );
 
+/** One row per keep/kill decision about a node. No FK: rows outlive the node row. */
+export const nodeLifecycleDecisions = sqliteTable(
+  'node_lifecycle_decisions',
+  {
+    id: text('id').primaryKey(),
+    nodeId: text('node_id').notNull(),
+    source: text('source').notNull(),
+    decision: text('decision').notNull(),
+    reason: text('reason'),
+    workspaceCount: integer('workspace_count'),
+    detailJson: text('detail_json'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => ({
+    nodeCreatedIdx: index('idx_node_lifecycle_decisions_node_created').on(
+      table.nodeId,
+      table.createdAt
+    ),
+    createdIdx: index('idx_node_lifecycle_decisions_created').on(table.createdAt),
+  })
+);
+
 export const nodes = sqliteTable(
   'nodes',
   {
