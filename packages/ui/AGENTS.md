@@ -14,9 +14,19 @@ Design system tokens and shared UI components for the control plane app. Provide
 | `src/primitives/` | Layout primitives (Container, PageLayout, Typography) |
 | `src/hooks/` | Shared UI hooks |
 | `src/styles.css` | Base styles imported by consumers |
-| `src/glass/glass.css` | Glass v2 material (`.sam-glass`, `--chrome`, `-rim`, `-sheen`, `-live`), shared by the app and the marketing site; follows `[data-ui-theme]` and `html[data-theme]` |
+| `src/glass/glass.css` | Glass v2 material (`.sam-glass`, `--chrome`, `--slab`, `--quiet`, `-rim`, `-sheen`, `-live`), plus `.sam-void`, `.sam-well`, `.sam-raised`, shared by the app and the marketing site; follows `[data-ui-theme]` and `html[data-theme]` |
+| `src/tokens/sam-glass.css` | SAM Glass app tokens: people colours, counts, nav glow, pane radii and gutter (both themes) |
 | `src/glass/node-field.ts` | Framework-agnostic canvas renderer of SAM's node/workspace network as lit glass tiles (`createGlassNodeField`); `field-model.ts` holds its pure geometry and lifecycle |
 | `src/components/GlassNodeField.tsx` | React wrapper for the node field (decorative background) |
+
+## SAM Glass
+
+The app's visual language: glass panes over a dark green void. Guide: `docs/guides/sam-glass-design-system.md`. Rule: `.claude/rules/80-sam-glass.md`. Build recipe: the `sam-glass` skill.
+
+- Surfaces are glass (`.sam-glass .sam-glass-rim`, `--slab`, `--quiet`); elements on them (buttons, avatars, chips, counts, inputs) are solid or wells.
+- One live blur at a time (`.sam-glass-live` on a single overlay).
+- People colours (`--sam-person-*`) mean who; amber means waiting on you.
+- New components go in `src/components/` with a story; the table of components to build is in the guide.
 
 ## Commands
 

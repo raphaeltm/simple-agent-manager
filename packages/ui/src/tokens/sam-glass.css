@@ -1,0 +1,60 @@
+/*
+ * SAM Glass — tokens for people, counts and pane layout.
+ *
+ * The glass material itself (fills, rim light, sheen, depth, the void, wells) lives in
+ * src/glass/glass.css so the marketing site can share it. This file holds the app-only
+ * tokens the SAM Glass components need. Guide: docs/guides/sam-glass-design-system.md
+ *
+ * Dark is the default (:root); [data-ui-theme='sam-light'] overrides.
+ */
+
+:root {
+  /* People: who did something. Never a status. You are green; teammates get cyan, violet
+     and rose in the order they joined the project (stable per project); automations are grey.
+     Initials sit on these in --sam-person-ink (6:1 or better on every person colour). */
+  --sam-person-you: #4ade80;
+  --sam-person-1: #22d3ee;
+  --sam-person-2: #a78bfa;
+  --sam-person-3: #fb7185;
+  --sam-person-auto: #94a3b8;
+  --sam-person-ink: #06100c;
+
+  /* Ring that separates solid elements (avatars, counts) from what they overlap. */
+  --sam-separator: #0a1411;
+
+  /* Counts on icon buttons and nav items. Green = running now; amber = waiting on you. */
+  --sam-count-active: #22c55e;
+  --sam-count-active-ink: #04120b;
+  --sam-attention-ink: #1a0f00;
+
+  /* Current nav item and open chat. */
+  --sam-nav-active-top: rgb(74 222 128 / 0.16);
+  --sam-nav-active-bottom: rgb(34 197 94 / 0.07);
+  --sam-shadow-glow-active: 0 0 26px -8px rgb(34 197 94 / 0.5);
+  --sam-shadow-accent: 0 8px 22px -6px rgb(34 197 94 / 0.6);
+
+  /* Pane layout: 16px frame, 14px gutters so the void shows between panes. */
+  --sam-space-gutter: 14px;
+  --sam-radius-control: 12px;
+  --sam-radius-pane: 20px;
+  --sam-radius-slab: 22px;
+  --sam-hairline: rgb(255 255 255 / 0.06);
+}
+
+[data-ui-theme='sam-light'] {
+  --sam-person-you: #15803d;
+  --sam-person-1: #0e7490;
+  --sam-person-2: #6d28d9;
+  --sam-person-3: #be123c;
+  --sam-person-auto: #475569;
+  --sam-person-ink: #ffffff;
+  --sam-separator: #f8fbf8;
+  --sam-count-active: #15803d;
+  --sam-count-active-ink: #ffffff;
+  --sam-attention-ink: #ffffff;
+  --sam-nav-active-top: #ffffff;
+  --sam-nav-active-bottom: rgb(255 255 255 / 0.7);
+  --sam-shadow-glow-active: 0 6px 14px -6px rgb(21 128 61 / 0.35);
+  --sam-shadow-accent: 0 8px 20px -8px rgb(21 128 61 / 0.5);
+  --sam-hairline: rgb(17 39 29 / 0.08);
+}
