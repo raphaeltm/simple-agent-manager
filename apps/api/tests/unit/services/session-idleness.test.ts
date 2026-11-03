@@ -220,6 +220,77 @@ describe('classifySessionIdleness', () => {
     });
   });
 
+  describe('the completed-task drain follows the work clock, not re-reports', () => {
+    const completedAt = new Date(NOW.getTime() - 20 * 60 * 1000).toISOString();
+
+    it('releases a completed task whose hung turn keeps re-reporting (production 2026-11-03)', () => {
+      // `activityAt` is 30 s old because the VM re-reports every minute; no work since
+      // the turn started 25 min ago.
+      expect(
+        classify({
+          taskStatus: 'completed',
+          taskCompletedAt: completedAt,
+          state: {
+            activity: 'prompting',
+            activityAt: NOW.getTime() - 30_000,
+            promptStartedAt: NOW.getTime() - 25 * 60 * 1000,
+            workAt: NOW.getTime() - 25 * 60 * 1000,
+          },
+        })
+      ).toMatchObject({ idle: true, conclusive: true, reason: 'completed_prompt_stale' });
+    });
+
+    it('keeps draining while the agent still persists work after complete_task (control)', () => {
+      expect(
+        classify({
+          taskStatus: 'completed',
+          taskCompletedAt: completedAt,
+          state: {
+            activity: 'prompting',
+            activityAt: NOW.getTime() - 30_000,
+            promptStartedAt: NOW.getTime() - 25 * 60 * 1000,
+            workAt: NOW.getTime() - 2 * 60 * 1000,
+          },
+        })
+      ).toMatchObject({
+        idle: false,
+        reason: 'prompt_turn_active',
+        retryAt: new Date(NOW.getTime() - 2 * 60 * 1000 + IDLE_AFTER_MS),
+      });
+    });
+
+    it('keeps draining while harness work progresses (control)', () => {
+      expect(
+        classify({
+          taskStatus: 'completed',
+          taskCompletedAt: completedAt,
+          state: {
+            activity: 'prompting',
+            activityAt: NOW.getTime() - 30_000,
+            workAt: NOW.getTime() - 25 * 60 * 1000,
+            runtimeWorkState: 'inactive',
+            runtimeWorkProgressAt: NOW.getTime() - 60_000,
+          },
+        })
+      ).toMatchObject({ idle: false, reason: 'prompt_turn_active' });
+    });
+
+    it('falls back to the turn start for rows written before the work clock existed', () => {
+      expect(
+        classify({
+          taskStatus: 'completed',
+          taskCompletedAt: completedAt,
+          state: {
+            activity: 'prompting',
+            activityAt: NOW.getTime() - 30_000,
+            promptStartedAt: NOW.getTime() - 25 * 60 * 1000,
+            workAt: null,
+          },
+        })
+      ).toMatchObject({ idle: true, reason: 'completed_prompt_stale' });
+    });
+  });
+
   it('sleeps a completed task immediately once it reports idle', () => {
     expect(
       classify({

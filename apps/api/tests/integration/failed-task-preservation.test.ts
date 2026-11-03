@@ -15,6 +15,11 @@ import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
+import { runMigrations } from '../../src/durable-objects/migrations';
+import {
+  getSessionState as readProjectDataSessionState,
+  upsertActivityState,
+} from '../../src/durable-objects/project-data/session-state';
 import type { Env } from '../../src/env';
 import { emptyResult, resolveCleanupConfig } from '../../src/scheduled/node-cleanup/shared';
 import { sweepTerminalCfContainers } from '../../src/scheduled/node-cleanup/terminal-cf-container-phase';
@@ -31,6 +36,7 @@ import {
 } from '../../src/services/session-snapshots';
 import { cleanupTerminalTaskResources } from '../../src/services/task-terminal-cleanup';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
+import { createSqlStorage } from '../unit/durable-objects/sql-storage-test-utils';
 
 const mocks = vi.hoisted(() => ({
   cleanupTaskRun: vi.fn(),
@@ -819,12 +825,14 @@ describe('failed-task work preservation vertical slice', () => {
     const wokeAt = new Date(START.getTime() + HOUR);
     await wakeOldInstantFailure(wokeAt);
 
-    // The follow-up's turn hangs, re-reporting every minute; a queued message is
-    // retried against the busy container just before the sweep runs.
+    // The follow-up's turn never ends but keeps producing work, so its drain never
+    // closes; a queued message is retried against the busy container just before the
+    // sweep runs. (A turn that only re-reports ages out and sleeps instead.)
     const later = new Date(wokeAt.getTime() + 9 * HOUR);
     mocks.getSessionState.mockResolvedValue({
       activity: 'prompting',
       activityAt: later.getTime() - 60_000,
+      workAt: later.getTime() - 60_000,
       promptStartedAt: wokeAt.getTime(),
     });
     vi.setSystemTime(new Date(later.getTime() - 60_000));
@@ -926,10 +934,12 @@ describe('failed-task work preservation vertical slice', () => {
     // the maximum wait bounds it. Driven through the real sweep's deferral branch.
     env.FAILED_TASK_PRESERVATION_MAX_WAIT_MS = String(60 * 60_000);
     seedFailedTask('vm', 'failed', new Date(START.getTime() - 61 * 60_000).toISOString());
-    // One turn, hung since before the failure, re-reporting every minute.
+    // One turn, open since before the failure, still producing work every minute. A
+    // turn that only re-reports ages out instead (next test).
     mocks.getSessionState.mockResolvedValue({
       activity: 'prompting',
       activityAt: START.getTime() - 60_000,
+      workAt: START.getTime() - 60_000,
       promptStartedAt: START.getTime() - 2 * HOUR,
     });
     await cleanupTerminalTaskResources(env, 'task-1', { status: 'failed' });
@@ -943,11 +953,78 @@ describe('failed-task work preservation vertical slice', () => {
     expect(next).toMatchObject({ selected: 0 });
   });
 
-  it('keeps a completed task with a still-reporting prompt draining (control)', async () => {
+  it('sleeps a failed task whose hung turn only re-reports, keeping its work', async () => {
+    // Production 2026-11-03: a turn that never returns re-reports `prompting` every
+    // minute, which moves `activityAt` but not the work clock. The drain ends 15 min
+    // after the last real work and the session sleeps with its snapshot, instead of
+    // waiting out the maximum wait and losing the work.
+    seedFailedTask('vm', 'failed', new Date(START.getTime() - 20 * 60_000).toISOString());
+    mocks.getSessionState.mockResolvedValue({
+      activity: 'prompting',
+      activityAt: START.getTime() - 30_000,
+      workAt: START.getTime() - 25 * 60_000,
+      promptStartedAt: START.getTime() - 25 * 60_000,
+    });
+
+    await cleanupTerminalTaskResources(env, 'task-1', { status: 'failed' });
+    const sweep = await runSessionSleepSweep(env, START);
+
+    expect(sweep).toMatchObject({ claimed: 1, slept: 1, deferred: 0 });
+    expect(snapshotRow()).toMatchObject({ status: 'available', sleep_status: 'sleeping' });
+    expect(mocks.persistMessage).not.toHaveBeenCalled();
+  });
+
+  it('sleeps a completed task whose hung turn keeps re-reporting through the real ProjectData writer', async () => {
+    // Production 2026-11-03 (node 01M6EHBZ85GDPDQS5JSAYCKF4Z): the turn that called
+    // complete_task never returned, and the VM re-reported `prompting` every minute for
+    // 13 h. Session state here is the real ProjectData writer and reader; a re-report
+    // lands before EVERY read, including the sleep's own mid-capture re-checks.
+    const projectDataDb = new Database(':memory:');
+    const projectDataSql = createSqlStorage(projectDataDb);
+    runMigrations(projectDataSql);
+    const turnStartedAt = START.getTime() - 25 * 60_000;
+    let reportAt = turnStartedAt;
+    const reReport = () =>
+      upsertActivityState(projectDataSql, 'agent-1', {
+        activity: 'prompting',
+        observedAt: reportAt,
+        now: reportAt,
+        promptStartedAt: turnStartedAt,
+        runtimeWorkState: 'inactive',
+        runtimeWorkCount: 0,
+        runtimeWorkSource: 'claude-background-tasks',
+      });
+    expect(reReport()).toBe('work_edge');
+    while (reportAt < START.getTime() - 60_000) {
+      reportAt += 60_000;
+      expect(reReport()).toBe('same_turn_rereport');
+    }
+    mocks.getSessionState.mockImplementation(async () => {
+      reportAt += 1_000;
+      reReport();
+      return readProjectDataSessionState(projectDataSql, 'agent-1');
+    });
+    seedFailedTask('vm', 'completed', new Date(START.getTime() - 20 * 60_000).toISOString());
+
+    await cleanupTerminalTaskResources(env, 'task-1', { status: 'completed' });
+    const sweep = await runSessionSleepSweep(env, START);
+
+    // Liveness: the reader really was consulted, more than once (eligibility plus the
+    // sleep's re-checks), and each read saw a fresher last-report clock.
+    expect(mocks.getSessionState.mock.calls.length).toBeGreaterThanOrEqual(3);
+    expect(sweep).toMatchObject({ claimed: 1, slept: 1, deferred: 0 });
+    expect(mocks.hibernateAgentSessionOnNode).toHaveBeenCalled();
+    expect(snapshotRow()).toMatchObject({ status: 'available', sleep_status: 'sleeping' });
+    projectDataDb.close();
+  });
+
+  it('keeps a completed task whose agent still persists work draining (control)', async () => {
     seedFailedTask('vm', 'completed', new Date(START.getTime() - 20 * 60_000).toISOString());
     mocks.getSessionState.mockResolvedValue({
       activity: 'prompting',
       activityAt: START.getTime() - 60_000,
+      workAt: START.getTime() - 60_000,
+      promptStartedAt: START.getTime() - 25 * 60_000,
     });
 
     await cleanupTerminalTaskResources(env, 'task-1', { status: 'completed' });

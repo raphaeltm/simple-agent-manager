@@ -2584,6 +2584,21 @@ export const MIGRATIONS: Migration[] = [
       );
     },
   },
+  {
+    // `session_state.activity_at` is a last-REPORT clock: the VM agent re-reports `prompting`
+    // every minute while a turn is open, so it never ages. `work_at` moves only on real work
+    // (an activity edge, a new turn, harness progress, a persisted message) and is what
+    // idleness reads (`session-work-clock.ts`). NULL on existing rows falls back to
+    // `prompt_started_at`, so a turn wedged before this migration still ages out.
+    name: '071-session-state-work-clock',
+    run(sql) {
+      try {
+        sql.exec('ALTER TABLE session_state ADD COLUMN work_at INTEGER');
+      } catch {
+        // Column already exists from a partial previous run — safe to ignore.
+      }
+    },
+  },
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects
   // that ran it keep an unused `message_upload_parts` table, since DO migrations
   // never drop tables, so neither that migration name nor that table name may be reused.

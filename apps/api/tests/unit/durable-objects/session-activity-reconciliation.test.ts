@@ -533,7 +533,7 @@ describe('session activity reconciliation', () => {
           runtimeWorkSource: 'claude_sdk',
           runtimeWorkProgressAt: now,
         })
-      ).toBe(true);
+      ).toBe('work_edge');
       expect(
         upsertActivityState(sql, ACP_SESSION, {
           activity: 'idle',
@@ -544,7 +544,7 @@ describe('session activity reconciliation', () => {
           runtimeWorkSource: 'claude_sdk',
           runtimeWorkProgressAt: now + 1000,
         })
-      ).toBe(true);
+      ).toBe('work_edge');
 
       // Simulates isolate A flushing a coalesced intermediate after isolate B
       // already delivered the terminal idle state. Without the DO CAS this
@@ -587,7 +587,7 @@ describe('session activity reconciliation', () => {
           now,
           restartCount: 1,
         })
-      ).toBe(true);
+      ).toBe('work_edge');
       expect(
         upsertActivityState(sql, ACP_SESSION, {
           activity: 'prompting',
@@ -595,7 +595,7 @@ describe('session activity reconciliation', () => {
           now: now + 10,
           restartCount: 2,
         })
-      ).toBe(true);
+      ).toBe('same_turn_rereport');
       expect(readState()).toMatchObject({
         activity: 'prompting',
         activity_at: now,
@@ -604,7 +604,7 @@ describe('session activity reconciliation', () => {
 
       expect(
         upsertActivityState(sql, ACP_SESSION, { activity: 'idle', observedAt: now, now })
-      ).toBe(true);
+      ).toBe('work_edge');
       expect(readState()).toMatchObject({ activity: 'idle', activity_at: now });
 
       expect(
@@ -627,7 +627,7 @@ describe('session activity reconciliation', () => {
 
       expect(
         upsertActivityState(sql, ACP_SESSION, { activity: 'prompting', observedAt: now, now })
-      ).toBe(true);
+      ).toBe('work_edge');
       expect(
         upsertActivityState(sql, ACP_SESSION, {
           activity: 'error',
@@ -635,7 +635,7 @@ describe('session activity reconciliation', () => {
           now,
           statusError: 'tool host crashed',
         })
-      ).toBe(true);
+      ).toBe('work_edge');
       expect(readState()).toMatchObject({
         activity: 'error',
         activity_at: now,

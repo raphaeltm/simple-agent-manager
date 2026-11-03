@@ -33,7 +33,11 @@ export interface HarnessWorkConfig {
 
 export interface SessionIdlenessActivityState {
   activity?: string | null;
+  /** Last-REPORT clock: same-turn re-reports move it. Never an idleness anchor on its own. */
   activityAt?: number | null;
+  promptStartedAt?: number | null;
+  /** Last real-work clock (`project-data/session-work-clock.ts`). */
+  workAt?: number | null;
   runtimeWorkState?: string | null;
   runtimeWorkCount?: number | null;
   runtimeWorkSource?: string | null;
@@ -124,6 +128,22 @@ export function getFreshHarnessWorkLeaseExpiry(
 }
 
 /**
+ * When the session last did real work. `workAt` is the work clock; rows written before
+ * it existed fall back to the turn start, then the last report. Harness progress counts
+ * as work too.
+ */
+export function sessionWorkAnchor(state: SessionIdlenessActivityState | null): number | null {
+  if (!state) return null;
+  const positive = (value: number | null | undefined): number | null =>
+    typeof value === 'number' && value > 0 ? value : null;
+  const work =
+    positive(state.workAt) ?? positive(state.promptStartedAt) ?? positive(state.activityAt);
+  const progress = positive(state.runtimeWorkProgressAt);
+  if (work === null) return progress;
+  return progress === null ? work : Math.max(work, progress);
+}
+
+/**
  * Single predicate for "has this session handed control back and is nothing it
  * started still in flight?", plus the automatic-sleep scheduling policy layered
  * on top of it (see `SessionIdlenessPolicy`).
@@ -188,13 +208,20 @@ export function classifySessionIdleness(input: {
   if (sleepPreservedTerminalTask && activity !== 'idle') {
     // complete_task runs inside the prompt: an hours-old prompting transition
     // does not mean the response following that tool has already drained. The
-    // drain follows activity for a failed task too: an agent still working after
+    // drain follows real work for a failed task too: an agent still working after
     // the failure would otherwise be slept mid-turn, and `sleepWorkspaceSession`
-    // aborts on every activity change, spending the retry budget. A HUNG failed
-    // prompt is bounded elsewhere: the check-in watchdog releases it, and failed
-    // preservation has its own maximum wait (`failed-task-preservation-release.ts`).
+    // aborts on every work change, spending the retry budget.
+    //
+    // The anchor is the WORK clock, never `activityAt`: the VM agent re-reports an
+    // open turn every minute and each report moves `activityAt`, so a turn that never
+    // returns would keep the drain open forever (.claude/rules/53). Persisted
+    // messages move the work clock, so an agent still writing after complete_task
+    // keeps draining.
     const completedAt = Date.parse(input.taskCompletedAt ?? '');
-    const drainAnchor = Math.max(activityAt ?? 0, Number.isFinite(completedAt) ? completedAt : 0);
+    const drainAnchor = Math.max(
+      sessionWorkAnchor(input.state) ?? 0,
+      Number.isFinite(completedAt) ? completedAt : 0
+    );
     if (!drainAnchor) {
       return {
         idle: false,

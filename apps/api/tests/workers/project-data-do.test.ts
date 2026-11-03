@@ -109,7 +109,7 @@ describe('ProjectData Durable Object', () => {
           runtimeWorkSource: 'claude_sdk',
           runtimeWorkProgressAt: 1_000,
         })
-      ).resolves.toBe(true);
+      ).resolves.toBe('work_edge');
       await expect(
         stub.reportActivity('acp-cas', 'idle', {
           observedAt: 2_000,
@@ -118,7 +118,7 @@ describe('ProjectData Durable Object', () => {
           runtimeWorkSource: 'claude_sdk',
           runtimeWorkProgressAt: 2_000,
         })
-      ).resolves.toBe(true);
+      ).resolves.toBe('work_edge');
 
       // Simulates a delayed coalesced intermediate from another Worker isolate.
       // The stale write must not resurrect a working state or active harness work.
@@ -156,7 +156,7 @@ describe('ProjectData Durable Object', () => {
           observedAt: 2_000,
           statusError: 'terminal error wins same millisecond',
         })
-      ).resolves.toBe(true);
+      ).resolves.toBe('work_edge');
       expect(await stub.getSessionState('acp-cas')).toMatchObject({
         activity: 'error',
         activityAt: 2_000,

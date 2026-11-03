@@ -169,6 +169,7 @@ import type {
   CreateReservedTaskSessionWithInitialMessageResult,
   SessionIdentityGuard as ProjectDataSessionIdentityGuard,
 } from '../durable-objects/project-data/sessions';
+import type { ActivityReportOutcome } from '../durable-objects/project-data/session-work-clock';
 import type { RegisterTaskWaitInput } from '../durable-objects/project-data/task-waits';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
@@ -2701,7 +2702,7 @@ export async function reportAcpSessionActivity(
     runtimeWorkSource?: string;
     runtimeWorkProgressAt?: number | null;
   }
-): Promise<boolean> {
+): Promise<ActivityReportOutcome> {
   const stub = await getStub(env, projectId);
   return stub.reportActivity(sessionId, activity, extra);
 }

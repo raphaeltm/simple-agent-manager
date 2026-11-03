@@ -8,13 +8,16 @@
  * - Probe-backed reconciliation for stale working states
  */
 import type {
-  PlanEntry,
   SessionActivitySource,
   SessionActivityTerminalReason,
-  SessionStateSnapshot,
 } from '@simple-agent-manager/shared';
 
 import { createModuleLogger } from '../../lib/logger';
+import {
+  type ActivityReportOutcome,
+  isSameTurnRereport,
+  readPriorActivityForWorkClock,
+} from './session-work-clock';
 
 const log = createModuleLogger('project_data.session_state');
 
@@ -81,7 +84,7 @@ export function upsertActivityState(
   sql: SqlStorage,
   sessionId: string,
   update: ActivityUpdate
-): boolean {
+): ActivityReportOutcome {
   const now = update.now ?? Date.now();
   const activityAt = normalizeActivityObservedAt(update.observedAt, now);
   const promptStartedAt =
@@ -95,6 +98,15 @@ export function upsertActivityState(
     ? null
     : (update.reason ?? (update.activity === 'idle' ? 'completed' : null));
   const hasRuntimeWorkUpdate = update.runtimeWorkState !== undefined;
+  // Read before the write: no await separates the two, so the DO cannot interleave.
+  const sameTurnRereport = isSameTurnRereport(readPriorActivityForWorkClock(sql, sessionId), {
+    activity: update.activity,
+    promptStartedAt,
+    hasRuntimeWorkUpdate,
+    runtimeWorkState: update.runtimeWorkState,
+    runtimeWorkCount: update.runtimeWorkCount,
+    runtimeWorkProgressAt: update.runtimeWorkProgressAt,
+  });
 
   const cursor = sql.exec(
     `INSERT INTO session_state (
@@ -102,9 +114,9 @@ export function upsertActivityState(
        agent_type, restart_count, status_error,
        activity_source, activity_reason, activity_probe_attempts,
        runtime_work_state, runtime_work_count, runtime_work_source,
-       runtime_work_updated_at, runtime_work_progress_at
+       runtime_work_updated_at, runtime_work_progress_at, work_at
      )
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?)
 	     ON CONFLICT(session_id) DO UPDATE SET
 	       activity_source = excluded.activity_source,
 	       activity_reason = excluded.activity_reason,
@@ -143,7 +155,8 @@ export function upsertActivityState(
 		       THEN excluded.runtime_work_updated_at ELSE session_state.runtime_work_updated_at END,
 		   runtime_work_progress_at = CASE
 		     WHEN ? = 1 AND (session_state.runtime_work_progress_at IS NULL OR excluded.runtime_work_progress_at >= session_state.runtime_work_progress_at)
-		       THEN excluded.runtime_work_progress_at ELSE session_state.runtime_work_progress_at END
+		       THEN excluded.runtime_work_progress_at ELSE session_state.runtime_work_progress_at END,
+		   work_at = CASE WHEN ? = 1 THEN session_state.work_at ELSE excluded.work_at END
 	     WHERE session_state.activity_at IS NULL
 	        OR session_state.activity_at < excluded.activity_at
 	        OR (
@@ -179,9 +192,12 @@ export function upsertActivityState(
     hasRuntimeWorkUpdate ? (update.runtimeWorkSource ?? null) : null,
     hasRuntimeWorkUpdate ? activityAt : null,
     hasRuntimeWorkUpdate ? (update.runtimeWorkProgressAt ?? null) : null,
-    ...Array(5).fill(hasRuntimeWorkUpdate ? 1 : 0)
+    activityAt,
+    ...Array(5).fill(hasRuntimeWorkUpdate ? 1 : 0),
+    sameTurnRereport ? 1 : 0
   );
-  return cursor.rowsWritten > 0;
+  if (cursor.rowsWritten === 0) return false;
+  return sameTurnRereport ? 'same_turn_rereport' : 'work_edge';
 }
 
 /**
@@ -320,6 +336,7 @@ function recordTurnEndFromActivities(
     `UPDATE session_state
      SET activity = 'idle',
          activity_at = ?,
+         work_at = ?,
          activity_source = ?,
          activity_reason = ?,
          prompt_started_at = NULL,
@@ -328,6 +345,7 @@ function recordTurnEndFromActivities(
          activity_probe_attempts = 0,
          activity_probe_at = NULL
      WHERE ${whereClause}`,
+    now,
     now,
     input.source,
     input.reason,
@@ -366,11 +384,12 @@ export function markPromptAccepted(
 
   sql.exec(
     `INSERT INTO session_state
-       (session_id, activity, activity_at, prompt_started_at, prompt_epoch, restart_count)
-     VALUES (?, 'prompting', ?, ?, ?, 0)
+       (session_id, activity, activity_at, prompt_started_at, prompt_epoch, restart_count, work_at)
+     VALUES (?, 'prompting', ?, ?, ?, 0, ?)
      ON CONFLICT(session_id) DO UPDATE SET
        activity = 'prompting',
        activity_at = excluded.activity_at,
+       work_at = excluded.work_at,
        prompt_started_at = excluded.prompt_started_at,
        prompt_epoch = excluded.prompt_epoch,
        status_error = NULL,
@@ -381,7 +400,8 @@ export function markPromptAccepted(
     sessionId,
     now,
     promptEpoch,
-    promptEpoch
+    promptEpoch,
+    now
   );
   return true;
 }
@@ -426,8 +446,9 @@ export function refreshWorkingActivityForChatSession(
   const whereClause = `activity IN ('prompting', 'recovering') AND ${CHAT_SESSION_STATE_WHERE}`;
   sql.exec(
     `UPDATE session_state
-     SET activity_at = ?
+     SET activity_at = ?, work_at = ?
      WHERE ${whereClause}`,
+    now,
     now,
     chatSessionId,
     chatSessionId
@@ -500,6 +521,7 @@ export function terminalizeChatSessionActivity(
     `UPDATE session_state
      SET activity = ?,
          activity_at = ?,
+         work_at = ?,
          last_stop_reason = ?,
          status_error = ?,
          activity_source = 'control_plane',
@@ -513,6 +535,7 @@ export function terminalizeChatSessionActivity(
          runtime_work_updated_at = ?
      WHERE ${whereClause}`,
     outcome.activity,
+    now,
     now,
     stopped ? outcome.reason : null,
     // A failure keeps its user-visible context; a stop clears any stale error.
@@ -544,84 +567,8 @@ export function listSessionStateIdsForChatSession(
     .filter((id): id is string => typeof id === 'string' && id.length > 0);
 }
 
-// --- Read Operations ---
-
-export function getSessionState(sql: SqlStorage, sessionId: string): SessionStateSnapshot | null {
-  const rows = sql
-    .exec(
-      `SELECT activity, activity_at, status_error, current_plan_json, plan_updated_at,
-              prompt_started_at, last_stop_reason, agent_type,
-              activity_source, activity_reason,
-              runtime_work_state, runtime_work_count, runtime_work_source,
-              runtime_work_updated_at, runtime_work_progress_at
-       FROM session_state WHERE session_id = ?`,
-      sessionId
-    )
-    .toArray();
-
-  const row = rows[0];
-  if (!row) return null;
-
-  let currentPlan = null;
-  if (row.current_plan_json && typeof row.current_plan_json === 'string') {
-    try {
-      currentPlan = JSON.parse(row.current_plan_json);
-    } catch {
-      // Corrupted plan JSON — treat as no plan
-    }
-  }
-
-  return {
-    activity: (row.activity as SessionStateSnapshot['activity']) || 'idle',
-    activityAt: (row.activity_at as number) || 0,
-    statusError: (row.status_error as string) || null,
-    currentPlan,
-    planUpdatedAt: (row.plan_updated_at as number) || null,
-    promptStartedAt: (row.prompt_started_at as number) || null,
-    lastStopReason: (row.last_stop_reason as string) || null,
-    agentType: (row.agent_type as string) || null,
-    activitySource: (row.activity_source as SessionActivitySource) || null,
-    activityReason: (row.activity_reason as SessionActivityTerminalReason) || null,
-    runtimeWorkState: (row.runtime_work_state as SessionStateSnapshot['runtimeWorkState']) || null,
-    runtimeWorkCount: typeof row.runtime_work_count === 'number' ? row.runtime_work_count : null,
-    runtimeWorkSource: (row.runtime_work_source as string) || null,
-    runtimeWorkUpdatedAt:
-      typeof row.runtime_work_updated_at === 'number' ? row.runtime_work_updated_at : null,
-    runtimeWorkProgressAt:
-      typeof row.runtime_work_progress_at === 'number' ? row.runtime_work_progress_at : null,
-  };
-}
-
-export interface PersistedPlanSnapshot {
-  currentPlan: PlanEntry[] | null;
-  planUpdatedAt: number | null;
-}
-
-export function getLatestPersistedPlan(
-  sql: SqlStorage,
-  sessionId: string
-): PersistedPlanSnapshot | null {
-  const row = sql
-    .exec(
-      `SELECT content, created_at
-       FROM chat_messages
-       WHERE session_id = ? AND role = 'plan'
-       ORDER BY created_at DESC, sequence DESC
-       LIMIT 1`,
-      sessionId
-    )
-    .toArray()[0];
-
-  if (!row || typeof row.content !== 'string') return null;
-
-  try {
-    const parsed = JSON.parse(row.content);
-    if (!Array.isArray(parsed)) return null;
-    return {
-      currentPlan: parsed as PlanEntry[],
-      planUpdatedAt: (row.created_at as number) || null,
-    };
-  } catch {
-    return null;
-  }
-}
+export {
+  getLatestPersistedPlan,
+  getSessionState,
+  type PersistedPlanSnapshot,
+} from './session-state-read';
