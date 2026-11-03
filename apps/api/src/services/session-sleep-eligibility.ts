@@ -13,7 +13,6 @@ import {
   type SessionIdlenessClassification,
   sessionWorkAnchor,
 } from './session-idleness';
-import { isRequiredSleepTurnRunning } from './session-sleep-required-turn-end';
 import { resolveSleepRequirement, type SleepRequirement } from './session-sleep-requirement';
 import {
   DEFAULT_SESSION_SLEEP_AFTER_MS,
@@ -77,26 +76,26 @@ export function classifyRequiredSleepTurn(
   state: SessionIdlenessActivityState | null
 ): SessionIdlenessClassification {
   const activity = state?.activity ?? null;
-  if (isRequiredSleepTurnRunning(activity)) {
+  // `recovering` is not a turn here: the required sleep has just cancelled the turn, and the
+  // VM restarts the killed agent idle, reporting `recovering` while it does.
+  if (activity === 'prompting') {
     return { idle: false, conclusive: true, reason: 'prompt_turn_active', activity };
   }
   return { idle: true, conclusive: true, reason: 'idle', activity };
 }
 
 /**
- * Did something between two reads invalidate the sleep? A required sleep is aborted only by a
- * NEW turn: harness and work-clock changes are expected while the stopped agent restarts.
+ * Did something between two reads invalidate the sleep? For a required sleep nothing here does:
+ * the only thing that may abort it is a new prompt turn, and the required gate
+ * (`classifyRequiredSleepTurn`) already refuses every read that shows one. Harness, work-clock
+ * and `recovering` changes are expected while the cancelled agent restarts.
  */
 export function sleepStateChanged(
   before: SessionIdlenessActivityState | null,
   after: SessionIdlenessActivityState | null,
   requirement: SleepRequirement
 ): boolean {
-  if (requirement === 'required') {
-    return (
-      isRequiredSleepTurnRunning(after?.activity) && !isRequiredSleepTurnRunning(before?.activity)
-    );
-  }
+  if (requirement === 'required') return false;
   if (!before || !after) return before !== after;
   return idlenessStateChanged(before, after);
 }

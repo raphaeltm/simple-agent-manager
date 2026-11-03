@@ -5,26 +5,30 @@
  * not idle", deferrals never reached the bounded fallback, and the workspace pinned its node
  * (production 2026-11-03). A required sleep therefore ends the turn itself:
  *
- * 1. `stopAgentSessionOnNode`. The VM agent completes the in-flight prompt as cancelled, kills
- *    the agent process and does NOT restart it (`handleStopAgentSession` → `SessionHost.Stop`).
- *    The chat Stop button's `/cancel` restarts the agent, which then reports `recovering` and
- *    can start new turns while the final snapshot is captured; a runtime about to be torn down
- *    must not do either. The session record keeps its ACP session id, so the snapshot still
- *    records a resumable harness identity (`populateSnapshotHarnessIdentity`).
+ * 1. `cancelAgentSessionOnNode`, the chat Stop button's path. The VM agent cancels the ACP
+ *    prompt and stops the agent process, SIGTERM then SIGKILL (`CancelPromptFromControlPlane` →
+ *    `StopProcessForPromptCancel`), and restarts it idle. The restart matters: if this sleep then
+ *    fails before teardown, the chat is left with a working agent. `/stop` would end the turn the
+ *    same way but leave the session permanently stopped, so a failed sleep would strand the chat.
+ *    The restarting agent reports `recovering`; the required gate does not count that as a turn
+ *    (`classifyRequiredSleepTurn`).
  * 2. `recordSessionTurnEnd`, the control-plane turn end, so ProjectData does not wait for a VM
  *    `idle` report that a wedged turn may never send.
  */
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { NodeAgentHttpError, stopAgentSessionOnNode } from './node-agent';
+import { cancelAgentSessionOnNode } from './node-agent';
 import * as projectDataService from './project-data';
 import { isSleepingContainerRuntime } from './sleeping-container-runtime';
 
 /** Activities that mean a turn is (or may be) in flight on the agent. */
 const RUNNING_TURN_ACTIVITIES = new Set(['prompting', 'recovering']);
 
-/** The agent has no session to stop: nothing is in flight there. */
-const NO_TURN_ON_AGENT = 404;
+/**
+ * Agent answers meaning nothing is in flight there, so ProjectData's turn is stale: 409, no
+ * prompt to cancel; 404, no such session on the VM.
+ */
+const NO_TURN_STATUSES = new Set([404, 409]);
 
 export function isRequiredSleepTurnRunning(activity: string | null | undefined): boolean {
   return RUNNING_TURN_ACTIVITIES.has(activity ?? '');
@@ -72,32 +76,26 @@ export async function endAgentTurnForRequiredSleep(
   // Captured before the VM call, so a turn that starts during the call is never ended by
   // this call's result (.claude/rules/49).
   const observedAt = Date.now();
-  // A sleeping Instant container has no turn in flight, and a stop would wake it.
-  const status = isSleepingContainerRuntime(workspace)
-    ? NO_TURN_ON_AGENT
-    : await stopAgentSessionOnNode(
+  // A sleeping Instant container has no turn in flight, and a cancel would wake it.
+  const result = isSleepingContainerRuntime(workspace)
+    ? { success: false, status: 409 }
+    : await cancelAgentSessionOnNode(
         workspace.nodeId,
         workspace.id,
         agentSessionId,
         env,
         workspace.userId,
         { requestTimeoutMs: options.requestTimeoutMs }
-      ).then(
-        () => 200,
-        (error: unknown) => {
-          // 404: the agent has no such session running, so ProjectData's turn is stale.
-          if (error instanceof NodeAgentHttpError && error.statusCode === 404) {
-            return NO_TURN_ON_AGENT;
-          }
-          log.warn('session_sleep.required_turn_stop_failed', {
-            workspaceId: workspace.id,
-            agentSessionId,
-            error: error instanceof Error ? error.message : String(error),
-          });
-          return error instanceof NodeAgentHttpError ? error.statusCode : 0;
-        }
-      );
-  const confirmed = status === 200 || status === NO_TURN_ON_AGENT;
+      ).catch((error: unknown) => {
+        log.warn('session_sleep.required_turn_cancel_failed', {
+          workspaceId: workspace.id,
+          agentSessionId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return { success: false, status: 0 };
+      });
+  const status = result.status;
+  const confirmed = result.success || NO_TURN_STATUSES.has(status);
   if (!confirmed && !options.confirmWithoutAgent) {
     throw new RequiredSleepTurnEndError(status);
   }

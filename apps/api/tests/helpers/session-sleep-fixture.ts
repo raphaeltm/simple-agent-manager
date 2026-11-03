@@ -18,6 +18,7 @@ const sleepBoundaryMocks = vi.hoisted(() => ({
   stopSession: vi.fn(),
   sendPrompt: vi.fn(),
   nodeAgentRequest: vi.fn(),
+  cancelAgentSession: vi.fn(),
   stopAgent: vi.fn(),
   getAcpSession: vi.fn(),
   getSession: vi.fn(),
@@ -39,6 +40,7 @@ vi.mock('../../src/services/node-agent', async (importOriginal) => ({
   nodeAgentRequest: (...args: unknown[]) => sleepBoundaryMocks.nodeAgentRequest(...args),
   sendPromptToAgentOnNode: (...args: unknown[]) => sleepBoundaryMocks.sendPrompt(...args),
   stopAgentSessionOnNode: (...args: unknown[]) => sleepBoundaryMocks.stopAgent(...args),
+  cancelAgentSessionOnNode: (...args: unknown[]) => sleepBoundaryMocks.cancelAgentSession(...args),
   hibernateAgentSessionOnNode: (...args: unknown[]) =>
     sleepBoundaryMocks.hibernateAgentSessionOnNode(...args),
   stopWorkspaceOnNode: (...args: unknown[]) => sleepBoundaryMocks.stopWorkspaceOnNode(...args),
@@ -196,7 +198,7 @@ export function createSessionSleepFixture(taskStatus: string, getActivity: () =>
   });
   mocks.getAcpSession.mockResolvedValue(null);
   mocks.recordSessionTurnEnd.mockResolvedValue(true);
-  mocks.stopAgent.mockResolvedValue({ status: 'stopped' });
+  mocks.cancelAgentSession.mockResolvedValue({ success: true, status: 200 });
   mocks.stopWorkspaceOnNode.mockImplementation(() => {
     order.push('stop-workspace');
     return Promise.resolve();

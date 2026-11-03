@@ -6,7 +6,7 @@
  * "agent is not idle" until a person deleted the node, which stranded the chat.
  *
  * Driven through the real sleep service, sweep and SQL. Only the VM boundary is mocked:
- * `stopAgentSessionOnNode`, the snapshot capture and the workspace stop.
+ * `cancelAgentSessionOnNode`, the snapshot capture and the workspace stop.
  */
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -15,7 +15,6 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
-import { NodeAgentHttpError } from '../../src/services/node-agent';
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
 import {
   queueWorkspaceSessionSleep,
@@ -39,23 +38,21 @@ describe('required sleep', () => {
   let activity: SleepActivity;
   let fixture: ReturnType<typeof createSessionSleepFixture>;
   let order: string[];
-  let stopOutcome: 'ok' | '404' | 'fail';
+  let cancelOutcome: 'ok' | '404' | '409' | 'fail';
 
   beforeEach(() => {
     // The production shape: a turn re-reporting `prompting` with no end in sight.
     activity = { activity: 'prompting', activityAt: START.getTime() - 30_000 };
     fixture = createSessionSleepFixture('in_progress', () => activity);
     ({ sqlite, env, order } = fixture);
-    stopOutcome = 'ok';
-    // `stopAgentSessionOnNode`'s own contract: the session on success, a NodeAgentHttpError
-    // on any non-2xx (`nodeAgentRequest`).
-    mocks.stopAgent.mockImplementation(() => {
-      order.push('stop-agent');
-      if (stopOutcome === '404') {
-        return Promise.reject(new NodeAgentHttpError(404, 'session not found: agent-1'));
-      }
-      if (stopOutcome === 'fail') return Promise.reject(new NodeAgentHttpError(502, 'bad gateway'));
-      return Promise.resolve({ id: 'agent-1', status: 'stopped' });
+    cancelOutcome = 'ok';
+    // `cancelAgentSessionOnNode`'s own contract: a status, never a throw.
+    mocks.cancelAgentSession.mockImplementation(() => {
+      order.push('cancel');
+      if (cancelOutcome === '404') return Promise.resolve({ success: false, status: 404 });
+      if (cancelOutcome === '409') return Promise.resolve({ success: false, status: 409 });
+      if (cancelOutcome === 'fail') return Promise.resolve({ success: false, status: 502 });
+      return Promise.resolve({ success: true, status: 200 });
     });
     // The control-plane turn end is what makes ProjectData report the turn as over.
     mocks.recordSessionTurnEnd.mockImplementation(() => {
@@ -76,8 +73,8 @@ describe('required sleep', () => {
       .get() as Record<string, unknown>;
   }
 
-  function stopCalls() {
-    return mocks.stopAgent.mock.calls.filter(
+  function cancelCalls() {
+    return mocks.cancelAgentSession.mock.calls.filter(
       (call) => call[0] === 'node-1' && call[1] === 'workspace-1' && call[2] === 'agent-1'
     );
   }
@@ -108,7 +105,7 @@ describe('required sleep', () => {
     it('stops a turn that is still prompting, then sleeps the session', async () => {
       await explicitSleep();
 
-      expect(stopCalls()).toHaveLength(1);
+      expect(cancelCalls()).toHaveLength(1);
       expect(mocks.recordSessionTurnEnd).toHaveBeenCalledWith(
         env,
         'project-1',
@@ -116,7 +113,7 @@ describe('required sleep', () => {
         expect.objectContaining({ reason: 'cancelled', observedAt: expect.any(Number) })
       );
       // The turn ends before the final snapshot is captured.
-      expect(order.indexOf('stop-agent')).toBeLessThan(order.indexOf('final-snapshot:chat-1'));
+      expect(order.indexOf('cancel')).toBeLessThan(order.indexOf('final-snapshot:chat-1'));
       expect(order.indexOf('turn-end')).toBeLessThan(order.indexOf('final-snapshot:chat-1'));
       expect(mocks.stopWorkspaceOnNode).toHaveBeenCalled();
       // The chat stays wakeable.
@@ -124,15 +121,46 @@ describe('required sleep', () => {
       expect(snapshotRow().sleeping_at).toEqual(expect.any(String));
     });
 
-    it('sleeps when the agent has no such session running (404)', async () => {
-      stopOutcome = '404';
+    it.each(['404', '409'] as const)(
+      'sleeps when the agent reports no turn in flight (%s)',
+      async (outcome) => {
+        cancelOutcome = outcome;
+        await explicitSleep();
+        expect(mocks.recordSessionTurnEnd).toHaveBeenCalled();
+        expect(snapshotRow()).toMatchObject({ sleep_status: 'sleeping' });
+      }
+    );
+
+    it('is not aborted by the cancelled agent restarting (recovering) during capture', async () => {
+      // `/cancel` restarts the killed agent idle, and it reports `recovering` while it does.
+      mocks.recordSessionTurnEnd.mockImplementation(() => {
+        order.push('turn-end');
+        activity = { activity: 'recovering', activityAt: Date.now() };
+        return Promise.resolve(true);
+      });
       await explicitSleep();
-      expect(mocks.recordSessionTurnEnd).toHaveBeenCalled();
       expect(snapshotRow()).toMatchObject({ sleep_status: 'sleeping' });
+      expect(mocks.stopWorkspaceOnNode).toHaveBeenCalled();
+    });
+
+    it('is aborted by a NEW prompt turn that starts during capture (control)', async () => {
+      mocks.recordSessionTurnEnd.mockImplementation(() => {
+        order.push('turn-end');
+        activity = { activity: 'idle', activityAt: Date.now() };
+        return Promise.resolve(true);
+      });
+      // A follow-up is delivered to the restarted agent while the final snapshot is captured.
+      const capture = mocks.hibernateAgentSessionOnNode.getMockImplementation()!;
+      mocks.hibernateAgentSessionOnNode.mockImplementation((...args: unknown[]) => {
+        activity = { activity: 'prompting', activityAt: Date.now() };
+        return capture(...(args as Parameters<typeof capture>));
+      });
+      await expect(explicitSleep()).rejects.toThrow(/activity changed/);
+      expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
     });
 
     it('fails, and spends the attempt budget, when the agent cannot confirm the stop', async () => {
-      stopOutcome = 'fail';
+      cancelOutcome = 'fail';
       await expect(explicitSleep()).rejects.toThrow(/could not stop the agent turn/);
       expect(mocks.recordSessionTurnEnd).not.toHaveBeenCalled();
       expect(mocks.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
@@ -140,7 +168,7 @@ describe('required sleep', () => {
     });
 
     it('records the turn end without the agent once the attempt budget is spent', async () => {
-      stopOutcome = 'fail';
+      cancelOutcome = 'fail';
       sqlite
         .prepare(
           `UPDATE session_snapshots SET sleep_episode_failures = 3, sleep_episode_started_at = ?
@@ -148,13 +176,13 @@ describe('required sleep', () => {
         )
         .run(new Date(START.getTime() - 20 * MINUTE).toISOString());
       await explicitSleep();
-      expect(stopCalls()).toHaveLength(1);
+      expect(cancelCalls()).toHaveLength(1);
       expect(mocks.recordSessionTurnEnd).toHaveBeenCalled();
       expect(snapshotRow()).toMatchObject({ sleep_status: 'sleeping' });
     });
 
     it('stays required when the sweep retries it, so a reachable agent is stopped then', async () => {
-      stopOutcome = 'fail';
+      cancelOutcome = 'fail';
       await expect(explicitSleep()).rejects.toThrow(/could not stop the agent turn/);
       const failed = sqlite
         .prepare(
@@ -165,16 +193,16 @@ describe('required sleep', () => {
       expect(failed.sleep_required_episode_started_at).toBe(failed.sleep_episode_started_at);
 
       // The turn is still `prompting`; a normal sleep would defer it forever.
-      stopOutcome = 'ok';
+      cancelOutcome = 'ok';
       const sweep = await runSessionSleepSweep(env, new Date(failed.sleep_after));
 
       expect(sweep).toMatchObject({ claimed: 1, slept: 1 });
-      expect(stopCalls()).toHaveLength(2);
+      expect(cancelCalls()).toHaveLength(2);
       expect(snapshotRow()).toMatchObject({ sleep_status: 'sleeping' });
     });
 
     it('is no longer required once a person follows up in the chat (control)', async () => {
-      stopOutcome = 'fail';
+      cancelOutcome = 'fail';
       await expect(explicitSleep()).rejects.toThrow(/could not stop the agent turn/);
       // A human follow-up ends the episode; the next sleep is an ordinary idle sleep.
       await cancelScheduledSessionSleep(drizzle(env.DATABASE, { schema }), 'chat-1');
@@ -185,17 +213,17 @@ describe('required sleep', () => {
         sleepAfterMs: 0,
       });
 
-      stopOutcome = 'ok';
+      cancelOutcome = 'ok';
       const sweep = await runSessionSleepSweep(env, new Date(START.getTime() + HOUR));
 
       expect(sweep).toMatchObject({ claimed: 0, deferred: 1 });
-      expect(stopCalls()).toHaveLength(1);
+      expect(cancelCalls()).toHaveLength(1);
     });
 
     it('does not stop anything when the turn has already ended (control)', async () => {
       activity = { activity: 'idle', activityAt: START.getTime() - MINUTE };
       await explicitSleep();
-      expect(stopCalls()).toHaveLength(0);
+      expect(cancelCalls()).toHaveLength(0);
       expect(mocks.recordSessionTurnEnd).not.toHaveBeenCalled();
       expect(snapshotRow()).toMatchObject({ sleep_status: 'sleeping' });
     });
@@ -209,7 +237,7 @@ describe('required sleep', () => {
       const sweep = await runSessionSleepSweep(env, START);
 
       expect(sweep).toMatchObject({ claimed: 0, deferred: 1 });
-      expect(stopCalls()).toHaveLength(0);
+      expect(cancelCalls()).toHaveLength(0);
       expect(mocks.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
     });
 
@@ -221,7 +249,7 @@ describe('required sleep', () => {
       const sweep = await runSessionSleepSweep(env, START);
 
       expect(sweep).toMatchObject({ claimed: 1, slept: 1 });
-      expect(stopCalls()).toHaveLength(0);
+      expect(cancelCalls()).toHaveLength(0);
       expect(snapshotRow()).toMatchObject({ sleep_status: 'sleeping' });
     });
 
@@ -232,14 +260,14 @@ describe('required sleep', () => {
       const sweep = await runSessionSleepSweep(env, START);
 
       expect(sweep).toMatchObject({ claimed: 1, slept: 1 });
-      expect(stopCalls()).toHaveLength(1);
+      expect(cancelCalls()).toHaveLength(1);
       expect(mocks.recordSessionTurnEnd).toHaveBeenCalled();
       expect(snapshotRow()).toMatchObject({ sleep_status: 'sleeping' });
     });
 
     it('tears down through the bounded fallback when the agent never confirms', async () => {
       ageNode(24 * HOUR + 31 * MINUTE);
-      stopOutcome = 'fail';
+      cancelOutcome = 'fail';
       await queueLifetimeSleep();
       sqlite
         .prepare(
@@ -262,7 +290,7 @@ describe('required sleep', () => {
       await queueLifetimeSleep();
       const sweep = await runSessionSleepSweep(env, START);
       expect(sweep).toMatchObject({ claimed: 0, deferred: 1 });
-      expect(stopCalls()).toHaveLength(0);
+      expect(cancelCalls()).toHaveLength(0);
     });
 
     it('never forces a user-owned node, however old (control)', async () => {
@@ -270,7 +298,7 @@ describe('required sleep', () => {
       await queueLifetimeSleep();
       const sweep = await runSessionSleepSweep(env, START);
       expect(sweep).toMatchObject({ claimed: 0, deferred: 1 });
-      expect(stopCalls()).toHaveLength(0);
+      expect(cancelCalls()).toHaveLength(0);
     });
   });
 

@@ -90,8 +90,8 @@ How each piece behaves:
 
 - [x] `session-sleep-requirement.ts`: `resolveSleepRequirement` plus the admin setting
       `operations.nodeLifetimeForceSleepAfterMs` (definition, name union, docs)
-- [x] `endAgentTurnForRequiredSleep` (`stopAgentSessionOnNode` and `recordSessionTurnEnd`; 404 means
-      no turn; skips sleeping containers)
+- [x] `endAgentTurnForRequiredSleep` (`cancelAgentSessionOnNode` and `recordSessionTurnEnd`; 404 and
+      409 mean no turn; skips sleeping containers)
 - [x] Gate and abort check take the requirement: `sleepTeardownSafetyGate`, `sleepStateChanged`,
       `completeSleepTeardown`, `verifyAndBeginSleepTeardown`
 - [x] `sleepWorkspaceSession` resolves the requirement and ends the turn after the claim, before verify/capture
@@ -107,9 +107,12 @@ How each piece behaves:
 
 ### Adversarial review round 1 (all addressed)
 
-- [x] H1: `/cancel` restarts the agent, which reports `recovering` and can start turns during
-      capture. Required sleep now calls `/stop` (`SessionHost.Stop` completes the prompt as
-      cancelled, no restart; the session record keeps its ACP id for the snapshot).
+- [x] H1: `/cancel` restarts the agent, which reports `recovering`, and that aborted the required
+      gate. First fixed by switching to `/stop` (42126e1a0); round 2 found `/stop` leaves the VM
+      session permanently stopped, so a sleep that then failed stranded the chat. Final: keep
+      `/cancel` (kill, idle restart, chat usable on failure) and let the required gate count only
+      `prompting` as a turn (`classifyRequiredSleepTurn`); `sleepStateChanged` adds nothing for
+      required sleeps.
 - [x] H2: a person's Sleep was required only for its first attempt. Migration 0217 adds
       `session_snapshots.sleep_required_episode_started_at`; required while equal to
       `sleep_episode_started_at`, so every episode-ending writer clears it for free.
@@ -121,6 +124,19 @@ How each piece behaves:
 - [x] M3 close before retire; M5 404 is no turn; L1 widen serving statuses to "not deleted";
       L2 lifetime notice text; L3 explicit sleep documented in the API reference; L4 test no longer
       swallows its failure.
+### Adversarial review round 2
+
+- [x] HIGH `/stop` strands the chat when the sleep fails: reverted to `/cancel` (see H1).
+- [ ] MEDIUM persisted warm claim skips the cutoff and can loop
+- [ ] MEDIUM trial orchestrator candidate query ignores the cutoff and can hot-loop
+- [ ] MEDIUM a close that keeps failing stalls retirement and the failed-task release
+- [ ] LOW preferred/explicit node refusals do not name the cutoff
+- [x] LOW `/stop` slow under lock: gone with the revert
+- [ ] LOW marker never cleared, only made stale (timestamp collision, speculative)
+- [x] Cloudflare HIGH bind-limit test with the cutoff on; MEDIUM `nodes.created_at` index (pre-existing,
+      bounded by `user_id`/`id`), noted
+- [x] Selection records the cutoff as a named, non-deferrable rejection (rule 74)
+
 - [x] M4 (finalize `stopping` snapshots as sleeping on deletion): deferred to
       `tasks/backlog/2026-11-03-finalize-stopping-snapshot-on-workspace-deletion.md`.
 - Rule 18 splits: `workspace-admission-sql.ts`, `node-selection-shared.ts`, `warm-node-claim.ts`,

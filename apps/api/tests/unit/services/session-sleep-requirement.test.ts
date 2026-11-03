@@ -96,7 +96,10 @@ describe('resolveSleepRequirement', () => {
 describe('classifyRequiredSleepTurn', () => {
   it('blocks only while a turn is running', () => {
     expect(classifyRequiredSleepTurn({ activity: 'prompting' })).toMatchObject({ idle: false });
-    expect(classifyRequiredSleepTurn({ activity: 'recovering' })).toMatchObject({ idle: false });
+  });
+
+  it('does not count the cancelled agent restarting (recovering) as a turn', () => {
+    expect(classifyRequiredSleepTurn({ activity: 'recovering' })).toMatchObject({ idle: true });
   });
 
   it('ignores a harness lease, the idle interval and an unknown state', () => {
@@ -116,11 +119,13 @@ describe('classifyRequiredSleepTurn', () => {
 describe('sleepStateChanged', () => {
   const idle = { activity: 'idle', activityAt: 1, workAt: 1 };
 
-  it('aborts a required sleep only when a new turn starts', () => {
+  it('never aborts a required sleep on its own; the required gate refuses a new turn', () => {
     expect(
       sleepStateChanged(idle, { ...idle, runtimeWorkState: 'inactive', workAt: 2 }, 'required')
     ).toBe(false);
-    expect(sleepStateChanged(idle, { ...idle, activity: 'prompting' }, 'required')).toBe(true);
+    // A new prompt turn is refused by the required gate itself (classifyRequiredSleepTurn).
+    expect(sleepStateChanged(idle, { ...idle, activity: 'prompting' }, 'required')).toBe(false);
+    expect(sleepStateChanged(idle, { ...idle, activity: 'recovering' }, 'required')).toBe(false);
   });
 
   it('keeps the work-clock comparison for normal and deadline sleeps', () => {
