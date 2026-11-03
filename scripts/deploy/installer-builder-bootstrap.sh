@@ -18,19 +18,39 @@ mkdir -p "$SAM_JOB_DIRECTORY"
 # OS support packages follow Debian security updates; language/deploy tools are pinned.
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends ca-certificates curl git build-essential pkg-config libssl-dev python3 make docker.io docker-cli docker-buildx xz-utils
-curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' https://go.dev/dl/go1.26.10.linux-amd64.tar.gz -o /sam/go.tar.gz
-printf '%s  %s\n' ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5 /sam/go.tar.gz | sha256sum --check --status
+# Pinned downloads retry across identical versioned sources: one transient CDN
+# error (a 404 from dl.google.com on 2026-11-03) must not fail an hour-long build.
+# The checksum, not the source, decides acceptance.
+fetch_pinned() {
+  local output=$1 sha=$2 attempt url
+  shift 2
+  for attempt in 1 2 3 4; do
+    for url in "$@"; do
+      if curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --connect-timeout 20 "$url" -o "$output" &&
+        printf '%s  %s\n' "$sha" "$output" | sha256sum --check --status; then
+        return 0
+      fi
+      echo "pinned download attempt $attempt failed: $url" >&2
+      rm -f "$output"
+    done
+    sleep $((attempt * ${SAM_FETCH_RETRY_DELAY_SECONDS:-5}))
+  done
+  return 1
+}
+fetch_pinned /sam/go.tar.gz ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5 \
+  https://dl.google.com/go/go1.26.10.linux-amd64.tar.gz https://go.dev/dl/go1.26.10.linux-amd64.tar.gz
 tar -xzf /sam/go.tar.gz -C /usr/local
 rm /sam/go.tar.gz
-curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' https://static.rust-lang.org/rustup/archive/1.29.2/x86_64-unknown-linux-gnu/rustup-init -o /sam/rustup-init
-printf '%s  %s\n' 5be191e8c70a5007074254cb74d78dbfdd25cd5a61c27de7b8e5410122ec24f4 /sam/rustup-init | sha256sum --check --status
+fetch_pinned /sam/rustup-init 5be191e8c70a5007074254cb74d78dbfdd25cd5a61c27de7b8e5410122ec24f4 \
+  https://static.rust-lang.org/rustup/archive/1.29.2/x86_64-unknown-linux-gnu/rustup-init
 chmod 700 /sam/rustup-init
 /sam/rustup-init -y --profile minimal --default-toolchain 1.95.0
 rm /sam/rustup-init
 npm install --global --ignore-scripts pnpm@9.15.9
 # Pulumi toolchain download is checksum-pinned below.
-curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' https://github.com/pulumi/pulumi/releases/download/v3.272.0/pulumi-v3.272.0-linux-x64.tar.gz -o /sam/pulumi.tar.gz
-printf '%s  %s\n' 58d545f2b98761051922008ebd381ecef95484d7f7a5ff7faa15d7a780ea84f6 /sam/pulumi.tar.gz | sha256sum --check --status
+fetch_pinned /sam/pulumi.tar.gz 58d545f2b98761051922008ebd381ecef95484d7f7a5ff7faa15d7a780ea84f6 \
+  https://github.com/pulumi/pulumi/releases/download/v3.272.0/pulumi-v3.272.0-linux-x64.tar.gz \
+  https://get.pulumi.com/releases/sdk/pulumi-v3.272.0-linux-x64.tar.gz
 mkdir -p /root/.pulumi/bin
 tar -xzf /sam/pulumi.tar.gz --strip-components=1 -C /root/.pulumi/bin
 rm /sam/pulumi.tar.gz
