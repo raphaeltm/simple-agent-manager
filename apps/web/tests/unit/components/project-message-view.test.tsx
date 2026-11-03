@@ -391,6 +391,10 @@ function render(ui: ReactElement) {
 }
 
 async function selectPhraseInMessage(fullText: string, selectedPhrase: string) {
+  // Select once the page has settled, as a person does: the message-box composer focuses
+  // itself when it mounts, which (as in a browser) moves the selection into its textarea.
+  // Both callers render a session the viewer can write to, so the composer always appears.
+  await screen.findByRole('combobox');
   const message = await screen.findByText(fullText);
   const textNode = message.firstChild;
   expect(textNode).toBeTruthy();
@@ -1619,8 +1623,10 @@ describe('ProjectMessageView — session context dropdown', () => {
     expect(screen.getByText('Unknown — no saved resource request')).toBeTruthy();
     expect(screen.getByText('Unknown — no hardware report')).toBeTruthy();
 
-    // Should show node info
-    expect(screen.getByText('Node:')).toBeTruthy();
+    // Should show node info. The node is fetched after the workspace resolves, so wait for it.
+    await waitFor(() => {
+      expect(screen.getByText('Node:')).toBeTruthy();
+    });
     expect(screen.getByText('htz-fsn1-abc')).toBeTruthy();
     expect(screen.getByText('(healthy)')).toBeTruthy();
 
@@ -2253,6 +2259,8 @@ describe('ProjectMessageView — message anchored comments', () => {
 
     render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
 
+    // Wait for the composer, which focuses itself on mount (see selectPhraseInMessage).
+    await screen.findByRole('combobox');
     const message = await screen.findByText(`${selectedPhrase} for a review comment.`);
     const textNode = message.firstChild;
     expect(textNode).toBeTruthy();
