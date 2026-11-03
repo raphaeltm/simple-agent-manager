@@ -29,6 +29,23 @@ export const OPERATIONS_ACTION_TARGET_TYPES: Record<OperationsAction, Operations
     cancel_stuck_task: 'task',
   };
 
+/** Human labels for each action, shown in the approval notification and Admin → Approvals. */
+export const OPERATIONS_ACTION_LABELS: Record<OperationsAction, string> = {
+  retry_snapshot: 'Retry snapshot',
+  rerun_node_cleanup: 'Re-run node cleanup',
+  sleep_session: 'Sleep session',
+  delete_workspace: 'Delete workspace',
+  delete_node: 'Delete node',
+  restart_vm_agent: 'Restart VM agent',
+  cancel_stuck_task: 'Cancel stuck task',
+};
+
+/** Actions that cannot be undone; the approver is warned before tapping Approve. */
+export const OPERATIONS_IRREVERSIBLE_ACTIONS: readonly OperationsAction[] = [
+  'delete_workspace',
+  'delete_node',
+];
+
 /**
  * Actions that run without a human tap when `operations.debuggerTools` is `read_auto_safe`
  * (the action matrix Raphaël approved on 2026-11-03). Every other action, and every action in

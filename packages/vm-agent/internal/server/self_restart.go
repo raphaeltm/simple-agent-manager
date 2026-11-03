@@ -16,6 +16,10 @@ var selfRestartSignal = func() error { return syscall.Kill(os.Getpid(), syscall.
 // VM agent. Only a node-scoped management token may call it. Refused in standalone
 // (cf-container) mode, where no supervisor would start the agent again.
 //
+// The control plane signs this token for the approving Operations superadmin, not the node
+// owner: requireNodeEventAuth checks only that it is node-scoped and bound to this node, so the
+// token subject must not be read as the owner here.
+//
 // The signal runs on a resource-lifetime goroutine after the 202 is written, never on the
 // request context, so the response reaches the control plane before the process exits
 // (rule 71). Repeated requests while one is pending are idempotent.

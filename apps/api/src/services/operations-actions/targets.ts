@@ -9,9 +9,13 @@ import {
   OPERATIONS_ACTION_TARGET_TYPES,
   type OperationsAction,
 } from '@simple-agent-manager/shared';
+import { and, desc, eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
 
 import type { Node } from '../../db/schema';
+import * as schema from '../../db/schema';
 import type { Env } from '../../env';
+import { liveSessionWorkspaceCondition } from '../../routes/chat-workspace-resolver';
 import { findAccessibleNode, operatorNodeAccess } from '../node-diagnostics-access';
 import type { OperationsAccessContext } from '../operations-access';
 
@@ -50,9 +54,6 @@ export interface ChatSessionTarget {
 }
 
 export type ActionTarget = NodeTarget | WorkspaceTarget | TaskTarget | ChatSessionTarget;
-
-/** Workspace statuses that still bridge a chat session to a runtime. */
-const LIVE_SESSION_WORKSPACE_STATUSES = ['running', 'recovery', 'sleeping'] as const;
 
 interface WorkspaceRow {
   id: string;
@@ -99,14 +100,23 @@ export async function resolveActionTarget(
       return row ? toWorkspaceTarget(row) : null;
     }
     case 'chat_session': {
-      const row = await env.DATABASE.prepare(
-        `${WORKSPACE_SELECT}
-          WHERE w.chat_session_id = ?
-            AND w.status IN (${LIVE_SESSION_WORKSPACE_STATUSES.map(() => '?').join(', ')})
-          ORDER BY w.updated_at DESC, w.id DESC LIMIT 1`
-      )
-        .bind(targetId, ...LIVE_SESSION_WORKSPACE_STATUSES)
-        .first<WorkspaceRow>();
+      // Installation-wide on purpose: the operator acts on any user's session. The liveness
+      // predicate is the owner routes' own (`liveSessionWorkspaceCondition`).
+      const [row] = await drizzle(env.DATABASE, { schema })
+        .select({
+          id: schema.workspaces.id,
+          user_id: schema.workspaces.userId,
+          project_id: schema.workspaces.projectId,
+          node_id: schema.workspaces.nodeId,
+          chat_session_id: schema.workspaces.chatSessionId,
+          status: schema.workspaces.status,
+          runtime: schema.nodes.runtime,
+        })
+        .from(schema.workspaces)
+        .leftJoin(schema.nodes, eq(schema.workspaces.nodeId, schema.nodes.id))
+        .where(and(eq(schema.workspaces.chatSessionId, targetId), liveSessionWorkspaceCondition()))
+        .orderBy(desc(schema.workspaces.updatedAt), desc(schema.workspaces.id))
+        .limit(1);
       if (row)
         return { kind: 'chat_session', chatSessionId: targetId, workspace: toWorkspaceTarget(row) };
       // A session with no live workspace still exists if a task or snapshot names it.

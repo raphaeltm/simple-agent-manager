@@ -270,6 +270,25 @@ describe('request → approve → execute', () => {
     expect(edges.executeAction).toHaveBeenCalledTimes(1);
   });
 
+  it('records a failed outcome when the target lookup throws after the approval was claimed', async () => {
+    const approval = await request('delete_node', NODE_A);
+    await decide(approval.id, 'approve');
+    // Fails only the post-claim target read; the claim itself touches another table.
+    main.exec('ALTER TABLE nodes RENAME TO nodes_unavailable');
+
+    const outcome = toolResult<{ result: { status: string; message: string } }>(
+      await execute(approval.id, 'delete_node', NODE_A)
+    );
+
+    expect(outcome.result.status).toBe('failed');
+    expect(edges.executeAction).not.toHaveBeenCalled();
+    expect(row(approval.id).status).toBe('executed');
+    expect(JSON.parse(String(row(approval.id).execution_result_json))).toMatchObject({
+      status: 'failed',
+      message: expect.stringContaining('Failed query'),
+    });
+  });
+
   it('two concurrent executes of one approval run the action once', async () => {
     const approval = await request('delete_workspace', 'ws-1');
     await decide(approval.id, 'approve');

@@ -211,6 +211,47 @@ describe('sleep_session → sleepWorkspaceSession', () => {
   });
 });
 
+describe('chat session targets use the owner routes’ liveness predicate', () => {
+  it('a cf-container workspace in error is still a live target; a VM one in error is not', async () => {
+    insert('workspaces', {
+      id: 'ws-container',
+      user_id: 'owner',
+      node_id: 'node-container',
+      project_id: 'proj-user',
+      chat_session_id: 'chat-container',
+      name: 'c',
+      status: 'error',
+      repository: 'o/r',
+      branch: 'main',
+    });
+    insert('workspaces', {
+      id: 'ws-vm-error',
+      user_id: 'owner',
+      node_id: 'node-1',
+      project_id: 'proj-user',
+      chat_session_id: 'chat-vm-error',
+      name: 'v',
+      status: 'error',
+      repository: 'o/r',
+      branch: 'main',
+    });
+    insert('tasks', {
+      id: 'task-vm-error',
+      project_id: 'proj-user',
+      user_id: 'owner',
+      title: 't',
+      status: 'failed',
+      chat_session_id: 'chat-vm-error',
+    });
+
+    const container = await resolveActionTarget(env, GRANT, 'sleep_session', 'chat-container');
+    const vm = await resolveActionTarget(env, GRANT, 'sleep_session', 'chat-vm-error');
+
+    expect(container).toMatchObject({ workspace: { workspaceId: 'ws-container' } });
+    expect(vm).toMatchObject({ kind: 'chat_session', workspace: null });
+  });
+});
+
 describe('cancel_stuck_task → cancelTask', () => {
   it('cancels as the task owner, so cleanup also tears down the owner’s workspace', async () => {
     shared.cancelTask.mockImplementationOnce(async (_env, _db, task) => ({

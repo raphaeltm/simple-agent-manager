@@ -91,6 +91,23 @@ describe('AdminApprovals', () => {
     expect(within(settled).queryByRole('button', { name: 'Approve' })).toBeNull();
   });
 
+  it('warns before approving an irreversible action, and not for a reversible one', async () => {
+    mocks.fetchOperationsApprovals.mockResolvedValue({
+      approvals: [
+        approval({}),
+        approval({ id: 'appr-sleep', action: 'sleep_session', targetType: 'chat_session' }),
+      ],
+    });
+
+    renderPage();
+
+    const deletion = await screen.findByTestId('approval-appr-1');
+    expect(within(deletion).getByText(/Cannot be undone/)).toBeTruthy();
+    expect(
+      within(screen.getByTestId('approval-appr-sleep')).queryByText(/Cannot be undone/)
+    ).toBeNull();
+  });
+
   it('Approve sends the decision and refreshes the list', async () => {
     mocks.fetchOperationsApprovals
       .mockResolvedValueOnce({ approvals: [approval({})] })

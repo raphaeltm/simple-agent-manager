@@ -1,33 +1,27 @@
-import type {
-  OperationsAction,
-  OperationsActionApproval,
-  OperationsApprovalDecision,
+import {
+  OPERATIONS_ACTION_LABELS,
+  OPERATIONS_IRREVERSIBLE_ACTIONS,
+  type OperationsActionApproval,
+  type OperationsApprovalDecision,
 } from '@simple-agent-manager/shared';
 import { Body, Button, Card, Spinner } from '@simple-agent-manager/ui';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
 import { useQueryScope } from '../hooks/useQueryScope';
 import { decideOperationsApproval, fetchOperationsApprovals } from '../lib/api';
-
-const ACTION_LABELS: Record<OperationsAction, string> = {
-  retry_snapshot: 'Retry snapshot',
-  rerun_node_cleanup: 'Re-run node cleanup',
-  sleep_session: 'Sleep session',
-  delete_workspace: 'Delete workspace',
-  delete_node: 'Delete node',
-  restart_vm_agent: 'Restart VM agent',
-  cancel_stuck_task: 'Cancel stuck task',
-};
 
 const STATUS_STYLES: Record<OperationsActionApproval['status'], { bg: string; text: string }> = {
   pending: { bg: 'var(--sam-color-warning-tint)', text: 'var(--sam-color-warning-fg)' },
   approved: { bg: 'var(--sam-color-success-tint)', text: 'var(--sam-color-success)' },
   executed: { bg: 'var(--sam-color-info-tint)', text: 'var(--sam-color-info-fg)' },
   denied: { bg: 'var(--sam-color-danger-tint)', text: 'var(--sam-color-danger-fg)' },
-  expired: { bg: 'var(--sam-color-info-tint)', text: 'var(--sam-color-fg-muted)' },
+  expired: { bg: 'var(--sam-color-warning-tint)', text: 'var(--sam-color-fg-primary)' },
 };
+
+/** Reasons longer than this start clamped to three lines, with Show more. */
+const REASON_CLAMP_CHARS = 240;
 
 function formatTime(value: string | null) {
   if (!value) return '—';
@@ -88,8 +82,33 @@ function ApprovalItem({
   useEffect(() => {
     if (highlighted) ref.current?.scrollIntoView({ block: 'center' });
   }, [highlighted]);
+  const [reasonExpanded, setReasonExpanded] = useState(false);
   const pending = approval.status === 'pending';
+  const irreversible = OPERATIONS_IRREVERSIBLE_ACTIONS.includes(approval.action);
   const result = executionMessage(approval);
+  // Right under the request, so a long reason or target list never pushes them off a phone screen.
+  const actions = (
+    <div className="grid grid-cols-2 gap-3 sm:max-w-md">
+      <Button
+        variant={irreversible ? 'danger' : 'primary'}
+        className="min-h-11"
+        disabled={deciding !== null}
+        loading={deciding === 'approve'}
+        onClick={() => onDecide('approve')}
+      >
+        {deciding === 'approve' ? 'Approving…' : 'Approve'}
+      </Button>
+      <Button
+        variant="secondary"
+        className="min-h-11"
+        disabled={deciding !== null}
+        loading={deciding === 'deny'}
+        onClick={() => onDecide('deny')}
+      >
+        {deciding === 'deny' ? 'Denying…' : 'Deny'}
+      </Button>
+    </div>
+  );
 
   return (
     <div
@@ -100,7 +119,7 @@ function ApprovalItem({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-fg-primary">
-            {ACTION_LABELS[approval.action] ?? approval.action}
+            {OPERATIONS_ACTION_LABELS[approval.action] ?? approval.action}
           </div>
           <div className="break-all font-mono text-xs text-fg-muted">
             {approval.targetType} {approval.targetId}
@@ -109,7 +128,29 @@ function ApprovalItem({
         <StatusChip status={approval.status} />
       </div>
 
-      <Body className="whitespace-pre-wrap break-words text-sm">{approval.reason}</Body>
+      {irreversible && pending && (
+        <div className="text-xs font-semibold text-danger-fg">
+          ⚠ Cannot be undone: approving permanently deletes this {approval.targetType}.
+        </div>
+      )}
+      <div>
+        <Body
+          className={`whitespace-pre-wrap break-words text-sm ${reasonExpanded ? '' : 'line-clamp-3'}`}
+        >
+          {approval.reason}
+        </Body>
+        {approval.reason.length > REASON_CLAMP_CHARS && (
+          <button
+            type="button"
+            className="mt-1 text-xs text-accent hover:underline"
+            aria-expanded={reasonExpanded}
+            onClick={() => setReasonExpanded((open) => !open)}
+          >
+            {reasonExpanded ? 'Show less' : 'Show more'}
+          </button>
+        )}
+      </div>
+      {pending && actions}
       {approval.evidenceSummary && (
         <details className="text-xs text-fg-muted">
           <summary className="cursor-pointer">Evidence</summary>
@@ -124,32 +165,11 @@ function ApprovalItem({
         {pending ? ` · expires ${formatTime(approval.expiresAt)}` : null}
         {approval.autoApproved ? ' · auto-approved' : null}
         {!pending && approval.decidedAt && !approval.autoApproved
-          ? ` · decided ${formatTime(approval.decidedAt)}`
+          ? ` · decided ${formatTime(approval.decidedAt)}${approval.decidedBy ? ` by ${approval.decidedBy}` : ''}`
           : null}
         {approval.executedAt ? ` · executed ${formatTime(approval.executedAt)}` : null}
       </div>
       {result && <div className="break-words text-xs text-fg-primary">Result: {result}</div>}
-
-      {pending && (
-        <div className="grid grid-cols-2 gap-3 sm:max-w-md">
-          <Button
-            variant="primary"
-            className="min-h-11"
-            disabled={deciding !== null}
-            onClick={() => onDecide('approve')}
-          >
-            {deciding === 'approve' ? 'Approving…' : 'Approve'}
-          </Button>
-          <Button
-            variant="secondary"
-            className="min-h-11"
-            disabled={deciding !== null}
-            onClick={() => onDecide('deny')}
-          >
-            {deciding === 'deny' ? 'Denying…' : 'Deny'}
-          </Button>
-        </div>
-      )}
     </div>
   );
 }
@@ -200,7 +220,7 @@ export function AdminApprovals() {
     <div className="flex flex-col gap-4">
       <Card>
         <div className="flex items-center justify-between gap-3 border-b border-border-default px-4 py-3">
-          <span className="text-sm font-medium text-fg-primary">
+          <span className="text-sm font-medium text-fg-primary" aria-live="polite">
             Waiting for you{pending.length > 0 ? ` (${pending.length})` : ''}
           </span>
           <Button

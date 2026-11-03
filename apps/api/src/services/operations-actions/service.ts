@@ -15,6 +15,7 @@
  * MCP call, is audited here.
  */
 import {
+  OPERATIONS_ACTION_LABELS,
   OPERATIONS_ACTIONS,
   OPERATIONS_AUTO_SAFE_ACTIONS,
   type OperationsAction,
@@ -95,16 +96,6 @@ async function loadTaskAuthority(
   };
 }
 
-const ACTION_LABELS: Record<OperationsAction, string> = {
-  retry_snapshot: 'Retry snapshot',
-  rerun_node_cleanup: 'Re-run node cleanup',
-  sleep_session: 'Sleep session',
-  delete_workspace: 'Delete workspace',
-  delete_node: 'Delete node',
-  restart_vm_agent: 'Restart VM agent',
-  cancel_stuck_task: 'Cancel stuck task',
-};
-
 async function notifyApprover(env: Env, approval: StoredOperationsApproval): Promise<void> {
   try {
     await sendNotification(env, approval.requesterUserId, {
@@ -113,7 +104,7 @@ async function notifyApprover(env: Env, approval: StoredOperationsApproval): Pro
       sessionId: approval.requestingSessionId,
       type: 'operations_approval',
       urgency: 'high',
-      title: `Approve: ${ACTION_LABELS[approval.action]} ${approval.targetId}?`,
+      title: `Approve: ${OPERATIONS_ACTION_LABELS[approval.action]} ${approval.targetId}?`,
       body: approval.reason.slice(0, 500),
       actionUrl: `/admin/approvals?approval=${encodeURIComponent(approval.id)}`,
       metadata: {
@@ -252,10 +243,20 @@ export async function executeOperationsAction(
     throw new OperationsActionError(REFUSAL_MESSAGES[claim.refusal], claim.refusal);
   }
 
-  const target = await resolveActionTarget(env, grant, input.action, input.targetId);
-  const result: ActionExecutionResult = target
-    ? await executeAction(env, grant, input.action, target)
-    : { status: 'failed', message: `Target ${input.targetId} no longer exists` };
+  // The approval is spent from here on, so every outcome, including a failed lookup, is
+  // recorded on it: an executed row must never be left without a result.
+  let result: ActionExecutionResult;
+  try {
+    const target = await resolveActionTarget(env, grant, input.action, input.targetId);
+    result = target
+      ? await executeAction(env, grant, input.action, target)
+      : { status: 'failed', message: `Target ${input.targetId} no longer exists` };
+  } catch (error) {
+    result = {
+      status: 'failed',
+      message: (error instanceof Error ? error.message : String(error)).slice(0, 500),
+    };
+  }
   await recordExecutionResult(env.DATABASE, claim.approval.id, { ...result });
   return { approval: { ...claim.approval, executionResult: { ...result } }, result };
 }
