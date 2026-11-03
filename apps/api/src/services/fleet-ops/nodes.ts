@@ -93,13 +93,20 @@ export async function listFleetNodes(env: Env, filter: ListNodesFilter, now = Da
          WHERE w.node_id = n.id AND w.status != 'deleted') AS workspace_count,
        COUNT(*) OVER () AS total
      FROM nodes n
-     WHERE (?1 = 1 OR n.status != 'deleted')
-       AND (?2 IS NULL OR n.status = ?2)
-       AND (?3 IS NULL OR n.user_id = ?3)
+     WHERE (? = 1 OR n.status != 'deleted')
+       AND (? IS NULL OR n.status = ?)
+       AND (? IS NULL OR n.user_id = ?)
      ORDER BY julianday(n.created_at) DESC, n.id ASC
-     LIMIT ?4`
+     LIMIT ?`
   )
-    .bind(filter.includeDeleted ? 1 : 0, filter.status ?? null, filter.userId ?? null, filter.limit)
+    .bind(
+      filter.includeDeleted ? 1 : 0,
+      filter.status ?? null,
+      filter.status ?? null,
+      filter.userId ?? null,
+      filter.userId ?? null,
+      filter.limit
+    )
     .all<Row>();
   const results = rows.results ?? [];
   const total = results.length > 0 ? Number(results[0]?.total) : 0;

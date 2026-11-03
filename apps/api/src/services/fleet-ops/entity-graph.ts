@@ -253,12 +253,12 @@ export async function resolveEntityGraph(
 async function detectEntityType(env: Env, id: string): Promise<OpsEntityType> {
   const row = await env.DATABASE.prepare(
     `SELECT CASE
-       WHEN EXISTS (SELECT 1 FROM tasks WHERE id = ?1) THEN 'task'
-       WHEN EXISTS (SELECT 1 FROM workspaces WHERE id = ?1) THEN 'workspace'
-       WHEN EXISTS (SELECT 1 FROM nodes WHERE id = ?1) THEN 'node'
+       WHEN EXISTS (SELECT 1 FROM tasks WHERE id = ?) THEN 'task'
+       WHEN EXISTS (SELECT 1 FROM workspaces WHERE id = ?) THEN 'workspace'
+       WHEN EXISTS (SELECT 1 FROM nodes WHERE id = ?) THEN 'node'
        ELSE 'session' END AS kind`
   )
-    .bind(id)
+    .bind(id, id, id)
     .first<{ kind: string }>();
   const kind = row?.kind;
   return (OPS_ENTITY_TYPES as readonly string[]).includes(kind ?? '')

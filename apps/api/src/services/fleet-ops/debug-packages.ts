@@ -10,7 +10,7 @@
  * memory before encryption. The read is capped: it stops and fails the moment the byte cap is
  * crossed, and refuses up front when the agent's Content-Length already exceeds it.
  */
-import { and, eq, like, or, sql } from 'drizzle-orm';
+import { and, eq, like, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
@@ -133,7 +133,7 @@ export async function captureDebugPackage(
     status: 'ok' as const,
     fileId: file.id,
     filename,
-    directory,
+    directory: file.directory,
     sizeBytes: data.byteLength,
     capBytes,
     expiresAt: new Date(
@@ -163,10 +163,8 @@ export async function purgeExpiredDebugPackages(
     .where(
       and(
         eq(files.projectId, projectId),
-        or(
-          eq(files.directory, DEBUG_PACKAGE_ROOT),
-          like(files.directory, `${DEBUG_PACKAGE_ROOT}/%`)
-        ),
+        // The library stores directories normalized with a trailing slash.
+        like(files.directory, `${DEBUG_PACKAGE_ROOT}/%`),
         sql`julianday(${files.createdAt}) < julianday(${cutoff})`
       )
     )
