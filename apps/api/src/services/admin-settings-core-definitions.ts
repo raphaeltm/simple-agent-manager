@@ -4,6 +4,7 @@ import {
   DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING_LIMIT,
   DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS_LIMIT,
   DEFAULT_NODE_CLEANUP_BLOCKED_RETIREMENT_MS,
+  DEFAULT_NODE_LIFETIME_ADMISSION_CUTOFF_PERCENT,
   DEFAULT_NODE_LIFETIME_FORCE_SLEEP_AFTER_MS,
   DEFAULT_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
   MAX_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
@@ -47,6 +48,13 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     'Operations',
     'Leeway in milliseconds after a node reaches its absolute lifetime before any session whose agent turn is still running is stopped and force-slept.',
     { min: 1, max: 86400000 }
+  ),
+  integerDefinition(
+    'operations.nodeLifetimeAdmissionCutoffPercent',
+    DEFAULT_NODE_LIFETIME_ADMISSION_CUTOFF_PERCENT,
+    'Operations',
+    'Percent of the absolute node lifetime, at its end, during which a node takes no new workspace placements. 0 disables the cutoff.',
+    { min: 0, max: 99 }
   ),
 
   integerDefinition(

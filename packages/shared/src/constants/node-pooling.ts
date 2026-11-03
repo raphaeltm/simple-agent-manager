@@ -63,6 +63,14 @@ export const DEFAULT_NODE_ABSOLUTE_MAX_LIFETIME_MS = 24 * 60 * 60 * 1000; // 24 
 export const DEFAULT_NODE_LIFETIME_FORCE_SLEEP_AFTER_MS = 30 * 60 * 1000; // 30 minutes
 
 /**
+ * A node takes no new workspace placements in the last this-many percent of
+ * DEFAULT_NODE_ABSOLUTE_MAX_LIFETIME_MS (policy a3780107, 2026-11-03): work placed that close
+ * to the ceiling would be force-slept almost at once. 0 disables the cutoff. Admin setting
+ * `operations.nodeLifetimeAdmissionCutoffPercent`.
+ */
+export const DEFAULT_NODE_LIFETIME_ADMISSION_CUTOFF_PERCENT = 10;
+
+/**
  * Default grace (ms) before the cleanup sweep hands an empty managed workspace VM that never
  * entered the warm pool to NodeLifecycle. Override via NODE_EMPTY_WARM_HANDOFF_GRACE_MS.
  *

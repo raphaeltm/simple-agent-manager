@@ -19,6 +19,7 @@ import {
 } from './workspace-admission-sql';
 import {
   isResolvedResourceReservation,
+  type PlacementAdmissionPolicy,
   type WorkspaceAdmissionPolicy,
 } from './workspace-resource-capacity';
 
@@ -68,7 +69,7 @@ export interface WorkspacePlacementTaskLifecycleGuard {
 export async function reserveWorkspacePlacement(
   database: D1Database,
   input: WorkspacePlacementInput,
-  policy: WorkspaceAdmissionPolicy
+  policy: PlacementAdmissionPolicy
 ): Promise<boolean> {
   if (
     input.resolvedReservation !== undefined &&
@@ -76,7 +77,7 @@ export async function reserveWorkspacePlacement(
   ) {
     return false;
   }
-  const admission = buildWorkspaceAdmissionSql(input, policy);
+  const admission = buildWorkspaceAdmissionSql(input, policy, policy.lifetimeAdmissionCutoffAgeMs);
   const taskLifecyclePredicate = buildTaskLifecyclePlacementPredicate(input.taskLifecycleGuard);
   const result = await database
     .prepare(
@@ -138,7 +139,7 @@ export async function reserveWorkspacePlacement(
 export async function attachPrecreatedWorkspacePlacement(
   database: D1Database,
   input: WorkspacePlacementInput,
-  policy: WorkspaceAdmissionPolicy
+  policy: PlacementAdmissionPolicy
 ): Promise<boolean> {
   if (
     input.resolvedReservation !== undefined &&
@@ -146,7 +147,7 @@ export async function attachPrecreatedWorkspacePlacement(
   ) {
     return false;
   }
-  const admission = buildWorkspaceAdmissionSql(input, policy);
+  const admission = buildWorkspaceAdmissionSql(input, policy, policy.lifetimeAdmissionCutoffAgeMs);
   const result = await database
     .prepare(
       `${admission.sql},
@@ -218,7 +219,12 @@ export async function reserveWorkspaceRestart(
   policy: WorkspaceAdmissionPolicy
 ): Promise<boolean> {
   if (!isResolvedResourceReservation(input.resolvedReservation)) return false;
-  const admission = buildWorkspaceAdmissionSql(input, policy);
+  const admission = buildWorkspaceAdmissionSql(
+    input,
+    policy,
+    // A restart keeps the workspace on its own node; refusing it would strand the workspace.
+    null
+  );
   const result = await database
     .prepare(
       `${admission.sql}, eligible AS (

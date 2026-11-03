@@ -5,6 +5,7 @@
  */
 import { resolveResourceReservation } from '@simple-agent-manager/shared';
 
+import { lifetimeAdmissionCutoffSql } from './node-lifetime-admission';
 import { buildPlacementAuthoritySqlPredicate } from './placement-authority';
 import type { WorkspacePlacementInput } from './workspace-placement';
 import {
@@ -24,7 +25,12 @@ export function buildWorkspaceAdmissionSql(
     | 'capacityPlacementSnapshot'
     | 'authorityNodeClass'
   >,
-  policy: WorkspaceAdmissionPolicy
+  policy: WorkspaceAdmissionPolicy,
+  /**
+   * Node age past which a new placement is refused (`node-lifetime-admission.ts`). Null for a
+   * restart, which keeps a workspace on its own node, or when the cutoff is disabled.
+   */
+  lifetimeAdmissionCutoffAgeMs: number | null
 ): {
   sql: string;
   binds: Array<string | number | null>;
@@ -44,7 +50,9 @@ export function buildWorkspaceAdmissionSql(
     requireProjectMembership: true,
   });
   const requestedReservationJson = JSON.stringify(resolvedReservation);
-  const admissionNow = new Date().toISOString();
+  const admissionAt = new Date();
+  const admissionNow = admissionAt.toISOString();
+  const lifetimeCutoff = lifetimeAdmissionCutoffSql('n', lifetimeAdmissionCutoffAgeMs, admissionAt);
   return {
     requestedReservationJson,
     admissionNow,
@@ -97,6 +105,7 @@ export function buildWorkspaceAdmissionSql(
            AND n.status = 'running'
            AND n.node_role = 'workspace'
            ${capacityPredicate.sql}
+           ${lifetimeCutoff.sql}
        ),
        requested_reservation AS (
          SELECT
@@ -151,6 +160,7 @@ export function buildWorkspaceAdmissionSql(
       input.nodeId,
       input.userId,
       ...capacityPredicate.binds,
+      ...lifetimeCutoff.binds,
       requestedReservationJson,
       resolvedReservation.cpuMillis,
       resolvedReservation.memoryMb,

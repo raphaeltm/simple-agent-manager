@@ -1,0 +1,80 @@
+/**
+ * No new workspace placements in the last stretch of a node's absolute lifetime (policy
+ * a3780107, 2026-11-03). Past `NODE_ABSOLUTE_MAX_LIFETIME_MS` every session on the node sleeps,
+ * and after the leeway a running turn is stopped (`session-sleep-requirement.ts`), so work
+ * placed near the ceiling would be cut off almost at once.
+ *
+ * The condition is "the lifetime sweep will reap this node soon". The signal is the node's age
+ * against the same ceiling, over the same population as `sweepMaxLifetimeNodes`
+ * (`scheduled/node-cleanup/node-phases.ts`), so the two cannot diverge: a node the sweep never
+ * reaps (user-owned, or not auto-provisioned by a task) is never cut off.
+ *
+ * Enforced in the final atomic reservation (`workspace-admission-sql.ts`) and, as a hint, in the
+ * task runner's candidate queries (`task-runner/node-selection.ts`), per rule 69.
+ */
+import {
+  DEFAULT_NODE_ABSOLUTE_MAX_LIFETIME_MS,
+  DEFAULT_NODE_LIFETIME_ADMISSION_CUTOFF_PERCENT,
+} from '@simple-agent-manager/shared';
+
+import type { Env } from '../env';
+import { parsePositiveInt } from '../lib/route-helpers';
+import { resolveAdminSetting } from './admin-settings-resolution';
+import {
+  type PlacementAdmissionPolicy,
+  resolveWorkspaceAdmissionPolicy,
+} from './workspace-resource-capacity';
+
+/**
+ * The node age at which new placements stop, or null when the cutoff is disabled (0 percent).
+ * `resolveAdminSetting` answers its code default during a settings outage, so the cutoff holds.
+ */
+export async function resolveLifetimeAdmissionCutoffAgeMs(env: Env): Promise<number | null> {
+  const lifetimeMs = parsePositiveInt(
+    env.NODE_ABSOLUTE_MAX_LIFETIME_MS,
+    DEFAULT_NODE_ABSOLUTE_MAX_LIFETIME_MS
+  );
+  const setting = Number(
+    await resolveAdminSetting(env, 'operations.nodeLifetimeAdmissionCutoffPercent')
+  );
+  const percent =
+    Number.isInteger(setting) && setting >= 0 && setting < 100
+      ? setting
+      : DEFAULT_NODE_LIFETIME_ADMISSION_CUTOFF_PERCENT;
+  if (percent === 0) return null;
+  return Math.floor((lifetimeMs * (100 - percent)) / 100);
+}
+
+/** The admission policy of a new placement, with its lifetime cutoff resolved. */
+export async function resolvePlacementAdmissionPolicy(
+  env: Env,
+  scaling?: Parameters<typeof resolveWorkspaceAdmissionPolicy>[1]
+): Promise<PlacementAdmissionPolicy> {
+  return {
+    ...resolveWorkspaceAdmissionPolicy(env, scaling),
+    lifetimeAdmissionCutoffAgeMs: await resolveLifetimeAdmissionCutoffAgeMs(env),
+  };
+}
+
+/**
+ * `AND NOT (<node is past the cutoff>)` for a query over `nodes` aliased `alias`, or nothing
+ * when the cutoff is disabled. The age test is the lifetime sweep's own `created_at < ?`.
+ */
+export function lifetimeAdmissionCutoffSql(
+  alias: string,
+  cutoffAgeMs: number | null | undefined,
+  now: Date
+): { sql: string; binds: string[] } {
+  if (cutoffAgeMs == null) return { sql: '', binds: [] };
+  return {
+    sql: `AND NOT (
+             ${alias}.node_class != 'user-owned'
+             AND EXISTS (
+               SELECT 1 FROM tasks lifetime_task
+               WHERE lifetime_task.auto_provisioned_node_id = ${alias}.id
+             )
+             AND ${alias}.created_at < ?
+           )`,
+    binds: [new Date(now.getTime() - cutoffAgeMs).toISOString()],
+  };
+}

@@ -14,8 +14,8 @@ import {
 import {
   evaluateWorkspaceReservationCapacity,
   loadActiveWorkspaceReservationUsage,
+  type PlacementAdmissionPolicy,
   resolveWorkspaceAdmissionPolicy,
-  type WorkspaceAdmissionPolicy,
 } from '../../../src/services/workspace-resource-capacity';
 import {
   createAllSchemaTables,
@@ -273,9 +273,10 @@ function reservationV3(
 }
 
 function admissionPolicy(
-  overrides: Partial<WorkspaceAdmissionPolicy> = {}
-): WorkspaceAdmissionPolicy {
+  overrides: Partial<PlacementAdmissionPolicy> = {}
+): PlacementAdmissionPolicy {
   return {
+    lifetimeAdmissionCutoffAgeMs: null,
     cpuShareBudgetPercent: 100,
     hostMemoryReserveMb: 0,
     diskPressureThresholdPercent: 90,
@@ -1268,4 +1269,97 @@ describe('80 percent disk default at every workspace atomic admission', () => {
       expect(await admit()).toBe(true);
     }
   );
+});
+
+describe('lifetime admission cutoff at every new-placement atomic admission (policy a3780107)', () => {
+  const HOUR = 60 * 60 * 1000;
+  // 90% of the 24h absolute lifetime: the default 10% cutoff.
+  const CUTOFF_AGE_MS = 0.9 * 24 * HOUR;
+  const policy = () => admissionPolicy({ lifetimeAdmissionCutoffAgeMs: CUTOFF_AGE_MS });
+
+  function ageNode(ageMs: number) {
+    sqlite
+      ?.prepare("UPDATE nodes SET created_at = ? WHERE id = 'node-1'")
+      .run(new Date(Date.now() - ageMs).toISOString());
+  }
+
+  /** The lifetime sweep only reaps nodes a task auto-provisioned (`sweepMaxLifetimeNodes`). */
+  function autoProvision() {
+    sqlite
+      ?.prepare(
+        `INSERT INTO tasks (id, project_id, user_id, title, status, auto_provisioned_node_id,
+           created_at, updated_at)
+         VALUES ('task-provisioner', 'project-1', 'user-1', 'Provisioner', 'completed', 'node-1',
+           '2026-08-28T00:00:00.000Z', '2026-08-28T00:00:00.000Z')`
+      )
+      .run();
+  }
+
+  function admitter(database: ReturnType<typeof createDb>, path: 'insert' | 'attach') {
+    const input = reserveInput(capacitySnapshot());
+    if (path === 'attach') seedPlaceholderWorkspace(input.id);
+    return () =>
+      path === 'insert'
+        ? reserveWorkspacePlacement(database, input, policy())
+        : attachPrecreatedWorkspacePlacement(database, input, policy());
+  }
+
+  it.each(['insert', 'attach'] as const)(
+    'refuses %s onto an auto-provisioned node past the cutoff, and admits it before',
+    async (path) => {
+      const database = createDb();
+      seedNode();
+      autoProvision();
+      const admit = admitter(database, path);
+
+      ageNode(CUTOFF_AGE_MS + HOUR);
+      expect(await admit()).toBe(false);
+      expect(
+        sqlite?.prepare("SELECT COUNT(*) AS count FROM workspaces WHERE node_id = 'node-1'").get()
+      ).toEqual({ count: 0 });
+
+      // Convergence control: the same node one hour younger than the cutoff is admitted.
+      ageNode(CUTOFF_AGE_MS - HOUR);
+      expect(await admit()).toBe(true);
+    }
+  );
+
+  it('admits an old node the lifetime sweep never reaps (no task auto-provisioned it)', async () => {
+    const database = createDb();
+    seedNode();
+    ageNode(48 * HOUR);
+    expect(await admitter(database, 'insert')()).toBe(true);
+  });
+
+  it('admits past the cutoff when the cutoff is disabled', async () => {
+    const database = createDb();
+    seedNode();
+    autoProvision();
+    ageNode(CUTOFF_AGE_MS + HOUR);
+    const input = reserveInput(capacitySnapshot());
+    expect(await reserveWorkspacePlacement(database, input, admissionPolicy())).toBe(true);
+  });
+
+  it('still restarts a workspace on its own node past the cutoff', async () => {
+    const database = createDb();
+    seedNode();
+    autoProvision();
+    ageNode(CUTOFF_AGE_MS + HOUR);
+    seedActiveWorkspace('workspace-1');
+    sqlite?.exec(
+      "UPDATE workspaces SET status = 'evicted', chat_session_id = 'chat-1', eviction_finalized_at = '2026-09-13T00:00:00.000Z' WHERE id = 'workspace-1'"
+    );
+    expect(
+      await reserveWorkspaceRestart(
+        database,
+        {
+          ...reserveInput(capacitySnapshot()),
+          chatSessionId: 'chat-1',
+          evictionGeneration: 'next',
+          expectedEvictionGeneration: null,
+        },
+        policy()
+      )
+    ).toBe(true);
+  });
 });

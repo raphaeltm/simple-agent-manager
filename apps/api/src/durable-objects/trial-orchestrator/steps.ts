@@ -47,6 +47,7 @@ import {
   createWorkspaceOnNode,
   startAgentSessionOnNode,
 } from '../../services/node-agent';
+import { resolvePlacementAdmissionPolicy } from '../../services/node-lifetime-admission';
 import { createNodeRecord, provisionNode } from '../../services/nodes';
 import { buildPlacementAuthoritySqlPredicate } from '../../services/placement-authority';
 import * as projectDataService from '../../services/project-data';
@@ -62,7 +63,6 @@ import { reserveWorkspacePlacement } from '../../services/workspace-placement';
 import {
   evaluateWorkspaceReservationCapacity,
   loadActiveWorkspaceReservationUsage,
-  resolveWorkspaceAdmissionPolicy,
   type WorkspaceResourceNode,
 } from '../../services/workspace-resource-capacity';
 import { verifyNodeAgentHealthy } from '../task-runner/node-steps';
@@ -462,7 +462,7 @@ export async function handleNodeSelection(
     rc.env.DATABASE,
     candidates.map((node) => node.id)
   );
-  const admissionPolicy = resolveWorkspaceAdmissionPolicy(rc.env);
+  const admissionPolicy = await resolvePlacementAdmissionPolicy(rc.env);
 
   for (const candidate of candidates) {
     if (
@@ -728,7 +728,7 @@ export async function handleWorkspaceCreation(
       resolvedReservation: allocation.placement.resolvedReservation,
       createdAt: now,
     },
-    resolveWorkspaceAdmissionPolicy(rc.env)
+    await resolvePlacementAdmissionPolicy(rc.env)
   );
   if (!placementReserved) {
     if (state.autoProvisionedNode) {

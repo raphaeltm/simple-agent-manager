@@ -13,16 +13,14 @@ import {
 
 import { log } from '../../lib/logger';
 import type { DevcontainerCacheCredentials } from '../../services/devcontainer-cache';
+import { resolvePlacementAdmissionPolicy } from '../../services/node-lifetime-admission';
 import { SessionRecoveryAuthorityRevokedError } from '../../services/session-recovery-authority';
 import {
   markVmAdmissionPlaced,
   releaseVmProvisioningLease,
 } from '../../services/vm-admission-control';
 import { reserveWorkspacePlacement } from '../../services/workspace-placement';
-import {
-  isResolvedResourceReservation,
-  resolveWorkspaceAdmissionPolicy,
-} from '../../services/workspace-resource-capacity';
+import { isResolvedResourceReservation } from '../../services/workspace-resource-capacity';
 import { computeBackoffMs, getRecoverySourceTaskGuard, isTransientError } from './helpers';
 import { persistPlacementDiagnostics, updatePlacementDiagnostics } from './placement-diagnostics';
 import { ensureSessionLinked } from './state-machine';
@@ -185,7 +183,10 @@ async function createAndProvisionWorkspace(
     state.config.resolvedReservation = resolvedReservation;
     await rc.ctx.storage.put('state', state);
   }
-  const admissionPolicy = resolveWorkspaceAdmissionPolicy(rc.env, state.config.projectScaling);
+  const admissionPolicy = await resolvePlacementAdmissionPolicy(
+    rc.env,
+    state.config.projectScaling
+  );
   admissionPolicy.allowBusyBuildQueue = await isUserConversationStart(state, rc);
   updatePlacementDiagnostics(state, { queue: {} });
   const placementReserved = await reserveWorkspacePlacement(

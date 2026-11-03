@@ -121,7 +121,7 @@ export async function prepareAbsoluteLifetimeRelease(
           workspace.project_id,
           workspace.chat_session_id,
           'system',
-          `SAM could not preserve workspace ${workspace.id} before the managed node reached its absolute lifetime. Its snapshot is ${workspace.snapshot_status ?? 'missing'}/${workspace.degradation ?? 'unknown'} after ${attempts} sleep attempts. SAM will terminate the idle workspace through its bounded sleep cleanup to stop using compute, even if exact recovery cannot be verified. This conversation and successful backups are retained; unpublished files and saved agent state may be lost. Active work and other workspaces remain protected.`,
+          `SAM could not preserve workspace ${workspace.id} before the managed node reached its absolute lifetime. Its snapshot is ${workspace.snapshot_status ?? 'missing'}/${workspace.degradation ?? 'unknown'} after ${attempts} sleep attempts. SAM will stop any agent turn that is still running and terminate the workspace through its bounded sleep cleanup to stop using compute, even if exact recovery cannot be verified. This conversation and successful backups are retained; unpublished files and saved agent state may be lost. Other workspaces are not affected.`,
           { source: 'node_cleanup', kind: 'absolute_lifetime_preservation_blocked' },
           `absolute-lifetime-preservation-${node.id}-${workspace.id}`
         );

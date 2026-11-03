@@ -211,6 +211,13 @@ before it stops the agent and sleeps the session anyway. The default is 1,800,00
 (30 minutes); admins can set a whole number from 1 to 86,400,000 milliseconds. The chat keeps its
 transcript and checkpoint, and the next message wakes it on another machine.
 
+So that new work does not start on a VM that is about to be retired, a VM takes no new
+workspaces in the last part of its lifetime. `operations.nodeLifetimeAdmissionCutoffPercent` sets
+that part as a percent of the lifetime. The default is 10 (no new workspaces after 21.6 hours);
+admins can set a whole number from 0 to 99, and 0 turns the cutoff off. SAM starts the new work on
+another VM, creating one if it needs to. Restarting a stopped workspace on its own VM is still
+allowed. VMs you added yourself, and VMs no task created, have no lifetime limit and no cutoff.
+
 ## Blocked VM cleanup
 
 `operations.nodeCleanupBlockedRetirementMs` controls how long automatic cleanup may remain blocked before SAM retires a stopped workspace VM. The default is 1,800,000 milliseconds (30 minutes); admins can set a whole number from 1 to 86,400,000 milliseconds.
