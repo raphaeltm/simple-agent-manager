@@ -10,7 +10,6 @@
  * memory before encryption. The read is capped: it stops and fails the moment the byte cap is
  * crossed, and refuses up front when the agent's Content-Length already exceeds it.
  */
-import { and, eq, like, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
@@ -143,53 +142,66 @@ export async function captureDebugPackage(
 }
 
 /**
- * Deletes debug packages older than `operations.debugPackageRetentionDays` from the Operations
- * project library, oldest first, at most `debugPackagePurgeBatchSize` per run, in a fixed number
- * of round trips (one select, then `deleteFiles`). A failed batch is logged and retried by the
- * next daily run.
+ * Deletes debug packages older than `operations.debugPackageRetentionDays`, oldest first, at most
+ * `debugPackagePurgeBatchSize` per run, then `deleteFiles` once per owning project.
+ *
+ * Only packages the capture tool created are eligible: files whose IDs a successful
+ * `ops_capture_debug_package` audit row recorded (this covers packages left in a former
+ * Operations project after the setting changed), plus, in case an audit write failed, agent
+ * uploads under `/debug-packages/` in the current Operations project. A user's own upload into
+ * that directory is never purged. A failed project batch is logged and retried by the next run.
  */
 export async function purgeExpiredDebugPackages(
   env: Env,
   settings: FleetOpsSettings,
   now: number = Date.now()
 ) {
-  const projectId = await configuredFeedbackProjectId(env);
-  if (!projectId) return { skipped: 'no_operations_project' as const, deleted: 0, failed: 0 };
+  const currentProjectId = (await configuredFeedbackProjectId(env)) ?? '';
   const cutoff = new Date(now - settings.debugPackageRetentionDays * DAY_MS).toISOString();
-  const db = drizzle(env.DATABASE, { schema });
-  const files = schema.projectFiles;
-  const expired = await db
-    .select({ id: files.id })
-    .from(files)
-    .where(
-      and(
-        eq(files.projectId, projectId),
-        // The library stores directories normalized with a trailing slash.
-        like(files.directory, `${DEBUG_PACKAGE_ROOT}/%`),
-        sql`julianday(${files.createdAt}) < julianday(${cutoff})`
+  const expired =
+    (
+      await env.DATABASE.prepare(
+        `SELECT f.id, f.project_id
+         FROM project_files f
+         WHERE julianday(f.created_at) < julianday(?)
+           AND (
+             f.id IN (
+               SELECT json_extract(a.detail, '$.fileId') FROM operations_audit_log a
+               WHERE a.tool = 'ops_capture_debug_package' AND a.outcome = 'succeeded'
+             )
+             OR (f.project_id = ? AND f.upload_source = 'agent' AND f.directory LIKE ?)
+           )
+         ORDER BY julianday(f.created_at) ASC, f.id ASC
+         LIMIT ?`
       )
-    )
-    .orderBy(sql`julianday(${files.createdAt}) ASC`, files.id)
-    .limit(settings.debugPackagePurgeBatchSize);
+        // The library stores directories normalized with a trailing slash.
+        .bind(
+          cutoff,
+          currentProjectId,
+          `${DEBUG_PACKAGE_ROOT}/%`,
+          settings.debugPackagePurgeBatchSize
+        )
+        .all<{ id: string; project_id: string }>()
+    ).results ?? [];
 
+  const byProject = new Map<string, string[]>();
+  for (const row of expired) {
+    byProject.set(row.project_id, [...(byProject.get(row.project_id) ?? []), row.id]);
+  }
+  const db = drizzle(env.DATABASE, { schema });
   let deleted = 0;
   let failed = 0;
-  try {
-    deleted = (
-      await deleteFiles(
-        db,
-        env.R2,
+  for (const [projectId, ids] of byProject) {
+    try {
+      deleted += (await deleteFiles(db, env.R2, projectId, ids)).length;
+    } catch (error) {
+      failed += ids.length;
+      log.error('fleet_ops.debug_package_purge_failed', {
         projectId,
-        expired.map((row) => row.id)
-      )
-    ).length;
-  } catch (error) {
-    failed = expired.length;
-    log.error('fleet_ops.debug_package_purge_failed', {
-      projectId,
-      files: expired.length,
-      error: error instanceof Error ? error.message : String(error),
-    });
+        files: ids.length,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
   }
   return {
     retentionDays: settings.debugPackageRetentionDays,

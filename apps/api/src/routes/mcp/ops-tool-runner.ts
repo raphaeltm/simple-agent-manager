@@ -160,11 +160,16 @@ export function optionalLimit(
   return Math.max(1, Math.min(Math.trunc(n), max));
 }
 
+const MAX_DATE_MS = 8.64e15;
+
 /** Accepts an ISO 8601 string or epoch milliseconds. */
 export function optionalTime(params: Record<string, unknown>, name: string): number | undefined {
   const value = params[name];
   if (value === undefined || value === null || value === '') return undefined;
   const ms = typeof value === 'number' ? value : Date.parse(String(value));
-  if (!Number.isFinite(ms)) throw new OpsToolInputError(`${name} must be an ISO 8601 time`);
+  // Date covers ±8.64e15 ms; anything outside it would throw a RangeError in toISOString().
+  if (!Number.isFinite(ms) || Math.abs(ms) > MAX_DATE_MS) {
+    throw new OpsToolInputError(`${name} must be an ISO 8601 time`);
+  }
   return ms;
 }

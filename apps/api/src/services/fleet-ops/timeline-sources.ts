@@ -157,6 +157,8 @@ const recordSource: TimelineSource = {
       push(n, 'warm_since', 'node.warm', 'Node entered warm pool', ids);
       push(n, 'last_heartbeat_at', 'node.last_heartbeat', 'Last node heartbeat', ids);
     }
+    // Events are appended table by table; order by time so the cap keeps the newest.
+    events.sort((a, b) => a.at.localeCompare(b.at));
     return events.slice(-limit);
   },
 };
@@ -357,6 +359,16 @@ const nodeAgentEventSource: TimelineSource = {
         const event = raw as Row;
         const ms = toEpochMs(event.createdAt);
         if (!inWindow(scope, ms)) return [];
+        // A node hosts other workspaces too: outside a node timeline, keep node-level events and
+        // events for this timeline's own workspaces only.
+        const workspaceId = str(event.workspaceId);
+        if (
+          scope.entityType !== 'node' &&
+          workspaceId &&
+          !scope.workspaceIds.includes(workspaceId)
+        ) {
+          return [];
+        }
         return [
           {
             at: new Date(ms).toISOString(),

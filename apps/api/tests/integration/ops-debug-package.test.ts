@@ -303,3 +303,119 @@ describe('ops_capture_debug_package', () => {
     expect(main.prepare('SELECT COUNT(*) AS n FROM project_files').get()).toEqual({ n: 1 });
   });
 });
+
+describe('debug package reads and retention', () => {
+  const DAY_MS = 24 * 60 * 60 * 1000;
+  const old = (days: number) => new Date(Date.now() - days * DAY_MS).toISOString();
+  const libraryFile = (id: string, extra: Record<string, unknown>) =>
+    insert('project_files', {
+      id,
+      project_id: OPS_PROJECT,
+      filename: `${id}.tar.gz`,
+      mime_type: 'application/gzip',
+      size_bytes: 1,
+      uploaded_by: 'admin',
+      upload_source: 'agent',
+      status: 'ready',
+      r2_key: `key-${id}`,
+      directory: `/debug-packages/${NODE}/`,
+      created_at: old(30),
+      updated_at: old(30),
+      ...extra,
+    });
+  const remainingIds = () =>
+    (main.prepare('SELECT id FROM project_files ORDER BY id').all() as Array<{ id: string }>).map(
+      (r) => r.id
+    );
+
+  it('lists and displays a package only to a token that passes the Operations read gate', async () => {
+    insert('users', {
+      id: 'member',
+      email: 'm@example.test',
+      name: 'm',
+      role: 'user',
+      status: 'active',
+    });
+    insert('tasks', {
+      id: 'task-member',
+      project_id: OPS_PROJECT,
+      user_id: 'member',
+      title: 't',
+      status: 'in_progress',
+    });
+    await storeMcpToken(env.KV, 'tok-member', {
+      taskId: 'task-member',
+      projectId: OPS_PROJECT,
+      userId: 'member',
+      workspaceId: 'ws-m',
+    });
+    const body = await capture();
+    libraryFile('notes', { directory: '/engineering/', upload_source: 'user' });
+
+    const listed = async (token: string) => {
+      const res = await callMcpTool(app, env, token, 'list_library_files', { recursive: true });
+      expect(res.error, JSON.stringify(res.error)).toBeUndefined();
+      return (JSON.parse(res.result?.content[0]?.text ?? '{}').files as Array<{ id: string }>).map(
+        (f) => f.id
+      );
+    };
+    const displayed = async (token: string) =>
+      JSON.parse(
+        (await callMcpTool(app, env, token, 'display_from_library', { fileId: body.fileId })).result
+          ?.content[0]?.text ?? '{}'
+      );
+
+    // A superadmin's Operations task sees the package; a plain project member does not.
+    expect(await listed('tok-admin')).toEqual(expect.arrayContaining([body.fileId, 'notes']));
+    expect(await listed('tok-member')).toEqual(['notes']);
+    expect((await displayed('tok-admin')).fileId).toBe(body.fileId);
+    expect((await displayed('tok-member')).error).toBe('FILE_NOT_FOUND');
+  });
+
+  it('purges only captured packages, including those left in a former Operations project', async () => {
+    // A package captured while another project was the Operations project (audit row records it).
+    libraryFile('former-pkg', { project_id: 'proj-former', r2_key: 'key-former' });
+    insert('operations_audit_log', {
+      id: 'audit-former',
+      actor_user_id: 'admin',
+      task_id: 'task-old',
+      tool: 'ops_capture_debug_package',
+      target_type: 'node',
+      target_id: NODE,
+      outcome: 'succeeded',
+      detail: JSON.stringify({ fileId: 'former-pkg' }),
+      created_at: old(30),
+    });
+    // Fallback: an agent-uploaded package in the current Operations project with no audit row.
+    libraryFile('unaudited-pkg', {});
+    // Never purged: a person's own upload into the same directory.
+    libraryFile('user-upload', { upload_source: 'user' });
+    for (const key of ['key-former', 'key-unaudited-pkg', 'key-user-upload']) {
+      r2Objects.set(key, { data: new ArrayBuffer(1) });
+    }
+
+    const result = await purgeExpiredDebugPackages(env, FLEET_OPS_DEFAULTS);
+
+    expect(result.deleted).toBe(2);
+    expect(remainingIds()).toEqual(['user-upload']);
+    expect([...r2Objects.keys()]).toEqual(['key-user-upload']);
+  });
+
+  it('keeps the rows when the R2 delete fails, so the next run retries', async () => {
+    libraryFile('unaudited-pkg', {});
+    env = {
+      ...env,
+      R2: {
+        ...memoryR2(),
+        delete: async () => {
+          throw new Error('R2 unavailable');
+        },
+      } as unknown as R2Bucket,
+    } as Env;
+
+    const result = await purgeExpiredDebugPackages(env, FLEET_OPS_DEFAULTS);
+
+    expect(result).toMatchObject({ deleted: 0, failed: 1 });
+    expect(remainingIds()).toEqual(['unaudited-pkg']);
+  });
+});

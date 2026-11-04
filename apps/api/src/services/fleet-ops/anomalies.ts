@@ -47,6 +47,8 @@ export interface AnomalyClassResult {
   readonly truncated: boolean;
   readonly findings: readonly AnomalyFinding[];
   readonly error?: string;
+  /** Set when `total` may count reported items that a full scan would have dropped. */
+  readonly totalIsUpperBound?: boolean;
 }
 
 export interface AnomalyReport {
@@ -98,6 +100,12 @@ function result(
   const total = rows.length > 0 ? int(rows[0]?.total) : 0;
   return { class: cls, total, returned: findings.length, truncated: total > rows.length, findings };
 }
+
+/**
+ * Quarantine reports are read up to this many times the per-class cap, so reports for
+ * workspaces deleted since can be dropped without hiding open ones behind them.
+ */
+const QUARANTINE_SCAN_MULTIPLIER = 4;
 
 interface SweepContext {
   readonly env: Env;
@@ -313,6 +321,8 @@ async function snapshotFailures(ctx: SweepContext): Promise<AnomalyClassResult> 
  * cheap SQL signal. Workspaces already deleted since are dropped from the report.
  */
 async function deletionQuarantine(ctx: SweepContext): Promise<AnomalyClassResult> {
+  // Reports for workspaces deleted since are dropped after reading, so read past the cap.
+  const scanLimit = ctx.cap * QUARANTINE_SCAN_MULTIPLIER;
   const rows = await ctx.env.OBSERVABILITY_DATABASE.prepare(
     `SELECT workspace_id, MAX(node_id) AS node_id, MAX(user_id) AS user_id,
             MAX(timestamp) AS last_at, COUNT(*) AS reports, COUNT(*) OVER () AS total
@@ -325,13 +335,13 @@ async function deletionQuarantine(ctx: SweepContext): Promise<AnomalyClassResult
     .bind(
       WORKSPACE_DELETION_QUARANTINE_MESSAGE,
       ctx.now - ctx.settings.lookbackHours * 3_600_000,
-      ctx.cap
+      scanLimit
     )
     .all<Row>();
   const reported = rows.results ?? [];
   const ids = reported.map((row) => text(row.workspace_id)).filter((id): id is string => !!id);
   const statuses = new Map<string, string>();
-  // `anomalyMaxPerClass` may exceed D1's bound-parameter ceiling, so look statuses up in chunks.
+  // The scan may exceed D1's bound-parameter ceiling, so look statuses up in chunks.
   const lookups = await Promise.all(
     chunk(ids, D1_MAX_BOUND_PARAMETERS).map((part) =>
       ctx.env.DATABASE.prepare(
@@ -345,7 +355,7 @@ async function deletionQuarantine(ctx: SweepContext): Promise<AnomalyClassResult
     for (const row of current.results ?? []) statuses.set(String(row.id), String(row.status));
   }
   const open = reported.filter((row) => statuses.get(String(row.workspace_id)) !== 'deleted');
-  const base = result('workspace_deletion_quarantine', open, (row) => {
+  const base = result('workspace_deletion_quarantine', open.slice(0, ctx.cap), (row) => {
     const lastAt = int(row.last_at);
     return {
       ids: {
@@ -359,12 +369,15 @@ async function deletionQuarantine(ctx: SweepContext): Promise<AnomalyClassResult
       observedAt: lastAt ? new Date(lastAt).toISOString() : null,
     };
   });
-  // The total counts every reported workspace, including ones deleted since; say so.
-  const total = reported.length > 0 ? int(reported[0]?.total) : 0;
+  // Exact when the scan read every reported workspace; otherwise unread ones count as open.
+  const reportedTotal = reported.length > 0 ? int(reported[0]?.total) : 0;
+  const scannedAll = reported.length >= reportedTotal;
+  const total = reportedTotal - (reported.length - open.length);
   return {
     ...base,
-    total: total - (reported.length - open.length),
-    truncated: total > reported.length,
+    total,
+    truncated: total > base.returned,
+    ...(scannedAll ? {} : { totalIsUpperBound: true }),
   };
 }
 

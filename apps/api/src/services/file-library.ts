@@ -20,7 +20,7 @@ import type {
   UpdateTagsRequest,
 } from '@simple-agent-manager/shared';
 import { buildLibraryR2Key } from '@simple-agent-manager/shared';
-import { and, asc, desc, eq, inArray, like, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, like, notLike, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
@@ -424,12 +424,18 @@ export async function listFiles(
   db: AppDb,
   env: Env,
   projectId: string,
-  filters: ListFilesRequest = {}
+  filters: ListFilesRequest = {},
+  /** Hide every file whose directory starts with this prefix (restricted directories). */
+  options: { excludeDirectoryPrefix?: string } = {}
 ): Promise<ListFilesResponse> {
   const pageSize = Math.min(filters.limit ?? getListDefaultPageSize(env), getListMaxPageSize(env));
 
   // Build conditions
   const conditions = [eq(schema.projectFiles.projectId, projectId)];
+  if (options.excludeDirectoryPrefix) {
+    const escaped = options.excludeDirectoryPrefix.replace(/[%_]/g, '\\$&');
+    conditions.push(notLike(schema.projectFiles.directory, `${escaped}%`));
+  }
 
   // Directory filtering
   if (filters.directory) {

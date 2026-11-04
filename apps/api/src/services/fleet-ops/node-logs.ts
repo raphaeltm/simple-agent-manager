@@ -99,6 +99,7 @@ export async function readNodeLogs(
     : page.entries;
 
   const lines: string[] = [];
+  let lastReturned: LogEntry | null = null;
   let bytes = 0;
   let truncatedByBytes = false;
   for (const entry of matched.slice(0, lineCap)) {
@@ -109,8 +110,12 @@ export async function readNodeLogs(
       break;
     }
     lines.push(line);
+    lastReturned = entry;
     bytes += size;
   }
+  // When the line or byte cap withheld matches, the agent's cursor would skip them (it points
+  // past the whole scanned page). Hand back a time bound instead: every source accepts `until`.
+  const withheld = matched.length > lines.length;
 
   return {
     status: 'ok' as const,
@@ -119,9 +124,10 @@ export async function readNodeLogs(
     matchedEntries: matched.length,
     returnedLines: lines.length,
     returnedBytes: bytes,
-    truncated: truncatedByBytes || matched.length > lines.length,
+    truncated: withheld,
     truncatedByBytes,
-    nextCursor: page.nextCursor,
+    nextCursor: withheld ? null : page.nextCursor,
+    continueUntil: withheld ? (lastReturned?.timestamp ?? null) : null,
     moreOnNode: page.hasMore,
     log: untrustedTextBlock({ kind: 'node log', text: lines.join('\n'), maxLength: caps.maxBytes }),
   };

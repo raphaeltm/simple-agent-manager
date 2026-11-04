@@ -138,7 +138,8 @@ export const FLEET_OPS_SETTINGS = [
     name: 'operations.debugPackageCapturesPerHour',
     key: 'debugPackageCapturesPerHour',
     defaultValue: 20,
-    description: 'Debug packages one superadmin may capture per hour across all Operations tasks.',
+    description:
+      'Debug package capture attempts one superadmin may make per hour across all Operations tasks. Attempts count even when the node is unreachable or the package is too large.',
     range: { min: 1, max: 200 },
   },
   {

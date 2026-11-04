@@ -52,6 +52,12 @@ const ERROR_LEVELS = ['error', 'warn', 'info'] as const;
 const MINUTE_MS = 60_000;
 const HOUR_MS = 60 * MINUTE_MS;
 
+/** Page size when the caller gives none, never above `operations.opsListMaxRows`. */
+const DEFAULT_PAGE_SIZE = 50;
+function defaultListLimit(settings: { listMaxRows: number }): number {
+  return Math.min(DEFAULT_PAGE_SIZE, settings.listMaxRows);
+}
+
 /** One free-text field, capped and fenced in its own untrusted envelope. */
 function bounded(kind: string, text: unknown, max: number): string {
   return untrustedTextBlock({
@@ -192,7 +198,7 @@ export const handleOpsSearchErrors: Handler = (requestId, params, tokenData, env
         taskId: optionalString(params, 'taskId', 128),
         sessionId: optionalString(params, 'sessionId', 128),
         userId: optionalString(params, 'userId', 128),
-        limit: optionalLimit(params, 'limit', settings.listMaxRows) ?? 50,
+        limit: optionalLimit(params, 'limit', settings.listMaxRows) ?? defaultListLimit(settings),
         cursor: optionalString(params, 'cursor', 64),
       });
       const max = settings.textFieldMaxLength;
@@ -258,7 +264,7 @@ export const handleOpsQueryWorkerLogs: Handler = (requestId, params, tokenData, 
         timeRange: { start: new Date(since).toISOString(), end: new Date(until).toISOString() },
         levels: levels as string[],
         search: optionalString(params, 'contains', 500),
-        limit: optionalLimit(params, 'limit', settings.listMaxRows) ?? 50,
+        limit: optionalLimit(params, 'limit', settings.listMaxRows) ?? defaultListLimit(settings),
         cursor: optionalString(params, 'cursor', 512),
         queryId: optionalString(params, 'queryId', 128),
         scriptName: optionalString(params, 'scriptName', 64),

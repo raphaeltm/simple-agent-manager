@@ -127,7 +127,7 @@ export const OPS_READ_TOOLS = [
   ),
   tool(
     'ops_node_logs',
-    'Read a running node’s logs (agent, cloud-init, docker, systemd), filtered on the server. With contains, scans a full agent page and returns only matching lines. Line and byte caps apply (operations.opsNodeLog*); use nextCursor to read further back. Grep narrowly; never paste raw log lines into ideas, PRs or knowledge.',
+    'Read a running node’s logs (agent, cloud-init, docker, systemd), filtered on the server. With contains, scans a full agent page and returns only matching lines. Line and byte caps apply (operations.opsNodeLog*). To read further back pass nextCursor as cursor, or, when caps withheld matches, pass continueUntil as until (it repeats the boundary line). Grep narrowly; never paste raw log lines into ideas, PRs or knowledge.',
     {
       nodeId: id('Node ID.'),
       source: { type: 'string', enum: [...NODE_LOG_SOURCES] },
@@ -168,7 +168,7 @@ export const OPS_READ_TOOLS = [
   ),
   tool(
     'ops_capture_debug_package',
-    'Capture a running node’s full debug package (cloud-init, journal, vm-agent log, docker state, events and metrics databases) into this Operations project’s library at /debug-packages/<nodeId>/<timestamp>.tar.gz. Returns the fileId; fetch it with download_library_file. Raw and unredacted: deleted automatically after operations.debugPackageRetentionDays (default 7). Size-capped by operations.debugPackageMaxBytes and rate-limited by operations.debugPackageCapturesPerHour.',
+    'Capture a running node’s full debug package (cloud-init, journal, vm-agent log, docker state, events and metrics databases) into this Operations project’s library at /debug-packages/<nodeId>/<timestamp>.tar.gz. Returns the fileId; fetch it with download_library_file. Raw and unredacted: a daily purge deletes up to operations.debugPackagePurgeBatchSize packages older than operations.debugPackageRetentionDays (default 7); your downloaded copy is not purged, so delete it when done. Size-capped by operations.debugPackageMaxBytes; every attempt counts toward operations.debugPackageCapturesPerHour.',
     { nodeId: id('Node ID.') },
     ['nodeId']
   ),

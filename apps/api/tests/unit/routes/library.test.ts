@@ -17,6 +17,7 @@ const mockGetDownloadTimeoutMs = vi.hoisted(() => vi.fn().mockReturnValue(60000)
 const mockGetListMaxPageSize = vi.hoisted(() => vi.fn().mockReturnValue(200));
 const mockValidateFilename = vi.hoisted(() => vi.fn());
 const mockValidateDirectory = vi.hoisted(() => vi.fn((dir: string) => dir));
+const authRole = vi.hoisted(() => ({ value: 'user' }));
 
 // Mock auth middleware
 vi.mock('../../../src/middleware/auth', () => ({
@@ -27,7 +28,7 @@ vi.mock('../../../src/middleware/auth', () => ({
       id: 'test-user-id',
       email: 'test@example.com',
       name: 'Test',
-      role: 'user',
+      role: authRole.value,
       status: 'active',
     },
   }),
@@ -46,7 +47,8 @@ vi.mock('drizzle-orm/d1', () => ({
   drizzle: vi.fn().mockReturnValue({}),
 }));
 vi.mock('../../../src/db/schema', () => ({}));
-vi.mock('../../../src/lib/logger', () => ({
+vi.mock('../../../src/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
   log: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
 }));
 vi.mock('../../../src/services/file-library', () => ({
@@ -103,6 +105,65 @@ describe('library routes', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockGetDownloadTimeoutMs.mockReturnValue(60000);
+    authRole.value = 'user';
+  });
+
+  // Raw node debug packages (policy a35180d5): only superadmins see them in the app.
+  describe('raw debug packages under /debug-packages/', () => {
+    const pkg = {
+      id: 'pkg-1',
+      filename: 'p.tar.gz',
+      directory: '/debug-packages/NODE1/',
+      mimeType: 'application/gzip',
+      sizeBytes: 3,
+    };
+    const get = async (path: string) => {
+      const { app, env } = makeApp(makeEnv());
+      return app.fetch(new Request(`${BASE_URL}/projects/test-project-id/library${path}`), env);
+    };
+
+    it('hides them from a member’s listing and directory tree, but not from a superadmin’s', async () => {
+      mockListFiles.mockResolvedValue({ files: [], cursor: null });
+      mockListDirectories.mockResolvedValue([
+        { path: '/debug-packages/', name: 'debug-packages', fileCount: 1 },
+        { path: '/docs/', name: 'docs', fileCount: 2 },
+      ]);
+
+      expect((await get('')).status).toBe(200);
+      const memberDirs = (await (await get('/directories')).json()) as {
+        directories: Array<{ path: string }>;
+      };
+      expect(mockListFiles.mock.calls[0]?.[4]).toEqual({
+        excludeDirectoryPrefix: '/debug-packages/',
+      });
+      expect(memberDirs.directories.map((d) => d.path)).toEqual(['/docs/']);
+
+      authRole.value = 'superadmin';
+      await get('');
+      const adminDirs = (await (await get('/directories')).json()) as {
+        directories: Array<{ path: string }>;
+      };
+      expect(mockListFiles.mock.calls[1]?.[4]).toEqual({});
+      expect(adminDirs.directories.map((d) => d.path)).toEqual(['/debug-packages/', '/docs/']);
+    });
+
+    it('answers not found to a member for metadata, download and preview', async () => {
+      mockGetFile.mockResolvedValue({ file: pkg, tags: [] });
+      mockDownloadFile.mockResolvedValue({ data: new Uint8Array([1, 2, 3]).buffer, file: pkg });
+
+      for (const path of ['/pkg-1', '/pkg-1/download', '/pkg-1/preview']) {
+        expect((await get(path)).status, path).toBe(404);
+      }
+    });
+
+    it('serves metadata and download to a superadmin', async () => {
+      authRole.value = 'superadmin';
+      mockGetFile.mockResolvedValue({ file: pkg, tags: [] });
+      mockDownloadFile.mockResolvedValue({ data: new Uint8Array([1, 2, 3]).buffer, file: pkg });
+
+      expect((await get('/pkg-1')).status).toBe(200);
+      expect((await get('/pkg-1/download')).status).toBe(200);
+    });
   });
 
   describe('POST /upload', () => {
@@ -270,7 +331,8 @@ describe('library routes', () => {
           tags: ['design', 'api'],
           mimeType: 'image/',
           limit: 10,
-        })
+        }),
+        { excludeDirectoryPrefix: '/debug-packages/' }
       );
     });
   });

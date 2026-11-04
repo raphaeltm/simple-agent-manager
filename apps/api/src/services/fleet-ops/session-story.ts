@@ -33,10 +33,13 @@ export interface SessionStoryRequest {
 }
 
 /** Splits a row into structured fields and the free-text fields it carried. */
+/** Free text a user or agent wrote: error columns plus task titles. */
+const STORY_TEXT_COLUMNS: readonly string[] = [...ENTITY_TEXT_COLUMNS, 'title'];
+
 function splitRow(row: Row, label: string, texts: string[]): Row {
   const structured: Row = {};
   for (const [key, value] of Object.entries(row)) {
-    if ((ENTITY_TEXT_COLUMNS as readonly string[]).includes(key)) {
+    if (STORY_TEXT_COLUMNS.includes(key)) {
       if (typeof value === 'string' && value)
         texts.push(`[${label} ${String(row.id)} ${key}] ${value}`);
       structured[`has_${key}`] = typeof value === 'string' && value.length > 0;
@@ -65,6 +68,11 @@ async function settle<T>(
 
 function primaryChatSessionId(graph: EntityGraph): string | null {
   if (graph.entityType === 'session') return graph.entityId;
+  if (graph.entityType === 'workspace') {
+    // The workspace's own link wins: a retry can relink it to a newer chat session.
+    const own = graph.workspaces.find((w) => w.id === graph.entityId)?.chat_session_id;
+    if (typeof own === 'string' && own) return own;
+  }
   const fromTask = graph.tasks.find((t) => t.id === graph.entityId)?.chat_session_id;
   if (typeof fromTask === 'string' && fromTask) return fromTask;
   return graph.chatSessionIds[0] ?? null;

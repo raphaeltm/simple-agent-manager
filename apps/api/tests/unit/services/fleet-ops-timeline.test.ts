@@ -192,7 +192,36 @@ describe('buildTimeline', () => {
     expect(capped.truncated).toBe(true);
     expect(capped.droppedOlderEvents).toBe(all.events.length - 3);
     expect(capped.events).toEqual(all.events.slice(-3));
-    expect(capped.continueUntil).toBe(capped.events[0]?.at);
+    // Exclusive cursor: one millisecond before the oldest event this page returned.
+    expect(capped.continueUntil).toBe(new Date(Date.parse(capped.events[0]!.at) - 1).toISOString());
+
+    // Following the cursor never repeats an event and reaches the rest.
+    const next = await buildTimeline(
+      env,
+      request({ limit: 3, untilMs: Date.parse(capped.continueUntil!) }),
+      SQL_SOURCES
+    );
+    const seen = new Set(capped.events.map((e) => `${e.at}|${e.kind}`));
+    expect(next.events.some((e) => seen.has(`${e.at}|${e.kind}`))).toBe(false);
+    expect(next.events.length).toBeGreaterThan(0);
+  });
+
+  it('gives a cursor when one source hits its cap even though the merge fits', async () => {
+    const result = await buildTimeline(env, request({ perSourceLimit: 1 }), SQL_SOURCES);
+
+    expect(result.truncated).toBe(true);
+    expect(result.droppedOlderEvents).toBe(0);
+    expect(result.continueUntil).not.toBeNull();
+    // The cursor is at or after each capped source's oldest returned event.
+    const capped = result.sources.filter((s) => s.hitLimit).map((s) => s.name);
+    for (const name of capped) {
+      const oldest = result.events
+        .filter((e) => e.source === name)
+        .map((e) => e.at)
+        .sort()[0];
+      if (oldest)
+        expect(result.continueUntil! >= new Date(Date.parse(oldest) - 1).toISOString()).toBe(true);
+    }
   });
 
   it('isolates a failing source and reports it', async () => {

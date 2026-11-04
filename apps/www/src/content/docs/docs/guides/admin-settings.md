@@ -438,9 +438,14 @@ log, Docker state, the agent's event and metrics databases) as
 `/debug-packages/<node ID>/<time>.tar.gz` in the Operations project's
 [library](/docs/guides/project-files/). The agent downloads it into its own workspace with
 `download_library_file`. Packages are **raw and unredacted**: they can contain anything the node
-logged. They stay in that private library only, and a daily 03:00 UTC cleanup deletes them after
-the retention period. Capture stops and stores nothing if a package is larger than the size cap,
-and each superadmin may capture a limited number of packages per hour.
+logged. In the app only superadmins see them, and over MCP only tokens that pass the debugger-tool
+check can list, download or display them; every MCP download is audited. A daily 03:00 UTC cleanup
+deletes up to `operations.debugPackagePurgeBatchSize` packages older than the retention period
+(oldest first), including packages left in a former Operations project; a larger backlog clears
+over several days. A copy an agent downloads into its workspace is not purged; the playbook tells
+the agent to delete it when done. Capture stops and stores nothing if a package is larger than the
+size cap, and each superadmin may make a limited number of capture attempts per hour (failed
+attempts count).
 
 ### Read tool limits
 
@@ -449,7 +454,7 @@ and each superadmin may capture a limited number of packages per hour.
 | `operations.debugPackageRetentionDays`        | 7          | 1–90         | Days a debug package stays in the Operations library before the daily cleanup deletes it                                                                                                                        |
 | `operations.debugPackageMaxBytes`             | 20,971,520 | 1 MiB–32 MiB | Largest debug package capture accepts (also limited by the library's upload limit). Capture holds the package and its encrypted copy in Worker memory, so the maximum leaves room under the 128 MB Worker limit |
 | `operations.debugPackagePurgeBatchSize`       | 50         | 1–90         | Expired debug packages one daily cleanup deletes, in one batch                                                                                                                                                  |
-| `operations.debugPackageCapturesPerHour`      | 20         | 1–200        | Debug packages one superadmin may capture per hour                                                                                                                                                              |
+| `operations.debugPackageCapturesPerHour`      | 20         | 1–200        | Debug package capture attempts one superadmin may make per hour (attempts on an unreachable node or an oversized package count)                                                                                 |
 | `operations.opsAnomalyEmptyNodeGraceMs`       | 900,000    | 0–7 days     | Extra time past the warm-node cleanup grace before an empty running node is reported                                                                                                                            |
 | `operations.opsAnomalyTerminalTaskGraceMs`    | 900,000    | 0–7 days     | Time after a task ends before its still-running workspace is reported                                                                                                                                           |
 | `operations.opsAnomalyIdleTaskMinutes`        | 60         | 1–10,080     | Minutes without task or workspace activity before an in-progress task is reported                                                                                                                               |

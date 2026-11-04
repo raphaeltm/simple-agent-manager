@@ -28,6 +28,21 @@ function parseJson(value: unknown): Record<string, unknown> | null {
   }
 }
 
+/**
+ * Node names, heartbeat metrics, placement explanations and incident text come from users and
+ * node processes: strip control characters and envelope-marker lines from every string.
+ */
+function neutralizeStrings<T>(value: T): T {
+  if (typeof value === 'string') return neutralizeUntrustedText(value) as T;
+  if (Array.isArray(value)) return value.map((item) => neutralizeStrings(item) as unknown) as T;
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, neutralizeStrings(item)])
+    ) as T;
+  }
+  return value;
+}
+
 function shapeNode(row: Row, now: number) {
   const createdAt = String(row.created_at ?? '');
   const createdMs = Date.parse(
@@ -115,7 +130,7 @@ export async function listFleetNodes(env: Env, filter: ListNodesFilter, now = Da
     total,
     returned: results.length,
     truncated: total > results.length,
-    nodes: results.map((row) => shapeNode(row, now)),
+    nodes: results.map((row) => neutralizeStrings(shapeNode(row, now))),
   };
 }
 
@@ -175,12 +190,12 @@ export async function getFleetNode(env: Env, nodeId: string, limit: number, now 
     };
   };
 
-  return {
+  return neutralizeStrings({
     node: shapeNode(node, now),
     placementExplanation: parseJson(node.placement_explanation_json),
     lifecycle,
     workspaces: listed(workspaces),
     healthEvents: listed(healthEvents),
     diagnosticIncidents: listed(incidents),
-  };
+  });
 }

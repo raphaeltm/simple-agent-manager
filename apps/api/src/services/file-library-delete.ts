@@ -35,9 +35,13 @@ export async function deleteFile(
 }
 
 /**
- * Deletes many files of one project in a fixed number of round trips: one lookup, one tag
- * delete, one file delete and one R2 delete. IDs from another project are ignored. The caller
+ * Deletes many files of one project in a fixed number of round trips: one lookup, one R2
+ * delete, one tag delete and one file delete. IDs from another project are ignored. The caller
  * keeps `fileIds` under D1's bound-parameter limit. Returns the IDs actually deleted.
+ *
+ * Unlike `deleteFile`, the R2 objects go first: this serves retention purges, where a row left
+ * behind by a failed R2 call is what lets the next run retry. If the row deletes then fail, the
+ * rows point at objects that are already gone and the next run deletes them.
  */
 export async function deleteFiles(
   db: AppDb,
@@ -54,10 +58,9 @@ export async function deleteFiles(
   if (rows.length === 0) return [];
 
   const ids = rows.map((row) => row.id);
+  await r2.delete(rows.map((row) => row.r2Key));
   await db.delete(schema.projectFileTags).where(inArray(schema.projectFileTags.fileId, ids));
   await db.delete(files).where(and(eq(files.projectId, projectId), inArray(files.id, ids)));
-
-  await r2.delete(rows.map((row) => row.r2Key));
 
   log.info('file_library_delete_many', { projectId, deleted: ids.length });
   return ids;

@@ -51,7 +51,7 @@ export interface TimelineResult {
   readonly sources: readonly TimelineSourceReport[];
   readonly truncated: boolean;
   readonly droppedOlderEvents: number;
-  /** Pass as `until` to read the events this page dropped. */
+  /** Pass as `until` to read further back; exclusive of every event already returned. */
   readonly continueUntil: string | null;
   readonly graphCapped: readonly string[];
 }
@@ -109,6 +109,8 @@ export async function buildTimeline(
   );
   const reports: TimelineSourceReport[] = [];
   const merged: TimelineEvent[] = [];
+  // Oldest event each capped source returned: older events of that source were not read.
+  const cappedSourceOldest: string[] = [];
   settled.forEach((outcome, index) => {
     const name = sources[index]?.name ?? `source-${index}`;
     if (outcome.status === 'rejected') {
@@ -126,11 +128,10 @@ export async function buildTimeline(
       const ms = Date.parse(event.at);
       return Number.isFinite(ms) && ms >= sinceMs && ms <= untilMs;
     });
-    reports.push({
-      name,
-      events: events.length,
-      hitLimit: outcome.value.length >= request.perSourceLimit,
-    });
+    const hitLimit = outcome.value.length >= request.perSourceLimit;
+    reports.push({ name, events: events.length, hitLimit });
+    const oldest = events.reduce<string | null>((min, e) => (min && min < e.at ? min : e.at), null);
+    if (hitLimit && oldest) cappedSourceOldest.push(oldest);
     merged.push(...events);
   });
 
@@ -145,6 +146,14 @@ export async function buildTimeline(
   const dropped = Math.max(0, merged.length - request.limit);
   const page = merged.slice(dropped).map((event) => boundText(event, request.textMaxLength));
   const first = page[0];
+  // Everything newer than the cursor has been returned in full: the merge dropped only events at
+  // or before `first`, and each capped source is complete back to its own oldest event. The
+  // cursor is exclusive (one millisecond earlier) so the next page never repeats an event.
+  const boundaries = [...cappedSourceOldest, ...(dropped > 0 && first ? [first.at] : [])];
+  const boundary = boundaries.reduce<string | null>(
+    (max, at) => (max && max > at ? max : at),
+    null
+  );
 
   return {
     entityType: graph.entityType,
@@ -155,7 +164,7 @@ export async function buildTimeline(
     sources: reports,
     truncated: dropped > 0 || reports.some((r) => r.hitLimit),
     droppedOlderEvents: dropped,
-    continueUntil: dropped > 0 && first ? first.at : null,
+    continueUntil: boundary ? new Date(Date.parse(boundary) - 1).toISOString() : null,
     graphCapped: graph.capped,
   };
 }

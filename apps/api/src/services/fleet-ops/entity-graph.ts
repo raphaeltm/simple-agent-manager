@@ -141,7 +141,7 @@ export async function resolveEntityGraph(
   };
 
   // A node's story is its workspaces, not every task that ever ran on them.
-  const tasks =
+  let tasks =
     type === 'node'
       ? []
       : await select(
@@ -158,6 +158,19 @@ export async function resolveEntityGraph(
           rowCap,
           capped
         );
+  // Many newer recovery tasks can push the requested task out of the capped window; keep it.
+  if (type === 'task' && !tasks.some((t) => t.id === entityId)) {
+    const own = await select(
+      env,
+      'tasks',
+      TASK_COLUMNS,
+      anyIdIn([['id', [entityId]]]),
+      'id',
+      1,
+      []
+    );
+    tasks = [...own, ...tasks.slice(0, Math.max(0, rowCap - own.length))];
+  }
   const chatFromTasks = unique(seed.chatSessionIds, strings(tasks, 'chat_session_id'));
   const workspaces = await select(
     env,
