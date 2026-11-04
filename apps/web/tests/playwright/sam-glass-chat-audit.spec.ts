@@ -254,14 +254,6 @@ const SURFACES: Surface[] = [
     },
   },
   {
-    name: 'automation-triggers',
-    only: 'desktop',
-    open: async (page) => {
-      await page.getByRole('button', { name: 'Automation triggers' }).click();
-      return page.locator('section[aria-label="Automation triggers"]');
-    },
-  },
-  {
     name: 'command-palette',
     open: async (page) => {
       if (isPhone(page)) {
@@ -339,6 +331,79 @@ test.describe('SAM Glass chat — failed chat', () => {
       const failureHeight = (await page.getByTestId('failure-card-shell').boundingBox())!.height;
       expect(failureHeight).toBeGreaterThanOrEqual(40);
       await capture(page, 'failed-chat', theme);
+    });
+  }
+});
+
+test.describe('SAM Glass chat — pane edges', () => {
+  test('no container between a chat pane and the void clips its shadow', async ({ page }) => {
+    await openChat(page, 'light');
+    const clipping = await page.evaluate(() =>
+      Array.from(document.querySelectorAll<HTMLElement>('.sam-glass'))
+        .filter((pane) => pane.getClientRects().length > 0)
+        .flatMap((pane) => {
+          const found: string[] = [];
+          for (
+            let a = pane.parentElement;
+            a && !a.classList.contains('sam-void');
+            a = a.parentElement
+          ) {
+            const s = getComputedStyle(a);
+            if (s.overflowX !== 'visible' || s.overflowY !== 'visible') {
+              found.push(`${a.tagName.toLowerCase()}.${String(a.className).slice(0, 50)}`);
+            }
+          }
+          return found;
+        })
+    );
+    // Liveness: the chat's panes are on screen.
+    await expect(page.getByTestId('session-floating-header')).toBeVisible();
+    expect([...new Set(clipping)]).toEqual([]);
+  });
+
+  test('the message box draws no outline inside its slab', async ({ page }) => {
+    await openChat(page, 'light');
+    const footer = page.getByTestId('session-footer');
+    // Liveness: the dock's centre button sits on the slab.
+    await expect(
+      footer.getByRole('button', { name: /sleep|archive|interrupt|stop/i }).first()
+    ).toBeVisible();
+    // Icons are small SVGs; the old dock outline was an SVG as wide as the slab.
+    const wideSvgs = await footer
+      .locator('svg')
+      .evaluateAll((svgs) => svgs.filter((svg) => svg.getBoundingClientRect().width > 120).length);
+    expect(wideSvgs).toBe(0);
+  });
+
+  test('the chat list header carries only the project name', async ({ page }) => {
+    test.skip(isPhone(page), 'the desktop chat list pane');
+    await openChat(page, 'light');
+    await expect(page.getByRole('button', { name: 'New Chat', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Automation triggers' })).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Project settings' })).toHaveCount(0);
+  });
+
+  for (const theme of ['dark', 'light'] as const) {
+    test(`a page in the content pane paints no background over the glass (${theme})`, async ({
+      page,
+    }) => {
+      await setupGlassChatMocks(page, { theme });
+      await page.goto('/projects');
+      await expect(page.getByRole('heading', { name: 'Projects' }).first()).toBeAttached({
+        timeout: 15_000,
+      });
+      await expect(page.getByText('Something went wrong')).toHaveCount(0);
+      const root = await page.evaluate(() => {
+        const main = document.querySelector('main')!;
+        const first = main.firstElementChild as HTMLElement;
+        return {
+          background: getComputedStyle(first).backgroundColor,
+          fills: first.getBoundingClientRect().height >= main.clientHeight - 1,
+        };
+      });
+      expect(root.background).toBe('rgba(0, 0, 0, 0)');
+      expect(root.fills).toBe(true);
+      await screenshot(page, `glass-projects-page-${theme}`, { scopeToProject: true });
     });
   }
 });

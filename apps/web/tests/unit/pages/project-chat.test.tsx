@@ -720,21 +720,6 @@ describe('ProjectChat new chat button', () => {
     expect(screen.queryByRole('dialog', { name: 'Task hierarchy' })).not.toBeInTheDocument();
   });
 
-  it('gear icon navigates to the project settings page', async () => {
-    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
-    renderProjectChat();
-
-    await waitFor(() => {
-      expect(screen.getByLabelText('Project settings')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByLabelText('Project settings'));
-
-    await waitFor(() => {
-      expect(screen.getByTestId('settings-page')).toBeInTheDocument();
-    });
-  });
-
   it('clears new chat intent and navigates to new session after task submission', async () => {
     mocks.listChatSessions.mockResolvedValue({
       sessions: [SESSION_1],

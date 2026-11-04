@@ -1,9 +1,6 @@
-import { IconButton, SearchField, SegmentedControl } from '@simple-agent-manager/ui';
-import { ChevronDown, ChevronRight, Plus, Settings } from 'lucide-react';
-import { useState } from 'react';
-import { useNavigate } from 'react-router';
+import { SearchField, SegmentedControl } from '@simple-agent-manager/ui';
+import { ChevronDown, ChevronRight, Plus } from 'lucide-react';
 
-import { TriggerDropdown } from '../../components/triggers/TriggerDropdown';
 import { sessionScopeOptions } from './session-scope-options';
 import { SessionList } from './SessionList';
 import type { useProjectChatState } from './useProjectChatState';
@@ -19,14 +16,12 @@ export function ProjectChatSidebar({
   state: ReturnType<typeof useProjectChatState>;
   onShowHierarchy: (taskId: string) => void;
 }>) {
-  const navigate = useNavigate();
-  const [triggerDropdownOpen, setTriggerDropdownOpen] = useState(false);
   const handleShowHierarchy = onShowHierarchy;
 
   return (
     <>
-      {/* Header: project name + automation and settings buttons */}
-      <div className="flex shrink-0 items-center gap-1 pt-2.5 pr-2 pb-1 pl-4">
+      {/* Header: the project name. Automation and project settings live in the project nav. */}
+      <div className="flex min-h-14 shrink-0 items-center gap-1 pt-2.5 pr-2 pb-1 pl-4">
         <span className="min-w-0 flex-1 truncate text-[17px] font-semibold text-fg-primary">
           {state.project?.name || 'Project'}
         </span>
@@ -44,16 +39,6 @@ export function ProjectChatSidebar({
             />
           </button>
         )}
-        <TriggerDropdown
-          projectId={state.projectId}
-          open={triggerDropdownOpen}
-          onToggle={() => setTriggerDropdownOpen((prev) => !prev)}
-        />
-        <IconButton
-          label="Project settings"
-          icon={<Settings size={20} strokeWidth={1.75} />}
-          onClick={() => navigate(`/projects/${state.projectId}/settings`)}
-        />
       </div>
 
       {/* New chat */}

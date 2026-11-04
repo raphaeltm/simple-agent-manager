@@ -11,9 +11,10 @@
 // interrupt/archive control never disappears even when the `agentActivity`
 // signal is stale — that resilience is the whole point of this component.
 //
-// Geometry (the animated "bump") is ported from the approved Concept B
-// prototype. All fills/strokes read design tokens so the dock adapts to the
-// dark (`sam`) and light (`sam-light`) themes with no wrapper scoping.
+// The dock draws no surface of its own: it sits at the top of the message-box
+// slab (SAM Glass), and the centre button rises from the middle of the bar to
+// rest on the slab's top edge while the agent works. Colours read design
+// tokens, so it follows the dark (`sam`) and light (`sam-light`) themes.
 
 import { Button, Dialog } from '@simple-agent-manager/ui';
 import { Archive, ListTodo, Moon, Square } from 'lucide-react';
@@ -25,10 +26,8 @@ import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useSta
 
 const BAR_H = 38; // flat bar height (px) — ~2/3 of the original 56px
 const BTN = Math.round(BAR_H * 0.9); // button diameter ≈ 90% of the bar height
-const BUBBLE_R = BAR_H / 2; // bubble radius = half bar height => ~5% gap around the button
-const FILLET_R = 12; // radius of the smooth blend where the dome meets the flat bar
-const OVERLAP = 4; // how far the bar/dome laps over the button rim (bubble OVER button)
-const SVG_PAD_TOP = Math.ceil(BUBBLE_R) + 12; // room above the bar for the bubble crest
+const BUTTON_CLEARANCE = BAR_H / 2; // half the bar: how far the working button rises above it
+const TOP_PAD = Math.ceil(BUTTON_CLEARANCE) + 12; // room above the bar for the raised button
 
 const EASE_DURATION_MS = 420;
 
@@ -73,7 +72,7 @@ function useEased(target: number, reducedMotion: boolean, durationMs = EASE_DURA
   return value;
 }
 
-/** Measures a container's pixel width so the SVG bump keeps a constant shape. */
+/** Measures the dock's pixel width so the centre button stays centred. */
 function useWidth<T extends HTMLElement>() {
   const ref = useRef<T | null>(null);
   const [width, setWidth] = useState(375);
@@ -199,52 +198,15 @@ export function CompletionDock({
   const progress = useEased(working ? 1 : 0, reducedMotion);
   const { ref, width } = useWidth<HTMLDivElement>();
 
-  const totalH = BAR_H + SVG_PAD_TOP;
-  const yB = SVG_PAD_TOP; // baseline (top of the flat bar) in SVG space
+  const totalH = BAR_H + TOP_PAD;
+  const yB = TOP_PAD; // baseline: the top of the flat bar, measured from the top of the dock
   const cx = width / 2;
   const R = BTN / 2;
 
-  // Button center rises from the bar's vertical center (idle) to the bar's top
-  // edge (working). The bubble is a circle of radius BUBBLE_R concentric with
-  // the button, so the dome arcs OVER the button top at a constant gap. Where
-  // the dome meets the flat bar, a concave fillet blends the two smoothly.
+  // Button center rises from the bar's vertical center (idle) to the bar's top edge
+  // (working), so a working agent's button sits on the slab's top edge.
   const btnC = yB + (BAR_H / 2) * (1 - progress);
-  const h = btnC - yB;
   const btnTop = btnC - R;
-
-  const D = (BUBBLE_R + FILLET_R) * (BUBBLE_R + FILLET_R) - (FILLET_R + h) * (FILLET_R + h);
-  const hasBump = D > 1 && h < BUBBLE_R - 0.5;
-
-  let path: string;
-  if (hasBump) {
-    const s = Math.sqrt(D);
-    const k = BUBBLE_R / (BUBBLE_R + FILLET_R);
-    const tx = k * s;
-    const ty = btnC - k * (FILLET_R + h);
-    path = [
-      `M 0 ${yB}`,
-      `L ${cx - s} ${yB}`,
-      `A ${FILLET_R} ${FILLET_R} 0 0 0 ${cx - tx} ${ty}`,
-      `A ${BUBBLE_R} ${BUBBLE_R} 0 0 1 ${cx + tx} ${ty}`,
-      `A ${FILLET_R} ${FILLET_R} 0 0 0 ${cx + s} ${yB}`,
-      `L ${width} ${yB}`,
-      `L ${width} ${totalH}`,
-      `L 0 ${totalH}`,
-      'Z',
-    ].join(' ');
-  } else {
-    path = [`M 0 ${yB}`, `L ${width} ${yB}`, `L ${width} ${totalH}`, `L 0 ${totalH}`, 'Z'].join(
-      ' '
-    );
-  }
-
-  // Punch a circular hole (evenodd) concentric with the button so it shows
-  // THROUGH the bar/dome, with the bar material lapping ~OVERLAP px over the rim.
-  const holeR = R - OVERLAP;
-  path +=
-    ` M ${cx} ${btnC - holeR}` +
-    ` A ${holeR} ${holeR} 0 1 1 ${cx} ${btnC + holeR}` +
-    ` A ${holeR} ${holeR} 0 1 1 ${cx} ${btnC - holeR} Z`;
 
   // Center-button identity: Interrupt while working, Sleep while awake idle,
   // Archive only once the session is already sleeping.
@@ -326,13 +288,11 @@ export function CompletionDock({
   }, [archiving]);
 
   return (
-    // Only the flat bar (BAR_H) participates in the flex column; the crest
-    // region (SVG_PAD_TOP) overhangs UP over the message list via a negative
-    // top margin so the scroll area reaches the top of the flat bar and the
-    // bubble floats OVER the chat. `pointer-events-none` on the wrapper lets
-    // scroll/clicks pass through the transparent crest to the messages behind
-    // it; interactive controls re-enable events with `pointer-events-auto`.
-    <div className="shrink-0 pointer-events-none" style={{ marginTop: -SVG_PAD_TOP }}>
+    // Only the flat bar (BAR_H) participates in the flex column; the space above
+    // it (TOP_PAD), where the working button rises, overhangs UP via a
+    // negative top margin. `pointer-events-none` on the wrapper lets scroll and
+    // clicks pass through that space; the controls re-enable `pointer-events-auto`.
+    <div className="shrink-0 pointer-events-none" style={{ marginTop: -TOP_PAD }}>
       {/* Announce working/idle transitions to assistive tech (the morph itself is
           purely visual; ElapsedTime is aria-hidden). */}
       <span className="sr-only" role="status" aria-live="polite">
@@ -345,25 +305,6 @@ export function CompletionDock({
               : 'Session sleeping'}
       </span>
       <div ref={ref} className="relative w-full select-none" style={{ height: totalH }}>
-        <svg
-          width={width}
-          height={totalH}
-          viewBox={`0 0 ${width} ${totalH}`}
-          className="absolute inset-0 overflow-visible"
-          style={{ zIndex: 1, pointerEvents: 'none' }}
-          aria-hidden
-        >
-          {/* The dock sits at the top of the message-box slab (SAM Glass), which supplies
-              the surface; the crest is drawn as a faint hairline only, so the centre button
-              reads as resting on the slab's top edge. */}
-          <path
-            d={path}
-            fillRule="evenodd"
-            fill="none"
-            stroke="var(--sam-hairline)"
-            strokeWidth={1}
-          />
-        </svg>
 
         {/* Left cluster: plan pill */}
         {hasPlan && (
