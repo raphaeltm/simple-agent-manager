@@ -189,6 +189,11 @@ const Setup = lazyNamed(() => import('./pages/Setup'), 'Setup');
 const TaskRedirect = lazyNamed(() => import('./pages/TaskRedirect'), 'TaskRedirect');
 const Tools = lazyNamed(() => import('./pages/Tools'), 'Tools');
 const ToolsCli = lazyNamed(() => import('./pages/ToolsCli'), 'ToolsCli');
+// PROTOTYPE ONLY — remove before merging to main.
+const NodesGlassPrototype = lazyNamed(
+  () => import('./pages/nodes-glass-prototype'),
+  'NodesGlassPrototype'
+);
 const TrialChatGateHarness = lazyNamed(
   () => import('./pages/TrialChatGateHarness'),
   'TrialChatGateHarness'
@@ -273,6 +278,7 @@ export default function App() {
                     <Route path="/setup" element={page(<Setup />)} />
                     {showDevOnlyRoutes && (
                       <>
+                        <Route path="/prototype/nodes-glass" element={page(<NodesGlassPrototype />)} />
                         {/* Harness for Playwright audits — mounts trial components with mock data */}
                         <Route
                           path="/__test/trial-chat-gate"
