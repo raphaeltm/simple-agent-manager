@@ -635,13 +635,17 @@ test.describe('Linked work — chat Related panel', () => {
     // Flush with the viewport edge, and never starting off-screen to the left.
     expect(Math.round(drawerRight)).toBeLessThanOrEqual(viewport!.width + 1);
     expect(drawerBox!.x).toBeGreaterThanOrEqual(-1);
-    // The two right edges coincide: no sliver of rail is left peeking out beside the panel.
-    expect(Math.abs(drawerRight - railRight)).toBeLessThanOrEqual(1);
+    // No sliver of rail is left peeking out beside the panel: the panel reaches at least the
+    // rail's right edge. (On phones the panel is full screen and the rail sits inside the
+    // SAM Glass frame, so the panel extends past it; desktop asserts exact alignment below.)
+    expect(drawerRight).toBeGreaterThanOrEqual(railRight - 1);
     // And the panel starts at or before the rail, so the rail's column is fully inside it.
     expect(drawerBox!.x).toBeLessThanOrEqual(railBox!.x + 1);
 
     if (viewport!.width >= 768) {
-      // Desktop: a rail beside the conversation, not the whole screen.
+      // Desktop: a rail beside the conversation, not the whole screen, its right edge on the
+      // rail pane's right edge (both sit inside the same 16px frame).
+      expect(Math.abs(drawerRight - railRight)).toBeLessThanOrEqual(1);
       expect(drawerBox!.width).toBeLessThan(viewport!.width);
       expect(drawerBox!.width).toBeGreaterThan(railBox!.width);
     } else {

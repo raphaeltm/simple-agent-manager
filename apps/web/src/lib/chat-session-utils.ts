@@ -7,7 +7,7 @@ import {
   CheckCircle2,
   CirclePause,
   HelpCircle,
-  Loader2,
+  LoaderCircle,
   Moon,
   XCircle,
 } from 'lucide-react';
@@ -171,7 +171,7 @@ export function isHighPriorityAttention(state: AttentionState): boolean {
  * Attention state -> icon + color + label mapping (uses design tokens).
  *
  * Single source of truth consumed by `SessionItem` (full session card) and the
- * Focus Mode session strip (`FocusStrip`). The `active` icon (`Loader2`) is the
+ * Focus Mode session strip (`FocusStrip`). The `active` icon (`LoaderCircle`) is the
  * only one intended to spin — callers add `animate-spin` when the state is
  * `active`.
  */
@@ -190,8 +190,10 @@ export const ATTENTION_ICON: Record<
     label: 'Wake failed',
   },
   error: { icon: AlertCircle, color: 'var(--sam-color-danger, #ef4444)', label: 'Error' },
-  active: { icon: Loader2, color: 'var(--sam-color-success)', label: 'Running' },
-  idle: { icon: CirclePause, color: 'var(--sam-color-warning, #f59e0b)', label: 'Idle' },
+  // SAM Glass: green spins while working, a moon means resting, amber is reserved for
+  // "waiting on you" (needs_input) — an idle agent is not waiting on anyone in particular.
+  active: { icon: LoaderCircle, color: 'var(--sam-color-success)', label: 'Running' },
+  idle: { icon: Moon, color: 'var(--sam-color-fg-muted)', label: 'Idle' },
   sleeping: { icon: Moon, color: 'var(--sam-color-info, #3b82f6)', label: 'Sleeping' },
   completed: { icon: CheckCircle2, color: 'var(--sam-color-fg-muted)', label: 'Completed' },
   failed: { icon: XCircle, color: 'var(--sam-color-danger, #ef4444)', label: 'Failed' },

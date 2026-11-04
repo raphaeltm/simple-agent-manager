@@ -35,7 +35,8 @@
 .sg-pane--slab { border-radius: var(--sam-radius-slab); box-shadow: inset 0 1px 0 var(--sam-rim-bevel), inset 0 -1px 0 var(--sam-rim-bounce), var(--sam-shadow-slab); }
 .sg-pane--quiet { background: linear-gradient(160deg, var(--sam-glass-sheen-quiet), rgba(0,0,0,0) 40%), var(--sam-glass-pane-quiet); box-shadow: inset 0 1px 0 var(--sam-rim-bevel), var(--sam-shadow-pane-quiet); }
 .sg-pane--quiet::before { opacity: .7; }
-/* Live blur: only for one overlay at a time (drawers, sheets, popovers), never for every pane. */
+/* Live blur for overlays (drawers, sheets, popovers). In the app every pane is also frosted:
+   see packages/ui/src/tokens/sam-glass.css. */
 .sg-pane--blur { background: linear-gradient(160deg, var(--sam-glass-sheen), rgba(0,0,0,0) 40%), var(--sam-glass-pane-thin); -webkit-backdrop-filter: blur(22px) saturate(1.5); backdrop-filter: blur(22px) saturate(1.5); }
 .sg-pane__pad { padding: 16px 18px; }
 .sg-pane__head { display: flex; align-items: center; gap: 12px; padding: 16px 18px 12px; }

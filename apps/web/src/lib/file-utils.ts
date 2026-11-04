@@ -1,4 +1,8 @@
-import { normalizeMimeType, resolveEffectiveMimeType } from '@simple-agent-manager/shared';
+import {
+  normalizeMimeType,
+  resolveEffectiveMimeType,
+  sanitizeFilename,
+} from '@simple-agent-manager/shared';
 
 /** Image file extensions that can be rendered inline via <img> tag. */
 const IMAGE_EXTENSIONS = new Set([
@@ -107,4 +111,15 @@ export function detectLanguage(filePath: string): string {
   if (lower === 'makefile') return 'makefile';
   const ext = lower.split('.').pop() ?? '';
   return EXT_TO_LANG[ext] ?? '';
+}
+
+/**
+ * Return `file` with a name the upload API accepts. Unsafe characters are
+ * replaced rather than rejected; the original File is returned untouched when
+ * its name is already safe.
+ */
+export function withSafeFilename(file: File): File {
+  const name = sanitizeFilename(file.name);
+  if (name === file.name) return file;
+  return new File([file], name, { type: file.type, lastModified: file.lastModified });
 }

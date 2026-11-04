@@ -1,4 +1,5 @@
 import type { DetectedPort, WorkspaceResponse } from '@simple-agent-manager/shared';
+import { chipClassName } from '@simple-agent-manager/ui';
 import { AlertTriangle, ExternalLink, Globe } from 'lucide-react';
 import { type CSSProperties, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -17,7 +18,9 @@ export function WorkspaceProfileBadge({ workspace }: Readonly<{ workspace: Works
   const tooltipId = useId();
   const isRecovery = workspace.status === 'recovery';
   const label = getWorkspaceProfileLabel(workspace);
-  const badgeClassName = 'inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0';
+  const badgeClassName = chipClassName({
+    tone: isRecovery ? 'warning' : workspace.workspaceProfile === 'lightweight' ? 'info' : 'success',
+  });
 
   useLayoutEffect(() => {
     if (!open || !triggerRef.current) return;
@@ -49,10 +52,6 @@ export function WorkspaceProfileBadge({ workspace }: Readonly<{ workspace: Works
       <span
         className={badgeClassName}
         aria-label={`Workspace profile: ${label}`}
-        style={{
-          backgroundColor: workspace.workspaceProfile === 'lightweight' ? 'var(--sam-color-info-tint)' : 'var(--sam-color-success-tint)',
-          color: workspace.workspaceProfile === 'lightweight' ? 'var(--sam-color-info)' : 'var(--sam-color-success)',
-        }}
       >
         {label}
       </span>
@@ -71,14 +70,9 @@ export function WorkspaceProfileBadge({ workspace }: Readonly<{ workspace: Works
         onBlur={() => setOpen(false)}
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={() => setOpen(false)}
-        className={`${badgeClassName} border border-transparent cursor-help focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary`}
-        style={{
-          backgroundColor: 'var(--sam-color-warning-tint, rgba(245, 158, 11, 0.12))',
-          color: 'var(--sam-color-warning, #f59e0b)',
-          borderColor: 'color-mix(in srgb, var(--sam-color-warning, #f59e0b) 24%, transparent)',
-        }}
+        className={`${badgeClassName} cursor-help focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring`}
       >
-        <AlertTriangle size={10} aria-hidden="true" />
+        <AlertTriangle size={13} aria-hidden="true" />
         {label}
       </button>
       {open && typeof document !== 'undefined' && createPortal(

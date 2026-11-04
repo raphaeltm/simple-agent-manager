@@ -3,7 +3,7 @@ import type {
   ProfilePickerState,
   UpdateProfilePickerRequest,
 } from '@simple-agent-manager/shared';
-import { useModalInteraction } from '@simple-agent-manager/ui';
+import { paneClassName, useModalInteraction } from '@simple-agent-manager/ui';
 import { ChevronDown, ChevronRight, Pencil, Plus, Search, Settings2, X } from 'lucide-react';
 import { type CSSProperties, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -53,11 +53,11 @@ const LAYER_CLASSES = {
 
 function sheetLayout(isMobile: boolean, anchor: DOMRect | null) {
   if (isMobile) {
-    return { className: 'fixed inset-x-0 bottom-0 max-h-[85vh] rounded-t-2xl', style: undefined };
+    return { className: 'fixed inset-x-0 bottom-0 max-h-[85vh] rounded-t-[var(--sam-radius-pane)]', style: undefined };
   }
   if (!anchor) {
     return {
-      className: 'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-xl',
+      className: 'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-[var(--sam-radius-pane)]',
       style: { width: SHEET_WIDTH_PX, maxHeight: SHEET_MAX_HEIGHT_PX } satisfies CSSProperties,
     };
   }
@@ -66,7 +66,7 @@ function sheetLayout(isMobile: boolean, anchor: DOMRect | null) {
     window.innerWidth - SHEET_WIDTH_PX - VIEWPORT_GUTTER_PX
   );
   return {
-    className: 'fixed rounded-xl',
+    className: 'fixed rounded-[var(--sam-radius-pane)]',
     style: {
       left,
       bottom: window.innerHeight - anchor.top + 8,
@@ -123,7 +123,7 @@ export function ProfilePickerSheet(props: ProfilePickerSheetProps) {
     // One root for backdrop and sheet, so isolating the page leaves the backdrop clickable.
     <div data-sam-modal-root="">
       <div
-        className={`fixed inset-0 border-0 glass-backdrop-dim ${layer.backdrop}`}
+        className={`fixed inset-0 border-0 sam-scrim ${layer.backdrop}`}
         onClick={onClose}
         aria-hidden="true"
       />
@@ -134,7 +134,7 @@ export function ProfilePickerSheet(props: ProfilePickerSheetProps) {
         aria-label="Choose a profile"
         tabIndex={-1}
         style={layout.style}
-        className={`${layout.className} ${layer.sheet} flex flex-col overflow-hidden outline-none glass-modal glass-panel-container glass-composited`}
+        className={`${layout.className} ${layer.sheet} ${paneClassName('overlay', { rounded: false })} flex flex-col overflow-hidden outline-none`}
       >
         {isMobile && (
           <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-border-default" />

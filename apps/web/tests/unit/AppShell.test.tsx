@@ -161,13 +161,13 @@ describe('AppShell (global context)', () => {
   it('highlights active nav item based on current route', () => {
     renderAppShell('/projects');
     const projectsLink = screen.getByText('Projects').closest('a');
-    expect(projectsLink?.className).toContain('text-accent');
+    expect(projectsLink).toHaveAttribute('aria-current', 'page');
   });
 
   it('does not highlight inactive nav items', () => {
     renderAppShell('/dashboard');
     const projectsLink = screen.getByText('Projects').closest('a');
-    expect(projectsLink?.className).not.toContain('text-accent');
+    expect(projectsLink).not.toHaveAttribute('aria-current');
   });
 
   it('shows Admin nav item in sidebar for superadmins', () => {
@@ -491,13 +491,13 @@ describe('AppShell (Focus Mode — desktop)', () => {
     renderAppShell();
 
     // Default: full nav rail (220px) and the segmented toggle is visible.
-    expect(gridColumns()).toBe('220px 1fr');
+    expect(gridColumns()).toBe('220px minmax(0, 1fr)');
     expect(screen.getByRole('group', { name: 'Focus Mode' })).toBeInTheDocument();
 
     // Select Focus -> nav collapses to the 56px icon rail, persisted.
     fireEvent.click(screen.getByRole('button', { name: 'Focus', exact: true }));
     expect(setItem).toHaveBeenCalledWith('sam:focus-mode', 'focus');
-    expect(gridColumns()).toBe('56px 1fr');
+    expect(gridColumns()).toBe('56px minmax(0, 1fr)');
 
     // In focus mode the compact cycle control replaces the segmented group.
     const cycle = screen.getByRole('button', {
@@ -505,7 +505,7 @@ describe('AppShell (Focus Mode — desktop)', () => {
     });
     fireEvent.click(cycle);
     expect(setItem).toHaveBeenCalledWith('sam:focus-mode', 'zen');
-    expect(gridColumns()).toBe('0px 1fr');
+    expect(gridColumns()).toBe('0px minmax(0, 1fr)');
   });
 
   it('hydrates the persisted mode across reloads', () => {
@@ -514,7 +514,7 @@ describe('AppShell (Focus Mode — desktop)', () => {
     renderAppShell();
 
     // The hydration effect reads localStorage on mount and collapses to 56px.
-    expect(gridColumns()).toBe('56px 1fr');
+    expect(gridColumns()).toBe('56px minmax(0, 1fr)');
     // The compact cycle control (not the segmented group) is shown in focus mode.
     expect(
       screen.getByRole('button', { name: /Focus Mode: Focus\. Activate to switch to Zen/ }),
@@ -524,16 +524,16 @@ describe('AppShell (Focus Mode — desktop)', () => {
 
   it('cycles default -> focus -> zen -> default with the F key', () => {
     renderAppShell();
-    expect(gridColumns()).toBe('220px 1fr');
+    expect(gridColumns()).toBe('220px minmax(0, 1fr)');
 
     fireEvent.keyDown(window, { key: 'f' });
-    expect(gridColumns()).toBe('56px 1fr');
+    expect(gridColumns()).toBe('56px minmax(0, 1fr)');
 
     fireEvent.keyDown(window, { key: 'f' });
-    expect(gridColumns()).toBe('0px 1fr');
+    expect(gridColumns()).toBe('0px minmax(0, 1fr)');
 
     fireEvent.keyDown(window, { key: 'f' });
-    expect(gridColumns()).toBe('220px 1fr');
+    expect(gridColumns()).toBe('220px minmax(0, 1fr)');
   });
 
   it('disables the column transition under prefers-reduced-motion', () => {
@@ -554,7 +554,7 @@ describe('AppShell (Focus Mode — desktop)', () => {
     document.body.appendChild(input);
     input.focus();
     fireEvent.keyDown(input, { key: 'f' });
-    expect(gridColumns()).toBe('220px 1fr');
+    expect(gridColumns()).toBe('220px minmax(0, 1fr)');
     input.remove();
     expect(search).toBeInTheDocument();
   });
@@ -567,7 +567,7 @@ describe('AppShell (Focus Mode — desktop)', () => {
     document.body.appendChild(select);
     select.focus();
     fireEvent.keyDown(select, { key: 'f' });
-    expect(gridColumns()).toBe('220px 1fr');
+    expect(gridColumns()).toBe('220px minmax(0, 1fr)');
     select.remove();
   });
 });

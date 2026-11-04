@@ -11,6 +11,7 @@ import type { KnowledgeEntityIndexEntry } from '../../durable-objects/project-da
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { resolveAgentMessageChannelsConfig } from '../../services/agent-message-channels';
+import { resolveOperationsPlaybook } from '../../services/fleet-ops/playbook';
 import * as projectDataService from '../../services/project-data';
 import {
   INTERNAL_ERROR,
@@ -175,7 +176,7 @@ export async function handleGetInstructions(
   // entity index, which is what tells the agent the injected set is partial — if ranked
   // retrieval dies, the index alone still says what exists and how to fetch it, instead
   // of the pre-existing behaviour of silently injecting nothing at all.
-  const [knowledgeResult, entityIndexResult, policyResult, ideaSliceResult] =
+  const [knowledgeResult, entityIndexResult, policyResult, ideaSliceResult, playbookResult] =
     await Promise.allSettled([
       projectDataService.getAllHighConfidenceKnowledge(
         env,
@@ -188,7 +189,10 @@ export async function handleGetInstructions(
       projectDataService.getActivePolicies(env, tokenData.projectId),
       // Already isolated internally; a failure degrades to "no idea block".
       buildInstructionIdeaSlice(env, tokenData.projectId, chatSessionId),
+      // Already isolated internally; null outside the Operations project or with tools off.
+      resolveOperationsPlaybook(env, tokenData.projectId),
     ]);
+  const operationsPlaybook = playbookResult.status === 'fulfilled' ? playbookResult.value : null;
 
   // Each slice is shape-checked, not just status-checked. `allSettled` only reports
   // whether the RPC threw; a fulfilled-but-malformed value (an older DO revision mid-deploy,
@@ -353,6 +357,9 @@ export async function handleGetInstructions(
           })
         : []),
       ...(ideaSlice ? ideaSlice.instructions : []),
+      ...(operationsPlaybook
+        ? ['This is the Operations project: follow `operationsPlaybook` when debugging SAM itself.']
+        : []),
       ...knowledgeInstructions,
       ...policyInstructions,
       ...(project.repoProvider === 'artifacts'
@@ -385,6 +392,7 @@ export async function handleGetInstructions(
     // the LLM, for which prose and JSON are equally parseable; a bare id array would need
     // its titles re-duplicated to be correlatable, costing ~2x the inline form; and callers
     // that need structured policy data already have `list_policies` / `get_policy`.
+    ...(operationsPlaybook ? { operationsPlaybook } : {}),
     ...(knowledgeDirectives ? { knowledgeDirectives } : {}),
     ...(policyDirectives ? { policyDirectives } : {}),
   };

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -17,7 +16,6 @@ import (
 
 	"github.com/workspace/vm-agent/internal/bootstrap"
 	"github.com/workspace/vm-agent/internal/config"
-	"github.com/workspace/vm-agent/internal/transferscratch"
 )
 
 type workspaceDeletionIdentity struct {
@@ -94,6 +92,12 @@ func (s *Server) handleSafeDeleteWorkspace(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	defer lock.Unlock()
+	// Holding the lock is the commitment point. The durable intent and inline
+	// attempt below belong to one bounded attempt, not to the caller's connection:
+	// the control plane stops waiting after a few seconds, and cancelling half-done
+	// Docker and filesystem work there only deferred it to the next reconciler tick.
+	attemptCtx, cancelAttempt := context.WithTimeout(context.WithoutCancel(r.Context()), s.workspaceDeletionAttemptTimeout())
+	defer cancelAttempt()
 	if s.store == nil {
 		writeError(w, 503, "deletion persistence unavailable")
 		return
@@ -159,13 +163,13 @@ func (s *Server) handleSafeDeleteWorkspace(w http.ResponseWriter, r *http.Reques
 			d.Standalone = true
 			d.Volume = ""
 		} else {
-			ids, err := deletionDocker(r.Context(), "ps", "-aq", "--no-trunc", "--filter", "label="+s.config.ContainerLabelKey+"="+meta.ContainerLabelVal)
+			ids, err := deletionDocker(attemptCtx, "ps", "-aq", "--no-trunc", "--filter", "label="+s.config.ContainerLabelKey+"="+meta.ContainerLabelVal)
 			if err != nil {
 				writeError(w, 503, err.Error())
 				return
 			}
 			d.Containers = strings.Fields(ids)
-			d.VolumeIdentity, err = deletionVolumeIdentity(r.Context(), d.Volume)
+			d.VolumeIdentity, err = deletionVolumeIdentity(attemptCtx, d.Volume)
 			if err == nil && d.VolumeIdentity != "" {
 				err = validateDeletionVolumeOwnership(d.VolumeIdentity, identity)
 			}
@@ -179,7 +183,10 @@ func (s *Server) handleSafeDeleteWorkspace(w http.ResponseWriter, r *http.Reques
 			return
 		}
 	}
-	if err := s.applyWorkspaceDeletion(r.Context(), &d); err != nil {
+	if err := s.applyWorkspaceDeletion(attemptCtx, &d); err != nil {
+		// The intent is durable; let the reconciler continue now instead of on its
+		// next tick. It takes the lifecycle lock after this handler releases it.
+		s.wakeWorkspaceDeletionReconciler()
 		writeError(w, 503, "physical cleanup pending: "+err.Error())
 		return
 	}
@@ -296,11 +303,7 @@ func (s *Server) applyWorkspaceDeletion(ctx context.Context, d *workspaceDeletio
 	if ino != 0 && (ino != d.RootInode || dev != d.RootDevice) {
 		return errors.New("host root identity changed before removal")
 	}
-	budget := s.config.WorkspaceDeletionMaxEntries
-	if budget <= 0 {
-		budget = config.DefaultWorkspaceDeletionMaxEntries
-	}
-	if err := removeDeletionRoot(ctx, d.Root, d.RootDevice, d.RootInode, budget); err != nil {
+	if err := removeDeletionRoot(ctx, d.Root, d.RootDevice, d.RootInode); err != nil {
 		return err
 	}
 	if err := s.verifyDeletionAbsent(ctx, d); err != nil {
@@ -340,89 +343,6 @@ func containsDeletionID(ids []string, id string) bool {
 	}
 	return false
 }
-func (s *Server) reconcileWorkspaceDeletions(ctx context.Context) {
-	if s.store == nil {
-		return
-	}
-	batch := s.config.WorkspaceDeletionBatchSize
-	if batch <= 0 {
-		batch = config.DefaultWorkspaceDeletionBatchSize
-	}
-	items, err := s.store.WorkspaceDeletions(batch)
-	if err != nil {
-		return
-	}
-	for _, payload := range items {
-		var d workspaceDeletionIntent
-		if json.Unmarshal([]byte(payload), &d) != nil || d.Finalized {
-			continue
-		}
-		lock := s.workspaceLifecycleLock(d.WorkspaceID)
-		if lock.Lock(ctx) != nil {
-			return
-		}
-		attemptCtx, cancel := context.WithTimeout(ctx, s.workspaceDeletionAttemptTimeout())
-		err := s.applyWorkspaceDeletion(attemptCtx, &d)
-		cancel()
-		if err != nil {
-			_ = s.saveWorkspaceDeletion(&d)
-		}
-		lock.Unlock()
-		if err != nil {
-			slog.Warn("Workspace physical cleanup remains pending", "workspace", d.WorkspaceID, "error", err)
-		}
-	}
-}
-func (s *Server) startWorkspaceDeletionReconciler() {
-	lifetime, cancelLifetime := context.WithCancel(context.Background())
-	s.workspaceLifecycleMu.Lock()
-	if s.workspaceDeletionDone != nil {
-		s.workspaceLifecycleMu.Unlock()
-		cancelLifetime()
-		return
-	}
-	s.workspaceDeletionCancel = cancelLifetime
-	s.workspaceDeletionDone = make(chan struct{})
-	done := s.workspaceDeletionDone
-	s.workspaceLifecycleMu.Unlock()
-	go func() {
-		defer close(done)
-		interval := s.config.WorkspaceDeletionRetryInterval
-		if interval <= 0 {
-			interval = config.DefaultWorkspaceDeletionRetryInterval
-		}
-		ticker := time.NewTicker(interval)
-		defer ticker.Stop()
-		for {
-			ctx, cancel := context.WithTimeout(lifetime, interval)
-			s.reconcileWorkspaceDeletions(ctx)
-			s.inventoryWorkspaceCleanup(ctx)
-			retention := s.config.WorkspaceDeletionTombstoneRetention
-			if retention <= 0 {
-				retention = config.DefaultWorkspaceDeletionTombstoneRetention
-			}
-			batch := s.config.WorkspaceDeletionBatchSize
-			if batch <= 0 {
-				batch = config.DefaultWorkspaceDeletionBatchSize
-			}
-			if s.store != nil {
-				if _, err := s.store.PruneFinalizedWorkspaceDeletions(time.Now().Add(-retention), batch); err != nil {
-					slog.Warn("Workspace deletion tombstone cleanup failed", "error", err)
-				}
-			}
-			transferscratch.SweepFromEnvironment(ctx)
-			cancel()
-			select {
-			case <-s.done:
-				return
-			case <-lifetime.Done():
-				return
-			case <-ticker.C:
-			}
-		}
-	}()
-}
-
 func (s *Server) requireNoWorkspaceDeletion(id string) error {
 	if s.store == nil {
 		return nil
@@ -458,16 +378,4 @@ func (s *Server) workspaceDeletionAttemptTimeout() time.Duration {
 		return s.config.WorkspaceDeletionAttemptTimeout
 	}
 	return config.DefaultWorkspaceDeletionAttemptTimeout
-}
-
-func (s *Server) stopWorkspaceDeletionReconciler() {
-	s.workspaceLifecycleMu.Lock()
-	cancel, done := s.workspaceDeletionCancel, s.workspaceDeletionDone
-	s.workspaceLifecycleMu.Unlock()
-	if cancel != nil {
-		cancel()
-	}
-	if done != nil {
-		<-done
-	}
 }

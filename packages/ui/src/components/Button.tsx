@@ -1,6 +1,11 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
-type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost';
+/**
+ * `accent` and `raised` are the SAM Glass variants: a lit green primary with a glow, and a
+ * secondary that sits raised on the glass. Use them on SAM Glass surfaces; the older variants
+ * stay for screens that have not moved over yet.
+ */
+type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost' | 'accent' | 'raised';
 type ButtonSize = 'sm' | 'md' | 'lg';
 
 export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {
@@ -17,6 +22,9 @@ const variantClasses: Record<ButtonVariant, string> = {
   danger: 'bg-danger text-fg-on-accent border border-transparent',
   ghost:
     'bg-transparent text-fg-primary border border-border-default hover:bg-[var(--sam-form-focus-inset)]',
+  accent:
+    'border-0 text-[var(--sam-on-accent)] bg-[linear-gradient(180deg,var(--sam-accent-top),var(--sam-accent-bottom))] shadow-[inset_0_1px_0_rgb(255_255_255/0.32),inset_0_-1px_0_rgb(0_0_0/0.2),var(--sam-shadow-accent)] hover:brightness-105',
+  raised: 'sam-raised border-0 text-fg-primary hover:brightness-110',
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
@@ -34,7 +42,7 @@ export function buttonClassName({
   size = 'md',
   disabled = false,
 }: { variant?: ButtonVariant; size?: ButtonSize; disabled?: boolean } = {}): string {
-  return `inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md font-semibold transition-all duration-150 ease-in-out ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${variantClasses[variant]} ${sizeClasses[size]}`;
+  return `inline-flex items-center justify-center gap-2 whitespace-nowrap ${variant === 'accent' || variant === 'raised' ? 'rounded-[var(--sam-radius-control)]' : 'rounded-md'} font-semibold transition-all duration-150 ease-in-out ${disabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${variantClasses[variant]} ${sizeClasses[size]}`;
 }
 
 export function Button({

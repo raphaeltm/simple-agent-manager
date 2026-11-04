@@ -68,20 +68,14 @@ export interface UnresolvedManifest {
  * Async function that resolves a tag to a digest.
  * Provided by the API layer at submission time.
  */
-export type ImageResolver = (
-  registry: string,
-  repository: string,
-  tag: string,
-) => Promise<string>;
+export type ImageResolver = (registry: string, repository: string, tag: string) => Promise<string>;
 
 // =============================================================================
 // Parse result
 // =============================================================================
 
 export type ComposeParseResult =
-  | { success: true; manifest: UnresolvedManifest }
-  | { success: false; errors: ComposeParseError[] };
+  { success: true; manifest: UnresolvedManifest } | { success: false; errors: ComposeParseError[] };
 
 export type ComposeResolveResult =
-  | { success: true; manifest: DeploymentManifest }
-  | { success: false; errors: ComposeParseError[] };
+  { success: true; manifest: DeploymentManifest } | { success: false; errors: ComposeParseError[] };

@@ -171,7 +171,7 @@ function PermissionOptions({
 }) {
   return (
     <div
-      className="flex min-w-0 flex-wrap gap-2 pr-14 sm:pr-0"
+      className="flex min-w-0 flex-wrap gap-2 pr-14"
       aria-label="Permission options"
       data-testid="acp-permission-options"
     >
@@ -222,7 +222,7 @@ function PermissionDetails({
     );
   if (state === 'error')
     return (
-      <div className="flex flex-wrap items-center gap-2 pr-12 sm:pr-0" role="alert">
+      <div className="flex flex-wrap items-center gap-2 pr-12" role="alert">
         <p className="text-sm text-warning-fg">
           Secure permission details are unavailable. No option was inferred.
         </p>
@@ -256,7 +256,7 @@ function SubmissionStatus({
   if (!submission?.message) return null;
   return (
     <div
-      className="mt-3 flex flex-wrap items-center gap-2 pr-12 sm:pr-0"
+      className="mt-3 flex flex-wrap items-center gap-2 pr-12"
       role="status"
       data-testid="acp-permission-submission-status"
     >
@@ -296,7 +296,7 @@ function PermissionCardContent({
   return (
     <div className="ml-9 min-w-0">
       <p
-        className="mt-1 break-words pr-12 text-sm text-fg-secondary sm:pr-0"
+        className="mt-1 break-words pr-12 text-sm text-fg-secondary"
         data-testid="acp-permission-status-description"
       >
         {!canAnswer && card.isPending
@@ -316,7 +316,7 @@ function PermissionCardContent({
         </div>
       )}
       {card.mayReveal && card.choiceError && (
-        <p className="mt-3 pr-12 text-sm text-danger sm:pr-0" role="alert">
+        <p className="mt-3 pr-12 text-sm text-danger" role="alert">
           {card.choiceError}
         </p>
       )}

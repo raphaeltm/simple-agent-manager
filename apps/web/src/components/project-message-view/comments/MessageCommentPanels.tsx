@@ -200,10 +200,10 @@ export function DesktopCommentRail({
 
   return (
     <aside
-      className="glass-panel-container glass-composited glass-modal relative hidden min-h-0 w-80 max-w-[42vw] shrink-0 flex-col overflow-hidden rounded-none border-y-0 border-r-0 border-l border-border-default shadow-xl lg:flex 2xl:w-[24rem]"
+      className="relative hidden min-h-0 w-80 max-w-[42vw] shrink-0 flex-col overflow-hidden border-l border-[var(--sam-hairline)] lg:flex 2xl:w-[24rem]"
       aria-label="Session comments"
     >
-      <header className="flex min-h-[44px] shrink-0 items-center gap-2 border-b border-border-default px-3 py-2">
+      <header className="flex min-h-[52px] shrink-0 items-center gap-2 border-b border-[var(--sam-hairline)] px-3 py-2">
         <MessageSquareQuote size={16} className="shrink-0 text-fg-muted" aria-hidden="true" />
         <div className="min-w-0 flex-1">
           <h2 className="m-0 text-sm font-semibold text-fg-primary">Comments</h2>

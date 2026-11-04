@@ -79,10 +79,13 @@ const taskRunnerSource = [
   'types.ts',
   'node-steps.ts',
   'node-selection.ts',
+  'node-selection-shared.ts',
   'workspace-steps.ts',
   'agent-session-step.ts',
   'state-machine.ts',
   'helpers.ts',
+  // Last: the warm-claim tests below slice from `tryClaimWarmNode` to the end.
+  'warm-node-claim.ts',
 ]
   .map((f) => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8'))
   .join('\n');
@@ -132,8 +135,7 @@ describe('concurrent warm pool claiming safety', () => {
   describe('TaskRunner DO warm claiming uses same pattern', () => {
     it('TaskRunner tryClaimWarmNode re-checks D1 freshness', () => {
       const section = taskRunnerSource.slice(
-        taskRunnerSource.indexOf('async function tryClaimWarmNode('),
-        taskRunnerSource.indexOf('async function findNodeWithCapacity(')
+        taskRunnerSource.indexOf('async function tryClaimWarmNode(')
       );
       expect(section).toContain("status = 'running' AND warm_since IS NOT NULL");
       // Fresh check query
@@ -149,16 +151,14 @@ describe('concurrent warm pool claiming safety', () => {
 
     it('TaskRunner tryClaimWarmNode catches claim failures and tries next', () => {
       const section = taskRunnerSource.slice(
-        taskRunnerSource.indexOf('async function tryClaimWarmNode('),
-        taskRunnerSource.indexOf('async function findNodeWithCapacity(')
+        taskRunnerSource.indexOf('async function tryClaimWarmNode(')
       );
       expect(section).toContain('} catch (error) {');
     });
 
     it('TaskRunner tryClaimWarmNode returns null if no warm node claimed', () => {
       const section = taskRunnerSource.slice(
-        taskRunnerSource.indexOf('async function tryClaimWarmNode('),
-        taskRunnerSource.indexOf('async function findNodeWithCapacity(')
+        taskRunnerSource.indexOf('async function tryClaimWarmNode(')
       );
       expect(section).toContain('return null');
     });

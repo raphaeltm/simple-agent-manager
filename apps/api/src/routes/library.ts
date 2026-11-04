@@ -31,7 +31,6 @@ import {
   validateDirectory,
   validateFilename,
 } from '../services/file-library';
-import { getMaxSearchLength } from '../services/file-library-config';
 import {
   contentDispositionFilename,
   downloadContentType,
@@ -40,39 +39,19 @@ import {
   previewHeaders,
 } from '../services/file-serving-policy';
 import {
+  assertDebugPackageVisibleTo,
+  debugPackageListOptions,
+  isDebugPackageDirectory,
+  userMayReadDebugPackages,
+} from '../services/fleet-ops/debug-package-access';
+import {
   getPreviewHostname,
   getPreviewUrlTtlSeconds,
   mintPreviewPath,
 } from '../services/interactive-preview';
+import { getEncryptionKey, requireParam, validateSearchLength } from './library-route-helpers';
 
 const libraryRoutes = new Hono<{ Bindings: Env }>();
-
-// ---------------------------------------------------------------------------
-// Helper: get encryption key
-// ---------------------------------------------------------------------------
-
-function validateSearchLength(search: string | undefined, env: Env): void {
-  if (search && search.length > getMaxSearchLength(env)) {
-    throw errors.badRequest(
-      `Search query exceeds maximum length of ${getMaxSearchLength(env)} characters`
-    );
-  }
-}
-
-function getEncryptionKey(env: Env): string {
-  const key = env.LIBRARY_ENCRYPTION_KEY ?? env.ENCRYPTION_KEY;
-  if (!key) {
-    throw errors.internal('Encryption key not configured');
-  }
-  return key;
-}
-
-function requireParam(value: string | undefined, name: string): string {
-  if (!value) {
-    throw errors.badRequest(`Missing required parameter: ${name}`);
-  }
-  return value;
-}
 
 // ---------------------------------------------------------------------------
 // POST /upload — multipart file upload
@@ -229,7 +208,14 @@ libraryRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
     limit: query['limit'] ? parseInt(query['limit'], 10) : undefined,
   };
 
-  const result = await listFiles(db, c.env, projectId, filters);
+  const mayReadDebugPackages = userMayReadDebugPackages(auth.user.role);
+  const result = await listFiles(
+    db,
+    c.env,
+    projectId,
+    filters,
+    debugPackageListOptions(mayReadDebugPackages)
+  );
   return c.json(result, 200);
 });
 
@@ -251,8 +237,11 @@ libraryRoutes.get('/directories', requireAuth(), requireApproved(), async (c) =>
   const search = c.req.query('search') || undefined;
   validateSearchLength(search, c.env);
   const directories = await listDirectories(db, projectId, parentDirectory, c.env, search);
+  const visible = userMayReadDebugPackages(auth.user.role)
+    ? directories
+    : directories.filter((d) => !isDebugPackageDirectory(`${d.path.replace(/\/$/, '')}/`));
 
-  return c.json({ directories }, 200);
+  return c.json({ directories: visible }, 200);
 });
 
 // ---------------------------------------------------------------------------
@@ -269,6 +258,7 @@ libraryRoutes.get('/:fileId', requireAuth(), requireApproved(), async (c) => {
   await requireProjectAccess(db, projectId, userId);
 
   const result = await getFile(db, projectId, fileId);
+  assertDebugPackageVisibleTo(auth.user.role, result.file.directory);
   return c.json(result, 200);
 });
 
@@ -294,6 +284,7 @@ libraryRoutes.get('/:fileId/download', requireAuth(), requireApproved(), async (
       timeoutHandle = setTimeout(() => reject(errors.internal('Download timed out')), timeoutMs);
     }),
   ]).finally(() => clearTimeout(timeoutHandle));
+  assertDebugPackageVisibleTo(auth.user.role, file.directory);
 
   return new Response(data, {
     status: 200,
@@ -367,6 +358,7 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
   // inline-previewable (rejected here) — so no extension-sniffed HTML/SVG is
   // ever served in a way the browser would execute.
   const { file } = await getFile(db, projectId, fileId);
+  assertDebugPackageVisibleTo(auth.user.role, file.directory);
   const effectiveMime = resolveEffectiveMimeType(file.mimeType, file.filename);
   if (!isInlinePreviewable(effectiveMime)) {
     throw errors.badRequest('File type is not supported for inline preview');

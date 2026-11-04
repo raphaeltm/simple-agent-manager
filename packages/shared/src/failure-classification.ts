@@ -109,7 +109,8 @@ const FAILURE_RULES: FailureRule[] = [
     code: 'model-unavailable',
     label: 'Model unavailable for this account',
     explanation: 'The provider rejected this model for the current account or credential.',
-    guidance: 'Check model access with the provider. Changing a working login alone may not grant access.',
+    guidance:
+      'Check model access with the provider. Changing a working login alone may not grant access.',
     retryable: false,
     diagnosable: true,
     patterns: [/^model_unavailable$/],
@@ -117,8 +118,10 @@ const FAILURE_RULES: FailureRule[] = [
   {
     code: 'unsupported-loopback-auth',
     label: 'Sign-in flow unavailable',
-    explanation: 'This service requires a local browser callback that this session cannot complete.',
-    guidance: 'Use a connection method supported by that service. This session cannot complete its local callback flow.',
+    explanation:
+      'This service requires a local browser callback that this session cannot complete.',
+    guidance:
+      'Use a connection method supported by that service. This session cannot complete its local callback flow.',
     retryable: false,
     diagnosable: true,
     patterns: [/^unsupported_loopback_auth$/],
@@ -127,7 +130,8 @@ const FAILURE_RULES: FailureRule[] = [
     code: 'mcp-auth-required',
     label: 'Tool connection needs sign-in',
     explanation: 'An MCP service rejected the tool connection because it needs authentication.',
-    guidance: 'Review the personal or project MCP connection. A project administrator may need to update a shared server. Its service may require sign-in rather than a bearer token.',
+    guidance:
+      'Review the personal or project MCP connection. A project administrator may need to update a shared server. Its service may require sign-in rather than a bearer token.',
     retryable: true,
     diagnosable: true,
     patterns: [/^mcp_endpoint_needs_auth$/],
@@ -136,7 +140,8 @@ const FAILURE_RULES: FailureRule[] = [
     code: 'model-credential-missing',
     label: 'Agent connection missing',
     explanation: 'The selected agent has no usable provider connection for this session.',
-    guidance: 'The session creator can connect the agent in Settings using the guided sign-in or supported key method.',
+    guidance:
+      'The session creator can connect the agent in Settings using the guided sign-in or supported key method.',
     retryable: true,
     diagnosable: true,
     patterns: [/^model_provider_credential_missing$/],
@@ -311,8 +316,12 @@ const UNKNOWN_CLASSIFICATION: FailureClassification = {
 // These codes are emitted by the VM task callback. Never infer them from an
 // execution step, conversation text, URL, schema field, or wrapper metadata.
 const STRUCTURAL_FAILURE_CODES = new Set<FailureCode>([
-  'model-unavailable', 'unsupported-loopback-auth', 'mcp-auth-required',
-  'model-credential-missing', 'model-credential-rejected', 'agent-prompt-failed',
+  'model-unavailable',
+  'unsupported-loopback-auth',
+  'mcp-auth-required',
+  'model-credential-missing',
+  'model-credential-rejected',
+  'agent-prompt-failed',
 ]);
 
 /**

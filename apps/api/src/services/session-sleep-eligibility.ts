@@ -4,15 +4,18 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
+import { resolveAdminSetting } from './admin-settings';
 import * as projectDataService from './project-data';
 import { parseProviderLimitWait, providerLimitNeedsImmediateSleep } from './provider-limit-policy';
 import {
   classifySessionIdleness,
+  DEFAULT_SESSION_STALE_TURN_NO_WORK_MINUTES,
   parseHarnessWorkConfig,
   type SessionIdlenessActivityState,
   type SessionIdlenessClassification,
   sessionWorkAnchor,
 } from './session-idleness';
+import { resolveSleepRequirement, type SleepRequirement } from './session-sleep-requirement';
 import {
   DEFAULT_SESSION_SLEEP_AFTER_MS,
   deferSessionSnapshotSleepBeforeClaim,
@@ -39,19 +42,35 @@ export function sessionSleepDeferralReason(
 }
 
 /**
+ * `operations.sessionStaleTurnNoWorkMinutes` in milliseconds; null when an admin set it to 0.
+ * `resolveAdminSetting` answers the code default during a settings outage, so the bound holds.
+ */
+export async function resolveSessionStaleTurnMs(env: Env): Promise<number | null> {
+  const minutes = Number(await resolveAdminSetting(env, 'operations.sessionStaleTurnNoWorkMinutes'));
+  const effective = Number.isFinite(minutes) ? minutes : DEFAULT_SESSION_STALE_TURN_NO_WORK_MINUTES;
+  return effective > 0 ? effective * 60_000 : null;
+}
+
+/**
  * The gate every sleep teardown asks before its point of no return: has the agent handed
  * control back with nothing it started still in flight (`policy: 'prompt-turn-ended'`)?
  * It asks the SAFETY question only. Whoever reached the teardown already decided the
  * session should sleep: the sweep enforced the idle interval in its eligibility check,
  * and a person pressing Sleep on a session that just went idle must not wait for it.
+ * It applies the same stale-turn bound as the eligibility check, or a session the sweep
+ * found stale would be refused here and spend its retry budget.
  */
 export function sleepTeardownSafetyGate(
   env: Env,
-  task: { taskStatus: string | null; taskCompletedAt: string | null }
-): (state: SessionIdlenessActivityState | null) => SessionIdlenessClassification {
+  task: { taskStatus: string | null; taskCompletedAt: string | null },
+  requirement: SleepRequirement = 'normal'
+): (state: SessionIdlenessActivityState | null) => Promise<SessionIdlenessClassification> {
+  if (requirement === 'required') return async (state) => classifyRequiredSleepTurn(state);
   const idleAfterMs = parsePositiveInt(env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS);
   const harnessWorkConfig = parseHarnessWorkConfig(env);
-  return (state) =>
+  // Read once per gate and only for an open turn: an idle session never consults the bound.
+  let staleTurnMs: Promise<number | null> | undefined;
+  return async (state) =>
     classifySessionIdleness({
       taskStatus: task.taskStatus,
       taskCompletedAt: task.taskCompletedAt,
@@ -60,7 +79,48 @@ export function sleepTeardownSafetyGate(
       idleAfterMs,
       harnessWorkConfig,
       policy: 'prompt-turn-ended',
+      staleTurnMs:
+        state && state.activity !== 'idle'
+          ? await (staleTurnMs ??= resolveSessionStaleTurnMs(env))
+          : null,
     });
+}
+
+/**
+ * The gate for a REQUIRED sleep (`session-sleep-requirement.ts`), asked after
+ * `endAgentTurnForRequiredSleep` has ended the turn. Only a running turn blocks it: a harness
+ * lease, the idle interval, a completed task's drain and an unknown state do not, because a
+ * required sleep must not fail (policy a3780107).
+ */
+export function classifyRequiredSleepTurn(
+  state: SessionIdlenessActivityState | null
+): SessionIdlenessClassification {
+  const activity = state?.activity ?? null;
+  // `recovering` is not a turn here: the required sleep has just cancelled the turn, and the
+  // VM restarts the killed agent idle, reporting `recovering` while it does.
+  if (activity === 'prompting') {
+    return { idle: false, conclusive: true, reason: 'prompt_turn_active', activity };
+  }
+  return { idle: true, conclusive: true, reason: 'idle', activity };
+}
+
+/**
+ * Did something between two reads invalidate the sleep? A required sleep is aborted only by a
+ * NEW prompt turn. A turn still running at a read is refused by the required gate
+ * (`classifyRequiredSleepTurn`); a turn that started AND ended between two reads is caught here,
+ * by the VM's own turn-start clock, which only a new prompt moves. Harness, work-clock and
+ * `recovering` changes are expected while the cancelled agent restarts.
+ */
+export function sleepStateChanged(
+  before: SessionIdlenessActivityState | null,
+  after: SessionIdlenessActivityState | null,
+  requirement: SleepRequirement
+): boolean {
+  if (requirement === 'required') {
+    return (after?.reportedPromptStartedAt ?? 0) > (before?.reportedPromptStartedAt ?? 0);
+  }
+  if (!before || !after) return before !== after;
+  return idlenessStateChanged(before, after);
 }
 
 /**
@@ -95,6 +155,8 @@ export async function checkAutomaticSessionSleepEligibility(
     userId: string;
     sleepStatus?: string | null;
     sleepClaimId?: string | null;
+    /** The episode is the retry of a person's failed Sleep (`isPersonRequiredSleepEpisode`). */
+    requiredByPerson?: boolean;
   },
   now = new Date()
 ): Promise<AutomaticSessionSleepEligibility> {
@@ -109,8 +171,14 @@ export async function checkAutomaticSessionSleepEligibility(
       taskCompletedAt: sql<
         string | null
       >`COALESCE(${schema.tasks.completedAt}, ${schema.tasks.updatedAt})`,
+      nodeCreatedAt: schema.nodes.createdAt,
+      nodeRole: schema.nodes.nodeRole,
+      nodeClass: schema.nodes.nodeClass,
+      nodeAutoProvisioned: sql<number>`EXISTS (SELECT 1 FROM tasks auto_task
+        WHERE auto_task.auto_provisioned_node_id = ${schema.workspaces.nodeId})`,
     })
     .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
     .leftJoin(
       schema.sessionSummaries,
       eq(schema.sessionSummaries.id, schema.workspaces.chatSessionId)
@@ -132,6 +200,12 @@ export async function checkAutomaticSessionSleepEligibility(
   if (!workspace?.projectId || !workspace.chatSessionId) {
     return { eligible: false, reason: 'workspace_metadata_missing' };
   }
+  // A person's failed Sleep, or a node past its absolute lifetime plus the leeway: the claimed
+  // sleep ends the turn itself (`sleepWorkspaceSession`), so nothing here may defer it.
+  const requirement = await resolveSleepRequirement(env, workspace, now, {
+    requestedByPerson: input.requiredByPerson === true,
+  });
+  if (requirement === 'required') return { eligible: true };
   const [agentSession] = await db
     .select({ id: schema.agentSessions.id })
     .from(schema.agentSessions)
@@ -156,19 +230,24 @@ export async function checkAutomaticSessionSleepEligibility(
     now,
     idleAfterMs,
     harnessWorkConfig: parseHarnessWorkConfig(env),
+    // Read only for an open turn: an idle session never consults the bound.
+    staleTurnMs:
+      state && state.activity !== 'idle' ? await resolveSessionStaleTurnMs(env) : null,
     // The unattended scheduler is the only caller that also waits out the idle
     // interval before reclaiming a session on its own initiative.
     // Only long known resets (or blocked/unknown waits) request immediate sleep.
     // Short resets retain the ordinary idle interval; safety gates always apply.
+    // Past the node's absolute lifetime the session sleeps as soon as its turn ends.
     policy:
-      ['provider_limit_waiting', 'provider_limit_blocked'].includes(
+      requirement === 'deadline' ||
+      (['provider_limit_waiting', 'provider_limit_blocked'].includes(
         workspace.admissionState ?? ''
       ) &&
-      providerLimitNeedsImmediateSleep(
-        parseProviderLimitWait(workspace.providerLimitWaitJson),
-        now.getTime(),
-        idleAfterMs
-      )
+        providerLimitNeedsImmediateSleep(
+          parseProviderLimitWait(workspace.providerLimitWaitJson),
+          now.getTime(),
+          idleAfterMs
+        ))
         ? 'prompt-turn-ended'
         : 'idle-interval-elapsed',
   });
