@@ -32,8 +32,16 @@ export const FLEET_OPS_SETTINGS = [
     key: 'debugPackagePurgeBatchSize',
     defaultValue: 50,
     description:
-      'Expired debug packages the daily purge deletes per run. Deleted in one batch, so the maximum stays under the database statement parameter limit.',
+      'Expired debug packages the daily purge deletes per batch. A batch is one statement, so the maximum stays under the database parameter limit; the purge runs batches until none are left or its deadline passes.',
     range: { min: 1, max: 90 },
+  },
+  {
+    name: 'operations.debugPackagePurgeDeadlineMs',
+    key: 'debugPackagePurgeDeadlineMs',
+    defaultValue: 20_000,
+    description:
+      'Milliseconds the daily debug package purge keeps deleting batches before it stops; anything left continues the next day.',
+    range: { min: 1_000, max: 120_000 },
   },
   {
     name: 'operations.opsAnomalyEmptyNodeGraceMs',

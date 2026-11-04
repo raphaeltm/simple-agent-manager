@@ -401,6 +401,36 @@ describe('debug package reads and retention', () => {
     expect([...r2Objects.keys()]).toEqual(['key-user-upload']);
   });
 
+  it('clears more expired packages than one batch in a single run (rule 81)', async () => {
+    const count = FLEET_OPS_DEFAULTS.debugPackagePurgeBatchSize * 2 + 30;
+    for (let i = 0; i < count; i++) {
+      libraryFile(`bulk-${String(i).padStart(4, '0')}`, {});
+    }
+
+    const result = await purgeExpiredDebugPackages(env, FLEET_OPS_DEFAULTS);
+
+    expect(result).toMatchObject({ deleted: count, failed: 0, batches: 3, complete: true });
+    expect(remainingIds()).toEqual([]);
+  });
+
+  it('stops at its deadline and says the backlog is not finished', async () => {
+    for (let i = 0; i < FLEET_OPS_DEFAULTS.debugPackagePurgeBatchSize + 5; i++) {
+      libraryFile(`late-${String(i).padStart(4, '0')}`, {});
+    }
+    // A clock that passes the deadline once the first batch has run.
+    let tick = 0;
+    const clock = () => (tick++ < 2 ? 0 : FLEET_OPS_DEFAULTS.debugPackagePurgeDeadlineMs + 1);
+
+    const result = await purgeExpiredDebugPackages(env, FLEET_OPS_DEFAULTS, Date.now(), clock);
+
+    expect(result).toMatchObject({
+      deleted: FLEET_OPS_DEFAULTS.debugPackagePurgeBatchSize,
+      batches: 1,
+      complete: false,
+    });
+    expect(remainingIds()).toHaveLength(5);
+  });
+
   it('keeps the rows when the R2 delete fails, so the next run retries', async () => {
     libraryFile('unaudited-pkg', {});
     env = {

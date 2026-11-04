@@ -14,11 +14,11 @@ export async function runDebugPackagePurge(env: Env, cron: string): Promise<void
     log.info('cron.completed', {
       cron,
       type: 'debug-package-purge',
-      debugPackagePurgeSkipped: 'skipped' in result ? result.skipped : undefined,
-      debugPackageRetentionDays: 'retentionDays' in result ? result.retentionDays : undefined,
+      debugPackageRetentionDays: result.retentionDays,
       debugPackagesDeleted: result.deleted,
       debugPackagesFailed: result.failed,
-      debugPackagePurgeBatchFull: 'batchFull' in result ? result.batchFull : undefined,
+      debugPackagePurgeBatches: result.batches,
+      debugPackagePurgeComplete: result.complete,
     });
   } catch (err) {
     log.error('cron.debug_package_purge_failed', { cron, error: String(err) });
