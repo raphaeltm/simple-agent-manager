@@ -244,7 +244,7 @@ export async function runSessionSleepFallback(
         requestTimeoutMs: getNodeAgentBackgroundRequestTimeoutMs(env),
       });
     }
-    const classify = sleepTeardownSafetyGate(env, workspace, requirement);
+    const classify = await sleepTeardownSafetyGate(env, workspace, requirement);
     const stateBefore = await projectDataService.getSessionState(
       env,
       workspace.projectId,

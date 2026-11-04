@@ -64,7 +64,7 @@ async function verifyAndBeginSleepTeardown(
     workspace.projectId,
     agentSession.id
   );
-  const classifyGate = sleepTeardownSafetyGate(env, workspace, requirement);
+  const classifyGate = await sleepTeardownSafetyGate(env, workspace, requirement);
   // A required sleep has already ended the turn; an unknown state must not block it.
   const stateMissingBlocks = requirement !== 'required';
   const idlenessBefore = classifyGate(stateBefore);

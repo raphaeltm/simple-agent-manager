@@ -4,10 +4,12 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
+import { resolveAdminSetting } from './admin-settings';
 import * as projectDataService from './project-data';
 import { parseProviderLimitWait, providerLimitNeedsImmediateSleep } from './provider-limit-policy';
 import {
   classifySessionIdleness,
+  DEFAULT_SESSION_STALE_TURN_NO_WORK_MINUTES,
   parseHarnessWorkConfig,
   type SessionIdlenessActivityState,
   type SessionIdlenessClassification,
@@ -40,20 +42,33 @@ export function sessionSleepDeferralReason(
 }
 
 /**
+ * `operations.sessionStaleTurnNoWorkMinutes` in milliseconds; null when an admin set it to 0.
+ * `resolveAdminSetting` answers the code default during a settings outage, so the bound holds.
+ */
+export async function resolveSessionStaleTurnMs(env: Env): Promise<number | null> {
+  const minutes = Number(await resolveAdminSetting(env, 'operations.sessionStaleTurnNoWorkMinutes'));
+  const effective = Number.isFinite(minutes) ? minutes : DEFAULT_SESSION_STALE_TURN_NO_WORK_MINUTES;
+  return effective > 0 ? effective * 60_000 : null;
+}
+
+/**
  * The gate every sleep teardown asks before its point of no return: has the agent handed
  * control back with nothing it started still in flight (`policy: 'prompt-turn-ended'`)?
  * It asks the SAFETY question only. Whoever reached the teardown already decided the
  * session should sleep: the sweep enforced the idle interval in its eligibility check,
  * and a person pressing Sleep on a session that just went idle must not wait for it.
+ * It applies the same stale-turn bound as the eligibility check, or a session the sweep
+ * found stale would be refused here and spend its retry budget.
  */
-export function sleepTeardownSafetyGate(
+export async function sleepTeardownSafetyGate(
   env: Env,
   task: { taskStatus: string | null; taskCompletedAt: string | null },
   requirement: SleepRequirement = 'normal'
-): (state: SessionIdlenessActivityState | null) => SessionIdlenessClassification {
+): Promise<(state: SessionIdlenessActivityState | null) => SessionIdlenessClassification> {
   if (requirement === 'required') return classifyRequiredSleepTurn;
   const idleAfterMs = parsePositiveInt(env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS);
   const harnessWorkConfig = parseHarnessWorkConfig(env);
+  const staleTurnMs = await resolveSessionStaleTurnMs(env);
   return (state) =>
     classifySessionIdleness({
       taskStatus: task.taskStatus,
@@ -63,6 +78,7 @@ export function sleepTeardownSafetyGate(
       idleAfterMs,
       harnessWorkConfig,
       policy: 'prompt-turn-ended',
+      staleTurnMs,
     });
 }
 
@@ -210,6 +226,7 @@ export async function checkAutomaticSessionSleepEligibility(
     now,
     idleAfterMs,
     harnessWorkConfig: parseHarnessWorkConfig(env),
+    staleTurnMs: await resolveSessionStaleTurnMs(env),
     // The unattended scheduler is the only caller that also waits out the idle
     // interval before reclaiming a session on its own initiative.
     // Only long known resets (or blocked/unknown waits) request immediate sleep.

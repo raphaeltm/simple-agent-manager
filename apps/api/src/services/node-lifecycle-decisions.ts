@@ -14,7 +14,11 @@ import { ulid } from '../lib/ulid';
 import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from './workspace-resource-capacity';
 
 export type NodeLifecycleDecisionSource =
-  'node_lifecycle' | 'cleanup_sweep' | 'warm_handoff' | 'operations_action';
+  | 'node_lifecycle'
+  | 'cleanup_sweep'
+  | 'warm_handoff'
+  | 'operations_action'
+  | 'deployment_teardown';
 
 export type NodeLifecycleDecision =
   // NodeLifecycle DO

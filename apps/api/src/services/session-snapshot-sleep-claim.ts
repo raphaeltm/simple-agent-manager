@@ -23,7 +23,7 @@ type SnapshotLeaseEnv = Env & {
   SESSION_SLEEP_MAX_ATTEMPTS?: string;
 };
 
-function sessionSleepClaimLeaseMs(env: Env): number {
+export function sessionSleepClaimLeaseMs(env: Env): number {
   return parsePositiveInt(
     (env as SnapshotLeaseEnv).SESSION_SLEEP_CLAIM_LEASE_MS,
     DEFAULT_SESSION_SLEEP_CLAIM_LEASE_MS

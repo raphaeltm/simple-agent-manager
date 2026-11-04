@@ -68,6 +68,14 @@ export const FLEET_OPS_SETTINGS = [
     range: { min: 1, max: 7 * 24 * 60 },
   },
   {
+    name: 'operations.opsAnomalyDestroyingNodeHours',
+    key: 'destroyingNodeHours',
+    defaultValue: 6,
+    description:
+      'Hours a node may stay destroying, counted from its last heartbeat, before its unfinished teardown counts as an anomaly.',
+    range: { min: 1, max: 30 * 24 },
+  },
+  {
     name: 'operations.opsAnomalyLookbackHours',
     key: 'lookbackHours',
     defaultValue: 24,
