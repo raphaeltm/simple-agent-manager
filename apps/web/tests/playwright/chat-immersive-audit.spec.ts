@@ -141,7 +141,9 @@ const SLOW_MOTION = 0.2;
 async function chromeSlots(page: Page, options: { withoutTransform?: boolean } = {}) {
   return page.evaluate(({ withoutTransform }) => {
     const out: Record<string, { x: number; y: number }> = {};
-    for (const el of Array.from(document.querySelectorAll<HTMLElement>('[data-immersive-chrome]'))) {
+    for (const el of Array.from(
+      document.querySelectorAll<HTMLElement>('[data-immersive-chrome]')
+    )) {
       if (el.getClientRects().length === 0) continue;
       const r = el.getBoundingClientRect();
       const t = withoutTransform ? new DOMMatrix(getComputedStyle(el).transform) : new DOMMatrix();
@@ -154,9 +156,11 @@ async function chromeSlots(page: Page, options: { withoutTransform?: boolean } =
 async function waitForSlideToFinish(page: Page) {
   await expect
     .poll(() =>
-      page.evaluate(() =>
-        document.getAnimations().filter((a) => a.playState === 'running' || a.playState === 'paused')
-          .length
+      page.evaluate(
+        () =>
+          document
+            .getAnimations()
+            .filter((a) => a.playState === 'running' || a.playState === 'paused').length
       )
     )
     .toBe(0);

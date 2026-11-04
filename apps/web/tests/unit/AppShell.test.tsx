@@ -1,7 +1,14 @@
-import { act, fireEvent, render as baseRender, type RenderOptions, screen, within } from '@testing-library/react';
+import {
+  act,
+  fireEvent,
+  render as baseRender,
+  type RenderOptions,
+  screen,
+  within,
+} from '@testing-library/react';
 import { type ReactElement, useEffect, useState } from 'react';
 import { MemoryRouter, useNavigate } from 'react-router';
-import { afterEach, beforeAll, beforeEach,describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppShell } from '../../src/components/AppShell';
 import { GLOBAL_NAV_ITEMS, PROJECT_NAV_ITEMS } from '../../src/components/NavSidebar';
@@ -42,20 +49,20 @@ beforeAll(() => {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
     value: vi.fn().mockImplementation((query: string) => ({
-      get matches() { return matchMediaMatches; },
+      get matches() {
+        return matchMediaMatches;
+      },
       media: query,
       onchange: null,
       addListener: vi.fn(),
       removeListener: vi.fn(),
-      addEventListener: vi.fn(
-        (_type: string, listener: (event: MediaQueryListEvent) => void) => {
-          matchMediaListeners.add(listener);
-        },
-      ),
+      addEventListener: vi.fn((_type: string, listener: (event: MediaQueryListEvent) => void) => {
+        matchMediaListeners.add(listener);
+      }),
       removeEventListener: vi.fn(
         (_type: string, listener: (event: MediaQueryListEvent) => void) => {
           matchMediaListeners.delete(listener);
-        },
+        }
       ),
       dispatchEvent: vi.fn(),
     })),
@@ -124,7 +131,7 @@ function renderAppShell(path = '/dashboard') {
       <AppShell>
         <div data-testid="page-content">Page content</div>
       </AppShell>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
@@ -238,7 +245,7 @@ describe('AppShell (project context)', () => {
         <AppShell>
           <div data-testid="page-content">Page content</div>
         </AppShell>
-      </MemoryRouter>,
+      </MemoryRouter>
     );
 
     // Global nav panel should be hidden initially
@@ -254,7 +261,9 @@ describe('AppShell (project context)', () => {
     expect(globalNav?.getAttribute('aria-hidden')).not.toBe('true');
 
     // Navigate to a different route
-    act(() => { navigateFn('/projects/proj-123/ideas'); });
+    act(() => {
+      navigateFn('/projects/proj-123/ideas');
+    });
 
     // Global nav should be hidden again after route change
     const globalNavAfter = container.querySelector('nav[aria-label="Primary navigation"]');
@@ -453,7 +462,7 @@ describe('AppShell (mobile)', () => {
         <AppShell>
           <StatefulPage />
         </AppShell>
-      </MemoryRouter>,
+      </MemoryRouter>
     );
 
     fireEvent.change(screen.getByLabelText('Draft'), { target: { value: 'keep this' } });
@@ -517,7 +526,7 @@ describe('AppShell (Focus Mode — desktop)', () => {
     expect(gridColumns()).toBe('56px minmax(0, 1fr)');
     // The compact cycle control (not the segmented group) is shown in focus mode.
     expect(
-      screen.getByRole('button', { name: /Focus Mode: Focus\. Activate to switch to Zen/ }),
+      screen.getByRole('button', { name: /Focus Mode: Focus\. Activate to switch to Zen/ })
     ).toBeInTheDocument();
     expect(screen.queryByRole('group', { name: 'Focus Mode' })).not.toBeInTheDocument();
   });
@@ -589,7 +598,7 @@ describe('AppShell (Focus Mode — mobile is disabled)', () => {
 
     expect(screen.queryByRole('group', { name: 'Focus Mode' })).not.toBeInTheDocument();
     expect(
-      screen.queryByRole('button', { name: /Focus Mode: .*Activate to switch/ }),
+      screen.queryByRole('button', { name: /Focus Mode: .*Activate to switch/ })
     ).not.toBeInTheDocument();
     // The collapsing desktop grid wrapper is not used on mobile.
     expect(document.querySelector('div.grid.h-screen')).toBeNull();
@@ -599,7 +608,7 @@ describe('AppShell (Focus Mode — mobile is disabled)', () => {
     renderAppShell();
     fireEvent.keyDown(window, { key: 'f' });
     expect(
-      screen.queryByRole('button', { name: /Focus Mode: .*Activate to switch/ }),
+      screen.queryByRole('button', { name: /Focus Mode: .*Activate to switch/ })
     ).not.toBeInTheDocument();
   });
 });
@@ -632,7 +641,11 @@ function ChatStandIn({
     <>
       <div data-immersive-chrome="session-header">Session header</div>
       {withHiddenPiece && (
-        <div data-immersive-chrome="composer" data-testid="hidden-piece" style={{ display: 'none' }} />
+        <div
+          data-immersive-chrome="composer"
+          data-testid="hidden-piece"
+          style={{ display: 'none' }}
+        />
       )}
       <aside data-immersive-chrome="tool-rail" style={{ width: '46px' }}>
         Tools
@@ -649,11 +662,12 @@ function renderChatShell(withToggle = true, withHiddenPiece = false) {
       <AppShell>
         <ChatStandIn withToggle={withToggle} withHiddenPiece={withHiddenPiece} />
       </AppShell>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
-const chromePieces = () => Array.from(document.querySelectorAll<HTMLElement>('[data-immersive-chrome]'));
+const chromePieces = () =>
+  Array.from(document.querySelectorAll<HTMLElement>('[data-immersive-chrome]'));
 const shellFrame = () => document.querySelector<HTMLElement>('.sam-void');
 
 describe('AppShell (immersive chat view)', () => {
@@ -731,7 +745,7 @@ describe('AppShell (immersive chat view)', () => {
     await settle();
     expect(animations).toHaveLength(4);
     const animated = new Set(
-      animations.flatMap((a) => a.keyframes.flatMap((frame) => Object.keys(frame))),
+      animations.flatMap((a) => a.keyframes.flatMap((frame) => Object.keys(frame)))
     );
     expect([...animated].sort()).toEqual(['opacity', 'transform']);
     for (const el of chromePieces()) expect(el.style.visibility).toBe('hidden');
@@ -756,10 +770,13 @@ describe('AppShell (immersive chat view)', () => {
     await settle();
     expect(animations).toHaveLength(8);
     for (const el of chromePieces()) expect(el).not.toHaveAttribute('inert');
-    expect(animations.slice(4).every((a) => (a.play as ReturnType<typeof vi.fn>).mock.calls.length === 1)).toBe(true);
     expect(
-      screen.getByRole('button', { name: 'Show only the conversation' }),
-    ).toHaveAttribute('aria-pressed', 'false');
+      animations.slice(4).every((a) => (a.play as ReturnType<typeof vi.fn>).mock.calls.length === 1)
+    ).toBe(true);
+    expect(screen.getByRole('button', { name: 'Show only the conversation' })).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    );
   });
 
   it('ends the immersive view when the chat goes away', async () => {
@@ -773,7 +790,7 @@ describe('AppShell (immersive chat view)', () => {
         <AppShell>
           <ChatStandIn withToggle={false} />
         </AppShell>
-      </MemoryRouter>,
+      </MemoryRouter>
     );
     expect(shellFrame()).not.toHaveAttribute('data-chat-immersive');
     for (const el of chromePieces()) {
@@ -818,13 +835,16 @@ describe('AppShell (immersive chat view)', () => {
     await settle();
     // Only the exit's four slides ran; the stale enter never started its own.
     expect(animations).toHaveLength(4);
-    expect(animations.every((a) => (a.play as ReturnType<typeof vi.fn>).mock.calls.length === 1)).toBe(true);
+    expect(
+      animations.every((a) => (a.play as ReturnType<typeof vi.fn>).mock.calls.length === 1)
+    ).toBe(true);
     expect(shellFrame()).not.toHaveAttribute('data-chat-immersive');
     expect(document.querySelector('[data-immersive-pinned]')).toBeNull();
     for (const el of chromePieces()) expect(el.style.visibility).toBe('');
-    expect(
-      screen.getByRole('button', { name: 'Show only the conversation' }),
-    ).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Show only the conversation' })).toHaveAttribute(
+      'aria-pressed',
+      'false'
+    );
   });
 
   it('cancels a pending exit when the reader taps again before it slides', async () => {
@@ -850,9 +870,10 @@ describe('AppShell (immersive chat view)', () => {
       expect(el).toHaveAttribute('data-immersive-pinned');
       expect(el.style.visibility).toBe('hidden');
     }
-    expect(
-      screen.getByRole('button', { name: 'Show the rest of the app' }),
-    ).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: 'Show the rest of the app' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
   });
 
   it('leaves a piece that is not displayed alone', async () => {
