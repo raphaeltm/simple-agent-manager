@@ -2,6 +2,7 @@ import type { AdminSettingDefinition } from './admin-setting-definitions';
 import { CORE_SETTINGS } from './admin-settings-core-definitions';
 import { FEATURE_SETTINGS } from './admin-settings-features-definitions';
 import { LIFECYCLE_LATENCY_SETTINGS } from './admin-settings-lifecycle-latency-definitions';
+import { OPERATIONS_TELEMETRY_SETTINGS } from './admin-settings-operations-telemetry-definitions';
 import { OPERATOR_SETTINGS } from './admin-settings-operator-definitions';
 export {
   type AdminSettingDefinition,
@@ -23,6 +24,7 @@ const definitions = [
   ...FEATURE_SETTINGS,
   ...OPERATOR_SETTINGS,
   ...LIFECYCLE_LATENCY_SETTINGS,
+  ...OPERATIONS_TELEMETRY_SETTINGS,
 ];
 
 export const ADMIN_SETTINGS_REGISTRY: readonly AdminSettingDefinition[] = Object.freeze(

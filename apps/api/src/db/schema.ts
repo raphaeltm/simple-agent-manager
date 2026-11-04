@@ -1526,6 +1526,118 @@ export const nodeHealthEvents = sqliteTable(
   })
 );
 
+/** One row per keep/kill decision about a node. No FK: rows outlive the node row. */
+export const nodeLifecycleDecisions = sqliteTable(
+  'node_lifecycle_decisions',
+  {
+    id: text('id').primaryKey(),
+    nodeId: text('node_id').notNull(),
+    source: text('source').notNull(),
+    decision: text('decision').notNull(),
+    reason: text('reason'),
+    workspaceCount: integer('workspace_count'),
+    detailJson: text('detail_json'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => ({
+    nodeCreatedIdx: index('idx_node_lifecycle_decisions_node_created').on(
+      table.nodeId,
+      table.createdAt
+    ),
+    createdIdx: index('idx_node_lifecycle_decisions_created').on(table.createdAt),
+  })
+);
+
+/** Black box recorder index; the gzipped capture lives in R2 at `r2Key`. No FK: outlives the node. */
+export const nodeLogCaptures = sqliteTable(
+  'node_log_captures',
+  {
+    id: text('id').primaryKey(),
+    nodeId: text('node_id').notNull(),
+    userId: text('user_id').notNull(),
+    captureTrigger: text('capture_trigger').notNull(),
+    status: text('status').notNull(),
+    r2Key: text('r2_key'),
+    sourcesJson: text('sources_json'),
+    entryCount: integer('entry_count').notNull().default(0),
+    rawBytes: integer('raw_bytes').notNull().default(0),
+    storedBytes: integer('stored_bytes').notNull().default(0),
+    error: text('error'),
+    durationMs: integer('duration_ms'),
+    createdAt: text('created_at').notNull(),
+    expiresAt: text('expires_at').notNull(),
+  },
+  (table) => ({
+    nodeCreatedIdx: index('idx_node_log_captures_node_created').on(table.nodeId, table.createdAt),
+    expiresIdx: index('idx_node_log_captures_expires').on(table.expiresAt),
+  })
+);
+
+/** Per-step sleep/wake trace from the VM agent; bounded per chat and by age. */
+export const sessionSnapshotTraces = sqliteTable(
+  'session_snapshot_traces',
+  {
+    id: text('id').primaryKey(),
+    chatSessionId: text('chat_session_id').notNull(),
+    projectId: text('project_id'),
+    workspaceId: text('workspace_id').notNull(),
+    nodeId: text('node_id'),
+    operation: text('operation').notNull(),
+    outcome: text('outcome').notNull(),
+    failedPhase: text('failed_phase'),
+    phasesJson: text('phases_json').notNull(),
+    errorTail: text('error_tail'),
+    totalMs: integer('total_ms').notNull().default(0),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => ({
+    chatCreatedIdx: index('idx_session_snapshot_traces_chat_created').on(
+      table.chatSessionId,
+      table.createdAt
+    ),
+    createdIdx: index('idx_session_snapshot_traces_created').on(table.createdAt),
+  })
+);
+
+/** Server-side approval record for one Operations action; executed at most once (0221). */
+export const operationsActionApprovals = sqliteTable(
+  'operations_action_approvals',
+  {
+    id: text('id').primaryKey(),
+    action: text('action').notNull(),
+    targetType: text('target_type').notNull(),
+    targetId: text('target_id').notNull(),
+    reason: text('reason').notNull(),
+    evidenceSummary: text('evidence_summary'),
+    targetSummaryJson: text('target_summary_json'),
+    requestingProjectId: text('requesting_project_id').notNull(),
+    requestingTaskId: text('requesting_task_id').notNull(),
+    requestingAuthorityTaskId: text('requesting_authority_task_id').notNull(),
+    requestingSessionId: text('requesting_session_id'),
+    requesterUserId: text('requester_user_id').notNull(),
+    status: text('status').notNull(),
+    autoApproved: integer('auto_approved').notNull().default(0),
+    expiresAt: text('expires_at').notNull(),
+    decidedBy: text('decided_by'),
+    decidedAt: text('decided_at'),
+    decisionNote: text('decision_note'),
+    executedAt: text('executed_at'),
+    executionResultJson: text('execution_result_json'),
+    createdAt: text('created_at').notNull(),
+  },
+  (table) => ({
+    statusCreatedIdx: index('idx_operations_action_approvals_status_created').on(
+      table.status,
+      table.createdAt
+    ),
+    taskIdx: index('idx_operations_action_approvals_task').on(
+      table.requestingTaskId,
+      table.createdAt
+    ),
+    createdIdx: index('idx_operations_action_approvals_created').on(table.createdAt),
+  })
+);
+
 export const nodes = sqliteTable(
   'nodes',
   {

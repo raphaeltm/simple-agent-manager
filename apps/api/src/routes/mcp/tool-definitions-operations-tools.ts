@@ -7,7 +7,9 @@
  * definitions here and register the handler in `OPERATIONS_TOOL_HANDLERS`
  * (`tool-handler-table.ts`); a test fails if the two drift apart.
  */
+import { OPS_ACTION_TOOLS } from './tool-definitions-ops-action-tools';
 import { OPS_READ_TOOLS } from './tool-definitions-ops-read-tools';
+import { OPS_TELEMETRY_TOOLS } from './tool-definitions-ops-telemetry-tools';
 
 export const OPERATIONS_TOOLS = [
   {
@@ -23,4 +25,6 @@ export const OPERATIONS_TOOLS = [
     },
   },
   ...OPS_READ_TOOLS,
+  ...OPS_TELEMETRY_TOOLS,
+  ...OPS_ACTION_TOOLS,
 ];

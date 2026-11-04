@@ -218,6 +218,7 @@ type Config struct {
 
 	// VM-agent lifecycle/provisioning settings - configurable per constitution principle XI
 	GracefulShutdownTimeout   time.Duration // Max time to wait for HTTP shutdown after SIGTERM (env: GRACEFUL_SHUTDOWN_TIMEOUT, default: 30s)
+	SelfRestartDelay          time.Duration // Delay before an approved self-restart signals SIGTERM (env: VM_AGENT_SELF_RESTART_DELAY, default: 2s)
 	SystemProvisioningTimeout time.Duration // Max time for workspace host provisioning (env: SYSTEM_PROVISIONING_TIMEOUT, default: 15m)
 	CFIPFetchTimeout          time.Duration // Timeout for Cloudflare IP range fetches during firewall setup (env: CF_IP_FETCH_TIMEOUT, default: 10s)
 	BootLogHTTPTimeout        time.Duration // Timeout for boot-log callbacks (env: BOOT_LOG_HTTP_TIMEOUT, default: 10s)

@@ -1,8 +1,9 @@
 /**
- * The one wrapper every read-only Operations tool runs through (`ops-read-tools.ts`,
- * `ops-node-tools.ts`):
+ * The one wrapper every Operations tool runs through: read tools (`ops-read-tools.ts`,
+ * `ops-node-tools.ts`, `ops-telemetry-tools.ts`) via `runOpsReadTool`, approved actions
+ * (`ops-action-tools.ts`) via `runOpsActTool`:
  *
- * 1. `requireOperationsAccess(..., { capability: 'read' })` on every call. A denial is audited
+ * 1. `requireOperationsAccess(..., { capability })` on every call. A denial is audited
  *    and rethrown; the MCP dispatcher maps `OperationsAccessError` to INVALID_PARAMS.
  * 2. The Operations settings are read once.
  * 3. The tool runs; its outcome and response size are audited (sizes and IDs, never payloads).
@@ -16,6 +17,7 @@ import { type FleetOpsSettings, resolveFleetOpsSettings } from '../../services/f
 import {
   type OperationsAccessContext,
   OperationsAccessError,
+  type OperationsCapability,
   recordOperationsAudit,
   requireOperationsAccess,
 } from '../../services/operations-access';
@@ -46,18 +48,47 @@ export interface OpsToolRun {
   readonly settings: FleetOpsSettings;
 }
 
-export async function runOpsReadTool(
+export interface OpsToolOutput {
+  result: Record<string, unknown>;
+  detail?: Record<string, unknown>;
+  /** The approval record this call created or consumed, for the audit row. */
+  approvalId?: string;
+}
+
+type OpsToolBody = (ctx: OpsToolRun) => Promise<OpsToolOutput>;
+
+export function runOpsReadTool(
   requestId: string | number | null,
   tokenData: McpTokenData,
   env: Env,
   target: OpsToolTarget,
-  run: (
-    ctx: OpsToolRun
-  ) => Promise<{ result: Record<string, unknown>; detail?: Record<string, unknown> }>
+  run: OpsToolBody
+): Promise<JsonRpcResponse> {
+  return runOpsTool('read', requestId, tokenData, env, target, run);
+}
+
+/** Actions: needs `operations.debuggerTools` at `read_ask` or `read_auto_safe`. */
+export function runOpsActTool(
+  requestId: string | number | null,
+  tokenData: McpTokenData,
+  env: Env,
+  target: OpsToolTarget,
+  run: OpsToolBody
+): Promise<JsonRpcResponse> {
+  return runOpsTool('act', requestId, tokenData, env, target, run);
+}
+
+async function runOpsTool(
+  capability: OperationsCapability,
+  requestId: string | number | null,
+  tokenData: McpTokenData,
+  env: Env,
+  target: OpsToolTarget,
+  run: OpsToolBody
 ): Promise<JsonRpcResponse> {
   let grant: OperationsAccessContext;
   try {
-    grant = await requireOperationsAccess(env, tokenData, { capability: 'read' });
+    grant = await requireOperationsAccess(env, tokenData, { capability });
   } catch (error) {
     if (error instanceof OperationsAccessError && tokenData.taskId) {
       await recordOperationsAudit(env, {
@@ -73,7 +104,11 @@ export async function runOpsReadTool(
     throw error;
   }
 
-  const audit = (outcome: 'succeeded' | 'failed', detail: Record<string, unknown>) =>
+  const audit = (
+    outcome: 'succeeded' | 'failed',
+    detail: Record<string, unknown>,
+    approvalId?: string
+  ) =>
     recordOperationsAudit(env, {
       actorUserId: grant.userId,
       taskId: grant.taskId,
@@ -82,17 +117,18 @@ export async function runOpsReadTool(
       targetId: target.targetId ?? null,
       outcome,
       detail,
+      approvalId: approvalId ?? null,
     });
 
   try {
     const settings = await resolveFleetOpsSettings(env);
-    const { result, detail } = await run({ grant, settings });
+    const { result, detail, approvalId } = await run({ grant, settings });
     const text = JSON.stringify({
       untrustedContent: true,
       untrustedTextGuidance: UNTRUSTED_TEXT_GUIDANCE,
       ...result,
     });
-    await audit('succeeded', { ...detail, resultBytes: text.length });
+    await audit('succeeded', { ...detail, resultBytes: text.length }, approvalId);
     return jsonRpcSuccess(requestId, { content: [{ type: 'text', text }] });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

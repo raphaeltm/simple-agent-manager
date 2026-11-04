@@ -28,6 +28,7 @@ export const NOTIFICATION_TYPE_URGENCY: Record<NotificationType, NotificationUrg
   mention: 'medium',
   comment: 'low',
   session_access: 'medium',
+  operations_approval: 'high',
 };
 
 /**

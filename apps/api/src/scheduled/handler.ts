@@ -28,6 +28,7 @@ import { runIncidentTriggerSweep } from './incident-triggers';
 import { runNodeCleanupSweep } from './node-cleanup';
 import { runObservabilityPurge } from './observability-purge';
 import { runOperationsAuditPurge } from './operations-audit-purge';
+import { runOperationsTelemetryRetention } from './operations-telemetry-retention';
 import {
   isHourlyPlatformMaintenanceCron,
   scheduleHourlyPlatformMaintenance,
@@ -96,6 +97,7 @@ export async function scheduled(
     // Separate promise: an analytics failure must not skip the audit retention purge.
     ctx.waitUntil(runOperationsAuditPurge(env, controller.cron));
     ctx.waitUntil(runDebugPackagePurge(env, controller.cron));
+    ctx.waitUntil(runOperationsTelemetryRetention(env, controller.cron));
     // Separate promise again, so none of the jobs above can suppress the latency check.
     ctx.waitUntil(
       runLifecycleLatencyDailyEvaluation(env).catch((err) => {

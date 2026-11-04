@@ -72,8 +72,10 @@ export function resolveMissionStateLimits(env: {
 }): MissionStateLimits {
   return {
     maxStateEntries: Number(env.MISSION_MAX_STATE_ENTRIES) || DEFAULT_MISSION_MAX_STATE_ENTRIES,
-    stateTitleMaxLength: Number(env.MISSION_STATE_TITLE_MAX_LENGTH) || DEFAULT_MISSION_STATE_TITLE_MAX_LENGTH,
-    stateContentMaxLength: Number(env.MISSION_STATE_CONTENT_MAX_LENGTH) || DEFAULT_MISSION_STATE_CONTENT_MAX_LENGTH,
+    stateTitleMaxLength:
+      Number(env.MISSION_STATE_TITLE_MAX_LENGTH) || DEFAULT_MISSION_STATE_TITLE_MAX_LENGTH,
+    stateContentMaxLength:
+      Number(env.MISSION_STATE_CONTENT_MAX_LENGTH) || DEFAULT_MISSION_STATE_CONTENT_MAX_LENGTH,
   };
 }
 
@@ -92,6 +94,7 @@ export function resolveHandoffLimits(env: {
     maxFacts: Number(env.HANDOFF_MAX_FACTS) || DEFAULT_HANDOFF_MAX_FACTS,
     maxOpenQuestions: Number(env.HANDOFF_MAX_OPEN_QUESTIONS) || DEFAULT_HANDOFF_MAX_OPEN_QUESTIONS,
     maxArtifactRefs: Number(env.HANDOFF_MAX_ARTIFACT_REFS) || DEFAULT_HANDOFF_MAX_ARTIFACT_REFS,
-    maxSuggestedActions: Number(env.HANDOFF_MAX_SUGGESTED_ACTIONS) || DEFAULT_HANDOFF_MAX_SUGGESTED_ACTIONS,
+    maxSuggestedActions:
+      Number(env.HANDOFF_MAX_SUGGESTED_ACTIONS) || DEFAULT_HANDOFF_MAX_SUGGESTED_ACTIONS,
   };
 }

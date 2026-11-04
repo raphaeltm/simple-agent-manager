@@ -12,6 +12,7 @@ import { listNodeEventsOnNode } from '../node-agent';
 import { type NodeAccess, runNodeDiagnostic } from '../node-diagnostics-access';
 import { listActivityEvents } from '../project-data';
 import { anyIdIn, type EntityGraph, type OpsEntityType, placeholders } from './entity-graph';
+import { TELEMETRY_TIMELINE_SOURCES } from './timeline-sources-telemetry';
 
 export interface TimelineScope {
   readonly entityType: OpsEntityType;
@@ -392,4 +393,5 @@ export const DEFAULT_TIMELINE_SOURCES: readonly TimelineSource[] = [
   nodeHealthSource,
   bootLogSource,
   nodeAgentEventSource,
+  ...TELEMETRY_TIMELINE_SOURCES,
 ];

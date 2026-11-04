@@ -99,6 +99,7 @@ func Load() (*Config, error) {
 		BootstrapTimeout: getEnvDuration("BOOTSTRAP_TIMEOUT", 30*time.Minute),
 
 		GracefulShutdownTimeout:   getEnvDuration("GRACEFUL_SHUTDOWN_TIMEOUT", DefaultGracefulShutdownTimeout),
+		SelfRestartDelay:          getEnvDuration("VM_AGENT_SELF_RESTART_DELAY", DefaultSelfRestartDelay),
 		SystemProvisioningTimeout: getEnvDuration("SYSTEM_PROVISIONING_TIMEOUT", DefaultSystemProvisioningTimeout),
 		CFIPFetchTimeout:          getEnvDuration("CF_IP_FETCH_TIMEOUT", DefaultCFIPFetchTimeout),
 		BootLogHTTPTimeout:        getEnvDuration("BOOT_LOG_HTTP_TIMEOUT", DefaultBootLogHTTPTimeout),

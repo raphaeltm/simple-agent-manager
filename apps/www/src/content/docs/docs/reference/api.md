@@ -891,6 +891,28 @@ Rate-limited to 20 submissions per clock hour per user (`RATE_LIMIT_REPORT_ISSUE
 
 Superadmin only. Runs a platform-error triage sweep immediately instead of waiting for the hourly cron. The Operations project itself is configured from **Admin → Integrations** or the environment fallback; this endpoint remains the manual way to verify automated triage without waiting up to an hour.
 
+## Operations Approvals
+
+These endpoints back **Admin → Approvals** and require an approved, active **superadmin**. They
+decide what an Operations-project agent asked to do with `ops_request_action`; see
+[Approved actions](/docs/guides/admin-settings/#approved-actions).
+
+### `GET /api/admin/operations/approvals`
+
+Lists approvals, pending first, then newest first: `{ "approvals": [...] }`. Optional `status`
+(`pending`, `approved`, `denied`, `expired`, `executed`) and `limit` (up to 200).
+
+### `GET /api/admin/operations/approvals/:id`
+
+One approval: `{ "approval": {...} }`, or `404`.
+
+### `POST /api/admin/operations/approvals/:id/decision`
+
+Body: `{ "decision": "approve" | "deny", "note"?: string }` (note up to 1,000 characters). Decides
+a pending request once and delivers the decision to the requesting agent's chat. Returns
+`{ "approval", "delivered" }`. Returns `409` if the request was already decided or has expired,
+and `404` for an unknown ID.
+
 ## Admin Settings
 
 These endpoints back [Admin → Settings](/docs/guides/admin-settings/) and require an approved,
