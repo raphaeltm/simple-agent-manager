@@ -383,22 +383,27 @@ test.describe('SAM Glass chat — pane edges', () => {
     await expect(page.getByRole('button', { name: 'Project settings' })).toHaveCount(0);
   });
 
-  test('a page in the content pane paints no background over the glass', async ({ page }) => {
-    await setupGlassChatMocks(page, { theme: 'light' });
-    await page.goto('/projects');
-    await expect(page.getByRole('heading', { name: 'Projects' }).first()).toBeAttached({
-      timeout: 15_000,
+  for (const theme of ['dark', 'light'] as const) {
+    test(`a page in the content pane paints no background over the glass (${theme})`, async ({
+      page,
+    }) => {
+      await setupGlassChatMocks(page, { theme });
+      await page.goto('/projects');
+      await expect(page.getByRole('heading', { name: 'Projects' }).first()).toBeAttached({
+        timeout: 15_000,
+      });
+      await expect(page.getByText('Something went wrong')).toHaveCount(0);
+      const root = await page.evaluate(() => {
+        const main = document.querySelector('main')!;
+        const first = main.firstElementChild as HTMLElement;
+        return {
+          background: getComputedStyle(first).backgroundColor,
+          fills: first.getBoundingClientRect().height >= main.clientHeight - 1,
+        };
+      });
+      expect(root.background).toBe('rgba(0, 0, 0, 0)');
+      expect(root.fills).toBe(true);
+      await screenshot(page, `glass-projects-page-${theme}`, { scopeToProject: true });
     });
-    await expect(page.getByText('Something went wrong')).toHaveCount(0);
-    const root = await page.evaluate(() => {
-      const main = document.querySelector('main')!;
-      const first = main.firstElementChild as HTMLElement;
-      return {
-        background: getComputedStyle(first).backgroundColor,
-        fills: first.getBoundingClientRect().height >= main.clientHeight - 1,
-      };
-    });
-    expect(root.background).toBe('rgba(0, 0, 0, 0)');
-    expect(root.fills).toBe(true);
-  });
+  }
 });
