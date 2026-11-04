@@ -12,6 +12,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vite
 
 import { AppShell } from '../../src/components/AppShell';
 import { GLOBAL_NAV_ITEMS, PROJECT_NAV_ITEMS } from '../../src/components/NavSidebar';
+import { ImmersiveChatToggle } from '../../src/components/project-message-view/ImmersiveChatToggle';
 import { ThemeProvider } from '../../src/contexts/ThemeContext';
 import { QueryTestWrapper } from '../test-utils/query-test-utils';
 
@@ -619,8 +620,6 @@ describe('AppShell (Focus Mode — mobile is disabled)', () => {
 // jsdom has no layout or Web Animations, so `getClientRects` and `animate` are stubbed;
 // the slide's geometry is covered by tests/playwright/chat-immersive-audit.spec.ts.
 // ---------------------------------------------------------------------------
-
-import { ImmersiveChatToggle } from '../../src/components/project-message-view/ImmersiveChatToggle';
 
 interface FakeAnimation {
   keyframes: Keyframe[];
