@@ -102,7 +102,7 @@ vi.mock('../../../src/components/project-message-view/types', async (importOrigi
   CHAT_FALLBACK_POLL_MS: 1,
 }));
 
-import { SessionStatusBanners } from '../../../src/components/project-message-view/SessionStatusBanners';
+import { SessionStatusCapsules } from '../../../src/components/project-message-view/SessionStatusBanners';
 import { useSessionLifecycle } from '../../../src/components/project-message-view/useSessionLifecycle';
 import { chatQueryKeys } from '../../../src/lib/query-options';
 import { CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS } from '../../../src/lib/query-persist-config';
@@ -798,7 +798,7 @@ describe('useSessionLifecycle loading semantics', () => {
     // Not claimed yet, so no wake is in flight; the banner is open only because
     // the send left the agent working. That gate is what makes the reason visible.
     expect(result.current.isWaking).toBe(false);
-    const banners = render(createElement(SessionStatusBanners, { lc: result.current }));
+    const banners = render(createElement(SessionStatusCapsules, { lc: result.current }));
     expect(screen.getByTestId('wake-progress-label').textContent).toBe(
       'Waiting for the previous workspace to finish shutting down...'
     );
@@ -809,7 +809,7 @@ describe('useSessionLifecycle loading semantics', () => {
       expect(result.current.wakeWait?.reason).toBe('provider_transient_capacity')
     );
     expect(result.current.isWaking).toBe(true);
-    render(createElement(SessionStatusBanners, { lc: result.current }));
+    render(createElement(SessionStatusCapsules, { lc: result.current }));
     expect(screen.getByTestId('wake-progress-label').textContent).toMatch(
       /^Your cloud provider has no capacity right now\. Retrying\.\.\. Next try at .+\.$/
     );

@@ -1,8 +1,11 @@
 import type { TaskExecutionStep } from '@simple-agent-manager/shared';
-import { EXECUTION_STEP_LABELS, EXECUTION_STEP_ORDER } from '@simple-agent-manager/shared';
-import { Spinner } from '@simple-agent-manager/ui';
+import { EXECUTION_STEP_LABELS } from '@simple-agent-manager/shared';
+import { Button } from '@simple-agent-manager/ui';
+import { Ban, Check, Server, XCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
+import { NoticeMeta, NoticeSlab } from '../../components/chat-notices/NoticeSlab';
+import { StageTrack } from '../../components/chat-notices/StageTrack';
 import type { ProvisioningState } from './types';
 import { isTerminal } from './types';
 
@@ -15,6 +18,7 @@ interface ProvisioningIndicatorProps {
   state: ProvisioningState;
   bootLogCount: number;
   onViewLogs: () => void;
+  className?: string;
 }
 
 const PROVISIONING_STAGES: ProvisioningStage[] = [
@@ -26,6 +30,8 @@ const PROVISIONING_STAGES: ProvisioningStage[] = [
   { label: 'Installing dependencies', steps: ['workspace_ready', 'attachment_transfer'] },
   { label: 'Starting agent', steps: ['agent_session'] },
 ];
+
+const PROVISIONING_STAGE_LABELS = PROVISIONING_STAGES.map((stage) => stage.label);
 
 function getStageIndex(step: TaskExecutionStep | null): number {
   if (!step) return 0;
@@ -48,19 +54,36 @@ function getStatusLabel(state: ProvisioningState): string {
   const stageIndex = getStageIndex(state.executionStep);
   const stageLabel =
     PROVISIONING_STAGES[stageIndex]?.label ?? EXECUTION_STEP_LABELS[state.executionStep];
-  return `${stageLabel} (${stageIndex + 1}/${PROVISIONING_STAGES.length})`;
+  return `${stageLabel} · ${stageIndex + 1} of ${PROVISIONING_STAGES.length}`;
 }
 
-function getStageColor(isComplete: boolean, isCurrent: boolean, hasStarted: boolean): string {
-  if (isComplete) return 'var(--sam-color-success)';
-  if (isCurrent || hasStarted) return 'var(--sam-color-accent-primary)';
-  return 'var(--sam-color-border-default)';
+/** "Setting up a new server..." → "Setting up a new server." */
+function asSentence(label: string): string {
+  return `${label.replace(/\.+$/, '')}.`;
 }
 
+function getDetail(state: ProvisioningState): string | null {
+  if (state.errorMessage) return state.errorMessage;
+  if (isTerminal(state.status)) return null;
+  const detail = state.executionStep
+    ? asSentence(EXECUTION_STEP_LABELS[state.executionStep])
+    : 'Waiting for the task runner.';
+  return `${detail} This usually takes 2–4 minutes.`;
+}
+
+function getIcon(status: ProvisioningState['status']) {
+  if (status === 'failed') return <XCircle size={16} />;
+  if (status === 'cancelled') return <Ban size={15} />;
+  if (status === 'completed') return <Check size={15} />;
+  return <Server size={15} />;
+}
+
+/** First-boot progress for a new chat, as a SAM Glass notice slab with a stage track. */
 export function ProvisioningIndicator({
   state,
   bootLogCount,
   onViewLogs,
+  className,
 }: Readonly<ProvisioningIndicatorProps>) {
   const [elapsed, setElapsed] = useState(0);
 
@@ -70,78 +93,46 @@ export function ProvisioningIndicator({
     return () => clearInterval(interval);
   }, [state.startedAt, state.status]);
 
-  const currentStepOrder = state.executionStep ? EXECUTION_STEP_ORDER[state.executionStep] : -1;
   const currentStageIndex = getStageIndex(state.executionStep);
   const isFailed = state.status === 'failed';
+  const isActive = !isTerminal(state.status);
+  const tone = isFailed ? 'danger' : state.status === 'cancelled' ? 'warning' : 'progress';
 
   return (
-    <div
-      className={`shrink-0 px-4 py-3 border-b ${isFailed ? 'bg-danger-tint border-[rgba(239,68,68,0.12)]' : 'bg-[rgba(22,163,74,0.06)] border-[rgba(34,197,94,0.1)]'}`}
+    <NoticeSlab
+      tone={tone}
+      role={isFailed ? 'alert' : undefined}
+      data-testid="provisioning-indicator"
+      className={className}
+      icon={getIcon(state.status)}
+      title={getStatusLabel(state)}
+      meta={
+        <>
+          {state.branchName && isActive && (
+            <span className="hidden min-w-0 max-w-[22rem] sm:inline-flex">
+              <NoticeMeta>{state.branchName}</NoticeMeta>
+            </span>
+          )}
+          <NoticeMeta>{getElapsedDisplay(elapsed)}</NoticeMeta>
+        </>
+      }
+      detail={getDetail(state)}
+      inlineActions
+      actions={
+        bootLogCount > 0 ? (
+          <Button variant="raised" size="sm" onClick={onViewLogs}>
+            View logs
+          </Button>
+        ) : undefined
+      }
     >
-      <div className="flex items-center gap-2 mb-2">
-        {!isTerminal(state.status) && <Spinner size="sm" />}
-        <span
-          className={`sam-type-secondary font-medium ${isFailed ? 'text-danger' : 'text-fg-primary'}`}
-        >
-          {getStatusLabel(state)}
-        </span>
-        {state.branchName && !isTerminal(state.status) && (
-          <span className="sam-type-caption text-fg-muted">{state.branchName}</span>
-        )}
-        <span className="sam-type-caption text-fg-muted ml-auto">{getElapsedDisplay(elapsed)}</span>
-        {bootLogCount > 0 && (
-          <button
-            type="button"
-            onClick={onViewLogs}
-            className="sam-type-caption text-accent-primary hover:underline bg-transparent border-none cursor-pointer px-2 min-h-[44px] flex items-center shrink-0"
-          >
-            View Logs
-          </button>
-        )}
-      </div>
-
-      {!isTerminal(state.status) && (
-        <div className="sam-type-caption text-fg-muted mb-2">
-          Usually takes 2-4 minutes. Current detail:{' '}
-          {state.executionStep
-            ? EXECUTION_STEP_LABELS[state.executionStep]
-            : 'Waiting for task runner...'}
-        </div>
+      {(isActive || isFailed) && (
+        <StageTrack
+          stages={PROVISIONING_STAGE_LABELS}
+          current={currentStageIndex}
+          failed={isFailed}
+        />
       )}
-
-      {!isTerminal(state.status) && (
-        <div className="grid grid-cols-4 gap-1">
-          {PROVISIONING_STAGES.map((stage, index) => {
-            const isComplete = index < currentStageIndex;
-            const isCurrent = index === currentStageIndex;
-            const hasStarted = stage.steps.some(
-              (step) => EXECUTION_STEP_ORDER[step] <= currentStepOrder
-            );
-            return (
-              <div key={stage.label} className="min-w-0">
-                <div
-                  title={stage.label}
-                  className="h-[3px] rounded-sm transition-colors duration-300"
-                  style={{
-                    backgroundColor: getStageColor(isComplete, isCurrent, hasStarted),
-                  }}
-                />
-                <div
-                  className={`mt-1 text-[10px] leading-tight truncate ${isCurrent ? 'text-fg-primary' : 'text-fg-muted'}`}
-                >
-                  {index + 1}. {stage.label}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {state.errorMessage && (
-        <div className="sam-type-caption text-danger mt-2 p-2 px-3 bg-surface rounded-sm border border-danger-tint break-words">
-          {state.errorMessage}
-        </div>
-      )}
-    </div>
+    </NoticeSlab>
   );
 }

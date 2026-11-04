@@ -32,6 +32,8 @@ interface ConversationPaneProps {
   toolRail: ReactNode;
   /** Requests without a matching tool call render at the live conversation tail. */
   tail: ReactNode;
+  /** Transient status capsules floating over the top of the conversation. */
+  statusCapsules?: ReactNode;
 }
 
 /**
@@ -91,6 +93,7 @@ export function ConversationPane({
   commentRail,
   toolRail,
   tail,
+  statusCapsules,
 }: Readonly<ConversationPaneProps>) {
   const [readerScrolledUp, scrollIntentHandlers] = useReaderScrolledUp();
 
@@ -113,6 +116,7 @@ export function ConversationPane({
           </div>
           {commentRail}
         </div>
+        {statusCapsules}
         {toolRail}
       </Pane>
     );
@@ -185,6 +189,7 @@ export function ConversationPane({
         </div>
         {commentRail}
       </div>
+      {statusCapsules}
       {toolRail}
     </Pane>
   );

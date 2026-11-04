@@ -1,4 +1,4 @@
-import { Alert, Pane, Spinner } from '@simple-agent-manager/ui';
+import { Pane, Spinner } from '@simple-agent-manager/ui';
 import { PanelRight } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
@@ -13,6 +13,7 @@ import { ZenPeekRail } from '../../components/ZenPeekRail';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { resolveAttentionAnswer } from '../../lib/api';
 import { sessionWidthForMode } from '../../lib/focus-mode';
+import { AttentionAnswerNotice, type AttentionAnswerStatus } from './AttentionAnswerNotice';
 import { ChatInput } from './ChatInput';
 import { DerivedSessionBanner } from './DerivedSessionBanner';
 import { FocusStrip } from './FocusStrip';
@@ -35,10 +36,9 @@ export function ProjectChat() {
   const location = useLocation();
   const navigate = useNavigate();
   const state = useProjectChatState();
-  const [attentionAnswerStatus, setAttentionAnswerStatus] = useState<{
-    variant: 'success' | 'error';
-    message: string;
-  } | null>(null);
+  const [attentionAnswerStatus, setAttentionAnswerStatus] = useState<AttentionAnswerStatus | null>(
+    null
+  );
   const [pendingAttentionAnswer, setPendingAttentionAnswer] = useState<{
     markerId: string;
     answer: string;
@@ -266,6 +266,7 @@ export function ProjectChat() {
                   state={state.provisioning}
                   bootLogCount={state.bootLogs.length}
                   onViewLogs={() => state.setBootLogPanelOpen(true)}
+                  className="w-full max-w-[720px]"
                 />
               ) : showProfileCards ? (
                 <NewChatProfileCards
@@ -354,29 +355,19 @@ export function ProjectChat() {
           /* Active session view */
           <div className={`flex min-h-0 flex-1 flex-col ${COLUMN_GAP}`}>
             {attentionAnswerStatus && (
-              <Alert
-                variant={attentionAnswerStatus.variant}
+              <AttentionAnswerNotice
+                status={attentionAnswerStatus}
                 onDismiss={() => setAttentionAnswerStatus(null)}
-                className="shrink-0"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span>{attentionAnswerStatus.message}</span>
-                  {attentionAnswerStatus.variant === 'error' && pendingAttentionAnswer && (
-                    <button
-                      type="button"
-                      className="min-h-11 rounded-md border border-current px-3 py-2 text-sm font-medium"
-                      onClick={() =>
+                onRetry={
+                  pendingAttentionAnswer
+                    ? () =>
                         void submitAttentionAnswer(
                           pendingAttentionAnswer.markerId,
                           pendingAttentionAnswer.answer
                         )
-                      }
-                    >
-                      Retry answer
-                    </button>
-                  )}
-                </div>
-              </Alert>
+                    : undefined
+                }
+              />
             )}
             {state.provisioning &&
               state.sessionId === state.provisioning.sessionId &&

@@ -21,7 +21,7 @@ import { resolveSessionViewerCapabilities, sessionOwnerLabel } from './session-v
 import { SessionFooter } from './SessionFooter';
 import type { ProjectMessageViewProps } from './SessionMessageView.types';
 import { SessionMessageViewDialogs } from './SessionMessageViewDialogs';
-import { SessionStatusBanners } from './SessionStatusBanners';
+import { SessionStatusBanners, SessionStatusCapsules } from './SessionStatusBanners';
 import { SessionToolRail } from './SessionToolRail';
 import type { DisplayItem } from './tool-call-groups';
 import { groupToolCallItems } from './tool-call-groups';
@@ -412,6 +412,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
           commentRail={desktopCommentRail}
           toolRail={isMobile ? sessionToolRail : null}
           tail={chatListContext.footer}
+          statusCapsules={<SessionStatusCapsules lc={lc} />}
         />
 
         <SessionFooter

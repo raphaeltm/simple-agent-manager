@@ -18,7 +18,7 @@ your work is safe and what to do next. Everything here applies to both
   → [Usually nothing to do](#waiting-for-a-provider-limit-reset)
 - **"SAM paused automatic check-ins…"** The agent kept stopping without finishing, or its model was
   rejected, so SAM stopped nudging it. → [Look, then reply](#sam-paused-automatic-check-ins)
-- **A strip or failure card saying the agent's connection is missing or was rejected**, or that its
+- **A notice or failure card saying the agent's connection is missing or was rejected**, or that its
   model is unavailable for your account. → [Fix the connection](#the-agent-or-a-tool-cant-sign-in)
 - **A message saying a sign-in flow requires a local callback**, or an MCP tool failing with
   `401 Unauthorized`. → [Connect the tool another way](#the-agent-or-a-tool-cant-sign-in)
@@ -26,7 +26,7 @@ your work is safe and what to do next. Everything here applies to both
   been recorded. → [Check wake compatibility](/docs/guides/agents/#after-a-chat-wakes-from-sleep)
 - **The agent stops whenever it needs your approval, and no card appears.** Check whether agent
   requests are enabled on your instance. → [Check request settings](#the-agent-stops-for-approval-and-no-card-appears)
-- **A strip with a spinner**, such as **Waking and restoring session...** or, on a VM, a step like
+- **A small floating status with a spinner** over the top of the conversation, such as **Waking and restoring session...** or, on a VM, a step like
   **Finding a server...**, or a reason it's waiting such as **Your cloud provider has no capacity
   right now. Retrying...**. A wake or a recovery is in progress.
   → [Wait, or clear what it's waiting for](#recovery-is-in-progress)
@@ -222,10 +222,10 @@ the limit is 3; to change it, add `TASK_RECONCILIATION_MAX_CHECKINS` under `[var
 
 ## The agent or a tool can't sign in
 
-When the agent can't use its provider account, the chat says so — in a strip above the conversation
+When the agent can't use its provider account, the chat says so — in a notice above the session header
 or in the failure card under the chat header (expand the card for the next step):
 
-- **A strip: "Agent connection missing."** The agent has no credential it can use for this chat. If
+- **A notice: "Agent connection missing".** The agent has no credential it can use for this chat. If
   you started the chat, select **Open agent accounts** and connect the agent under
   **Settings → Agents**; otherwise ask the person who started it. It also appears when the account
   pinned to the project or the profile is paused: the project's **Accounts** tab then says **Can't
@@ -256,7 +256,7 @@ too:
   [When a server needs sign-in](/docs/guides/mcp-servers/#when-a-server-needs-sign-in).
 - **A message: "This sign-in flow requires a local callback that this session cannot complete."**
   The server wants to finish its sign-in at `localhost`, which a remote SAM session can't do. While
-  that message is the latest in the chat, a strip above the conversation offers the person who
+  that message is the latest in the chat, a notice above the session header offers the person who
   started the chat **Review MCP connections** (anyone else is asked to tell them); connect the
   server another way.
 
@@ -276,18 +276,18 @@ in Manual, with the request switches in force at their first wake; see
 
 ## Recovery is in progress
 
-A strip with a spinner means SAM is waking the session or rebuilding it from its snapshot. Usually you
-need to do nothing: when it finishes, the chat carries on. If the strip names a reason it's waiting,
+A small status with a spinner, floating over the top of the conversation, means SAM is waking the session or rebuilding it from its snapshot. Usually you
+need to do nothing: when it finishes, the chat carries on. If the status names a reason it's waiting,
 the table below says what you can do.
 
-On Instant this finishes within two minutes. On a VM, the strip names the step it has reached —
+On Instant this finishes within two minutes. On a VM, the status names the step it has reached —
 **Finding a server...**, **Provisioning a server...**, **Restoring your session...**, **Starting
 the agent...** — because a VM wake often provisions a replacement machine, which takes a few
 minutes. The composer reads **Waking the agent — your message will be delivered...** while it
 works, and the **Nodes** page (**Infrastructure** in the main navigation) may briefly show the chat's old workspace deleted and a new one being
 created. That is normal.
 
-If a VM wake is waiting, the strip says why when SAM knows (`attachWakeState` in
+If a VM wake is waiting, the status says why when SAM knows (`attachWakeState` in
 `apps/api/src/routes/chat/wake-state.ts`):
 
 <picture>
@@ -295,7 +295,7 @@ If a VM wake is waiting, the strip says why when SAM knows (`attachWakeState` in
   <img src="/images/docs/chat-wake-waiting.png" alt="A sleeping chat titled Add tax columns to receipts. A strip with a spinner across the top reads: Your cloud provider has no capacity right now. Retrying... Next try at 02:34 PM. The last message, a follow-up question from the user, waits below, and the message box reads Waking the agent, your message will be delivered." loading="lazy" />
 </picture>
 
-| The strip says                                                         | What is happening                                                                                 | What you can do                                                                                                               |
+| The status says                                                        | What is happening                                                                                 | What you can do                                                                                                               |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | **Waiting for the previous workspace to finish shutting down...**      | SAM is still deleting the machine the chat slept on. The wake starts once it is gone.             | Wait. If it lasts, check that node on the **Nodes** page (see [A node won't go away](#a-node-wont-go-away)).                  |
 | **Your cloud provider has no capacity right now. Retrying...**         | Your provider is out of that machine type in that location.                                       | Wait, or allow more machine types or locations in your [compute pool](/docs/guides/compute-pools/).                           |
@@ -305,14 +305,14 @@ If a VM wake is waiting, the strip says why when SAM knows (`attachWakeState` in
 | **Waiting for a new server to finish starting...**                     | SAM starts one new machine at a time for your account on each cloud, and one is already starting. | Wait; it usually takes a few minutes.                                                                                         |
 | **Waiting for a server that is still setting up...**                   | A machine that can take this chat is busy setting up another workspace.                           | Wait.                                                                                                                         |
 
-When SAM has scheduled its next attempt, the strip adds **Next try at** and the time. If it shows
+When SAM has scheduled its next attempt, the status adds **Next try at** and the time. If it shows
 only **Waiting for server capacity...**, SAM has not recorded a reason yet. SAM keeps trying; if
 the wait drags on, delete machines you no longer need from the **Nodes** page. A message you sent is held for an
 hour: if the wake is still waiting then, the chat reports **Wake failed: Session is waking** (see
 [Wake failed](#wake-failed)).
 
 Until a **Wake failed** message appears, SAM still holds your message and keeps retrying the wake,
-even if the strip is gone when you reopen the chat. Don't send the message again: a second copy
+even if the status is gone when you reopen the chat. Don't send the message again: a second copy
 would be delivered as well. SAM retries a pending delivery for up to an hour, but elapsed time and
 the absence of a reply do not prove that the agent never received it. If the state is unclear,
 check the transcript, task, and linked GitHub work before resending. Send it again only when those

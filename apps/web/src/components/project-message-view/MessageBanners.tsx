@@ -1,37 +1,42 @@
-import { Spinner } from '@simple-agent-manager/ui';
-
 import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
+import { StatusCapsule } from '../chat-notices/StatusCapsule';
 
-/** WebSocket connection status banner (TDF-8). */
-export function ConnectionBanner({ state, onRetry }: { state: ChatConnectionState; onRetry: () => void }) {
-  const label = state === 'connecting' ? 'Connecting...'
-    : state === 'reconnecting' ? 'Reconnecting...'
-    : 'Disconnected';
+/** WebSocket connection status (TDF-8), as a capsule floating over the conversation. */
+export function ConnectionBanner({
+  state,
+  onRetry,
+}: {
+  state: ChatConnectionState;
+  onRetry: () => void;
+}) {
+  const label =
+    state === 'connecting'
+      ? 'Connecting...'
+      : state === 'reconnecting'
+        ? 'Reconnecting...'
+        : 'Disconnected';
 
   const isRecoverable = state === 'disconnected';
 
   return (
-    <div
+    <StatusCapsule
       role="alert"
-      className="flex items-center gap-2 px-4 py-1 border-b border-border-default text-xs"
-      style={{
-        backgroundColor: isRecoverable ? 'var(--sam-color-danger-tint)' : 'var(--sam-color-warning-tint, var(--sam-color-info-tint))',
-      }}
+      data-testid="connection-banner"
+      tone={isRecoverable ? 'danger' : state === 'reconnecting' ? 'warning' : 'info'}
+      indicator={isRecoverable ? 'dot' : 'spinner'}
+      action={
+        isRecoverable ? (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="sam-raised ml-1 min-h-7 shrink-0 cursor-pointer rounded-full border-0 px-3 text-[12.5px] font-semibold text-fg-primary hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-primary"
+          >
+            Retry
+          </button>
+        ) : undefined
+      }
     >
-      {!isRecoverable && <Spinner size="sm" />}
-      <span style={{ color: isRecoverable ? 'var(--sam-color-danger)' : 'var(--sam-color-fg-muted)' }}>
-        {label}
-      </span>
-      {isRecoverable && (
-        <button
-          type="button"
-          onClick={onRetry}
-          className="bg-transparent border-none cursor-pointer text-xs font-medium underline p-0"
-          style={{ color: 'var(--sam-color-accent-primary)' }}
-        >
-          Retry
-        </button>
-      )}
-    </div>
+      {label}
+    </StatusCapsule>
   );
 }
