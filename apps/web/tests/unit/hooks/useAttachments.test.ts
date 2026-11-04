@@ -74,4 +74,26 @@ describe('staged attachment identity', () => {
     await act(async () => finish());
     expect(result.current.chatAttachments).toEqual([]);
   });
+  it('uploads a file with unsafe characters under a sanitized name instead of rejecting it', async () => {
+    mocks.request.mockResolvedValue({ uploadId: 'shot', uploadUrl: 'shot' });
+    mocks.upload.mockResolvedValue(undefined);
+    const setError = vi.fn();
+    const { result } = renderHook(() => useAttachments('project', setError));
+    const original = new File(['png'], 'CleanShot 2026-11-04 at 12.22.51@2x.png', {
+      type: 'image/png',
+    });
+    act(() => result.current.handleChatFilesSelected([original]));
+    await waitFor(() => expect(result.current.chatAttachments[0]?.status).toBe('complete'));
+    expect(mocks.request).toHaveBeenCalledWith(
+      'project',
+      'CleanShot 2026-11-04 at 12.22.51_2x.png',
+      3,
+      'image/png'
+    );
+    expect(result.current.chatAttachments[0]).toMatchObject({
+      file: { name: 'CleanShot 2026-11-04 at 12.22.51_2x.png' },
+      ref: { filename: 'CleanShot 2026-11-04 at 12.22.51_2x.png', contentType: 'image/png' },
+    });
+    expect(setError).not.toHaveBeenCalledWith(expect.stringContaining('invalid characters'));
+  });
 });
