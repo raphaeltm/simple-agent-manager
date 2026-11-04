@@ -5,6 +5,7 @@ import { isExpiredTask } from '@simple-agent-manager/shared';
 import { Button, Pane } from '@simple-agent-manager/ui';
 import { type ReactNode, type RefObject, useEffect, useMemo, useState } from 'react';
 
+import { IMMERSIVE_CHROME } from '../shell/chat-immersive-transition';
 import { ArchivedForkComposer } from './ArchivedForkComposer';
 import { CompletionDock } from './CompletionDock';
 import { FollowUpInput, ReadOnlyFollowUp } from './FollowUpInput';
@@ -122,7 +123,7 @@ export function SessionFooter({
     <Pane
       variant="slab"
       data-testid="session-footer"
-      data-immersive-chrome="composer"
+      data-immersive-chrome={IMMERSIVE_CHROME.composer}
       className="shrink-0 empty:hidden"
     >
       {/* Lifecycle control — a single always-mounted dock while the session is

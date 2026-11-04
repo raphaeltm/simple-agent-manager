@@ -28,17 +28,34 @@ const SETTLE_CAP_MS = 220;
 /** How far past the screen edge a piece travels, so its shadow leaves with it. */
 const OFFSCREEN_MARGIN_PX = 12;
 
+/**
+ * The `data-immersive-chrome` values: the contract between the transition and the components
+ * it moves. Components set the attribute from this map, so a typo is a type error rather than a
+ * piece that silently slides off the wrong edge.
+ */
+export const IMMERSIVE_CHROME = {
+  appBar: 'app-bar',
+  sessionHeader: 'session-header',
+  toolRail: 'tool-rail',
+  composer: 'composer',
+} as const;
+export type ImmersiveChromeName = (typeof IMMERSIVE_CHROME)[keyof typeof IMMERSIVE_CHROME];
+
 const CHROME_SELECTOR = '[data-immersive-chrome]';
 const PINNED_ATTR = 'data-immersive-pinned';
 
 /** Which screen edge each piece leaves by. */
 type Edge = 'top' | 'right' | 'bottom';
-const EDGE_BY_CHROME: Record<string, Edge> = {
+const EDGE_BY_CHROME: Record<ImmersiveChromeName, Edge> = {
   'app-bar': 'top',
   'session-header': 'top',
   'tool-rail': 'right',
   composer: 'bottom',
 };
+
+function isChromeName(value: string | undefined): value is ImmersiveChromeName {
+  return value !== undefined && value in EDGE_BY_CHROME;
+}
 
 /** Inline properties `pin` writes, removed again by `unpin`. */
 const PINNED_PROPS = [
@@ -73,7 +90,8 @@ function prefersReducedMotion(): boolean {
 }
 
 function offscreenTransform(el: HTMLElement, rect: DOMRect): string {
-  const edge = EDGE_BY_CHROME[el.dataset.immersiveChrome ?? ''] ?? 'top';
+  const name = el.dataset.immersiveChrome;
+  const edge = isChromeName(name) ? EDGE_BY_CHROME[name] : 'top';
   if (edge === 'right') {
     return `translate3d(${window.innerWidth - rect.left + OFFSCREEN_MARGIN_PX}px, 0, 0)`;
   }
@@ -131,9 +149,14 @@ function unpin({ el, width }: Pinned) {
   el.style.width = width;
 }
 
+/** Pieces held `inert` while they come back in, out of sight or still sliding. */
+let inertHeld: HTMLElement[] = [];
+
 function cancelRunning() {
   for (const animation of running) animation.cancel();
   running = [];
+  for (const el of inertHeld) el.removeAttribute('inert');
+  inertHeld = [];
 }
 
 function slide(el: HTMLElement, from: string, to: string, fromOpacity: number, toOpacity: number) {
@@ -225,6 +248,10 @@ export async function exitChatImmersive(setActive: SetActive): Promise<void> {
     animation.pause();
     return animation;
   });
+  // Back in the flow but invisible and off screen until the slide lands: keep them out of the
+  // tab order and the accessibility tree meanwhile, so nothing unseen can take focus.
+  for (const { el } of moves) el.setAttribute('inert', '');
+  inertHeld = moves.map(({ el }) => el);
   await listSettled();
   if (run !== generation) return;
   for (const animation of running) animation.play();

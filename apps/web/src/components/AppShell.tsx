@@ -267,11 +267,10 @@ export function AppShell({ children }: AppShellProps) {
   // consumers never collapse on small viewports.
   const focusMode: FocusMode = isMobile ? 'default' : focusModeState;
 
-  // The immersive chat view is phone-only; leaving the phone layout always ends it.
+  // The immersive chat view is phone-only. `ImmersiveChatToggle` owns ending it when the screen
+  // leaves the phone layout (it also unpins the chrome); this guard only keeps the frame and the
+  // tool rail in their normal shape for the render in between.
   const chatImmersive = isMobile && chatImmersiveOn;
-  useEffect(() => {
-    if (!isMobile) setChatImmersiveOn(false);
-  }, [isMobile]);
   const chatImmersiveContext = useMemo(
     () => ({ active: chatImmersive, setActive: setChatImmersiveOn }),
     [chatImmersive]

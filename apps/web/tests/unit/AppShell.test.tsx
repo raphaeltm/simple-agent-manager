@@ -621,10 +621,19 @@ interface FakeAnimation {
   cancel: () => void;
 }
 
-function ChatStandIn({ withToggle = true }: { withToggle?: boolean }) {
+function ChatStandIn({
+  withToggle = true,
+  withHiddenPiece = false,
+}: {
+  withToggle?: boolean;
+  withHiddenPiece?: boolean;
+}) {
   return (
     <>
       <div data-immersive-chrome="session-header">Session header</div>
+      {withHiddenPiece && (
+        <div data-immersive-chrome="composer" data-testid="hidden-piece" style={{ display: 'none' }} />
+      )}
       <aside data-immersive-chrome="tool-rail" style={{ width: '46px' }}>
         Tools
       </aside>
@@ -634,11 +643,11 @@ function ChatStandIn({ withToggle = true }: { withToggle?: boolean }) {
   );
 }
 
-function renderChatShell(withToggle = true) {
+function renderChatShell(withToggle = true, withHiddenPiece = false) {
   return render(
     <MemoryRouter initialEntries={['/projects/p1/chat/s1']}>
       <AppShell>
-        <ChatStandIn withToggle={withToggle} />
+        <ChatStandIn withToggle={withToggle} withHiddenPiece={withHiddenPiece} />
       </AppShell>
     </MemoryRouter>,
   );
@@ -665,8 +674,11 @@ describe('AppShell (immersive chat view)', () => {
       query.includes('prefers-reduced-motion')
         ? ({ matches: reducedMotion, media: query } as MediaQueryList)
         : shellMatchMedia(query)) as typeof window.matchMedia;
-    Element.prototype.getClientRects = function () {
-      return [{}] as unknown as DOMRectList;
+    // jsdom has no layout: report one box for every element except a `display: none` one,
+    // which the transition must skip.
+    Element.prototype.getClientRects = function (this: Element) {
+      const hidden = (this as HTMLElement).style?.display === 'none';
+      return (hidden ? [] : [{}]) as unknown as DOMRectList;
     };
     Element.prototype.animate = function (keyframes: Keyframe[] | PropertyIndexedKeyframes) {
       const animation: FakeAnimation = {
@@ -738,8 +750,12 @@ describe('AppShell (immersive chat view)', () => {
     // A React-managed inline width survives the round trip.
     expect(document.querySelector<HTMLElement>('aside')!.style.width).toBe('46px');
 
+    // Invisible and off screen until the slide lands, so out of the tab order meanwhile.
+    for (const el of chromePieces()) expect(el).toHaveAttribute('inert');
+
     await settle();
     expect(animations).toHaveLength(8);
+    for (const el of chromePieces()) expect(el).not.toHaveAttribute('inert');
     expect(animations.slice(4).every((a) => (a.play as ReturnType<typeof vi.fn>).mock.calls.length === 1)).toBe(true);
     expect(
       screen.getByRole('button', { name: 'Show only the conversation' }),
@@ -792,6 +808,63 @@ describe('AppShell (immersive chat view)', () => {
     await settle();
     expect(shellFrame()).not.toHaveAttribute('data-chat-immersive');
     expect(animations).toHaveLength(0);
+  });
+
+  it('cancels a pending enter when the reader taps again before it slides', async () => {
+    renderChatShell();
+    fireEvent.click(screen.getByRole('button', { name: 'Show only the conversation' }));
+    // No wait: the enter is still waiting for the message list to settle.
+    fireEvent.click(screen.getByRole('button', { name: 'Show the rest of the app' }));
+    await settle();
+    // Only the exit's four slides ran; the stale enter never started its own.
+    expect(animations).toHaveLength(4);
+    expect(animations.every((a) => (a.play as ReturnType<typeof vi.fn>).mock.calls.length === 1)).toBe(true);
+    expect(shellFrame()).not.toHaveAttribute('data-chat-immersive');
+    expect(document.querySelector('[data-immersive-pinned]')).toBeNull();
+    for (const el of chromePieces()) expect(el.style.visibility).toBe('');
+    expect(
+      screen.getByRole('button', { name: 'Show only the conversation' }),
+    ).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('cancels a pending exit when the reader taps again before it slides', async () => {
+    renderChatShell();
+    fireEvent.click(screen.getByRole('button', { name: 'Show only the conversation' }));
+    await settle();
+    expect(animations).toHaveLength(4);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show the rest of the app' }));
+    // No wait: the exit's slides are created paused, waiting for the list to settle.
+    const exitSlides = animations.slice(4);
+    expect(exitSlides).toHaveLength(4);
+    fireEvent.click(screen.getByRole('button', { name: 'Show only the conversation' }));
+    // The paused exit slides were cancelled, never played.
+    for (const slide of exitSlides) {
+      expect(slide.cancel).toHaveBeenCalled();
+      expect(slide.play).not.toHaveBeenCalled();
+    }
+    for (const el of chromePieces()) expect(el).not.toHaveAttribute('inert');
+    await settle();
+    expect(shellFrame()).toHaveAttribute('data-chat-immersive', 'on');
+    for (const el of chromePieces()) {
+      expect(el).toHaveAttribute('data-immersive-pinned');
+      expect(el.style.visibility).toBe('hidden');
+    }
+    expect(
+      screen.getByRole('button', { name: 'Show the rest of the app' }),
+    ).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('leaves a piece that is not displayed alone', async () => {
+    renderChatShell(true, true);
+    fireEvent.click(screen.getByRole('button', { name: 'Show only the conversation' }));
+    const hidden = screen.getByTestId('hidden-piece');
+    expect(hidden).not.toHaveAttribute('data-immersive-pinned');
+    expect(hidden.style.position).toBe('');
+    await settle();
+    // The four displayed pieces still slid away.
+    expect(animations).toHaveLength(4);
+    expect(document.querySelectorAll('[data-immersive-pinned]')).toHaveLength(4);
   });
 
   it('has no toggle on the desktop layout', () => {

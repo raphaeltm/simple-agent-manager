@@ -4,6 +4,7 @@ import { paneClassName } from '@simple-agent-manager/ui';
 import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils';
 import { TruncatedSummary } from '../chat/TruncatedSummary';
 import { FailureCard } from '../debug/FailureCard';
+import { IMMERSIVE_CHROME } from '../shell/chat-immersive-transition';
 import { SessionHeader } from './SessionHeader';
 import type { useSessionLifecycle } from './useSessionLifecycle';
 import type { SessionLinkedWork } from './useSessionLinkedWork';
@@ -75,7 +76,7 @@ export function FloatingHeader({
       // conversation below its minimum height on a short phone screen.
       className="relative z-10 flex min-h-0 shrink flex-col gap-2"
       data-testid="session-floating-header"
-      data-immersive-chrome="session-header"
+      data-immersive-chrome={IMMERSIVE_CHROME.sessionHeader}
     >
       <SessionHeader
         projectId={projectId}

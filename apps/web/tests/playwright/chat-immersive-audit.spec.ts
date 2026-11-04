@@ -26,6 +26,9 @@ import {
 } from './sam-glass-fixtures';
 
 test.use({ timezoneId: 'UTC', locale: 'en-US' });
+// Each case loads the real chat and drives at least one full slide (two in the round trips),
+// which does not fit the config's 15s CI default.
+test.describe.configure({ timeout: 60_000 });
 
 type Theme = 'dark' | 'light';
 const MINUTE = 60_000;
@@ -131,6 +134,23 @@ async function wideReplyGeometry(page: Page) {
   });
 }
 
+/** Playback rate for inspecting a slide mid-flight. */
+const SLOW_MOTION = 0.2;
+
+/** Each chrome piece's box, optionally with the slide's current translation taken out. */
+async function chromeSlots(page: Page, options: { withoutTransform?: boolean } = {}) {
+  return page.evaluate(({ withoutTransform }) => {
+    const out: Record<string, { x: number; y: number }> = {};
+    for (const el of Array.from(document.querySelectorAll<HTMLElement>('[data-immersive-chrome]'))) {
+      if (el.getClientRects().length === 0) continue;
+      const r = el.getBoundingClientRect();
+      const t = withoutTransform ? new DOMMatrix(getComputedStyle(el).transform) : new DOMMatrix();
+      out[el.dataset.immersiveChrome ?? '?'] = { x: r.x - t.m41, y: r.y - t.m42 };
+    }
+    return out;
+  }, options);
+}
+
 async function waitForSlideToFinish(page: Page) {
   await expect
     .poll(() =>
@@ -164,15 +184,13 @@ for (const theme of ['dark', 'light'] as const) {
       expect(geometry!.width).toBeLessThanOrEqual(Math.min(geometry!.rowWidth, 736) + 1);
     }
 
-    // Liveness: your own message is still a bubble. It sits above the tall reply, so scroll up
-    // until the virtualized list renders it.
-    const userBubble = page.locator('.glass-msg-user').last();
-    await expect
-      .poll(async () => {
-        await page.getByTestId('virtuoso-scroller').evaluate((el) => el.scrollBy(0, -300));
-        return userBubble.count();
-      })
-      .toBeGreaterThan(0);
+    // Liveness: your own message is still a bubble. The conversation opens on the tall reply, so
+    // scroll to the top, where the transcript starts with your message, and let the virtualized
+    // list render it.
+    await conversation(page)
+      .getByTestId('virtuoso-scroller')
+      .evaluate((el) => el.scrollTo({ top: 0 }));
+    const userBubble = page.locator('.glass-msg-user').first();
     await expect(userBubble).toBeVisible();
     const userBorder = await userBubble.evaluate((el) => getComputedStyle(el).borderTopWidth);
     expect(userBorder).not.toBe('0px');
@@ -258,13 +276,26 @@ test.describe('immersive view on a phone', () => {
   test('the slide animates only transform and opacity', async ({ page }) => {
     test.skip(!isPhone(page), 'phone-only control');
     await openChat(page, 'dark');
+    // Where each piece sits in the normal layout, before anything is pinned.
+    const slots = await chromeSlots(page);
+
     // Slow the slide right down so it can be inspected mid-flight.
     const cdp = await page.context().newCDPSession(page);
     await cdp.send('Animation.enable');
-    await cdp.send('Animation.setPlaybackRate', { playbackRate: 0.05 });
+    await cdp.send('Animation.setPlaybackRate', { playbackRate: SLOW_MOTION });
 
     for (const name of ['Show only the conversation', 'Show the rest of the app']) {
       await page.getByRole('button', { name }).click();
+      if (name === 'Show only the conversation') {
+        // Pinned exactly where it was: with the slide's own translation taken out, every piece
+        // sits on its normal-layout slot, so pinning (and the layout change behind it) does
+        // not make anything jump. This is what correctPins() is for: `<main>` contains layout.
+        const pinned = await chromeSlots(page, { withoutTransform: true });
+        for (const key of Object.keys(slots)) {
+          expect(Math.abs(pinned[key]!.x - slots[key]!.x), `${key} left`).toBeLessThanOrEqual(1);
+          expect(Math.abs(pinned[key]!.y - slots[key]!.y), `${key} top`).toBeLessThanOrEqual(1);
+        }
+      }
       await expect
         .poll(() => page.evaluate(() => document.getAnimations().length), { timeout: 5000 })
         .toBeGreaterThan(0);
@@ -286,6 +317,14 @@ test.describe('immersive view on a phone', () => {
         ).sort()
       );
       expect(animated).toEqual(['opacity', 'transform']);
+      if (name === 'Show only the conversation') {
+        // Pinned over the conversation, the rail carries a fill so its icons do not sit on the
+        // message text while it slides.
+        const railFill = await chrome(page, 'tool-rail').evaluate(
+          (el) => getComputedStyle(el).backgroundColor
+        );
+        expect(railFill).not.toBe('rgba(0, 0, 0, 0)');
+      }
       // Mid-slide, the conversation already has its final size: the layout changed once, up
       // front, and the slide does not resize it.
       const midSlide = await box(conversation(page));
@@ -295,8 +334,10 @@ test.describe('immersive view on a phone', () => {
       expect(Math.abs(settled.y - midSlide.y)).toBeLessThanOrEqual(1);
       expect(Math.abs(settled.height - midSlide.height)).toBeLessThanOrEqual(1);
       expect(Math.abs(settled.width - midSlide.width)).toBeLessThanOrEqual(1);
-      await cdp.send('Animation.setPlaybackRate', { playbackRate: 0.05 });
+      await cdp.send('Animation.setPlaybackRate', { playbackRate: SLOW_MOTION });
     }
+    await cdp.send('Animation.setPlaybackRate', { playbackRate: 1 });
+    await cdp.detach();
   });
 });
 

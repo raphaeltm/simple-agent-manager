@@ -26,6 +26,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { CSSProperties } from 'react';
 
 import { useChatImmersive } from '../shell/chat-immersive-context';
+import { IMMERSIVE_CHROME } from '../shell/chat-immersive-transition';
 import {
   isToolGroupStart,
   nextToolStripMode,
@@ -236,7 +237,7 @@ export function SessionToolRail({
           aria-label={cycleLabel}
           title={cycleLabel}
           data-testid="session-tool-rail-tab"
-          data-immersive-chrome="tool-rail"
+          data-immersive-chrome={IMMERSIVE_CHROME.toolRail}
           className="sam-raised absolute right-0 z-30 flex cursor-pointer flex-col items-center justify-center gap-1 rounded-l-[var(--sam-radius-control)] border-0 py-3 text-fg-muted shadow-[var(--sam-glass-v2-depth-slab)] transition-colors hover:text-fg-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring"
           style={{ ...RAIL_TAB_STYLE, width: RAIL_TAB_WIDTH_PX }}
         >
@@ -262,7 +263,7 @@ export function SessionToolRail({
     <div className="relative shrink-0" style={{ width: gutter }}>
       <aside
         data-testid="session-tool-rail"
-        data-immersive-chrome="tool-rail"
+        data-immersive-chrome={IMMERSIVE_CHROME.toolRail}
         data-mode={mode}
         aria-label="Session tools"
         className={`absolute inset-y-0 right-0 z-20 flex flex-col overflow-hidden ${

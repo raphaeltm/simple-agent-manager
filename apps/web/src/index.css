@@ -287,7 +287,7 @@
       display: none;
     }
 
-    aside[data-immersive-chrome][data-immersive-pinned] {
+    [data-immersive-chrome='tool-rail'][data-immersive-pinned] {
       background: var(--sam-glass-v2-raised);
       border-radius: var(--sam-radius-pane) 0 0 var(--sam-radius-pane);
     }
