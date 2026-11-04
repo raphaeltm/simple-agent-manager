@@ -60,7 +60,7 @@ export interface TriggerAdmissionInput {
   /** Durable hook used to link source admission state before external submission begins. */
   beforeSubmit?: (executionId: string) => Promise<void>;
   /**
-   * An execution id the caller stored durably before calling (email intake). A later call with
+   * An execution id stored durably by the caller (email) or derived from the occurrence (cron). A later call with
    * the same id resumes that execution, including its rendered prompt, instead of reserving
    * another, the way a GitHub delivery id does. Submission is idempotent per execution id.
    */
@@ -99,9 +99,10 @@ async function recordSkippedExecution(
   eventType: string,
   scheduledAt: string,
   reason: AdmissionSkipReason,
-  githubDeliveryId?: string
+  githubDeliveryId?: string,
+  callerExecutionId?: string
 ): Promise<string> {
-  const executionId = ulid();
+  const executionId = callerExecutionId ?? ulid();
   const now = new Date().toISOString();
   const insert = env.DATABASE.prepare(
     `INSERT OR IGNORE INTO trigger_executions
@@ -120,13 +121,22 @@ async function recordSkippedExecution(
     trigger.id,
     trigger.projectId
   );
+  // Only the INSERT winner allocates a sequence; replaying an existing ID must not increment it.
   const increment = env.DATABASE.prepare(
     `UPDATE triggers SET next_execution_sequence = next_execution_sequence + 1, updated_at = ?
-     WHERE id = ? AND project_id = ?
+     WHERE id = ? AND project_id = ? AND changes() > 0
        AND EXISTS (SELECT 1 FROM trigger_executions WHERE id = ?)`
   ).bind(now, trigger.id, trigger.projectId, executionId);
   const [insertResult] = await env.DATABASE.batch([insert, increment]);
   if (!insertResult?.meta.changes) {
+    if (callerExecutionId) {
+      const winner = await env.DATABASE.prepare(
+        'SELECT id FROM trigger_executions WHERE id = ? AND trigger_id = ?'
+      )
+        .bind(callerExecutionId, trigger.id)
+        .first<{ id: string }>();
+      if (winner) return winner.id;
+    }
     if (githubDeliveryId) {
       const winner = await env.DATABASE.prepare(
         'SELECT id FROM trigger_executions WHERE github_delivery_id = ? AND trigger_id = ?'
@@ -284,16 +294,17 @@ export async function admitAndSubmitTriggerExecution(
     now,
     now,
     input.githubDeliveryId ?? null,
-    input.githubDeliveryId ? JSON.stringify(trigger) : null,
+    input.githubDeliveryId || input.executionId ? JSON.stringify(trigger) : null,
     trigger.id,
     trigger.projectId,
     allowPaused,
     ...EXECUTION_HOLDS_RUN_SLOT_BINDINGS,
     ...emailLeaseBindings(input.emailLease)
   );
+  // Only the INSERT winner allocates a sequence; replaying an existing ID must not increment it.
   const increment = env.DATABASE.prepare(
     `UPDATE triggers SET next_execution_sequence = next_execution_sequence + 1, updated_at = ?
-     WHERE id = ? AND project_id = ?
+     WHERE id = ? AND project_id = ? AND changes() > 0
        AND EXISTS (SELECT 1 FROM trigger_executions WHERE id = ?)`
   ).bind(now, trigger.id, trigger.projectId, executionId);
   const [reserveResult] = previous ? [] : await env.DATABASE.batch([reserve, increment]);
@@ -303,6 +314,14 @@ export async function admitAndSubmitTriggerExecution(
     // reserved, and there is nothing to record as skipped.
     if (await lostEmailLease(env, input.emailLease)) {
       return { outcome: 'failed', executionId, error: 'Another attempt took over this email' };
+    }
+    if (input.executionId) {
+      const winner = await env.DATABASE.prepare(
+        'SELECT id FROM trigger_executions WHERE id = ? AND trigger_id = ?'
+      )
+        .bind(input.executionId, trigger.id)
+        .first<{ id: string }>();
+      if (winner) return admitAndSubmitTriggerExecution(env, input, submitter);
     }
     if (input.githubDeliveryId) {
       const winner = await env.DATABASE.prepare(
@@ -320,9 +339,11 @@ export async function admitAndSubmitTriggerExecution(
       input.eventType,
       scheduledAt,
       reason,
-      input.githubDeliveryId
+      input.githubDeliveryId,
+      input.executionId
     );
-    if (input.githubDeliveryId) return admitAndSubmitTriggerExecution(env, input, submitter);
+    if (input.githubDeliveryId || input.executionId)
+      return admitAndSubmitTriggerExecution(env, input, submitter);
     return { outcome: 'skipped', executionId: skippedId, reason };
   }
 
