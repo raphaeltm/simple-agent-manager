@@ -438,6 +438,29 @@ describe('ops read tools — through the real MCP route', () => {
     ]);
   });
 
+  it('a list with no limit still honours operations.opsListMaxRows', async () => {
+    main
+      .prepare(`INSERT INTO platform_settings (key, value, updated_at) VALUES (?, ?, ?)`)
+      .run('operations.opsListMaxRows', '2', '2026-11-03T00:00:00Z');
+    const obs = new Database(':memory:');
+    createSchemaTables(obs, [platformErrors]);
+    for (const n of [1, 2, 3]) {
+      obs
+        .prepare(
+          `INSERT INTO platform_errors (id, source, level, message, timestamp, created_at)
+           VALUES (?, 'api', 'error', 'boom', ?, ?)`
+        )
+        .run(`pe-${n}`, Date.now() - n * 1000, Date.now());
+    }
+    env = { ...env, OBSERVABILITY_DATABASE: createSqliteD1(obs) } as Env;
+
+    const result = body(await callMcpTool(app, env, 'tok-admin', 'ops_search_errors', {}));
+
+    expect(result.total).toBe(3);
+    expect(result.errors).toHaveLength(2);
+    expect(result.hasMore).toBe(true);
+  });
+
   it('a tool that fails after the gate records a failed audit row', async () => {
     env = { ...env, OBSERVABILITY_DATABASE: createSqliteD1(new Database(':memory:')) } as Env;
 

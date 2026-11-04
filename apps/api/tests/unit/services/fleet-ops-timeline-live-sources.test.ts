@@ -138,6 +138,15 @@ beforeEach(() => {
         createdAt: at(45),
       },
       { id: 'ev-old', level: 'info', type: 'old', message: 'outside window', createdAt: at(3_000) },
+      {
+        id: 'ev-neighbor',
+        nodeId: 'node-1',
+        workspaceId: 'ws-someone-else',
+        level: 'info',
+        type: 'workspace.neighbor',
+        message: 'another workspace on this node',
+        createdAt: at(40),
+      },
     ],
   });
 });
@@ -148,13 +157,18 @@ describe('buildTimeline live sources', () => {
 
     const bySource = (name: string) => result.events.filter((e) => e.source === name);
     expect(bySource('boot_log')).toHaveLength(2);
-    expect(bySource('node_agent_events')).toEqual([
+    // A node timeline shows every workspace's events on the node.
+    expect(bySource('node_agent_events').map((e) => e.ids.workspaceId)).toEqual([
+      'ws-1',
+      'ws-someone-else',
+    ]);
+    expect(bySource('node_agent_events')[0]).toEqual(
       expect.objectContaining({
         at: at(45),
         kind: 'node.event.workspace.provision_failed',
         ids: { nodeId: 'node-1', workspaceId: 'ws-1' },
-      }),
-    ]);
+      })
+    );
     // Two of the three workspaces are read; the third costs nothing.
     expect(stores.getBootLogs).toHaveBeenCalledTimes(2);
     // A node hosts many users' chats, so its timeline does not fan out into chat activity.
@@ -171,6 +185,10 @@ describe('buildTimeline live sources', () => {
 
     const activity = result.events.filter((e) => e.source === 'activity_events');
     expect(activity).toHaveLength(1);
+    // Only this workspace's node events, not a neighbour's on the same node.
+    expect(
+      result.events.filter((e) => e.source === 'node_agent_events').map((e) => e.ids.workspaceId)
+    ).toEqual(['ws-1']);
     expect(activity[0]?.ids.chatSessionId).toBe('chat-1');
     expect(stores.listActivityEvents).toHaveBeenCalledWith(env, 'p', null, 50, NOW + 1, 'chat-1');
     expect(activity[0]?.text).toContain('BEGIN UNTRUSTED ACTIVITY_EVENTS');

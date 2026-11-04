@@ -360,6 +360,37 @@ describe('findAnomalies', () => {
     expect(entry.findings.at(-1)?.ids.workspaceId).toBe('ws-q-149');
   });
 
+  it('applies the quarantine cap after dropping workspaces deleted since', async () => {
+    node('node-1');
+    const report = (workspaceId: string, msAgo: number) =>
+      insert(obs, 'platform_errors', {
+        id: `e-${workspaceId}`,
+        source: 'api',
+        level: 'error',
+        message: WORKSPACE_DELETION_QUARANTINE_MESSAGE,
+        workspace_id: workspaceId,
+        node_id: 'node-1',
+        timestamp: NOW - msAgo,
+        created_at: NOW - msAgo,
+      });
+    // The three newest reports belong to workspaces deleted since; the open one is older.
+    for (const [i, id] of ['ws-gone-1', 'ws-gone-2', 'ws-gone-3'].entries()) {
+      workspace(id, 'node-1', { status: 'deleted' });
+      report(id, (i + 1) * MIN);
+    }
+    workspace('ws-open', 'node-1', { status: 'stopping' });
+    report('ws-open', 10 * MIN);
+
+    const entry = findingIds(
+      await findAnomalies(env, { ...FLEET_OPS_DEFAULTS, anomalyMaxPerClass: 2 }, { now: NOW }),
+      'workspace_deletion_quarantine'
+    );
+
+    expect(entry.findings.map((f) => f.ids.workspaceId)).toEqual(['ws-open']);
+    expect(entry.total).toBe(1);
+    expect(entry.truncated).toBe(false);
+  });
+
   it('isolates a failing class: the others still report', async () => {
     node('node-stale', { last_heartbeat_at: iso(30 * MIN) });
     obs.exec('DROP TABLE platform_errors');

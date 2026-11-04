@@ -255,4 +255,15 @@ describe('buildTimeline', () => {
       ids: { nodeId: 'node-1' },
     });
   });
+
+  it('the records source keeps its newest events when it hits its cap', async () => {
+    const records = DEFAULT_TIMELINE_SOURCES.filter((src) => src.name === 'records');
+    const all = await buildTimeline(env, request({ perSourceLimit: 100 }), records);
+    const capped = await buildTimeline(env, request({ perSourceLimit: 2 }), records);
+
+    expect(all.events.length).toBeGreaterThan(2);
+    expect(capped.events.map((e) => `${e.at}|${e.kind}`)).toEqual(
+      all.events.slice(-2).map((e) => `${e.at}|${e.kind}`)
+    );
+  });
 });
