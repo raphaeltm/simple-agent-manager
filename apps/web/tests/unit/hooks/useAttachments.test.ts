@@ -94,6 +94,7 @@ describe('staged attachment identity', () => {
       file: { name: 'CleanShot_2026-11-04_at_12.22.51_2x.png' },
       ref: { filename: 'CleanShot_2026-11-04_at_12.22.51_2x.png', contentType: 'image/png' },
     });
+    expect(mocks.upload.mock.calls[0]?.[1]).toBe(result.current.chatAttachments[0]?.file);
     expect(setError).not.toHaveBeenCalledWith(expect.stringContaining('invalid characters'));
   });
 });

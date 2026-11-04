@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { sanitizeFilename } from '../../src/filename';
+import { MAX_SANITIZED_FILENAME_LENGTH, sanitizeFilename } from '../../src/filename';
 import { SAFE_FILENAME_REGEX } from '../../src/types';
 
 describe('sanitizeFilename', () => {
@@ -33,7 +33,27 @@ describe('sanitizeFilename', () => {
     expect(sanitizeFilename('.')).toBe('file');
     expect(sanitizeFilename('..')).toBe('file');
     expect(sanitizeFilename('   ')).toBe('file');
-    expect(sanitizeFilename('截图', 'upload')).toBe('upload');
+    expect(sanitizeFilename('截图')).toBe('file');
+  });
+
+  it('shortens long names to the path component limit and keeps the extension', () => {
+    const out = sanitizeFilename(`${'a'.repeat(400)}.png`);
+    expect(out).toHaveLength(MAX_SANITIZED_FILENAME_LENGTH);
+    expect(out.endsWith('.png')).toBe(true);
+    expect(new TextEncoder().encode(out).length).toBeLessThanOrEqual(255);
+  });
+
+  it('bounds names that grow during sanitization', () => {
+    // NFKD turns each U+2487 into "(20)", which sanitizes to "_20_": 1 char in, 4 out.
+    const out = sanitizeFilename(`${String.fromCodePoint(0x2487).repeat(200)}.txt`);
+    expect(out.length).toBeLessThanOrEqual(MAX_SANITIZED_FILENAME_LENGTH);
+    expect(out.endsWith('.txt')).toBe(true);
+  });
+
+  it('drops an overlong extension rather than keeping it whole', () => {
+    const out = sanitizeFilename(`name.${'x'.repeat(300)}`);
+    expect(out).toHaveLength(MAX_SANITIZED_FILENAME_LENGTH);
+    expect(out.startsWith('name.')).toBe(true);
   });
 
   it('always returns a name the upload validators accept', () => {
