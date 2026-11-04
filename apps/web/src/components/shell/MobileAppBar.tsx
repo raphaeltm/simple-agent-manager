@@ -3,6 +3,8 @@ import { Menu } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { Link } from 'react-router';
 
+// PROTOTYPE ONLY (chat-surface): remove before merge.
+import { PrototypeOptionsPill } from '../../pages/chat-surface-prototype/controls';
 import { NotificationCenter } from '../NotificationCenter';
 import { RecentChatsDropdown } from '../RecentChatsDropdown';
 
@@ -52,6 +54,7 @@ export function MobileAppBar({
           </span>
         )}
       </Link>
+      <PrototypeOptionsPill />
       <div className="sam-well flex shrink-0 items-center rounded-[14px] p-0.5">
         <RecentChatsDropdown />
         <NotificationCenter />
