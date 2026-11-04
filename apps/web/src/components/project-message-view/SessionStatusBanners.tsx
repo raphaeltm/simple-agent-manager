@@ -112,6 +112,7 @@ export function SessionStatusBanners({ lc }: Readonly<{ lc: UseSessionLifecycleR
         <NoticeSlab
           role="alert"
           data-testid="resume-error-notice"
+          compact
           tone="danger"
           icon={<CloudOff size={15} />}
           title={lc.resumeError}

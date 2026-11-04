@@ -27,6 +27,7 @@ export function AttentionAnswerNotice({
   return (
     <NoticeSlab
       role="alert"
+      compact
       tone={failed ? 'danger' : 'success'}
       icon={failed ? <CircleAlert size={15} /> : <Check size={15} />}
       title={status.message}

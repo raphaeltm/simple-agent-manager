@@ -13,12 +13,20 @@ import type { ButtonHTMLAttributes, ReactNode } from 'react';
 import { NOTICE_TONES, type NoticeTone } from './notice-tones';
 
 /** Solid round badge holding a notice's icon: an element on glass, so never translucent. */
-export function NoticeBadge({ tone, children }: { tone: NoticeTone; children: ReactNode }) {
+export function NoticeBadge({
+  tone,
+  children,
+  small = false,
+}: {
+  tone: NoticeTone;
+  children: ReactNode;
+  small?: boolean;
+}) {
   const t = NOTICE_TONES[tone];
   return (
     <span
       aria-hidden="true"
-      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border bg-[var(--sam-chip-bg)]"
+      className={`flex ${small ? 'h-7 w-7' : 'h-8 w-8'} shrink-0 items-center justify-center rounded-full border bg-[var(--sam-chip-bg)]`}
       style={{ borderColor: t.edge, color: t.fg, boxShadow: `0 0 18px -4px ${t.glow}` }}
     >
       {children}
@@ -72,6 +80,12 @@ export interface NoticeSlabProps {
   actions?: ReactNode;
   /** Short actions stay beside the title on phones instead of moving under the text. */
   inlineActions?: boolean;
+  /**
+   * For a notice that is only a message (an error, a result): smaller badge and 13px text, and on
+   * phones the text scrolls past about five lines (the actions stay outside it), so a long
+   * message cannot crowd the conversation off a short screen.
+   */
+  compact?: boolean;
   /** Content under the header row, such as a stage track. */
   children?: ReactNode;
   role?: 'status' | 'alert';
@@ -87,6 +101,7 @@ export function NoticeSlab({
   meta,
   actions,
   inlineActions = false,
+  compact = false,
   children,
   role,
   'data-testid': testId,
@@ -98,7 +113,7 @@ export function NoticeSlab({
       role={role}
       data-testid={testId}
       data-tone={tone}
-      className={`${paneClassName('slab')} relative shrink-0 overflow-hidden px-4 py-3.5 ${className}`}
+      className={`${paneClassName('slab')} relative shrink-0 overflow-hidden ${compact ? 'px-3.5 py-2.5' : 'px-4 py-3.5'} ${className}`}
       style={{
         boxShadow: `inset 0 1px 0 var(--sam-glass-v2-bevel), inset 0 -1px 0 ${t.edge}, var(--sam-glass-v2-depth-slab)`,
       }}
@@ -112,14 +127,26 @@ export function NoticeSlab({
         {/* One copy of the actions: beside the text from `sm`, wrapped under it on phones
             (the text column claims the rest of the first line) unless `inlineActions`. */}
         <div className="flex flex-wrap items-start gap-x-3 gap-y-2.5">
-          <NoticeBadge tone={tone}>{icon}</NoticeBadge>
+          <NoticeBadge tone={tone} small={compact}>
+            {icon}
+          </NoticeBadge>
           <div
-            className={`flex min-w-0 flex-1 flex-col gap-1 pt-[5px] ${
-              inlineActions || !actions ? '' : 'basis-[calc(100%-44px)] sm:basis-0'
+            className={`flex min-w-0 flex-1 flex-col gap-1 ${compact ? 'max-h-32 overflow-y-auto pt-1 sm:max-h-none' : 'pt-[5px]'} ${
+              inlineActions || !actions
+                ? ''
+                : compact
+                  ? 'basis-[calc(100%-40px)] sm:basis-0'
+                  : 'basis-[calc(100%-44px)] sm:basis-0'
             }`}
           >
             <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-              <span className="min-w-0 break-words text-sm font-semibold leading-tight text-fg-primary [overflow-wrap:anywhere]">
+              <span
+                className={`min-w-0 break-words text-fg-primary [overflow-wrap:anywhere] ${
+                  compact
+                    ? 'text-[13px] font-medium leading-snug'
+                    : 'text-sm font-semibold leading-tight'
+                }`}
+              >
                 {title}
               </span>
               {meta}
@@ -133,7 +160,9 @@ export function NoticeSlab({
           {actions && (
             <div
               className={`flex items-center gap-2 sm:self-center ${
-                inlineActions ? 'shrink-0' : 'w-full flex-wrap pl-11 sm:w-auto sm:shrink-0 sm:pl-0'
+                inlineActions
+                  ? 'shrink-0'
+                  : `w-full flex-wrap ${compact ? 'pl-10' : 'pl-11'} sm:w-auto sm:shrink-0 sm:pl-0`
               }`}
             >
               {actions}
