@@ -466,15 +466,19 @@ function suite(label: string) {
     // The list is virtualized, and on a short phone the conversation pane (between the session
     // and message-box slabs) is shorter than both expanded groups, so only the rows near the
     // viewport are mounted. Visit each end of the conversation and check the group there.
-    await scroller.evaluate((el) => {
-      el.scrollTop = 0;
-    });
-    await expect(page.getByText('Read: docs/architecture.md')).toBeVisible();
+    // The seeded groups open and grow after the first render, and the list keeps its bottom
+    // anchor while rows re-measure, so retry each visit until the list has settled.
+    const visit = async (end: 'top' | 'bottom', text: string) => {
+      await expect(async () => {
+        await scroller.evaluate((el, to) => {
+          el.scrollTop = to === 'top' ? 0 : el.scrollHeight;
+        }, end);
+        await expect(page.getByText(text)).toBeVisible({ timeout: 1_000 });
+      }).toPass({ timeout: 10_000 });
+    };
+    await visit('top', 'Read: docs/architecture.md');
     await expect(headers.first()).toHaveAttribute('aria-expanded', 'true');
-    await scroller.evaluate((el) => {
-      el.scrollTop = el.scrollHeight;
-    });
-    await expect(page.getByText('Bash: wc -l docs/architecture.md')).toBeVisible();
+    await visit('bottom', 'Bash: wc -l docs/architecture.md');
     await expect(headers.last()).toHaveAttribute('aria-expanded', 'true');
     // Every mounted group is open; none was left collapsed by the seed.
     for (const header of await headers.all()) {
