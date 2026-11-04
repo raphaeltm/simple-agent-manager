@@ -25,6 +25,8 @@ import { Count, paneClassName } from '@simple-agent-manager/ui';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { CSSProperties } from 'react';
 
+import { useChatImmersive } from '../shell/chat-immersive-context';
+import { IMMERSIVE_CHROME } from '../shell/chat-immersive-transition';
 import {
   isToolGroupStart,
   nextToolStripMode,
@@ -131,12 +133,7 @@ function ToolBadge({
 }
 
 function RailDivider() {
-  return (
-    <div
-      aria-hidden="true"
-      className="mx-2.5 my-1.5 h-px bg-[var(--sam-hairline)]"
-    />
-  );
+  return <div aria-hidden="true" className="mx-2.5 my-1.5 h-px bg-[var(--sam-hairline)]" />;
 }
 
 /** One rail row. Renders an anchor for navigating actions and a button for the rest. */
@@ -160,7 +157,9 @@ function RailAction({
   const className = `relative flex items-center border-none bg-transparent transition-colors hover:bg-[var(--sam-glass-v2-raised)] hover:text-fg-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus-ring ${
     isMobile ? '' : 'rounded-[var(--sam-radius-control)]'
   } ${
-    compact ? `${iconRowHeight} justify-center px-0` : `${isMobile ? 'h-9' : 'h-10'} w-full gap-2.5 px-2.5 text-left`
+    compact
+      ? `${iconRowHeight} justify-center px-0`
+      : `${isMobile ? 'h-9' : 'h-10'} w-full gap-2.5 px-2.5 text-left`
   } ${action.disabled ? 'cursor-default opacity-60' : 'cursor-pointer'}`;
 
   const label = !compact && (
@@ -219,7 +218,10 @@ export function SessionToolRail({
   // It must be a flex CHILD, not absolutely positioned against the messages container:
   // that container is `flex-col` below `lg`, so a sibling spacer reserved no horizontal
   // space at all on mobile and the expanded details panel slid underneath the rail.
-  const gutter = sessionToolRailGutter(mode, isMobile);
+  // The immersive chat view slides the rail away, so its slot stops reserving width and the
+  // conversation takes the whole row (`shell/chat-immersive-transition.ts`).
+  const immersive = useChatImmersive().active;
+  const gutter = immersive ? 0 : sessionToolRailGutter(mode, isMobile);
 
   // `meta` (Report / Complete / Details) is pinned; everything else scrolls. See the
   // comment on the scrolling list below for why.
@@ -235,6 +237,7 @@ export function SessionToolRail({
           aria-label={cycleLabel}
           title={cycleLabel}
           data-testid="session-tool-rail-tab"
+          data-immersive-chrome={IMMERSIVE_CHROME.toolRail}
           className="sam-raised absolute right-0 z-30 flex cursor-pointer flex-col items-center justify-center gap-1 rounded-l-[var(--sam-radius-control)] border-0 py-3 text-fg-muted shadow-[var(--sam-glass-v2-depth-slab)] transition-colors hover:text-fg-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring"
           style={{ ...RAIL_TAB_STYLE, width: RAIL_TAB_WIDTH_PX }}
         >
@@ -260,6 +263,7 @@ export function SessionToolRail({
     <div className="relative shrink-0" style={{ width: gutter }}>
       <aside
         data-testid="session-tool-rail"
+        data-immersive-chrome={IMMERSIVE_CHROME.toolRail}
         data-mode={mode}
         aria-label="Session tools"
         className={`absolute inset-y-0 right-0 z-20 flex flex-col overflow-hidden ${

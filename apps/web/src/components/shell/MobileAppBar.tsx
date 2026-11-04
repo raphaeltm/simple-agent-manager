@@ -5,6 +5,7 @@ import { Link } from 'react-router';
 
 import { NotificationCenter } from '../NotificationCenter';
 import { RecentChatsDropdown } from '../RecentChatsDropdown';
+import { IMMERSIVE_CHROME } from './chat-immersive-transition';
 
 /** The screen's main toggle, raised at the right edge of the mobile app bar. */
 export interface ShellScreenAction {
@@ -33,6 +34,7 @@ export function MobileAppBar({
     <Pane
       as="header"
       variant="slab"
+      data-immersive-chrome={IMMERSIVE_CHROME.appBar}
       className="relative z-30 flex h-14 shrink-0 items-center gap-1 pr-1.5 pl-1"
     >
       <IconButton

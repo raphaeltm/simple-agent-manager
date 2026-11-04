@@ -12,6 +12,7 @@ import {
 } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
+import { ImmersiveChatToggle } from './ImmersiveChatToggle';
 import { CHAT_LIST_COMPONENTS, type ChatListContext } from './MessageListScaffold';
 import type { DisplayItem } from './tool-call-groups';
 import type { UseSessionLifecycleResult } from './useSessionLifecycle.types';
@@ -171,6 +172,14 @@ export function ConversationPane({
               <ChevronDown size={16} className="text-fg-muted" />
             </button>
           )}
+
+          <ImmersiveChatToggle
+            agentActive={lc.agentActivity !== 'idle'}
+            atBottom={!lc.showScrollButton}
+            scrollToBottom={() =>
+              virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end' })
+            }
+          />
 
           {selectionControls}
         </div>

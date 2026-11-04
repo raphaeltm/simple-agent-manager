@@ -32,6 +32,7 @@ import { MobileNavDrawer, type MobileNavItem } from './MobileNavDrawer';
 import { extractProjectId, getGlobalNavItems, NavSidebar, PROJECT_NAV_ITEMS } from './NavSidebar';
 import { OnboardingProvider } from './onboarding';
 import { ChoosePathWizard } from './onboarding/choose-path/ChoosePathWizard';
+import { ChatImmersiveContext } from './shell/chat-immersive-context';
 import { DesktopSidebar } from './shell/DesktopSidebar';
 import { MobileAppBar, type ShellScreenAction } from './shell/MobileAppBar';
 import { SidebarProjectList } from './SidebarProjectList';
@@ -79,6 +80,7 @@ export function AppShell({ children }: AppShellProps) {
   const [showGlobalNav, setShowGlobalNav] = useState(false);
   const [focusModeState, setFocusModeState] = useState<FocusMode>('default');
   const [screenAction, setScreenAction] = useState<ShellScreenAction | null>(null);
+  const [chatImmersiveOn, setChatImmersiveOn] = useState(false);
   const commandPalette = useGlobalCommandPalette();
   const {
     projects: sidebarProjects,
@@ -265,6 +267,15 @@ export function AppShell({ children }: AppShellProps) {
   // consumers never collapse on small viewports.
   const focusMode: FocusMode = isMobile ? 'default' : focusModeState;
 
+  // The immersive chat view is phone-only. `ImmersiveChatToggle` owns ending it when the screen
+  // leaves the phone layout (it also unpins the chrome); this guard only keeps the frame and the
+  // tool rail in their normal shape for the render in between.
+  const chatImmersive = isMobile && chatImmersiveOn;
+  const chatImmersiveContext = useMemo(
+    () => ({ active: chatImmersive, setActive: setChatImmersiveOn }),
+    [chatImmersive]
+  );
+
   const shellContext = useMemo(
     () => ({ setProjectName, focusMode, setFocusMode, cycleFocusMode, setScreenAction }),
     [setProjectName, focusMode, setFocusMode, cycleFocusMode]
@@ -290,53 +301,59 @@ export function AppShell({ children }: AppShellProps) {
   if (isMobile) {
     return (
       <AppShellContext.Provider value={shellContext}>
-        <OnboardingProvider>
-          <ChoosePathWizard />
-          <div className="sam-void flex h-screen flex-col gap-2.5 p-2.5">
-            <SkipToContent />
-            <MobileAppBar
-              projectName={projectId ? projectName || 'Project' : undefined}
-              onOpenMenu={() => setDrawerOpen(true)}
-              screenAction={screenAction}
-            />
-
-            <div key="main-frame" className={mainFrameClassName}>
-              <main id="main-content" className={mainClassName}>
-                {children ?? <Outlet />}
-              </main>
-            </div>
-
-            <div key="global-audio" className="shrink-0">
-              <GlobalAudioPlayer />
-            </div>
-
-            {drawerOpen && user && (
-              <MobileNavDrawer
-                onClose={() => setDrawerOpen(false)}
-                user={{ name: user.name, email: user.email, image: user.image }}
-                navItems={mobileNavItems}
-                globalNavItems={projectId ? mobileGlobalNavItems : undefined}
-                currentPath={location.pathname}
-                onNavigate={(path) => {
-                  navigate(path);
-                  setDrawerOpen(false);
-                }}
-                onSignOut={handleSignOut}
-                onOpenSearch={() => {
-                  setDrawerOpen(false);
-                  commandPalette.open();
-                }}
+        <ChatImmersiveContext.Provider value={chatImmersiveContext}>
+          <OnboardingProvider>
+            <ChoosePathWizard />
+            <div
+              className={`sam-void flex h-screen flex-col gap-2.5 ${chatImmersive ? 'p-1.5' : 'p-2.5'}`}
+              data-chat-immersive={chatImmersive ? 'on' : undefined}
+            >
+              <SkipToContent />
+              <MobileAppBar
                 projectName={projectId ? projectName || 'Project' : undefined}
-                projectListSection={mobileProjectListSection}
-                projectHealthElement={mobileProjectHealthElement}
-                showGlobalNav={showGlobalNav}
-                onToggleGlobalNav={projectId ? handleToggleGlobalNav : undefined}
+                onOpenMenu={() => setDrawerOpen(true)}
+                screenAction={screenAction}
               />
-            )}
 
-            {commandPalette.isOpen && <GlobalCommandPalette onClose={commandPalette.close} />}
-          </div>
-        </OnboardingProvider>
+              <div key="main-frame" className={mainFrameClassName}>
+                <main id="main-content" className={mainClassName}>
+                  {children ?? <Outlet />}
+                </main>
+              </div>
+
+              {/* Hidden while nothing plays, so an empty slot does not add a gap below the panes. */}
+              <div key="global-audio" className="shrink-0 empty:hidden">
+                <GlobalAudioPlayer />
+              </div>
+
+              {drawerOpen && user && (
+                <MobileNavDrawer
+                  onClose={() => setDrawerOpen(false)}
+                  user={{ name: user.name, email: user.email, image: user.image }}
+                  navItems={mobileNavItems}
+                  globalNavItems={projectId ? mobileGlobalNavItems : undefined}
+                  currentPath={location.pathname}
+                  onNavigate={(path) => {
+                    navigate(path);
+                    setDrawerOpen(false);
+                  }}
+                  onSignOut={handleSignOut}
+                  onOpenSearch={() => {
+                    setDrawerOpen(false);
+                    commandPalette.open();
+                  }}
+                  projectName={projectId ? projectName || 'Project' : undefined}
+                  projectListSection={mobileProjectListSection}
+                  projectHealthElement={mobileProjectHealthElement}
+                  showGlobalNav={showGlobalNav}
+                  onToggleGlobalNav={projectId ? handleToggleGlobalNav : undefined}
+                />
+              )}
+
+              {commandPalette.isOpen && <GlobalCommandPalette onClose={commandPalette.close} />}
+            </div>
+          </OnboardingProvider>
+        </ChatImmersiveContext.Provider>
       </AppShellContext.Provider>
     );
   }
@@ -345,82 +362,85 @@ export function AppShell({ children }: AppShellProps) {
 
   return (
     <AppShellContext.Provider value={shellContext}>
-      <OnboardingProvider>
-        <ChoosePathWizard />
-        <div
-          className="sam-void grid h-screen overflow-hidden p-4 transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none"
-          style={{
-            gridTemplateColumns: `${navWidth}px minmax(0, 1fr)`,
-            gridTemplateRows: 'minmax(0, 1fr) auto',
-            // Zen collapses the nav column to nothing, so it must not keep a gutter either.
-            columnGap: navWidth > 0 ? 'var(--sam-space-gutter)' : 0,
-            ['--sam-void-x' as string]: '58%',
-          }}
-        >
-          <SkipToContent />
-          {/* Announce Focus Mode changes to assistive tech (mode is cycled via the
+      {/* Same provider position as the phone branch, so crossing the breakpoint never remounts the page. */}
+      <ChatImmersiveContext.Provider value={chatImmersiveContext}>
+        <OnboardingProvider>
+          <ChoosePathWizard />
+          <div
+            className="sam-void grid h-screen overflow-hidden p-4 transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none"
+            style={{
+              gridTemplateColumns: `${navWidth}px minmax(0, 1fr)`,
+              gridTemplateRows: 'minmax(0, 1fr) auto',
+              // Zen collapses the nav column to nothing, so it must not keep a gutter either.
+              columnGap: navWidth > 0 ? 'var(--sam-space-gutter)' : 0,
+              ['--sam-void-x' as string]: '58%',
+            }}
+          >
+            <SkipToContent />
+            {/* Announce Focus Mode changes to assistive tech (mode is cycled via the
           "F" key or the toggle, so screen readers need a live region). */}
-          <div aria-live="polite" className="sr-only">
-            {focusMode === 'default'
-              ? 'Default view'
-              : focusMode === 'focus'
-                ? 'Focus mode: sidebars collapsed'
-                : 'Zen mode: sidebars hidden'}
-          </div>
-          {focusMode === 'zen' ? (
-            <ZenPeekRail
-              edge="nav"
-              label="Navigation"
-              onExpand={() => setFocusMode('default')}
-              gridRow="1"
-            >
-              <NavSidebar
-                projectName={projectName}
-                showGlobalNav={showGlobalNav}
-                onToggleGlobalNav={handleToggleGlobalNav}
-                projectListSection={desktopProjectListSection}
-                projectHealthElement={projectHealthElement}
-              />
-            </ZenPeekRail>
-          ) : (
-            /* `overflow-y-auto` is a backstop, not the primary scroller — NavSidebar scrolls
+            <div aria-live="polite" className="sr-only">
+              {focusMode === 'default'
+                ? 'Default view'
+                : focusMode === 'focus'
+                  ? 'Focus mode: sidebars collapsed'
+                  : 'Zen mode: sidebars hidden'}
+            </div>
+            {focusMode === 'zen' ? (
+              <ZenPeekRail
+                edge="nav"
+                label="Navigation"
+                onExpand={() => setFocusMode('default')}
+                gridRow="1"
+              >
+                <NavSidebar
+                  projectName={projectName}
+                  showGlobalNav={showGlobalNav}
+                  onToggleGlobalNav={handleToggleGlobalNav}
+                  projectListSection={desktopProjectListSection}
+                  projectHealthElement={projectHealthElement}
+                />
+              </ZenPeekRail>
+            ) : (
+              /* `overflow-y-auto` is a backstop, not the primary scroller — NavSidebar scrolls
                itself (it carries `flex-1 min-h-0`). It only engages on very short windows,
                where the header, search, layout control and footer no longer fit, so sign-out
                stays reachable. */
-            <aside
-              aria-label="Sidebar"
-              className="sam-glass sam-glass-rim relative z-30 flex min-h-0 flex-col overflow-x-hidden overflow-y-auto rounded-[var(--sam-radius-pane)]"
-              style={{ gridRow: '1' }}
-            >
-              <DesktopSidebar
-                focusMode={focusMode}
-                onSelectFocusMode={setFocusMode}
-                onCycleFocusMode={cycleFocusMode}
-                onOpenCommandPalette={commandPalette.open}
-                projectName={projectName}
-                showGlobalNav={showGlobalNav}
-                onToggleGlobalNav={handleToggleGlobalNav}
-                projectListSection={desktopProjectListSection}
-                projectHealthElement={projectHealthElement}
-                user={user ?? null}
-                onSignOut={signOutHandler}
-              />
-            </aside>
-          )}
+              <aside
+                aria-label="Sidebar"
+                className="sam-glass sam-glass-rim relative z-30 flex min-h-0 flex-col overflow-x-hidden overflow-y-auto rounded-[var(--sam-radius-pane)]"
+                style={{ gridRow: '1' }}
+              >
+                <DesktopSidebar
+                  focusMode={focusMode}
+                  onSelectFocusMode={setFocusMode}
+                  onCycleFocusMode={cycleFocusMode}
+                  onOpenCommandPalette={commandPalette.open}
+                  projectName={projectName}
+                  showGlobalNav={showGlobalNav}
+                  onToggleGlobalNav={handleToggleGlobalNav}
+                  projectListSection={desktopProjectListSection}
+                  projectHealthElement={projectHealthElement}
+                  user={user ?? null}
+                  onSignOut={signOutHandler}
+                />
+              </aside>
+            )}
 
-          <div key="main-frame" className={mainFrameClassName} style={{ gridRow: '1' }}>
-            <main id="main-content" className={mainClassName} style={{ gridRow: '1' }}>
-              {children ?? <Outlet />}
-            </main>
+            <div key="main-frame" className={mainFrameClassName} style={{ gridRow: '1' }}>
+              <main id="main-content" className={mainClassName} style={{ gridRow: '1' }}>
+                {children ?? <Outlet />}
+              </main>
+            </div>
+
+            <div key="global-audio" style={{ gridColumn: '1 / -1', gridRow: '2' }}>
+              <GlobalAudioPlayer />
+            </div>
+
+            {commandPalette.isOpen && <GlobalCommandPalette onClose={commandPalette.close} />}
           </div>
-
-          <div key="global-audio" style={{ gridColumn: '1 / -1', gridRow: '2' }}>
-            <GlobalAudioPlayer />
-          </div>
-
-          {commandPalette.isOpen && <GlobalCommandPalette onClose={commandPalette.close} />}
-        </div>
-      </OnboardingProvider>
+        </OnboardingProvider>
+      </ChatImmersiveContext.Provider>
     </AppShellContext.Provider>
   );
 }
