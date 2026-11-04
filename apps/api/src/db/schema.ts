@@ -5360,3 +5360,48 @@ export const operationsAuditLog = sqliteTable(
 );
 
 export type OperationsAuditLogRow = typeof operationsAuditLog.$inferSelect;
+
+// =============================================================================
+// Lifecycle latency monitoring (migration 0220)
+// =============================================================================
+// Written only by services/lifecycle-latency/watchdog.ts, which samples transient states.
+export const lifecycleStateObservations = sqliteTable(
+  'lifecycle_state_observations',
+  {
+    entityType: text('entity_type').notNull(),
+    entityId: text('entity_id').notNull(),
+    status: text('status').notNull(),
+    firstSeenAt: text('first_seen_at').notNull(),
+    lastSeenAt: text('last_seen_at').notNull(),
+    alertedAt: text('alerted_at'),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.entityType, table.entityId, table.status] }),
+    seenIdx: index('idx_lifecycle_state_observations_seen').on(
+      table.entityType,
+      table.status,
+      table.firstSeenAt
+    ),
+  })
+);
+
+export const lifecycleStateEpisodes = sqliteTable(
+  'lifecycle_state_episodes',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    entityType: text('entity_type').notNull(),
+    entityId: text('entity_id').notNull(),
+    status: text('status').notNull(),
+    firstSeenAt: text('first_seen_at').notNull(),
+    lastSeenAt: text('last_seen_at').notNull(),
+    endedAt: text('ended_at').notNull(),
+  },
+  (table) => ({
+    stateEndedIdx: index('idx_lifecycle_state_episodes_state_ended').on(
+      table.entityType,
+      table.status,
+      table.endedAt
+    ),
+    endedIdx: index('idx_lifecycle_state_episodes_ended').on(table.endedAt),
+  })
+);

@@ -135,7 +135,7 @@ before you try again.
 | AI models     | `aiModels.*` (below)                                                   | see below                                      | Which AI models agents may call, and the spending limits                                                                                                                                                  | —                                                                                 |
 | Email         | `agentEmail.*` (below)                                                 | see below                                      | Limits for agent email (preview)                                                                                                                                                                          | —                                                                                 |
 
-**Operations** also holds limits for [workflows](#workflows), [linked work](#linked-work), pull
+**Operations** also holds the [lifecycle latency budgets](#lifecycle-latency-monitoring), limits for [workflows](#workflows), [linked work](#linked-work), pull
 request tracking, the GitHub trigger queue, the Account Map, [workload identity](/docs/guides/workload-identity/)
 tokens, and the [SAM assistant](/docs/reference/configuration/#private-sam-assistant-runtime-controls).
 Every card shows its own description, default, and range, so the tables below cover the limits
@@ -230,6 +230,60 @@ Two related settings control warning and alert frequency: `operations.nodeCleanu
 Active workspaces and provider ownership checks remain protected. When SAM can't retire a blocked VM at the deadline (often, but not always, because it can't prove who owns the server), it keeps the VM and records an error in **Admin → Errors**, at most once per node per `operations.nodeCleanupOwnershipAlertIntervalMs` (one day by default): **VM may still exist at provider: _provider_ _server id_; cleanup requires ownership/operator resolution**. Before deleting anything, open the node and read its **Cleanup blocked since…** reasons. Delete the server in that provider's console only when the reason is `provenance` (or `strict_provider_ownership_or_deletion_failure`) and you have checked that it belongs to your installation and runs nothing you need. If the reasons include `active_workspace` or `warm_placement_claim`, or the node hosts app deployments, resolve that first instead. Once the server is gone, the node's owner can remove the node with **I already deleted this server** on its page, after selecting **Delete Node** first if the node shows **Stopped**; see [SAM can't delete a node](/docs/guides/session-troubleshooting/#sam-cant-delete-a-node). That button refuses nodes on the installation's own cloud account, and the app has no other way to remove such a node yet.
 
 Blocked nodes show the time and reason in their error message on the node list and detail page, as **Cleanup blocked since** _time_ followed by reason codes; [A node won't go away](/docs/guides/session-troubleshooting/#a-node-wont-go-away) explains each one.
+
+## Lifecycle latency monitoring
+
+SAM watches how long workspaces, nodes, session sleeps and session wakes stay in states that should
+end on their own within minutes, and records an error in **Admin → Errors** when one takes too long.
+The hourly platform-feedback triage groups those errors and, when a feedback project and an incident
+trigger are configured, files them as incidents for that project's agents to investigate.
+
+- **States are sampled every five minutes.** The watchdog records when it first sees a workspace,
+  node, session sleep or session wake in a watched state, and when that episode ends
+  (`lifecycle_state_observations` and `lifecycle_state_episodes`, migration
+  `0220_lifecycle_state_observations.sql`). It reads the status columns only, so no part of SAM has
+  to report anything. Because it samples, an episode is noticed up to five minutes after it starts,
+  and episodes shorter than one sample are not recorded.
+- **Slow states, every five minutes.** The latency watchdog (`runLifecycleLatencyWatchdog` in
+  `apps/api/src/services/lifecycle-latency/watchdog.ts`) records one warning per slow episode:
+  **Lifecycle latency budget exceeded: _entity_ _state_**, for example
+  `Lifecycle latency budget exceeded: workspace stopping`. The error's context carries the entity ID,
+  when the watchdog first saw it in the state, how long it has been there and its last error message. A later, separate
+  episode for the same entity is reported again.
+- **Regressions, once a day.** At 03:00 UTC the daily check
+  (`runLifecycleLatencyDailyEvaluation` in `daily-evaluation.ts`) computes the median, p95 and longest
+  observed time spent in each watched state over the last 24 hours. It records
+  **Lifecycle latency regression: _entity_ _state_** when the p95 is over the state's budget, or more
+  than `lifecycleLatency.regressionPercent` of its p95 over the previous 7 days. Every run logs a
+  `lifecycle_latency.daily_summary` line with those numbers for every watched state.
+
+Watched states and their **Operations** budgets, in minutes. Set a budget to 0 to turn off both the
+watchdog and the daily check for that state.
+
+| Setting                                         | Default | What it watches                                            |
+| ----------------------------------------------- | ------- | ---------------------------------------------------------- |
+| `lifecycleLatency.workspacePendingMinutes`      | 15      | A workspace in `pending`                                   |
+| `lifecycleLatency.workspaceCreatingMinutes`     | 15      | A workspace in `creating`                                  |
+| `lifecycleLatency.workspaceRecoveryMinutes`     | 15      | A workspace in `recovery`                                  |
+| `lifecycleLatency.workspaceStoppingMinutes`     | 10      | A workspace in `stopping`, including deletion confirmation |
+| `lifecycleLatency.nodePendingMinutes`           | 15      | A node in `pending`                                        |
+| `lifecycleLatency.nodeCreatingMinutes`          | 15      | A node in `creating`                                       |
+| `lifecycleLatency.nodeRecoveryMinutes`          | 15      | A node in `recovery`                                       |
+| `lifecycleLatency.nodeStoppingMinutes`          | 20      | A node in `stopping`                                       |
+| `lifecycleLatency.sessionSleepPreparingMinutes` | 15      | A session sleep capturing its snapshot (`preparing`)       |
+| `lifecycleLatency.sessionSleepStoppingMinutes`  | 15      | A session sleep stopping its workspace (`stopping`)        |
+| `lifecycleLatency.sessionWakingMinutes`         | 15      | A session wake in progress (`waking`)                      |
+
+The rest control the checks themselves:
+
+| Setting                                         | Default | Range      | What it controls                                                                                                                             |
+| ----------------------------------------------- | ------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lifecycleLatency.alertsPerStatePerTick`        | 5       | 1–20       | Slow episodes recorded per state in one run. Older episodes first; the rest are recorded on later runs                                       |
+| `lifecycleLatency.observationsPerSourcePerTick` | 200     | 10–1,000   | Rows in watched states sampled per table in one run, oldest first. A truncated sample is logged and does not close episodes it could not see |
+| `lifecycleLatency.regressionPercent`            | 200     | 101–10,000 | How far above its previous 7-day p95 a state's 24-hour p95 must be to count as a regression                                                  |
+| `lifecycleLatency.minSamples`                   | 5       | 1–10,000   | Fewest finished episodes in a window before the daily check judges it                                                                        |
+| `lifecycleLatency.retentionDays`                | 30      | 8–365      | Days finished episodes are kept                                                                                                              |
+| `lifecycleLatency.evaluationSampleLimit`        | 2,000   | 10–20,000  | Most recent finished episodes the daily check reads per state                                                                                |
 
 ## Linked work
 
