@@ -24,6 +24,7 @@ import {
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
+import { D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { composableCredentialReference } from '../default-capacity-pool-helpers';
@@ -335,8 +336,8 @@ async function restoreOwnCredentialReferences(
   restoreCredentialReferences(credentials, referencesByKey);
 }
 
-/** D1 caps bound parameters per statement at 100; the owner id takes one. */
-const MAX_NAMED_CREDENTIAL_IDS = 99;
+/** One statement's bound parameters, less the owner id. Beyond it, the least recent go unnamed. */
+const MAX_NAMED_CREDENTIAL_IDS = D1_MAX_BOUND_PARAMETERS - 1;
 
 /**
  * Attach the Settings name of each of the caller's own composable credentials,
