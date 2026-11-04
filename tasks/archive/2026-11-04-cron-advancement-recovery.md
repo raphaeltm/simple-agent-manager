@@ -23,8 +23,8 @@ A failed schedule write can escape trigger isolation. Retrying a due occurrence 
 - [x] Isolate advancement failures and attempt at most one write per trigger per sweep.
 - [x] Safe allowlisted database cause categories, without raw query messages or parameters.
 - [x] Update scheduling documentation.
-- [ ] Full lint/typecheck/test/build and task completion validation.
-- [ ] Independent local specialist reviews and resolve findings.
+- [x] Full lint/typecheck/test/build and task completion validation.
+- [x] Independent local specialist reviews and resolve findings.
 - [ ] Staging deployment and live verification.
 - [ ] PR, CI, best-effort CodeRabbit review, merge, production deploy and basic smoke.
 
@@ -35,3 +35,10 @@ Later due triggers run despite admission or advancement errors. Later sweeps reu
 ## Selection budget
 
 At most CRON_MAX_FIRE_PER_SWEEP candidates (default 5) per sweep, one KV read/write, and at most two bounded due-selection queries. Existing per-candidate admission work remains bounded by the selected page; schedule advancement is attempted once per selected occurrence. Indexed trigger lookup reuses an existing occurrence before submission.
+
+## Validation and review
+
+- Full repository lint, typecheck, test and build passed. Test rerun: 21/21 tasks green; API 1,017 files passed, 1 skipped, 14,832 tests passed, 2 skipped. First parallel run hit timeouts in the unchanged session-sleep suite; its 42 tests and the complete rerun passed.
+- Focused recovery/admission/category suite: 35 passed. Actual workerd D1 sweep regression: 1 passed.
+- Independent Cloudflare and test reviews found capped-prefix starvation; cursor rotation and a red-to-green cap=1 test addressed it. Delta reviews passed. Completion, constitution and documentation reviews passed.
+- Staging, PR/CI, CodeRabbit and production release remain pending below.
