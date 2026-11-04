@@ -60,41 +60,61 @@ ACP turn), policies d08d64dc, 0f05422d and a3780107.
 
 - Production D1: the node row has `placement_credential_source/reference/version/fingerprint` all
   NULL. It was provisioned 2026-07-12, before deployment nodes recorded a credential binding
-  (first bound deployment node: 2026-08-26).
-- `cleanupDeploymentNode()` → `deleteNodeResourcesStrict()` → `requireStrictNodeProvider()` throws
-  "exact provider credential binding is missing" on every attempt, before any provider call.
-- PR #2472 (merged 2026-10-29) added `recoverLegacyDeploymentBinding()` (positive provider ownership
-  evidence: labels, IP, location, boot window, credential fence), but
-  `runDeploymentNodeCleanup()` only runs it for `status = 'running'` nodes. This node was already
-  `destroying`, so it never got a binding and could never be deleted.
-- The failure went to `nodes.error_message` (cleared on the owner-attested deletion), never to
-  `cleanup_blocked_reason` (the claim in `cleanupDeploymentNode()` clears it on every attempt) and
-  never to `node_lifecycle_decisions`.
+  (first bound deployment node: 2026-08-26). It went `destroying` around 2026-10-24/25 (its
+  environment stopped 2026-10-24T08:06Z; last heartbeat 2026-10-25T03:40Z).
+- Before 2026-10-29, `deleteNodeResourcesStrict()` → `requireStrictNodeProvider()` refused every
+  unbound node with "exact provider credential binding is missing", before any provider call. That
+  is certain for the first ~4 days.
+- PR #2472 (merged 2026-10-29) made `deleteNodeResourcesStrict()` call
+  `recoverLegacyDeploymentBinding()` for any status (the sweep's own call covers `running` nodes).
+  It recovers a binding only from positive provider evidence: one candidate credential, the VM's
+  id/IP/location/boot window, and SAM labels. For this node it kept returning `false`, so deletion
+  kept failing. **Which predicate refused cannot be reconstructed**: the function returned a bare
+  `false`, the failure went only to `nodes.error_message` (cleared by the owner-attested deletion on
+  2026-11-04, which also nulled `ip_address`), and the Worker log query tool does not return those
+  log fields. Candidates: an IP or boot-window mismatch with the July server, or a label on the
+  July server (environment/installation) that differs from today's values.
+- Contributing defect: the claim in `cleanupDeploymentNode()` cleared `cleanup_blocked_since` and
+  `cleanup_blocked_reason` on every hourly attempt, which erased what the stranded-node sweep
+  records and reset its alert clock. No `node_lifecycle_decisions` rows were written by deployment
+  teardown at all.
 - Production today: zero non-deleted managed VM nodes lack a binding, so no live node is stuck.
   Self-hosted installations upgrading from pre-August builds can still have them.
+- Decision: do not loosen strict deletion's ownership proof (a security design change with nothing
+  live to fix). Ship the observability so the next refusal names its predicate.
 
 ## Implementation checklist
 
 ### Part 1
-- [ ] `classifySessionIdleness()`: bound a working turn on a non-terminal task by the work clock.
-      When `sessionWorkAnchor(state) + staleTurnMs <= now` and no harness lease is fresh, the turn
-      is idle (`reason: 'prompt_turn_stale'`). Optional input; no bound when omitted.
-- [ ] New admin setting `sessions.staleTurnNoWorkMinutes` (default 30, 0 disables), resolved
-      through the admin settings registry; threaded to every sleep caller of the classifier
-      (eligibility, teardown safety gate, fallback, operational status).
-- [ ] `resolveVmPromptDeliveryTarget()`: retry `not_ready` while the target session's sleep is
-      claimed (`preparing` inside the claim lease, or `stopping`).
-- [ ] Docs: configuration reference / admin settings doc for the new setting; comment in
-      `session-sleep-required-turn-end.ts` naming the delivery hold.
+- [x] `classifySessionIdleness()`: bound an open turn on a non-terminal task by the work clock
+      (`reason: 'prompt_turn_stale'`). Optional input; no bound when omitted.
+- [x] Admin setting `operations.sessionStaleTurnNoWorkMinutes` (default 30, 0 disables), resolved
+      lazily (only for a non-idle state) by `checkAutomaticSessionSleepEligibility()` and
+      `sleepTeardownSafetyGate()` (now returns an async classifier; execution, teardown and fallback
+      callers updated).
+- [x] `resolveVmPromptDeliveryTarget()`: retry `not_ready` while the target session's sleep is
+      claimed (`preparing` inside the claim lease, or `stopping`), `isSleepClaimHoldingDelivery()`.
+- [x] Not done, by decision: ending a turn from the `awaiting_followup` task callback. It carries
+      no turn identity, so it could end a newer turn started by a queued delivery; the existing
+      probe of the VM's SessionHost already reconciles a lost idle report, and the no-work bound
+      covers an unreachable VM.
+- [x] Not done, by decision: suppressing the VM's restart after a sleep cancel. It is the
+      intentional-cancel path (no restart-count increment) and keeps the chat usable if the sleep
+      fails; the harm was the delivered prompt, now held. No VM agent change, so no rollout concern.
+- [x] Docs: `guides/admin-settings.md` (Stale agent turns), `architecture/overview.md`, comment in
+      `session-sleep-required-turn-end.ts`.
 
 ### Part 2
-- [ ] `runDeploymentNodeCleanup()`: run legacy binding recovery for `destroying`/`error` deployment
-      nodes too, before the strict-deletion attempt.
-- [ ] `cleanupDeploymentNode()`: keep `cleanup_blocked_since` across attempts, write the failure
-      reason to `cleanup_blocked_reason`, clear both on success; record a `destroy_failed`
-      decision (and `destroyed` on success) in `node_lifecycle_decisions` (deduped).
-- [ ] `ops_find_anomalies`: new class `node_destroying_too_long` with an Operations setting
-      `operations.opsAnomalyDestroyingHours` (default 6).
+- [x] `cleanupDeploymentNode()`: keep `cleanup_blocked_since` across attempts, write the cause to
+      `cleanup_blocked_reason`, record `destroy_failed` / `destroyed` decisions
+      (`source: 'deployment_teardown'`); the terminal retire already clears the columns.
+- [x] `recoverLegacyDeploymentBinding()`: `attemptLegacyDeploymentBindingRecovery()` names every
+      refusal; refusals other than `not_legacy` / `missing_provider_instance` are logged and
+      recorded as `legacy_binding_refused` decisions (deduplicated).
+- [x] `ops_find_anomalies`: `node_destroying_too_long`, setting
+      `operations.opsAnomalyDestroyingNodeHours` (default 6); docs and env-reference updated.
+- [x] Removed my first-cut extra recovery call in `cleanupDeploymentNode()`: strict deletion already
+      runs it (found when the discrimination check stayed green).
 
 ## Acceptance criteria
 
@@ -105,8 +125,9 @@ ACP turn), policies d08d64dc, 0f05422d and a3780107.
       call) through the real delivery runner; after the claim is gone it is delivered. Guard proven
       discriminating; stale `preparing` claim control.
 - [ ] A legacy unbound deployment node in `destroying` gets its binding recovered and is deleted by
-      the sweep; when deletion fails, the reason lands in `cleanup_blocked_reason` and a
-      `destroy_failed` decision row.
+      the sweep; when deletion fails, the reason lands in `cleanup_blocked_reason`, the blocked
+      clock survives retries, and `destroy_failed` + `legacy_binding_refused` decision rows name the
+      cause.
 - [ ] `ops_find_anomalies` reports a node destroying past the threshold and not one under it.
 - [ ] Staging: deploy, verify the anomaly class and settings via the live API, exercise sleep of a
       real VM session, clean up.
