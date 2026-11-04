@@ -51,8 +51,9 @@ back. He tried an interactive prototype on branch `sam/love-new-ui-see-2sqw33` (
 - [x] `AcpConversationItemView`: agent messages use `layout="flush"` with a `glass-msg-agent`
       class (text color, desktop line-length cap); remove the unused `.glass-msg-assistant` style
 - [x] Message rows: `px-3 md:px-4` on phones in both row components
-- [x] `AppShellContext`: `chatImmersive` + `setChatImmersive`, forced off on desktop; mobile shell
-      frame padding shrinks while immersive
+- [x] Immersive state in a dedicated `ChatImmersiveContext` provided by `AppShell` (not a field on
+      `AppShellContext`; see notes), forced off on desktop; mobile shell frame padding shrinks while
+      immersive
 - [x] Mark the four chrome pieces with `data-immersive-chrome`; tool rail gutter collapses to 0
       while immersive; CSS hides any chrome piece that is not pinned while immersive (remount safety)
 - [x] Transition module (pin, single layout change via `flushSync`, settle, transform-only slide;
