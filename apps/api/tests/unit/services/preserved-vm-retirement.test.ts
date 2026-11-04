@@ -171,6 +171,48 @@ describe('legacy VM retirement: real SQL, snapshot verifier and strict provider 
       count: 1,
     });
   });
+  /** `createRecoveryTask` releases the slept workspace's binding while it claims the snapshot. */
+  function releaseBindingForWake(options: { wakeClaim: boolean }) {
+    sqlite.exec("UPDATE workspaces SET chat_session_id=NULL, status='sleeping' WHERE id='ws'");
+    if (options.wakeClaim)
+      sqlite.exec(
+        "UPDATE session_snapshots SET recovery_status='waking', recovery_task_id='wake-task' WHERE workspace_id='ws'"
+      );
+  }
+  it('retires a stopped node on the first pass when a wake released the slept workspace binding', async () => {
+    releaseBindingForWake({ wakeClaim: true });
+    expect((await handoff()).lifetimeDestroyed).toBe(1);
+    expect(boundary.remove).toHaveBeenCalledExactlyOnceWith('server', expect.anything());
+    expect(workspace()).toEqual({
+      status: 'deleted',
+      runtime_deletion_proof: 'node_runtime_terminated',
+    });
+    expect(
+      sqlite.prepare('SELECT recovery_status, recovery_task_id FROM session_snapshots').get()
+    ).toEqual({ recovery_status: 'waking', recovery_task_id: 'wake-task' });
+  });
+  it('keeps a stopped node whose unbound workspace snapshot carries no wake claim (control)', async () => {
+    releaseBindingForWake({ wakeClaim: false });
+    expect((await handoff()).lifetimeDestroyed).toBe(0);
+    expect(boundary.remove).not.toHaveBeenCalled();
+    expect(workspace()).toEqual({ status: 'sleeping', runtime_deletion_proof: null });
+    expect(sqlite.prepare('SELECT status FROM nodes').get()).toEqual({ status: 'stopped' });
+  });
+  it('refuses the atomic node claim when the wake claim disappears after preparation', async () => {
+    releaseBindingForWake({ wakeClaim: true });
+    const preservedVm = await preparePreservedVmRetirement(env, 'node', 'owner');
+    expect(preservedVm).toBeDefined();
+    sqlite.exec("UPDATE session_snapshots SET recovery_task_id=NULL WHERE workspace_id='ws'");
+    expect(
+      await claimNodeForCleanup(
+        env,
+        { id: 'node', user_id: 'owner', status: 'running' },
+        now().toISOString(),
+        { preservedVm }
+      )
+    ).toBe(false);
+    expect(boundary.remove).not.toHaveBeenCalled();
+  });
   it('recovers completed preservation missing its legacy sleeping timestamp without fabricating stop proof', async () => {
     sqlite.exec(
       "UPDATE session_snapshots SET sleeping_at=NULL,updated_at='2000-01-01T00:00:00.000Z'"
