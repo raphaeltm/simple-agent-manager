@@ -42,6 +42,27 @@ Pools exist at three **scopes**, each edited in a different place:
 These are settings tabs. **Infrastructure** in the main navigation is something else: it opens the
 **Nodes** page, which lists your machines.
 
+### What each machine is using
+
+On the **Nodes** page each machine is named for what it is (provider, type and location, with its
+vCPU, memory and disk), not for the task that first started it. Its chart covers the last hour by default:
+memory rises above the middle line, CPU hangs below it, and the dashed lines mark what SAM set aside
+for the sessions running there. Under the chart, each session is a row with its chat's title (select
+it to open the chat), who started it, the project and how long it has been running, a small chart of
+its own, and what it is using against what was set aside, for example **2.9/4.0 GB** and
+**1.3/2.0 vCPU**.
+
+- **over limit** in red means a session is using more memory than was set aside for it. Memory is
+  what runs out: a session that keeps growing can be stopped for using too much.
+- **burst, fine** means a session is using more CPU than was set aside. That only makes work slower,
+  so it is not a problem on its own.
+
+Usage history comes from each machine in batches, every 15 minutes by default, so the right-hand end
+of a chart fills in later. The dot at the right edge is the memory the machine reported in the last
+minute. How far back the charts go is the admin setting `nodes.usageWindowMinutes`
+([Admin settings](/docs/guides/admin-settings/#the-settings)). Workspace links and the machine's full
+hardware details are under **Advanced**.
+
 Each panel sums the pool up in one sentence (which provider, which regions, the smallest and
 largest machine), lists its settings in plain words, and shows the machine types it allows with the
 regions each one is allowed in. **Edit** opens the same panel for changes, with a Save bar that stays

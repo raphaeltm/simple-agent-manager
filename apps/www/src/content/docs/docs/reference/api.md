@@ -382,6 +382,10 @@ Comment threads and replies accept an optional `mentions: [{ "userId": "..." }]`
 
 List all nodes for the authenticated user.
 
+### `GET /api/nodes/resource-usage`
+
+CPU and memory for each of the caller's own workspaces on the caller's own nodes, for the Nodes page (`apps/api/src/services/node-resource-usage.ts`). Returns `{ windowMinutes, windowStart, windowEnd, bucketMs, workspaces }`. Each workspace has `workspaceId`, `nodeId`, `projectId`, `projectName`, `chatSessionId`, `title` (the chat topic, then the task title, then the workspace name), `ownerUserId`, `ownerName`, `isMine`, `status`, `createdAt`, `reservation` (`{ cpuMillis, memoryMb, diskMb, exclusiveNode }` or `null`) and `series`: per-minute `{ start, cpuMillis, memoryBytes }` from the workspace's resource history over the last `windowMinutes` (admin setting `nodes.usageWindowMinutes`, default 60). History arrives in batches, so `historyEndsAt` says where it currently stops. Live per-workspace memory is in each node's `lastMetrics.workspaceMemory` from `GET /api/nodes`.
+
 ### `GET /api/nodes/:id`
 
 Get node details including health status and hosted workspaces.

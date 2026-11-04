@@ -83,10 +83,11 @@ Claude Code, Codex, Gemini CLI, OpenCode, and Amp are installed with npm and nee
 
 Most work happens through chat, but every workspace also has a direct view for hands-on control.
 To find one, select **Infrastructure** in the main navigation (between **Tools** and **Settings**;
-on a phone, in the menu). It opens the **Nodes** page: each machine lists up to three of its
-workspaces with **Open**, and selecting the machine shows all of them under **Workspaces**. There's
-no longer a single list of every workspace; old links to the Workspaces page open Nodes. **Create
-Workspace** is on a machine's page.
+on a phone, in the menu). It opens the **Nodes** page, which lists each machine with the sessions
+running on it (see [What each machine is using](/docs/guides/compute-pools/#what-each-machine-is-using)).
+Open **Advanced** on a machine for links to its workspaces, or select **Details** to see all of them
+under **Workspaces**. There's no longer a single list of every workspace; old links to the
+Workspaces page open Nodes. **Create Workspace** is on a machine's page.
 
 ### Terminal
 
@@ -123,7 +124,7 @@ Restarting starts from a clean checkout. Any uncommitted changes from the previo
 
 ### Removing a machine
 
-A machine's page also has **Stop Node** and **Delete Node** (**Delete Node Only** on a machine that
+A machine's menu (**⋮**) on the Nodes page has **Stop** and **Delete**, and its page has **Stop Node** and **Delete Node** (**Delete Node Only** on a machine that
 hosts [app deployments](/docs/guides/app-deployments/)). Deleting a machine deletes its server at
 your cloud provider. SAM can take a while to finish, and it waits on purpose while something on the
 machine still needs keeping; a red line on the machine says why. If a machine stays for a long time,
