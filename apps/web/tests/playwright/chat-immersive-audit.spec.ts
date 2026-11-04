@@ -392,6 +392,25 @@ test.describe('immersive view on a phone', () => {
   });
 });
 
+test('the toggle sits directly above the jump button, in its column', async ({ page }) => {
+  test.skip(!isPhone(page), 'phone-only control');
+  await openChat(page, 'dark', 'tail');
+  // Scroll up so the jump-to-latest button shows.
+  await conversation(page)
+    .getByTestId('virtuoso-scroller')
+    .evaluate((el) => el.scrollTo({ top: 0 }));
+  const jump = page.getByRole('button', { name: 'Scroll to bottom' });
+  const toggle = page.getByTestId('chat-immersive-toggle');
+  await expect(jump).toBeVisible();
+  await expect(toggle).toBeVisible();
+  const j = await box(jump);
+  const t = await box(toggle);
+  // Same right-hand column (permission cards keep that column clear of their content)...
+  expect(Math.abs(t.x + t.width - (j.x + j.width))).toBeLessThanOrEqual(1);
+  // ...stacked above it with a gap, never overlapping.
+  expect(t.y + t.height).toBeLessThanOrEqual(j.y - 4);
+});
+
 test('there is no immersive toggle off the phone layout', async ({ page }) => {
   test.skip(isPhone(page), 'checks the tablet and desktop layouts');
   await openChat(page, 'dark');

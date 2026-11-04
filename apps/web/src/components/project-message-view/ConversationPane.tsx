@@ -165,7 +165,7 @@ export function ConversationPane({
                   behavior: 'smooth',
                 });
               }}
-              className="sam-scroll-button sam-raised absolute right-[4.25rem] z-10 md:right-4 flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border-0 shadow-[var(--sam-glass-v2-depth-slab)] hover:brightness-110"
+              className="sam-scroll-button sam-raised absolute right-4 z-10 flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border-0 shadow-[var(--sam-glass-v2-depth-slab)] hover:brightness-110"
               data-agent-active={lc.agentActivity !== 'idle'}
               aria-label="Scroll to bottom"
             >

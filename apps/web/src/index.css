@@ -265,10 +265,12 @@
     transform: translate3d(0, -2.75rem, 0);
   }
 
-  /* The phone-only "just the conversation" toggle sits beside the scroll button and moves up
-     with it while the agent works. */
+  /* The phone-only "just the conversation" toggle sits directly above the scroll button, in the
+     same right-hand column: permission cards stop at 80% of the row so that column stays clear of
+     their text and buttons (acp-permission-chat-audit.spec.ts). It moves up with the scroll button
+     while the agent works. */
   .sam-immersive-toggle {
-    bottom: 0.75rem;
+    bottom: calc(0.75rem + 2.75rem + 0.5rem);
     transition:
       transform 200ms ease,
       background-color 150ms ease;

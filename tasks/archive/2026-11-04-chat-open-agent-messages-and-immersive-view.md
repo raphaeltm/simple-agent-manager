@@ -60,8 +60,8 @@ back. He tried an interactive prototype on branch `sam/love-new-ui-see-2sqw33` (
       exit layout-first); honours `prefers-reduced-motion`; resets on unmount and on leaving the
       phone layout
 - [x] Toggle button bottom-right of the conversation on phones (44px, aria-pressed, labels
-      "Show only the conversation" / "Show the rest of the app"); the scroll-to-bottom button sits
-      beside it
+      "Show only the conversation" / "Show the rest of the app"); it sits directly above the
+      scroll-to-bottom button, in the same right-hand column
 - [x] Unit tests: toggle enter/exit through the real button, context forced off on desktop,
       reset on unmount, reduced motion
 - [x] Playwright audit (real chat page, mocked API): mobile toggle hides chrome and the
@@ -72,15 +72,15 @@ back. He tried an interactive prototype on branch `sam/love-new-ui-see-2sqw33` (
 
 ## Acceptance Criteria
 
-- [ ] Agent replies in project chat have no bubble and span the message column (capped for line
+- [x] Agent replies in project chat have no bubble and span the message column (capped for line
       length on desktop); user messages keep their bubbles
-- [ ] On a phone, the toggle slides away the app bar, session header, tool rail and composer; the
+- [x] On a phone, the toggle slides away the app bar, session header, tool rail and composer; the
       conversation fills the screen; tapping again restores everything
-- [ ] The transition animates only transform/opacity (no per-frame layout of the message list)
-- [ ] The toggle does not render on desktop, and immersive state never strands the shell (resets
+- [x] The transition animates only transform/opacity (no per-frame layout of the message list)
+- [x] The toggle does not render on desktop, and immersive state never strands the shell (resets
       on unmount / breakpoint change)
-- [ ] No prototype code, routes or mock data remain
-- [ ] Verified on staging on a phone viewport against a real chat
+- [x] No prototype code, routes or mock data remain
+- [x] Verified on staging on a phone viewport against a real chat
 
 ## Implementation Notes
 
@@ -98,6 +98,28 @@ back. He tried an interactive prototype on branch `sam/love-new-ui-see-2sqw33` (
   `tasks/backlog/2026-11-04-session-header-title-clipped-at-tablet-width.md`.
 - `markdown-chat-rendering-audit.spec.ts` is quarantined and fails on `main` at its task-list
   step (before the updated bubble step).
+
+## Staging Verification
+
+- Deploy 41869506644 (16:39Z) succeeded; live check on a real chat (iPhone 14, both themes) found the
+  conversation could lose its place at the newest message on toggle (react-virtuoso re-anchors on
+  its top row). Fixed in 4d3bd763b (`stickToBottom`), reproduced locally first (6/8 fail -> 8/8 pass).
+- Deploy 41881212005 failed at Deploy API Worker with Cloudflare 10021 (startup CPU) on the
+  6408ed26b base, unrelated to this web-only diff; merged main 8d73422a6 (#2523, the startup fix).
+- Deploy 41883691575 (718880d86) succeeded with smoke tests. Live check, dark and light: agent reply
+  has no bubble and spans its row; toggle hides all four chrome pieces, conversation 378x832, reply
+  300 -> 354px; at the newest message before, during and after three on/off cycles (16px / 14px);
+  a reader scrolled up keeps the same top row; every piece returns to its exact rect; nothing left
+  pinned or inert; no overflow. Only console errors: 404s for the sleeping test chat's deleted
+  workspace (pre-existing data).
+
+## CI Follow-up
+
+- CI's `acp-permission-chat-audit.spec.ts` caught that moving the scroll-to-bottom button left
+  (to sit beside the toggle) put it over permission-card text and option buttons: those cards
+  stop at 80% of the row so the right-hand column stays clear. The scroll button is back at
+  `right-4` and the toggle is stacked above it in the same column; a new audit case asserts the
+  column and the gap with measured coordinates.
 
 ## References
 
