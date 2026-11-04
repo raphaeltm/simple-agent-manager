@@ -16,8 +16,8 @@ import {
   resolveCleanupConfig,
 } from '../../../src/scheduled/node-cleanup/shared';
 import { preparePreservedVmRetirement } from '../../../src/services/preserved-vm-retirement';
-import { ensureSessionRecovery } from '../../../src/services/session-recovery';
 import { repairRetiredVmSleepSnapshots } from '../../../src/services/retired-vm-sleep-repair';
+import { ensureSessionRecovery } from '../../../src/services/session-recovery';
 import { buildSessionSnapshotR2Key } from '../../../src/services/session-snapshot-artifacts';
 import { deleteNodeResourcesStrict } from '../../../src/services/strict-node-deletion';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
