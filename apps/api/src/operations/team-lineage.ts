@@ -121,16 +121,20 @@ export async function readTeamTasks(
     rows = parseTeamRows(result.results ?? [], projectId);
   } else {
     root = await rootTaskId(env, projectId, scope);
+    // Without planner statistics, production D1 looked `child` and `t` up through
+    // idx_tasks_project_user, reading every task in the project per lineage row. The unary
+    // `+` keeps the project check as a filter only, so `child` uses idx_tasks_parent_task_id,
+    // and CROSS JOIN keeps `lineage` outermost so `t` is a primary-key lookup.
     const result = await env.DATABASE.prepare(
       `WITH RECURSIVE lineage(id, depth) AS (
          SELECT id, 0 FROM tasks WHERE id = ? AND project_id = ?
          UNION ALL
          SELECT child.id, lineage.depth + 1 FROM tasks child
          JOIN lineage ON child.parent_task_id = lineage.id
-         WHERE child.project_id = ? AND lineage.depth < ?
+         WHERE +child.project_id = ? AND lineage.depth < ?
        )
        SELECT ${TASK_COLUMNS}, lineage.depth AS depth FROM lineage
-       JOIN tasks t ON t.id = lineage.id AND t.project_id = ?
+       CROSS JOIN tasks t WHERE t.id = lineage.id AND t.project_id = ?
        ORDER BY lineage.depth ASC, ${READER_ORDER}
        LIMIT ?`
     )

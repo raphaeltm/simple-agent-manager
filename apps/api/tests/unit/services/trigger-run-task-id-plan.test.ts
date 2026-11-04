@@ -9,14 +9,13 @@
  * which is the condition production was in, and enter through `consecutiveFailureCount`.
  */
 import Database from 'better-sqlite3';
-import { getTableConfig, type SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { tasks, triggerExecutions, triggers } from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { consecutiveFailureCount } from '../../../src/services/trigger-failure-window';
 import { TRIGGER_RUN_TASK_ID_SQL } from '../../../src/services/trigger-run-slots';
-import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import { createDeclaredIndexes, createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const PROJECT_ID = 'project-a';
 const TRIGGER_ID = 'trigger-a';
@@ -25,25 +24,6 @@ const databases: Database.Database[] = [];
 afterEach(() => {
   for (const db of databases.splice(0)) db.close();
 });
-
-/**
- * Create the schema's declared plain-column indexes too; `createSchemaTables` only emits
- * primary keys. Expression indexes are skipped: none of them covers `tasks.project_id`.
- */
-function createDeclaredIndexes(sqlite: Database.Database, tables: SQLiteTable[]): void {
-  for (const table of tables) {
-    const config = getTableConfig(table);
-    for (const index of config.indexes) {
-      const names = index.config.columns.map((column) => (column as { name?: unknown }).name);
-      if (!names.every((name): name is string => typeof name === 'string')) continue;
-      const columns = names.map((name) => `"${name}"`);
-      sqlite.exec(
-        `CREATE ${index.config.unique ? 'UNIQUE ' : ''}INDEX IF NOT EXISTS "${index.config.name}" ` +
-          `ON "${config.name}" (${columns.join(', ')})`
-      );
-    }
-  }
-}
 
 function setup() {
   const sqlite = new Database(':memory:');
@@ -136,9 +116,9 @@ describe('TRIGGER_RUN_TASK_ID_SQL query plan', () => {
 
     const successorSteps = plan.filter((detail) => detail.includes('successor'));
     expect(successorSteps.length).toBeGreaterThan(0);
-    expect(successorSteps.every((detail) => detail.includes('sqlite_autoindex_tasks_1 (id=?)'))).toBe(
-      true
-    );
+    expect(
+      successorSteps.every((detail) => detail.includes('sqlite_autoindex_tasks_1 (id=?)'))
+    ).toBe(true);
     expect(plan.some((detail) => detail.includes('idx_tasks_project_user'))).toBe(false);
   });
 });
