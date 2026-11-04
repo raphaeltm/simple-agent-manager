@@ -11,9 +11,10 @@
 // interrupt/archive control never disappears even when the `agentActivity`
 // signal is stale — that resilience is the whole point of this component.
 //
-// Geometry (the animated "bump") is ported from the approved Concept B
-// prototype. All fills/strokes read design tokens so the dock adapts to the
-// dark (`sam`) and light (`sam-light`) themes with no wrapper scoping.
+// The dock draws no surface of its own: it sits at the top of the message-box
+// slab (SAM Glass), and the centre button rises from the middle of the bar to
+// rest on the slab's top edge while the agent works. Colours read design
+// tokens, so it follows the dark (`sam`) and light (`sam-light`) themes.
 
 import { Button, Dialog } from '@simple-agent-manager/ui';
 import { Archive, ListTodo, Moon, Square } from 'lucide-react';
@@ -25,8 +26,8 @@ import { type ReactNode, useCallback, useEffect, useLayoutEffect, useRef, useSta
 
 const BAR_H = 38; // flat bar height (px) — ~2/3 of the original 56px
 const BTN = Math.round(BAR_H * 0.9); // button diameter ≈ 90% of the bar height
-const BUBBLE_R = BAR_H / 2; // bubble radius = half bar height => ~5% gap around the button
-const SVG_PAD_TOP = Math.ceil(BUBBLE_R) + 12; // room above the bar for the bubble crest
+const BUTTON_CLEARANCE = BAR_H / 2; // half the bar: how far the working button rises above it
+const TOP_PAD = Math.ceil(BUTTON_CLEARANCE) + 12; // room above the bar for the raised button
 
 const EASE_DURATION_MS = 420;
 
@@ -71,7 +72,7 @@ function useEased(target: number, reducedMotion: boolean, durationMs = EASE_DURA
   return value;
 }
 
-/** Measures a container's pixel width so the SVG bump keeps a constant shape. */
+/** Measures the dock's pixel width so the centre button stays centred. */
 function useWidth<T extends HTMLElement>() {
   const ref = useRef<T | null>(null);
   const [width, setWidth] = useState(375);
@@ -197,8 +198,8 @@ export function CompletionDock({
   const progress = useEased(working ? 1 : 0, reducedMotion);
   const { ref, width } = useWidth<HTMLDivElement>();
 
-  const totalH = BAR_H + SVG_PAD_TOP;
-  const yB = SVG_PAD_TOP; // baseline (top of the flat bar) in SVG space
+  const totalH = BAR_H + TOP_PAD;
+  const yB = TOP_PAD; // baseline: the top of the flat bar, measured from the top of the dock
   const cx = width / 2;
   const R = BTN / 2;
 
@@ -287,13 +288,11 @@ export function CompletionDock({
   }, [archiving]);
 
   return (
-    // Only the flat bar (BAR_H) participates in the flex column; the crest
-    // region (SVG_PAD_TOP) overhangs UP over the message list via a negative
-    // top margin so the scroll area reaches the top of the flat bar and the
-    // bubble floats OVER the chat. `pointer-events-none` on the wrapper lets
-    // scroll/clicks pass through the transparent crest to the messages behind
-    // it; interactive controls re-enable events with `pointer-events-auto`.
-    <div className="shrink-0 pointer-events-none" style={{ marginTop: -SVG_PAD_TOP }}>
+    // Only the flat bar (BAR_H) participates in the flex column; the space above
+    // it (TOP_PAD), where the working button rises, overhangs UP via a
+    // negative top margin. `pointer-events-none` on the wrapper lets scroll and
+    // clicks pass through that space; the controls re-enable `pointer-events-auto`.
+    <div className="shrink-0 pointer-events-none" style={{ marginTop: -TOP_PAD }}>
       {/* Announce working/idle transitions to assistive tech (the morph itself is
           purely visual; ElapsedTime is aria-hidden). */}
       <span className="sr-only" role="status" aria-live="polite">
