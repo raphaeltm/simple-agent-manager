@@ -2,10 +2,9 @@
  * Visual audit for the chat's notices in SAM Glass (rule 17).
  *
  * - Provisioning is a notice slab in the conversation column with a stage track.
- * - A wake is a status capsule floating over the top of the conversation pane, not a
- *   strip in the column. The capsule must stay inside the pane and, on phones, clear of
- *   the tool rail on the pane's right edge: both are layout relationships, so they are
- *   asserted as measured coordinates.
+ * - A wake is a status capsule at the top of the conversation pane, not a strip in the
+ *   column. It must never cover a message and must stay clear of the tool rail: both are
+ *   layout relationships, so they are asserted as measured coordinates.
  *
  * Mounts the real project chat route against mocked APIs. Long branch names and the
  * longest wait-reason label are the overflow stress cases (rule 56).
@@ -132,21 +131,28 @@ async function openWakingChat(page: Page, waitReason: string | null) {
   await expect(page.locator('body')).not.toContainText('Do you have a cloud hosting account?');
 }
 
-/** The capsule floats inside the conversation pane and clear of the phone tool rail. */
-async function assertCapsuleInsidePane(page: Page) {
+/**
+ * The capsule sits inside the conversation pane, above the transcript: it must never cover a
+ * message (on a phone a short chat starts right under the pane's top edge), and it must stay
+ * clear of the tool rail.
+ */
+async function assertCapsuleAboveTranscript(page: Page) {
   const capsule = await page.getByTestId('wake-progress-banner').boundingBox();
   const log = await page.getByRole('log', { name: 'Conversation' }).boundingBox();
   expect(capsule).not.toBeNull();
   expect(log).not.toBeNull();
-  // Over the top of the conversation, not stacked above it in the column.
-  expect(capsule!.y).toBeGreaterThanOrEqual(log!.y);
-  expect(capsule!.x).toBeGreaterThanOrEqual(log!.x - 1);
+  // The log scrolls and clips its messages, so a capsule that ends where the log begins can
+  // never cover one. Liveness: the newest message is on screen below it.
+  expect(capsule!.y + capsule!.height).toBeLessThanOrEqual(log!.y + 1);
+  await expect(page.getByText('Tracing the session switch path')).toBeVisible();
+  const newest = await page.getByText('Tracing the session switch path').boundingBox();
+  expect(newest!.y).toBeGreaterThanOrEqual(capsule!.y + capsule!.height);
 
-  // The capsule must end before the conversation does, and before the tool rail (inside
-  // the pane on phones, its own pane beside it on desktop). The rail renders for an
-  // owned session in both layouts.
+  // Inside the conversation column, and before the tool rail (inside the pane on phones, its
+  // own pane beside it on desktop). The rail renders for an owned session in both layouts.
   const rail = await page.getByTestId('session-tool-rail').boundingBox();
   expect(rail).not.toBeNull();
+  expect(capsule!.x).toBeGreaterThanOrEqual(log!.x - 1);
   expect(capsule!.x + capsule!.width).toBeLessThanOrEqual(log!.x + log!.width + 1);
   expect(capsule!.x + capsule!.width).toBeLessThanOrEqual(rail!.x + 1);
 }
@@ -178,12 +184,12 @@ for (const viewport of [
       await screenshot(page, `chat-notices-provisioning-${viewport.name.toLowerCase()}`);
     });
 
-    test('a wake floats as a capsule over the conversation', async ({ page }) => {
+    test('a wake shows as a capsule above the conversation', async ({ page }) => {
       await openWakingChat(page, null);
       await expect(page.getByTestId('wake-progress-label')).toHaveText('Restoring your session...');
       // Liveness beside the layout checks: the transcript is still on screen underneath.
       await expect(page.getByText('Tracing the session switch path')).toBeVisible();
-      await assertCapsuleInsidePane(page);
+      await assertCapsuleAboveTranscript(page);
       await assertNoOverflow(page);
       await screenshot(page, `chat-notices-waking-${viewport.name.toLowerCase()}`);
     });
@@ -197,7 +203,7 @@ for (const viewport of [
       await expect(page.getByTestId('wake-progress-label')).toContainText(
         "This project's server limit is reached."
       );
-      await assertCapsuleInsidePane(page);
+      await assertCapsuleAboveTranscript(page);
       await assertNoOverflow(page);
       await screenshot(page, `chat-notices-wake-wait-${viewport.name.toLowerCase()}`);
     });

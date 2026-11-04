@@ -4,7 +4,11 @@ import { Button } from '@simple-agent-manager/ui';
 import { Ban, Check, Server, XCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
-import { NoticeMeta, NoticeSlab } from '../../components/chat-notices/NoticeSlab';
+import {
+  NOTICE_ACTION_CLASS,
+  NoticeMeta,
+  NoticeSlab,
+} from '../../components/chat-notices/NoticeSlab';
 import { StageTrack } from '../../components/chat-notices/StageTrack';
 import type { ProvisioningState } from './types';
 import { isTerminal } from './types';
@@ -120,7 +124,7 @@ export function ProvisioningIndicator({
       inlineActions
       actions={
         bootLogCount > 0 ? (
-          <Button variant="raised" size="sm" onClick={onViewLogs}>
+          <Button variant="raised" size="sm" className={NOTICE_ACTION_CLASS} onClick={onViewLogs}>
             View logs
           </Button>
         ) : undefined

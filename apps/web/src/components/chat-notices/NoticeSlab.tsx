@@ -43,6 +43,9 @@ export function NoticeMeta({
   );
 }
 
+/** Phones get 44px targets (SAM Glass); `sm` Buttons are 36px. */
+export const NOTICE_ACTION_CLASS = 'max-sm:min-h-11';
+
 /** The quiet action on a notice (Dismiss): text only, so the raised or accent action leads. */
 export function NoticeTextButton({
   className = '',
@@ -53,7 +56,7 @@ export function NoticeTextButton({
     <button
       type={type}
       {...props}
-      className={`min-h-9 shrink-0 cursor-pointer rounded-[var(--sam-radius-control)] border-0 bg-transparent px-3 text-sm font-medium text-fg-muted hover:text-fg-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-primary ${className}`}
+      className={`min-h-11 shrink-0 cursor-pointer sm:min-h-9 rounded-[var(--sam-radius-control)] border-0 bg-transparent px-3 text-sm font-medium text-fg-muted hover:text-fg-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-primary ${className}`}
     />
   );
 }

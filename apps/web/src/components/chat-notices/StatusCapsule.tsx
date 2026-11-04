@@ -1,4 +1,4 @@
-import { paneClassName, Spinner } from '@simple-agent-manager/ui';
+import { Spinner } from '@simple-agent-manager/ui';
 import type { ReactNode } from 'react';
 
 import { NOTICE_TONES, type NoticeTone } from './notice-tones';
@@ -20,9 +20,10 @@ export interface StatusCapsuleProps {
 }
 
 /**
- * A small floating capsule for transient states (connecting, waking): a pill on one line, and
- * long labels wrap. It sits over the top of the conversation rather than in the column, so the
- * transcript does not jump as it comes and goes. Place it with `StatusCapsuleSlot`.
+ * A small capsule for transient states (connecting, waking): a pill on one line; long labels
+ * wrap. It sits inside the conversation pane rather than as a strip in the column, so the
+ * session header and message box stay put as it comes and goes. An element on glass, so solid.
+ * Place it with `StatusCapsuleSlot`.
  */
 export function StatusCapsule({
   tone,
@@ -39,10 +40,8 @@ export function StatusCapsule({
       role={role}
       data-testid={testId}
       data-tone={tone}
-      className={`${paneClassName('overlay', { rounded: false })} pointer-events-auto inline-flex min-w-0 max-w-full items-center gap-2 rounded-[18px] py-1.5 pl-2 pr-3`}
+      className="inline-flex min-w-0 max-w-full items-center gap-2 rounded-[18px] bg-[var(--sam-chip-bg)] py-1.5 pl-2 pr-3"
       style={{
-        // Nearly solid: the capsule sits over transcript text, which must not read through it.
-        background: 'color-mix(in srgb, var(--sam-chip-bg) 90%, transparent)',
         boxShadow: `inset 0 1px 0 var(--sam-glass-v2-bevel), inset 0 0 0 1px ${t.edge}, 0 10px 30px -10px rgb(0 0 0 / 0.6), 0 0 24px -8px ${t.glow}`,
       }}
     >
@@ -72,13 +71,10 @@ export function StatusCapsule({
 }
 
 /**
- * Centres capsules at the top of the conversation pane. The pane must be positioned. The side
- * padding keeps a capsule clear of the phone tool rail on the pane's right edge (below `md`).
+ * Centres capsules at the top of the conversation pane, in its flow above the messages, so a
+ * capsule never covers the transcript (on a phone a short chat starts right under the pane's
+ * top edge).
  */
 export function StatusCapsuleSlot({ children }: Readonly<{ children: ReactNode }>) {
-  return (
-    <div className="pointer-events-none absolute inset-x-0 top-3 z-20 flex flex-col items-center gap-2 px-14 md:px-4">
-      {children}
-    </div>
-  );
+  return <div className="flex shrink-0 flex-col items-center gap-2 px-3 pt-3">{children}</div>;
 }

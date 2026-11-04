@@ -1,7 +1,7 @@
 import { Button, buttonClassName } from '@simple-agent-manager/ui';
 import { CloudOff, KeyRound, Link2Off, RotateCw } from 'lucide-react';
 
-import { NoticeSlab, NoticeTextButton } from '../chat-notices/NoticeSlab';
+import { NOTICE_ACTION_CLASS, NoticeSlab, NoticeTextButton } from '../chat-notices/NoticeSlab';
 import { StatusCapsule, StatusCapsuleSlot } from '../chat-notices/StatusCapsule';
 import { ConnectionBanner } from './MessageBanners';
 import { ElapsedTime } from './session-view-utils';
@@ -74,7 +74,7 @@ export function SessionStatusBanners({ lc }: Readonly<{ lc: UseSessionLifecycleR
             isMine ? (
               <a
                 href="/settings/agents"
-                className={buttonClassName({ variant: 'accent', size: 'sm' })}
+                className={`${buttonClassName({ variant: 'accent', size: 'sm' })} ${NOTICE_ACTION_CLASS}`}
               >
                 Open agent accounts
               </a>
@@ -98,7 +98,7 @@ export function SessionStatusBanners({ lc }: Readonly<{ lc: UseSessionLifecycleR
             isMine ? (
               <a
                 href="/settings/mcp-servers"
-                className={buttonClassName({ variant: 'raised', size: 'sm' })}
+                className={`${buttonClassName({ variant: 'raised', size: 'sm' })} ${NOTICE_ACTION_CLASS}`}
               >
                 Review MCP connections
               </a>
@@ -122,6 +122,7 @@ export function SessionStatusBanners({ lc }: Readonly<{ lc: UseSessionLifecycleR
                 <Button
                   variant="raised"
                   size="sm"
+                  className={NOTICE_ACTION_CLASS}
                   onClick={() => {
                     lc.clearResumeError();
                     void lc.handleSendFollowUp();

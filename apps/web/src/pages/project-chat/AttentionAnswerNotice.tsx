@@ -1,7 +1,11 @@
 import { Button } from '@simple-agent-manager/ui';
 import { Check, CircleAlert } from 'lucide-react';
 
-import { NoticeSlab, NoticeTextButton } from '../../components/chat-notices/NoticeSlab';
+import {
+  NOTICE_ACTION_CLASS,
+  NoticeSlab,
+  NoticeTextButton,
+} from '../../components/chat-notices/NoticeSlab';
 
 export interface AttentionAnswerStatus {
   variant: 'success' | 'error';
@@ -30,7 +34,7 @@ export function AttentionAnswerNotice({
         <>
           <NoticeTextButton onClick={onDismiss}>Dismiss</NoticeTextButton>
           {failed && onRetry && (
-            <Button variant="raised" size="sm" onClick={onRetry}>
+            <Button variant="raised" size="sm" className={NOTICE_ACTION_CLASS} onClick={onRetry}>
               Retry answer
             </Button>
           )}
