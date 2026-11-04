@@ -11,8 +11,11 @@
  * so the newest minutes are missing until the next upload. Live memory comes from the
  * heartbeat (`nodes.last_metrics.workspaceMemory`) and is returned by `GET /api/nodes`.
  *
- * I/O per request: one admin-setting read (cached per isolate), one workspace query, and
- * ceil(workspaces with a project / CHUNK_PAIRS_PER_STATEMENT) chunk queries.
+ * I/O per request: the admin settings (cached per isolate), one workspace query, and
+ * ceil(history workspaces / CHUNK_BRANCHES_PER_STATEMENT) chunk queries. History workspaces
+ * are capped by `nodes.usageMaxHistoryWorkspaces` (default 150, so at most 5 chunk queries)
+ * and each chunk query is bounded by time, reading about (window + lookback) / 15 minutes
+ * chunks per workspace: 8 at the defaults, whatever the workspace's age.
  */
 import type {
   NodeResourceReservation,
@@ -25,21 +28,48 @@ import type {
 import type { Env } from '../env';
 import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import { log } from '../lib/logger';
-import { DEFAULT_NODE_USAGE_WINDOW_MINUTES } from './admin-setting-definitions';
+import {
+  DEFAULT_NODE_USAGE_CHUNK_LOOKBACK_MINUTES,
+  DEFAULT_NODE_USAGE_MAX_HISTORY_WORKSPACES,
+  DEFAULT_NODE_USAGE_WINDOW_MINUTES,
+} from './admin-setting-definitions';
 import { resolveAdminSetting } from './admin-settings';
 import { parseStoredResolvedReservationJson } from './resource-requirements-input';
 import { getRollupConfig, parseWorkspaceResourceRollup } from './workspace-resource-rollup';
 
 const MINUTE_MS = 60_000;
-/** Two bound parameters per (project_id, workspace_id) pair, plus the window start. */
-const CHUNK_PAIRS_PER_STATEMENT = Math.floor((D1_MAX_BOUND_PARAMETERS - 1) / 2);
+/**
+ * Three bound parameters per (project_id, workspace_id, started_at) branch, plus the window
+ * start. The started_at bound sits inside each branch so SQLite's OR optimisation can range
+ * scan the (project_id, workspace_id, started_at) index instead of reading every chunk the
+ * workspace ever uploaded.
+ */
+const CHUNK_BRANCHES_PER_STATEMENT = Math.floor((D1_MAX_BOUND_PARAMETERS - 1) / 3);
+
+/** Workspace states that may still be producing history, ranked first when the read is capped. */
+const LIVE_STATUSES: ReadonlySet<string> = new Set([
+  'pending',
+  'creating',
+  'running',
+  'recovery',
+  'stopping',
+]);
+
+async function positiveIntegerSetting(
+  env: Env,
+  name:
+    | 'nodes.usageWindowMinutes'
+    | 'nodes.usageChunkLookbackMinutes'
+    | 'nodes.usageMaxHistoryWorkspaces',
+  fallback: number
+): Promise<number> {
+  const value = await resolveAdminSetting(env, name);
+  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : fallback;
+}
 
 /** Admin setting `nodes.usageWindowMinutes`; degrades to the default on a store outage. */
-export async function getNodeUsageWindowMinutes(env: Env): Promise<number> {
-  const value = await resolveAdminSetting(env, 'nodes.usageWindowMinutes');
-  return typeof value === 'number' && Number.isInteger(value) && value > 0
-    ? value
-    : DEFAULT_NODE_USAGE_WINDOW_MINUTES;
+export function getNodeUsageWindowMinutes(env: Env): Promise<number> {
+  return positiveIntegerSetting(env, 'nodes.usageWindowMinutes', DEFAULT_NODE_USAGE_WINDOW_MINUTES);
 }
 
 interface WorkspaceRow {
@@ -51,6 +81,7 @@ interface WorkspaceRow {
   display_name: string | null;
   status: string;
   created_at: string;
+  updated_at: string | null;
   resolved_reservation_json: string | null;
   workspace_user_id: string;
   project_name: string | null;
@@ -73,7 +104,7 @@ interface ChunkRow {
  */
 const WORKSPACES_SQL = `
 SELECT w.id, w.node_id, w.project_id, w.chat_session_id, w.name, w.display_name, w.status,
-       w.created_at, w.resolved_reservation_json, w.user_id AS workspace_user_id,
+       w.created_at, w.updated_at, w.resolved_reservation_json, w.user_id AS workspace_user_id,
        p.name AS project_name,
        ss.topic AS session_topic, ss.created_by_user_id AS session_creator_id,
        t.title AS task_title,
@@ -189,23 +220,62 @@ class SeriesBuilder {
 async function readChunkRows(
   env: Env,
   pairs: Array<{ projectId: string; workspaceId: string }>,
-  windowStart: number
+  windowStart: number,
+  earliestChunkStart: number
 ): Promise<ChunkRow[]> {
   const rows: ChunkRow[] = [];
-  for (let i = 0; i < pairs.length; i += CHUNK_PAIRS_PER_STATEMENT) {
-    const batch = pairs.slice(i, i + CHUNK_PAIRS_PER_STATEMENT);
-    const predicate = batch.map(() => '(project_id = ? AND workspace_id = ?)').join(' OR ');
+  for (let i = 0; i < pairs.length; i += CHUNK_BRANCHES_PER_STATEMENT) {
+    const batch = pairs.slice(i, i + CHUNK_BRANCHES_PER_STATEMENT);
+    const predicate = batch
+      .map(() => '(project_id = ? AND workspace_id = ? AND started_at > ?)')
+      .join(' OR ');
     const result = await env.DATABASE.prepare(
       `SELECT project_id, workspace_id, rollup_json
        FROM workspace_resource_chunks
-       WHERE (${predicate}) AND ended_at > ? AND rollup_json IS NOT NULL
-       ORDER BY started_at ASC`
+       WHERE (${predicate}) AND ended_at > ? AND rollup_json IS NOT NULL`
     )
-      .bind(...batch.flatMap((pair) => [pair.projectId, pair.workspaceId]), windowStart)
+      .bind(
+        ...batch.flatMap((pair) => [pair.projectId, pair.workspaceId, earliestChunkStart]),
+        windowStart
+      )
       .all<ChunkRow>();
     rows.push(...(result.results ?? []));
   }
   return rows;
+}
+
+function timestampMs(value: string | null): number {
+  const ms = value ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+/**
+ * Which workspaces get history in this request: only ones that can have history in the window
+ * (still live, or changed since the chunk lookback began), live ones first, then most
+ * recently changed, up to the cap. A stopped workspace untouched for days has no chunks in
+ * the window, so it costs no read.
+ */
+function historyCandidates(
+  rows: WorkspaceRow[],
+  earliestChunkStart: number,
+  max: number
+): { pairs: Array<{ projectId: string; workspaceId: string }>; omittedIds: Set<string> } {
+  const eligible = rows
+    .filter((row): row is WorkspaceRow & { project_id: string } => row.project_id !== null)
+    .filter(
+      (row) => LIVE_STATUSES.has(row.status) || timestampMs(row.updated_at) >= earliestChunkStart
+    )
+    .sort(
+      (a, b) =>
+        Number(LIVE_STATUSES.has(b.status)) - Number(LIVE_STATUSES.has(a.status)) ||
+        timestampMs(b.updated_at) - timestampMs(a.updated_at)
+    );
+  return {
+    pairs: eligible
+      .slice(0, max)
+      .map((row) => ({ projectId: row.project_id, workspaceId: row.id })),
+    omittedIds: new Set(eligible.slice(max).map((row) => row.id)),
+  };
 }
 
 export async function getNodeResourceUsage(
@@ -213,21 +283,45 @@ export async function getNodeResourceUsage(
   userId: string,
   now: number = Date.now()
 ): Promise<NodeResourceUsageResponse> {
-  const windowMinutes = await getNodeUsageWindowMinutes(env);
+  const [windowMinutes, lookbackMinutes, maxHistoryWorkspaces] = await Promise.all([
+    getNodeUsageWindowMinutes(env),
+    positiveIntegerSetting(
+      env,
+      'nodes.usageChunkLookbackMinutes',
+      DEFAULT_NODE_USAGE_CHUNK_LOOKBACK_MINUTES
+    ),
+    positiveIntegerSetting(
+      env,
+      'nodes.usageMaxHistoryWorkspaces',
+      DEFAULT_NODE_USAGE_MAX_HISTORY_WORKSPACES
+    ),
+  ]);
   const windowStart = now - windowMinutes * MINUTE_MS;
+  const earliestChunkStart = windowStart - lookbackMinutes * MINUTE_MS;
   const { bucketMs } = getRollupConfig(env);
 
   const workspaceRows =
     (await env.DATABASE.prepare(WORKSPACES_SQL).bind(userId, userId).all<WorkspaceRow>()).results ??
     [];
 
-  const pairs = workspaceRows
-    .filter((row): row is WorkspaceRow & { project_id: string } => row.project_id !== null)
-    .map((row) => ({ projectId: row.project_id, workspaceId: row.id }));
+  const { pairs, omittedIds } = historyCandidates(
+    workspaceRows,
+    earliestChunkStart,
+    maxHistoryWorkspaces
+  );
+  const omitted = omittedIds.size;
   const projectOf = new Map(pairs.map((pair) => [pair.workspaceId, pair.projectId]));
+  if (omitted > 0) {
+    log.warn('node_usage.history_capped', {
+      userId,
+      read: pairs.length,
+      omitted,
+      maxHistoryWorkspaces,
+    });
+  }
 
   const builder = new SeriesBuilder(windowStart, now);
-  for (const chunk of await readChunkRows(env, pairs, windowStart)) {
+  for (const chunk of await readChunkRows(env, pairs, windowStart, earliestChunkStart)) {
     // Defence in depth: the predicate already pairs project and workspace.
     if (projectOf.get(chunk.workspace_id) !== chunk.project_id) continue;
     if (!builder.add(chunk.workspace_id, chunk.rollup_json)) {
@@ -256,8 +350,16 @@ export async function getNodeResourceUsage(
       reservation: reservationOf(row),
       series,
       historyEndsAt,
+      historyOmitted: omittedIds.has(row.id),
     };
   });
 
-  return { windowMinutes, windowStart, windowEnd: now, bucketMs, workspaces };
+  return {
+    windowMinutes,
+    windowStart,
+    windowEnd: now,
+    bucketMs,
+    historyOmittedCount: omitted,
+    workspaces,
+  };
 }

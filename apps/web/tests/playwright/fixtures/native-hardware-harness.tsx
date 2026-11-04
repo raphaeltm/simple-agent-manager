@@ -140,6 +140,7 @@ function Surface() {
           reservation: null,
           series: { start: [], cpuMillis: [], memoryBytes: [] },
           historyEndsAt: null,
+          historyOmitted: false,
         }))}
         usageWindow={null}
         clock={Date.parse('2026-09-07T12:00:00Z')}

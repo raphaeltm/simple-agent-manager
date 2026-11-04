@@ -1,6 +1,6 @@
 import type { CredentialProvider, NodeResponse, VMSize } from '@simple-agent-manager/shared';
 import { PROVIDER_LABELS, VM_SIZE_LABELS } from '@simple-agent-manager/shared';
-import { Button, Select } from '@simple-agent-manager/ui';
+import { Button, Pane, Select } from '@simple-agent-manager/ui';
 import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 
@@ -93,7 +93,7 @@ export function CreateNodeForm({
   };
 
   return (
-    <div className="glass-surface grid min-w-0 gap-4 rounded-md p-4">
+    <Pane as="div" className="grid min-w-0 gap-4 p-4">
       {poolSummary?.scope === 'installation' && (
         <p className="sam-type-secondary m-0 text-fg-muted">Installation-funded compute</p>
       )}
@@ -255,6 +255,6 @@ export function CreateNodeForm({
           Create Node
         </Button>
       </div>
-    </div>
+    </Pane>
   );
 }

@@ -96,6 +96,7 @@ function makeSession(
     reservation: { cpuMillis: 2000, memoryMb: 4096, diskMb: 10240, exclusiveNode: false },
     series: series(seed, cpu, mem),
     historyEndsAt: NOW - 12 * MINUTE,
+    historyOmitted: false,
     ...rest,
   };
 }
@@ -267,6 +268,7 @@ function usage(workspaces: unknown[]) {
     windowStart: NOW - 60 * MINUTE,
     windowEnd: NOW,
     bucketMs: MINUTE,
+    historyOmittedCount: 0,
     workspaces,
   };
 }
@@ -285,6 +287,31 @@ async function setupApiMocks(
     if (path === '/api/credentials' || path === '/api/github/installations')
       return route.fulfill({ json: [] });
     if (path === '/api/credentials/agent') return route.fulfill({ json: { credentials: [] } });
+    if (path === '/api/providers/catalog') return route.fulfill({ json: { catalogs: [] } });
+    if (path === '/api/capacity-pools/defaults')
+      return route.fulfill({
+        json: {
+          effectiveSummary: {
+            scope: 'installation',
+            state: 'configured-ready',
+            strategy: 'pack',
+            exhaustionPolicy: 'fail',
+            availableCandidateCount: 1,
+            nativeOfferings: [
+              {
+                provider: 'hetzner',
+                location: 'nbg1',
+                providerInstanceType: 'cx43',
+                displayName: 'CX43',
+                vcpu: 8,
+                memoryMb: 16384,
+                diskGb: 160,
+                price: '€16/month',
+              },
+            ],
+          },
+        },
+      });
     if (path === '/api/nodes/resource-usage') {
       if (options.usageError)
         return route.fulfill({
@@ -394,6 +421,42 @@ for (const theme of ['dark', 'light'] as const) {
       await expect(page.getByRole('heading', { name: 'Hetzner cx53' })).toBeVisible();
       await checkLayout(page);
       await capture(page, 'nodes-usage-error');
+    });
+
+    test('create form open', async ({ page }) => {
+      test.skip(theme === 'light', 'layout check runs once');
+      await setupApiMocks(page, { nodes: NORMAL_NODES, sessions: NORMAL_SESSIONS });
+      await page.goto('/nodes');
+      await page.getByRole('button', { name: 'Create Node' }).click();
+      await expect(page.getByLabel('Native offering')).toBeVisible();
+      await checkLayout(page);
+      await capture(page, 'nodes-usage-create-form');
+    });
+
+    test('actions menu and Advanced work from the keyboard', async ({ page }) => {
+      test.skip(theme === 'light', 'interaction check runs once');
+      await setupApiMocks(page, { nodes: NORMAL_NODES, sessions: NORMAL_SESSIONS });
+      await page.goto('/nodes');
+      const trigger = page.getByRole('button', { name: 'Actions for Hetzner cx53' });
+      await trigger.focus();
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('menuitem', { name: 'Stop' })).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('menuitem', { name: 'Stop' })).toHaveCount(0);
+
+      const pane = page.getByRole('article', { name: /Hetzner cx53/ });
+      const advanced = pane.getByText('Advanced', { exact: true });
+      await advanced.focus();
+      await page.keyboard.press('Enter');
+      await expect(pane.getByRole('link', { name: /Workspace/ }).first()).toBeVisible();
+
+      // 44px targets on a phone.
+      if ((page.viewportSize()?.width ?? 0) < 768) {
+        for (const target of [trigger, advanced, pane.getByRole('link', { name: /Details/ })]) {
+          const box = await target.boundingBox();
+          expect(box?.height ?? 0).toBeGreaterThanOrEqual(44);
+        }
+      }
     });
 
     test('nodes error', async ({ page }) => {

@@ -1,4 +1,5 @@
 import type { NodeResourceUsageSeries } from '@simple-agent-manager/shared';
+import { memo, useMemo } from 'react';
 
 /**
  * Memory and CPU on one time axis: memory rises above the centre line, CPU hangs below
@@ -112,7 +113,11 @@ export interface MirrorChartProps {
   className: string;
 }
 
-export function MirrorChart({
+/**
+ * Memoized: the page re-renders on every poll and clock tick, and these props are
+ * primitives plus a series array that keeps its identity until new history arrives.
+ */
+export const MirrorChart = memo(function MirrorChart({
   series,
   windowStart,
   windowEnd,
@@ -125,12 +130,18 @@ export function MirrorChart({
   liveMemory = null,
   className,
 }: MirrorChartProps) {
-  const span = Math.max(1, windowEnd - windowStart);
-  const xFor = (start: number) =>
-    Math.min(100, Math.max(0, ((start + bucketMs / 2 - windowStart) / span) * 100));
   const memoryStroke = memoryDanger ? DANGER_COLOR : MEMORY_COLOR;
   const safeMemoryMax = memoryMax > 0 ? memoryMax : 1;
   const safeCpuMax = cpuMax > 0 ? cpuMax : 1;
+  const { memoryRuns, cpuRuns } = useMemo(() => {
+    const span = Math.max(1, windowEnd - windowStart);
+    const xFor = (start: number) =>
+      Math.min(100, Math.max(0, ((start + bucketMs / 2 - windowStart) / span) * 100));
+    return {
+      memoryRuns: runs(series, series.memoryBytes, xFor, safeMemoryMax, true),
+      cpuRuns: runs(series, series.cpuMillis, xFor, safeCpuMax, false),
+    };
+  }, [series, windowStart, windowEnd, bucketMs, safeMemoryMax, safeCpuMax]);
   return (
     <div className={`relative ${className}`}>
       <svg
@@ -139,7 +150,7 @@ export function MirrorChart({
         className="absolute inset-0 h-full w-full"
         aria-hidden="true"
       >
-        {runs(series, series.memoryBytes, xFor, safeMemoryMax, true).map((points, i) => (
+        {memoryRuns.map((points, i) => (
           <Half
             key={`m${i}`}
             points={points}
@@ -148,7 +159,7 @@ export function MirrorChart({
             fillOpacity={0.4}
           />
         ))}
-        {runs(series, series.cpuMillis, xFor, safeCpuMax, false).map((points, i) => (
+        {cpuRuns.map((points, i) => (
           <Half
             key={`c${i}`}
             points={points}
@@ -182,7 +193,7 @@ export function MirrorChart({
       )}
     </div>
   );
-}
+});
 
 export function Swatch({ color }: { color: string }) {
   return (

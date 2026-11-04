@@ -9,7 +9,7 @@ import {
 } from '@simple-agent-manager/ui';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Server } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { CreateNodeForm } from '../components/node/CreateNodeForm';
@@ -28,12 +28,25 @@ import {
   nodeResourceUsageQueryOptions,
 } from '../lib/query-options';
 
-/** Re-renders on a slow tick so ages and live-memory freshness stay current between polls. */
+/** Shared so a machine with no sessions keeps the same prop identity between renders. */
+const NO_SESSIONS: NodeWorkspaceResourceUsage[] = [];
+
+/**
+ * Re-renders on a slow tick so ages and live-memory freshness stay current between polls.
+ * Skips ticks while the tab is hidden and catches up as soon as it is visible again.
+ */
 function useClock(): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), NODE_PAGE_CLOCK_TICK_MS);
-    return () => clearInterval(id);
+    const tick = () => {
+      if (document.visibilityState !== 'hidden') setNow(Date.now());
+    };
+    const id = setInterval(tick, NODE_PAGE_CLOCK_TICK_MS);
+    document.addEventListener('visibilitychange', tick);
+    return () => {
+      clearInterval(id);
+      document.removeEventListener('visibilitychange', tick);
+    };
   }, []);
   return now;
 }
@@ -95,39 +108,45 @@ export function Nodes() {
     [usage]
   );
 
-  const invalidate = () => {
+  const invalidate = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: nodeQueryKeys.all(queryScope) });
-  };
+  }, [queryClient, queryScope]);
 
-  const handleStopNode = async (id: string) => {
-    try {
-      await stopNode(id);
-      invalidate();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to stop node');
-    }
-  };
+  const handleStopNode = useCallback(
+    async (id: string) => {
+      try {
+        await stopNode(id);
+        invalidate();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to stop node');
+      }
+    },
+    [invalidate]
+  );
 
-  const handleDeleteNode = async (id: string) => {
-    const targetNode = (nodes ?? []).find((n) => n.id === id);
-    if (targetNode?.nodeRole === 'deployment') {
-      const envs = targetNode.deploymentEnvironments ?? [];
-      const envSummary =
-        envs.length > 0
-          ? `${envs.length} deployment environment${envs.length === 1 ? '' : 's'}: ${envs.map((env) => env.name).join(', ')}`
-          : 'deployment environments currently listed on this node';
-      const confirmed = window.confirm(
-        `"${targetNode.name}" is a deployment node hosting ${envSummary}. Deleting it here destroys the node infrastructure and affects ALL hosted environments, but it does not perform each environment's volume teardown.\n\nFor full per-environment teardown, use Destroy on the project Deployments page.\n\nContinue with node-only deletion?`
-      );
-      if (!confirmed) return;
-    }
-    try {
-      await deleteNode(id);
-      invalidate();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete node');
-    }
-  };
+  const handleDeleteNode = useCallback(
+    async (id: string) => {
+      const targetNode = (nodes ?? []).find((n) => n.id === id);
+      if (targetNode?.nodeRole === 'deployment') {
+        const envs = targetNode.deploymentEnvironments ?? [];
+        const envSummary =
+          envs.length > 0
+            ? `${envs.length} deployment environment${envs.length === 1 ? '' : 's'}: ${envs.map((env) => env.name).join(', ')}`
+            : 'deployment environments currently listed on this node';
+        const confirmed = window.confirm(
+          `"${targetNode.name}" is a deployment node hosting ${envSummary}. Deleting it here destroys the node infrastructure and affects ALL hosted environments, but it does not perform each environment's volume teardown.\n\nFor full per-environment teardown, use Destroy on the project Deployments page.\n\nContinue with node-only deletion?`
+        );
+        if (!confirmed) return;
+      }
+      try {
+        await deleteNode(id);
+        invalidate();
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Failed to delete node');
+      }
+    },
+    [invalidate, nodes]
+  );
 
   return (
     <PageLayout title="Nodes" maxWidth="xl">
@@ -142,6 +161,12 @@ export function Nodes() {
           {sortedNodes.length > 0 && (
             <p className="m-0 flex flex-wrap items-center gap-x-3 gap-y-1 text-[12px] text-fg-muted">
               {usage && <span>Last {usage.windowMinutes} minutes.</span>}
+              {usage && usage.historyOmittedCount > 0 && (
+                <span>
+                  Usage for {usage.historyOmittedCount} older session
+                  {usage.historyOmittedCount === 1 ? '' : 's'} was not loaded.
+                </span>
+              )}
               <span className="flex items-center gap-1.5">
                 <Swatch color={MEMORY_COLOR} /> Memory goes up
               </span>
@@ -221,7 +246,7 @@ export function Nodes() {
             <NodeUsagePane
               key={node.id}
               node={node}
-              sessions={sessionsByNode ? (sessionsByNode.get(node.id) ?? []) : undefined}
+              sessions={sessionsByNode ? (sessionsByNode.get(node.id) ?? NO_SESSIONS) : undefined}
               usageWindow={usageWindow}
               clock={clock}
               onStop={handleStopNode}

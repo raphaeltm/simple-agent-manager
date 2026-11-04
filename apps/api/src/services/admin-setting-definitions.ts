@@ -27,6 +27,8 @@ export type AdminSettingName =
   | OperationsTelemetrySettingName
   | 'chat.profileUsageWindowDays'
   | 'nodes.usageWindowMinutes'
+  | 'nodes.usageChunkLookbackMinutes'
+  | 'nodes.usageMaxHistoryWorkspaces'
   | 'chat.profilePinCandidateLimit'
   | 'collaboration.ideaUpdateBodyMaxLength'
   | 'collaboration.ideaUpdateQuoteMaxLength'
@@ -129,6 +131,16 @@ export interface AdminSettingDefinition {
 
 /** Minutes of CPU and memory history the Nodes page draws per machine and session (`GET /api/nodes/resource-usage`). */
 export const DEFAULT_NODE_USAGE_WINDOW_MINUTES = 60;
+
+/**
+ * How far before the Nodes page window a resource-history chunk may start and still be read.
+ * VM agents upload a chunk every 15 minutes by default, so 60 leaves room for slow uploads
+ * while letting the chunk index bound the scan by time.
+ */
+export const DEFAULT_NODE_USAGE_CHUNK_LOOKBACK_MINUTES = 60;
+
+/** Most workspaces whose history the Nodes page reads in one request; the rest are disclosed. */
+export const DEFAULT_NODE_USAGE_MAX_HISTORY_WORKSPACES = 150;
 
 /** Days of a person's own new chats that order their new-chat profile picker (idea 01M5EW9H86VD88S7E3WWA1D9X1). */
 export const DEFAULT_PROFILE_USAGE_WINDOW_DAYS = 30;

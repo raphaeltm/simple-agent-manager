@@ -5,6 +5,8 @@ import {
   DEFAULT_COMMENT_CONTEXT_MAX_ROWS,
   DEFAULT_COMMENT_CONTEXT_MESSAGES,
   DEFAULT_COMMENT_MENTIONS_MAX,
+  DEFAULT_NODE_USAGE_CHUNK_LOOKBACK_MINUTES,
+  DEFAULT_NODE_USAGE_MAX_HISTORY_WORKSPACES,
   DEFAULT_NODE_USAGE_WINDOW_MINUTES,
   DEFAULT_PROFILE_PIN_CANDIDATE_LIMIT,
   DEFAULT_PROFILE_USAGE_WINDOW_DAYS,
@@ -195,6 +197,20 @@ export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
     'Operations',
     'Minutes of CPU and memory history the Nodes page draws for each machine and session. VM agents upload history in 15-minute batches, so a window under 30 minutes is often mostly empty.',
     { min: 15, max: 360 }
+  ),
+  integerDefinition(
+    'nodes.usageChunkLookbackMinutes',
+    DEFAULT_NODE_USAGE_CHUNK_LOOKBACK_MINUTES,
+    'Operations',
+    'How long before the Nodes page window a CPU and memory history chunk may start and still be drawn. It must cover the longest chunk a VM agent uploads (15 minutes by default); a larger value reads more rows.',
+    { min: 15, max: 1440 }
+  ),
+  integerDefinition(
+    'nodes.usageMaxHistoryWorkspaces',
+    DEFAULT_NODE_USAGE_MAX_HISTORY_WORKSPACES,
+    'Operations',
+    'Most workspaces per person whose CPU and memory history the Nodes page reads in one request. Running and most recently changed workspaces come first; the page says how many it left out.',
+    { min: 1, max: 500 }
   ),
   integerDefinition(
     'chat.profileUsageWindowDays',

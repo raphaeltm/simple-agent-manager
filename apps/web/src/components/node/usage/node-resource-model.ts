@@ -13,12 +13,14 @@ import type {
   NodeResponse,
   NodeWorkspaceResourceUsage,
 } from '@simple-agent-manager/shared';
-import { PROVIDER_LABELS, VM_LOCATIONS } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_NODE_HEARTBEAT_STALE_SECONDS,
+  PROVIDER_LABELS,
+  VM_LOCATIONS,
+} from '@simple-agent-manager/shared';
 
 const MB = 1024 * 1024;
 const GB = 1024 * MB;
-/** Matches the API's default heartbeat staleness when a node does not say. */
-const DEFAULT_HEARTBEAT_STALE_SECONDS = 180;
 
 export interface MachineSpec {
   title: string;
@@ -66,7 +68,7 @@ function timestampMs(value: string | null | undefined): number | null {
  */
 export function liveMemoryByWorkspace(node: NodeResponse, now: number): Map<string, number> {
   const result = new Map<string, number>();
-  const staleMs = (node.heartbeatStaleAfterSeconds ?? DEFAULT_HEARTBEAT_STALE_SECONDS) * 1000;
+  const staleMs = (node.heartbeatStaleAfterSeconds ?? DEFAULT_NODE_HEARTBEAT_STALE_SECONDS) * 1000;
   const heartbeatAt = timestampMs(node.lastHeartbeatAt);
   for (const entry of node.lastMetrics?.workspaceMemory ?? []) {
     const at = timestampMs(entry.collectedAt) ?? heartbeatAt;

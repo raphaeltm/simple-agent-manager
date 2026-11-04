@@ -82,6 +82,7 @@ function usageResponse(
     windowStart: now - 60 * MINUTE,
     windowEnd: now,
     bucketMs: MINUTE,
+    historyOmittedCount: workspaces.filter((w) => w.historyOmitted).length,
     workspaces,
   };
 }
@@ -112,6 +113,7 @@ function session(
       memoryBytes: start.map(() => memoryGb * GB),
     },
     historyEndsAt: end,
+    historyOmitted: false,
     ...rest,
   };
 }
@@ -284,6 +286,11 @@ describe('Nodes page', () => {
     const memoryRow = (await screen.findByRole('link', { name: 'Memory hog' })).closest('li');
     const cpuRow = screen.getByRole('link', { name: 'CPU burst' }).closest('li');
     expect(within(memoryRow as HTMLElement).getByText('over limit')).toBeInTheDocument();
+    // The status is in the numbers' accessible name too, not only in red text.
+    expect(
+      within(memoryRow as HTMLElement).getByLabelText(/memory over its limit/)
+    ).toBeInTheDocument();
+    expect(within(cpuRow as HTMLElement).getByLabelText(/CPU bursting/)).toBeInTheDocument();
     expect(within(cpuRow as HTMLElement).getByText('burst, fine')).toBeInTheDocument();
     expect(within(cpuRow as HTMLElement).queryByText('over limit')).not.toBeInTheDocument();
   });
@@ -295,6 +302,22 @@ describe('Nodes page', () => {
       await screen.findByText(/Couldn.t load sessions and usage: usage boom/)
     ).toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Node 1' })).toBeInTheDocument();
+  });
+
+  it('says when a session’s usage was left out rather than calling it empty', async () => {
+    mocks.getNodeResourceUsage.mockResolvedValue(
+      usageResponse([
+        session({
+          historyOmitted: true,
+          series: { start: [], cpuMillis: [], memoryBytes: [] },
+          historyEndsAt: null,
+        }),
+      ])
+    );
+    renderPage();
+    expect(await screen.findByText('Usage not loaded: too many sessions')).toBeInTheDocument();
+    expect(screen.getByText(/Usage for 1 older session was not loaded/)).toBeInTheDocument();
+    expect(screen.queryByText('No usage recorded yet')).not.toBeInTheDocument();
   });
 
   it('says nothing is running on a machine with no sessions', async () => {

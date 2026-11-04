@@ -11,6 +11,7 @@ import {
   Pane,
 } from '@simple-agent-manager/ui';
 import { ChevronRight, Rocket, Server } from 'lucide-react';
+import { memo, useMemo } from 'react';
 import { Link } from 'react-router';
 
 import { HardwareDetails } from '../../hardware/HardwareDetails';
@@ -91,7 +92,7 @@ export interface NodeUsagePaneProps {
   onDelete: (id: string) => void;
 }
 
-export function NodeUsagePane({
+export const NodeUsagePane = memo(function NodeUsagePane({
   node,
   sessions,
   usageWindow,
@@ -102,12 +103,16 @@ export function NodeUsagePane({
   const spec = machineSpec(node);
   const status = STATUS_CHIP[node.status] ?? STATUS_CHIP.running;
   const isDeployment = node.nodeRole === 'deployment';
-  const live = liveMemoryByWorkspace(node, clock);
-  const rows = (sessions ?? []).map((usage) => ({
-    usage,
-    live: live.get(usage.workspaceId),
-    now: sessionNow(usage, live.get(usage.workspaceId)),
-  }));
+  const live = useMemo(() => liveMemoryByWorkspace(node, clock), [node, clock]);
+  const rows = useMemo(
+    () =>
+      (sessions ?? []).map((usage) => ({
+        usage,
+        live: live.get(usage.workspaceId),
+        now: sessionNow(usage, live.get(usage.workspaceId)),
+      })),
+    [sessions, live]
+  );
 
   // Machine totals: capacity from the hardware, set aside from reservations, "now" from
   // live memory where the heartbeat has it and the newest history minute otherwise.
@@ -118,7 +123,8 @@ export function NodeUsagePane({
   const reservedCpu = rows.reduce((t, r) => t + (r.now.reservedCpuMillis ?? 0), 0);
   const memoryNow = rows.reduce((t, r) => t + (r.now.memoryBytes ?? 0), 0);
   const cpuNow = rows.reduce((t, r) => t + (r.now.cpuMillis ?? 0), 0);
-  const total = sumSeries(rows.map((r) => r.usage.series));
+  // Recomputed only when new history arrives, not on every poll or clock tick.
+  const total = useMemo(() => sumSeries((sessions ?? []).map((usage) => usage.series)), [sessions]);
   const liveTotal = rows.some((r) => r.live !== undefined) ? memoryNow : null;
   const memoryMax =
     memoryCapacity ??
@@ -143,7 +149,10 @@ export function NodeUsagePane({
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 items-center gap-2">
-            <h2 className="m-0 min-w-0 truncate text-[15px] font-semibold text-fg-primary">
+            <h2
+              className="m-0 min-w-0 truncate text-[15px] font-semibold text-fg-primary"
+              title={spec.title}
+            >
               {spec.title}
             </h2>
             <span className="ml-auto flex shrink-0 items-center gap-1.5">
@@ -157,7 +166,9 @@ export function NodeUsagePane({
                     {node.healthStatus === 'unhealthy' ? 'Unhealthy' : 'No heartbeat'}
                   </Chip>
                 )}
-              <span role="presentation" onClick={(e) => e.stopPropagation()}>
+              {/* The shared trigger is 32px; on a phone it grows to a 44px target here. The menu
+                  itself is portaled to the body, so this selector only reaches the trigger. */}
+              <span className="max-md:[&_button]:h-11 max-md:[&_button]:w-11">
                 <DropdownMenu
                   items={nodeActions(node, { onStop, onDelete })}
                   aria-label={`Actions for ${spec.title}`}
@@ -165,7 +176,7 @@ export function NodeUsagePane({
               </span>
             </span>
           </div>
-          <p className="m-0 mt-0.5 truncate text-[12.5px] text-fg-muted">
+          <p className="m-0 mt-0.5 text-[12.5px] text-fg-muted [overflow-wrap:anywhere]">
             {[spec.location, specLine(spec), isDeployment ? 'Deployment' : null]
               .filter(Boolean)
               .join(' · ')}
@@ -242,7 +253,6 @@ export function NodeUsagePane({
               <NodeSessionRow
                 key={r.usage.workspaceId}
                 usage={r.usage}
-                now={r.now}
                 liveMemory={r.live}
                 windowStart={usageWindow?.windowStart ?? clock}
                 windowEnd={usageWindow?.windowEnd ?? clock}
@@ -255,8 +265,15 @@ export function NodeUsagePane({
       )}
 
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <details className="min-w-0 text-[11.5px] text-fg-muted">
-          <summary className="cursor-pointer select-none">Advanced</summary>
+        <details className="group min-w-0 text-[11.5px] text-fg-muted">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1 select-none hover:text-fg-primary focus-visible:outline-2 focus-visible:outline-focus-ring [&::-webkit-details-marker]:hidden">
+            <ChevronRight
+              size={14}
+              aria-hidden="true"
+              className="transition-transform group-open:rotate-90 motion-reduce:transition-none"
+            />
+            Advanced
+          </summary>
           <div className="mt-2 flex flex-col gap-2">
             {rows.length > 0 && (
               <ul className="m-0 flex list-none flex-col gap-1 p-0">
@@ -282,7 +299,7 @@ export function NodeUsagePane({
         </details>
         <Link
           to={`/nodes/${node.id}`}
-          className="inline-flex min-h-9 items-center gap-1 rounded-[var(--sam-radius-control)] px-2 text-[12.5px] text-fg-muted no-underline hover:text-fg-primary"
+          className="inline-flex min-h-11 items-center gap-1 rounded-[var(--sam-radius-control)] px-2 text-[12.5px] text-fg-muted no-underline hover:text-fg-primary"
         >
           Details
           <ChevronRight size={14} aria-hidden="true" />
@@ -290,4 +307,4 @@ export function NodeUsagePane({
       </div>
     </Pane>
   );
-}
+});

@@ -18,10 +18,17 @@ import {
   storeWorkspaceResourceChunk,
   type WorkspaceResourceUploadBody,
 } from '../../../src/services/workspace-resource-history';
-import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import {
+  createAllSchemaTables,
+  createDeclaredIndexes,
+  createSqliteD1,
+} from '../../helpers/sqlite-d1';
 
 const auth = vi.hoisted(() => ({ userId: 'owner-1' }));
-const settings = vi.hoisted(() => ({ windowMinutes: 60 as unknown }));
+const settings = vi.hoisted(() => ({
+  windowMinutes: 60 as unknown,
+  maxHistoryWorkspaces: undefined as unknown,
+}));
 
 vi.mock('../../../src/middleware/auth', async (load) => ({
   ...(await load<typeof import('../../../src/middleware/auth')>()),
@@ -32,7 +39,11 @@ vi.mock('../../../src/middleware/auth', async (load) => ({
 vi.mock('../../../src/services/admin-settings', async (load) => ({
   ...(await load<typeof import('../../../src/services/admin-settings')>()),
   resolveAdminSetting: vi.fn(async (_env: unknown, name: string) =>
-    name === 'nodes.usageWindowMinutes' ? settings.windowMinutes : undefined
+    name === 'nodes.usageWindowMinutes'
+      ? settings.windowMinutes
+      : name === 'nodes.usageMaxHistoryWorkspaces'
+        ? settings.maxHistoryWorkspaces
+        : undefined
   ),
 }));
 
@@ -52,6 +63,7 @@ afterEach(() => {
   databases.splice(0).forEach((db) => db.close());
   auth.userId = 'owner-1';
   settings.windowMinutes = 60;
+  settings.maxHistoryWorkspaces = undefined;
 });
 
 function base64(bytes: Uint8Array): string {
@@ -137,6 +149,7 @@ function fixture() {
       displayName?: string | null;
       status?: string;
       reservation?: string | null;
+      updatedAt?: string;
     }) =>
       sqlite
         .prepare(
@@ -155,7 +168,7 @@ function fixture() {
           w.status ?? 'running',
           w.reservation === undefined ? RESERVATION : w.reservation,
           '2026-11-04T10:00:00Z',
-          '2026-11-04T10:00:00Z'
+          w.updatedAt ?? new Date(now).toISOString()
         ),
     session: (id: string, projectId: string, topic: string | null, createdBy: string) =>
       sqlite
@@ -515,5 +528,122 @@ describe('GET /api/nodes/resource-usage', () => {
 
     settings.windowMinutes = 'not a number';
     expect((await getUsage(f)).windowMinutes).toBe(60);
+  });
+
+  describe('at the outer limit', () => {
+    it('reads only chunks near the window, by index range, however much history a workspace has', async () => {
+      const f = fixture();
+      createDeclaredIndexes(f.sqlite, [schema.workspaceResourceChunks]);
+      const { recent } = await seedOwnerWorkspace(f);
+      // ~90 days of 15-minute chunks behind the window, copied from a real uploaded row.
+      const template = f.sqlite
+        .prepare(`SELECT * FROM workspace_resource_chunks WHERE started_at = ?`)
+        .get(recent) as Record<string, unknown>;
+      const insert = f.sqlite.prepare(
+        `INSERT INTO workspace_resource_chunks (id, project_id, workspace_id, chunk_sequence, source_version, r2_key,
+           storage_format, compressed_bytes, uncompressed_bytes, sha256, started_at, ended_at, sample_count,
+           completeness_json, summary_json, rollup_json, created_at, expires_at)
+         VALUES (?, ?, ?, ?, 1, ?, 'gzip', 1, 1, 'x', ?, ?, 180, '{}', '{}', ?, 0, 0)`
+      );
+      const old = f.sqlite.transaction(() => {
+        for (let i = 0; i < 8_640; i++) {
+          const start = recent - (4 * 60 + i * 15) * MINUTE;
+          insert.run(
+            `old-${i}`,
+            'p1',
+            'w1',
+            1000 + i,
+            `old/${i}`,
+            start,
+            start + 15 * MINUTE,
+            template.rollup_json
+          );
+        }
+      });
+      old();
+
+      const statements: string[] = [];
+      const prepare = f.sqlite.prepare.bind(f.sqlite);
+      f.sqlite.prepare = ((sql: string) => {
+        statements.push(sql);
+        return prepare(sql);
+      }) as typeof f.sqlite.prepare;
+
+      const body = await getUsage(f);
+      expect(body.workspaces[0]?.series.start).toHaveLength(30);
+
+      const chunkSql = statements.find((sql) => sql.includes('FROM workspace_resource_chunks'));
+      expect(chunkSql).toBeDefined();
+      const plan = prepare(`EXPLAIN QUERY PLAN ${chunkSql}`)
+        .all('p1', 'w1', 0, 0)
+        .map((row) => (row as { detail: string }).detail)
+        .join('\n');
+      // The started_at bound is inside the index search, so old history is never read.
+      expect(plan).toContain('idx_workspace_resource_chunks_project_workspace');
+      expect(plan).toMatch(/started_at>\?/);
+    });
+
+    it('reads history for more workspaces than fit in one statement', async () => {
+      const f = fixture();
+      f.sql.user('owner-1', 'Owner One');
+      f.sql.project('p1', 'SAM', 'owner-1');
+      f.sql.node('node-1', 'owner-1');
+      const start = minuteFloor(f.now) - 30 * MINUTE;
+      for (let i = 0; i < 40; i++) {
+        f.sql.workspace({ id: `w${i}`, userId: 'owner-1', nodeId: 'node-1', projectId: 'p1' });
+        await upload(f.env, { projectId: 'p1', workspaceId: `w${i}`, sequence: 1, start });
+      }
+
+      const body = await getUsage(f);
+      expect(body.workspaces).toHaveLength(40);
+      expect(body.workspaces.every((w) => w.series.start.length === 15)).toBe(true);
+      expect(body.historyOmittedCount).toBe(0);
+    });
+
+    it('caps history reads, live and recent first, and says what it left out', async () => {
+      const f = fixture();
+      f.sql.user('owner-1', 'Owner One');
+      f.sql.project('p1', 'SAM', 'owner-1');
+      f.sql.node('node-1', 'owner-1');
+      const start = minuteFloor(f.now) - 30 * MINUTE;
+      const iso = (minutesAgo: number) => new Date(f.now - minutesAgo * MINUTE).toISOString();
+      const seed = async (id: string, status: string, updatedMinutesAgo: number) => {
+        f.sql.workspace({
+          id,
+          userId: 'owner-1',
+          nodeId: 'node-1',
+          projectId: 'p1',
+          status,
+          updatedAt: iso(updatedMinutesAgo),
+        });
+        await upload(f.env, { projectId: 'p1', workspaceId: id, sequence: 1, start });
+      };
+      await seed('live-new', 'running', 1);
+      await seed('live-old', 'running', 50);
+      await seed('stopped-recent', 'stopped', 5);
+      await seed('live-mid', 'running', 20);
+      // Stopped long before the lookback: cannot have history in the window, so never read or counted.
+      f.sql.workspace({
+        id: 'stopped-ancient',
+        userId: 'owner-1',
+        nodeId: 'node-1',
+        projectId: 'p1',
+        status: 'stopped',
+        updatedAt: iso(60 * 24 * 7),
+      });
+      settings.maxHistoryWorkspaces = 3;
+
+      const body = await getUsage(f);
+      const byId = Object.fromEntries(body.workspaces.map((w) => [w.workspaceId, w]));
+      expect(body.historyOmittedCount).toBe(1);
+      expect(byId['live-new']?.series.start.length).toBe(15);
+      expect(byId['live-mid']?.series.start.length).toBe(15);
+      expect(byId['live-old']?.series.start.length).toBe(15);
+      expect(byId['stopped-recent']).toMatchObject({ historyOmitted: true, series: { start: [] } });
+      expect(byId['stopped-ancient']).toMatchObject({
+        historyOmitted: false,
+        series: { start: [] },
+      });
+    });
   });
 });

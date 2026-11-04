@@ -1,7 +1,7 @@
 import type { NodeWorkspaceResourceUsage, WorkspaceStatus } from '@simple-agent-manager/shared';
 import { PersonAvatar, personSlotFor } from '@simple-agent-manager/ui';
 import { Circle, CircleAlert, Loader2, Moon, Square } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { memo, type ReactNode } from 'react';
 import { Link } from 'react-router';
 
 import { CPU_COLOR, DANGER_COLOR, MEMORY_COLOR, MirrorChart, Swatch } from './MirrorChart';
@@ -11,7 +11,7 @@ import {
   formatGbBare,
   formatVcpu,
   formatVcpuBare,
-  type SessionNow,
+  sessionNow,
 } from './node-resource-model';
 
 const STATUS: Record<WorkspaceStatus, { label: string; icon: ReactNode }> = {
@@ -32,7 +32,7 @@ const STATUS: Record<WorkspaceStatus, { label: string; icon: ReactNode }> = {
     icon: (
       <Loader2
         size={15}
-        className="animate-spin text-[var(--sam-color-warning)] motion-reduce:animate-none"
+        className="animate-spin text-[var(--sam-status-info-fg)] motion-reduce:animate-none"
       />
     ),
   },
@@ -63,7 +63,6 @@ function ownerLabel(usage: NodeWorkspaceResourceUsage): string {
 
 export interface NodeSessionRowProps {
   usage: NodeWorkspaceResourceUsage;
-  now: SessionNow;
   liveMemory: number | undefined;
   windowStart: number;
   windowEnd: number;
@@ -71,15 +70,16 @@ export interface NodeSessionRowProps {
   clock: number;
 }
 
-export function NodeSessionRow({
+/** Memoized so a clock tick re-renders only rows whose age text or live memory changed. */
+export const NodeSessionRow = memo(function NodeSessionRow({
   usage,
-  now,
   liveMemory,
   windowStart,
   windowEnd,
   bucketMs,
   clock,
 }: NodeSessionRowProps) {
+  const now = sessionNow(usage, liveMemory);
   const status = STATUS[usage.status] ?? STATUS.running;
   const chatHref =
     usage.projectId && usage.chatSessionId
@@ -93,7 +93,10 @@ export function NodeSessionRow({
   const cpuAge = now.cpuAt != null ? formatAge(now.cpuAt, clock) : null;
 
   const title = (
-    <span className="line-clamp-2 break-words text-[13.5px] font-medium text-fg-primary md:line-clamp-1">
+    <span
+      className="line-clamp-2 break-words text-[13.5px] font-medium text-fg-primary md:line-clamp-1"
+      title={usage.title}
+    >
       {usage.title}
     </span>
   );
@@ -157,7 +160,11 @@ export function NodeSessionRow({
                 className="h-10 w-full min-w-0"
               />
             ) : (
-              <span className="text-[11.5px] text-fg-muted">No usage recorded yet</span>
+              <span className="text-[11.5px] text-fg-muted">
+                {usage.historyOmitted
+                  ? 'Usage not loaded: too many sessions'
+                  : 'No usage recorded yet'}
+              </span>
             )}
           </span>
           <div
@@ -171,6 +178,11 @@ export function NodeSessionRow({
               now.reservedCpuMillis != null
                 ? `of ${formatVcpu(now.reservedCpuMillis)} set aside`
                 : '',
+              now.memoryOver
+                ? ', memory over its limit'
+                : now.cpuOver
+                  ? ', CPU bursting above what was set aside, which is fine'
+                  : '',
             ].join(' ')}
           >
             <div
@@ -215,4 +227,4 @@ export function NodeSessionRow({
       </div>
     </li>
   );
-}
+});

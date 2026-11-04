@@ -39,6 +39,8 @@ export interface NodeWorkspaceResourceUsage {
   series: NodeResourceUsageSeries;
   /** End of the newest history bucket, epoch milliseconds; null when there is no history. */
   historyEndsAt: number | null;
+  /** True when this workspace's history was left out because the request hit its cap. */
+  historyOmitted: boolean;
 }
 
 export interface NodeResourceUsageResponse {
@@ -47,5 +49,7 @@ export interface NodeResourceUsageResponse {
   windowStart: number;
   windowEnd: number;
   bucketMs: number;
+  /** Workspaces whose history was left out because the request hit its cap. */
+  historyOmittedCount: number;
   workspaces: NodeWorkspaceResourceUsage[];
 }
