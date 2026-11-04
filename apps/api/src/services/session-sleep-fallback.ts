@@ -244,13 +244,13 @@ export async function runSessionSleepFallback(
         requestTimeoutMs: getNodeAgentBackgroundRequestTimeoutMs(env),
       });
     }
-    const classify = await sleepTeardownSafetyGate(env, workspace, requirement);
+    const classify = sleepTeardownSafetyGate(env, workspace, requirement);
     const stateBefore = await projectDataService.getSessionState(
       env,
       workspace.projectId,
       agentSession.id
     );
-    const idlenessBefore = classify(stateBefore);
+    const idlenessBefore = await classify(stateBefore);
     const stateMissingBlocks = requirement !== 'required';
     if ((!stateBefore && stateMissingBlocks) || !idlenessBefore.idle) {
       await deferSessionSnapshotSleepBeforeClaim(
@@ -307,7 +307,7 @@ export async function runSessionSleepFallback(
     );
     if (
       (!stateAfter && stateMissingBlocks) ||
-      !classify(stateAfter).idle ||
+      !(await classify(stateAfter)).idle ||
       sleepStateChanged(stateBefore, stateAfter, requirement)
     ) {
       await deferSessionSnapshotSleepBeforeClaim(

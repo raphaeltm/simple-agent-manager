@@ -64,10 +64,10 @@ async function verifyAndBeginSleepTeardown(
     workspace.projectId,
     agentSession.id
   );
-  const classifyGate = await sleepTeardownSafetyGate(env, workspace, requirement);
+  const classifyGate = sleepTeardownSafetyGate(env, workspace, requirement);
   // A required sleep has already ended the turn; an unknown state must not block it.
   const stateMissingBlocks = requirement !== 'required';
-  const idlenessBefore = classifyGate(stateBefore);
+  const idlenessBefore = await classifyGate(stateBefore);
   if ((!stateBefore && stateMissingBlocks) || !idlenessBefore.idle) {
     throw new Error(sessionSleepDeferralReason(idlenessBefore, stateBefore));
   }
@@ -109,7 +109,7 @@ async function verifyAndBeginSleepTeardown(
   );
   if (
     (!stateAfter && stateMissingBlocks) ||
-    !classifyGate(stateAfter).idle ||
+    !(await classifyGate(stateAfter)).idle ||
     sleepStateChanged(stateBefore, stateAfter, requirement)
   ) {
     throw new Error('Workspace activity changed while the final snapshot was captured');
@@ -128,7 +128,7 @@ async function verifyAndBeginSleepTeardown(
   );
   if (
     (!stateAtStop && stateMissingBlocks) ||
-    !classifyGate(stateAtStop).idle ||
+    !(await classifyGate(stateAtStop)).idle ||
     sleepStateChanged(stateAfter, stateAtStop, requirement)
   ) {
     throw new Error('Workspace activity changed during snapshot artifact verification');

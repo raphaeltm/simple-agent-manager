@@ -639,6 +639,53 @@ describe('sleepWorkspaceSession', () => {
     expect(mocks.deferSessionSnapshotSleepBeforeClaim).toHaveBeenCalledTimes(1);
   });
 
+  // Production 2026-11-04 (idea 01M6K6QTEE7T9KNYB7317D7Y8E): a running conversation's turn
+  // hung with no output for ~10 h while the VM kept re-reporting `prompting`. The sweep must
+  // reclaim it once the work clock has been silent for the bound (default 30 min).
+  it('sleeps a running task whose open turn has done no work for the stale-turn bound', async () => {
+    const now = new Date('2026-11-04T11:50:00.000Z');
+    mocks.getSessionState.mockResolvedValue({
+      activity: 'prompting',
+      activityAt: now.getTime() - 30_000,
+      promptStartedAt: now.getTime() - 9 * 60 * 60 * 1000,
+      workAt: now.getTime() - 31 * 60 * 1000,
+    });
+    const { checkAutomaticSessionSleepEligibility } =
+      await import('../../../src/services/session-sleep');
+
+    await expect(
+      checkAutomaticSessionSleepEligibility(
+        buildEnv(),
+        { workspaceId: 'workspace-1', userId: 'user-1' },
+        now
+      )
+    ).resolves.toEqual({ eligible: true });
+    expect(mocks.deferSessionSnapshotSleepBeforeClaim).not.toHaveBeenCalled();
+  });
+
+  it('still defers a running task whose open turn did work inside the bound (control)', async () => {
+    const now = new Date('2026-11-04T11:50:00.000Z');
+    mocks.getSessionState.mockResolvedValue({
+      activity: 'prompting',
+      activityAt: now.getTime() - 30_000,
+      promptStartedAt: now.getTime() - 9 * 60 * 60 * 1000,
+      workAt: now.getTime() - 20 * 60 * 1000,
+    });
+    const { checkAutomaticSessionSleepEligibility } =
+      await import('../../../src/services/session-sleep');
+
+    await expect(
+      checkAutomaticSessionSleepEligibility(
+        buildEnv(),
+        { workspaceId: 'workspace-1', userId: 'user-1' },
+        now
+      )
+    ).resolves.toMatchObject({
+      eligible: false,
+      reason: 'Workspace agent is not idle (prompting)',
+    });
+  });
+
   // Raphaël, 2026-08-24 (PR #1874 review): an orchestrator whose prompt turn has
   // ended must SLEEP and be woken durably by the ProjectData parent-wake delivery
   // path when its children finish. Keeping it awake because it has children burns

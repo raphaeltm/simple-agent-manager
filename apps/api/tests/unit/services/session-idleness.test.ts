@@ -361,4 +361,72 @@ describe('classifySessionIdleness', () => {
       ).toMatchObject({ idle: false, reason: 'prompt_turn_active' });
     });
   });
+  // Production 2026-11-04 (idea 01M6K6QTEE7T9KNYB7317D7Y8E): a conversation's turn hung for
+  // 9h54m. The VM kept re-reporting `prompting`, so only the work clock can tell it is stale.
+  describe('a hung turn on a running task is bounded by the work clock', () => {
+    const STALE_TURN_MS = 30 * 60 * 1000;
+    const hung = (workAgoMs: number, extra: NonNullable<ClassifyInput['state']> = {}) =>
+      idleState({
+        activity: 'prompting',
+        // A same-turn re-report a minute ago: last-report clocks are fresh.
+        activityAt: NOW.getTime() - 60_000,
+        promptStartedAt: NOW.getTime() - 10 * 60 * 60 * 1000,
+        workAt: NOW.getTime() - workAgoMs,
+        ...extra,
+      });
+
+    it.each(['prompt-turn-ended', 'idle-interval-elapsed'] as const)(
+      'releases a turn with no work for longer than the bound under %s',
+      (policy) => {
+        expect(
+          classify({ policy, staleTurnMs: STALE_TURN_MS, state: hung(STALE_TURN_MS + 1_000) })
+        ).toMatchObject({ idle: true, conclusive: true, reason: 'prompt_turn_stale' });
+      }
+    );
+
+    it('keeps a turn that did real work inside the bound (control)', () => {
+      expect(
+        classify({ staleTurnMs: STALE_TURN_MS, state: hung(STALE_TURN_MS - 60_000) })
+      ).toMatchObject({ idle: false, reason: 'prompt_turn_active' });
+    });
+
+    it('keeps a silent turn whose harness work still holds a fresh lease (control)', () => {
+      const state = hung(STALE_TURN_MS * 2, {
+        runtimeWorkState: 'active',
+        runtimeWorkCount: 1,
+        runtimeWorkUpdatedAt: NOW.getTime() - 30_000,
+        runtimeWorkProgressAt: NOW.getTime() - 60_000,
+      });
+      expect(classify({ staleTurnMs: STALE_TURN_MS, state })).toMatchObject({
+        idle: false,
+        reason: 'runtime_work_lease_active',
+      });
+    });
+
+    it('waits out the longer idle interval under the scheduling policy', () => {
+      const short = 5 * 60 * 1000;
+      const state = hung(short + 60_000);
+      expect(classify({ policy: 'prompt-turn-ended', staleTurnMs: short, state })).toMatchObject({
+        idle: true,
+      });
+      expect(classify({ policy: 'idle-interval-elapsed', staleTurnMs: short, state })).toMatchObject(
+        { idle: false, reason: 'prompt_turn_active' }
+      );
+    });
+
+    it.each([undefined, null, 0])('stays unbounded when the bound is %s', (staleTurnMs) => {
+      expect(classify({ staleTurnMs, state: hung(STALE_TURN_MS * 20) })).toMatchObject({
+        idle: false,
+        reason: 'prompt_turn_active',
+      });
+    });
+
+    it('refuses to guess when the state carries no work evidence at all', () => {
+      const state = { activity: 'prompting' };
+      expect(classify({ staleTurnMs: STALE_TURN_MS, state })).toMatchObject({
+        idle: false,
+        reason: 'prompt_turn_active',
+      });
+    });
+  });
 });

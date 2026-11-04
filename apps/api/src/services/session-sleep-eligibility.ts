@@ -60,16 +60,17 @@ export async function resolveSessionStaleTurnMs(env: Env): Promise<number | null
  * It applies the same stale-turn bound as the eligibility check, or a session the sweep
  * found stale would be refused here and spend its retry budget.
  */
-export async function sleepTeardownSafetyGate(
+export function sleepTeardownSafetyGate(
   env: Env,
   task: { taskStatus: string | null; taskCompletedAt: string | null },
   requirement: SleepRequirement = 'normal'
-): Promise<(state: SessionIdlenessActivityState | null) => SessionIdlenessClassification> {
-  if (requirement === 'required') return classifyRequiredSleepTurn;
+): (state: SessionIdlenessActivityState | null) => Promise<SessionIdlenessClassification> {
+  if (requirement === 'required') return async (state) => classifyRequiredSleepTurn(state);
   const idleAfterMs = parsePositiveInt(env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS);
   const harnessWorkConfig = parseHarnessWorkConfig(env);
-  const staleTurnMs = await resolveSessionStaleTurnMs(env);
-  return (state) =>
+  // Read once per gate and only for an open turn: an idle session never consults the bound.
+  let staleTurnMs: Promise<number | null> | undefined;
+  return async (state) =>
     classifySessionIdleness({
       taskStatus: task.taskStatus,
       taskCompletedAt: task.taskCompletedAt,
@@ -78,7 +79,10 @@ export async function sleepTeardownSafetyGate(
       idleAfterMs,
       harnessWorkConfig,
       policy: 'prompt-turn-ended',
-      staleTurnMs,
+      staleTurnMs:
+        state && state.activity !== 'idle'
+          ? await (staleTurnMs ??= resolveSessionStaleTurnMs(env))
+          : null,
     });
 }
 
@@ -226,7 +230,9 @@ export async function checkAutomaticSessionSleepEligibility(
     now,
     idleAfterMs,
     harnessWorkConfig: parseHarnessWorkConfig(env),
-    staleTurnMs: await resolveSessionStaleTurnMs(env),
+    // Read only for an open turn: an idle session never consults the bound.
+    staleTurnMs:
+      state && state.activity !== 'idle' ? await resolveSessionStaleTurnMs(env) : null,
     // The unattended scheduler is the only caller that also waits out the idle
     // interval before reclaiming a session on its own initiative.
     // Only long known resets (or blocked/unknown waits) request immediate sleep.

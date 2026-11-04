@@ -208,7 +208,7 @@ export async function completeSleepTeardown(
     workspace.projectId,
     agentSession.id
   );
-  const safe = (await sleepTeardownSafetyGate(env, workspace, options.requirement))(activity);
+  const safe = await sleepTeardownSafetyGate(env, workspace, options.requirement)(activity);
   if (!safe.idle) throw new Error(sessionSleepDeferralReason(safe, activity));
   await ensureProjectDataSleeping(env, workspace, claimId);
 
