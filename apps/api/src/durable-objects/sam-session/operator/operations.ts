@@ -1,5 +1,4 @@
 import type { StandardSchemaWithJSON } from '@mastra/core/schema';
-import { createTool } from '@mastra/core/tools';
 import { resolveSamConfig } from '@simple-agent-manager/shared';
 import { toJsonSchema } from '@valibot/to-json-schema';
 import { drizzle } from 'drizzle-orm/d1';
@@ -115,7 +114,7 @@ export async function assertOperatorResource(
     });
 }
 
-export function operatorTools(options: {
+export async function operatorTools(options: {
   env: Env;
   store: OperatorStore;
   turn: OperatorTurn;
@@ -127,6 +126,9 @@ export function operatorTools(options: {
   onDispatch: (actionId: string, projectId: string, result: unknown) => void;
 }) {
   const { env, store, turn, userId, assertCurrent } = options;
+  assertCurrent();
+  const { createTool } = await import('@mastra/core/tools');
+  assertCurrent();
   const sharedTools = Object.fromEntries(
     operations
       .filter((operation) => OPERATOR_OPERATIONS.has(operation.name))
