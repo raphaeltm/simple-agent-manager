@@ -366,6 +366,15 @@ describe('legacy deployment credential recovery', () => {
       expect(await reason()).toBe(expected);
     });
 
+    it('names a missing credential', async () => {
+      await db
+        .update(schema.credentials)
+        .set({ isActive: false })
+        .where(eq(schema.credentials.id, 'cloud-key'));
+      expect(await reason()).toBe('credential_missing_or_ambiguous');
+      expect(createProviderForUser).not.toHaveBeenCalled();
+    });
+
     it('names an ambiguous credential choice', async () => {
       await db.insert(schema.credentials).values({
         id: 'second-key',
@@ -381,7 +390,10 @@ describe('legacy deployment credential recovery', () => {
     });
 
     it.each([
+      ['missing_provider_instance', { providerInstanceId: null }],
+      ['missing_cloud_provider', { cloudProvider: null }],
       ['missing_agent_ready', { agentReadyAt: null }],
+      ['unrecognized_attribution_source', { credentialAttributionSource: 'legacy-import' }],
       ['missing_credential_attribution', { credentialAttributionSource: null }],
       ['attribution_not_owner', { credentialAttributionUserId: 'someone-else' }],
       ['not_legacy', { placementCredentialReference: 'credentials:existing' }],

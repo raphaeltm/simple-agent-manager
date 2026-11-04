@@ -642,6 +642,8 @@ describe('sleepWorkspaceSession', () => {
   // Production 2026-11-04 (idea 01M6K6QTEE7T9KNYB7317D7Y8E): a running conversation's turn
   // hung with no output for ~10 h while the VM kept re-reporting `prompting`. The sweep must
   // reclaim it once the work clock has been silent for the bound (default 30 min).
+  // `buildD1Database` holds no admin-settings overrides, so the bound resolves to its
+  // registry default (30 min).
   it('sleeps a running task whose open turn has done no work for the stale-turn bound', async () => {
     const now = new Date('2026-11-04T11:50:00.000Z');
     mocks.getSessionState.mockResolvedValue({

@@ -34,7 +34,13 @@ import {
   acceptedPromptResponse,
   versionedPromptCapabilities,
 } from '../helpers/vm-prompt-delivery-fixtures';
-import { inboxRows, okBody, sqlRows, testEnv, twoAgentProject } from './helpers/agent-message-channels';
+import {
+  inboxRows,
+  okBody,
+  sqlRows,
+  testEnv,
+  twoAgentProject,
+} from './helpers/agent-message-channels';
 
 const config = resolveDurableExecutionConfig({});
 const RUNTIME_IDENTITY = 'sleep-claim-runtime';
@@ -222,5 +228,37 @@ describe('durable delivery while a sleep is claimed', () => {
     );
 
     expect(resolution).toEqual({ kind: 'retry', reason: 'Session is going to sleep (stopping)' });
+  });
+  // Rule 61: an Instant (cf-container) session's sleep claim holds deliveries the same way.
+  it('holds an Instant session whose sleep is claimed', async () => {
+    const f = await runningConversationWithQueuedMessage();
+    await claimSleep(f);
+    await env.DATABASE.batch([
+      env.DATABASE.prepare("UPDATE nodes SET runtime = 'cf-container' WHERE id = ?").bind(f.nodeId),
+      env.DATABASE.prepare(
+        "UPDATE session_snapshots SET runtime = 'cf-container' WHERE chat_session_id = ?"
+      ).bind(f.b.sessionId),
+    ]);
+
+    const resolve = () =>
+      resolveVmPromptDeliveryTarget(
+        testEnv,
+        f.projectId,
+        f.b.sessionId,
+        undefined,
+        async () => null
+      );
+
+    expect(await resolve()).toEqual({
+      kind: 'retry',
+      reason: 'Session is going to sleep (preparing)',
+    });
+    // Control: once the claim is released the same Instant runtime is a ready target.
+    const db = drizzle(env.DATABASE, { schema });
+    await failSessionSnapshotSleepBeforeTeardown(db, testEnv, f.b.sessionId, CLAIM_ID, 'test');
+    expect(await resolve()).toMatchObject({
+      kind: 'ready',
+      target: { workspaceId: f.b.workspaceId, runtime: 'cf-container' },
+    });
   });
 });

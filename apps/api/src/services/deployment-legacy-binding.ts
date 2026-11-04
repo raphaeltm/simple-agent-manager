@@ -37,6 +37,7 @@ export type LegacyBindingRefusal =
   | 'missing_agent_ready'
   | 'missing_credential_attribution'
   | 'attribution_not_owner'
+  | 'unrecognized_attribution_source'
   | 'credential_missing_or_ambiguous'
   | 'credential_unresolvable'
   | 'provider_vm_not_found'
@@ -146,7 +147,8 @@ export async function attemptLegacyDeploymentBindingRecovery(
             )
           )
           .limit(2);
-  if (!['user', 'project', 'platform'].includes(source)) return refuse('attribution_not_owner');
+  if (!['user', 'project', 'platform'].includes(source))
+    return refuse('unrecognized_attribution_source');
   const credential = rows.length === 1 ? rows[0] : undefined;
   if (!credential) return refuse('credential_missing_or_ambiguous');
   const fingerprint = await fingerprintEncryptedProviderCredential(

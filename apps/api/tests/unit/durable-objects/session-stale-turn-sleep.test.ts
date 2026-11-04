@@ -26,6 +26,7 @@ import {
   upsertActivityState,
 } from '../../../src/durable-objects/project-data/session-state';
 import type { Env } from '../../../src/env';
+import { DEFAULT_SESSION_STALE_TURN_NO_WORK_MINUTES } from '../../../src/services/session-idleness';
 import {
   sessionSleepDeferralReason,
   sleepStateChanged,
@@ -128,6 +129,8 @@ describe('a hung turn on a running task reaches the sleep gate', () => {
   }
 
   it('lets the sleep through once the turn has done no work for the default bound', async () => {
+    // The cases below are sized around this default; a changed default must revisit them.
+    expect(DEFAULT_SESSION_STALE_TURN_NO_WORK_MINUTES).toBe(30);
     const end = T0 + 2 * MINUTE + 31 * MINUTE;
     hungTurnUntil(end);
 
@@ -164,6 +167,9 @@ describe('a hung turn on a running task reaches the sleep gate', () => {
 
     setStaleTurnMinutes(90);
     expect((await gateAt(end)).classification).toMatchObject({ idle: false });
+
+    // A fresh settings database per value: the admin settings cache is keyed by the D1 binding,
+    // so rewriting one database would serve the cached value for up to its TTL.
 
     ({ sqlite: settings, env } = createAdminSettingsEnv());
     setStaleTurnMinutes(0);

@@ -384,6 +384,23 @@ describe('classifySessionIdleness', () => {
       }
     );
 
+    // A required sleep's cancel restarts the agent, which reports `recovering`; a restart that
+    // never finishes is bounded the same way, and a fresh one is not.
+    it('bounds a `recovering` agent by the same work clock', () => {
+      expect(
+        classify({
+          staleTurnMs: STALE_TURN_MS,
+          state: hung(STALE_TURN_MS + 1_000, { activity: 'recovering' }),
+        })
+      ).toMatchObject({ idle: true, reason: 'prompt_turn_stale', activity: 'recovering' });
+      expect(
+        classify({
+          staleTurnMs: STALE_TURN_MS,
+          state: hung(60_000, { activity: 'recovering' }),
+        })
+      ).toMatchObject({ idle: false, reason: 'prompt_turn_active' });
+    });
+
     it('keeps a turn that did real work inside the bound (control)', () => {
       expect(
         classify({ staleTurnMs: STALE_TURN_MS, state: hung(STALE_TURN_MS - 60_000) })
@@ -409,9 +426,9 @@ describe('classifySessionIdleness', () => {
       expect(classify({ policy: 'prompt-turn-ended', staleTurnMs: short, state })).toMatchObject({
         idle: true,
       });
-      expect(classify({ policy: 'idle-interval-elapsed', staleTurnMs: short, state })).toMatchObject(
-        { idle: false, reason: 'prompt_turn_active' }
-      );
+      expect(
+        classify({ policy: 'idle-interval-elapsed', staleTurnMs: short, state })
+      ).toMatchObject({ idle: false, reason: 'prompt_turn_active' });
     });
 
     it.each([undefined, null, 0])('stays unbounded when the bound is %s', (staleTurnMs) => {

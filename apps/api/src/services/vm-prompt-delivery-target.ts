@@ -158,7 +158,9 @@ function isVmWakeHandoffPending(row: DeliveryTargetRow): boolean {
  * the VM restarts the agent idle, so a prompt delivered now starts a new turn that aborts the sleep
  * and runs work nobody asked for (production 2026-11-04, idea 01M6K6QTEE7T9KNYB7317D7Y8E). Held
  * deliveries wake the session through the normal recovery path once it is `sleeping`. A
- * `preparing` claim past its lease is abandoned and no longer holds anything.
+ * `preparing` claim past its lease is abandoned and no longer holds anything. `stopping` has no
+ * lease of its own: it converges to `sleeping` or `terminal_failed`
+ * (`session-sleep-stopping-failure.ts`), and each delivery's own TTL bounds the wait.
  */
 function isSleepClaimHoldingDelivery(env: Env, row: DeliveryTargetRow, now = Date.now()): boolean {
   if (row.snapshot_sleep_status === 'stopping') return true;
