@@ -23,7 +23,14 @@ export interface ChatListContext {
 }
 
 function ChatListFooter({ context }: { context?: ChatListContext }) {
-  return context?.footer ?? null;
+  return (
+    <>
+      {context?.footer}
+      {/* Room below the newest message for the phone-only conversation toggle, so nothing sits
+          under it at the bottom of the chat. Sized in CSS (zero on wider screens). */}
+      <div aria-hidden="true" className="sam-immersive-toggle-clearance" />
+    </>
+  );
 }
 
 function ChatListHeader({ context }: { context?: ChatListContext }) {

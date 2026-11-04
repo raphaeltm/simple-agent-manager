@@ -51,6 +51,7 @@ export function ImmersiveChatToggle({
       title={label}
       data-testid="chat-immersive-toggle"
       data-agent-active={agentActive}
+      data-jump-visible={!atBottom}
       className="sam-immersive-toggle sam-raised absolute right-4 z-10 flex h-11 w-11 cursor-pointer items-center justify-center rounded-full border-0 text-fg-primary shadow-[var(--sam-glass-v2-depth-slab)] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
     >
       {active ? (

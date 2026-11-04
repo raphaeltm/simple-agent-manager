@@ -57,9 +57,14 @@ function isChromeName(value: string | undefined): value is ImmersiveChromeName {
   return value !== undefined && value in EDGE_BY_CHROME;
 }
 
-/** Inline properties `pin` writes, removed again by `unpin`. */
+/**
+ * Inline properties `pin` (and the end of the slide) write. `unpin` puts back whatever each piece
+ * had before, because some carry their own inline values (the collapsed Tools tab sets `top`, the
+ * tool rail its `width`) and React does not reapply a value that did not change.
+ */
 const PINNED_PROPS = [
   'position',
+  'width',
   'top',
   'left',
   'right',
@@ -85,8 +90,8 @@ export interface ChatImmersiveOptions {
 
 interface Pinned {
   el: HTMLElement;
-  /** The inline `width` the element had before pinning, restored on unpin. */
-  width: string;
+  /** Each pinned property's inline value before pinning (`''` when it had none). */
+  saved: Record<(typeof PINNED_PROPS)[number], string>;
 }
 
 let pinned: Pinned[] = [];
@@ -118,7 +123,10 @@ function chromeElements(): HTMLElement[] {
 }
 
 function pin(el: HTMLElement, rect: DOMRect): Pinned {
-  const record = { el, width: el.style.width };
+  const saved = Object.fromEntries(
+    PINNED_PROPS.map((prop) => [prop, el.style.getPropertyValue(prop)])
+  ) as Pinned['saved'];
+  const record = { el, saved };
   el.setAttribute(PINNED_ATTR, '');
   Object.assign(el.style, {
     position: 'fixed',
@@ -152,14 +160,49 @@ function correctPins(measured: ReadonlyArray<{ el: HTMLElement; rect: DOMRect }>
   });
 }
 
-function unpin({ el, width }: Pinned) {
+function unpin({ el, saved }: Pinned) {
   el.removeAttribute(PINNED_ATTR);
-  for (const prop of PINNED_PROPS) el.style.removeProperty(prop);
-  el.style.width = width;
+  for (const prop of PINNED_PROPS) {
+    if (saved[prop]) el.style.setProperty(prop, saved[prop]);
+    else el.style.removeProperty(prop);
+  }
 }
 
-/** Pieces held `inert` while they come back in, out of sight or still sliding. */
+/** Pieces held `inert` while they move or sit out of sight, so nothing unseen takes focus. */
 let inertHeld: HTMLElement[] = [];
+
+function holdInert(els: HTMLElement[]) {
+  for (const el of els) el.setAttribute('inert', '');
+  inertHeld = els;
+}
+
+const SCROLL_KEYS = new Set(['ArrowUp', 'ArrowDown', 'PageUp', 'PageDown', 'Home', 'End', ' ']);
+
+/**
+ * Wraps `stickToBottom` so it stops as soon as the reader shows they want to scroll during the
+ * transition (a wheel, a touch, a scrolling key): their new position wins over the newest message.
+ */
+function followNewestUntilReaderScrolls(stickToBottom: (() => void) | undefined) {
+  if (!stickToBottom) return { stick: undefined, stop: () => {} };
+  let readerScrolled = false;
+  const mark = (event: Event) => {
+    if (event instanceof KeyboardEvent && !SCROLL_KEYS.has(event.key)) return;
+    readerScrolled = true;
+  };
+  const listen = { capture: true, passive: true } as const;
+  for (const type of ['wheel', 'touchstart', 'keydown'])
+    document.addEventListener(type, mark, listen);
+  return {
+    stick: () => {
+      if (!readerScrolled) stickToBottom();
+    },
+    stop: () => {
+      for (const type of ['wheel', 'touchstart', 'keydown']) {
+        document.removeEventListener(type, mark, listen);
+      }
+    },
+  };
+}
 
 function cancelRunning() {
   for (const animation of running) animation.cancel();
@@ -184,7 +227,7 @@ function slide(el: HTMLElement, from: string, to: string, fromOpacity: number, t
  * conversation makes react-virtuoso re-anchor and render rows on the main thread; letting that
  * finish before the slide keeps it out of the animation's frames.
  */
-function listSettled(onFrame?: () => void): Promise<void> {
+function listSettled(run: number, onFrame?: () => void): Promise<void> {
   return new Promise((resolve) => {
     const started = performance.now();
     let scrolled = true;
@@ -193,7 +236,8 @@ function listSettled(onFrame?: () => void): Promise<void> {
     };
     document.addEventListener('scroll', onScroll, { capture: true, passive: true });
     const check = () => {
-      if (!scrolled || performance.now() - started > SETTLE_CAP_MS) {
+      // A newer toggle or a reset took over: stop, without re-pinning on its behalf.
+      if (run !== generation || !scrolled || performance.now() - started > SETTLE_CAP_MS) {
         document.removeEventListener('scroll', onScroll, { capture: true });
         resolve();
         return;
@@ -215,36 +259,43 @@ export async function enterChatImmersive(
 ): Promise<void> {
   cancelRunning();
   const run = ++generation;
-
-  // Measure every piece before writing anything, so this is one forced layout, not one per piece.
-  const measured = chromeElements().map((el) => ({ el, rect: el.getBoundingClientRect() }));
-  pinned = measured.map(({ el, rect }) => pin(el, rect));
-  flushSync(() => setActive(true));
-  correctPins(measured);
-  stickToBottom?.();
-
-  const moves = measured.map(({ el, rect }) => ({ el, offscreen: offscreenTransform(el, rect) }));
-  if (prefersReducedMotion()) {
-    for (const { el } of moves) el.style.visibility = 'hidden';
-    await listSettled(stickToBottom);
-    return;
-  }
-  await listSettled(stickToBottom);
-  if (run !== generation) return;
-
-  running = moves.map(({ el, offscreen }) => slide(el, 'none', offscreen, 1, 0));
+  const follow = followNewestUntilReaderScrolls(stickToBottom);
   try {
-    await Promise.all(running.map((animation) => animation.finished));
-  } catch {
-    return; // Cancelled by a newer toggle.
+    // Measure every piece before writing anything, so this is one forced layout, not one per
+    // piece.
+    const measured = chromeElements().map((el) => ({ el, rect: el.getBoundingClientRect() }));
+    pinned = measured.map(({ el, rect }) => pin(el, rect));
+    flushSync(() => setActive(true));
+    correctPins(measured);
+    follow.stick?.();
+
+    const moves = measured.map(({ el, rect }) => ({ el, offscreen: offscreenTransform(el, rect) }));
+    if (prefersReducedMotion()) {
+      for (const { el } of moves) el.style.visibility = 'hidden';
+      await listSettled(run, follow.stick);
+      return;
+    }
+    await listSettled(run, follow.stick);
+    if (run !== generation) return;
+
+    // Out of the tab order and the accessibility tree from the moment they start to leave.
+    holdInert(moves.map(({ el }) => el));
+    running = moves.map(({ el, offscreen }) => slide(el, 'none', offscreen, 1, 0));
+    try {
+      await Promise.all(running.map((animation) => animation.finished));
+    } catch {
+      return; // Cancelled by a newer toggle.
+    }
+    if (run !== generation) return;
+    // Off screen and invisible either way; hidden as well, so nothing pinned takes taps.
+    for (const { el } of moves) {
+      el.style.visibility = 'hidden';
+      el.style.pointerEvents = 'none';
+    }
+    follow.stick?.();
+  } finally {
+    follow.stop();
   }
-  if (run !== generation) return;
-  // Off screen and invisible either way; hidden as well, so nothing pinned can take focus or taps.
-  for (const { el } of moves) {
-    el.style.visibility = 'hidden';
-    el.style.pointerEvents = 'none';
-  }
-  stickToBottom?.();
 }
 
 export async function exitChatImmersive(
@@ -253,41 +304,44 @@ export async function exitChatImmersive(
 ): Promise<void> {
   const els = pinned.filter((p) => p.el.isConnected).map((p) => p.el);
   const run = ++generation;
-  unpinAll();
-  flushSync(() => setActive(false));
-  cancelRunning();
-  stickToBottom?.();
-  if (els.length === 0 || prefersReducedMotion()) {
-    await listSettled(stickToBottom);
-    return;
-  }
-
-  // Measure every slot before starting any animation, so this is one forced layout. Each piece
-  // is held off screen on its first keyframe while the list settles.
-  const moves = els.map((el) => ({
-    el,
-    offscreen: offscreenTransform(el, el.getBoundingClientRect()),
-  }));
-  running = moves.map(({ el, offscreen }) => {
-    const animation = slide(el, offscreen, 'none', 0, 1);
-    animation.pause();
-    return animation;
-  });
-  // Back in the flow but invisible and off screen until the slide lands: keep them out of the
-  // tab order and the accessibility tree meanwhile, so nothing unseen can take focus.
-  for (const { el } of moves) el.setAttribute('inert', '');
-  inertHeld = moves.map(({ el }) => el);
-  await listSettled(stickToBottom);
-  if (run !== generation) return;
-  for (const animation of running) animation.play();
+  const follow = followNewestUntilReaderScrolls(stickToBottom);
   try {
-    await Promise.all(running.map((animation) => animation.finished));
-  } catch {
-    return;
+    unpinAll();
+    flushSync(() => setActive(false));
+    cancelRunning();
+    follow.stick?.();
+    if (els.length === 0 || prefersReducedMotion()) {
+      await listSettled(run, follow.stick);
+      return;
+    }
+
+    // Measure every slot before starting any animation, so this is one forced layout. Each
+    // piece is held off screen on its first keyframe while the list settles.
+    const moves = els.map((el) => ({
+      el,
+      offscreen: offscreenTransform(el, el.getBoundingClientRect()),
+    }));
+    running = moves.map(({ el, offscreen }) => {
+      const animation = slide(el, offscreen, 'none', 0, 1);
+      animation.pause();
+      return animation;
+    });
+    // Back in the flow but invisible and off screen until the slide lands.
+    holdInert(moves.map(({ el }) => el));
+    await listSettled(run, follow.stick);
+    if (run !== generation) return;
+    for (const animation of running) animation.play();
+    try {
+      await Promise.all(running.map((animation) => animation.finished));
+    } catch {
+      return;
+    }
+    if (run !== generation) return;
+    cancelRunning();
+    follow.stick?.();
+  } finally {
+    follow.stop();
   }
-  if (run !== generation) return;
-  cancelRunning();
-  stickToBottom?.();
 }
 
 function unpinAll() {

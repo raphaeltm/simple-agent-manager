@@ -127,6 +127,7 @@ export function ConversationPane({
           role="log"
           aria-live="polite"
           aria-label="Conversation"
+          data-agent-active={lc.agentActivity !== 'idle'}
           {...scrollIntentHandlers}
         >
           <div className="flex-1 min-h-0">

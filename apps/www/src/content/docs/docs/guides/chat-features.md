@@ -209,7 +209,8 @@ a wide screen the replies stop at a comfortable reading width.
 
 On a phone, the button with two outward arrows at the bottom right of the conversation hides
 everything else: the app bar, the chat's title and status, the tool rail and the message box slide
-away, and the conversation fills the screen. Select the button again (now two inward arrows) to
+away, and the conversation fills the screen. If a message is being read aloud, its player stays so
+you can pause or stop it. Select the button again (now two inward arrows) to
 bring them back, for example to reply. Leaving the chat or turning the phone to a wider layout
 brings them back too. The button doesn't appear on wider screens, where
 [Focus Mode](#focus-mode) collapses the sidebars instead.

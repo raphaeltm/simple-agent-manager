@@ -224,6 +224,13 @@ for (const theme of ['dark', 'light'] as const) {
       expect(geometry!.width).toBeLessThanOrEqual(Math.min(geometry!.rowWidth, 736) + 1);
     }
 
+    // Overflow first, while the wide reply (table, long URL) is still mounted: scrolling to the
+    // top below lets the virtualized list unmount it.
+    await assertNoOverflow(page);
+    // At 768px the session header already clips its title on main, unrelated to messages:
+    // tasks/backlog/2026-11-04-session-header-title-clipped-at-tablet-width.md
+    if (page.viewportSize()?.width !== 768) await assertNoClippedOverflow(page);
+
     // Liveness: your own message is still a bubble. The conversation opens on the tall reply, so
     // scroll to the top, where the transcript starts with your message, and let the virtualized
     // list render it.
@@ -235,10 +242,6 @@ for (const theme of ['dark', 'light'] as const) {
     const userBorder = await userBubble.evaluate((el) => getComputedStyle(el).borderTopWidth);
     expect(userBorder).not.toBe('0px');
 
-    await assertNoOverflow(page);
-    // At 768px the session header already clips its title on main, unrelated to messages:
-    // tasks/backlog/2026-11-04-session-header-title-clipped-at-tablet-width.md
-    if (page.viewportSize()?.width !== 768) await assertNoClippedOverflow(page);
     await screenshot(page, `chat-immersive-open-messages-${theme}`);
   });
 }
@@ -389,6 +392,8 @@ test.describe('immersive view on a phone', () => {
     }
     await cdp.send('Animation.setPlaybackRate', { playbackRate: 1 });
     await cdp.detach();
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 });
 
@@ -403,12 +408,74 @@ test('the toggle sits directly above the jump button, in its column', async ({ p
   const toggle = page.getByTestId('chat-immersive-toggle');
   await expect(jump).toBeVisible();
   await expect(toggle).toBeVisible();
+  await expect(toggle).toHaveAttribute('data-jump-visible', 'true');
+  // The toggle lifts above the jump button with a short transition; measure once it lands.
+  await expect
+    .poll(async () => {
+      const [jb, tb] = [await box(jump), await box(toggle)];
+      return Math.round(jb.y - (tb.y + tb.height));
+    })
+    .toBe(8);
   const j = await box(jump);
   const t = await box(toggle);
   // Same right-hand column (permission cards keep that column clear of their content)...
   expect(Math.abs(t.x + t.width - (j.x + j.width))).toBeLessThanOrEqual(1);
   // ...stacked above it with a gap, never overlapping.
   expect(t.y + t.height).toBeLessThanOrEqual(j.y - 4);
+  await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
+});
+
+test('at the newest message the toggle takes the jump slot and covers no message', async ({
+  page,
+}) => {
+  test.skip(!isPhone(page), 'phone-only control');
+  await openChat(page, 'dark', 'tail');
+  await expect(page.getByRole('button', { name: 'Scroll to bottom' })).toHaveCount(0);
+  const log = await box(conversation(page));
+  const t = await box(page.getByTestId('chat-immersive-toggle'));
+  // In the jump button's slot: 0.75rem above the conversation's bottom edge.
+  expect(Math.abs(log.y + log.height - (t.y + t.height) - 12)).toBeLessThanOrEqual(1);
+  // The list leaves room for it: the newest message ends above the toggle.
+  const newestBottom = await page.evaluate(() => {
+    const rows = Array.from(document.querySelectorAll('.sam-message-entry'));
+    const last = rows.at(-1);
+    if (!last) throw new Error('no message rendered');
+    return last.getBoundingClientRect().bottom;
+  });
+  expect(newestBottom).toBeLessThanOrEqual(t.y + 1);
+  // Liveness: the newest message is what sits there.
+  await expect(page.getByText(/^HELLO$/)).toBeVisible();
+  await assertNoOverflow(page);
+});
+
+test('a reader scrolled up keeps their place through both toggles', async ({ page }) => {
+  test.skip(!isPhone(page), 'phone-only control');
+  await openChat(page, 'dark', 'tail');
+  const scroller = conversation(page).getByTestId('virtuoso-scroller');
+  await scroller.evaluate((el) => el.scrollBy(0, -600));
+  await expect(page.getByRole('button', { name: 'Scroll to bottom' })).toBeVisible();
+  /** The message row at the top of the conversation, by its stable list index. */
+  const topRow = () =>
+    page.evaluate(() => {
+      const log = document.querySelector('[role="log"]')!.getBoundingClientRect();
+      const rows = Array.from(document.querySelectorAll<HTMLElement>('[data-item-index]'));
+      const row = rows.find((el) => el.getBoundingClientRect().bottom > log.top + 4);
+      return row?.dataset.itemIndex ?? null;
+    });
+  const before = await topRow();
+  expect(before).not.toBeNull();
+
+  await page.getByRole('button', { name: 'Show only the conversation' }).click();
+  await waitForSlideToFinish(page);
+  expect(await topRow()).toBe(before);
+  // Not pulled down to the newest message.
+  await expect(page.getByRole('button', { name: 'Scroll to bottom' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Show the rest of the app' }).click();
+  await waitForSlideToFinish(page);
+  expect(await topRow()).toBe(before);
+  await expect(page.getByRole('button', { name: 'Scroll to bottom' })).toBeVisible();
 });
 
 test('there is no immersive toggle off the phone layout', async ({ page }) => {

@@ -4,6 +4,7 @@ import {
   render as baseRender,
   type RenderOptions,
   screen,
+  waitFor,
   within,
 } from '@testing-library/react';
 import { type ReactElement, useEffect, useState } from 'react';
@@ -642,7 +643,10 @@ function ChatStandIn({
 }) {
   return (
     <>
-      <div data-immersive-chrome="session-header">Session header</div>
+      {/* An inline value of its own, like the collapsed Tools tab's `top: 62%`. */}
+      <div data-immersive-chrome="session-header" style={{ top: '62%' }}>
+        Session header
+      </div>
       {withHiddenPiece && (
         <div
           data-immersive-chrome="composer"
@@ -723,11 +727,39 @@ describe('AppShell (immersive chat view)', () => {
     Element.prototype.getClientRects = originalGetClientRects;
   });
 
-  async function settle() {
-    // The transition waits for the message list to settle over a few animation frames.
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 120));
-    });
+  const played = (a: FakeAnimation) => (a.play as ReturnType<typeof vi.fn>).mock.calls.length > 0;
+
+  /**
+   * The transition waits for the message list to settle over a few animation frames before it
+   * slides, and a loaded worker can delay those frames, so these wait for the state each test
+   * asserts rather than for a fixed time.
+   *
+   * Entered: every pinned piece is hidden, which happens only once the slide has finished (or at
+   * once, without a slide, under reduced motion).
+   */
+  async function untilEntered() {
+    await waitFor(
+      () => {
+        const pinnedPieces = Array.from(
+          document.querySelectorAll<HTMLElement>('[data-immersive-pinned]')
+        );
+        expect(pinnedPieces.length).toBeGreaterThan(0);
+        for (const el of pinnedPieces) expect(el.style.visibility).toBe('hidden');
+      },
+      { timeout: 3000 }
+    );
+  }
+
+  /** Exited: nothing pinned or held inert, and the return slides (if any) have played. */
+  async function untilExited() {
+    await waitFor(
+      () => {
+        expect(document.querySelector('[data-immersive-pinned]')).toBeNull();
+        expect(document.querySelector('[data-immersive-chrome][inert]')).toBeNull();
+        if (!reducedMotion) expect(animations.slice(-4).every(played)).toBe(true);
+      },
+      { timeout: 3000 }
+    );
   }
 
   it('slides every piece of chrome away and back through the toggle', async () => {
@@ -751,13 +783,17 @@ describe('AppShell (immersive chat view)', () => {
     expect(shellFrame()).toHaveAttribute('data-chat-immersive', 'on');
     expect(shellFrame()!.className).toContain('p-1.5');
 
-    await settle();
+    await untilEntered();
     expect(animations).toHaveLength(4);
     const animated = new Set(
       animations.flatMap((a) => a.keyframes.flatMap((frame) => Object.keys(frame)))
     );
     expect([...animated].sort()).toEqual(['opacity', 'transform']);
-    for (const el of chromePieces()) expect(el.style.visibility).toBe('hidden');
+    for (const el of chromePieces()) {
+      expect(el.style.visibility).toBe('hidden');
+      // Out of the tab order from the moment the slide started.
+      expect(el).toHaveAttribute('inert');
+    }
 
     const exit = screen.getByRole('button', { name: 'Show the rest of the app' });
     expect(exit).toHaveAttribute('aria-pressed', 'true');
@@ -770,13 +806,16 @@ describe('AppShell (immersive chat view)', () => {
     }
     expect(shellFrame()).not.toHaveAttribute('data-chat-immersive');
     expect(shellFrame()!.className).toContain('p-2.5');
-    // A React-managed inline width survives the round trip.
+    // A piece's own inline values survive the round trip, React-managed or not.
     expect(document.querySelector<HTMLElement>('aside')!.style.width).toBe('46px');
+    expect(
+      document.querySelector<HTMLElement>('[data-immersive-chrome="session-header"]')!.style.top
+    ).toBe('62%');
 
     // Invisible and off screen until the slide lands, so out of the tab order meanwhile.
     for (const el of chromePieces()) expect(el).toHaveAttribute('inert');
 
-    await settle();
+    await untilExited();
     expect(animations).toHaveLength(8);
     for (const el of chromePieces()) expect(el).not.toHaveAttribute('inert');
     expect(
@@ -791,7 +830,7 @@ describe('AppShell (immersive chat view)', () => {
   it('ends the immersive view when the chat goes away', async () => {
     const { rerender } = renderChatShell();
     fireEvent.click(screen.getByRole('button', { name: 'Show only the conversation' }));
-    await settle();
+    await untilEntered();
     expect(shellFrame()).toHaveAttribute('data-chat-immersive', 'on');
 
     rerender(
@@ -811,7 +850,7 @@ describe('AppShell (immersive chat view)', () => {
   it('ends the immersive view when the screen leaves the phone layout', async () => {
     renderChatShell();
     fireEvent.click(screen.getByRole('button', { name: 'Show only the conversation' }));
-    await settle();
+    await untilEntered();
     expect(shellFrame()).toHaveAttribute('data-chat-immersive', 'on');
 
     act(() => setMatchMediaMatches(false));
@@ -826,12 +865,12 @@ describe('AppShell (immersive chat view)', () => {
     reducedMotion = true;
     renderChatShell();
     fireEvent.click(screen.getByRole('button', { name: 'Show only the conversation' }));
-    await settle();
+    await untilEntered();
     expect(shellFrame()).toHaveAttribute('data-chat-immersive', 'on');
     for (const el of chromePieces()) expect(el.style.visibility).toBe('hidden');
 
     fireEvent.click(screen.getByRole('button', { name: 'Show the rest of the app' }));
-    await settle();
+    await untilExited();
     expect(shellFrame()).not.toHaveAttribute('data-chat-immersive');
     expect(animations).toHaveLength(0);
   });
@@ -841,7 +880,7 @@ describe('AppShell (immersive chat view)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show only the conversation' }));
     // No wait: the enter is still waiting for the message list to settle.
     fireEvent.click(screen.getByRole('button', { name: 'Show the rest of the app' }));
-    await settle();
+    await untilExited();
     // Only the exit's four slides ran; the stale enter never started its own.
     expect(animations).toHaveLength(4);
     expect(
@@ -859,7 +898,7 @@ describe('AppShell (immersive chat view)', () => {
   it('cancels a pending exit when the reader taps again before it slides', async () => {
     renderChatShell();
     fireEvent.click(screen.getByRole('button', { name: 'Show only the conversation' }));
-    await settle();
+    await untilEntered();
     expect(animations).toHaveLength(4);
 
     fireEvent.click(screen.getByRole('button', { name: 'Show the rest of the app' }));
@@ -873,7 +912,7 @@ describe('AppShell (immersive chat view)', () => {
       expect(slide.play).not.toHaveBeenCalled();
     }
     for (const el of chromePieces()) expect(el).not.toHaveAttribute('inert');
-    await settle();
+    await untilEntered();
     expect(shellFrame()).toHaveAttribute('data-chat-immersive', 'on');
     for (const el of chromePieces()) {
       expect(el).toHaveAttribute('data-immersive-pinned');
@@ -891,7 +930,7 @@ describe('AppShell (immersive chat view)', () => {
     const hidden = screen.getByTestId('hidden-piece');
     expect(hidden).not.toHaveAttribute('data-immersive-pinned');
     expect(hidden.style.position).toBe('');
-    await settle();
+    await untilEntered();
     // The four displayed pieces still slid away.
     expect(animations).toHaveLength(4);
     expect(document.querySelectorAll('[data-immersive-pinned]')).toHaveLength(4);
@@ -909,16 +948,34 @@ describe('AppShell (immersive chat view)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Show only the conversation' }));
     // Right after the layout change, before anything slides.
     expect(scrollToBottom).toHaveBeenCalled();
-    await settle();
+    await untilEntered();
     const afterEnter = scrollToBottom.mock.calls.length;
 
     fireEvent.click(screen.getByRole('button', { name: 'Show the rest of the app' }));
     expect(scrollToBottom.mock.calls.length).toBeGreaterThan(afterEnter);
-    await settle();
+    await untilExited();
     expect(shellFrame()).not.toHaveAttribute('data-chat-immersive');
   });
 
-  it('leaves a reader who scrolled up where they are', async () => {
+  it('stops following the newest message once the reader scrolls during the transition', async () => {
+    const scrollToBottom = vi.fn();
+    render(
+      <MemoryRouter initialEntries={['/projects/p1/chat/s1']}>
+        <AppShell>
+          <ChatStandIn atBottom scrollToBottom={scrollToBottom} />
+        </AppShell>
+      </MemoryRouter>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Show only the conversation' }));
+    expect(scrollToBottom).toHaveBeenCalled();
+    // The reader scrolls up while the list is still settling.
+    fireEvent.wheel(document, { deltaY: -200 });
+    const atScroll = scrollToBottom.mock.calls.length;
+    await untilEntered();
+    expect(scrollToBottom).toHaveBeenCalledTimes(atScroll);
+  });
+
+  it('does not pin a reader who scrolled up to the newest message', async () => {
     const scrollToBottom = vi.fn();
     render(
       <MemoryRouter initialEntries={['/projects/p1/chat/s1']}>
@@ -928,9 +985,9 @@ describe('AppShell (immersive chat view)', () => {
       </MemoryRouter>
     );
     fireEvent.click(screen.getByRole('button', { name: 'Show only the conversation' }));
-    await settle();
+    await untilEntered();
     fireEvent.click(screen.getByRole('button', { name: 'Show the rest of the app' }));
-    await settle();
+    await untilExited();
     // Liveness: both toggles ran.
     expect(animations).toHaveLength(8);
     expect(scrollToBottom).not.toHaveBeenCalled();

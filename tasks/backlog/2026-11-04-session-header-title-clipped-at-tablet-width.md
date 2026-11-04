@@ -14,6 +14,11 @@ Reproduced on unmodified `main` code (same 3px clip) with `setupGlassChatMocks` 
 `Tablet (768x1024)` project, so it predates that change. Not the session-list title bug in
 `2026-11-04-session-title-zero-width-beside-long-connector-chip.md`.
 
+Also at 768px: `acp-permission-chat-audit.spec.ts`'s "Mobile" cases fail `assertNoClippedOverflow`
+locally on the `Tablet (768x1024)` project (the same header clip, plus a tool-activity card clipped
+from 127px to 73px in the ~180px conversation column). CI runs that spec on iPhone 14 only, so it
+does not see them.
+
 ## Acceptance Criteria
 
 - [ ] The session header title wraps or truncates inside its slab at 768px, with no
@@ -22,3 +27,4 @@ Reproduced on unmodified `main` code (same 3px clip) with `setupGlassChatMocks` 
 - [ ] Consider whether 768px should use the phone layout or collapse the chat list so the
       conversation column is not ~180px wide
 - [ ] Re-enable the tablet clipped-overflow assertion in `chat-immersive-audit.spec.ts`
+- [ ] `acp-permission-chat-audit.spec.ts` passes on `Tablet (768x1024)`
