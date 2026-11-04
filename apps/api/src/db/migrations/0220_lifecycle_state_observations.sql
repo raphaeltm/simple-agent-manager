@@ -4,6 +4,14 @@
 -- `changes === 1` compare-and-sets on those tables). Both tables are written only by
 -- `services/lifecycle-latency/watchdog.ts`.
 
+-- Indexes left by the trigger draft where it was applied (staging); no-ops elsewhere. That draft's
+-- status_changed_at columns and two empty tables also remain there, unused (columns cannot be
+-- dropped conditionally and new migrations may not drop tables).
+DROP INDEX IF EXISTS idx_workspaces_status_changed_at;
+DROP INDEX IF EXISTS idx_nodes_status_changed_at;
+DROP INDEX IF EXISTS idx_session_snapshots_sleep_status_changed_at;
+DROP INDEX IF EXISTS idx_session_snapshots_recovery_status_changed_at;
+
 -- One row per entity currently seen in a watched state. first_seen_at is the first sample that
 -- saw it there (at most one sweep after it really entered). alerted_at makes the slow-state alert
 -- at-most-once per episode. The row is removed, and an episode recorded, once the entity leaves.

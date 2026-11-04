@@ -92,23 +92,28 @@ verdict, locally or in CI.
 
 ## Implementation Checklist
 
-- [x] Migration `0218_lifecycle_latency_monitoring.sql` and drizzle schema additions
-- [x] Churning-table entry for `DATABASE.lifecycle_state_transitions` and `DATABASE.lifecycle_latency_alerts`
+- [x] Migrations: `0219_drop_lifecycle_status_triggers.sql` (removes the trigger draft where applied) and
+      `0220_lifecycle_state_observations.sql` (observation and episode tables; drops the draft's indexes)
+- [x] Drizzle schema for `lifecycle_state_observations` and `lifecycle_state_episodes`
+- [x] Churning-table entries for both new tables
 - [x] Admin settings: `lifecycleLatency.*` definitions and name typing
-- [x] `services/lifecycle-latency/` holding the watched-state config, the watchdog and the daily evaluation
+- [x] `services/lifecycle-latency/`: watched-state config, sampling watchdog, daily evaluation
 - [x] Wire the watchdog into the 5-minute sweep and the evaluation into the daily cron
-- [x] Workers tests with real migrations covering:
-  - trigger stamping and history
-  - the watchdog alerting once per episode
-  - a new episode alerting again
-  - no alert under budget (liveness)
-  - all four entity kinds
+- [x] Workers tests (real migrations):
+  - one-row status updates report `changes === 1`, and no writing triggers exist on status tables
+  - first sighting, under/over budget, one alert per episode, episode end recorded, new episode re-alerts
+  - unwatched states, per-state cap with disclosure, overlapping runs alert once
+  - session sleep and wake watches; budget 0 closes episodes and skips the daily check
+  - truncated sample never closes unseen episodes; sustained overflow still observes every row
+  - daily regression (over budget, vs baseline), minimum samples, watchdog-recorded episodes, purge
   - defaults resolved through the real settings resolver
-  - daily regression detection, including min-samples and baseline controls
-  - retention purge
-- [x] Discrimination proofs, reverting each guard once
-- [x] Docs: lifecycle latency monitoring section and the settings in the admin settings guide
-- [ ] `pnpm quality:migration-safety`, `pnpm quality:runtime-tunables`, lint, typecheck and tests
+- [x] Discrimination proofs, each guard reverted once (alert CAS, truncation guard, alerted/unalerted
+      cap partition, unobserved-first sampling, minimum samples, budget-0 daily gate)
+- [x] Docs: lifecycle latency monitoring section and settings in the admin settings guide; churning
+      table list in the configuration reference
+- [x] Lesson recorded in `apps/api/.claude/rules/31-migration-safety.md`
+- [x] `pnpm quality:migration-safety`, `pnpm quality:runtime-tunables`, lint, typecheck, unit suite
+      (14,806 pass) and full workers suite in three shards (1,916 pass, on 3b2007a2a)
 
 ## Acceptance Criteria
 

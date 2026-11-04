@@ -1,4 +1,5 @@
 import type { Env } from '../../env';
+import { chunk } from '../../lib/d1-limits';
 import { log } from '../../lib/logger';
 import { persistError } from '../observability';
 import {
@@ -12,6 +13,11 @@ import {
 } from './watches';
 
 const ERROR_MESSAGE_MAX_LENGTH = 300;
+/**
+ * Upserts per D1 batch. A batch size, not a work limit: every sampled row is still written, in
+ * ceil(sample / 50) batches (at most 20 at the 1,000-row maximum of observationsPerSourcePerTick).
+ */
+const OBSERVATION_BATCH_SIZE = 50;
 
 interface SlowRow {
   id: string;
@@ -58,8 +64,9 @@ export function slowStateMessage(entityType: LifecycleEntityType, status: string
  * Entry time is when this watchdog first saw the row in the state, so an alert fires at most one
  * run late. It deliberately does not use triggers on the status tables (migration 0219).
  *
- * I/O per run, per entity source (4): one sample SELECT, one batched upsert of at most
- * `observationsPerSourcePerTick` rows, one two-statement batch that ends unseen episodes, one
+ * I/O per run, per entity source (4): one sample SELECT, upserts of at most
+ * `observationsPerSourcePerTick` rows in batches of OBSERVATION_BATCH_SIZE (a handful of rows
+ * normally, so one batch; at most four at the default of 200), one two-statement batch that ends unseen episodes, one
  * alert SELECT and one batched compare-and-set. Plus one observability insert per new alert,
  * issued in parallel (at most `alertsPerStatePerTick` per state).
  */
@@ -176,13 +183,18 @@ async function observe(
   const source = LIFECYCLE_ENTITY_SOURCES[entityType];
   const cap = Math.max(1, settings.observationsPerSourcePerTick);
   const placeholders = watches.map(() => '?').join(', ');
-  // Oldest rows first (rowid order), one extra row to detect truncation.
+  // Rows not yet observed in their current state come first, so that when more rows exist than
+  // the cap, each run admits new ones and every stuck row is observed within a few runs. Rows
+  // already observed keep their first_seen_at; a truncated run ends no episodes, so skipping
+  // their refresh loses nothing. One extra row detects truncation.
   const { results } = await env.DATABASE.prepare(
-    `SELECT id, ${source.statusColumn} AS status FROM ${source.table}
-      WHERE ${source.statusColumn} IN (${placeholders})
-      ORDER BY rowid LIMIT ?`
+    `SELECT t.id AS id, t.${source.statusColumn} AS status FROM ${source.table} t
+       LEFT JOIN lifecycle_state_observations o
+         ON o.entity_type = ? AND o.entity_id = t.id AND o.status = t.${source.statusColumn}
+      WHERE t.${source.statusColumn} IN (${placeholders})
+      ORDER BY (o.entity_id IS NOT NULL), t.rowid LIMIT ?`
   )
-    .bind(...watches.map((watch) => watch.status), cap + 1)
+    .bind(entityType, ...watches.map((watch) => watch.status), cap + 1)
     .all<{ id: string; status: string }>();
   const rows = results ?? [];
   const truncated = rows.length > cap;
@@ -196,9 +208,10 @@ async function observe(
       action: 'episodes_not_ended_this_run',
     });
   }
-  if (sample.length > 0) {
+  // Small batches keep each D1 transaction well inside platform limits at the setting's maximum.
+  for (const rows of chunk(sample, OBSERVATION_BATCH_SIZE)) {
     await env.DATABASE.batch(
-      sample.map((row) =>
+      rows.map((row) =>
         env.DATABASE.prepare(
           `INSERT INTO lifecycle_state_observations
              (entity_type, entity_id, status, first_seen_at, last_seen_at)

@@ -298,6 +298,36 @@ describe('lifecycle latency watchdog', () => {
   });
 });
 
+describe('lifecycle latency watchdog under sustained overflow', () => {
+  it('observes every row within a few runs when more rows exist than the sample cap', async () => {
+    const nodeIds: string[] = [];
+    for (let i = 0; i < 3; i++) {
+      const id = `node-${crypto.randomUUID()}`;
+      nodeIds.push(id);
+      await seedNode(id, USER_ID, { status: 'creating' });
+    }
+    const settings = { ...LIFECYCLE_LATENCY_DEFAULTS, observationsPerSourcePerTick: 1 };
+    const t0 = Date.now();
+    for (let run = 0; run < 3; run++) {
+      const result = await runLifecycleLatencyWatchdog(
+        env as never,
+        new Date(t0 + run * MINUTE),
+        settings
+      );
+      expect(result.truncated).toEqual(['node']);
+    }
+    const { results } = await env.DATABASE.prepare(
+      "SELECT entity_id FROM lifecycle_state_observations WHERE entity_type = 'node' ORDER BY entity_id"
+    ).all<{ entity_id: string }>();
+    expect((results ?? []).map((row) => row.entity_id)).toEqual([...nodeIds].sort());
+
+    // Every one is then alerted once it is over budget, despite the small sample cap.
+    const late = new Date(t0 + (LIFECYCLE_LATENCY_DEFAULTS.nodeCreatingMinutes + 3) * MINUTE);
+    const alerted = await runLifecycleLatencyWatchdog(env as never, late, settings);
+    expect(alerted.alerted).toBe(3);
+  });
+});
+
 describe('lifecycle latency daily evaluation', () => {
   async function seedEpisodes(
     now: number,
