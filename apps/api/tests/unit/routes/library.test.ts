@@ -519,6 +519,77 @@ describe('library routes', () => {
       expect(res.headers.get('X-Frame-Options')).toBeNull();
     });
 
+    describe('video', () => {
+      const bytes = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
+      const fetchPreview = (headers?: Record<string, string>) => {
+        mockGetFile.mockResolvedValue({
+          // Stored as octet-stream, as cf-container agent uploads are: the .mp4 name recovers it.
+          file: { filename: 'demo.mp4', mimeType: 'application/octet-stream', sizeBytes: 10 },
+          tags: [],
+        });
+        mockDownloadFile.mockResolvedValue({
+          data: bytes.slice().buffer,
+          file: { filename: 'demo.mp4', mimeType: 'application/octet-stream', sizeBytes: 10 },
+          metadata: {},
+        });
+        const { app, env } = makeApp(makeEnv());
+        return app.fetch(
+          new Request(`${BASE_URL}/projects/test-project-id/library/file-123/preview`, { headers }),
+          env
+        );
+      };
+
+      it('serves the whole video inline and advertises byte ranges', async () => {
+        const res = await fetchPreview();
+        expect(res.status).toBe(200);
+        expect(res.headers.get('Content-Type')).toBe('video/mp4');
+        expect(res.headers.get('Accept-Ranges')).toBe('bytes');
+        expect(res.headers.get('Content-Length')).toBe('10');
+        expect(res.headers.get('X-Content-Type-Options')).toBe('nosniff');
+        expect(res.headers.get('Content-Security-Policy')).toBe(
+          `default-src 'none'; style-src 'unsafe-inline'; ${FRAME_ANCESTORS}`
+        );
+        expect(new Uint8Array(await res.arrayBuffer())).toEqual(bytes);
+      });
+
+      it('answers a byte range with 206 and only those bytes', async () => {
+        const res = await fetchPreview({ Range: 'bytes=2-4' });
+        expect(res.status).toBe(206);
+        expect(res.headers.get('Content-Range')).toBe('bytes 2-4/10');
+        expect(res.headers.get('Content-Length')).toBe('3');
+        expect(Array.from(new Uint8Array(await res.arrayBuffer()))).toEqual([2, 3, 4]);
+      });
+
+      it('answers an open-ended and a suffix range', async () => {
+        const open = await fetchPreview({ Range: 'bytes=7-' });
+        expect(open.status).toBe(206);
+        expect(open.headers.get('Content-Range')).toBe('bytes 7-9/10');
+        const suffix = await fetchPreview({ Range: 'bytes=-2' });
+        expect(suffix.headers.get('Content-Range')).toBe('bytes 8-9/10');
+        expect(Array.from(new Uint8Array(await suffix.arrayBuffer()))).toEqual([8, 9]);
+      });
+
+      it('clamps a range past the end to the last byte', async () => {
+        const res = await fetchPreview({ Range: 'bytes=5-500' });
+        expect(res.status).toBe(206);
+        expect(res.headers.get('Content-Range')).toBe('bytes 5-9/10');
+      });
+
+      it('answers 416 for a range starting past the end', async () => {
+        const res = await fetchPreview({ Range: 'bytes=10-' });
+        expect(res.status).toBe(416);
+        expect(res.headers.get('Content-Range')).toBe('bytes */10');
+      });
+
+      it('sends the whole body for several ranges or a malformed header', async () => {
+        for (const range of ['bytes=0-1,4-5', 'items=0-1', 'bytes=5-2']) {
+          const res = await fetchPreview({ Range: range });
+          expect(res.status).toBe(200);
+          expect(res.headers.get('Content-Length')).toBe('10');
+        }
+      });
+    });
+
     it('returns inline headers for PDF', async () => {
       const content = new TextEncoder().encode('%PDF-1.4\n%fake but well-formed header\n');
       mockGetFile.mockResolvedValue({
