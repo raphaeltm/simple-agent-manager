@@ -20,6 +20,8 @@ Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB
 | Variable | `D1_SESSION_MODE`                                  | No (default: `first-primary`; `disabled` pins reads to primary)    |
 | Variable | `D1_MIGRATION_CHURNING_TABLES`                     | No (may narrow the reviewed built-in retention/expiry table list)  |
 | Variable | `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` | No (default: `50`; range: 0–100)                                   |
+| Variable | `D1_MIGRATION_READ_ATTEMPTS`                       | No (default: `3`; range: 1–5; verification reads only)             |
+| Variable | `D1_MIGRATION_READ_RETRY_DELAY_MS`                 | No (default: `10000`; range: 0–60000)                              |
 | Secret   | `CF_API_TOKEN`                                     | Yes (requires Account → SSL and Certificates → Edit for Origin CA) |
 | Secret   | `CF_ACCOUNT_ID`                                    | Yes                                                                |
 | Secret   | `CF_ZONE_ID`                                       | Yes                                                                |
