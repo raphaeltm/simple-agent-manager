@@ -1,5 +1,3 @@
-// PROTOTYPE ONLY: must stay the first import; remove before merge.
-import './pages/chat-surface-prototype/boot';
 import './app.css';
 import './index.css';
 import './styles/acp-chat.css';

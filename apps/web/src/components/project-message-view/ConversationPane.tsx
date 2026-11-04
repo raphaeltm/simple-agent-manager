@@ -12,8 +12,6 @@ import {
 } from 'react';
 import { Virtuoso, type VirtuosoHandle } from 'react-virtuoso';
 
-// PROTOTYPE ONLY (chat-surface): remove before merge.
-import { ImmersiveToggle } from '../../pages/chat-surface-prototype/controls';
 import { CHAT_LIST_COMPONENTS, type ChatListContext } from './MessageListScaffold';
 import type { DisplayItem } from './tool-call-groups';
 import type { UseSessionLifecycleResult } from './useSessionLifecycle.types';
@@ -173,9 +171,6 @@ export function ConversationPane({
               <ChevronDown size={16} className="text-fg-muted" />
             </button>
           )}
-
-          {/* PROTOTYPE ONLY (chat-surface): remove before merge. */}
-          <ImmersiveToggle agentActive={lc.agentActivity !== 'idle'} />
 
           {selectionControls}
         </div>

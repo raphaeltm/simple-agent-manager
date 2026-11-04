@@ -10,8 +10,6 @@ import { memo, useCallback } from 'react';
 
 import { useGlobalAudio } from '../../contexts/GlobalAudioContext';
 import { getTtsApiUrl } from '../../lib/api';
-// PROTOTYPE ONLY (chat-surface): remove before merge.
-import { useChatSurfacePrototypeValue } from '../../pages/chat-surface-prototype/prototype-state';
 import type { DisplayItem } from './tool-call-groups';
 import { matchToolCard } from './tool-cards';
 import { AbsorbedConversationItemView, ToolCallGroupCard } from './ToolCallGroupCard';
@@ -161,10 +159,6 @@ function AcpConversationItemViewImpl({
   // invalidates this callback for every mounted bubble once. That is a rare,
   // explicitly user-initiated action and is not on the streaming hot path.
   const { startPlayback } = useGlobalAudio();
-  // PROTOTYPE ONLY (chat-surface): agent replies without a bubble. Remove before merge.
-  const agentBubbleClassName = useChatSurfacePrototypeValue((s) =>
-    s.enabled && s.agentStyle === 'open' ? 'proto-msg-open' : 'glass-msg-assistant'
-  );
 
   const isAgentMessage = item.kind === 'agent_message';
   const audioId = isAgentMessage ? item.id : '';
@@ -220,7 +214,7 @@ function AcpConversationItemViewImpl({
           ttsStorageId={item.id}
           onPlayAudio={handlePlayAudio}
           onFileClick={onFileClick}
-          bubbleClassName={agentBubbleClassName}
+          bubbleClassName="glass-msg-assistant"
         />
       );
     case 'thinking':
