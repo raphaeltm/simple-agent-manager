@@ -5,6 +5,7 @@ import {
   MAX_SAM_OPERATOR_EVENT_PAGE_SIZE,
   OPERATOR_DEFAULTS,
 } from './admin-setting-definitions';
+import { FLEET_OPS_SETTINGS } from './fleet-ops/settings-definitions';
 /** Operations-project debugger tools dial (idea 01M6GGY1QPGG4D40HG0PVGQS3R, policy a35180d5). */
 export const OPERATIONS_TOOLS_MODES = ['off', 'read', 'read_ask', 'read_auto_safe'] as const;
 export const DEFAULT_OPERATIONS_AUDIT_RETENTION_DAYS = 90;
@@ -72,5 +73,14 @@ export const OPERATOR_SETTINGS: AdminSettingDefinition[] = [
     'Operations',
     'Browser tabs that can follow one private SAM answer live at the same time.',
     { min: 1, max: 20 }
+  ),
+  ...FLEET_OPS_SETTINGS.map((setting) =>
+    integerDefinition(
+      setting.name,
+      setting.defaultValue,
+      'Operations',
+      setting.description,
+      setting.range
+    )
   ),
 ];

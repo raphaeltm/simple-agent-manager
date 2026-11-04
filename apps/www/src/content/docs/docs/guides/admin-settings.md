@@ -378,12 +378,12 @@ debugger tools that let its agents look across every user's nodes, workspaces an
 | `operations.debuggerTools`      | `off`   | `off`, `read`, `read_ask`, `read_auto_safe` | Which debugger tools Operations agents may use. `off` hides and refuses all of them        |
 | `operations.auditRetentionDays` | 90      | 1–3,650                                     | Days each debugger tool audit record is kept before the daily 03:00 UTC cleanup deletes it |
 
-Today the only debugger tool is `ops_get_access_status`, which reports this setting, the
-capabilities a task has, and why any are refused. Read tools and approved actions arrive in later
-releases, and each of them uses the gate below. What each value will allow:
+`ops_get_access_status` reports this setting, the capabilities a task has, and why any are
+refused. The read tools below ship today; approved actions arrive in a later release, and each of
+them uses the gate below. What each value allows:
 
 - `off`: none. This is the default on new and updated installations.
-- `read`: read-only tools.
+- `read`: the read-only tools below.
 - `read_ask`: read-only tools, plus actions that each need a person to approve them.
 - `read_auto_safe`: like `read_ask`, but low-risk actions run without approval. Deleting things
   always needs approval.
@@ -403,6 +403,75 @@ see these tools, and the private incident tools (`list_incident_queue` and the r
 only to the Operations project too. Debugger tool calls are recorded in an audit log with the acting
 user, task, tool and target. `ops_get_access_status` records only calls made by a task inside the
 Operations project.
+
+### Read tools
+
+With the setting at `read` or above, agents in the Operations project get these tools. They read
+across every user of the installation. Everything they return that a user, agent or node process
+wrote (log lines, error messages, event text) comes back marked as untrusted data, and the agent
+is told never to follow instructions found in it.
+
+| Tool                                                             | What it answers                                                                                                                                                                                            |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ops_find_anomalies`                                             | What is broken now: empty nodes past the warm-node cleanup grace, stale heartbeats, running workspaces whose task ended, idle in-progress tasks, snapshot failures, deletion quarantine, pending incidents |
+| `ops_list_nodes`                                                 | Every node with status, health, last heartbeat and metrics, age, owner and workspace counts                                                                                                                |
+| `ops_get_node`                                                   | One node with its lifecycle state, placement explanation, workspaces, health events and recent incidents                                                                                                   |
+| `ops_get_session_story`                                          | Everything recorded about one task, chat session or workspace in one answer                                                                                                                                |
+| `ops_timeline`                                                   | One time-ordered list of events for a task, chat session, workspace or node, merged from every store                                                                                                       |
+| `ops_search_errors`                                              | Platform errors filtered by source, node, workspace, task, text and time                                                                                                                                   |
+| `ops_query_worker_logs`                                          | The same Cloudflare Workers log search as **Admin → Logs**, sharing its per-user rate limit                                                                                                                |
+| `ops_node_logs`                                                  | A running node's logs, filtered on the server with `contains`, capped in lines and bytes                                                                                                                   |
+| `ops_node_system_info`, `ops_node_events`, `ops_node_containers` | Live system info, agent events and containers from a running node                                                                                                                                          |
+| `ops_workspace_agent_sessions`                                   | Live agent sessions on a workspace                                                                                                                                                                         |
+| `ops_capture_debug_package`                                      | Saves a node's full debug package into the Operations project's library (see below)                                                                                                                        |
+
+These tools reach a node through the same path as a node owner's own **Logs** and **System info**
+views. When the Operations project's agent starts a task, its instructions include a short
+debugging playbook: start with anomalies, then the timeline, then narrowly filtered logs, and only
+then a debug package; keep the reported symptom exact; never paste raw logs into ideas, PRs or
+knowledge.
+
+### Debug packages
+
+`ops_capture_debug_package` saves a node's debug package (cloud-init and system logs, the agent
+log, Docker state, the agent's event and metrics databases) as
+`/debug-packages/<node ID>/<time>.tar.gz` in the Operations project's
+[library](/docs/guides/project-files/). The agent downloads it into its own workspace with
+`download_library_file`. Packages are **raw and unredacted**: they can contain anything the node
+logged. In the app only superadmins see them, and over MCP only tokens that pass the debugger-tool
+check can list, download or display them; every MCP download is audited. A daily 03:00 UTC cleanup
+deletes packages older than the retention period, oldest first, in batches of
+`operations.debugPackagePurgeBatchSize` until none are left or `operations.debugPackagePurgeDeadlineMs`
+(20 seconds by default, enough for thousands of packages) has passed; anything left continues the
+next day. Packages left in a former Operations project are included. A copy an agent downloads into its workspace is not purged; the playbook tells
+the agent to delete it when done. Capture stops and stores nothing if a package is larger than the
+size cap, and each superadmin may make a limited number of capture attempts per hour (failed
+attempts count).
+
+### Read tool limits
+
+| Setting                                       | Default    | Range         | What it controls                                                                                                                                                                                                |
+| --------------------------------------------- | ---------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `operations.debugPackageRetentionDays`        | 7          | 1–90          | Days a debug package stays in the Operations library before the daily cleanup deletes it                                                                                                                        |
+| `operations.debugPackageMaxBytes`             | 20,971,520 | 1 MiB–32 MiB  | Largest debug package capture accepts (also limited by the library's upload limit). Capture holds the package and its encrypted copy in Worker memory, so the maximum leaves room under the 128 MB Worker limit |
+| `operations.debugPackagePurgeBatchSize`       | 50         | 1–90          | Expired debug packages the daily cleanup deletes per batch                                                                                                                                                      |
+| `operations.debugPackagePurgeDeadlineMs`      | 20,000     | 1,000–120,000 | Milliseconds the daily cleanup keeps deleting batches before it stops; the rest continues the next day                                                                                                          |
+| `operations.debugPackageCapturesPerHour`      | 20         | 1–200         | Debug package capture attempts one superadmin may make per hour (attempts on an unreachable node or an oversized package count)                                                                                 |
+| `operations.opsAnomalyEmptyNodeGraceMs`       | 900,000    | 0–7 days      | Extra time past the warm-node cleanup grace before an empty running node is reported                                                                                                                            |
+| `operations.opsAnomalyTerminalTaskGraceMs`    | 900,000    | 0–7 days      | Time after a task ends before its still-running workspace is reported                                                                                                                                           |
+| `operations.opsAnomalyIdleTaskMinutes`        | 60         | 1–10,080      | Minutes without task or workspace activity before an in-progress task is reported                                                                                                                               |
+| `operations.opsAnomalyLookbackHours`          | 24         | 1–720         | Hours of snapshot failures and deletion-quarantine reports the anomaly check looks at                                                                                                                           |
+| `operations.opsAnomalyMaxPerClass`            | 25         | 1–200         | Findings returned per anomaly type; each type still reports its total                                                                                                                                           |
+| `operations.opsNodeLogMaxLines`               | 200        | 1–1,000       | Most log lines one `ops_node_logs` call returns                                                                                                                                                                 |
+| `operations.opsNodeLogMaxBytes`               | 65,536     | 1 KiB–1 MiB   | Most bytes of log text one `ops_node_logs` call returns                                                                                                                                                         |
+| `operations.opsTimelineMaxEvents`             | 200        | 10–1,000      | Most events one timeline returns; older ones are dropped and the answer says how to read them                                                                                                                   |
+| `operations.opsTimelinePerSourceLimit`        | 100        | 5–500         | Most events one store contributes to a timeline                                                                                                                                                                 |
+| `operations.opsTimelineDefaultWindowHours`    | 168        | 1–2,160       | Hours a timeline looks back when no start time is given                                                                                                                                                         |
+| `operations.opsTimelineFanoutLimit`           | 2          | 1–5           | Chat sessions, workspaces and running nodes per timeline that get their own activity, boot log and live node event reads                                                                                        |
+| `operations.opsEntityGraphRowCap`             | 25         | 1–100         | Related tasks, workspaces, sessions, snapshots or nodes a session story or timeline reads per table                                                                                                             |
+| `operations.opsWorkerLogDefaultWindowMinutes` | 60         | 1–1,440       | Minutes of Worker logs `ops_query_worker_logs` covers when no start time is given                                                                                                                               |
+| `operations.opsListMaxRows`                   | 100        | 1–500         | Most nodes, errors or log lines one list returns                                                                                                                                                                |
+| `operations.opsTextFieldMaxLength`            | 2,000      | 100–20,000    | Characters of one free-text field (an error message, for example) a tool returns                                                                                                                                |
 
 ## If the database can't be read
 

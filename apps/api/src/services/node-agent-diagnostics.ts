@@ -1,5 +1,5 @@
 import type { Env } from '../env';
-import { nodeAgentRequest } from './node-agent';
+import { nodeAgentRawRequest, nodeAgentRequest } from './node-agent';
 
 export async function getNodeSystemInfoFromNode(
   nodeId: string,
@@ -34,4 +34,19 @@ export async function listNodeContainersFromNode(
     method: 'GET',
     userId,
   });
+}
+
+/** Opens a raw diagnostic artifact stream (debug package, events/metrics export) from a node. */
+export async function openNodeDiagnosticDownload(
+  nodeId: string,
+  env: Env,
+  userId: string,
+  path: '/debug-package' | '/events/export' | '/metrics/export'
+): Promise<Response> {
+  const response = await nodeAgentRawRequest(nodeId, env, path, userId);
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`VM agent returned ${response.status}: ${body}`);
+  }
+  return response;
 }

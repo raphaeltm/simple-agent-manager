@@ -21,6 +21,7 @@ import { runScheduledComposeImageArtifactCleanup } from './compose-image-artifac
 import { runComputeUsageCleanup } from './compute-usage-cleanup';
 import { runCronTriggerSweep } from './cron-triggers';
 import { runScheduledDeploymentReleaseRetention } from './d1-retention';
+import { runDebugPackagePurge } from './debug-package-purge';
 import { runDeploymentNodeCleanup } from './deployment-node-cleanup';
 import { notifyFailedSweeps } from './failed-sweep-notifications';
 import { runIncidentTriggerSweep } from './incident-triggers';
@@ -94,7 +95,8 @@ export async function scheduled(
     );
     // Separate promise: an analytics failure must not skip the audit retention purge.
     ctx.waitUntil(runOperationsAuditPurge(env, controller.cron));
-    // Separate promise again, so neither job above can suppress the latency check.
+    ctx.waitUntil(runDebugPackagePurge(env, controller.cron));
+    // Separate promise again, so none of the jobs above can suppress the latency check.
     ctx.waitUntil(
       runLifecycleLatencyDailyEvaluation(env).catch((err) => {
         log.error('cron.lifecycle_latency_daily_failed', {

@@ -7,6 +7,8 @@
  * definitions here and register the handler in `OPERATIONS_TOOL_HANDLERS`
  * (`tool-handler-table.ts`); a test fails if the two drift apart.
  */
+import { OPS_READ_TOOLS } from './tool-definitions-ops-read-tools';
+
 export const OPERATIONS_TOOLS = [
   {
     name: 'ops_get_access_status',
@@ -20,4 +22,5 @@ export const OPERATIONS_TOOLS = [
       additionalProperties: false,
     },
   },
+  ...OPS_READ_TOOLS,
 ];

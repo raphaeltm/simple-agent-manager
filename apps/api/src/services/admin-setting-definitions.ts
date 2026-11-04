@@ -7,6 +7,7 @@ import {
   type ConnectorSettingKey,
   validateConnectorSetting,
 } from './connector-settings-definition';
+import { type FleetOpsSettingName } from './fleet-ops/settings-definitions';
 import { type LifecycleLatencySettingKey } from './lifecycle-latency/defaults';
 import { type WORKFLOW_DEFAULTS } from './workflow-defaults';
 
@@ -21,6 +22,7 @@ export type AdminSettingName =
   | `connector.${ConnectorSettingKey}`
   | ConnectorReadSettingName
   | AgentEmailSettingName
+  | FleetOpsSettingName
   | 'chat.profileUsageWindowDays'
   | 'chat.profilePinCandidateLimit'
   | 'collaboration.ideaUpdateBodyMaxLength'

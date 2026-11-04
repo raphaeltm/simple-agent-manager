@@ -993,10 +993,8 @@ func (s *Server) handleListTabs(w http.ResponseWriter, r *http.Request) {
 	// Accept both workspace session cookies (browser) and management tokens (control plane).
 	// Also accept workspace JWT token via ?token= query param for first-load scenarios
 	// before a session cookie has been established.
-	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
-		if !s.requireNodeManagementAuth(w, r, workspaceID) {
-			return
-		}
+	if !s.requireWorkspaceOrManagementAuth(w, r, workspaceID) {
+		return
 	}
 
 	if s.store == nil {
@@ -1028,10 +1026,8 @@ func (s *Server) handleListAgentSessions(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// Accept both workspace session cookies (browser) and management tokens (control plane).
-	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
-		if !s.requireNodeManagementAuth(w, r, workspaceID) {
-			return
-		}
+	if !s.requireWorkspaceOrManagementAuth(w, r, workspaceID) {
+		return
 	}
 
 	sessions := s.agentSessions.List(workspaceID)
