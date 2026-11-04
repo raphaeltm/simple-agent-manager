@@ -11,7 +11,9 @@
  *    fails before teardown, the chat is left with a working agent. `/stop` would end the turn the
  *    same way but leave the session permanently stopped, so a failed sleep would strand the chat.
  *    The restarting agent reports `recovering`; the required gate does not count that as a turn
- *    (`classifyRequiredSleepTurn`).
+ *    (`classifyRequiredSleepTurn`). The restarted agent is idle, but durable deliveries queued
+ *    behind the cancelled turn are not handed to it: the delivery target holds them while the
+ *    sleep claim is live (`isSleepClaimHoldingDelivery` in `vm-prompt-delivery-target.ts`).
  * 2. `recordSessionTurnEnd`, the control-plane turn end, so ProjectData does not wait for a VM
  *    `idle` report that a wedged turn may never send.
  */

@@ -20,6 +20,7 @@ import {
 import { agentModelSettingDefinitions } from './agent-models/settings-definition';
 import { CONNECTOR_DEFAULTS, type ConnectorSettingKey } from './connector-settings-definition';
 import { ENV_KEYS, SECRET_KINDS, SETTING_KEYS } from './platform-config-store';
+import { DEFAULT_SESSION_STALE_TURN_NO_WORK_MINUTES } from './session-idleness';
 export const CORE_SETTINGS: AdminSettingDefinition[] = [
   integerDefinition(
     'operations.nodeCleanupRefusalWarnAfterMs',
@@ -48,6 +49,13 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     'Operations',
     'Leeway in milliseconds after a node reaches its absolute lifetime before any session whose agent turn is still running is stopped and force-slept.',
     { min: 1, max: 86400000 }
+  ),
+  integerDefinition(
+    'operations.sessionStaleTurnNoWorkMinutes',
+    DEFAULT_SESSION_STALE_TURN_NO_WORK_MINUTES,
+    'Operations',
+    'Minutes an open agent turn may go with no new message and no background-work progress before it no longer keeps its session awake, so the session can sleep. Applies to sessions whose task is still running. 0 turns the bound off.',
+    { min: 0, max: 10080 }
   ),
   integerDefinition(
     'operations.nodeLifetimeAdmissionCutoffPercent',

@@ -1,4 +1,3 @@
-import { ModelRouterLanguageModel, ModelsDevGateway } from '@mastra/core/llm';
 import type { PlatformAIModel, SamConfig } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -22,6 +21,7 @@ export async function resolveOperatorModel(
   modelId: string,
   headers: { metadata: string; sessionAffinity: string }
 ) {
+  const { ModelRouterLanguageModel, ModelsDevGateway } = await import('@mastra/core/llm');
   if (modelId.startsWith('claude-')) {
     const auth = await resolveUpstreamAuth(env, drizzle(env.DATABASE));
     const gateway = new ModelsDevGateway({

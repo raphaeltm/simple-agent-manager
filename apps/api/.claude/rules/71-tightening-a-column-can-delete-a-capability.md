@@ -118,6 +118,22 @@ were refused. The refusal was classified as a placement cancellation, so nothing
 - Test each caller's real entry point against the real predicate:
   `apps/api/tests/unit/services/deployment-error-recovery.test.ts`.
 
+## An Escape Path That Refuses Must Say Why
+
+Legacy binding recovery (#2472) was the escape path for unbound deployment nodes, and it returned
+a bare `false`. Node `01KXAR1T3XCQKKPBEJEERQ2PSZ` sat in `destroying` for 10 days. Each hourly
+attempt refused, the failure text lived only in `nodes.error_message`, and the deployment claim
+cleared `cleanup_blocked_reason` on every attempt. When a person finally deleted the server, the
+evidence was gone with it (idea `01M6K6R2255R7414WSER4N3STJ`).
+
+- A recovery or escape path that refuses returns a named reason for each predicate
+  (`attemptLegacyDeploymentBindingRecovery()`), and the refusal is recorded where operators look:
+  the node decision log (`legacy_binding_refused`) and `cleanup_blocked_reason`.
+- A retry claim must not erase the blocked clock or reason that another sweep recorded. Clear them
+  only with the terminal proof.
+- Give a stuck terminal state its own anomaly (`node_destroying_too_long`), so it is not waiting
+  on someone to notice an absence.
+
 ## Quick Compliance Check
 
 - [ ] Every caller of a tightened status gate is listed with the state it arrives in

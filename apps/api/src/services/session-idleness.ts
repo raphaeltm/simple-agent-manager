@@ -26,6 +26,14 @@ export const DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS = 5 * 60 * 1000;
  */
 export const DEFAULT_HARNESS_BACKGROUND_WORK_MAX_DURATION_MS = 30 * 60 * 1000;
 
+/**
+ * Default for `operations.sessionStaleTurnNoWorkMinutes`: how long an open turn on a running task
+ * may go without real work before it stops keeping the session awake. Longer than a Claude Code
+ * foreground Bash call (capped at 10 min); background tasks and Codex/OpenCode tool calls hold
+ * the session through the harness lease instead.
+ */
+export const DEFAULT_SESSION_STALE_TURN_NO_WORK_MINUTES = 30;
+
 export interface HarnessWorkConfig {
   leaseMs: number;
   maxDurationMs: number;
@@ -53,7 +61,8 @@ export type SessionIdlenessReason =
   | 'prompt_turn_active'
   | 'prompt_turn_unknown'
   | 'idle_interval_pending'
-  | 'completed_prompt_stale';
+  | 'completed_prompt_stale'
+  | 'prompt_turn_stale';
 
 /**
  * The two different questions callers ask of the same idleness evidence.
@@ -168,6 +177,11 @@ export function classifySessionIdleness(input: {
   idleAfterMs: number;
   harnessWorkConfig: HarnessWorkConfig;
   policy: SessionIdlenessPolicy;
+  /**
+   * How long an open turn on a non-terminal task may go without real work before it no longer
+   * counts as one (`operations.sessionStaleTurnNoWorkMinutes`). Omitted or null: unbounded.
+   */
+  staleTurnMs?: number | null;
 }): SessionIdlenessClassification {
   const activity = input.state?.activity ?? null;
 
@@ -254,6 +268,22 @@ export function classifySessionIdleness(input: {
   }
 
   if (activity !== 'idle') {
+    // A turn that never returns keeps reporting `prompting` (production 2026-11-04: a
+    // conversation's turn ran 9h54m with no output, idea 01M6K6QTEE7T9KNYB7317D7Y8E). The VM's
+    // own SessionHost confirms it, so the stale-activity probe cannot end it either. Bound it by
+    // the WORK clock, which same-turn re-reports and probe confirmations do not move: no message
+    // and no harness progress for the bound means nothing is coming back (policy d08d64dc). A
+    // fresh harness lease already returned above, so live background work is never cut short.
+    const workAnchor = sessionWorkAnchor(input.state);
+    if (input.staleTurnMs && input.staleTurnMs > 0 && workAnchor !== null) {
+      const silenceMs =
+        input.policy === 'idle-interval-elapsed'
+          ? Math.max(input.staleTurnMs, input.idleAfterMs)
+          : input.staleTurnMs;
+      if (workAnchor + silenceMs <= input.now.getTime()) {
+        return { idle: true, conclusive: true, reason: 'prompt_turn_stale', activity };
+      }
+    }
     return {
       idle: false,
       conclusive: true,

@@ -26,6 +26,7 @@ import type { FleetOpsSettings } from './settings';
 export const ANOMALY_CLASSES = [
   'empty_node_past_warm_grace',
   'stale_node_heartbeat',
+  'node_destroying_too_long',
   'running_workspace_for_terminal_task',
   'idle_in_progress_task',
   'session_snapshot_failure',
@@ -184,6 +185,44 @@ async function staleHeartbeats(ctx: SweepContext): Promise<AnomalyClassResult> {
         `(${minutesSince(lastHeartbeat ?? text(row.created_at), ctx.now) ?? '?'} min ago, ` +
         `stale after ${int(row.heartbeat_stale_after_seconds)} s).`,
       observedAt: lastHeartbeat,
+    };
+  });
+}
+
+/**
+ * Teardown that never finishes. A destroying node no longer heartbeats (the heartbeat write
+ * skips it), so the last heartbeat marks roughly when teardown began. `stale_node_heartbeat`
+ * covers running nodes only; without this class a node could retry its teardown for days
+ * unseen (node 01KXAR1T3XCQKKPBEJEERQ2PSZ, idea 01M6K6R2255R7414WSER4N3STJ).
+ */
+async function destroyingNodes(ctx: SweepContext): Promise<AnomalyClassResult> {
+  const rows = await ctx.env.DATABASE.prepare(
+    `SELECT n.id, n.user_id, n.status, n.node_role, n.cloud_provider, n.last_heartbeat_at,
+            n.created_at, n.cleanup_blocked_since, n.cleanup_blocked_reason,
+            COUNT(*) OVER () AS total
+     FROM nodes n
+     WHERE n.status IN ('destroying', 'deleting')
+       AND julianday(COALESCE(n.last_heartbeat_at, n.created_at)) < julianday(?)
+     ORDER BY julianday(COALESCE(n.last_heartbeat_at, n.created_at)) ASC, n.id ASC
+     LIMIT ?`
+  )
+    .bind(isoMinus(ctx.now, ctx.settings.destroyingNodeHours * 60 * 60_000), ctx.cap)
+    .all<Row>();
+  return result('node_destroying_too_long', rows.results ?? [], (row) => {
+    const since = text(row.last_heartbeat_at) ?? text(row.created_at);
+    const blockedReason = text(row.cleanup_blocked_reason);
+    return {
+      ids: { nodeId: text(row.id), userId: text(row.user_id) },
+      reason:
+        `${text(row.cloud_provider) ?? 'unknown-provider'} ${text(row.node_role) ?? 'workspace'} ` +
+        `node has been ${text(row.status)} for about ${minutesSince(since, ctx.now) ?? '?'} min ` +
+        `(last heartbeat ${text(row.last_heartbeat_at) ?? 'never'}); ` +
+        (blockedReason
+          ? `cleanup blocked since ${text(row.cleanup_blocked_since) ?? 'unknown'}: ` +
+            neutralizeUntrustedText(blockedReason)
+          : 'no cleanup refusal recorded') +
+        '.',
+      observedAt: since,
     };
   });
 }
@@ -409,6 +448,7 @@ async function pendingIncidents(ctx: SweepContext): Promise<AnomalyClassResult> 
 const SWEEPS: Record<AnomalyClass, (ctx: SweepContext) => Promise<AnomalyClassResult>> = {
   empty_node_past_warm_grace: emptyNodes,
   stale_node_heartbeat: staleHeartbeats,
+  node_destroying_too_long: destroyingNodes,
   running_workspace_for_terminal_task: runningWorkspacesForTerminalTasks,
   idle_in_progress_task: idleInProgressTasks,
   session_snapshot_failure: snapshotFailures,
@@ -445,6 +485,7 @@ export async function findAnomalies(
       emptyNodeIdleMs: ctx.emptyNodeIdleMs,
       terminalTaskGraceMs: settings.terminalTaskGraceMs,
       idleTaskMinutes: settings.idleTaskMinutes,
+      destroyingNodeHours: settings.destroyingNodeHours,
       lookbackHours: settings.lookbackHours,
       maxPerClass: ctx.cap,
     },
