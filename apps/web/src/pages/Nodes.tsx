@@ -17,20 +17,22 @@ import { CPU_COLOR, MEMORY_COLOR, Swatch } from '../components/node/usage/Mirror
 import { NodeUsagePane, type UsageWindow } from '../components/node/usage/NodeUsagePane';
 import { useQueryScope } from '../hooks/useQueryScope';
 import { deleteNode, stopNode } from '../lib/api';
-import { NODE_LIST_POLL_MS, NODE_RESOURCE_USAGE_POLL_MS } from '../lib/poll-intervals';
+import {
+  NODE_LIST_POLL_MS,
+  NODE_PAGE_CLOCK_TICK_MS,
+  NODE_RESOURCE_USAGE_POLL_MS,
+} from '../lib/poll-intervals';
 import {
   nodeListQueryOptions,
   nodeQueryKeys,
   nodeResourceUsageQueryOptions,
 } from '../lib/query-options';
 
-const CLOCK_TICK_MS = 30_000;
-
 /** Re-renders on a slow tick so ages and live-memory freshness stay current between polls. */
 function useClock(): number {
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
-    const id = setInterval(() => setNow(Date.now()), CLOCK_TICK_MS);
+    const id = setInterval(() => setNow(Date.now()), NODE_PAGE_CLOCK_TICK_MS);
     return () => clearInterval(id);
   }, []);
   return now;

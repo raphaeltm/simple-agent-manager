@@ -227,6 +227,13 @@ export const NODE_RESOURCE_USAGE_POLL_MS = resolveIntervalMs(
   DEFAULT_NODE_RESOURCE_USAGE_POLL_MS
 );
 
+/** Re-render tick on the `/nodes` page so ages and live-memory freshness stay current. */
+const DEFAULT_NODE_PAGE_CLOCK_TICK_MS = 30_000;
+export const NODE_PAGE_CLOCK_TICK_MS = resolveIntervalMs(
+  import.meta.env.VITE_NODE_PAGE_CLOCK_TICK_MS,
+  DEFAULT_NODE_PAGE_CLOCK_TICK_MS
+);
+
 /** Workspace list refresh on the `/nodes` page. */
 const DEFAULT_WORKSPACE_LIST_POLL_MS = 10_000;
 export const WORKSPACE_LIST_POLL_MS = resolveIntervalMs(

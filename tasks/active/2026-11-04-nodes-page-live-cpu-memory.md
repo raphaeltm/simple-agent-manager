@@ -22,45 +22,54 @@ Prototype: `/prototype/nodes-glass?concept=both` on branch `sam/feel-keep-talkin
 
 Because history arrives in 15-minute batches, the per-machine chart covers the last **60 minutes** by default (admin setting `nodes.usageWindowMinutes`, 15–360), not 30, and the page says plainly that history arrives in batches. Live memory from the heartbeat (≤60s old) is used for the "now" memory numbers and drawn as a point at the right edge. CPU "now" is the latest history minute, shown with its age.
 
+## Implementation notes
+
+- Names changed during implementation to avoid confusion with the existing vCPU-hour billing "node usage" (`services/node-usage.ts`): service `services/node-resource-usage.ts`, route `GET /api/nodes/resource-usage`, types `NodeResourceUsageResponse`, `NodeWorkspaceResourceUsage`, `NodeResourceUsageSeries`, `NodeResourceReservation`.
+- `main` rejects direct pushes (repository rule), so this task file travels in the PR rather than being committed to `main` first.
+- Guards proven discriminating: removing `n.user_id = ?` or `w.user_id = ?` fails the cross-user test; removing the chunk project pairing fails only when both the SQL predicate and the in-code check are removed (defence in depth). Web: removing the heartbeat-freshness check or the memory-over flag each fails exactly one page test.
+- Playwright audit had to dismiss the onboarding overlay (localStorage `sam-onboarding-wizard-dismissed-<user>`) or it would cover the page.
+
 ## Implementation checklist
 
 ### Shared types
-- [ ] Add `NodeWorkspaceMemoryMetric` and `workspaceMemory?` to `NodeMetrics`.
-- [ ] Add `NodeUsageResponse` / `NodeWorkspaceUsage` types (`packages/shared/src/types/node-usage.ts`), exported from the types barrel.
+- [x] Add `NodeWorkspaceMemoryMetric` and `workspaceMemory?` to `NodeMetrics`.
+- [x] Add `NodeUsageResponse` / `NodeWorkspaceUsage` types (`packages/shared/src/types/node-usage.ts`), exported from the types barrel.
 
 ### API
-- [ ] Admin setting `nodes.usageWindowMinutes` (default 60, range 15–360) + name in the union.
-- [ ] Service `apps/api/src/services/node-usage.ts`: one joined D1 read of the caller's non-deleted workspaces on the caller's nodes (title: session topic → task title → workspace display name; project name; owner; reservation parsed fault-tolerantly), then batched chunk reads (`project_id` + `workspace_id`, `ended_at > windowStart`, `rollup_json IS NOT NULL`), per-row fault isolation for malformed rollups, merged into per-minute series clipped to the window.
-- [ ] Route `GET /api/nodes/usage` registered before `/:id`.
-- [ ] Tests against a real SQL engine (`tests/helpers/sqlite-d1.ts`): owner path; another user's workspace/chunks excluded (attack + owner control, verified discriminating); chunk with mismatched `project_id` excluded; window filter; malformed rollup skipped while good rows remain; title fallback order; malformed reservation → null; rollup built by the real `buildStoredRollupJson` producer.
-- [ ] API docs (`apps/www/src/content/docs/docs/reference/api.md`) and admin settings docs if they list settings.
+- [x] Admin setting `nodes.usageWindowMinutes` (default 60, range 15–360) + name in the union.
+- [x] Service `apps/api/src/services/node-usage.ts`: one joined D1 read of the caller's non-deleted workspaces on the caller's nodes (title: session topic → task title → workspace display name; project name; owner; reservation parsed fault-tolerantly), then batched chunk reads (`project_id` + `workspace_id`, `ended_at > windowStart`, `rollup_json IS NOT NULL`), per-row fault isolation for malformed rollups, merged into per-minute series clipped to the window.
+- [x] Route `GET /api/nodes/usage` registered before `/:id`.
+- [x] Tests against a real SQL engine (`tests/helpers/sqlite-d1.ts`): owner path; another user's workspace/chunks excluded (attack + owner control, verified discriminating); chunk with mismatched `project_id` excluded; window filter; malformed rollup skipped while good rows remain; title fallback order; malformed reservation → null; rollup built by the real `buildStoredRollupJson` producer.
+- [x] API docs (`apps/www/src/content/docs/docs/reference/api.md`) and admin settings docs if they list settings.
 
 ### Web
-- [ ] Query options + poll cadence `NODE_USAGE_POLL_MS` (default 60s, env-overridable).
-- [ ] Pure model (`components/node/usage/node-usage-model.ts`): align/sum series per machine, live memory merge, latest values, over-limit flags, hardware title.
-- [ ] `MirrorChart` (memory up, CPU down, dashed set-aside lines, labels outside the chart, live memory point).
-- [ ] `NodeUsagePane`: hardware title + location + spec, status/health chips, price, Stop/Delete menu, Details link, error/cleanup message, machine chart, session rows, Advanced (workspace links, node name/id); deployment-node and empty/creating/stopped states.
-- [ ] `NodeSessionRow`: status, chat title linking to `/projects/:projectId/chat/:sessionId`, owner/project/age, mirrored sparkline, used/reserved numbers, "over limit" (memory, danger) / "burst, fine" (CPU, muted), no-history state.
-- [ ] `Nodes.tsx`: new layout; create-node form extracted to its own component (keep behaviour); keep stale-while-revalidate behaviour.
-- [ ] Remove `NodeCard`, `NodeWorkspaceMiniCard`, `MiniMetricBadge` if no longer used, with their tests; update the Playwright native-hardware harness.
-- [ ] Unit tests: model; Nodes page (sessions render with chat links; create/stop/delete still work; error/empty states; live memory overrides history).
-- [ ] Playwright visual audit (mobile 375 + desktop 1280, dark + light): normal, long text, empty, many items (30 sessions), error; `assertNoOverflow`.
+- [x] Query options + poll cadence `NODE_USAGE_POLL_MS` (default 60s, env-overridable).
+- [x] Pure model (`components/node/usage/node-usage-model.ts`): align/sum series per machine, live memory merge, latest values, over-limit flags, hardware title.
+- [x] `MirrorChart` (memory up, CPU down, dashed set-aside lines, labels outside the chart, live memory point).
+- [x] `NodeUsagePane`: hardware title + location + spec, status/health chips, price, Stop/Delete menu, Details link, error/cleanup message, machine chart, session rows, Advanced (workspace links, node name/id); deployment-node and empty/creating/stopped states.
+- [x] `NodeSessionRow`: status, chat title linking to `/projects/:projectId/chat/:sessionId`, owner/project/age, mirrored sparkline, used/reserved numbers, "over limit" (memory, danger) / "burst, fine" (CPU, muted), no-history state.
+- [x] `Nodes.tsx`: new layout; create-node form extracted to its own component (keep behaviour); keep stale-while-revalidate behaviour.
+- [x] Remove `NodeCard`, `NodeWorkspaceMiniCard`, `MiniMetricBadge` if no longer used, with their tests; update the Playwright native-hardware harness.
+- [x] Unit tests: model; Nodes page (sessions render with chat links; create/stop/delete still work; error/empty states; live memory overrides history).
+- [x] Playwright visual audit (mobile 375 + desktop 1280, dark + light): normal, long text, empty, many items (30 sessions), error; `assertNoOverflow`.
 
 ### Docs
-- [ ] Update user-facing docs that describe the Nodes page.
+- [x] Update user-facing docs that describe the Nodes page.
 
 ## Acceptance criteria
 
-- [ ] `/nodes` shows each machine by hardware (provider, type, location, vCPU/RAM/disk), never by task name.
-- [ ] Each machine shows a mirrored chart of the last `nodes.usageWindowMinutes` minutes: memory above the line, CPU below, dashed lines at what is set aside.
-- [ ] Each session on a machine is a row with its chat title linking to the chat, owner, project, age, a mirrored sparkline and used/reserved numbers for memory and CPU.
-- [ ] Memory over its reservation reads as danger; CPU over its reservation does not.
-- [ ] Workspace links are only under "Advanced".
-- [ ] Create node, Stop and Delete still work; node detail is still reachable.
-- [ ] The page says that history arrives in 15-minute batches; live memory is used when available.
-- [ ] A user never sees another user's workspaces or usage.
-- [ ] No horizontal overflow at 375px and 1280px; light and dark themes.
-- [ ] No prototype files on `main`.
+- [x] `/nodes` shows each machine by hardware (provider, type, location, vCPU/RAM/disk), never by task name.
+- [x] Each machine shows a mirrored chart of the last `nodes.usageWindowMinutes` minutes: memory above the line, CPU below, dashed lines at what is set aside.
+- [x] Each session on a machine is a row with its chat title linking to the chat, owner, project, age, a mirrored sparkline and used/reserved numbers for memory and CPU.
+- [x] Memory over its reservation reads as danger; CPU over its reservation does not.
+- [x] Workspace links are only under "Advanced".
+- [x] Create node, Stop and Delete still work; node detail is still reachable.
+- [x] The page says that history arrives in batches (the docs say every 15 minutes by default); live memory is used when available.
+- [x] A user never sees another user's workspaces or usage.
+- [x] No horizontal overflow at 375px and 1280px; light and dark themes.
+- [x] No prototype files on `main`.
+
+Evidence: `apps/api/tests/unit/routes/node-resource-usage.test.ts` (9 tests, real SQL, cross-user attack + owner control), `apps/web/tests/unit/pages/nodes.test.tsx` (15 tests), `apps/web/tests/unit/components/node/usage/node-resource-model.test.ts` (6), `apps/web/tests/playwright/nodes-usage-audit.spec.ts` (14 at 375 and 1280, dark and light, `assertNoClippedOverflow`). The branch was cut from `origin/main`; no `nodes-glass-prototype` files are in the diff. Staging verification: see PR.
 
 ## References
 
