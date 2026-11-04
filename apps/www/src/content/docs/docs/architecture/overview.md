@@ -480,6 +480,8 @@ request and again before a VM-confirmed terminal write. Identity changes and exh
 residence are dead-lettered for investigation rather than silently discarded; a plain D1
 `nodes.status = 'deleted'` value is not terminal proof.
 
+The VM deletion reconciler reloads each saved intent after acquiring its workspace lifecycle lock, so an inline deletion cannot have its completion record overwritten by an older background attempt. Legacy incomplete records whose workspace metadata is already gone can finalize only after the existing identity and preservation checks pass and the workspace directory, labeled containers and named Docker volume are all verified absent. A remaining artifact or failed probe keeps cleanup pending; this recovery path never removes artifacts without metadata.
+
 Live attempts also maintain a compact lexicographically ordered due-time index. A bounded,
 resumable per-DO backfill makes pre-index attempts discoverable during rollout. Alarm reads
 are limited to the configured batch and the next indexed deadline, so retained dead letters

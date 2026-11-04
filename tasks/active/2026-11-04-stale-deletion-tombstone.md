@@ -14,14 +14,14 @@ The November 4 recap chat accepted a user reply but could not wake: workspace 01
 
 ## Checklist
 
-- [ ] Reproduce stale-read interleaving via real reconciler and deletion writer.
-- [ ] Re-read intent under lock, validate key identity, skip finalized/removed records.
-- [ ] Remove redundant error-path persistence.
-- [ ] Converge metadata-missing intents only after verifying all physical artifacts absent, retaining owner/incarnation checks.
-- [ ] Test recovery, remaining artifacts, ownership, ordinary deletion, and discriminating mutations.
-- [ ] Document lifecycle behavior and incident lesson.
+- [x] Reproduce stale-read interleaving via real reconciler and deletion writer.
+- [x] Re-read intent under lock, validate key identity, skip finalized/removed records.
+- [x] Remove redundant error-path persistence.
+- [x] Converge metadata-missing intents only after verifying all physical artifacts absent, retaining owner/incarnation checks.
+- [x] Test recovery, remaining artifacts, ownership, ordinary deletion, and discriminating mutations.
+- [x] Document lifecycle behavior and incident lesson.
 - [ ] Run Go focused/race/full tests, vet and build; relevant repository checks.
-- [ ] Local Go/security/test/completion/doc/constitution reviews; resolve findings.
+- [x] Local Go/security/test/completion/doc/constitution reviews; resolve findings.
 - [ ] Staging fresh VM heartbeat/access plus sleep→delete→wake; cleanup resources.
 - [ ] PR and CI; CodeRabbit request and bounded wait; merge and verify production deploy.
 - [ ] Verify affected workspace deletion proof through safe recovery; do not wake recap or repost.
@@ -39,3 +39,10 @@ The November 4 recap chat accepted a user reply but could not wake: workspace 01
 - `packages/vm-agent/.claude/rules/06-vm-agent-patterns.md`, `27-vm-agent-staging-refresh.md`, `54-vm-agent-rollout-compatibility.md`
 - `.claude/rules/35-vertical-slice-testing.md`
 - Production post already published: https://x.com/simpleagentman/status/2118118731767304669
+
+## Validation evidence
+
+- Old-code regression failed deterministically; independent reload-removal and absence-recovery-removal mutants both fail.
+- Full Go suite, vet and build passed before final timestamp-only fairness fix; focused persistence/server checks pass afterward. Repository lint/typecheck and documentation build pass. Final focused race passed (server 23.415s, persistence 1.587s); deletion-focused coverage: reconciler helper 94.7%, absence verifier 100%.
+- Go and security reviews passed after restoring retry fairness with timestamp-only updates. Documentation and constitution reviews passed; completion review confirms implementation coverage, with staging/release criteria pending.
+- Timestamp-only retry rotation preserves payload bytes and advances a bounded queue; missing records are not recreated.

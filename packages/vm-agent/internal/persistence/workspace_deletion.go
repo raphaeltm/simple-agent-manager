@@ -15,6 +15,14 @@ func (s *Store) PutWorkspaceDeletion(id, payload string) error {
 	_, err := s.db.Exec(`INSERT INTO workspace_deletions(workspace_id,payload) VALUES (?,?) ON CONFLICT(workspace_id) DO UPDATE SET payload=excluded.payload, updated_at=unixepoch()`, id, payload)
 	return err
 }
+
+// TouchWorkspaceDeletion rotates a failed attempt behind older pending work
+// without rewriting its authority or completion state.
+func (s *Store) TouchWorkspaceDeletion(id string) error {
+	_, err := s.db.Exec(`UPDATE workspace_deletions SET updated_at=unixepoch() WHERE workspace_id=?`, id)
+	return err
+}
+
 func (s *Store) WorkspaceDeletions(limit int) (map[string]string, error) {
 	rows, err := s.db.Query(`SELECT workspace_id,payload FROM workspace_deletions WHERE COALESCE(json_extract(payload,'$.finalized'),0)=0 ORDER BY updated_at, workspace_id LIMIT ?`, limit)
 	if err != nil {
