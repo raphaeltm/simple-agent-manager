@@ -67,6 +67,14 @@ Constraint: do not relax the proof requirement (rule 56).
   - TS ambiguity check: the two-snapshot control;
   - SQL task-id conjunct: the race test "loses its wake task";
   - SQL status conjunct: the race test "loses its held claim state".
+- [x] Review fix (test-engineer HIGH): the restored branch now compares the target with the
+      snapshot's conversation. A completed wake leaves the source unbound with
+      `recovery_status='restored'`. `workspace-deletion-preservation-real-sql.test.ts` grants that
+      source and refuses a target holding a different conversation. Each direction was proven by
+      reverting the comparison and by deleting it.
+- [x] Review fix (test-engineer MEDIUM): `preserved-vm-retirement.test.ts` wakes through the real
+      `ensureSessionRecovery`. It asserts the writer's output (binding NULL, claim `waking`), then
+      that the node retires on the first pass. It fails on pre-fix src.
 - [x] Architecture overview updated.
 
 ## Acceptance Criteria
