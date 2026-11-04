@@ -33,6 +33,7 @@ function makeCredential(
   return {
     credentialReference: 'cc_credentials:cred-1',
     credentialId: 'cred-1',
+    credentialName: null,
     credentialSource: 'user',
     provider: 'anthropic',
     providerMode: 'direct',
@@ -140,7 +141,8 @@ describe('CredentialLimitChip', () => {
     fireEvent.click(chip);
     const details = screen.getByTestId('credential-limit-details');
     expect(details).toHaveTextContent('Claude usage');
-    expect(details).toHaveTextContent('Your credential');
+    expect(screen.getByTestId('credential-limit-account-name')).toHaveTextContent('Your account');
+    expect(details).toHaveTextContent('Claude Code');
     const windows = screen.getAllByTestId('credential-limit-window');
     expect(windows).toHaveLength(2);
     expect(windows[0]).toHaveTextContent('5h');
@@ -152,11 +154,44 @@ describe('CredentialLimitChip', () => {
   });
 });
 
+describe('CredentialLimitChip account name', () => {
+  it('titles the panel with the account name and keeps whose account it is in the meta line', () => {
+    render(
+      <CredentialLimitChip credential={makeCredential({ credentialName: 'Work Max' })} now={NOW} />
+    );
+    const chip = screen.getByTestId('credential-limit-chip');
+    expect(chip).toHaveAccessibleName(/Usage limits for Work Max/);
+    fireEvent.click(chip);
+    expect(screen.getByTestId('credential-limit-account-name')).toHaveTextContent('Work Max');
+    expect(screen.getByTestId('credential-limit-details')).toHaveTextContent(
+      'Your account · Claude Code · sampled 3m ago'
+    );
+    expect(screen.getByRole('dialog')).toHaveAccessibleName('Claude usage Work Max');
+  });
+
+  it('shows a window sample age only when it lags the newest sample', () => {
+    const credential = makeCredential();
+    credential.windows[1] = { ...credential.windows[1], observedAt: NOW - 20 * 60_000 };
+    render(<CredentialLimitChip credential={credential} now={NOW} />);
+    fireEvent.click(screen.getByTestId('credential-limit-chip'));
+    const windows = screen.getAllByTestId('credential-limit-window');
+    expect(windows[0]).not.toHaveTextContent('sampled');
+    expect(windows[1]).toHaveTextContent('sampled 20m ago');
+  });
+});
+
 describe('CredentialLimitChip with a window lacking a sample', () => {
   it('says usage unknown instead of a dash', () => {
     const credential = makeCredential({
       level: 'ok',
-      windows: [{ ...makeCredential().windows[1], windowType: 'claude.seven_day_opus', utilizationPercent: null, level: 'ok' }],
+      windows: [
+        {
+          ...makeCredential().windows[1],
+          windowType: 'claude.seven_day_opus',
+          utilizationPercent: null,
+          level: 'ok',
+        },
+      ],
     });
     render(<CredentialLimitChip credential={credential} now={NOW} />);
     expect(screen.getByTestId('credential-limit-chip')).toHaveTextContent('Claude · Opus week —');
@@ -169,7 +204,13 @@ describe('CredentialLimitChip with a window lacking a sample', () => {
     const credential = makeCredential({
       level: 'rejected',
       windows: [
-        { ...makeCredential().windows[1], windowType: 'opencode.weekly', utilizationPercent: null, status: 'rejected', level: 'rejected' },
+        {
+          ...makeCredential().windows[1],
+          windowType: 'opencode.weekly',
+          utilizationPercent: null,
+          status: 'rejected',
+          level: 'rejected',
+        },
       ],
     });
     render(<CredentialLimitChip credential={credential} now={NOW} />);
@@ -177,7 +218,7 @@ describe('CredentialLimitChip with a window lacking a sample', () => {
     expect(screen.getByTestId('credential-limit-window')).toHaveTextContent('Limit reached');
     expect(screen.getByTestId('credential-limit-window')).not.toHaveTextContent('usage unknown');
     // The dialog is labelled by its heading, not a generic string.
-    expect(screen.getByRole('dialog')).toHaveAccessibleName('OpenCode usage');
+    expect(screen.getByRole('dialog')).toHaveAccessibleName('OpenCode usage Your account');
   });
 });
 

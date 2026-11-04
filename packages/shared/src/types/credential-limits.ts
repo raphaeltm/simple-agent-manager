@@ -40,6 +40,12 @@ export interface CredentialLimitCredentialSummary {
   credentialReference: string;
   /** Composable-credential id when the reference points at one, else null. */
   credentialId: string | null;
+  /**
+   * The name the caller gave this account in Settings ("Work Max"), so the UI
+   * can say which account it is. Set only for the caller's own composable
+   * credentials; null for other members', project-legacy and platform ones.
+   */
+  credentialName: string | null;
   credentialSource: CredentialLimitCredentialSource;
   provider: string;
   providerMode: string;
