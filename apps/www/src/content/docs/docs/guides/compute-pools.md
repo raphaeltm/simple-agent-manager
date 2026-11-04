@@ -58,8 +58,8 @@ its own, and what it is using against what was set aside, for example **2.9/4.0 
   so it is not a problem on its own.
 
 Usage history comes from each machine in batches, every 15 minutes by default, so the right-hand end
-of a chart fills in later. The dot at the right edge is the memory the machine reported in the last
-minute. How far back the charts go is the admin setting `nodes.usageWindowMinutes`
+of a chart fills in later. When a machine reports its sessions' memory with its heartbeat, a dot
+at the right edge shows that latest reading, and the numbers use it. How far back the charts go is the admin setting `nodes.usageWindowMinutes`
 ([Admin settings](/docs/guides/admin-settings/#the-settings)). Workspace links and the machine's full
 hardware details are under **Advanced**.
 

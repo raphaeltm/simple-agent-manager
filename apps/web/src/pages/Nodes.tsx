@@ -100,6 +100,12 @@ export function Nodes() {
     return map;
   }, [usage]);
 
+  // Only promise a live dot when some machine actually reported live memory.
+  const hasLiveMemory = useMemo(
+    () => (nodes ?? []).some((node) => (node.lastMetrics?.workspaceMemory?.length ?? 0) > 0),
+    [nodes]
+  );
+
   const usageWindow = useMemo<UsageWindow | null>(
     () =>
       usage
@@ -175,8 +181,8 @@ export function Nodes() {
               </span>
               <span>Dashed: what SAM set aside.</span>
               <span>
-                History arrives in batches, so the newest minutes fill in later; the dot is live
-                memory.
+                History arrives in batches, so the newest minutes fill in later
+                {hasLiveMemory ? '; the dot is live memory.' : '.'}
               </span>
             </p>
           )}
