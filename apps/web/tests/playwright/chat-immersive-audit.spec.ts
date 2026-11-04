@@ -48,7 +48,7 @@ const WIDE_REPLY = [
   'Nothing needs you right now. I will check the PR3 deploy when it finishes.',
 ].join('\n');
 
-const MESSAGES = [
+const WIDE_MESSAGES = [
   ...GLASS_MESSAGES,
   {
     id: 'msg-immersive-user',
@@ -70,11 +70,30 @@ const MESSAGES = [
   },
 ];
 
+/**
+ * The same transcript ending in a tail of short turns, like a real chat: when the
+ * conversation's width and height change together these reflow, and the list must still end
+ * on the newest one.
+ */
+const TAIL_MESSAGES = [
+  ...WIDE_MESSAGES,
+  ...['Thanks. Check the deploy again?', 'Checking now.', 'ok', 'HELLO'].map((content, i) => ({
+    id: `msg-immersive-tail-${i}`,
+    sessionId: GLASS_SESSION_ID,
+    role: i % 2 === 0 ? 'user' : 'assistant',
+    content,
+    toolMetadata: null,
+    createdAt: GLASS_NOW - (60 - i * 10) * 1000,
+    sequence: WIDE_MESSAGES.length + 1 + i,
+  })),
+];
+
 function isPhone(page: Page): boolean {
   return (page.viewportSize()?.width ?? 0) < 768;
 }
 
-async function openChat(page: Page, theme: Theme) {
+async function openChat(page: Page, theme: Theme, transcript: 'wide' | 'tail' = 'wide') {
+  const MESSAGES = transcript === 'wide' ? WIDE_MESSAGES : TAIL_MESSAGES;
   await setupGlassChatMocks(page, { theme });
   // Registered after the shared mocks, so these win for the open chat's transcript.
   const open = GLASS_SESSIONS.find((s) => s.id === GLASS_SESSION_ID);
@@ -92,7 +111,8 @@ async function openChat(page: Page, theme: Theme) {
   );
   await page.goto(`/projects/${GLASS_PROJECT_ID}/chat/${GLASS_SESSION_ID}`);
   await expect(page.getByText('Something went wrong')).toHaveCount(0);
-  await expect(page.getByText(/Nothing needs you right now/)).toBeVisible({ timeout: 20_000 });
+  const newest = transcript === 'wide' ? /Nothing needs you right now/ : /^HELLO$/;
+  await expect(page.getByText(newest)).toBeVisible({ timeout: 20_000 });
   // Bring the newest reply fully into view, as a reader at the bottom of the chat sees it.
   const scroll = page.getByRole('button', { name: 'Scroll to bottom' });
   if ((await scroll.count()) > 0) await scroll.click();
@@ -132,6 +152,22 @@ async function wideReplyGeometry(page: Page) {
       boxShadow: cs.boxShadow,
     };
   });
+}
+
+/** Width of the newest agent reply on screen. */
+async function newestReplyWidth(page: Page) {
+  return page.evaluate(() => {
+    const el = Array.from(document.querySelectorAll('.glass-msg-agent')).at(-1);
+    if (!el) throw new Error('no agent reply rendered');
+    return el.getBoundingClientRect().width;
+  });
+}
+
+/** How far the conversation is scrolled up from its newest content, in px. */
+async function distanceFromBottom(page: Page) {
+  return conversation(page)
+    .getByTestId('virtuoso-scroller')
+    .evaluate((el) => el.scrollHeight - el.scrollTop - el.clientHeight);
 }
 
 /** Playback rate for inspecting a slide mid-flight. */
@@ -213,7 +249,7 @@ test.describe('immersive view on a phone', () => {
       page,
     }) => {
       test.skip(!isPhone(page), 'phone-only control');
-      await openChat(page, theme);
+      await openChat(page, theme, 'tail');
       const viewport = page.viewportSize()!;
 
       const before = {
@@ -222,11 +258,19 @@ test.describe('immersive view on a phone', () => {
         rail: await box(chrome(page, 'tool-rail')),
         composer: await box(chrome(page, 'composer')),
         log: await box(conversation(page)),
-        reply: (await wideReplyGeometry(page))!.width,
+        reply: await newestReplyWidth(page),
       };
+
+      // The reader is at the newest message before the tap.
+      await expect(page.getByRole('button', { name: 'Scroll to bottom' })).toHaveCount(0);
 
       await page.getByRole('button', { name: 'Show only the conversation' }).click();
       await waitForSlideToFinish(page);
+
+      // ...and still is after it: growing the conversation must not scroll the newest message
+      // away (the list otherwise keeps its top fixed as it grows).
+      await expect(page.getByRole('button', { name: 'Scroll to bottom' })).toHaveCount(0);
+      expect(await distanceFromBottom(page)).toBeLessThanOrEqual(2);
 
       for (const name of ['app-bar', 'session-header', 'tool-rail', 'composer'] as const) {
         await expect(chrome(page, name), `${name} slides away`).toBeHidden();
@@ -242,15 +286,18 @@ test.describe('immersive view on a phone', () => {
       expect(log.x).toBeLessThanOrEqual(8);
       expect(log.x + log.width).toBeGreaterThanOrEqual(viewport.width - 8);
       // The reply gained the rail's and the frame's width.
-      const reply = (await wideReplyGeometry(page))!.width;
+      const reply = await newestReplyWidth(page);
       expect(reply).toBeGreaterThan(before.reply + 40);
-      // Liveness: the conversation still renders its content.
-      await expect(page.getByText(/Nothing needs you right now/)).toBeVisible();
+      // Liveness: the newest message is still on screen.
+      await expect(page.getByText(/^HELLO$/)).toBeVisible();
       await assertNoOverflow(page);
       await screenshot(page, `chat-immersive-on-${theme}`);
 
       await toggle.click();
       await waitForSlideToFinish(page);
+      // Shrinking back keeps the reader at the newest message too.
+      await expect(page.getByRole('button', { name: 'Scroll to bottom' })).toHaveCount(0);
+      expect(await distanceFromBottom(page)).toBeLessThanOrEqual(2);
 
       // Everything is back where it was, with nothing left pinned.
       const after = {

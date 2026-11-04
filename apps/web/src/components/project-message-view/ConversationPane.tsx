@@ -173,7 +173,13 @@ export function ConversationPane({
             </button>
           )}
 
-          <ImmersiveChatToggle agentActive={lc.agentActivity !== 'idle'} />
+          <ImmersiveChatToggle
+            agentActive={lc.agentActivity !== 'idle'}
+            atBottom={!lc.showScrollButton}
+            scrollToBottom={() =>
+              virtuosoRef.current?.scrollToIndex({ index: 'LAST', align: 'end' })
+            }
+          />
 
           {selectionControls}
         </div>

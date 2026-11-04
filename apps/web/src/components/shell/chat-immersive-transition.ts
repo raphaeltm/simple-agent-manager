@@ -74,6 +74,15 @@ const PINNED_PROPS = [
 
 type SetActive = (on: boolean) => void;
 
+export interface ChatImmersiveOptions {
+  /**
+   * Keeps the conversation on its newest message. Pass it only when the reader is at the newest
+   * message when they tap: resizing a virtualized list re-anchors it on its top row, and once the
+   * width changes too the rows reflow, so the newest message would otherwise slide out of view.
+   */
+  stickToBottom?: () => void;
+}
+
 interface Pinned {
   el: HTMLElement;
   /** The inline `width` the element had before pinning, restored on unpin. */
@@ -175,7 +184,7 @@ function slide(el: HTMLElement, from: string, to: string, fromOpacity: number, t
  * conversation makes react-virtuoso re-anchor and render rows on the main thread; letting that
  * finish before the slide keeps it out of the animation's frames.
  */
-function listSettled(): Promise<void> {
+function listSettled(onFrame?: () => void): Promise<void> {
   return new Promise((resolve) => {
     const started = performance.now();
     let scrolled = true;
@@ -190,6 +199,9 @@ function listSettled(): Promise<void> {
         return;
       }
       scrolled = false;
+      // Re-pinning to the newest message scrolls only while the list is still moving, so it
+      // keeps the wait going exactly as long as the list needs.
+      onFrame?.();
       requestAnimationFrame(check);
     };
     // Two frames: the first paints the new layout, the second sees any re-anchoring scroll.
@@ -197,7 +209,10 @@ function listSettled(): Promise<void> {
   });
 }
 
-export async function enterChatImmersive(setActive: SetActive): Promise<void> {
+export async function enterChatImmersive(
+  setActive: SetActive,
+  { stickToBottom }: ChatImmersiveOptions = {}
+): Promise<void> {
   cancelRunning();
   const run = ++generation;
 
@@ -206,13 +221,15 @@ export async function enterChatImmersive(setActive: SetActive): Promise<void> {
   pinned = measured.map(({ el, rect }) => pin(el, rect));
   flushSync(() => setActive(true));
   correctPins(measured);
+  stickToBottom?.();
 
   const moves = measured.map(({ el, rect }) => ({ el, offscreen: offscreenTransform(el, rect) }));
   if (prefersReducedMotion()) {
     for (const { el } of moves) el.style.visibility = 'hidden';
+    await listSettled(stickToBottom);
     return;
   }
-  await listSettled();
+  await listSettled(stickToBottom);
   if (run !== generation) return;
 
   running = moves.map(({ el, offscreen }) => slide(el, 'none', offscreen, 1, 0));
@@ -227,15 +244,23 @@ export async function enterChatImmersive(setActive: SetActive): Promise<void> {
     el.style.visibility = 'hidden';
     el.style.pointerEvents = 'none';
   }
+  stickToBottom?.();
 }
 
-export async function exitChatImmersive(setActive: SetActive): Promise<void> {
+export async function exitChatImmersive(
+  setActive: SetActive,
+  { stickToBottom }: ChatImmersiveOptions = {}
+): Promise<void> {
   const els = pinned.filter((p) => p.el.isConnected).map((p) => p.el);
   const run = ++generation;
   unpinAll();
   flushSync(() => setActive(false));
   cancelRunning();
-  if (els.length === 0 || prefersReducedMotion()) return;
+  stickToBottom?.();
+  if (els.length === 0 || prefersReducedMotion()) {
+    await listSettled(stickToBottom);
+    return;
+  }
 
   // Measure every slot before starting any animation, so this is one forced layout. Each piece
   // is held off screen on its first keyframe while the list settles.
@@ -252,7 +277,7 @@ export async function exitChatImmersive(setActive: SetActive): Promise<void> {
   // tab order and the accessibility tree meanwhile, so nothing unseen can take focus.
   for (const { el } of moves) el.setAttribute('inert', '');
   inertHeld = moves.map(({ el }) => el);
-  await listSettled();
+  await listSettled(stickToBottom);
   if (run !== generation) return;
   for (const animation of running) animation.play();
   try {
@@ -260,7 +285,9 @@ export async function exitChatImmersive(setActive: SetActive): Promise<void> {
   } catch {
     return;
   }
-  if (run === generation) cancelRunning();
+  if (run !== generation) return;
+  cancelRunning();
+  stickToBottom?.();
 }
 
 function unpinAll() {

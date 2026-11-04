@@ -14,7 +14,16 @@ import {
  * away so only the conversation shows, and brings it back. Desktop has Focus and Zen modes for
  * the same job, so the button renders nothing there.
  */
-export function ImmersiveChatToggle({ agentActive }: Readonly<{ agentActive: boolean }>) {
+export function ImmersiveChatToggle({
+  agentActive,
+  atBottom,
+  scrollToBottom,
+}: Readonly<{
+  agentActive: boolean;
+  /** Whether the reader is at the newest message, so the toggle keeps them there. */
+  atBottom: boolean;
+  scrollToBottom: () => void;
+}>) {
   const isMobile = useIsMobile();
   const { active, setActive } = useChatImmersive();
   // Leaving the chat, or the phone layout, must never strand the shell with its chrome pinned
@@ -31,7 +40,11 @@ export function ImmersiveChatToggle({ agentActive }: Readonly<{ agentActive: boo
     <button
       type="button"
       onClick={() => {
-        void (active ? exitChatImmersive(setActive) : enterChatImmersive(setActive));
+        // Someone reading the newest message stays on it; someone scrolled up keeps their place.
+        const options = atBottom ? { stickToBottom: scrollToBottom } : {};
+        void (active
+          ? exitChatImmersive(setActive, options)
+          : enterChatImmersive(setActive, options));
       }}
       aria-label={label}
       aria-pressed={active}

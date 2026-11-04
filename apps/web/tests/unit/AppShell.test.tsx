@@ -632,9 +632,13 @@ interface FakeAnimation {
 function ChatStandIn({
   withToggle = true,
   withHiddenPiece = false,
+  atBottom = false,
+  scrollToBottom = () => {},
 }: {
   withToggle?: boolean;
   withHiddenPiece?: boolean;
+  atBottom?: boolean;
+  scrollToBottom?: () => void;
 }) {
   return (
     <>
@@ -650,7 +654,13 @@ function ChatStandIn({
         Tools
       </aside>
       <section data-immersive-chrome="composer">Message box</section>
-      {withToggle && <ImmersiveChatToggle agentActive={false} />}
+      {withToggle && (
+        <ImmersiveChatToggle
+          agentActive={false}
+          atBottom={atBottom}
+          scrollToBottom={scrollToBottom}
+        />
+      )}
     </>
   );
 }
@@ -885,6 +895,45 @@ describe('AppShell (immersive chat view)', () => {
     // The four displayed pieces still slid away.
     expect(animations).toHaveLength(4);
     expect(document.querySelectorAll('[data-immersive-pinned]')).toHaveLength(4);
+  });
+
+  it('keeps a reader at the newest message there through both toggles', async () => {
+    const scrollToBottom = vi.fn();
+    render(
+      <MemoryRouter initialEntries={['/projects/p1/chat/s1']}>
+        <AppShell>
+          <ChatStandIn atBottom scrollToBottom={scrollToBottom} />
+        </AppShell>
+      </MemoryRouter>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Show only the conversation' }));
+    // Right after the layout change, before anything slides.
+    expect(scrollToBottom).toHaveBeenCalled();
+    await settle();
+    const afterEnter = scrollToBottom.mock.calls.length;
+
+    fireEvent.click(screen.getByRole('button', { name: 'Show the rest of the app' }));
+    expect(scrollToBottom.mock.calls.length).toBeGreaterThan(afterEnter);
+    await settle();
+    expect(shellFrame()).not.toHaveAttribute('data-chat-immersive');
+  });
+
+  it('leaves a reader who scrolled up where they are', async () => {
+    const scrollToBottom = vi.fn();
+    render(
+      <MemoryRouter initialEntries={['/projects/p1/chat/s1']}>
+        <AppShell>
+          <ChatStandIn atBottom={false} scrollToBottom={scrollToBottom} />
+        </AppShell>
+      </MemoryRouter>
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Show only the conversation' }));
+    await settle();
+    fireEvent.click(screen.getByRole('button', { name: 'Show the rest of the app' }));
+    await settle();
+    // Liveness: both toggles ran.
+    expect(animations).toHaveLength(8);
+    expect(scrollToBottom).not.toHaveBeenCalled();
   });
 
   it('has no toggle on the desktop layout', () => {
