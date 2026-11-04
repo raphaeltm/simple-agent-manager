@@ -5,7 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
-import { recoverLegacyDeploymentBinding } from '../../../src/services/deployment-legacy-binding';
+import {
+  attemptLegacyDeploymentBindingRecovery,
+  recoverLegacyDeploymentBinding,
+} from '../../../src/services/deployment-legacy-binding';
 import { fingerprintEncryptedProviderCredential } from '../../../src/services/provider-credential-exact';
 import { createProviderForUser } from '../../../src/services/provider-credentials';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -247,30 +250,26 @@ describe('legacy deployment credential recovery', () => {
   });
 
   it('selects the attributed project credential rather than the user fallback', async () => {
-    await db
-      .insert(schema.projects)
-      .values({
-        id: 'project',
-        userId: 'owner',
-        name: 'App',
-        normalizedName: 'app',
-        installationId: 'github-installation',
-        repository: 'owner/app',
-      });
-    await db
-      .insert(schema.credentials)
-      .values({
-        id: 'project-key',
-        userId: 'owner',
-        projectId: 'project',
-        provider: 'hetzner',
-        credentialType: 'cloud-provider',
-        isActive: true,
-        encryptedToken: 'project-ciphertext',
-        iv: 'project-iv',
-        createdAt: UPDATED,
-        updatedAt: UPDATED,
-      });
+    await db.insert(schema.projects).values({
+      id: 'project',
+      userId: 'owner',
+      name: 'App',
+      normalizedName: 'app',
+      installationId: 'github-installation',
+      repository: 'owner/app',
+    });
+    await db.insert(schema.credentials).values({
+      id: 'project-key',
+      userId: 'owner',
+      projectId: 'project',
+      provider: 'hetzner',
+      credentialType: 'cloud-provider',
+      isActive: true,
+      encryptedToken: 'project-ciphertext',
+      iv: 'project-iv',
+      createdAt: UPDATED,
+      updatedAt: UPDATED,
+    });
     await db
       .update(schema.nodes)
       .set({ credentialAttributionSource: 'project', credentialAttributionProjectId: 'project' })
@@ -338,5 +337,89 @@ describe('legacy deployment credential recovery', () => {
       return vm;
     });
     await expectUnbound();
+  });
+  // Idea 01M6K6R2255R7414WSER4N3STJ: a refusal returned a bare `false`, so a node stuck in teardown
+  // for 10 days left no record of which ownership evidence was missing.
+  describe('names why a binding was not recovered', () => {
+    async function reason() {
+      const result = await attemptLegacyDeploymentBindingRecovery(env, node);
+      return result.recovered ? 'recovered' : result.reason;
+    }
+    function decisionRows() {
+      return sqlite
+        .prepare('SELECT source, decision, reason FROM node_lifecycle_decisions WHERE node_id = ?')
+        .all(node.id);
+    }
+
+    it('recovers with no refusal (control)', async () => {
+      expect(await reason()).toBe('recovered');
+    });
+
+    it.each([
+      ['provider_vm_not_found', () => getVM.mockResolvedValue(null)],
+      ['provider_vm_identity_mismatch', () => Object.assign(vm, { ip: '203.0.113.9' })],
+      ['provider_label_mismatch', () => Object.assign(vm.labels, { role: 'workspace' })],
+      ['installation_identity_unconfigured', () => delete env.SAM_INSTALLATION_ID],
+      ['credential_unresolvable', () => vi.mocked(createProviderForUser).mockResolvedValue(null)],
+    ] as const)('%s', async (expected, arrange) => {
+      arrange();
+      expect(await reason()).toBe(expected);
+    });
+
+    it('names an ambiguous credential choice', async () => {
+      await db.insert(schema.credentials).values({
+        id: 'second-key',
+        userId: 'owner',
+        provider: 'hetzner',
+        credentialType: 'cloud-provider',
+        isActive: true,
+        encryptedToken: 'another-ciphertext',
+        iv: 'another-iv',
+        updatedAt: UPDATED,
+      });
+      expect(await reason()).toBe('credential_missing_or_ambiguous');
+    });
+
+    it.each([
+      ['missing_agent_ready', { agentReadyAt: null }],
+      ['missing_credential_attribution', { credentialAttributionSource: null }],
+      ['attribution_not_owner', { credentialAttributionUserId: 'someone-else' }],
+      ['not_legacy', { placementCredentialReference: 'credentials:existing' }],
+      ['not_legacy', { nodeRole: 'workspace' }],
+    ] as const)('%s for %j', async (expected, changes) => {
+      node = { ...node, ...changes } as schema.Node;
+      expect(await reason()).toBe(expected);
+    });
+
+    it('names a node that changed while the provider GET was in flight', async () => {
+      getVM.mockImplementation(async () => {
+        await db
+          .update(schema.nodes)
+          .set({ status: 'destroying' })
+          .where(eq(schema.nodes.id, node.id));
+        return vm;
+      });
+      expect(await reason()).toBe('node_changed_during_recovery');
+    });
+
+    it('records a refusal in the node lifecycle decision log', async () => {
+      getVM.mockResolvedValue(null);
+      expect(await recoverLegacyDeploymentBinding(env, node)).toBe(false);
+      expect(decisionRows()).toEqual([
+        {
+          source: 'cleanup_sweep',
+          decision: 'legacy_binding_refused',
+          reason: 'provider_vm_not_found',
+        },
+      ]);
+    });
+
+    it('does not record nodes the recovery does not apply to (control)', async () => {
+      node = { ...node, nodeRole: 'workspace' } as schema.Node;
+      expect(await recoverLegacyDeploymentBinding(env, node)).toBe(false);
+      node = { ...node, nodeRole: 'deployment', providerInstanceId: null } as schema.Node;
+      expect(await recoverLegacyDeploymentBinding(env, node)).toBe(false);
+      expect(decisionRows()).toEqual([]);
+    });
   });
 });

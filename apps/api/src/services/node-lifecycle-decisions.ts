@@ -36,6 +36,7 @@ export type NodeLifecycleDecision =
   | 'destroyed'
   | 'destroy_failed'
   | 'skipped'
+  | 'legacy_binding_refused'
   // Warm handoff
   | 'handed_to_warm'
   | 'preserved_active'

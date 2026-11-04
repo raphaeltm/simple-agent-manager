@@ -6,7 +6,12 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
+import {
+  DEFAULT_NODE_DECISION_DEDUPE_WINDOW_MS,
+  recordNodeLifecycleDecision,
+} from './node-lifecycle-decisions';
 import {
   buildNodeProviderLabels,
   resolveEnvironmentLabel,
@@ -18,31 +23,101 @@ import {
 } from './provider-credential-exact';
 import { createProviderForUser } from './provider-credentials';
 
+/**
+ * Why a legacy binding was not recovered. `not_legacy` means the node is not an unbound managed
+ * deployment VM, so recovery does not apply; every other reason names the one piece of ownership
+ * evidence that was missing or disagreed, so a stuck teardown can say why (idea
+ * 01M6K6R2255R7414WSER4N3STJ: a refusal returned a bare `false` and the node retried for 10 days
+ * with nothing recorded).
+ */
+export type LegacyBindingRefusal =
+  | 'not_legacy'
+  | 'missing_provider_instance'
+  | 'missing_cloud_provider'
+  | 'missing_agent_ready'
+  | 'missing_credential_attribution'
+  | 'attribution_not_owner'
+  | 'credential_missing_or_ambiguous'
+  | 'credential_unresolvable'
+  | 'provider_vm_not_found'
+  | 'provider_vm_identity_mismatch'
+  | 'installation_identity_unconfigured'
+  | 'provider_label_mismatch'
+  | 'node_changed_during_recovery';
+
+export type LegacyBindingRecovery =
+  { recovered: true } | { recovered: false; reason: LegacyBindingRefusal };
+
+const refuse = (reason: LegacyBindingRefusal): LegacyBindingRecovery => ({
+  recovered: false,
+  reason,
+});
+
+/** Refusals that say nothing about this node's ownership evidence, so are not recorded. */
+const UNRECORDED_REFUSALS = new Set<LegacyBindingRefusal>([
+  'not_legacy',
+  // A providerless node is torn down through provider inventory, never through this binding.
+  'missing_provider_instance',
+]);
+
+/**
+ * Strict deletion and the deployment sweep call this before an unbound legacy deployment VM can be
+ * deleted. A refusal is recorded in the node lifecycle decision log (deduplicated, so an hourly
+ * retry does not flood it) because strict deletion's own error can only say the binding is missing.
+ */
 export async function recoverLegacyDeploymentBinding(
   env: Env,
   node: schema.Node,
   signal?: AbortSignal
 ): Promise<boolean> {
+  const result = await attemptLegacyDeploymentBindingRecovery(env, node, signal);
+  if (result.recovered) return true;
+  if (!UNRECORDED_REFUSALS.has(result.reason)) {
+    log.warn('deployment_node.legacy_binding_refused', {
+      nodeId: node.id,
+      status: node.status,
+      reason: result.reason,
+    });
+    await recordNodeLifecycleDecision(env.DATABASE, {
+      nodeId: node.id,
+      source: 'cleanup_sweep',
+      decision: 'legacy_binding_refused',
+      reason: result.reason,
+      dedupeWindowMs: DEFAULT_NODE_DECISION_DEDUPE_WINDOW_MS,
+    });
+  }
+  return false;
+}
+
+export async function attemptLegacyDeploymentBindingRecovery(
+  env: Env,
+  node: schema.Node,
+  signal?: AbortSignal
+): Promise<LegacyBindingRecovery> {
   if (
     node.nodeRole !== 'deployment' ||
     node.nodeClass !== 'managed' ||
     node.runtime !== 'vm' ||
-    !node.providerInstanceId ||
-    !node.cloudProvider ||
-    !node.agentReadyAt ||
     node.placementCredentialSource ||
     node.placementCredentialReference ||
     node.placementCredentialVersion ||
-    node.placementCredentialFingerprint ||
-    !node.credentialAttributionUserId ||
-    !node.credentialAttributionSource
+    node.placementCredentialFingerprint
   )
-    return false;
+    return refuse('not_legacy');
+  if (!node.providerInstanceId) return refuse('missing_provider_instance');
+  if (!node.cloudProvider) return refuse('missing_cloud_provider');
+  if (!node.agentReadyAt) return refuse('missing_agent_ready');
+  if (!node.credentialAttributionUserId || !node.credentialAttributionSource)
+    return refuse('missing_credential_attribution');
+  const cloudProvider = node.cloudProvider;
+  const providerInstanceId = node.providerInstanceId;
+  const agentReadyAt = node.agentReadyAt;
   const db = drizzle(env.DATABASE, { schema });
   const source = node.credentialAttributionSource;
   const attributionUserId = node.credentialAttributionUserId;
   const projectId = source === 'project' ? node.credentialAttributionProjectId : null;
-  if (attributionUserId !== node.userId || (source === 'project' && !projectId)) return false;
+  if (attributionUserId !== node.userId || (source === 'project' && !projectId))
+    return refuse('attribution_not_owner');
   const rows =
     source === 'platform'
       ? await db
@@ -71,9 +146,9 @@ export async function recoverLegacyDeploymentBinding(
             )
           )
           .limit(2);
-  if (!['user', 'project', 'platform'].includes(source) || rows.length !== 1) return false;
-  const credential = rows[0];
-  if (!credential) return false;
+  if (!['user', 'project', 'platform'].includes(source)) return refuse('attribution_not_owner');
+  const credential = rows.length === 1 ? rows[0] : undefined;
+  if (!credential) return refuse('credential_missing_or_ambiguous');
   const fingerprint = await fingerprintEncryptedProviderCredential(
     credential.encryptedToken,
     credential.iv
@@ -93,33 +168,33 @@ export async function recoverLegacyDeploymentBinding(
     projectId,
     binding
   );
-  if (!resolved || resolved.providerName !== node.cloudProvider) return false;
+  if (!resolved || resolved.providerName !== cloudProvider)
+    return refuse('credential_unresolvable');
   const vm = await resolved.provider.getVM(
     node.providerInstanceId,
     signal ? { signal } : undefined
   );
   // A wrong-account 404 is NEVER absence proof and never creates a binding.
+  if (!vm) return refuse('provider_vm_not_found');
   if (
-    !vm ||
-    vm.id !== node.providerInstanceId ||
+    vm.id !== providerInstanceId ||
     vm.location !== node.vmLocation ||
     vm.ip !== node.ipAddress ||
     Date.parse(vm.createdAt) < Date.parse(node.createdAt) ||
-    Date.parse(vm.createdAt) > Date.parse(node.agentReadyAt) ||
+    Date.parse(vm.createdAt) > Date.parse(agentReadyAt) ||
     !Number.isFinite(Date.parse(vm.createdAt)) ||
     !Number.isFinite(Date.parse(node.createdAt)) ||
-    !Number.isFinite(Date.parse(node.agentReadyAt))
+    !Number.isFinite(Date.parse(agentReadyAt))
   )
-    return false;
+    return refuse('provider_vm_identity_mismatch');
   const environmentLabel = resolveEnvironmentLabel(env);
   const installationId = resolveInstallationId(env);
+  if (!environmentLabel || !installationId) return refuse('installation_identity_unconfigured');
   if (
-    !environmentLabel ||
-    !installationId ||
     hasAmbiguousLabel(vm.labels, 'incarnation') ||
     (!node.runtimeIncarnationId && vm.labels.incarnation !== undefined)
   )
-    return false;
+    return refuse('provider_label_mismatch');
   const labels = buildNodeProviderLabels({
     nodeId: node.id,
     isDeploymentNode: true,
@@ -136,7 +211,7 @@ export async function recoverLegacyDeploymentBinding(
       ((['node', 'role', 'managed'].includes(key) || vm.labels[key] !== undefined) &&
         vm.labels[key] !== value)
     )
-      return false;
+      return refuse('provider_label_mismatch');
   }
   const credentialTable = source === 'platform' ? schema.platformCredentials : schema.credentials;
   const credentialFence = and(
@@ -179,5 +254,5 @@ export async function recoverLegacyDeploymentBinding(
       )
     )
     .run();
-  return result.meta.changes === 1;
+  return result.meta.changes === 1 ? { recovered: true } : refuse('node_changed_during_recovery');
 }

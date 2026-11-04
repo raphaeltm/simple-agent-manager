@@ -1,12 +1,9 @@
 /** Deployment teardown keeps its placement until strict runtime termination succeeds. */
 import { DEPLOYMENT_STOP_ERROR_PREFIX } from '@simple-agent-manager/shared';
-import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { log } from '../lib/logger';
-import { recoverLegacyDeploymentBinding } from './deployment-legacy-binding';
 import { deleteDNSRecord } from './dns';
 import { getTimeoutMs } from './fetch-timeout';
 import {
@@ -15,26 +12,6 @@ import {
 } from './node-lifecycle-decisions';
 import { retireDeletedDeploymentNodeRecord } from './node-resource-lifecycle';
 import { deleteNodeResourcesStrict } from './strict-node-deletion';
-
-/**
- * A deployment node provisioned before deployment nodes recorded their placement credential
- * (production: July 2026) can never pass strict deletion, which refuses an unbound node before any
- * provider call. `recoverLegacyDeploymentBinding` restores the binding from positive provider
- * ownership evidence. The sweep runs it for running nodes; a node already being torn down needs it
- * here, or it retries forever (node 01KXAR1T3XCQKKPBEJEERQ2PSZ, idea 01M6K6R2255R7414WSER4N3STJ).
- * It never weakens strict deletion: no evidence, no binding, and the attempt fails as before.
- */
-async function recoverLegacyBindingBeforeTeardown(
-  env: Env,
-  nodeId: string,
-  signal: AbortSignal
-): Promise<void> {
-  const db = drizzle(env.DATABASE, { schema });
-  const node = await db.select().from(schema.nodes).where(eq(schema.nodes.id, nodeId)).get();
-  if (!node || node.placementCredentialReference || node.placementCredentialSource) return;
-  const recovered = await recoverLegacyDeploymentBinding(env, node, signal);
-  log.info('deployment_node.legacy_binding_before_teardown', { nodeId, recovered });
-}
 
 /** Keeps the recorded cause readable in the node UI; the full text stays in `error_message`. */
 const CLEANUP_BLOCKED_REASON_MAX_LENGTH = 500;
@@ -85,7 +62,6 @@ export async function cleanupDeploymentNode(
   try {
     const signal = AbortSignal.timeout(options.requestTimeoutMs);
     const deadline = Date.now() + options.requestTimeoutMs;
-    if (claim.status !== 'deleted') await recoverLegacyBindingBeforeTeardown(env, nodeId, signal);
     const proof =
       claim.status === 'deleted'
         ? claim

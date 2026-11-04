@@ -2,7 +2,7 @@ import { HetznerProvider } from '@simple-agent-manager/providers';
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
@@ -14,6 +14,7 @@ import { provisionDeploymentNode } from '../../../src/services/deployment-provis
 import { deleteDNSRecord } from '../../../src/services/dns';
 import { teardownDeploymentEnvironmentOnNode } from '../../../src/services/node-agent';
 import { stopNodeResources } from '../../../src/services/node-resource-lifecycle';
+import { createProviderForUser } from '../../../src/services/provider-credentials';
 import { exactProviderCredentialBindingFromPlacementSnapshot } from '../../../src/services/provider-credential-exact';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -494,6 +495,142 @@ describe('deployment teardown with real SQL and strict provider boundary', () =>
     expect(row().runtime_termination_confirmed_at).toBeNull();
     expect(provider.deleteVM).not.toHaveBeenCalled();
     expect(provider.listVMs).not.toHaveBeenCalled();
+  });
+
+  // Production node 01KXAR1T3XCQKKPBEJEERQ2PSZ (idea 01M6K6R2255R7414WSER4N3STJ): provisioned in
+  // July with no placement credential binding, it sat `destroying` for 10 days. Strict deletion
+  // refused it every hour, legacy binding recovery (#2472) refused it with a bare `false`, and the
+  // claim cleared `cleanup_blocked_*` on every attempt, so nothing recorded why.
+  describe('a legacy unbound deployment node that is already being torn down', () => {
+    const LEGACY = {
+      status: 'destroying',
+      placementCredentialSource: null,
+      placementCredentialReference: null,
+      placementCredentialVersion: null,
+      placementCredentialFingerprint: null,
+      ipAddress: '203.0.113.8',
+      agentReadyAt: '2026-10-22T08:58:00.000Z',
+      credentialAttributionUserId: 'user',
+      credentialAttributionSource: 'user',
+    } as const;
+
+    function decisions() {
+      return sqlite
+        .prepare(
+          'SELECT source, decision, reason FROM node_lifecycle_decisions WHERE node_id = ? ORDER BY created_at'
+        )
+        .all('node') as Array<{ source: string; decision: string; reason: string | null }>;
+    }
+
+    it('recovers its binding from positive provider evidence, then deletes it', async () => {
+      await seedNode(LEGACY);
+      sqlite
+        .prepare(
+          `INSERT INTO credentials (id, user_id, provider, credential_type, is_active, encrypted_token, iv, created_at, updated_at)
+           VALUES ('cloud-key', 'user', 'hetzner', 'cloud-provider', 1, 'ciphertext', 'fixture-iv', ?, ?)`
+        )
+        .run('2026-10-01T00:00:00.000Z', '2026-10-01T00:00:00.000Z');
+      // The exact credential the recovery binds resolves; any other generation is refused.
+      const original = vi.mocked(createProviderForUser).getMockImplementation()!;
+      onTestFinished(() => {
+        vi.mocked(createProviderForUser).mockImplementation(original);
+      });
+      vi.mocked(createProviderForUser).mockImplementation(
+        async (_db, _user, _key, _env, _provider, _project, binding) => {
+          if (binding?.credentialReference !== 'credentials:cloud-key')
+            throw new Error('Credential rotated');
+          return { provider, providerName: 'hetzner' } as never;
+        }
+      );
+      provider.getVM.mockResolvedValue({
+        id: '123',
+        ip: '203.0.113.8',
+        location: 'fsn1',
+        createdAt: '2026-10-22T08:55:00.000Z',
+        labels: { node: 'node', managed: 'simple-agent-manager', role: 'deployment' },
+      });
+
+      expect(await runDeploymentNodeCleanup(env)).toEqual({ deleted: 1, failed: 0 });
+
+      expect(provider.deleteVM).toHaveBeenCalledTimes(1);
+      expect(provider.deleteVM.mock.calls[0]?.[0]).toBe('123');
+      expect(row()).toMatchObject({
+        status: 'deleted',
+        placement_credential_reference: 'credentials:cloud-key',
+        cleanup_blocked_since: null,
+        cleanup_blocked_reason: null,
+      });
+      expect(decisions()).toEqual([
+        {
+          source: 'deployment_teardown',
+          decision: 'destroyed',
+          reason: 'strict_termination_proof',
+        },
+      ]);
+    });
+
+    it('records why it cannot be deleted and keeps the blocked clock across retries', async () => {
+      // No provider evidence is possible (never reached agent-ready), so no binding is recovered.
+      await seedNode({ ...LEGACY, agentReadyAt: null });
+      vi.useFakeTimers({ now: Date.parse('2026-11-01T00:00:00.000Z'), toFake: ['Date'] });
+      try {
+        await cleanupDeploymentNode(env, 'node', 'user', options);
+        const first = row();
+        vi.setSystemTime(Date.parse('2026-11-01T01:05:00.000Z'));
+        await cleanupDeploymentNode(env, 'node', 'user', options);
+
+        expect(first.cleanup_blocked_since).toBe('2026-11-01T00:00:00.000Z');
+        expect(row()).toMatchObject({
+          status: 'destroying',
+          cleanup_blocked_since: '2026-11-01T00:00:00.000Z',
+          cleanup_blocked_reason: expect.stringContaining(
+            'exact provider credential binding is missing'
+          ),
+        });
+        expect(provider.deleteVM).not.toHaveBeenCalled();
+        // Each attempt records the teardown failure and the ownership evidence that was missing.
+        expect(
+          decisions().map(({ source, decision, reason }) => ({ source, decision, reason }))
+        ).toEqual([
+          {
+            source: 'cleanup_sweep',
+            decision: 'legacy_binding_refused',
+            reason: 'missing_agent_ready',
+          },
+          {
+            source: 'deployment_teardown',
+            decision: 'destroy_failed',
+            reason: expect.stringContaining('exact provider credential binding is missing'),
+          },
+          {
+            source: 'cleanup_sweep',
+            decision: 'legacy_binding_refused',
+            reason: 'missing_agent_ready',
+          },
+          {
+            source: 'deployment_teardown',
+            decision: 'destroy_failed',
+            reason: expect.stringContaining('exact provider credential binding is missing'),
+          },
+        ]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it('clears the recorded refusal once a later attempt deletes the node (control)', async () => {
+      await seedNode({ status: 'destroying' });
+      provider.deleteVM.mockRejectedValueOnce(new Error('provider unavailable'));
+      await cleanupDeploymentNode(env, 'node', 'user', options);
+      expect(row().cleanup_blocked_reason).toContain('provider unavailable');
+
+      expect((await cleanupDeploymentNode(env, 'node', 'user', options)).nodeDeleted).toBe(true);
+      expect(row()).toMatchObject({
+        status: 'deleted',
+        cleanup_blocked_since: null,
+        cleanup_blocked_reason: null,
+      });
+    });
   });
 
   it('does not delete a shared node with another active environment', async () => {
