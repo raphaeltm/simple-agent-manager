@@ -75,10 +75,10 @@ function request(path: string, body: unknown, method = 'POST') {
   });
 }
 
-function toolsFor(f: ReturnType<typeof fixture>) {
+async function toolsFor(f: ReturnType<typeof fixture>) {
   const { turn } = f.controller.store.accept('turn-key', 'Record the requested project idea');
   f.controller.store.setState(turn.id, 'running');
-  const tools = operatorTools({
+  const tools = await operatorTools({
     env: f.env,
     store: f.controller.store,
     turn,
@@ -152,7 +152,7 @@ describe('SAM operator authorization and effect fencing', () => {
     'rejects schema-invalid stored $operation input on $endpoint without changing receipts or executing effects',
     async ({ operation, endpoint, input, approval }) => {
       const f = fixture();
-      const { turn } = toolsFor(f);
+      const { turn } = await toolsFor(f);
       const actionId = `invalid-${endpoint}`;
       f.controller.store.reserveAction(
         actionId,
@@ -205,7 +205,7 @@ describe('SAM operator authorization and effect fencing', () => {
 
   it('executes an authorized idea once and returns the durable receipt on a repeated tool call', async () => {
     const f = fixture();
-    const { execute, turn } = toolsFor(f);
+    const { execute, turn } = await toolsFor(f);
     const input = { projectId: 'project-alice', title: 'Authorized idea' };
     const first = await execute('sam_idea_create', input);
     expect(first).toMatchObject({ title: input.title, status: 'draft' });
@@ -216,7 +216,7 @@ describe('SAM operator authorization and effect fencing', () => {
 
   it('cannot create work in another user’s project or after membership removal', async () => {
     const f = fixture();
-    const { execute } = toolsFor(f);
+    const { execute } = await toolsFor(f);
     await execute('sam_idea_create', { projectId: 'project-bob', title: 'Must not exist' });
     f.database.prepare("UPDATE project_members SET status='removed' WHERE user_id='alice'").run();
     await execute('sam_idea_create', { projectId: 'project-alice', title: 'Also forbidden' });
@@ -227,7 +227,7 @@ describe('SAM operator authorization and effect fencing', () => {
     const f = fixture();
     const canary = 'PRIVATE_REVOKED_PROJECT_TASK_CANARY';
     f.database.prepare("UPDATE tasks SET title=? WHERE id='task-alice'").run(canary);
-    const { execute } = toolsFor(f);
+    const { execute } = await toolsFor(f);
     expect(
       await execute('sam_task_get', {
         projectId: 'project-alice',
@@ -251,7 +251,7 @@ describe('SAM operator authorization and effect fencing', () => {
     'redacts a completed $operation receipt on repeated $endpoint after project revocation',
     async ({ operation, endpoint }) => {
       const f = fixture();
-      const { turn } = toolsFor(f);
+      const { turn } = await toolsFor(f);
       const canary = 'REVOKED_COMPLETED_RECEIPT_CANARY';
       f.database.prepare("UPDATE tasks SET id=? WHERE id='task-alice'").run(canary);
       const input =
@@ -331,7 +331,7 @@ describe('SAM operator authorization and effect fencing', () => {
         }),
       }),
     } as unknown as Env['PROJECT_DATA'];
-    const { turn } = toolsFor(f);
+    const { turn } = await toolsFor(f);
     const canary = 'REVOKED_SESSION_RECEIPT_CANARY';
     f.controller.store.reserveAction(
       'shared-action',
@@ -363,7 +363,7 @@ describe('SAM operator authorization and effect fencing', () => {
 
   it('rejects a pending destructive confirmation after its turn is cancelled', async () => {
     const f = fixture();
-    const { turn } = toolsFor(f);
+    const { turn } = await toolsFor(f);
     f.controller.store.reserveAction(
       'stop-action',
       turn.id,
@@ -402,7 +402,7 @@ describe('SAM operator authorization and effect fencing', () => {
         } as D1PreparedStatement;
       },
     } as D1Database;
-    const { execute, turn } = toolsFor(f);
+    const { execute, turn } = await toolsFor(f);
     const input = { projectId: 'project-alice', title: 'Committed but unacknowledged' };
     expect(await execute('sam_idea_create', input)).toMatchObject({ status: 'uncertain' });
     expect(await execute('sam_idea_create', input)).toMatchObject({ status: 'uncertain' });
@@ -414,7 +414,7 @@ describe('SAM operator authorization and effect fencing', () => {
 
   it('does not create an idea when disabled during project authorization', async () => {
     const f = fixture();
-    const { execute } = toolsFor(f);
+    const { execute } = await toolsFor(f);
     const paused = pauseMembershipRead(f.env);
     const pending = execute('sam_idea_create', {
       projectId: 'project-alice',
@@ -430,7 +430,7 @@ describe('SAM operator authorization and effect fencing', () => {
 
   it('does not create an idea if the account is suspended during project authorization', async () => {
     const f = fixture();
-    const { execute } = toolsFor(f);
+    const { execute } = await toolsFor(f);
     const paused = pauseMembershipRead(f.env);
     const pending = execute('sam_idea_create', {
       projectId: 'project-alice',
@@ -445,7 +445,7 @@ describe('SAM operator authorization and effect fencing', () => {
 
   it('applies a live installation kill-switch edit before an in-flight write reaches its effect', async () => {
     const f = fixture();
-    const { execute } = toolsFor(f);
+    const { execute } = await toolsFor(f);
     const paused = pauseMembershipRead(f.env);
     const pending = execute('sam_idea_create', {
       projectId: 'project-alice',
@@ -503,7 +503,7 @@ describe('SAM operator authorization and effect fencing', () => {
         acceptPromptDelivery,
       }),
     } as unknown as Env['PROJECT_DATA'];
-    const { execute } = toolsFor(f);
+    const { execute } = await toolsFor(f);
     const paused = pauseMembershipRead(f.env, 'agent_profiles');
     const pending = execute('sam_chat_send', {
       projectId: 'project-alice',
@@ -524,7 +524,7 @@ describe('SAM operator authorization and effect fencing', () => {
 
   it('does not issue any new action after the account is suspended', async () => {
     const f = fixture();
-    const { execute } = toolsFor(f);
+    const { execute } = await toolsFor(f);
     f.database.prepare("UPDATE users SET status='suspended' WHERE id='alice'").run();
     await expect(
       execute('sam_idea_create', {

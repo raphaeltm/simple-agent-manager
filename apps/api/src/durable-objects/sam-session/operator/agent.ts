@@ -1,4 +1,3 @@
-import { Agent } from '@mastra/core/agent';
 import { PLATFORM_AI_MODELS, resolveSamConfig } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../../env';
@@ -66,6 +65,10 @@ export async function runOperatorAgent(options: {
   live?: OperatorLive;
 }): Promise<string> {
   const { env, store, turn, userId, assertCurrent, live } = options;
+  assertCurrent();
+  // Keep provider initialization out of the Worker's startup CPU budget.
+  const { Agent } = await import('@mastra/core/agent');
+  assertCurrent();
   const config = resolveSamConfig(env as unknown as Record<string, string | undefined>);
   const catalogModel = PLATFORM_AI_MODELS.find((item) => item.id === config.model);
   if (!catalogModel) throw new Error('SAM model is not in the supported platform catalog');
@@ -93,13 +96,14 @@ export async function runOperatorAgent(options: {
         },
       },
     ],
-    tools: operatorTools({
+    tools: await operatorTools({
       ...options,
       onToolAttempt: () => {
         toolAttempted = true;
       },
     }),
   });
+  assertCurrent();
   // The canonical per-user history is projected into Mastra; no second framework memory.
   const appOrigin = new URL(getTrustedApiOrigin(env));
   if (appOrigin.hostname.startsWith('api.'))
