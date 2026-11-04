@@ -1,9 +1,9 @@
-import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
+import { ATTACHMENT_DEFAULTS } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { TaskAttachmentRef } from '../../lib/api';
 import { requestAttachmentUpload, uploadAttachmentToR2 } from '../../lib/api';
-import { formatFileSize } from '../../lib/file-utils';
+import { formatFileSize, withSafeFilename } from '../../lib/file-utils';
 
 export const DEFAULT_ATTACHMENT_MESSAGE = 'Please read the attached files.';
 
@@ -100,7 +100,7 @@ export function useAttachments(
       const newFiles: AttachmentUploadState[] = [];
       const currentTotal = current.reduce((sum, a) => sum + a.file.size, 0);
       let runningTotal = currentTotal;
-      for (const file of Array.from(files)) {
+      for (const file of Array.from(files).map(withSafeFilename)) {
         if (current.length + newFiles.length >= maxFiles) {
           setSubmitError(`Maximum ${maxFiles} files allowed`);
           break;
@@ -111,10 +111,6 @@ export function useAttachments(
         }
         if (file.size > maxBytes) {
           setSubmitError(`${file.name} exceeds ${formatFileSize(maxBytes)} limit`);
-          continue;
-        }
-        if (!SAFE_FILENAME_REGEX.test(file.name) || ['.', '..'].includes(file.name)) {
-          setSubmitError(`${file.name} has invalid characters`);
           continue;
         }
         if (runningTotal + file.size > batchMax) {

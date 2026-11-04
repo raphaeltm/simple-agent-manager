@@ -251,7 +251,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
         className={`${paneClassName('overlay')} fixed top-[20%] left-1/2 -translate-x-1/2 w-[90vw] max-w-[480px] z-command-palette flex flex-col overflow-hidden`}
       >
         {/* Search input */}
-        <div className="flex items-center gap-2 px-4 py-3 border-b border-border-default bg-[rgba(0,0,0,0.2)]">
+        <div className="sam-well m-2.5 mb-1.5 flex items-center gap-2 rounded-[14px] px-3 py-2.5">
           <Search size={14} className="text-fg-muted shrink-0" />
           <input
             ref={inputRef}
