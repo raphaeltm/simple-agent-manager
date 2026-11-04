@@ -1618,6 +1618,8 @@ export const nodes = sqliteTable(
     cleanupBlockedReason: text('cleanup_blocked_reason'),
     cleanupBlockedAlertedAt: text('cleanup_blocked_alerted_at'),
     cleanupRetirementSourcesJson: text('cleanup_retirement_sources_json'),
+    /** When `status` last changed; maintained by D1 triggers (migration 0218). */
+    statusChangedAt: text('status_changed_at'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -1703,6 +1705,8 @@ export const workspaces = sqliteTable(
     resolvedReservationJson: text('resolved_reservation_json'),
     /** JSON snapshot of PlacementExplanation for audit. */
     placementExplanationJson: text('placement_explanation_json'),
+    /** When `status` last changed; maintained by D1 triggers (migration 0218). */
+    statusChangedAt: text('status_changed_at'),
     ...capacityPlacementColumns(),
     createdAt: text('created_at')
       .notNull()
@@ -2105,7 +2109,11 @@ export const sessionSnapshots = sqliteTable(
      * decay in `session-snapshot-recovery-budget.ts`.
      */
     recoveryFailedAt: text('recovery_failed_at'),
+    /** When `recoveryStatus` last changed; maintained by D1 triggers (migration 0218). */
+    recoveryStatusChangedAt: text('recovery_status_changed_at'),
     sleepStatus: text('sleep_status'),
+    /** When `sleepStatus` last changed; maintained by D1 triggers (migration 0218). */
+    sleepStatusChangedAt: text('sleep_status_changed_at'),
     sleepAfter: text('sleep_after'),
     sleepAttempts: integer('sleep_attempts').notNull().default(0),
     sleepError: text('sleep_error'),
@@ -5360,3 +5368,45 @@ export const operationsAuditLog = sqliteTable(
 );
 
 export type OperationsAuditLogRow = typeof operationsAuditLog.$inferSelect;
+
+// =============================================================================
+// Lifecycle latency monitoring (migration 0218)
+// =============================================================================
+// Rows are written by D1 triggers on workspaces, nodes and session_snapshots status changes,
+// never by application code. `enteredAt` is when `fromStatus` was entered (null when unknown).
+export const lifecycleStateTransitions = sqliteTable(
+  'lifecycle_state_transitions',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    entityType: text('entity_type').notNull(),
+    entityId: text('entity_id').notNull(),
+    fromStatus: text('from_status'),
+    toStatus: text('to_status'),
+    enteredAt: text('entered_at'),
+    changedAt: text('changed_at').notNull(),
+  },
+  (table) => ({
+    stateChangedIdx: index('idx_lifecycle_state_transitions_state_changed').on(
+      table.entityType,
+      table.fromStatus,
+      table.changedAt
+    ),
+    changedIdx: index('idx_lifecycle_state_transitions_changed').on(table.changedAt),
+  })
+);
+
+/** One row per alerted slow-state episode; the primary key makes the alert at-most-once. */
+export const lifecycleLatencyAlerts = sqliteTable(
+  'lifecycle_latency_alerts',
+  {
+    entityType: text('entity_type').notNull(),
+    entityId: text('entity_id').notNull(),
+    status: text('status').notNull(),
+    enteredAt: text('entered_at').notNull(),
+    alertedAt: text('alerted_at').notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.entityType, table.entityId, table.status, table.enteredAt] }),
+    alertedIdx: index('idx_lifecycle_latency_alerts_alerted').on(table.alertedAt),
+  })
+);

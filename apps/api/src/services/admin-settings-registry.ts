@@ -1,6 +1,7 @@
 import type { AdminSettingDefinition } from './admin-setting-definitions';
 import { CORE_SETTINGS } from './admin-settings-core-definitions';
 import { FEATURE_SETTINGS } from './admin-settings-features-definitions';
+import { LIFECYCLE_LATENCY_SETTINGS } from './admin-settings-lifecycle-latency-definitions';
 import { OPERATOR_SETTINGS } from './admin-settings-operator-definitions';
 export {
   type AdminSettingDefinition,
@@ -17,7 +18,12 @@ export {
   MAX_SAM_OPERATOR_EVENT_PAGE_SIZE,
   OPERATOR_DEFAULTS,
 } from './admin-setting-definitions';
-const definitions = [...CORE_SETTINGS, ...FEATURE_SETTINGS, ...OPERATOR_SETTINGS];
+const definitions = [
+  ...CORE_SETTINGS,
+  ...FEATURE_SETTINGS,
+  ...OPERATOR_SETTINGS,
+  ...LIFECYCLE_LATENCY_SETTINGS,
+];
 
 export const ADMIN_SETTINGS_REGISTRY: readonly AdminSettingDefinition[] = Object.freeze(
   definitions.map((definition) =>
