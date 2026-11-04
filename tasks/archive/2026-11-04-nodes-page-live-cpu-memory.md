@@ -69,7 +69,7 @@ Because history arrives in 15-minute batches, the per-machine chart covers the l
 - [x] No horizontal overflow at 375px and 1280px; light and dark themes.
 - [x] No prototype files on `main`.
 
-Evidence: `apps/api/tests/unit/routes/node-resource-usage.test.ts` (9 tests, real SQL, cross-user attack + owner control), `apps/web/tests/unit/pages/nodes.test.tsx` (15 tests), `apps/web/tests/unit/components/node/usage/node-resource-model.test.ts` (6), `apps/web/tests/playwright/nodes-usage-audit.spec.ts` (14 at 375 and 1280, dark and light, `assertNoClippedOverflow`). The branch was cut from `origin/main`; no `nodes-glass-prototype` files are in the diff. Staging verification: see PR.
+Evidence: `apps/api/tests/unit/routes/node-resource-usage.test.ts` (12 tests, real SQL, cross-user attack + owner control, 8,640-chunk outer-limit and query-plan check), `apps/web/tests/unit/pages/nodes.test.tsx`, `apps/web/tests/unit/components/node/usage/node-resource-model.test.ts` (6), `apps/web/tests/playwright/nodes-usage-audit.spec.ts` (18 at 375 and 1280, dark and light, `assertNoClippedOverflow`). The branch was cut from `origin/main`; no `nodes-glass-prototype` files are in the diff. Staging verification (sammy.party): at `58c1e046a` a real VM session (Hetzner cx33, Falkenstein) showed its row, its chat link, a real machine chart (0.5/4.0 GB, <0.1/2.0 vCPU) and per-session history, 2 passed at 375 and 1280. At `d359b96d1`, `staging-nodes-usage.spec.ts` passed at 375 and 1280 (2026-11-04 22:53Z): resource-usage returned 200, Instant containers were named "Instant container · Cloudflare" with no empty chart, and no onboarding wizard appeared. The test workspaces and node were deleted.
 
 ## References
 
