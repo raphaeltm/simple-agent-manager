@@ -1,9 +1,8 @@
 /**
- * Lifecycle latency monitoring against real Miniflare D1 with the real migration chain, so
- * the status triggers in migration 0218 are what stamp `*_changed_at` and record transitions.
- * The watchdog is driven with an injected clock instead of hand-aged timestamps (rule 62).
+ * Lifecycle latency monitoring against real Miniflare D1 with the real migration chain.
+ * The watchdog is driven with an injected clock; state changes go through real UPDATEs.
  *
- * Source: apps/api/src/services/lifecycle-latency/, migration 0218_lifecycle_latency_monitoring.sql
+ * Source: apps/api/src/services/lifecycle-latency/, migrations 0219 and 0220.
  */
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -16,10 +15,13 @@ import { seedNode, seedUser, seedWorkspace } from './helpers/seed-d1';
 
 const USER_ID = 'user-latency-001';
 const MINUTE = 60_000;
+const HOUR = 60 * MINUTE;
+const DAY = 24 * HOUR;
 
 async function resetLifecycleState(): Promise<void> {
   await env.DATABASE.batch([
-    env.DATABASE.prepare('DELETE FROM lifecycle_latency_alerts'),
+    env.DATABASE.prepare('DELETE FROM lifecycle_state_observations'),
+    env.DATABASE.prepare('DELETE FROM lifecycle_state_episodes'),
     env.DATABASE.prepare(
       "UPDATE workspaces SET status = 'deleted' WHERE status NOT IN ('deleted', 'error')"
     ),
@@ -29,21 +31,12 @@ async function resetLifecycleState(): Promise<void> {
     env.DATABASE.prepare(
       'UPDATE session_snapshots SET sleep_status = NULL, recovery_status = NULL'
     ),
-    env.DATABASE.prepare('DELETE FROM lifecycle_state_transitions'),
   ]);
   await env.OBSERVABILITY_DATABASE.prepare('DELETE FROM platform_errors').run();
 }
 
 async function setStatus(table: 'workspaces' | 'nodes', id: string, status: string) {
-  await env.DATABASE.prepare(`UPDATE ${table} SET status = ? WHERE id = ?`).bind(status, id).run();
-}
-
-async function changedAt(table: 'workspaces' | 'nodes', id: string): Promise<string> {
-  const row = await env.DATABASE.prepare(`SELECT status_changed_at FROM ${table} WHERE id = ?`)
-    .bind(id)
-    .first<{ status_changed_at: string | null }>();
-  expect(row?.status_changed_at).toBeTruthy();
-  return row!.status_changed_at!;
+  return env.DATABASE.prepare(`UPDATE ${table} SET status = ? WHERE id = ?`).bind(status, id).run();
 }
 
 async function platformErrors(message: string) {
@@ -73,96 +66,55 @@ async function seedSnapshot(id: string, workspaceId: string, nodeId: string) {
     .run();
 }
 
+async function seedStoppingWorkspace() {
+  const nodeId = `node-${crypto.randomUUID()}`;
+  const workspaceId = `ws-${crypto.randomUUID()}`;
+  await seedNode(nodeId, USER_ID, { status: 'running' });
+  await seedWorkspace(workspaceId, nodeId, USER_ID, { status: 'running' });
+  await env.DATABASE.prepare(
+    "UPDATE workspaces SET status = 'stopping', error_message = 'deletion unconfirmed' WHERE id = ?"
+  )
+    .bind(workspaceId)
+    .run();
+  return { nodeId, workspaceId };
+}
+
 beforeEach(async () => {
   await seedUser(USER_ID);
   await resetLifecycleState();
 });
 
-describe('status triggers', () => {
-  it('stamps the entry time on insert and on every real status change, and records history', async () => {
-    const nodeId = `node-${crypto.randomUUID()}`;
-    await seedNode(nodeId, USER_ID, { status: 'creating' });
-    const inserted = await changedAt('nodes', nodeId);
-
-    await setStatus('nodes', nodeId, 'running');
-    const running = await changedAt('nodes', nodeId);
-    expect(running >= inserted).toBe(true);
-
-    // Same status again is not a transition (e.g. a heartbeat rewriting status = 'running').
-    await setStatus('nodes', nodeId, 'running');
-    await env.DATABASE.prepare('UPDATE nodes SET updated_at = ? WHERE id = ?')
-      .bind(new Date(Date.now() + MINUTE).toISOString(), nodeId)
-      .run();
-    expect(await changedAt('nodes', nodeId)).toBe(running);
-
-    const { results } = await env.DATABASE.prepare(
-      `SELECT entity_type, from_status, to_status, entered_at FROM lifecycle_state_transitions
-        WHERE entity_id = ? ORDER BY id`
-    )
-      .bind(nodeId)
-      .all();
-    expect(results).toEqual([
-      { entity_type: 'node', from_status: 'creating', to_status: 'running', entered_at: inserted },
-    ]);
-  });
-
-  it('records workspace, session sleep and session wake transitions', async () => {
+describe('status tables stay trigger-free', () => {
+  // Status writers guard with `meta.changes === 1`, and D1 counts trigger writes in it. A
+  // trigger that writes on these tables broke node provisioning on staging (migration 0219).
+  it('reports exactly one change for a one-row status update on every watched table', async () => {
     const nodeId = `node-${crypto.randomUUID()}`;
     const workspaceId = `ws-${crypto.randomUUID()}`;
     const snapshotId = `snap-${crypto.randomUUID()}`;
-    await seedNode(nodeId, USER_ID, { status: 'running' });
-    await seedWorkspace(workspaceId, nodeId, USER_ID, { status: 'running' });
+    await seedNode(nodeId, USER_ID, { status: 'creating' });
+    await seedWorkspace(workspaceId, nodeId, USER_ID, { status: 'creating' });
     await seedSnapshot(snapshotId, workspaceId, nodeId);
 
-    await setStatus('workspaces', workspaceId, 'stopping');
-    await env.DATABASE.prepare(
-      "UPDATE session_snapshots SET sleep_status = 'sleeping' WHERE id = ?"
-    )
-      .bind(snapshotId)
-      .run();
-    await env.DATABASE.prepare(
-      "UPDATE session_snapshots SET recovery_status = 'waking' WHERE id = ?"
-    )
-      .bind(snapshotId)
-      .run();
-
-    const snapshot = await env.DATABASE.prepare(
-      'SELECT sleep_status_changed_at, recovery_status_changed_at FROM session_snapshots WHERE id = ?'
-    )
-      .bind(snapshotId)
-      .first<{
-        sleep_status_changed_at: string | null;
-        recovery_status_changed_at: string | null;
-      }>();
-    expect(snapshot?.sleep_status_changed_at).toBeTruthy();
-    expect(snapshot?.recovery_status_changed_at).toBeTruthy();
-
-    const { results } = await env.DATABASE.prepare(
-      `SELECT entity_type, entity_id, from_status, to_status FROM lifecycle_state_transitions
-        WHERE entity_id IN (?, ?) ORDER BY id`
-    )
-      .bind(workspaceId, snapshotId)
-      .all();
-    expect(results).toEqual([
-      {
-        entity_type: 'workspace',
-        entity_id: workspaceId,
-        from_status: 'running',
-        to_status: 'stopping',
-      },
-      {
-        entity_type: 'session_sleep',
-        entity_id: snapshotId,
-        from_status: 'preparing',
-        to_status: 'sleeping',
-      },
-      {
-        entity_type: 'session_recovery',
-        entity_id: snapshotId,
-        from_status: null,
-        to_status: 'waking',
-      },
+    const updates = await env.DATABASE.batch([
+      env.DATABASE.prepare("UPDATE nodes SET status = 'running' WHERE id = ?").bind(nodeId),
+      env.DATABASE.prepare("UPDATE workspaces SET status = 'running' WHERE id = ?").bind(
+        workspaceId
+      ),
+      env.DATABASE.prepare(
+        "UPDATE session_snapshots SET sleep_status = 'sleeping' WHERE id = ?"
+      ).bind(snapshotId),
+      env.DATABASE.prepare(
+        "UPDATE session_snapshots SET recovery_status = 'waking' WHERE id = ?"
+      ).bind(snapshotId),
     ]);
+    expect(updates.map((update) => update.meta.changes)).toEqual([1, 1, 1, 1]);
+
+    // Only guard triggers that write nothing (BEFORE ... RAISE) may exist on these tables.
+    const { results } = await env.DATABASE.prepare(
+      `SELECT name FROM sqlite_master WHERE type = 'trigger'
+         AND tbl_name IN ('workspaces', 'nodes', 'session_snapshots') ORDER BY name`
+    ).all<{ name: string }>();
+    expect((results ?? []).map((row) => row.name)).toEqual(['trg_nodes_capacity_pool_max_nodes']);
   });
 });
 
@@ -171,73 +123,108 @@ describe('lifecycle latency watchdog', () => {
     expect(await resolveLifecycleLatencySettings(env as never)).toEqual(LIFECYCLE_LATENCY_DEFAULTS);
   });
 
-  it('records one warning per slow stopping episode, and a new episode alerts again', async () => {
-    const nodeId = `node-${crypto.randomUUID()}`;
-    const workspaceId = `ws-${crypto.randomUUID()}`;
-    await seedNode(nodeId, USER_ID, { status: 'running' });
-    await seedWorkspace(workspaceId, nodeId, USER_ID, { status: 'running' });
-    await env.DATABASE.prepare(
-      "UPDATE workspaces SET error_message = 'deletion unconfirmed' WHERE id = ?"
-    )
-      .bind(workspaceId)
-      .run();
-    await setStatus('workspaces', workspaceId, 'stopping');
-    const entered = Date.parse(await changedAt('workspaces', workspaceId));
+  it('records one warning per slow episode, ends the episode when the state ends, and alerts a new one', async () => {
+    const { nodeId, workspaceId } = await seedStoppingWorkspace();
     const message = 'Lifecycle latency budget exceeded: workspace stopping';
     const budget = LIFECYCLE_LATENCY_DEFAULTS.workspaceStoppingMinutes * MINUTE;
+    const t0 = Date.now();
 
-    // Under the default budget: nothing fires, but the watchdog did run (liveness).
-    const early = await runLifecycleLatencyWatchdog(
-      env as never,
-      new Date(entered + budget - MINUTE)
-    );
-    expect(early.watchedStates).toBeGreaterThan(0);
-    expect(early.alerted).toBe(0);
+    // First sighting: observed, nothing over budget yet (liveness: the run did see it).
+    const first = await runLifecycleLatencyWatchdog(env as never, new Date(t0));
+    expect(first.observed.workspace).toBe(1);
+    expect(first.alerted).toBe(0);
+    const under = await runLifecycleLatencyWatchdog(env as never, new Date(t0 + budget - MINUTE));
+    expect(under.alerted).toBe(0);
     expect(await platformErrors(message)).toHaveLength(0);
 
-    const late = await runLifecycleLatencyWatchdog(
-      env as never,
-      new Date(entered + budget + MINUTE)
-    );
-    expect(late.alerted).toBe(1);
-    expect(late.breached['workspace.stopping']).toBe(1);
+    const over = await runLifecycleLatencyWatchdog(env as never, new Date(t0 + budget + MINUTE));
+    expect(over.alerted).toBe(1);
+    expect(over.breached['workspace.stopping']).toBe(1);
     const [row] = await platformErrors(message);
     expect(row).toMatchObject({ level: 'warn', workspace_id: workspaceId, node_id: nodeId });
     expect(JSON.parse(row!.context!)).toMatchObject({
       entityType: 'workspace',
       entityId: workspaceId,
       status: 'stopping',
+      ageMinutes: LIFECYCLE_LATENCY_DEFAULTS.workspaceStoppingMinutes + 1,
       budgetMinutes: LIFECYCLE_LATENCY_DEFAULTS.workspaceStoppingMinutes,
       lastError: 'deletion unconfirmed',
     });
 
-    // Same episode on the next tick: still breached, not re-alerted.
+    // Same episode on the next run: still breached, not re-alerted.
     const again = await runLifecycleLatencyWatchdog(
       env as never,
-      new Date(entered + budget + 6 * MINUTE)
+      new Date(t0 + budget + 6 * MINUTE)
     );
-    expect(again.breached['workspace.stopping']).toBe(1);
-    expect(again.alerted).toBe(0);
+    expect(again).toMatchObject({ alerted: 0, breached: { 'workspace.stopping': 1 } });
     expect(await platformErrors(message)).toHaveLength(1);
 
-    // A later, separate stop is a new episode.
+    // The workspace leaves the state: the episode is recorded and the observation closed.
     await setStatus('workspaces', workspaceId, 'running');
-    await setStatus('workspaces', workspaceId, 'stopping');
-    const reentered = Date.parse(await changedAt('workspaces', workspaceId));
-    const second = await runLifecycleLatencyWatchdog(
+    const ended = await runLifecycleLatencyWatchdog(
       env as never,
-      new Date(Math.max(reentered, entered + budget + 7 * MINUTE) + budget + MINUTE)
+      new Date(t0 + budget + 11 * MINUTE)
     );
+    expect(ended.ended).toBe(1);
+    const episode = await env.DATABASE.prepare(
+      'SELECT status, first_seen_at, last_seen_at FROM lifecycle_state_episodes WHERE entity_id = ?'
+    )
+      .bind(workspaceId)
+      .first<{ status: string; first_seen_at: string; last_seen_at: string }>();
+    expect(episode).toEqual({
+      status: 'stopping',
+      first_seen_at: new Date(t0).toISOString(),
+      last_seen_at: new Date(t0 + budget + 6 * MINUTE).toISOString(),
+    });
+
+    // A later, separate stop is a new episode and alerts again.
+    await setStatus('workspaces', workspaceId, 'stopping');
+    const t1 = t0 + budget + 20 * MINUTE;
+    await runLifecycleLatencyWatchdog(env as never, new Date(t1));
+    const second = await runLifecycleLatencyWatchdog(env as never, new Date(t1 + budget + MINUTE));
     expect(second.alerted).toBe(1);
     expect(await platformErrors(message)).toHaveLength(2);
   });
 
-  it('alerts once when two watchdog runs overlap', async () => {
+  it('ignores states that are not watched', async () => {
     const nodeId = `node-${crypto.randomUUID()}`;
-    await seedNode(nodeId, USER_ID, { status: 'creating' });
-    const at = new Date(Date.now() + (LIFECYCLE_LATENCY_DEFAULTS.nodeCreatingMinutes + 1) * MINUTE);
-    // Both runs select the same unalerted episode before either records it; the alert row's
-    // primary key decides which one reports.
+    const workspaceId = `ws-${crypto.randomUUID()}`;
+    await seedNode(nodeId, USER_ID, { status: 'running' });
+    await seedWorkspace(workspaceId, nodeId, USER_ID, { status: 'running' });
+    const t0 = Date.now();
+    await runLifecycleLatencyWatchdog(env as never, new Date(t0));
+    const result = await runLifecycleLatencyWatchdog(env as never, new Date(t0 + DAY));
+    expect(result).toMatchObject({ alerted: 0, breached: {}, observed: { workspace: 0, node: 0 } });
+  });
+
+  it('caps alerts per state, oldest first, and discloses the rest', async () => {
+    for (let i = 0; i < 3; i++)
+      await seedNode(`node-${crypto.randomUUID()}`, USER_ID, { status: 'creating' });
+    const settings = { ...LIFECYCLE_LATENCY_DEFAULTS, alertsPerStatePerTick: 2 };
+    const t0 = Date.now();
+    await runLifecycleLatencyWatchdog(env as never, new Date(t0), settings);
+    const at = new Date(t0 + (LIFECYCLE_LATENCY_DEFAULTS.nodeCreatingMinutes + 1) * MINUTE);
+
+    expect(await runLifecycleLatencyWatchdog(env as never, at, settings)).toMatchObject({
+      alerted: 2,
+      deferred: 1,
+      breached: { 'node.creating': 3 },
+    });
+    expect(await runLifecycleLatencyWatchdog(env as never, at, settings)).toMatchObject({
+      alerted: 1,
+      deferred: 0,
+    });
+    expect((await runLifecycleLatencyWatchdog(env as never, at, settings)).alerted).toBe(0);
+    expect(await platformErrors('Lifecycle latency budget exceeded: node creating')).toHaveLength(
+      3
+    );
+  });
+
+  it('alerts once when two watchdog runs overlap', async () => {
+    await seedNode(`node-${crypto.randomUUID()}`, USER_ID, { status: 'creating' });
+    const t0 = Date.now();
+    await runLifecycleLatencyWatchdog(env as never, new Date(t0));
+    const at = new Date(t0 + (LIFECYCLE_LATENCY_DEFAULTS.nodeCreatingMinutes + 1) * MINUTE);
     const [left, right] = await Promise.all([
       runLifecycleLatencyWatchdog(env as never, at),
       runLifecycleLatencyWatchdog(env as never, at),
@@ -245,39 +232,6 @@ describe('lifecycle latency watchdog', () => {
     expect(left.alerted + right.alerted).toBe(1);
     expect(await platformErrors('Lifecycle latency budget exceeded: node creating')).toHaveLength(
       1
-    );
-  });
-
-  it('ignores states that are not watched, and states that already ended', async () => {
-    const nodeId = `node-${crypto.randomUUID()}`;
-    const workspaceId = `ws-${crypto.randomUUID()}`;
-    await seedNode(nodeId, USER_ID, { status: 'running' });
-    await seedWorkspace(workspaceId, nodeId, USER_ID, { status: 'creating' });
-    await setStatus('workspaces', workspaceId, 'running');
-    const entered = Date.parse(await changedAt('workspaces', workspaceId));
-
-    const result = await runLifecycleLatencyWatchdog(
-      env as never,
-      new Date(entered + 24 * 60 * MINUTE)
-    );
-    expect(result.alerted).toBe(0);
-    expect(result.breached).toEqual({});
-  });
-
-  it('caps alerts per state, oldest first, and discloses the rest', async () => {
-    const nodeIds = [1, 2, 3].map(() => `node-${crypto.randomUUID()}`);
-    for (const nodeId of nodeIds) await seedNode(nodeId, USER_ID, { status: 'creating' });
-    const settings = { ...LIFECYCLE_LATENCY_DEFAULTS, alertsPerStatePerTick: 2 };
-    const at = new Date(Date.now() + (LIFECYCLE_LATENCY_DEFAULTS.nodeCreatingMinutes + 1) * MINUTE);
-
-    const first = await runLifecycleLatencyWatchdog(env as never, at, settings);
-    expect(first).toMatchObject({ alerted: 2, deferred: 1, breached: { 'node.creating': 3 } });
-    const second = await runLifecycleLatencyWatchdog(env as never, at, settings);
-    expect(second).toMatchObject({ alerted: 1, deferred: 0 });
-    const third = await runLifecycleLatencyWatchdog(env as never, at, settings);
-    expect(third.alerted).toBe(0);
-    expect(await platformErrors('Lifecycle latency budget exceeded: node creating')).toHaveLength(
-      3
     );
   });
 
@@ -294,8 +248,9 @@ describe('lifecycle latency watchdog', () => {
       .bind(snapshotId)
       .run();
 
-    const at = new Date(Date.now() + 16 * MINUTE);
-    const result = await runLifecycleLatencyWatchdog(env as never, at);
+    const t0 = Date.now();
+    await runLifecycleLatencyWatchdog(env as never, new Date(t0));
+    const result = await runLifecycleLatencyWatchdog(env as never, new Date(t0 + 16 * MINUTE));
     expect(result.breached).toMatchObject({
       'session_sleep.preparing': 1,
       'session_recovery.waking': 1,
@@ -308,40 +263,59 @@ describe('lifecycle latency watchdog', () => {
     ).toHaveLength(1);
   });
 
-  it('turns a watch off when its budget is 0', async () => {
+  it('turns a watch off when its budget is 0, closing its open episodes', async () => {
     const nodeId = `node-${crypto.randomUUID()}`;
     await seedNode(nodeId, USER_ID, { status: 'creating' });
+    const t0 = Date.now();
+    await runLifecycleLatencyWatchdog(env as never, new Date(t0));
     const settings = { ...LIFECYCLE_LATENCY_DEFAULTS, nodeCreatingMinutes: 0 };
-    const result = await runLifecycleLatencyWatchdog(
+    const result = await runLifecycleLatencyWatchdog(env as never, new Date(t0 + HOUR), settings);
+    expect(result).toMatchObject({ alerted: 0, ended: 1 });
+    expect(result.breached['node.creating']).toBeUndefined();
+  });
+
+  it('does not close episodes it could not see when the sample is truncated', async () => {
+    const first = `node-${crypto.randomUUID()}`;
+    await seedNode(first, USER_ID, { status: 'creating' });
+    const t0 = Date.now();
+    await runLifecycleLatencyWatchdog(env as never, new Date(t0));
+    await seedNode(`node-${crypto.randomUUID()}`, USER_ID, { status: 'creating' });
+    await seedNode(`node-${crypto.randomUUID()}`, USER_ID, { status: 'creating' });
+    await setStatus('nodes', first, 'running');
+
+    const settings = { ...LIFECYCLE_LATENCY_DEFAULTS, observationsPerSourcePerTick: 1 };
+    const truncated = await runLifecycleLatencyWatchdog(
       env as never,
-      new Date(Date.now() + 60 * MINUTE),
+      new Date(t0 + MINUTE),
       settings
     );
-    expect(result.breached['node.creating']).toBeUndefined();
-    expect(result.alerted).toBe(0);
+    expect(truncated).toMatchObject({ truncated: ['node'], ended: 0 });
+
+    // A full sample later closes the episode that really ended.
+    const full = await runLifecycleLatencyWatchdog(env as never, new Date(t0 + 2 * MINUTE));
+    expect(full.truncated).toEqual([]);
+    expect(full.ended).toBe(1);
   });
 });
 
 describe('lifecycle latency daily evaluation', () => {
-  const HOUR = 60 * MINUTE;
-  const DAY = 24 * HOUR;
-
   async function seedEpisodes(
     now: number,
     entityType: string,
-    fromStatus: string,
+    status: string,
     episodes: Array<{ endedAgoMs: number; durationMs: number }>
   ) {
     await env.DATABASE.batch(
       episodes.map(({ endedAgoMs, durationMs }) =>
         env.DATABASE.prepare(
-          `INSERT INTO lifecycle_state_transitions (entity_type, entity_id, from_status, to_status, entered_at, changed_at)
-           VALUES (?, ?, ?, 'deleted', ?, ?)`
+          `INSERT INTO lifecycle_state_episodes (entity_type, entity_id, status, first_seen_at, last_seen_at, ended_at)
+           VALUES (?, ?, ?, ?, ?, ?)`
         ).bind(
           entityType,
           crypto.randomUUID(),
-          fromStatus,
+          status,
           new Date(now - endedAgoMs - durationMs).toISOString(),
+          new Date(now - endedAgoMs).toISOString(),
           new Date(now - endedAgoMs).toISOString()
         )
       )
@@ -409,7 +383,6 @@ describe('lifecycle latency daily evaluation', () => {
     expect(result.evaluations.some((e) => e.entityType === 'node' && e.status === 'creating')).toBe(
       false
     );
-    // Other states are still evaluated (liveness).
     expect(result.evaluations.length).toBeGreaterThan(0);
     expect(await platformErrors('Lifecycle latency regression: node creating')).toHaveLength(0);
   });
@@ -443,46 +416,38 @@ describe('lifecycle latency daily evaluation', () => {
     );
   });
 
-  it('measures episodes recorded by the real triggers', async () => {
-    const nodeId = `node-${crypto.randomUUID()}`;
-    const workspaceId = `ws-${crypto.randomUUID()}`;
-    await seedNode(nodeId, USER_ID, { status: 'running' });
-    await seedWorkspace(workspaceId, nodeId, USER_ID, { status: 'running' });
-    await setStatus('workspaces', workspaceId, 'stopping');
+  it('measures episodes the watchdog recorded', async () => {
+    const { workspaceId } = await seedStoppingWorkspace();
+    const t0 = Date.now();
+    await runLifecycleLatencyWatchdog(env as never, new Date(t0));
+    await runLifecycleLatencyWatchdog(env as never, new Date(t0 + 5 * MINUTE));
     await setStatus('workspaces', workspaceId, 'deleted');
+    await runLifecycleLatencyWatchdog(env as never, new Date(t0 + 10 * MINUTE));
 
     const result = await runLifecycleLatencyDailyEvaluation(
       env as never,
-      new Date(Date.now() + MINUTE)
+      new Date(t0 + 11 * MINUTE)
     );
     const stopping = result.evaluations.find(
       (e) => e.entityType === 'workspace' && e.status === 'stopping'
     );
-    expect(stopping?.last24h.count).toBe(1);
-    expect(stopping?.last24h.maxMs).toBeGreaterThanOrEqual(0);
+    expect(stopping?.last24h).toMatchObject({ count: 1, maxMs: 5 * MINUTE });
   });
 
-  it('purges history and alert records past retention', async () => {
+  it('purges episodes past retention', async () => {
     const now = Date.now();
     const retentionMs = LIFECYCLE_LATENCY_DEFAULTS.retentionDays * DAY;
     await seedEpisodes(now, 'workspace', 'stopping', [
       { endedAgoMs: retentionMs + DAY, durationMs: MINUTE },
       { endedAgoMs: HOUR, durationMs: MINUTE },
     ]);
-    await env.DATABASE.batch([
-      env.DATABASE.prepare(
-        `INSERT INTO lifecycle_latency_alerts VALUES ('workspace', 'old', 'stopping', 'x', ?)`
-      ).bind(new Date(now - retentionMs - DAY).toISOString()),
-      env.DATABASE.prepare(
-        `INSERT INTO lifecycle_latency_alerts VALUES ('workspace', 'new', 'stopping', 'y', ?)`
-      ).bind(new Date(now - HOUR).toISOString()),
-    ]);
-
     const result = await runLifecycleLatencyDailyEvaluation(env as never, new Date(now));
-    expect(result).toMatchObject({ purgedTransitions: 1, purgedAlerts: 1 });
+    expect(result.purgedEpisodes).toBe(1);
     const remaining = await env.DATABASE.prepare(
-      'SELECT (SELECT COUNT(*) FROM lifecycle_state_transitions) AS t, (SELECT COUNT(*) FROM lifecycle_latency_alerts) AS a'
-    ).first<{ t: number; a: number }>();
-    expect(remaining).toEqual({ t: 1, a: 1 });
+      'SELECT COUNT(*) AS n FROM lifecycle_state_episodes'
+    ).first<{
+      n: number;
+    }>();
+    expect(remaining?.n).toBe(1);
   });
 });

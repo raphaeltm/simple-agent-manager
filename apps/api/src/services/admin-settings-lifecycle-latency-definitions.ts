@@ -42,6 +42,13 @@ export const LIFECYCLE_LATENCY_SETTINGS: AdminSettingDefinition[] = [
     { min: 1, max: 20 }
   ),
   integerDefinition(
+    'lifecycleLatency.observationsPerSourcePerTick',
+    LIFECYCLE_LATENCY_DEFAULTS.observationsPerSourcePerTick,
+    'Operations',
+    'Rows in watched states the latency watchdog samples per table in one five-minute run, oldest first. When more exist, the run is logged as truncated and does not close episodes it could not see. Worst case per run: four tables times this value in writes.',
+    { min: 10, max: 1_000 }
+  ),
+  integerDefinition(
     'lifecycleLatency.regressionPercent',
     LIFECYCLE_LATENCY_DEFAULTS.regressionPercent,
     'Operations',
@@ -59,7 +66,7 @@ export const LIFECYCLE_LATENCY_SETTINGS: AdminSettingDefinition[] = [
     'lifecycleLatency.retentionDays',
     LIFECYCLE_LATENCY_DEFAULTS.retentionDays,
     'Operations',
-    'Days lifecycle state transitions and slow-state alert records are kept before the daily purge removes them.',
+    'Days finished lifecycle episodes are kept before the daily purge removes them.',
     // At least the daily check's 7-day baseline plus the last day (BASELINE_DAYS + 1).
     { min: 8, max: 365 }
   ),
@@ -67,7 +74,7 @@ export const LIFECYCLE_LATENCY_SETTINGS: AdminSettingDefinition[] = [
     'lifecycleLatency.evaluationSampleLimit',
     LIFECYCLE_LATENCY_DEFAULTS.evaluationSampleLimit,
     'Operations',
-    'Most recent completed episodes the daily latency check reads per state.',
+    'Most recent finished episodes the daily latency check reads per state.',
     { min: 10, max: 20_000 }
   ),
 ];

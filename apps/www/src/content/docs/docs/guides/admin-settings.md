@@ -238,19 +238,21 @@ end on their own within minutes, and records an error in **Admin → Errors** wh
 The hourly platform-feedback triage groups those errors and, when a feedback project and an incident
 trigger are configured, files them as incidents for that project's agents to investigate.
 
-- **Every status change is recorded.** Database triggers stamp the time a workspace, node, session
-  sleep or session wake entered its current state and keep a transition history (migration
-  `0218_lifecycle_latency_monitoring.sql`). This happens no matter which part of SAM changed the
-  status.
+- **States are sampled every five minutes.** The watchdog records when it first sees a workspace,
+  node, session sleep or session wake in a watched state, and when that episode ends
+  (`lifecycle_state_observations` and `lifecycle_state_episodes`, migration
+  `0220_lifecycle_state_observations.sql`). It reads the status columns only, so no part of SAM has
+  to report anything. Because it samples, an episode is noticed up to five minutes after it starts,
+  and episodes shorter than one sample are not recorded.
 - **Slow states, every five minutes.** The latency watchdog (`runLifecycleLatencyWatchdog` in
   `apps/api/src/services/lifecycle-latency/watchdog.ts`) records one warning per slow episode:
   **Lifecycle latency budget exceeded: _entity_ _state_**, for example
   `Lifecycle latency budget exceeded: workspace stopping`. The error's context carries the entity ID,
-  when it entered the state, how long it has been there and its last error message. A later, separate
+  when the watchdog first saw it in the state, how long it has been there and its last error message. A later, separate
   episode for the same entity is reported again.
 - **Regressions, once a day.** At 03:00 UTC the daily check
   (`runLifecycleLatencyDailyEvaluation` in `daily-evaluation.ts`) computes the median, p95 and longest
-  time spent in each watched state over the last 24 hours. It records
+  observed time spent in each watched state over the last 24 hours. It records
   **Lifecycle latency regression: _entity_ _state_** when the p95 is over the state's budget, or more
   than `lifecycleLatency.regressionPercent` of its p95 over the previous 7 days. Every run logs a
   `lifecycle_latency.daily_summary` line with those numbers for every watched state.
@@ -274,13 +276,14 @@ watchdog and the daily check for that state.
 
 The rest control the checks themselves:
 
-| Setting                                  | Default | Range      | What it controls                                                                                       |
-| ---------------------------------------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------ |
-| `lifecycleLatency.alertsPerStatePerTick` | 5       | 1–20       | Slow episodes recorded per state in one run. Older episodes first; the rest are recorded on later runs |
-| `lifecycleLatency.regressionPercent`     | 200     | 101–10,000 | How far above its previous 7-day p95 a state's 24-hour p95 must be to count as a regression            |
-| `lifecycleLatency.minSamples`            | 5       | 1–10,000   | Fewest completed episodes in a window before the daily check judges it                                 |
-| `lifecycleLatency.retentionDays`         | 30      | 8–365      | Days transition history and alert records are kept                                                     |
-| `lifecycleLatency.evaluationSampleLimit` | 2,000   | 10–20,000  | Most recent completed episodes the daily check reads per state                                         |
+| Setting                                         | Default | Range      | What it controls                                                                                                                             |
+| ----------------------------------------------- | ------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lifecycleLatency.alertsPerStatePerTick`        | 5       | 1–20       | Slow episodes recorded per state in one run. Older episodes first; the rest are recorded on later runs                                       |
+| `lifecycleLatency.observationsPerSourcePerTick` | 200     | 10–1,000   | Rows in watched states sampled per table in one run, oldest first. A truncated sample is logged and does not close episodes it could not see |
+| `lifecycleLatency.regressionPercent`            | 200     | 101–10,000 | How far above its previous 7-day p95 a state's 24-hour p95 must be to count as a regression                                                  |
+| `lifecycleLatency.minSamples`                   | 5       | 1–10,000   | Fewest finished episodes in a window before the daily check judges it                                                                        |
+| `lifecycleLatency.retentionDays`                | 30      | 8–365      | Days finished episodes are kept                                                                                                              |
+| `lifecycleLatency.evaluationSampleLimit`        | 2,000   | 10–20,000  | Most recent finished episodes the daily check reads per state                                                                                |
 
 ## Linked work
 

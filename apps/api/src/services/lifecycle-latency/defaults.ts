@@ -16,6 +16,12 @@ export const LIFECYCLE_LATENCY_DEFAULTS = Object.freeze({
   sessionWakingMinutes: 15,
   /** Slow episodes alerted per state per watchdog tick; the rest are counted, not dropped. */
   alertsPerStatePerTick: 5,
+  /**
+   * Rows sampled per entity table per tick. Production holds a few dozen rows in transient
+   * states at once (2026-11), so 200 leaves wide headroom; a truncated sample is logged and does
+   * not end episodes it could not see.
+   */
+  observationsPerSourcePerTick: 200,
   /** Daily check flags a state whose 24h p95 exceeds this percent of the prior 7-day p95. */
   regressionPercent: 200,
   /** Fewest completed episodes in a window before its percentiles are judged. */

@@ -7,39 +7,35 @@ import { LIFECYCLE_LATENCY_DEFAULTS, type LifecycleLatencySettingKey } from './d
 export type LifecycleEntityType = 'workspace' | 'node' | 'session_sleep' | 'session_recovery';
 
 /**
- * Where each entity's state lives. Column names are constants, never caller input. The
- * changed-at columns are maintained by the D1 triggers in migration 0218, so they move only on
- * a real state change (unlike `updated_at`, which retries and keepalives rewrite).
+ * Where each entity's state lives. Column names are constants, never caller input. Entry time is
+ * not read from these rows: `updated_at` is rewritten by retries and keepalives, so the watchdog
+ * records when it first sees each row in a state (`lifecycle_state_observations`).
  */
 export const LIFECYCLE_ENTITY_SOURCES: Record<
   LifecycleEntityType,
-  { table: string; statusColumn: string; changedAtColumn: string; detailColumns: string }
+  { table: string; statusColumn: string; detailColumns: string }
 > = {
   workspace: {
     table: 'workspaces',
     statusColumn: 'status',
-    changedAtColumn: 'status_changed_at',
     detailColumns:
       'node_id AS node_id, id AS workspace_id, user_id AS user_id, chat_session_id AS chat_session_id, error_message AS error_message',
   },
   node: {
     table: 'nodes',
     statusColumn: 'status',
-    changedAtColumn: 'status_changed_at',
     detailColumns:
       'id AS node_id, NULL AS workspace_id, user_id AS user_id, NULL AS chat_session_id, error_message AS error_message',
   },
   session_sleep: {
     table: 'session_snapshots',
     statusColumn: 'sleep_status',
-    changedAtColumn: 'sleep_status_changed_at',
     detailColumns:
       'node_id AS node_id, workspace_id AS workspace_id, user_id AS user_id, chat_session_id AS chat_session_id, sleep_error AS error_message',
   },
   session_recovery: {
     table: 'session_snapshots',
     statusColumn: 'recovery_status',
-    changedAtColumn: 'recovery_status_changed_at',
     detailColumns:
       'node_id AS node_id, recovery_workspace_id AS workspace_id, user_id AS user_id, chat_session_id AS chat_session_id, recovery_error AS error_message',
   },

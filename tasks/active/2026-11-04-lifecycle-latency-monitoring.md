@@ -44,7 +44,22 @@ this project. Idea `01M6HS335G8J4P423NY2MYTQCJ`.
 - **The post-migration row-count gate needs a churn entry** for the new history table, because it
   is purged by retention (`scripts/deploy/d1-migration-churning-tables.ts`).
 
-## Design
+## Design Change After Staging (2026-11-04)
+
+The first design used D1 triggers on the status tables. Staging showed D1 counts trigger writes in
+`meta.changes` (`changes: 3` for a one-row status update), which broke every `changes === 1`
+compare-and-set on those tables: `provisionNode` destroyed each VM it had just created. The
+triggers were dropped (`0219_drop_lifecycle_status_triggers.sql`), the draft `0218` was removed
+(never applied in production; staging keeps its orphan columns and two empty tables), and the
+watchdog now samples states instead (`0220_lifecycle_state_observations.sql`). A workers test
+guards the `changes === 1` invariant for one-row status updates on these tables, and
+`apps/api/.claude/rules/31-migration-safety.md` records the lesson.
+
+The full local workers suite timed out before staging was deployed, and staging was deployed
+anyway; the suite would have caught this. Do not deploy to staging before the workers suite has a
+verdict, locally or in CI.
+
+## Original Design (superseded where it says triggers)
 
 1. **Migration** (one file, all additive):
    - Columns `workspaces.status_changed_at`, `nodes.status_changed_at`,

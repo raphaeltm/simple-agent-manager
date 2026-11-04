@@ -19,7 +19,7 @@ const BASELINE_DAYS = 7;
 /**
  * Rows deleted per purge statement, and statements per table per run. These bound one run's I/O,
  * not retention: up to 100k rows a day per table can be purged, against a few thousand
- * transitions a day in production (2026-11: ~6k workspaces and ~1.7k nodes created in total).
+ * episodes a day in production (2026-11: ~6k workspaces and ~1.7k nodes created in total).
  * Anything left over is purged by the next run.
  */
 const PURGE_BATCH_SIZE = 5_000;
@@ -46,8 +46,7 @@ export interface LifecycleStateEvaluation {
 export interface LifecycleLatencyDailyResult {
   evaluations: LifecycleStateEvaluation[];
   regressions: number;
-  purgedTransitions: number;
-  purgedAlerts: number;
+  purgedEpisodes: number;
 }
 
 /** Nearest-rank percentile over an already sorted list. */
@@ -94,12 +93,14 @@ export function regressionMessage(watch: LifecycleWatch): string {
 }
 
 /**
- * Daily check over `lifecycle_state_transitions`: per watched state, p50/p95/max time spent in
- * that state over the last 24 hours against its budget and its previous 7 days. Regressions are
+ * Daily check over `lifecycle_state_episodes`: per watched state, p50/p95/max observed time spent
+ * in that state over the last 24 hours against its budget and its previous 7 days. Durations come
+ * from the watchdog's five-minute samples, so an episode shorter than one sample is not recorded
+ * and every duration is a lower bound accurate to about one sample at each end. Regressions are
  * recorded in `platform_errors` for platform-feedback triage; a summary is always logged.
  *
  * I/O per run: one settings read, one SELECT per watched state (at most 11), one observability insert
- * per regression, and at most `PURGE_MAX_BATCHES` deletes per purged table.
+ * per regression, and at most `PURGE_MAX_BATCHES` purge deletes.
  */
 export async function runLifecycleLatencyDailyEvaluation(
   env: Env,
@@ -116,11 +117,11 @@ export async function runLifecycleLatencyDailyEvaluation(
   const active = LIFECYCLE_WATCHES.filter((watch) => budgetMs(settings, watch) > 0);
   for (const watch of active) {
     const { results } = await env.DATABASE.prepare(
-      `SELECT changed_at,
-              (julianday(changed_at) - julianday(entered_at)) * 86400000.0 AS duration_ms
-         FROM lifecycle_state_transitions
-        WHERE entity_type = ? AND from_status = ? AND entered_at IS NOT NULL AND changed_at >= ?
-        ORDER BY changed_at DESC
+      `SELECT ended_at AS changed_at,
+              (julianday(last_seen_at) - julianday(first_seen_at)) * 86400000.0 AS duration_ms
+         FROM lifecycle_state_episodes
+        WHERE entity_type = ? AND status = ? AND ended_at >= ?
+        ORDER BY ended_at DESC
         LIMIT ?`
     )
       .bind(watch.entityType, watch.status, windowStart, sampleLimit)
@@ -169,23 +170,16 @@ export async function runLifecycleLatencyDailyEvaluation(
   }
 
   const cutoff = new Date(now.getTime() - settings.retentionDays * DAY_MS).toISOString();
-  const purgedTransitions = await purgeInBatches(
+  const purgedEpisodes = await purgeInBatches(
     env,
-    `DELETE FROM lifecycle_state_transitions WHERE id IN (
-       SELECT id FROM lifecycle_state_transitions WHERE changed_at < ? ORDER BY changed_at LIMIT ?)`,
-    cutoff
-  );
-  const purgedAlerts = await purgeInBatches(
-    env,
-    `DELETE FROM lifecycle_latency_alerts WHERE rowid IN (
-       SELECT rowid FROM lifecycle_latency_alerts WHERE alerted_at < ? ORDER BY alerted_at LIMIT ?)`,
+    `DELETE FROM lifecycle_state_episodes WHERE id IN (
+       SELECT id FROM lifecycle_state_episodes WHERE ended_at < ? ORDER BY ended_at LIMIT ?)`,
     cutoff
   );
 
   log.info('lifecycle_latency.daily_summary', {
     regressions,
-    purgedTransitions,
-    purgedAlerts,
+    purgedEpisodes,
     states: evaluations.map((evaluation) => ({
       state: `${evaluation.entityType}.${evaluation.status}`,
       budgetMs: evaluation.budgetMs,
@@ -198,7 +192,7 @@ export async function runLifecycleLatencyDailyEvaluation(
       regression: evaluation.regression,
     })),
   });
-  return { evaluations, regressions, purgedTransitions, purgedAlerts };
+  return { evaluations, regressions, purgedEpisodes };
 }
 
 async function purgeInBatches(env: Env, sql: string, cutoff: string): Promise<number> {
