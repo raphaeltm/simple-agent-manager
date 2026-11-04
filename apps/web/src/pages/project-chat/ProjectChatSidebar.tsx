@@ -122,6 +122,10 @@ export function ProjectChatSidebar({
             </div>
           )}
         </nav>
+      ) : state.loading ? (
+        <div className="flex flex-1 items-center justify-center p-4" role="status">
+          <span className="text-center text-[13px] text-fg-muted">Loading chats…</span>
+        </div>
       ) : (
         <div className="flex flex-1 items-center justify-center p-4">
           <span className="text-center text-[13px] text-fg-muted">

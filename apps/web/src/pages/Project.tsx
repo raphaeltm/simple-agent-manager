@@ -6,6 +6,7 @@ import { Outlet, useLocation, useParams } from 'react-router';
 
 import { useAppShell } from '../components/AppShell';
 import { useAuth } from '../components/AuthProvider';
+import { LoadingPane } from '../components/LoadingPane';
 import { useIsMobile } from '../hooks/useIsMobile';
 import {
   mcpConnectionsQueryOptions,
@@ -97,10 +98,7 @@ export function Project() {
     return (
       <div className="flex-1 min-h-0 flex flex-col">
         {projectLoading ? (
-          <div className="flex items-center justify-center flex-1 gap-2">
-            <Spinner size="md" />
-            <span className="text-fg-muted text-sm">Loading project...</span>
-          </div>
+          <LoadingPane testId="project-loading" />
         ) : !project ? (
           <div className="p-4">
             <Alert variant="error">{error ?? 'Project not found.'}</Alert>

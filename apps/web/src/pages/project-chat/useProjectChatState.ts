@@ -28,21 +28,16 @@ import { useTrialStatus } from '../../hooks/useTrialStatus';
 import { useVisibilityAwarePoll } from '../../hooks/useVisibilityAwarePoll';
 import type { ChatSessionResponse } from '../../lib/api';
 import {
-  closeConversationTask,
   getProjectTask,
   getTranscribeApiUrl,
   listChatSessions,
   listProjectTasks,
-  sleepChatSession,
   startInstantChatSession,
-  stopChatSession,
   submitTask,
 } from '../../lib/api';
 import { getSessionState } from '../../lib/chat-session-utils';
-import {
-  applyMessageCommentRealtimeEventToQueryCache,
-  chatQueryKeys,
-} from '../../lib/query-options';
+import { readInitialSessionList } from '../../lib/project-route-prefetch';
+import { applyMessageCommentRealtimeEventToQueryCache } from '../../lib/query-options';
 import { stripMarkdown } from '../../lib/text-utils';
 import { useProjectContext } from '../ProjectContext';
 import { buildForkMessage } from './profileWizardHelpers';
@@ -60,6 +55,7 @@ import {
 } from './types';
 import { DEFAULT_ATTACHMENT_MESSAGE, useAttachments } from './useAttachments';
 import { useComposerPrefill } from './useComposerPrefill';
+import { useConversationActions } from './useConversationActions';
 import { useProfileChoice } from './useProfileChoice';
 import { useProjectSkills } from './useProjectSkills';
 import { useProvisioningTracker } from './useProvisioningTracker';
@@ -233,12 +229,6 @@ export function useProjectChatState() {
 
   const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
 
-  // Conversation lifecycle state
-  const [sleepingConversation, setSleepingConversation] = useState(false);
-  const [sleepError, setSleepError] = useState<string | null>(null);
-  const [closingConversation, setClosingConversation] = useState(false);
-  const [closeError, setCloseError] = useState<string | null>(null);
-
   const { filteredRecent, filteredStale, effectiveShowStale } = useSessionFilters(
     sessions,
     taskInfoMap,
@@ -271,11 +261,11 @@ export function useProjectChatState() {
     if (hasLoadedRef.current) setIsRefreshing(true);
     try {
       const scope = multiplayerActive ? sessionScope : 'all';
-      const sessionResult = await listChatSessions(projectId, {
-        limit: CHAT_SESSION_LIST_LIMIT,
-        scope,
-      });
-      resetSessions(sessionResult.sessions);
+      const sessions =
+        !hasLoadedRef.current && scope === 'all'
+          ? await readInitialSessionList(queryClient, queryScope, projectId)
+          : (await listChatSessions(projectId, { limit: CHAT_SESSION_LIST_LIMIT, scope })).sessions;
+      resetSessions(sessions);
       hasLoadedRef.current = true;
 
       listProjectTasks(projectId, { limit: CHAT_TASK_LIST_LIMIT })
@@ -289,13 +279,21 @@ export function useProjectChatState() {
           /* task titles are cosmetic */
         });
 
-      return sessionResult.sessions;
+      return sessions;
     } catch {
       return [];
     } finally {
       setIsRefreshing(false);
     }
-  }, [projectId, sessionScope, multiplayerActive, resetSessions, replaceTaskInfoMap]);
+  }, [
+    projectId,
+    sessionScope,
+    multiplayerActive,
+    resetSessions,
+    replaceTaskInfoMap,
+    queryClient,
+    queryScope,
+  ]);
 
   const handleSessionEvent = useCallback(
     (raw: RawSessionEvent) => {
@@ -597,52 +595,12 @@ export function useProjectChatState() {
     [navigate, projectId]
   );
 
-  const handleSleepConversation = useCallback(async () => {
-    const selectedSession = sessions.find((s) => s.id === sessionId);
-    if (!selectedSession) return;
-    if (!selectedSession.workspaceId) {
-      setSleepError('This session has no workspace to sleep.');
-      return;
-    }
-
-    setSleepingConversation(true);
-    setSleepError(null);
-    try {
-      // Session-scoped: works for the owner and for anyone they shared the session with.
-      await sleepChatSession(projectId, selectedSession.id);
-      if (queryScope) {
-        await queryClient.invalidateQueries({
-          queryKey: chatQueryKeys.sessionMessages(queryScope, projectId, selectedSession.id),
-        });
-      }
-      void loadSessions();
-    } catch (err) {
-      console.warn('Failed to sleep conversation:', err);
-      setSleepError(err instanceof Error ? err.message : 'Failed to sleep conversation');
-    } finally {
-      setSleepingConversation(false);
-    }
-  }, [loadSessions, projectId, queryClient, queryScope, sessionId, sessions]);
-
-  const handleCloseConversation = useCallback(async () => {
-    const selectedSession = sessions.find((s) => s.id === sessionId);
-    if (!selectedSession) return;
-    setClosingConversation(true);
-    setCloseError(null);
-    try {
-      if (selectedSession.taskId) {
-        await closeConversationTask(projectId, selectedSession.taskId);
-      } else {
-        await stopChatSession(projectId, selectedSession.id);
-      }
-      void loadSessions();
-    } catch (err) {
-      console.warn('Failed to close conversation:', err);
-      setCloseError(err instanceof Error ? err.message : 'Failed to close conversation');
-    } finally {
-      setClosingConversation(false);
-    }
-  }, [projectId, sessionId, sessions, loadSessions]);
+  const conversationActions = useConversationActions({
+    projectId,
+    sessionId,
+    sessions,
+    loadSessions,
+  });
 
   const handleTaskModeChange = useCallback((mode: TaskMode) => {
     userSetTaskModeRef.current = true;
@@ -653,7 +611,9 @@ export function useProjectChatState() {
   // Derived state
   // ---------------------------------------------------------------------------
 
-  const showNewChatInput = !sessionId || sessions.length === 0;
+  // While the first list read is in flight an empty list means "not loaded yet", not "no
+  // chats", so a deep-linked conversation stays on screen.
+  const showNewChatInput = !sessionId || (!loading && sessions.length === 0);
   const hasSessions = sessions.length > 0;
 
   return {
@@ -730,12 +690,7 @@ export function useProjectChatState() {
     setPendingDerived,
     handleFork,
     handleRetry,
-    sleepingConversation,
-    sleepError,
-    handleSleepConversation,
-    closingConversation,
-    closeError,
-    handleCloseConversation,
+    ...conversationActions,
     transcribeApiUrl,
     getSessionState,
   };

@@ -509,6 +509,59 @@ describe('ProjectChat new chat button', () => {
     });
   });
 
+  it('shows a deep-linked conversation while the session list is still loading', async () => {
+    // A cold deep link names its session. The conversation (whose transcript loads on
+    // its own) must not wait behind the sidebar's list read.
+    let resolveList: (value: { sessions: unknown[]; total: number }) => void = () => undefined;
+    mocks.listChatSessions.mockReturnValue(
+      new Promise((resolve) => {
+        resolveList = resolve;
+      })
+    );
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/session-1`);
+
+    expect(await screen.findByTestId('message-view')).toHaveTextContent('session-1');
+    expect(mocks.listChatSessions).toHaveBeenCalled();
+    expect(screen.queryByTestId('chat-sessions-loading')).not.toBeInTheDocument();
+    // The sidebar says it is loading, not that the project has no chats.
+    expect(screen.queryByText('No chats yet. Start a new one above.')).not.toBeInTheDocument();
+    expect(screen.queryByText('What do you want to build?')).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveList({ sessions: [SESSION_1, SESSION_2], total: 2 });
+    });
+    expect(screen.getByTestId('message-view')).toHaveTextContent('session-1');
+    expect(await screen.findAllByText('First chat')).not.toHaveLength(0);
+  });
+
+  it('waits for the list on the bare chat route, then shows the new-chat screen', async () => {
+    let resolveList: (value: { sessions: unknown[]; total: number }) => void = () => undefined;
+    mocks.listChatSessions.mockReturnValue(
+      new Promise((resolve) => {
+        resolveList = resolve;
+      })
+    );
+
+    renderProjectChat();
+
+    expect(await screen.findByTestId('chat-sessions-loading')).toBeInTheDocument();
+    await act(async () => {
+      resolveList({ sessions: [], total: 0 });
+    });
+    expect(await screen.findByText('What do you want to build?')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-sessions-loading')).not.toBeInTheDocument();
+  });
+
+  it('falls back to the new-chat screen when a deep link resolves to a project with no chats', async () => {
+    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/session-1`);
+
+    expect(await screen.findByText('What do you want to build?')).toBeInTheDocument();
+    expect(screen.queryByTestId('message-view')).not.toBeInTheDocument();
+  });
+
   it('shows new chat input when there are no sessions', async () => {
     mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
 

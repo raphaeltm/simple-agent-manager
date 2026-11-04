@@ -1,5 +1,4 @@
 import type { ToolCallContentItem } from '@simple-agent-manager/acp-client';
-import { Spinner } from '@simple-agent-manager/ui';
 import { type FC, useCallback, useMemo, useRef } from 'react';
 import type { VirtuosoHandle } from 'react-virtuoso';
 
@@ -7,6 +6,7 @@ import { useAcpPermissionInteractions } from '../../hooks/useAcpPermissionIntera
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { useAuth } from '../AuthProvider';
 import { ChatFilePanel } from '../chat/ChatFilePanel';
+import { LoadingPane } from '../LoadingPane';
 import { CommentableConversationItem } from './comments/CommentableConversationItem';
 import { DesktopCommentRail } from './comments/MessageCommentPanels';
 import { useMessageComments } from './comments/useMessageComments';
@@ -343,9 +343,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     return lc.error ? (
       <div className="p-4 text-danger text-sm">{lc.error}</div>
     ) : (
-      <div className="flex justify-center p-8" data-testid="chat-loading">
-        <Spinner size="lg" />
-      </div>
+      <LoadingPane testId="chat-loading" />
     );
   }
 

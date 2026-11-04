@@ -41,8 +41,9 @@ function renderProvider() {
   return render(
     <OnboardingProvider>
       <Probe />
-    </OnboardingProvider>
-  , { wrapper: QueryTestWrapper });
+    </OnboardingProvider>,
+    { wrapper: QueryTestWrapper }
+  );
 }
 
 // Configure the user's OWN cloud + GitHub creds, with the agent credential
@@ -106,6 +107,36 @@ describe('OnboardingProvider', () => {
       expect(screen.getByTestId('overlay')).toHaveTextContent('closed');
       expect(localStorage.getItem(STORAGE_KEY)).toBe('true');
     });
+  });
+
+  it('does not flash the overlay for a set-up user while one status read is still in flight', async () => {
+    // A cold load on a fresh browser: credentials land well before the GitHub
+    // installations read. Deciding on the first read showed a fully set-up user the
+    // onboarding overlay until the slow read arrived, then closed it again.
+    mockOwnSetup({ agentActive: true });
+    let resolveInstallations: (value: unknown) => void = () => undefined;
+    mocks.listGitHubInstallations.mockReturnValue(
+      new Promise((resolve) => {
+        resolveInstallations = resolve;
+      })
+    );
+    renderProvider();
+
+    await waitFor(() => {
+      expect(mocks.listCredentials).toHaveBeenCalled();
+      expect(mocks.listAgentCredentials).toHaveBeenCalled();
+    });
+    // Let both fast reads settle and every effect they trigger run.
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.getByTestId('loading')).toHaveTextContent('loading');
+    expect(screen.getByTestId('overlay')).toHaveTextContent('closed');
+
+    resolveInstallations([{ id: 'inst-1' }]);
+    await waitFor(() => {
+      expect(screen.getByTestId('loading')).toHaveTextContent('ready');
+      expect(localStorage.getItem(STORAGE_KEY)).toBe('true');
+    });
+    expect(screen.getByTestId('overlay')).toHaveTextContent('closed');
   });
 
   it('keeps the overlay open when the only agent credential is inactive', async () => {

@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query';
-import { type ReactNode, Suspense } from 'react';
+import { type ReactNode, Suspense, useEffect, useState } from 'react';
 import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from 'react-router';
 
 import { AppShell } from './components/AppShell';
@@ -8,11 +8,13 @@ import { BackgroundFetchIndicator } from './components/BackgroundFetchIndicator'
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { PageViewTracker } from './components/PageViewTracker';
 import { ProtectedRoute } from './components/ProtectedRoute';
-import { RouteFallback } from './components/RouteFallback';
+import { NestedRouteFallback, RouteFallback } from './components/RouteFallback';
 import { GlobalAudioProvider } from './contexts/GlobalAudioContext';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { useQueryScope } from './hooks/useQueryScope';
 import { ToastProvider } from './hooks/useToast';
 import { lazyNamed, memoizeRouteImport } from './lib/lazy-with-retry';
+import { prefetchProjectRoute } from './lib/project-route-prefetch';
 import { queryClient } from './lib/query-client';
 // Initial landing set — statically imported per .claude/rules/60-request-io-and-bundle-budgets.md.
 // Every other page below is code-split via lazyNamed(). Do NOT add static page imports here.
@@ -72,6 +74,13 @@ const loadProjectSettings = memoizeRouteImport(() => import('./pages/ProjectSett
 const ProjectShell = lazyNamed(loadProjectShell, 'Project');
 function Project() {
   const { pathname } = useLocation();
+  const queryScope = useQueryScope();
+  // The URL this project route was entered through. Later in-project navigation is read by
+  // the mounted pages themselves; only the cold entry has nothing in flight yet.
+  const [entryPath] = useState(pathname);
+  useEffect(() => {
+    prefetchProjectRoute(queryClient, queryScope, entryPath);
+  }, [entryPath, queryScope]);
   void loadProjectShell().catch(() => undefined);
   if (/\/settings(?:\/|$)/.test(pathname)) {
     void loadProjectSettings().catch(() => undefined);
@@ -209,8 +218,8 @@ const Workspace = lazyNamed(() => import('./pages/workspace'), 'Workspace');
  * `.claude/rules/48-stale-while-revalidate-ui.md`: a fallback must never unmount
  * already-rendered content.
  */
-function page(element: ReactNode) {
-  return <Suspense fallback={<RouteFallback />}>{element}</Suspense>;
+function page(element: ReactNode, fallback: ReactNode = <RouteFallback />) {
+  return <Suspense fallback={fallback}>{element}</Suspense>;
 }
 
 function ProtectedLayout() {
@@ -296,8 +305,14 @@ export default function App() {
                       {/* Project detail — shell with sub-routes */}
                       <Route path="/projects/:id" element={page(<Project />)}>
                         <Route index element={<Navigate to="chat" replace />} />
-                        <Route path="chat" element={page(<ProjectChat />)} />
-                        <Route path="chat/:sessionId" element={page(<ProjectChat />)} />
+                        <Route
+                          path="chat"
+                          element={page(<ProjectChat />, <NestedRouteFallback />)}
+                        />
+                        <Route
+                          path="chat/:sessionId"
+                          element={page(<ProjectChat />, <NestedRouteFallback />)}
+                        />
                         <Route path="agent" element={page(<ProjectAgentChat />)} />
                         <Route path="library" element={page(<ProjectLibrary />)} />
                         <Route path="comments" element={page(<ProjectComments />)} />

@@ -1,10 +1,11 @@
-import { Pane, Spinner } from '@simple-agent-manager/ui';
+import { Pane } from '@simple-agent-manager/ui';
 import { PanelRight } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
 import { useAppShell } from '../../components/AppShell';
 import { BootLogPanel } from '../../components/chat/BootLogPanel';
+import { LoadingPane } from '../../components/LoadingPane';
 import { NewChatProfileCards, visibleProfiles } from '../../components/project-chat/profile-picker';
 import { ProjectMessageView } from '../../components/project-message-view';
 import { useCommentDeepLink } from '../../components/project-message-view/comments/useCommentDeepLink';
@@ -199,13 +200,11 @@ export function ProjectChat() {
     return getSessionSourceContext(session.taskId, state.taskInfoMap, state.sessions);
   }, [state.sessionId, state.sessions, state.taskInfoMap]);
 
-  // Loading state
-  if (state.loading && state.sessions.length === 0) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <Spinner size="lg" />
-      </div>
-    );
+  // A deep link names its session, so the conversation does not wait for the sidebar's
+  // session list: its transcript loads (or was prefetched) on its own. Only the bare chat
+  // route waits, because what it shows depends on whether the project has any chats.
+  if (state.loading && state.sessions.length === 0 && !state.sessionId) {
+    return <LoadingPane testId="chat-sessions-loading" />;
   }
 
   // Two or more visible profiles make choosing one worth a step of its own: show the
