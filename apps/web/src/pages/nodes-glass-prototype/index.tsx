@@ -21,14 +21,16 @@ import { useIsMobile } from '../../hooks/useIsMobile';
 import { ConceptCost } from './ConceptCost';
 import { ConceptFill } from './ConceptFill';
 import { ConceptLive } from './ConceptLive';
+import { ConceptLiveBoth } from './ConceptLiveBoth';
 import { ConceptSessions } from './ConceptSessions';
 import { MACHINES } from './mock-data';
 
-type Concept = 'fill' | 'live' | 'sessions' | 'cost';
+type Concept = 'fill' | 'live' | 'both' | 'sessions' | 'cost';
 
 const CONCEPTS: Record<Concept, { label: string; long: string }> = {
   fill: { label: 'Fill', long: 'Fill levels' },
   live: { label: 'Live', long: 'Live' },
+  both: { label: 'Both', long: 'CPU + memory' },
   sessions: { label: 'List', long: 'Sessions first' },
   cost: { label: 'Cost', long: 'Cost' },
 };
@@ -131,12 +133,13 @@ export function NodesGlassPrototype() {
               value: key,
               label: isMobile ? CONCEPTS[key].label : CONCEPTS[key].long,
             }))}
-            className="w-full md:w-[480px]"
+            className="w-full md:w-[640px]"
           />
         </div>
       </Pane>
       {concept === 'fill' && <ConceptFill machines={MACHINES} />}
       {concept === 'live' && <ConceptLive machines={MACHINES} />}
+      {concept === 'both' && <ConceptLiveBoth machines={MACHINES} />}
       {concept === 'sessions' && <ConceptSessions machines={MACHINES} />}
       {concept === 'cost' && <ConceptCost machines={MACHINES} />}
     </div>
