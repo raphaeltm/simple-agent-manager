@@ -276,7 +276,7 @@ The rest control the checks themselves:
 
 | Setting                                  | Default | Range      | What it controls                                                                                       |
 | ---------------------------------------- | ------- | ---------- | ------------------------------------------------------------------------------------------------------ |
-| `lifecycleLatency.alertsPerStatePerTick` | 5       | 1–100      | Slow episodes recorded per state in one run. Older episodes first; the rest are recorded on later runs |
+| `lifecycleLatency.alertsPerStatePerTick` | 5       | 1–20       | Slow episodes recorded per state in one run. Older episodes first; the rest are recorded on later runs |
 | `lifecycleLatency.regressionPercent`     | 200     | 101–10,000 | How far above its previous 7-day p95 a state's 24-hour p95 must be to count as a regression            |
 | `lifecycleLatency.minSamples`            | 5       | 1–10,000   | Fewest completed episodes in a window before the daily check judges it                                 |
 | `lifecycleLatency.retentionDays`         | 30      | 8–365      | Days transition history and alert records are kept                                                     |

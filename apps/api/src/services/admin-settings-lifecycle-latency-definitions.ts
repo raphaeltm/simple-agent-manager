@@ -38,8 +38,8 @@ export const LIFECYCLE_LATENCY_SETTINGS: AdminSettingDefinition[] = [
     'lifecycleLatency.alertsPerStatePerTick',
     LIFECYCLE_LATENCY_DEFAULTS.alertsPerStatePerTick,
     'Operations',
-    'Slow-state errors the latency watchdog records per state in one five-minute run. Older episodes are recorded first; the rest are counted in the run log and recorded on later runs.',
-    { min: 1, max: 100 }
+    'Slow-state errors the latency watchdog records per state in one five-minute run. Older episodes are recorded first; the rest are counted in the run log and recorded on later runs. Worst case per run: this value times the 11 watched states in error writes.',
+    { min: 1, max: 20 }
   ),
   integerDefinition(
     'lifecycleLatency.regressionPercent',

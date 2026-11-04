@@ -50,8 +50,8 @@ export function slowStateMessage(entityType: LifecycleEntityType, status: string
  * platform-feedback triage turns those into incidents for the feedback project.
  *
  * I/O per run: one settings read (cached), one SELECT per entity source (4), one batched
- * INSERT OR IGNORE, and one observability insert per new alert (at most
- * `alertsPerStatePerTick` per state).
+ * INSERT OR IGNORE, and one observability insert per new alert, issued in parallel (at most
+ * `alertsPerStatePerTick` per state: 55 with the default of 5, 220 at the maximum of 20).
  */
 export async function runLifecycleLatencyWatchdog(
   env: Env,
@@ -108,6 +108,7 @@ export async function runLifecycleLatencyWatchdog(
     )
   );
 
+  const writes: Promise<void>[] = [];
   for (const [index, { watch, row }] of candidates.entries()) {
     if ((inserts[index]?.meta.changes ?? 0) !== 1) continue; // already alerted for this episode
     result.alerted += 1;
@@ -124,21 +125,25 @@ export async function runLifecycleLatencyWatchdog(
       lastError: row.error_message?.slice(0, ERROR_MESSAGE_MAX_LENGTH) ?? null,
     };
     log.warn('lifecycle_latency.budget_exceeded', context);
-    await persistError(
-      env.OBSERVABILITY_DATABASE,
-      {
-        source: 'api',
-        level: 'warn',
-        message: slowStateMessage(watch.entityType, row.status),
-        context,
-        nodeId: row.node_id,
-        workspaceId: row.workspace_id,
-        userId: row.user_id,
-        sessionId: row.chat_session_id,
-      },
-      env
+    // Independent writes; persistError never throws, so one slow write cannot stall the others.
+    writes.push(
+      persistError(
+        env.OBSERVABILITY_DATABASE,
+        {
+          source: 'api',
+          level: 'warn',
+          message: slowStateMessage(watch.entityType, row.status),
+          context,
+          nodeId: row.node_id,
+          workspaceId: row.workspace_id,
+          userId: row.user_id,
+          sessionId: row.chat_session_id,
+        },
+        env
+      )
     );
   }
+  await Promise.all(writes);
 
   log.info('lifecycle_latency.watchdog', { ...result });
   return result;

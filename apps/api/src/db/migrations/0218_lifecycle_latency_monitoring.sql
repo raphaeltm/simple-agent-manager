@@ -43,6 +43,9 @@ CREATE INDEX idx_session_snapshots_sleep_status_changed_at
 CREATE INDEX idx_session_snapshots_recovery_status_changed_at
   ON session_snapshots (recovery_status, recovery_status_changed_at);
 
+-- Note: an UPDATE ... RETURNING status_changed_at returns the value from before these AFTER
+-- triggers ran. Read it back with a separate SELECT.
+
 -- Workspaces
 CREATE TRIGGER trg_workspaces_status_transition
 AFTER UPDATE OF status ON workspaces
@@ -103,12 +106,13 @@ WHEN NEW.sleep_status IS NOT NULL OR NEW.recovery_status IS NOT NULL
 BEGIN UPDATE session_snapshots SET sleep_status_changed_at = CASE WHEN NEW.sleep_status IS NULL THEN NULL ELSE COALESCE(NEW.sleep_status_changed_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) END, recovery_status_changed_at = CASE WHEN NEW.recovery_status IS NULL THEN NULL ELSE COALESCE(NEW.recovery_status_changed_at, strftime('%Y-%m-%dT%H:%M:%fZ', 'now')) END WHERE id = NEW.id; END;
 
 -- Backfill only rows in a non-terminal state. updated_at is the best available approximation of
--- when they entered it; rows already terminal never need a state age.
-UPDATE workspaces SET status_changed_at = COALESCE(updated_at, created_at)
+-- when they entered it; rows already terminal never need a state age. strftime normalizes every
+-- source format (including SQLite's CURRENT_TIMESTAMP) to the ISO form the watchdog compares as text.
+UPDATE workspaces SET status_changed_at = strftime('%Y-%m-%dT%H:%M:%fZ', COALESCE(updated_at, created_at))
 WHERE status_changed_at IS NULL AND status NOT IN ('deleted', 'error');
-UPDATE nodes SET status_changed_at = COALESCE(updated_at, created_at)
+UPDATE nodes SET status_changed_at = strftime('%Y-%m-%dT%H:%M:%fZ', COALESCE(updated_at, created_at))
 WHERE status_changed_at IS NULL AND status NOT IN ('deleted', 'error');
-UPDATE session_snapshots SET sleep_status_changed_at = COALESCE(sleep_claimed_at, updated_at, created_at)
+UPDATE session_snapshots SET sleep_status_changed_at = strftime('%Y-%m-%dT%H:%M:%fZ', COALESCE(sleep_claimed_at, updated_at, created_at))
 WHERE sleep_status_changed_at IS NULL AND sleep_status IN ('preparing', 'stopping');
-UPDATE session_snapshots SET recovery_status_changed_at = COALESCE(recovery_claimed_at, updated_at, created_at)
+UPDATE session_snapshots SET recovery_status_changed_at = strftime('%Y-%m-%dT%H:%M:%fZ', COALESCE(recovery_claimed_at, updated_at, created_at))
 WHERE recovery_status_changed_at IS NULL AND recovery_status = 'waking';
