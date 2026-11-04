@@ -17,8 +17,10 @@ const mockGetDownloadTimeoutMs = vi.hoisted(() => vi.fn().mockReturnValue(60000)
 const mockGetListMaxPageSize = vi.hoisted(() => vi.fn().mockReturnValue(200));
 const mockValidateFilename = vi.hoisted(() => vi.fn());
 const mockValidateDirectory = vi.hoisted(() => vi.fn((dir: string) => dir));
-const authRole = vi.hoisted(() => ({ value: 'user' }));
 
+// Role the mocked getAuth reports. The raw debug package tests switch it to superadmin
+// to check that only superadmins see /debug-packages/ files.
+const authRole = vi.hoisted(() => ({ value: 'user' }));
 // Mock auth middleware
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
@@ -47,10 +49,6 @@ vi.mock('drizzle-orm/d1', () => ({
   drizzle: vi.fn().mockReturnValue({}),
 }));
 vi.mock('../../../src/db/schema', () => ({}));
-vi.mock('../../../src/lib/logger', async (importOriginal) => ({
-  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
-  log: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
-}));
 vi.mock('../../../src/services/file-library', () => ({
   uploadFile: mockUploadFile,
   replaceFile: mockReplaceFile,
@@ -84,6 +82,12 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
     ...overrides,
   } as Env;
 }
+
+// Hoisted by Vitest; declared below the fixtures to keep their line numbers stable.
+vi.mock('../../../src/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
+  log: { info: vi.fn(), error: vi.fn(), warn: vi.fn() },
+}));
 
 /** The only origin allowed to frame a preview: the app, never the API itself. */
 const FRAME_ANCESTORS = 'frame-ancestors https://app.test.example.com';
