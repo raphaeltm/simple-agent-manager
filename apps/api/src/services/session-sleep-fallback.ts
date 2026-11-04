@@ -250,7 +250,7 @@ export async function runSessionSleepFallback(
       workspace.projectId,
       agentSession.id
     );
-    const idlenessBefore = classify(stateBefore);
+    const idlenessBefore = await classify(stateBefore);
     const stateMissingBlocks = requirement !== 'required';
     if ((!stateBefore && stateMissingBlocks) || !idlenessBefore.idle) {
       await deferSessionSnapshotSleepBeforeClaim(
@@ -307,7 +307,7 @@ export async function runSessionSleepFallback(
     );
     if (
       (!stateAfter && stateMissingBlocks) ||
-      !classify(stateAfter).idle ||
+      !(await classify(stateAfter)).idle ||
       sleepStateChanged(stateBefore, stateAfter, requirement)
     ) {
       await deferSessionSnapshotSleepBeforeClaim(

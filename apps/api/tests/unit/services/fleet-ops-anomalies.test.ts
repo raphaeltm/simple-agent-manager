@@ -113,7 +113,7 @@ describe('findAnomalies', () => {
 
     const report = await findAnomalies(env, FLEET_OPS_DEFAULTS, { now: NOW });
 
-    expect(report.classes).toHaveLength(7);
+    expect(report.classes).toHaveLength(8);
     for (const entry of report.classes) {
       expect(entry.error, entry.class).toBeUndefined();
       expect(entry.findings, entry.class).toEqual([]);
@@ -158,6 +158,31 @@ describe('findAnomalies', () => {
     expect(entry.findings.map((f) => f.ids.nodeId)).toEqual(['node-never', 'node-stale']);
     expect(entry.findings[0]?.reason).toContain('is unhealthy');
     expect(entry.findings[1]?.reason).toContain('is stale');
+  });
+
+  it('finds nodes destroying past the threshold with their recorded cleanup refusal', async () => {
+    const threshold = FLEET_OPS_DEFAULTS.destroyingNodeHours * 60 * MIN;
+    node('node-stuck', {
+      status: 'destroying',
+      node_role: 'deployment',
+      last_heartbeat_at: iso(threshold + 60 * MIN),
+      cleanup_blocked_since: iso(threshold),
+      cleanup_blocked_reason: 'exact provider credential binding is missing',
+    });
+    node('node-deleting', { status: 'deleting', last_heartbeat_at: iso(threshold + MIN) });
+    // Healthy neighbours: a teardown still inside the threshold, and a long-dead node already deleted.
+    node('node-recent', { status: 'destroying', last_heartbeat_at: iso(threshold - 10 * MIN) });
+    node('node-deleted', { status: 'deleted', last_heartbeat_at: iso(threshold * 4) });
+
+    const entry = findingIds(
+      await findAnomalies(env, FLEET_OPS_DEFAULTS, { now: NOW }),
+      'node_destroying_too_long'
+    );
+
+    expect(entry.findings.map((f) => f.ids.nodeId)).toEqual(['node-stuck', 'node-deleting']);
+    expect(entry.findings[0]?.reason).toContain('deployment node has been destroying');
+    expect(entry.findings[0]?.reason).toContain('exact provider credential binding is missing');
+    expect(entry.findings[1]?.reason).toContain('no cleanup refusal recorded');
   });
 
   it('finds running workspaces whose task ended past the grace, unless another task is active', async () => {
