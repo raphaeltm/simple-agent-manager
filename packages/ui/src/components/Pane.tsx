@@ -6,7 +6,10 @@ import type { ElementType, HTMLAttributes, ReactNode } from 'react';
  * - `pane`: sidebar, chat list, settings group, tool rail
  * - `quiet`: a pane other panes sit on (the conversation)
  * - `slab`: a pane laid on another pane (page header, message box, mobile app bar)
- * - `overlay`: the one drawer or sheet on screen; the only pane with a live blur
+ * - `overlay`: a drawer, sheet or popover over content; it blurs what it covers
+ *
+ * In the app every pane is frosted (it blurs the void behind it, on its ::after; see
+ * tokens/sam-glass.css). A pane inside another pane does not blur again.
  */
 export type PaneVariant = 'pane' | 'quiet' | 'slab' | 'overlay';
 
@@ -14,7 +17,7 @@ const variantClasses: Record<PaneVariant, string> = {
   pane: 'sam-glass sam-glass-rim rounded-[var(--sam-radius-pane)]',
   quiet: 'sam-glass sam-glass--quiet sam-glass-rim rounded-[var(--sam-radius-pane)]',
   slab: 'sam-glass sam-glass--slab sam-glass-rim rounded-[var(--sam-radius-slab)]',
-  // The normal pane fill under the blur: text on a drawer must stay 4.5:1 whatever passes
+  // The normal pane fill under its own blur: text on a drawer must stay 4.5:1 whatever passes
   // behind it, and a thinner fill let busy content read through in the light theme.
   overlay: 'sam-glass sam-glass-live sam-glass-rim rounded-[var(--sam-radius-pane)]',
 };

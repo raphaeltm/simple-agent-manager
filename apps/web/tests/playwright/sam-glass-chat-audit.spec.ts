@@ -38,37 +38,68 @@ async function openChat(page: Page, theme: Theme, path = `chat/${GLASS_SESSION_I
 }
 
 /**
- * Panes are frosted: each one blurs the void behind it. Returns how many visible panes blur,
- * and how many blurring elements sit inside another blurring element without being an
- * overlay; those would blur the same backdrop twice.
+ * Panes are frosted: each one blurs the void behind it (on its ::after; overlays on themselves).
+ * Returns how many visible panes blur, how many blurring elements sit inside another blurring
+ * element without being an overlay (they would blur the same backdrop twice), and which panes
+ * would trap a `position: fixed` child: a dialog rendered inside a pane must not be confined to
+ * the pane, which a backdrop-filter on the pane itself would do.
  */
-async function frostedPanes(page: Page): Promise<{ frosted: number; nested: string[] }> {
+async function frostedPanes(
+  page: Page
+): Promise<{ frosted: number; nested: string[]; trapping: string[] }> {
   return page.evaluate(() => {
-    const blurs = (el: Element) => {
-      const style = getComputedStyle(el);
+    const has = (style: CSSStyleDeclaration) => {
       const filter = style.backdropFilter || style.getPropertyValue('-webkit-backdrop-filter');
       return Boolean(filter && filter !== 'none' && filter.includes('blur'));
     };
+    const blurs = (el: Element) =>
+      has(getComputedStyle(el)) ||
+      (getComputedStyle(el, '::after').content !== 'none' && has(getComputedStyle(el, '::after')));
     const visible = (el: Element) => el.getClientRects().length > 0;
-    const frosted = Array.from(document.querySelectorAll('.sam-glass')).filter(
-      (el) => visible(el) && blurs(el)
-    ).length;
+    const label = (el: Element) =>
+      `${el.tagName.toLowerCase()}.${String(el.className).slice(0, 60)}`;
+    const panes = Array.from(document.querySelectorAll<HTMLElement>('.sam-glass')).filter(visible);
+    const frosted = panes.filter(blurs).length;
     const nested = Array.from(document.querySelectorAll<HTMLElement>('body *'))
       .filter((el) => visible(el) && blurs(el) && !el.classList.contains('sam-glass-live'))
       .filter((el) => {
         for (let p = el.parentElement; p; p = p.parentElement) if (blurs(p)) return true;
         return false;
       })
-      .map((el) => `${el.tagName.toLowerCase()}.${String(el.className).slice(0, 60)}`);
-    return { frosted, nested };
+      .map(label);
+    // The pane itself must not become the containing block for fixed children: a fixed probe
+    // inside the pane lands where the same probe inside the pane's parent does.
+    const fixedBox = (host: Element) => {
+      const probe = document.createElement('div');
+      probe.style.cssText = 'position:fixed;inset:0;pointer-events:none;visibility:hidden';
+      host.appendChild(probe);
+      const r = probe.getBoundingClientRect();
+      probe.remove();
+      return r;
+    };
+    const trapping = panes
+      .filter((pane) => !pane.classList.contains('sam-glass-live') && pane.parentElement)
+      .filter((pane) => {
+        const inside = fixedBox(pane);
+        const outside = fixedBox(pane.parentElement!);
+        return (
+          Math.abs(inside.x - outside.x) > 1 ||
+          Math.abs(inside.y - outside.y) > 1 ||
+          Math.abs(inside.width - outside.width) > 1 ||
+          Math.abs(inside.height - outside.height) > 1
+        );
+      })
+      .map(label);
+    return { frosted, nested, trapping };
   });
 }
 
 async function capture(page: Page, name: string, theme: Theme, surface?: Locator) {
   if (surface) await expect(surface).toBeVisible({ timeout: 15_000 });
-  const { frosted, nested } = await frostedPanes(page);
+  const { frosted, nested, trapping } = await frostedPanes(page);
   expect(frosted).toBeGreaterThan(0);
   expect(nested).toEqual([]);
+  expect(trapping).toEqual([]);
   await screenshot(page, `glass-${name}-${theme}`, { scopeToProject: true });
 }
 

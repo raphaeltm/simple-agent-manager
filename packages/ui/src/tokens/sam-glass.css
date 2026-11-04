@@ -124,26 +124,35 @@
 /*
  * Frosted panes: every pane blurs the void behind it. The void is static gradients, so the
  * browser can keep each pane's backdrop; nothing animates behind a pane. A pane inside another
- * pane does not blur again (the outer one already did), except an overlay laid over content.
- * In the components layer, so a Tailwind utility on a pane still wins.
+ * pane does not blur again (the outer one already did). Overlays (.sam-glass-live) keep their
+ * own blur from glass.css. In the components layer, so a Tailwind utility on a pane still wins.
+ *
+ * The blur sits on ::after, behind the pane's content, never on the pane itself: an element with
+ * a backdrop-filter becomes the containing block for its position:fixed descendants, which would
+ * trap every dialog rendered inside a pane (rather than portaled) within the pane's box.
+ * ::after is free on panes because the app does not use .sam-glass-sheen.
  */
 @layer components {
   @supports (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px)) {
-    :where(.sam-glass) {
+    :where(.sam-glass:not(.sam-glass-live, .sam-glass-sheen))::after {
+      content: '';
+      position: absolute;
+      inset: 0;
+      z-index: -1;
+      border-radius: inherit;
+      pointer-events: none;
       -webkit-backdrop-filter: blur(var(--sam-pane-blur)) saturate(var(--sam-pane-saturate));
       backdrop-filter: blur(var(--sam-pane-blur)) saturate(var(--sam-pane-saturate));
     }
 
-    :where(.sam-glass .sam-glass:not(.sam-glass-live)) {
-      -webkit-backdrop-filter: none;
-      backdrop-filter: none;
+    :where(.sam-glass .sam-glass:not(.sam-glass-live, .sam-glass-sheen))::after {
+      content: none;
     }
   }
 
   @media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
-    :where(.sam-glass) {
-      -webkit-backdrop-filter: none;
-      backdrop-filter: none;
+    :where(.sam-glass:not(.sam-glass-live, .sam-glass-sheen))::after {
+      content: none;
     }
   }
 }

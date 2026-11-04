@@ -13,7 +13,7 @@
  *   .sam-glass--chrome    lighter fill for chrome (nav pills, chips, docks)
  *   .sam-glass-rim        1px gradient rim light (uses ::before; element must be positioned)
  *   .sam-glass-sheen      one light sweep over the rim when `.is-sheened` is added (uses ::after)
- *   .sam-glass-live       real backdrop blur, only where the backdrop is unknown (e.g. sticky nav)
+ *   .sam-glass-live       real backdrop blur on the element itself: overlays and sticky chrome
  *
  * SAM Glass additions (docs/guides/sam-glass-design-system.md):
  *   .sam-void             the ground every app screen floats over: light at the edges, a deep core
