@@ -65,18 +65,18 @@ describe('MobileNavDrawer', () => {
   it('renders initial letter when no avatar image', () => {
     render(<MobileNavDrawer {...defaultProps} />);
 
-    // The fallback should show 'D' for 'Dev User'
-    expect(screen.getByText('D')).toBeInTheDocument();
+    // The fallback shows the initials for 'Dev User' on the person's solid avatar
+    expect(screen.getByText('DU')).toBeInTheDocument();
   });
 
   it('highlights the active navigation item', () => {
     render(<MobileNavDrawer {...defaultProps} currentPath="/dashboard" />);
 
-    const homeButton = screen.getByText('Home');
-    expect(homeButton.className).toContain('text-accent');
+    const homeButton = screen.getByRole('button', { name: 'Home' });
+    expect(homeButton).toHaveAttribute('aria-current', 'page');
 
-    const projectsButton = screen.getByText('Projects');
-    expect(projectsButton.className).not.toContain('text-accent');
+    const projectsButton = screen.getByRole('button', { name: 'Projects' });
+    expect(projectsButton).not.toHaveAttribute('aria-current');
   });
 
   it('calls onNavigate when a nav item is clicked', () => {
@@ -188,7 +188,7 @@ describe('MobileNavDrawer', () => {
     );
 
     const panel = screen.getByTestId('mobile-nav-panel');
-    const slidingPanels = panel.querySelectorAll('nav [aria-hidden]');
+    const slidingPanels = panel.querySelectorAll('nav > div > [aria-hidden]');
 
     expect(slidingPanels).toHaveLength(1);
     expect(slidingPanels[0]).toHaveAttribute('aria-hidden', 'true');
@@ -206,11 +206,11 @@ describe('MobileNavDrawer', () => {
   it('marks nested path as active for non-dashboard routes', () => {
     render(<MobileNavDrawer {...defaultProps} currentPath="/projects/abc-123" />);
 
-    const projectsButton = screen.getByText('Projects');
-    expect(projectsButton.className).toContain('text-accent');
+    const projectsButton = screen.getByRole('button', { name: 'Projects' });
+    expect(projectsButton).toHaveAttribute('aria-current', 'page');
 
-    const homeButton = screen.getByText('Home');
-    expect(homeButton.className).not.toContain('text-accent');
+    const homeButton = screen.getByRole('button', { name: 'Home' });
+    expect(homeButton).not.toHaveAttribute('aria-current');
   });
 
 

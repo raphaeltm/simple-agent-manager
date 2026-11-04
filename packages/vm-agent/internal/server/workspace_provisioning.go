@@ -105,7 +105,7 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 	}
 	ctx, timings := startLifecycleTimings(ctx, "system_wait")
 	defer func() {
-		s.finishLifecycleTimings(timings, "workspace", runtime.ID, s.runtimeCallbackToken(runtime), resultErr)
+		s.finishLifecycleTimings(timings, "workspace", runtime.ID, "", s.runtimeCallbackToken(runtime), resultErr)
 	}()
 
 	if err := s.waitForSystemProvisioning(ctx); err != nil {

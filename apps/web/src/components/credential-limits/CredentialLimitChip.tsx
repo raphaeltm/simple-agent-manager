@@ -1,6 +1,6 @@
 import type { CredentialLimitCredentialSummary } from '@simple-agent-manager/shared';
 import { credentialLimitWindowLabel } from '@simple-agent-manager/shared';
-import { Dialog, StatusBadge } from '@simple-agent-manager/ui';
+import { chipClassName, Dialog, StatusBadge } from '@simple-agent-manager/ui';
 import { Gauge } from 'lucide-react';
 import { useId, useState } from 'react';
 
@@ -40,10 +40,10 @@ export function CredentialLimitChip({
         onClick={() => setOpen(true)}
         aria-label={`Usage limits: ${text}. ${LEVEL_LABELS[credential.level]}. Open details`}
         data-testid="credential-limit-chip"
-        className="inline-flex max-w-full items-center gap-1 rounded border border-transparent px-1.5 py-0.5 text-[10px] font-medium shrink-0 cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary"
-        style={{ backgroundColor: style.background, color: style.color }}
+        className={`${chipClassName()} cursor-pointer transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring`}
       >
-        <Gauge size={10} aria-hidden="true" />
+        {/* The level colour rides on the gauge; the chip stays solid and neutral (SAM Glass). */}
+        <Gauge size={14} strokeWidth={1.75} aria-hidden="true" style={{ color: style.color }} />
         <span className="truncate">{text}</span>
       </button>
       <Dialog

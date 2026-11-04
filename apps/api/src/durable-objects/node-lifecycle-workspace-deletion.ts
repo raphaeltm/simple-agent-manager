@@ -44,6 +44,10 @@ import {
   workspaceStoppedTtlMs,
 } from './node-lifecycle-workspace-deletion-support';
 
+/** Persisted to `platform_errors` on every dead-letter; Operations anomaly sweeps match on it. */
+export const WORKSPACE_DELETION_QUARANTINE_MESSAGE =
+  'Workspace deletion entered durable operator quarantine';
+
 export type { WorkspaceDeletionMode } from '../services/workspace-deletion';
 export type {
   NodeLifecycleDeletionEnv,
@@ -766,7 +770,7 @@ export class NodeLifecycleWorkspaceDeletionQueue {
       {
         source: 'api',
         level: 'error',
-        message: 'Workspace deletion entered durable operator quarantine',
+        message: WORKSPACE_DELETION_QUARANTINE_MESSAGE,
         context: { reason, attemptCount: entry.attemptCount ?? 0 },
         workspaceId: entry.workspaceId,
         nodeId: entry.nodeId ?? null,

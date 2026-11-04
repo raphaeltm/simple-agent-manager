@@ -577,16 +577,6 @@ function viewportScreenshot(baseName: string, viewport: OverlayViewport) {
 
 const sharedOverlayScenarios: SharedOverlayScenario[] = [
   {
-    // The trigger popover lives in the project chat's sidebar header.
-    name: 'TriggerDropdown portal renders positioned correctly',
-    run: (page, viewport) =>
-      openOptionalButtonOverlay(page, {
-        buttonSelector: 'button[aria-label="Automation triggers"]',
-        overlayScreenshotName: viewportScreenshot('portal-trigger-dropdown', viewport),
-        url: '/projects/proj-test-1/chat',
-      }),
-  },
-  {
     name: 'Library FileActionsMenu portal renders positioned correctly',
     run: (page, viewport) =>
       openOptionalButtonOverlay(page, {

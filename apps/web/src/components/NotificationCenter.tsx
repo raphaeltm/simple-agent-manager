@@ -1,5 +1,5 @@
 import type { NotificationResponse } from '@simple-agent-manager/shared';
-import { Alert, Button } from '@simple-agent-manager/ui';
+import { Alert, Button, IconButton, paneClassName } from '@simple-agent-manager/ui';
 import { Bell, CheckCheck, Loader2 } from 'lucide-react';
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -177,19 +177,15 @@ export function NotificationCenter() {
   return (
     <div className="relative">
       {/* Bell Button */}
-      <button
+      <IconButton
         ref={buttonRef}
         onClick={() => setIsOpen(!isOpen)}
-        aria-label={notificationButtonLabel}
-        className="relative flex items-center justify-center w-9 h-9 bg-transparent border-none text-fg-muted cursor-pointer hover:text-fg-primary transition-colors"
-      >
-        <Bell size={18} />
-        {attentionUnreadCount > 0 && (
-          <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-accent text-fg-on-accent text-[10px] font-bold leading-none">
-            {attentionUnreadCount > 99 ? '99+' : attentionUnreadCount}
-          </span>
-        )}
-      </button>
+        label={notificationButtonLabel}
+        icon={<Bell size={20} strokeWidth={1.75} />}
+        count={attentionUnreadCount > 99 ? '99+' : attentionUnreadCount || undefined}
+        countTone="attention"
+        showTooltip={false}
+      />
 
       {question && (
         <Suspense fallback={null}>
@@ -212,11 +208,11 @@ export function NotificationCenter() {
             role="dialog"
             aria-label="Notifications"
             style={panelStyle}
-            className="glass-panel-container glass-composited fixed inset-x-4 sm:inset-x-auto sm:w-[380px] max-h-[calc(100vh-5rem)] sm:max-h-[520px] glass-surface rounded-lg shadow-lg flex flex-col z-[100] overflow-hidden"
+            className={`${paneClassName('overlay')} fixed inset-x-4 sm:inset-x-auto sm:w-[380px] max-h-[calc(100vh-5rem)] sm:max-h-[520px] flex flex-col z-[100] overflow-hidden`}
           >
             {/* Header */}
-            <div className="flex items-center justify-between px-4 py-3 border-b border-border-default">
-              <h3 className="text-sm font-semibold text-fg-primary">Notifications</h3>
+            <div className="flex items-center justify-between px-4 py-3 border-b border-[var(--sam-hairline)]">
+              <h3 className="text-[15px] font-semibold text-fg-primary">Notifications</h3>
               <div className="flex items-center gap-2">
                 {unreadCount > 0 && (
                   <button

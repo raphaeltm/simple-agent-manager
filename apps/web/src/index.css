@@ -178,6 +178,14 @@
   .divide-y > * + * { border-top: 1px solid var(--sam-color-border-default); }
 }
 
+/* ── SAM Glass: the scrim behind an open drawer or sheet. It only dims; the overlay pane above
+   it blurs what it covers (docs/guides/sam-glass-design-system.md). ── */
+@layer utilities {
+  .sam-scrim {
+    background: var(--sam-scrim);
+  }
+}
+
 /* ── Glass utilities (opt-in foundation for the glassomorphism migration) ── */
 @layer utilities {
   .glass-chrome,
@@ -222,6 +230,14 @@
   .glass-modal .glass-surface,
   .glass-modal .glass-modal {
     background-color: var(--sam-glass-nested-bg);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+
+  /* Legacy glass inside a SAM Glass pane (an ordinary page in the shell's content pane) drops
+     its own blur: the frosted pane already blurred the void behind it, and blurring that again
+     only costs (apps/web/.claude/rules/80-sam-glass.md). */
+  .sam-glass :is(.glass-chrome, .glass-surface, .glass-modal, .glass-backdrop-dim) {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
@@ -400,49 +416,29 @@
   }
 }
 
-/* ── Glass message bubbles (overrides acp-client defaults for project chat) ── */
+/* ── Message bubbles (override acp-client defaults for project chat) ──
+   SAM Glass: the conversation is a quiet pane, so a reply is a slightly raised card laid on it
+   with a hairline edge, not a glowing panel; your own messages carry a faint tint of your
+   person colour. Tokens only, so both themes follow. */
 @layer utilities {
   .glass-msg-user {
-    background: var(--sam-msg-user-bg) !important;
-    border: 1px solid var(--sam-msg-user-border) !important;
-    border-bottom-right-radius: 4px !important;
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+    background: color-mix(in srgb, var(--sam-person-you) 9%, var(--sam-glass-v2-raised)) !important;
+    border: 1px solid color-mix(in srgb, var(--sam-person-you) 22%, transparent) !important;
+    border-radius: 18px !important;
+    border-bottom-right-radius: 6px !important;
+    box-shadow: inset 0 1px 0 var(--sam-glass-v2-raised-edge);
     color: var(--sam-color-fg-primary) !important;
   }
 
   .glass-msg-assistant {
     position: relative;
-    /* Layered fill: a faint green wash rising from the bottom over the base. */
-    background: var(--sam-msg-assistant-bg) !important;
-    border: 1px solid var(--sam-msg-assistant-border) !important;
-    border-bottom-left-radius: 4px !important;
+    background: var(--sam-glass-v2-raised) !important;
+    border: 1px solid var(--sam-hairline) !important;
+    border-radius: 18px !important;
+    border-bottom-left-radius: 6px !important;
     box-shadow:
-      /* tight green rim */
-      0 0 0 1px rgba(34, 197, 94, 0.08),
-      /* depth */
-      0 2px 14px rgba(0, 0, 0, 0.22),
-      /* soft outer green glow */
-      0 0 20px rgba(34, 197, 94, 0.14),
-      /* inner glow pooling toward the bottom edge */
-      inset 0 -22px 28px -22px rgba(34, 197, 94, 0.55) !important;
+      inset 0 1px 0 var(--sam-glass-v2-raised-edge),
+      inset 0 -1px 0 var(--sam-glass-v2-bounce) !important;
     color: var(--sam-color-fg-primary) !important;
-  }
-
-  /* Semi-transparent green gradient hairline along the bottom edge. */
-  .glass-msg-assistant::after {
-    content: '';
-    position: absolute;
-    left: 14px;
-    right: 14px;
-    bottom: 0;
-    height: 1px;
-    border-radius: 1px;
-    background: linear-gradient(
-      to right,
-      rgba(34, 197, 94, 0) 0%,
-      rgba(34, 197, 94, 0.55) 50%,
-      rgba(34, 197, 94, 0) 100%
-    );
-    pointer-events: none;
   }
 }

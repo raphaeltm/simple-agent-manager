@@ -95,6 +95,9 @@ export const PROMPT_DELIVERY_SOURCES = [
   'project_event_wake',
   'github_trigger',
   'scheduled_action',
+  // A superadmin's approve/deny decision on an Operations action, delivered to the requesting
+  // agent's session (`services/operations-actions/decision-delivery.ts`).
+  'operations_decision',
 ] as const;
 
 export type PromptDeliverySource = (typeof PROMPT_DELIVERY_SOURCES)[number];

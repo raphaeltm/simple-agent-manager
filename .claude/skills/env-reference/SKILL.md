@@ -20,6 +20,8 @@ Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB
 | Variable | `D1_SESSION_MODE`                                  | No (default: `first-primary`; `disabled` pins reads to primary)    |
 | Variable | `D1_MIGRATION_CHURNING_TABLES`                     | No (may narrow the reviewed built-in retention/expiry table list)  |
 | Variable | `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` | No (default: `50`; range: 0–100)                                   |
+| Variable | `D1_MIGRATION_READ_ATTEMPTS`                       | No (default: `3`; range: 1–5; verification reads only)             |
+| Variable | `D1_MIGRATION_READ_RETRY_DELAY_MS`                 | No (default: `10000`; range: 0–60000)                              |
 | Secret   | `CF_API_TOKEN`                                     | Yes (requires Account → SSL and Certificates → Edit for Origin CA) |
 | Secret   | `CF_ACCOUNT_ID`                                    | Yes                                                                |
 | Secret   | `CF_ZONE_ID`                                       | Yes                                                                |
@@ -84,10 +86,12 @@ Use the typed **Operations** admin settings below for live configuration. All ei
 
 Operations debugger tools (`apps/api/src/services/operations-access.ts`):
 
-| Admin setting key               | Default | Meaning                                                                                                   |
-| ------------------------------- | ------- | --------------------------------------------------------------------------------------------------------- |
+| Admin setting key               | Default | Meaning                                                                                                         |
+| ------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------- |
 | `operations.debuggerTools`      | `off`   | `off` / `read` / `read_ask` / `read_auto_safe`; gate for `ops_*` MCP tools in the Operations project. No cache. |
-| `operations.auditRetentionDays` | `90`    | Integer `1`–`3650`; days `operations_audit_log` rows are kept (daily `0 3 * * *` purge).                   |
+| `operations.auditRetentionDays` | `90`    | Integer `1`–`3650`; days `operations_audit_log` rows are kept (daily `0 3 * * *` purge).                        |
+
+Read-tool limits for the `ops_*` tools (`apps/api/src/services/fleet-ops/settings-definitions.ts`, resolved once per call by `resolveFleetOpsSettings`): `operations.debugPackageRetentionDays` (7), `operations.debugPackageMaxBytes` (20 MiB, max 32 MiB), `operations.debugPackagePurgeBatchSize` (50 per batch, max 90), `operations.debugPackagePurgeDeadlineMs` (20000), `operations.debugPackageCapturesPerHour` (20), `operations.opsAnomalyEmptyNodeGraceMs` (900000), `operations.opsAnomalyTerminalTaskGraceMs` (900000), `operations.opsAnomalyIdleTaskMinutes` (60), `operations.opsAnomalyLookbackHours` (24), `operations.opsAnomalyMaxPerClass` (25), `operations.opsNodeLogMaxLines` (200), `operations.opsNodeLogMaxBytes` (65536), `operations.opsTimelineMaxEvents` (200), `operations.opsTimelinePerSourceLimit` (100), `operations.opsTimelineDefaultWindowHours` (168), `operations.opsTimelineFanoutLimit` (2), `operations.opsEntityGraphRowCap` (25), `operations.opsWorkerLogDefaultWindowMinutes` (60), `operations.opsListMaxRows` (100), `operations.opsTextFieldMaxLength` (2000). Defaults, ranges and meanings: public docs `guides/admin-settings.md#read-tool-limits`.
 
 Each refresh selects at most 25 watches and reads at most 25 events per watch: at most 325 caller D1 reads, 75 cold ProjectData RPCs, and 625 local event-reference inserts, plus fixed alarm setup. A work-card read performs at most 75 D1 reads. Each watch persists its next check and charges an attempt before I/O; the alarm uses the earliest watch deadline. Failed watches defer until that deadline and stop after the retry limit, with a visible update warning. The watch lifetime also stops observation independently; neither condition cancels project work.
 
@@ -778,8 +782,8 @@ Trial configuration is currently sourced from `apps/api/.env.example` and `apps/
 
 - `NODE_USER_ID` / `NODE_RUNTIME_INCARNATION_ID` — Generated node owner and boot identity. Strict physical workspace deletion fails closed when either is missing; legacy nodes do not supply physical deletion proof.
 - `WORKSPACE_DELETION_RETRY_INTERVAL` — Go duration between bounded local retries of persisted deletion intents (default: `1m`). Retries resume the same exact operation under the workspace lifecycle lock. Unknown resources are never adopted based on age or status.
-- `WORKSPACE_DELETION_ATTEMPT_TIMEOUT` — Maximum Go duration for one local retry attempt (default: `30s`).
-- `WORKSPACE_DELETION_BATCH_SIZE` / `WORKSPACE_DELETION_MAX_ENTRIES` — Retry-intent batch and per-attempt filesystem walk bounds (defaults: `32` / `512`). Partial cleanup remains pending and resumes through the same intent.
+- `WORKSPACE_DELETION_ATTEMPT_TIMEOUT` — Maximum Go duration for one deletion attempt, inline or retried (default: `30s`). This is the only per-attempt bound on the filesystem walk; an interrupted walk remains pending and resumes through the same intent. The deletion endpoint also uses it to bound the wait for the workspace lifecycle lock, then starts a fresh attempt timer once the lock is held.
+- `WORKSPACE_DELETION_BATCH_SIZE` — Retry intents processed per local retry pass (default: `32`).
 - `WORKSPACE_DELETION_TOMBSTONE_RETENTION` — Retention for finalized local deletion receipts (default: `168h`). Bounded pruning never removes unfinished deletion intents. Ownership records are removed only after verified completion.
 - `SAM_IMAGE_TRANSFER_SCRATCH_DIR` — Dedicated private image archive directory (default: `$TMPDIR/sam-image-transfers`, using the OS temporary directory when `TMPDIR` is unset). Only marked operations created by SAM's publish/deploy image transfers are candidates; previous unmarked temporary directories are preserved. The root must be private and owned by the agent user; ancestors must be root/agent-owned and not group/other-writable unless sticky. Unsafe custom roots and `TMPDIR` ancestors are rejected before creation.
 - `SAM_IMAGE_TRANSFER_SCRATCH_DRY_RUN` — Report candidates without deleting crash leftovers (default: `true`). Normal successful operations still remove their own scratch files while holding their lease.

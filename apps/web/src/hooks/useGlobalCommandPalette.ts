@@ -1,4 +1,4 @@
-import { useCallback,useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 /**
  * Hook to manage the global command palette open/close state.
@@ -25,7 +25,14 @@ export function useGlobalCommandPalette() {
       if (modifierPressed && e.key.toLowerCase() === 'k' && !e.shiftKey && !e.altKey) {
         e.preventDefault();
         e.stopPropagation();
-        setIsOpen((prev) => !prev);
+        setIsOpen((prev) => {
+          if (prev) return false;
+          // Another overlay (a drawer, sheet or dialog) is open: opening the palette over it
+          // would put a second live blur on screen (SAM Glass allows one), so the shortcut
+          // waits until that overlay is closed. The palette never marks itself as a modal
+          // root, so this cannot block closing it.
+          return document.querySelector('[data-sam-modal-root]') === null;
+        });
       }
     };
 
