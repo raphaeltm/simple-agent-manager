@@ -391,7 +391,7 @@ test('Connector provenance in session sidebar remains user-initiated', async ({ 
   const sessions = NORMAL_SESSIONS.map((session, i) => ({ ...session, task: tasks[i] }));
   await setupApiMocks(page, { tasks, sessions });
   await page.goto('/projects/proj-1');
-  await expect(page.getByRole('button', { name: 'Project settings' })).toBeVisible();
+  await expect(page.getByRole('textbox').first()).toBeVisible();
   await openMobileSidebar(page);
   await expect(page.getByTitle(`Created via ${connectorClientName}`).first()).toBeVisible();
   await assertNoOverflow(page);

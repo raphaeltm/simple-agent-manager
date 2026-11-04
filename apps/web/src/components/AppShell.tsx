@@ -277,8 +277,10 @@ export function AppShell({ children }: AppShellProps) {
   const mainFrameClassName = bareMain
     ? 'contents'
     : 'sam-glass sam-glass-rim rounded-[var(--sam-radius-pane)] flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden';
-  const mainClassName = `sam-main-content relative flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden ${
-    bareMain ? 'overflow-y-hidden' : 'overflow-y-auto'
+  // The chat surfaces scroll inside their own panes, so their main does not clip: clipping it
+  // would cut the panes' shadows off at its edges. Ordinary pages scroll in main itself.
+  const mainClassName = `sam-main-content relative flex min-h-0 min-w-0 flex-1 flex-col ${
+    bareMain ? 'overflow-visible' : 'overflow-x-hidden overflow-y-auto'
   }`;
 
   const signOutHandler = () => {
