@@ -833,7 +833,13 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
               decidedAt: tick(2).toISOString(),
             })
           );
-        activity = { activity: currentActivity, activityAt: tick(2).getTime() - 60 * 60 * 1000 };
+        activity = {
+          activity: currentActivity,
+          activityAt: tick(2).getTime() - 60 * 60 * 1000,
+          // A live turn: it persisted work a minute ago, so the stale-turn bound
+          // (`operations.sessionStaleTurnNoWorkMinutes`) does not release it.
+          ...(currentActivity === 'prompting' ? { workAt: tick(3).getTime() - 60 * 1000 } : {}),
+        };
         await sweepAt(tick(3));
         if (currentActivity === 'idle') {
           expect(row()).toMatchObject({ sleep_status: 'sleeping' });
@@ -872,7 +878,12 @@ describe('bounded sleep-failure episode: transcript-and-Git fallback', () => {
             decidedAt: tick(2).toISOString(),
           })
         );
-      activity = { activity: 'prompting', activityAt: tick(2).getTime() - 60 * 60 * 1000 };
+      // A live turn (work a minute ago), so re-arming rebuilds the clock without sleeping.
+      activity = {
+        activity: 'prompting',
+        activityAt: tick(2).getTime() - 60 * 60 * 1000,
+        workAt: tick(3).getTime() - 60 * 1000,
+      };
       await sweepAt(tick(3));
       const rearmed = sqlite
         .prepare(

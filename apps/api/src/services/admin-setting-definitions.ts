@@ -48,6 +48,7 @@ export type AdminSettingName =
   | 'operations.workloadIdentityTokenTtlSeconds'
   | 'operations.nodeCleanupBlockedRetirementMs'
   | 'operations.nodeLifetimeForceSleepAfterMs'
+  | 'operations.sessionStaleTurnNoWorkMinutes'
   | 'operations.nodeLifetimeAdmissionCutoffPercent'
   | 'operations.nodeCleanupRefusalWarnAfterMs'
   | 'operations.nodeCleanupOwnershipAlertIntervalMs'

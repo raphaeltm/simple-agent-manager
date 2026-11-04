@@ -39,7 +39,7 @@ export function tool(
 export const OPS_READ_TOOLS = [
   tool(
     'ops_find_anomalies',
-    'Start here. Cheap SQL sweep for what is broken right now: empty nodes past the warm-node grace, stale node heartbeats, running workspaces whose task ended, idle in-progress tasks, session snapshot sleep/capture/recovery failures, workspace-deletion quarantine, and pending incidents. Each finding has IDs and a reason; each class reports its total and whether it was capped. Thresholds are admin settings (operations.opsAnomaly*).',
+    'Start here. Cheap SQL sweep for what is broken right now: empty nodes past the warm-node grace, stale node heartbeats, nodes stuck destroying, running workspaces whose task ended, idle in-progress tasks, session snapshot sleep/capture/recovery failures, workspace-deletion quarantine, and pending incidents. Each finding has IDs and a reason; each class reports its total and whether it was capped. Thresholds are admin settings (operations.opsAnomaly*).',
     {
       classes: {
         type: 'array',
