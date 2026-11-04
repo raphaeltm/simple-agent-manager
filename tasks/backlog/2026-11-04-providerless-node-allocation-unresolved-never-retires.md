@@ -28,7 +28,7 @@ cleanup needs a time bound and an escalation path.
 ## Context
 
 Found during staging verification of lifecycle latency monitoring
-(`tasks/active/2026-11-04-lifecycle-latency-monitoring.md`). The new watchdog alerted the
+(`tasks/archive/2026-11-04-lifecycle-latency-monitoring.md`). The new watchdog alerted the
 workspace's `stopping` state at 03:16 UTC as designed.
 
 Around the same time Hetzner returned `403 shared core limit exceeded` for a new staging VM. The

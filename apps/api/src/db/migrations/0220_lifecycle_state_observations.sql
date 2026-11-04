@@ -1,4 +1,4 @@
--- Lifecycle latency monitoring (tasks/active/2026-11-04-lifecycle-latency-monitoring.md).
+-- Lifecycle latency monitoring (tasks/archive/2026-11-04-lifecycle-latency-monitoring.md).
 -- The watchdog samples rows in transient states every five minutes instead of using triggers on
 -- the status tables (see 0219: D1 counts trigger writes in meta.changes, which breaks the
 -- `changes === 1` compare-and-sets on those tables). Both tables are written only by
