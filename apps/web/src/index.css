@@ -267,9 +267,11 @@
 
   /* The phone-only "just the conversation" toggle shares the scroll button's right-hand column:
      permission cards stop at 80% of the row so that column stays clear of their text and buttons
-     (acp-permission-chat-audit.spec.ts). At the newest message it takes the scroll button's slot;
-     when the scroll button shows, it lifts directly above it. Both lift together while the agent
-     works, clearing the composer's dock as it rises. */
+     (acp-permission-chat-audit.spec.ts). At the newest message it rests in the scroll button's
+     slot, beside the last message's left-aligned action and comment row, so it covers no text and
+     needs no extra room in the list. When the scroll button shows, the toggle lifts directly above
+     it, and with it while the agent works (the scroll button rises then to clear the composer's
+     dock). */
   .sam-immersive-toggle {
     --sam-toggle-lift-jump: 0rem;
     --sam-toggle-lift-active: 0rem;
@@ -288,24 +290,8 @@
     --sam-toggle-lift-jump: 3.25rem;
   }
 
-  .sam-immersive-toggle[data-agent-active='true'] {
+  .sam-immersive-toggle[data-jump-visible='true'][data-agent-active='true'] {
     --sam-toggle-lift-active: 2.75rem;
-  }
-
-  /* Room at the end of the conversation for the toggle (its slot plus the lift while the agent
-     works), so at the newest message nothing sits under it. Phones only, where it renders. */
-  .sam-immersive-toggle-clearance {
-    height: 0;
-  }
-
-  @media (max-width: 767px) {
-    .sam-immersive-toggle-clearance {
-      height: 3.5rem;
-    }
-
-    [data-agent-active='true'] .sam-immersive-toggle-clearance {
-      height: 6.25rem;
-    }
   }
 
   /* Immersive chat view (components/shell/chat-immersive-transition.ts). The slide pins each

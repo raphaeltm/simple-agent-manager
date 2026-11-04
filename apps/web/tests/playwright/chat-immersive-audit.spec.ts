@@ -426,25 +426,39 @@ test('the toggle sits directly above the jump button, in its column', async ({ p
   await assertNoClippedOverflow(page);
 });
 
-test('at the newest message the toggle takes the jump slot and covers no message', async ({
+test('at the newest message the toggle rests in the jump slot and covers no text', async ({
   page,
 }) => {
   test.skip(!isPhone(page), 'phone-only control');
   await openChat(page, 'dark', 'tail');
   await expect(page.getByRole('button', { name: 'Scroll to bottom' })).toHaveCount(0);
+  const toggle = page.getByTestId('chat-immersive-toggle');
+  await expect(toggle).toHaveAttribute('data-jump-visible', 'false');
   const log = await box(conversation(page));
-  const t = await box(page.getByTestId('chat-immersive-toggle'));
+  const t = await box(toggle);
   // In the jump button's slot: 0.75rem above the conversation's bottom edge.
   expect(Math.abs(log.y + log.height - (t.y + t.height) - 12)).toBeLessThanOrEqual(1);
-  // The list leaves room for it: the newest message ends above the toggle.
-  const newestBottom = await page.evaluate(() => {
-    const rows = Array.from(document.querySelectorAll('.sam-message-entry'));
-    const last = rows.at(-1);
-    if (!last) throw new Error('no message rendered');
-    return last.getBoundingClientRect().bottom;
-  });
-  expect(newestBottom).toBeLessThanOrEqual(t.y + 1);
-  // Liveness: the newest message is what sits there.
+  // No rendered message text lies under it: it sits beside the newest message's left-aligned
+  // action and comment row. Every text line of every rendered row is checked.
+  const overlap = await page.evaluate((tb) => {
+    let area = 0;
+    for (const row of Array.from(document.querySelectorAll('.sam-message-entry'))) {
+      const walker = document.createTreeWalker(row, NodeFilter.SHOW_TEXT);
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!node.textContent?.trim()) continue;
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        for (const r of Array.from(range.getClientRects())) {
+          const w = Math.min(r.right, tb.x + tb.width) - Math.max(r.left, tb.x);
+          const h = Math.min(r.bottom, tb.y + tb.height) - Math.max(r.top, tb.y);
+          if (w > 0 && h > 0) area += w * h;
+        }
+      }
+    }
+    return area;
+  }, t);
+  expect(overlap).toBe(0);
+  // Liveness: the newest message is on screen, just above it.
   await expect(page.getByText(/^HELLO$/)).toBeVisible();
   await assertNoOverflow(page);
 });
