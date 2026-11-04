@@ -1,6 +1,6 @@
 /** Cron source adapter. Scheduling stays here; execution policy lives in trigger-admission. */
 import { DEFAULT_CRON_MAX_FIRE_PER_SWEEP } from '@simple-agent-manager/shared';
-import { and, eq, isNotNull, lte } from 'drizzle-orm';
+import { and, asc, eq, gt, isNotNull, lte } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -22,6 +22,8 @@ export interface CronSweepStats {
 
 type ProcessResult = 'fired' | 'skipped' | 'failed';
 
+const CURSOR_KEY = 'cron-sweep:due-trigger-cursor';
+
 export async function runCronTriggerSweep(env: Env): Promise<CronSweepStats> {
   if (env.CRON_SWEEP_ENABLED === 'false') {
     return { checked: 0, fired: 0, skipped: 0, failed: 0 };
@@ -29,18 +31,36 @@ export async function runCronTriggerSweep(env: Env): Promise<CronSweepStats> {
 
   const db = drizzle(env.DATABASE, { schema });
   const now = new Date();
+  const limit = parsePositiveInt(env.CRON_MAX_FIRE_PER_SWEEP, DEFAULT_CRON_MAX_FIRE_PER_SWEEP);
+  let cursor: string | null = null;
+  try {
+    cursor = await env.KV.get(CURSOR_KEY);
+  } catch {
+    log.warn('cron_sweep.cursor_read_failed');
+  }
+  const due = and(
+    eq(schema.triggers.sourceType, 'cron'),
+    eq(schema.triggers.status, 'active'),
+    isNotNull(schema.triggers.nextFireAt),
+    lte(schema.triggers.nextFireAt, now.toISOString())
+  );
+  // A failing occurrence stays due. Rotate the bounded page independently of its schedule,
+  // otherwise a poison prefix can consume the entire sweep limit forever.
   const dueTriggers = await db
     .select()
     .from(schema.triggers)
-    .where(
-      and(
-        eq(schema.triggers.sourceType, 'cron'),
-        eq(schema.triggers.status, 'active'),
-        isNotNull(schema.triggers.nextFireAt),
-        lte(schema.triggers.nextFireAt, now.toISOString())
-      )
-    )
-    .limit(parsePositiveInt(env.CRON_MAX_FIRE_PER_SWEEP, DEFAULT_CRON_MAX_FIRE_PER_SWEEP));
+    .where(and(due, cursor ? gt(schema.triggers.id, cursor) : undefined))
+    .orderBy(asc(schema.triggers.id))
+    .limit(limit);
+  if (cursor && dueTriggers.length < limit) {
+    const wrapped = await db
+      .select()
+      .from(schema.triggers)
+      .where(and(due, lte(schema.triggers.id, cursor)))
+      .orderBy(asc(schema.triggers.id))
+      .limit(limit - dueTriggers.length);
+    dueTriggers.push(...wrapped);
+  }
 
   const stats: CronSweepStats = {
     checked: dueTriggers.length,
@@ -60,6 +80,13 @@ export async function runCronTriggerSweep(env: Env): Promise<CronSweepStats> {
         recovery: 'retry_due_occurrence_next_sweep',
       });
     }
+  }
+  const last = dueTriggers.at(-1);
+  try {
+    // One write per sweep avoids KV's per-key write rate limit.
+    await env.KV.put(CURSOR_KEY, last?.id ?? '');
+  } catch {
+    log.warn('cron_sweep.cursor_write_failed');
   }
   return stats;
 }

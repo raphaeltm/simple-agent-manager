@@ -97,7 +97,16 @@ beforeEach(() => {
     };
     return statement;
   }) as D1Database['prepare'];
-  env = { DATABASE: database } as Env;
+  const cursors = new Map<string, string>();
+  env = {
+    DATABASE: database,
+    KV: {
+      get: async (key: string) => cursors.get(key) ?? null,
+      put: async (key: string, value: string) => {
+        cursors.set(key, value);
+      },
+    },
+  } as unknown as Env;
   submit.mockImplementation(async (_env, input) => {
     const taskId = input.triggerExecutionId;
     sqlite
@@ -279,5 +288,41 @@ describe('cron advancement recovery through real admission', () => {
     expect(sqlite.prepare('SELECT next_fire_at FROM triggers').get()).toEqual({
       next_fire_at: '2030-01-01T00:00:00.000Z',
     });
+  });
+  it('rotates past a persistently failing trigger when the sweep cap is one', async () => {
+    await seed('a');
+    await seed('b');
+    env.CRON_MAX_FIRE_PER_SWEEP = '1';
+    await expect(runCronTriggerSweep(env)).resolves.toMatchObject({ checked: 1, failed: 1 });
+    await expect(runCronTriggerSweep(env)).resolves.toMatchObject({ checked: 1, fired: 1 });
+    await expect(runCronTriggerSweep(env)).resolves.toMatchObject({ checked: 1, failed: 1 });
+    expect(executions()).toHaveLength(2);
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(advanceAttempts).toEqual(['a', 'b', 'a']);
+  });
+  it('contains cursor storage failures and still processes the bounded page', async () => {
+    await seed('a');
+    await seed('b');
+    failAdvance = false;
+    env.KV.get = vi.fn().mockRejectedValue(new Error('private KV diagnostic'));
+    env.KV.put = vi.fn().mockRejectedValue(new Error('private KV diagnostic'));
+    await expect(runCronTriggerSweep(env)).resolves.toMatchObject({ checked: 2, fired: 2 });
+    expect(submit).toHaveBeenCalledTimes(2);
+    expect(log.warn).toHaveBeenCalledWith('cron_sweep.cursor_read_failed');
+    expect(log.warn).toHaveBeenCalledWith('cron_sweep.cursor_write_failed');
+    expect(JSON.stringify(vi.mocked(log.warn).mock.calls)).not.toContain('private KV diagnostic');
+  });
+
+  it('fills a partial forward page by wrapping without exceeding the cap or repeating rows', async () => {
+    await seed('a');
+    await seed('b');
+    await seed('c');
+    env.CRON_MAX_FIRE_PER_SWEEP = '2';
+    env.KV.get = vi.fn().mockResolvedValue('b');
+    failAdvance = false;
+    await expect(runCronTriggerSweep(env)).resolves.toMatchObject({ checked: 2, fired: 2 });
+    expect(advanceAttempts).toEqual(['c', 'a']);
+    expect(executions()).toHaveLength(2);
+    expect(submit).toHaveBeenCalledTimes(2);
   });
 });

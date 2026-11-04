@@ -29,9 +29,10 @@ describe('cron advancement isolation on real D1', () => {
       });
       await seedTriggerExecution(`busy-${id}`, id, PROJECT, { status: 'running' });
     }
-    await env.DATABASE
-      .exec(`CREATE TRIGGER cron_test_fail_advance BEFORE UPDATE OF next_fire_at ON triggers
-      WHEN OLD.id = 'cron-recovery-a' BEGIN SELECT RAISE(ABORT, 'SQLITE_BUSY: injected test failure'); END`);
+    await env.DATABASE.prepare(
+      `CREATE TRIGGER cron_test_fail_advance BEFORE UPDATE OF next_fire_at ON triggers
+      WHEN OLD.id = 'cron-recovery-a' BEGIN SELECT RAISE(ABORT, 'SQLITE_BUSY: injected test failure'); END`
+    ).run();
     try {
       await expect(runCronTriggerSweep(env)).resolves.toMatchObject({
         checked: 2,

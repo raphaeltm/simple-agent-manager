@@ -76,6 +76,8 @@ vi.mock('drizzle-orm/d1', () => ({
 }));
 
 vi.mock('drizzle-orm', () => ({
+  asc: vi.fn((col: unknown) => col),
+  gt: vi.fn((_col: unknown, val: unknown) => ['gt', val]),
   eq: vi.fn((_col: unknown, val: unknown) => ['eq', val]),
   and: vi.fn((...args: unknown[]) => ['and', ...args]),
   count: vi.fn(() => 'count'),
@@ -154,6 +156,7 @@ describe('runCronTriggerSweep', () => {
     queryResults = [[trigger], [{ name: 'My Project' }]];
 
     const stats = await runCronTriggerSweep({
+      KV: { get: async () => null, put: async () => {} },
       DATABASE: { prepare: () => ({ bind: () => ({ first: async () => null }) }) },
     } as any);
 

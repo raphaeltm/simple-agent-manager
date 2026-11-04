@@ -19,6 +19,7 @@ A failed schedule write can escape trigger isolation. Retrying a due occurrence 
 - [x] Failure-injection regression tests through real sweep, admission, and SQLite boundary.
 - [x] Stable occurrence identity, including recovery of existing execution records and concurrent admission.
 - [x] Preserve pending work on exceptions; advance only after a durable admission outcome.
+- [x] Rotate bounded due selection with an isolated KV cursor so a failed prefix cannot starve later work.
 - [x] Isolate advancement failures and attempt at most one write per trigger per sweep.
 - [x] Safe allowlisted database cause categories, without raw query messages or parameters.
 - [x] Update scheduling documentation.
@@ -30,3 +31,7 @@ A failed schedule write can escape trigger isolation. Retrying a due occurrence 
 ## Acceptance
 
 Later due triggers run despite admission or advancement errors. Later sweeps reuse accepted executions and recover pending ones. Exceptions do not discard due occurrences. Retries are bounded per sweep, remain observable, and leak no database parameters through new diagnostics. No production repair is performed.
+
+## Selection budget
+
+At most CRON_MAX_FIRE_PER_SWEEP candidates (default 5) per sweep, one KV read/write, and at most two bounded due-selection queries. Existing per-candidate admission work remains bounded by the selected page; schedule advancement is attempted once per selected occurrence. Indexed trigger lookup reuses an existing occurrence before submission.
