@@ -10,6 +10,11 @@ import {
 } from './watches';
 
 const DAY_MS = 86_400_000;
+/**
+ * Fixed comparison window for the regression check, not a tunable: the check needs
+ * BASELINE_DAYS + 1 days of history, which is why `lifecycleLatency.retentionDays` has a minimum
+ * of 8 (`admin-settings-lifecycle-latency-definitions.ts`). Change both together.
+ */
 const BASELINE_DAYS = 7;
 /**
  * Rows deleted per purge statement, and statements per table per run. These bound one run's I/O,
@@ -93,7 +98,7 @@ export function regressionMessage(watch: LifecycleWatch): string {
  * that state over the last 24 hours against its budget and its previous 7 days. Regressions are
  * recorded in `platform_errors` for platform-feedback triage; a summary is always logged.
  *
- * I/O per run: one settings read, one SELECT per watched state (11), one observability insert
+ * I/O per run: one settings read, one SELECT per watched state (at most 11), one observability insert
  * per regression, and at most `PURGE_MAX_BATCHES` deletes per purged table.
  */
 export async function runLifecycleLatencyDailyEvaluation(
@@ -107,7 +112,9 @@ export async function runLifecycleLatencyDailyEvaluation(
   const sampleLimit = Math.max(1, settings.evaluationSampleLimit);
   const evaluations: LifecycleStateEvaluation[] = [];
 
-  for (const watch of LIFECYCLE_WATCHES) {
+  // A budget of 0 turns a state's watch off for both the watchdog and this check.
+  const active = LIFECYCLE_WATCHES.filter((watch) => budgetMs(settings, watch) > 0);
+  for (const watch of active) {
     const { results } = await env.DATABASE.prepare(
       `SELECT changed_at,
               (julianday(changed_at) - julianday(entered_at)) * 86400000.0 AS duration_ms

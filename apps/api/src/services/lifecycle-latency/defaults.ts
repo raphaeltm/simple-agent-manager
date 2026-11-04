@@ -1,6 +1,6 @@
 /**
  * Code defaults for lifecycle latency monitoring. Every value is an admin setting
- * (`lifecycleLatency.<key>`, Operations group). A budget of 0 turns that state's watch off.
+ * (`lifecycleLatency.<key>`, Operations group). A budget of 0 turns off both the watchdog and the daily check for that state.
  */
 export const LIFECYCLE_LATENCY_DEFAULTS = Object.freeze({
   workspacePendingMinutes: 15,

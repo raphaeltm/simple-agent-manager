@@ -255,8 +255,8 @@ trigger are configured, files them as incidents for that project's agents to inv
   than `lifecycleLatency.regressionPercent` of its p95 over the previous 7 days. Every run logs a
   `lifecycle_latency.daily_summary` line with those numbers for every watched state.
 
-Watched states and their **Operations** budgets, in minutes. Set a budget to 0 to stop watching
-that state.
+Watched states and their **Operations** budgets, in minutes. Set a budget to 0 to turn off both the
+watchdog and the daily check for that state.
 
 | Setting                                         | Default | What it watches                                            |
 | ----------------------------------------------- | ------- | ---------------------------------------------------------- |

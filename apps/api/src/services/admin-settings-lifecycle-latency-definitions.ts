@@ -27,7 +27,7 @@ const budgetSettings = (Object.keys(BUDGET_DESCRIPTIONS) as BudgetKey[]).map((ke
     `lifecycleLatency.${key}`,
     LIFECYCLE_LATENCY_DEFAULTS[key],
     'Operations',
-    `Minutes ${BUDGET_DESCRIPTIONS[key]} before the latency watchdog records a slow-state error and the daily check treats it as over budget. 0 turns the watch off.`,
+    `Minutes ${BUDGET_DESCRIPTIONS[key]} before the latency watchdog records a slow-state error and the daily check treats it as over budget. 0 turns off both checks for that state.`,
     { min: 0, max: MAX_BUDGET_MINUTES }
   )
 );
@@ -60,6 +60,7 @@ export const LIFECYCLE_LATENCY_SETTINGS: AdminSettingDefinition[] = [
     LIFECYCLE_LATENCY_DEFAULTS.retentionDays,
     'Operations',
     'Days lifecycle state transitions and slow-state alert records are kept before the daily purge removes them.',
+    // At least the daily check's 7-day baseline plus the last day (BASELINE_DAYS + 1).
     { min: 8, max: 365 }
   ),
   integerDefinition(

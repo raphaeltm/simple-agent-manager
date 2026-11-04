@@ -392,6 +392,28 @@ describe('lifecycle latency daily evaluation', () => {
     });
   });
 
+  it('skips a state whose budget is 0, even when it regressed against its baseline', async () => {
+    const now = Date.now();
+    await seedEpisodes(now, 'node', 'creating', [
+      ...Array.from({ length: 10 }, (_, i) => ({
+        endedAgoMs: 2 * DAY + i * HOUR,
+        durationMs: 2 * MINUTE,
+      })),
+      ...Array.from({ length: 6 }, (_, i) => ({
+        endedAgoMs: (i + 1) * HOUR,
+        durationMs: 6 * MINUTE,
+      })),
+    ]);
+    const settings = { ...LIFECYCLE_LATENCY_DEFAULTS, nodeCreatingMinutes: 0 };
+    const result = await runLifecycleLatencyDailyEvaluation(env as never, new Date(now), settings);
+    expect(result.evaluations.some((e) => e.entityType === 'node' && e.status === 'creating')).toBe(
+      false
+    );
+    // Other states are still evaluated (liveness).
+    expect(result.evaluations.length).toBeGreaterThan(0);
+    expect(await platformErrors('Lifecycle latency regression: node creating')).toHaveLength(0);
+  });
+
   it('stays quiet below the sample minimum and for a steady state', async () => {
     const now = Date.now();
     await seedEpisodes(
