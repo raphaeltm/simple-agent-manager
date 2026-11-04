@@ -363,82 +363,85 @@ export function AppShell({ children }: AppShellProps) {
 
   return (
     <AppShellContext.Provider value={shellContext}>
-      <OnboardingProvider>
-        <ChoosePathWizard />
-        <div
-          className="sam-void grid h-screen overflow-hidden p-4 transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none"
-          style={{
-            gridTemplateColumns: `${navWidth}px minmax(0, 1fr)`,
-            gridTemplateRows: 'minmax(0, 1fr) auto',
-            // Zen collapses the nav column to nothing, so it must not keep a gutter either.
-            columnGap: navWidth > 0 ? 'var(--sam-space-gutter)' : 0,
-            ['--sam-void-x' as string]: '58%',
-          }}
-        >
-          <SkipToContent />
-          {/* Announce Focus Mode changes to assistive tech (mode is cycled via the
+      {/* Same provider position as the phone branch, so crossing the breakpoint never remounts the page. */}
+      <ChatImmersiveContext.Provider value={chatImmersiveContext}>
+        <OnboardingProvider>
+          <ChoosePathWizard />
+          <div
+            className="sam-void grid h-screen overflow-hidden p-4 transition-[grid-template-columns] duration-200 ease-out motion-reduce:transition-none"
+            style={{
+              gridTemplateColumns: `${navWidth}px minmax(0, 1fr)`,
+              gridTemplateRows: 'minmax(0, 1fr) auto',
+              // Zen collapses the nav column to nothing, so it must not keep a gutter either.
+              columnGap: navWidth > 0 ? 'var(--sam-space-gutter)' : 0,
+              ['--sam-void-x' as string]: '58%',
+            }}
+          >
+            <SkipToContent />
+            {/* Announce Focus Mode changes to assistive tech (mode is cycled via the
           "F" key or the toggle, so screen readers need a live region). */}
-          <div aria-live="polite" className="sr-only">
-            {focusMode === 'default'
-              ? 'Default view'
-              : focusMode === 'focus'
-                ? 'Focus mode: sidebars collapsed'
-                : 'Zen mode: sidebars hidden'}
-          </div>
-          {focusMode === 'zen' ? (
-            <ZenPeekRail
-              edge="nav"
-              label="Navigation"
-              onExpand={() => setFocusMode('default')}
-              gridRow="1"
-            >
-              <NavSidebar
-                projectName={projectName}
-                showGlobalNav={showGlobalNav}
-                onToggleGlobalNav={handleToggleGlobalNav}
-                projectListSection={desktopProjectListSection}
-                projectHealthElement={projectHealthElement}
-              />
-            </ZenPeekRail>
-          ) : (
-            /* `overflow-y-auto` is a backstop, not the primary scroller — NavSidebar scrolls
+            <div aria-live="polite" className="sr-only">
+              {focusMode === 'default'
+                ? 'Default view'
+                : focusMode === 'focus'
+                  ? 'Focus mode: sidebars collapsed'
+                  : 'Zen mode: sidebars hidden'}
+            </div>
+            {focusMode === 'zen' ? (
+              <ZenPeekRail
+                edge="nav"
+                label="Navigation"
+                onExpand={() => setFocusMode('default')}
+                gridRow="1"
+              >
+                <NavSidebar
+                  projectName={projectName}
+                  showGlobalNav={showGlobalNav}
+                  onToggleGlobalNav={handleToggleGlobalNav}
+                  projectListSection={desktopProjectListSection}
+                  projectHealthElement={projectHealthElement}
+                />
+              </ZenPeekRail>
+            ) : (
+              /* `overflow-y-auto` is a backstop, not the primary scroller — NavSidebar scrolls
                itself (it carries `flex-1 min-h-0`). It only engages on very short windows,
                where the header, search, layout control and footer no longer fit, so sign-out
                stays reachable. */
-            <aside
-              aria-label="Sidebar"
-              className="sam-glass sam-glass-rim relative z-30 flex min-h-0 flex-col overflow-x-hidden overflow-y-auto rounded-[var(--sam-radius-pane)]"
-              style={{ gridRow: '1' }}
-            >
-              <DesktopSidebar
-                focusMode={focusMode}
-                onSelectFocusMode={setFocusMode}
-                onCycleFocusMode={cycleFocusMode}
-                onOpenCommandPalette={commandPalette.open}
-                projectName={projectName}
-                showGlobalNav={showGlobalNav}
-                onToggleGlobalNav={handleToggleGlobalNav}
-                projectListSection={desktopProjectListSection}
-                projectHealthElement={projectHealthElement}
-                user={user ?? null}
-                onSignOut={signOutHandler}
-              />
-            </aside>
-          )}
+              <aside
+                aria-label="Sidebar"
+                className="sam-glass sam-glass-rim relative z-30 flex min-h-0 flex-col overflow-x-hidden overflow-y-auto rounded-[var(--sam-radius-pane)]"
+                style={{ gridRow: '1' }}
+              >
+                <DesktopSidebar
+                  focusMode={focusMode}
+                  onSelectFocusMode={setFocusMode}
+                  onCycleFocusMode={cycleFocusMode}
+                  onOpenCommandPalette={commandPalette.open}
+                  projectName={projectName}
+                  showGlobalNav={showGlobalNav}
+                  onToggleGlobalNav={handleToggleGlobalNav}
+                  projectListSection={desktopProjectListSection}
+                  projectHealthElement={projectHealthElement}
+                  user={user ?? null}
+                  onSignOut={signOutHandler}
+                />
+              </aside>
+            )}
 
-          <div key="main-frame" className={mainFrameClassName} style={{ gridRow: '1' }}>
-            <main id="main-content" className={mainClassName} style={{ gridRow: '1' }}>
-              {children ?? <Outlet />}
-            </main>
+            <div key="main-frame" className={mainFrameClassName} style={{ gridRow: '1' }}>
+              <main id="main-content" className={mainClassName} style={{ gridRow: '1' }}>
+                {children ?? <Outlet />}
+              </main>
+            </div>
+
+            <div key="global-audio" style={{ gridColumn: '1 / -1', gridRow: '2' }}>
+              <GlobalAudioPlayer />
+            </div>
+
+            {commandPalette.isOpen && <GlobalCommandPalette onClose={commandPalette.close} />}
           </div>
-
-          <div key="global-audio" style={{ gridColumn: '1 / -1', gridRow: '2' }}>
-            <GlobalAudioPlayer />
-          </div>
-
-          {commandPalette.isOpen && <GlobalCommandPalette onClose={commandPalette.close} />}
-        </div>
-      </OnboardingProvider>
+        </OnboardingProvider>
+      </ChatImmersiveContext.Provider>
     </AppShellContext.Provider>
   );
 }

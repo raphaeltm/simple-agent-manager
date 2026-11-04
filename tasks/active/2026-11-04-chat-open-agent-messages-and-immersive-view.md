@@ -43,31 +43,31 @@ back. He tried an interactive prototype on branch `sam/love-new-ui-see-2sqw33` (
 
 ## Implementation Checklist
 
-- [ ] Remove prototype scaffolding: `pages/chat-surface-prototype/`, the boot import in
+- [x] Remove prototype scaffolding: `pages/chat-surface-prototype/`, the boot import in
       `main.tsx`, the Proto pill in `MobileAppBar.tsx`, prototype hooks in `ConversationPane.tsx`
       and `AcpConversationItemView.tsx`
-- [ ] `MessageBubble`: add a `layout` prop (`'bubble'` default, `'flush'`): flush drops the width
+- [x] `MessageBubble`: add a `layout` prop (`'bubble'` default, `'flush'`): flush drops the width
       cap, padding, rounding and the built-in surface colors; unit tests for both layouts
-- [ ] `AcpConversationItemView`: agent messages use `layout="flush"` with a `glass-msg-agent`
+- [x] `AcpConversationItemView`: agent messages use `layout="flush"` with a `glass-msg-agent`
       class (text color, desktop line-length cap); remove the unused `.glass-msg-assistant` style
-- [ ] Message rows: `px-3 md:px-4` on phones in both row components
-- [ ] `AppShellContext`: `chatImmersive` + `setChatImmersive`, forced off on desktop; mobile shell
+- [x] Message rows: `px-3 md:px-4` on phones in both row components
+- [x] `AppShellContext`: `chatImmersive` + `setChatImmersive`, forced off on desktop; mobile shell
       frame padding shrinks while immersive
-- [ ] Mark the four chrome pieces with `data-immersive-chrome`; tool rail gutter collapses to 0
+- [x] Mark the four chrome pieces with `data-immersive-chrome`; tool rail gutter collapses to 0
       while immersive; CSS hides any chrome piece that is not pinned while immersive (remount safety)
-- [ ] Transition module (pin, single layout change via `flushSync`, settle, transform-only slide;
+- [x] Transition module (pin, single layout change via `flushSync`, settle, transform-only slide;
       exit layout-first); honours `prefers-reduced-motion`; resets on unmount and on leaving the
       phone layout
-- [ ] Toggle button bottom-right of the conversation on phones (44px, aria-pressed, labels
+- [x] Toggle button bottom-right of the conversation on phones (44px, aria-pressed, labels
       "Show only the conversation" / "Show the rest of the app"); the scroll-to-bottom button sits
       beside it
-- [ ] Unit tests: toggle enter/exit through the real button, context forced off on desktop,
+- [x] Unit tests: toggle enter/exit through the real button, context forced off on desktop,
       reset on unmount, reduced motion
-- [ ] Playwright audit (real chat page, mocked API): mobile toggle hides chrome and the
+- [x] Playwright audit (real chat page, mocked API): mobile toggle hides chrome and the
       conversation fills the screen (measured coordinates), toggle back restores; agent message
       spans the row; no overflow; desktop has no toggle; both themes; 375 and 1280 viewports
-- [ ] Update the three Playwright specs that read `.glass-msg-assistant`
-- [ ] Docs: chat-features.md section on agent messages and the phone full-conversation view
+- [x] Update the three Playwright specs that read `.glass-msg-assistant`
+- [x] Docs: chat-features.md section on agent messages and the phone full-conversation view
 
 ## Acceptance Criteria
 
@@ -80,6 +80,23 @@ back. He tried an interactive prototype on branch `sam/love-new-ui-see-2sqw33` (
       on unmount / breakpoint change)
 - [ ] No prototype code, routes or mock data remain
 - [ ] Verified on staging on a phone viewport against a real chat
+
+## Implementation Notes
+
+- `main` is protected, so this task file was committed on the feature branch instead of `main`.
+- Immersive state lives in its own `ChatImmersiveContext` (not `AppShellContext`), so toggling
+  re-renders only the shell frame, the rail gutter and the toggle, not the chat page.
+- `.sam-main-content` has `contain: layout`, which makes `<main>` the containing block for
+  `position: fixed` descendants. The transition measures where each pinned piece landed after
+  the single layout change and corrects it before the next paint (`correctPins`).
+- The provider wraps both the phone and desktop branches identically; wrapping only the phone
+  branch broke the existing "preserves routed child state when rotation crosses the mobile
+  breakpoint" test (rule 48 #5).
+- The shell's empty audio-player slot added a 10px gap below the composer; it is now `empty:hidden`.
+- Found a pre-existing session-header title clip at 768px on `main`: filed
+  `tasks/backlog/2026-11-04-session-header-title-clipped-at-tablet-width.md`.
+- `markdown-chat-rendering-audit.spec.ts` is quarantined and fails on `main` at its task-list
+  step (before the updated bubble step).
 
 ## References
 

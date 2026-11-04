@@ -4,7 +4,7 @@
  * Every scenario runs at both project viewports, calls `assertNoOverflow`
  * (which includes the clipped-overflow walk, rule 56) and captures a screenshot.
  * The coordinate assertion in `assertCardWithinBubbleColumn` is the load-bearing
- * one: the card must not reach past the assistant bubble column it sits in
+ * one: the card must not reach past 80% of the message column it sits in
  * (rule 17, "a layout relationship must be asserted as measured coordinates").
  */
 import { expect, type Page, type Route, test } from '@playwright/test';
@@ -245,23 +245,23 @@ function groupCard(page: Page) {
 }
 
 /**
- * The card must occupy the same column as the assistant bubble, capped at the
- * same 80% of the message row.
+ * The card must occupy the same column as the agent's messages, capped at 80%
+ * of the message row.
  *
- * Measured across elements, not read back from the card alone. The bubble itself
- * shrinks to its content, so its RENDERED right edge is not the column edge —
- * the comparison is against the bubble's own flex wrapper, which spans the row's
- * content box, times the shared 80% cap. Removing `max-w-[80%]` from the card
- * makes `card.width === wrapper.width` and fails this.
+ * Measured across elements, not read back from the card alone. The comparison is
+ * against the message's own flex wrapper, which spans the row's content box, times
+ * the 80% cap. Removing `max-w-[80%]` from the card makes
+ * `card.width === wrapper.width` and fails this.
  *
- * The assistant bubble is the reference, falling back to the user bubble when a
- * scenario has no assistant message yet (a still-running turn). Either wrapper
- * spans the same row content box — `justify-start` vs `justify-end` moves the
- * bubble inside the wrapper, not the wrapper.
+ * The agent's reply (`.glass-msg-agent`, which has no bubble) is the reference,
+ * falling back to the user bubble when a scenario has no agent message yet (a
+ * still-running turn). Either wrapper spans the same row content box —
+ * `justify-start` vs `justify-end` moves the message inside the wrapper, not the
+ * wrapper.
  */
 async function assertCardWithinBubbleColumn(page: Page) {
   await expect(groupCard(page)).toBeVisible();
-  await expect(page.locator('.glass-msg-assistant, .glass-msg-user').first()).toBeVisible();
+  await expect(page.locator('.glass-msg-agent, .glass-msg-user').first()).toBeVisible();
 
   const geometry = await page.evaluate(() => {
     const rect = (el: Element | null | undefined) => {
@@ -271,7 +271,7 @@ async function assertCardWithinBubbleColumn(page: Page) {
     };
     const card = document.querySelector('[data-testid="tool-call-group"]');
     const bubble =
-      document.querySelector('.glass-msg-assistant') ?? document.querySelector('.glass-msg-user');
+      document.querySelector('.glass-msg-agent') ?? document.querySelector('.glass-msg-user');
     return {
       card: rect(card),
       cardColumn: rect(card?.parentElement),
@@ -282,7 +282,7 @@ async function assertCardWithinBubbleColumn(page: Page) {
 
   expect(geometry.card, 'group card must be laid out').not.toBeNull();
   expect(geometry.cardColumn, 'group card column must be laid out').not.toBeNull();
-  expect(geometry.bubbleColumn, 'assistant bubble column must be laid out').not.toBeNull();
+  expect(geometry.bubbleColumn, 'agent message column must be laid out').not.toBeNull();
 
   // Same column: identical content box, identical left-aligned start.
   expect(Math.abs(geometry.cardColumn!.width - geometry.bubbleColumn!.width)).toBeLessThanOrEqual(
@@ -290,7 +290,7 @@ async function assertCardWithinBubbleColumn(page: Page) {
   );
   expect(Math.abs(geometry.card!.left - geometry.bubbleColumn!.left)).toBeLessThanOrEqual(1);
 
-  // Never past the agent bubble column edge (the shared 80% cap).
+  // Never past 80% of the message column.
   const columnEdge = geometry.bubbleColumn!.left + geometry.bubbleColumn!.width * 0.8;
   expect(geometry.card!.right).toBeLessThanOrEqual(columnEdge + 1);
   expect(geometry.card!.right).toBeLessThanOrEqual(geometry.viewportWidth);

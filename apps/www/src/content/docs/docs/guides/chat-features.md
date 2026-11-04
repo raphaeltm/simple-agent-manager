@@ -1,6 +1,6 @@
 ---
 title: Chat Features
-description: Answering an agent's permission requests and questions, message actions, the session tool rail, file browsing, tool activity cards, diagrams, conversation forking, finding past conversations, voice input, and text-to-speech in SAM's chat interface.
+description: Answering an agent's permission requests and questions, reading the conversation, message actions, the session tool rail, file browsing, tool activity cards, diagrams, conversation forking, finding past conversations, voice input, and text-to-speech in SAM's chat interface.
 ---
 
 SAM's project pages are chat-first interfaces where you interact with AI coding agents in real-time.
@@ -198,6 +198,21 @@ use a VM profile whose **Task Mode** is **Task**, such as one you create with **
 and **Cloud VM**: its agent works through to the end and pushes its branch before it finishes, and
 a script or another agent can wait for it to finish. Choosing **Build and open PRs** sets that up;
 it doesn't add an instruction to open pull requests, so ask for one.
+
+## Reading the Conversation
+
+Your own messages sit in bubbles on the right. The agent's replies have no bubble: they lie on the
+conversation at its full width, so tables, code and long links have room, especially on a phone. On
+a wide screen the replies stop at a comfortable reading width.
+
+### Showing only the conversation on a phone
+
+On a phone, the button with two outward arrows at the bottom right of the conversation hides
+everything else: the app bar, the chat's title and status, the tool rail and the message box slide
+away, and the conversation fills the screen. Select the button again (now two inward arrows) to
+bring them back, for example to reply. Leaving the chat or turning the phone to a wider layout
+brings them back too. The button doesn't appear on wider screens, where
+[Focus Mode](#focus-mode) collapses the sidebars instead.
 
 ## Message Actions
 
@@ -660,7 +675,8 @@ On desktop, project chat has three layout levels you can cycle with the **F** ke
 - **Focus** — collapses the main navigation so you stay inside one project.
 - **Zen** — collapses the session sidebar too, for maximum reading and prompt-writing space.
 
-Reopen the sidebars whenever you need to switch projects, sessions, or settings.
+Reopen the sidebars whenever you need to switch projects, sessions, or settings. On a phone, use
+[Showing only the conversation](#showing-only-the-conversation-on-a-phone) instead.
 
 ## Command Palette
 
