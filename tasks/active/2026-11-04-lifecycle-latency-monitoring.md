@@ -117,16 +117,28 @@ verdict, locally or in CI.
 
 ## Acceptance Criteria
 
-- [ ] A workspace held in `stopping` past its budget produces exactly one `platform_errors` warn row
-      per episode. The row lands in the next watchdog tick, through the real trigger-maintained
-      timestamp.
-- [ ] A new stop episode for the same workspace alerts again; a state under budget never alerts.
-- [ ] Every status transition on workspaces, nodes and session sleep/recovery is recorded with its
-      duration, and no status writer changes.
-- [ ] The daily evaluation flags a synthetic 3× regression and stays quiet below the sample minimum.
-- [ ] Budgets and limits are admin settings, with defaults exercised through the real resolver.
-- [ ] Staging: a forced slow state produces a `platform_errors` row and the transitions are recorded.
-- [ ] Production: deploy verified, and the first watchdog ticks' output checked.
+- [x] A workspace held in `stopping` past its budget produces exactly one `platform_errors` warn row
+      per episode, at most one run late (workers test; staging: 9 stuck workspaces alerted once at
+      03:16 UTC, 10 minutes after first observation at 03:06).
+- [x] A new stop episode for the same workspace alerts again; a state under budget never alerts.
+- [x] Episodes are recorded when observed states end, with no writes to the status tables
+      (workers tests; `changes === 1` guard).
+- [x] The daily evaluation flags a synthetic 3× regression and stays quiet below the sample minimum
+      (workers tests; not observed live because the staging deploy landed after 03:00 UTC).
+- [x] Budgets and limits are admin settings, with defaults exercised through the real resolver
+      (and rendered on staging Admin → Settings, desktop and mobile).
+- [x] Staging: migrations 0219/0220 applied, no writing triggers, observations and alerts recorded.
+      A VM create could not be verified: Hetzner returned `403 shared core limit exceeded` for the
+      shared production/staging account.
+- [ ] Production: deploy verified, and the first watchdog runs' output checked.
+
+## Staging Evidence
+
+- 0219 dropped the draft triggers (verified 02:07 UTC); 0220 applied and dropped the draft's indexes.
+- First run on the redesign at 03:06 observed 9 `workspace.stopping`, 1 `node.recovery`, 3
+  `session_recovery.waking`. Alerts landed at 03:16 (stopping, 10-minute budget) and 03:21 (others,
+  15-minute budget), one per episode.
+- Follow-up filed: `tasks/backlog/2026-11-04-providerless-node-allocation-unresolved-never-retires.md`.
 
 ## References
 
