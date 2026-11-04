@@ -1,4 +1,4 @@
-import { and, eq, isNotNull } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -7,33 +7,47 @@ import { verifySessionSnapshotArtifactsForSleep } from './session-snapshot-artif
 import type { WorkspaceDeletionIdentity } from './workspace-deletion';
 
 /**
- * The conversation the workspace's snapshot belongs to. A wake releases the old workspace's chat
- * binding in the transaction that claims the snapshot (`createRecoveryTask` in
- * `session-recovery.ts`), so a slept workspace whose wake is in flight, or stuck, has no binding
- * left. Its snapshot still names it exactly, so that snapshot's own conversation is used, but only
- * when the snapshot carries the wake claim that explains the released binding. Any other unbound
- * workspace stays unpreserved. Without this, the deletion queue deferred such a workspace forever
- * and its node could only be retired by the stranded-node deadline (idea 01M6K6R2255R7414WSER4N3STJ,
- * node 01M6F4WPF51FYE55F3FVHJ6YAZ).
+ * Snapshot recovery states in which a wake still holds the snapshot's claim. A wake releases the
+ * old workspace's chat binding in the transaction that claims the snapshot (`createRecoveryTask` in
+ * `session-recovery.ts`), and a completed sleep resets `recovery_status` to NULL, so these states
+ * are exactly the ones that explain a released binding (`claimStillOwned` in
+ * `session-recovery-handoff.ts` uses the same set). `recovery_task_id` alone is not enough: it is
+ * never cleared.
+ */
+export const WAKE_CLAIM_RECOVERY_STATUSES = ['waking', 'failed', 'restored'] as const;
+
+/**
+ * The conversation the workspace's snapshot belongs to. A slept workspace whose wake is in flight,
+ * stuck or finished has no binding left, but its snapshot still names it exactly, so that
+ * snapshot's own conversation is used while the wake claim explains the released binding. Any
+ * other unbound workspace stays unpreserved. Without this, the deletion queue deferred such a
+ * workspace forever and its node could only be retired by the stranded-node deadline (idea
+ * 01M6K6R2255R7414WSER4N3STJ, node 01M6F4WPF51FYE55F3FVHJ6YAZ).
  */
 async function findPreservationSnapshot(env: Env, expected: WorkspaceDeletionIdentity) {
   if (!expected.projectId || !expected.nodeId) return null;
-  const snapshot = await drizzle(env.DATABASE, { schema })
+  const snapshots = await drizzle(env.DATABASE, { schema })
     .select()
     .from(schema.sessionSnapshots)
     .where(
       and(
         expected.chatSessionId
           ? eq(schema.sessionSnapshots.chatSessionId, expected.chatSessionId)
-          : isNotNull(schema.sessionSnapshots.recoveryTaskId),
+          : and(
+              isNotNull(schema.sessionSnapshots.recoveryTaskId),
+              inArray(schema.sessionSnapshots.recoveryStatus, WAKE_CLAIM_RECOVERY_STATUSES)
+            ),
         eq(schema.sessionSnapshots.workspaceId, expected.workspaceId),
         eq(schema.sessionSnapshots.nodeId, expected.nodeId),
         eq(schema.sessionSnapshots.userId, expected.userId),
         eq(schema.sessionSnapshots.projectId, expected.projectId)
       )
     )
-    .get();
-  return snapshot?.chatSessionId ? snapshot : null;
+    .limit(2)
+    .all();
+  // More than one candidate is ambiguous, so the workspace stays unpreserved.
+  const [snapshot, ...others] = snapshots;
+  return snapshot?.chatSessionId && others.length === 0 ? snapshot : null;
 }
 
 /** Status/age/pressure are scheduling hints, never authority to discard user data. */

@@ -34,29 +34,43 @@ Constraint: do not relax the proof requirement (rule 56).
 - 9 production snapshots are stuck `waking` with no recovery workspace for more than 2 hours. This
   fix lets their old workspaces be deleted with proof, which releases the fence. Whether their
   queued tasks then place is tracked on idea `01M6K6R2255R7414WSER4N3STJ`.
-- Not changed, because they are not on the proof path:
+- Not changed, because they are not on the proof path, and no follow-up is needed (no observed
+  defect):
   - `preservedVmRetirementActivitySql` falls back to the workspace's own clock for an unbound row.
   - `retired-vm-sleep-repair.ts` skips a legacy repair for an unbound row.
 
 ## Implementation Checklist
 
 - [x] `findPreservationSnapshot`: an unbound workspace matches its snapshot only while the snapshot
-      carries a wake claim (`recovery_task_id`). Otherwise it stays unpreserved.
+      holds a wake claim: `recovery_task_id` set and `recovery_status` in
+      `WAKE_CLAIM_RECOVERY_STATUSES` (waking, failed, restored; the same set as `claimStillOwned`).
+      `recovery_task_id` alone is never cleared, and a completed sleep resets the status. If more
+      than one snapshot matches, the workspace stays unpreserved (fail closed).
 - [x] `snapshotConversationMatchesSql`, the same rule in SQL, used by `preservedVmSourceSql` and
       `workspaceArtifactsRetirementGuardSql`.
+- [x] Review fix (security-auditor MEDIUM, validator HIGH): the claim was `recovery_task_id` only, a
+      write-once proxy (rule 74). Tightened in both TS and SQL, with stale-claim and ambiguous-row
+      controls.
 - [x] Workers test, real NodeLifecycle DO. A slept workspace under a wake:
   - is scheduled for deletion;
   - is deleted with `vm_agent_confirmed`;
   - releases the wake fence.
-  The control: an unbound workspace with no wake claim is refused at enqueue.
+  The controls: an unbound workspace with no wake claim, or only a stale wake task, is refused at
+  enqueue. Only this test can observe the TS status conjunct, since the SQL guard masks it in the
+  handoff tests.
 - [x] Unit test, real SQL: the stopped-node handoff retires the node on the first pass. The
-      controls: no wake claim; the wake claim disappears between preparation and the atomic claim.
-- [x] Pre-fix red and post-fix green recorded; each guard (TS and SQL) deleted once, and its
-      control went red.
+      controls: no wake claim; a stale wake task; two claimed snapshots; the wake task or the held
+      status disappears between preparation and the atomic claim.
+- [x] Pre-fix red and post-fix green recorded. Each guard was deleted once, and exactly its
+      test went red:
+  - TS status conjunct: the workers stale-claim control;
+  - TS ambiguity check: the two-snapshot control;
+  - SQL task-id conjunct: the race test "loses its wake task";
+  - SQL status conjunct: the race test "loses its held claim state".
 - [x] Architecture overview updated.
 
 ## Acceptance Criteria
 
 - [x] A slept workspace whose wake released its binding gets deletion proof on its first due attempt.
 - [x] Its stopped node is destroyed on the first cleanup pass.
-- [x] No unbound workspace without a wake claim is treated as preserved.
+- [x] No unbound workspace without a held wake claim is treated as preserved, including one with only a stale wake task.

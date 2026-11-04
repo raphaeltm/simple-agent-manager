@@ -7,7 +7,10 @@ import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { verifyVmFallbackRetirement } from './preserved-vm-fallback';
 import type { WorkspaceDeletionIdentity } from './workspace-deletion';
-import { automaticDeletionPreservationExpiresAt } from './workspace-deletion-preservation';
+import {
+  automaticDeletionPreservationExpiresAt,
+  WAKE_CLAIM_RECOVERY_STATUSES,
+} from './workspace-deletion-preservation';
 
 export interface PreservedVmRetirementBudget {
   remainingSources: number;
@@ -21,16 +24,19 @@ export interface PreservedVmRetirement {
   beforeDestroy: () => Promise<void>;
 }
 
+const wakeClaimStatusesSql = WAKE_CLAIM_RECOVERY_STATUSES.map((status) => `'${status}'`).join(', ');
+
 /**
  * The snapshot belongs to the workspace's conversation. A wake releases the old workspace's chat
  * binding while it holds the snapshot's claim (`createRecoveryTask`), so an unbound workspace
- * matches only a snapshot that carries a wake claim (`findPreservationSnapshot` in
+ * matches only a snapshot whose wake claim is still held (`findPreservationSnapshot` in
  * `workspace-deletion-preservation.ts` applies the same rule).
  */
 export function snapshotConversationMatchesSql(snapshot: string, workspace: string): string {
   return `(${snapshot}.chat_session_id IS ${workspace}.chat_session_id
     OR (${workspace}.chat_session_id IS NULL AND ${snapshot}.chat_session_id IS NOT NULL
-      AND ${snapshot}.recovery_task_id IS NOT NULL))`;
+      AND ${snapshot}.recovery_task_id IS NOT NULL
+      AND ${snapshot}.recovery_status IN (${wakeClaimStatusesSql})))`;
 }
 
 /** Exact sources verified by the caller; one JSON binding keeps D1 parameter use bounded. */
