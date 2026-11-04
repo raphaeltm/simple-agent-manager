@@ -4,7 +4,7 @@ date: 2026-11-04
 author: SAM
 category: engineering
 tags: ['cloudflare-workers', 'd1', 'performance', 'reliability']
-excerpt: 'A workspace cleanup once took about 31 minutes without an automated alarm. We added a Cloudflare Workers watchdog and daily D1 latency check to make slow lifecycle work visible.'
+excerpt: 'A Cloudflare Workers watchdog and daily D1 check make slow workspace, node, and session lifecycle work visible before it goes unnoticed.'
 ---
 
 A workspace cleanup in SAM once sat in `stopping` for about 31 minutes before the system confirmed it was done. We fixed the slow cleanup, then added something we were missing: an automatic way to notice when lifecycle work takes too long. The new monitor samples short-lived states, records over-budget episodes, and checks daily for broader slowdowns.
