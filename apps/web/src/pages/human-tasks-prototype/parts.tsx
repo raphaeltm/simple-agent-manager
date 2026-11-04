@@ -27,8 +27,8 @@ import { type Dispatch, useEffect, useRef, useState } from 'react';
 
 import {
   type Activity,
-  AGENTS,
   type AgentId,
+  AGENTS,
   type HumanTask,
   PEOPLE,
   type PersonId,
@@ -42,7 +42,7 @@ export function slotFor(person: PersonId, viewer: PersonId): PersonSlot {
 }
 
 export function nameFor(person: PersonId, viewer: PersonId): string {
-  return person === viewer ? 'You' : PEOPLE[person].name.split(' ')[0]!;
+  return person === viewer ? 'You' : (PEOPLE[person].name.split(' ')[0] ?? PEOPLE[person].name);
 }
 
 export function AgentAvatar({ size = 20 }: { size?: 14 | 20 | 26 }) {
@@ -190,7 +190,9 @@ function ActivityLine({ item, viewer }: { item: Activity; viewer: PersonId }) {
             <span className="font-semibold text-fg-primary">{who}</span>
             <span className="font-mono text-fg-muted">{item.at}</span>
           </div>
-          <p className="m-0 mt-0.5 text-[13.5px] leading-relaxed text-fg-primary [overflow-wrap:anywhere]">{item.text}</p>
+          <p className="m-0 mt-0.5 text-[13.5px] leading-relaxed text-fg-primary [overflow-wrap:anywhere]">
+            {item.text}
+          </p>
         </div>
       </div>
     );
@@ -232,10 +234,14 @@ export function TaskDetail({
   const scroller = useRef<HTMLDivElement>(null);
   const done = task.status !== 'open';
   // Keep the newest activity (an agent's reply after it woke) in view.
-  const seen = useRef(task.activity.length);
+  // Start at the newest activity once people have interacted; a fresh task opens at the top.
+  const seen = useRef(task.activity.length > 1 ? 0 : task.activity.length);
   useEffect(() => {
     if (task.activity.length > seen.current) {
-      scroller.current?.scrollTo({ top: scroller.current.scrollHeight, behavior: 'smooth' });
+      scroller.current?.scrollTo({
+        top: scroller.current.scrollHeight,
+        behavior: seen.current === 0 ? 'instant' : 'smooth',
+      });
     }
     seen.current = task.activity.length;
   }, [task.activity.length]);
@@ -274,7 +280,9 @@ export function TaskDetail({
               </Chip>
             )}
           </div>
-          <h2 className="m-0 text-lg font-semibold leading-snug text-fg-primary [overflow-wrap:anywhere]">{task.title}</h2>
+          <h2 className="m-0 text-lg font-semibold leading-snug text-fg-primary [overflow-wrap:anywhere]">
+            {task.title}
+          </h2>
           <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-muted">
             <span className="inline-flex items-center gap-1.5">
               <AgentAvatar size={14} /> from {AGENTS[task.from].chat}
@@ -286,9 +294,14 @@ export function TaskDetail({
       </div>
       <PaneSeparator className="mx-5" />
       <div ref={scroller} className="relative min-h-0 flex-1 overflow-y-auto px-5 py-4">
-        <p className="m-0 text-[13.5px] leading-relaxed text-fg-muted [overflow-wrap:anywhere]">{task.why}</p>
+        <p
+          data-testid="task-why"
+          className="m-0 text-[13.5px] leading-relaxed text-fg-muted [overflow-wrap:anywhere]"
+        >
+          {task.why}
+        </p>
         {task.steps.length > 0 && (
-          <ul className="m-0 mt-4 list-none space-y-1 p-0">
+          <ul data-testid="task-steps" className="m-0 mt-4 list-none space-y-1 p-0">
             {task.steps.map((step) => (
               <li key={step.id}>
                 <label className="flex cursor-pointer items-start gap-2.5 rounded-[10px] px-2 py-1.5 text-[13.5px] hover:bg-[var(--sam-glass-v2-raised)]">
@@ -298,7 +311,9 @@ export function TaskDetail({
                     onChange={() => dispatch({ type: 'step', id: task.id, step: step.id })}
                     className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--sam-color-accent-primary)]"
                   />
-                  <span className={`min-w-0 [overflow-wrap:anywhere] ${step.done ? 'text-fg-muted line-through' : 'text-fg-primary'}`}>
+                  <span
+                    className={`min-w-0 [overflow-wrap:anywhere] ${step.done ? 'text-fg-muted line-through' : 'text-fg-primary'}`}
+                  >
                     {step.text}
                   </span>
                 </label>
@@ -307,7 +322,10 @@ export function TaskDetail({
           </ul>
         )}
 
-        <div className="mt-5 rounded-[var(--sam-radius-control)] sam-well px-3 py-2.5">
+        <div
+          data-testid="task-watching"
+          className="mt-5 rounded-[var(--sam-radius-control)] sam-well px-3 py-2.5"
+        >
           <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
             <Bell size={12} /> Watching this task
           </div>
@@ -327,7 +345,7 @@ export function TaskDetail({
         <div className="mt-5 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
           Activity
         </div>
-        <div className="mt-1">
+        <div className="mt-1" data-testid="task-activity">
           {task.activity.map((item) => (
             <ActivityLine key={item.id} item={item} viewer={state.viewer} />
           ))}
@@ -366,7 +384,7 @@ export function TaskDetail({
               size="sm"
               onClick={() => dispatch({ type: 'claim', id: task.id })}
             >
-              <Hand size={15} /> I'll take it
+              <Hand size={15} /> I&apos;ll take it
             </Button>
           )}
           {done ? (

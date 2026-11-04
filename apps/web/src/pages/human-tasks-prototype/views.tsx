@@ -158,7 +158,10 @@ export function ChatView({
                 ) : (
                   <div key={m.id} className="text-[14.5px] leading-relaxed text-fg-primary">
                     {m.wake && (
-                      <div className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-[var(--sam-chip-bg)] px-2.5 py-1 text-xs text-[var(--sam-status-success-fg)]">
+                      <div
+                        data-testid="wake-chip"
+                        className="mb-2 inline-flex items-center gap-1.5 rounded-full bg-[var(--sam-chip-bg)] px-2.5 py-1 text-xs text-[var(--sam-status-success-fg)]"
+                      >
                         <Zap size={12} /> {m.wake}
                       </div>
                     )}
@@ -297,7 +300,7 @@ export function HomeView({ state, dispatch }: { state: State; dispatch: Dispatch
         </div>
       </Pane>
       {Object.entries(byProject).map(([project, tasks]) => (
-        <Pane key={project} className="p-2">
+        <Pane key={project} className="p-2" data-testid="home-project">
           <div className="flex items-center gap-2 px-3 pt-2 pb-1">
             <span className="text-[13px] font-semibold text-fg-primary">{project}</span>
             <Count value={tasks.length} tone="attention" />
@@ -322,7 +325,11 @@ export function HomeView({ state, dispatch }: { state: State; dispatch: Dispatch
           ))}
         </Pane>
       ))}
-      <Pane variant="quiet" className="px-5 py-4 text-xs leading-relaxed text-fg-muted">
+      <Pane
+        variant="quiet"
+        className="px-5 py-4 text-xs leading-relaxed text-fg-muted"
+        data-testid="home-note"
+      >
         No push notification was sent for these. You get one quiet daily digest; agents only ping
         you directly with
         <span className="font-mono"> request_human_input</span> when they are actually stuck.

@@ -380,7 +380,7 @@ function stressState(): State {
 
 export function sceneState(name: string | null): State {
   if (name === 'stress') return stressState();
-  const scene = (name && SCENES[name]) || SCENES['solo-chat']!;
+  const scene = (name ? SCENES[name] : undefined) ?? { mode: 'solo' as const, actions: [] };
   return scene.actions.reduce(reducer, initialState(scene.mode));
 }
 
