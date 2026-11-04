@@ -91,6 +91,36 @@ threadId)`). Do not make the shared one accept `null`.
   with only `name` and `message`. An `instanceof`- or `code`-based mapping passes
   a richer simulation and 500s in production.
 
+## The Same Bug at Runtime: a Transition That Releases the Column
+
+A schema change is not the only way a scoping column becomes NULL. A lifecycle transition can
+release it on purpose, and every predicate that keys on the column's *current* value then loses
+its row.
+
+A VM wake (`createRecoveryTask` in `session-recovery.ts`) nulls the old workspace's
+`chat_session_id` so the conversation can bind to its replacement. Both deletion-preservation
+checks matched the workspace's snapshot by that binding, so a workspace under a wake had no
+preserved snapshot:
+- the deletion queue refused it forever;
+- the wake fence waited on that deletion;
+- the node's handoff refused the node until the stranded-node deadline (warm node
+  `01M6F4WPF51FYE55F3FVHJ6YAZ`, 2026-11-04).
+
+The release did not make any check less strict. It made a required action impossible, and that
+is invisible because the symptom is an absence.
+
+- When a transition nulls a scoping column, grep every reader of that column and decide, per
+  reader, what the released row should match instead.
+- Key the replacement on a record that names the row exactly (here the snapshot's own
+  `workspace_id`). Gate it on the state that explains the release, not on a write-once marker
+  of it: `recovery_task_id` is never cleared, while `recovery_status` returns to NULL when the
+  claim ends.
+- If more than one row can match, fail closed rather than pick one.
+- Test each reader with the released row as the real writer leaves it, and pair that with a
+  stale-marker control. See `apps/api/src/services/workspace-deletion-preservation.ts`
+  (`findPreservationSnapshot`) and `preserved-vm-retirement.ts`
+  (`snapshotConversationMatchesSql`).
+
 ## Quick Compliance Check
 
 Before merging a migration that relaxes a constraint:
