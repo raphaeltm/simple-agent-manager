@@ -26,6 +26,7 @@ export type AdminSettingName =
   | FleetOpsSettingName
   | OperationsTelemetrySettingName
   | 'chat.profileUsageWindowDays'
+  | 'nodes.usageWindowMinutes'
   | 'chat.profilePinCandidateLimit'
   | 'collaboration.ideaUpdateBodyMaxLength'
   | 'collaboration.ideaUpdateQuoteMaxLength'
@@ -125,6 +126,9 @@ export interface AdminSettingDefinition {
   readonly choices?: readonly string[];
   readonly validate: (value: unknown) => boolean;
 }
+
+/** Minutes of CPU and memory history the Nodes page draws per machine and session (`GET /api/nodes/resource-usage`). */
+export const DEFAULT_NODE_USAGE_WINDOW_MINUTES = 60;
 
 /** Days of a person's own new chats that order their new-chat profile picker (idea 01M5EW9H86VD88S7E3WWA1D9X1). */
 export const DEFAULT_PROFILE_USAGE_WINDOW_DAYS = 30;

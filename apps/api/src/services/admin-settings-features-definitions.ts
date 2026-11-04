@@ -5,6 +5,7 @@ import {
   DEFAULT_COMMENT_CONTEXT_MAX_ROWS,
   DEFAULT_COMMENT_CONTEXT_MESSAGES,
   DEFAULT_COMMENT_MENTIONS_MAX,
+  DEFAULT_NODE_USAGE_WINDOW_MINUTES,
   DEFAULT_PROFILE_PIN_CANDIDATE_LIMIT,
   DEFAULT_PROFILE_USAGE_WINDOW_DAYS,
   DEFAULT_SESSION_ACCESS_MAX_GRANTS,
@@ -187,6 +188,13 @@ export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
       setting.description,
       setting.range
     )
+  ),
+  integerDefinition(
+    'nodes.usageWindowMinutes',
+    DEFAULT_NODE_USAGE_WINDOW_MINUTES,
+    'Operations',
+    'Minutes of CPU and memory history the Nodes page draws for each machine and session. VM agents upload history in 15-minute batches, so a window under 30 minutes is often mostly empty.',
+    { min: 15, max: 360 }
   ),
   integerDefinition(
     'chat.profileUsageWindowDays',
