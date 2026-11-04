@@ -14,8 +14,8 @@ import { provisionDeploymentNode } from '../../../src/services/deployment-provis
 import { deleteDNSRecord } from '../../../src/services/dns';
 import { teardownDeploymentEnvironmentOnNode } from '../../../src/services/node-agent';
 import { stopNodeResources } from '../../../src/services/node-resource-lifecycle';
-import { createProviderForUser } from '../../../src/services/provider-credentials';
 import { exactProviderCredentialBindingFromPlacementSnapshot } from '../../../src/services/provider-credential-exact';
+import { createProviderForUser } from '../../../src/services/provider-credentials';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const provider = vi.hoisted(() => ({

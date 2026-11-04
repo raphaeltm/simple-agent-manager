@@ -499,9 +499,9 @@ attempts count).
 
 SAM keeps three records that outlive the node or session they describe:
 
-- **Node decision log.** The node lifecycle, the cleanup sweep and the warm handoff each record one
-  short row per keep or kill decision (kept active, marked warm, destroy attempted, skipped and
-  why). `ops_why_is_node_alive` reads it. Heartbeats only show that a node is reachable, never that
+- **Node decision log.** The node lifecycle, the cleanup sweep, the warm handoff, deployment-node
+  teardown and operations actions each record one short row per keep or kill decision (kept
+  active, marked warm, destroy attempted, skipped, a refused legacy credential recovery, and why). `ops_why_is_node_alive` reads it. Heartbeats only show that a node is reachable, never that
   it is idle.
 - **Black box log captures.** Before SAM tears a node down, and when a node turns unhealthy, it
   saves the tail of the VM agent, systemd and cloud-init logs, gzipped, in R2. Teardown captures
