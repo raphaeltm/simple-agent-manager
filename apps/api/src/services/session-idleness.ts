@@ -38,6 +38,8 @@ export interface SessionIdlenessActivityState {
   promptStartedAt?: number | null;
   /** Last real-work clock (`project-data/session-work-clock.ts`). */
   workAt?: number | null;
+  /** The VM's own latest turn start; grows only when a new prompt starts. */
+  reportedPromptStartedAt?: number | null;
   runtimeWorkState?: string | null;
   runtimeWorkCount?: number | null;
   runtimeWorkSource?: string | null;

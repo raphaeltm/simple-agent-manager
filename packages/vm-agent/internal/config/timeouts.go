@@ -6,6 +6,9 @@ const (
 	// DefaultGracefulShutdownTimeout bounds HTTP server shutdown after SIGTERM.
 	// Override via GRACEFUL_SHUTDOWN_TIMEOUT.
 	DefaultGracefulShutdownTimeout = 30 * time.Second
+	// DefaultSelfRestartDelay is how long an approved self-restart waits after answering the
+	// control plane before signalling itself, so the 202 response is delivered first.
+	DefaultSelfRestartDelay = 2 * time.Second
 
 	// DefaultSystemProvisioningTimeout bounds workspace host provisioning before
 	// bootstrap. Override via SYSTEM_PROVISIONING_TIMEOUT.

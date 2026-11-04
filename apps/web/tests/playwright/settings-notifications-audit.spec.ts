@@ -24,10 +24,11 @@ type NotificationType =
   | 'cron_failure'
   | 'mention'
   | 'comment'
-  | 'session_access';
+  | 'session_access'
+  | 'operations_approval';
 
 /** One in-app switch per notification type, plus the Web Push switch. */
-const TYPE_SWITCH_COUNT = 10;
+const TYPE_SWITCH_COUNT = 11;
 
 interface PreferenceMock {
   notificationType: NotificationType | '*';
@@ -62,6 +63,13 @@ async function setupApiMocks(
     saveError = false,
     notifications = [],
   } = options;
+
+  // The first-run cloud onboarding wizard overlays every page for a user with no credentials.
+  // It covered the settings page in every screenshot and intercepted the switch clicks
+  // (.claude/rules/62), so mark it dismissed before the app boots.
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, MOCK_USER.user.id);
 
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
@@ -385,4 +393,16 @@ test.describe('Notification Settings — Desktop', () => {
       page.getByRole('alert').filter({ hasText: /Could not load notification preferences/i })
     ).toBeVisible();
   });
+});
+
+test('the Operations approvals switch renders, enabled by default', async ({ page }) => {
+  await setupApiMocks(page, { preferences: [] });
+  await navigateToNotificationSettings(page);
+  const row = page.getByRole('switch', { name: /Operations approvals/i });
+  await row.scrollIntoViewIfNeeded();
+  await expect(row).toBeVisible();
+  await expect(row).toHaveAttribute('aria-checked', 'true');
+  await expect(page.getByText(/asks you to approve an action/)).toBeVisible();
+  await screenshot(page, 'notification-settings-operations-approvals', { scopeToProject: true });
+  await assertNoOverflow(page);
 });

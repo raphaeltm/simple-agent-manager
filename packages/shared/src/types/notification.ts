@@ -16,6 +16,8 @@ export const NOTIFICATION_TYPES = [
   'comment',
   /** A session was shared with you, or your shared access to it was removed. */
   'session_access',
+  /** An Operations-project agent asks a superadmin to approve an action. */
+  'operations_approval',
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 

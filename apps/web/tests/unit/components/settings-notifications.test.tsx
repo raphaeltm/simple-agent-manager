@@ -82,11 +82,12 @@ describe('SettingsNotifications', () => {
     });
     const switches = screen.getAllByRole('switch');
     expect(switches).toHaveLength(NOTIFICATION_TYPES.length);
-    expect(switches).toHaveLength(10);
+    expect(switches).toHaveLength(11);
     expect(screen.getByText('Operational Failure')).toBeInTheDocument();
     expect(screen.getByText('Mentions')).toBeInTheDocument();
     expect(screen.getByText('Comments on your sessions')).toBeInTheDocument();
     expect(screen.getByText('Shared sessions')).toBeInTheDocument();
+    expect(screen.getByText('Operations approvals')).toBeInTheDocument();
     for (const sw of switches) {
       expect(sw).toHaveAttribute('aria-checked', 'true');
     }

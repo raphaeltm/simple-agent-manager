@@ -104,7 +104,7 @@ export function mimeTypeFromFilename(filename: string | null | undefined): strin
  */
 export function resolveEffectiveMimeType(
   storedMimeType: string | null | undefined,
-  filename?: string | null,
+  filename?: string | null
 ): string {
   const base = normalizeMimeType(storedMimeType ?? '');
   if (!isUnknownMimeType(base)) {

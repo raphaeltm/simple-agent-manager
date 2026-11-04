@@ -20,7 +20,7 @@ import type {
   UpdateTagsRequest,
 } from '@simple-agent-manager/shared';
 import { buildLibraryR2Key } from '@simple-agent-manager/shared';
-import { and, asc, desc, eq, inArray, like, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, inArray, like, notLike, sql } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
@@ -424,12 +424,18 @@ export async function listFiles(
   db: AppDb,
   env: Env,
   projectId: string,
-  filters: ListFilesRequest = {}
+  filters: ListFilesRequest = {},
+  /** Hide every file whose directory starts with this prefix (restricted directories). */
+  options: { excludeDirectoryPrefix?: string } = {}
 ): Promise<ListFilesResponse> {
   const pageSize = Math.min(filters.limit ?? getListDefaultPageSize(env), getListMaxPageSize(env));
 
   // Build conditions
   const conditions = [eq(schema.projectFiles.projectId, projectId)];
+  if (options.excludeDirectoryPrefix) {
+    const escaped = options.excludeDirectoryPrefix.replace(/[%_]/g, '\\$&');
+    conditions.push(notLike(schema.projectFiles.directory, `${escaped}%`));
+  }
 
   // Directory filtering
   if (filters.directory) {
@@ -669,32 +675,7 @@ export async function downloadFile(
 // Delete
 // ---------------------------------------------------------------------------
 
-export async function deleteFile(
-  db: AppDb,
-  r2: R2Bucket,
-  projectId: string,
-  fileId: string
-): Promise<void> {
-  const rows = await db
-    .select()
-    .from(schema.projectFiles)
-    .where(and(eq(schema.projectFiles.id, fileId), eq(schema.projectFiles.projectId, projectId)))
-    .limit(1);
-
-  if (!rows[0]) {
-    throw errors.notFound('File');
-  }
-
-  // Delete D1 first (safer order — orphaned R2 objects are benign, orphaned D1 rows are errors)
-  // Explicitly delete tags since D1 may not have PRAGMA foreign_keys = ON
-  await db.delete(schema.projectFileTags).where(eq(schema.projectFileTags.fileId, fileId));
-  await db.delete(schema.projectFiles).where(eq(schema.projectFiles.id, fileId));
-
-  // Then delete R2 object (best-effort)
-  await r2.delete(rows[0].r2Key);
-
-  log.info('file_library_delete', { projectId, fileId, filename: rows[0].filename });
-}
+export { deleteFile, deleteFiles } from './file-library-delete';
 
 // ---------------------------------------------------------------------------
 // Tag management

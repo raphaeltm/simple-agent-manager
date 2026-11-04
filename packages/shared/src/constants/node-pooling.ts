@@ -50,11 +50,25 @@ export const DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS = DEFAULT_NODE_WARM_TIMEOUT_
  * This is the true backstop. DEFAULT_MAX_AUTO_NODE_LIFETIME_MS only applies to nodes
  * whose workspaces are all inactive, so a node with a workspace row wedged in
  * `running` escapes it forever — two production nodes survived 1932h and 2135h that
- * way. This ceiling additionally requires that no workspace has *reported activity*
- * within DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS, which distinguishes a genuinely busy
- * node from one holding a stuck workspace row.
+ * way. Past this ceiling every session on the node must sleep, busy or not (policy
+ * a3780107, 2026-11-03): each sleeps as soon as its turn ends, and after
+ * DEFAULT_NODE_LIFETIME_FORCE_SLEEP_AFTER_MS any turn still running is stopped and slept.
  */
 export const DEFAULT_NODE_ABSOLUTE_MAX_LIFETIME_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+/**
+ * Leeway (ms) after DEFAULT_NODE_ABSOLUTE_MAX_LIFETIME_MS before a session whose turn is still
+ * running is stopped and force-slept. Admin setting `operations.nodeLifetimeForceSleepAfterMs`.
+ */
+export const DEFAULT_NODE_LIFETIME_FORCE_SLEEP_AFTER_MS = 30 * 60 * 1000; // 30 minutes
+
+/**
+ * A node takes no new workspace placements in the last this-many percent of
+ * DEFAULT_NODE_ABSOLUTE_MAX_LIFETIME_MS (policy a3780107, 2026-11-03): work placed that close
+ * to the ceiling would be force-slept almost at once. 0 disables the cutoff. Admin setting
+ * `operations.nodeLifetimeAdmissionCutoffPercent`.
+ */
+export const DEFAULT_NODE_LIFETIME_ADMISSION_CUTOFF_PERCENT = 10;
 
 /**
  * Default grace (ms) before the cleanup sweep hands an empty managed workspace VM that never

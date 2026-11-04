@@ -875,7 +875,8 @@ describe('failed-task work preservation vertical slice', () => {
       DATABASE: {
         ...base,
         prepare: (query: string) => {
-          if (/from "workspaces" left join "session_summaries"/i.test(query)) {
+          // The sweep's eligibility read: the only statement selecting provider_limit_wait_json.
+          if (/"provider_limit_wait_json"/i.test(query) && /from "workspaces"/i.test(query)) {
             throw new Error('D1_ERROR: overloaded');
           }
           return base.prepare(query);

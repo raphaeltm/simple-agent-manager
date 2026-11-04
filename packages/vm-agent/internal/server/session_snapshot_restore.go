@@ -61,7 +61,7 @@ func (s *Server) prepareFreshSessionAfterDegradedRestore(workspaceID, sessionID 
 
 func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceRuntime, sessionID, chatSessionID, agentType, callbackToken string) (result map[string]interface{}, resultErr error) {
 	ctx, timings := startLifecycleTimings(ctx, "metadata")
-	defer func() { s.finishLifecycleTimings(timings, "wake", runtime.ID, callbackToken, resultErr) }()
+	defer func() { s.finishLifecycleTimings(timings, "wake", runtime.ID, chatSessionID, callbackToken, resultErr) }()
 	restore, err := s.fetchSnapshotRestore(ctx, runtime.ID, chatSessionID, callbackToken)
 	if err != nil {
 		return nil, err

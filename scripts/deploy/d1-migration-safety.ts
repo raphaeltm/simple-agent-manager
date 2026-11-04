@@ -7,6 +7,7 @@ import {
   DEFAULT_D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT,
   DEFAULT_D1_MIGRATION_CHURNING_TABLES,
 } from './d1-migration-churning-tables.js';
+import { executeD1VerificationRead } from './d1-migration-read-retry.js';
 
 export {
   DEFAULT_D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT,
@@ -141,11 +142,7 @@ function quoteSqlLiteral(value: string): string {
 
 export class ExecD1MigrationSafetyRunner implements D1MigrationSafetyRunner {
   executeJson(command: string, args: string[], options: { cwd?: string } = {}): unknown {
-    const output = execFileSync(command, args, {
-      cwd: options.cwd,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const output = executeD1VerificationRead(command, args, options);
     return parseWranglerJsonOutput(output);
   }
 
@@ -343,7 +340,9 @@ export function countProtectedTables(
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      throw new MigrationSafetyError(`Failed to count ${db.binding}.${table}: ${message}`);
+      throw new MigrationSafetyError(`Failed to count ${db.binding}.${table}: ${message}`, {
+        cause: error,
+      });
     }
 
     if (rows.length !== 1 || !('count' in rows[0])) {

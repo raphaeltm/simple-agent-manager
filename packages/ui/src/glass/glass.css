@@ -13,7 +13,7 @@
  *   .sam-glass--chrome    lighter fill for chrome (nav pills, chips, docks)
  *   .sam-glass-rim        1px gradient rim light (uses ::before; element must be positioned)
  *   .sam-glass-sheen      one light sweep over the rim when `.is-sheened` is added (uses ::after)
- *   .sam-glass-live       real backdrop blur, only where the backdrop is unknown (e.g. sticky nav)
+ *   .sam-glass-live       real backdrop blur on the element itself: overlays and sticky chrome
  *
  * SAM Glass additions (docs/guides/sam-glass-design-system.md):
  *   .sam-void             the ground every app screen floats over: light at the edges, a deep core
@@ -23,7 +23,8 @@
  *   .sam-raised           a raised control on glass (secondary button, chosen segment, current tab)
  *
  * Surfaces are glass; elements on them (avatars, buttons, chips, counts) are solid.
- * One live blur at a time: only an overlay (drawer, sheet) gets .sam-glass-live.
+ * Here panes do not blur; the app frosts every pane in tokens/sam-glass.css (lower fills plus a
+ * backdrop blur), and an overlay (drawer, sheet) gets .sam-glass-live.
  *
  * The material rules use :where() so they carry no specificity: a consumer's own layout and
  * surface rules (position, background, shadow) always win, whatever order stylesheets load in.

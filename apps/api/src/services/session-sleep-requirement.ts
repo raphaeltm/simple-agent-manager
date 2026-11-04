@@ -1,0 +1,107 @@
+/**
+ * How strongly a sleep must happen (policy a3780107, 2026-11-03: "as close to impossible as
+ * possible for a required sleep to fail to take place").
+ *
+ * - `normal`: unattended idle sleep. Waits for canonical idleness (policy 0f05422d).
+ * - `deadline`: the node is past its absolute lifetime. The session sleeps as soon as its turn
+ *   ends, without waiting out the idle interval, but nothing is killed.
+ * - `required`: a person pressed Sleep (and every retry of that episode, migration 0217), or
+ *   the node is past its absolute lifetime plus the force-sleep leeway. The agent's turn is
+ *   ended first (`endAgentTurnForRequiredSleep`), and neither a running turn nor a harness
+ *   lease may block the sleep.
+ */
+import {
+  DEFAULT_NODE_ABSOLUTE_MAX_LIFETIME_MS,
+  DEFAULT_NODE_LIFETIME_FORCE_SLEEP_AFTER_MS,
+} from '@simple-agent-manager/shared';
+
+import type { Env } from '../env';
+import { parsePositiveInt } from '../lib/route-helpers';
+import { resolveAdminSetting } from './admin-settings-resolution';
+
+export type SleepRequirement = 'normal' | 'deadline' | 'required';
+
+export interface SleepRequirementNode {
+  nodeCreatedAt: string | null;
+  nodeRole: string | null;
+  nodeClass: string | null;
+  /** 1 when a task auto-provisioned this node. */
+  nodeAutoProvisioned: number | boolean | null;
+}
+
+/**
+ * The nodes the absolute lifetime governs. Mirrors the candidate predicate of
+ * `sweepMaxLifetimeNodes` (`scheduled/node-cleanup/node-phases.ts`): workspace nodes that SAM
+ * auto-provisioned and owns. A user-owned or manually created node is never forced.
+ */
+export function isLifetimeGovernedNode(node: SleepRequirementNode): boolean {
+  return (
+    node.nodeRole === 'workspace' && node.nodeClass !== 'user-owned' && !!node.nodeAutoProvisioned
+  );
+}
+
+export function classifySleepRequirement(
+  node: SleepRequirementNode,
+  now: Date,
+  config: { absoluteMaxLifetimeMs: number; forceSleepAfterMs: number; requestedByPerson: boolean }
+): SleepRequirement {
+  if (config.requestedByPerson) return 'required';
+  if (!isLifetimeGovernedNode(node)) return 'normal';
+  const createdAt = Date.parse(node.nodeCreatedAt ?? '');
+  if (!Number.isFinite(createdAt)) return 'normal';
+  const age = now.getTime() - createdAt;
+  if (age >= config.absoluteMaxLifetimeMs + config.forceSleepAfterMs) return 'required';
+  if (age >= config.absoluteMaxLifetimeMs) return 'deadline';
+  return 'normal';
+}
+
+/** `resolveAdminSetting` answers its code default during a settings outage, so a deadline holds. */
+async function resolveForceSleepAfterMs(env: Env): Promise<number> {
+  const value = Number(await resolveAdminSetting(env, 'operations.nodeLifetimeForceSleepAfterMs'));
+  return Number.isFinite(value) && value > 0 ? value : DEFAULT_NODE_LIFETIME_FORCE_SLEEP_AFTER_MS;
+}
+
+export async function resolveSleepRequirement(
+  env: Env,
+  node: SleepRequirementNode,
+  now: Date,
+  options: { requestedByPerson: boolean }
+): Promise<SleepRequirement> {
+  if (options.requestedByPerson) return 'required';
+  if (!isLifetimeGovernedNode(node)) return 'normal';
+  const absoluteMaxLifetimeMs = parsePositiveInt(
+    env.NODE_ABSOLUTE_MAX_LIFETIME_MS,
+    DEFAULT_NODE_ABSOLUTE_MAX_LIFETIME_MS
+  );
+  // Read the leeway setting only for a node already past its lifetime: every other sleep
+  // check stays free of the extra lookup.
+  const forceSleepAfterMs =
+    classifySleepRequirement(node, now, {
+      absoluteMaxLifetimeMs,
+      forceSleepAfterMs: Number.POSITIVE_INFINITY,
+      requestedByPerson: false,
+    }) === 'normal'
+      ? Number.POSITIVE_INFINITY
+      : await resolveForceSleepAfterMs(env);
+  return classifySleepRequirement(node, now, {
+    absoluteMaxLifetimeMs,
+    forceSleepAfterMs,
+    requestedByPerson: false,
+  });
+}
+
+/**
+ * Whether a person's Sleep made the row's current episode required. The claim records the
+ * episode it marked; once that episode ends or restarts the columns differ (migration 0217).
+ */
+export function isPersonRequiredSleepEpisode(
+  row: {
+    sleepEpisodeStartedAt?: string | null;
+    sleepRequiredEpisodeStartedAt?: string | null;
+  } | null
+): boolean {
+  return Boolean(
+    row?.sleepEpisodeStartedAt &&
+      row.sleepRequiredEpisodeStartedAt === row.sleepEpisodeStartedAt
+  );
+}

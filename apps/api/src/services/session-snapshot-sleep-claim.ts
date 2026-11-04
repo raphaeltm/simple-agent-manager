@@ -48,6 +48,11 @@ export async function claimSessionSnapshotSleep(
      * preserving their spent budget before using the normal claim/idle guards.
      */
     reopenBlockedEpisode?: boolean;
+    /**
+     * A person asked for this sleep, so its episode is required and stays required for the
+     * sweep's and the fallback's retries (migration 0217).
+     */
+    markRequired?: boolean;
   }
 ): Promise<SessionSnapshotSleepClaim> {
   const now = input.now ?? new Date();
@@ -87,6 +92,8 @@ export async function claimSessionSnapshotSleep(
     'failed',
     'expired',
   ]);
+  const episodeStartedAt = sql`CASE WHEN ${blockedEpisode} THEN ${nowIso}
+    ELSE COALESCE(${snapshots.sleepEpisodeStartedAt}, ${nowIso}) END`;
   const staleClaim = and(
     eq(snapshots.sleepStatus, 'preparing'),
     or(isNull(snapshots.sleepClaimedAt), lte(snapshots.sleepClaimedAt, staleBefore))
@@ -102,8 +109,8 @@ export async function claimSessionSnapshotSleep(
       sleepError: null,
       // The episode clock starts at the first claim and is never moved by a later one.
       // SQLite evaluates SET expressions against the row as it was before this update.
-      sleepEpisodeStartedAt: sql`CASE WHEN ${blockedEpisode} THEN ${nowIso}
-        ELSE COALESCE(${snapshots.sleepEpisodeStartedAt}, ${nowIso}) END`,
+      sleepEpisodeStartedAt: episodeStartedAt,
+      ...(input.markRequired ? { sleepRequiredEpisodeStartedAt: episodeStartedAt } : {}),
       // Re-claiming a stale `preparing` claim means the previous attempt never reported
       // back (a crashed or killed Worker): it counts as a failed attempt, so a crash loop
       // spends the same bounded budget as a reported failure.

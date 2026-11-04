@@ -7,6 +7,9 @@ import {
   type ConnectorSettingKey,
   validateConnectorSetting,
 } from './connector-settings-definition';
+import { type FleetOpsSettingName } from './fleet-ops/settings-definitions';
+import { type LifecycleLatencySettingKey } from './lifecycle-latency/defaults';
+import { type OperationsTelemetrySettingName } from './operations-telemetry-defaults';
 import { type WORKFLOW_DEFAULTS } from './workflow-defaults';
 
 export type AdminSettingValue = boolean | number | string | readonly string[] | null;
@@ -15,10 +18,13 @@ export type AdminSettingType = 'boolean' | 'integer' | 'string' | 'string-list' 
 
 export type AdminSettingName =
   | `workflow.${keyof typeof WORKFLOW_DEFAULTS}`
+  | `lifecycleLatency.${LifecycleLatencySettingKey}`
   | `aiModels.${AgentModelSettingKey}`
   | `connector.${ConnectorSettingKey}`
   | ConnectorReadSettingName
   | AgentEmailSettingName
+  | FleetOpsSettingName
+  | OperationsTelemetrySettingName
   | 'chat.profileUsageWindowDays'
   | 'chat.profilePinCandidateLimit'
   | 'collaboration.ideaUpdateBodyMaxLength'
@@ -41,6 +47,8 @@ export type AdminSettingName =
   | 'integration.gitlab.clientSecret'
   | 'operations.workloadIdentityTokenTtlSeconds'
   | 'operations.nodeCleanupBlockedRetirementMs'
+  | 'operations.nodeLifetimeForceSleepAfterMs'
+  | 'operations.nodeLifetimeAdmissionCutoffPercent'
   | 'operations.nodeCleanupRefusalWarnAfterMs'
   | 'operations.nodeCleanupOwnershipAlertIntervalMs'
   | 'operations.evictionRecoveryRetryBatchSize'

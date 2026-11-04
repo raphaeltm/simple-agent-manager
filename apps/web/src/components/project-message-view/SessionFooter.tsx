@@ -2,7 +2,7 @@ import type { SlashCommand } from '@simple-agent-manager/acp-client';
 import { PlanModal } from '@simple-agent-manager/acp-client';
 import type { AgentProfile } from '@simple-agent-manager/shared';
 import { isExpiredTask } from '@simple-agent-manager/shared';
-import { Button } from '@simple-agent-manager/ui';
+import { Button, Pane } from '@simple-agent-manager/ui';
 import { type ReactNode, type RefObject, useEffect, useMemo, useState } from 'react';
 
 import { ArchivedForkComposer } from './ArchivedForkComposer';
@@ -117,7 +117,9 @@ export function SessionFooter({
     lc.sessionState === 'active' || lc.sessionState === 'idle' || lc.sessionState === 'sleeping';
 
   return (
-    <>
+    // The message-box slab (SAM Glass). `empty:hidden` drops it when no footer state
+    // applies; no `overflow-hidden`, because the dock's crest rises above the slab's edge.
+    <Pane variant="slab" data-testid="session-footer" className="shrink-0 empty:hidden">
       {/* Lifecycle control — a single always-mounted dock while the session is
           active. Its center button morphs between Interrupt (working), Sleep
           (awake idle), and Archive (already sleeping), so irreversible archive
@@ -218,7 +220,7 @@ export function SessionFooter({
         <ReadOnlyFollowUp ownerLabel={sessionOwnerLabel} onNewChat={onNewChat} ended />
       )}
       {lc.sessionState === 'terminated' && lc.session?.status !== 'stopped' && (
-        <div className="shrink-0 border-t border-border-default px-4 py-3 bg-surface text-center">
+        <div className="shrink-0 px-4 py-4 text-center">
           <p className="m-0 sam-type-secondary text-fg-muted">
             {isExpiredTask(lc.taskEmbed)
               ? 'The saved workspace has expired. Your transcript is still available.'
@@ -231,7 +233,7 @@ export function SessionFooter({
           )}
         </div>
       )}
-    </>
+    </Pane>
   );
 }
 
@@ -248,7 +250,7 @@ function SharedSessionNotice({
   const timeLeft = expiresAt === null ? null : accessTimeLeft(expiresAt, now);
   return (
     <div
-      className="shrink-0 border-t border-border-default bg-surface px-4 py-2 text-xs text-fg-muted"
+      className="shrink-0 border-b border-[var(--sam-hairline)] px-4 py-2.5 text-xs text-fg-muted md:px-5"
       data-testid="shared-session-notice"
     >
       <span className="font-medium text-fg-primary">

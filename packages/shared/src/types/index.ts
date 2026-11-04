@@ -499,6 +499,25 @@ export type {
   WebPushSubscriptionsResponse,
 } from './notification';
 export { NOTIFICATION_CHANNELS, NOTIFICATION_TYPES, NOTIFICATION_URGENCIES } from './notification';
+export type {
+  DecideOperationsActionApprovalRequest,
+  DecideOperationsActionApprovalResponse,
+  ListOperationsActionApprovalsResponse,
+  OperationsAction,
+  OperationsActionApproval,
+  OperationsActionTargetType,
+  OperationsApprovalDecision,
+  OperationsApprovalStatus,
+} from './operations-actions';
+export {
+  OPERATIONS_ACTION_LABELS,
+  OPERATIONS_ACTION_TARGET_TYPES,
+  OPERATIONS_ACTIONS,
+  OPERATIONS_APPROVAL_DECISIONS,
+  OPERATIONS_APPROVAL_STATUSES,
+  OPERATIONS_AUTO_SAFE_ACTIONS,
+  OPERATIONS_IRREVERSIBLE_ACTIONS,
+} from './operations-actions';
 
 // Shared session access
 export type {

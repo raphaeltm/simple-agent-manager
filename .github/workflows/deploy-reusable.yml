@@ -1115,6 +1115,8 @@ jobs:
           DEPLOY_ENV: ${{ steps.deploy_resources.outputs.environment }}
           D1_MIGRATION_CHURNING_TABLES: ${{ vars.D1_MIGRATION_CHURNING_TABLES }}
           D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT: ${{ vars.D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT }}
+          D1_MIGRATION_READ_ATTEMPTS: ${{ vars.D1_MIGRATION_READ_ATTEMPTS }}
+          D1_MIGRATION_READ_RETRY_DELAY_MS: ${{ vars.D1_MIGRATION_READ_RETRY_DELAY_MS }}
 
       - name: Guard ProjectData archive routing compatibility
         if: ${{ inputs.dry_run != true }}
