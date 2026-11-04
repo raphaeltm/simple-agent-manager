@@ -153,7 +153,9 @@ describe('runCronTriggerSweep', () => {
     // admission owns concurrency, sequence allocation, execution rows, and submission.
     queryResults = [[trigger], [{ name: 'My Project' }]];
 
-    const stats = await runCronTriggerSweep({ DATABASE: {} } as any);
+    const stats = await runCronTriggerSweep({
+      DATABASE: { prepare: () => ({ bind: () => ({ first: async () => null }) }) },
+    } as any);
 
     expect(stats.checked).toBe(1);
     expect(stats.fired).toBe(1);
