@@ -73,3 +73,18 @@ export function useChatSurfacePrototype(): ChatSurfacePrototypeState {
     () => state
   );
 }
+
+/**
+ * Subscribes to one primitive derived from the state, so a component re-renders only when
+ * that value changes. Every agent message uses this; subscribing them to the whole state
+ * re-rendered every message (and its markdown) mid-animation on each immersive toggle.
+ */
+export function useChatSurfacePrototypeValue<T extends string | number | boolean>(
+  select: (s: ChatSurfacePrototypeState) => T
+): T {
+  return useSyncExternalStore(
+    subscribe,
+    () => select(state),
+    () => select(state)
+  );
+}

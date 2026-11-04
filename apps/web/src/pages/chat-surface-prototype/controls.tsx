@@ -9,6 +9,7 @@ import { FlaskConical, Maximize2, Minimize2 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 
 import { useIsMobile } from '../../hooks/useIsMobile';
+import { enterImmersive, exitImmersive, resetImmersive } from './immersive-transition';
 import {
   type AgentMessageStyle,
   type ImmersiveComposer,
@@ -21,9 +22,9 @@ export function ImmersiveToggle({ agentActive }: { agentActive: boolean }) {
   const isMobile = useIsMobile();
 
   // Leaving the chat (or the phone layout) must never strand the shell with its chrome hidden.
-  useEffect(() => () => setChatSurfacePrototype({ immersive: false }), []);
+  useEffect(() => () => resetImmersive(), []);
   useEffect(() => {
-    if (!isMobile) setChatSurfacePrototype({ immersive: false });
+    if (!isMobile) resetImmersive();
   }, [isMobile]);
 
   if (!proto.enabled || !isMobile) return null;
@@ -31,7 +32,7 @@ export function ImmersiveToggle({ agentActive }: { agentActive: boolean }) {
   return (
     <button
       type="button"
-      onClick={() => setChatSurfacePrototype({ immersive: !proto.immersive })}
+      onClick={() => (proto.immersive ? exitImmersive() : void enterImmersive(proto.composer))}
       aria-label={label}
       aria-pressed={proto.immersive}
       title={label}
