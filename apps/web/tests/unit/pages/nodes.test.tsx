@@ -320,6 +320,22 @@ describe('Nodes page', () => {
     expect(screen.queryByText('No usage recorded yet')).not.toBeInTheDocument();
   });
 
+  it('draws no chart for a machine whose sessions have neither history nor reservations', async () => {
+    mocks.getNodeResourceUsage.mockResolvedValue(
+      usageResponse([
+        session({
+          reservation: null,
+          series: { start: [], cpuMillis: [], memoryBytes: [] },
+          historyEndsAt: null,
+        }),
+      ])
+    );
+    renderPage();
+    // Liveness: the session row is there.
+    expect(await screen.findByRole('link', { name: 'Fix the OOM relocation' })).toBeInTheDocument();
+    expect(screen.queryByTestId('machine-chart')).not.toBeInTheDocument();
+  });
+
   it('says nothing is running on a machine with no sessions', async () => {
     renderPage();
     expect(await screen.findByText(/Nothing running/)).toBeInTheDocument();

@@ -22,6 +22,9 @@ import {
 const MB = 1024 * 1024;
 const GB = 1024 * MB;
 
+/** `providerInstanceType` of an Instant (Cloudflare container) node. */
+const INSTANT_CONTAINER_TYPE = 'cf-container';
+
 export interface MachineSpec {
   title: string;
   location: string;
@@ -37,9 +40,15 @@ export function machineSpec(node: NodeResponse): MachineSpec {
     : null;
   const type = node.observedProviderInstanceType || node.providerInstanceType || null;
   const location = VM_LOCATIONS[node.vmLocation];
+  // Instant sessions run in a Cloudflare container, not a VM with a provider type.
+  const instant = type === INSTANT_CONTAINER_TYPE;
   return {
-    title: [provider, type].filter(Boolean).join(' ') || node.name,
-    location: location ? `${location.name}, ${location.country}` : node.vmLocation,
+    title: instant ? 'Instant container' : [provider, type].filter(Boolean).join(' ') || node.name,
+    location: instant
+      ? 'Cloudflare'
+      : location
+        ? `${location.name}, ${location.country}`
+        : node.vmLocation,
     vcpu: node.observedProviderInstanceVcpuCount ?? node.providerInstanceVcpuCount ?? null,
     memoryMb: node.observedProviderInstanceMemoryMb ?? node.providerInstanceMemoryMb ?? null,
     diskGb: node.observedProviderInstanceDiskGb ?? node.providerInstanceDiskGb ?? null,

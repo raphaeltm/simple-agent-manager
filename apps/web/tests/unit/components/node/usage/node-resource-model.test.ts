@@ -41,6 +41,13 @@ describe('node resource model', () => {
     expect(spec.memoryMb).toBe(32768);
     // No hardware at all: fall back to the stored name rather than an empty title.
     expect(machineSpec(baseNode).title).toBe('Auto: some task title');
+    expect(
+      machineSpec({
+        ...baseNode,
+        cloudProvider: 'cloudflare' as never,
+        providerInstanceType: 'cf-container',
+      })
+    ).toMatchObject({ title: 'Instant container', location: 'Cloudflare' });
   });
 
   it('sums sessions per bucket start and keeps a bucket only one session reported', () => {

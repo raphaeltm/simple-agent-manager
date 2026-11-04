@@ -10,7 +10,13 @@
  */
 import { expect, test } from '@playwright/test';
 
-import { dismissStagingOnboarding, STAGING_APP, stagingLogin, stagingShot } from './staging-helpers';
+import {
+  dismissStagingOnboarding,
+  STAGING_API,
+  STAGING_APP,
+  stagingLogin,
+  stagingShot,
+} from './staging-helpers';
 
 test.skip(!process.env.SAM_PLAYWRIGHT_PRIMARY_USER, 'needs the staging smoke token');
 
@@ -18,6 +24,15 @@ test('Nodes page shows machines, sessions and their CPU and memory', async ({ pa
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await stagingLogin(page);
+  // A returning user who dismissed onboarding: its overlay would otherwise cover the page and
+  // the screenshots would show the wizard while DOM assertions still passed.
+  const sessionRes = await page.request.get(`${STAGING_API}/api/auth/get-session`);
+  const userId = ((await sessionRes.json()) as { user?: { id?: string } }).user?.id;
+  expect(userId, 'no signed-in user').toBeTruthy();
+  await page.addInitScript(
+    (id) => window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${id}`, 'true'),
+    userId
+  );
 
   const usageResponse = page.waitForResponse((res) =>
     res.url().endsWith('/api/nodes/resource-usage')
@@ -58,6 +73,7 @@ test('Nodes page shows machines, sessions and their CPU and memory', async ({ pa
       );
     }
     await expect(page.getByTestId('machine-chart').first()).toBeVisible();
+    await expect(page.getByText(/Do you have a cloud hosting account/)).toHaveCount(0);
     await link.scrollIntoViewIfNeeded();
     await stagingShot(page, 'nodes-usage-session');
   }

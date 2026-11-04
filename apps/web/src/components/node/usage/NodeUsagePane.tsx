@@ -210,7 +210,7 @@ export const NodeUsagePane = memo(function NodeUsagePane({
         <p className="m-0 text-[13px] text-fg-muted">{emptyNote(node)}</p>
       ) : (
         <>
-          {usageWindow && (
+          {usageWindow && (total.start.length > 0 || reservedMemory > 0 || reservedCpu > 0) && (
             <div className="flex flex-col gap-1.5" data-testid="machine-chart">
               <div className="flex items-center justify-between gap-2 font-mono text-[10.5px]">
                 <span className="flex min-w-0 items-center gap-1.5 text-fg-primary">
