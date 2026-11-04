@@ -214,7 +214,8 @@ function AcpConversationItemViewImpl({
           ttsStorageId={item.id}
           onPlayAudio={handlePlayAudio}
           onFileClick={onFileClick}
-          bubbleClassName="glass-msg-assistant"
+          layout="flush"
+          bubbleClassName="glass-msg-agent"
         />
       );
     case 'thinking':

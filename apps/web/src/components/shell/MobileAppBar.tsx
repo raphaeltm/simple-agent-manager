@@ -33,6 +33,7 @@ export function MobileAppBar({
     <Pane
       as="header"
       variant="slab"
+      data-immersive-chrome="app-bar"
       className="relative z-30 flex h-14 shrink-0 items-center gap-1 pr-1.5 pl-1"
     >
       <IconButton

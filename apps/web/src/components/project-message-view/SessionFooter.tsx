@@ -119,7 +119,12 @@ export function SessionFooter({
   return (
     // The message-box slab (SAM Glass). `empty:hidden` drops it when no footer state
     // applies; no `overflow-hidden`, because the dock's crest rises above the slab's edge.
-    <Pane variant="slab" data-testid="session-footer" className="shrink-0 empty:hidden">
+    <Pane
+      variant="slab"
+      data-testid="session-footer"
+      data-immersive-chrome="composer"
+      className="shrink-0 empty:hidden"
+    >
       {/* Lifecycle control — a single always-mounted dock while the session is
           active. Its center button morphs between Interrupt (working), Sleep
           (awake idle), and Archive (already sleeping), so irreversible archive

@@ -192,6 +192,46 @@ describe('MessageBubble', () => {
     });
   });
 
+  describe('layout', () => {
+    const container = (el: HTMLElement) => el.firstElementChild!.firstElementChild as HTMLElement;
+
+    it('draws a bubble capped at 80% of the row by default', () => {
+      const { container: root } = render(<MessageBubble text="Hello" role="agent" />);
+      const box = container(root);
+      expect(box.className).toContain('max-w-[80%]');
+      expect(box.className).toContain('px-4');
+      expect(box.className).toContain('border');
+    });
+
+    it('lays a flush message on the surface at the full row width', () => {
+      const { container: root } = render(
+        <MessageBubble text="Hello" role="agent" layout="flush" />
+      );
+      const box = container(root);
+      expect(box.className).toContain('w-full');
+      expect(box.className).not.toContain('max-w-[80%]');
+      expect(box.className).not.toContain('px-4');
+      expect(box.className).not.toContain('rounded-lg');
+      // No built-in surface: no white card, no border.
+      expect(box.className).not.toContain('bg-white');
+      expect(box.className).not.toContain('border');
+      expect(root.firstElementChild!.className).toContain('justify-start');
+    });
+
+    it('keeps a theme class on a flush message', () => {
+      const { container: root } = render(
+        <MessageBubble text="Hello" role="agent" layout="flush" bubbleClassName="glass-msg-agent" />
+      );
+      expect(container(root).className).toContain('glass-msg-agent');
+      expect(container(root).className).not.toContain('max-w-[80%]');
+    });
+
+    it('gives a flush message the default action palette', () => {
+      render(<MessageBubble text="Hello" role="agent" layout="flush" timestamp={1710288000000} />);
+      expect(screen.getByLabelText('Message info').style.color).toBe('var(--sam-color-fg-muted)');
+    });
+  });
+
   describe('streaming indicator', () => {
     it('shows streaming indicator when streaming is true', () => {
       const { container } = render(
@@ -375,7 +415,8 @@ describe('MessageBubble', () => {
           text="Hello"
           role="agent"
           timestamp={1710288000000}
-          bubbleClassName="glass-msg-assistant"
+          layout="flush"
+          bubbleClassName="glass-msg-agent"
         />
       );
       const info = screen.getByLabelText('Message info');

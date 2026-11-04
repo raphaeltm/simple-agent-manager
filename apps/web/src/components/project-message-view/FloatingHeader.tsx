@@ -75,6 +75,7 @@ export function FloatingHeader({
       // conversation below its minimum height on a short phone screen.
       className="relative z-10 flex min-h-0 shrink flex-col gap-2"
       data-testid="session-floating-header"
+      data-immersive-chrome="session-header"
     >
       <SessionHeader
         projectId={projectId}

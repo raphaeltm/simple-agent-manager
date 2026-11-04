@@ -32,6 +32,7 @@ import { MobileNavDrawer, type MobileNavItem } from './MobileNavDrawer';
 import { extractProjectId, getGlobalNavItems, NavSidebar, PROJECT_NAV_ITEMS } from './NavSidebar';
 import { OnboardingProvider } from './onboarding';
 import { ChoosePathWizard } from './onboarding/choose-path/ChoosePathWizard';
+import { ChatImmersiveContext } from './shell/chat-immersive-context';
 import { DesktopSidebar } from './shell/DesktopSidebar';
 import { MobileAppBar, type ShellScreenAction } from './shell/MobileAppBar';
 import { SidebarProjectList } from './SidebarProjectList';
@@ -79,6 +80,7 @@ export function AppShell({ children }: AppShellProps) {
   const [showGlobalNav, setShowGlobalNav] = useState(false);
   const [focusModeState, setFocusModeState] = useState<FocusMode>('default');
   const [screenAction, setScreenAction] = useState<ShellScreenAction | null>(null);
+  const [chatImmersiveOn, setChatImmersiveOn] = useState(false);
   const commandPalette = useGlobalCommandPalette();
   const {
     projects: sidebarProjects,
@@ -265,6 +267,16 @@ export function AppShell({ children }: AppShellProps) {
   // consumers never collapse on small viewports.
   const focusMode: FocusMode = isMobile ? 'default' : focusModeState;
 
+  // The immersive chat view is phone-only; leaving the phone layout always ends it.
+  const chatImmersive = isMobile && chatImmersiveOn;
+  useEffect(() => {
+    if (!isMobile) setChatImmersiveOn(false);
+  }, [isMobile]);
+  const chatImmersiveContext = useMemo(
+    () => ({ active: chatImmersive, setActive: setChatImmersiveOn }),
+    [chatImmersive]
+  );
+
   const shellContext = useMemo(
     () => ({ setProjectName, focusMode, setFocusMode, cycleFocusMode, setScreenAction }),
     [setProjectName, focusMode, setFocusMode, cycleFocusMode]
@@ -290,53 +302,59 @@ export function AppShell({ children }: AppShellProps) {
   if (isMobile) {
     return (
       <AppShellContext.Provider value={shellContext}>
-        <OnboardingProvider>
-          <ChoosePathWizard />
-          <div className="sam-void flex h-screen flex-col gap-2.5 p-2.5">
-            <SkipToContent />
-            <MobileAppBar
-              projectName={projectId ? projectName || 'Project' : undefined}
-              onOpenMenu={() => setDrawerOpen(true)}
-              screenAction={screenAction}
-            />
-
-            <div key="main-frame" className={mainFrameClassName}>
-              <main id="main-content" className={mainClassName}>
-                {children ?? <Outlet />}
-              </main>
-            </div>
-
-            <div key="global-audio" className="shrink-0">
-              <GlobalAudioPlayer />
-            </div>
-
-            {drawerOpen && user && (
-              <MobileNavDrawer
-                onClose={() => setDrawerOpen(false)}
-                user={{ name: user.name, email: user.email, image: user.image }}
-                navItems={mobileNavItems}
-                globalNavItems={projectId ? mobileGlobalNavItems : undefined}
-                currentPath={location.pathname}
-                onNavigate={(path) => {
-                  navigate(path);
-                  setDrawerOpen(false);
-                }}
-                onSignOut={handleSignOut}
-                onOpenSearch={() => {
-                  setDrawerOpen(false);
-                  commandPalette.open();
-                }}
+        <ChatImmersiveContext.Provider value={chatImmersiveContext}>
+          <OnboardingProvider>
+            <ChoosePathWizard />
+            <div
+              className={`sam-void flex h-screen flex-col gap-2.5 ${chatImmersive ? 'p-1.5' : 'p-2.5'}`}
+              data-chat-immersive={chatImmersive ? 'on' : undefined}
+            >
+              <SkipToContent />
+              <MobileAppBar
                 projectName={projectId ? projectName || 'Project' : undefined}
-                projectListSection={mobileProjectListSection}
-                projectHealthElement={mobileProjectHealthElement}
-                showGlobalNav={showGlobalNav}
-                onToggleGlobalNav={projectId ? handleToggleGlobalNav : undefined}
+                onOpenMenu={() => setDrawerOpen(true)}
+                screenAction={screenAction}
               />
-            )}
 
-            {commandPalette.isOpen && <GlobalCommandPalette onClose={commandPalette.close} />}
-          </div>
-        </OnboardingProvider>
+              <div key="main-frame" className={mainFrameClassName}>
+                <main id="main-content" className={mainClassName}>
+                  {children ?? <Outlet />}
+                </main>
+              </div>
+
+              {/* Hidden while nothing plays, so an empty slot does not add a gap below the panes. */}
+              <div key="global-audio" className="shrink-0 empty:hidden">
+                <GlobalAudioPlayer />
+              </div>
+
+              {drawerOpen && user && (
+                <MobileNavDrawer
+                  onClose={() => setDrawerOpen(false)}
+                  user={{ name: user.name, email: user.email, image: user.image }}
+                  navItems={mobileNavItems}
+                  globalNavItems={projectId ? mobileGlobalNavItems : undefined}
+                  currentPath={location.pathname}
+                  onNavigate={(path) => {
+                    navigate(path);
+                    setDrawerOpen(false);
+                  }}
+                  onSignOut={handleSignOut}
+                  onOpenSearch={() => {
+                    setDrawerOpen(false);
+                    commandPalette.open();
+                  }}
+                  projectName={projectId ? projectName || 'Project' : undefined}
+                  projectListSection={mobileProjectListSection}
+                  projectHealthElement={mobileProjectHealthElement}
+                  showGlobalNav={showGlobalNav}
+                  onToggleGlobalNav={projectId ? handleToggleGlobalNav : undefined}
+                />
+              )}
+
+              {commandPalette.isOpen && <GlobalCommandPalette onClose={commandPalette.close} />}
+            </div>
+          </OnboardingProvider>
+        </ChatImmersiveContext.Provider>
       </AppShellContext.Provider>
     );
   }

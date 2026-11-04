@@ -372,7 +372,7 @@ export function ReaderConversation({
             return (
               <div
                 key={item.id}
-                className={`sam-message-entry min-w-0 px-4 pb-3 ${
+                className={`sam-message-entry min-w-0 px-3 pb-3 md:px-4 ${
                   isAnchor ? 'border-0 border-l-2 border-solid border-warning/70' : ''
                 }`}
                 data-reader-anchor={isAnchor ? 'true' : undefined}

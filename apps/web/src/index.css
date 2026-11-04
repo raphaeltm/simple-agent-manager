@@ -265,6 +265,34 @@
     transform: translate3d(0, -2.75rem, 0);
   }
 
+  /* The phone-only "just the conversation" toggle sits beside the scroll button and moves up
+     with it while the agent works. */
+  .sam-immersive-toggle {
+    bottom: 0.75rem;
+    transition:
+      transform 200ms ease,
+      background-color 150ms ease;
+  }
+
+  .sam-immersive-toggle[data-agent-active='true'] {
+    transform: translate3d(0, -2.75rem, 0);
+  }
+
+  /* Immersive chat view (components/shell/chat-immersive-transition.ts). The slide pins each
+     piece of chrome; a piece that is not pinned while the view is on (one React remounted) stays
+     hidden instead of reappearing in the flow. The tool rail has no fill of its own inside the
+     conversation pane, so pinned over the conversation it borrows the raised fill. */
+  @media (max-width: 767px) {
+    [data-chat-immersive='on'] [data-immersive-chrome]:not([data-immersive-pinned]) {
+      display: none;
+    }
+
+    aside[data-immersive-chrome][data-immersive-pinned] {
+      background: var(--sam-glass-v2-raised);
+      border-radius: var(--sam-radius-pane) 0 0 var(--sam-radius-pane);
+    }
+  }
+
   /* Flash a message briefly when jumped to from the timeline. */
   @keyframes sam-message-flash {
     0% {
@@ -416,10 +444,12 @@
   }
 }
 
-/* ── Message bubbles (override acp-client defaults for project chat) ──
-   SAM Glass: the conversation is a quiet pane, so a reply is a slightly raised card laid on it
-   with a hairline edge, not a glowing panel; your own messages carry a faint tint of your
-   person colour. Tokens only, so both themes follow. */
+/* ── Messages (override acp-client defaults for project chat) ──
+   SAM Glass: your own messages are bubbles carrying a faint tint of your person colour. Agent
+   replies have no bubble: they lie on the conversation pane at the full row width
+   (`MessageBubble layout="flush"`), like the SAM assistant chat, so a phone gives them the whole
+   column. On wider screens the line length is capped for reading. Tokens only, so both themes
+   follow. */
 @layer utilities {
   .glass-msg-user {
     background: color-mix(in srgb, var(--sam-person-you) 9%, var(--sam-glass-v2-raised)) !important;
@@ -430,15 +460,13 @@
     color: var(--sam-color-fg-primary) !important;
   }
 
-  .glass-msg-assistant {
-    position: relative;
-    background: var(--sam-glass-v2-raised) !important;
-    border: 1px solid var(--sam-hairline) !important;
-    border-radius: 18px !important;
-    border-bottom-left-radius: 6px !important;
-    box-shadow:
-      inset 0 1px 0 var(--sam-glass-v2-raised-edge),
-      inset 0 -1px 0 var(--sam-glass-v2-bounce) !important;
-    color: var(--sam-color-fg-primary) !important;
+  .glass-msg-agent {
+    color: var(--sam-color-fg-primary);
+  }
+
+  @media (min-width: 768px) {
+    .glass-msg-agent {
+      max-width: 46rem;
+    }
   }
 }
