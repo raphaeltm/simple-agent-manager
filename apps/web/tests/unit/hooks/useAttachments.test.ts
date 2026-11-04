@@ -86,13 +86,13 @@ describe('staged attachment identity', () => {
     await waitFor(() => expect(result.current.chatAttachments[0]?.status).toBe('complete'));
     expect(mocks.request).toHaveBeenCalledWith(
       'project',
-      'CleanShot 2026-11-04 at 12.22.51_2x.png',
+      'CleanShot_2026-11-04_at_12.22.51_2x.png',
       3,
       'image/png'
     );
     expect(result.current.chatAttachments[0]).toMatchObject({
-      file: { name: 'CleanShot 2026-11-04 at 12.22.51_2x.png' },
-      ref: { filename: 'CleanShot 2026-11-04 at 12.22.51_2x.png', contentType: 'image/png' },
+      file: { name: 'CleanShot_2026-11-04_at_12.22.51_2x.png' },
+      ref: { filename: 'CleanShot_2026-11-04_at_12.22.51_2x.png', contentType: 'image/png' },
     });
     expect(setError).not.toHaveBeenCalledWith(expect.stringContaining('invalid characters'));
   });

@@ -6,16 +6,20 @@ import { SAFE_FILENAME_REGEX } from '../../src/types';
 describe('sanitizeFilename', () => {
   it('replaces characters outside the safe set and keeps the extension', () => {
     expect(sanitizeFilename('CleanShot 2026-11-04 at 12.22.51@2x.png')).toBe(
-      'CleanShot 2026-11-04 at 12.22.51_2x.png'
+      'CleanShot_2026-11-04_at_12.22.51_2x.png'
     );
   });
 
   it('leaves already-safe names unchanged', () => {
-    expect(sanitizeFilename('my file_v1.2-final.tar.gz')).toBe('my file_v1.2-final.tar.gz');
+    expect(sanitizeFilename('my_file_v1.2-final.tar.gz')).toBe('my_file_v1.2-final.tar.gz');
+  });
+
+  it('replaces spaces with underscores and trims surrounding whitespace', () => {
+    expect(sanitizeFilename('  my   report final.pdf ')).toBe('my_report_final.pdf');
   });
 
   it('folds accents and collapses runs of unsafe characters', () => {
-    expect(sanitizeFilename('résumé (copy) #2.pdf')).toBe('resume _copy_ _2.pdf');
+    expect(sanitizeFilename('résumé (copy) #2.pdf')).toBe('resume_copy_2.pdf');
     expect(sanitizeFilename('a@@##b.txt')).toBe('a_b.txt');
   });
 
@@ -37,6 +41,7 @@ describe('sanitizeFilename', () => {
     for (const input of inputs) {
       const out = sanitizeFilename(input);
       expect(SAFE_FILENAME_REGEX.test(out)).toBe(true);
+      expect(out).not.toContain(' ');
       expect(['.', '..']).not.toContain(out);
     }
   });

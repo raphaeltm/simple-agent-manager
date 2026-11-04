@@ -135,8 +135,8 @@ async function openPalette(page: Page) {
   await page.waitForTimeout(400);
 }
 
-async function gotoApp(page: Page, path: string) {
-  await seedTheme(page, 'dark');
+async function gotoApp(page: Page, path: string, theme: 'dark' | 'light' = 'dark') {
+  await seedTheme(page, theme, theme === 'dark');
   await page.goto(path);
   // The AppShell must mount (it owns the Ctrl+K listener). The sidebar trigger
   // is a stable marker that the shell rendered.
@@ -157,6 +157,17 @@ async function auditGlobalCommands(page: Page, suffix: string) {
   await gotoApp(page, '/dashboard');
   await openPalette(page);
   await screenshot(page, `command-palette-global-${suffix}`);
+  await assertNoOverflow(page);
+}
+
+// The search field is a SAM Glass well; light mode used to render it as a
+// muddy dark band, so light gets its own screenshot.
+async function auditGlobalCommandsLight(page: Page, suffix: string) {
+  await setupMocks(page);
+  await gotoApp(page, '/dashboard', 'light');
+  await openPalette(page);
+  await expect(page.locator('[role="combobox"]')).toBeFocused();
+  await screenshot(page, `command-palette-global-light-${suffix}`);
   await assertNoOverflow(page);
 }
 
@@ -203,6 +214,8 @@ test.describe('Command Palette — Mobile', () => {
   test('global commands on dashboard (superadmin)', ({ page }) =>
     auditGlobalCommands(page, 'mobile'));
 
+  test('global commands in light mode', ({ page }) => auditGlobalCommandsLight(page, 'mobile'));
+
   test('context actions inside a project', ({ page }) =>
     auditContextActions(page, 'mobile'));
 
@@ -224,6 +237,8 @@ test.describe('Command Palette — Desktop', () => {
 
   test('global commands on dashboard (superadmin)', ({ page }) =>
     auditGlobalCommands(page, 'desktop'));
+
+  test('global commands in light mode', ({ page }) => auditGlobalCommandsLight(page, 'desktop'));
 
   test('context actions inside a project', ({ page }) =>
     auditContextActions(page, 'desktop'));
