@@ -61,7 +61,9 @@ export function FloatingHeader({
   // A diagnosable failure lights the slab's lower edge red, the way the session slab's lower
   // edge is lit green. The shell scrolls itself so a long report cannot push the
   // conversation off screen.
-  const failureShellClassName = `${paneClassName('slab')} max-h-[40vh] overflow-y-auto px-3 py-2 ${
+  // The failure card scrolls, so it gives up height before the session header does, down to
+  // its first line.
+  const failureShellClassName = `${paneClassName('slab')} min-h-11 max-h-[40vh] shrink overflow-y-auto px-3 py-2 ${
     failureClassification?.diagnosable
       ? 'shadow-[inset_0_-1px_0_var(--sam-danger-edge),var(--sam-glass-v2-depth-slab)]'
       : ''

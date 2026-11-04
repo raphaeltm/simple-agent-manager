@@ -38,7 +38,7 @@ interface ConversationPaneProps {
  * pane's rounded corners; the list scrolls itself.
  */
 const PANE_CLASS_NAME =
-  'relative flex min-h-[min(220px,35dvh)] min-w-0 flex-1 flex-row overflow-hidden';
+  'relative flex min-h-[min(180px,28dvh)] min-w-0 flex-1 flex-row overflow-hidden';
 
 /** Keys that scroll a focused conversation toward older messages. */
 const SCROLL_UP_KEYS: ReadonlySet<string> = new Set(['ArrowUp', 'PageUp', 'Home']);

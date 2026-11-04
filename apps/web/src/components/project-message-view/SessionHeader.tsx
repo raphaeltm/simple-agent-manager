@@ -205,7 +205,12 @@ export function SessionHeader({
   const people = sessionPeople(session.access, viewerId);
 
   return (
-    <div data-testid="session-header" className={`${paneClassName('slab')} flex min-h-0 shrink flex-col overflow-hidden`}>
+    <div
+      data-testid="session-header"
+      // Only the open details panel may give up height (it scrolls); the title and chips never
+      // get clipped, whatever else shares the column on a short phone.
+      className={`${paneClassName('slab')} flex flex-col overflow-hidden ${expanded ? 'min-h-0 shrink' : 'shrink-0'}`}
+    >
       <div className="shrink-0 space-y-2.5 px-4 pt-3 pb-3.5 md:px-6 md:pt-4">
         <div className="flex items-start gap-3">
           {/* Retry / Fork / the details chevron live in `SessionToolRail`, so the title

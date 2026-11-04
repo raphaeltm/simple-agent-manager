@@ -310,3 +310,35 @@ for (const theme of ['dark', 'light'] as const) {
     }
   });
 }
+
+test.describe('SAM Glass chat — failed chat', () => {
+  // A short phone (browser toolbars or the keyboard showing), where the header, the failure
+  // card, the conversation's minimum height and the message box cannot all fit.
+  test.use({ viewport: { width: 375, height: 560 } });
+
+  for (const theme of ['dark', 'light'] as const) {
+    test(`the failure card gives up height before the session header (${theme})`, async ({
+      page,
+    }) => {
+      await setupGlassChatMocks(page, {
+        theme,
+        openSessionError: 'The agent process exited before it reported a result.',
+      });
+      await page.goto(`/projects/${GLASS_PROJECT_ID}/chat/${GLASS_SESSION_ID}`);
+      await expect(page.getByText(/clickable prototype next/).first()).toBeVisible({
+        timeout: 20_000,
+      });
+      // Liveness: the failure card is on screen, sharing the column with the header.
+      await expect(page.getByTestId('failure-card-shell')).toBeVisible();
+      const header = page.getByTestId('session-header');
+      await expect(header).toBeVisible();
+      // Nothing in the collapsed header is clipped: its title and chips fit inside it.
+      const clipped = await header.evaluate((el) => el.scrollHeight - el.clientHeight);
+      expect(clipped).toBeLessThanOrEqual(1);
+      // ...and the failure card keeps at least its first line; the rest scrolls.
+      const failureHeight = (await page.getByTestId('failure-card-shell').boundingBox())!.height;
+      expect(failureHeight).toBeGreaterThanOrEqual(40);
+      await capture(page, 'failed-chat', theme);
+    });
+  }
+});

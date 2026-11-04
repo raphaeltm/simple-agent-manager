@@ -311,7 +311,8 @@ export const GLASS_MESSAGES = [
   {
     id: 'msg-glass-3',
     role: 'user',
-    content: 'Can we fold Conductor and Sculptor into this too? I mostly care how they show sub-agents.',
+    content:
+      'Can we fold Conductor and Sculptor into this too? I mostly care how they show sub-agents.',
     toolMetadata: {
       kind: 'durable_prompt_delivery',
       deliveryId: 'delivery-glass-jonas',
@@ -390,7 +391,12 @@ const FILE_LIST = {
     { name: 'docs', type: 'dir', size: 0, modifiedAt: '2026-11-03T12:10:00Z' },
     { name: 'CLAUDE.md', type: 'file', size: 18_442, modifiedAt: '2026-11-03T11:02:00Z' },
     { name: 'package.json', type: 'file', size: 2_310, modifiedAt: '2026-11-02T09:15:00Z' },
-    { name: 'competitor-ui-research-t3-code-conductor-sculptor-session-panels-synthesis.md', type: 'file', size: 31_904, modifiedAt: '2026-11-03T14:12:00Z' },
+    {
+      name: 'competitor-ui-research-t3-code-conductor-sculptor-session-panels-synthesis.md',
+      type: 'file',
+      size: 31_904,
+      modifiedAt: '2026-11-03T14:12:00Z',
+    },
   ],
 };
 
@@ -403,8 +409,21 @@ const GIT_STATUS = {
   untracked: [{ path: 'notes/needs-you-section-prototype.md', status: '?' }],
 };
 
-/** Registers every API route the chat, its panels and the app shell read. */
-export async function setupGlassChatMocks(page: Page, options: { theme: 'dark' | 'light' }) {
+/**
+ * Registers every API route the chat, its panels and the app shell read. `openSessionError`
+ * marks the open chat's task as failed with that message, so the failure card shows.
+ */
+export async function setupGlassChatMocks(
+  page: Page,
+  options: { theme: 'dark' | 'light'; openSessionError?: string }
+) {
+  const allSessions = options.openSessionError
+    ? GLASS_SESSIONS.map((s) =>
+        s.id === GLASS_SESSION_ID
+          ? { ...s, task: { ...s.task, status: 'failed', errorMessage: options.openSessionError } }
+          : s
+      )
+    : GLASS_SESSIONS;
   await page.clock.setFixedTime(GLASS_NOW);
   await page.addInitScript(
     ({ userId, theme }) => {
@@ -424,89 +443,92 @@ export async function setupGlassChatMocks(page: Page, options: { theme: 'dark' |
     });
   });
 
-  await page.route((url) => url.pathname.startsWith('/api/'), async (route: Route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname;
-    const respond = (body: unknown) => route.fulfill({ status: 200, json: body });
+  await page.route(
+    (url) => url.pathname.startsWith('/api/'),
+    async (route: Route) => {
+      const url = new URL(route.request().url());
+      const path = url.pathname;
+      const respond = (body: unknown) => route.fulfill({ status: 200, json: body });
 
-    if (path.includes('/api/auth/')) return respond(GLASS_USER);
-    if (path === '/api/notifications/unread-count') return respond({ count: 2 });
-    if (path.startsWith('/api/notifications')) {
-      return respond({ notifications: NOTIFICATIONS, unreadCount: 2, nextCursor: null });
-    }
-    if (path === '/api/credentials/agent') {
-      return respond({ credentials: [{ agentType: 'claude-code', isActive: true }] });
-    }
-    if (path.startsWith('/api/credentials')) {
-      return respond([{ id: 'cred-glass-hetzner', provider: 'hetzner', name: 'Hetzner' }]);
-    }
-    if (path === '/api/github/installations') {
-      return respond([{ id: 'inst-1', accountName: 'raphaeltm', accountType: 'User' }]);
-    }
-    if (path === '/api/agents') return respond({ agents: [] });
-    if (path === '/api/nodes') return respond([]);
-    if (path === '/api/report-issue/config') return respond({ enabled: true });
-    if (path === '/api/trial/status') return respond({ available: false });
-    if (path === '/api/workspaces') return respond([WORKSPACE]);
-    if (path.startsWith('/api/workspaces/')) return respond(WORKSPACE);
-    if (path === '/api/projects') return respond({ projects: [GLASS_PROJECT], nextCursor: null });
-    if (path === '/api/chats/recent' || path.startsWith('/api/chats')) {
-      return respond({
-        sessions: GLASS_SESSIONS.slice(0, 5).map((session) => ({
-          ...session,
-          projectName: GLASS_PROJECT.name,
-        })),
-        hasMore: false,
-      });
-    }
+      if (path.includes('/api/auth/')) return respond(GLASS_USER);
+      if (path === '/api/notifications/unread-count') return respond({ count: 2 });
+      if (path.startsWith('/api/notifications')) {
+        return respond({ notifications: NOTIFICATIONS, unreadCount: 2, nextCursor: null });
+      }
+      if (path === '/api/credentials/agent') {
+        return respond({ credentials: [{ agentType: 'claude-code', isActive: true }] });
+      }
+      if (path.startsWith('/api/credentials')) {
+        return respond([{ id: 'cred-glass-hetzner', provider: 'hetzner', name: 'Hetzner' }]);
+      }
+      if (path === '/api/github/installations') {
+        return respond([{ id: 'inst-1', accountName: 'raphaeltm', accountType: 'User' }]);
+      }
+      if (path === '/api/agents') return respond({ agents: [] });
+      if (path === '/api/nodes') return respond([]);
+      if (path === '/api/report-issue/config') return respond({ enabled: true });
+      if (path === '/api/trial/status') return respond({ available: false });
+      if (path === '/api/workspaces') return respond([WORKSPACE]);
+      if (path.startsWith('/api/workspaces/')) return respond(WORKSPACE);
+      if (path === '/api/projects') return respond({ projects: [GLASS_PROJECT], nextCursor: null });
+      if (path === '/api/chats/recent' || path.startsWith('/api/chats')) {
+        return respond({
+          sessions: allSessions.slice(0, 5).map((session) => ({
+            ...session,
+            projectName: GLASS_PROJECT.name,
+          })),
+          hasMore: false,
+        });
+      }
 
-    const match = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
-    if (!match) return respond({});
-    const sub = match[2] ?? '';
-    const open = GLASS_SESSIONS.find((s) => s.id === GLASS_SESSION_ID)!;
-    if (sub === '/members') return respond(MEMBERS);
-    if (sub === `/sessions/${GLASS_SESSION_ID}/access`) return respond(open.access);
-    if (sub === `/sessions/${GLASS_SESSION_ID}/comments`) return respond({ comments: [] });
-    if (sub === '/comment-threads') return respond({ threads: [], total: 0 });
-    if (sub === '/sessions') {
-      const scope = url.searchParams.get('scope');
-      const sessions = scope === 'my' ? GLASS_SESSIONS.filter((s) => s.isMine) : GLASS_SESSIONS;
-      return respond({ sessions, total: sessions.length, hasMore: false });
+      const match = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
+      if (!match) return respond({});
+      const sub = match[2] ?? '';
+      const open = allSessions.find((s) => s.id === GLASS_SESSION_ID)!;
+      if (sub === '/members') return respond(MEMBERS);
+      if (sub === `/sessions/${GLASS_SESSION_ID}/access`) return respond(open.access);
+      if (sub === `/sessions/${GLASS_SESSION_ID}/comments`) return respond({ comments: [] });
+      if (sub === '/comment-threads') return respond({ threads: [], total: 0 });
+      if (sub === '/sessions') {
+        const scope = url.searchParams.get('scope');
+        const sessions = scope === 'my' ? allSessions.filter((s) => s.isMine) : allSessions;
+        return respond({ sessions, total: sessions.length, hasMore: false });
+      }
+      if (/^\/sessions\/[^/]+\/state$/.test(sub)) return respond(makeIdleSessionState());
+      if (sub === `/sessions/${GLASS_SESSION_ID}`) {
+        return respond({
+          session: open,
+          messages: GLASS_MESSAGES,
+          hasMore: false,
+          state: makeIdleSessionState(),
+        });
+      }
+      if (sub === `/sessions/${GLASS_SESSION_ID}/messages`) {
+        return respond({ messages: GLASS_MESSAGES, hasMore: false });
+      }
+      if (sub === '/tasks') return respond({ tasks: GLASS_TASKS, nextCursor: null });
+      if (sub.endsWith('/files/list')) return respond(FILE_LIST);
+      if (sub.endsWith('/git/status')) return respond(GIT_STATUS);
+      if (sub === '/agent-profiles' || sub === '/skills') return respond({ items: [] });
+      if (sub === '/triggers') return respond({ triggers: [] });
+      if (/\/commands|\/cached-commands/.test(sub)) return respond({ commands: [] });
+      if (sub === '/credential-attribution-health') {
+        return respond({
+          multiplayerActive: true,
+          counts: {
+            resources: 0,
+            personalResources: 0,
+            personalCredentials: 0,
+            projectCoveredCredentials: 0,
+          },
+          resources: [],
+        });
+      }
+      if (sub === '') return respond(GLASS_PROJECT);
+      // Empty bounded lists for the project's remaining list endpoints (automation schedules,
+      // watches, subscriptions, triggers), so panels render their empty states instead of
+      // reading fields off a bare object.
+      return respond({ items: [], subscriptions: [], nextCursor: null, total: 0, hasMore: false });
     }
-    if (/^\/sessions\/[^/]+\/state$/.test(sub)) return respond(makeIdleSessionState());
-    if (sub === `/sessions/${GLASS_SESSION_ID}`) {
-      return respond({
-        session: open,
-        messages: GLASS_MESSAGES,
-        hasMore: false,
-        state: makeIdleSessionState(),
-      });
-    }
-    if (sub === `/sessions/${GLASS_SESSION_ID}/messages`) {
-      return respond({ messages: GLASS_MESSAGES, hasMore: false });
-    }
-    if (sub === '/tasks') return respond({ tasks: GLASS_TASKS, nextCursor: null });
-    if (sub.endsWith('/files/list')) return respond(FILE_LIST);
-    if (sub.endsWith('/git/status')) return respond(GIT_STATUS);
-    if (sub === '/agent-profiles' || sub === '/skills') return respond({ items: [] });
-    if (sub === '/triggers') return respond({ triggers: [] });
-    if (/\/commands|\/cached-commands/.test(sub)) return respond({ commands: [] });
-    if (sub === '/credential-attribution-health') {
-      return respond({
-        multiplayerActive: true,
-        counts: {
-          resources: 0,
-          personalResources: 0,
-          personalCredentials: 0,
-          projectCoveredCredentials: 0,
-        },
-        resources: [],
-      });
-    }
-    if (sub === '') return respond(GLASS_PROJECT);
-    // Empty bounded lists for the project's remaining list endpoints (automation schedules,
-    // watches, subscriptions, triggers), so panels render their empty states instead of
-    // reading fields off a bare object.
-    return respond({ items: [], subscriptions: [], nextCursor: null, total: 0, hasMore: false });
-  });
+  );
 }
