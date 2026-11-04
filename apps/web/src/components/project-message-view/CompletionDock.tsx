@@ -353,13 +353,14 @@ export function CompletionDock({
           style={{ zIndex: 1, pointerEvents: 'none' }}
           aria-hidden
         >
-          {/* Theme-aware chrome: fill + hairline read the same tokens the
-              composer's .glass-chrome uses, so the dock adapts to dark/light. */}
+          {/* The dock sits at the top of the message-box slab (SAM Glass), which supplies
+              the surface; the crest is drawn as a faint hairline only, so the centre button
+              reads as resting on the slab's top edge. */}
           <path
             d={path}
             fillRule="evenodd"
-            fill="var(--sam-glass-bg-chrome)"
-            stroke="var(--sam-glass-border-color)"
+            fill="none"
+            stroke="var(--sam-hairline)"
             strokeWidth={1}
           />
         </svg>

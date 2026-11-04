@@ -1,3 +1,4 @@
+import { chipClassName } from '@simple-agent-manager/ui';
 import { MessageSquareQuote } from 'lucide-react';
 
 /**
@@ -37,16 +38,12 @@ export function SessionCommentChip({
     <button
       type="button"
       onClick={onOpenComments}
-      className="inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 border cursor-pointer whitespace-nowrap transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary"
-      style={{
-        color: hasAttention ? 'var(--sam-color-warning-fg)' : 'var(--sam-color-fg-muted)',
-        borderColor: hasAttention ? 'var(--sam-color-warning)' : 'var(--sam-color-border-default)',
-        backgroundColor: hasAttention ? 'var(--sam-color-warning-tint)' : 'transparent',
-      }}
+      // Amber only when someone is waiting on you; otherwise a neutral chip (SAM Glass).
+      className={`${chipClassName({ tone: hasAttention ? 'warning' : 'neutral' })} cursor-pointer transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring`}
       aria-label={ariaLabel}
       title="Open comments"
     >
-      <MessageSquareQuote size={10} aria-hidden="true" />
+      <MessageSquareQuote size={14} strokeWidth={1.75} aria-hidden="true" />
       {chipText}
     </button>
   );

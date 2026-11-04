@@ -391,6 +391,10 @@ function render(ui: ReactElement) {
 }
 
 async function selectPhraseInMessage(fullText: string, selectedPhrase: string) {
+  // Select once the page has settled, as a person does: the message-box composer focuses
+  // itself when it mounts, which (as in a browser) moves the selection into its textarea.
+  // Both callers render a session the viewer can write to, so the composer always appears.
+  await screen.findByRole('combobox');
   const message = await screen.findByText(fullText);
   const textNode = message.firstChild;
   expect(textNode).toBeTruthy();
@@ -1619,8 +1623,10 @@ describe('ProjectMessageView — session context dropdown', () => {
     expect(screen.getByText('Unknown — no saved resource request')).toBeTruthy();
     expect(screen.getByText('Unknown — no hardware report')).toBeTruthy();
 
-    // Should show node info
-    expect(screen.getByText('Node:')).toBeTruthy();
+    // Should show node info. The node is fetched after the workspace resolves, so wait for it.
+    await waitFor(() => {
+      expect(screen.getByText('Node:')).toBeTruthy();
+    });
     expect(screen.getByText('htz-fsn1-abc')).toBeTruthy();
     expect(screen.getByText('(healthy)')).toBeTruthy();
 
@@ -2253,6 +2259,8 @@ describe('ProjectMessageView — message anchored comments', () => {
 
     render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
 
+    // Wait for the composer, which focuses itself on mount (see selectPhraseInMessage).
+    await screen.findByRole('combobox');
     const message = await screen.findByText(`${selectedPhrase} for a review comment.`);
     const textNode = message.firstChild;
     expect(textNode).toBeTruthy();
@@ -2880,7 +2888,7 @@ describe('ProjectMessageView — inline idle indicator', () => {
     expect(screen.queryByRole('button', { name: 'Interrupt agent' })).toBeNull();
   });
 
-  it('renders error banner with glass-chrome styling when task has errorMessage', async () => {
+  it('renders error banner in a SAM Glass slab when task has errorMessage', async () => {
     const session = {
       ...makeSession('sess-err'),
       task: {
@@ -2910,9 +2918,11 @@ describe('ProjectMessageView — inline idle indicator', () => {
       expect(screen.getByText('Provisioning failed')).toBeTruthy();
     });
 
-    // The failure card wrapper keeps the glass-chrome header treatment
-    const errorWrapper = screen.getByText('Provisioning failed').closest('.glass-chrome');
-    expect(errorWrapper).toBeTruthy();
+    // The failure card sits in its own SAM Glass slab under the session header
+    const errorWrapper = screen
+      .getByText('Provisioning failed')
+      .closest('[data-testid="failure-card-shell"]');
+    expect(errorWrapper?.classList.contains('sam-glass--slab')).toBe(true);
 
     // Expanding the card reveals the raw error message
     fireEvent.click(screen.getByRole('button', { name: /Provisioning failed/ }));
@@ -2920,10 +2930,9 @@ describe('ProjectMessageView — inline idle indicator', () => {
       expect(screen.getByText('Node provisioning failed')).toBeTruthy();
     });
 
-    // SessionHeader should have hasContentBelow (no rounded-b-2xl)
-    const headerEl = container.querySelector('.glass-chrome.border-t-0');
-    expect(headerEl).toBeTruthy();
-    expect(headerEl!.className).not.toContain('rounded-b-2xl');
+    // The session header stays its own slab above the failure slab (SAM Glass gutters).
+    const headerEl = container.querySelector('[data-testid="session-header"]');
+    expect(headerEl?.classList.contains('sam-glass--slab')).toBe(true);
   });
 });
 

@@ -145,14 +145,14 @@ describe('SessionTreeItem — hover does not erase selected background', () => {
     const { container } = renderItem(makeSession({ id: 'x', topic: 'Selected row' }), {
       selectedSessionId: 'x',
     });
-    expect(container.innerHTML).not.toMatch(/hover:bg-\[var\(--sam-color-bg-surface-hover\)\]/);
+    expect(container.innerHTML).not.toMatch(/hover:bg-\[var\(--sam-glass-v2-raised\)\]/);
   });
 
   it('unselected row still applies the hover override class', () => {
     const { container } = renderItem(makeSession({ id: 'x', topic: 'Unselected row' }), {
       selectedSessionId: null,
     });
-    expect(container.innerHTML).toMatch(/hover:bg-\[var\(--sam-color-bg-surface-hover\)\]/);
+    expect(container.innerHTML).toMatch(/hover:bg-\[var\(--sam-glass-v2-raised\)\]/);
   });
 });
 
@@ -232,7 +232,7 @@ describe('SessionTreeItem — hierarchy button', () => {
 
     const btn = screen.getByRole('button', { name: 'Has subtasks' });
     expect(btn).toBeInTheDocument();
-    expect(btn).toHaveStyle({ width: '22px', height: '22px' });
+    expect(btn).toHaveStyle({ width: '26px', height: '26px' });
   });
 
   it('renders "Subtask" button for a child task', () => {

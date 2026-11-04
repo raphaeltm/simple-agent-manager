@@ -43,18 +43,21 @@ describe('Dialog', () => {
     expect(dialog.className).toContain('inset-0');
   });
 
-  it('applies backdrop blur class on the overlay', () => {
+  it('dims the page with a scrim that does not blur (the dialog pane is the one blur)', () => {
     render(
       <Dialog isOpen={true} onClose={vi.fn()}>
         <p>Content</p>
       </Dialog>,
     );
     const dialog = screen.getByRole('dialog');
-    // The overlay is the first child with glass-backdrop-dim
-    const overlay = dialog.querySelector('.glass-backdrop-dim');
+    const overlay = dialog.querySelector('[data-dialog-backdrop]');
     expect(overlay).not.toBeNull();
     expect(overlay!.className).toContain('fixed');
     expect(overlay!.className).toContain('inset-0');
+    expect(overlay!.className).toContain('bg-[var(--sam-scrim)]');
+    expect(overlay!.className).not.toContain('backdrop');
+    const pane = overlay!.nextElementSibling as HTMLElement;
+    expect(pane.className).toContain('sam-glass-live');
   });
 
   it('calls onClose when backdrop is clicked', () => {
@@ -64,7 +67,7 @@ describe('Dialog', () => {
         <p>Content</p>
       </Dialog>,
     );
-    const overlay = screen.getByRole('dialog').querySelector('.glass-backdrop-dim');
+    const overlay = screen.getByRole('dialog').querySelector('[data-dialog-backdrop]');
     fireEvent.click(overlay!);
     expect(onClose).toHaveBeenCalledTimes(1);
   });

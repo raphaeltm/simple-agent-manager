@@ -1,9 +1,11 @@
-import { ChevronDown, ChevronRight, Search, X } from 'lucide-react';
+import { SearchField, SegmentedControl } from '@simple-agent-manager/ui';
+import { ChevronDown, ChevronRight, Plus } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
-import { createPortal } from 'react-dom';
 
+import { GlassSheet, GlassSheetHeader } from '../../components/shell/GlassSheet';
 import { useScrollLock } from '../../hooks/useScrollLock';
 import type { ChatSessionListItem } from '../../lib/api';
+import { sessionScopeOptions } from './session-scope-options';
 import { SessionList } from './SessionList';
 import type { SessionScope } from './useProjectChatState';
 import { useSessionFilters } from './useSessionFilters';
@@ -70,147 +72,105 @@ export function MobileSessionDrawer({
   // Prevent body scroll — always active while this drawer is mounted
   useScrollLock(true);
 
-  return createPortal(
-    <>
-      {/* Backdrop */}
-      <div
-        role="presentation"
-        onClick={handleClose}
-        className="sam-glass-drawer-backdrop fixed inset-0 glass-backdrop-dim border-0 z-drawer-backdrop"
-        data-state={isClosing ? 'closing' : 'open'}
-      />
+  return (
+    <GlassSheet
+      label="Chat sessions"
+      edge="right"
+      onBackdropClick={handleClose}
+      closing={isClosing}
+      widthClassName="w-[88vw] max-w-[360px]"
+    >
+      <GlassSheetHeader title="Chats" onClose={handleClose} closeLabel="Close chat list">
+        {realtimeDegraded && onRefresh && (
+          <button
+            type="button"
+            onClick={onRefresh}
+            title="Realtime updates paused. Tap to refresh."
+            aria-label="Realtime updates paused. Tap to refresh session list."
+            className="mt-1 flex min-h-9 cursor-pointer items-center gap-1.5 rounded-lg border-none bg-transparent px-1 text-xs text-warning-fg"
+          >
+            <span
+              aria-hidden="true"
+              className="inline-block h-2 w-2 shrink-0 rounded-full bg-[var(--sam-color-warning)]"
+            />
+            <span>Refresh</span>
+          </button>
+        )}
+      </GlassSheetHeader>
 
-      {/* Panel */}
-      <div
-        role="dialog"
-        aria-modal="true"
-        aria-label="Chat sessions"
-        className="sam-glass-drawer-panel glass-panel-container fixed top-0 right-0 bottom-0 glass-modal border-r-0 rounded-l-[20px] rounded-r-none z-drawer flex flex-col overflow-hidden before:content-[''] before:absolute before:top-0 before:bottom-0 before:left-0 before:w-[3px] before:bg-[linear-gradient(to_bottom,transparent_0%,rgba(34,197,94,0.55)_50%,transparent_100%)] before:pointer-events-none before:blur-[1px]"
-        data-state={isClosing ? 'closing' : 'open'}
-        style={{
-          width: '85vw',
-          maxWidth: 320,
-        }}
-      >
-        {/* Drawer header */}
-        <div className="shrink-0 p-3 border-b border-border-default flex items-center gap-2">
-          <span className="text-sm font-semibold text-fg-primary flex-1">Chats</span>
-          {realtimeDegraded && onRefresh && (
-            <button
-              type="button"
-              onClick={onRefresh}
-              title="Realtime updates paused. Tap to refresh."
-              aria-label="Realtime updates paused. Tap to refresh session list."
-              className="flex items-center gap-1 bg-transparent border-none cursor-pointer text-xs px-1.5 py-0.5 rounded-sm"
-              style={{ color: 'var(--sam-color-warning, #f59e0b)' }}
-            >
-              <span
-                aria-hidden="true"
-                className="inline-block w-2 h-2 rounded-full shrink-0"
-                style={{ backgroundColor: 'var(--sam-color-warning, #f59e0b)' }}
-              />
-              <span>Refresh</span>
-            </button>
-          )}
+      {/* Search + new chat, then the ownership filter */}
+      <div className="shrink-0 space-y-2.5 px-4 pb-3">
+        <div className="flex items-center gap-2.5">
+          <SearchField
+            value={mobileSearch}
+            onValueChange={setMobileSearch}
+            placeholder="Search chats..."
+            size="lg"
+            className="min-w-0 flex-1"
+          />
           <button
             type="button"
             onClick={onNewChat}
-            className="bg-transparent border border-border-default rounded-sm px-2 py-0.5 cursor-pointer text-fg-primary text-xs font-medium"
+            aria-label="New chat"
+            title="New chat"
+            className="inline-grid h-12 w-12 shrink-0 cursor-pointer place-items-center rounded-[14px] border-0 bg-[linear-gradient(180deg,var(--sam-accent-top),var(--sam-accent-bottom))] text-[var(--sam-on-accent)] shadow-[inset_0_1px_0_rgb(255_255_255/0.32),var(--sam-shadow-accent)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
           >
-            + New
+            <Plus size={22} strokeWidth={2.25} aria-hidden="true" />
           </button>
         </div>
-
-        {/* Search */}
-        <div className="shrink-0 px-2 py-1.5 border-b border-border-default space-y-1.5">
-          <div className="relative flex items-center">
-            <Search size={13} className="absolute left-2 text-fg-muted pointer-events-none" />
-            <input
-              type="text"
-              value={mobileSearch}
-              onChange={(e) => setMobileSearch(e.target.value)}
-              placeholder="Search chats..."
-              className="w-full pl-7 pr-7 py-1 text-xs rounded-md border border-border-default bg-transparent text-fg-primary placeholder:text-fg-muted focus:outline-none focus:border-accent-primary"
-            />
-            {mobileSearch && (
-              <button
-                type="button"
-                onClick={() => setMobileSearch('')}
-                className="absolute right-1.5 p-0.5 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary"
-                aria-label="Clear search"
-              >
-                <X size={12} />
-              </button>
-            )}
-          </div>
-          {showOwnership && (
-            <div
-              className="grid grid-cols-2 gap-1 rounded-md border border-border-default bg-surface/40 p-0.5"
-              aria-label="Session ownership filter"
-            >
-              {(['my', 'all'] as const).map((scope) => (
-                <button
-                  key={scope}
-                  type="button"
-                  onClick={() => onSessionScopeChange(scope)}
-                  aria-pressed={sessionScope === scope}
-                  className={`rounded-sm px-2 py-1 text-[11px] font-medium transition-colors ${
-                    sessionScope === scope
-                      ? 'bg-accent/15 text-accent'
-                      : 'bg-transparent text-fg-muted hover:text-fg-primary'
-                  }`}
-                >
-                  {scope === 'my' ? 'My sessions' : 'All sessions'}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Subtle refresh indicator */}
-        {isRefreshing && (
-          <div
-            className="h-0.5 bg-accent animate-pulse"
-            role="status"
-            aria-label="Refreshing sessions"
+        {showOwnership && (
+          <SegmentedControl
+            label="Session ownership filter"
+            value={sessionScope}
+            onChange={onSessionScopeChange}
+            options={sessionScopeOptions(sessions, sessionScope)}
+            size="lg"
           />
         )}
-
-        {/* Session list */}
-        <nav aria-label="Chat sessions" className="flex-1 overflow-y-auto min-h-0">
-          <SessionList
-            sessions={filteredR}
-            selectedSessionId={selectedSessionId}
-            onSelect={onSelect}
-            taskInfoMap={taskInfoMap}
-            onShowHierarchy={onShowHierarchy}
-            showOwnership={showOwnership}
-          />
-          {filteredS.length > 0 && (
-            <>
-              <button
-                type="button"
-                onClick={() => setMobileShowStale(!showOlder)}
-                className="w-full flex items-center gap-1.5 px-3 py-2 text-xs text-fg-muted bg-transparent border-none border-b border-border-default cursor-pointer hover:bg-surface-hover transition-colors"
-              >
-                {showOlder ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                <span>Older ({filteredS.length})</span>
-              </button>
-              {showOlder && (
-                <SessionList
-                  sessions={filteredS}
-                  selectedSessionId={selectedSessionId}
-                  onSelect={onSelect}
-                  taskInfoMap={taskInfoMap}
-                  onShowHierarchy={onShowHierarchy}
-                  showOwnership={showOwnership}
-                />
-              )}
-            </>
-          )}
-        </nav>
       </div>
-    </>,
-    document.body
+
+      {/* Subtle refresh indicator */}
+      {isRefreshing && (
+        <div
+          className="mx-4 h-0.5 animate-pulse rounded-full bg-accent"
+          role="status"
+          aria-label="Refreshing sessions"
+        />
+      )}
+
+      {/* Session list */}
+      <nav aria-label="Chat sessions" className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
+        <SessionList
+          sessions={filteredR}
+          selectedSessionId={selectedSessionId}
+          onSelect={onSelect}
+          taskInfoMap={taskInfoMap}
+          onShowHierarchy={onShowHierarchy}
+          showOwnership={showOwnership}
+        />
+        {filteredS.length > 0 && (
+          <>
+            <button
+              type="button"
+              onClick={() => setMobileShowStale(!showOlder)}
+              className="mt-1 flex min-h-11 w-full cursor-pointer items-center gap-1.5 rounded-[11px] border-none bg-transparent px-3 text-sm text-fg-muted transition-colors hover:bg-[var(--sam-glass-v2-raised)]"
+            >
+              {showOlder ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+              <span>Older ({filteredS.length})</span>
+            </button>
+            {showOlder && (
+              <SessionList
+                sessions={filteredS}
+                selectedSessionId={selectedSessionId}
+                onSelect={onSelect}
+                taskInfoMap={taskInfoMap}
+                onShowHierarchy={onShowHierarchy}
+                showOwnership={showOwnership}
+              />
+            )}
+          </>
+        )}
+      </nav>
+    </GlassSheet>
   );
 }

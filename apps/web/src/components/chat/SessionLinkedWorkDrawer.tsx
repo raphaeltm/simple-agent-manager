@@ -8,9 +8,8 @@
  * so opening it issues no request of its own.
  */
 import { Spinner } from '@simple-agent-manager/ui';
-import { FileText, GitPullRequest, Lightbulb, Link2, X } from 'lucide-react';
+import { FileText, GitPullRequest, Lightbulb, Link2 } from 'lucide-react';
 import { useRef } from 'react';
-import { createPortal } from 'react-dom';
 
 import { projectIdeaPath, projectLibraryFilePath } from '../../lib/project-routes';
 import {
@@ -20,6 +19,7 @@ import {
   PullRequestStateBadge,
 } from '../linked-work';
 import type { SessionLinkedWork } from '../project-message-view/useSessionLinkedWork';
+import { GlassSheet, GlassSheetHeader } from '../shell/GlassSheet';
 import { useDialogFocusTrap } from './useDialogFocusTrap';
 
 const IDEA_ACCENT = 'var(--sam-color-accent-primary)';
@@ -178,38 +178,25 @@ export function SessionLinkedWorkDrawer({
     linkedWork.files.items.length > 0 ||
     linkedWork.pullRequests.items.length > 0;
 
-  return createPortal(
-    <>
-      <div
-        className="hidden md:block fixed inset-0 glass-backdrop-dim z-40"
-        onClick={onClose}
-        aria-hidden="true"
-      />
-      <div
-        ref={panelRef}
-        tabIndex={-1}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Related work"
-        data-testid="session-linked-work-drawer"
-        className="glass-panel-container glass-composited fixed z-50 glass-modal flex flex-col overflow-hidden rounded-l-[20px] rounded-r-none border-y-0 border-r-0 shadow-xl
-          inset-0
-          md:inset-y-0 md:left-auto md:right-0 md:w-[400px] lg:w-[460px]"
-      >
-        <header className="flex min-h-14 shrink-0 items-center gap-2 border-b border-border-default px-3 py-1">
-          <Link2 size={18} className="shrink-0 text-fg-muted" aria-hidden="true" />
-          <h2 className="m-0 min-w-0 flex-1 text-[15px] font-semibold text-fg-primary">
-            Related work
-          </h2>
-          <button
-            type="button"
-            onClick={onClose}
-            className="inline-flex h-11 w-11 cursor-pointer items-center justify-center rounded-md bg-transparent text-fg-muted transition-colors hover:text-fg-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent-primary"
-            aria-label="Close related work"
-          >
-            <X size={18} aria-hidden="true" />
-          </button>
-        </header>
+  return (
+    <GlassSheet
+      label="Related work"
+      panelRef={panelRef}
+      onBackdropClick={onClose}
+      backdrop="desktop"
+      mobile="full"
+      widthClassName="w-full md:w-[400px] lg:w-[460px]"
+      zClassName="z-50"
+      backdropZClassName="z-40"
+      animated={false}
+      testId="session-linked-work-drawer"
+    >
+        <GlassSheetHeader
+          icon={<Link2 size={20} strokeWidth={1.75} />}
+          title="Related work"
+          onClose={onClose}
+          closeLabel="Close related work"
+        />
 
         <div className="min-h-0 flex-1 overflow-y-auto pb-[env(safe-area-inset-bottom)]">
           {/* Spinner only before the first result. A refetch keeps the list on screen
@@ -231,8 +218,6 @@ export function SessionLinkedWorkDrawer({
             <EmptyState />
           )}
         </div>
-      </div>
-    </>,
-    document.body
+    </GlassSheet>
   );
 }

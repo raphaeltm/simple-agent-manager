@@ -1,3 +1,4 @@
+import { paneClassName } from '@simple-agent-manager/ui';
 import { type ReactNode, useRef, useState } from 'react';
 
 /**
@@ -77,8 +78,10 @@ export function ZenPeekRail({
 
         {open && (
           <aside
-            className={`absolute left-3 ${isTop ? 'top-0' : 'bottom-0'} glass-chrome glass-panel-container glass-composited border-y-0 border-l-0 shadow-2xl flex flex-col overflow-hidden`}
-            style={{ width: panelWidth, height: '200%' }}
+            // The peek is the screen's one overlay (SAM Glass): a pane with the live blur,
+            // inset from the edge like every other pane.
+            className={`absolute left-3 ${isTop ? 'top-2' : 'bottom-2'} ${paneClassName('overlay')} flex flex-col overflow-hidden`}
+            style={{ width: panelWidth, height: 'calc(200% - 1rem)' }}
           >
             {children}
           </aside>
