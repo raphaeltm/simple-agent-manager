@@ -219,6 +219,25 @@ admins can set a whole number from 0 to 99, and 0 turns the cutoff off. SAM star
 another VM, creating one if it needs to. Restarting a stopped workspace on its own VM is still
 allowed. VMs you added yourself, and VMs no task created, have no lifetime limit and no cutoff.
 
+## Stale agent turns
+
+An agent's turn can stop producing anything without ending: the VM keeps reporting the turn as
+running, so the session could not sleep and its VM stayed up (production, 2026-11-04: one turn ran
+almost ten hours with no output). `operations.sessionStaleTurnNoWorkMinutes` bounds this for
+sessions whose task is still running. When an open turn has persisted no message and made no
+background-work progress for that many minutes, it no longer keeps the session awake, and the
+session sleeps like an idle one. Periodic "still prompting" reports and the VM confirming the turn
+is open do not count as work. Background work the agent started (a Claude background task, a Codex
+or OpenCode tool call) still holds the session through its own lease. The default is 30 minutes;
+admins can set a whole number from 0 to 10,080, and 0 turns the bound off. Automatic sleep also
+waits out the idle interval (`SESSION_SLEEP_AFTER_MS`) when it is longer. The conversation keeps its
+transcript and snapshot, and the next message wakes it.
+
+While a session's sleep is in progress, SAM holds queued durable messages for it instead of
+delivering them to the agent. A required sleep ends the agent's turn and the VM restarts the agent
+idle; a message delivered then would start a new turn and abort the sleep. Held messages are
+delivered when the sleep finishes (waking the session) or fails.
+
 ## Blocked VM cleanup
 
 `operations.nodeCleanupBlockedRetirementMs` controls how long automatic cleanup may remain blocked before SAM retires a stopped workspace VM. The default is 1,800,000 milliseconds (30 minutes); admins can set a whole number from 1 to 86,400,000 milliseconds.
@@ -411,21 +430,21 @@ across every user of the installation. Everything they return that a user, agent
 wrote (log lines, error messages, event text) comes back marked as untrusted data, and the agent
 is told never to follow instructions found in it.
 
-| Tool                                                             | What it answers                                                                                                                                                                                            |
-| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ops_find_anomalies`                                             | What is broken now: empty nodes past the warm-node cleanup grace, stale heartbeats, running workspaces whose task ended, idle in-progress tasks, snapshot failures, deletion quarantine, pending incidents |
-| `ops_list_nodes`                                                 | Every node with status, health, last heartbeat and metrics, age, owner and workspace counts                                                                                                                |
-| `ops_get_node`                                                   | One node with its lifecycle state, placement explanation, workspaces, health events and recent incidents                                                                                                   |
-| `ops_get_session_story`                                          | Everything recorded about one task, chat session or workspace in one answer                                                                                                                                |
-| `ops_timeline`                                                   | One time-ordered list of events for a task, chat session, workspace or node, merged from every store                                                                                                       |
-| `ops_search_errors`                                              | Platform errors filtered by source, node, workspace, task, text and time                                                                                                                                   |
-| `ops_query_worker_logs`                                          | The same Cloudflare Workers log search as **Admin → Logs**, sharing its per-user rate limit                                                                                                                |
-| `ops_node_logs`                                                  | A running node's logs, filtered on the server with `contains`, capped in lines and bytes                                                                                                                   |
-| `ops_node_system_info`, `ops_node_events`, `ops_node_containers` | Live system info, agent events and containers from a running node                                                                                                                                          |
-| `ops_workspace_agent_sessions`                                   | Live agent sessions on a workspace                                                                                                                                                                         |
-| `ops_capture_debug_package`                                      | Saves a node's full debug package into the Operations project's library (see below)                                                                                                                        |
-| `ops_why_is_node_alive`                                          | Why a node still exists: its active workspaces, warm/claim state, the last keep/kill decisions and a plain verdict                                                                                         |
-| `ops_get_node_log_capture`                                       | One black box log capture (see below), filtered on the server with `source` and `contains`                                                                                                                 |
+| Tool                                                             | What it answers                                                                                                                                                                                                                    |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ops_find_anomalies`                                             | What is broken now: empty nodes past the warm-node cleanup grace, stale heartbeats, nodes stuck destroying, running workspaces whose task ended, idle in-progress tasks, snapshot failures, deletion quarantine, pending incidents |
+| `ops_list_nodes`                                                 | Every node with status, health, last heartbeat and metrics, age, owner and workspace counts                                                                                                                                        |
+| `ops_get_node`                                                   | One node with its lifecycle state, placement explanation, workspaces, health events and recent incidents                                                                                                                           |
+| `ops_get_session_story`                                          | Everything recorded about one task, chat session or workspace in one answer                                                                                                                                                        |
+| `ops_timeline`                                                   | One time-ordered list of events for a task, chat session, workspace or node, merged from every store                                                                                                                               |
+| `ops_search_errors`                                              | Platform errors filtered by source, node, workspace, task, text and time                                                                                                                                                           |
+| `ops_query_worker_logs`                                          | The same Cloudflare Workers log search as **Admin → Logs**, sharing its per-user rate limit                                                                                                                                        |
+| `ops_node_logs`                                                  | A running node's logs, filtered on the server with `contains`, capped in lines and bytes                                                                                                                                           |
+| `ops_node_system_info`, `ops_node_events`, `ops_node_containers` | Live system info, agent events and containers from a running node                                                                                                                                                                  |
+| `ops_workspace_agent_sessions`                                   | Live agent sessions on a workspace                                                                                                                                                                                                 |
+| `ops_capture_debug_package`                                      | Saves a node's full debug package into the Operations project's library (see below)                                                                                                                                                |
+| `ops_why_is_node_alive`                                          | Why a node still exists: its active workspaces, warm/claim state, the last keep/kill decisions and a plain verdict                                                                                                                 |
+| `ops_get_node_log_capture`                                       | One black box log capture (see below), filtered on the server with `source` and `contains`                                                                                                                                         |
 
 These tools reach a node through the same path as a node owner's own **Logs** and **System info**
 views. When the Operations project's agent starts a task, its instructions include a short
@@ -462,6 +481,7 @@ attempts count).
 | `operations.opsAnomalyEmptyNodeGraceMs`       | 900,000    | 0–7 days      | Extra time past the warm-node cleanup grace before an empty running node is reported                                                                                                                            |
 | `operations.opsAnomalyTerminalTaskGraceMs`    | 900,000    | 0–7 days      | Time after a task ends before its still-running workspace is reported                                                                                                                                           |
 | `operations.opsAnomalyIdleTaskMinutes`        | 60         | 1–10,080      | Minutes without task or workspace activity before an in-progress task is reported                                                                                                                               |
+| `operations.opsAnomalyDestroyingNodeHours`    | 6          | 1–720         | Hours a node may stay destroying, counted from its last heartbeat, before its unfinished teardown is reported with any recorded cleanup refusal                                                                 |
 | `operations.opsAnomalyLookbackHours`          | 24         | 1–720         | Hours of snapshot failures and deletion-quarantine reports the anomaly check looks at                                                                                                                           |
 | `operations.opsAnomalyMaxPerClass`            | 25         | 1–200         | Findings returned per anomaly type; each type still reports its total                                                                                                                                           |
 | `operations.opsNodeLogMaxLines`               | 200        | 1–1,000       | Most log lines one `ops_node_logs` call returns                                                                                                                                                                 |
