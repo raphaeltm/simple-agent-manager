@@ -217,6 +217,16 @@ export const NODE_LIST_POLL_MS = resolveIntervalMs(
   DEFAULT_NODE_LIST_POLL_MS
 );
 
+/**
+ * Per-session CPU and memory history on the `/nodes` page. History arrives from VM agents
+ * in 15-minute batches and live memory rides on the node list poll, so this can be slow.
+ */
+const DEFAULT_NODE_RESOURCE_USAGE_POLL_MS = 30_000;
+export const NODE_RESOURCE_USAGE_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_NODE_RESOURCE_USAGE_POLL_MS,
+  DEFAULT_NODE_RESOURCE_USAGE_POLL_MS
+);
+
 /** Workspace list refresh on the `/nodes` page. */
 const DEFAULT_WORKSPACE_LIST_POLL_MS = 10_000;
 export const WORKSPACE_LIST_POLL_MS = resolveIntervalMs(

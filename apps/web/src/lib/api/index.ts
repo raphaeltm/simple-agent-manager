@@ -439,6 +439,7 @@ export {
   getNode,
   getNodeLogs,
   getNodeLogStreamUrl,
+  getNodeResourceUsage,
   getNodeSystemInfo,
   listNodeContainers,
   listNodeEvents,

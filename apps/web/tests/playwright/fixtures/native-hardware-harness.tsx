@@ -9,8 +9,8 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { BrowserRouter } from 'react-router';
 
-import { NodeCard } from '../../../src/components/node/NodeCard';
 import { NodeOverviewSection } from '../../../src/components/node/NodeOverviewSection';
+import { NodeUsagePane } from '../../../src/components/node/usage/NodeUsagePane';
 import { SessionHeaderInfrastructure } from '../../../src/components/project-message-view/SessionHeaderInfrastructure';
 import { WorkspaceCard } from '../../../src/components/WorkspaceCard';
 import { WorkspaceSidebar } from '../../../src/components/WorkspaceSidebar';
@@ -121,14 +121,30 @@ const workspaces =
         id: `ws-${i}`,
       }));
 function Surface() {
-  if (surface === 'node-card')
+  if (surface === 'node-pane')
     return (
-      <NodeCard
+      <NodeUsagePane
         node={node}
-        workspaces={workspaces}
+        sessions={workspaces.map((ws) => ({
+          workspaceId: ws.id,
+          nodeId: node.id,
+          projectId: null,
+          projectName: null,
+          chatSessionId: null,
+          title: ws.displayName ?? ws.name,
+          ownerUserId: null,
+          ownerName: null,
+          isMine: true,
+          status: ws.status,
+          createdAt: ws.createdAt,
+          reservation: null,
+          series: { start: [], cpuMillis: [], memoryBytes: [] },
+          historyEndsAt: null,
+        }))}
+        usageWindow={null}
+        clock={Date.parse('2026-09-07T12:00:00Z')}
         onStop={noop}
         onDelete={noop}
-        onCreateWorkspace={noop}
       />
     );
   if (surface === 'node-detail') return <NodeOverviewSection node={node} />;
