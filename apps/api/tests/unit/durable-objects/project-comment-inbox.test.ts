@@ -65,7 +65,7 @@ describe('ProjectData project comment inbox', () => {
       body,
       actor: HUMAN,
     });
-    sql.exec(`UPDATE comment_threads SET updated_at = ? WHERE id = ?`, updatedAt, thread.id);
+    sql.exec(`UPDATE anchored_comment_threads SET updated_at = ? WHERE id = ?`, updatedAt, thread.id);
     return thread.id;
   }
 
@@ -76,7 +76,7 @@ describe('ProjectData project comment inbox', () => {
       actor: HUMAN,
     });
     sql.exec(
-      `UPDATE library_file_comment_threads SET updated_at = ? WHERE id = ?`,
+      `UPDATE anchored_comment_threads SET updated_at = ? WHERE id = ?`,
       updatedAt,
       thread.id
     );
@@ -290,11 +290,11 @@ describe('ProjectData project comment inbox', () => {
     seedMessage('s-1', 'm-1', 1);
     const openMessage = messageThreadAt('s-1', 'm-1', 'still open', 3_000);
     const resolvedMessage = messageThreadAt('s-1', 'm-1', 'done', 2_000);
-    sql.exec(`UPDATE comment_threads SET status = 'resolved' WHERE id = ?`, resolvedMessage);
+    sql.exec(`UPDATE anchored_comment_threads SET status = 'resolved' WHERE id = ?`, resolvedMessage);
     const openFile = fileThreadAt('file-1', 'still open', 1_500);
     const resolvedFile = fileThreadAt('file-1', 'done', 1_000);
     sql.exec(
-      `UPDATE library_file_comment_threads SET status = 'resolved' WHERE id = ?`,
+      `UPDATE anchored_comment_threads SET status = 'resolved' WHERE id = ?`,
       resolvedFile
     );
 
@@ -311,9 +311,9 @@ describe('ProjectData project comment inbox', () => {
     seedMessage('s-1', 'm-1', 1);
     const openMessage = messageThreadAt('s-1', 'm-1', 'still open', 3_000);
     const sentMessage = messageThreadAt('s-1', 'm-1', 'sent to agent', 2_000);
-    sql.exec(`UPDATE comment_threads SET status = 'sent' WHERE id = ?`, sentMessage);
+    sql.exec(`UPDATE anchored_comment_threads SET status = 'sent' WHERE id = ?`, sentMessage);
     const sentFile = fileThreadAt('file-1', 'sent file', 1_500);
-    sql.exec(`UPDATE library_file_comment_threads SET status = 'sent' WHERE id = ?`, sentFile);
+    sql.exec(`UPDATE anchored_comment_threads SET status = 'sent' WHERE id = ?`, sentFile);
     fileThreadAt('file-1', 'still open file', 1_000);
 
     const sent = listProjectCommentInbox(sql, env, { status: 'sent' });
@@ -351,9 +351,9 @@ describe('ProjectData project comment inbox', () => {
 
     // SQLite is dynamically typed, so a text value survives the NOT NULL column
     // but fails the valibot v.number() (rule 50).
-    sql.exec(`UPDATE comment_threads SET created_at = 'not-a-number' WHERE id = ?`, bad);
+    sql.exec(`UPDATE anchored_comment_threads SET created_at = 'not-a-number' WHERE id = ?`, bad);
     sql.exec(
-      `UPDATE library_file_comment_threads SET created_at = 'not-a-number' WHERE id = ?`,
+      `UPDATE anchored_comment_threads SET created_at = 'not-a-number' WHERE id = ?`,
       badFile
     );
 
@@ -446,13 +446,13 @@ describe('ProjectData project comment inbox', () => {
     expect(inbox.totalCount).toBe(2);
 
     const hydrateThreadCall = calls.find(
-      (call) => call.statement.includes('FROM comment_threads') && call.statement.includes('id IN')
+      (call) => call.statement.includes('FROM anchored_comment_threads') && call.statement.includes('id IN')
     );
     expect(hydrateThreadCall?.params).toEqual([selectedSmall]);
 
     const hydrateReplyCall = calls.find(
       (call) =>
-        call.statement.includes('FROM comment_replies') && call.statement.includes('thread_id IN')
+        call.statement.includes('FROM anchored_comment_replies') && call.statement.includes('thread_id IN')
     );
     expect(hydrateReplyCall?.params).toEqual([selectedSmall]);
   });

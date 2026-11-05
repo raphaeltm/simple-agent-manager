@@ -570,7 +570,9 @@ describe('DO Migrations', () => {
       // Resource links (067): three indexes (source, target, weak-target cleanup).
       // Idea updates (068): two seek indexes (timeline and per-session throttle).
       // Attention marker changes for the summary sync delta (070): two.
-      expect(indexes).toHaveLength(140);
+      // Anchored comment threads (072): seven (scope/sequence, scope/status, message,
+      // updated_at, status/updated_at, reply thread/sequence, reply scope).
+      expect(indexes).toHaveLength(147);
       expect(indexes.some((query) => query.includes('idx_session_access_grants_expiry_due'))).toBe(
         true
       );

@@ -2,67 +2,29 @@
  * Project-wide comment inbox — the cross-anchor read behind
  * `GET /api/projects/:projectId/comments`.
  *
- * Message threads and library-file threads live in physically separate tables
- * (.claude/rules/63), each owned by its own module. This module is the one place
- * that reads both and applies a *single* budget across them, so the page can ask
- * "what is outstanding in this project" in one request instead of fanning out a
- * request per session and per file.
- *
- * It deliberately does not merge the two into a union type. They are different
- * shapes, and keeping them apart lets the existing per-kind client mappers be
- * reused unchanged.
+ * Every anchor kind lives in the shared anchored comment tables (DO migration 072), so the
+ * inbox is one ranked read with a single budget, then a split back into the per-kind API
+ * shapes. The response keeps message and file threads apart because the clients map them
+ * with different mappers.
  */
-
-import type { LibraryFileCommentThread, MessageCommentThread } from '@simple-agent-manager/shared';
-
-import type {
-  ListProjectCommentThreadsInput,
-  ProjectCommentInboxResult,
-  ProjectCommentThreadCandidate,
-} from './comment-contracts';
+import { hydrateThreadRecordsByIds, listProjectThreadCandidates } from './anchored-comment-store';
+import type { ListProjectCommentThreadsInput, ProjectCommentInboxResult } from './comment-contracts';
 import {
   resolveProjectCommentListLimit,
   resolveProjectCommentListMaxBytes,
 } from './comment-normalization';
-import {
-  hydrateProjectCommentThreads,
-  listProjectCommentThreadCandidates,
-  readSessionTopics,
-} from './comments';
-import {
-  hydrateProjectFileCommentThreads,
-  listProjectFileCommentThreadCandidates,
-} from './library-file-comments';
+import { readSessionTopics, toMessageCommentThread } from './comments';
+import { toLibraryFileCommentThread } from './library-file-comments';
 import type { Env } from './types';
 
-/** One thread plus which table it came from, so the merge can split back. */
-type RankedThread =
-  | { kind: 'message'; candidate: ProjectCommentThreadCandidate }
-  | { kind: 'file'; candidate: ProjectCommentThreadCandidate };
-
-function compareRankedThread(a: RankedThread, b: RankedThread): number {
-  if (b.candidate.updatedAt !== a.candidate.updatedAt) {
-    return b.candidate.updatedAt - a.candidate.updatedAt;
-  }
-  if (a.candidate.id < b.candidate.id) return -1;
-  if (a.candidate.id > b.candidate.id) return 1;
-  return 0;
-}
-
 /**
- * Reads both anchor kinds and keeps the `limit` most recently active threads
- * across the two.
+ * The `limit` most recently active threads across every anchor kind.
  *
- * The cap is applied to the *union*, not per source, so one very chatty
- * conversation cannot crowd library threads out of the page and vice versa.
- * Correctness of taking the top `limit` after merging: each source is asked for
- * its own `limit + 1` newest rows, and the true top `limit` of the union is
- * necessarily contained in the union of each source's top `limit` — a thread
- * excluded from its own source's page is older than `limit` threads already in
- * hand, so it cannot belong in the merged page either.
- *
- * `totalCount` is a real `COUNT(*)` over both tables rather than a derived
- * guess, so the UI can state how much it is not showing (.claude/rules/65).
+ * The cap applies to the union, so one chatty conversation cannot crowd library threads off
+ * the page. The ranking reads `limit + 1` candidates in `updated_at DESC, id ASC` order (a
+ * total order, so repeated calls return the same sequence), then the byte budget skips any
+ * thread that would overflow the RPC payload. `totalCount` is a real `COUNT(*)`, so the UI
+ * can say how much it is not showing (.claude/rules/65).
  */
 export function listProjectCommentInbox(
   sql: SqlStorage,
@@ -71,54 +33,32 @@ export function listProjectCommentInbox(
 ): ProjectCommentInboxResult {
   const limit = resolveProjectCommentListLimit(env, input.limit);
   const maxBytes = resolveProjectCommentListMaxBytes(env);
-  const status = input.status ?? null;
+  const page = listProjectThreadCandidates(sql, { status: input.status ?? null, limit });
 
-  const messagePage = listProjectCommentThreadCandidates(sql, { status, limit });
-  const filePage = listProjectFileCommentThreadCandidates(sql, { status, limit });
-
-  // Merge on `updatedAt`, breaking ties by id so repeated identical calls return
-  // an identical sequence (rule 65: ties need a total order, or the payload
-  // permutes between calls and defeats caching).
-  const ranked: RankedThread[] = [
-    ...messagePage.candidates.map((candidate): RankedThread => ({ kind: 'message', candidate })),
-    ...filePage.candidates.map((candidate): RankedThread => ({ kind: 'file', candidate })),
-  ].sort(compareRankedThread);
-
-  const page: RankedThread[] = [];
+  const selectedIds: string[] = [];
   let selectedBytes = 0;
-  for (const entry of ranked) {
-    if (page.length >= limit) break;
-    const nextBytes = selectedBytes + entry.candidate.estimatedBytes;
+  for (const candidate of page.candidates) {
+    if (selectedIds.length >= limit) break;
+    const nextBytes = selectedBytes + candidate.estimatedBytes;
     if (nextBytes > maxBytes) continue;
-    page.push(entry);
+    selectedIds.push(candidate.id);
     selectedBytes = nextBytes;
   }
 
-  const totalCount = messagePage.totalCount + filePage.totalCount;
-
-  const messageIds = page
-    .filter(
-      (entry): entry is Extract<RankedThread, { kind: 'message' }> => entry.kind === 'message'
-    )
-    .map((entry) => entry.candidate.id);
-  const fileIds = page
-    .filter((entry): entry is Extract<RankedThread, { kind: 'file' }> => entry.kind === 'file')
-    .map((entry) => entry.candidate.id);
-
-  const messageThreads: MessageCommentThread[] = hydrateProjectCommentThreads(sql, messageIds);
-  const fileThreads: LibraryFileCommentThread[] = hydrateProjectFileCommentThreads(sql, fileIds);
+  const records = hydrateThreadRecordsByIds(sql, selectedIds);
+  const messageThreads = records.flatMap((record) => toMessageCommentThread(record) ?? []);
+  const fileThreads = records.flatMap((record) => toLibraryFileCommentThread(record) ?? []);
   const returnedCount = messageThreads.length + fileThreads.length;
-
   const sessionIds = [...new Set(messageThreads.map((thread) => thread.sessionId))];
 
   return {
     messageThreads,
     fileThreads,
     sessions: readSessionTopics(sql, sessionIds),
-    // Truncated either because the merge overflowed the budget, or because a
-    // source reported more rows than it returned. `totalCount` is the honest
-    // signal; this stays for callers that only need the boolean.
-    hasMore: totalCount > returnedCount,
-    totalCount,
+    // Truncated either because the byte budget skipped a thread, or because more rows match
+    // than were returned. `totalCount` is the honest signal; this stays for callers that
+    // only need the boolean.
+    hasMore: page.totalCount > returnedCount,
+    totalCount: page.totalCount,
   };
 }
