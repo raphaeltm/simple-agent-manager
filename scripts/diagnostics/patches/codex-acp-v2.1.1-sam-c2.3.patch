@@ -1,20 +1,38 @@
 diff --git a/package-lock.json b/package-lock.json
-index 467e8da..333ae74 100644
+index 467e8da..48fd02e 100644
 --- a/package-lock.json
 +++ b/package-lock.json
 @@ -3 +3 @@
 -  "version": "2.1.1",
-+  "version": "2.1.1-sam-c2.2",
++  "version": "2.1.1-sam-c2.3",
 @@ -9 +9 @@
 -      "version": "2.1.1",
-+      "version": "2.1.1-sam-c2.2",
++      "version": "2.1.1-sam-c2.3",
 diff --git a/package.json b/package.json
-index 9b5ecc3..dee63d8 100644
+index 9b5ecc3..a6e5b23 100644
 --- a/package.json
 +++ b/package.json
 @@ -6 +6 @@
 -  "version": "2.1.1",
-+  "version": "2.1.1-sam-c2.2",
++  "version": "2.1.1-sam-c2.3",
+diff --git a/src/AcpExtensions.ts b/src/AcpExtensions.ts
+index b450c8b..dbd80ce 100644
+--- a/src/AcpExtensions.ts
++++ b/src/AcpExtensions.ts
+@@ -124,0 +125,6 @@ export type SessionSteerRequest = {
++    _meta?: {
++        steering?: {
++            /** Leave idle input unconsumed so the host can own a normal prompt lifecycle. */
++            idleBehavior?: "promptRequired";
++        };
++    };
+@@ -127,3 +133,3 @@ export type SessionSteerRequest = {
+-export type SessionSteeringResponse = {
+-    outcome: "injected" | "startedNewTurn" | "failed";
+-}
++export type SessionSteeringResponse =
++    | {outcome: "injected" | "startedNewTurn" | "failed"}
++    | {outcome: "promptRequired", reason: "noRunningTurn"}
 diff --git a/src/CodexAcpClient.ts b/src/CodexAcpClient.ts
 index ecdf1b8..2f0e211 100644
 --- a/src/CodexAcpClient.ts
@@ -29,39 +47,63 @@ index ecdf1b8..2f0e211 100644
 +                    },
 +                } : {}),
 diff --git a/src/CodexAcpServer.ts b/src/CodexAcpServer.ts
-index a43f9ab..650784e 100644
+index a43f9ab..1d501e7 100644
 --- a/src/CodexAcpServer.ts
 +++ b/src/CodexAcpServer.ts
-@@ -313,0 +314,3 @@ export class CodexAcpServer {
+@@ -132,0 +133 @@ import {randomUUID} from "node:crypto";
++import {isRecord} from "./permissions/json";
+@@ -313,0 +315,3 @@ export class CodexAcpServer {
 +    private readonly mcpElicitationHandlers = new Map<string, CodexElicitationHandler>();
 +    private readonly seenMcpUrlElicitations = new Set<string>();
 +    private readonly mcpElicitationOwner = new Map<string, number>();
-@@ -947,0 +951,2 @@ export class CodexAcpServer {
+@@ -420,0 +425 @@ export class CodexAcpServer {
++                    idleBehaviors: ["promptRequired"],
+@@ -947,0 +953,2 @@ export class CodexAcpServer {
 +        this.mcpElicitationHandlers.get(params.sessionId)?.dispose();
 +        this.mcpElicitationHandlers.delete(params.sessionId);
-@@ -1182,0 +1188 @@ export class CodexAcpServer {
+@@ -1182,0 +1190 @@ export class CodexAcpServer {
 +            this.clearMcpElicitationHandlers();
-@@ -1186,0 +1193,5 @@ export class CodexAcpServer {
+@@ -1186,0 +1195,5 @@ export class CodexAcpServer {
 +    private clearMcpElicitationHandlers(): void {
 +        for (const handler of this.mcpElicitationHandlers.values()) handler.dispose();
 +        this.mcpElicitationHandlers.clear();
 +    }
 +
-@@ -1193,0 +1205,2 @@ export class CodexAcpServer {
+@@ -1193,0 +1207,2 @@ export class CodexAcpServer {
 +        this.clearMcpElicitationHandlers();
 +        this.seenMcpUrlElicitations.clear();
-@@ -2932,0 +2946,5 @@ export class CodexAcpServer {
+@@ -1625,0 +1641,3 @@ export class CodexAcpServer {
++        if (params._meta?.steering?.idleBehavior === "promptRequired") {
++            return {outcome: "promptRequired", reason: "noRunningTurn"};
++        }
+@@ -1805,0 +1824,13 @@ export class CodexAcpServer {
++        const meta = params["_meta"];
++        // The ACP type allows `_meta: null`; treat it like an absent `_meta`.
++        if (meta !== undefined && meta !== null && !isRecord(meta)) {
++            throw RequestError.invalidParams(undefined, "steering _meta must be an object");
++        }
++        const steering = meta?.["steering"];
++        if (steering !== undefined && !isRecord(steering)) {
++            throw RequestError.invalidParams(undefined, "steering _meta.steering must be an object");
++        }
++        const idleBehavior = steering?.["idleBehavior"];
++        if (idleBehavior !== undefined && idleBehavior !== "promptRequired") {
++            throw RequestError.invalidParams(undefined, "unsupported steering idleBehavior");
++        }
+@@ -1808,0 +1840 @@ export class CodexAcpServer {
++            ...(idleBehavior === "promptRequired" ? {_meta: {steering: {idleBehavior}}} : {}),
+@@ -2932,0 +2965,5 @@ export class CodexAcpServer {
 +            this.mcpElicitationHandlers.get(params.sessionId)?.dispose();
 +            const owner = (this.mcpElicitationOwner.get(params.sessionId) ?? 0) + 1;
 +            this.mcpElicitationOwner.set(params.sessionId, owner);
 +            const processGeneration = this.codexProcessGeneration;
 +            const sessionGeneration = this.getSessionGeneration(params.sessionId);
-@@ -2938,0 +2957,4 @@ export class CodexAcpServer {
+@@ -2938,0 +2976,4 @@ export class CodexAcpServer {
 +                () => this.mcpElicitationOwner.get(params.sessionId) === owner
 +                    && this.codexProcessGeneration === processGeneration
 +                    && this.getSessionGeneration(params.sessionId) === sessionGeneration,
 +                this.seenMcpUrlElicitations,
-@@ -2939,0 +2962 @@ export class CodexAcpServer {
+@@ -2939,0 +2981 @@ export class CodexAcpServer {
 +            this.mcpElicitationHandlers.set(params.sessionId, elicitationHandler);
 diff --git a/src/CodexElicitationHandler.ts b/src/CodexElicitationHandler.ts
 index 1b6dd82..32836f5 100644
@@ -273,13 +315,88 @@ index b356978..564a516 100644
 +        });
 +
 diff --git a/src/__tests__/CodexACPAgent/initialize.test.ts b/src/__tests__/CodexACPAgent/initialize.test.ts
-index 45e2bd6..7a3a08c 100644
+index 45e2bd6..eada463 100644
 --- a/src/__tests__/CodexACPAgent/initialize.test.ts
 +++ b/src/__tests__/CodexACPAgent/initialize.test.ts
-@@ -132,0 +133,3 @@ describe('CodexACPAgent - initialize', () => {
+@@ -71,0 +72 @@ describe('CodexACPAgent - initialize', () => {
++                    idleBehaviors: ["promptRequired"],
+@@ -84,0 +86 @@ describe('CodexACPAgent - initialize', () => {
++                idleBehaviors: ["promptRequired"],
+@@ -132,0 +135,3 @@ describe('CodexACPAgent - initialize', () => {
 +                extensions: {
 +                    'sam/acp-explicit-elicitation': { form: true, url: true },
 +                },
+diff --git a/src/__tests__/CodexACPAgent/steer-events.test.ts b/src/__tests__/CodexACPAgent/steer-events.test.ts
+index c13a719..e03e46b 100644
+--- a/src/__tests__/CodexACPAgent/steer-events.test.ts
++++ b/src/__tests__/CodexACPAgent/steer-events.test.ts
+@@ -154,0 +155,66 @@ describe('_session/steering', () => {
++    it('leaves idle input unconsumed when the host requires a prompt', async () => {
++        const mockFixture = createCodexMockTestFixture();
++        const sessionState = createTestSessionState();
++        vi.spyOn(mockFixture.getCodexAcpAgent(), "getSessionState").mockReturnValue(sessionState);
++        const turnStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "turnStart");
++        const turnSteerSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "turnSteer");
++
++        await expect(mockFixture.getCodexAcpAgent().extMethod(SESSION_STEERING_METHOD, {
++            sessionId: "session-id",
++            prompt: [{type: "text", text: "arrived while idle"}],
++            _meta: {steering: {idleBehavior: "promptRequired"}},
++        })).resolves.toEqual({outcome: "promptRequired", reason: "noRunningTurn"});
++
++        expect(turnStartSpy).not.toHaveBeenCalled();
++        expect(turnSteerSpy).not.toHaveBeenCalled();
++        expect(sessionState.currentTurnId).toBeNull();
++    });
++
++    it('returns promptRequired instead of a detached turn when the steered turn already ended', async () => {
++        const {mockFixture, sessionState, turnCompleted} = startActiveTurn();
++        const turnStartSpy = vi.spyOn(mockFixture.getCodexAppServerClient(), "turnStart")
++            .mockResolvedValueOnce({turn: createTurn("turn-id", "inProgress")});
++        vi.spyOn(mockFixture.getCodexAppServerClient(), "turnSteer").mockImplementation(async () => {
++            turnCompleted.resolve({
++                threadId: "session-id",
++                turn: createTurn("turn-id", "completed"),
++            });
++            throw Object.assign(new Error("Internal error"), {
++                data: {details: "no active turn to steer"},
++            });
++        });
++
++        const promptPromise = mockFixture.getCodexAcpAgent().prompt({
++            sessionId: "session-id",
++            prompt: [{type: "text", text: "long running prompt"}],
++        });
++        await vi.waitFor(() => {
++            expect(sessionState.currentTurnId).toBe("turn-id");
++        });
++
++        await expect(mockFixture.getCodexAcpAgent().extMethod(SESSION_STEERING_METHOD, {
++            sessionId: "session-id",
++            prompt: [{type: "text", text: "racing follow-up"}],
++            _meta: {steering: {idleBehavior: "promptRequired"}},
++        })).resolves.toEqual({outcome: "promptRequired", reason: "noRunningTurn"});
++        await expect(promptPromise).resolves.toMatchObject({stopReason: "end_turn"});
++        expect(turnStartSpy).toHaveBeenCalledTimes(1);
++        await vi.waitFor(() => {
++            expect(sessionState.currentTurnId).toBeNull();
++        });
++    });
++
++    it.each([
++        {steering: {idleBehavior: "startDetachedTurn"}},
++        {steering: "promptRequired"},
++        "not-an-object",
++    ])('rejects unsupported steering metadata %j', async (_meta) => {
++        const mockFixture = createCodexMockTestFixture();
++
++        await expect(mockFixture.getCodexAcpAgent().extMethod(SESSION_STEERING_METHOD, {
++            sessionId: "session-id",
++            prompt: [{type: "text", text: "x"}],
++            _meta,
++        })).rejects.toThrow(RequestError);
++    });
++
 diff --git a/src/__tests__/PermissionLifecycleContext.test.ts b/src/__tests__/PermissionLifecycleContext.test.ts
 index c24eead..02f4708 100644
 --- a/src/__tests__/PermissionLifecycleContext.test.ts
@@ -365,6 +482,17 @@ index c24eead..02f4708 100644
 +        capped.dispose();
 +    });
 +
+diff --git a/src/__tests__/SteeringQueue.test.ts b/src/__tests__/SteeringQueue.test.ts
+index 54b5e63..3b56c54 100644
+--- a/src/__tests__/SteeringQueue.test.ts
++++ b/src/__tests__/SteeringQueue.test.ts
+@@ -61 +61,5 @@ describe("SteeringQueue", () => {
+-        const outcomes: SessionSteeringResponse["outcome"][] = ["injected", "startedNewTurn", "injected"];
++        const outcomes: Array<Exclude<SessionSteeringResponse["outcome"], "promptRequired">> = [
++            "injected",
++            "startedNewTurn",
++            "injected",
++        ];
 diff --git a/src/subagents/CodexSubagentSubscriptions.ts b/src/subagents/CodexSubagentSubscriptions.ts
 index 27998e0..7ae96c5 100644
 --- a/src/subagents/CodexSubagentSubscriptions.ts
