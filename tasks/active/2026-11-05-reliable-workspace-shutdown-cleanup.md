@@ -91,21 +91,21 @@ production release (basic smoke only).
 
 ## Implementation Checklist
 
-- [ ] VM: generalize helper (stopped-source verification, labels, limits, disk precheck)
-- [ ] VM: final quiesced capture after stop in `performEviction`; quiescence check; `quiesced` in completion
-- [ ] VM: report final-capture failure so the capture generation is released
-- [ ] VM: reap helpers at startup and before deletion removes container/volume
-- [ ] API: migration 0224 `workspaces.preservation_receipt_json` + schema
-- [ ] API: completion records quiesced; eviction statement grants preserved for quiesced generation
-- [ ] API: receipt writer in full-sleep finalize and both eviction batches
-- [ ] API: restore completion stamps receipt and schedules source deletion
-- [ ] API: preservation check reads receipt (artifacts or restored) with legacy fallback
-- [ ] API: safety-net sweep selects receipt-bearing sources
-- [ ] API: directional chat-detachment acceptance across deletion identity + stop finalize
-- [ ] API: cleanup refusal does not starve warm handoff of an empty running node
-- [ ] Docs: architecture/lifecycle docs updated
-- [ ] Tests (Go): controller ordering/failure; helper flow with fake docker (labels, limits, writer refusal, restart mid-capture, cleanup); deletion reaps leaked helper before volume rm; startup reaper; real-Docker round trip (stop → helper capture → restore: HOME, staged/unstaged/untracked)
-- [ ] Tests (TS, real SQL / workers): quiesced eviction grants receipt; live eviction does not; successor capture before cleanup still preserved via restoredAt; chat detachment mid-deletion completes; X→Y chat still fenced; lost deletion response; non-target tenant untouched; warm handoff after artifact-only refusal; stopped-node deadline then applies
+- [x] VM: generalize helper (stopped-source verification, labels, limits, disk precheck)
+- [x] VM: final quiesced capture after stop in `performEviction`; quiescence check; `quiesced` in completion
+- [x] VM: report final-capture failure so the capture generation is released
+- [x] VM: reap helpers at startup and before deletion removes container/volume
+- [x] API: migration 0224 `workspaces.preservation_receipt_json` + schema
+- [x] API: completion records quiesced; eviction statement grants preserved for quiesced generation
+- [x] API: receipt writer in full-sleep finalize and both eviction batches
+- [x] API: restore completion stamps receipt and schedules source deletion
+- [x] API: preservation check reads receipt (artifacts or restored) with legacy fallback
+- [x] API: safety-net sweep selects receipt-bearing sources
+- [x] API: directional chat-detachment acceptance across deletion identity + stop finalize
+- [x] API: cleanup refusal does not starve warm handoff of an empty running node
+- [x] Docs: architecture/lifecycle docs updated
+- [x] Tests (Go): controller ordering/failure; helper flow with fake docker (labels, limits, writer refusal, restart mid-capture, cleanup); deletion reaps leaked helper before volume rm; startup reaper; real-Docker round trip (stop → helper capture → restore: HOME, staged/unstaged/untracked)
+- [x] Tests (TS, real SQL / workers): quiesced eviction grants receipt; live eviction does not; successor capture before cleanup still preserved via restoredAt; chat detachment mid-deletion completes; X→Y chat still fenced; lost deletion response; non-target tenant untouched; warm handoff after artifact-only refusal; stopped-node deadline then applies
 - [ ] Staging: real VM eviction → final capture → restore elsewhere → source container+volume+root removed with proof → empty node released; neighbor untouched; cleanup
 - [ ] Production: basic smoke, read-only observation; report `01M6MK1T` quarantine (needs authorized remediation path)
 
@@ -118,6 +118,24 @@ production release (basic smoke only).
 - [ ] An empty running node refused only for artifact proof reaches warm handoff in the same tick; residue is bounded by the existing deadline.
 - [ ] Helpers never outlive their capture across agent restarts and never block volume removal.
 - [ ] Verified end to end on staging with a real VM.
+
+## Implementation Notes
+
+- (4) First attempt (skip backoff for artifact-only refusals of empty running nodes) broke the
+  paged-sweep fairness tests in `preserved-vm-retirement.test.ts`: permanently refused candidates
+  must still back off so later ticks reach valid nodes. Replaced with
+  `handOffArtifactBlockedEmptyNode()`: the refusing destroy sweep hands the empty node to the warm
+  pool, which leaves the candidate set through `warm_since`.
+- Receipt verification checks HOME, WIP and the manifest object, matching the full-sleep verifier.
+- `docker commit` measured 18 MiB/s for 1 GiB of incompressible data inside this nested
+  devcontainer (overlay on overlay); a real VM is expected to be much faster. The final capture is
+  bounded by `EVICTION_FINAL_SNAPSHOT_TIMEOUT_SECONDS` (300 s) and the disk-headroom check; a timeout
+  keeps the pre-stop capture and grants no preservation. Measure on a staging VM.
+- Integration test: 128 MiB writable layer captured + round-tripped in ~12 s locally.
+- Discrimination evidence: `.tmp/discrimination.md` (copied into the PR).
+- Production: workspace 01M6MK1T is still `stopping` with a dead-lettered entry. After deploy, a
+  dead-lettered entry is not re-attempted automatically; an explicit (owner) delete promotes it,
+  or the node's retirement deadline proves it. Report; no unauthorized mutation.
 
 ## Notes
 
