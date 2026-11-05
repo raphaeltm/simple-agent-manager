@@ -683,6 +683,11 @@ test.describe('Linked work — chat Related panel', () => {
 
   test('the header chip names the idea being worked on and opens it', async ({ page }) => {
     await openChat(page);
+    if ((page.viewportSize()?.width ?? 1280) <= 767) {
+      // On a phone the chips live in the session-info sheet behind the one-row header's title.
+      await page.getByRole('button', { name: /Show session info/ }).click();
+      await expect(page.getByTestId('session-info-sheet')).toBeVisible();
+    }
     const chip = page.getByTestId('session-working-on-chip');
     await expect(chip).toBeVisible();
     await expect(chip).toContainText('Working on');

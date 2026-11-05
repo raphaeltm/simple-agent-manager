@@ -4,16 +4,10 @@ import type {
   TaskDetailResponse,
   WorkspaceResponse,
 } from '@simple-agent-manager/shared';
-import { isExpiredTask } from '@simple-agent-manager/shared';
-import {
-  AvatarStack,
-  Chip,
-  chipClassName,
-  paneClassName,
-} from '@simple-agent-manager/ui';
-import { Globe, User2 } from 'lucide-react';
+import { AvatarStack, paneClassName } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { useIsMobile } from '../../hooks/useIsMobile';
 import type { ChatSessionResponse } from '../../lib/api';
 import { getPortAccessUrl, getProjectTask, listChatMessages } from '../../lib/api';
 import { sessionPeople } from '../../lib/session-people';
@@ -21,26 +15,17 @@ import { stripMarkdown } from '../../lib/text-utils';
 import { sanitizeUrl } from '../../lib/url-utils';
 import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils';
 import { useAuth } from '../AuthProvider';
-import { SessionCredentialLimitChip } from '../credential-limits/SessionCredentialLimitChip';
 import { PublicPortsToggleRow } from './PublicPortsToggleRow';
-import { SessionCommentChip } from './SessionCommentChip';
-import { WorkspaceProfileBadge } from './SessionHeaderBadges';
+import { SessionPortList } from './SessionHeaderBadges';
+import { SessionHeaderChips, sessionStateLabel, sessionStateTone } from './SessionHeaderChips';
 import { SessionHeaderDetails } from './SessionHeaderDetails';
-import { getCreatorLabel } from './SessionHeaderFormatters';
-import { SessionWorkingOnChip } from './SessionWorkingOnChip';
+import { SessionHeaderMobile } from './SessionHeaderMobile';
 import type { SessionState } from './types';
 import { usePublicPortsToggle } from './usePublicPortsToggle';
 import { resolvePrimaryPullRequest, type SessionLinkedWork } from './useSessionLinkedWork';
 
 /** Hoisted so the fallback resolve below keeps a stable argument identity. */
 const EMPTY_PULL_REQUESTS: never[] = [];
-
-const SESSION_STATE_LABELS: Partial<Record<SessionState, string>> = {
-  active: 'Active',
-  idle: 'Idle',
-  sleeping: 'Sleeping',
-  terminated: 'Stopped',
-};
 
 /**
  * Session header — title, status chips, and an expandable details panel.
@@ -51,6 +36,10 @@ const SESSION_STATE_LABELS: Partial<Record<SessionState, string>> = {
  * They now live in `SessionToolRail`, and the disclosure is controlled by the rail's
  * "Details" action (see `useSessionTools`). This component is presentational: it owns
  * no action state and triggers no mutations.
+ *
+ * On a phone (`useIsMobile`) the header is one row (`SessionHeaderMobile`) and `expanded` opens
+ * the session-info sheet, which holds the chips, every port, the public-ports switch and the
+ * details. Desktop keeps the title, chip row and inline disclosure.
  */
 export function SessionHeader({
   projectId,
@@ -192,23 +181,134 @@ export function SessionHeader({
     [publicPorts.enabled, workspace]
   );
 
+  const isMobile = useIsMobile();
   const sessionTitle = session.topic
     ? stripMarkdown(session.topic)
     : `Chat ${session.id.slice(0, 8)}`;
-  const creatorLabel = getCreatorLabel(session);
-  const sortedPorts = detectedPorts.slice().sort((a, b) => a.port - b.port);
-  const firstPort = sortedPorts[0];
-  const extraPortCount = Math.max(0, sortedPorts.length - 1);
-  // Green is working; amber is reserved for "waiting on you", so a resting agent is neutral.
-  const stateTone =
-    sessionState === 'active' ? 'success' : sessionState === 'sleeping' ? 'info' : 'muted';
+  const sortedPorts = useMemo(
+    () => detectedPorts.slice().sort((a, b) => a.port - b.port),
+    [detectedPorts]
+  );
   const people = sessionPeople(session.access, viewerId);
+  const peopleStack =
+    people.length > 1 ? (
+      <AvatarStack
+        people={people}
+        size={26}
+        label={`People with access: ${people.map((person) => person.name).join(', ')}`}
+        className="mt-0.5 shrink-0"
+      />
+    ) : null;
+
+  const chips = (surface: 'header' | 'sheet') => (
+    <SessionHeaderChips
+      projectId={projectId}
+      session={session}
+      sessionState={sessionState}
+      taskEmbed={taskEmbed}
+      workspace={workspace}
+      sortedPorts={sortedPorts}
+      getWorkspacePortHref={getWorkspacePortHref}
+      onShowMorePorts={() => onExpandedChange(true)}
+      onOpenComments={onOpenComments}
+      unresolvedCommentCount={unresolvedCommentCount}
+      needsAttentionCommentCount={needsAttentionCommentCount}
+      linkedWork={linkedWork}
+      lineageText={lineageText}
+      surface={surface}
+    />
+  );
+
+  // Mark-complete failures stay on screen outside the disclosure: the action that produces
+  // this error lives in the tool rail, so the details are usually closed when it fails.
+  const completeErrorRow = completeError ? (
+    <div className="flex items-center gap-2 border-t border-[var(--sam-danger-edge)] px-4 py-1.5 md:px-6">
+      <span className="text-xs text-danger-fg">{completeError}</span>
+      {onDismissCompleteError && (
+        <button
+          type="button"
+          onClick={onDismissCompleteError}
+          className="cursor-pointer border-none bg-transparent text-xs text-fg-muted underline"
+        >
+          Dismiss
+        </button>
+      )}
+    </div>
+  ) : null;
+
+  const publicPortsRow =
+    workspace && detectedPorts.length > 0 ? (
+      <PublicPortsToggleRow
+        enabled={publicPorts.enabled}
+        saving={publicPorts.saving}
+        error={publicPorts.error}
+        onToggle={publicPorts.toggle}
+      />
+    ) : null;
+
+  const details = (
+    <SessionHeaderDetails
+      projectId={projectId}
+      session={session}
+      sessionTitle={sessionTitle}
+      sessionState={sessionState}
+      idleCountdownMs={idleCountdownMs}
+      taskEmbed={taskEmbed}
+      workspace={workspace}
+      node={node}
+      // The sheet lists the ports in their own section above the details.
+      detectedPorts={isMobile ? [] : detectedPorts}
+      getWorkspacePortHref={getWorkspacePortHref}
+      initialPrompt={initialPrompt}
+      initialPromptLoading={initialPromptLoading}
+      initialPromptError={initialPromptError}
+      primaryPullRequest={primaryPullRequest}
+      triggerDetail={triggerDetail}
+      sourceContext={sourceContext}
+      onShowHierarchy={onShowHierarchy}
+      surface={isMobile ? 'sheet' : 'inline'}
+    />
+  );
+
+  if (isMobile) {
+    return (
+      <SessionHeaderMobile
+        title={sessionTitle}
+        stateLabel={sessionStateLabel(sessionState, taskEmbed)}
+        stateTone={sessionStateTone(sessionState)}
+        firstPort={sortedPorts[0]}
+        getWorkspacePortHref={getWorkspacePortHref}
+        unresolvedCommentCount={unresolvedCommentCount}
+        needsAttentionCommentCount={needsAttentionCommentCount}
+        onOpenComments={onOpenComments}
+        expanded={expanded}
+        onExpandedChange={onExpandedChange}
+        people={peopleStack}
+        belowRow={completeErrorRow}
+        sheetContent={
+          <>
+            <div className="px-4 pt-1 pb-3">{chips('sheet')}</div>
+            {sortedPorts.length > 0 && (
+              <section
+                aria-label="Forwarded ports"
+                className="border-t border-[var(--sam-hairline)] px-2 pt-2"
+              >
+                <SessionPortList ports={sortedPorts} getHref={getWorkspacePortHref} />
+              </section>
+            )}
+            {publicPortsRow}
+            {details}
+          </>
+        }
+      />
+    );
+  }
 
   return (
     <div
       data-testid="session-header"
       // Only the open details panel may give up height (it scrolls); the title and chips never
-      // get clipped, whatever else shares the column on a short phone.
+      // get clipped, whatever else shares the column.
       className={`${paneClassName('slab')} flex flex-col overflow-hidden ${expanded ? 'min-h-0 shrink' : 'shrink-0'}`}
     >
       <div className="shrink-0 space-y-2.5 px-4 pt-3 pb-3.5 md:px-6 md:pt-4">
@@ -231,136 +331,15 @@ export function SessionHeader({
           >
             {sessionTitle}
           </div>
-          {people.length > 1 && (
-            <AvatarStack
-              people={people}
-              size={26}
-              label={`People with access: ${people.map((person) => person.name).join(', ')}`}
-              className="mt-0.5 shrink-0"
-            />
-          )}
+          {peopleStack}
         </div>
 
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <Chip tone={stateTone} dot>
-            {isExpiredTask(taskEmbed)
-              ? 'Expired'
-              : (SESSION_STATE_LABELS[sessionState] ?? 'Stopped')}
-          </Chip>
-
-          {workspace && <WorkspaceProfileBadge workspace={workspace} />}
-
-          <SessionCredentialLimitChip
-            projectId={projectId}
-            agentSessionId={session.agentSessionId ?? null}
-          />
-
-          {creatorLabel && (
-            <Chip
-              icon={<User2 size={14} strokeWidth={1.75} aria-hidden="true" />}
-              title={session.isMine ? 'Created by you' : `Created by ${creatorLabel}`}
-              // Phones keep the chip row to one line; the owner is on the chat list row.
-              className="max-md:hidden"
-            >
-              {session.isMine ? 'Your session' : creatorLabel}
-            </Chip>
-          )}
-
-          {firstPort && (
-            <a
-              href={getWorkspacePortHref(firstPort)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className={`${chipClassName({ tone: 'success' })} transition-[filter] hover:brightness-110`}
-              title={`${firstPort.label} — ${firstPort.url}`}
-            >
-              <Globe size={14} strokeWidth={1.75} aria-hidden="true" />
-              {firstPort.port}
-            </a>
-          )}
-
-          {extraPortCount > 0 && (
-            <button
-              type="button"
-              onClick={() => onExpandedChange(true)}
-              className={`${chipClassName()} cursor-pointer transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring`}
-              aria-label={`Show ${extraPortCount} more forwarded ${extraPortCount === 1 ? 'port' : 'ports'}`}
-            >
-              +{extraPortCount} more
-            </button>
-          )}
-
-          {onOpenComments && (
-            <SessionCommentChip
-              unresolvedCommentCount={unresolvedCommentCount}
-              needsAttentionCommentCount={needsAttentionCommentCount}
-              onOpenComments={onOpenComments}
-            />
-          )}
-
-          {linkedWork?.workingOn && (
-            <SessionWorkingOnChip projectId={projectId} workingOn={linkedWork.workingOn} />
-          )}
-
-          {lineageText && (
-            <Chip tone="muted" title={lineageText}>
-              {lineageText.startsWith('⑂') ? '⑂ fork' : lineageText}
-            </Chip>
-          )}
-        </div>
+        {chips('header')}
       </div>
 
-      {/* Mark-complete failures. Rendered OUTSIDE the disclosure: the action that
-          produces this error now lives in the tool rail, so the user has no reason to
-          have the details panel open when it fails. */}
-      {completeError && (
-        <div className="flex items-center gap-2 border-t border-[var(--sam-danger-edge)] px-4 py-1.5 md:px-6">
-          <span className="text-xs" style={{ color: 'var(--sam-color-danger)' }}>
-            {completeError}
-          </span>
-          {onDismissCompleteError && (
-            <button
-              type="button"
-              onClick={onDismissCompleteError}
-              className="text-xs bg-transparent border-none cursor-pointer underline"
-              style={{ color: 'var(--sam-color-fg-muted)' }}
-            >
-              Dismiss
-            </button>
-          )}
-        </div>
-      )}
-
-      {workspace && detectedPorts.length > 0 && (
-        <PublicPortsToggleRow
-          enabled={publicPorts.enabled}
-          saving={publicPorts.saving}
-          error={publicPorts.error}
-          onToggle={publicPorts.toggle}
-        />
-      )}
-
-      {expanded && (
-        <SessionHeaderDetails
-          projectId={projectId}
-          session={session}
-          sessionTitle={sessionTitle}
-          sessionState={sessionState}
-          idleCountdownMs={idleCountdownMs}
-          taskEmbed={taskEmbed}
-          workspace={workspace}
-          node={node}
-          detectedPorts={detectedPorts}
-          getWorkspacePortHref={getWorkspacePortHref}
-          initialPrompt={initialPrompt}
-          initialPromptLoading={initialPromptLoading}
-          initialPromptError={initialPromptError}
-          primaryPullRequest={primaryPullRequest}
-          triggerDetail={triggerDetail}
-          sourceContext={sourceContext}
-          onShowHierarchy={onShowHierarchy}
-        />
-      )}
+      {completeErrorRow}
+      {publicPortsRow}
+      {expanded && details}
     </div>
   );
 }
