@@ -91,6 +91,12 @@ export function useProjectChatState() {
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const hasLoadedRef = useRef(false);
+  // A list read has succeeded: only then does an empty list mean "no chats".
+  const [listLoaded, setListLoaded] = useState(false);
+  // The read in flight when the page mounted, for handlers that need the selected session.
+  const initialLoadRef = useRef<Promise<ChatSessionResponse[]>>(Promise.resolve([]));
+  // The first list came from the route prefetch; see the first-socket-open refresh below.
+  const listFromPrefetchRef = useRef(false);
   // Credentials, trial status, provider catalog, agent catalog and agent profiles all
   // come from shared TanStack queries. Before this migration each was fetched by a
   // mount effect local to this hook, duplicating requests that the settings pages,
@@ -261,12 +267,18 @@ export function useProjectChatState() {
     if (hasLoadedRef.current) setIsRefreshing(true);
     try {
       const scope = multiplayerActive ? sessionScope : 'all';
-      const sessions =
-        !hasLoadedRef.current && scope === 'all'
-          ? await readInitialSessionList(queryClient, queryScope, projectId)
-          : (await listChatSessions(projectId, { limit: CHAT_SESSION_LIST_LIMIT, scope })).sessions;
+      let sessions: ChatSessionResponse[];
+      if (!hasLoadedRef.current && scope === 'all') {
+        const initial = await readInitialSessionList(queryClient, queryScope, projectId);
+        sessions = initial.sessions;
+        listFromPrefetchRef.current = initial.prefetched;
+      } else {
+        sessions = (await listChatSessions(projectId, { limit: CHAT_SESSION_LIST_LIMIT, scope }))
+          .sessions;
+      }
       resetSessions(sessions);
       hasLoadedRef.current = true;
+      setListLoaded(true);
 
       listProjectTasks(projectId, { limit: CHAT_TASK_LIST_LIMIT })
         .then((tasksResult) => {
@@ -329,8 +341,21 @@ export function useProjectChatState() {
 
   useEffect(() => {
     setLoading(true);
-    void loadSessions().finally(() => setLoading(false));
+    const load = loadSessions();
+    initialLoadRef.current = load;
+    void load.finally(() => setLoading(false));
   }, [loadSessions]);
+
+  /**
+   * The selected session, waiting for the page's first list read when it has not landed.
+   * A deep link shows its conversation before the list arrives, so its actions must not
+   * read "not in the list yet" as "no such session".
+   */
+  const findSession = useCallback(
+    async (id: string) =>
+      sessions.find((s) => s.id === id) ?? (await initialLoadRef.current).find((s) => s.id === id),
+    [sessions]
+  );
 
   // Session-list freshness has two modes, and exactly one is active at a time.
   //
@@ -348,6 +373,13 @@ export function useProjectChatState() {
   // tabs. Reconnect catch-up is handled by `onReconnected` above; disconnect and
   // tab-return catch-up come from the hook's elapsed-gated refresh.
   const wsConnected = connectionState === 'connected';
+  // The route prefetch read the list before this socket subscribed, and the server replays
+  // nothing on subscribe: read it once more when the socket first opens.
+  useEffect(() => {
+    if (!wsConnected || !listLoaded || !listFromPrefetchRef.current) return;
+    listFromPrefetchRef.current = false;
+    void loadSessions();
+  }, [wsConnected, listLoaded, loadSessions]);
   useVisibilityAwarePoll(loadSessions, SESSION_SYNC_INTERVAL_MS, {
     enabled: !loading,
     paused: wsConnected,
@@ -598,7 +630,7 @@ export function useProjectChatState() {
   const conversationActions = useConversationActions({
     projectId,
     sessionId,
-    sessions,
+    findSession,
     loadSessions,
   });
 
@@ -611,9 +643,9 @@ export function useProjectChatState() {
   // Derived state
   // ---------------------------------------------------------------------------
 
-  // While the first list read is in flight an empty list means "not loaded yet", not "no
-  // chats", so a deep-linked conversation stays on screen.
-  const showNewChatInput = !sessionId || (!loading && sessions.length === 0);
+  // Until a list read succeeds an empty list means "not loaded", not "no chats", so a
+  // deep-linked conversation stays on screen while it loads or after it fails.
+  const showNewChatInput = !sessionId || (listLoaded && !loading && sessions.length === 0);
   const hasSessions = sessions.length > 0;
 
   return {
@@ -627,6 +659,7 @@ export function useProjectChatState() {
     hasSessions,
     showNewChatInput,
     loadSessions,
+    findSession,
     realtimeDegraded,
     sidebarOpen,
     setSidebarOpen,

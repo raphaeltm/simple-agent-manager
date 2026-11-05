@@ -26,18 +26,22 @@ export function initialChatSessionListQueryOptions(queryScope: string, projectId
  *
  * Joins the read {@link prefetchProjectRoute} started, or reuses its result while it is
  * within the client's default `staleTime`, then removes the entry so it is consumed once.
+ * `prefetched` says the list came from the route read, which started before the chat's
+ * socket could subscribe: a session created in between reached no socket.
  */
 export async function readInitialSessionList(
   queryClient: QueryClient,
   queryScope: string,
   projectId: string
-): Promise<ChatSessionListItem[]> {
+): Promise<{ sessions: ChatSessionListItem[]; prefetched: boolean }> {
   if (!queryScope) {
-    return (await listChatSessions(projectId, { limit: CHAT_SESSION_LIST_LIMIT })).sessions;
+    const { sessions } = await listChatSessions(projectId, { limit: CHAT_SESSION_LIST_LIMIT });
+    return { sessions, prefetched: false };
   }
   const options = initialChatSessionListQueryOptions(queryScope, projectId);
+  const prefetched = queryClient.getQueryState(options.queryKey) !== undefined;
   try {
-    return await queryClient.fetchQuery(options);
+    return { sessions: await queryClient.fetchQuery(options), prefetched };
   } finally {
     queryClient.removeQueries({ queryKey: options.queryKey, exact: true });
   }

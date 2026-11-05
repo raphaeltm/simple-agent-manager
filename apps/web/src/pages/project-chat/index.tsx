@@ -178,15 +178,27 @@ export function ProjectChat() {
     return `${attention.markerId}:${attention.reason ?? ''}`;
   }, [chatSessions, sessionId]);
 
+  // A deep-linked conversation can show before the session list lands: wait for it then.
+  const { findSession } = state;
+  const withActiveSession = useCallback(
+    (act: (session: (typeof chatSessions)[number]) => void) => {
+      if (!sessionId) return;
+      const loaded = chatSessions.find((sess) => sess.id === sessionId);
+      if (loaded) act(loaded);
+      else void findSession(sessionId).then((session) => session && act(session));
+    },
+    [chatSessions, findSession, sessionId]
+  );
+
   const handleRetryActiveSession = useCallback(() => {
-    const session = chatSessions.find((sess) => sess.id === sessionId);
-    if (session?.taskId) handleRetry(session);
-  }, [chatSessions, sessionId, handleRetry]);
+    withActiveSession((session) => {
+      if (session.taskId) handleRetry(session);
+    });
+  }, [withActiveSession, handleRetry]);
 
   const handleForkActiveSession = useCallback(() => {
-    const session = chatSessions.find((sess) => sess.id === sessionId);
-    if (session) handleFork(session);
-  }, [chatSessions, sessionId, handleFork]);
+    withActiveSession(handleFork);
+  }, [withActiveSession, handleFork]);
 
   const handleSessionMutated = useCallback(() => {
     void loadSessions();

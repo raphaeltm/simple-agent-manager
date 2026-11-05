@@ -24,6 +24,7 @@ import { ToastProvider } from './hooks/useToast';
 import { lazyNamed, memoizeRouteImport } from './lib/lazy-with-retry';
 import { prefetchProjectRoute } from './lib/project-route-prefetch';
 import { queryClient } from './lib/query-client';
+import { isProjectChatRoute } from './lib/shell-routes';
 // Initial landing set — statically imported per .claude/rules/60-request-io-and-bundle-budgets.md.
 // Every other page below is code-split via lazyNamed(). Do NOT add static page imports here.
 import { Dashboard } from './pages/Dashboard';
@@ -81,9 +82,6 @@ const loadProjectShell = memoizeRouteImport(() => import('./pages/Project'));
 const loadProjectChat = memoizeRouteImport(() => import('./pages/project-chat'));
 const loadProjectSettings = memoizeRouteImport(() => import('./pages/ProjectSettings'));
 const ProjectShell = lazyNamed(loadProjectShell, 'Project');
-/** Matches the project routes that render the chat: its index (a redirect) and `chat/*`. */
-const PROJECT_CHAT_PATH = /\/projects\/[^/]+(?:\/chat(?:\/|$)|\/?$)/;
-
 /**
  * The project shell's chunk fallback. On a chat route it is the chat's own loading
  * layout, so the spinner is already where the project and transcript spinners that
@@ -91,7 +89,7 @@ const PROJECT_CHAT_PATH = /\/projects\/[^/]+(?:\/chat(?:\/|$)|\/?$)/;
  */
 function ProjectRouteFallback() {
   const { pathname } = useLocation();
-  return PROJECT_CHAT_PATH.test(pathname) ? (
+  return isProjectChatRoute(pathname) ? (
     <ChatLoadingLayout testId="route-fallback" />
   ) : (
     <RouteFallback />
@@ -113,7 +111,7 @@ function Project() {
   void loadProjectShell().catch(() => undefined);
   if (/\/settings(?:\/|$)/.test(pathname)) {
     void loadProjectSettings().catch(() => undefined);
-  } else if (PROJECT_CHAT_PATH.test(pathname)) {
+  } else if (isProjectChatRoute(pathname)) {
     void loadProjectChat().catch(() => undefined);
   }
   return <ProjectShell />;

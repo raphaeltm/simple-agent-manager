@@ -69,8 +69,14 @@ selected transcript 7086–9841. Mobile: auth 3881–5955; project 6514–9956; 
 - Prefetch lives in the `Project` route wrapper (`App.tsx`) and fires per project
   (`useEffect([projectId, queryScope])`): the route element stays mounted across projects.
 - `ChatLoadingLayout` reserves the chats pane so the spinner keeps one position on desktop.
-- Accepted trade-off: one extra background transcript delta read when the prefetch settles
-  before the conversation mounts (`refetchOnMount: 'always'` kept).
+- Transcript reads: a transcript read that the route prefetch starts marks the next open
+  (`takeRoutePrefetchedTranscript`). That open refetches on mount only if the read is stale
+  (`refetchOnMount: true`, default 15 s `staleTime`); every other open keeps
+  `refetchOnMount: 'always'`. A cold open makes one transcript read.
+- Session list: the first read joins the route prefetch. Because that read predates the
+  chat socket, the socket's first open reads the list once more. A failed first read keeps
+  a deep-linked conversation on screen. Sleep, close, retry and fork wait for the first list
+  read instead of silently doing nothing.
 - Remaining opportunity recorded on the idea: warm (persisted) transcripts still wait for
   project detail.
 - Pre-existing `lazy-route-chunks-audit.spec.ts` failures on main filed as

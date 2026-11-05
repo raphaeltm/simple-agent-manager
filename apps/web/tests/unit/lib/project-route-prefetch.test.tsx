@@ -141,7 +141,7 @@ describe('readInitialSessionList', () => {
     const read = readInitialSessionList(client, 'user-1', 'proj-1');
     list.resolve({ sessions: SESSIONS, total: 1 });
 
-    await expect(read).resolves.toEqual(SESSIONS);
+    await expect(read).resolves.toEqual({ sessions: SESSIONS, prefetched: true });
     expect(mocks.listChatSessions).toHaveBeenCalledTimes(1);
   });
 
@@ -155,7 +155,10 @@ describe('readInitialSessionList', () => {
 
     const fresh = [{ id: 'session-2', topic: 'Newer', status: 'active' }];
     mocks.listChatSessions.mockResolvedValueOnce({ sessions: fresh, total: 1 });
-    await expect(readInitialSessionList(client, 'user-1', 'proj-1')).resolves.toEqual(fresh);
+    await expect(readInitialSessionList(client, 'user-1', 'proj-1')).resolves.toEqual({
+      sessions: fresh,
+      prefetched: false,
+    });
     expect(mocks.listChatSessions).toHaveBeenCalledTimes(2);
   });
 
@@ -166,7 +169,10 @@ describe('readInitialSessionList', () => {
 
     const otherUsers = [{ id: 'session-9', topic: 'Theirs', status: 'active' }];
     mocks.listChatSessions.mockResolvedValueOnce({ sessions: otherUsers, total: 1 });
-    await expect(readInitialSessionList(client, 'user-2', 'proj-1')).resolves.toEqual(otherUsers);
+    await expect(readInitialSessionList(client, 'user-2', 'proj-1')).resolves.toEqual({
+      sessions: otherUsers,
+      prefetched: false,
+    });
     expect(mocks.listChatSessions).toHaveBeenCalledTimes(2);
   });
 });

@@ -13,7 +13,8 @@ import { chatQueryKeys } from '../../lib/query-options';
 interface ConversationActionsInput {
   projectId: string;
   sessionId: string | undefined;
-  sessions: ChatSessionResponse[];
+  /** The selected session, waiting for the first list read when it has not landed. */
+  findSession: (id: string) => Promise<ChatSessionResponse | undefined>;
   loadSessions: () => Promise<unknown>;
 }
 
@@ -21,7 +22,7 @@ interface ConversationActionsInput {
 export function useConversationActions({
   projectId,
   sessionId,
-  sessions,
+  findSession,
   loadSessions,
 }: ConversationActionsInput) {
   const queryScope = useQueryScope();
@@ -32,16 +33,16 @@ export function useConversationActions({
   const [closeError, setCloseError] = useState<string | null>(null);
 
   const handleSleepConversation = useCallback(async () => {
-    const selectedSession = sessions.find((s) => s.id === sessionId);
-    if (!selectedSession) return;
-    if (!selectedSession.workspaceId) {
-      setSleepError('This session has no workspace to sleep.');
-      return;
-    }
-
+    if (!sessionId) return;
     setSleepingConversation(true);
     setSleepError(null);
     try {
+      const selectedSession = await findSession(sessionId);
+      if (!selectedSession) return;
+      if (!selectedSession.workspaceId) {
+        setSleepError('This session has no workspace to sleep.');
+        return;
+      }
       // Session-scoped: works for the owner and for anyone they shared the session with.
       await sleepChatSession(projectId, selectedSession.id);
       if (queryScope) {
@@ -56,14 +57,15 @@ export function useConversationActions({
     } finally {
       setSleepingConversation(false);
     }
-  }, [loadSessions, projectId, queryClient, queryScope, sessionId, sessions]);
+  }, [findSession, loadSessions, projectId, queryClient, queryScope, sessionId]);
 
   const handleCloseConversation = useCallback(async () => {
-    const selectedSession = sessions.find((s) => s.id === sessionId);
-    if (!selectedSession) return;
+    if (!sessionId) return;
     setClosingConversation(true);
     setCloseError(null);
     try {
+      const selectedSession = await findSession(sessionId);
+      if (!selectedSession) return;
       if (selectedSession.taskId) {
         await closeConversationTask(projectId, selectedSession.taskId);
       } else {
@@ -76,7 +78,7 @@ export function useConversationActions({
     } finally {
       setClosingConversation(false);
     }
-  }, [projectId, sessionId, sessions, loadSessions]);
+  }, [findSession, projectId, sessionId, loadSessions]);
 
   return {
     sleepingConversation,
