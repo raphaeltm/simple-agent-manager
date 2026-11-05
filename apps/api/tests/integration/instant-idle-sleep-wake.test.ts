@@ -1229,13 +1229,16 @@ describe('Instant session wake after idle sleep', () => {
         await sleepThroughSessionSleep();
         expect(runtimeRows().node).toEqual(SLEPT_ROWS.node);
         expect(agentSessionStatus(leftRunning)).toBe('running');
+        // The person's Sleep asked the awake agent to cancel before teardown (required sleep);
+        // only what the workspace page does afterwards is under test here.
+        const signalsBeforeAction = vmAgent.signals.length;
 
         const response = await postWorkspaceAgentAction(action, leftRunning);
 
         expect(response.status).toBe(200);
         expect(await response.json()).toMatchObject({ status });
         expect(vmAgent.starts).toBe(0);
-        expect(vmAgent.signals).toEqual([]);
+        expect(vmAgent.signals.slice(signalsBeforeAction)).toEqual([]);
         // Liveness: the route still recorded the transition it was asked for.
         expect(agentSessionStatus(leftRunning)).toBe(status);
       }

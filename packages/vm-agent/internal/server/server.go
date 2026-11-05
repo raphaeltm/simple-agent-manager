@@ -114,6 +114,7 @@ type Server struct {
 	portScanners           map[string]*ports.Scanner
 	portDiscoveries        map[string]*container.Discovery // per-workspace container discovery
 	bootstrapComplete      atomic.Bool
+	selfRestartRequested   atomic.Bool // set once an Operations-approved restart is pending
 	callbackTokenMu        sync.RWMutex
 	callbackToken          string
 	tokenRenewal           workspaceTokenRenewal // workspace callback token renewal (workspace_callback_token_renewal.go)
@@ -140,6 +141,7 @@ type Server struct {
 
 	workspaceDeletionCancel context.CancelFunc
 	workspaceDeletionDone   chan struct{}
+	workspaceDeletionWake   chan struct{}
 	workspaceLifecycleMu    sync.Mutex
 	workspaceLifecycleLocks map[string]*workspaceLifecycleEntry
 
@@ -1176,6 +1178,7 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /workspaces/{workspaceId}/worktrees", s.handleRemoveWorktree)
 
 	mux.HandleFunc("GET /debug-package", s.handleDebugPackage)
+	mux.HandleFunc("POST /admin/restart-agent", s.handleRestartAgent)
 	mux.HandleFunc("GET /events", s.handleListNodeEvents)
 	mux.HandleFunc("GET /events/export", s.handleExportEvents)
 	mux.HandleFunc("GET /metrics/export", s.handleExportMetrics)

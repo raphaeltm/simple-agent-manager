@@ -249,21 +249,28 @@ async function assertMarkdownRendering(page: Page, screenshotName: string) {
     .evaluate((el) => getComputedStyle(el).listStyleType);
   expect(taskListStyle).toBe('none');
 
-  // 2. Agent bubble has the green-glow treatment (green border + box-shadow).
-  const assistantBubble = page.locator('.glass-msg-assistant').first();
-  await expect(assistantBubble).toBeVisible();
-  const glow = await assistantBubble.evaluate((el) => {
+  // 2. The agent's reply has no bubble: it lies on the conversation pane with no fill,
+  // border or shadow, at the full row width on a phone (capped for reading on wider screens).
+  const agentReply = page.locator('.glass-msg-agent').first();
+  await expect(agentReply).toBeVisible();
+  const surface = await agentReply.evaluate((el) => {
     const cs = getComputedStyle(el);
-    return { borderColor: cs.borderColor, boxShadow: cs.boxShadow };
+    const row = el.parentElement?.getBoundingClientRect();
+    return {
+      background: cs.backgroundColor,
+      borderWidth: cs.borderTopWidth,
+      boxShadow: cs.boxShadow,
+      width: el.getBoundingClientRect().width,
+      rowWidth: row?.width ?? 0,
+    };
   });
-  // Green channel dominant in the border (rgb 34, 197, 94 → green > red, green > blue).
-  const channels = glow.borderColor.match(/(\d{1,3}),\s{0,2}(\d{1,3}),\s{0,2}(\d{1,3})/);
-  expect(channels).not.toBeNull();
-  const [r, g, b] = [Number(channels![1]), Number(channels![2]), Number(channels![3])];
-  expect(g).toBeGreaterThan(r);
-  expect(g).toBeGreaterThan(b);
-  // A multi-layer box-shadow is present (not "none").
-  expect(glow.boxShadow).not.toBe('none');
+  expect(surface.background).toBe('rgba(0, 0, 0, 0)');
+  expect(surface.borderWidth).toBe('0px');
+  expect(surface.boxShadow).toBe('none');
+  expect(surface.width).toBeLessThanOrEqual(surface.rowWidth + 1);
+  if ((page.viewportSize()?.width ?? 0) < 768) {
+    expect(Math.abs(surface.width - surface.rowWidth)).toBeLessThanOrEqual(1);
+  }
 
   // 3. Table renders with bordered cells (grid lines).
   const table = page.locator('.prose table').first();

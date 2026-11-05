@@ -122,15 +122,19 @@ describe('terminal session sleep lifecycle integration', () => {
     expect(
       sqlite.prepare('SELECT sleep_after FROM session_snapshots WHERE id = ?').get('snapshot-1')
     ).toEqual({ sleep_after: RETRY_AT.toISOString() });
-    await expect(
-      sleepWorkspaceSession(env, {
-        workspaceId: 'workspace-1',
-        userId: 'user-1',
-        reason: 'explicit test sleep',
-      })
-    ).rejects.toThrow('Workspace agent is not idle (prompting)');
     expect(mocks.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
-    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+    // A person's Sleep is required (policy a3780107): it stops the turn, then sleeps.
+    mocks.recordSessionTurnEnd.mockImplementation(() => {
+      activity = { activity: 'idle', activityAt: START.getTime() };
+      return Promise.resolve(true);
+    });
+    await sleepWorkspaceSession(env, {
+      workspaceId: 'workspace-1',
+      userId: 'user-1',
+      reason: 'explicit test sleep',
+    });
+    expect(mocks.cancelAgentSession).toHaveBeenCalledTimes(1);
+    expect(mocks.stopWorkspaceOnNode).toHaveBeenCalled();
   });
 
   it('terminalizes a stopped capture in the service catch before the sweep handles it again', async () => {
@@ -561,7 +565,10 @@ describe('terminal session sleep lifecycle integration', () => {
       'mixed-vm-workspace',
       env,
       'user-1',
-      expect.objectContaining({ expectedEvictionGeneration: '', beforeExternalMutation: expect.any(Function) })
+      expect.objectContaining({
+        expectedEvictionGeneration: '',
+        beforeExternalMutation: expect.any(Function),
+      })
     );
     expect(mocks.sleepVmAgentContainer).toHaveBeenCalledWith(env, 'mixed-instant-node');
     expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalledWith(

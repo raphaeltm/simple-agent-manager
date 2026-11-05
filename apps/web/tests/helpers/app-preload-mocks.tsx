@@ -20,7 +20,9 @@ vi.mock('../../src/components/ProtectedRoute', () => ({
   ProtectedRoute: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
 
-vi.mock('../../src/components/AppShell', () => ({
+vi.mock('../../src/components/AppShell', async (importOriginal) => ({
+  // The real hook: it falls back to a default shell context outside an AppShell.
+  useAppShell: (await importOriginal<typeof import('../../src/components/AppShell')>()).useAppShell,
   AppShell: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="app-shell">{children}</div>
   ),

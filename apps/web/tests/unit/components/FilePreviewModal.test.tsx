@@ -1,4 +1,4 @@
-import { screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { FilePreviewModal } from '../../../src/components/library/FilePreviewModal';
@@ -171,5 +171,77 @@ describe('FilePreviewModal — octet-stream extension recovery', () => {
     expect(screen.queryByTitle(/Interactive preview/)).toBeNull();
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(screen.getByText('blob.bin')).toBeTruthy();
+    // It says so and offers the download, rather than leaving the pane blank.
+    expect(screen.getByText(/no preview for this file type/i)).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Download' })).toBeTruthy();
+  });
+});
+
+describe('FilePreviewModal — video', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('plays an octet-stream .mp4 inline from the preview URL', () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(
+      <FilePreviewModal
+        projectId="proj-1"
+        file={makeFile({ filename: 'prototype-a-one-line.mp4', sizeBytes: 868_000 })}
+        previewUrl="https://api.test/preview/f-video"
+        onClose={noop}
+        onDownload={noop}
+      />
+    );
+
+    const video = screen.getByTestId('video-preview') as HTMLVideoElement;
+    expect(video.tagName).toBe('VIDEO');
+    expect(video.getAttribute('src')).toBe('https://api.test/preview/f-video');
+    expect(video.controls).toBe(true);
+    expect(video.hasAttribute('playsinline')).toBe(true);
+    // The element streams the bytes itself; nothing is fetched as text.
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(screen.queryByText(/no preview for this file type/i)).toBeNull();
+  });
+
+  it('offers the download when the browser cannot play the video', () => {
+    const onDownload = vi.fn();
+    render(
+      <FilePreviewModal
+        projectId="proj-1"
+        file={makeFile({ filename: 'clip.mov', mimeType: 'video/quicktime' })}
+        previewUrl="https://api.test/preview/f-mov"
+        onClose={noop}
+        onDownload={onDownload}
+      />
+    );
+
+    fireEvent.error(screen.getByTestId('video-preview'));
+    expect(screen.queryByTestId('video-preview')).toBeNull();
+    expect(screen.getByText(/can't play in your browser/i)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Download' }));
+    expect(onDownload).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not try to stream a video above the preview ceiling', () => {
+    render(
+      <FilePreviewModal
+        projectId="proj-1"
+        file={makeFile({
+          filename: 'huge.mp4',
+          mimeType: 'video/mp4',
+          sizeBytes: 500 * 1024 * 1024,
+        })}
+        previewUrl="https://api.test/preview/f-huge"
+        onClose={noop}
+        onDownload={noop}
+      />
+    );
+
+    expect(screen.queryByTestId('video-preview')).toBeNull();
+    expect(screen.getByText(/too large to preview/i)).toBeTruthy();
   });
 });

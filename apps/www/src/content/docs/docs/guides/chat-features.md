@@ -1,6 +1,6 @@
 ---
 title: Chat Features
-description: Answering an agent's permission requests and questions, message actions, the session tool rail, file browsing, tool activity cards, diagrams, conversation forking, finding past conversations, voice input, and text-to-speech in SAM's chat interface.
+description: Answering an agent's permission requests and questions, reading the conversation, message actions, the session tool rail, file browsing, tool activity cards, diagrams, conversation forking, finding past conversations, voice input, and text-to-speech in SAM's chat interface.
 ---
 
 SAM's project pages are chat-first interfaces where you interact with AI coding agents in real-time.
@@ -55,7 +55,7 @@ For every kind of request:
   [shared project](/docs/guides/collaboration/), other members see that the agent is waiting, but
   not what it asked or what was answered.
 - **No notification is sent.** Watch the session list for **Needs input**; on a phone, open the list
-  with the list icon at the right of the project-name bar. (Notifications cover a different kind of
+  with the chat list button at the right end of the app bar. (Notifications cover a different kind of
   question, the one agents ask with their `request_human_input` tool — see
   [Notifications](/docs/guides/notifications/).)
 - **You don't have to stay on the page.** A request waits in SAM, not in your browser tab, so you can
@@ -198,6 +198,22 @@ use a VM profile whose **Task Mode** is **Task**, such as one you create with **
 and **Cloud VM**: its agent works through to the end and pushes its branch before it finishes, and
 a script or another agent can wait for it to finish. Choosing **Build and open PRs** sets that up;
 it doesn't add an instruction to open pull requests, so ask for one.
+
+## Reading the Conversation
+
+Your own messages sit in bubbles on the right. The agent's replies have no bubble: they lie on the
+conversation at its full width, so tables, code and long links have room, especially on a phone. On
+a wide screen the replies stop at a comfortable reading width.
+
+### Showing only the conversation on a phone
+
+On a phone, the button with two outward arrows at the bottom right of the conversation hides
+everything else: the app bar, the chat's title and status, the tool rail and the message box slide
+away, and the conversation fills the screen. If a message is being read aloud, its player stays so
+you can pause or stop it. Select the button again (now two inward arrows) to
+bring them back, for example to reply. Leaving the chat or turning the phone to a wider layout
+brings them back too. The button doesn't appear on wider screens, where
+[Focus Mode](#focus-mode) collapses the sidebars instead.
 
 ## Message Actions
 
@@ -618,7 +634,7 @@ SAM also collapses platform-injected setup messages in the chat timeline. Those 
 
 Persistent chat sessions can sleep and recover on both [Instant and VM-backed runtimes](/docs/guides/instant-sessions/):
 
-- **Sleeping.** The session went idle or you manually chose **Sleep** for an awake idle conversation-mode session with a workspace. SAM writes a checkpoint, releases compute, and keeps the composer visible so sending a message wakes the same chat, with the same agent, model, and permission mode it started with (for chats started since 7 October 2026, and on a self-hosted instance only from v2026.10.08; older ones wake in Manual, see [After a chat wakes from sleep](/docs/guides/agents/#after-a-chat-wakes-from-sleep)). A message sent in the first minutes after it slept waits (up to an hour) until the old workspace has finished shutting down, then wakes it, usually within a minute or two of the shutdown. Your message, or a notification from another agent or a subscribed event, reaches the agent once the woken session has fully started.
+- **Sleeping.** The session went idle or you manually chose **Sleep** for an awake idle conversation-mode session with a workspace. If the agent is still in a turn when you ask it to sleep, SAM stops the turn first (ending the agent's process if it doesn't stop on its own), so a stuck agent can't keep the session awake. A VM that SAM created starts retiring when it is 24 hours old: its sessions then sleep as soon as their turn ends, and a turn still running 30 minutes later is stopped and slept. SAM writes a checkpoint, releases compute, and keeps the composer visible so sending a message wakes the same chat, with the same agent, model, and permission mode it started with (for chats started since 7 October 2026, and on a self-hosted instance only from v2026.10.08; older ones wake in Manual, see [After a chat wakes from sleep](/docs/guides/agents/#after-a-chat-wakes-from-sleep)). A message sent in the first minutes after it slept waits (up to an hour) until the old workspace has finished shutting down, then wakes it, usually within a minute or two of the shutdown. Your message, or a notification from another agent or a subscribed event, reaches the agent once the woken session has fully started.
 - **Archiving a sleeping conversation.** Choose **Archive** in the dock and confirm when you are finished with the chat. This also works for sleeping VM conversations. SAM immediately requests deletion of your linked workspace and discards its restore snapshots once runtime deletion is confirmed. If cleanup is interrupted, retry Archive; SAM keeps deletion retryable without completing the conversation twice. Archiving a shared conversation does not delete another member's workspace.
 - **Snapshots that keep failing.** If SAM cannot save a complete snapshot after a few tries (three, or 15 minutes, by default), it stops retrying and shuts the idle workspace down anyway, and the chat says what was kept. A VM session can fall back on an earlier snapshot: a complete one brings back everything it saved, and one that saved the repository's exact commit brings back the repository but not every other file. Otherwise SAM keeps only the conversation and any successful backups. Either way, changes made after the last successful snapshot can be lost, so push what you want to keep. [SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot) explains each case.
 - **Recovery.** SAM is rebuilding the session's runtime and restoring its saved state. Wait for it to finish instead of resending.
@@ -648,7 +664,7 @@ An unsent message in the composer stays with its chat when you switch to another
 
 ## Session Filters (Shared Projects)
 
-In a project shared with teammates, everyone's chat sessions appear in the same session list. A filter near the session search switches between **My sessions**, the chats you started, and **All sessions**, everything happening in the project. A chat a teammate [shared with you](/docs/guides/collaboration/#share-a-chat) isn't yours, so it's only under **All sessions**; its notification also opens it.
+In a project shared with teammates, everyone's chat sessions appear in the same session list. A filter under the session search switches between **Mine**, the chats you started, and **All**, everything happening in the project; each choice shows how many chats it holds. Rows a teammate started carry a thin line in that person's colour on their left edge, with their name under the title. A chat a teammate [shared with you](/docs/guides/collaboration/#share-a-chat) isn't yours, so it's only under **All**; its notification also opens it.
 
 For the full team workflow — inviting people, approving access, roles, and shared resources — see [Collaboration & Shared Projects](/docs/guides/collaboration/). To comment on a teammate's chat, mention someone, or drive a chat together, see [Work together in a chat](/docs/guides/collaboration/#work-together-in-a-chat).
 
@@ -660,7 +676,8 @@ On desktop, project chat has three layout levels you can cycle with the **F** ke
 - **Focus** — collapses the main navigation so you stay inside one project.
 - **Zen** — collapses the session sidebar too, for maximum reading and prompt-writing space.
 
-Reopen the sidebars whenever you need to switch projects, sessions, or settings.
+Reopen the sidebars whenever you need to switch projects, sessions, or settings. On a phone, use
+[Showing only the conversation](#showing-only-the-conversation-on-a-phone) instead.
 
 ## Command Palette
 

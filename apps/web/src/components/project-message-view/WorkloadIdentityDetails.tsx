@@ -2,10 +2,12 @@ import {
   type WorkloadIdentityMetadata,
   WorkloadIdentityMetadataSchema,
 } from '@simple-agent-manager/shared';
+import { ChevronDown, KeyRound } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import * as v from 'valibot';
 
 import { request } from '../../lib/api/client';
+
 function IdentityCopy({ label, value }: Readonly<{ label: string; value: string }>) {
   const [feedback, setFeedback] = useState('');
   return (
@@ -13,7 +15,8 @@ function IdentityCopy({ label, value }: Readonly<{ label: string; value: string 
       <button
         type="button"
         aria-label={`Copy ${label}`}
-        className="text-xs rounded border border-border-default px-1.5 py-0.5 text-fg-muted hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-primary"
+        // Raised secondary control (SAM Glass); the pseudo-element widens the tap target.
+        className="sam-raised relative h-7 cursor-pointer rounded-full border-none px-2.5 text-[11px] font-medium text-fg-primary after:absolute after:-inset-y-2 after:inset-x-0 after:content-[''] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
         onClick={() => {
           setFeedback('');
           void navigator.clipboard.writeText(value).then(
@@ -62,14 +65,21 @@ export function WorkloadIdentityDetails({
 
   return (
     <details
-      className="border-t border-border-default pt-2 min-w-0"
+      className="group min-w-0 border-t border-[var(--sam-hairline)] first:border-t-0"
       open={open}
       onToggle={(event) => setOpen(event.currentTarget.open)}
     >
-      <summary className="text-xs font-medium text-fg-primary cursor-pointer py-2 focus-visible:outline focus-visible:outline-accent-primary">
-        Workload identity (OIDC)
+      {/* Styled like the other detail sections' labels, as a full-width 44px disclosure row. */}
+      <summary className="flex min-h-11 cursor-pointer list-none items-center gap-1.5 px-4 text-[11px] font-semibold tracking-[0.1em] text-fg-muted uppercase hover:text-fg-primary focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-focus-ring md:px-6 [&::-webkit-details-marker]:hidden">
+        <KeyRound size={12} aria-hidden="true" className="shrink-0" />
+        <span className="flex-1">Workload identity (OIDC)</span>
+        <ChevronDown
+          size={14}
+          aria-hidden="true"
+          className="shrink-0 transition-transform group-open:rotate-180"
+        />
       </summary>
-      <div className="grid gap-3 py-2 pr-1 min-w-0 text-xs max-h-[60vh] overflow-y-auto overscroll-contain">
+      <div className="grid max-h-[60vh] min-w-0 gap-3 overflow-y-auto overscroll-contain px-4 pb-3 text-xs md:px-6">
         <p className="m-0 text-fg-muted">
           Use these IDs when configuring external services to trust this agent. Names can change;
           base access rules on IDs, issuer and audience.

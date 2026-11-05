@@ -1,0 +1,149 @@
+# Lifecycle Latency Monitoring
+
+## Problem
+
+On 2026-11-03 every VM workspace stop took ~31 minutes for six days, and nothing automated noticed
+(fixed in #2516, `tasks/archive/2026-11-03-fast-workspace-physical-deletion.md`). Raphaël asked for
+lifecycle systems to be measured and evaluated regularly, with slowness flagged automatically to
+this project. Idea `01M6HS335G8J4P423NY2MYTQCJ`.
+
+## Research Findings
+
+- **Timings are log-only.** `recordLifecycleTimings` (`apps/api/src/services/lifecycle-timings.ts`)
+  and `recordRunnerPhase` only call `log.info`.
+- **No state-entry timestamp exists.** `workspaces.updated_at` is rewritten on every deletion retry
+  (`persistDeletionDiagnostic`), so state age cannot be measured. There is no transition history for
+  workspaces or nodes; `task_status_events` exists for tasks only.
+- **Status writers are scattered** across routes, DOs, services and sweeps (rule 44). A D1 trigger
+  records every transition at the storage layer instead. D1 triggers are already used
+  (`0167_capacity_pool_max_nodes.sql`), and Workers tests apply real migrations
+  (`vitest.workers.config.ts`), so trigger behavior is testable.
+- **Alert path exists and is live in production.**
+  - `persistError` writes to `platform_errors`.
+  - The hourly `runPlatformFeedbackTriage` groups warn and error rows by normalized signature, then
+    creates ideas and incidents in the feedback project.
+  - `runIncidentTriggerSweep` dispatches the matching trigger.
+  - Production (queried 2026-11-04): `feedback.projectId` is the SAM project, and the active trigger
+    is `01M0Y4KTQAVKTG7VVWNWXD89Y8` "SAM private incident triage".
+- **Watchdogs today catch failures and hard timeouts only.** Examples:
+  - `checkProvisioningTimeouts` at 30 minutes.
+  - `recoverStuckTasks`.
+  - The 24-hour deletion dead-letter.
+
+  Nothing checks latency, and `log.warn` is not persisted.
+
+- **Runtime tunables go in the admin settings registry** (rule 07,
+  `apps/api/src/services/admin-settings-*-definitions.ts`), read via `resolveAdminSettingDetailsMany`.
+- **Cron structure.** The 5-minute sweep list in `apps/api/src/scheduled/handler.ts` uses
+  `createSweepIsolator`. The daily `0 3 * * *` branch runs analytics forward and the audit purge.
+- **Statuses.**
+  - Workspaces and nodes: `pending`, `creating`, `recovery` and `stopping` are transient.
+  - Session sleep (`session_snapshots.sleep_status`): `preparing` and `stopping` are transient.
+  - Session recovery (`recovery_status`): `waking` is transient.
+  - Production has 17 `waking` rows. They may be stale and will be surfaced once (capped and grouped).
+- **The post-migration row-count gate needs a churn entry** for the new history table, because it
+  is purged by retention (`scripts/deploy/d1-migration-churning-tables.ts`).
+
+## Design Change After Staging (2026-11-04)
+
+The first design used D1 triggers on the status tables. Staging showed D1 counts trigger writes in
+`meta.changes` (`changes: 3` for a one-row status update), which broke every `changes === 1`
+compare-and-set on those tables: `provisionNode` destroyed each VM it had just created. The
+triggers were dropped (`0219_drop_lifecycle_status_triggers.sql`), the draft `0218` was removed
+(never applied in production; staging keeps its orphan columns and two empty tables), and the
+watchdog now samples states instead (`0220_lifecycle_state_observations.sql`). A workers test
+guards the `changes === 1` invariant for one-row status updates on these tables, and
+`apps/api/.claude/rules/31-migration-safety.md` records the lesson.
+
+The full local workers suite timed out before staging was deployed, and staging was deployed
+anyway; the suite would have caught this. Do not deploy to staging before the workers suite has a
+verdict, locally or in CI.
+
+## Original Design (superseded where it says triggers)
+
+1. **Migration** (one file, all additive):
+   - Columns `workspaces.status_changed_at`, `nodes.status_changed_at`,
+     `session_snapshots.sleep_status_changed_at` and
+     `session_snapshots.recovery_status_changed_at`.
+   - Table `lifecycle_state_transitions`: entity type, entity id, from/to status, from-entered-at,
+     changed-at.
+   - Table `lifecycle_latency_alerts`: one row per alerted episode, with an
+     `(entity_type, entity_id, status, entered_at)` primary key.
+   - `AFTER UPDATE OF <status column>` triggers that insert a transition and stamp the changed-at
+     column.
+   - `AFTER INSERT` triggers that stamp the initial changed-at.
+   - A backfill for non-terminal rows.
+2. **Watchdog** (`lifecycle_latency_watchdog`, every 5 minutes):
+   - One bounded SELECT per table for rows past their state's budget, oldest first.
+   - `INSERT OR IGNORE` an alert row per episode.
+   - On a new insert, call `persistError(level 'warn')` with a stable message per entity and state,
+     so triage groups them into one signature.
+   - The per-tick cap is disclosed in the log (rule 65).
+3. **Daily evaluation** (`0 3 * * *`):
+   - Per watched state, compute p50, p95 and max over 24 hours from the transitions, and p95 over the
+     prior 7 days.
+   - Flag a regression with `persistError` when p95 exceeds the budget, or exceeds the regression
+     factor times the baseline, given enough samples.
+   - Always log a summary.
+   - Purge transitions and alerts past retention, in bounded batches.
+4. **Settings** (Operations group):
+   - One budget in minutes per watched state.
+   - Alerts per tick, regression factor, minimum samples and retention days.
+
+## Implementation Checklist
+
+- [x] Migrations: `0219_drop_lifecycle_status_triggers.sql` (removes the trigger draft where applied) and
+      `0220_lifecycle_state_observations.sql` (observation and episode tables; drops the draft's indexes)
+- [x] Drizzle schema for `lifecycle_state_observations` and `lifecycle_state_episodes`
+- [x] Churning-table entries for both new tables
+- [x] Admin settings: `lifecycleLatency.*` definitions and name typing
+- [x] `services/lifecycle-latency/`: watched-state config, sampling watchdog, daily evaluation
+- [x] Wire the watchdog into the 5-minute sweep and the evaluation into the daily cron
+- [x] Workers tests (real migrations):
+  - one-row status updates report `changes === 1`, and no writing triggers exist on status tables
+  - first sighting, under/over budget, one alert per episode, episode end recorded, new episode re-alerts
+  - unwatched states, per-state cap with disclosure, overlapping runs alert once
+  - session sleep and wake watches; budget 0 closes episodes and skips the daily check
+  - truncated sample never closes unseen episodes; sustained overflow still observes every row
+  - daily regression (over budget, vs baseline), minimum samples, watchdog-recorded episodes, purge
+  - defaults resolved through the real settings resolver
+- [x] Discrimination proofs, each guard reverted once (alert CAS, truncation guard, alerted/unalerted
+      cap partition, unobserved-first sampling, minimum samples, budget-0 daily gate)
+- [x] Docs: lifecycle latency monitoring section and settings in the admin settings guide; churning
+      table list in the configuration reference
+- [x] Lesson recorded in `apps/api/.claude/rules/31-migration-safety.md`
+- [x] `pnpm quality:migration-safety`, `pnpm quality:runtime-tunables`, lint, typecheck, unit suite
+      (14,806 pass) and full workers suite in three shards (1,916 pass, on 3b2007a2a)
+
+## Acceptance Criteria
+
+- [x] A workspace held in `stopping` past its budget produces exactly one `platform_errors` warn row
+      per episode, at most one run late (workers test; staging: 9 stuck workspaces alerted once at
+      03:16 UTC, 10 minutes after first observation at 03:06).
+- [x] A new stop episode for the same workspace alerts again; a state under budget never alerts.
+- [x] Episodes are recorded when observed states end, with no writes to the status tables
+      (workers tests; `changes === 1` guard).
+- [x] The daily evaluation flags a synthetic 3× regression and stays quiet below the sample minimum
+      (workers tests; not observed live because the staging deploy landed after 03:00 UTC).
+- [x] Budgets and limits are admin settings, with defaults exercised through the real resolver
+      (and rendered on staging Admin → Settings, desktop and mobile).
+- [x] Staging: migrations 0219/0220 applied, no writing triggers, observations and alerts recorded.
+      A VM create could not be verified: Hetzner returned `403 shared core limit exceeded` for the
+      shared production/staging account.
+- [ ] Production: deploy verified, and the first watchdog runs' output checked.
+
+## Staging Evidence
+
+- 0219 dropped the draft triggers (verified 02:07 UTC); 0220 applied and dropped the draft's indexes.
+- First run on the redesign at 03:06 observed 9 `workspace.stopping`, 1 `node.recovery`, 3
+  `session_recovery.waking`. Alerts landed at 03:16 (stopping, 10-minute budget) and 03:21 (others,
+  15-minute budget), one per episode.
+- Follow-up filed: `tasks/backlog/2026-11-04-providerless-node-allocation-unresolved-never-retires.md`.
+
+## References
+
+- `.claude/rules/81-work-bounds-must-state-throughput.md`
+- `apps/api/.claude/rules/47-control-loop-io-budget.md`,
+  `apps/api/.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md`,
+  `apps/api/.claude/rules/31-migration-safety.md`, `apps/api/.claude/rules/65-capped-selection-must-rank-and-disclose.md`
+- Idea `01M6HS335G8J4P423NY2MYTQCJ`

@@ -1,5 +1,4 @@
 import type { ToolCallContentItem } from '@simple-agent-manager/acp-client';
-import { Spinner } from '@simple-agent-manager/ui';
 import { type FC, useCallback, useMemo, useRef } from 'react';
 import type { VirtuosoHandle } from 'react-virtuoso';
 
@@ -7,6 +6,7 @@ import { useAcpPermissionInteractions } from '../../hooks/useAcpPermissionIntera
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { useAuth } from '../AuthProvider';
 import { ChatFilePanel } from '../chat/ChatFilePanel';
+import { LoadingPane } from '../LoadingPane';
 import { CommentableConversationItem } from './comments/CommentableConversationItem';
 import { DesktopCommentRail } from './comments/MessageCommentPanels';
 import { useMessageComments } from './comments/useMessageComments';
@@ -14,14 +14,14 @@ import { useProjectMessageCommentUi } from './comments/useProjectMessageCommentU
 import { ConversationPane } from './ConversationPane';
 import { FloatingHeader } from './FloatingHeader';
 import { loadToolCallContent } from './load-tool-content';
-import { type ChatListContext, useFloatingHeaderHeight } from './MessageListScaffold';
+import type { ChatListContext } from './MessageListScaffold';
 import { ProjectMessageViewDrawers } from './ProjectMessageViewDrawers';
 import { useSessionFocusHandoff } from './session-focus-handoff';
 import { resolveSessionViewerCapabilities, sessionOwnerLabel } from './session-viewer-access';
 import { SessionFooter } from './SessionFooter';
 import type { ProjectMessageViewProps } from './SessionMessageView.types';
 import { SessionMessageViewDialogs } from './SessionMessageViewDialogs';
-import { SessionStatusBanners } from './SessionStatusBanners';
+import { SessionStatusBanners, SessionStatusCapsules } from './SessionStatusBanners';
 import { SessionToolRail } from './SessionToolRail';
 import type { DisplayItem } from './tool-call-groups';
 import { groupToolCallItems } from './tool-call-groups';
@@ -66,7 +66,6 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
 }) => {
   const virtuosoRef = useRef<VirtuosoHandle>(null);
   const chatLogRef = useRef<HTMLDivElement>(null);
-  const [floatingHeaderRef, floatingHeaderHeight] = useFloatingHeaderHeight();
   /*
    * The on-demand panels the tool rail opens. Their handlers must keep a stable identity:
    * they feed `useSessionTools`' memoized action array, and an inline arrow would rebuild it
@@ -321,7 +320,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   /** Values the stable `ChatListHeader` reads, passed via Virtuoso's `context`. */
   const chatListContext = useMemo<ChatListContext>(
     () => ({
-      headerSpacerHeight: floatingHeaderHeight + 8,
+      headerSpacerHeight: 12,
       hasMore: lc.hasMore,
       loadingMore: lc.loadingMore,
       onLoadMore: lc.loadMore,
@@ -332,7 +331,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
           </div>
         ) : null,
     }),
-    [floatingHeaderHeight, lc.hasMore, lc.loadingMore, lc.loadMore, permissionPlacement]
+    [lc.hasMore, lc.loadingMore, lc.loadMore, permissionPlacement]
   );
 
   useSessionFocusHandoff(Boolean(lc.session));
@@ -344,9 +343,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
     return lc.error ? (
       <div className="p-4 text-danger text-sm">{lc.error}</div>
     ) : (
-      <div className="flex justify-center p-8" data-testid="chat-loading">
-        <Spinner size="lg" />
-      </div>
+      <LoadingPane testId="chat-loading" />
     );
   }
 
@@ -383,10 +380,8 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
       needsAttentionCommentCount={commentCounts.needs_you}
       sourceContext={sourceContext}
       onShowHierarchy={onShowHierarchy}
-      containerRef={floatingHeaderRef}
       expanded={sessionTools.detailsExpanded}
       onExpandedChange={sessionTools.setDetailsExpanded}
-      flushRight={sessionTools.mode !== 'hidden'}
       completeError={sessionTools.completeError}
       onDismissCompleteError={sessionTools.dismissCompleteError}
       linkedWork={linkedWork}
@@ -394,42 +389,50 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
   );
 
   return (
-    <div className="flex flex-col flex-1 min-h-0">
-      <SessionStatusBanners lc={lc} />
+    <div className="flex min-h-0 min-w-0 flex-1 gap-[var(--sam-space-gutter)]">
+      {/* SAM Glass conversation column: the session slab, the quiet message pane and the
+          message-box slab, separated by gutters. On desktop the tool rail is its own pane
+          beside the whole column; on phones it stays inside the message pane so the header
+          and message box keep the full width. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2.5 md:gap-[var(--sam-space-gutter)]">
+        <SessionStatusBanners lc={lc} />
 
-      <ConversationPane
-        lc={lc}
-        displayItems={displayItems}
-        header={floatingHeader}
-        headerHeight={floatingHeaderHeight}
-        chatLogRef={chatLogRef}
-        virtuosoRef={virtuosoRef}
-        renderItem={renderConversationItem}
-        listContext={chatListContext}
-        selectionControls={commentUi.selectionControls}
-        commentRail={desktopCommentRail}
-        toolRail={sessionToolRail}
-        tail={chatListContext.footer}
-      />
+        {floatingHeader}
 
-      <SessionFooter
-        projectId={projectId}
-        onFork={onFork}
-        lc={lc}
-        viewer={viewer}
-        viewerId={viewerId}
-        selectedTextComposer={commentUi.selectedTextComposer}
-        onSleepConversation={onSleepConversation}
-        sleepingConversation={sleepingConversation}
-        sleepError={sleepError}
-        onCloseConversation={onCloseConversation}
-        closingConversation={closingConversation}
-        closeError={closeError}
-        agentProfiles={agentProfiles}
-        slashCommands={slashCommands}
-        onNewChat={onNewChat}
-        accessNoticeRef={accessNoticeRef}
-      />
+        <ConversationPane
+          lc={lc}
+          displayItems={displayItems}
+          chatLogRef={chatLogRef}
+          virtuosoRef={virtuosoRef}
+          renderItem={renderConversationItem}
+          listContext={chatListContext}
+          selectionControls={commentUi.selectionControls}
+          commentRail={desktopCommentRail}
+          toolRail={isMobile ? sessionToolRail : null}
+          tail={chatListContext.footer}
+          statusCapsules={<SessionStatusCapsules lc={lc} />}
+        />
+
+        <SessionFooter
+          projectId={projectId}
+          onFork={onFork}
+          lc={lc}
+          viewer={viewer}
+          viewerId={viewerId}
+          selectedTextComposer={commentUi.selectedTextComposer}
+          onSleepConversation={onSleepConversation}
+          sleepingConversation={sleepingConversation}
+          sleepError={sleepError}
+          onCloseConversation={onCloseConversation}
+          closingConversation={closingConversation}
+          closeError={closeError}
+          agentProfiles={agentProfiles}
+          slashCommands={slashCommands}
+          onNewChat={onNewChat}
+          accessNoticeRef={accessNoticeRef}
+        />
+      </div>
+      {!isMobile && sessionToolRail}
       <p role="status" className="sr-only">
         {filePanelNotice}
       </p>

@@ -1,3 +1,4 @@
+import { chipClassName } from '@simple-agent-manager/ui';
 import { Lightbulb } from 'lucide-react';
 import { Link } from 'react-router';
 
@@ -29,12 +30,7 @@ export function SessionWorkingOnChip({
       // instead of pushing the chip row past the viewport. The row wraps, so on a phone the
       // chip gets a line of its own and may use all of it. The full title stays available as
       // the accessible name and the tooltip.
-      className="inline-flex max-w-full items-center gap-1 rounded border px-1.5 py-0.5 text-[10px] font-medium no-underline transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary sm:max-w-[22rem]"
-      style={{
-        color: 'var(--sam-color-accent-primary)',
-        borderColor: 'color-mix(in srgb, var(--sam-color-accent-primary) 40%, transparent)',
-        backgroundColor: 'color-mix(in srgb, var(--sam-color-accent-primary) 10%, transparent)',
-      }}
+      className={`${chipClassName({ tone: 'success' })} !shrink transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring sm:max-w-[22rem]`}
       /*
        * Leads with the action, because that is what a link's accessible name is for, and reads
        * as a sentence for both verbs — "Discussing the idea X — open it" did not.
@@ -47,7 +43,7 @@ export function SessionWorkingOnChip({
       title={`${verb}: ${idea.title}`}
       data-testid="session-working-on-chip"
     >
-      <Lightbulb size={10} aria-hidden="true" className="shrink-0" />
+      <Lightbulb size={14} strokeWidth={1.75} aria-hidden="true" className="shrink-0" />
       <span className="shrink-0">{verb}</span>
       <span className="min-w-0 truncate">{idea.title}</span>
     </Link>

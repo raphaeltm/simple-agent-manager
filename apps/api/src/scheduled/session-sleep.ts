@@ -13,6 +13,10 @@ import {
   sleepWorkspaceSession,
 } from '../services/session-sleep';
 import {
+  closeChatOfDeletedSleepWorkspace,
+  deferDeletedWorkspaceChatClose,
+} from '../services/session-sleep-deleted-workspace';
+import {
   parseSessionSleepFallbackRecord,
   sessionSleepEpisodeConfig,
   sessionSleepEpisodePhase,
@@ -27,6 +31,7 @@ import {
   rearmPreservationBlockedSleep,
   retireDeadWorkspaceSleepIntent,
 } from '../services/session-sleep-fallback-state';
+import { isPersonRequiredSleepEpisode } from '../services/session-sleep-requirement';
 import { sessionSleepRuntimeChanged } from '../services/session-sleep-runtime-identity';
 import {
   reconcileUnconfirmedSleepBlock,
@@ -268,6 +273,32 @@ export async function runSessionSleepSweep(
         candidate.workspaceStatus &&
         isDeadSleepIntentWorkspace(candidate.sleepStatus, candidate.workspaceStatus)
       ) {
+        // A deleted workspace can never finish this sleep, so its chat would stay open with no
+        // runtime and no wake path. Close it BEFORE retiring the intent: a retired intent is never
+        // selected again, so a close that failed after retirement would never be retried.
+        // Stopped and errored workspaces can still be restarted and keep their chat.
+        if (candidate.workspaceStatus === 'deleted') {
+          const closed = await closeChatOfDeletedSleepWorkspace(env, db, {
+            snapshotId: candidate.snapshotId,
+            chatSessionId: candidate.chatSessionId,
+            workspaceId,
+          }).then(
+            () => true,
+            (error: unknown) => {
+              log.warn('session_sleep_sweep.deleted_workspace_chat_close_failed', {
+                snapshotId: candidate.snapshotId,
+                chatSessionId: candidate.chatSessionId,
+                workspaceId,
+                error: sessionLifecycleError(env, error),
+              });
+              return false;
+            }
+          );
+          if (!closed) {
+            await deferDeletedWorkspaceChatClose(db, env, candidate.snapshotId, now);
+            continue;
+          }
+        }
         const retired = await retireDeadWorkspaceSleepIntent(db, {
           snapshotId: candidate.snapshotId,
           workspaceId,
@@ -301,6 +332,7 @@ export async function runSessionSleepSweep(
           userId: candidate.userId,
           sleepStatus: candidate.sleepStatus,
           sleepClaimId: candidate.sleepClaimId,
+          requiredByPerson: isPersonRequiredSleepEpisode(candidate),
         });
         if (!eligibility.eligible) {
           if (eligibility.reason === 'workspace_metadata_missing') {

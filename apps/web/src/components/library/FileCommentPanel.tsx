@@ -1,10 +1,9 @@
-import { Spinner } from '@simple-agent-manager/ui';
+import { IconButton, Spinner } from '@simple-agent-manager/ui';
 import { X } from 'lucide-react';
 
 import type { MessageCommentAction } from '../../lib/api/comments';
 import { CommentComposer } from '../project-message-view/comments/CommentComposer';
 import { CommentThreadList } from '../project-message-view/comments/CommentThread';
-import { FOCUS_RING } from './types';
 import { useLibraryFileComments } from './useLibraryFileComments';
 
 interface FileCommentPanelProps {
@@ -54,17 +53,14 @@ export function FileCommentPanel({
   };
 
   return (
-    <div className="flex h-full w-full flex-col overflow-hidden border-l border-border-default bg-surface">
-      <div className="flex shrink-0 items-center justify-between border-b border-border-default px-3 py-2">
-        <h4 className="text-sm font-semibold text-fg-primary">Comments</h4>
-        <button
-          type="button"
+    <div className="flex h-full w-full flex-col overflow-hidden">
+      <div className="flex shrink-0 items-center justify-between border-b border-[var(--sam-hairline)] py-1 pl-4 pr-1">
+        <h4 className="m-0 text-sm font-semibold text-fg-primary">Comments</h4>
+        <IconButton
+          label="Close comments"
+          icon={<X size={18} aria-hidden="true" />}
           onClick={onClose}
-          className={`rounded p-1 text-fg-muted hover:text-fg-primary ${FOCUS_RING}`}
-          aria-label="Close comments"
-        >
-          <X size={16} />
-        </button>
+        />
       </div>
 
       <div className="min-h-0 flex-1 overflow-auto p-3">
@@ -74,9 +70,7 @@ export function FileCommentPanel({
           </div>
         )}
 
-        {error && !loading && (
-          <p className="text-sm text-danger-fg">{error}</p>
-        )}
+        {error && !loading && <p className="text-sm text-danger-fg">{error}</p>}
 
         {!loading && !error && (
           <CommentThreadList
@@ -91,7 +85,7 @@ export function FileCommentPanel({
         )}
       </div>
 
-      <div className="shrink-0 border-t border-border-default p-3">
+      <div className="shrink-0 border-t border-[var(--sam-hairline)] p-3">
         {mutationError && (
           <p role="alert" className="mb-2 text-xs text-danger-fg">
             {mutationError}

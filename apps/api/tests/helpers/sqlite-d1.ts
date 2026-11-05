@@ -66,6 +66,26 @@ export function createAllSchemaTables(
   createSchemaTables(sqlite, tables);
 }
 
+/**
+ * Create the schema's declared plain-column indexes, which `createSchemaTables` omits. Use it
+ * for query-plan tests: production D1 has no planner statistics, so a secondary index the
+ * fixture lacks can win a plan that the fixture never sees. Expression indexes are skipped and
+ * partial indexes lose their WHERE clause, so this set is a superset of production's.
+ */
+export function createDeclaredIndexes(sqlite: Database.Database, tables: SQLiteTable[]): void {
+  for (const table of tables) {
+    const config = getTableConfig(table);
+    for (const index of config.indexes) {
+      const names = index.config.columns.map((column) => (column as { name?: unknown }).name);
+      if (!names.every((name): name is string => typeof name === 'string')) continue;
+      sqlite.exec(
+        `CREATE ${index.config.unique ? 'UNIQUE ' : ''}INDEX IF NOT EXISTS "${index.config.name}" ` +
+          `ON "${config.name}" (${names.map((name) => `"${name}"`).join(', ')})`
+      );
+    }
+  }
+}
+
 /** Faithful D1 boundary adapter backed by a real in-memory SQLite engine. */
 export function createSqliteD1(sqlite: Database.Database): D1Database {
   const normalize = (params: unknown[]) =>

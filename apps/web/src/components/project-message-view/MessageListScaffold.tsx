@@ -1,5 +1,5 @@
 import { Button } from '@simple-agent-manager/ui';
-import { forwardRef, type HTMLAttributes, type ReactNode, useEffect, useState } from 'react';
+import { forwardRef, type HTMLAttributes, type ReactNode } from 'react';
 
 /**
  * Data the virtualized list's Header needs, threaded through Virtuoso's `context`
@@ -58,26 +58,3 @@ export const CHAT_LIST_COMPONENTS = {
   Footer: ChatListFooter,
   Scroller: ChatListScroller,
 };
-
-/**
- * Measures the floating header's rendered height so the message list can pad
- * itself by the real value. The header stack (title wrapping to two lines,
- * status badges, error banner, output summary) varies from ~56px to several
- * hundred px — a fixed spacer leaves messages hidden behind the glass.
- */
-export function useFloatingHeaderHeight(): [(el: HTMLDivElement | null) => void, number] {
-  const [el, setEl] = useState<HTMLDivElement | null>(null);
-  const [height, setHeight] = useState(56);
-  useEffect(() => {
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(() => {
-      setHeight((prev) => {
-        const next = Math.ceil(el.getBoundingClientRect().height);
-        return next > 0 && next !== prev ? next : prev;
-      });
-    });
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [el]);
-  return [setEl, height];
-}

@@ -4,6 +4,7 @@ import type {
   NodeContainerListResponse,
   NodeLogFilter,
   NodeLogResponse,
+  NodeResourceUsageResponse,
   NodeResponse,
   NodeSystemInfo,
 } from '@simple-agent-manager/shared';
@@ -12,6 +13,11 @@ import { API_URL, request } from './client';
 
 export async function listNodes(): Promise<NodeResponse[]> {
   return request<NodeResponse[]>('/api/nodes');
+}
+
+/** Per-session CPU and memory history for the caller's nodes (the Nodes page). */
+export async function getNodeResourceUsage(): Promise<NodeResourceUsageResponse> {
+  return request<NodeResourceUsageResponse>('/api/nodes/resource-usage');
 }
 
 export async function getNode(id: string): Promise<NodeResponse> {

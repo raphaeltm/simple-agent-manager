@@ -49,6 +49,7 @@ export function selectSweepCandidates(
       sleepError: snapshots.sleepError,
       sleepFallbackJson: snapshots.sleepFallbackJson,
       sleepEpisodeStartedAt: snapshots.sleepEpisodeStartedAt,
+      sleepRequiredEpisodeStartedAt: snapshots.sleepRequiredEpisodeStartedAt,
       sleepEpisodeFailures: snapshots.sleepEpisodeFailures,
       updatedAt: snapshots.updatedAt,
       status: snapshots.status,

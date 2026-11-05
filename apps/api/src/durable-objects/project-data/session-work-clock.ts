@@ -113,3 +113,27 @@ export function isSameTurnRereport(
   }
   return true;
 }
+
+/**
+ * Keep the VM's own turn start from a report `upsertActivityState` dropped as stale. The VM sends
+ * each report on its own goroutine, so a turn's `prompting` report can land after that turn's
+ * `idle` report; its start is still evidence that a NEW turn ran. Without it a required sleep's
+ * change check (`sleepStateChanged`) cannot see a turn that started and ended between two reads.
+ * Monotonic, like the upsert's own `MAX`.
+ */
+export function keepReportedTurnStart(
+  sql: SqlStorage,
+  sessionId: string,
+  reportedPromptStartedAt: number | null
+): void {
+  if (reportedPromptStartedAt === null) return;
+  sql.exec(
+    `UPDATE session_state
+     SET reported_prompt_started_at = ?
+     WHERE session_id = ?
+       AND COALESCE(reported_prompt_started_at, 0) < ?`,
+    reportedPromptStartedAt,
+    sessionId,
+    reportedPromptStartedAt
+  );
+}

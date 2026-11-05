@@ -10,11 +10,6 @@ import {
 
 /** How often to poll task status during provisioning (ms). */
 export const TASK_STATUS_POLL_MS = 2000;
-/** Max sessions to load in the sidebar. Override via VITE_CHAT_SESSION_LIST_LIMIT. */
-const DEFAULT_CHAT_SESSION_LIST_LIMIT = 100;
-export const CHAT_SESSION_LIST_LIMIT = parseInt(
-  import.meta.env.VITE_CHAT_SESSION_LIST_LIMIT || String(DEFAULT_CHAT_SESSION_LIST_LIMIT)
-);
 
 /**
  * Prompts for "Ask an agent" on the Deployments pages, which open a new chat at

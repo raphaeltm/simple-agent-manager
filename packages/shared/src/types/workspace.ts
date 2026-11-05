@@ -116,11 +116,24 @@ export interface Node {
   updatedAt: string;
 }
 
+/** One workspace container's memory from the node heartbeat (container mode only). */
+export interface NodeWorkspaceMemoryMetric {
+  workspaceId: string;
+  memoryUsageBytes: number;
+  memoryLimitBytes?: number;
+  memoryPercent?: number;
+  containerId?: string;
+  containerName?: string;
+  collectedAt?: string;
+}
+
 /** Lightweight metrics from node heartbeat (stored in D1) */
 export interface NodeMetrics {
   cpuLoadAvg1?: number;
   memoryPercent?: number;
   diskPercent?: number;
+  /** Live per-workspace memory; refreshed by each heartbeat, no history kept. */
+  workspaceMemory?: NodeWorkspaceMemoryMetric[];
 }
 
 export interface NodeResponse {

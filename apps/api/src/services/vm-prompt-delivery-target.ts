@@ -13,6 +13,7 @@ import {
 } from './session-recovery';
 import type { ProjectEventWakeRecoveryGuard } from './session-recovery-authority';
 import { classifySessionRecoveryRefusal } from './session-recovery-refusals';
+import { sessionSleepClaimLeaseMs } from './session-snapshot-sleep-claim';
 
 export interface VmPromptDeliveryTarget {
   projectId: string;
@@ -84,6 +85,7 @@ interface DeliveryTargetRow {
   agent_session_status: string | null;
   agent_session_updated_at: string | null;
   snapshot_sleep_status: string | null;
+  snapshot_sleep_claimed_at: string | null;
   snapshot_runtime: string | null;
   snapshot_recovery_status: string | null;
   snapshot_recovery_task_id: string | null;
@@ -148,6 +150,23 @@ function isVmWakeHandoffPending(row: DeliveryTargetRow): boolean {
     (row.snapshot_recovery_status === 'restored' &&
       row.snapshot_recovery_workspace_id === row.workspace_id)
   );
+}
+
+/**
+ * A sleep owns this session: `preparing` inside its claim lease, or `stopping` (teardown, which
+ * rolls forward and never back to a deliverable chat). A required sleep cancels the turn first and
+ * the VM restarts the agent idle, so a prompt delivered now starts a new turn that aborts the sleep
+ * and runs work nobody asked for (production 2026-11-04, idea 01M6K6QTEE7T9KNYB7317D7Y8E). Held
+ * deliveries wake the session through the normal recovery path once it is `sleeping`. A
+ * `preparing` claim past its lease is abandoned and no longer holds anything. `stopping` has no
+ * lease of its own: it converges to `sleeping` or `terminal_failed`
+ * (`session-sleep-stopping-failure.ts`), and each delivery's own TTL bounds the wait.
+ */
+function isSleepClaimHoldingDelivery(env: Env, row: DeliveryTargetRow, now = Date.now()): boolean {
+  if (row.snapshot_sleep_status === 'stopping') return true;
+  if (row.snapshot_sleep_status !== 'preparing') return false;
+  const claimedAt = Date.parse(row.snapshot_sleep_claimed_at ?? '');
+  return Number.isFinite(claimedAt) && claimedAt + sessionSleepClaimLeaseMs(env) > now;
 }
 
 function readyTarget(
@@ -260,6 +279,7 @@ export async function resolveVmPromptDeliveryTarget(
             a.status AS agent_session_status,
             a.updated_at AS agent_session_updated_at,
             s.sleep_status AS snapshot_sleep_status,
+            s.sleep_claimed_at AS snapshot_sleep_claimed_at,
             s.runtime AS snapshot_runtime,
             s.recovery_status AS snapshot_recovery_status,
             s.recovery_task_id AS snapshot_recovery_task_id,
@@ -350,6 +370,10 @@ export async function resolveVmPromptDeliveryTarget(
       };
     }
     return { kind: 'retry', reason: `Target agent session is ${row.agent_session_status}` };
+  }
+  if (isSleepClaimHoldingDelivery(env, row)) {
+    // A retry cannot exhaust the delivery attempt budget (`applyPromptDeliveryResult`); TTL bounds it.
+    return { kind: 'retry', reason: `Session is going to sleep (${row.snapshot_sleep_status})` };
   }
   if (isVmWakeHandoffPending(row)) {
     // A not_ready retry cannot exhaust the delivery attempt budget (`applyPromptDeliveryResult`

@@ -42,6 +42,8 @@ Operations-project agents can also call `list_incident_queue`, `get_incident`, `
 
 Operations debugger tools (`ops_*`) are listed only to the Operations project while the `operations.debuggerTools` admin setting is not `off`. Each call is refused with JSON-RPC `-32602` and `data.reason` (`not_operations_project`, `mode_off`, `mode_read_only`, `not_task_scoped`, `task_not_found`, `task_owner_mismatch` or `not_superadmin`) unless the setting allows the capability, the token is a task token in the Operations project, and the task's owner is an active superadmin at call time. `ops_get_access_status` reports the mode, the allowed capabilities (`read`, `act`) and any denial reason without failing. Gated `ops_*` tools record every call in `operations_audit_log`. `ops_get_access_status` is the exception: it records task-scoped calls made inside the Operations project (outcome `allowed` or `denied`), and records nothing for calls from other projects or from tokens without a task.
 
+The read-only `ops_*` tools (`ops_find_anomalies`, `ops_list_nodes`, `ops_get_node`, `ops_get_session_story`, `ops_timeline`, `ops_search_errors`, `ops_query_worker_logs`, `ops_node_logs`, `ops_node_system_info`, `ops_node_events`, `ops_node_containers`, `ops_workspace_agent_sessions`, `ops_capture_debug_package`) need capability `read`. Each result is JSON with `untrustedContent: true`; free text from users, agents and nodes is returned inside `----- BEGIN UNTRUSTED ... -----` envelopes. Capped lists report `total`/`truncated`, and `ops_timeline` returns `continueUntil` for reading further back. See [Admin Settings](/docs/guides/admin-settings/#read-tools).
+
 Project eventing uses a pull loop over the canonical ProjectData `project_event_*` tables. Agents create a short-lived subscription with `create_project_event_subscription`, using v1 exact/set filters for `source`, `eventType`, `subjectType`, `subjectId`, and `severity`; recover existing subscriptions with `list_project_event_subscriptions`; inspect or cancel with `get_project_event_subscription` and `cancel_project_event_subscription`. Project, task, session, workspace, owner, and agent identity come from the verified MCP token, not tool arguments.
 
 `dispatch_task` accepts modern VM workload input through `resourceRequirements` with optional `minVcpu`, `minMemoryGb`, `minDiskGb`, and `exclusiveNode`. Known numeric fields must be finite and non-negative; `exclusiveNode: false` is preserved. Deprecated `vmSize` remains accepted as a legacy compatibility hint and is not expanded into hardware by the client or MCP handler.
@@ -254,6 +256,8 @@ Permanently stop a running workspace and delete any retained persistent-session 
 
 Checkpoint the workspace's agent HOME, harness identity, exact Git checkout, and repository work in progress, verify the snapshot, and put the session to sleep. Git state includes the saved `HEAD`, branch or detached state, canonical upstream metadata, clean local-only commits, working tree, and index. VM compute is stopped only after SAM re-verifies the durable manifest and every artifact the manifest still claims. A complete snapshot restores and validates that state; if the saved Git state cannot be recreated, wake reports explicit degraded recovery instead of success on a different commit. Sleep requires a complete final snapshot (`verifyAndBeginSleepTeardown` in `apps/api/src/services/session-sleep-execution.ts`). If the final checkpoint is degraded, or stops reporting progress and is recorded as degraded, the sleep request fails and the workspace stays awake. SAM then retries automatically, within the bounded sleep-failure budget (`SESSION_SLEEP_FAILURE_MAX_ATTEMPTS`, `SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS`); after that SAM releases the idle runtime anyway, sleeping on a verified Git recovery point when there is one and otherwise keeping only the transcript and successful backups ([SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot)). A session that already sleeps on an older degraded snapshot still wakes and reports the reduced restore state. Sending a follow-up in the same chat wakes the session during the seven-day retention window.
 
+This request, the chat's **Sleep** button (`POST /api/projects/:id/sessions/:sessionId/sleep`) and `sam chat sleep` are explicit sleeps, and an explicit sleep does not wait for the agent. If the agent is still in a turn, SAM first cancels it the way the chat's **Stop** button does: the agent process is stopped (SIGTERM, then SIGKILL if it does not exit) and restarted idle, and the turn ends as cancelled. The turn is not continued after wake. If the sleep then fails, the chat keeps a working agent (`endAgentTurnForRequiredSleep` in `apps/api/src/services/session-sleep-required-turn-end.ts`). If SAM cannot reach the agent, the request fails, and SAM keeps retrying the same sleep without waiting for the turn until it succeeds or the bounded fallback releases the runtime.
+
 ### `POST /api/workspaces/:id/restart`
 
 Restart a stopped or errored workspace. Provisions a new VM and recreates the container. A
@@ -377,6 +381,10 @@ Comment threads and replies accept an optional `mentions: [{ "userId": "..." }]`
 ### `GET /api/nodes`
 
 List all nodes for the authenticated user.
+
+### `GET /api/nodes/resource-usage`
+
+CPU and memory for each of the caller's own workspaces on the caller's own nodes, for the Nodes page (`apps/api/src/services/node-resource-usage.ts`). Returns `{ windowMinutes, windowStart, windowEnd, bucketMs, historyOmittedCount, historyTruncatedCount, workspacesOmitted, workspaces }`. Each workspace has `workspaceId`, `nodeId`, `projectId`, `projectName`, `chatSessionId`, `title` (the chat topic, then the task title, then the workspace name), `ownerUserId`, `ownerName`, `isMine`, `status`, `holdsReservation` (true while running, creating or recovering), `createdAt`, `reservation` (`{ cpuMillis, memoryMb, diskMb, exclusiveNode }` or `null`) and `series`: per-`bucketMs` `{ start, cpuMillis, memoryBytes }` from the workspace's resource history over the last `windowMinutes` (admin setting `nodes.usageWindowMinutes`, default 60). Project fields are returned only for projects the caller is an active member of; otherwise `projectId`, `projectName` and `chatSessionId` are `null` and `title` is a neutral `Workspace <id>` label. History arrives in batches, so `historyEndsAt` says where it currently stops. At most `nodes.usageMaxWorkspaces` (default 500) workspaces are listed, running and most recently changed first; `workspacesOmitted` says whether more exist. History is read only for workspaces that are still running or changed recently, at most `nodes.usageMaxHistoryWorkspaces` (default 150) per request, running first and each machine's newest before any machine's second; `historyOmittedCount` and each workspace's `historyOmitted` say what was left out. Each read is bounded by time (`nodes.usageChunkLookbackMinutes` before the window, default 60) and by `nodes.usageMaxChunksPerWorkspace` (default 48) chunks per workspace, newest first; `historyTruncatedCount` and `historyTruncated` say which workspaces lost their oldest minutes. Live per-workspace memory is in each node's `lastMetrics.workspaceMemory` from `GET /api/nodes`.
 
 ### `GET /api/nodes/:id`
 
@@ -886,6 +894,28 @@ Rate-limited to 20 submissions per clock hour per user (`RATE_LIMIT_REPORT_ISSUE
 ### `POST /api/admin/observability/feedback-triage`
 
 Superadmin only. Runs a platform-error triage sweep immediately instead of waiting for the hourly cron. The Operations project itself is configured from **Admin → Integrations** or the environment fallback; this endpoint remains the manual way to verify automated triage without waiting up to an hour.
+
+## Operations Approvals
+
+These endpoints back **Admin → Approvals** and require an approved, active **superadmin**. They
+decide what an Operations-project agent asked to do with `ops_request_action`; see
+[Approved actions](/docs/guides/admin-settings/#approved-actions).
+
+### `GET /api/admin/operations/approvals`
+
+Lists approvals, pending first, then newest first: `{ "approvals": [...] }`. Optional `status`
+(`pending`, `approved`, `denied`, `expired`, `executed`) and `limit` (up to 200).
+
+### `GET /api/admin/operations/approvals/:id`
+
+One approval: `{ "approval": {...} }`, or `404`.
+
+### `POST /api/admin/operations/approvals/:id/decision`
+
+Body: `{ "decision": "approve" | "deny", "note"?: string }` (note up to 1,000 characters). Decides
+a pending request once and delivers the decision to the requesting agent's chat. Returns
+`{ "approval", "delivered" }`. Returns `409` if the request was already decided or has expired,
+and `404` for an unknown ID.
 
 ## Admin Settings
 

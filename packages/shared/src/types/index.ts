@@ -195,6 +195,7 @@ export type {
   NodeStatus,
   NodeSystemInfo,
   NodeTransport,
+  NodeWorkspaceMemoryMetric,
   PortsResponse,
   UpdateWorkspaceRequest,
   VMLocation,
@@ -499,6 +500,25 @@ export type {
   WebPushSubscriptionsResponse,
 } from './notification';
 export { NOTIFICATION_CHANNELS, NOTIFICATION_TYPES, NOTIFICATION_URGENCIES } from './notification';
+export type {
+  DecideOperationsActionApprovalRequest,
+  DecideOperationsActionApprovalResponse,
+  ListOperationsActionApprovalsResponse,
+  OperationsAction,
+  OperationsActionApproval,
+  OperationsActionTargetType,
+  OperationsApprovalDecision,
+  OperationsApprovalStatus,
+} from './operations-actions';
+export {
+  OPERATIONS_ACTION_LABELS,
+  OPERATIONS_ACTION_TARGET_TYPES,
+  OPERATIONS_ACTIONS,
+  OPERATIONS_APPROVAL_DECISIONS,
+  OPERATIONS_APPROVAL_STATUSES,
+  OPERATIONS_AUTO_SAFE_ACTIONS,
+  OPERATIONS_IRREVERSIBLE_ACTIONS,
+} from './operations-actions';
 
 // Shared session access
 export type {
@@ -963,6 +983,13 @@ export type {
   SandboxFileReadResult,
 } from './sandbox';
 
+// Nodes page resource usage
+export type {
+  NodeResourceReservation,
+  NodeResourceUsageResponse,
+  NodeResourceUsageSeries,
+  NodeWorkspaceResourceUsage,
+} from './node-resource-usage';
 // Resource Requirements & Reservations
 export type {
   LegacyVmSizeResolutionInput,

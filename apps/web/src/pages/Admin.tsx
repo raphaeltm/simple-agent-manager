@@ -18,6 +18,7 @@ const ADMIN_TABS: Tab[] = [
   { id: 'quotas', label: 'Quotas', path: 'quotas' },
   { id: 'errors', label: 'Errors', path: 'errors' },
   { id: 'diagnoses', label: 'Diagnoses', path: 'diagnoses' },
+  { id: 'approvals', label: 'Approvals', path: 'approvals' },
   { id: 'overview', label: 'Overview', path: 'overview' },
   { id: 'logs', label: 'Logs', path: 'logs' },
   { id: 'stream', label: 'Stream', path: 'stream' },

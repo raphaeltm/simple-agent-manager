@@ -34,6 +34,12 @@ interface MessageBubbleProps {
    * action buttons switch from their light-on-dark palette to the theme's colors.
    */
   bubbleClassName?: string;
+  /**
+   * `bubble` (default) draws the message as a card capped at 80% of the row. `flush` lays it
+   * on the surface at the full row width with no padding, rounding or built-in colors, for
+   * agent replies that should read like a document rather than a chat bubble.
+   */
+  layout?: 'bubble' | 'flush';
 }
 
 /**
@@ -300,8 +306,10 @@ export const MessageBubble = React.memo(function MessageBubble({
   onPlayAudio,
   onFileClick,
   bubbleClassName,
+  layout = 'bubble',
 }: MessageBubbleProps) {
   const isUser = role === 'user';
+  const flush = layout === 'flush';
   const renderMermaid = !streaming && !animated;
   // When onFileClick is provided for agent messages, build components that intercept file-path links.
   // useMemo ensures stable references — react-markdown won't unmount/remount custom renderers.
@@ -337,12 +345,14 @@ export const MessageBubble = React.memo(function MessageBubble({
   return (
     <div className={`flex ${isUser ? 'justify-end' : 'justify-start'} mb-4`}>
       <div
-        className={`max-w-[80%] min-w-0 rounded-lg px-4 py-3 ${
+        className={`min-w-0 ${flush ? 'w-full' : 'max-w-[80%] rounded-lg px-4 py-3'} ${
           bubbleClassName
             ? bubbleClassName
-            : isUser
-              ? 'bg-blue-600 text-white'
-              : 'bg-white border border-gray-200 text-gray-900'
+            : flush
+              ? ''
+              : isUser
+                ? 'bg-blue-600 text-white'
+                : 'bg-white border border-gray-200 text-gray-900'
         }`}
       >
         <div className="prose prose-sm max-w-none overflow-x-auto break-words">
@@ -368,7 +378,7 @@ export const MessageBubble = React.memo(function MessageBubble({
             hideTts={isUser}
             // Light-on-dark icons belong to the built-in solid blue user bubble;
             // a bubbleClassName replaces that background with themed colors.
-            variant={isUser && !bubbleClassName ? 'on-dark' : 'default'}
+            variant={isUser && !bubbleClassName && !flush ? 'on-dark' : 'default'}
             align={isUser ? 'end' : 'start'}
             onPlayAudio={isUser ? undefined : onPlayAudio}
           />

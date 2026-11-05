@@ -6,6 +6,7 @@ import type {
   TaskMode,
   UpdateAgentProfileRequest,
 } from '@simple-agent-manager/shared';
+import { paneClassName } from '@simple-agent-manager/ui';
 import { Paperclip } from 'lucide-react';
 import type { MutableRefObject } from 'react';
 import { useId, useState } from 'react';
@@ -168,7 +169,8 @@ export function ChatInput({
   const optionsPanelId = useId();
 
   return (
-    <div className="relative shrink-0 glass-chrome border-x-0 border-b-0 px-4 py-3 before:content-[''] before:absolute before:top-0 before:left-[15%] before:right-[15%] before:h-px before:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.18)_0%,transparent_70%)] before:pointer-events-none">
+    // The new-chat message box is a SAM Glass slab, like the follow-up composer in a chat.
+    <div className={`${paneClassName('slab')} shrink-0 px-3 py-3 md:px-4`}>
       {error && (
         <div role="alert" className="p-2 px-3 mb-2 rounded-sm bg-danger-tint text-danger text-xs">
           {error}

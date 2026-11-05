@@ -7,6 +7,10 @@ import { runAgentEmailRecovery } from '../services/agent-email/recovery';
 import { reconcileDiagnosisRuns } from '../services/diagnosis-runner';
 import { reconcileDiagnosticIncidents } from '../services/diagnostic-incident-reconciliation';
 import { runGitHubTriggerRecovery } from '../services/github-trigger-recovery';
+import {
+  runLifecycleLatencyDailyEvaluation,
+  runLifecycleLatencyWatchdog,
+} from '../services/lifecycle-latency';
 import { isOperationalLoopEnabled } from '../services/operational-kill-switch';
 import { checkProvisioningTimeouts } from '../services/timeout';
 import { migrateOrphanedWorkspaces } from '../services/workspace-migration';
@@ -17,12 +21,14 @@ import { runScheduledComposeImageArtifactCleanup } from './compose-image-artifac
 import { runComputeUsageCleanup } from './compute-usage-cleanup';
 import { runCronTriggerSweep } from './cron-triggers';
 import { runScheduledDeploymentReleaseRetention } from './d1-retention';
+import { runDebugPackagePurge } from './debug-package-purge';
 import { runDeploymentNodeCleanup } from './deployment-node-cleanup';
 import { notifyFailedSweeps } from './failed-sweep-notifications';
 import { runIncidentTriggerSweep } from './incident-triggers';
 import { runNodeCleanupSweep } from './node-cleanup';
 import { runObservabilityPurge } from './observability-purge';
 import { runOperationsAuditPurge } from './operations-audit-purge';
+import { runOperationsTelemetryRetention } from './operations-telemetry-retention';
 import {
   isHourlyPlatformMaintenanceCron,
   scheduleHourlyPlatformMaintenance,
@@ -90,6 +96,16 @@ export async function scheduled(
     );
     // Separate promise: an analytics failure must not skip the audit retention purge.
     ctx.waitUntil(runOperationsAuditPurge(env, controller.cron));
+    ctx.waitUntil(runDebugPackagePurge(env, controller.cron));
+    ctx.waitUntil(runOperationsTelemetryRetention(env, controller.cron));
+    // Separate promise again, so none of the jobs above can suppress the latency check.
+    ctx.waitUntil(
+      runLifecycleLatencyDailyEvaluation(env).catch((err) => {
+        log.error('cron.lifecycle_latency_daily_failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      })
+    );
     return;
   }
 
@@ -173,6 +189,9 @@ export async function scheduled(
     runObservabilityPurge(env)
   );
   const cronTriggers = await sweeps.isolate('cron_triggers', () => runCronTriggerSweep(env));
+  const lifecycleLatency = await sweeps.isolate('lifecycle_latency_watchdog', () =>
+    runLifecycleLatencyWatchdog(env)
+  );
   const incidentTriggers = await sweeps.isolate('incident_triggers', () =>
     runIncidentTriggerSweep(env)
   );
@@ -255,6 +274,8 @@ export async function scheduled(
     diagnosticIncidentsDeleted: incidentRecovery?.deleted,
     diagnosticIncidentMetadataRepaired: incidentRecovery?.incidentMetadataRepaired,
     provisioningTimedOut: timedOut,
+    lifecycleLatencyAlerted: lifecycleLatency?.alerted,
+    lifecycleLatencyDeferred: lifecycleLatency?.deferred,
     workspacesMigrated: migrated,
     sleepLifecycleRepairSelected: sessionSleepLifecycleRepair?.selected,
     sleepLifecycleRepairRepaired: sessionSleepLifecycleRepair?.repaired,
