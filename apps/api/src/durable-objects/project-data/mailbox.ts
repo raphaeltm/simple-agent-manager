@@ -26,6 +26,26 @@ import { parseMailboxMessageRow } from './row-schemas';
 
 const log = createModuleLogger('mailbox');
 
+/**
+ * Parses inbox rows, skipping (and logging) any that no longer match the row schema, so
+ * one malformed row cannot fail a whole list read (rule 50).
+ */
+function parseMailboxRows(rows: Record<string, unknown>[], context: string): AgentMailboxMessage[] {
+  const messages: AgentMailboxMessage[] = [];
+  for (const row of rows) {
+    try {
+      messages.push(parseMailboxMessageRow(row));
+    } catch (error) {
+      log.warn('mailbox.row_skipped', {
+        context,
+        messageId: typeof row.id === 'string' ? row.id : null,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return messages;
+}
+
 // ─── Core operations ───────────────────────────────────────────────────────
 
 export interface EnqueueOptions {
@@ -63,8 +83,10 @@ export function enqueueMessage(sql: SqlStorage, opts: EnqueueOptions): AgentMail
     opts.ackRequired === undefined ? (isDurable ? 1 : 0) : opts.ackRequired ? 1 : 0;
   const ttlMs =
     typeof opts.ttlMs === 'number' && opts.ttlMs > 0 ? opts.ttlMs : MAILBOX_DEFAULTS.TTL_MS;
-  const expiresAt = typeof opts.expiresAt === 'number' && Number.isFinite(opts.expiresAt)
-    ? Math.min(now + ttlMs, opts.expiresAt) : now + ttlMs;
+  const expiresAt =
+    typeof opts.expiresAt === 'number' && Number.isFinite(opts.expiresAt)
+      ? Math.min(now + ttlMs, opts.expiresAt)
+      : now + ttlMs;
 
   // Enforce per-project message cap
   if (opts.maxMessages && isMailboxAtCapacity(sql, opts.maxMessages)) {
@@ -175,7 +197,7 @@ export function getPendingMessages(
       limit
     )
     .toArray();
-  return rows.map(parseMailboxMessageRow);
+  return parseMailboxRows(rows, 'pending');
 }
 
 /**
@@ -183,7 +205,7 @@ export function getPendingMessages(
  */
 export function getMessage(sql: SqlStorage, messageId: string): AgentMailboxMessage | null {
   const [row] = sql.exec('SELECT * FROM session_inbox WHERE id = ?', messageId).toArray();
-  return row ? parseMailboxMessageRow(row) : null;
+  return row ? (parseMailboxRows([row], 'get')[0] ?? null) : null;
 }
 
 /**
@@ -318,7 +340,7 @@ export function getUnackedMessages(
       now
     )
     .toArray();
-  return rows.map(parseMailboxMessageRow);
+  return parseMailboxRows(rows, 'ack_timeout');
 }
 
 /**
@@ -388,7 +410,7 @@ export function listMessages(
     .toArray();
 
   return {
-    messages: rows.map(parseMailboxMessageRow),
+    messages: parseMailboxRows(rows, 'list'),
     total,
   };
 }

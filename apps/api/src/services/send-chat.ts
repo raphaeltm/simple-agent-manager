@@ -8,6 +8,7 @@ import { expectJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
 import { forwardPromptToLiveAgent } from '../routes/chat-prompt-forward';
+import { getMcpLimits } from '../routes/mcp/_helpers';
 import { type SendChatMessageSchema } from '../schemas';
 import { enrichMessageWithMentions } from '../services/mention-enrichment';
 import * as projectDataService from '../services/project-data';
@@ -101,6 +102,10 @@ export async function sendChat(
   if (deliveryIntent === 'steer' && attachments.length > 0) {
     // A steer carries text into the running turn; files travel with a queued prompt.
     throw errors.badRequest('Attachments cannot be sent as a steer; queue the message instead');
+  }
+  // The same bound as an agent's steer through send_durable_message (MAILBOX_MESSAGE_MAX_LENGTH).
+  if (deliveryIntent === 'steer' && content.length > getMcpLimits(env).mailboxMessageMaxLength) {
+    throw errors.badRequest('Message is too long to steer; queue it instead');
   }
   if (attachments.length > 0) {
     const validation = await validateAttachments(env, userId, attachments);

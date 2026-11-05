@@ -162,6 +162,27 @@ describe('live steer delivery adapter', () => {
   });
 
   it.each([
+    ['an older protocol version', 0],
+    ['a newer protocol version', 2],
+  ])(
+    'gives a VM agent advertising %s the queue without sending anything',
+    async (_name, version) => {
+      const capabilities = {
+        ...fixture.capabilities,
+        steering: { ...(fixture.capabilities.steering as Record<string, unknown>), version },
+      };
+      vm({ capabilities, steer: () => fixture.injectedSteer });
+      const input = steerInput();
+      expect(await submitSteerDelivery(envWithTarget(runningRow), input)).toMatchObject({
+        kind: 'steer_fallback',
+        reason: 'runtime_steering_unsupported',
+      });
+      expect(steerCalls()).toHaveLength(0);
+      expect(input.beforeSubmit).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
     ['sleeping VM workspace', { ...runningRow, workspace_status: 'sleeping' }],
     [
       'slept Instant container',

@@ -31,6 +31,7 @@ import {
   errorMessage,
   getDeliveryCapabilities,
   httpStatus,
+  runSideEffectGuard,
 } from './vm-prompt-delivery-runtime-queries';
 import {
   resolveVmPromptDeliveryTarget,
@@ -73,10 +74,6 @@ function ambiguous(
   };
 }
 
-async function runGuard(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult | null> {
-  return input.beforeSideEffect ? input.beforeSideEffect() : null;
-}
-
 async function resolveSteerTarget(
   env: Env,
   input: VmPromptDeliveryAdapterInput
@@ -88,7 +85,7 @@ async function resolveSteerTarget(
         input.projectId,
         input.claim.message.targetSessionId,
         input.sourceTaskGuard,
-        () => runGuard(input),
+        () => runSideEffectGuard(input),
         { allowWake: false }
       );
   if (resolution.kind === 'guarded') return resolution.result;
@@ -101,7 +98,7 @@ async function resolveSteerTarget(
         )
       : fallback('runtime_not_ready', resolution.reason);
   }
-  const guarded = await runGuard(input);
+  const guarded = await runSideEffectGuard(input);
   if (guarded) return guarded;
   const capabilities = await getDeliveryCapabilities(
     env,
@@ -281,7 +278,7 @@ export async function submitSteerDelivery(
         recoverContainerOnTimeout: false,
         ...(input.sourceTaskGuard ? { sourceTaskGuard: input.sourceTaskGuard } : {}),
         beforeExternalMutation: async () => {
-          const denied = await runGuard(input);
+          const denied = await runSideEffectGuard(input);
           if (denied) throw new PromptDeliveryGuardError(denied);
         },
         body: JSON.stringify({
@@ -337,7 +334,7 @@ export async function reconcileSteerDelivery(
         input.projectId,
         input.claim.message.targetSessionId,
         input.sourceTaskGuard,
-        () => runGuard(input),
+        () => runSideEffectGuard(input),
         { allowWake: false }
       );
   if (resolution.kind === 'guarded') return resolution.result;

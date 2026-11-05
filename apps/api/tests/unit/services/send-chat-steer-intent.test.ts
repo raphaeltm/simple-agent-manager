@@ -93,4 +93,17 @@ describe('composer delivery intent', () => {
     expect(mocks.cancel).not.toHaveBeenCalled();
     expect(mocks.accept).not.toHaveBeenCalled();
   });
+
+  it('refuses a steer longer than the mailbox bound, and still queues the same text', async () => {
+    const limited = { ...env, MAILBOX_MESSAGE_MAX_LENGTH: '16' } as unknown as Env;
+    const long = 'x'.repeat(17);
+    await expect(
+      sendChat(limited, 'owner', 'project', 'chat', { content: long, deliveryIntent: 'steer' })
+    ).rejects.toThrow('too long to steer');
+    expect(mocks.cancel).not.toHaveBeenCalled();
+    expect(mocks.accept).not.toHaveBeenCalled();
+    // The bound is a steer bound: the same message as Queue next is accepted.
+    await sendChat(limited, 'owner', 'project', 'chat', { content: long });
+    expect(mocks.accept).toHaveBeenCalledTimes(1);
+  });
 });
