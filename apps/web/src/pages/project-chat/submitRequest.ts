@@ -1,8 +1,4 @@
-import type {
-  ResourceRequirements,
-  TaskMode,
-  WorkspaceProfile,
-} from '@simple-agent-manager/shared';
+import type { ResourceRequirements, TaskMode, WorkspaceProfile } from '@simple-agent-manager/shared';
 
 import type { TaskAttachmentRef } from '../../lib/api';
 import type { submitTask } from '../../lib/api';
@@ -37,9 +33,7 @@ export function buildBaseSubmitRequest({
   pendingDerived: PendingDerived | null;
 }>): SubmitTaskPayload {
   const derivedFields = getDerivedSubmitFields(pendingDerived);
-  const resourceFields = selectedResourceRequirements
-    ? { resourceRequirements: selectedResourceRequirements }
-    : {};
+  const resourceFields = selectedResourceRequirements ? { resourceRequirements: selectedResourceRequirements } : {};
 
   if (agentProfileId) {
     return {
@@ -58,27 +52,20 @@ export function buildBaseSubmitRequest({
     ...(skillId ? { skillId } : {}),
     ...resourceFields,
     workspaceProfile: selectedWorkspaceProfile,
-    ...(selectedWorkspaceProfile !== 'lightweight' && devcontainerConfigName
-      ? { devcontainerConfigName }
-      : {}),
+    ...(selectedWorkspaceProfile !== 'lightweight' && devcontainerConfigName ? { devcontainerConfigName } : {}),
     taskMode: selectedTaskMode,
     ...derivedFields,
   };
 }
 
-export function getCompletedAttachmentRefs(
-  attachments: Array<{ status: string; ref?: TaskAttachmentRef | null }>
-) {
+export function getCompletedAttachmentRefs(attachments: Array<{ status: string; ref?: TaskAttachmentRef | null }>) {
   return attachments.reduce<TaskAttachmentRef[]>((refs, attachment) => {
     if (attachment.status === 'complete' && attachment.ref) refs.push(attachment.ref);
     return refs;
   }, []);
 }
 
-export function withAttachmentRefs(
-  baseRequest: SubmitTaskPayload,
-  attachmentRefs: TaskAttachmentRef[]
-): SubmitTaskPayload {
+export function withAttachmentRefs(baseRequest: SubmitTaskPayload, attachmentRefs: TaskAttachmentRef[]): SubmitTaskPayload {
   if (attachmentRefs.length === 0) return baseRequest;
   return { ...baseRequest, attachments: attachmentRefs };
 }
