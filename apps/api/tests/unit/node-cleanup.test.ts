@@ -277,7 +277,8 @@ describe('runNodeCleanupSweep', () => {
       .mocked(env.DATABASE.prepare)
       .mock.calls.map(([sql]) => sql)
       .filter((sql) => sql.includes('FROM nodes n'));
-    expect(nodeCandidateQueries).toHaveLength(8);
+    // The max-lifetime sweep runs two bounded pages (`max-lifetime-candidates.ts`).
+    expect(nodeCandidateQueries).toHaveLength(9);
     expect(nodeCandidateQueries.every((sql) => sql.includes('cleanup_backoff_until'))).toBe(true);
   });
 

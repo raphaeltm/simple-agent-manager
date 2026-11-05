@@ -238,9 +238,14 @@ test.describe('Workflow run page', () => {
     const detail = page.getByTestId('workflow-step-detail');
     await expect(detail).toContainText('Step 2 of 3 · waits for an event');
     await expect(detail.getByText('Listening', { exact: true })).toBeVisible();
-    // The fixture's clock starts when the file loads, so the countdown may have moved a minute.
+    // The fixtures' clock is fixed when a worker first loads them, which on a reused worker
+    // can be many minutes before this test runs, so expect the time actually left.
+    const timeoutAt = WAITING.steps.find((s) => s.key === 'wait-ci')?.wait?.timeoutAt ?? '';
+    const left = Math.round((Date.parse(timeoutAt) - Date.now()) / 60_000);
     await expect(page.getByTestId('workflow-step-explanation')).toHaveText(
-      /^Listening for CI to finish on pull request #2405\. Gives up in [34]\d min\.$/
+      new RegExp(
+        `^Listening for CI to finish on pull request #2405\\. Gives up in (${left - 1}|${left}|${left + 1}) min\\.$`
+      )
     );
     await expect(detail.getByText('What it waits for')).toBeVisible();
     await expect(detail.getByText('check_suite.completed')).toBeVisible();

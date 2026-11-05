@@ -58,7 +58,10 @@ vi.mock('react-router', () => ({
   ),
 }));
 
-vi.mock('@simple-agent-manager/ui', () => ({
+// Spreads the real module so new SAM Glass primitives (Chip, AvatarStack, paneClassName) render
+// for real; only the pieces this suite needs to observe are replaced.
+vi.mock('@simple-agent-manager/ui', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@simple-agent-manager/ui')>()),
   Button: ({
     children,
     onClick,
@@ -740,19 +743,14 @@ describe('SessionHeader', () => {
     expect(screen.getByText('Test Session')).toBeInTheDocument();
   });
 
-  describe('hasContentBelow prop', () => {
-    it('includes bottom rounding and green glow when hasContentBelow is false (default)', () => {
+  describe('SAM Glass surface', () => {
+    // The header is a slab laid over the conversation pane, not chrome floating over it: it
+    // keeps its own rounded corners whatever follows it.
+    it('renders as a slab with its own rounded corners', () => {
       const { container } = renderHeader();
       const outer = container.firstElementChild as HTMLElement;
-      expect(outer.className).toContain('rounded-b-2xl');
-      expect(outer.className).toContain('after:');
-    });
-
-    it('suppresses bottom rounding and green glow when hasContentBelow is true', () => {
-      const { container } = renderHeader({ hasContentBelow: true });
-      const outer = container.firstElementChild as HTMLElement;
-      expect(outer.className).not.toContain('rounded-b-2xl');
-      expect(outer.className).not.toContain('after:');
+      expect(outer.className).toContain('sam-glass--slab');
+      expect(outer.className).toContain('rounded-[var(--sam-radius-slab)]');
     });
   });
 });

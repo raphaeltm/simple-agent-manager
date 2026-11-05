@@ -4,7 +4,7 @@
  * Six booleans and twelve handlers for the panels the session tool rail opens — Timeline,
  * Comments, Resources, Automation, Related and Share. They lived inline in
  * `SessionMessageView`, which this extraction keeps under the 500-line ceiling
- * (`.claude/rules/18-file-size-limits.md`); the behaviour is unchanged.
+ * (`.claude/rules/18-file-size-limits.md`).
  *
  * Every handler is `useCallback`-stable, which is load-bearing rather than tidy: they feed
  * `useSessionTools`' memoised action array, and an inline arrow would hand the rail a new prop
@@ -35,26 +35,40 @@ export interface SessionOverlays {
   closeShare: () => void;
 }
 
-export function useSessionOverlays(): SessionOverlays {
-  const [showTimeline, setShowTimeline] = useState(false);
-  const [showComments, setShowComments] = useState(false);
-  const [showResources, setShowResources] = useState(false);
-  const [showAutomation, setShowAutomation] = useState(false);
-  const [showRelated, setShowRelated] = useState(false);
-  const [showShare, setShowShare] = useState(false);
+/**
+ * The drawers and dialogs the rail opens are exclusive: opening one closes the others, because
+ * each is a SAM Glass overlay over the chat, and two stacked overlays would blur one another
+ * into an unreadable smear (`apps/web/.claude/rules/80-sam-glass.md`). Comments stay independent: on desktop they are a
+ * rail docked inside the conversation, not an overlay, and must survive opening Timeline.
+ */
+type ExclusivePanel = 'timeline' | 'resources' | 'automation' | 'related' | 'share';
 
-  const openTimeline = useCallback(() => setShowTimeline(true), []);
-  const closeTimeline = useCallback(() => setShowTimeline(false), []);
+export function useSessionOverlays(): SessionOverlays {
+  const [panel, setPanel] = useState<ExclusivePanel | null>(null);
+  const [showComments, setShowComments] = useState(false);
+  const closeIf = useCallback(
+    (target: ExclusivePanel) => setPanel((current) => (current === target ? null : current)),
+    []
+  );
+
+  const showTimeline = panel === 'timeline';
+  const showResources = panel === 'resources';
+  const showAutomation = panel === 'automation';
+  const showRelated = panel === 'related';
+  const showShare = panel === 'share';
+
+  const openTimeline = useCallback(() => setPanel('timeline'), []);
+  const closeTimeline = useCallback(() => closeIf('timeline'), [closeIf]);
   const openComments = useCallback(() => setShowComments(true), []);
   const closeComments = useCallback(() => setShowComments(false), []);
-  const openResources = useCallback(() => setShowResources(true), []);
-  const closeResources = useCallback(() => setShowResources(false), []);
-  const openAutomation = useCallback(() => setShowAutomation(true), []);
-  const closeAutomation = useCallback(() => setShowAutomation(false), []);
-  const openRelated = useCallback(() => setShowRelated(true), []);
-  const closeRelated = useCallback(() => setShowRelated(false), []);
-  const openShare = useCallback(() => setShowShare(true), []);
-  const closeShare = useCallback(() => setShowShare(false), []);
+  const openResources = useCallback(() => setPanel('resources'), []);
+  const closeResources = useCallback(() => closeIf('resources'), [closeIf]);
+  const openAutomation = useCallback(() => setPanel('automation'), []);
+  const closeAutomation = useCallback(() => closeIf('automation'), [closeIf]);
+  const openRelated = useCallback(() => setPanel('related'), []);
+  const closeRelated = useCallback(() => closeIf('related'), [closeIf]);
+  const openShare = useCallback(() => setPanel('share'), []);
+  const closeShare = useCallback(() => closeIf('share'), [closeIf]);
 
   return useMemo(
     () => ({

@@ -527,7 +527,10 @@ test.describe('Project chat composer audit', () => {
     );
 
     await page.getByRole('button', { name: /^To / }).click();
-    await page.getByRole('dialog', { name: 'Choose a profile' }).getByRole('button', { name: /^New$/ }).click();
+    await page
+      .getByRole('dialog', { name: 'Choose a profile' })
+      .getByRole('button', { name: /^New$/ })
+      .click();
     await chooseWizardOption(page, /OpenAI Codex/i);
     await chooseWizardOption(page, /Chat and explore/i);
     await chooseWizardOption(page, /Instant container/i);
@@ -570,8 +573,8 @@ test.describe('Project chat composer audit', () => {
   }, testInfo) => {
     await openMockedChat(page, 'provisioning', PROVISIONING_SESSION.id);
 
-    await expect(page.getByText('Installing dependencies (3/4)')).toBeVisible();
-    await expect(page.getByText(/Usually takes 2-4 minutes/)).toBeVisible();
+    await expect(page.getByText('Installing dependencies · 3 of 4')).toBeVisible();
+    await expect(page.getByText(/This usually takes 2–4 minutes/)).toBeVisible();
     await expect(page.getByText('sam/provisioning-progress-with-long-branch-name')).toBeVisible();
     await captureComposerAudit(
       page,
@@ -719,13 +722,11 @@ for (const mode of ['new', 'active'] as const) {
     await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeInViewport();
     await screenshot(page, `attachments-${mode}-ready-${getProjectSuffix(testInfo.project.name)}`);
     await assertNoOverflow(page);
-    await page
-      .locator('input[type=file]')
-      .setInputFiles({
-        name: 'failed.txt',
-        mimeType: 'text/plain',
-        buffer: Buffer.from('failure'),
-      });
+    await page.locator('input[type=file]').setInputFiles({
+      name: 'failed.txt',
+      mimeType: 'text/plain',
+      buffer: Buffer.from('failure'),
+    });
     await expect(page.getByRole('button', { name: 'Send', exact: true })).toBeDisabled();
     await screenshot(page, `attachments-${mode}-error-${getProjectSuffix(testInfo.project.name)}`);
     await assertNoOverflow(page);

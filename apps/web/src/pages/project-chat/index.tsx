@@ -1,5 +1,5 @@
-import { Alert, Spinner } from '@simple-agent-manager/ui';
-import { List, Settings } from 'lucide-react';
+import { Pane, Spinner } from '@simple-agent-manager/ui';
+import { PanelRight } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
@@ -13,6 +13,7 @@ import { ZenPeekRail } from '../../components/ZenPeekRail';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { resolveAttentionAnswer } from '../../lib/api';
 import { sessionWidthForMode } from '../../lib/focus-mode';
+import { AttentionAnswerNotice, type AttentionAnswerStatus } from './AttentionAnswerNotice';
 import { ChatInput } from './ChatInput';
 import { DerivedSessionBanner } from './DerivedSessionBanner';
 import { FocusStrip } from './FocusStrip';
@@ -23,25 +24,47 @@ import { ProvisioningIndicator } from './ProvisioningIndicator';
 import { isTerminal } from './types';
 import { useProjectChatState } from './useProjectChatState';
 
+/** Gaps between the conversation column's panes: 10px on phones, the 14px gutter above. */
+const COLUMN_GAP = 'gap-2.5 md:gap-[var(--sam-space-gutter)]';
+
 /** With fewer visible profiles there is nothing to choose between, so keep the starter prompts. */
 const MIN_PROFILES_FOR_CARDS = 2;
 
 export function ProjectChat() {
   const isMobile = useIsMobile();
-  const { focusMode, setFocusMode } = useAppShell();
+  const { focusMode, setFocusMode, setScreenAction } = useAppShell();
   const location = useLocation();
   const navigate = useNavigate();
   const state = useProjectChatState();
-  const [attentionAnswerStatus, setAttentionAnswerStatus] = useState<{
-    variant: 'success' | 'error';
-    message: string;
-  } | null>(null);
+  const [attentionAnswerStatus, setAttentionAnswerStatus] = useState<AttentionAnswerStatus | null>(
+    null
+  );
   const [pendingAttentionAnswer, setPendingAttentionAnswer] = useState<{
     markerId: string;
     answer: string;
   } | null>(null);
   const processedAttentionAction = useRef<string | null>(null);
   const { loadSessions, projectId, sessionId } = state;
+
+  // The chat list is this screen's main toggle: the mobile app bar shows it raised at its
+  // right edge (SAM Glass), in place of the second bar this page used to draw.
+  const { hasSessions, sidebarOpen, setSidebarOpen } = state;
+  const chatListAction = useMemo(
+    () =>
+      isMobile && hasSessions
+        ? {
+            label: 'Open chat list',
+            icon: <PanelRight size={20} strokeWidth={1.75} />,
+            onClick: () => setSidebarOpen(true),
+            expanded: sidebarOpen,
+          }
+        : null,
+    [isMobile, hasSessions, sidebarOpen, setSidebarOpen]
+  );
+  useEffect(() => {
+    setScreenAction(chatListAction);
+    return () => setScreenAction(null);
+  }, [chatListAction, setScreenAction]);
 
   const submitAttentionAnswer = useCallback(
     async (markerId: string, answer: string) => {
@@ -106,9 +129,12 @@ export function ProjectChat() {
 
   const handleShowHierarchy = useCallback(
     (taskId: string) => {
+      // The hierarchy modal replaces the phone's chat-list drawer rather than stacking on it:
+      // both are SAM Glass overlays, and one blurred over the other is unreadable.
+      setSidebarOpen(false);
       navigate(location.pathname + location.search + `#hierarchy-${taskId}`);
     },
-    [navigate, location.pathname, location.search]
+    [navigate, location.pathname, location.search, setSidebarOpen]
   );
 
   const handleHierarchyClose = useCallback(() => {
@@ -192,7 +218,7 @@ export function ProjectChat() {
   const sidebarInner = <ProjectChatSidebar state={state} onShowHierarchy={handleShowHierarchy} />;
 
   return (
-    <div className="flex flex-1 min-h-0">
+    <div className="flex min-h-0 flex-1 gap-[var(--sam-space-gutter)]">
       {/* ================================================================== */}
       {/* Desktop session sidebar — collapses with Focus Mode                */}
       {/* default: 288px full panel · focus: 64px status strip · zen: seam   */}
@@ -203,9 +229,11 @@ export function ProjectChat() {
         </ZenPeekRail>
       )}
       {!isMobile && focusMode !== 'zen' && (
-        <div
+        <Pane
+          as="aside"
+          aria-label="Chats"
           style={{ width: sessionWidthForMode(focusMode) }}
-          className="relative z-20 shrink-0 overflow-hidden glass-chrome glass-panel-container glass-composited border-y-0 border-l-0 flex flex-col transition-[width] duration-200 ease-out motion-reduce:transition-none"
+          className="relative z-20 flex shrink-0 flex-col overflow-hidden transition-[width] duration-200 ease-out motion-reduce:transition-none"
         >
           {focusMode === 'focus' ? (
             <FocusStrip
@@ -219,51 +247,26 @@ export function ProjectChat() {
           ) : (
             sidebarInner
           )}
-        </div>
+        </Pane>
       )}
 
       {/* ================================================================== */}
       {/* Main content area                                                  */}
       {/* ================================================================== */}
-      <div className="flex-1 flex flex-col min-h-0 min-w-0">
-        {/* Mobile header bar */}
-        {isMobile && (
-          <div className="relative z-20 shrink-0 flex items-center gap-2 px-3 py-2 glass-chrome border-x-0 border-t-0">
-            <button
-              type="button"
-              onClick={() => navigate(`/projects/${state.projectId}/settings`)}
-              aria-label="Project settings"
-              className="shrink-0 p-1.5 bg-transparent border-none cursor-pointer text-fg-muted"
-            >
-              <Settings size={16} />
-            </button>
-            <span className="text-sm font-semibold text-fg-primary truncate flex-1">
-              {state.project?.name || 'Project'}
-            </span>
-            {state.hasSessions && (
-              <button
-                type="button"
-                onClick={() => state.setSidebarOpen(true)}
-                aria-label="Open chat list"
-                className="p-1.5 bg-transparent border-none cursor-pointer text-fg-muted"
-              >
-                <List size={18} />
-              </button>
-            )}
-          </div>
-        )}
-
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {state.showNewChatInput ? (
           /* New chat / empty state */
-          <div className="flex-1 flex flex-col min-h-0">
-            <div
-              className={`flex-1 min-h-0 overflow-y-auto flex flex-col items-center gap-3 ${isMobile ? 'p-4 justify-start pb-8' : 'p-8 justify-center'}`}
+          <div className={`flex min-h-0 flex-1 flex-col ${COLUMN_GAP}`}>
+            <Pane
+              variant="quiet"
+              className={`flex min-h-0 flex-1 flex-col items-center gap-3 overflow-y-auto ${isMobile ? 'justify-start p-4 pb-8' : 'justify-center p-8'}`}
             >
               {state.provisioning ? (
                 <ProvisioningIndicator
                   state={state.provisioning}
                   bootLogCount={state.bootLogs.length}
                   onViewLogs={() => state.setBootLogPanelOpen(true)}
+                  className="w-full max-w-[720px]"
                 />
               ) : showProfileCards ? (
                 <NewChatProfileCards
@@ -276,19 +279,25 @@ export function ProjectChat() {
                 />
               ) : (
                 <>
-                  <span className="text-base font-semibold text-fg-primary">
+                  <img
+                    src="/sam-head.png"
+                    alt=""
+                    aria-hidden="true"
+                    className="mb-1 h-12 w-12 object-contain drop-shadow-[0_6px_18px_rgb(34_197_94/0.35)]"
+                  />
+                  <span className="text-xl font-semibold text-fg-primary">
                     What do you want to build?
                   </span>
-                  <span className="sam-type-secondary text-fg-muted text-center max-w-[400px]">
+                  <span className="max-w-[400px] text-center text-sm text-fg-muted">
                     Describe the task and an agent will start working on it automatically.
                   </span>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full max-w-[560px] mt-2">
+                  <div className="mt-3 grid w-full max-w-[560px] grid-cols-1 gap-2.5 sm:grid-cols-2">
                     {starterPrompts.map((prompt) => (
                       <button
                         key={prompt}
                         type="button"
                         onClick={() => state.setMessage(prompt)}
-                        className="min-h-[44px] rounded-md border border-border-default bg-surface px-3 py-2 text-left text-sm text-fg-primary hover:border-accent hover:bg-accent/5 transition-colors"
+                        className="sam-raised min-h-[48px] cursor-pointer rounded-[14px] border-0 px-4 py-2.5 text-left text-sm text-fg-primary transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
                       >
                         {prompt}
                       </button>
@@ -296,7 +305,7 @@ export function ProjectChat() {
                   </div>
                 </>
               )}
-            </div>
+            </Pane>
             {state.pendingDerived && (
               <DerivedSessionBanner
                 derived={state.pendingDerived}
@@ -344,31 +353,21 @@ export function ProjectChat() {
           </div>
         ) : (
           /* Active session view */
-          <div className="flex-1 flex flex-col min-h-0">
+          <div className={`flex min-h-0 flex-1 flex-col ${COLUMN_GAP}`}>
             {attentionAnswerStatus && (
-              <Alert
-                variant={attentionAnswerStatus.variant}
+              <AttentionAnswerNotice
+                status={attentionAnswerStatus}
                 onDismiss={() => setAttentionAnswerStatus(null)}
-                className="m-3 mb-0"
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <span>{attentionAnswerStatus.message}</span>
-                  {attentionAnswerStatus.variant === 'error' && pendingAttentionAnswer && (
-                    <button
-                      type="button"
-                      className="min-h-11 rounded-md border border-current px-3 py-2 text-sm font-medium"
-                      onClick={() =>
+                onRetry={
+                  pendingAttentionAnswer
+                    ? () =>
                         void submitAttentionAnswer(
                           pendingAttentionAnswer.markerId,
                           pendingAttentionAnswer.answer
                         )
-                      }
-                    >
-                      Retry answer
-                    </button>
-                  )}
-                </div>
-              </Alert>
+                    : undefined
+                }
+              />
             )}
             {state.provisioning &&
               state.sessionId === state.provisioning.sessionId &&

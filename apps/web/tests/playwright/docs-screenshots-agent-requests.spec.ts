@@ -387,6 +387,7 @@ const INTERACTIONS: Record<string, InteractionFixture> = {
 const USAGE_CREDENTIAL = {
   credentialReference: 'cc_credentials:cred-claude',
   credentialId: 'cred-claude',
+  credentialName: 'Personal Max',
   credentialSource: 'user',
   provider: 'anthropic',
   providerMode: 'direct',
@@ -683,7 +684,8 @@ test('docs: usage limits dialog from the chat header', async ({ page }) => {
 
   const details = page.getByTestId('credential-limit-details');
   await expect(details).toBeVisible();
-  await expect(details.getByRole('heading', { name: 'Claude usage' })).toBeVisible();
+  await expect(details.getByText('Claude usage')).toBeVisible();
+  await expect(details.getByRole('heading', { name: 'Personal Max' })).toBeVisible();
   await expect(details.getByText('Warning')).toBeVisible();
   const windows = details.getByTestId('credential-limit-window');
   await expect(windows).toHaveCount(2);
@@ -695,7 +697,8 @@ test('docs: usage limits dialog from the chat header', async ({ page }) => {
   await expect(windows.nth(1)).toContainText('31% used');
 
   await opaqueBackdrop(page);
-  const panel = page.locator('.glass-panel-container').filter({ has: details });
+  // The Dialog pane: details sit in its scrolling body, which sits in the pane.
+  const panel = details.locator('xpath=../..');
   await expectNoOverflow(page);
   await docsShot(
     page,

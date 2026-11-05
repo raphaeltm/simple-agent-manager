@@ -152,9 +152,29 @@ export async function deleteNodeRoute(c: Context<{ Bindings: Env }>) {
     throw errors.notFound('Node');
   }
 
-  const strandedTasks = await listStrandedNodeTasks(c.env, nodeId);
+  await deleteOwnedNode(c.env, db, node, userId);
+  return c.json({ success: true });
+}
 
-  const cleanup = await deleteNodeResources(nodeId, userId, c.env);
+/**
+ * The whole owner node deletion once the caller is authorized for `node`: strict provider
+ * teardown, then record removal. `userId` must be the node's owner. Shared by the owner's
+ * Delete route and the Operations `delete_node` action, so there is one teardown path.
+ * Throws a 409 when runtime termination is not proven.
+ */
+export async function deleteOwnedNode(
+  env: Env,
+  db: NodesDb,
+  node: Pick<
+    typeof schema.nodes.$inferSelect,
+    'id' | 'nodeRole' | 'nodeClass' | 'lastHeartbeatAt' | 'createdAt'
+  >,
+  userId: string
+): Promise<void> {
+  const nodeId = node.id;
+  const strandedTasks = await listStrandedNodeTasks(env, nodeId);
+
+  const cleanup = await deleteNodeResources(nodeId, userId, env);
   if ((node.nodeRole ?? 'workspace') === 'deployment' && cleanup.errors.length > 0) {
     throw errors.conflict(
       `Deployment node could not be fully deprovisioned: ${cleanup.errors.join('; ')}`
@@ -167,7 +187,7 @@ export async function deleteNodeRoute(c: Context<{ Bindings: Env }>) {
   }
 
   await completeOwnerNodeRemoval({
-    env: c.env,
+    env,
     db,
     node,
     userId,
@@ -175,7 +195,6 @@ export async function deleteNodeRoute(c: Context<{ Bindings: Env }>) {
     strandedTasks,
     reason: await ownerRemovalReason(db, nodeId, cleanup.runtimeTerminationConfirmedAt),
   });
-  return c.json({ success: true });
 }
 
 /**

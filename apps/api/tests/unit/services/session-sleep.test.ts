@@ -38,6 +38,8 @@ vi.mock('../../../src/services/node-agent', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/services/node-agent')>()),
   hibernateAgentSessionOnNode: (...args: unknown[]) => mocks.hibernateAgentSessionOnNode(...args),
   stopWorkspaceOnNode: (...args: unknown[]) => mocks.stopWorkspaceOnNode(...args),
+  // A required (person's) sleep always asks the agent; by default it has no prompt in flight.
+  cancelAgentSessionOnNode: () => Promise.resolve({ success: false, status: 409 }),
 }));
 vi.mock('../../../src/services/vm-agent-container', () => ({
   sleepVmAgentContainer: (...args: unknown[]) => mocks.sleepVmAgentContainer(...args),
@@ -135,7 +137,7 @@ function buildDb(
       leftJoin: vi.fn(() => chain),
       where: vi.fn(() => chain),
       orderBy: vi.fn(() => chain),
-      limit: vi.fn(async () => projection?.toStatus ? [] : (selectRows.shift() ?? [])),
+      limit: vi.fn(async () => (projection?.toStatus ? [] : (selectRows.shift() ?? []))),
       // Identity guard reads do not consume the existing loaded-row fixtures.
       get: vi.fn(async () => ({ id: 'workspace-1' })),
     };
@@ -149,7 +151,12 @@ function buildDb(
     return chain;
   });
   const insert = vi.fn(() => ({ select: vi.fn((query: unknown) => query) }));
-  return { select, update, insert, batch: vi.fn(async (statements: unknown[]) => statements.map(() => ({ meta: { changes: 1 } }))) };
+  return {
+    select,
+    update,
+    insert,
+    batch: vi.fn(async (statements: unknown[]) => statements.map(() => ({ meta: { changes: 1 } }))),
+  };
 }
 
 function buildD1Database(
@@ -632,6 +639,55 @@ describe('sleepWorkspaceSession', () => {
     expect(mocks.deferSessionSnapshotSleepBeforeClaim).toHaveBeenCalledTimes(1);
   });
 
+  // Production 2026-11-04 (idea 01M6K6QTEE7T9KNYB7317D7Y8E): a running conversation's turn
+  // hung with no output for ~10 h while the VM kept re-reporting `prompting`. The sweep must
+  // reclaim it once the work clock has been silent for the bound (default 30 min).
+  // `buildD1Database` holds no admin-settings overrides, so the bound resolves to its
+  // registry default (30 min).
+  it('sleeps a running task whose open turn has done no work for the stale-turn bound', async () => {
+    const now = new Date('2026-11-04T11:50:00.000Z');
+    mocks.getSessionState.mockResolvedValue({
+      activity: 'prompting',
+      activityAt: now.getTime() - 30_000,
+      promptStartedAt: now.getTime() - 9 * 60 * 60 * 1000,
+      workAt: now.getTime() - 31 * 60 * 1000,
+    });
+    const { checkAutomaticSessionSleepEligibility } =
+      await import('../../../src/services/session-sleep');
+
+    await expect(
+      checkAutomaticSessionSleepEligibility(
+        buildEnv(),
+        { workspaceId: 'workspace-1', userId: 'user-1' },
+        now
+      )
+    ).resolves.toEqual({ eligible: true });
+    expect(mocks.deferSessionSnapshotSleepBeforeClaim).not.toHaveBeenCalled();
+  });
+
+  it('still defers a running task whose open turn did work inside the bound (control)', async () => {
+    const now = new Date('2026-11-04T11:50:00.000Z');
+    mocks.getSessionState.mockResolvedValue({
+      activity: 'prompting',
+      activityAt: now.getTime() - 30_000,
+      promptStartedAt: now.getTime() - 9 * 60 * 60 * 1000,
+      workAt: now.getTime() - 20 * 60 * 1000,
+    });
+    const { checkAutomaticSessionSleepEligibility } =
+      await import('../../../src/services/session-sleep');
+
+    await expect(
+      checkAutomaticSessionSleepEligibility(
+        buildEnv(),
+        { workspaceId: 'workspace-1', userId: 'user-1' },
+        now
+      )
+    ).resolves.toMatchObject({
+      eligible: false,
+      reason: 'Workspace agent is not idle (prompting)',
+    });
+  });
+
   // Raphaël, 2026-08-24 (PR #1874 review): an orchestrator whose prompt turn has
   // ended must SLEEP and be woken durably by the ProjectData parent-wake delivery
   // path when its children finish. Keeping it awake because it has children burns
@@ -847,6 +903,47 @@ describe('sleepWorkspaceSession', () => {
     expect(mocks.failSessionSnapshotSleepBeforeTeardown).toHaveBeenCalledTimes(1);
   });
 
+  it('does not abort a person-initiated Sleep when harness work begins during capture', async () => {
+    // A person's Sleep is required (policy a3780107): only a new turn may stop it.
+    let harnessActive = false;
+    mocks.getSessionState.mockImplementation(async () => ({
+      activity: 'idle',
+      activityAt: 100,
+      runtimeWorkState: harnessActive ? 'active' : 'inactive',
+      runtimeWorkCount: harnessActive ? 1 : 0,
+      runtimeWorkUpdatedAt: harnessActive ? Date.now() : 90,
+      runtimeWorkProgressAt: harnessActive ? Date.now() : 90,
+    }));
+    mocks.getRestorableSessionSnapshot
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        status: 'available',
+        degradation: 'none',
+        expiresAt: '2026-08-19T00:00:00.000Z',
+      })
+      .mockResolvedValue({
+        status: 'available',
+        degradation: 'none',
+        sleepingAt: '2026-08-12T00:00:00.000Z',
+        sleepStatus: 'sleeping',
+        expiresAt: '2026-08-19T00:00:00.000Z',
+      });
+    mocks.verifySessionSnapshotArtifactsForSleep.mockImplementation(async () => {
+      harnessActive = true;
+      return true;
+    });
+    const { sleepWorkspaceSession } = await import('../../../src/services/session-sleep');
+
+    await sleepWorkspaceSession(buildEnv(), {
+      workspaceId: 'workspace-1',
+      userId: 'user-1',
+      reason: 'test',
+    });
+
+    expect(mocks.beginSessionSnapshotStopping).toHaveBeenCalled();
+    expect(mocks.stopWorkspaceOnNode).toHaveBeenCalled();
+  });
+
   it('aborts when harness work begins across the artifact-verification barrier', async () => {
     let harnessActive = false;
     mocks.getSessionState.mockImplementation(async () => ({
@@ -873,6 +970,8 @@ describe('sleepWorkspaceSession', () => {
         workspaceId: 'workspace-1',
         userId: 'user-1',
         reason: 'test',
+        // A sweep-claimed sleep: a person's Sleep is required and ignores harness work.
+        sleepClaimId: 'sweep-claim',
       })
     ).rejects.toThrow('activity changed during snapshot artifact verification');
 
@@ -1089,7 +1188,20 @@ describe('sleepWorkspaceSession', () => {
     );
     expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
     expect(mocks.finalizeSessionSnapshotSleeping).toHaveBeenCalledTimes(1);
-    expect(mocks.sleepSession).toHaveBeenCalledWith(env, 'project-1', 'chat-1', expect.objectContaining({ runtimeGuard: expect.objectContaining({ workspaceId: 'workspace-1', userId: 'user-1', nodeId: 'node-1', evictionGeneration: null, claimId: expect.any(String) }) }));
+    expect(mocks.sleepSession).toHaveBeenCalledWith(
+      env,
+      'project-1',
+      'chat-1',
+      expect.objectContaining({
+        runtimeGuard: expect.objectContaining({
+          workspaceId: 'workspace-1',
+          userId: 'user-1',
+          nodeId: 'node-1',
+          evictionGeneration: null,
+          claimId: expect.any(String),
+        }),
+      })
+    );
     expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith(
       'node-1',
       'workspace-1',
@@ -1188,6 +1300,8 @@ describe('sleepWorkspaceSession', () => {
         workspaceId: 'workspace-1',
         userId: 'user-1',
         reason: 'test',
+        // A sweep-claimed sleep: a person's Sleep is required and ignores harness work.
+        sleepClaimId: 'sweep-claim',
       })
     ).rejects.toThrow('Workspace activity changed');
 
@@ -1226,6 +1340,8 @@ describe('sleepWorkspaceSession', () => {
         workspaceId: 'workspace-1',
         userId: 'user-1',
         reason: 'test',
+        // A sweep-claimed sleep: a person's Sleep is required and ignores harness work.
+        sleepClaimId: 'sweep-claim',
       })
     ).rejects.toThrow('Harness-owned background work is active');
 
@@ -1355,6 +1471,8 @@ describe('sleepWorkspaceSession', () => {
         workspaceId: 'workspace-1',
         userId: 'user-1',
         reason: 'test',
+        // A sweep-claimed sleep: a person's Sleep is required and ignores harness work.
+        sleepClaimId: 'sweep-claim',
       })
     ).rejects.toThrow('Workspace activity changed while the final snapshot was captured');
 

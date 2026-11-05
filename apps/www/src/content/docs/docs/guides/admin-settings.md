@@ -135,7 +135,7 @@ before you try again.
 | AI models     | `aiModels.*` (below)                                                   | see below                                      | Which AI models agents may call, and the spending limits                                                                                                                                                  | —                                                                                 |
 | Email         | `agentEmail.*` (below)                                                 | see below                                      | Limits for agent email (preview)                                                                                                                                                                          | —                                                                                 |
 
-**Operations** also holds limits for [workflows](#workflows), [linked work](#linked-work), pull
+**Operations** also holds the [lifecycle latency budgets](#lifecycle-latency-monitoring), limits for [workflows](#workflows), [linked work](#linked-work), pull
 request tracking, the GitHub trigger queue, the Account Map, [workload identity](/docs/guides/workload-identity/)
 tokens, and the [SAM assistant](/docs/reference/configuration/#private-sam-assistant-runtime-controls).
 Every card shows its own description, default, and range, so the tables below cover the limits
@@ -202,6 +202,42 @@ These **Operations** settings bound automatic retries after an eviction wake fai
 | `operations.evictionRecoveryRetryWallMs`    | 10,000  | 1–30,000     | Milliseconds before starting another retry; an in-flight durable wake may finish afterward                                          |
 | `operations.evictionRecoveryRetryDelayMs`   | 60,000  | 1–86,400,000 | Minimum interval after failure or preclaim deferral; deferrals rotate fairly without resetting the failure anchor or attempt budget |
 
+## Node lifetime
+
+A VM that SAM created for tasks starts retiring when it is 24 hours old
+(`NODE_ABSOLUTE_MAX_LIFETIME_MS`). From then on, every session on it sleeps as soon as its agent's
+turn ends, and SAM removes the VM once its sessions have slept.
+`operations.nodeLifetimeForceSleepAfterMs` sets how long SAM waits for a turn that is still running
+before it stops the agent and sleeps the session anyway. The default is 1,800,000 milliseconds
+(30 minutes); admins can set a whole number from 1 to 86,400,000 milliseconds. The chat keeps its
+transcript and checkpoint, and the next message wakes it on another machine.
+
+So that new work does not start on a VM that is about to be retired, a VM takes no new
+workspaces in the last part of its lifetime. `operations.nodeLifetimeAdmissionCutoffPercent` sets
+that part as a percent of the lifetime. The default is 10 (no new workspaces after 21.6 hours);
+admins can set a whole number from 0 to 99, and 0 turns the cutoff off. SAM starts the new work on
+another VM, creating one if it needs to. Restarting a stopped workspace on its own VM is still
+allowed. VMs you added yourself, and VMs no task created, have no lifetime limit and no cutoff.
+
+## Stale agent turns
+
+An agent's turn can stop producing anything without ending: the VM keeps reporting the turn as
+running, so the session could not sleep and its VM stayed up (production, 2026-11-04: one turn ran
+almost ten hours with no output). `operations.sessionStaleTurnNoWorkMinutes` bounds this for
+sessions whose task is still running. When an open turn has persisted no message and made no
+background-work progress for that many minutes, it no longer keeps the session awake, and the
+session sleeps like an idle one. Periodic "still prompting" reports and the VM confirming the turn
+is open do not count as work. Background work the agent started (a Claude background task, a Codex
+or OpenCode tool call) still holds the session through its own lease. The default is 30 minutes;
+admins can set a whole number from 0 to 10,080, and 0 turns the bound off. Automatic sleep also
+waits out the idle interval (`SESSION_SLEEP_AFTER_MS`) when it is longer. The conversation keeps its
+transcript and snapshot, and the next message wakes it.
+
+While a session's sleep is in progress, SAM holds queued durable messages for it instead of
+delivering them to the agent. A required sleep ends the agent's turn and the VM restarts the agent
+idle; a message delivered then would start a new turn and abort the sleep. Held messages are
+delivered when the sleep finishes (waking the session) or fails.
+
 ## Blocked VM cleanup
 
 `operations.nodeCleanupBlockedRetirementMs` controls how long automatic cleanup may remain blocked before SAM retires a stopped workspace VM. The default is 1,800,000 milliseconds (30 minutes); admins can set a whole number from 1 to 86,400,000 milliseconds.
@@ -213,6 +249,60 @@ Two related settings control warning and alert frequency: `operations.nodeCleanu
 Active workspaces and provider ownership checks remain protected. When SAM can't retire a blocked VM at the deadline (often, but not always, because it can't prove who owns the server), it keeps the VM and records an error in **Admin → Errors**, at most once per node per `operations.nodeCleanupOwnershipAlertIntervalMs` (one day by default): **VM may still exist at provider: _provider_ _server id_; cleanup requires ownership/operator resolution**. Before deleting anything, open the node and read its **Cleanup blocked since…** reasons. Delete the server in that provider's console only when the reason is `provenance` (or `strict_provider_ownership_or_deletion_failure`) and you have checked that it belongs to your installation and runs nothing you need. If the reasons include `active_workspace` or `warm_placement_claim`, or the node hosts app deployments, resolve that first instead. Once the server is gone, the node's owner can remove the node with **I already deleted this server** on its page, after selecting **Delete Node** first if the node shows **Stopped**; see [SAM can't delete a node](/docs/guides/session-troubleshooting/#sam-cant-delete-a-node). That button refuses nodes on the installation's own cloud account, and the app has no other way to remove such a node yet.
 
 Blocked nodes show the time and reason in their error message on the node list and detail page, as **Cleanup blocked since** _time_ followed by reason codes; [A node won't go away](/docs/guides/session-troubleshooting/#a-node-wont-go-away) explains each one.
+
+## Lifecycle latency monitoring
+
+SAM watches how long workspaces, nodes, session sleeps and session wakes stay in states that should
+end on their own within minutes, and records an error in **Admin → Errors** when one takes too long.
+The hourly platform-feedback triage groups those errors and, when a feedback project and an incident
+trigger are configured, files them as incidents for that project's agents to investigate.
+
+- **States are sampled every five minutes.** The watchdog records when it first sees a workspace,
+  node, session sleep or session wake in a watched state, and when that episode ends
+  (`lifecycle_state_observations` and `lifecycle_state_episodes`, migration
+  `0220_lifecycle_state_observations.sql`). It reads the status columns only, so no part of SAM has
+  to report anything. Because it samples, an episode is noticed up to five minutes after it starts,
+  and episodes shorter than one sample are not recorded.
+- **Slow states, every five minutes.** The latency watchdog (`runLifecycleLatencyWatchdog` in
+  `apps/api/src/services/lifecycle-latency/watchdog.ts`) records one warning per slow episode:
+  **Lifecycle latency budget exceeded: _entity_ _state_**, for example
+  `Lifecycle latency budget exceeded: workspace stopping`. The error's context carries the entity ID,
+  when the watchdog first saw it in the state, how long it has been there and its last error message. A later, separate
+  episode for the same entity is reported again.
+- **Regressions, once a day.** At 03:00 UTC the daily check
+  (`runLifecycleLatencyDailyEvaluation` in `daily-evaluation.ts`) computes the median, p95 and longest
+  observed time spent in each watched state over the last 24 hours. It records
+  **Lifecycle latency regression: _entity_ _state_** when the p95 is over the state's budget, or more
+  than `lifecycleLatency.regressionPercent` of its p95 over the previous 7 days. Every run logs a
+  `lifecycle_latency.daily_summary` line with those numbers for every watched state.
+
+Watched states and their **Operations** budgets, in minutes. Set a budget to 0 to turn off both the
+watchdog and the daily check for that state.
+
+| Setting                                         | Default | What it watches                                            |
+| ----------------------------------------------- | ------- | ---------------------------------------------------------- |
+| `lifecycleLatency.workspacePendingMinutes`      | 15      | A workspace in `pending`                                   |
+| `lifecycleLatency.workspaceCreatingMinutes`     | 15      | A workspace in `creating`                                  |
+| `lifecycleLatency.workspaceRecoveryMinutes`     | 15      | A workspace in `recovery`                                  |
+| `lifecycleLatency.workspaceStoppingMinutes`     | 10      | A workspace in `stopping`, including deletion confirmation |
+| `lifecycleLatency.nodePendingMinutes`           | 15      | A node in `pending`                                        |
+| `lifecycleLatency.nodeCreatingMinutes`          | 15      | A node in `creating`                                       |
+| `lifecycleLatency.nodeRecoveryMinutes`          | 15      | A node in `recovery`                                       |
+| `lifecycleLatency.nodeStoppingMinutes`          | 20      | A node in `stopping`                                       |
+| `lifecycleLatency.sessionSleepPreparingMinutes` | 15      | A session sleep capturing its snapshot (`preparing`)       |
+| `lifecycleLatency.sessionSleepStoppingMinutes`  | 15      | A session sleep stopping its workspace (`stopping`)        |
+| `lifecycleLatency.sessionWakingMinutes`         | 15      | A session wake in progress (`waking`)                      |
+
+The rest control the checks themselves:
+
+| Setting                                         | Default | Range      | What it controls                                                                                                                             |
+| ----------------------------------------------- | ------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lifecycleLatency.alertsPerStatePerTick`        | 5       | 1–20       | Slow episodes recorded per state in one run. Older episodes first; the rest are recorded on later runs                                       |
+| `lifecycleLatency.observationsPerSourcePerTick` | 200     | 10–1,000   | Rows in watched states sampled per table in one run, oldest first. A truncated sample is logged and does not close episodes it could not see |
+| `lifecycleLatency.regressionPercent`            | 200     | 101–10,000 | How far above its previous 7-day p95 a state's 24-hour p95 must be to count as a regression                                                  |
+| `lifecycleLatency.minSamples`                   | 5       | 1–10,000   | Fewest finished episodes in a window before the daily check judges it                                                                        |
+| `lifecycleLatency.retentionDays`                | 30      | 8–365      | Days finished episodes are kept                                                                                                              |
+| `lifecycleLatency.evaluationSampleLimit`        | 2,000   | 10–20,000  | Most recent finished episodes the daily check reads per state                                                                                |
 
 ## Linked work
 
@@ -302,17 +392,17 @@ The **Operations project** is the private project you select in **Admin → Inte
 debugger tools that let its agents look across every user's nodes, workspaces and sessions. Two
 **Operations** settings control them:
 
-| Setting                         | Default | Values                                        | What it controls                                                                                         |
-| ------------------------------- | ------- | --------------------------------------------- | -------------------------------------------------------------------------------------------------------- |
-| `operations.debuggerTools`      | `off`   | `off`, `read`, `read_ask`, `read_auto_safe`   | Which debugger tools Operations agents may use. `off` hides and refuses all of them                      |
-| `operations.auditRetentionDays` | 90      | 1–3,650                                       | Days each debugger tool audit record is kept before the daily 03:00 UTC cleanup deletes it               |
+| Setting                         | Default | Values                                      | What it controls                                                                           |
+| ------------------------------- | ------- | ------------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `operations.debuggerTools`      | `off`   | `off`, `read`, `read_ask`, `read_auto_safe` | Which debugger tools Operations agents may use. `off` hides and refuses all of them        |
+| `operations.auditRetentionDays` | 90      | 1–3,650                                     | Days each debugger tool audit record is kept before the daily 03:00 UTC cleanup deletes it |
 
-Today the only debugger tool is `ops_get_access_status`, which reports this setting, the
-capabilities a task has, and why any are refused. Read tools and approved actions arrive in later
-releases, and each of them uses the gate below. What each value will allow:
+`ops_get_access_status` reports this setting, the capabilities a task has, and why any are
+refused. The read tools and the [approved actions](#approved-actions) below all use the gate
+below. What each value allows:
 
 - `off`: none. This is the default on new and updated installations.
-- `read`: read-only tools.
+- `read`: the read-only tools below.
 - `read_ask`: read-only tools, plus actions that each need a person to approve them.
 - `read_auto_safe`: like `read_ask`, but low-risk actions run without approval. Deleting things
   always needs approval.
@@ -332,6 +422,144 @@ see these tools, and the private incident tools (`list_incident_queue` and the r
 only to the Operations project too. Debugger tool calls are recorded in an audit log with the acting
 user, task, tool and target. `ops_get_access_status` records only calls made by a task inside the
 Operations project.
+
+### Read tools
+
+With the setting at `read` or above, agents in the Operations project get these tools. They read
+across every user of the installation. Everything they return that a user, agent or node process
+wrote (log lines, error messages, event text) comes back marked as untrusted data, and the agent
+is told never to follow instructions found in it.
+
+| Tool                                                             | What it answers                                                                                                                                                                                                                    |
+| ---------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ops_find_anomalies`                                             | What is broken now: empty nodes past the warm-node cleanup grace, stale heartbeats, nodes stuck destroying, running workspaces whose task ended, idle in-progress tasks, snapshot failures, deletion quarantine, pending incidents |
+| `ops_list_nodes`                                                 | Every node with status, health, last heartbeat and metrics, age, owner and workspace counts                                                                                                                                        |
+| `ops_get_node`                                                   | One node with its lifecycle state, placement explanation, workspaces, health events and recent incidents                                                                                                                           |
+| `ops_get_session_story`                                          | Everything recorded about one task, chat session or workspace in one answer                                                                                                                                                        |
+| `ops_timeline`                                                   | One time-ordered list of events for a task, chat session, workspace or node, merged from every store                                                                                                                               |
+| `ops_search_errors`                                              | Platform errors filtered by source, node, workspace, task, text and time                                                                                                                                                           |
+| `ops_query_worker_logs`                                          | The same Cloudflare Workers log search as **Admin → Logs**, sharing its per-user rate limit                                                                                                                                        |
+| `ops_node_logs`                                                  | A running node's logs, filtered on the server with `contains`, capped in lines and bytes                                                                                                                                           |
+| `ops_node_system_info`, `ops_node_events`, `ops_node_containers` | Live system info, agent events and containers from a running node                                                                                                                                                                  |
+| `ops_workspace_agent_sessions`                                   | Live agent sessions on a workspace                                                                                                                                                                                                 |
+| `ops_capture_debug_package`                                      | Saves a node's full debug package into the Operations project's library (see below)                                                                                                                                                |
+| `ops_why_is_node_alive`                                          | Why a node still exists: its active workspaces, warm/claim state, the last keep/kill decisions and a plain verdict                                                                                                                 |
+| `ops_get_node_log_capture`                                       | One black box log capture (see below), filtered on the server with `source` and `contains`                                                                                                                                         |
+
+These tools reach a node through the same path as a node owner's own **Logs** and **System info**
+views. When the Operations project's agent starts a task, its instructions include a short
+debugging playbook: start with anomalies, then the timeline, then narrowly filtered logs, and only
+then a debug package; keep the reported symptom exact; never paste raw logs into ideas, PRs or
+knowledge.
+
+### Debug packages
+
+`ops_capture_debug_package` saves a node's debug package (cloud-init and system logs, the agent
+log, Docker state, the agent's event and metrics databases) as
+`/debug-packages/<node ID>/<time>.tar.gz` in the Operations project's
+[library](/docs/guides/project-files/). The agent downloads it into its own workspace with
+`download_library_file`. Packages are **raw and unredacted**: they can contain anything the node
+logged. In the app only superadmins see them, and over MCP only tokens that pass the debugger-tool
+check can list, download or display them; every MCP download is audited. A daily 03:00 UTC cleanup
+deletes packages older than the retention period, oldest first, in batches of
+`operations.debugPackagePurgeBatchSize` until none are left or `operations.debugPackagePurgeDeadlineMs`
+(20 seconds by default, enough for thousands of packages) has passed; anything left continues the
+next day. Packages left in a former Operations project are included. A copy an agent downloads into its workspace is not purged; the playbook tells
+the agent to delete it when done. Capture stops and stores nothing if a package is larger than the
+size cap, and each superadmin may make a limited number of capture attempts per hour (failed
+attempts count).
+
+### Read tool limits
+
+| Setting                                       | Default    | Range         | What it controls                                                                                                                                                                                                |
+| --------------------------------------------- | ---------- | ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `operations.debugPackageRetentionDays`        | 7          | 1–90          | Days a debug package stays in the Operations library before the daily cleanup deletes it                                                                                                                        |
+| `operations.debugPackageMaxBytes`             | 20,971,520 | 1 MiB–32 MiB  | Largest debug package capture accepts (also limited by the library's upload limit). Capture holds the package and its encrypted copy in Worker memory, so the maximum leaves room under the 128 MB Worker limit |
+| `operations.debugPackagePurgeBatchSize`       | 50         | 1–90          | Expired debug packages the daily cleanup deletes per batch                                                                                                                                                      |
+| `operations.debugPackagePurgeDeadlineMs`      | 20,000     | 1,000–120,000 | Milliseconds the daily cleanup keeps deleting batches before it stops; the rest continues the next day                                                                                                          |
+| `operations.debugPackageCapturesPerHour`      | 20         | 1–200         | Debug package capture attempts one superadmin may make per hour (attempts on an unreachable node or an oversized package count)                                                                                 |
+| `operations.opsAnomalyEmptyNodeGraceMs`       | 900,000    | 0–7 days      | Extra time past the warm-node cleanup grace before an empty running node is reported                                                                                                                            |
+| `operations.opsAnomalyTerminalTaskGraceMs`    | 900,000    | 0–7 days      | Time after a task ends before its still-running workspace is reported                                                                                                                                           |
+| `operations.opsAnomalyIdleTaskMinutes`        | 60         | 1–10,080      | Minutes without task or workspace activity before an in-progress task is reported                                                                                                                               |
+| `operations.opsAnomalyDestroyingNodeHours`    | 6          | 1–720         | Hours a node may stay destroying, counted from its last heartbeat, before its unfinished teardown is reported with any recorded cleanup refusal                                                                 |
+| `operations.opsAnomalyLookbackHours`          | 24         | 1–720         | Hours of snapshot failures and deletion-quarantine reports the anomaly check looks at                                                                                                                           |
+| `operations.opsAnomalyMaxPerClass`            | 25         | 1–200         | Findings returned per anomaly type; each type still reports its total                                                                                                                                           |
+| `operations.opsNodeLogMaxLines`               | 200        | 1–1,000       | Most log lines one `ops_node_logs` call returns                                                                                                                                                                 |
+| `operations.opsNodeLogMaxBytes`               | 65,536     | 1 KiB–1 MiB   | Most bytes of log text one `ops_node_logs` call returns                                                                                                                                                         |
+| `operations.opsTimelineMaxEvents`             | 200        | 10–1,000      | Most events one timeline returns; older ones are dropped and the answer says how to read them                                                                                                                   |
+| `operations.opsTimelinePerSourceLimit`        | 100        | 5–500         | Most events one store contributes to a timeline                                                                                                                                                                 |
+| `operations.opsTimelineDefaultWindowHours`    | 168        | 1–2,160       | Hours a timeline looks back when no start time is given                                                                                                                                                         |
+| `operations.opsTimelineFanoutLimit`           | 2          | 1–5           | Chat sessions, workspaces and running nodes per timeline that get their own activity, boot log and live node event reads                                                                                        |
+| `operations.opsEntityGraphRowCap`             | 25         | 1–100         | Related tasks, workspaces, sessions, snapshots or nodes a session story or timeline reads per table                                                                                                             |
+| `operations.opsWorkerLogDefaultWindowMinutes` | 60         | 1–1,440       | Minutes of Worker logs `ops_query_worker_logs` covers when no start time is given                                                                                                                               |
+| `operations.opsListMaxRows`                   | 100        | 1–500         | Most nodes, errors or log lines one list returns                                                                                                                                                                |
+| `operations.opsTextFieldMaxLength`            | 2,000      | 100–20,000    | Characters of one free-text field (an error message, for example) a tool returns                                                                                                                                |
+
+### Black box recorder, decision log and step traces
+
+SAM keeps three records that outlive the node or session they describe:
+
+- **Node decision log.** The node lifecycle, the cleanup sweep, the warm handoff, deployment-node
+  teardown and operations actions each record one short row per keep or kill decision (kept
+  active, marked warm, destroy attempted, skipped, a refused legacy credential recovery, and why). `ops_why_is_node_alive` reads it. Heartbeats only show that a node is reachable, never that
+  it is idle.
+- **Black box log captures.** Before SAM tears a node down, and when a node turns unhealthy, it
+  saves the tail of the VM agent, systemd and cloud-init logs, gzipped, in R2. Teardown captures
+  run only when the node sent a recent heartbeat, and a capture never delays teardown past its
+  timeout. `ops_get_node` lists a node's captures and `ops_get_node_log_capture` reads one.
+  Captures are raw logs, like debug packages.
+- **Sleep and wake step traces.** For each sleep or wake, the VM agent reports which steps ran, how
+  long each took, which one failed and the end of its error output (secrets are redacted). They
+  appear in `ops_get_session_story` and `ops_timeline`. Older VM agents report timings only.
+
+All three appear in `ops_timeline`. A daily 03:00 UTC cleanup deletes them after their retention
+period.
+
+### Approved actions
+
+With the setting at `read_ask` or `read_auto_safe`, Operations agents can ask to act:
+
+| Action               | Acts on      | `read_ask`     | `read_auto_safe` |
+| -------------------- | ------------ | -------------- | ---------------- |
+| `retry_snapshot`     | chat session | needs approval | runs at once     |
+| `rerun_node_cleanup` | node         | needs approval | runs at once     |
+| `sleep_session`      | chat session | needs approval | needs approval   |
+| `delete_workspace`   | workspace    | needs approval | needs approval   |
+| `delete_node`        | node         | needs approval | needs approval   |
+| `restart_vm_agent`   | node         | needs approval | needs approval   |
+| `cancel_stuck_task`  | task         | needs approval | needs approval   |
+
+1. The agent calls `ops_request_action` with the action, the target ID, a reason and a short
+   evidence summary. SAM saves an approval record and, when approval is needed, sends the task's
+   owner an **Approval Needed** notification.
+2. Open it, or go to **Admin → Approvals**, and tap **Approve** or **Deny**. Any active superadmin
+   can decide. The decision reaches the agent's chat as a new message, waking it if it is asleep.
+3. The agent calls `ops_execute_action`. SAM checks the record is approved, not expired, for the
+   same action and target, and was requested by that task (or the same conversation after it woke
+   from sleep). It marks the record executed before running it, so one approval runs once.
+
+Approval is the server record only. An agent cannot approve itself by writing in chat or by
+quoting a log line, and `request_human_input` answers are never treated as approval. Each action
+runs through the same code as the matching button in the app (for example, deleting a node uses
+the same provider teardown as **Delete Node**). The result is saved on the record and shown on
+**Admin → Approvals**. Requests and approvals expire after `operations.actionApprovalTtlMs`; ask
+again once one has expired.
+
+### Telemetry and approval settings
+
+| Setting                                         | Default   | Range           | What it controls                                                           |
+| ----------------------------------------------- | --------- | --------------- | -------------------------------------------------------------------------- |
+| `operations.nodeDecisionLogRetentionDays`       | 14        | 1–365           | Days node keep/kill decisions are kept                                     |
+| `operations.nodeDecisionDedupeWindowMs`         | 1,800,000 | 1 minute–1 day  | How long before the same repeated cleanup-sweep decision is recorded again |
+| `operations.nodeLogCaptureRetentionDays`        | 7         | 1–90            | Days black box log captures are kept                                       |
+| `operations.nodeLogCaptureTimeoutMs`            | 5,000     | 500–30,000      | Longest a capture may add before node teardown goes ahead                  |
+| `operations.nodeLogCaptureLinesPerSource`       | 300       | 10–1,000        | Log lines captured from each of the VM agent, systemd and cloud-init       |
+| `operations.nodeLogCaptureMaxBytes`             | 1,000,000 | 10 KB–10 MB     | Largest uncompressed capture stored                                        |
+| `operations.nodeLogCaptureHeartbeatFreshnessMs` | 600,000   | 1 minute–1 day  | How recent a node's heartbeat must be for teardown to try a capture        |
+| `operations.snapshotTracesPerSession`           | 10        | 1–100           | Sleep/wake step traces kept per chat session                               |
+| `operations.snapshotTraceRetentionDays`         | 30        | 1–365           | Days step traces are kept                                                  |
+| `operations.actionApprovalTtlMs`                | 3,600,000 | 1 minute–7 days | How long a request waits for a decision, and an approval then stays usable |
+| `operations.actionApprovalRetentionDays`        | 90        | 1–365           | Days decided, expired and executed approval records are kept               |
 
 ## If the database can't be read
 

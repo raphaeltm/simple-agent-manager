@@ -135,8 +135,8 @@ async function openPalette(page: Page) {
   await page.waitForTimeout(400);
 }
 
-async function gotoApp(page: Page, path: string) {
-  await seedTheme(page, 'dark');
+async function gotoApp(page: Page, path: string, theme: 'dark' | 'light' = 'dark') {
+  await seedTheme(page, theme, theme === 'dark');
   await page.goto(path);
   // The AppShell must mount (it owns the Ctrl+K listener). The sidebar trigger
   // is a stable marker that the shell rendered.
@@ -157,6 +157,29 @@ async function auditGlobalCommands(page: Page, suffix: string) {
   await gotoApp(page, '/dashboard');
   await openPalette(page);
   await screenshot(page, `command-palette-global-${suffix}`);
+  await assertNoOverflow(page);
+}
+
+const LONG_UNBROKEN_NAME = 'Averyveryverylongprojectnamewithnospacesthatcannotwrapanywhereatall';
+const LONG_URL = `https://example.com/a/very/long/path/${'x'.repeat(120)}`;
+
+// The search field is a SAM Glass well; light mode used to render it as a
+// muddy dark band (a fixed rgba(0,0,0,0.2)), so light gets its own check.
+async function auditGlobalCommandsLight(page: Page, suffix: string) {
+  await setupMocks(page, {
+    projects: [{ id: 'proj-test-1', name: LONG_UNBROKEN_NAME }, ...NORMAL_PROJECTS.slice(1)],
+    chats: { sessions: [makeSession({ id: 'sess-url', topic: LONG_URL })], total: 1 },
+  });
+  await gotoApp(page, '/dashboard', 'light');
+  await openPalette(page);
+  const combobox = page.locator('[role="combobox"]');
+  await expect(combobox).toBeFocused();
+  // Light well token: --sam-glass-v2-well rgb(17 39 29 / 0.05) in glass.css.
+  const searchRowBackground = await combobox.evaluate(
+    (input) => getComputedStyle(input.parentElement!).backgroundColor
+  );
+  expect(searchRowBackground).toBe('rgba(17, 39, 29, 0.05)');
+  await screenshot(page, `command-palette-global-light-${suffix}`);
   await assertNoOverflow(page);
 }
 
@@ -203,6 +226,8 @@ test.describe('Command Palette — Mobile', () => {
   test('global commands on dashboard (superadmin)', ({ page }) =>
     auditGlobalCommands(page, 'mobile'));
 
+  test('global commands in light mode', ({ page }) => auditGlobalCommandsLight(page, 'mobile'));
+
   test('context actions inside a project', ({ page }) =>
     auditContextActions(page, 'mobile'));
 
@@ -224,6 +249,8 @@ test.describe('Command Palette — Desktop', () => {
 
   test('global commands on dashboard (superadmin)', ({ page }) =>
     auditGlobalCommands(page, 'desktop'));
+
+  test('global commands in light mode', ({ page }) => auditGlobalCommandsLight(page, 'desktop'));
 
   test('context actions inside a project', ({ page }) =>
     auditContextActions(page, 'desktop'));

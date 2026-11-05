@@ -603,7 +603,7 @@ describe('ProjectChat new chat button', () => {
     });
 
     // Click the "+ New Chat" button in the sidebar
-    fireEvent.click(screen.getByRole('button', { name: '+ New Chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New Chat', exact: true }));
 
     // Should show the new chat input
     await waitFor(() => {
@@ -720,21 +720,6 @@ describe('ProjectChat new chat button', () => {
     expect(screen.queryByRole('dialog', { name: 'Task hierarchy' })).not.toBeInTheDocument();
   });
 
-  it('gear icon navigates to the project settings page', async () => {
-    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
-    renderProjectChat();
-
-    await waitFor(() => {
-      expect(screen.getByLabelText('Project settings')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByLabelText('Project settings'));
-
-    await waitFor(() => {
-      expect(screen.getByTestId('settings-page')).toBeInTheDocument();
-    });
-  });
-
   it('clears new chat intent and navigates to new session after task submission', async () => {
     mocks.listChatSessions.mockResolvedValue({
       sessions: [SESSION_1],
@@ -764,7 +749,7 @@ describe('ProjectChat new chat button', () => {
     });
 
     // Click "+ New Chat"
-    fireEvent.click(screen.getByRole('button', { name: '+ New Chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New Chat', exact: true }));
 
     await waitFor(() => {
       expect(screen.getByText('What do you want to build?')).toBeInTheDocument();
@@ -1085,7 +1070,7 @@ describe('ProjectChat new chat button', () => {
     });
 
     // Click New Chat — should clear the banner
-    fireEvent.click(screen.getByRole('button', { name: '+ New Chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New Chat', exact: true }));
 
     await waitFor(() => {
       expect(screen.getByText('What do you want to build?')).toBeInTheDocument();
@@ -1115,11 +1100,11 @@ describe('ProvisioningIndicator', () => {
       { wrapper: QueryTestWrapper }
     );
 
-    expect(screen.getByText('Installing dependencies (3/4)')).toBeInTheDocument();
-    expect(screen.getByText(/Usually takes 2-4 minutes/)).toBeInTheDocument();
-    expect(screen.getByText('1. Provisioning VM')).toBeInTheDocument();
-    expect(screen.getByText('4. Starting agent')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'View Logs' })).toBeInTheDocument();
+    expect(screen.getByText('Installing dependencies · 3 of 4')).toBeInTheDocument();
+    expect(screen.getByText(/This usually takes 2–4 minutes/)).toBeInTheDocument();
+    expect(screen.getByText('Provisioning VM')).toBeInTheDocument();
+    expect(screen.getByText('Starting agent')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'View logs' })).toBeInTheDocument();
   });
 });
 

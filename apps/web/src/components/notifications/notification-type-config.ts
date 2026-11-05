@@ -9,6 +9,7 @@ import {
   type LucideIcon,
   MessageSquare,
   MessageSquareQuote,
+  ShieldCheck,
   Users,
 } from 'lucide-react';
 
@@ -34,6 +35,7 @@ export const NOTIFICATION_TYPE_CONFIG: Record<NotificationType, NotificationType
   mention: { icon: AtSign, color: 'text-accent', label: 'Mention' },
   comment: { icon: MessageSquareQuote, color: 'text-info-fg', label: 'Comment' },
   session_access: { icon: Users, color: 'text-info-fg', label: 'Shared Session' },
+  operations_approval: { icon: ShieldCheck, color: 'text-warning-fg', label: 'Approval Needed' },
 };
 
 /**
@@ -52,11 +54,13 @@ export function notificationTypeConfig(type: string): NotificationTypeConfig {
  * These are the only types counted in the bell badge.
  * Low-value updates (task_complete, progress, session_ended, pr_created, comment,
  * session_access) are accessible in the Updates tab but do not inflate the badge count.
- * A mention is addressed to you by a person, so it needs you.
+ * A mention is addressed to you by a person, so it needs you. An Operations approval waits on
+ * your tap.
  */
 export const ATTENTION_TYPES: ReadonlySet<string> = new Set<NotificationType>([
   'needs_input',
   'error',
   'cron_failure',
   'mention',
+  'operations_approval',
 ]);

@@ -301,6 +301,11 @@ export async function rearmPreservationBlockedSleep(
       sleepStoppingSince: null,
       // Preserve the spent budget: reopening must never buy another full capture cycle.
       sleepEpisodeStartedAt: sql`COALESCE(${s.sleepEpisodeStartedAt}, ${s.createdAt})`,
+      // An episode clock rebuilt from `created_at` is an automatic episode. A person's claim can
+      // land in the millisecond the row was created, so a stale required mark could equal it
+      // (`isPersonRequiredSleepEpisode`); drop the mark whenever the clock is rebuilt.
+      sleepRequiredEpisodeStartedAt: sql`CASE WHEN ${s.sleepEpisodeStartedAt} IS NULL THEN NULL
+        ELSE ${s.sleepRequiredEpisodeStartedAt} END`,
       sleepEpisodeFailures: sql`MAX(COALESCE(${s.sleepEpisodeFailures}, 0), ${record.failedAttempts})`,
       updatedAt: input.now.toISOString(),
     })

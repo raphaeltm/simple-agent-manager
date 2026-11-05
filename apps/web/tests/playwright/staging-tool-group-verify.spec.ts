@@ -113,7 +113,7 @@ const LIVE_POLL_INTERVAL_MS = Number.parseInt(
  * agent (`.claude/rules/62`).
  */
 function assistantDoneMarker(page: Page) {
-  return page.locator('.glass-msg-assistant', { hasText: LIVE_DONE_MARKER });
+  return page.locator('.glass-msg-agent', { hasText: LIVE_DONE_MARKER });
 }
 
 /**
@@ -364,9 +364,9 @@ async function openFixtureSession(page: Page, query = ''): Promise<void> {
   await page.goto(`${STAGING_APP}/projects/${PROJECT_ID}/chat/${SESSION_ID}${query}`);
   await expect(page.getByText('Something went wrong')).toHaveCount(0);
   await dismissStagingOnboarding(page);
-  // The conversation mounts at the last item, so an assistant bubble is the
+  // The conversation mounts at the last item, so an agent message is the
   // first thing that must exist before anything else is measured.
-  await expect(page.locator('.glass-msg-assistant').first()).toBeVisible({ timeout: 45_000 });
+  await expect(page.locator('.glass-msg-agent').first()).toBeVisible({ timeout: 45_000 });
 }
 
 /**
@@ -472,7 +472,7 @@ test.describe('Staging — tool activity cards', () => {
     await openFixtureSession(page);
 
     // Liveness first: the prose the grouping exists to surface must be readable.
-    const bubble = page.locator('.glass-msg-assistant').first();
+    const bubble = page.locator('.glass-msg-agent').first();
     await expect(bubble).toBeVisible();
     expect((await bubble.innerText()).trim().length).toBeGreaterThan(0);
 

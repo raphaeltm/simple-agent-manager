@@ -1,13 +1,9 @@
 import { EXECUTION_STEP_LABELS } from '@simple-agent-manager/shared';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { ProvisioningIndicator } from '../../../src/pages/project-chat/ProvisioningIndicator';
 import type { ProvisioningState } from '../../../src/pages/project-chat/types';
-
-vi.mock('@simple-agent-manager/ui', () => ({
-  Spinner: ({ size }: { size?: string }) => <span data-testid="spinner" data-size={size}>Loading...</span>,
-}));
 
 function makeState(overrides: Partial<ProvisioningState> = {}): ProvisioningState {
   return {
@@ -29,9 +25,11 @@ function makeState(overrides: Partial<ProvisioningState> = {}): ProvisioningStat
 describe('ProvisioningIndicator', () => {
   it('shows staged status text and preserves execution step detail', () => {
     const state = makeState({ executionStep: 'workspace_creation' });
-    const { container } = render(<ProvisioningIndicator state={state} bootLogCount={0} onViewLogs={vi.fn()} />);
-    expect(screen.getByText('Cloning repository (2/4)')).toBeInTheDocument();
-    expect(container).toHaveTextContent(`Current detail: ${EXECUTION_STEP_LABELS.workspace_creation}`);
+    const { container } = render(
+      <ProvisioningIndicator state={state} bootLogCount={0} onViewLogs={vi.fn()} />
+    );
+    expect(screen.getByText('Cloning repository · 2 of 4')).toBeInTheDocument();
+    expect(container).toHaveTextContent('Creating workspace. This usually takes 2–4 minutes.');
   });
 
   it('shows "Starting..." when no execution step is set', () => {
@@ -40,16 +38,29 @@ describe('ProvisioningIndicator', () => {
     expect(screen.getByText('Starting...')).toBeInTheDocument();
   });
 
-  it('shows spinner for non-terminal states', () => {
-    const state = makeState({ status: 'running' });
+  it('shows the stage track with the current stage marked while provisioning', () => {
+    const state = makeState({ executionStep: 'workspace_ready' });
     render(<ProvisioningIndicator state={state} bootLogCount={0} onViewLogs={vi.fn()} />);
-    expect(screen.getByTestId('spinner')).toBeInTheDocument();
+    const track = screen.getByTestId('stage-track');
+    expect(within(track).getByText('Installing dependencies')).toHaveAttribute(
+      'aria-current',
+      'step'
+    );
+    expect(track.querySelectorAll('[data-stage-state="done"]')).toHaveLength(2);
+    expect(track.querySelectorAll('[data-stage-state="current"]')).toHaveLength(1);
   });
 
-  it('hides spinner for terminal states', () => {
-    const state = makeState({ status: 'failed', errorMessage: 'Something broke' });
+  it('marks the stage that failed and alerts', () => {
+    const state = makeState({
+      status: 'failed',
+      executionStep: 'workspace_ready',
+      errorMessage: 'Something broke',
+    });
     render(<ProvisioningIndicator state={state} bootLogCount={0} onViewLogs={vi.fn()} />);
-    expect(screen.queryByTestId('spinner')).not.toBeInTheDocument();
+    expect(screen.getByRole('alert')).toHaveAttribute('data-tone', 'danger');
+    const track = screen.getByTestId('stage-track');
+    expect(track.querySelectorAll('[data-stage-state="failed"]')).toHaveLength(1);
+    expect(track.querySelectorAll('[data-stage-state="current"]')).toHaveLength(0);
   });
 
   it('shows "Setup failed" for failed status', () => {
@@ -88,48 +99,40 @@ describe('ProvisioningIndicator', () => {
     expect(screen.queryByText('VM failed to start')).not.toBeInTheDocument();
   });
 
-  it('shows View Logs button when bootLogCount > 0', () => {
+  it('shows View logs button when bootLogCount > 0', () => {
     const onViewLogs = vi.fn();
     const state = makeState();
     render(<ProvisioningIndicator state={state} bootLogCount={5} onViewLogs={onViewLogs} />);
-    expect(screen.getByText('View Logs')).toBeInTheDocument();
+    expect(screen.getByText('View logs')).toBeInTheDocument();
   });
 
-  it('hides View Logs button when bootLogCount is 0', () => {
+  it('hides View logs button when bootLogCount is 0', () => {
     const state = makeState();
     render(<ProvisioningIndicator state={state} bootLogCount={0} onViewLogs={vi.fn()} />);
-    expect(screen.queryByText('View Logs')).not.toBeInTheDocument();
+    expect(screen.queryByText('View logs')).not.toBeInTheDocument();
   });
 
-  it('calls onViewLogs when View Logs button is clicked', () => {
+  it('calls onViewLogs when View logs button is clicked', () => {
     const onViewLogs = vi.fn();
     const state = makeState();
     render(<ProvisioningIndicator state={state} bootLogCount={3} onViewLogs={onViewLogs} />);
-    screen.getByText('View Logs').click();
+    screen.getByText('View logs').click();
     expect(onViewLogs).toHaveBeenCalledTimes(1);
   });
 
-  it('renders progress bar segments for non-terminal state', () => {
-    const state = makeState({ executionStep: 'workspace_creation' });
-    const { container } = render(
-      <ProvisioningIndicator state={state} bootLogCount={0} onViewLogs={vi.fn()} />,
-    );
-    // Progress bar has multiple segment divs with title attributes matching step labels
-    const segments = container.querySelectorAll('[title]');
-    expect(segments.length).toBeGreaterThan(0);
-    // 'running' and 'awaiting_followup' are filtered out from progress bar
-    const titles = Array.from(segments).map((el) => el.getAttribute('title'));
-    expect(titles).not.toContain(EXECUTION_STEP_LABELS.running);
-    expect(titles).not.toContain(EXECUTION_STEP_LABELS.awaiting_followup);
-  });
-
-  it('hides progress bar for terminal states', () => {
-    const state = makeState({ status: 'completed' });
-    const { container } = render(
-      <ProvisioningIndicator state={state} bootLogCount={0} onViewLogs={vi.fn()} />,
-    );
-    const segments = container.querySelectorAll('[title]');
-    expect(segments.length).toBe(0);
+  it('hides the stage track once setup completed or was cancelled', () => {
+    for (const status of ['completed', 'cancelled'] as const) {
+      const { unmount } = render(
+        <ProvisioningIndicator
+          state={makeState({ status })}
+          bootLogCount={0}
+          onViewLogs={vi.fn()}
+        />
+      );
+      expect(screen.getByTestId('provisioning-indicator')).toBeInTheDocument();
+      expect(screen.queryByTestId('stage-track')).not.toBeInTheDocument();
+      unmount();
+    }
   });
 
   it.each([
@@ -144,13 +147,13 @@ describe('ProvisioningIndicator', () => {
     render(<ProvisioningIndicator state={state} bootLogCount={3} onViewLogs={onViewLogs} />);
 
     expect(
-      screen.queryByText(/machines were available|larger size was unavailable/),
+      screen.queryByText(/machines were available|larger size was unavailable/)
     ).not.toBeInTheDocument();
-    expect(screen.getByText('Provisioning VM (1/4)')).toBeInTheDocument();
-    expect(screen.getByText(/Current detail:/)).toHaveTextContent(
-      EXECUTION_STEP_LABELS.node_agent_ready,
+    expect(screen.getByText('Provisioning VM · 1 of 4')).toBeInTheDocument();
+    expect(screen.getByText(/This usually takes/)).toHaveTextContent(
+      EXECUTION_STEP_LABELS.node_agent_ready.replace(/\.+$/, '.')
     );
-    screen.getByRole('button', { name: 'View Logs' }).click();
+    screen.getByRole('button', { name: 'View logs' }).click();
     expect(onViewLogs).toHaveBeenCalledOnce();
   });
 });

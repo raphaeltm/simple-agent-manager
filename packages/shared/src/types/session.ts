@@ -366,6 +366,11 @@ export interface SessionStateSnapshot {
    * Null on rows written before the clock existed.
    */
   workAt?: number | null;
+  /**
+   * The latest turn start the VM agent itself reported. Only grows, and only when a new prompt
+   * starts; a re-report of the same turn, a cancel or a restart leaves it unchanged.
+   */
+  reportedPromptStartedAt?: number | null;
   /** D1-sourced recovery status from session_snapshots (sleep/wake lifecycle). */
   recoveryStatus?: 'waking' | 'restored' | 'failed' | null;
   /**

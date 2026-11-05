@@ -322,20 +322,30 @@ async function setupExpiringGrant(
   );
 }
 
-/** Scroll the virtualized conversation from the top until `label` is rendered, then assert it. */
+/**
+ * Bring `text` into the virtualized conversation's rendered window. If it is already rendered,
+ * pin it into view; otherwise scroll down from the top until it renders, then pin it. Pinning
+ * matters because the virtual list can re-measure after a scroll and drop a row that was only in
+ * the overscan band.
+ */
 async function scrollConversationUntil(page: Page, text: string) {
+  const target = page.getByText(text, { exact: false }).first();
+  const pin = async () => {
+    await target.scrollIntoViewIfNeeded().catch(() => undefined);
+  };
+  if (await target.count()) return pin();
   const scroller = page.locator('[data-sam-conversation-scroller="true"]').first();
   await scroller.evaluate((el) => {
     el.scrollTop = 0;
     el.dispatchEvent(new Event('scroll', { bubbles: true }));
   });
-  for (let step = 0; step < 20; step += 1) {
-    if (await page.getByText(text, { exact: false }).count()) return;
+  for (let step = 0; step < 30; step += 1) {
+    await page.waitForTimeout(80);
+    if (await target.count()) return pin();
     await scroller.evaluate((el) => {
-      el.scrollTop += Math.max(120, el.clientHeight * 0.6);
+      el.scrollTop += Math.max(120, el.clientHeight * 0.8);
       el.dispatchEvent(new Event('scroll', { bubbles: true }));
     });
-    await page.waitForTimeout(150);
   }
 }
 

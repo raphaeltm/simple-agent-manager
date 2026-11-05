@@ -1,10 +1,11 @@
 /** Cron source adapter. Scheduling stays here; execution policy lives in trigger-admission. */
 import { DEFAULT_CRON_MAX_FIRE_PER_SWEEP } from '@simple-agent-manager/shared';
-import { and, eq, isNotNull, lte } from 'drizzle-orm';
+import { and, asc, eq, gt, isNotNull, lte } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { databaseFailureCategory } from '../lib/database-failure-category';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { expectJsonRecord } from '../lib/runtime-validation';
@@ -21,6 +22,8 @@ export interface CronSweepStats {
 
 type ProcessResult = 'fired' | 'skipped' | 'failed';
 
+const CURSOR_KEY = 'cron-sweep:due-trigger-cursor';
+
 export async function runCronTriggerSweep(env: Env): Promise<CronSweepStats> {
   if (env.CRON_SWEEP_ENABLED === 'false') {
     return { checked: 0, fired: 0, skipped: 0, failed: 0 };
@@ -28,18 +31,36 @@ export async function runCronTriggerSweep(env: Env): Promise<CronSweepStats> {
 
   const db = drizzle(env.DATABASE, { schema });
   const now = new Date();
+  const limit = parsePositiveInt(env.CRON_MAX_FIRE_PER_SWEEP, DEFAULT_CRON_MAX_FIRE_PER_SWEEP);
+  let cursor: string | null = null;
+  try {
+    cursor = await env.KV.get(CURSOR_KEY);
+  } catch {
+    log.warn('cron_sweep.cursor_read_failed');
+  }
+  const due = and(
+    eq(schema.triggers.sourceType, 'cron'),
+    eq(schema.triggers.status, 'active'),
+    isNotNull(schema.triggers.nextFireAt),
+    lte(schema.triggers.nextFireAt, now.toISOString())
+  );
+  // A failing occurrence stays due. Rotate the bounded page independently of its schedule,
+  // otherwise a poison prefix can consume the entire sweep limit forever.
   const dueTriggers = await db
     .select()
     .from(schema.triggers)
-    .where(
-      and(
-        eq(schema.triggers.sourceType, 'cron'),
-        eq(schema.triggers.status, 'active'),
-        isNotNull(schema.triggers.nextFireAt),
-        lte(schema.triggers.nextFireAt, now.toISOString())
-      )
-    )
-    .limit(parsePositiveInt(env.CRON_MAX_FIRE_PER_SWEEP, DEFAULT_CRON_MAX_FIRE_PER_SWEEP));
+    .where(and(due, cursor ? gt(schema.triggers.id, cursor) : undefined))
+    .orderBy(asc(schema.triggers.id))
+    .limit(limit);
+  if (cursor && dueTriggers.length < limit) {
+    const wrapped = await db
+      .select()
+      .from(schema.triggers)
+      .where(and(due, lte(schema.triggers.id, cursor)))
+      .orderBy(asc(schema.triggers.id))
+      .limit(limit - dueTriggers.length);
+    dueTriggers.push(...wrapped);
+  }
 
   const stats: CronSweepStats = {
     checked: dueTriggers.length,
@@ -55,10 +76,17 @@ export async function runCronTriggerSweep(env: Env): Promise<CronSweepStats> {
       log.error('cron_sweep.trigger_error', {
         triggerId: trigger.id,
         projectId: trigger.projectId,
-        error: error instanceof Error ? error.message : String(error),
+        databaseFailureCategory: databaseFailureCategory(error),
+        recovery: 'retry_due_occurrence_next_sweep',
       });
-      await advanceNextFireAt(db, trigger);
     }
+  }
+  const last = dueTriggers.at(-1);
+  try {
+    // One write per sweep avoids KV's per-key write rate limit.
+    await env.KV.put(CURSOR_KEY, last?.id ?? '');
+  } catch {
+    log.warn('cron_sweep.cursor_write_failed');
   }
   return stats;
 }
@@ -69,6 +97,28 @@ async function processTrigger(
   trigger: schema.TriggerRow,
   now: Date
 ): Promise<ProcessResult> {
+  const scheduledAt = trigger.nextFireAt ?? now.toISOString();
+  // Reuse pre-existing executions too, so rollout can recover an older stranded occurrence.
+  const previous = await env.DATABASE.prepare(
+    `SELECT id, status FROM trigger_executions
+     WHERE trigger_id = ? AND project_id = ? AND event_type = 'cron' AND scheduled_at = ?
+     ORDER BY (task_id IS NOT NULL) DESC, sequence_number DESC LIMIT 1`
+  )
+    .bind(trigger.id, trigger.projectId, scheduledAt)
+    .first<{ id: string; status: string }>();
+  if (previous && ['completed', 'failed', 'skipped'].includes(previous.status)) {
+    await advanceNextFireAt(db, trigger);
+    return previous.status === 'failed' ? 'failed' : 'skipped';
+  }
+  const digest = await crypto.subtle.digest(
+    'SHA-256',
+    new TextEncoder().encode(JSON.stringify(['cron', trigger.id, scheduledAt]))
+  );
+  const executionId =
+    previous?.id ??
+    `cron-${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join(
+      ''
+    )}`;
   const project = await db
     .select({ name: schema.projects.name })
     .from(schema.projects)
@@ -79,7 +129,8 @@ async function processTrigger(
     trigger,
     eventType: 'cron',
     triggeredBy: 'cron',
-    scheduledAt: trigger.nextFireAt ?? now.toISOString(),
+    scheduledAt,
+    executionId,
     renderPrompt: (executionId, sequenceNumber) => {
       const context = buildCronContext(
         {
@@ -120,9 +171,27 @@ async function advanceNextFireAt(
   db: ReturnType<typeof drizzle<typeof schema>>,
   trigger: schema.TriggerRow
 ): Promise<void> {
-  if (!trigger.cronExpression) return;
-  await db
-    .update(schema.triggers)
-    .set({ nextFireAt: cronToNextFire(trigger.cronExpression, trigger.cronTimezone ?? 'UTC') })
-    .where(eq(schema.triggers.id, trigger.id));
+  if (!trigger.cronExpression || !trigger.nextFireAt) {
+    throw new Error('Due cron trigger lacks a schedule');
+  }
+  try {
+    await db
+      .update(schema.triggers)
+      .set({ nextFireAt: cronToNextFire(trigger.cronExpression, trigger.cronTimezone ?? 'UTC') })
+      .where(
+        and(
+          eq(schema.triggers.id, trigger.id),
+          eq(schema.triggers.status, 'active'),
+          eq(schema.triggers.nextFireAt, trigger.nextFireAt)
+        )
+      );
+  } catch (error) {
+    log.error('cron_sweep.advancement_failed', {
+      triggerId: trigger.id,
+      projectId: trigger.projectId,
+      databaseFailureCategory: databaseFailureCategory(error),
+      recovery: 'retry_due_occurrence_next_sweep',
+    });
+    throw error;
+  }
 }

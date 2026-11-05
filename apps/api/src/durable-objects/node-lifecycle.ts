@@ -40,12 +40,13 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import type { DirectProvisioningInput } from '../services/direct-provisioning';
-import { deferAlarmWhenDisabled } from '../services/operational-kill-switch';
 import {
-  isSessionRecoveryTaskAuthorized,
-  type SessionRecoverySourceTaskGuard,
-  sourceProjectMemberAuthoritySql,
-} from '../services/session-recovery-authority';
+  type NodeLifecycleDecision,
+  type NodeLifecycleDecisionDetail,
+  recordNodeLifecycleDecision,
+} from '../services/node-lifecycle-decisions';
+import { deferAlarmWhenDisabled } from '../services/operational-kill-switch';
+import { type SessionRecoverySourceTaskGuard } from '../services/session-recovery-authority';
 import { boundedWarmPlacementClaimGuardSql } from '../services/warm-placement-claims';
 import type { WorkspaceDeletionIdentity } from '../services/workspace-deletion';
 import {
@@ -63,6 +64,7 @@ import {
 } from './node-lifecycle-occupancy';
 import { NodeLifecycleProvisioning } from './node-lifecycle-provisioning';
 import type { NodeLifecycleEnv, StoredState, WarmNodeClaimResult } from './node-lifecycle-types';
+import { clearWarmNodeClaim, persistWarmNodeClaim } from './node-lifecycle-warm-claims';
 import {
   NodeLifecycleWorkspaceDeletionQueue,
   type WorkspaceDeletionClaimResult,
@@ -96,114 +98,6 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     return this.ctx.blockConcurrencyWhile(() =>
       finalizeWorkspaceStopInNode(this.env as Env, identity)
     );
-  }
-
-  private async persistWarmClaim(
-    nodeId: string,
-    taskId: string,
-    sourceTaskGuard?: SessionRecoverySourceTaskGuard
-  ): Promise<'claimed' | 'unavailable' | 'source_task_revoked'> {
-    const now = new Date().toISOString();
-    const guarded = sourceTaskGuard ? 1 : 0;
-    const result = await this.env.DATABASE.prepare(
-      `UPDATE tasks AS recovery
-          SET claimed_warm_node_at = CASE
-                WHEN recovery.claimed_warm_node_id = ?
-                 AND recovery.claimed_warm_node_at IS NOT NULL
-                  THEN recovery.claimed_warm_node_at
-                ELSE ?
-              END,
-              claimed_warm_node_id = ?, updated_at = ?
-        WHERE recovery.id = ?
-          AND recovery.status NOT IN ('completed', 'failed', 'cancelled')
-          AND EXISTS (SELECT 1 FROM nodes WHERE id = ? AND status = 'running')
-          AND NOT EXISTS (
-            SELECT 1 FROM tasks incumbent
-             WHERE incumbent.claimed_warm_node_id = ?
-               AND incumbent.id != recovery.id
-               AND incumbent.status NOT IN ('completed', 'failed', 'cancelled')
-          )
-          AND (
-            ? = 0
-            OR (
-              recovery.recovery_source_task_id = ?
-              AND recovery.project_id = ?
-              AND recovery.chat_session_id = ?
-              AND recovery.triggered_by = 'session-recovery'
-              AND EXISTS (
-                SELECT 1 FROM tasks source
-                 WHERE source.id = ?
-                   AND source.project_id = recovery.project_id
-                   ${sourceTaskGuard?.projectEventWake ? sourceProjectMemberAuthoritySql() : ''}
-                   ${
-                     sourceTaskGuard?.requiredProjectMemberId
-                       ? `AND EXISTS (
-                     SELECT 1 FROM project_members scheduled_member
-                       JOIN users scheduled_user ON scheduled_user.id = scheduled_member.user_id
-                     WHERE scheduled_member.project_id = recovery.project_id
-                       AND scheduled_member.user_id = ?
-                       AND scheduled_member.status = 'active' AND scheduled_user.status = 'active'
-                       AND scheduled_member.role IN ('owner','admin','maintainer')
-                   )`
-                       : ''
-                   }
-                   AND (
-                     source.status NOT IN ('completed', 'failed', 'cancelled')
-                     OR (
-                       source.status = 'cancelled'
-                       AND source.superseded_by_task_id = recovery.id
-                     )
-                   )
-              )
-              AND EXISTS (
-                SELECT 1 FROM session_snapshots snapshot
-                 WHERE snapshot.chat_session_id = recovery.chat_session_id
-                   AND snapshot.project_id = recovery.project_id
-                   AND snapshot.recovery_task_id = recovery.id
-                   AND snapshot.recovery_status IN ('waking', 'restored')
-              )
-            )
-          )`
-    )
-      .bind(
-        nodeId,
-        now,
-        nodeId,
-        now,
-        taskId,
-        nodeId,
-        nodeId,
-        guarded,
-        sourceTaskGuard?.taskId ?? '',
-        sourceTaskGuard?.projectId ?? '',
-        sourceTaskGuard?.chatSessionId ?? '',
-        sourceTaskGuard?.taskId ?? '',
-        ...(sourceTaskGuard?.requiredProjectMemberId
-          ? [sourceTaskGuard.requiredProjectMemberId]
-          : [])
-      )
-      .run();
-    if ((result.meta.changes ?? 0) > 0) return 'claimed';
-    if (!sourceTaskGuard) return 'unavailable';
-    const authorized = await isSessionRecoveryTaskAuthorized(this.env.DATABASE, {
-      recoveryTaskId: taskId,
-      sourceTaskId: sourceTaskGuard.taskId,
-      projectId: sourceTaskGuard.projectId,
-      chatSessionId: sourceTaskGuard.chatSessionId,
-      projectEventWake: sourceTaskGuard.projectEventWake,
-      requiredProjectMemberId: sourceTaskGuard.requiredProjectMemberId,
-    });
-    return authorized ? 'unavailable' : 'source_task_revoked';
-  }
-
-  private async clearWarmClaim(taskId: string, nodeId: string): Promise<void> {
-    await this.env.DATABASE.prepare(
-      `UPDATE tasks
-          SET claimed_warm_node_id = NULL, claimed_warm_node_at = NULL, updated_at = ?
-        WHERE id = ? AND claimed_warm_node_id = ?`
-    )
-      .bind(new Date().toISOString(), taskId, nodeId)
-      .run();
   }
 
   /**
@@ -261,6 +155,12 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
       // No warm alarm; preserve any pending workspace-deletion alarms.
       await this.recalculateAlarm(null);
       await this.updateD1WarmSince(nodeId, null);
+      await this.recordDecision(
+        nodeId,
+        'kept_active',
+        userOwned ? 'user_owned' : occupied ? 'active_workspace' : 'placement_claim',
+        { userOwned, occupied, placementClaim }
+      );
       return this.toPublicState(activeState);
     }
 
@@ -285,7 +185,11 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
 
     // Update D1 warm_since column
     await this.updateD1WarmSince(nodeId, new Date(now).toISOString());
-    if (previousClaim) await this.clearWarmClaim(previousClaim, nodeId);
+    if (previousClaim) await clearWarmNodeClaim(this.env, previousClaim, nodeId);
+    await this.recordDecision(nodeId, 'marked_warm', 'last_workspace_left', {
+      warmTimeoutMs: warmTimeout,
+      teardownDueAt: new Date(now + warmTimeout).toISOString(),
+    });
 
     return this.toPublicState(newState);
   }
@@ -311,7 +215,10 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
 
     // Clear D1 warm_since
     await this.updateD1WarmSince(state.nodeId, null);
-    if (previousClaim) await this.clearWarmClaim(previousClaim, state.nodeId);
+    if (previousClaim) await clearWarmNodeClaim(this.env, previousClaim, state.nodeId);
+    await this.recordDecision(state.nodeId, 'marked_active', 'workspace_started', {
+      previousClaim,
+    });
 
     return this.toPublicState(state);
   }
@@ -344,7 +251,12 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     }
 
     if (state.status === 'active' && state.claimedByTask === taskId) {
-      const claimResult = await this.persistWarmClaim(state.nodeId, taskId, sourceTaskGuard);
+      const claimResult = await persistWarmNodeClaim(
+        this.env,
+        state.nodeId,
+        taskId,
+        sourceTaskGuard
+      );
       return claimResult === 'claimed'
         ? { claimed: true, state: this.toPublicState(state) }
         : {
@@ -362,7 +274,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
 
     // This single conditional D1 write both proves live recovery authority and
     // records the exact node claim before the DO cancels its teardown alarm.
-    const claimResult = await this.persistWarmClaim(state.nodeId, taskId, sourceTaskGuard);
+    const claimResult = await persistWarmNodeClaim(this.env, state.nodeId, taskId, sourceTaskGuard);
     if (claimResult !== 'claimed') {
       return {
         claimed: false,
@@ -384,6 +296,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
 
     // Clear D1 warm_since
     await this.updateD1WarmSince(state.nodeId, null);
+    await this.recordDecision(state.nodeId, 'claimed', 'warm_node_reused', { taskId });
 
     return { claimed: true, state: this.toPublicState(state) };
   }
@@ -408,7 +321,8 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     await this.ctx.storage.put('state', state);
     await this.recalculateAlarm(now + (state.warmTimeoutOverrideMs ?? this.getWarmTimeoutMs()));
     await this.updateD1WarmSince(state.nodeId, new Date(now).toISOString());
-    await this.clearWarmClaim(taskId, state.nodeId);
+    await clearWarmNodeClaim(this.env, taskId, state.nodeId);
+    await this.recordDecision(state.nodeId, 'claim_released', 'claim_unused', { taskId });
     return { released: true, state: this.toPublicState(state) };
   }
 
@@ -574,6 +488,22 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     return (await this.ctx.storage.get<StoredState>('state')) ?? null;
   }
 
+  /** Best-effort decision log row; never fails the transition (see node-lifecycle-decisions). */
+  private async recordDecision(
+    nodeId: string,
+    decision: NodeLifecycleDecision,
+    reason: string | null,
+    detail?: NodeLifecycleDecisionDetail
+  ): Promise<void> {
+    await recordNodeLifecycleDecision(this.env.DATABASE, {
+      nodeId,
+      source: 'node_lifecycle',
+      decision,
+      reason,
+      detail,
+    });
+  }
+
   private async handleDestroyingAlarm(state: StoredState): Promise<void> {
     const now = Date.now();
     const destroyingSince = state.destroyingSince ?? state.warmSince ?? now;
@@ -666,6 +596,14 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
         await this.updateD1WarmSince(state.nodeId, null);
         await this.recalculateAlarm(null);
         log.info('node_lifecycle.warm_handoff_preserved', { nodeId: state.nodeId });
+        await this.recordDecision(
+          state.nodeId,
+          'warm_handoff_preserved',
+          'reservation_or_claim_won',
+          {
+            nodeStatus: node.status,
+          }
+        );
         return;
       }
       state.status = 'destroying';
@@ -674,6 +612,9 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
       log.info('node_lifecycle.alarm.warm_to_destroying', {
         nodeId: state.nodeId,
         userId: state.userId,
+        warmSince: state.warmSince ? new Date(state.warmSince).toISOString() : null,
+      });
+      await this.recordDecision(state.nodeId, 'warm_expired_destroying', 'warm_timeout_elapsed', {
         warmSince: state.warmSince ? new Date(state.warmSince).toISOString() : null,
       });
     } catch (err) {
@@ -690,6 +631,11 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     reason: string,
     terminalProof: boolean
   ): Promise<void> {
+    await this.recordDecision(
+      nodeId,
+      terminalProof ? 'deletion_finalized' : 'destroying_state_retired',
+      reason
+    );
     if (terminalProof) {
       log.info('node_lifecycle.destroying_terminal', { nodeId, reason });
       await this.ctx.storage.deleteAlarm();

@@ -80,7 +80,6 @@ func Load() (*Config, error) {
 		JWTIssuer:   getEnv("JWT_ISSUER", ""), // Will be derived from ControlPlaneURL if not set
 
 		WorkspaceDeletionTombstoneRetention: getEnvDuration("WORKSPACE_DELETION_TOMBSTONE_RETENTION", DefaultWorkspaceDeletionTombstoneRetention),
-		WorkspaceDeletionMaxEntries:         getEnvInt("WORKSPACE_DELETION_MAX_ENTRIES", DefaultWorkspaceDeletionMaxEntries),
 		WorkspaceDeletionBatchSize:          getEnvInt("WORKSPACE_DELETION_BATCH_SIZE", DefaultWorkspaceDeletionBatchSize),
 		WorkspaceDeletionAttemptTimeout:     getEnvDuration("WORKSPACE_DELETION_ATTEMPT_TIMEOUT", DefaultWorkspaceDeletionAttemptTimeout),
 		WorkspaceDeletionRetryInterval:      getEnvDuration("WORKSPACE_DELETION_RETRY_INTERVAL", DefaultWorkspaceDeletionRetryInterval),
@@ -100,6 +99,7 @@ func Load() (*Config, error) {
 		BootstrapTimeout: getEnvDuration("BOOTSTRAP_TIMEOUT", 30*time.Minute),
 
 		GracefulShutdownTimeout:   getEnvDuration("GRACEFUL_SHUTDOWN_TIMEOUT", DefaultGracefulShutdownTimeout),
+		SelfRestartDelay:          getEnvDuration("VM_AGENT_SELF_RESTART_DELAY", DefaultSelfRestartDelay),
 		SystemProvisioningTimeout: getEnvDuration("SYSTEM_PROVISIONING_TIMEOUT", DefaultSystemProvisioningTimeout),
 		CFIPFetchTimeout:          getEnvDuration("CF_IP_FETCH_TIMEOUT", DefaultCFIPFetchTimeout),
 		BootLogHTTPTimeout:        getEnvDuration("BOOT_LOG_HTTP_TIMEOUT", DefaultBootLogHTTPTimeout),

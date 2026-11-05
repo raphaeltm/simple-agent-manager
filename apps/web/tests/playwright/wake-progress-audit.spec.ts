@@ -201,7 +201,7 @@ for (const viewport of [
         // task-launch path and is fed by the session's own task; the wake banner
         // covers the wake path and is fed by the recovery task. They must never
         // both claim the screen — if this fires, the two have started to overlap.
-        await expect(page.getByText('Usually takes 2-4 minutes.')).toHaveCount(0);
+        await expect(page.getByTestId('provisioning-indicator')).toHaveCount(0);
 
         await assertNoOverflow(page);
         await screenshot(page, `wake-progress-${name}-${viewport.name.toLowerCase()}`);

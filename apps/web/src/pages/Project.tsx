@@ -13,6 +13,7 @@ import {
   projectQueryKeys,
   projectRuntimeConfigQueryOptions,
 } from '../lib/query-options';
+import { isFullBleedRoute } from '../lib/shell-routes';
 import { ProjectContext } from './ProjectContext';
 
 export function Project() {
@@ -41,9 +42,7 @@ export function Project() {
 
   // Chat routes, and the comment reader (a conversation with its own scroller), get a
   // full-bleed layout (no PageLayout wrapper)
-  const isChatRoute =
-    /\/(chat|agent)(\/|$)/.test(location.pathname) ||
-    /\/comments\/[^/]+\/[^/]+\/?$/.test(location.pathname);
+  const isChatRoute = isFullBleedRoute(location.pathname);
 
   const isSettingsRoute = /\/settings(?:\/|$)/.test(location.pathname);
   const independentSettings = /\/settings\/(runtime|deploy)(?:\/|$)/.test(location.pathname);

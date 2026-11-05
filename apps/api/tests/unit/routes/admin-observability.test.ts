@@ -82,6 +82,13 @@ class MockCfApiError extends Error {
   }
 }
 
+// Only the Cloudflare call is faked: the route's validation lives in the real shared
+// `queryWorkerLogs`, which the Operations `ops_query_worker_logs` tool also calls.
+vi.mock('../../../src/services/observability-logs', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/observability-logs')>()),
+  queryCloudflareLogs: (...args: unknown[]) => mockQueryCloudflareLogs(...args),
+}));
+
 vi.mock('../../../src/services/observability', () => ({
   queryErrors: (...args: unknown[]) => mockQueryErrors(...args),
   getHealthSummary: (...args: unknown[]) => mockGetHealthSummary(...args),
@@ -1045,7 +1052,7 @@ describe('Admin Observability Routes', () => {
         },
         createEnv()
       );
-      
+
       expect(response.status).toBe(202);
       expect(await response.json()).toEqual({ run: diagnosis });
       expect(mockCreateDebugDiagnosisRun).toHaveBeenCalledWith(
