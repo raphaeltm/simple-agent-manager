@@ -47,7 +47,7 @@ index ecdf1b8..2f0e211 100644
 +                    },
 +                } : {}),
 diff --git a/src/CodexAcpServer.ts b/src/CodexAcpServer.ts
-index a43f9ab..1d501e7 100644
+index a43f9ab..528433e 100644
 --- a/src/CodexAcpServer.ts
 +++ b/src/CodexAcpServer.ts
 @@ -132,0 +133 @@ import {randomUUID} from "node:crypto";
@@ -56,27 +56,25 @@ index a43f9ab..1d501e7 100644
 +    private readonly mcpElicitationHandlers = new Map<string, CodexElicitationHandler>();
 +    private readonly seenMcpUrlElicitations = new Set<string>();
 +    private readonly mcpElicitationOwner = new Map<string, number>();
-@@ -420,0 +425 @@ export class CodexAcpServer {
-+                    idleBehaviors: ["promptRequired"],
-@@ -947,0 +953,2 @@ export class CodexAcpServer {
+@@ -947,0 +952,2 @@ export class CodexAcpServer {
 +        this.mcpElicitationHandlers.get(params.sessionId)?.dispose();
 +        this.mcpElicitationHandlers.delete(params.sessionId);
-@@ -1182,0 +1190 @@ export class CodexAcpServer {
+@@ -1182,0 +1189 @@ export class CodexAcpServer {
 +            this.clearMcpElicitationHandlers();
-@@ -1186,0 +1195,5 @@ export class CodexAcpServer {
+@@ -1186,0 +1194,5 @@ export class CodexAcpServer {
 +    private clearMcpElicitationHandlers(): void {
 +        for (const handler of this.mcpElicitationHandlers.values()) handler.dispose();
 +        this.mcpElicitationHandlers.clear();
 +    }
 +
-@@ -1193,0 +1207,2 @@ export class CodexAcpServer {
+@@ -1193,0 +1206,2 @@ export class CodexAcpServer {
 +        this.clearMcpElicitationHandlers();
 +        this.seenMcpUrlElicitations.clear();
-@@ -1625,0 +1641,3 @@ export class CodexAcpServer {
+@@ -1625,0 +1640,3 @@ export class CodexAcpServer {
 +        if (params._meta?.steering?.idleBehavior === "promptRequired") {
 +            return {outcome: "promptRequired", reason: "noRunningTurn"};
 +        }
-@@ -1805,0 +1824,13 @@ export class CodexAcpServer {
+@@ -1805,0 +1823,13 @@ export class CodexAcpServer {
 +        const meta = params["_meta"];
 +        // The ACP type allows `_meta: null`; treat it like an absent `_meta`.
 +        if (meta !== undefined && meta !== null && !isRecord(meta)) {
@@ -90,20 +88,20 @@ index a43f9ab..1d501e7 100644
 +        if (idleBehavior !== undefined && idleBehavior !== "promptRequired") {
 +            throw RequestError.invalidParams(undefined, "unsupported steering idleBehavior");
 +        }
-@@ -1808,0 +1840 @@ export class CodexAcpServer {
+@@ -1808,0 +1839 @@ export class CodexAcpServer {
 +            ...(idleBehavior === "promptRequired" ? {_meta: {steering: {idleBehavior}}} : {}),
-@@ -2932,0 +2965,5 @@ export class CodexAcpServer {
+@@ -2932,0 +2964,5 @@ export class CodexAcpServer {
 +            this.mcpElicitationHandlers.get(params.sessionId)?.dispose();
 +            const owner = (this.mcpElicitationOwner.get(params.sessionId) ?? 0) + 1;
 +            this.mcpElicitationOwner.set(params.sessionId, owner);
 +            const processGeneration = this.codexProcessGeneration;
 +            const sessionGeneration = this.getSessionGeneration(params.sessionId);
-@@ -2938,0 +2976,4 @@ export class CodexAcpServer {
+@@ -2938,0 +2975,4 @@ export class CodexAcpServer {
 +                () => this.mcpElicitationOwner.get(params.sessionId) === owner
 +                    && this.codexProcessGeneration === processGeneration
 +                    && this.getSessionGeneration(params.sessionId) === sessionGeneration,
 +                this.seenMcpUrlElicitations,
-@@ -2939,0 +2981 @@ export class CodexAcpServer {
+@@ -2939,0 +2980 @@ export class CodexAcpServer {
 +            this.mcpElicitationHandlers.set(params.sessionId, elicitationHandler);
 diff --git a/src/CodexElicitationHandler.ts b/src/CodexElicitationHandler.ts
 index 1b6dd82..32836f5 100644
@@ -315,14 +313,10 @@ index b356978..564a516 100644
 +        });
 +
 diff --git a/src/__tests__/CodexACPAgent/initialize.test.ts b/src/__tests__/CodexACPAgent/initialize.test.ts
-index 45e2bd6..eada463 100644
+index 45e2bd6..7a3a08c 100644
 --- a/src/__tests__/CodexACPAgent/initialize.test.ts
 +++ b/src/__tests__/CodexACPAgent/initialize.test.ts
-@@ -71,0 +72 @@ describe('CodexACPAgent - initialize', () => {
-+                    idleBehaviors: ["promptRequired"],
-@@ -84,0 +86 @@ describe('CodexACPAgent - initialize', () => {
-+                idleBehaviors: ["promptRequired"],
-@@ -132,0 +135,3 @@ describe('CodexACPAgent - initialize', () => {
+@@ -132,0 +133,3 @@ describe('CodexACPAgent - initialize', () => {
 +                extensions: {
 +                    'sam/acp-explicit-elicitation': { form: true, url: true },
 +                },
