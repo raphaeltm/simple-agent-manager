@@ -14,12 +14,12 @@ import { ulid } from '../../lib/ulid';
 import type { DurableExecutionConfig } from './durable-execution-config';
 import { promptDeliveryBackoffMs } from './durable-execution-config';
 import * as mailbox from './mailbox';
+import * as messages from './messages';
 import {
   applySteerDeliveryResult,
   isSteerDeliveryResult,
   type SteerDeliveryResult,
 } from './prompt-delivery-steer';
-import * as messages from './messages';
 import { parseMailboxMessageRow } from './row-schemas';
 import type { Env } from './types';
 
@@ -330,7 +330,8 @@ export function claimDuePromptDeliveries(
   const claims: PromptDeliveryClaim[] = [];
   // One claim per target and lane per pass: a steer may run beside the queued prompt.
   const claimedLanes = new Set<string>();
-  const laneKey = (target: unknown, intent: unknown) => `${String(target)}\u0000${String(intent ?? 'queue')}`;
+  const laneKey = (target: unknown, intent: unknown) =>
+    `${String(target)}\u0000${String(intent ?? 'queue')}`;
   for (const row of rows) {
     if (claimedLanes.has(laneKey(row.target_session_id, row.delivery_intent))) continue;
     let message: AgentMailboxMessage;

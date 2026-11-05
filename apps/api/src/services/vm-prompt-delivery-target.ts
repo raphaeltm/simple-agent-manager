@@ -258,13 +258,27 @@ async function resolveSleepingContainerTarget(
   return readyTarget(projectId, chatSessionId, row, row.node_id, row.agent_session_id);
 }
 
+/** A steer reports this instead of starting a wake; nothing it carries may restart a runtime. */
+export const SESSION_NOT_AWAKE_REASON = 'session_not_awake';
+
+export interface ResolveTargetOptions {
+  /**
+   * False for live steering: a sleeping or missing runtime has no running turn to
+   * steer, so the resolver reports it instead of starting a recovery or container wake.
+   */
+  allowWake?: boolean;
+}
+
 export async function resolveVmPromptDeliveryTarget(
   env: Env,
   projectId: string,
   chatSessionId: string,
   sourceTaskGuard: VmPromptDeliverySourceTaskGuard | undefined,
-  runSideEffectGuard: () => Promise<PromptDeliveryResult | null>
+  runSideEffectGuard: () => Promise<PromptDeliveryResult | null>,
+  options: ResolveTargetOptions = {}
 ): Promise<TargetResolution> {
+  const allowWake = options.allowWake ?? true;
+  const notAwake: TargetResolution = { kind: 'retry', reason: SESSION_NOT_AWAKE_REASON };
   const row = await env.DATABASE.prepare(
     `SELECT w.id AS workspace_id,
             w.user_id AS user_id,
@@ -298,6 +312,7 @@ export async function resolveVmPromptDeliveryTarget(
     .first<DeliveryTargetRow>();
 
   if (!row) {
+    if (!allowWake) return notAwake;
     const snapshot = await env.DATABASE.prepare(
       `SELECT runtime, sleep_status FROM session_snapshots WHERE chat_session_id = ? LIMIT 1`
     )
@@ -320,12 +335,14 @@ export async function resolveVmPromptDeliveryTarget(
     (row.snapshot_runtime ?? row.node_runtime) !== 'cf-container' &&
     ['sleeping', 'stopping', 'stopped', 'deleted', 'error'].includes(row.workspace_status)
   ) {
+    if (!allowWake) return notAwake;
     const guarded = await runSideEffectGuard();
     if (guarded) return { kind: 'guarded', result: guarded };
     const recovery = await ensureSessionRecovery(env, projectId, chatSessionId, sourceTaskGuard);
     return recoveryResolution(recovery, `Target workspace is ${row.workspace_status}`);
   }
   if (isSleepingContainer(row.snapshot_runtime ?? row.node_runtime, row.snapshot_sleep_status)) {
+    if (!allowWake) return notAwake;
     return resolveSleepingContainerTarget(env, projectId, chatSessionId, row, runSideEffectGuard);
   }
   if (TERMINAL_WORKSPACE_STATUSES.includes(row.workspace_status)) {

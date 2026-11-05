@@ -7,10 +7,7 @@
  * being retried as a steer. An unconfirmed steer is terminal and surfaced, never
  * replayed (`applyPromptDeliveryResult` handles `ambiguous` for both lanes).
  */
-import type {
-  VmPromptDeliveryCapabilities,
-  VmSteerReceipt,
-} from '@simple-agent-manager/shared';
+import type { VmPromptDeliveryCapabilities, VmSteerReceipt } from '@simple-agent-manager/shared';
 
 import type { PromptDeliveryClaim } from './prompt-delivery';
 
@@ -43,7 +40,33 @@ export type SteerDeliveryResult =
     };
 
 export function isSteerDeliveryResult(result: { kind: string }): result is SteerDeliveryResult {
-  return result.kind === 'steered' || result.kind === 'steer_fallback' || result.kind === 'steer_pending';
+  return (
+    result.kind === 'steered' || result.kind === 'steer_fallback' || result.kind === 'steer_pending'
+  );
+}
+
+/**
+ * What the transcript row shows about a steer, durably across reloads. `unconfirmed`
+ * is a steer the runtime may or may not have taken (the inbox row is `ambiguous`).
+ */
+export type TranscriptSteerOutcome = 'steered' | 'queued_fallback' | 'unconfirmed';
+
+export function labelSteerOutcomeOnTranscript(
+  sql: SqlStorage,
+  claim: PromptDeliveryClaim,
+  outcome: TranscriptSteerOutcome,
+  reason: string | null
+): void {
+  sql.exec(
+    `UPDATE chat_messages
+        SET tool_metadata = json_set(COALESCE(tool_metadata, '{}'),
+          '$.steerOutcome', ?, '$.steerReason', ?)
+      WHERE id = ? AND session_id = ? AND json_valid(COALESCE(tool_metadata, '{}'))`,
+    outcome,
+    reason === null ? null : boundedReason(reason),
+    claim.message.promptMessageId,
+    claim.message.targetSessionId
+  );
 }
 
 function boundedReason(reason: string): string {
@@ -60,16 +83,18 @@ export function applySteerDeliveryResult(
   if (result.kind === 'steer_pending') {
     // Leave the row `delivering`: the stale-claim sweep reclaims it in reconcile mode.
     return (
-      sql.exec(
-        `SELECT 1 FROM session_inbox WHERE id = ? AND delivery_state = 'delivering' AND attempt_id = ?`,
-        claim.message.id,
-        claim.attemptId
-      ).toArray().length > 0
+      sql
+        .exec(
+          `SELECT 1 FROM session_inbox WHERE id = ? AND delivery_state = 'delivering' AND attempt_id = ?`,
+          claim.message.id,
+          claim.attemptId
+        )
+        .toArray().length > 0
     );
   }
   if (result.kind === 'steered') {
     // No prompt epoch, no target backoff change: the running turn still owns both.
-    return (
+    const applied =
       sql.exec(
         `UPDATE session_inbox
          SET delivery_state = CASE WHEN ack_required = 1 THEN 'delivered' ELSE 'acked' END,
@@ -92,13 +117,14 @@ export function applySteerDeliveryResult(
         result.capabilities.steering?.version ?? null,
         claim.message.id,
         claim.attemptId
-      ).rowsWritten > 0
-    );
+      ).rowsWritten > 0;
+    if (applied) labelSteerOutcomeOnTranscript(sql, claim, 'steered', null);
+    return applied;
   }
   // Not consumed: hand the message to the queue lane as a normal next-turn prompt. It
   // keeps its delivery ID and transcript row; the VM tracks steer and prompt receipts
   // separately, so the later prompt delivery is not a conflict.
-  return (
+  const applied =
     sql.exec(
       `UPDATE session_inbox
        SET delivery_intent = 'queue',
@@ -120,6 +146,7 @@ export function applySteerDeliveryResult(
       boundedReason(result.reason),
       claim.message.id,
       claim.attemptId
-    ).rowsWritten > 0
-  );
+    ).rowsWritten > 0;
+  if (applied) labelSteerOutcomeOnTranscript(sql, claim, 'queued_fallback', result.reason);
+  return applied;
 }

@@ -33,6 +33,7 @@ import {
   type VmPromptDeliverySourceTaskGuard,
   type VmPromptDeliveryTarget,
 } from './vm-prompt-delivery-target';
+import { reconcileSteerDelivery, submitSteerDelivery } from './vm-steer-delivery-adapter';
 
 export type { VmPromptDeliverySourceTaskGuard, VmPromptDeliveryTarget };
 
@@ -69,6 +70,9 @@ export interface VmPromptDeliveryAdapterInput {
 export interface VmPromptDeliveryAdapter {
   submit(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult>;
   reconcile(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult>;
+  /** Live steer into the running turn; adapters without it deliver steers as queued prompts. */
+  steer?(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult>;
+  reconcileSteer?(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult>;
 }
 
 function isMissingActiveAgentSession(error: unknown): boolean {
@@ -81,6 +85,14 @@ function isMissingActiveAgentSession(error: unknown): boolean {
 
 export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
   constructor(private readonly env: Env) {}
+
+  steer(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult> {
+    return submitSteerDelivery(this.env, input);
+  }
+
+  reconcileSteer(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult> {
+    return reconcileSteerDelivery(this.env, input);
+  }
 
   private async prepareSubmit(input: VmPromptDeliveryAdapterInput): Promise<
     | PromptDeliveryResult
