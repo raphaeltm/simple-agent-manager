@@ -47,9 +47,10 @@ export function isSteerDeliveryResult(result: { kind: string }): result is Steer
 
 /**
  * What the transcript row shows about a steer, durably across reloads. `unconfirmed`
- * is a steer the runtime may or may not have taken (the inbox row is `ambiguous`).
+ * is a steer the runtime may or may not have taken (the inbox row is `ambiguous`);
+ * `failed` is one that was never delivered, as a steer or as its queued fallback.
  */
-export type TranscriptSteerOutcome = 'steered' | 'queued_fallback' | 'unconfirmed';
+export type TranscriptSteerOutcome = 'steered' | 'queued_fallback' | 'unconfirmed' | 'failed';
 
 export function labelSteerOutcomeOnTranscript(
   sql: SqlStorage,
@@ -61,7 +62,8 @@ export function labelSteerOutcomeOnTranscript(
     `UPDATE chat_messages
         SET tool_metadata = json_set(COALESCE(tool_metadata, '{}'),
           '$.steerOutcome', ?, '$.steerReason', ?)
-      WHERE id = ? AND session_id = ? AND json_valid(COALESCE(tool_metadata, '{}'))`,
+      WHERE id = ? AND session_id = ? AND json_valid(COALESCE(tool_metadata, '{}'))
+        AND json_extract(tool_metadata, '$.deliveryIntent') = 'steer'`,
     outcome,
     reason === null ? null : boundedReason(reason),
     claim.message.promptMessageId,

@@ -112,6 +112,8 @@ function runAcceptedPromptDeliveryHooks(
           source: input.sourceKind,
           kind: 'durable_prompt_delivery',
           deliveryId: accepted.message.id,
+          // Matches the persisted row, so a live client shows the steer's state too.
+          ...(accepted.message.deliveryIntent === 'steer' ? { deliveryIntent: 'steer' } : {}),
         },
         createdAt: accepted.transcriptCreatedAt,
         sequence: accepted.transcriptSequence,

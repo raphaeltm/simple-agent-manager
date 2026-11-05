@@ -254,6 +254,46 @@ describe('steer lane through the delivery alarm', () => {
     expect(row('late-steer').delivery_state).toBe('acked');
   });
 
+  it('labels a steer that was never delivered, even after it fell back to the queue', async () => {
+    vi.spyOn(DefaultVmPromptDeliveryAdapter.prototype, 'steer').mockResolvedValue({
+      kind: 'steer_fallback',
+      reason: 'no_running_turn',
+      error: 'idle',
+      runtimeIdentity: 'runtime',
+      capabilities,
+    });
+    const terminal: PromptDeliveryResult = {
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'session ended',
+      runtimeIdentity: 'runtime',
+      capabilities: null,
+    };
+    vi.spyOn(DefaultVmPromptDeliveryAdapter.prototype, 'submit').mockResolvedValue(terminal);
+    await enqueue('lost-steer', 'steer');
+    await enqueue('lost-queued', 'queue');
+    // The live row carries the steer intent, like the persisted one.
+    expect(
+      broadcasts
+        .filter((b) => b.type === 'message.new')
+        .map((b) => (b.payload.toolMetadata as Record<string, unknown>).deliveryIntent)
+    ).toEqual(['steer', undefined]);
+
+    await tick();
+    expect(row('lost-steer').steer_outcome).toBe('queued_fallback');
+    while (row('lost-steer').delivery_state !== 'failed') await tick();
+    while (row('lost-queued').delivery_state !== 'failed') await tick();
+
+    // The fallback reports intent `queue`, yet the row sent as a steer says it failed.
+    expect(transcriptMetadata('lost-steer')).toMatchObject({
+      deliveryIntent: 'steer',
+      steerOutcome: 'failed',
+      steerReason: 'terminal_target',
+    });
+    // A plain queued message gets no steer label.
+    expect(transcriptMetadata('lost-queued')).not.toHaveProperty('steerOutcome');
+  });
+
   it('admits steers for one session one at a time, in order', async () => {
     const first = deferred<PromptDeliveryResult>();
     const order: string[] = [];

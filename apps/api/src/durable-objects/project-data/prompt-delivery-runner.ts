@@ -250,8 +250,14 @@ export async function runPromptDeliveryClaim(
     }
   }
   const applied = applyPromptDeliveryResult(sql, claim, result, config);
-  if (applied && result.kind === 'ambiguous' && claim.message.deliveryIntent === 'steer') {
+  // A message sent as a steer keeps a truthful label to the end, including after it
+  // fell back to the queue (its inbox intent is then `queue`; the row still says steer,
+  // which the label's own predicate checks).
+  if (applied && result.kind === 'ambiguous') {
     labelSteerOutcomeOnTranscript(sql, claim, 'unconfirmed', result.reason);
+  }
+  if (applied && result.kind === 'failed') {
+    labelSteerOutcomeOnTranscript(sql, claim, 'failed', result.reason);
   }
   if (applied) {
     advanceProjectEventPromptAttemptCheckpoint(sql, hooks.projectId, claim, result);
