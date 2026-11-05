@@ -67,6 +67,8 @@ Once a provider is connected, SAM uses it automatically when it provisions works
 Cloud provider credentials are stored encrypted per user — never as environment variables or shared secrets. In a [shared project](/docs/guides/collaboration/), a member can attach a project-level cloud credential from the project's **Accounts** tab (**Use a cloud account only this project bills to**) so shared work doesn't run on someone's personal account.
 :::
 
+For Google Cloud API prerequisites, WIF setup, and permission-error troubleshooting, see [Connect Google Cloud](/docs/guides/google-cloud/).
+
 ### Choosing an environment size and profile
 
 When you start a chat you can optionally choose:
