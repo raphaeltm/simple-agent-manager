@@ -100,21 +100,21 @@ runtimes have (or can cheaply get) a harness-level steering path: ACP extension
 ## Implementation checklist
 
 ### Adapters (artifacts)
-- [ ] Codex: C2.3 adapter patch (promptRequired backport + idleBehaviors advertisement + tests),
+- [~] Codex: C2.3 adapter patch (patch+tests done, 1093 adapter tests pass; review build run 41948124473) (promptRequired backport + idleBehaviors advertisement + tests),
       provenance, build script versions; run review build; package; publish release; update pins
       (`codex_staging_candidate.go`, installer, prepare/publish scripts, `codex-runtime.ts`,
       verify image script, tests)
-- [ ] OpenCode: ACP steering patch (agent.ts/service.ts/turn.ts + tests), reproducible build
+- [~] OpenCode: ACP steering patch (patch+tests+build script+workflow done; 107 ACP tests; release publish + pins pending) (agent.ts/service.ts/turn.ts + tests), reproducible build
       script + workflow, publish release, update `opencode_install.sh` + manifest pins/version check
 - [ ] Claude: no artifact change; gate on identity
 
 ### VM agent (Go)
-- [ ] Capture `_meta.steering` + `agentInfo` at Initialize; `steeringSupport` per host
-- [ ] `SessionHost.Steer` (serialized, attempt-bound, bounded ctx, no lock across RPC)
-- [ ] Mirror steered user text to viewers + message reporter with the transcript message ID
-- [ ] `steer_delivery_receipts` migration + store methods
-- [ ] `/steer` and `/steer-receipts/{id}` handlers; capability advertisement `steering`
-- [ ] Tests: injected mid-prompt, idle → not consumed, no capability, cancel/checkpoint race,
+- [x] Capture `_meta.steering` + `agentInfo` at Initialize; `steeringSupport` per host
+- [x] `SessionHost.Steer` (serialized, attempt-bound, bounded ctx, no lock across RPC)
+- [x] Mirror steered user text to viewers + message reporter with the transcript message ID
+- [x] `steer_delivery_receipts` migration + store methods
+- [x] `/steer` and `/steer-receipts/{id}` handlers; capability advertisement `steering`
+- [x] Tests: injected mid-prompt, idle → not consumed, no capability, cancel/checkpoint race,
       duplicate ID, conflict, runtime change → ambiguous, no epoch/timeout reset, single-flight kept
 
 ### Shared + API

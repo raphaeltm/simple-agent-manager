@@ -285,6 +285,7 @@ type Config struct {
 	ACPPongTimeout                    time.Duration // WebSocket pong deadline after ping (default: 10s)
 	ACPPromptTimeout                  time.Duration // Max prompt runtime; 0 = no timeout (default: 0). Only for unmanaged workspace sessions; task prompts use control-plane liveness and absolute ceilings.
 	ACPPromptCancelGrace              time.Duration // Wait for a cancelled prompt to settle before finishing it cancelled and restarting the agent (default: 5s)
+	ACPSteerTimeout                   time.Duration // Bound on one live-steering request to the agent adapter (default: 20s)
 	ACPPromptRetryMaxRetries          int           // Retryable transient provider prompt errors after initial attempt (default: 2)
 	ACPPromptRetryInitial             time.Duration // Initial backoff for transient provider prompt retries (default: 15s)
 	ACPPromptRetryMax                 time.Duration // Max backoff for transient provider prompt retries (default: 2m)

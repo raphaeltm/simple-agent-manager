@@ -302,6 +302,7 @@ func (h *SessionHost) clearCurrentAgentSessionLocked() {
 	h.acpConn = nil
 	h.setSessionIDLocked("")
 	h.agentSupportsLoadSession = false
+	h.steering = steeringSupport{}
 }
 
 func (h *SessionHost) maxRestartAttempts() int {

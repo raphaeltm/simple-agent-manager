@@ -18,6 +18,12 @@
       "noWaiterStatus": "no_waiter",
       "staleStatus": "stale_generation"
     },
+    "steering": {
+      "supported": true,
+      "version": 1,
+      "lookup": true,
+      "states": ["accepted", "in_flight", "injected", "not_consumed", "ambiguous"]
+    },
     "checkpointRollover": {
       "supported": true,
       "automatic": false,
@@ -88,5 +94,43 @@
     "runtimeIdentity": "runtime-vm-01",
     "acceptedAt": null,
     "completedAt": null
+  },
+  "injectedSteer": {
+    "status": "injected",
+    "sessionId": "session-01",
+    "receipt": {
+      "deliveryId": "delivery-01",
+      "state": "injected",
+      "runtimeIdentity": "runtime-vm-01",
+      "promptEpoch": 1786312790000,
+      "acceptedAt": 1786312800123,
+      "completedAt": 1786312800456
+    }
+  },
+  "notConsumedSteer": {
+    "status": "not_consumed",
+    "sessionId": "session-01",
+    "receipt": {
+      "deliveryId": "delivery-01",
+      "state": "not_consumed",
+      "reason": "no_running_turn",
+      "runtimeIdentity": "runtime-vm-01",
+      "promptEpoch": null,
+      "acceptedAt": 1786312800123,
+      "completedAt": 1786312800456
+    }
+  },
+  "ambiguousSteer": {
+    "status": "ambiguous",
+    "sessionId": "session-01",
+    "receipt": {
+      "deliveryId": "delivery-01",
+      "state": "ambiguous",
+      "reason": "runtime_changed_after_invocation_claim",
+      "runtimeIdentity": "runtime-vm-01",
+      "promptEpoch": 1786312790000,
+      "acceptedAt": 1786312800123,
+      "completedAt": 1786312801123
+    }
   }
 }

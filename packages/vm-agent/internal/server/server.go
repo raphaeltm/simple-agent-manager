@@ -454,6 +454,7 @@ func New(cfg *config.Config) (*Server, error) {
 		PongTimeout:                      cfg.ACPPongTimeout,
 		PromptTimeout:                    cfg.ACPPromptTimeout,
 		PromptCancelGracePeriod:          cfg.ACPPromptCancelGrace,
+		SteerTimeout:                     cfg.ACPSteerTimeout,
 		PromptRetryMaxRetries:            cfg.ACPPromptRetryMaxRetries,
 		PromptRetryInitialDelay:          cfg.ACPPromptRetryInitial,
 		PromptRetryMaxDelay:              cfg.ACPPromptRetryMax,
@@ -1152,6 +1153,8 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/resume", s.handleResumeAgentSession)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/prompt", s.handleSendPrompt)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/agent-sessions/{sessionId}/prompt-receipts/{deliveryId}", s.handleGetPromptReceipt)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/steer", s.handleSteerPrompt)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/agent-sessions/{sessionId}/steer-receipts/{deliveryId}", s.handleGetSteerReceipt)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/interactions/{interactionId}/answer", s.handleAcpInteractionAnswer)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/checkpoint-rollovers", s.handleCheckpointRollover)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/agent-sessions/{sessionId}/checkpoint-rollovers/{operationId}", s.handleGetCheckpointRollover)

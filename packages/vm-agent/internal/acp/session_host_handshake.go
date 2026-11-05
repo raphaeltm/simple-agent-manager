@@ -82,10 +82,16 @@ func (h *SessionHost) initializeACP(ctx context.Context, agentType string, timeo
 	}
 	cancel()
 	h.agentSupportsLoadSession = resp.AgentCapabilities.LoadSession
-	slog.Info("ACP: Initialize succeeded", "loadSession", resp.AgentCapabilities.LoadSession)
+	h.steering = steeringSupportFromInitialize(resp)
+	slog.Info("ACP: Initialize succeeded", "loadSession", resp.AgentCapabilities.LoadSession,
+		"steering", h.steering.Advertised && h.steering.PromptRequired)
 	h.reportLifecycle("info", "ACP Initialize succeeded", map[string]interface{}{
 		"agentType":           agentType,
 		"supportsLoadSession": resp.AgentCapabilities.LoadSession,
+		"adapter":             h.steering.Adapter,
+		"adapterVersion":      h.steering.Version,
+		"steeringAdvertised":  h.steering.Advertised,
+		"steeringSupported":   h.steering.Advertised && h.steering.PromptRequired,
 	})
 	return resp, nil
 }
