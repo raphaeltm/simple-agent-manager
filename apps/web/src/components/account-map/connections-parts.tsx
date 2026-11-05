@@ -1,4 +1,5 @@
 /** Small pieces shared by the Account Map's desktop columns and phone list. */
+import { PROVIDER_LABELS } from '@simple-agent-manager/shared';
 import { Chip, type ChipTone } from '@simple-agent-manager/ui';
 import {
   CircleAlert,
@@ -111,9 +112,10 @@ export function MachineIcon({ machine }: { machine: MapMachine }) {
 /** "Hetzner · cx43 · fsn1", skipping what the node does not report. */
 export function machineDetail(machine: MapMachine): string {
   if (machine.placeholder) return 'Instant workspaces, or not placed yet';
-  return (
-    [machine.provider, machine.size, machine.location].filter(Boolean).join(' · ') || 'Machine'
-  );
+  const provider = machine.provider
+    ? (PROVIDER_LABELS[machine.provider as keyof typeof PROVIDER_LABELS] ?? machine.provider)
+    : null;
+  return [provider, machine.size, machine.location].filter(Boolean).join(' · ') || 'Machine';
 }
 
 /** A solid project initial, like the sidebar's recent-projects list. */
