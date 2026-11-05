@@ -85,9 +85,9 @@ production release (basic smoke only).
   plus the safety net selects receipt-bearing sources.
 - **Directional chat detachment.** Deletion identity accepts the current binding becoming NULL
   (authorized detachment), never a different chat and never NULL → bound.
-- **Warm handoff not starved.** An artifact-only refusal of an empty, not-yet-warm running node
-  does not install a backoff, so the same tick's warm handoff releases it normally and the
-  existing stopped-node deadline bounds any residue.
+- **Warm handoff not starved.** A destroy sweep that refuses an empty, not-yet-warm running node
+  only for artifact proof hands it to the warm pool (`handOffArtifactBlockedEmptyNode`); warm
+  retention, the warm timeout and the existing stopped-node deadline bound any residue.
 
 ## Implementation Checklist
 
