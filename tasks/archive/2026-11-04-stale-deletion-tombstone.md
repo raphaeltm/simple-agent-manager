@@ -20,7 +20,7 @@ The November 4 recap chat accepted a user reply but could not wake: workspace 01
 - [x] Converge metadata-missing intents only after verifying all physical artifacts absent, retaining owner/incarnation checks.
 - [x] Test recovery, remaining artifacts, ownership, ordinary deletion, and discriminating mutations.
 - [x] Document lifecycle behavior and incident lesson.
-- [ ] Run Go focused/race/full tests, vet and build; relevant repository checks.
+- [x] Run Go focused/race/full tests, vet and build; relevant repository checks.
 - [x] Local Go/security/test/completion/doc/constitution reviews; resolve findings.
 - [ ] Staging fresh VM heartbeat/access plus sleep→delete→wake; cleanup resources.
 - [ ] PR and CI; CodeRabbit request and bounded wait; merge and verify production deploy.
@@ -46,3 +46,11 @@ The November 4 recap chat accepted a user reply but could not wake: workspace 01
 - Full Go suite, vet and build passed before final timestamp-only fairness fix; focused persistence/server checks pass afterward. Repository lint/typecheck and documentation build pass. Final focused race passed (server 23.415s, persistence 1.587s); deletion-focused coverage: reconciler helper 94.7%, absence verifier 100%.
 - Go and security reviews passed after restoring retry fairness with timestamp-only updates. Documentation and constitution reviews passed; completion review confirms implementation coverage, with staging/release criteria pending.
 - Timestamp-only retry rotation preserves payload bytes and advances a bounded queue; missing records are not recreated.
+
+### Candidate refresh
+
+Merged released main SQLite update (#2510) into candidate before staging. The updated full Go suite passes; focused race/vet/build repeat pending. Repository build passes (9 tasks). The broad repository test attempt encountered infrastructure import timeouts under contention (all infra tests subsequently passed); five UI files failed in the parallel run and all 52 tests pass with one worker. The interrupted broad run did not produce a complete-suite summary; no TypeScript implementation changes are in this fix.
+
+### Release work remaining
+
+Implementation is complete; staging, PR/CI/CodeRabbit and production verification below remain release gates. Staging is reserved by the cold-chat task, which will explicitly release it. No fixture has been created.
