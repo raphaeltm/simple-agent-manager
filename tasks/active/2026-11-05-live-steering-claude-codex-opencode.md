@@ -100,13 +100,13 @@ runtimes have (or can cheaply get) a harness-level steering path: ACP extension
 ## Implementation checklist
 
 ### Adapters (artifacts)
-- [~] Codex: C2.3 adapter patch (patch+tests done, 1093 adapter tests pass; review build run 41948124473) (promptRequired backport + idleBehaviors advertisement + tests),
+- [x] Codex: C2.3 adapter patch (1093 adapter tests; review build run 41948124473; release acp-codex-runtime-c2.3-codemode2; pins updated) (promptRequired backport + tests),
       provenance, build script versions; run review build; package; publish release; update pins
       (`codex_staging_candidate.go`, installer, prepare/publish scripts, `codex-runtime.ts`,
       verify image script, tests)
-- [~] OpenCode: ACP steering patch (patch+tests+build script+workflow done; 107 ACP tests; release publish + pins pending) (agent.ts/service.ts/turn.ts + tests), reproducible build
+- [x] OpenCode: ACP steering patch (107 ACP tests; CI run 41952487055; release opencode-v2.2.5-sam-s1; pins updated) (agent.ts/service.ts/turn.ts + tests), reproducible build
       script + workflow, publish release, update `opencode_install.sh` + manifest pins/version check
-- [ ] Claude: no artifact change; gate on identity
+- [x] Claude: no artifact change; gate on identity (0.81.2+)
 
 ### VM agent (Go)
 - [x] Capture `_meta.steering` + `agentInfo` at Initialize; `steeringSupport` per host
@@ -118,32 +118,32 @@ runtimes have (or can cheaply get) a harness-level steering path: ACP extension
       duplicate ID, conflict, runtime change → ambiguous, no epoch/timeout reset, single-flight kept
 
 ### Shared + API
-- [ ] Shared types: intents, steer receipt/response, optional `steering` capability
-- [ ] DO migration 072 (`delivery_intent`, `steer_outcome`, `steer_fallback_reason`)
-- [ ] accept: intent persisted + idempotency includes intent + validation (no urgent steer)
-- [ ] claim lanes; steer bypasses busy backoff; ordered single steer per session
-- [ ] adapter `steer` + reconcile; runner steer path; fallback conversion; no new epoch
-- [ ] broadcast `mailbox.delivery_updated` with intent/outcome; persist outcome on transcript row
-- [ ] composer schema + send-chat; MCP tool; event subscriptions runtime_steer
-- [ ] Tests (sqlite unit + adapter + entry points)
+- [x] Shared types: intents, steer receipt/response, optional `steering` capability
+- [x] DO migration 072 (`delivery_intent`, `steer_outcome`, `steer_fallback_reason`)
+- [x] accept: intent persisted + idempotency includes intent + validation (no urgent steer)
+- [x] claim lanes; steer bypasses busy backoff; ordered single steer per session
+- [x] adapter `steer` + reconcile; runner steer path; fallback conversion; no new epoch
+- [x] broadcast `mailbox.delivery_updated` with intent/outcome; persist outcome on transcript row
+- [x] composer schema + send-chat; MCP tool; event subscriptions runtime_steer
+- [x] Tests (sqlite unit + adapter + entry points)
 
 ### Web
-- [ ] Composer Steer now / Queue next while working; send intent
-- [ ] Delivery chips from metadata + `mailbox.delivery_updated`
-- [ ] Playwright screenshots 375/1280
+- [x] Composer Steer now / Queue next while working; send intent
+- [x] Delivery chips from metadata + `mailbox.delivery_updated`
+- [x] Playwright screenshots 375/1280
 
 ### Docs
-- [ ] Public docs: chat/steering behaviour and MCP tool param
+- [x] Public docs: chat-features (Sending a message while the agent works), api.md (Live steering), configuration (ACP_STEER_TIMEOUT), agents.md (OpenCode sam-s1, send_durable_message), acp-runtime-distribution.md (C2.3)
 
 ## Acceptance criteria
 
 - [ ] Steer to each shipped runtime (Claude 0.81.2, Codex C2.3, OpenCode patched) during a long
       multistep turn changes a later action before the original turn completes (staging evidence)
-- [ ] Idle/turn-end race → queued fallback, never a detached turn
-- [ ] Duplicate delivery ID / lost response → no duplicate injection; runtime change → ambiguous
-- [ ] Steer acceptance does not create a prompt epoch, reset timeouts, or mark idle
-- [ ] Old VMs / unsupported adapters → visible queued fallback
-- [ ] UI distinguishes Steer now / Queue next / Stop with truthful states (screenshots)
+- [x] Idle/turn-end race → queued fallback, never a detached turn (real-adapter idle steer = prompt_required for all 3; steer-lane fallback test)
+- [x] Duplicate delivery ID / lost response → no duplicate injection; runtime change → ambiguous (VM steering tests; adapter receipt-recovery + steer-lane reconcile tests)
+- [x] Steer acceptance does not create a prompt epoch, reset timeouts, or mark idle (steer-lane test asserts session_state unchanged; VM no-epoch test)
+- [x] Old VMs / unsupported adapters → visible queued fallback (adapter test: no `steering` capability → runtime_steering_unsupported, nothing sent; chip test)
+- [x] UI distinguishes Steer now / Queue next / Stop with truthful states (footer + hook + chip tests; Playwright steering-composer-audit)
 
 ## Notes / limitations log
 
@@ -160,6 +160,22 @@ drives each shipped build through the real `SessionHost.HandlePrompt` + `Session
 
 The first agent-turn model call is held while the steer is sent, so the steer is
 provably delivered before the original turn completes and changes the next model call.
+
+### Later fixes found during web work (2026-11-05)
+- Failed steers were never labelled on the transcript (reload would show "Steering…" forever) and the
+  live `message.new` row lacked `deliveryIntent`; both fixed in 56c7d01b2 with discriminating tests.
+- Steering composer audit: `apps/web/tests/playwright/steering-composer-audit.spec.ts` (12 cases,
+  375/1280, dark/light); desktop label truncation fixed.
+
+### Known limitations (for PR)
+- Stock npm codex-acp 2.1.1 sessions are not steerable (visible queued fallback). Codex steering needs
+  SAM's C2 runtime (`SAM_CODEX_C2_CANDIDATE=1` or Codex forms/URL interactions enabled).
+- CI and workspace OpenCode builds are not byte-identical across environments; the CI build is published.
+- A crash between injection and receipt write leaves the steer `ambiguous` (never replayed).
+- "Added to current turn" means the runtime accepted it, not that the model acted on it.
+- A checkpoint/cancel during an in-flight steer RPC may drop the steer (reported ambiguous / fallback).
+- A steer that expires by TTL before delivery is not labelled on the transcript (TTL is 24h; steers claim immediately).
+- UI default is "Queue next" pending product decision.
 
 ### Artifacts
 - Codex runtime release: https://github.com/raphaeltm/simple-agent-manager/releases/tag/acp-codex-runtime-c2.3-codemode2
