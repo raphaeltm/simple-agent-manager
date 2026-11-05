@@ -6,9 +6,9 @@ review=$(realpath -- "$1")
 script_dir=$(cd -- "$(dirname -- "$0")" && pwd -P)
 output=$(realpath -m -- "$2")
 [[ ! -e "$output" && ! -L "$output" ]] || { echo 'output already exists' >&2; exit 1; }
-identity='sam-codex-acp-2.1.1-sam-c2.2+cli-0.160.0-sam-c2.2-codemode2'
-review_hash='7739902e3f38b7bd13e054df5838992896771813260ab1418832a1317fcc2545'
-catalog_hash='02c1b8818f856effeb90a076ace5ab70a9e25b81dadcbf78be000f53113c3b1e'
+identity='sam-codex-acp-2.1.1-sam-c2.3+cli-0.160.0-sam-c2.2-codemode2'
+review_hash='9322a7139aa019a44af925f2f1de579457b58872c037dd3fbb3ed3256fe9a38b'
+catalog_hash='8ad7f5887ea09d76152ee9889b0055ee230b18af30eb070695b7279c550c5d58'
 private=$(mktemp -d)
 trap 'rm -rf -- "$private"' EXIT
 mkdir -p "$private/review" "$private/package/releases" "$private/package/catalog" "$private/package/notices/$identity"
