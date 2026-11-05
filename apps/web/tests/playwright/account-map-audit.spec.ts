@@ -235,3 +235,16 @@ test.describe('Account Map', () => {
     await screenshot(page, 'account-map-error', { scopeToProject: true });
   });
 });
+
+test.describe('Account Map — light theme', () => {
+  test.use({ colorScheme: 'light' });
+
+  test('normal account renders legibly in light mode', async ({ page }) => {
+    await setup(page, accountMapFixture());
+    await page.goto('/account-map');
+    await expect(page.locator('html')).toHaveAttribute('data-ui-theme', 'sam-light');
+    await expect(page.getByRole('list', { name: 'How this connects' })).toBeVisible();
+    await assertNoOverflow(page);
+    await screenshot(page, 'account-map-light', { scopeToProject: true });
+  });
+});
