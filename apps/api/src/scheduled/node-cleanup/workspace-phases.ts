@@ -26,6 +26,7 @@ import {
   sleepLifecycleOwnsTerminalTaskWorkspaceSql,
 } from '../../services/sleep-preserved-task-status';
 import { loadWorkspaceDeletionIdentity } from '../../services/workspace-deletion';
+import { evictionWakeCommittedSql } from '../../services/workspace-deletion-preservation';
 import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
 import type { CleanupConfig, CleanupDb, NodeCleanupResult } from './shared';
 
@@ -158,6 +159,10 @@ export async function sweepOrphanedWorkspaces(
   }
 }
 
+/** The source's receipt records a committed restore of its generation. */
+const RECEIPT_RESTORED_SQL = `CASE WHEN json_valid(w.preservation_receipt_json)
+  THEN json_extract(w.preservation_receipt_json, '$.restoredAt') END IS NOT NULL`;
+
 /**
  * Phase 6 — safety net for stopped workspaces the DO alarm never deleted.
  */
@@ -181,17 +186,18 @@ export async function sweepStaleStoppedWorkspaces(
          WHERE s.workspace_id = w.id AND s.node_id = w.node_id AND s.user_id = w.user_id
            AND CASE WHEN json_valid(s.cleanup_identity_json)
              THEN json_extract(s.cleanup_identity_json, '$.preserved') ELSE NULL END = 1
-       ) OR json_valid(w.preservation_receipt_json))
-       -- The receipt outlives the snapshot row's pointer at this workspace; the queue
-       -- re-verifies it (workspace-preservation-receipt.ts) before any deletion.
-       -- An evicted source anchors its wake until a replacement restores it; the queue
-       -- refuses it before then, so selecting it would only pin the head of this page.
+       ) OR ${RECEIPT_RESTORED_SQL})
+       -- The receipt outlives the snapshot row's pointer at this workspace, but grants only
+       -- once a committed wake restored its generation; the queue re-verifies it
+       -- (workspace-preservation-receipt.ts) before any deletion.
+       -- An evicted source anchors its wake until that wake commits; the queue refuses it
+       -- before then, so selecting it would only pin the head of this page.
        AND (w.status != 'evicted'
-         OR CASE WHEN json_valid(w.preservation_receipt_json)
-           THEN json_extract(w.preservation_receipt_json, '$.restoredAt') END IS NOT NULL
+         OR ${RECEIPT_RESTORED_SQL}
          OR EXISTS (
            SELECT 1 FROM session_snapshots r
            WHERE r.workspace_id = w.id AND r.recovery_status = 'restored'
+             AND ${evictionWakeCommittedSql('r')}
          ))
        AND (n.id IS NULL OR n.node_class != 'user-owned')
        AND w.updated_at < ?

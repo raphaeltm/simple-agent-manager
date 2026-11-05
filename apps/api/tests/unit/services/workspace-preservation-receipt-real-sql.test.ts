@@ -24,7 +24,10 @@ import {
 import { completeSessionSnapshot } from '../../../src/services/session-snapshot-persistence';
 import { prepareSessionSnapshot } from '../../../src/services/session-snapshot-prepare';
 import { finalizeSessionSnapshotSleeping } from '../../../src/services/session-snapshot-sleep-lifecycle';
-import { completeSessionSnapshotRecovery } from '../../../src/services/session-snapshot-wake-outcome';
+import {
+  completeSessionSnapshotRecovery,
+  completeSessionSnapshotRecoveryGeneration,
+} from '../../../src/services/session-snapshot-wake-outcome';
 import { cleanupWorkspaceForDeletion } from '../../../src/services/workspace-cleanup';
 import {
   attemptWorkspaceDeletion,
@@ -38,6 +41,7 @@ import {
 import {
   parsePreservationReceipt,
   releaseRestoredSourceWorkspaces,
+  restoredSourceReceiptStampStatement,
 } from '../../../src/services/workspace-preservation-receipt';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -234,16 +238,47 @@ describe('evicted source cleanup through real writers and real SQL', () => {
       throw new Error(`eviction ${response.status}: ${await response.text()}`);
   }
 
-  /** The wake claimed the snapshot (claimSessionSnapshotRecovery) and released the binding. */
+  /**
+   * The wake claimed the snapshot (claimSessionSnapshotRecovery), released the binding and
+   * restored into `target`. Returns the generation the restore committed.
+   */
   async function wakeOnto(target: string) {
     sqlite.exec(`
       INSERT INTO workspaces (id, user_id, project_id, node_id, chat_session_id, status, eviction_generation)
         VALUES ('${target}', 'user', 'project', 'target-node', NULL, 'running', 'target-generation');
+      INSERT OR IGNORE INTO tasks (id, project_id, user_id, status, started_at)
+        VALUES ('wake-task', 'project', 'user', 'delegated', '2026-01-01T00:00:00Z');
       UPDATE session_snapshots SET recovery_status = 'waking', recovery_task_id = 'wake-task';
       UPDATE workspaces SET chat_session_id = NULL WHERE id = 'workspace';
       UPDATE workspaces SET chat_session_id = 'chat' WHERE id = '${target}';
     `);
-    expect(await completeSessionSnapshotRecovery(db(), 'chat', 'wake-task', target)).toBe(true);
+    const restored = await completeSessionSnapshotRecoveryGeneration(
+      db(),
+      'chat',
+      'wake-task',
+      target
+    );
+    expect(restored).not.toBeNull();
+    return restored?.snapshotGeneration ?? null;
+  }
+
+  /**
+   * The TaskRunner's commit (`transitionToInProgress`): the wake task starts and, in the same
+   * batch, the source receipt records the restore of `generation`.
+   */
+  async function commitWake(target: string, generation: string | null | undefined) {
+    const startedAt = new Date(Date.now() + 1).toISOString();
+    await env.DATABASE.batch([
+      env.DATABASE.prepare(
+        "UPDATE tasks SET status = 'in_progress', started_at = ? WHERE id = 'wake-task' AND status = 'delegated'"
+      ).bind(startedAt),
+      restoredSourceReceiptStampStatement(
+        env.DATABASE,
+        { chatSessionId: 'chat', restoredWorkspaceId: target, snapshotGeneration: generation },
+        startedAt,
+        { taskId: 'wake-task', startedAt }
+      ),
+    ]);
   }
 
   const receipt = () =>
@@ -396,7 +431,7 @@ describe('evicted source cleanup through real writers and real SQL', () => {
     expect(await sourcePreservation()).toBeNull();
   });
 
-  it('the stopped-workspace sweep leaves an unrestored evicted source to its wake', async () => {
+  it('the stopped-workspace sweep leaves an evicted source to its wake until the wake commits', async () => {
     // The fixture helper does not apply column defaults; the sweep excludes non-managed nodes.
     sqlite.exec("UPDATE nodes SET node_class = 'managed'");
     await capture('workspace', 'node', true);
@@ -414,45 +449,32 @@ describe('evicted source cleanup through real writers and real SQL', () => {
     };
     // Refused by the queue anyway; selecting it would pin the head of the bounded page.
     expect(await sweep()).toEqual([]);
-    await wakeOnto('target');
-    // Restored (snapshot row): selectable.
+    const generation = await wakeOnto('target');
+    // Restored but not committed: a wake that fails now still needs its source.
+    expect(await sweep()).toEqual([]);
+    expect(await sourcePreservation()).toBeNull();
+    await commitWake('target', generation);
     expect(await sweep()).toEqual(['workspace']);
-    await releaseRestoredSourceWorkspaces(env, {
-      chatSessionId: 'chat',
-      restoredWorkspaceId: 'target',
-    });
     await capture('target', 'target-node', false);
     // The successor moved the row; the receipt's restoredAt still selects it.
     expect(await sweep()).toEqual(['workspace']);
   });
 
-  it('a restore stamped at commit survives a lost release and the successor moving the row', async () => {
+  it('the commit stamps the restored generation even after the successor moved the row', async () => {
     sqlite.exec("UPDATE nodes SET node_class = 'managed'");
     await capture('workspace', 'node', true);
     await evict();
-    await wakeOnto('target');
-    // The TaskRunner stamps right after the restore commits; then the release is lost.
-    expect(
-      await releaseRestoredSourceWorkspaces(env, {
-        chatSessionId: 'chat',
-        restoredWorkspaceId: 'target',
-        stampOnly: true,
-      })
-    ).toBe(1);
-    expect(mocks.scheduleWorkspaceDeletion).not.toHaveBeenCalled();
-    const stampedAt = receipt()?.restoredAt;
-    expect(stampedAt).toBeTruthy();
-    // The release, when it does run, re-matches and keeps the first stamp.
-    expect(
-      await releaseRestoredSourceWorkspaces(env, {
-        chatSessionId: 'chat',
-        restoredWorkspaceId: 'target',
-      })
-    ).toBe(1);
-    expect(receipt()?.restoredAt).toBe(stampedAt);
-    mocks.scheduleWorkspaceDeletion.mockClear();
-    // Without that release, the successor's first capture moves the row away.
+    const generation = await wakeOnto('target');
+    // The successor captures before the commit and replaces the row's live generation.
     await capture('target', 'target-node', false);
+    // Control: matched against the live row, the commit would stamp nothing.
+    await commitWake('target', undefined);
+    expect(receipt()?.restoredAt ?? null).toBeNull();
+    sqlite.exec("UPDATE tasks SET status = 'delegated' WHERE id = 'wake-task'");
+    await commitWake('target', generation);
+    expect(receipt()).toMatchObject({ restoredWorkspaceId: 'target' });
+    expect(receipt()?.restoredAt).toBeTruthy();
+    // The release after the commit is lost; the receipt alone lets the sweep release it.
     expect(await sourcePreservation()).not.toBeNull();
     await sweepStaleStoppedWorkspaces(
       db(),
@@ -464,6 +486,17 @@ describe('evicted source cleanup through real writers and real SQL', () => {
     expect(mocks.scheduleWorkspaceDeletion.mock.calls.map((call) => call[1])).toEqual([
       'workspace',
     ]);
+  });
+
+  it('a refused commit records no restore on the receipt', async () => {
+    await capture('workspace', 'node', true);
+    await evict();
+    const generation = await wakeOnto('target');
+    // The task was cancelled before its commit: the transition matches nothing.
+    sqlite.exec("UPDATE tasks SET status = 'cancelled' WHERE id = 'wake-task'");
+    await commitWake('target', generation);
+    expect(receipt()?.restoredAt ?? null).toBeNull();
+    expect(await sourcePreservation()).toBeNull();
   });
 
   it('the eviction fence accepts only the wake that restored the snapshot', async () => {
@@ -499,33 +532,33 @@ describe('evicted source cleanup through real writers and real SQL', () => {
     ).toBe(false);
   });
 
-  it('without a receipt, the eviction snapshot row also waits for a restore (legacy path)', async () => {
+  it('without a receipt, the eviction snapshot row also waits for a committed restore (legacy path)', async () => {
     await capture('workspace', 'node', true);
     await evict();
     // A row preserved before receipts existed, or a receipt write that was lost.
     sqlite.exec("UPDATE workspaces SET preservation_receipt_json = NULL WHERE id = 'workspace'");
     expect(await sourcePreservation()).toBeNull();
-    await wakeOnto('target');
+    const generation = await wakeOnto('target');
+    // The wake task's earlier start predates this restore: not yet committed.
+    expect(await sourcePreservation()).toBeNull();
+    await commitWake('target', generation);
     expect(await sourcePreservation()).not.toBeNull();
   });
 
-  it('an unrestored sleep receipt needs its artifacts and an unexpired bound', async () => {
+  it('an unrestored receipt grants nothing on its own; the snapshot row decides', async () => {
     await capture('workspace', 'node', true);
     await evict();
-    // Isolate the receipt path: a sleep receipt, and the per-chat row moved away.
+    // A sleep receipt whose per-chat row moved away without a recorded restore.
     sqlite.exec(
       "UPDATE workspaces SET preservation_receipt_json = json_set(preservation_receipt_json, '$.reason', 'sleep')"
     );
     sqlite.exec("UPDATE session_snapshots SET workspace_id = 'elsewhere'");
-    expect(await sourcePreservation()).not.toBeNull();
-    const home = receipt()?.homeR2Key ?? '';
-    r2.objects.delete(home);
     expect(await sourcePreservation()).toBeNull();
-    r2.objects.set(home, 10);
+    // The same receipt once a committed wake restored its generation (liveness control).
     sqlite.exec(
-      "UPDATE workspaces SET preservation_receipt_json = json_set(preservation_receipt_json, '$.expiresAt', '2000-01-01T00:00:00Z')"
+      "UPDATE workspaces SET preservation_receipt_json = json_set(preservation_receipt_json, '$.restoredAt', '2026-11-05T00:00:00Z', '$.restoredWorkspaceId', 'target')"
     );
-    expect(await sourcePreservation()).toBeNull();
+    expect(await sourcePreservation()).not.toBeNull();
   });
 
   it('deletes the evicted source with proof after its chat moved, and never touches the successor', async () => {

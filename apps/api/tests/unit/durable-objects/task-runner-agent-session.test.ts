@@ -22,6 +22,8 @@ const {
   insertedAgentSessions,
   prepareAcpSessionForFreshStartMock,
   releaseRestoredSourceWorkspacesMock,
+  restoredSourceReceiptStampStatementMock,
+  lifecycleEvents,
   revokeMcpTokenMock,
   restoreAgentSessionOnNodeMock,
   startAgentSessionOnNodeMock,
@@ -38,6 +40,11 @@ const {
   insertedAgentSessions: [] as Array<Record<string, unknown>>,
   prepareAcpSessionForFreshStartMock: vi.fn(async () => ({ id: 'agent-session-new' })),
   releaseRestoredSourceWorkspacesMock: vi.fn(async () => 0),
+  restoredSourceReceiptStampStatementMock: vi.fn((_database: unknown, input: unknown) => ({
+    stamp: input,
+  })),
+  /** Ordered D1 commit and release events, across the database and the receipt service. */
+  lifecycleEvents: [] as string[],
   revokeMcpTokenMock: vi.fn(async () => undefined),
   restoreAgentSessionOnNodeMock: vi.fn(async () => ({ status: 'restored' })),
   startAgentSessionOnNodeMock: vi.fn(async () => undefined),
@@ -70,15 +77,22 @@ vi.mock('../../../src/services/project-data', () => ({
   transitionAcpSession: transitionAcpSessionMock,
   wakeSession: wakeSessionMock,
   wakeSessionForSnapshotRecovery: wakeSessionMock,
+  failSession: vi.fn(async () => undefined),
 }));
 
 vi.mock('../../../src/services/session-snapshots', () => ({
   completeSessionSnapshotRecovery: completeSessionSnapshotRecoveryMock,
+  // The runner keeps the generation its restore committed (`restoredSnapshotGeneration`).
+  completeSessionSnapshotRecoveryGeneration: async (...args: unknown[]) =>
+    (await (completeSessionSnapshotRecoveryMock as (...a: unknown[]) => Promise<boolean>)(...args))
+      ? { snapshotGeneration: 'generation-1' }
+      : null,
   failSessionSnapshotRecovery: failSessionSnapshotRecoveryMock,
 }));
 
 vi.mock('../../../src/services/workspace-preservation-receipt', () => ({
   releaseRestoredSourceWorkspaces: releaseRestoredSourceWorkspacesMock,
+  restoredSourceReceiptStampStatement: restoredSourceReceiptStampStatementMock,
 }));
 
 vi.mock('drizzle-orm/d1', () => ({
@@ -211,7 +225,8 @@ function makeContext(
           return null;
         },
         run: async () => {
-          if (sql.includes("UPDATE tasks SET status = 'in_progress'")) {
+          if (/UPDATE tasks\s+SET status = 'in_progress'/.test(sql)) {
+            lifecycleEvents.push(transitionChanges ? 'commit' : 'commit-refused');
             return { success: true, meta: { changes: transitionChanges } };
           }
           if (sql.includes('INSERT INTO task_status_events')) {
@@ -226,6 +241,16 @@ function makeContext(
         },
       }),
     })),
+    // The wake's commit and its receipt stamp run as one transaction.
+    batch: vi.fn(async (statements: Array<{ run?: () => Promise<unknown>; stamp?: unknown }>) =>
+      Promise.all(
+        statements.map(async (statement) => {
+          if (statement.run) return statement.run();
+          if (transitionChanges) lifecycleEvents.push('stamp');
+          return { success: true, meta: { changes: transitionChanges ? 1 : 0 } };
+        })
+      )
+    ),
   };
 
   const rc = {
@@ -304,6 +329,8 @@ describe('TaskRunner agent-session helpers', () => {
 describe('handleAgentSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    lifecycleEvents.length = 0;
+    releaseRestoredSourceWorkspacesMock.mockImplementation(async () => 0);
     dbAgentSessionIds.clear();
     getAcpSessionMock.mockResolvedValue(null);
     insertedAgentSessions.length = 0;
@@ -822,17 +849,15 @@ describe('handleAgentSession', () => {
     expect(releaseRestoredSourceWorkspacesMock).not.toHaveBeenCalled();
   });
 
-  it('releases the evicted source only after the wake commits, so its own fence cannot revoke it', async () => {
+  it('stamps the source receipt in the commit and releases the source only after it', async () => {
     // Staging 2026-11-05: the release ran before the final authority check, the source was
     // deleted within seconds, and the eviction fence (source must stay `evicted`) failed the wake.
     let sourceStatus = 'evicted';
-    releaseRestoredSourceWorkspacesMock.mockImplementation(
-      async (_env: unknown, input: { stampOnly?: boolean }) => {
-        // Stamping records the restore; only the queued deletion removes the source.
-        if (!input.stampOnly) sourceStatus = 'deleted';
-        return 1;
-      }
-    );
+    releaseRestoredSourceWorkspacesMock.mockImplementation(async () => {
+      lifecycleEvents.push('release');
+      sourceStatus = 'deleted';
+      return 1;
+    });
     const state = makeState({
       config: {
         ...makeState().config,
@@ -851,17 +876,42 @@ describe('handleAgentSession', () => {
     await handleAgentSession(state, rc);
 
     expect(statusEvents.map((event) => event.toStatus)).toEqual(['in_progress']);
-    // The restore is stamped as soon as it commits; deletion is queued after the wake commits.
+    // The commit and the receipt stamp share one transaction; deletion is queued after it.
+    expect(lifecycleEvents).toEqual(['commit', 'stamp', 'release']);
+    // Both name exactly the generation the restore committed, not the row's live one.
+    expect(restoredSourceReceiptStampStatementMock.mock.calls[0]?.[1]).toEqual({
+      chatSessionId: 'chat-1',
+      restoredWorkspaceId: 'workspace-1',
+      snapshotGeneration: 'generation-1',
+    });
     expect(releaseRestoredSourceWorkspacesMock.mock.calls.map((call) => call[1])).toEqual([
-      { chatSessionId: 'chat-1', restoredWorkspaceId: 'workspace-1', stampOnly: true },
-      { chatSessionId: 'chat-1', restoredWorkspaceId: 'workspace-1' },
+      {
+        chatSessionId: 'chat-1',
+        restoredWorkspaceId: 'workspace-1',
+        snapshotGeneration: 'generation-1',
+      },
     ]);
-    expect(completeSessionSnapshotRecoveryMock.mock.invocationCallOrder[0]).toBeLessThan(
-      releaseRestoredSourceWorkspacesMock.mock.invocationCallOrder[0]
-    );
     expect(sourceStatus).toBe('deleted');
     expect(state.config.evictionFence).toBeNull();
     // Every later alarm re-runs the authority check; the released source must not fail it.
     await expect(rc.assertRecoveryAuthority(state)).resolves.toBeUndefined();
+  });
+
+  it('neither stamps nor releases the source when the commit is refused', async () => {
+    const state = makeState({
+      config: {
+        ...makeState().config,
+        resumeSnapshotChatSessionId: 'chat-1',
+        evictionFence: { workspaceId: 'source', nodeId: 'source-node', generation: 'g' },
+      },
+    });
+    const { rc } = makeContext({ transitionChanges: 0 });
+
+    await handleAgentSession(state, rc);
+
+    expect(lifecycleEvents).toEqual(['commit-refused']);
+    expect(releaseRestoredSourceWorkspacesMock).not.toHaveBeenCalled();
+    // Liveness: the restore itself did complete, so only the commit gated the release.
+    expect(completeSessionSnapshotRecoveryMock).toHaveBeenCalledOnce();
   });
 });

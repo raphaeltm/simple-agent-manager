@@ -118,6 +118,9 @@ export async function automaticDeletionPreservationExpiresAt(
       !['running', 'recovery', 'sleeping'].includes(target.status)
     )
       return null;
+    // An evicted source anchors its wake until that wake commits: the eviction fence and the
+    // failed-wake retry both require it.
+    if (evictionSource && !(await evictionWakeCommitted(env, snapshot))) return null;
   }
   let identity: Record<string, unknown>;
   try {
@@ -158,6 +161,30 @@ export async function automaticDeletionPreservationExpiresAt(
       });
     });
   return snapshot.expiresAt;
+}
+
+/**
+ * The wake that restored the snapshot row `alias` committed: the commit
+ * (`transitionToInProgress`) starts the recovery task after the restore, so a start before it
+ * belongs to an earlier run of that task. Shared with the stale-workspace sweep.
+ */
+export function evictionWakeCommittedSql(alias: string): string {
+  return `EXISTS (SELECT 1 FROM tasks t WHERE t.id = ${alias}.recovery_task_id
+    AND ${alias}.restored_at IS NOT NULL AND t.started_at >= ${alias}.restored_at)`;
+}
+
+/** The same check for a loaded snapshot row (`evictionWakeCommittedSql`). */
+async function evictionWakeCommitted(
+  env: Env,
+  snapshot: { recoveryTaskId: string | null; restoredAt: string | null }
+): Promise<boolean> {
+  if (!snapshot.recoveryTaskId || !snapshot.restoredAt) return false;
+  const task = await drizzle(env.DATABASE, { schema })
+    .select({ startedAt: schema.tasks.startedAt })
+    .from(schema.tasks)
+    .where(eq(schema.tasks.id, snapshot.recoveryTaskId))
+    .get();
+  return Boolean(task?.startedAt && task.startedAt >= snapshot.restoredAt);
 }
 
 export async function automaticDeletionPreservationAvailable(

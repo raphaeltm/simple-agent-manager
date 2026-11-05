@@ -186,11 +186,12 @@ async function markSessionSnapshotSleepingWithConfig(
   sleepWarning?: string | null,
   expectedGeneration?: string,
   fallback = false,
-  runtimeGuard?: SQL
+  runtimeGuard?: SQL,
+  receipt?: { database: D1Database; nowIso: string }
 ): Promise<boolean> {
   const ttlDays = env ? getSessionSnapshotConfig(env).ttlDays : DEFAULT_SESSION_SNAPSHOT_TTL_DAYS;
   const warning = sleepWarning && env ? sessionLifecycleError(env, sleepWarning) : null;
-  const result = await db
+  const grant = db
     .update(schema.sessionSnapshots)
     .set({
       // Transcript-only termination is wakeable, while original backup keys/manifest stay retained.
@@ -276,7 +277,19 @@ async function markSessionSnapshotSleepingWithConfig(
           : [])
       )
     );
-  return (result.meta.changes ?? 0) > 0;
+  if (!receipt) return ((await grant).meta.changes ?? 0) > 0;
+  // The receipt joins the grant's transaction, after it: it copies only a generation the
+  // grant just preserved, so it is a no-op when the grant did not apply.
+  const { sql: grantSql, params } = grant.toSQL();
+  const [granted] = await receipt.database.batch([
+    receipt.database.prepare(grantSql).bind(...params),
+    preservationReceiptStatement(receipt.database, {
+      chatSessionId,
+      reason: 'sleep',
+      nowIso: receipt.nowIso,
+    }),
+  ]);
+  return (granted?.meta.changes ?? 0) > 0;
 }
 
 export async function finalizeSessionSnapshotSleeping(
@@ -301,25 +314,13 @@ export async function finalizeSessionSnapshotSleeping(
     options.sleepWarning,
     options.expectedGeneration,
     options.fallback ?? false,
-    options.runtimeGuard
+    options.runtimeGuard,
+    // A verified full sleep writes the durable receipt of the generation it preserves, on the
+    // source workspace, in the grant's own transaction (`workspace-preservation-receipt.ts`).
+    !options.fallback && options.expectedGeneration
+      ? { database: env.DATABASE, nowIso: now.toISOString() }
+      : undefined
   );
-  if (finalized && !options.fallback && options.expectedGeneration) {
-    // Durable receipt of the generation that just granted preservation, on the source
-    // workspace itself. Best effort: the deletion preservation check backfills it from
-    // the snapshot row while that row still names this workspace.
-    await preservationReceiptStatement(env.DATABASE, {
-      chatSessionId,
-      reason: 'sleep',
-      nowIso: now.toISOString(),
-    })
-      .run()
-      .catch((err: unknown) => {
-        log.warn('session_sleep.preservation_receipt_failed', {
-          chatSessionId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
-  }
   if (finalized) {
     // Every sleep finalizes here — the sleep sweep and an Instant container's own
     // idle sleep alike — so a failed task's incomplete capture is surfaced

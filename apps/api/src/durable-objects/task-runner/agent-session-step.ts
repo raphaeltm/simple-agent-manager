@@ -11,8 +11,8 @@ import {
 } from '../../services/agent-bootstrap-prompt';
 import type { SamAwareAgentStartResult } from '../../services/agent-session-bootstrap';
 import { getRecoverySourceTaskGuard } from './helpers';
+import { transitionToInProgress } from './in-progress-transition';
 import { prepareSnapshotRestoreAttempt } from './snapshot-restore-retry';
-import { transitionToInProgress } from './state-machine';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 export function buildTaskAgentSessionLabel(taskTitle: string): string {
@@ -187,7 +187,8 @@ export async function handleAgentSession(
   if (state.config.resumeSnapshotChatSessionId) {
     const { drizzle } = await import('drizzle-orm/d1');
     const schema = await import('../../db/schema');
-    const { completeSessionSnapshotRecovery } = await import('../../services/session-snapshots');
+    const { completeSessionSnapshotRecoveryGeneration } =
+      await import('../../services/session-snapshots');
     const projectDataService = await import('../../services/project-data');
     // Keep sleepingAt authoritative until the ProjectData lifecycle accepts the
     // idempotent wake. If this RPC fails, the snapshot remains claimable and a
@@ -208,45 +209,27 @@ export async function handleAgentSession(
     }
     await rc.assertRecoveryAuthority(state);
     const snapshotDb = drizzle(rc.env.DATABASE, { schema });
-    const recoveryCompleted = state.config.recoverySourceTaskId
-      ? await completeSessionSnapshotRecovery(
-          snapshotDb,
-          state.config.resumeSnapshotChatSessionId,
-          state.taskId,
-          state.stepResults.workspaceId,
-          state.config.recoverySourceTaskId,
-          state.config.recoveryAttemptId ?? undefined
-        )
-      : await completeSessionSnapshotRecovery(
-          snapshotDb,
-          state.config.resumeSnapshotChatSessionId,
-          state.taskId,
-          state.stepResults.workspaceId,
-          undefined,
-          state.config.recoveryAttemptId ?? undefined
-        );
-    if (!recoveryCompleted) {
+    const restored = await completeSessionSnapshotRecoveryGeneration(
+      snapshotDb,
+      state.config.resumeSnapshotChatSessionId,
+      state.taskId,
+      state.stepResults.workspaceId,
+      state.config.recoverySourceTaskId ?? undefined,
+      state.config.recoveryAttemptId ?? undefined
+    );
+    if (!restored) {
       throw Object.assign(
         new Error('Strict session restore succeeded but lifecycle recovery commit refused'),
         { permanent: true }
       );
     }
-    // Record the restore on the source's receipt now, before the successor can capture and
-    // move the snapshot row. Deletion is queued only after the commit below; the eviction
-    // fence accepts this runner's own restore while the source keeps its generation
-    // (`evictionRecoveryRestoredByRunner`).
-    const { releaseRestoredSourceWorkspaces } =
-      await import('../../services/workspace-preservation-receipt');
-    await releaseRestoredSourceWorkspaces(rc.env, {
-      chatSessionId: state.config.resumeSnapshotChatSessionId,
-      restoredWorkspaceId: state.stepResults.workspaceId,
-      stampOnly: true,
-    }).catch((error: unknown) => {
-      log.warn('task_runner.restored_source_stamp_failed', {
-        taskId: state.taskId,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    });
+    // Keep exactly what was restored: the commit below stamps the source receipt of this
+    // generation, and a successor capture may replace the row's live generation first. A
+    // retry after a crash keeps the first value.
+    if (state.stepResults.restoredSnapshotGeneration === undefined) {
+      state.stepResults.restoredSnapshotGeneration = restored.snapshotGeneration;
+      stateChanged = true;
+    }
   }
 
   await queueRestoredSessionPromptIfNeeded(state, rc, started);
@@ -269,13 +252,15 @@ export async function handleAgentSession(
     // source to stay `evicted`, so it must be gone before that source is released below.
     state.config.evictionFence = null;
     await rc.ctx.storage.put('state', state);
-    // The restored generation now lives here; release the retired source's files.
-    // Best effort: the stale-workspace sweep re-queues any receipt-bearing source.
+    // The restored generation now lives here; release the retired source's files. The
+    // commit already stamped its receipt, so the stale-workspace sweep re-queues the source
+    // if this best-effort release is lost.
     const { releaseRestoredSourceWorkspaces } =
       await import('../../services/workspace-preservation-receipt');
     await releaseRestoredSourceWorkspaces(rc.env, {
       chatSessionId: restoredChatSessionId,
       restoredWorkspaceId: state.stepResults.workspaceId,
+      snapshotGeneration: state.stepResults.restoredSnapshotGeneration,
     }).catch((error: unknown) => {
       log.warn('task_runner.restored_source_release_failed', {
         taskId: state.taskId,

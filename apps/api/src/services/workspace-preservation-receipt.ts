@@ -9,21 +9,18 @@
  *
  * The receipt is copied onto the source workspace row in the same D1 batch that grants
  * preservation (a verified full sleep, or a quiesced final eviction capture). Deletion
- * authority then reads the receipt: the identity must still match, and either the
- * generation's artifacts are still verifiably in R2 or that exact generation was restored
- * into a replacement workspace. An eviction receipt authorizes nothing until that restore:
- * the evicted source anchors its own wake. Receipts never grant preservation on their own;
- * only the two writers above create them.
+ * authority then reads the receipt: the identity must still match, and that exact generation
+ * must have been restored into a replacement workspace whose wake committed. The restore is
+ * stamped in the same D1 batch as that commit (`transitionToInProgress`), so a wake that fails
+ * after restoring never releases its source. Until then the snapshot row, which still names
+ * the source and carries its lifecycle state, decides. Receipts never grant preservation on
+ * their own; only the two writers above create them.
  */
 import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import {
-  buildSessionSnapshotR2Key,
-  getSessionSnapshotConfig,
-  verifySessionSnapshotRecordedArtifacts,
-} from './session-snapshot-artifacts';
+import { getSessionSnapshotConfig } from './session-snapshot-artifacts';
 import type { WorkspaceDeletionIdentity } from './workspace-deletion';
 
 export type PreservationReceiptReason = 'sleep' | 'quiesced_eviction';
@@ -156,95 +153,88 @@ export async function preservationReceiptExpiresAt(
   ) {
     return null;
   }
-  if (receipt.restoredAt) {
-    // The conversation, with exactly this generation, now lives in a replacement
-    // workspace; its later captures may already have replaced these artifacts.
-    const restoredHorizon = new Date(
-      Date.now() + getSessionSnapshotConfig(env).ttlDays * 24 * 60 * 60 * 1000
-    ).toISOString();
-    return Date.parse(receipt.expiresAt) > Date.now() ? receipt.expiresAt : restoredHorizon;
-  }
-  // An evicted source anchors its own wake: the replacement's eviction fence and the
-  // failed-wake retry (`scheduled/workspace-eviction-recovery.ts`) both require it to stay
-  // `evicted`. Verified artifacts alone never release it; a restore of this generation does.
-  if (receipt.reason === 'quiesced_eviction') return null;
-  if (
-    !Number.isFinite(Date.parse(receipt.expiresAt)) ||
-    Date.parse(receipt.expiresAt) <= Date.now()
-  )
-    return null;
-  const manifestJson = JSON.stringify({
-    artifacts: {
-      home: { sizeBytes: receipt.homeBytes },
-      ...(receipt.wipR2Key ? { wip: { sizeBytes: receipt.wipBytes } } : {}),
-    },
-  });
-  // Same objects the full-sleep verifier requires: HOME, WIP when recorded, and the manifest.
-  if (
-    receipt.manifestR2Key !==
-    buildSessionSnapshotR2Key(env, receipt.chatSessionId, receipt.snapshotGeneration, 'manifest')
-  )
-    return null;
-  const [artifacts, manifest] = await Promise.all([
-    verifySessionSnapshotRecordedArtifacts(env, {
-      chatSessionId: receipt.chatSessionId,
-      snapshotGeneration: receipt.snapshotGeneration,
-      homeR2Key: receipt.homeR2Key,
-      homeSha256: receipt.homeSha256,
-      wipR2Key: receipt.wipR2Key,
-      wipSha256: receipt.wipSha256,
-      manifestJson,
-    }),
-    env.R2.head(receipt.manifestR2Key),
-  ]);
-  return artifacts && manifest ? receipt.expiresAt : null;
+  // Only a committed restore of this exact generation releases the source: the conversation
+  // now lives in a replacement workspace, whose later captures may already have replaced these
+  // artifacts. Before that, the snapshot row still names this workspace and decides
+  // (`automaticDeletionPreservationExpiresAt`), including whether a wake still needs it.
+  if (!receipt.restoredAt) return null;
+  const restoredHorizon = new Date(
+    Date.now() + getSessionSnapshotConfig(env).ttlDays * 24 * 60 * 60 * 1000
+  ).toISOString();
+  return Date.parse(receipt.expiresAt) > Date.now() ? receipt.expiresAt : restoredHorizon;
+}
+
+export interface RestoredSourceReceiptStamp {
+  chatSessionId: string;
+  restoredWorkspaceId: string;
+  /**
+   * The generation the restore committed (`completeSessionSnapshotRecoveryGeneration`). A
+   * successor capture replaces the row's live generation, so the live row is consulted only
+   * for a runner that predates this value.
+   */
+  snapshotGeneration: string | null | undefined;
 }
 
 /**
- * A wake restored the conversation into `restoredWorkspaceId`. Record that on the source
- * receipt of exactly the restored generation, then (unless `stampOnly`) queue the source for
- * deletion: it is no longer needed for any retry of this wake, and nothing else would
- * release its node. The TaskRunner stamps right after the restore commits, so the record
- * survives a crash before the release and the successor's first capture moving the
- * snapshot row; the stale-workspace safety net then re-queues the source from the receipt.
- * Idempotent per restored workspace: a repeat keeps the first `restoredAt`.
+ * Stamp the restore on the source receipt of exactly the restored generation. Idempotent per
+ * restored workspace: a repeat keeps the first `restoredAt`. `commit` makes the stamp apply
+ * only when the wake's own commit (`transitionToInProgress`, same D1 batch) took effect.
  */
-export async function releaseRestoredSourceWorkspaces(
-  env: Env,
-  input: { chatSessionId: string; restoredWorkspaceId: string; stampOnly?: boolean }
-): Promise<number> {
-  const nowIso = new Date().toISOString();
-  const stamped = await env.DATABASE.prepare(
-    `UPDATE workspaces
-        SET preservation_receipt_json = json_set(preservation_receipt_json,
-              '$.restoredAt', COALESCE(json_extract(preservation_receipt_json, '$.restoredAt'), ?),
-              '$.restoredWorkspaceId', ?)
-      WHERE id IN (
-          SELECT workspace_id FROM session_snapshots WHERE chat_session_id = ?
-          UNION SELECT eviction_recovery_workspace_id FROM session_snapshots WHERE chat_session_id = ?)
-        AND id != ?
-        AND json_valid(preservation_receipt_json)
-        AND json_extract(preservation_receipt_json, '$.chatSessionId') = ?
-        AND (json_extract(preservation_receipt_json, '$.restoredAt') IS NULL
-          OR json_extract(preservation_receipt_json, '$.restoredWorkspaceId') = ?)
-        AND json_extract(preservation_receipt_json, '$.snapshotGeneration') = (
-          SELECT snapshot_generation FROM session_snapshots
-           WHERE chat_session_id = ? AND recovery_status = 'restored' AND recovery_workspace_id = ?)
-      RETURNING id, node_id AS nodeId, user_id AS userId, status`
-  )
+export function restoredSourceReceiptStampStatement(
+  database: D1Database,
+  input: RestoredSourceReceiptStamp,
+  nowIso: string,
+  commit?: { taskId: string; startedAt: string }
+): D1PreparedStatement {
+  return database
+    .prepare(
+      `UPDATE workspaces
+          SET preservation_receipt_json = json_set(preservation_receipt_json,
+                '$.restoredAt', COALESCE(json_extract(preservation_receipt_json, '$.restoredAt'), ?),
+                '$.restoredWorkspaceId', ?)
+        WHERE id != ?
+          AND json_valid(preservation_receipt_json)
+          AND json_extract(preservation_receipt_json, '$.chatSessionId') = ?
+          AND (json_extract(preservation_receipt_json, '$.restoredAt') IS NULL
+            OR json_extract(preservation_receipt_json, '$.restoredWorkspaceId') = ?)
+          AND json_extract(preservation_receipt_json, '$.snapshotGeneration') = COALESCE(?, (
+            SELECT snapshot_generation FROM session_snapshots
+             WHERE chat_session_id = ? AND recovery_status = 'restored' AND recovery_workspace_id = ?))
+          AND (? IS NULL OR EXISTS (
+            SELECT 1 FROM tasks WHERE id = ? AND status = 'in_progress' AND started_at = ?))
+        RETURNING id, node_id AS nodeId, user_id AS userId, status`
+    )
     .bind(
       nowIso,
       input.restoredWorkspaceId,
-      input.chatSessionId,
-      input.chatSessionId,
       input.restoredWorkspaceId,
       input.chatSessionId,
       input.restoredWorkspaceId,
+      input.snapshotGeneration ?? null,
       input.chatSessionId,
-      input.restoredWorkspaceId
-    )
-    .all<{ id: string; nodeId: string | null; userId: string; status: string }>();
-  if (input.stampOnly) return stamped.results?.length ?? 0;
+      input.restoredWorkspaceId,
+      commit?.taskId ?? null,
+      commit?.taskId ?? null,
+      commit?.startedAt ?? null
+    );
+}
+
+/**
+ * After the wake committed, queue every source restored into `restoredWorkspaceId` for
+ * deletion: it is no longer needed for any retry of this wake, and nothing else would release
+ * its node. The commit already stamped the receipt; stamping again here is idempotent and
+ * covers a runner whose commit predates the stamp joining the commit batch. Best effort: the
+ * stale-workspace sweep re-queues any source whose receipt records the restore.
+ */
+export async function releaseRestoredSourceWorkspaces(
+  env: Env,
+  input: RestoredSourceReceiptStamp
+): Promise<number> {
+  const stamped = await restoredSourceReceiptStampStatement(
+    env.DATABASE,
+    input,
+    new Date().toISOString()
+  ).all<{ id: string; nodeId: string | null; userId: string; status: string }>();
   let queued = 0;
   for (const source of stamped.results ?? []) {
     if (!source.nodeId) continue;

@@ -276,6 +276,42 @@ describe('workspace eviction lifecycle through HTTP and real SQL', () => {
     ).toEqual({ status: 'available', sleep_status: null, sleep_after: null });
   });
 
+  // A wake releases the stopping workspace's chat binding (and advances `updated_at`) while
+  // the Stop finalizer is queued behind the NodeLifecycle gate.
+  it.each([
+    ['finalizes a Stop whose chat a wake released meanwhile', true, 'stopped'],
+    ['still refuses a Stop whose row changed while its chat stayed bound', false, 'stopping'],
+  ])('%s', async (_label, releaseChat, expected) => {
+    const lifecycle = env.NODE_LIFECYCLE;
+    env.NODE_LIFECYCLE = {
+      ...lifecycle,
+      get: (id: DurableObjectId) => {
+        const stub = lifecycle.get(id) as unknown as {
+          finalizeWorkspaceStop: (identity: WorkspaceStopIdentity) => Promise<boolean>;
+        };
+        return {
+          ...stub,
+          finalizeWorkspaceStop: async (identity: WorkspaceStopIdentity) => {
+            sqlite
+              .prepare(
+                `UPDATE workspaces SET updated_at = ?${releaseChat ? ', chat_session_id = NULL' : ''} WHERE id = 'workspace'`
+              )
+              .run(new Date(Date.now() + 5).toISOString());
+            return stub.finalizeWorkspaceStop(identity);
+          },
+        };
+      },
+    } as unknown as Env['NODE_LIFECYCLE'];
+
+    expect((await stop()).status).toBe(200);
+    await Promise.all(pending);
+    expect(state().workspace).toEqual({ status: expected });
+    expect(sqlite.prepare('SELECT stop_runtime_confirmed_at FROM workspaces').get()).toEqual({
+      stop_runtime_confirmed_at: expect.any(String),
+    });
+    expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledTimes(releaseChat ? 1 : 0);
+  });
+
   it('retries confirmed Stop cleanup after a ProjectData failure without stopping the VM again', async () => {
     mocks.stopSession.mockRejectedValueOnce(new Error('temporary ProjectData failure'));
     expect((await stop()).status).toBe(200);

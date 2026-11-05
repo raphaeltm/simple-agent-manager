@@ -93,6 +93,12 @@ describe('eviction fence after this runner restored the snapshot', () => {
     await expect(check()).resolves.toBeUndefined();
   });
 
+  it('accepts a source whose row cleanup already deleted once this runner restored the snapshot', async () => {
+    restore('target');
+    sqlite.exec("DELETE FROM workspaces WHERE id = 'source'");
+    await expect(check()).resolves.toBeUndefined();
+  });
+
   // An explicit Restart moves the source to a new generation while the handoff is held. The
   // wake must lose to it even after its own restore, or the conversation runs twice.
   it('still refuses a restarted source after this runner restored the snapshot', async () => {
