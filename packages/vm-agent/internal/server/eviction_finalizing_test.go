@@ -168,3 +168,14 @@ func TestSnapshotsStillRunForALiveWorkspace(t *testing.T) {
 		}
 	}
 }
+
+func TestUnwrittenEvictionIntentLeavesNoFinalizingMark(t *testing.T) {
+	s := newEvictionTestServer() // No delivery store: the write-ahead intent cannot be written.
+	setupEvictionDocker(t, evictionTestContainerID)
+	if err := s.stopEvictedWorkspaceContainer(context.Background(), evictionTargetFixture(s)); err == nil {
+		t.Fatal("stopped without a durable intent")
+	}
+	if s.isEvictionFinalizing("workspace-1") {
+		t.Fatal("an eviction that never wrote its intent stayed marked finalizing")
+	}
+}

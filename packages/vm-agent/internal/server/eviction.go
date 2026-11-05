@@ -313,11 +313,13 @@ func (s *Server) stopEvictedWorkspaceContainer(ctx context.Context, target resou
 	}
 	// Write-ahead intent blocks automatic recovery even if the agent exits
 	// after Docker stops but before the completed eviction can be committed.
+	// Marked before the intent becomes visible to the delivery retry, and cleared by
+	// markWorkspaceEvicted once the eviction is recorded, after any final capture.
+	s.markEvictionFinalizing(target.WorkspaceID)
 	if err := s.prepareWorkspaceEvictionStop(ctx, target); err != nil {
+		s.clearEvictionFinalizing(target.WorkspaceID)
 		return err
 	}
-	// Cleared by markWorkspaceEvicted once the eviction is recorded, after any final capture.
-	s.markEvictionFinalizing(target.WorkspaceID)
 	if err := s.stopEvictionContainer(ctx, containerID); err != nil {
 		// A failed stop is not finalizing: the reconciler retries the intent.
 		s.clearEvictionFinalizing(target.WorkspaceID)
