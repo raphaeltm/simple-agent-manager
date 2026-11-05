@@ -9,6 +9,7 @@ import type {
   AgentMailboxMessage,
   DeliveryState,
   MessageClass,
+  PromptDeliveryIntent,
   PromptDeliverySource,
   SenderType,
 } from '@simple-agent-manager/shared';
@@ -46,6 +47,8 @@ export interface EnqueueOptions {
   ackRequired?: boolean;
   /** Persisted ownership fence separating the durable engine from legacy mailbox sweeps. */
   durableDelivery?: boolean;
+  /** Queue for the next turn (default) or steer the running one; selects the claim lane. */
+  deliveryIntent?: PromptDeliveryIntent;
 }
 
 /**
@@ -74,8 +77,8 @@ export function enqueueMessage(sql: SqlStorage, opts: EnqueueOptions): AgentMail
        created_at, delivered_at, message_class, delivery_state, sender_type,
        sender_id, ack_required, acked_at, ack_timeout_ms, expires_at,
        delivery_attempts, last_delivery_at, metadata, source_kind,
-       prompt_message_id, next_attempt_at, durable_delivery)
-    VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, 0, NULL, ?, ?, ?, ?, ?)`,
+       prompt_message_id, next_attempt_at, durable_delivery, delivery_intent)
+    VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, 0, NULL, ?, ?, ?, ?, ?, ?)`,
     id,
     opts.targetSessionId,
     opts.sourceTaskId,
@@ -94,7 +97,8 @@ export function enqueueMessage(sql: SqlStorage, opts: EnqueueOptions): AgentMail
     opts.sourceKind ?? 'agent_mailbox',
     opts.promptMessageId ?? id,
     now,
-    opts.durableDelivery ? 1 : 0
+    opts.durableDelivery ? 1 : 0,
+    opts.deliveryIntent ?? 'queue'
   );
 
   log.info('mailbox.enqueued', {
@@ -136,6 +140,9 @@ export function enqueueMessage(sql: SqlStorage, opts: EnqueueOptions): AgentMail
     acceptedAt: null,
     adapterProtocolVersion: null,
     receiptSupported: null,
+    deliveryIntent: opts.deliveryIntent ?? 'queue',
+    steerOutcome: null,
+    steerReason: null,
   };
 }
 

@@ -303,11 +303,11 @@ export function advanceProjectEventPromptAttemptCheckpoint(
     stableStringify([projectId, batchId, idempotencyKey, result.kind, claim.mode]),
     attemptNumber,
     attemptState,
-    result.kind === 'retry' ? 'queued' : null,
+    result.kind === 'retry' || result.kind === 'steer_fallback' ? 'queued' : null,
     EVENT_WAKE_ADAPTER_ID,
     result.capabilities ? String(result.capabilities.protocolVersion) : null,
     result.runtimeIdentity,
-    result.kind === 'accepted' || result.kind === 'ambiguous'
+    result.kind === 'accepted' || result.kind === 'ambiguous' || result.kind === 'steered'
       ? (result.receipt?.deliveryId ?? null)
       : null,
     'reason' in result ? result.reason : null,
@@ -353,8 +353,13 @@ function attemptStateForPromptResult(
 ): ProjectEventDeliveryAttemptState {
   switch (result.kind) {
     case 'accepted':
+    case 'steered':
       return 'accepted';
     case 'retry':
+    // A steer the runtime did not take is now an ordinary queued wake; its later
+    // queue-lane delivery records the terminal attempt.
+    case 'steer_fallback':
+    case 'steer_pending':
       return 'retry';
     case 'failed':
       return 'failed';
