@@ -78,7 +78,8 @@ function toAttentionSummary(value: unknown): SessionSummary['attention'] {
 function toHttpsUrl(value: string | null | undefined): string | null {
   if (!value) return null;
   try {
-    return new URL(value).protocol === 'https:' ? value : null;
+    const url = new URL(value);
+    return url.protocol === 'https:' ? url.href : null;
   } catch {
     return null;
   }

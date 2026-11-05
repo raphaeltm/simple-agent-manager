@@ -11,6 +11,7 @@ import {
   projectPath,
   projectTaskPath,
 } from '../../lib/project-routes';
+import { sanitizeUrl } from '../../lib/url-utils';
 import { type ConnectionsModel, machineOf, type MapWork, workspaceOf } from './connections-model';
 import { machineDetail, prLabel, WORK_STATE_LABEL } from './connections-parts';
 
@@ -105,7 +106,7 @@ function StepValue({ step, className }: { step: PathStep; className: string }) {
   if (step.href) {
     return (
       <a
-        href={step.href}
+        href={sanitizeUrl(step.href)}
         target="_blank"
         rel="noopener noreferrer"
         className={`${className} text-fg-primary underline decoration-[var(--sam-hairline)] underline-offset-2 hover:decoration-current`}
