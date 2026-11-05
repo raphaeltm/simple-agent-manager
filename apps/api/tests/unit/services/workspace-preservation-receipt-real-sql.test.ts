@@ -554,6 +554,49 @@ describe('evicted source cleanup through real writers and real SQL', () => {
     expect(await sourcePreservation()).not.toBeNull();
   });
 
+  it('a runner retry after its commit keeps the legacy source releasable', async () => {
+    await capture('workspace', 'node', true);
+    await evict();
+    sqlite.exec("UPDATE workspaces SET preservation_receipt_json = NULL WHERE id = 'workspace'");
+    const generation = await wakeOnto('target');
+    await commitWake('target', generation);
+    expect(await sourcePreservation()).not.toBeNull();
+    // The DO crashed before recording its commit; the retry completes the restore again.
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    expect(
+      await completeSessionSnapshotRecoveryGeneration(db(), 'chat', 'wake-task', 'target')
+    ).not.toBeNull();
+    expect(await sourcePreservation()).not.toBeNull();
+  });
+
+  it('the sweep does not select a restored receipt that no longer names the runtime', async () => {
+    sqlite.exec("UPDATE nodes SET node_class = 'managed'");
+    await capture('workspace', 'node', true);
+    await evict();
+    const generation = await wakeOnto('target');
+    await commitWake('target', generation);
+    const sweep = async () => {
+      mocks.scheduleWorkspaceDeletion.mockClear();
+      await sweepStaleStoppedWorkspaces(
+        db(),
+        env,
+        new Date('2099-01-01T00:00:00Z'),
+        resolveCleanupConfig(env),
+        emptyResult()
+      );
+      return mocks.scheduleWorkspaceDeletion.mock.calls.map((call) => call[1]);
+    };
+    // Liveness: the matching receipt is selected.
+    expect(await sweep()).toEqual(['workspace']);
+    // A Restart minted a new generation; the stopped row keeps the old receipt. The snapshot
+    // row moved to the successor, so only the receipt could have selected it.
+    await capture('target', 'target-node', false);
+    sqlite.exec(
+      "UPDATE workspaces SET status = 'stopped', eviction_generation = 'generation-2' WHERE id = 'workspace'"
+    );
+    expect(await sweep()).toEqual([]);
+  });
+
   it('a degraded restore never releases a legacy evicted source, even after its commit', async () => {
     await capture('workspace', 'node', true);
     await evict();

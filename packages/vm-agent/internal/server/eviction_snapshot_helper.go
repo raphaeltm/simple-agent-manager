@@ -256,6 +256,16 @@ func (s *Server) reapSnapshotHelpers(ctx context.Context, workspaceID string) er
 // ran. A container removed again before this check (`docker run --rm`) leaves no record;
 // `docker events --since` does not close that gap, because the daemon replays only a short
 // in-memory buffer that the capture's own `docker exec` events can overrun.
+//
+// Cost: one `docker ps -aq` and one batched `docker inspect` of every container the daemon
+// still holds, twice per final capture. That is bounded by the node's containers: one
+// devcontainer per workspace it has not deleted yet (the deletion queue removes stopped ones
+// after WORKSPACE_STOPPED_TTL_MS), helpers and system containers, i.e. tens on a VM sized for
+// a handful of workspaces, where a batched inspect returns well under a second.
+//
+// A helper this same workspace's earlier capture leaked (its removal outlived the capture
+// deadline) still mounts the volume and blocks quiescence until a reaper removes it. That is
+// the conservative outcome, not a foreign tenant.
 func (s *Server) requireNoForeignWorkspaceWriters(ctx context.Context, workspaceID, hostRoot string, since time.Time, ownIDs ...string) error {
 	ids, err := s.runEvictionDockerCommand(ctx, "ps", "-aq", "--no-trunc")
 	if err != nil {

@@ -133,7 +133,11 @@ export async function completeSessionSnapshotRecoveryGeneration(
       sleepingAt: null,
       recoveryAttempts: 0,
       recoveryFailedAt: null,
-      restoredAt: new Date().toISOString(),
+      // Set when the claim turns into a restore, never on a retry: the wake's commit starts
+      // its task after this, and a later rewrite would read as an uncommitted restore
+      // (`evictionWakeCommittedSql`).
+      restoredAt: sql`CASE WHEN ${schema.sessionSnapshots.recoveryStatus} = 'restored'
+        THEN ${schema.sessionSnapshots.restoredAt} ELSE ${new Date().toISOString()} END`,
       updatedAt: new Date().toISOString(),
     })
     .where(
