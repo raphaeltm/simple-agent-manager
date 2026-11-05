@@ -137,8 +137,9 @@ function grant(
 }
 
 /**
- * What every agent-wake delivery records about who woke the agent and for whom, under
- * `metadata.wake`. Server-written only; the existing `userId` / `onBehalfOfUserId` /
+ * What every agent wake records about who woke the agent and for whom: under
+ * `metadata.wake` on a queued prompt delivery, or on the `session.shared_answer` activity
+ * event for a teammate's attention answer, which bypasses the queue. Server-written only; the existing `userId` / `onBehalfOfUserId` /
  * `grantId` keys keep their meaning for the transcript and revocation paths.
  */
 export function agentWakeRecord(wake: AgentWakeGrant): Record<string, unknown> {

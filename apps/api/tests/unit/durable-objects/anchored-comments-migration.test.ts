@@ -163,6 +163,44 @@ describe('DO migration 073: anchored comment threads', () => {
     expect(checkLegacyCommentParity(sql).ok).toBe(true);
   });
 
+  it('a later copy adds rows written to the legacy tables, but never overwrites copied rows', () => {
+    // A Worker rolled back to pre-073 code writes the legacy tables (the documented rollback
+    // hazard). Rolling forward re-runs the copy: missing rows arrive, copied rows stay as-is.
+    sql.exec(
+      `INSERT INTO comment_threads
+         (id, session_id, anchor_kind, message_id, quote, body, author_type, author_id,
+          author_name, status, created_at, updated_at, sequence, version)
+       VALUES ('rollback-thread', 'session-b', 'message', 'message-b1', NULL, 'Written during rollback',
+         'human', 'user-owner', 'Owner', 'open', 5000, 5000, 2, 1)`
+    );
+    sql.exec(
+      `INSERT INTO comment_replies
+         (id, thread_id, session_id, body, author_type, author_id, author_name, created_at, sequence)
+       VALUES ('rollback-reply', 'rollback-thread', 'session-b', 'Rollback reply', 'human',
+         'user-owner', 'Owner', 5100, 1)`
+    );
+    sql.exec(
+      "UPDATE comment_threads SET status = 'open', updated_at = 6000 WHERE id = 'legacy-thread-resolved'"
+    );
+    sql.exec(
+      `INSERT INTO comment_replies
+         (id, thread_id, session_id, body, author_type, author_id, author_name, created_at, sequence)
+       VALUES ('reply-on-copied', 'legacy-thread-resolved', 'session-b', 'Late reply', 'human',
+         'user-owner', 'Owner', 6000, 1)`
+    );
+
+    copyLegacyCommentRows(sql);
+
+    const threads = comments.listCommentThreads(sql, env, { sessionId: 'session-b' }).threads;
+    const added = threads.find((t) => t.id === 'rollback-thread');
+    expect(added?.body).toBe('Written during rollback');
+    expect(added?.replies.map((r) => r.body)).toEqual(['Rollback reply']);
+    const copied = threads.find((t) => t.id === 'legacy-thread-resolved');
+    expect(copied?.replies.map((r) => r.body)).toEqual(['Late reply']);
+    expect(copied?.status).toBe('resolved');
+    expect(copied?.updatedAt).toBe(2200);
+  });
+
   it('records the migration once, so the runner does not copy again', () => {
     runMigrations(sql);
     expect(

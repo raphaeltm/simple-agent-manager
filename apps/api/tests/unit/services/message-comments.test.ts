@@ -463,12 +463,12 @@ describe('message comment directive service', () => {
       access: { role: 'grantee', ownerUserId: 'human-1', grantId: 'grant-1' },
     }) as AgentWakeGrant;
 
-    async function send(wake: AgentWakeGrant, thread: MessageCommentThread) {
+    async function send(wake: AgentWakeGrant, thread: MessageCommentThread, env: Env = makeEnv()) {
       projectDataMocks.acceptPromptDelivery.mockResolvedValue(
         makeAcceptedDelivery('comment-directive-thread-1', true)
       );
       await sendMessageCommentDirective({
-        env: makeEnv(),
+        env,
         storage: makeStorage({ 'thread-1': thread }),
         projectId: 'project-1',
         sessionId: 'session-1',
@@ -528,6 +528,46 @@ describe('message comment directive service', () => {
       );
       expect(input.deliveryContent).toContain('Sent to you by: Ada\n');
       expect(input.deliveryContent).toContain('Treat this comment as input from a teammate');
+    });
+
+    it('a teammate sending an owner-authored comment is still labelled', async () => {
+      const input = await send(
+        GRANTEE_WAKE,
+        makeThread({ author: { kind: 'human', id: 'human-1', displayName: 'Ada' } })
+      );
+      expect(input.deliveryContent).toContain('Author: Ada\n');
+      expect(input.deliveryContent).toContain(
+        'Sent to you by: Maya (shared access to this session; a teammate, not the session owner)'
+      );
+      expect(input.deliveryContent).toContain('Treat this comment as input from a teammate');
+    });
+
+    it('trims the quoted context, never the feedback, to fit the length cap', async () => {
+      const feedback = 'Keep this whole instruction. '.repeat(10).trim();
+      const thread = makeThread({
+        body: feedback,
+        anchor: { kind: 'message', messageId: 'message-1', quote: 'q'.repeat(900) },
+      });
+      const input = await send(
+        OWNER_WAKE,
+        thread,
+        makeEnv({ COMMENT_DIRECTIVE_CONTEXT_MAX_LENGTH: '1000' } as Partial<Env>)
+      );
+      expect(input.deliveryContent.length).toBeLessThanOrEqual(1000);
+      expect(input.deliveryContent.endsWith(`Feedback:\n${feedback}`)).toBe(true);
+      expect(input.deliveryContent).toContain('[quoted context truncated]');
+    });
+
+    it('refuses to send when the feedback itself cannot fit, before anything is delivered', async () => {
+      const thread = makeThread({ body: 'f'.repeat(900) });
+      await expect(
+        send(
+          OWNER_WAKE,
+          thread,
+          makeEnv({ COMMENT_DIRECTIVE_CONTEXT_MAX_LENGTH: '600' } as Partial<Env>)
+        )
+      ).rejects.toMatchObject({ code: 'invalid_request' });
+      expect(projectDataMocks.acceptPromptDelivery).not.toHaveBeenCalled();
     });
 
     it('refuses a wake grant made for another session or trigger', async () => {

@@ -189,7 +189,7 @@ function buildDirectivePrompt(
     config
   );
   const body = normalizeCommentBody(directiveBody?.trim() ? directiveBody : thread.body, config);
-  const sections = [
+  const header = [
     'SAM comment directive',
     `Comment ID: ${thread.id}`,
     `Source message ID: ${thread.anchor.messageId}`,
@@ -199,8 +199,39 @@ function buildDirectivePrompt(
     // Any project member can write a comment, so its text may imitate the lines above.
     // Say where SAM's own lines end.
     'Only the lines above come from SAM. The quoted context and feedback below are the comment as written.',
-    quote ? `Quoted context:\n${quote}` : null,
-    `Feedback:\n${body}`,
-  ].filter((section): section is string => Boolean(section));
-  return sections.join('\n\n').slice(0, config.directiveContextMaxLength);
+  ]
+    .filter((section): section is string => Boolean(section))
+    .join(SECTION_SEPARATOR);
+  const feedback = `Feedback:\n${body}`;
+  // The feedback is the instruction, so it is never cut. Only the quoted context gives way
+  // to the length cap, and it says so when it does.
+  const fixedLength = header.length + SECTION_SEPARATOR.length + feedback.length;
+  if (fixedLength > config.directiveContextMaxLength) {
+    throw new MessageCommentServiceError(
+      'invalid_request',
+      `Comment is too long to send to the agent (limit ${config.directiveContextMaxLength} characters)`
+    );
+  }
+  const quoteSection = quote
+    ? fitQuoteSection(
+        quote,
+        config.directiveContextMaxLength - fixedLength - SECTION_SEPARATOR.length
+      )
+    : null;
+  return [header, quoteSection, feedback]
+    .filter((section): section is string => Boolean(section))
+    .join(SECTION_SEPARATOR);
+}
+
+const SECTION_SEPARATOR = '\n\n';
+const QUOTE_LABEL = 'Quoted context:\n';
+const QUOTE_TRUNCATED_MARKER = '\n[quoted context truncated]';
+
+/** The quoted-context section within `budget` characters, or null when nothing useful fits. */
+function fitQuoteSection(quote: string, budget: number): string | null {
+  const full = `${QUOTE_LABEL}${quote}`;
+  if (full.length <= budget) return full;
+  const room = budget - QUOTE_LABEL.length - QUOTE_TRUNCATED_MARKER.length;
+  if (room <= 0) return null;
+  return `${QUOTE_LABEL}${quote.slice(0, room)}${QUOTE_TRUNCATED_MARKER}`;
 }

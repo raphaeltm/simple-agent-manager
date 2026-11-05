@@ -18,7 +18,11 @@ import {
   anchorScopeParams,
   type CommentAnchorScope,
 } from './anchored-comment-scope';
-import type { CommentActor, ListProjectCommentThreadCandidatesPage } from './comment-contracts';
+import type {
+  CommentActor,
+  ListProjectCommentThreadCandidatesPage,
+  ProjectCommentThreadCandidate,
+} from './comment-contracts';
 import { actorFromColumns } from './comment-normalization';
 import { parseProjectCommentThreadCandidates, restoreThreadOrder } from './comment-read-helpers';
 import { parseRow } from './row-schemas';
@@ -328,7 +332,12 @@ export function listThreadRecords(
  */
 export function listProjectThreadCandidates(
   sql: SqlStorage,
-  input: { status?: string | null; limit: number }
+  input: {
+    status?: string | null;
+    limit: number;
+    /** Keyset cursor: continue after this candidate in `updated_at DESC, id ASC` order. */
+    after?: ProjectCommentThreadCandidate | null;
+  }
 ): ListProjectCommentThreadCandidatesPage {
   const kindPlaceholders = COMMENT_ANCHOR_KINDS.map(() => '?').join(', ');
   const conditions = [`t.anchor_kind IN (${kindPlaceholders})`];
@@ -336,6 +345,11 @@ export function listProjectThreadCandidates(
   if (input.status) {
     conditions.push('t.status = ?');
     params.push(input.status);
+  }
+  if (input.after) {
+    // Keyset cursor. The count below only runs on the first window, before any cursor.
+    conditions.push('(t.updated_at < ? OR (t.updated_at = ? AND t.id > ?))');
+    params.push(input.after.updatedAt, input.after.updatedAt, input.after.id);
   }
   // Named `whereClause` deliberately — see `listThreadRecords`.
   const whereClause = `WHERE ${conditions.join(' AND ')}`;
@@ -358,9 +372,12 @@ export function listProjectThreadCandidates(
       input.limit + 1
     )
     .toArray();
-  const countRow = sql
-    .exec(`SELECT COUNT(*) AS count FROM anchored_comment_threads t ${whereClause}`, ...params)
-    .toArray()[0];
+  // The total is the same for every window, so only the first one counts it.
+  const countRow = input.after
+    ? null
+    : sql
+        .exec(`SELECT COUNT(*) AS count FROM anchored_comment_threads t ${whereClause}`, ...params)
+        .toArray()[0];
 
   return {
     candidates: parseProjectCommentThreadCandidates(
@@ -371,6 +388,7 @@ export function listProjectThreadCandidates(
       'comments.project_candidate_row_skipped'
     ),
     totalCount: typeof countRow?.count === 'number' ? countRow.count : 0,
+    windowFull: rows.length > input.limit,
   };
 }
 

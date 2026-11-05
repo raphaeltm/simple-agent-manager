@@ -462,4 +462,44 @@ describe('ProjectData project comment inbox', () => {
     );
     expect(hydrateReplyCall?.params).toEqual([selectedSmall]);
   });
+  it('reads past a window of oversized recent threads to fill the page with older ones', () => {
+    seedSession('s-1');
+    seedMessage('s-1', 'm-1', 1);
+    // limit 2 reads windows of 3 candidates. The three newest threads are each over the
+    // budget, so the first window selects nothing; the older file thread is in the second.
+    for (let i = 0; i < 3; i++) messageThreadAt('s-1', 'm-1', 'x'.repeat(100), 9_000 - i);
+    const olderFile = fileThreadAt('file-1', 'fits', 1_000);
+
+    const inbox = listProjectCommentInbox(
+      sql,
+      { ...env, PROJECT_COMMENT_LIST_MAX_BYTES: '20' } as Env,
+      { limit: 2 }
+    );
+
+    expect(inbox.fileThreads.map((t) => t.id)).toEqual([olderFile]);
+    expect(inbox.messageThreads).toEqual([]);
+    expect(inbox.totalCount).toBe(4);
+    expect(inbox.hasMore).toBe(true);
+  });
+
+  it('stops reading windows once the page is full', () => {
+    seedSession('s-1');
+    seedMessage('s-1', 'm-1', 1);
+    const newest = messageThreadAt('s-1', 'm-1', 'a', 9_000);
+    const next = messageThreadAt('s-1', 'm-1', 'b', 8_000);
+    for (let i = 0; i < 6; i++) fileThreadAt(`file-${i}`, 'older', 1_000 - i);
+
+    const calls: string[] = [];
+    const tracedSql = {
+      ...sql,
+      exec(statement: string, ...params: unknown[]) {
+        calls.push(statement);
+        return sql.exec(statement, ...(params as never[]));
+      },
+    } as SqlStorage;
+    const inbox = listProjectCommentInbox(tracedSql, env, { limit: 2 });
+
+    expect(inbox.messageThreads.map((t) => t.id)).toEqual([newest, next]);
+    expect(calls.filter((statement) => statement.includes('AS estimated_bytes'))).toHaveLength(1);
+  });
 });

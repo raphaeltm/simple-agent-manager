@@ -142,11 +142,13 @@ export type ProjectCommentThreadCandidate = {
   estimatedBytes: number;
 };
 
-/** One capped, `updated_at DESC`-ranked candidate page of a single anchor kind. */
+/** One capped window of the `updated_at DESC, id ASC` ranking across every anchor kind. */
 export type ListProjectCommentThreadCandidatesPage = {
   candidates: ProjectCommentThreadCandidate[];
-  /** Total rows matching the filter, ignoring the cap. */
+  /** Total rows matching the filter, ignoring the cap. Counted on the first window only. */
   totalCount: number;
+  /** More rows exist after this window. */
+  windowFull: boolean;
 };
 
 export type ProjectCommentSessionTopic = {

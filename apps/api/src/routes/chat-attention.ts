@@ -9,6 +9,7 @@ import type { Hono } from 'hono';
 import * as schema from '../db/schema';
 import { parseAttentionOptions } from '../durable-objects/project-data/attention';
 import type { Env } from '../env';
+import { agentWakeRecord } from '../lib/agent-wake-policy';
 import { markRejectedBeforeEffects } from '../lib/operation-effect-boundary';
 import { requireRouteParam } from '../lib/route-helpers';
 import { getUserId } from '../middleware/auth';
@@ -153,7 +154,7 @@ export async function answerAttention(
 
   await requireProjectCapability(db, projectId, userId, 'task:write');
   // The answer reaches the agent as a new prompt, so the agent-wake policy decides.
-  const { writer } = await authorizeAgentWake(env, {
+  const { writer, wake } = await authorizeAgentWake(env, {
     projectId,
     sessionId,
     actorUserId: userId,
@@ -219,6 +220,9 @@ export async function answerAttention(
   // stable downstream message ID for persistence-level deduplication.
   await sendPreparedPromptToLiveAgent(env, preparedPrompt, markerId);
   await projectDataService.completeAttentionAnswer(env, projectId, sessionId, markerId, answer);
-  await recordSharedSessionAnswer(env, writer, { markerId });
+  // The answer goes straight to the live agent, not through the prompt-delivery queue, so
+  // there is no delivery row to carry `metadata.wake`. A teammate's answer records it on the
+  // shared-answer audit event instead; an owner's answer is the owner acting for themself.
+  await recordSharedSessionAnswer(env, writer, { markerId, wake: agentWakeRecord(wake) });
   return { resolved: true, alreadyResolved: false, answer };
 }

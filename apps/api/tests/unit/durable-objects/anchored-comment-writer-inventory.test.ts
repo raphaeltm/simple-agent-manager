@@ -34,6 +34,10 @@ function sourceFiles(dir: string): string[] {
   });
 }
 
+/** Every SQLite write form, aimed at any of the unified tables. */
+const ANCHORED_WRITE =
+  /\b(INSERT\s+(OR\s+\w+\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+anchored_comment_/i;
+
 function writePattern(table: string): RegExp {
   // The table name must not be the tail of a longer identifier such as anchored_comment_threads.
   return new RegExp(
@@ -81,13 +85,19 @@ describe('legacy comment tables are not written after migration 073', () => {
     expect(
       writePattern('comment_threads').test('UPDATE anchored_comment_threads SET body = ?')
     ).toBe(false);
+    for (const sample of [
+      'INSERT OR IGNORE INTO anchored_comment_threads (id)',
+      'REPLACE INTO anchored_comment_replies (id)',
+      'DELETE FROM anchored_comment_status_mutations',
+    ]) {
+      expect(ANCHORED_WRITE.test(sample)).toBe(true);
+    }
+    expect(ANCHORED_WRITE.test('SELECT id FROM anchored_comment_threads')).toBe(false);
   });
 
   it('every anchored-table write lives in the shared mutation core or the migration', () => {
     const anchoredWriters = files
-      .filter(({ content }) =>
-        /\b(INSERT\s+INTO|UPDATE|DELETE\s+FROM)\s+anchored_comment_/i.test(content)
-      )
+      .filter(({ content }) => ANCHORED_WRITE.test(content))
       .map(({ path }) => path)
       .sort();
     expect(anchoredWriters).toEqual([

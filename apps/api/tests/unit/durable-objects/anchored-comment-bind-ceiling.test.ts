@@ -1,6 +1,6 @@
 /**
  * Durable Object SQLite rejects a statement with more than 100 bound parameters
- * (`D1_MAX_BOUND_PARAMETERS`); better-sqlite3 allows 32,766, so a fixture of any size passes
+ * (mirrored by `D1_MAX_BOUND_PARAMETERS`); better-sqlite3 allows 32,766, so a fixture of any size passes
  * there unless the test observes the statement shape (.claude/rules/69, harness ceiling).
  *
  * Comment list limits go up to 500 threads and the project inbox up to 300, so every
@@ -15,11 +15,18 @@ import { runMigrations } from '../../../src/durable-objects/migrations';
 import * as comments from '../../../src/durable-objects/project-data/comments';
 import { listProjectCommentInbox } from '../../../src/durable-objects/project-data/project-comment-inbox';
 import type { Env } from '../../../src/durable-objects/project-data/types';
-import { D1_MAX_BOUND_PARAMETERS } from '../../../src/lib/d1-limits';
 import { createSqlStorage } from './sql-storage-test-utils';
 
+/**
+ * Cloudflare's documented per-statement limit, written out rather than read from
+ * `D1_MAX_BOUND_PARAMETERS`: if that constant were ever raised past the runtime's real
+ * limit, production batching would follow it and only an independent literal would notice.
+ */
+const RUNTIME_BIND_CEILING = 100;
 // Two full batches and a remainder, so an off-by-one cannot land on a clean boundary.
-const THREADS = D1_MAX_BOUND_PARAMETERS * 2 + 1;
+const THREADS = RUNTIME_BIND_CEILING * 2 + 1;
+// Replies on threads in the first batch, the second batch and the remainder.
+const REPLY_THREAD_INDEXES = [0, RUNTIME_BIND_CEILING + 5, THREADS - 1];
 const ACTOR = { kind: 'human' as const, id: 'user-1', name: 'Ada' };
 
 describe('comment reads stay under the bound-parameter ceiling', () => {
@@ -66,19 +73,33 @@ describe('comment reads stay under the bound-parameter ceiling', () => {
     }
     // All threads in one session as well, for the per-session list.
     for (let i = 0; i < THREADS; i++) {
-      comments.createCommentThread(real, env, {
+      const { thread } = comments.createCommentThread(real, env, {
         sessionId: 'session-0',
         messageId: 'message-0',
         body: `Same session ${i}`,
         actor: ACTOR,
       });
+      if (REPLY_THREAD_INDEXES.includes(i)) {
+        comments.createCommentReply(real, env, {
+          sessionId: 'session-0',
+          threadId: thread.id,
+          body: `Reply on ${i}`,
+          actor: ACTOR,
+        });
+      }
     }
   });
 
   it('lists more threads than one batch in a session', () => {
     const listed = comments.listCommentThreads(sql, env, { sessionId: 'session-0', limit: 500 });
     expect(listed.threads).toHaveLength(THREADS + 1);
-    expect(maxBinds).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
+    const replies = listed.threads.flatMap((thread) =>
+      thread.replies.map((reply) => [thread.body, reply.body])
+    );
+    expect(replies).toEqual(
+      REPLY_THREAD_INDEXES.map((i) => [`Same session ${i}`, `Reply on ${i}`])
+    );
+    expect(maxBinds).toBeLessThanOrEqual(RUNTIME_BIND_CEILING);
   });
 
   it('hydrates an inbox page with more threads and sessions than one batch', () => {
@@ -88,7 +109,7 @@ describe('comment reads stay under the bound-parameter ceiling', () => {
     );
     const inbox = listProjectCommentInbox(sql, env, { limit: 300 });
     expect(inbox.messageThreads).toHaveLength(300);
-    expect(inbox.sessions.length).toBeGreaterThan(D1_MAX_BOUND_PARAMETERS);
-    expect(maxBinds).toBeLessThanOrEqual(D1_MAX_BOUND_PARAMETERS);
+    expect(inbox.sessions.length).toBeGreaterThan(RUNTIME_BIND_CEILING);
+    expect(maxBinds).toBeLessThanOrEqual(RUNTIME_BIND_CEILING);
   });
 });
