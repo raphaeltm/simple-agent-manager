@@ -81,7 +81,7 @@ Probed the real `agy-acp-server` 1.4.5 Linux x86_64 release locally (`.tmp/agy/p
 - [x] `google-antigravity` can be selected and configured with a Gemini API key and a model
 - [x] The VM agent installs Antigravity, verifies the archive digest, launches it, authenticates
       with `gemini-api-key`, and opens a session without writing into the repo
-- [ ] Draft PR with green CI
+- [x] Draft PR with green CI (#2542)
 - [ ] (After Raphaël connects a key) staging: a real prompt answered by Antigravity
 
 ## Verification Notes
@@ -93,6 +93,15 @@ Probed the real `agy-acp-server` 1.4.5 Linux x86_64 release locally (`.tmp/agy/p
 - Every guard was reverted once and the intended test went red: authenticate, session `_meta`,
   fs capabilities, mode mapping (bypass/accept and plan/default), snapshot exclusion, installer
   cleanup glob, manifest digest and `unzip` checks.
+
+## Staging (2026-11-05, run 42043721627)
+
+- Verified with a deliberately invalid Gemini key: UI connect (201), profiles on VM and Instant,
+  fresh VM node heartbeat, install, launch, `gemini-api-key` auth, session, and the prompt
+  reached Google ("API key not valid") on both runtimes; no `skills/` in the repo; Instant
+  sleep and wake re-authenticated and answered again. Test key and nodes deleted; profiles
+  "Antigravity VM/Instant (PR 2542 test)" kept in `hono`.
+- Remaining: one real reply with a valid key (staging has no Google key).
 
 ## References
 
