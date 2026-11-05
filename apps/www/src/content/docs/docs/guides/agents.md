@@ -330,12 +330,14 @@ coming before an agent stops on it.
 
 <picture>
   <source media="(max-width: 40em)" srcset="/images/docs/credential-usage-limits-mobile.png" />
-  <img src="/images/docs/credential-usage-limits.png" alt="The usage details dialog opened from a chat's usage chip. It reads &quot;Claude usage&quot; and &quot;Your credential · claude-code · sampled 4m ago&quot;, with an amber Warning badge, and lists two limits with progress bars: &quot;5h&quot; at 78% used in amber, resetting in about two hours, and &quot;Week&quot; at 31% used in green, resetting in about three days. A note at the bottom says the values are the latest samples SAM saw, not a live quote from the provider." loading="lazy" />
+  <img src="/images/docs/credential-usage-limits.png" alt="The usage details dialog opened from a chat's usage chip. It is titled with the account's name, &quot;Personal Max&quot;, under a small &quot;Claude usage&quot; label, then &quot;Your account · Claude Code · sampled 4m ago&quot;, with an amber Warning badge, and lists two limits with progress bars: &quot;5h&quot; at 78% used in amber, resetting in about two hours, and &quot;Week&quot; at 31% used in green, resetting in about three days. A note at the bottom says the values are the latest samples SAM saw, not a live quote from the provider." loading="lazy" />
 </picture>
 
 - **In a chat**, a small chip under the chat's title shows the credential that chat's agent uses —
   for example `Claude · 5h 78% · Week 31%`, shortest limit first. Select it to see every limit, how
-  much of it is used, and when it resets. It appears once SAM has a reading (for Claude Code, after
+  much of it is used, and when it resets. The dialog is titled with the account's name from
+  Settings, so you can tell which subscription it is; an account you didn't add (a project's or the
+  platform's) is labelled by whose it is instead. It appears once SAM has a reading (for Claude Code, after
   a few model calls); credentials that report nothing (see the list below) never show one.
 - **In Settings → Agents**, each account card shows the same chip once an agent has used that
   account. The raw credential list in **Settings → Advanced** shows it too.
