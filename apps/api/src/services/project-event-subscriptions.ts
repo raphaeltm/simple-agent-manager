@@ -15,6 +15,7 @@ import type {
   ProjectEventSubscriptionOwnerScope,
   ProjectEventWakeInstructions,
 } from '@simple-agent-manager/shared';
+import { DEFAULT_PROJECT_EVENT_REQUESTED_DELIVERY } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { errors } from '../middleware/error';
@@ -64,7 +65,9 @@ export async function createProjectEventSubscriptionForCaller(
 ): Promise<ProjectEventSubscriptionCreateResponse> {
   assertNoCallerProjectId(request as Record<string, unknown>);
   const context = await resolveSurfaceContext(env, caller);
-  const requestedDelivery = normalizeRequestedDelivery(request.requestedDelivery);
+  const requestedDelivery = normalizeRequestedDelivery(
+    request.requestedDelivery ?? DEFAULT_PROJECT_EVENT_REQUESTED_DELIVERY
+  );
 
   let owner: ProjectEventSubscriptionOwner;
   let target: NonNullable<ProjectEventDeliveryPreference['target']>;

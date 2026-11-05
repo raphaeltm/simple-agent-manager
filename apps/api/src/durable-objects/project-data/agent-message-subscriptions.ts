@@ -7,6 +7,7 @@
  */
 import {
   type AgentChannelMessageParticipant,
+  DEFAULT_PROJECT_EVENT_REQUESTED_DELIVERY,
   PROJECT_EVENT_CHANNEL_SOURCE,
   PROJECT_EVENT_CHANNEL_TYPE,
 } from '@simple-agent-manager/shared';
@@ -23,8 +24,16 @@ const MANAGED_OWNER_NAME = 'SAM agent messaging';
 const ROTATION_REASON = 'agent message subscription renewed';
 const EVICTION_REASON = 'idle agent message subscription released for capacity';
 
+/**
+ * Agent-message notices steer: they join the recipient's running turn instead of waiting for
+ * it to end, and an idle or sleeping recipient gets an ordinary wake prompt. A managed row
+ * created with another delivery is replaced on the pair's next message.
+ */
+export const AGENT_MESSAGE_REQUESTED_DELIVERY = DEFAULT_PROJECT_EVENT_REQUESTED_DELIVERY;
+
 type ManagedSubscriptionRow = {
   id: string;
+  requested_delivery: string;
   expires_at: number | null;
   delivery_lifetime_expires_at: number | null;
   prompt_delivery_count: number;
@@ -56,7 +65,7 @@ export function ensureManagedSubscription(
   const keyPrefix = `${AGENT_MESSAGE_SUBSCRIPTION_KEY_PREFIX}${channel}:`;
   const rows = sql
     .exec<ManagedSubscriptionRow>(
-      `SELECT id, expires_at, delivery_lifetime_expires_at, prompt_delivery_count,
+      `SELECT id, requested_delivery, expires_at, delivery_lifetime_expires_at, prompt_delivery_count,
               EXISTS (SELECT 1 FROM project_event_subscription_match_keys k
                       WHERE k.subscription_id = project_event_subscriptions.id) AS has_match_keys
        FROM project_event_subscriptions
@@ -77,10 +86,9 @@ export function ensureManagedSubscription(
       row.expires_at ?? Number.POSITIVE_INFINITY,
       row.delivery_lifetime_expires_at ?? Number.POSITIVE_INFINITY
     );
-    const canWake =
-      row.has_match_keys === 1 &&
-      row.prompt_delivery_count < limits.wakeMaxPerSubscription &&
-      end > now;
+    const exhausted = row.prompt_delivery_count >= limits.wakeMaxPerSubscription;
+    const currentDelivery = row.requested_delivery === AGENT_MESSAGE_REQUESTED_DELIVERY;
+    const canWake = row.has_match_keys === 1 && !exhausted && currentDelivery && end > now;
     // Near its end, keep it only while it still owes a wake: retiring would fail it.
     if (
       reusable === null &&
@@ -90,13 +98,17 @@ export function ensureManagedSubscription(
       reusable = row.id;
     } else if (
       end > now &&
-      (row.has_match_keys === 0 || row.prompt_delivery_count >= limits.wakeMaxPerSubscription) &&
-      hasQueuedWake(sql, projectId, row.id, participant.chatSessionId)
+      (exhausted
+        ? hasQueuedWake(sql, projectId, row.id, participant.chatSessionId)
+        : (row.has_match_keys === 0 || !currentDelivery) &&
+          hasPendingWake(sql, projectId, row.id, participant.chatSessionId))
     ) {
       // Keep the queued batch's original authority and lease until it drains.
       // Removing match keys stops new events reaching the exhausted subscription
       // while its replacement receives them; cancelling/expiring it would fail
-      // the queued prompt before the recipient can read its message.
+      // the queued prompt before the recipient can read its message. A row with an
+      // older delivery mode can still materialize its matched events, so it drains
+      // those too, in the mode it was created with.
       sql.exec(
         `DELETE FROM project_event_subscription_match_keys WHERE subscription_id = ?`,
         row.id
@@ -124,7 +136,7 @@ export function ensureManagedSubscription(
         subjectId: channel,
       },
       deliveryPreference: {
-        requested: 'existing_session_prompt',
+        requested: AGENT_MESSAGE_REQUESTED_DELIVERY,
         resolved: 'queued_for_prompt_delivery',
         // Stable chat identity only: runtime/agent IDs change across sleep/wake.
         target: {

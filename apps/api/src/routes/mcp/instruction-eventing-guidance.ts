@@ -10,7 +10,7 @@ export function buildEventingInstructions(input: {
   const instructions = [
     'Waiting on a PR or CI: reconcile the current PR head and checks before waiting, immediately after subscribing, and after every resume. ' +
       'If checks already finished, continue the existing review/release gates instead of waiting for another completion event. ' +
-      'For CI call `create_project_event_subscription` with requestedDelivery "existing_session_prompt", source "github", ' +
+      'For CI call `create_project_event_subscription` (requestedDelivery defaults to "runtime_steer") with source "github", ' +
       'subjectType "commit", subjectId = the full 40-character PR head SHA (never abbreviated), and exact eventType values ' +
       '"check_run.completed", "check_suite.completed", "workflow_run.completed"; bare names do not match. ' +
       'For reviews/comments use subjectType "pull_request" and subjectId = the PR number. ' +
