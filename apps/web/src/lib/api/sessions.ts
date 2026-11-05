@@ -2,7 +2,6 @@ import type {
   AgentProfileRuntime,
   SessionAccessSummary,
   SessionViewerAccess,
-  TaskAttachment,
   TaskExecutionStep,
   WakeWaitReason,
 } from '@simple-agent-manager/shared';
@@ -396,34 +395,6 @@ export async function stopChatSession(
     `/api/projects/${projectId}/sessions/${sessionId}/stop`,
     {
       method: 'POST',
-    }
-  );
-}
-
-export async function resetIdleTimer(
-  projectId: string,
-  sessionId: string
-): Promise<{ cleanupAt: number }> {
-  return request<{ cleanupAt: number }>(
-    `/api/projects/${projectId}/sessions/${sessionId}/idle-reset`,
-    {
-      method: 'POST',
-    }
-  );
-}
-
-/** Send a follow-up prompt to the running agent via the REST API. */
-export async function sendFollowUpPrompt(
-  projectId: string,
-  sessionId: string,
-  content: string,
-  attachments?: TaskAttachment[]
-): Promise<{ status: string; sessionId?: string; message?: string }> {
-  return request<{ status: string; sessionId?: string; message?: string }>(
-    `/api/projects/${projectId}/sessions/${sessionId}/prompt`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ content, attachments }),
     }
   );
 }

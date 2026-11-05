@@ -2226,7 +2226,7 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   // --- Library file comments ------------------------------------------------
-  // File-scoped threads in the shared anchored comment tables (DO migration 072). Callers must have
+  // File-scoped threads in the shared anchored comment tables (DO migration 073). Callers must have
   // already verified the file belongs to this project — the DO has no D1 access.
 
   listFileCommentThreads(

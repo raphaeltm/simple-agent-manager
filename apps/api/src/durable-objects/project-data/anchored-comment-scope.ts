@@ -1,7 +1,7 @@
 /**
  * The anchor scope every comment-thread query is built from.
  *
- * Message threads and library-file threads share one set of tables (DO migration 072,
+ * Message threads and library-file threads share one set of tables (DO migration 073,
  * `anchored-comments-migration.ts`). What keeps a session's threads away from another
  * session, or a file's threads away from a message lookup, is that every read and every
  * mutate carries BOTH `anchor_kind = ?` and `scope_key = ?`, and both columns are NOT NULL.

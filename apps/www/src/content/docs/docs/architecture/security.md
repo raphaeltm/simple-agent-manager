@@ -274,6 +274,14 @@ Enforcement points:
 
 The share dialog says so, and the server requires the owner to acknowledge it (`acknowledgeSharedCredentials` on `POST /api/projects/:id/sessions/:sessionId/access/grants`).
 
+## Messages Between Agents
+
+Task agents in one project can message each other (`send_durable_message`, `send_message_to_subtask`) and, with live steering, add a message to another agent's running turn. Agents in a project therefore trust each other: a compromised task can try to steer a sibling. SAM limits what that can do rather than preventing it:
+
+- A peer's text reaches the recipient fenced and labelled as another agent's message, never as a human directive (`composePeerSteerContent` in `apps/api/src/services/urgent-delivery-content.ts`), with an instruction to verify claims through SAM's tools before acting.
+- A steer can only use the `notify` and `deliver` classes, so it cannot stop the recipient's turn; this is checked at the MCP tool and again when the delivery is accepted (`canSteerMessageClass`).
+- The recipient must be a task in the caller's own project, resolved from the caller's verified MCP token.
+
 ## Workspace Isolation Model
 
 SAM's isolation boundary is the **node VM**, not the devcontainer. This is deliberate. Security reviews of SAM, whether by people or by automated scanners, should assess findings against this model.

@@ -503,6 +503,7 @@ export { NOTIFICATION_CHANNELS, NOTIFICATION_TYPES, NOTIFICATION_URGENCIES } fro
 export type {
   DecideOperationsActionApprovalRequest,
   DecideOperationsActionApprovalResponse,
+  GetOperationsActionApprovalResponse,
   ListOperationsActionApprovalsResponse,
   OperationsAction,
   OperationsActionApproval,
@@ -815,16 +816,22 @@ export type {
   GetPendingMessagesResponse,
   ListMailboxResponse,
   MessageClass,
+  PromptDeliveryIntent,
   PromptDeliverySource,
   SendDurableMessageRequest,
   SendDurableMessageResponse,
   SenderType,
+  SteerOutcome,
   VmPromptDeliveryCapabilities,
   VmPromptDeliveryReceipt,
   VmPromptDeliveryResponse,
   VmPromptReceiptState,
+  VmSteerReceipt,
+  VmSteerReceiptState,
+  VmSteerResponse,
 } from './mailbox';
 export {
+  canSteerMessageClass,
   DELIVERY_STATE_TRANSITIONS,
   DELIVERY_STATES,
   DELIVERY_TERMINAL_STATES,
@@ -833,10 +840,13 @@ export {
   MAILBOX_DEFAULTS,
   MESSAGE_CLASS_URGENCY,
   MESSAGE_CLASSES,
+  PROMPT_DELIVERY_INTENTS,
   PROMPT_DELIVERY_SOURCES,
   SENDER_TYPES,
+  STEER_OUTCOMES,
   TURN_STOP_URGENCY_THRESHOLD,
   VM_PROMPT_RECEIPT_STATES,
+  VM_STEER_RECEIPT_STATES,
 } from './mailbox';
 
 // Durable execution checkpoint foundation

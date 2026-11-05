@@ -2614,12 +2614,40 @@ export const MIGRATIONS: Migration[] = [
     },
   },
   {
+    // Live steering (idea 01M2EPH9WGDYFDQBZCP9QY1FDE). `delivery_intent` is the sender's
+    // queue/steer choice and selects the claim lane; `steer_outcome` and `steer_reason`
+    // record whether a steer reached the running turn or fell back to the queue.
+    // Additive only: existing rows read as `queue` with no steer outcome.
+    name: '072-prompt-delivery-intent',
+    run(sql) {
+      const existing = new Set(
+        sql
+          .exec('PRAGMA table_info(session_inbox)')
+          .toArray()
+          .map((column) => column.name)
+      );
+      if (!existing.has('delivery_intent')) {
+        sql.exec(
+          "ALTER TABLE session_inbox ADD COLUMN delivery_intent TEXT NOT NULL DEFAULT 'queue'"
+        );
+      }
+      if (!existing.has('steer_outcome')) {
+        sql.exec('ALTER TABLE session_inbox ADD COLUMN steer_outcome TEXT');
+      }
+      if (!existing.has('steer_reason')) {
+        sql.exec('ALTER TABLE session_inbox ADD COLUMN steer_reason TEXT');
+      }
+    },
+  },
+  {
     // One set of comment tables for every anchor kind, with the legacy message and
     // library-file rows copied in (ids preserved) and a logged parity check. The legacy
     // tables stay in place, frozen, as the recovery path. See anchored-comments-migration.ts.
-    name: '072-anchored-comment-threads',
+    name: '073-anchored-comment-threads',
     run: migrateAnchoredComments,
   },
+  // Retired before release: `072-anchored-comment-threads` ran on staging only (renumbered to
+  // 073 after another 072 merged first). That name may not be reused.
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects
   // that ran it keep an unused `message_upload_parts` table, since DO migrations
   // never drop tables, so neither that migration name nor that table name may be reused.

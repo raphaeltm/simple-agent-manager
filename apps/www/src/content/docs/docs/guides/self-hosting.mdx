@@ -115,6 +115,8 @@ Fresh deployments can keep most platform integration credentials out of GitHub A
 
 A superadmin can separately configure **Google infrastructure OAuth** at `/admin/integrations` for keyless GCP/WIF setup. It is intentionally absent from `/setup` so installations do not confuse it with Google login. Runtime integration values are stored encrypted and override environment fallbacks without a redeploy.
 
+Before users connect GCP accounts, follow [Connect Google Cloud](/docs/guides/google-cloud/) to enable the infrastructure OAuth-client project APIs and configure its callback. The guide also explains why disabled APIs can appear as permission errors.
+
 ### Set up GitLab sign-in
 
 To let people sign in with GitLab and create projects from GitLab repositories:

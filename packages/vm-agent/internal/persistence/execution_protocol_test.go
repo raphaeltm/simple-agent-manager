@@ -108,6 +108,9 @@ func TestDeleteWorkspaceExecutionProtocolRemovesOnlyTargetWorkspaceLedgers(t *te
 		if _, _, _, err := store.AcceptCheckpointRollover(workspaceID, "session", "operation", 1, "hash"); err != nil {
 			t.Fatal(err)
 		}
+		if _, _, _, err := store.AcceptSteerDelivery(workspaceID, "session", "steer", 1, "hash", "runtime"); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	if err := store.DeleteWorkspaceExecutionProtocol("ws-delete"); err != nil {
@@ -124,5 +127,11 @@ func TestDeleteWorkspaceExecutionProtocolRemovesOnlyTargetWorkspaceLedgers(t *te
 	}
 	if _, err := store.GetCheckpointRollover("ws-keep", "session", "operation", "runtime"); err != nil {
 		t.Fatalf("unrelated rollover removed: %v", err)
+	}
+	if _, err := store.GetSteerDelivery("ws-delete", "session", "steer", "runtime"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("deleted steer receipt err = %v, want sql.ErrNoRows", err)
+	}
+	if _, err := store.GetSteerDelivery("ws-keep", "session", "steer", "runtime"); err != nil {
+		t.Fatalf("unrelated steer receipt removed: %v", err)
 	}
 }

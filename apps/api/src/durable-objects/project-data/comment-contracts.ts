@@ -66,7 +66,7 @@ export type ListCommentThreadsResult = {
 // Library-file-anchored comments
 //
 // File comments share the anchored comment tables with message comments (DO
-// migration 072) but are scoped to their file, not a session. Keeping the inputs separate
+// migration 073) but are scoped to their file, not a session. Keeping the inputs separate
 // from the message-comment inputs above means no message-comment code path ever
 // has to treat `sessionId` as optional — which is what removed session isolation
 // in the first cut of this feature.

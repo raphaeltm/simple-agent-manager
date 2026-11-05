@@ -1,10 +1,10 @@
 /**
- * After DO migration 072 the legacy comment tables are frozen: nothing in the Worker may
+ * After DO migration 073 the legacy comment tables are frozen: nothing in the Worker may
  * INSERT, UPDATE, REPLACE or DELETE them (.claude/rules/44). Their rows are the recovery
  * path, and a write there would never reach the anchored tables every reader now uses.
  *
  * The only code allowed to name them is the append-only migration ledger (032/033/035/064
- * created and indexed them) and the 072 copy, which only reads them. Their foreign-key
+ * created and indexed them) and the 073 copy, which only reads them. Their foreign-key
  * cascades from `chat_sessions` / `chat_messages` are not code writers.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
@@ -42,7 +42,7 @@ function writePattern(table: string): RegExp {
   );
 }
 
-describe('legacy comment tables are not written after migration 072', () => {
+describe('legacy comment tables are not written after migration 073', () => {
   const files = sourceFiles(SRC).map((path) => ({
     path: relative(SRC, path),
     content: readFileSync(path, 'utf8'),
@@ -61,7 +61,7 @@ describe('legacy comment tables are not written after migration 072', () => {
     expect(writers.filter((entry) => !ALLOWED_FILES.has(entry.split(':')[0]))).toEqual([]);
   });
 
-  it('the 072 copy only reads the legacy tables', () => {
+  it('the 073 copy only reads the legacy tables', () => {
     const copy = files.find((f) => f.path.endsWith('anchored-comments-migration.ts'));
     expect(copy).toBeDefined();
     for (const table of LEGACY_TABLES) {

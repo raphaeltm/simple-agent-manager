@@ -2,7 +2,7 @@
  * Project-wide comment inbox — the cross-anchor read behind
  * `GET /api/projects/:projectId/comments`.
  *
- * Every anchor kind lives in the shared anchored comment tables (DO migration 072), so the
+ * Every anchor kind lives in the shared anchored comment tables (DO migration 073), so the
  * inbox is one ranked read with a single budget, then a split back into the per-kind API
  * shapes. The response keeps message and file threads apart because the clients map them
  * with different mappers.

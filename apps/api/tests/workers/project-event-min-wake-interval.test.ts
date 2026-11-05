@@ -457,7 +457,7 @@ describe('agent-chosen wake interval', () => {
       const before = await subscriptionCount(f);
       const message =
         'minimum wake interval applies only to subscriptions that wake the chat ' +
-        '(requestedDelivery existing_session_prompt or runtime_interrupt)';
+        '(requestedDelivery existing_session_prompt, runtime_interrupt or runtime_steer)';
 
       const recordOnlyFollow = await f.a.tool('follow_event_channel', {
         channel: CHANNEL,

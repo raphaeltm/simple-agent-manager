@@ -27,12 +27,12 @@ type openCodeInstallFixture struct {
 // download boundary are stubbed; extraction, hashing and replacement are real.
 func TestOpenCodeReleaseInstaller(t *testing.T) {
 	for _, tt := range []openCodeInstallCase{
-		{name: "x64 glibc replaces npm symlink", arch: "x86_64", version: "opencode v2.2.5"},
-		{name: "existing npm prefix ahead of system bin", arch: "x86_64", version: "opencode v2.2.5", npmPrefix: true},
-		{name: "x64 musl", arch: "x86_64", libc: "musl", version: "opencode v2.2.5"},
-		{name: "arm64 glibc", arch: "aarch64", version: "opencode v2.2.5"},
-		{name: "arm64 musl", arch: "arm64", libc: "musl", version: "opencode v2.2.5"},
-		{name: "checksum mismatch preserves installed binary", arch: "x86_64", version: "opencode v2.2.5", corrupt: true},
+		{name: "x64 glibc replaces npm symlink", arch: "x86_64", version: "opencode v2.2.5-sam-s1"},
+		{name: "existing npm prefix ahead of system bin", arch: "x86_64", version: "opencode v2.2.5-sam-s1", npmPrefix: true},
+		{name: "x64 musl", arch: "x86_64", libc: "musl", version: "opencode v2.2.5-sam-s1"},
+		{name: "arm64 glibc", arch: "aarch64", version: "opencode v2.2.5-sam-s1"},
+		{name: "arm64 musl", arch: "arm64", libc: "musl", version: "opencode v2.2.5-sam-s1"},
+		{name: "checksum mismatch preserves installed binary", arch: "x86_64", version: "opencode v2.2.5-sam-s1", corrupt: true},
 		{name: "wrong version preserves installed binary", arch: "x86_64", version: "1.18.32"},
 		{name: "unsupported arch rejects before download", arch: "riscv64", unsupported: true},
 	} {
@@ -40,7 +40,7 @@ func TestOpenCodeReleaseInstaller(t *testing.T) {
 			fixture := newOpenCodeInstallFixture(t, tt)
 			cmd := fixture.command()
 			output, err := cmd.CombinedOutput()
-			wantOK := !tt.corrupt && !tt.unsupported && tt.version == "opencode v2.2.5"
+			wantOK := !tt.corrupt && !tt.unsupported && tt.version == "opencode v2.2.5-sam-s1"
 			if (err == nil) != wantOK {
 				t.Fatalf("success=%v want %v: %s", err == nil, wantOK, output)
 			}
@@ -189,7 +189,7 @@ func (f openCodeInstallFixture) assertDownload(t *testing.T, tt openCodeInstallC
 	if tt.libc == "musl" {
 		target += "-musl"
 	}
-	if !strings.Contains(string(log), "/v2.2.5/opencode-"+target+".tar.gz") {
+	if !strings.Contains(string(log), "/opencode-v2.2.5-sam-s1/opencode-"+target+".tar.gz") {
 		t.Fatalf("wrong download: %s", log)
 	}
 }

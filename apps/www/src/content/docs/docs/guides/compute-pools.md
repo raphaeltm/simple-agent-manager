@@ -87,6 +87,8 @@ You can also see the pool in effect without leaving your work: the **workspace s
 chat session's **infrastructure** section both show a "Current compute pool" line with the scope,
 state, strategy, and how many offerings are available.
 
+If the same Google Cloud connection appears twice with identical offerings, see [GCP duplicate pool entries](/docs/guides/google-cloud/#google-cloud-appears-twice-in-the-node-pool).
+
 ### The other settings on the same page
 
 A project's **Infrastructure** tab holds four sections, in this order, and it is worth knowing which

@@ -94,7 +94,14 @@ const DOCUMENT_CARD_TOOLS = new Set([
   'replace_library_file',
   'display_from_library',
 ]);
+/**
+ * Operations approval request tool. Its chat card needs only the approval ID: the card
+ * reads action, target, reason and status from the server record, never from chat text.
+ */
+const APPROVAL_CARD_TOOL = 'ops_request_action';
 const TOOL_NAME_SEPARATORS = /__|\/|\.|:/;
+
+type CardPayloadMatcher = (payload: Record<string, unknown>) => Record<string, unknown> | undefined;
 
 function resolveDocumentCardRawOutputMaxBytes(options?: CompactMessageOptions): number {
   const configured = options?.documentCardRawOutputMaxBytes;
@@ -109,14 +116,34 @@ function normalizeToolName(toolName: unknown): string | undefined {
   return segments.length > 0 ? segments[segments.length - 1] : toolName;
 }
 
-function isDocumentCardTool(meta: Record<string, unknown>): boolean {
-  const base = normalizeToolName(meta.toolName) ?? normalizeToolName(meta.title);
-  return Boolean(base && DOCUMENT_CARD_TOOLS.has(base));
+function documentPayload(payload: Record<string, unknown>): Record<string, unknown> | undefined {
+  if (typeof payload.fileId === 'string' || typeof payload.id === 'string') return payload;
+  if (maybeJsonRecord(payload.existingFile)) return payload;
+  return payload.error === 'FILE_NOT_FOUND' || payload.error === 'FILE_EXISTS'
+    ? payload
+    : undefined;
 }
 
-function parseDocumentPayloadCandidate(
+/** Keeps only the approval ID; the rest of the result is untrusted and re-read by the card. */
+function approvalPayload(payload: Record<string, unknown>): Record<string, unknown> | undefined {
+  const approval = maybeJsonRecord(payload.approval);
+  const id = approval?.id;
+  return typeof id === 'string' && id ? { approval: { id } } : undefined;
+}
+
+/** Which typed chat card a tool renders as, and how to recognise its result payload. */
+function cardPayloadMatcher(meta: Record<string, unknown>): CardPayloadMatcher | undefined {
+  const base = normalizeToolName(meta.toolName) ?? normalizeToolName(meta.title);
+  if (!base) return undefined;
+  if (DOCUMENT_CARD_TOOLS.has(base)) return documentPayload;
+  if (base === APPROVAL_CARD_TOOL) return approvalPayload;
+  return undefined;
+}
+
+function parsePayloadCandidate(
   value: string,
-  maxBytes: number
+  maxBytes: number,
+  match: CardPayloadMatcher
 ): Record<string, unknown> | undefined {
   const trimmed = value.trim();
   if (!trimmed || textEncoder.encode(trimmed).byteLength > maxBytes) {
@@ -134,14 +161,12 @@ function parseDocumentPayloadCandidate(
     try {
       const parsed: unknown = JSON.parse(candidate);
       // maybeJsonRecord accepts arrays (valibot's record schema treats numeric
-      // indices as string keys) — same as the old `typeof value === 'object'`
-      // guard this replaces. isDocumentResultPayload only matches named keys
-      // (fileId/id/existingFile/error) that a JSON array can never carry at
-      // its top level, so this is not a behavior change.
+      // indices as string keys). The matchers only accept named keys
+      // (fileId/id/existingFile/error/approval) that a JSON array can never
+      // carry at its top level.
       const record = maybeJsonRecord(parsed);
-      if (record && isDocumentResultPayload(record)) {
-        return record;
-      }
+      const matched = record ? match(record) : undefined;
+      if (matched) return matched;
     } catch {
       // Try the next candidate.
     }
@@ -150,26 +175,21 @@ function parseDocumentPayloadCandidate(
   return undefined;
 }
 
-function isDocumentResultPayload(payload: Record<string, unknown>): boolean {
-  if (typeof payload.fileId === 'string' || typeof payload.id === 'string') return true;
-  if (maybeJsonRecord(payload.existingFile)) return true;
-  return payload.error === 'FILE_NOT_FOUND' || payload.error === 'FILE_EXISTS';
-}
-
-function findDocumentPayload(
+function findCardPayload(
   value: unknown,
   maxBytes: number,
+  match: CardPayloadMatcher,
   depth = 0
 ): Record<string, unknown> | undefined {
   if (depth > 6 || value === null || value === undefined) return undefined;
 
   if (typeof value === 'string') {
-    return parseDocumentPayloadCandidate(value, maxBytes);
+    return parsePayloadCandidate(value, maxBytes, match);
   }
 
   if (Array.isArray(value)) {
     for (const entry of value) {
-      const found = findDocumentPayload(entry, maxBytes, depth + 1);
+      const found = findCardPayload(entry, maxBytes, match, depth + 1);
       if (found) return found;
     }
     return undefined;
@@ -179,22 +199,28 @@ function findDocumentPayload(
   if (!record) return undefined;
 
   for (const key of ['text', 'output', 'content', 'result', 'message']) {
-    const found = findDocumentPayload(record[key], maxBytes, depth + 1);
+    const found = findCardPayload(record[key], maxBytes, match, depth + 1);
     if (found) return found;
   }
 
   return undefined;
 }
 
-function extractDocumentCardRawOutput(
+/**
+ * Compact mode drops tool `content`. For tools that render a typed chat card (library
+ * documents, Operations approvals) keep the card-critical payload as `rawOutput`, so the
+ * card still renders after a reload when the VM agent did not capture rawOutput itself.
+ */
+function extractCardRawOutput(
   meta: Record<string, unknown>,
   contentArray: unknown[],
   maxBytes: number
 ): Array<{ type: 'text'; text: string }> | undefined {
-  if (!isDocumentCardTool(meta)) return undefined;
+  const match = cardPayloadMatcher(meta);
+  if (!match) return undefined;
   if (meta.rawOutput !== undefined && meta.rawOutput !== null) return undefined;
 
-  const payload = findDocumentPayload(contentArray, maxBytes);
+  const payload = findCardPayload(contentArray, maxBytes, match);
   if (!payload) return undefined;
 
   const text = JSON.stringify(payload);
@@ -213,7 +239,7 @@ export function stripToolMetadataContent(meta: unknown, options?: CompactMessage
 
   const contentJson = JSON.stringify(contentArray);
   const contentSize = textEncoder.encode(contentJson).byteLength;
-  const rawOutput = extractDocumentCardRawOutput(
+  const rawOutput = extractCardRawOutput(
     obj,
     contentArray,
     resolveDocumentCardRawOutputMaxBytes(options)

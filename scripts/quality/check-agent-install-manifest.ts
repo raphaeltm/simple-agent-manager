@@ -57,8 +57,11 @@ for (const spec of specs) {
     const makefile = readFileSync(join(root, 'packages/vm-agent/Makefile'), 'utf8');
     if (
       spec.agentType !== 'opencode' ||
-      spec.repository !== 'anomalyco/opencode' ||
+      spec.repository !== 'raphaeltm/simple-agent-manager' ||
       !installer.includes(`version=${spec.version}\n`) ||
+      !installer.includes(
+        'https://github.com/raphaeltm/simple-agent-manager/releases/download/opencode-v$version/opencode-$target.tar.gz'
+      ) ||
       !goInstaller.includes(`const opencodeVersion = "${spec.version}"`) ||
       !goInstaller.includes('//go:embed opencode_install.sh') ||
       !goSource.includes('installCmd:    opencodeInstallScript') ||

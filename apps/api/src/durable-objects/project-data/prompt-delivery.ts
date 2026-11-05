@@ -1,10 +1,12 @@
-import type {
-  AgentMailboxMessage,
-  MessageClass,
-  PromptDeliverySource,
-  SenderType,
-  VmPromptDeliveryCapabilities,
-  VmPromptDeliveryReceipt,
+import {
+  type AgentMailboxMessage,
+  canSteerMessageClass,
+  type MessageClass,
+  type PromptDeliveryIntent,
+  type PromptDeliverySource,
+  type SenderType,
+  type VmPromptDeliveryCapabilities,
+  type VmPromptDeliveryReceipt,
 } from '@simple-agent-manager/shared';
 
 import { createModuleLogger } from '../../lib/logger';
@@ -13,6 +15,11 @@ import type { DurableExecutionConfig } from './durable-execution-config';
 import { promptDeliveryBackoffMs } from './durable-execution-config';
 import * as mailbox from './mailbox';
 import * as messages from './messages';
+import {
+  applySteerDeliveryResult,
+  isSteerDeliveryResult,
+  type SteerDeliveryResult,
+} from './prompt-delivery-steer';
 import { parseMailboxMessageRow } from './row-schemas';
 import type { Env } from './types';
 
@@ -32,6 +39,8 @@ export interface AcceptPromptDeliveryInput {
   senderType: SenderType;
   senderId?: string | null;
   messageClass?: MessageClass;
+  /** `steer` adds the message to the running turn when possible; default `queue`. */
+  deliveryIntent?: PromptDeliveryIntent;
   sourceKind: PromptDeliverySource;
   metadata?: Record<string, unknown> | null;
   ackTimeoutMs?: number | null;
@@ -61,13 +70,19 @@ export function acceptPromptDeliveryInTransaction(
   const deliveryContent = (input.deliveryContent ?? input.displayContent).trim();
   if (!targetSessionId) throw new Error('targetSessionId is required');
   if (!displayContent || !deliveryContent) throw new Error('prompt content is required');
+  const deliveryIntent = input.deliveryIntent ?? 'queue';
+  if (deliveryIntent === 'steer' && !canSteerMessageClass(input.messageClass ?? 'deliver')) {
+    // Urgency already has a path (stop-and-deliver); a steer never interrupts.
+    throw new Error('steer intent requires a non-urgent message class');
+  }
 
   const existing = input.deliveryId ? mailbox.getMessage(sql, input.deliveryId) : null;
   if (existing) {
     if (
       existing.targetSessionId !== targetSessionId ||
       existing.sourceKind !== input.sourceKind ||
-      existing.content !== deliveryContent
+      existing.content !== deliveryContent ||
+      existing.deliveryIntent !== deliveryIntent
     ) {
       throw new Error('deliveryId already belongs to a different prompt intent');
     }
@@ -87,6 +102,7 @@ export function acceptPromptDeliveryInTransaction(
     source: input.sourceKind,
     kind: 'durable_prompt_delivery',
     deliveryId,
+    ...(deliveryIntent === 'steer' ? { deliveryIntent } : {}),
   });
   const persisted = messages.persistMessage(
     sql,
@@ -115,6 +131,7 @@ export function acceptPromptDeliveryInTransaction(
     now,
     ackRequired: false,
     durableDelivery: true,
+    deliveryIntent,
   });
 
   return {
@@ -239,10 +256,14 @@ function deliveryPrioritySql(alias: string): string {
     WHEN 'interrupt' THEN 3 WHEN 'deliver' THEN 2 WHEN 'notify' THEN 1 ELSE 0 END`;
 }
 
+// Each intent is its own lane with its own head: a steer never waits behind a
+// queued prompt (that would defeat steering), and a queued prompt never waits
+// behind a steer. Within a lane delivery stays ordered and single-flight.
 function noEarlierDeliverySql(): string {
   return `inbox.id = (SELECT active.id FROM session_inbox active
     INDEXED BY idx_inbox_active_target_head
     WHERE active.target_session_id = inbox.target_session_id
+      AND active.delivery_intent = inbox.delivery_intent
       AND active.delivery_state IN ('queued', 'retry_wait', 'delivering')
     ORDER BY (active.delivery_state = 'delivering') DESC,
       ${deliveryPrioritySql('active')} DESC, active.created_at, active.rowid
@@ -251,11 +272,13 @@ function noEarlierDeliverySql(): string {
 
 // Urgent controls can still preempt a target whose informational messages are
 // backed off. Equal/lower priority messages share the target's single retry wake.
-const TARGET_BACKOFF_SQL = `COALESCE((SELECT next_attempt_at
+// The backoff exists because the target is busy, which is exactly when a steer
+// is useful, so the steer lane never waits on it.
+const TARGET_BACKOFF_SQL = `CASE WHEN inbox.delivery_intent = 'steer' THEN 0 ELSE COALESCE((SELECT next_attempt_at
   FROM prompt_delivery_target_backoff target
   WHERE target.target_session_id = inbox.target_session_id
     AND (${deliveryPrioritySql('inbox')} <= 2
-      OR target.message_priority >= ${deliveryPrioritySql('inbox')})), 0)`;
+      OR target.message_priority >= ${deliveryPrioritySql('inbox')})), 0) END`;
 
 // Split the states so each arm can range-seek its due-time index. Only active
 // rows participate in the head lookup; retained mailbox history is never scanned.
@@ -305,9 +328,12 @@ export function claimDuePromptDeliveries(
     .toArray();
 
   const claims: PromptDeliveryClaim[] = [];
-  const claimedTargets = new Set<string>();
+  // One claim per target and lane per pass: a steer may run beside the queued prompt.
+  const claimedLanes = new Set<string>();
+  const laneKey = (target: unknown, intent: unknown) =>
+    `${String(target)}\u0000${String(intent ?? 'queue')}`;
   for (const row of rows) {
-    if (claimedTargets.has(String(row.target_session_id))) continue;
+    if (claimedLanes.has(laneKey(row.target_session_id, row.delivery_intent))) continue;
     let message: AgentMailboxMessage;
     try {
       message = parseMailboxMessageRow(row);
@@ -358,7 +384,7 @@ export function claimDuePromptDeliveries(
     if (result.rowsWritten === 0) continue;
     const claimed = mailbox.getMessage(sql, message.id);
     if (claimed) {
-      claimedTargets.add(claimed.targetSessionId);
+      claimedLanes.add(laneKey(claimed.targetSessionId, claimed.deliveryIntent));
       claims.push({ message: claimed, attemptId, mode });
     }
   }
@@ -398,6 +424,7 @@ export interface AcceptedDeliveryResult {
 
 export type PromptDeliveryResult =
   | AcceptedDeliveryResult
+  | SteerDeliveryResult
   | {
       kind: 'retry';
       reason: 'busy' | 'not_ready' | 'receipt_not_found';
@@ -456,6 +483,7 @@ export function applyPromptDeliveryResult(
     )
     .toArray()[0];
   if (!current) return false;
+  if (isSteerDeliveryResult(result)) return applySteerDeliveryResult(sql, claim, result, now);
   const nudgedWhilePreparing =
     current.wake_ready_attempt_id === claim.attemptId &&
     current.prompt_delivery_phase === 'preparing';

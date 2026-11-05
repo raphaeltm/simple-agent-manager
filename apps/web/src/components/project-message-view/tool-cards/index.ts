@@ -1,3 +1,5 @@
+export { APPROVAL_CARD_TOOL, extractApprovalId, isApprovalCardTool } from './approval-card-data';
+export { ApprovalCard, type ApprovalCardProps } from './ApprovalCard';
 export {
   DOCUMENT_CARD_TOOLS,
   type DocumentCardData,

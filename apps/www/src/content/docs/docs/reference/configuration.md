@@ -910,6 +910,9 @@ Task-managed ACP prompts use control-plane inactivity classification and the tas
 | `ACTIVITY_TERMINAL_REPORT_BACKOFF`     | `1s`    | Backoff between terminal activity report retries                 |
 | `ACP_IDLE_SUSPEND_TIMEOUT`             | `30m`   | Idle session auto-suspend timeout                                |
 | `ACP_NOTIF_SERIALIZE_TIMEOUT`          | `5s`    | Notification serialization timeout                               |
+| `ACP_STEER_TIMEOUT`                    | `20s`   | Bound on one live-steering request to the agent adapter          |
+
+`PROMPT_REQUEST_MAX_BYTES` (default `4194304`) caps the body of a prompt or steer request from the control plane; the VM agent answers `413` above it.
 
 ## MCP (Agent Tools)
 

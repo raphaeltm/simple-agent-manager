@@ -533,8 +533,11 @@ With the setting at `read_ask` or `read_auto_safe`, Operations agents can ask to
 1. The agent calls `ops_request_action` with the action, the target ID, a reason and a short
    evidence summary. SAM saves an approval record and, when approval is needed, sends the task's
    owner an **Approval Needed** notification.
-2. Open it, or go to **Admin → Approvals**, and tap **Approve** or **Deny**. Any active superadmin
-   can decide. The decision reaches the agent's chat as a new message, waking it if it is asleep.
+2. Tap **Approve** or **Deny** on the approval card in the agent's conversation, or open the
+   notification or **Admin → Approvals**. Any active superadmin can decide. The card shows the
+   saved record (action, target, reason, status), never the agent's own text, and only offers the
+   buttons in the project that requested the approval. The decision reaches the agent's chat as a
+   new message, waking it if it is asleep.
 3. The agent calls `ops_execute_action`. SAM checks the record is approved, not expired, for the
    same action and target, and was requested by that task (or the same conversation after it woke
    from sleep). It marks the record executed before running it, so one approval runs once.

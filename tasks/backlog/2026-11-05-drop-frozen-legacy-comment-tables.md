@@ -2,7 +2,7 @@
 
 ## Problem
 
-DO migration `072-anchored-comment-threads` copied every message and library-file comment row into
+DO migration `073-anchored-comment-threads` copied every message and library-file comment row into
 `anchored_comment_threads` / `_replies` / `_status_mutations` and switched every writer and reader
 to them. The legacy tables were left in place, frozen and unwritten, as a recovery path:
 
@@ -27,6 +27,6 @@ They still cost storage in every project object, and the message tables still ca
 - [ ] Raphaël approves removal (or an alternative, such as leaving them indefinitely)
 - [ ] Production `comments.migration_parity` logs show `ok: true` for every project object, and no
       `comments.migration_parity_mismatch` was ever logged
-- [ ] At least one release cycle has passed with no rollback to pre-072 code
+- [ ] At least one release cycle has passed with no rollback to pre-073 code
 - [ ] If approved: a reviewed approach that does not drop a CASCADE parent's children unexpectedly,
       and the writer-inventory test and docs updated

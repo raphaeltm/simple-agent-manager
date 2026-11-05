@@ -6,9 +6,33 @@ Codex hosts select it when trusted forms/URL configuration is enabled. Existing
 hosts retain their executable; permissions-only and disabled fresh hosts use stock.
 All ACP defaults remain false. Production activation is a separate release step.
 
+## November 5: live steering (C2.3 adapter)
+
+The current distribution pairs Codex CLI `0.160.0-sam-c2.2` (unchanged, byte-identical) with ACP
+adapter `2.1.1-sam-c2.3`, identity
+`sam-codex-acp-2.1.1-sam-c2.3+cli-0.160.0-sam-c2.2-codemode2`. The adapter patch
+[`codex-acp-v2.1.1-sam-c2.3.patch`](patches/codex-acp-v2.1.1-sam-c2.3.patch) backports upstream
+2.4.0's `_session/steering` idle behaviour: with `_meta.steering.idleBehavior: "promptRequired"`
+an idle session returns `promptRequired` without consuming the input, instead of starting a
+detached turn. SAM always sends that flag, so a steer that arrives as a turn ends is queued as the
+next prompt rather than run twice.
+
+The immutable archive is 136243963 bytes, SHA-256
+`384d0071527848b68df318c04f2e6e040f2eea67131bbd5b6f66cc58f5bd65bd`, under the
+`acp-codex-runtime-c2.3-codemode2` GitHub release. The Ubuntu review build is
+[run 41948124473](https://github.com/raphaeltm/simple-agent-manager/actions/runs/41948124473); it
+passed the adapter's typecheck and test suite. The installer accepts the C2.2 release as the
+predecessor and upgrades it in place, as described below. Stock npm `codex-acp` 2.1.1 sessions
+still start detached turns, so the VM agent steers a Codex adapter only when it reports this
+version or upstream 2.4.0 and later (`session_host_steering.go`); others get a visible queued
+fallback. SAM's real-process test
+(`session_host_real_adapter_steering_test.go`) drives this build through `SessionHost` with a
+local model fixture: idle steer is not consumed, a mid-turn steer reaches the turn's next model
+call, and the turn completes once.
+
 ## October 5: Sol 6.1 runtime upgrade
 
-The current distribution pairs Codex CLI `0.160.0-sam-c2.2` with ACP adapter
+That distribution paired Codex CLI `0.160.0-sam-c2.2` with ACP adapter
 `2.1.1-sam-c2.2` and the official `rust-v0.160.0` Code Mode host. The CLI includes
 `gpt-6.1-sol` metadata. SAM's explicit MCP capability, ownership, cancellation,
 and URL completion patches remain applied; the profile's model is unchanged.

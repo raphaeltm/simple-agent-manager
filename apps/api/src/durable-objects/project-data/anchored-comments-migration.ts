@@ -1,5 +1,5 @@
 /**
- * DO migration 072: one set of comment tables for every anchor kind.
+ * DO migration 073: one set of comment tables for every anchor kind.
  *
  * Why unified tables do not repeat the incident in .claude/rules/63:
  * - Nothing is widened or relaxed. These are NEW tables; the old ones are untouched.
@@ -25,7 +25,7 @@
  * them is a separate, later change (tasks/backlog/2026-11-05-drop-frozen-legacy-comment-tables.md).
  *
  * Rollback: this migration is recorded once per object and never re-runs. If the Worker is
- * rolled back to code from before 072, that code reads and writes only the legacy tables, and
+ * rolled back to code from before 073, that code reads and writes only the legacy tables, and
  * anything written during the rollback window is invisible after rolling forward again. Roll
  * forward with a new migration that calls `copyLegacyCommentRows` (idempotent: it adds only
  * missing rows). Status changes made during the window to rows that already exist here are

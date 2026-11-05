@@ -125,7 +125,7 @@ is invisible because the symptom is an absence.
 ## When One Table Is the Right Answer: Make the Scope Non-Null for Every Kind
 
 Requirement 1 prefers separate tables because the incident widened an EXISTING table and made
-its scope column nullable. Migration `072-anchored-comment-threads` later unified message and
+its scope column nullable. Migration `073-anchored-comment-threads` later unified message and
 library-file comments into new shared tables without repeating that, and is the pattern to copy
 when more anchor kinds are coming (human tasks):
 
@@ -158,7 +158,7 @@ Before merging a migration that relaxes a constraint:
 - Implementation at the time: `apps/api/src/durable-objects/project-data/library-file-comments.ts`,
   DO migration `033-library-file-comment-threads` (now frozen legacy storage)
 - Current shared-table implementation: `anchored-comment-scope.ts`, `anchored-comment-store.ts`,
-  `anchored-comment-mutations.ts`, DO migration `072-anchored-comment-threads`
+  `anchored-comment-mutations.ts`, DO migration `073-anchored-comment-threads`
   (`anchored-comments-migration.ts`)
 - `.claude/rules/31-migration-safety.md` — why the recreation this forced is unrecoverable on a DO
 - `.claude/rules/51-server-side-node-class-gates.md` — the server must decide from values it verified

@@ -7,7 +7,8 @@ import { isExpiredTask, type SessionUndeliveredPrompt } from '@simple-agent-mana
 
 import type { ChatMessageResponse, ChatSessionResponse, SessionStateSnapshot } from '../../lib/api';
 import { maybeJsonRecord } from '../../lib/runtime-validation';
-import { userMessageAttribution } from './message-attribution';
+import { userMessageAttribution, userMessageDelivery } from './message-attribution';
+import { APPROVAL_CARD_TOOL } from './tool-cards/approval-card-data';
 import { DOCUMENT_CARD_TOOLS, normalizeToolName } from './tool-cards/document-card-data';
 
 /** Default idle timeout in ms — matches the server-side default (NODE_WARM_TIMEOUT_MS). */
@@ -126,15 +127,15 @@ function applyToolContentPointer(
  */
 function inferToolNameFromTitle(title: string): string | undefined {
   if (!title) return undefined;
-  const base = normalizeToolName(title);
-  if (base && DOCUMENT_CARD_TOOLS.has(base)) return title;
+  if (isTypedCardTool(title)) return title;
   if (title.startsWith('mcp__') && title.split('__').length >= 3) return title;
   return undefined;
 }
 
-function isDocumentCardTool(toolName: string | undefined): boolean {
+/** Tools that render a typed card (library documents, Operations approval requests). */
+function isTypedCardTool(toolName: string | undefined): boolean {
   const base = normalizeToolName(toolName);
-  return Boolean(base && DOCUMENT_CARD_TOOLS.has(base));
+  return Boolean(base && (DOCUMENT_CARD_TOOLS.has(base) || base === APPROVAL_CARD_TOOL));
 }
 
 function parseJsonRecordFromToolContent(content: string): Record<string, unknown> | undefined {
@@ -160,8 +161,12 @@ function parseJsonRecordFromToolContent(content: string): Record<string, unknown
   return undefined;
 }
 
-function legacyDocumentRawOutput(toolName: string | undefined, content: string): unknown {
-  if (!isDocumentCardTool(toolName)) return undefined;
+/**
+ * Codex result rows can omit rawOutput and keep the tool's JSON result in the message text;
+ * recover it for typed-card tools so the card renders from the correlated tool call.
+ */
+function legacyCardRawOutput(toolName: string | undefined, content: string): unknown {
+  if (!isTypedCardTool(toolName)) return undefined;
   const payload = parseJsonRecordFromToolContent(content);
   return payload ? [{ type: 'text', text: JSON.stringify(payload) }] : undefined;
 }
@@ -227,6 +232,7 @@ export function chatMessagesToConversationItems(
   const items = dedupedMsgs.reduce<ConversationItem[]>((acc, msg) => {
     if (msg.role === 'user') {
       const attribution = userMessageAttribution(msg, undelivered.get(msg.id));
+      const delivery = userMessageDelivery(msg);
       acc.push({
         kind: 'user_message',
         id: msg.id,
@@ -234,6 +240,7 @@ export function chatMessagesToConversationItems(
         timestamp: msg.createdAt,
         origin: msg.origin === 'system' ? 'system' : 'user',
         ...(attribution ? { attribution } : {}),
+        ...(delivery ? { delivery } : {}),
       });
     } else if (msg.role === 'assistant') {
       // Merge consecutive assistant chunks into one item. The merged roles are
@@ -323,7 +330,7 @@ export function chatMessagesToConversationItems(
           ? meta.toolName
           : inferToolNameFromTitle(rawTitle);
       const rawInput = meta ? meta.rawInput : undefined;
-      const rawOutput = meta?.rawOutput ?? legacyDocumentRawOutput(toolName, msg.content);
+      const rawOutput = meta?.rawOutput ?? legacyCardRawOutput(toolName, msg.content);
       const validStatuses = new Set(['pending', 'in_progress', 'completed', 'failed']);
       const rawStatus = meta && typeof meta.status === 'string' ? meta.status : '';
       const status = (validStatuses.has(rawStatus) ? rawStatus : 'completed') as
@@ -348,8 +355,7 @@ export function chatMessagesToConversationItems(
         // Codex result updates may omit title/toolName and keep the document
         // payload only in message content. Recover it with the initial row's
         // preserved tool identity after correlating the sparse rows by call ID.
-        const mergedRawOutput =
-          rawOutput ?? legacyDocumentRawOutput(existing.toolName, msg.content);
+        const mergedRawOutput = rawOutput ?? legacyCardRawOutput(existing.toolName, msg.content);
         // Update with latest status, explicit title, content, and locations.
         // Status-only tool_call_update rows often omit title/kind; do not let
         // the generic fallback title erase the richer initial tool_call title.

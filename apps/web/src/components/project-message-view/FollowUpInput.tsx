@@ -1,6 +1,6 @@
 import type { SlashCommand } from '@simple-agent-manager/acp-client';
 import type { AgentProfile } from '@simple-agent-manager/shared';
-import type { Ref } from 'react';
+import type { ReactNode, Ref } from 'react';
 
 import { useIsMobile } from '../../hooks/useIsMobile';
 import {
@@ -23,6 +23,7 @@ export function FollowUpInput({
   transcribeApiUrl,
   slashCommands,
   agentProfiles,
+  deliveryControl,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -37,6 +38,8 @@ export function FollowUpInput({
   transcribeApiUrl: string;
   slashCommands?: SlashCommand[];
   agentProfiles?: AgentProfile[];
+  /** Steer/queue choice, shown above the composer while the agent works. */
+  deliveryControl?: ReactNode;
 }) {
   const isMobile = useIsMobile();
 
@@ -47,6 +50,7 @@ export function FollowUpInput({
           {uploadError}
         </p>
       )}
+      {deliveryControl}
       <ProjectChatComposer
         value={value}
         onChange={onChange}

@@ -26,6 +26,7 @@ import {
   getDeliveryCapabilities,
   httpStatus,
   lookupDeliveryReceipt,
+  runSideEffectGuard,
 } from './vm-prompt-delivery-runtime-queries';
 import {
   resolveVmPromptDeliveryTarget,
@@ -33,6 +34,7 @@ import {
   type VmPromptDeliverySourceTaskGuard,
   type VmPromptDeliveryTarget,
 } from './vm-prompt-delivery-target';
+import { reconcileSteerDelivery, submitSteerDelivery } from './vm-steer-delivery-adapter';
 
 export type { VmPromptDeliverySourceTaskGuard, VmPromptDeliveryTarget };
 
@@ -69,6 +71,9 @@ export interface VmPromptDeliveryAdapterInput {
 export interface VmPromptDeliveryAdapter {
   submit(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult>;
   reconcile(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult>;
+  /** Live steer into the running turn; adapters without it deliver steers as queued prompts. */
+  steer?(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult>;
+  reconcileSteer?(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult>;
 }
 
 function isMissingActiveAgentSession(error: unknown): boolean {
@@ -81,6 +86,14 @@ function isMissingActiveAgentSession(error: unknown): boolean {
 
 export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
   constructor(private readonly env: Env) {}
+
+  steer(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult> {
+    return submitSteerDelivery(this.env, input);
+  }
+
+  reconcileSteer(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult> {
+    return reconcileSteerDelivery(this.env, input);
+  }
 
   private async prepareSubmit(input: VmPromptDeliveryAdapterInput): Promise<
     | PromptDeliveryResult
@@ -116,7 +129,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
     // A Cloudflare Container capability request may wake the container while
     // preparing the proxied request. Revalidate before the probe, not only
     // before the later prompt/wake mutations.
-    const guardedBeforeProbe = await this.runSideEffectGuard(input);
+    const guardedBeforeProbe = await runSideEffectGuard(input);
     if (guardedBeforeProbe) return guardedBeforeProbe;
     const capabilities = await getDeliveryCapabilities(
       this.env,
@@ -135,7 +148,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
     }
     if (target.runtime === 'cf-container') {
       const guarded = await commitContainerWake(this.env, target, () =>
-        this.runSideEffectGuard(input)
+        runSideEffectGuard(input)
       );
       if (guarded) return guarded;
     }
@@ -149,7 +162,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
       };
     }
 
-    const guarded = await this.runSideEffectGuard(input);
+    const guarded = await runSideEffectGuard(input);
     return guarded ?? { kind: 'prepared', target, capabilities };
   }
 
@@ -163,7 +176,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
     // into the short capability/readiness probe deadline.
     try {
       await transferPromptAttachments(this.env, input.claim, target, async () => {
-        const denied = await this.runSideEffectGuard(input);
+        const denied = await runSideEffectGuard(input);
         if (denied) throw new PromptDeliveryGuardError(denied);
       });
     } catch (error) {
@@ -197,7 +210,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
             : {}),
           ...(input.sourceTaskGuard ? { sourceTaskGuard: input.sourceTaskGuard } : {}),
           beforeExternalMutation: async () => {
-            const denied = await this.runSideEffectGuard(input);
+            const denied = await runSideEffectGuard(input);
             if (denied) throw new PromptDeliveryGuardError(denied);
           },
         }
@@ -354,7 +367,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
       };
     }
     const { target } = resolution;
-    const guardedBeforeProbe = await this.runSideEffectGuard(input);
+    const guardedBeforeProbe = await runSideEffectGuard(input);
     if (guardedBeforeProbe) return guardedBeforeProbe;
     const capabilities = await getDeliveryCapabilities(
       this.env,
@@ -395,7 +408,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
         receipt: null,
       };
     }
-    const guardedBeforeReceipt = await this.runSideEffectGuard(input);
+    const guardedBeforeReceipt = await runSideEffectGuard(input);
     if (guardedBeforeReceipt) return guardedBeforeReceipt;
     return lookupDeliveryReceipt(
       this.env,
@@ -417,14 +430,8 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
       projectId,
       chatSessionId,
       input.sourceTaskGuard,
-      () => this.runSideEffectGuard(input)
+      () => runSideEffectGuard(input)
     );
-  }
-
-  private async runSideEffectGuard(
-    input: VmPromptDeliveryAdapterInput
-  ): Promise<PromptDeliveryResult | null> {
-    return input.beforeSideEffect ? input.beforeSideEffect() : null;
   }
 
   private async reconcileAfterAmbiguousSubmit(
@@ -443,7 +450,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
         receipt: null,
       };
     }
-    const guarded = await this.runSideEffectGuard(input);
+    const guarded = await runSideEffectGuard(input);
     if (guarded) return guarded;
     return lookupDeliveryReceipt(
       this.env,

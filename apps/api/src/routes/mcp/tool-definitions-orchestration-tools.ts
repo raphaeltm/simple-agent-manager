@@ -53,7 +53,9 @@ export const ORCHESTRATION_TOOLS = [
       'so use them only when the peer must see the message immediately. Returns the message ID and delivery state. ' +
       'When SAM agent message channels are enabled (preview), notify/deliver messages are recorded on a shared agent-dm channel and the ' +
       'recipient gets a SAM notice and reads the text with get_event; the response then reports transport "agent_message_channel". ' +
-      'Accepted never means read or acted on.',
+      'Accepted never means read or acted on. ' +
+      'deliveryIntent "steer" (notify/deliver only) adds the message to the target\'s running turn without stopping it when its ' +
+      'runtime supports live steering; otherwise, or when the target is idle or asleep, it is delivered as an ordinary next-turn message.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -75,6 +77,13 @@ export const ORCHESTRATION_TOOLS = [
             'shutdown_with_final_prompt',
           ],
           description: 'Message urgency class (default: "deliver")',
+        },
+        deliveryIntent: {
+          type: 'string',
+          enum: ['queue', 'steer'],
+          description:
+            '"queue" (default) waits for the target\'s next turn. "steer" adds it to the running turn when possible; it never ' +
+            'stops the turn and falls back to "queue" visibly when the target is idle, asleep, or its runtime cannot steer.',
         },
         metadata: {
           type: 'object',

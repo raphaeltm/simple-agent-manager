@@ -13,6 +13,6 @@ docker run --rm --user node "$image" bash -ec '
   cd /opt/sam-codex-c2/current
   (cd payload; sha256sum --check SHA256SUMS)
   test "$(bin/codex --version)" = "codex-cli 0.160.0-sam-c2.2"
-  test "$(bin/codex-acp --version)" = "@agentclientprotocol/codex-acp 2.1.1-sam-c2.2"
+  test "$(bin/codex-acp --version)" = "@agentclientprotocol/codex-acp 2.1.1-sam-c2.3"
   echo "Pinned runtime image verified as node"
 '

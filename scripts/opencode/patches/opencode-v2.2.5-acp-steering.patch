@@ -1,0 +1,539 @@
+diff --git a/packages/cli/src/acp/agent.ts b/packages/cli/src/acp/agent.ts
+index bb2f7c8..61e1d48 100644
+--- a/packages/cli/src/acp/agent.ts
++++ b/packages/cli/src/acp/agent.ts
+@@ -18,6 +18,7 @@ import { ACPConnection } from "./connection"
+ import { ACPError } from "./error"
+ import { ACPService } from "./service"
+ import { ACPSessions } from "./sessions"
++import { ACPSteering } from "./steering"
+ import { ACPTurn } from "./turn"
+ 
+ type HandlerContext<Params> = AgentHandlerContext<Params> & { readonly requestId?: JsonRpcId }
+@@ -113,6 +114,13 @@ export const connect = Effect.fnUntraced(function* (client: OpenCodeClient, stre
+     "session/prompt",
+     handle((service, ctx) => service.prompt(ctx.params, ctx.signal)),
+   )
++  app.onRequest(
++    ACPSteering.Method,
++    { parse: ACPSteering.parse },
++    handle((service, ctx: AgentHandlerContext<ACPSteering.Request>) => service.steer(ctx.params))(
++      spanName(ACPSteering.Method),
++    ),
++  )
+   notification(
+     "session/cancel",
+     handle((service, ctx) => service.cancel(ctx.params)),
+diff --git a/packages/cli/src/acp/service.ts b/packages/cli/src/acp/service.ts
+index bdcca82..0e0ce4b 100644
+--- a/packages/cli/src/acp/service.ts
++++ b/packages/cli/src/acp/service.ts
+@@ -43,6 +43,7 @@ import { ACPDirectories } from "./directories"
+ import { ACPError } from "./error"
+ import { ACPReplay } from "./replay"
+ import type { ACPSessions, Attached, SupportedMcpServer } from "./sessions"
++import { ACPSteering } from "./steering"
+ import type { ACPTurn } from "./turn"
+ 
+ const AuthMethodID = "opencode-login"
+@@ -63,6 +64,7 @@ export interface Interface {
+   readonly setSessionMode: (input: SetSessionModeRequest) => Effect.Effect<SetSessionModeResponse, ACPError.Failure>
+   readonly prompt: (input: PromptRequest, signal: AbortSignal) => Effect.Effect<PromptResponse, ACPError.Failure>
+   readonly cancel: (input: CancelNotification) => Effect.Effect<void>
++  readonly steer: (input: ACPSteering.Request) => Effect.Effect<ACPSteering.Response, ACPError.Failure>
+ }
+ 
+ export function make(input: {
+@@ -127,6 +129,7 @@ export function make(input: {
+         },
+         authMethods: [authMethod],
+         agentInfo: { name: "OpenCode", version: OPENCODE_VERSION },
++        _meta: { steering: ACPSteering.capability },
+       }
+     }),
+     authenticate: Effect.fnUntraced(function* (params) {
+@@ -237,6 +240,7 @@ export function make(input: {
+     }),
+     prompt: input.turn.prompt,
+     cancel: input.turn.cancel,
++    steer: input.turn.steer,
+   }
+ }
+ 
+diff --git a/packages/cli/src/acp/steering.ts b/packages/cli/src/acp/steering.ts
+new file mode 100644
+index 0000000..c351f89
+--- /dev/null
++++ b/packages/cli/src/acp/steering.ts
+@@ -0,0 +1,49 @@
++import { RequestError, type ContentBlock } from "@agentclientprotocol/sdk"
++
++/**
++ * `_session/steering` adds input to the session's running ACP prompt turn. The request and
++ * response shapes match the Claude and Codex ACP adapters so one client handles all three.
++ * The turn that is already running stays the only prompt owner: steering never starts one.
++ */
++export const Method = "_session/steering"
++
++export type Request = {
++  readonly sessionId: string
++  readonly prompt: ReadonlyArray<ContentBlock>
++  readonly _meta?: { readonly steering?: { readonly idleBehavior?: "promptRequired" } }
++}
++
++export type Response = { readonly outcome: "injected" } | { readonly outcome: "promptRequired"; readonly reason: "noRunningTurn" }
++
++export const injected: Response = { outcome: "injected" }
++export const noRunningTurn: Response = { outcome: "promptRequired", reason: "noRunningTurn" }
++
++/**
++ * Advertised in `initialize._meta.steering`. Idle input is always returned unconsumed:
++ * this adapter has no detached-turn fallback, so `promptRequired` is the only idle behavior.
++ */
++export const capability = { supported: true, idleBehaviors: ["promptRequired"] } as const
++
++const isRecord = (value: unknown): value is Record<string, unknown> =>
++  typeof value === "object" && value !== null && !Array.isArray(value)
++
++export function parse(params: unknown): Request {
++  if (!isRecord(params)) throw RequestError.invalidParams(undefined, "steering params must be an object")
++  const { sessionId, prompt } = params
++  if (typeof sessionId !== "string" || sessionId.length === 0)
++    throw RequestError.invalidParams(undefined, "steering sessionId must be a non-empty string")
++  if (!Array.isArray(prompt) || prompt.length === 0)
++    throw RequestError.invalidParams(undefined, "steering prompt must be a non-empty array")
++  const meta = params["_meta"]
++  if (meta !== undefined && meta !== null && !isRecord(meta))
++    throw RequestError.invalidParams(undefined, "steering _meta must be an object")
++  const steering = isRecord(meta) ? meta["steering"] : undefined
++  if (steering !== undefined && !isRecord(steering))
++    throw RequestError.invalidParams(undefined, "steering _meta.steering must be an object")
++  const idleBehavior = isRecord(steering) ? steering["idleBehavior"] : undefined
++  if (idleBehavior !== undefined && idleBehavior !== "promptRequired")
++    throw RequestError.invalidParams(undefined, "unsupported steering idleBehavior")
++  return { sessionId, prompt: prompt as ContentBlock[] }
++}
++
++export * as ACPSteering from "./steering"
+diff --git a/packages/cli/src/acp/turn.ts b/packages/cli/src/acp/turn.ts
+index c02aeac..9675cdc 100644
+--- a/packages/cli/src/acp/turn.ts
++++ b/packages/cli/src/acp/turn.ts
+@@ -1,5 +1,6 @@
+ import type { CancelNotification, PromptRequest, PromptResponse, RequestError } from "@agentclientprotocol/sdk"
+ import type { OpenCodeClient, OpenCodeEvent } from "@opencode/client/effect"
++import type { SessionMessage } from "@opencode/schema/session-message"
+ import { TokenUsage } from "@opencode/schema/token-usage"
+ import {
+   Cause,
+@@ -27,6 +28,7 @@ import { ACPError } from "./error"
+ import { ACPPermission } from "./permission"
+ import { ACPPrompt } from "./prompt"
+ import type { ACPSessions, Attached } from "./sessions"
++import { ACPSteering } from "./steering"
+ import { ACPTranslate } from "./translate"
+ 
+ export interface Interface {
+@@ -34,6 +36,8 @@ export interface Interface {
+   readonly cancel: (input: CancelNotification) => Effect.Effect<void>
+   /** Unlike `cancel`, interrupts an idle session too, since server work can outlive its turn. */
+   readonly close: (sessionID: string) => Effect.Effect<void, ACPError.Error | RequestError>
++  /** Adds input to the session's running turn; never starts a turn (see `ACPSteering`). */
++  readonly steer: (input: ACPSteering.Request) => Effect.Effect<ACPSteering.Response, ACPError.Failure>
+ }
+ 
+ /** Core acknowledges an interrupt before its cleanup settles, and its shell tool waits 3s before SIGKILL. */
+@@ -48,12 +52,31 @@ type Subscription = {
+   readonly settled: Map<string, Deferred.Deferred<void>>
+ }
+ 
++/**
++ * Steers admitted to a running turn. Core may deliver a steer inside the current execution or,
++ * when it arrives after the loop decided to finish, in a successor execution. The turn stays the
++ * owner until every admitted steer is delivered, so no execution runs without an ACP prompt.
++ * Mutated only between yields, so a check and its update cannot interleave with another fiber.
++ */
++type Steers = {
++  readonly pending: Set<SessionMessage.ID>
++  /** No new steer is admitted once the turn has decided to finish. */
++  closing: boolean
++  /** The turn saw `succeeded` with steers still pending and is waiting for their execution. */
++  awaitingSuccessor: boolean
++  /** A pending steer was delivered after `succeeded`, so its successor execution will end the turn. */
++  successorStarted: boolean
++  /** Completed when an admission failure leaves nothing pending while awaiting a successor. */
++  abandoned: Deferred.Deferred<void>
++}
++
+ type Turn = {
+   readonly ctx: ACPTranslate.TurnContext
+   readonly state: Ref.Ref<ACPTranslate.TurnState>
+   readonly subscription: Subscription
+   readonly cancelled: Deferred.Deferred<void>
+   readonly background: boolean
++  readonly steers: Steers
+ }
+ 
+ export const make = Effect.fnUntraced(function* (input: {
+@@ -66,6 +89,8 @@ export const make = Effect.fnUntraced(function* (input: {
+   const scope = yield* Effect.scope
+   const drainTimeout = yield* CancelDrainTimeout
+   const turns = yield* FiberMap.make<string, PromptResponse, ACPError.Failure>()
++  // The turn currently consuming events for each session; only these accept steers.
++  const steerable = new Map<string, Turn>()
+ 
+   const open = Effect.fnUntraced(function* (ctx: ACPTranslate.TurnContext, state: Ref.Ref<ACPTranslate.TurnState>) {
+     // Parented to the service scope; the session scope may already be closed.
+@@ -86,7 +111,21 @@ export const make = Effect.fnUntraced(function* (input: {
+       Effect.forever,
+       Effect.forkIn(subscriptionScope),
+     )
+-    return { ctx, state, subscription, cancelled: yield* Deferred.make<void>(), background: false } satisfies Turn
++    const steers: Steers = {
++      pending: new Set(),
++      closing: false,
++      awaitingSuccessor: false,
++      successorStarted: false,
++      abandoned: yield* Deferred.make<void>(),
++    }
++    return {
++      ctx,
++      state,
++      subscription,
++      cancelled: yield* Deferred.make<void>(),
++      background: false,
++      steers,
++    } satisfies Turn
+   })
+ 
+   const take = (subscription: Subscription) =>
+@@ -195,6 +234,9 @@ export const make = Effect.fnUntraced(function* (input: {
+ 
+   const advance = Effect.fnUntraced(function* (turn: Turn) {
+     const event = yield* take(turn.subscription)
++    if (event.type === "session.inbox.delivered" && turn.steers.pending.delete(event.data.inboxID)) {
++      if (turn.steers.awaitingSuccessor) turn.steers.successorStarted = true
++    }
+     const folded = yield* Ref.modify(turn.state, (current) => {
+       const next =
+         turn.background && !ACPTranslate.fromTrackedChild(current, event)
+@@ -206,13 +248,47 @@ export const make = Effect.fnUntraced(function* (input: {
+     return folded
+   })
+ 
++  // Best effort: an undelivered steer must not start an execution after its turn ended.
++  const cancelPendingSteers = Effect.fnUntraced(function* (turn: Turn) {
++    const pending = [...turn.steers.pending]
++    turn.steers.pending.clear()
++    yield* Effect.forEach(
++      pending,
++      (inboxID) =>
++        input.client.session.inbox
++          .cancel({ sessionID: turn.ctx.sessionID, inboxID })
++          .pipe(
++            Effect.catchCause((cause) =>
++              Cause.hasInterruptsOnly(cause) ? Effect.void : Effect.logWarning("ACP steer cancel failed", cause),
++            ),
++          ),
++      { discard: true },
++    )
++  })
++
+   const consume = Effect.fnUntraced(function* (turn: Turn) {
+     while (true) {
+-      const folded = yield* advance(turn)
+-      if (folded.terminal) {
++      const folded = turn.steers.awaitingSuccessor
++        ? yield* advance(turn).pipe(
++            Effect.raceFirst(Deferred.await(turn.steers.abandoned).pipe(Effect.as(undefined))),
++          )
++        : yield* advance(turn)
++      if (!folded) {
++        // Every steer that held the turn open failed admission; the turn already succeeded.
++        turn.steers.closing = true
+         yield* asksSettled(turn.subscription)
+-        return folded.terminal
++        return "succeeded" as const
++      }
++      if (!folded.terminal) continue
++      if (folded.terminal === "succeeded" && turn.steers.pending.size > 0) {
++        turn.steers.awaitingSuccessor = true
++        turn.steers.successorStarted = false
++        continue
+       }
++      turn.steers.closing = true
++      if (folded.terminal !== "succeeded") yield* cancelPendingSteers(turn)
++      yield* asksSettled(turn.subscription)
++      return folded.terminal
+     }
+   })
+ 
+@@ -263,6 +339,8 @@ export const make = Effect.fnUntraced(function* (input: {
+     events: Fiber.Fiber<ACPTranslate.Terminal, ACPError.Failure>,
+   ) {
+     yield* Deferred.succeed(turn.cancelled, undefined)
++    turn.steers.closing = true
++    yield* cancelPendingSteers(turn)
+     yield* input.client.session
+       .interrupt({ sessionID: turn.ctx.sessionID })
+       .pipe(
+@@ -284,6 +362,13 @@ export const make = Effect.fnUntraced(function* (input: {
+       const connected = yield* take(turn.subscription)
+       if (connected.type !== "server.connected")
+         return yield* Effect.die(new Error(`expected server.connected, got ${connected.type}`))
++      steerable.set(attached.id, turn)
++      yield* Effect.addFinalizer(() =>
++        Effect.sync(() => {
++          turn.steers.closing = true
++          if (steerable.get(attached.id) === turn) steerable.delete(attached.id)
++        }),
++      )
+       const events = yield* consume(turn).pipe(Effect.forkScoped)
+       return yield* Effect.gen(function* () {
+         yield* submit(attached, prompt)
+@@ -371,7 +456,52 @@ export const make = Effect.fnUntraced(function* (input: {
+     return yield* settle(attached, yield* Ref.get(state), exit)
+   })
+ 
++  const acceptsSteers = (turn: Turn | undefined, sessionID: string): turn is Turn =>
++    turn !== undefined &&
++    steerable.get(sessionID) === turn &&
++    !turn.steers.closing &&
++    !Deferred.isDoneUnsafe(turn.cancelled)
++
++  const steer = Effect.fn("cli.acp.turn.steer")(function* (params: ACPSteering.Request) {
++    const turn = steerable.get(params.sessionId)
++    if (!acceptsSteers(turn, params.sessionId)) return ACPSteering.noRunningTurn
++    const attached = yield* input.sessions.require(params.sessionId)
++    const prompt = yield* ACPPrompt.prepare(yield* input.catalog.get(attached.cwd), [...params.prompt])
++    if (prompt.slash)
++      return yield* new ACPError.InvalidRequestError({
++        message: "slash commands cannot steer a running turn",
++        field: "prompt",
++      })
++    // Preparation yielded; the turn may have decided to finish meanwhile.
++    if (!acceptsSteers(turn, params.sessionId)) return ACPSteering.noRunningTurn
++    const id = prompt.start.id
++    // Registered before admission so a `succeeded` racing the request keeps the turn as owner.
++    turn.steers.pending.add(id)
++    const admitted = yield* Effect.gen(function* () {
++      if (prompt.synthetic.length > 0) {
++        yield* input.client.session
++          .synthetic({
++            sessionID: attached.id,
++            text: prompt.synthetic.join("\n\n"),
++            description: "ACP embedded context",
++            delivery: "steer",
++            resume: false,
++          })
++          .pipe(Effect.catch(ACPClient.classify))
++      }
++      yield* input.client.session
++        .prompt({ sessionID: attached.id, id, text: prompt.text, files: prompt.files, delivery: "steer" })
++        .pipe(Effect.catch(ACPClient.classify))
++    }).pipe(Effect.exit)
++    if (Exit.isSuccess(admitted)) return ACPSteering.injected
++    turn.steers.pending.delete(id)
++    if (turn.steers.awaitingSuccessor && !turn.steers.successorStarted && turn.steers.pending.size === 0)
++      yield* Deferred.succeed(turn.steers.abandoned, undefined)
++    return yield* Effect.failCause(admitted.cause)
++  })
++
+   return {
++    steer,
+     prompt: Effect.fnUntraced(function* (params, signal) {
+       // Synchronous and before setup, so concurrent prompts cannot both register and an early cancel still applies.
+       const turn = yield* Effect.withFiber((fiber) => {
+diff --git a/packages/cli/test/acp/steering.test.ts b/packages/cli/test/acp/steering.test.ts
+new file mode 100644
+index 0000000..2c91774
+--- /dev/null
++++ b/packages/cli/test/acp/steering.test.ts
+@@ -0,0 +1,141 @@
++import { describe, expect, test } from "bun:test"
++import { delivered, interrupted, rpcError, startSession, startWire, succeeded, textDelta } from "./wire-fixture"
++
++const injected = { outcome: "injected" }
++const noRunningTurn = { outcome: "promptRequired", reason: "noRunningTurn" }
++
++// The first submission starts a turn that stays open until the test ends it; later
++// submissions are steers the test delivers explicitly.
++const openTurn = (prompts: () => number) => ({
++  onPrompt: ({ sessionID, id }: { readonly sessionID: string; readonly id: string }) =>
++    prompts() === 1 ? [delivered(sessionID, id)] : [],
++})
++
++describe("acp _session/steering", () => {
++  test("advertises steering with prompt-required idle behavior", async () => {
++    await using acp = await startWire()
++    const initialized = (await acp.initialize()) as { _meta?: unknown }
++    expect(initialized._meta).toEqual({ steering: { supported: true, idleBehaviors: ["promptRequired"] } })
++  })
++
++  test("returns idle input unconsumed and submits nothing", async () => {
++    await using acp = await startSession()
++    expect(await acp.steer(acp.sessionId, "no turn yet")).toEqual(noRunningTurn)
++    expect(acp.server.prompts).toHaveLength(0)
++  })
++
++  test("adds input to the running turn without a second prompt owner", async () => {
++    await using acp = await startSession(openTurn(() => acp.server.prompts.length))
++    let responded = false
++    const prompt = acp.prompt(acp.sessionId, "long task").then((response) => {
++      responded = true
++      return response
++    })
++    await acp.until(() => acp.server.prompts.length === 1, "original prompt submission")
++
++    expect(await acp.steer(acp.sessionId, "use tabs, not spaces")).toEqual(injected)
++    const [original, steer] = acp.server.prompts
++    expect(steer).toMatchObject({ sessionID: original.sessionID, text: "use tabs, not spaces", delivery: "steer" })
++    expect(steer.id).not.toBe(original.id)
++    // A concurrent ACP prompt is still refused while the turn runs.
++    expect((await rpcError(acp.prompt(acp.sessionId, "second owner"))).message).toBeDefined()
++
++    acp.server.send(delivered(original.sessionID, steer.id), textDelta(original.sessionID, "msg_a", "tabs"))
++    expect(responded).toBe(false)
++    acp.server.send(succeeded(original.sessionID))
++    expect((await prompt).stopReason).toBe("end_turn")
++    expect(acp.server.prompts).toHaveLength(2)
++  })
++
++  test("keeps the turn as owner when a steer lands after the loop decided to finish", async () => {
++    await using acp = await startSession(openTurn(() => acp.server.prompts.length))
++    let responded = false
++    const prompt = acp.prompt(acp.sessionId, "long task").then((response) => {
++      responded = true
++      return response
++    })
++    await acp.until(() => acp.server.prompts.length === 1, "original prompt submission")
++    expect(await acp.steer(acp.sessionId, "one more thing")).toEqual(injected)
++    const [original, steer] = acp.server.prompts
++
++    // Core finished the first execution before it saw the steer; it starts a successor.
++    acp.server.send(succeeded(original.sessionID))
++    await Bun.sleep(50)
++    expect(responded).toBe(false)
++    expect(await acp.steer(acp.sessionId, "and this too")).toEqual(injected)
++    const third = acp.server.prompts[2]
++
++    acp.server.send(
++      delivered(original.sessionID, steer.id),
++      delivered(original.sessionID, third.id),
++      textDelta(original.sessionID, "msg_b", "handled"),
++      succeeded(original.sessionID),
++    )
++    expect((await prompt).stopReason).toBe("end_turn")
++    expect(acp.server.cancelledInbox).toEqual([])
++    expect(await acp.steer(acp.sessionId, "after the turn")).toEqual(noRunningTurn)
++  })
++
++  test("ends the turn when the only steer holding it open fails admission", async () => {
++    let release: () => void = () => {}
++    const gate = new Promise<void>((resolve) => (release = resolve))
++    await using acp = await startSession({
++      ...openTurn(() => acp.server.prompts.length),
++      fetch: async (request) => {
++        const body = request.body as { text?: string } | undefined
++        if (request.path.endsWith("/prompt") && body?.text === "rejected steer") {
++          await gate
++          return Response.json({ _tag: "SessionNotFoundError", message: "gone" }, { status: 500 })
++        }
++        return undefined
++      },
++    })
++    const prompt = acp.prompt(acp.sessionId, "long task")
++    await acp.until(() => acp.server.prompts.length === 1, "original prompt submission")
++    const steer = acp.steer(acp.sessionId, "rejected steer").then(
++      (value) => ({ ok: true as const, value }),
++      (error: unknown) => ({ ok: false as const, error }),
++    )
++    await acp.until(
++      () => acp.server.requests.some((item) => (item.body as { text?: string })?.text === "rejected steer"),
++      "steer admission request",
++    )
++    acp.server.send(succeeded(acp.server.prompts[0].sessionID))
++    await Bun.sleep(50)
++    release()
++    expect((await steer).ok).toBe(false)
++    expect((await prompt).stopReason).toBe("end_turn")
++  })
++
++  test("cancels undelivered steers when the turn is interrupted", async () => {
++    await using acp = await startSession(openTurn(() => acp.server.prompts.length))
++    const prompt = acp.prompt(acp.sessionId, "long task")
++    await acp.until(() => acp.server.prompts.length === 1, "original prompt submission")
++    expect(await acp.steer(acp.sessionId, "never delivered")).toEqual(injected)
++    const [original, steer] = acp.server.prompts
++
++    acp.server.send(interrupted(original.sessionID))
++    expect((await prompt).stopReason).toBe("cancelled")
++    expect(acp.server.cancelledInbox).toEqual([{ sessionID: original.sessionID, inboxID: steer.id }])
++    expect(await acp.steer(acp.sessionId, "too late")).toEqual(noRunningTurn)
++  })
++
++  test("refuses slash commands and unsupported idle behaviors", async () => {
++    await using acp = await startSession(openTurn(() => acp.server.prompts.length))
++    const prompt = acp.prompt(acp.sessionId, "long task")
++    await acp.until(() => acp.server.prompts.length === 1, "original prompt submission")
++
++    expect(await rpcError(acp.steer(acp.sessionId, "/compact"))).toMatchObject({
++      code: -32602,
++      message: "Invalid params: slash commands cannot steer a running turn",
++    })
++    expect((await rpcError(acp.steer(acp.sessionId, "x", { steering: { idleBehavior: "startDetachedTurn" } }))).code).toBe(
++      -32602,
++    )
++    expect((await rpcError(acp.steer(acp.sessionId, []))).code).toBe(-32602)
++    expect(acp.server.prompts).toHaveLength(1)
++
++    acp.server.send(succeeded(acp.server.prompts[0].sessionID))
++    expect((await prompt).stopReason).toBe("end_turn")
++  })
++})
+diff --git a/packages/cli/test/acp/wire-fixture.ts b/packages/cli/test/acp/wire-fixture.ts
+index 67ad107..7384e22 100644
+--- a/packages/cli/test/acp/wire-fixture.ts
++++ b/packages/cli/test/acp/wire-fixture.ts
+@@ -533,6 +533,12 @@ export async function startWire(options: WireOptions = {}) {
+         { sessionId, prompt: typeof prompt === "string" ? [{ type: "text", text: prompt }] : prompt },
+         signal,
+       ),
++    steer: (sessionId: string, prompt: string | ContentBlock[], meta: unknown = { steering: { idleBehavior: "promptRequired" } }) =>
++      connection.agent.request("_session/steering", {
++        sessionId,
++        prompt: typeof prompt === "string" ? [{ type: "text", text: prompt }] : prompt,
++        ...(meta === undefined ? {} : { _meta: meta }),
++      }) as Promise<unknown>,
+     waitForUpdate: (predicate: (update: SessionNotification) => boolean, description = "session/update") =>
+       until(() => updates.find(predicate), description),
+     async [Symbol.asyncDispose]() {
+@@ -585,6 +591,7 @@ function startServer(options: WireOptions, changed: () => void) {
+   const submissions: Submission[] = []
+   const selections: Selection[] = []
+   const interrupts: string[] = []
++  const cancelledInbox: Array<{ readonly sessionID: string; readonly inboxID: string }> = []
+   const replies: Array<{ readonly sessionID: string; readonly requestID: string; readonly decision: string }> = []
+   const cancelledForms: Array<{ readonly sessionID: string; readonly formID: string; readonly message?: string }> = []
+   const repliedForms: FormReply[] = []
+@@ -600,6 +607,7 @@ function startServer(options: WireOptions, changed: () => void) {
+     },
+     selections,
+     interrupts,
++    cancelledInbox,
+     replies,
+     cancelledForms,
+     repliedForms,
+@@ -807,6 +815,12 @@ function startServer(options: WireOptions, changed: () => void) {
+           return enqueued(req.params.sessionID, "msg_synthetic", "synthetic", { text: input.text })
+         }),
+       },
++      "/api/session/:sessionID/inbox/:inboxID": {
++        DELETE: route((req) => {
++          fake.cancelledInbox.push({ sessionID: req.params.sessionID, inboxID: req.params.inboxID })
++          return noContent()
++        }),
++      },
+       "/api/session/:sessionID/interrupt": {
+         POST: route(async (req) => {
+           const sessionID = req.params.sessionID

@@ -1,5 +1,5 @@
 /**
- * DO migration 072: legacy message and library-file comment rows move into the anchored
+ * DO migration 073: legacy message and library-file comment rows move into the anchored
  * tables with every field preserved, the copy is a no-op when run again, pre-migration
  * idempotency keys still replay, and the parity check catches a bad copy.
  *
@@ -20,16 +20,16 @@ import { listProjectCommentInbox } from '../../../src/durable-objects/project-da
 import type { Env } from '../../../src/durable-objects/project-data/types';
 import { createSqlStorage } from './sql-storage-test-utils';
 
-const MIGRATION_072 = '072-anchored-comment-threads';
+const MIGRATION_073 = '073-anchored-comment-threads';
 const OWNER = { kind: 'human' as const, id: 'user-owner', name: 'Owner' };
 
-/** Apply every migration before 072 and record them, as an existing project object has. */
-function migrateTo071(sql: SqlStorage): void {
+/** Apply every migration before 073 and record them, as an existing project object has. */
+function migrateToBefore073(sql: SqlStorage): void {
   sql.exec(
     'CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)'
   );
   for (const migration of MIGRATIONS) {
-    if (migration.name === MIGRATION_072) break;
+    if (migration.name === MIGRATION_073) break;
     migration.run(sql);
     sql.exec('INSERT INTO migrations (name, applied_at) VALUES (?, ?)', migration.name, 1);
   }
@@ -39,7 +39,7 @@ function count(sql: SqlStorage, query: string): number {
   return Number(sql.exec(query).toArray()[0]?.count ?? 0);
 }
 
-describe('DO migration 072: anchored comment threads', () => {
+describe('DO migration 073: anchored comment threads', () => {
   let db: Database.Database;
   let sql: SqlStorage;
   const env = {} as Env;
@@ -48,7 +48,7 @@ describe('DO migration 072: anchored comment threads', () => {
     db = new Database(':memory:');
     db.pragma('foreign_keys = ON');
     sql = createSqlStorage(db);
-    migrateTo071(sql);
+    migrateToBefore073(sql);
     seedLegacy(sql);
     runMigrations(sql);
   });
@@ -166,7 +166,7 @@ describe('DO migration 072: anchored comment threads', () => {
   it('records the migration once, so the runner does not copy again', () => {
     runMigrations(sql);
     expect(
-      count(sql, `SELECT COUNT(*) AS count FROM migrations WHERE name = '${MIGRATION_072}'`)
+      count(sql, `SELECT COUNT(*) AS count FROM migrations WHERE name = '${MIGRATION_073}'`)
     ).toBe(1);
   });
 
@@ -193,7 +193,7 @@ describe('DO migration 072: anchored comment threads', () => {
     const fresh = new Database(':memory:');
     fresh.pragma('foreign_keys = ON');
     const freshSql = createSqlStorage(fresh);
-    migrateTo071(freshSql);
+    migrateToBefore073(freshSql);
     seedLegacy(freshSql);
     freshSql.exec("INSERT INTO do_meta (key, value) VALUES ('projectId', 'project-1')");
     const logs = vi.spyOn(console, 'log').mockImplementation(() => undefined);

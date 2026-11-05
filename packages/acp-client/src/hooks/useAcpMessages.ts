@@ -46,6 +46,7 @@ export type {
   ToolCallItem,
   UserMessage,
   UserMessageAttribution,
+  UserMessageDelivery,
 } from './useAcpMessages.types';
 
 /**
