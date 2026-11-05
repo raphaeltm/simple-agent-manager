@@ -340,6 +340,48 @@ describe('workspace eviction lifecycle through HTTP and real SQL', () => {
     });
   });
 
+  // Staging 2026-11-05: the VM's 10 s callback client gave up mid-wake, the runtime cancelled the
+  // unregistered work after the snapshot claim, and the conversation stayed stranded in `waking`.
+  it.each([
+    ['the first callback', 'pending'],
+    ['a replay after the eviction committed', 'evicted'],
+  ])('keeps the wake alive past a client disconnect on %s', async (_label, phase) => {
+    sqlite
+      .prepare("UPDATE workspaces SET eviction_generation = 'generation-1' WHERE id = 'workspace'")
+      .run();
+    if (phase === 'evicted') {
+      expect((await evict({ evictionGeneration: 'generation-1' })).status).toBe(204);
+      expect(state().workspace).toEqual({ status: 'evicted' });
+      await Promise.all(pending);
+      pending.length = 0;
+      mocks.recoverWorkspaceAfterEviction.mockClear();
+    }
+    let releaseWake!: () => void;
+    let wakeStarted!: () => void;
+    const started = new Promise<void>((resolve) => (wakeStarted = resolve));
+    mocks.recoverWorkspaceAfterEviction.mockImplementationOnce(() => {
+      wakeStarted();
+      return new Promise((resolve) => {
+        releaseWake = () => resolve({ status: 'waking', taskId: 'recovery' });
+      });
+    });
+
+    const response = evict({ evictionGeneration: 'generation-1' });
+    await started;
+    // The client may disconnect here; only work registered with waitUntil survives it.
+    expect(pending).toHaveLength(1);
+    let registeredSettled = false;
+    void pending[0]!.then(() => (registeredSettled = true));
+    await Promise.resolve();
+    expect(registeredSettled).toBe(false);
+
+    releaseWake();
+    expect((await response).status).toBe(204);
+    await pending[0];
+    expect(registeredSettled).toBe(true);
+    expect(mocks.recoverWorkspaceAfterEviction).toHaveBeenCalledOnce();
+  });
+
   it.each([
     'eviction_snapshot_missing_or_stale',
     'source_task_not_wakeable',
