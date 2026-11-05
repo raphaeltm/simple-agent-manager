@@ -52,6 +52,14 @@ describe('mimeTypeFromFilename', () => {
     expect(mimeTypeFromFilename('data.xml')).toBe('application/xml');
   });
 
+  it('maps video extensions', () => {
+    expect(mimeTypeFromFilename('demo.mp4')).toBe('video/mp4');
+    expect(mimeTypeFromFilename('demo.M4V')).toBe('video/mp4');
+    expect(mimeTypeFromFilename('demo.webm')).toBe('video/webm');
+    expect(mimeTypeFromFilename('demo.mov')).toBe('video/quicktime');
+    expect(mimeTypeFromFilename('demo.ogv')).toBe('video/ogg');
+  });
+
   it('maps previewable doc/image extensions', () => {
     expect(mimeTypeFromFilename('page.html')).toBe('text/html');
     expect(mimeTypeFromFilename('page.htm')).toBe('text/html');
@@ -81,7 +89,13 @@ describe('mimeTypeFromFilename', () => {
   it('returns undefined (never a prototype member) for prototype-chain extensions', () => {
     // Filenames are attacker-controlled: an extension that names an inherited
     // Object.prototype member must NOT leak that member as a "type".
-    for (const name of ['agent.__proto__', 'x.constructor', 'x.toString', 'x.hasOwnProperty', 'x.valueOf']) {
+    for (const name of [
+      'agent.__proto__',
+      'x.constructor',
+      'x.toString',
+      'x.hasOwnProperty',
+      'x.valueOf',
+    ]) {
       const result = mimeTypeFromFilename(name);
       expect(typeof result === 'string' || result === undefined).toBe(true);
       expect(result).toBeUndefined();
@@ -89,7 +103,9 @@ describe('mimeTypeFromFilename', () => {
   });
 
   it('resolveEffectiveMimeType falls back to octet-stream for prototype-chain extensions', () => {
-    expect(resolveEffectiveMimeType('application/octet-stream', 'agent.__proto__')).toBe(OCTET_STREAM_MIME);
+    expect(resolveEffectiveMimeType('application/octet-stream', 'agent.__proto__')).toBe(
+      OCTET_STREAM_MIME
+    );
     expect(resolveEffectiveMimeType('', 'x.constructor')).toBe(OCTET_STREAM_MIME);
   });
 });
@@ -116,8 +132,12 @@ describe('resolveEffectiveMimeType', () => {
   });
 
   it('returns octet-stream when neither the stored type nor the extension resolve', () => {
-    expect(resolveEffectiveMimeType('application/octet-stream', 'blob.bin')).toBe(OCTET_STREAM_MIME);
-    expect(resolveEffectiveMimeType('application/octet-stream', 'Makefile')).toBe(OCTET_STREAM_MIME);
+    expect(resolveEffectiveMimeType('application/octet-stream', 'blob.bin')).toBe(
+      OCTET_STREAM_MIME
+    );
+    expect(resolveEffectiveMimeType('application/octet-stream', 'Makefile')).toBe(
+      OCTET_STREAM_MIME
+    );
     expect(resolveEffectiveMimeType('application/octet-stream', undefined)).toBe(OCTET_STREAM_MIME);
     expect(resolveEffectiveMimeType('', undefined)).toBe(OCTET_STREAM_MIME);
   });

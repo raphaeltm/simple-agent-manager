@@ -36,6 +36,7 @@ import {
   downloadContentType,
   hasPreviewableContent,
   isInlinePreviewable,
+  parseByteRange,
   previewHeaders,
 } from '../services/file-serving-policy';
 import {
@@ -387,17 +388,25 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
   }
 
   const { contentType, contentSecurityPolicy } = previewHeaders(effectiveMime, c.env);
-  return new Response(data, {
-    status: 200,
-    headers: {
-      'Content-Type': contentType,
-      'Content-Length': String(data.byteLength),
-      'Content-Disposition': `inline; filename="${contentDispositionFilename(file.filename)}"`,
-      'Cache-Control': 'private, no-store',
-      'X-Content-Type-Options': 'nosniff',
-      'Content-Security-Policy': contentSecurityPolicy,
-    },
-  });
+  const headers: Record<string, string> = {
+    'Content-Type': contentType,
+    'Content-Disposition': `inline; filename="${contentDispositionFilename(file.filename)}"`,
+    'Cache-Control': 'private, no-store',
+    'X-Content-Type-Options': 'nosniff',
+    'Content-Security-Policy': contentSecurityPolicy,
+    'Accept-Ranges': 'bytes',
+  };
+  // Video elements fetch in byte ranges to seek, and Safari plays nothing without them.
+  const range = parseByteRange(c.req.header('Range'), data.byteLength);
+  if (range === 'unsatisfiable') {
+    headers['Content-Range'] = `bytes */${data.byteLength}`;
+    return new Response(null, { status: 416, headers });
+  }
+  // A view, not a copy: the decrypted file can be up to the preview ceiling.
+  const body = range ? new Uint8Array(data, range.start, range.end - range.start + 1) : data;
+  headers['Content-Length'] = String(body.byteLength);
+  if (range) headers['Content-Range'] = `bytes ${range.start}-${range.end}/${data.byteLength}`;
+  return new Response(body, { status: range ? 206 : 200, headers });
 });
 
 // ---------------------------------------------------------------------------

@@ -65,7 +65,7 @@ function createPng(width: number, height: number): Buffer {
 const IMAGE_BYTES = createPng(640, 360);
 
 const PDF_BYTES = Buffer.from(
-  '%PDF-1.1\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF',
+  '%PDF-1.1\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n3 0 obj\n<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] >>\nendobj\ntrailer\n<< /Root 1 0 R >>\n%%EOF'
 );
 
 const MARKDOWN_BODY = [
@@ -124,11 +124,7 @@ const MOCK_SESSION = {
   agentType: 'claude-code',
 };
 
-function docToolMsg(opts: {
-  id: string;
-  sequence: number;
-  result: Record<string, unknown>;
-}) {
+function docToolMsg(opts: { id: string; sequence: number; result: Record<string, unknown> }) {
   return {
     id: opts.id,
     sessionId: SESSION_ID,
@@ -147,6 +143,15 @@ function docToolMsg(opts: {
 }
 
 const MOCK_MESSAGES = [
+  {
+    id: 'user-ask',
+    sessionId: SESSION_ID,
+    role: 'user',
+    content: 'Show me the preview files.',
+    toolMetadata: null,
+    createdAt: Date.now() - 50_000,
+    sequence: 0,
+  },
   docToolMsg({
     id: 'image-file',
     sequence: 1,
@@ -189,7 +194,101 @@ const MOCK_MESSAGES = [
   }),
 ];
 
-async function setupMocks(page: Page) {
+/** A short real WebM, recorded from a canvas in the browser so no binary fixture is committed. */
+async function recordWebm(page: Page): Promise<Buffer> {
+  await page.goto('about:blank');
+  const base64 = await page.evaluate(async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 640;
+    canvas.height = 360;
+    const ctx = canvas.getContext('2d')!;
+    const stream = canvas.captureStream(15);
+    const recorder = new MediaRecorder(stream, { mimeType: 'video/webm' });
+    const chunks: Blob[] = [];
+    recorder.ondataavailable = (event) => chunks.push(event.data);
+    const done = new Promise<void>((resolve) => (recorder.onstop = () => resolve()));
+    recorder.start();
+    const started = performance.now();
+    await new Promise<void>((resolve) => {
+      const draw = () => {
+        const t = (performance.now() - started) / 1000;
+        ctx.fillStyle = '#0b3d2a';
+        ctx.fillRect(0, 0, 640, 360);
+        ctx.fillStyle = '#4ade80';
+        ctx.fillRect(40 + t * 300, 140, 80, 80);
+        if (t < 1.2) requestAnimationFrame(draw);
+        else resolve();
+      };
+      draw();
+    });
+    recorder.stop();
+    await done;
+    const bytes = new Uint8Array(await new Blob(chunks, { type: 'video/webm' }).arrayBuffer());
+    let binary = '';
+    for (const byte of bytes) binary += String.fromCharCode(byte);
+    return btoa(binary);
+  });
+  return Buffer.from(base64, 'base64');
+}
+
+const VIDEO_LINKS = {
+  sessions: {
+    items: [
+      {
+        sessionId: 'sess-uploader',
+        topic: 'Create and upload mobile chat info prototypes to library',
+        status: 'sleeping',
+        relations: ['uploaded'],
+        lastActivityAt: null,
+        taskId: null,
+      },
+      {
+        sessionId: 'sess-viewer',
+        topic: 'Review the prototypes',
+        status: 'sleeping',
+        relations: ['viewed'],
+        lastActivityAt: null,
+        taskId: null,
+      },
+    ],
+    total: 2,
+    truncated: false,
+    totalIsLowerBound: false,
+  },
+  ideas: { items: [], total: 0, truncated: false, totalIsLowerBound: false },
+};
+
+const LONG_ZIP_NAME =
+  'release-bundle-with-a-very-long-name-that-an-agent-produced-for-the-weekly-recap-2026-11-04-final-v2.zip';
+
+/** A second conversation, so the virtualized list keeps every card above in view. */
+const MEDIA_MESSAGES = [
+  docToolMsg({
+    id: 'video-file',
+    sequence: 1,
+    result: {
+      fileId: 'video-file',
+      filename: 'prototype-a-one-line.webm',
+      // Stored as octet-stream, as cf-container agent uploads are: the extension recovers it.
+      mimeType: 'application/octet-stream',
+      sizeBytes: 868_000,
+    },
+  }),
+  docToolMsg({
+    id: 'other-file',
+    sequence: 2,
+    result: {
+      fileId: 'other-file',
+      filename: LONG_ZIP_NAME,
+      mimeType: 'application/zip',
+      sizeBytes: 4_200_000,
+    },
+  }),
+];
+
+async function setupMocks(page: Page, messages = MOCK_MESSAGES) {
+  const videoBytes = await recordWebm(page);
+
   await page.addInitScript(() => {
     localStorage.setItem('sam-onboarding-wizard-dismissed-test-user', 'true');
   });
@@ -205,8 +304,29 @@ async function setupMocks(page: Page) {
     if (path === `/api/projects/${PROJECT_ID}/library/pdf-file/preview`) {
       return route.fulfill({ status: 200, contentType: 'application/pdf', body: PDF_BYTES });
     }
+    if (path === `/api/projects/${PROJECT_ID}/library/video-file/preview`) {
+      return route.fulfill({ status: 200, contentType: 'video/webm', body: videoBytes });
+    }
+    if (path === `/api/projects/${PROJECT_ID}/library/video-file/comments`) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({ threads: [] }),
+      });
+    }
+    if (path === `/api/projects/${PROJECT_ID}/library/video-file/links`) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify(VIDEO_LINKS),
+      });
+    }
     if (path === `/api/projects/${PROJECT_ID}/library/html-file/preview`) {
-      return route.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8', body: HTML_BODY });
+      return route.fulfill({
+        status: 200,
+        contentType: 'text/plain; charset=utf-8',
+        body: HTML_BODY,
+      });
     }
     if (path === `/api/projects/${PROJECT_ID}/library/html-file/interactive-preview-url`) {
       return route.fulfill({
@@ -234,12 +354,31 @@ async function setupMocks(page: Page) {
     projectId: PROJECT_ID,
     project: MOCK_PROJECT,
     session: MOCK_SESSION,
-    messages: MOCK_MESSAGES,
+    messages,
   });
 }
 
+/**
+ * The conversation is virtualized and opens at its newest message, so a card may not be
+ * mounted until the list scrolls to it. Wheel up, then down, until it is.
+ */
+async function revealCard(page: Page, fileName: string) {
+  const card = page.getByRole('button', { name: `Open ${fileName}` });
+  const log = page.getByRole('log', { name: 'Conversation' });
+  await log.hover();
+  for (const step of [-300, 300]) {
+    for (let i = 0; i < 15; i += 1) {
+      if (await card.isVisible()) return card;
+      await page.mouse.wheel(0, step);
+      await page.waitForTimeout(150);
+    }
+  }
+  await expect(card).toBeVisible();
+  return card;
+}
+
 async function openModalAndCapture(page: Page, fileName: string, screenshotName: string) {
-  await page.getByRole('button', { name: `Open ${fileName}` }).click();
+  await (await revealCard(page, fileName)).click();
   await expect(page.getByRole('dialog')).toBeVisible();
   await expect(page.getByRole('heading', { name: fileName })).toBeVisible();
   await expect(page.getByText('Failed to load image')).toHaveCount(0);
@@ -264,9 +403,45 @@ async function openModalAndCapture(page: Page, fileName: string, screenshotName:
           display: getComputedStyle(img).display,
           naturalHeight: img.naturalHeight,
           naturalWidth: img.naturalWidth,
-        })),
+        }))
       )
       .toEqual({ display: 'block', naturalHeight: 360, naturalWidth: 640 });
+  }
+  if (fileName.endsWith('.webm')) {
+    const video = page.getByTestId('video-preview');
+    await expect(video).toBeVisible();
+    // It actually decoded: metadata loaded and it has a picture.
+    await expect
+      .poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState >= 1 && v.videoWidth))
+      .toBe(640);
+    // The artifact gets the screen: the pane holding it fills most of the viewport.
+    const pane = await page.getByRole('region', { name: `Preview of ${fileName}` }).boundingBox();
+    const viewport = page.viewportSize()!;
+    expect(pane!.height).toBeGreaterThan(viewport.height * 0.8);
+    expect(pane!.width).toBeGreaterThan(viewport.width * 0.9);
+    // Provenance lives on the header's meta line, and expands as a popover over the artifact.
+    const toggle = page.getByTestId('file-linked-work-toggle');
+    await expect(toggle).toContainText('Uploaded by Create and upload');
+    await toggle.click();
+    await expect(page.getByTestId('file-linked-chat')).toHaveCount(2);
+    await page.waitForTimeout(400);
+    await screenshot(page, `${screenshotName}-linked-work`);
+    await assertNoOverflow(page);
+    await toggle.click();
+    await expect(page.getByTestId('file-linked-chat')).toHaveCount(0);
+    await page.getByRole('button', { name: 'Show comments' }).click();
+    await expect(page.getByRole('complementary', { name: 'File comments' })).toBeVisible();
+    await expect(page.getByText('No comments on this file yet.')).toBeVisible();
+    await page.waitForTimeout(400);
+    await screenshot(page, `${screenshotName}-comments`);
+    await assertNoOverflow(page);
+    await page.getByRole('button', { name: 'Hide comments' }).click();
+  }
+  if (fileName.endsWith('.zip')) {
+    await expect(page.getByText(/no preview for this file type/i)).toBeVisible();
+    await expect(
+      page.getByRole('dialog').getByRole('button', { name: 'Download', exact: true })
+    ).toBeVisible();
   }
   await page.waitForTimeout(700);
   await screenshot(page, screenshotName);
@@ -279,10 +454,7 @@ async function runAudit(page: Page, suffix: string) {
   await setupMocks(page);
   await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
 
-  await expect(page.getByRole('button', { name: 'Open architecture-diagram.png' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Open preview-notes.md' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Open preview-contract.pdf' })).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Open interactive-preview.html' })).toBeVisible();
+  await expect(page.getByRole('log', { name: 'Conversation' })).toBeVisible();
 
   await openModalAndCapture(page, 'architecture-diagram.png', `file-preview-image-${suffix}`);
   await openModalAndCapture(page, 'preview-notes.md', `file-preview-markdown-${suffix}`);
@@ -290,10 +462,23 @@ async function runAudit(page: Page, suffix: string) {
   await openModalAndCapture(page, 'interactive-preview.html', `file-preview-html-${suffix}`);
 }
 
+async function runMediaAudit(page: Page, suffix: string) {
+  await setupMocks(page, MEDIA_MESSAGES);
+  await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
+  await openModalAndCapture(page, 'prototype-a-one-line.webm', `file-preview-video-${suffix}`);
+  await openModalAndCapture(page, LONG_ZIP_NAME, `file-preview-unsupported-${suffix}`);
+}
+
 test.describe('File Preview Modal', () => {
   test('opens image, markdown, PDF, and HTML previews edge-to-edge', async ({ page }) => {
     const viewport = page.viewportSize();
     const suffix = viewport?.width === 375 ? 'mobile' : 'desktop';
     await runAudit(page, suffix);
+  });
+
+  test('plays a video, and offers the download for a type it cannot show', async ({ page }) => {
+    const viewport = page.viewportSize();
+    const suffix = viewport?.width === 375 ? 'mobile' : 'desktop';
+    await runMediaAudit(page, suffix);
   });
 });
