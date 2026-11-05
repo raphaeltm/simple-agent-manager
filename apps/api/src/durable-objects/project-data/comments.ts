@@ -1,12 +1,25 @@
-import type {
-  CommentMention,
-  MessageCommentReply,
-  MessageCommentThread,
-} from '@simple-agent-manager/shared';
-import { COMMENT_STATUSES } from '@simple-agent-manager/shared';
-import * as v from 'valibot';
+/**
+ * Message-anchored comment threads: the message adapter over the shared comment core.
+ *
+ * Storage, idempotency, versions and limits live in `anchored-comment-store.ts` and
+ * `anchored-comment-mutations.ts`. This module adds what is specific to a message anchor:
+ * the session and message must exist in this Durable Object, the scope is the session
+ * (`{ kind: 'message', sessionId }`), and rows map to `MessageCommentThread`.
+ */
+import type { MessageCommentReply, MessageCommentThread } from '@simple-agent-manager/shared';
 
-import { createModuleLogger } from '../../lib/logger';
+import { chunk, D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
+import {
+  createReplyRecord,
+  createThreadRecord,
+  updateThreadStatusRecord,
+} from './anchored-comment-mutations';
+import type { CommentAnchorScope } from './anchored-comment-scope';
+import {
+  type CommentThreadRecord,
+  getThreadRecord,
+  listThreadRecords,
+} from './anchored-comment-store';
 import {
   COMMENT_IDEMPOTENCY_CONFLICT,
   COMMENT_LIMIT_EXCEEDED,
@@ -23,27 +36,11 @@ import {
   type CreateCommentThreadInput,
   type ListCommentThreadsInput,
   type ListCommentThreadsResult,
-  type ListProjectCommentThreadCandidatesPage,
-  type ListProjectCommentThreadsInput,
   type ProjectCommentSessionTopic,
   type UpdateCommentStatusInput,
 } from './comment-contracts';
-import {
-  actorFromColumns,
-  fingerprint,
-  normalizeActor,
-  normalizeBody,
-  normalizeClientMutationId,
-  normalizeQuote,
-  resolveCommentLimits,
-  resolveCommentListLimit,
-} from './comment-normalization';
-import { parseProjectCommentThreadCandidates, restoreThreadOrder } from './comment-read-helpers';
-import { parseRow } from './row-schemas';
+import { resolveCommentLimits, resolveCommentListLimit } from './comment-normalization';
 import type { Env } from './types';
-import { generateId } from './types';
-
-const log = createModuleLogger('project_data.comments');
 
 export {
   COMMENT_IDEMPOTENCY_CONFLICT,
@@ -67,94 +64,9 @@ export type {
   UpdateCommentStatusInput,
 };
 
-const ThreadRowSchema = v.object({
-  id: v.string(),
-  session_id: v.string(),
-  message_id: v.string(),
-  quote: v.nullable(v.string()),
-  body: v.string(),
-  author_type: v.picklist(['human', 'agent']),
-  author_id: v.string(),
-  author_name: v.nullable(v.string()),
-  status: v.picklist(COMMENT_STATUSES),
-  created_at: v.number(),
-  updated_at: v.number(),
-  sequence: v.number(),
-  version: v.number(),
-  client_mutation_id: v.nullable(v.string()),
-  sent_at: v.nullable(v.number()),
-  sent_by_type: v.nullable(v.picklist(['human', 'agent'])),
-  sent_by_id: v.nullable(v.string()),
-  sent_by_name: v.nullable(v.string()),
-  resolved_at: v.nullable(v.number()),
-  resolved_by_type: v.nullable(v.picklist(['human', 'agent'])),
-  resolved_by_id: v.nullable(v.string()),
-  resolved_by_name: v.nullable(v.string()),
-  reopened_at: v.nullable(v.number()),
-  reopened_by_type: v.nullable(v.picklist(['human', 'agent'])),
-  reopened_by_id: v.nullable(v.string()),
-  reopened_by_name: v.nullable(v.string()),
-  mentions_json: v.optional(v.nullable(v.string())),
-});
-
-const ReplyRowSchema = v.object({
-  id: v.string(),
-  thread_id: v.string(),
-  session_id: v.string(),
-  body: v.string(),
-  author_type: v.picklist(['human', 'agent']),
-  author_id: v.string(),
-  author_name: v.nullable(v.string()),
-  created_at: v.number(),
-  sequence: v.number(),
-  client_mutation_id: v.nullable(v.string()),
-  mentions_json: v.optional(v.nullable(v.string())),
-});
-
-const MentionSchema = v.object({
-  userId: v.pipe(v.string(), v.minLength(1)),
-  displayName: v.nullable(v.string()),
-});
-
-/**
- * Mentions are rendering data, never authority. A malformed stored list degrades to "no
- * mentions" rather than failing the thread read (.claude/rules/50).
- */
-function parseMentions(raw: string | null | undefined, rowId: string): CommentMention[] {
-  if (!raw) return [];
-  try {
-    const parsed = v.safeParse(v.array(MentionSchema), JSON.parse(raw));
-    if (parsed.success) return parsed.output;
-  } catch {
-    /* logged below */
-  }
-  log.warn('comments.mentions_invalid', { rowId });
-  return [];
+function sessionScope(sessionId: string): CommentAnchorScope {
+  return { kind: 'message', sessionId };
 }
-
-function serializeMentions(mentions: CommentMention[] | undefined): string | null {
-  return mentions && mentions.length > 0 ? JSON.stringify(mentions) : null;
-}
-
-/**
- * Idempotency fingerprint suffix: empty when there are no mentions, so a replayed request
- * created before mentions existed keeps the fingerprint it was stored with.
- */
-function mentionFingerprint(mentions: CommentMention[] | undefined): string[] {
-  if (!mentions || mentions.length === 0) return [];
-  // Code-unit order, the default sort's order that stored fingerprints were made with. Not
-  // localeCompare, which would reorder mixed-case ids and break replays of stored mutations.
-  const userIds = mentions.map((mention) => mention.userId);
-  return ['mentions', ...userIds.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))];
-}
-
-type ThreadRow = v.InferOutput<typeof ThreadRowSchema>;
-
-const ProjectThreadCandidateRowSchema = v.object({
-  id: v.string(),
-  updated_at: v.number(),
-  estimated_bytes: v.number(),
-});
 
 function ensureSession(sql: SqlStorage, sessionId: string): void {
   const row = sql.exec('SELECT id FROM chat_sessions WHERE id = ? LIMIT 1', sessionId).toArray()[0];
@@ -188,154 +100,51 @@ function ensureMessageAnchor(sql: SqlStorage, sessionId: string, messageId: stri
   throw new CommentNotFoundError('Message');
 }
 
-function nextThreadSequence(sql: SqlStorage, sessionId: string): number {
-  const row = sql
-    .exec(
-      'SELECT COALESCE(MAX(sequence), 0) AS max_sequence FROM comment_threads WHERE session_id = ?',
-      sessionId
-    )
-    .toArray()[0];
-  return (typeof row?.max_sequence === 'number' ? row.max_sequence : 0) + 1;
-}
-
-function nextReplySequence(sql: SqlStorage, threadId: string): number {
-  const row = sql
-    .exec(
-      'SELECT COALESCE(MAX(sequence), 0) AS max_sequence FROM comment_replies WHERE thread_id = ?',
-      threadId
-    )
-    .toArray()[0];
-  return (typeof row?.max_sequence === 'number' ? row.max_sequence : 0) + 1;
-}
-
-function mapReply(row: unknown): MessageCommentReply {
-  const r = parseRow(ReplyRowSchema, row, 'comment_reply');
+/**
+ * The per-kind CHECKs guarantee a message row has its session and message ids. A row that
+ * somehow lacks them cannot be shown as a message thread, so it is dropped (rule 50).
+ */
+export function toMessageCommentThread(record: CommentThreadRecord): MessageCommentThread | null {
+  if (record.anchorKind !== 'message' || !record.sessionId || !record.messageId) return null;
+  const sessionId = record.sessionId;
+  const replies: MessageCommentReply[] = record.replies.map((reply) => ({
+    id: reply.id,
+    threadId: reply.threadId,
+    sessionId,
+    author: reply.author,
+    body: reply.body,
+    createdAt: reply.createdAt,
+    sequence: reply.sequence,
+    clientMutationId: reply.clientMutationId,
+    mentions: reply.mentions,
+  }));
   return {
-    id: r.id,
-    threadId: r.thread_id,
-    sessionId: r.session_id,
-    author: { kind: r.author_type, id: r.author_id, name: r.author_name },
-    body: r.body,
-    createdAt: r.created_at,
-    sequence: r.sequence,
-    clientMutationId: r.client_mutation_id,
-    mentions: parseMentions(r.mentions_json, r.id),
-  };
-}
-
-function mapThread(row: unknown, replies: MessageCommentReply[]): MessageCommentThread {
-  const r = parseRow(ThreadRowSchema, row, 'comment_thread');
-  return {
-    id: r.id,
-    sessionId: r.session_id,
-    anchor: {
-      kind: 'message',
-      messageId: r.message_id,
-      quote: r.quote,
-    },
-    author: { kind: r.author_type, id: r.author_id, name: r.author_name },
-    body: r.body,
-    status: r.status,
-    createdAt: r.created_at,
-    updatedAt: r.updated_at,
-    sequence: r.sequence,
-    version: r.version,
-    clientMutationId: r.client_mutation_id,
-    sentAt: r.sent_at,
-    sentBy: actorFromColumns(r.sent_by_type, r.sent_by_id, r.sent_by_name),
-    resolvedAt: r.resolved_at,
-    resolvedBy: actorFromColumns(r.resolved_by_type, r.resolved_by_id, r.resolved_by_name),
-    reopenedAt: r.reopened_at,
-    reopenedBy: actorFromColumns(r.reopened_by_type, r.reopened_by_id, r.reopened_by_name),
-    mentions: parseMentions(r.mentions_json, r.id),
+    id: record.id,
+    sessionId,
+    anchor: { kind: 'message', messageId: record.messageId, quote: record.quote },
+    author: record.author,
+    body: record.body,
+    status: record.status,
+    createdAt: record.createdAt,
+    updatedAt: record.updatedAt,
+    sequence: record.sequence,
+    version: record.version,
+    clientMutationId: record.clientMutationId,
+    sentAt: record.sentAt,
+    sentBy: record.sentBy,
+    resolvedAt: record.resolvedAt,
+    resolvedBy: record.resolvedBy,
+    reopenedAt: record.reopenedAt,
+    reopenedBy: record.reopenedBy,
+    mentions: record.mentions,
     replies,
   };
 }
 
-function readReplies(sql: SqlStorage, threadIds: string[]): Map<string, MessageCommentReply[]> {
-  const byThread = new Map<string, MessageCommentReply[]>();
-  for (const threadId of threadIds) byThread.set(threadId, []);
-  if (threadIds.length === 0) return byThread;
-
-  const placeholders = threadIds.map(() => '?').join(', ');
-  const rows = sql
-    .exec(
-      `SELECT id, thread_id, session_id, body, author_type, author_id, author_name,
-              created_at, sequence, client_mutation_id, mentions_json
-       FROM comment_replies
-       WHERE thread_id IN (${placeholders})
-       ORDER BY thread_id ASC, sequence ASC`,
-      ...threadIds
-    )
-    .toArray();
-
-  for (const row of rows) {
-    try {
-      const reply = mapReply(row);
-      if (reply.threadId) byThread.get(reply.threadId)?.push(reply);
-    } catch (err) {
-      log.warn('comments.reply_row_skipped', {
-        rowId: typeof row.id === 'string' ? row.id : null,
-        threadId: typeof row.thread_id === 'string' ? row.thread_id : null,
-        error: String(err),
-      });
-    }
-  }
-  return byThread;
-}
-
-function readThreadRows(sql: SqlStorage, sessionId: string, threadIds: string[]): ThreadRow[] {
-  if (threadIds.length === 0) return [];
-  const placeholders = threadIds.map(() => '?').join(', ');
-  const rows = sql
-    .exec(
-      `SELECT id, session_id, message_id, quote, body, author_type, author_id, author_name,
-              status, created_at, updated_at, sequence, version, client_mutation_id,
-              sent_at, sent_by_type, sent_by_id, sent_by_name,
-              resolved_at, resolved_by_type, resolved_by_id, resolved_by_name,
-              reopened_at, reopened_by_type, reopened_by_id, reopened_by_name, mentions_json
-       FROM comment_threads
-       WHERE session_id = ? AND id IN (${placeholders})`,
-      sessionId,
-      ...threadIds
-    )
-    .toArray();
-
-  const parsed: ThreadRow[] = [];
-  for (const row of rows) {
-    try {
-      parsed.push(parseRow(ThreadRowSchema, row, 'comment_thread'));
-    } catch (err) {
-      log.warn('comments.thread_row_skipped', {
-        rowId: typeof row.id === 'string' ? row.id : null,
-        sessionId,
-        error: String(err),
-      });
-    }
-  }
-  return parsed;
-}
-
-function hydrateThreads(sql: SqlStorage, rows: unknown[]): MessageCommentThread[] {
-  const parsedRows: ThreadRow[] = [];
-  for (const row of rows) {
-    try {
-      parsedRows.push(parseRow(ThreadRowSchema, row, 'comment_thread'));
-    } catch (err) {
-      const record = row && typeof row === 'object' ? (row as Record<string, unknown>) : {};
-      log.warn('comments.thread_row_skipped', {
-        rowId: typeof record.id === 'string' ? record.id : null,
-        sessionId: typeof record.session_id === 'string' ? record.session_id : null,
-        error: String(err),
-      });
-    }
-  }
-
-  const replies = readReplies(
-    sql,
-    parsedRows.map((row) => row.id)
-  );
-  return parsedRows.map((row) => mapThread(row, replies.get(row.id) ?? []));
+function requireMessageThread(record: CommentThreadRecord): MessageCommentThread {
+  const thread = toMessageCommentThread(record);
+  if (!thread) throw new CommentNotFoundError('Comment thread');
+  return thread;
 }
 
 export function getCommentThread(
@@ -343,10 +152,8 @@ export function getCommentThread(
   sessionId: string,
   threadId: string
 ): MessageCommentThread | null {
-  const rows = readThreadRows(sql, sessionId, [threadId]);
-  if (rows.length === 0) return null;
-  const replies = readReplies(sql, [threadId]);
-  return mapThread(rows[0], replies.get(threadId) ?? []);
+  const record = getThreadRecord(sql, sessionScope(sessionId), threadId);
+  return record ? toMessageCommentThread(record) : null;
 }
 
 export function listCommentThreads(
@@ -355,137 +162,17 @@ export function listCommentThreads(
   input: ListCommentThreadsInput
 ): ListCommentThreadsResult {
   ensureSession(sql, input.sessionId);
-  const limit = resolveCommentListLimit(env, input.limit);
-  const conditions = ['session_id = ?'];
-  const params: Array<string | number> = [input.sessionId];
-
-  if (input.messageId) {
-    ensureMessageAnchor(sql, input.sessionId, input.messageId);
-    conditions.push('message_id = ?');
-    params.push(input.messageId);
-  }
-  if (input.status) {
-    conditions.push('status = ?');
-    params.push(input.status);
-  }
-  if (input.afterSequence !== null && input.afterSequence !== undefined) {
-    conditions.push('sequence > ?');
-    params.push(input.afterSequence);
-  }
-
-  const whereClause = conditions.join(' AND ');
-  const rows = sql
-    .exec(
-      `SELECT id, session_id, message_id, quote, body, author_type, author_id, author_name,
-              status, created_at, updated_at, sequence, version, client_mutation_id,
-              sent_at, sent_by_type, sent_by_id, sent_by_name,
-              resolved_at, resolved_by_type, resolved_by_id, resolved_by_name,
-              reopened_at, reopened_by_type, reopened_by_id, reopened_by_name, mentions_json
-       FROM comment_threads
-       WHERE ${whereClause}
-       ORDER BY sequence ASC
-       LIMIT ?`,
-      ...params,
-      limit + 1
-    )
-    .toArray();
-
-  const hasMore = rows.length > limit;
+  if (input.messageId) ensureMessageAnchor(sql, input.sessionId, input.messageId);
+  const result = listThreadRecords(sql, sessionScope(input.sessionId), {
+    messageId: input.messageId ?? null,
+    status: input.status ?? null,
+    afterSequence: input.afterSequence ?? null,
+    limit: resolveCommentListLimit(env, input.limit),
+  });
   return {
-    threads: hydrateThreads(sql, hasMore ? rows.slice(0, limit) : rows),
-    hasMore,
+    threads: result.threads.flatMap((record) => toMessageCommentThread(record) ?? []),
+    hasMore: result.hasMore,
   };
-}
-
-/**
- * Every message-anchored thread in the project, newest activity first.
- *
- * No session predicate, by design: this Durable Object *is* the project, so
- * every row in `comment_threads` belongs to it. The ordering is the load-bearing
- * decision — `updated_at` is bumped by `createCommentReply` and by every status
- * transition, so `updated_at DESC` genuinely means "most recently active", which
- * is what a reader triaging an inbox needs. Ordering by `sequence` (what the
- * session-scoped read uses, where it means chronological-within-one-conversation)
- * would rank by insertion order across sessions and systematically bury whatever
- * moved most recently (.claude/rules/65).
- *
- * Returns up to `limit + 1` so the caller can merge against the other anchor
- * kind and still detect truncation.
- */
-export function listProjectCommentThreadCandidates(
-  sql: SqlStorage,
-  input: ListProjectCommentThreadsInput & { limit: number }
-): ListProjectCommentThreadCandidatesPage {
-  const conditions: string[] = [];
-  const params: Array<string | number> = [];
-
-  if (input.status) {
-    conditions.push('t.status = ?');
-    params.push(input.status);
-  }
-
-  // Named `whereClause` deliberately: every fragment in `conditions` is a literal
-  // with `?` placeholders, and that identifier is what the sql-injection scanner
-  // recognises as a parameterized clause builder (scripts/quality/ast-checks.ts).
-  const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-
-  const rows = sql
-    .exec(
-      `SELECT t.id,
-              t.updated_at,
-              length(CAST(COALESCE(t.body, '') AS BLOB)) +
-                COALESCE(length(CAST(t.quote AS BLOB)), 0) +
-                COALESCE((
-                  SELECT SUM(length(CAST(COALESCE(r.body, '') AS BLOB)))
-                  FROM comment_replies r
-                  WHERE r.thread_id = t.id
-                ), 0) AS estimated_bytes
-       FROM comment_threads t
-       ${whereClause}
-       ORDER BY t.updated_at DESC, t.id ASC
-       LIMIT ?`,
-      ...params,
-      input.limit + 1
-    )
-    .toArray();
-
-  const countRow = sql
-    .exec(`SELECT COUNT(*) AS count FROM comment_threads t ${whereClause}`, ...params)
-    .toArray()[0];
-
-  return {
-    candidates: parseProjectCommentThreadCandidates(
-      rows,
-      ProjectThreadCandidateRowSchema,
-      'project_comment_candidate',
-      log,
-      'comments.project_candidate_row_skipped'
-    ),
-    totalCount: typeof countRow?.count === 'number' ? countRow.count : 0,
-  };
-}
-
-export function hydrateProjectCommentThreads(
-  sql: SqlStorage,
-  threadIds: string[]
-): MessageCommentThread[] {
-  if (threadIds.length === 0) return [];
-  const placeholders = threadIds.map(() => '?').join(', ');
-  const rows = sql
-    .exec(
-      `SELECT id, session_id, message_id, quote, body, author_type, author_id, author_name,
-              status, created_at, updated_at, sequence, version, client_mutation_id,
-              sent_at, sent_by_type, sent_by_id, sent_by_name,
-              resolved_at, resolved_by_type, resolved_by_id, resolved_by_name,
-              reopened_at, reopened_by_type, reopened_by_id, reopened_by_name, mentions_json
-       FROM comment_threads
-       WHERE id IN (${placeholders})`,
-      ...threadIds
-    )
-    .toArray();
-
-  const hydrated = hydrateThreads(sql, rows);
-  return restoreThreadOrder(threadIds, hydrated);
 }
 
 /**
@@ -498,11 +185,13 @@ export function readSessionTopics(
   sql: SqlStorage,
   sessionIds: string[]
 ): ProjectCommentSessionTopic[] {
-  if (sessionIds.length === 0) return [];
-  const placeholders = sessionIds.map(() => '?').join(', ');
-  const rows = sql
-    .exec(`SELECT id, topic FROM chat_sessions WHERE id IN (${placeholders})`, ...sessionIds)
-    .toArray();
+  // Batched under the bind-parameter ceiling: an inbox page can name up to 300 sessions.
+  const rows = chunk(sessionIds, D1_MAX_BOUND_PARAMETERS).flatMap((batch) => {
+    const placeholders = batch.map(() => '?').join(', ');
+    return sql
+      .exec(`SELECT id, topic FROM chat_sessions WHERE id IN (${placeholders})`, ...batch)
+      .toArray();
+  });
 
   const topics: ProjectCommentSessionTopic[] = [];
   for (const row of rows) {
@@ -517,82 +206,19 @@ export function createCommentThread(
   env: Env,
   input: CreateCommentThreadInput
 ): CommentThreadMutationResult {
-  const limits = resolveCommentLimits(env);
-  const actor = normalizeActor(input.actor);
-  const body = normalizeBody(input.body, limits);
-  const quote = normalizeQuote(input.quote, limits);
-  const clientMutationId = normalizeClientMutationId(input.clientMutationId, limits);
-  const requestFingerprint = fingerprint([
-    'thread',
-    input.messageId,
-    body,
-    quote,
-    actor.kind,
-    actor.id,
-    ...mentionFingerprint(input.mentions),
-  ]);
-
   ensureSession(sql, input.sessionId);
   ensureMessageAnchor(sql, input.sessionId, input.messageId);
-
-  if (clientMutationId) {
-    const existing = sql
-      .exec(
-        `SELECT id, client_mutation_fingerprint
-         FROM comment_threads
-         WHERE session_id = ? AND client_mutation_id = ?
-         LIMIT 1`,
-        input.sessionId,
-        clientMutationId
-      )
-      .toArray()[0];
-    if (existing) {
-      if (existing.client_mutation_fingerprint !== requestFingerprint) {
-        throw new CommentIdempotencyConflictError();
-      }
-      const thread = getCommentThread(sql, input.sessionId, String(existing.id));
-      if (!thread) throw new CommentNotFoundError('Comment thread');
-      return { thread, idempotent: true, changed: false };
-    }
-  }
-
-  const countRow = sql
-    .exec('SELECT COUNT(*) AS count FROM comment_threads WHERE session_id = ?', input.sessionId)
-    .toArray()[0];
-  if ((typeof countRow?.count === 'number' ? countRow.count : 0) >= limits.threadsPerSessionMax) {
-    throw new CommentLimitExceededError(
-      `session comment thread limit of ${limits.threadsPerSessionMax} reached`
-    );
-  }
-
-  const id = generateId();
-  const now = Date.now();
-  const sequence = nextThreadSequence(sql, input.sessionId);
-  sql.exec(
-    `INSERT INTO comment_threads
-       (id, session_id, anchor_kind, message_id, quote, body, author_type, author_id, author_name,
-        status, created_at, updated_at, sequence, version, client_mutation_id,
-        client_mutation_fingerprint, mentions_json)
-     VALUES (?, ?, 'message', ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?, 1, ?, ?, ?)`,
-    id,
-    input.sessionId,
-    input.messageId,
-    quote,
-    body,
-    actor.kind,
-    actor.id,
-    actor.name,
-    now,
-    now,
-    sequence,
-    clientMutationId,
-    clientMutationId ? requestFingerprint : null,
-    serializeMentions(input.mentions)
-  );
-
-  const thread = getCommentThread(sql, input.sessionId, id);
-  if (!thread) throw new CommentNotFoundError('Comment thread');
-  return { thread, idempotent: false, changed: true };
+  const result = createThreadRecord(sql, env, {
+    scope: sessionScope(input.sessionId),
+    messageId: input.messageId,
+    fingerprintAnchor: input.messageId,
+    body: input.body,
+    quote: input.quote,
+    clientMutationId: input.clientMutationId,
+    actor: input.actor,
+    mentions: input.mentions,
+  });
+  return { ...result, thread: requireMessageThread(result.thread) };
 }
 
 export function createCommentReply(
@@ -600,87 +226,18 @@ export function createCommentReply(
   env: Env,
   input: CreateCommentReplyInput
 ): CommentReplyMutationResult {
-  const limits = resolveCommentLimits(env);
-  const actor = normalizeActor(input.actor);
-  const body = normalizeBody(input.body, limits);
-  const clientMutationId = normalizeClientMutationId(input.clientMutationId, limits);
-  const requestFingerprint = fingerprint([
-    'reply',
-    input.threadId,
-    body,
-    actor.kind,
-    actor.id,
-    ...mentionFingerprint(input.mentions),
-  ]);
-
-  const thread = getCommentThread(sql, input.sessionId, input.threadId);
-  if (!thread) throw new CommentNotFoundError('Comment thread');
-
-  if (clientMutationId) {
-    const existing = sql
-      .exec(
-        `SELECT id, client_mutation_fingerprint
-         FROM comment_replies
-         WHERE thread_id = ? AND client_mutation_id = ?
-         LIMIT 1`,
-        input.threadId,
-        clientMutationId
-      )
-      .toArray()[0];
-    if (existing) {
-      if (existing.client_mutation_fingerprint !== requestFingerprint) {
-        throw new CommentIdempotencyConflictError();
-      }
-      const authoritative = getCommentThread(sql, input.sessionId, input.threadId);
-      const reply = authoritative?.replies.find((candidate) => candidate.id === existing.id);
-      if (!authoritative || !reply) throw new CommentNotFoundError('Comment thread');
-      return { thread: authoritative, reply, idempotent: true, changed: false };
-    }
-  }
-
-  const countRow = sql
-    .exec('SELECT COUNT(*) AS count FROM comment_replies WHERE thread_id = ?', input.threadId)
-    .toArray()[0];
-  if ((typeof countRow?.count === 'number' ? countRow.count : 0) >= limits.repliesPerThreadMax) {
-    throw new CommentLimitExceededError(
-      `comment reply limit of ${limits.repliesPerThreadMax} reached`
-    );
-  }
-
-  const id = generateId();
-  const now = Date.now();
-  const sequence = nextReplySequence(sql, input.threadId);
-  sql.exec(
-    `INSERT INTO comment_replies
-       (id, thread_id, session_id, body, author_type, author_id, author_name,
-        created_at, sequence, client_mutation_id, client_mutation_fingerprint, mentions_json)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    id,
-    input.threadId,
-    input.sessionId,
-    body,
-    actor.kind,
-    actor.id,
-    actor.name,
-    now,
-    sequence,
-    clientMutationId,
-    clientMutationId ? requestFingerprint : null,
-    serializeMentions(input.mentions)
-  );
-  sql.exec(
-    `UPDATE comment_threads
-     SET updated_at = ?, version = version + 1
-     WHERE id = ? AND session_id = ?`,
-    now,
-    input.threadId,
-    input.sessionId
-  );
-
-  const authoritative = getCommentThread(sql, input.sessionId, input.threadId);
-  const reply = authoritative?.replies.find((candidate) => candidate.id === id);
-  if (!authoritative || !reply) throw new CommentNotFoundError('Comment thread');
-  return { thread: authoritative, reply, idempotent: false, changed: true };
+  const result = createReplyRecord(sql, env, {
+    scope: sessionScope(input.sessionId),
+    threadId: input.threadId,
+    body: input.body,
+    clientMutationId: input.clientMutationId,
+    actor: input.actor,
+    mentions: input.mentions,
+  });
+  const thread = requireMessageThread(result.thread);
+  const reply = thread.replies.find((candidate) => candidate.id === result.reply.id);
+  if (!reply) throw new CommentNotFoundError('Comment thread');
+  return { thread, reply, idempotent: result.idempotent, changed: result.changed };
 }
 
 export function updateCommentThreadStatus(
@@ -688,98 +245,12 @@ export function updateCommentThreadStatus(
   env: Env,
   input: UpdateCommentStatusInput
 ): CommentThreadMutationResult {
-  const limits = resolveCommentLimits(env);
-  const actor = normalizeActor(input.actor);
-  const clientMutationId = normalizeClientMutationId(input.clientMutationId, limits);
-  if (!COMMENT_STATUSES.includes(input.status)) {
-    throw new CommentValidationError('status must be open, sent, or resolved');
-  }
-
-  const current = getCommentThread(sql, input.sessionId, input.threadId);
-  if (!current) throw new CommentNotFoundError('Comment thread');
-
-  if (clientMutationId) {
-    const existing = sql
-      .exec(
-        `SELECT target_status
-         FROM comment_status_mutations
-         WHERE thread_id = ? AND client_mutation_id = ?
-         LIMIT 1`,
-        input.threadId,
-        clientMutationId
-      )
-      .toArray()[0];
-    if (existing) {
-      if (existing.target_status !== input.status) throw new CommentIdempotencyConflictError();
-      return { thread: current, idempotent: true, changed: false };
-    }
-  }
-
-  const now = Date.now();
-  let changed = false;
-  if (current.status !== input.status) {
-    changed = true;
-    if (input.status === 'sent') {
-      sql.exec(
-        `UPDATE comment_threads
-         SET status = 'sent', sent_at = ?, sent_by_type = ?, sent_by_id = ?, sent_by_name = ?,
-             updated_at = ?, version = version + 1
-         WHERE id = ? AND session_id = ?`,
-        now,
-        actor.kind,
-        actor.id,
-        actor.name,
-        now,
-        input.threadId,
-        input.sessionId
-      );
-    } else if (input.status === 'resolved') {
-      sql.exec(
-        `UPDATE comment_threads
-         SET status = 'resolved', resolved_at = ?, resolved_by_type = ?, resolved_by_id = ?,
-             resolved_by_name = ?, updated_at = ?, version = version + 1
-         WHERE id = ? AND session_id = ?`,
-        now,
-        actor.kind,
-        actor.id,
-        actor.name,
-        now,
-        input.threadId,
-        input.sessionId
-      );
-    } else {
-      sql.exec(
-        `UPDATE comment_threads
-         SET status = 'open', reopened_at = ?, reopened_by_type = ?, reopened_by_id = ?,
-             reopened_by_name = ?, updated_at = ?, version = version + 1
-         WHERE id = ? AND session_id = ?`,
-        now,
-        actor.kind,
-        actor.id,
-        actor.name,
-        now,
-        input.threadId,
-        input.sessionId
-      );
-    }
-  }
-
-  const authoritative = getCommentThread(sql, input.sessionId, input.threadId);
-  if (!authoritative) throw new CommentNotFoundError('Comment thread');
-
-  if (clientMutationId) {
-    sql.exec(
-      `INSERT INTO comment_status_mutations
-         (thread_id, session_id, client_mutation_id, target_status, thread_version, created_at)
-       VALUES (?, ?, ?, ?, ?, ?)`,
-      input.threadId,
-      input.sessionId,
-      clientMutationId,
-      input.status,
-      authoritative.version,
-      now
-    );
-  }
-
-  return { thread: authoritative, idempotent: false, changed };
+  const result = updateThreadStatusRecord(sql, env, {
+    scope: sessionScope(input.sessionId),
+    threadId: input.threadId,
+    status: input.status,
+    clientMutationId: input.clientMutationId,
+    actor: input.actor,
+  });
+  return { ...result, thread: requireMessageThread(result.thread) };
 }

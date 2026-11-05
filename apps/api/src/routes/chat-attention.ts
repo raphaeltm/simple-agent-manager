@@ -9,6 +9,7 @@ import type { Hono } from 'hono';
 import * as schema from '../db/schema';
 import { parseAttentionOptions } from '../durable-objects/project-data/attention';
 import type { Env } from '../env';
+import { agentWakeRecord } from '../lib/agent-wake-policy';
 import { markRejectedBeforeEffects } from '../lib/operation-effect-boundary';
 import { requireRouteParam } from '../lib/route-helpers';
 import { getUserId } from '../middleware/auth';
@@ -20,10 +21,11 @@ import {
   requireProjectCapability,
 } from '../middleware/project-auth';
 import { parseOptionalBody, ResolveAttentionAnswerSchema } from '../schemas';
+import { authorizeAgentWake } from '../services/agent-wake-authorization';
 import { getCommentContextLimits } from '../services/collaboration-settings';
 import { getConnectorReadLimits } from '../services/connector-read-settings';
 import * as projectDataService from '../services/project-data';
-import { recordSharedSessionAnswer, requireSessionWriter } from '../services/session-access';
+import { recordSharedSessionAnswer } from '../services/session-access';
 import { getSessionMessageLimit } from './chat-message-query';
 import { preparePromptForLiveAgent, sendPreparedPromptToLiveAgent } from './chat-prompt-forward';
 
@@ -151,7 +153,12 @@ export async function answerAttention(
   const db = drizzle(env.DATABASE, { schema });
 
   await requireProjectCapability(db, projectId, userId, 'task:write');
-  const writer = await requireSessionWriter(env, projectId, sessionId, userId, {
+  // The answer reaches the agent as a new prompt, so the agent-wake policy decides.
+  const { writer, wake } = await authorizeAgentWake(env, {
+    projectId,
+    sessionId,
+    actorUserId: userId,
+    trigger: 'attention_answer',
     db,
     action: 'answer the agent in this session',
   });
@@ -213,6 +220,9 @@ export async function answerAttention(
   // stable downstream message ID for persistence-level deduplication.
   await sendPreparedPromptToLiveAgent(env, preparedPrompt, markerId);
   await projectDataService.completeAttentionAnswer(env, projectId, sessionId, markerId, answer);
-  await recordSharedSessionAnswer(env, writer, { markerId });
+  // The answer goes straight to the live agent, not through the prompt-delivery queue, so
+  // there is no delivery row to carry `metadata.wake`. A teammate's answer records it on the
+  // shared-answer audit event instead; an owner's answer is the owner acting for themself.
+  await recordSharedSessionAnswer(env, writer, { markerId, wake: agentWakeRecord(wake) });
   return { resolved: true, alreadyResolved: false, answer };
 }

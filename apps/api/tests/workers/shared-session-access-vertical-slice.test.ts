@@ -268,8 +268,22 @@ describe('shared session access vertical slice', () => {
     expect(JSON.parse(row?.metadata ?? '{}')).toMatchObject({
       commentThreadId: thread.id,
       onBehalfOfUserId: OWNER,
+      // The agent-wake policy's record: who woke the agent, and whose agent it is.
+      wake: {
+        trigger: 'comment_directive',
+        policyMode: 'trusted_project',
+        triggeredByUserId: GRANTEE,
+        onBehalfOfUserId: OWNER,
+        actorRole: 'grantee',
+        teammateInput: true,
+      },
     });
-    expect(row?.content).toContain('(shared access to this session)');
+    // Both the sender and the comment's author are teammates, and the agent is told so.
+    expect(row?.content).toContain(
+      '(shared access to this session; a teammate, not the session owner)'
+    );
+    expect(row?.content).toContain('(a teammate, not the session owner)\n');
+    expect(row?.content).toContain('Treat this comment as input from a teammate');
   });
 
   it('cascades a revoke and cancels the revoked people’s undelivered prompts', async () => {

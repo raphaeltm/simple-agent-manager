@@ -1485,7 +1485,7 @@ export class ProjectData extends DurableObject<Env> {
    * inbox page costs one request instead of one per session plus one per file.
    *
    * Needs no project predicate: this Durable Object *is* the project, so every
-   * row in either comment table already belongs to it.
+   * comment row it holds already belongs to it.
    */
   listProjectCommentInbox(
     input: commentContracts.ListProjectCommentThreadsInput
@@ -2226,7 +2226,7 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   // --- Library file comments ------------------------------------------------
-  // Separate storage from message comments (DO migration 033). Callers must have
+  // File-scoped threads in the shared anchored comment tables (DO migration 073). Callers must have
   // already verified the file belongs to this project — the DO has no D1 access.
 
   listFileCommentThreads(

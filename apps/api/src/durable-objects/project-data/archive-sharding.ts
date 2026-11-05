@@ -41,6 +41,10 @@ import {
   type ArchiveWriteReservation,
   estimateArchiveWrites,
 } from '../../project-data-archive/write-budget';
+import {
+  MESSAGE_COMMENT_REPLY_COUNT_SQL,
+  MESSAGE_COMMENT_THREAD_COUNT_SQL,
+} from './anchored-comment-scope';
 import * as compactArchive from './compact-archive';
 import { resolveMaterializationPassConfig } from './materialization';
 import * as messages from './messages';
@@ -789,17 +793,10 @@ function assertEligibleTerminalSource(
       'ProjectData archive refuses sessions with unresolved attention markers'
     );
   }
+  // Message comments cascade-delete with their messages, so a session that has any is refused.
   if (
-    countRows(
-      sql,
-      'SELECT COUNT(*) AS count FROM comment_threads WHERE session_id = ?',
-      sessionId
-    ) > 0 ||
-    countRows(
-      sql,
-      'SELECT COUNT(*) AS count FROM comment_replies WHERE session_id = ?',
-      sessionId
-    ) > 0
+    countRows(sql, MESSAGE_COMMENT_THREAD_COUNT_SQL, sessionId) > 0 ||
+    countRows(sql, MESSAGE_COMMENT_REPLY_COUNT_SQL, sessionId) > 0
   ) {
     throw new ProjectDataArchiveInvariantError(
       'message_comments_present',
@@ -910,9 +907,9 @@ export async function computeTerminalVersion(
     `chat_messages:${raw?.sha256 ?? (await tableAggregateSha256(sql, 'chat_messages', sessionId, pageRows))}`,
     `chat_messages_grouped:${await tableAggregateSha256(sql, 'chat_messages_grouped', sessionId, pageRows)}`,
     `tool_payload_archives:${await tableAggregateSha256(sql, 'tool_payload_archives', sessionId, pageRows)}`,
-    `comments:${countRows(sql, 'SELECT COUNT(*) AS count FROM comment_threads WHERE session_id = ?', sessionId)}:${countRows(
+    `comments:${countRows(sql, MESSAGE_COMMENT_THREAD_COUNT_SQL, sessionId)}:${countRows(
       sql,
-      'SELECT COUNT(*) AS count FROM comment_replies WHERE session_id = ?',
+      MESSAGE_COMMENT_REPLY_COUNT_SQL,
       sessionId
     )}`,
     `last_message_at:${lastMessageAt ?? 'null'}`,

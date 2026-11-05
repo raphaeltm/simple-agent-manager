@@ -94,13 +94,14 @@ threadId)`). Do not make the shared one accept `null`.
 ## The Same Bug at Runtime: a Transition That Releases the Column
 
 A schema change is not the only way a scoping column becomes NULL. A lifecycle transition can
-release it on purpose, and every predicate that keys on the column's *current* value then loses
+release it on purpose, and every predicate that keys on the column's _current_ value then loses
 its row.
 
 A VM wake (`createRecoveryTask` in `session-recovery.ts`) nulls the old workspace's
 `chat_session_id` so the conversation can bind to its replacement. Both deletion-preservation
 checks matched the workspace's snapshot by that binding, so a workspace under a wake had no
 preserved snapshot:
+
 - the deletion queue refused it forever;
 - the wake fence waited on that deletion;
 - the node's handoff refused the node until the stranded-node deadline (warm node
@@ -121,6 +122,22 @@ is invisible because the symptom is an absence.
   (`findPreservationSnapshot`) and `preserved-vm-retirement.ts`
   (`snapshotConversationMatchesSql`).
 
+## When One Table Is the Right Answer: Make the Scope Non-Null for Every Kind
+
+Requirement 1 prefers separate tables because the incident widened an EXISTING table and made
+its scope column nullable. Migration `073-anchored-comment-threads` later unified message and
+library-file comments into new shared tables without repeating that, and is the pattern to copy
+when more anchor kinds are coming (human tasks):
+
+- Create new tables; never relax the old ones. Copy rows across with ids preserved.
+- Every row carries NOT NULL `anchor_kind` and `scope_key`, so every predicate binds both. The
+  typed columns (`session_id`, `file_id`) are nullable, but per-kind CHECKs tie `scope_key` to
+  the right one and forbid the other kind's columns.
+- Every read and write takes a typed scope (`CommentAnchorScope`); there is no bare-id entry
+  point, and the predicate is one shared constant (`ANCHOR_SCOPE_PREDICATE`).
+- Tests: per-kind attacks including a file id equal to a session id, each conjunct deleted once
+  (`anchored-comment-scope-attacks.test.ts`).
+
 ## Quick Compliance Check
 
 Before merging a migration that relaxes a constraint:
@@ -138,8 +155,11 @@ Before merging a migration that relaxes a constraint:
 
 - Task: `tasks/archive/2026-08-22-library-file-commenting.md` (moves to
   `tasks/archive/` on completion)
-- Implementation: `apps/api/src/durable-objects/project-data/library-file-comments.ts`,
-  DO migration `033-library-file-comment-threads`
+- Implementation at the time: `apps/api/src/durable-objects/project-data/library-file-comments.ts`,
+  DO migration `033-library-file-comment-threads` (now frozen legacy storage)
+- Current shared-table implementation: `anchored-comment-scope.ts`, `anchored-comment-store.ts`,
+  `anchored-comment-mutations.ts`, DO migration `073-anchored-comment-threads`
+  (`anchored-comments-migration.ts`)
 - `.claude/rules/31-migration-safety.md` — why the recreation this forced is unrecoverable on a DO
 - `.claude/rules/51-server-side-node-class-gates.md` — the server must decide from values it verified
 - `.claude/rules/28-credential-resolution-fallback-tests.md` — SQL-predicate guards need a real SQL engine, and every attack case needs an owner control

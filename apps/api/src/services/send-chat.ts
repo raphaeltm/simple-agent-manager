@@ -4,6 +4,7 @@ import type * as v from 'valibot';
 import * as schema from '../db/schema';
 import { resolveDurableExecutionConfig } from '../durable-objects/project-data/durable-execution-config';
 import type { Env } from '../env';
+import { type AgentWakeGrant, agentWakeRecord } from '../lib/agent-wake-policy';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
@@ -14,8 +15,9 @@ import { enrichMessageWithMentions } from '../services/mention-enrichment';
 import * as projectDataService from '../services/project-data';
 import { cancelScheduledSessionSleep } from '../services/session-snapshots';
 import { buildVisibleInitialPrompt } from './agent-bootstrap-prompt';
+import { authorizeAgentWake } from './agent-wake-authorization';
 import { validateAttachments } from './attachment-upload';
-import { requireSessionWriter, type SessionWriterContext } from './session-access';
+import type { SessionWriterContext } from './session-access';
 import { buildSharedSessionSpeakerLine, loadSharedSessionNames } from './shared-session-names';
 
 export function validateSendChatContent(body: v.InferOutput<typeof SendChatMessageSchema>): string {
@@ -27,11 +29,14 @@ export function validateSendChatContent(body: v.InferOutput<typeof SendChatMessa
 export interface AuthorizedSendChat {
   project: schema.Project;
   writer: SessionWriterContext;
+  /** The agent-wake policy's grant for this prompt; recorded on the delivery. */
+  wake: AgentWakeGrant;
 }
 
 /**
- * The full authorization for a prompt: project capability and session writer (the owner, or a
- * grantee while both people stay active project members). Routes call it before an idempotency
+ * The full authorization for a prompt: project capability and the agent-wake policy
+ * (`authorizeAgentWake`: a session writer, i.e. the owner, or a grantee while both people stay
+ * active project members). Routes call it before an idempotency
  * receipt is reserved and hand the result to `sendChat`, so the checks run once per request.
  */
 export async function authorizeSendChat(
@@ -42,11 +47,15 @@ export async function authorizeSendChat(
 ): Promise<AuthorizedSendChat> {
   const db = drizzle(env.DATABASE, { schema });
   const project = await requireProjectCapability(db, projectId, userId, 'task:write');
-  const writer = await requireSessionWriter(env, projectId, sessionId, userId, {
+  const { writer, wake } = await authorizeAgentWake(env, {
+    projectId,
+    sessionId,
+    actorUserId: userId,
+    trigger: 'user_followup',
     db,
     action: 'send messages in this session',
   });
-  return { project, writer };
+  return { project, writer, wake };
 }
 
 function matchesRequest(
@@ -74,7 +83,7 @@ export async function sendChat(
 ) {
   const db = drizzle(env.DATABASE, { schema });
 
-  const { writer } = matchesRequest(authorized, userId, projectId, sessionId)
+  const { writer, wake } = matchesRequest(authorized, userId, projectId, sessionId)
     ? authorized
     : await authorizeSendChat(env, userId, projectId, sessionId);
   const shared = writer.role === 'grantee';
@@ -144,6 +153,7 @@ export async function sendChat(
       ttlMs: durableConfig.ttlMs,
       metadata: {
         userId,
+        wake: agentWakeRecord(wake),
         ...(names
           ? {
               senderName: names.senderName,

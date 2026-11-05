@@ -11,6 +11,7 @@
 import { MAILBOX_DEFAULTS } from '@simple-agent-manager/shared';
 
 import { log } from '../lib/logger';
+import { migrateAnchoredComments } from './project-data/anchored-comments-migration';
 import { migrateProjectSchedules } from './project-data/project-event-schedules-schema';
 import { migrateResourceLinks } from './project-data/resource-links-migration';
 import { parseMigrationName } from './project-data/row-schemas';
@@ -2638,6 +2639,15 @@ export const MIGRATIONS: Migration[] = [
       }
     },
   },
+  {
+    // One set of comment tables for every anchor kind, with the legacy message and
+    // library-file rows copied in (ids preserved) and a logged parity check. The legacy
+    // tables stay in place, frozen, as the recovery path. See anchored-comments-migration.ts.
+    name: '073-anchored-comment-threads',
+    run: migrateAnchoredComments,
+  },
+  // Retired before release: `072-anchored-comment-threads` ran on staging only (renumbered to
+  // 073 after another 072 merged first). That name may not be reused.
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects
   // that ran it keep an unused `message_upload_parts` table, since DO migrations
   // never drop tables, so neither that migration name nor that table name may be reused.

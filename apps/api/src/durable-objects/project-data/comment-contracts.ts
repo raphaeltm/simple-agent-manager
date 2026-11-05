@@ -65,8 +65,8 @@ export type ListCommentThreadsResult = {
 // ---------------------------------------------------------------------------
 // Library-file-anchored comments
 //
-// File comments are stored in their own tables (DO migration 033) and are
-// project+file scoped rather than session scoped. Keeping the inputs separate
+// File comments share the anchored comment tables with message comments (DO
+// migration 073) but are scoped to their file, not a session. Keeping the inputs separate
 // from the message-comment inputs above means no message-comment code path ever
 // has to treat `sessionId` as optional — which is what removed session isolation
 // in the first cut of this feature.
@@ -142,11 +142,13 @@ export type ProjectCommentThreadCandidate = {
   estimatedBytes: number;
 };
 
-/** One capped, `updated_at DESC`-ranked candidate page of a single anchor kind. */
+/** One capped window of the `updated_at DESC, id ASC` ranking across every anchor kind. */
 export type ListProjectCommentThreadCandidatesPage = {
   candidates: ProjectCommentThreadCandidate[];
-  /** Total rows matching the filter, ignoring the cap. */
+  /** Total rows matching the filter, ignoring the cap. Counted on the first window only. */
   totalCount: number;
+  /** More rows exist after this window. */
+  windowFull: boolean;
 };
 
 export type ProjectCommentSessionTopic = {

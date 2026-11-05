@@ -222,7 +222,9 @@ once, and a resolved thread can't be sent.
 </picture>
 
 The agent gets the comment quoted with the message it's about and who wrote it, after its current
-turn ends, like any message you send. In the chat it's labelled with who sent it, for example
+turn ends, like any message you send. When a teammate wrote the comment, or sent it from a chat
+shared with them, the agent is told it is a teammate's input rather than the chat owner's
+instruction. In the chat it's labelled with who sent it, for example
 **Grace Lee sent Rae Patel's comment to the agent**. Everyone else can comment, but not send: ask the chat's
 owner, or someone it's shared with, to send it, and @mention them so they get a **Mention**
 notification (a plain comment notification doesn't add to the bell's count).
