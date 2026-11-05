@@ -49,10 +49,11 @@ func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentS
 		if h.agentType == "openai-codex" {
 			slog.Info("ACP: skipping SetSessionMode for openai-codex (unsupported)", "mode", settings.PermissionMode)
 		} else {
-			slog.Info("ACP: setting session mode", "mode", settings.PermissionMode)
+			modeID := acpSessionModeID(h.agentType, settings.PermissionMode)
+			slog.Info("ACP: setting session mode", "mode", settings.PermissionMode, "modeId", modeID)
 			if _, err := h.acpConn.SetSessionMode(ctx, acpsdk.SetSessionModeRequest{
 				SessionId: h.sessionID,
-				ModeId:    acpsdk.SessionModeId(settings.PermissionMode),
+				ModeId:    acpsdk.SessionModeId(modeID),
 			}); err != nil {
 				slog.Warn("ACP SetSessionMode failed (non-fatal)", "mode", settings.PermissionMode, "error", err)
 				h.reportLifecycle("warn", "ACP SetSessionMode failed", map[string]interface{}{

@@ -45,6 +45,24 @@ func acpSessionMeta(agentType string) map[string]any {
 	return harnessLifecycleSessionMeta(agentType)
 }
 
+// antigravitySessionModes maps SAM permission modes to the session modes
+// agy-acp-server 1.4.5 advertises (default, auto_edit, yolo). It has no plan
+// mode, so Plan Mode is sent unchanged and the agent keeps asking.
+var antigravitySessionModes = map[string]string{
+	"acceptEdits":       "auto_edit",
+	"bypassPermissions": "yolo",
+}
+
+// acpSessionModeID translates a SAM permission mode to the agent's mode id.
+func acpSessionModeID(agentType, permissionMode string) string {
+	if agentType == "google-antigravity" {
+		if modeID, ok := antigravitySessionModes[permissionMode]; ok {
+			return modeID
+		}
+	}
+	return permissionMode
+}
+
 // acpClientFsCapabilities returns the file-system methods SAM serves to the agent.
 func acpClientFsCapabilities(agentType string) acpsdk.FileSystemCapabilities {
 	if agentType == "google-antigravity" {

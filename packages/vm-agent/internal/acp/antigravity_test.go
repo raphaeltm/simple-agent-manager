@@ -30,6 +30,7 @@ type fakeAntigravityACP struct {
 	fs            map[string]bool
 	modelValues   []string
 	sessionCalls  []string
+	modes         []string
 }
 
 func (f *fakeAntigravityACP) serve(reader io.Reader, writer io.Writer) {
@@ -122,6 +123,16 @@ func (f *fakeAntigravityACP) handle(method string, raw json.RawMessage) (any, ma
 			result["sessionId"] = "agy-session"
 		}
 		return result, nil
+	case acpsdk.AgentMethodSessionSetMode:
+		var params struct {
+			ModeID string `json:"modeId"`
+		}
+		_ = json.Unmarshal(raw, &params)
+		if !slices.Contains([]string{"default", "auto_edit", "yolo"}, params.ModeID) {
+			return nil, map[string]any{"code": -32602, "message": "unknown mode"}
+		}
+		f.modes = append(f.modes, params.ModeID)
+		return map[string]any{}, nil
 	case acpsdk.AgentMethodSessionSetConfigOption:
 		var params struct {
 			Value string `json:"value"`
@@ -156,6 +167,11 @@ type antigravityStartupResult struct {
 // session, model selection) against the fake agent.
 func startFakeAntigravity(t *testing.T, agentType string, authMethods []string, previousSessionID string) antigravityStartupResult {
 	t.Helper()
+	return startFakeAntigravityWithMode(t, agentType, authMethods, previousSessionID, "bypassPermissions")
+}
+
+func startFakeAntigravityWithMode(t *testing.T, agentType string, authMethods []string, previousSessionID, permissionMode string) antigravityStartupResult {
+	t.Helper()
 	workDir := t.TempDir()
 	t.Setenv("HOME", t.TempDir())
 
@@ -187,7 +203,7 @@ func startFakeAntigravity(t *testing.T, agentType string, authMethods []string, 
 		context.Background(),
 		agentType,
 		&agentCredential{credential: "test-gemini-key", credentialKind: "api-key"},
-		&agentSettingsPayload{Model: "gemini-3.1-pro"},
+		&agentSettingsPayload{Model: "gemini-3.1-pro", PermissionMode: permissionMode},
 		previousSessionID,
 		false,
 	)
@@ -238,6 +254,32 @@ func TestAntigravityStartupAuthenticatesWithGeminiKeyAndKeepsRepositoryClean(t *
 			}
 			if !slices.Contains(got.startup.envVars, "GEMINI_API_KEY=test-gemini-key") {
 				t.Fatal("GEMINI_API_KEY was not injected into the agent environment")
+			}
+		})
+	}
+}
+
+func TestAntigravityStartupMapsSAMPermissionModes(t *testing.T) {
+	for _, tc := range []struct {
+		permissionMode string
+		want           []string
+	}{
+		{permissionMode: "bypassPermissions", want: []string{"yolo"}},
+		{permissionMode: "acceptEdits", want: []string{"auto_edit"}},
+		{permissionMode: "default", want: nil},
+	} {
+		t.Run(tc.permissionMode, func(t *testing.T) {
+			got := startFakeAntigravityWithMode(t, "google-antigravity", antigravity145AuthMethods, "", tc.permissionMode)
+			if got.err != nil {
+				t.Fatalf("Antigravity startup failed: %v", got.err)
+			}
+			got.fake.mu.Lock()
+			defer got.fake.mu.Unlock()
+			if !slices.Equal(got.fake.modes, tc.want) {
+				t.Fatalf("session modes = %v, want %v", got.fake.modes, tc.want)
+			}
+			if len(got.fake.modelValues) != 1 {
+				t.Fatalf("model selections = %v, want one (startup reached settings)", got.fake.modelValues)
 			}
 		})
 	}
