@@ -47,15 +47,12 @@ import {
   ensureCapacitySourceCredentialAnchor,
   resolveOfferingsForSeed,
 } from './default-capacity-source-credentials';
-import {
-  listManagedGcpCredentialMirrors,
-  type ManagedGcpCredentialMirror,
-} from './gcp-credential-mirrors';
+import { type ManagedGcpCredentialMirror } from './gcp-credential-mirrors';
 import { reconcileManagedGcpPoolMirror } from './gcp-pool-mirror-reconciliation';
 import {
   listInstallationProviderCatalogSeeds,
   listProjectProviderCatalogSeeds,
-  listUserProviderCatalogSeeds,
+  listUserProviderCatalogSeedSnapshot,
   type ProviderCatalogCredentialSeed,
 } from './provider-catalogs';
 
@@ -97,7 +94,7 @@ export async function ensureUserDefaultPool(
   } satisfies ScopeIdentity;
   const seedSnapshotGeneration = await readCapacityPoolScopeGeneration(db, scope);
   await options.beforeCredentialSeedSelection?.({ scope, seedSnapshotGeneration });
-  const seeds = await listUserProviderCatalogSeeds(db, { userId });
+  const { seeds, managedGcpMirrors } = await listUserProviderCatalogSeedSnapshot(db, { userId });
   await options.afterCredentialSeedSelection?.({
     scope,
     seedSnapshotGeneration,
@@ -109,9 +106,7 @@ export async function ensureUserDefaultPool(
     seedSnapshotGeneration,
     catalogSeedsToCapacitySeeds(scope, seeds),
     options,
-    seeds.some((seed) => seed.provider === 'gcp' && !seed.externalSourceRef)
-      ? await listManagedGcpCredentialMirrors(db, userId)
-      : []
+    managedGcpMirrors
   );
 }
 
@@ -296,7 +291,8 @@ export async function ensureDefaultPoolForCredentialSeeds(
       pool.id,
       poolGuard,
       mirror,
-      seedSnapshotGeneration
+      seedSnapshotGeneration,
+      resolveCandidatePublishBatchSize(options)
     );
     if (repairedGuard) {
       poolGuard = repairedGuard;

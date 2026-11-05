@@ -39,6 +39,7 @@ import {
 import { encrypt } from '../../../src/services/encryption';
 import { listManagedGcpCredentialMirrors } from '../../../src/services/gcp-credential-mirrors';
 import { replaceUserGcpCredential } from '../../../src/services/gcp-credential-store';
+import { reconcileManagedGcpPoolMirror } from '../../../src/services/gcp-pool-mirror-reconciliation';
 import {
   capacityPlacementSnapshotForTaskStart,
   PlacementResolutionError,
@@ -6240,60 +6241,327 @@ describe('GCP managed compatibility copies', () => {
     return { db, options, canonical, mirror };
   }
 
-  it.each(['pool edit', 'source refresh', 'credential rotation'])(
-    'defers the entire repair on a concurrent %s',
-    async (race) => {
-      const { options, canonical, mirror } = await existingCopies();
-      const database = createSqliteD1WithBindLimit(sqlite!, 100);
-      const repairStatements = new WeakSet<object>();
-      let raced = false;
-      const racingDatabase = {
-        ...database,
-        prepare(query: string) {
-          const statement = database.prepare(query);
-          return {
-            ...statement,
-            bind(...values: unknown[]) {
-              const bound = statement.bind(...values);
-              if (query.includes('pair.legacyId')) repairStatements.add(bound);
-              return bound;
-            },
-          };
-        },
-        async batch(statements: D1PreparedStatement[]) {
-          if (!raced && statements.some((statement) => repairStatements.has(statement))) {
-            raced = true;
-            if (race === 'pool edit')
-              sqlite!.exec('UPDATE capacity_pools SET revision = revision + 1');
-            if (race === 'source refresh')
-              sqlite!
-                .prepare(
-                  'UPDATE capacity_sources SET source_generation = source_generation + 100 WHERE id = ?'
-                )
-                .run(mirror.id);
-            if (race === 'credential rotation')
-              sqlite!.exec("UPDATE cc_credentials SET iv = 'rotated'");
+  it('retains mirror protection when the relationship changes after seed selection', async () => {
+    const { db, options, canonical, mirror } = await existingCopies();
+    let changed = false;
+    await ensureDefaultCapacityPoolsForExistingCredentials(db, {
+      ...options,
+      afterCredentialSeedSelection: async ({ scope }) => {
+        if (scope.scope !== 'user') return;
+        changed = true;
+        sqlite!.exec("UPDATE cc_credentials SET iv = 'rotated-after-selection'");
+      },
+    });
+    expect(changed).toBe(true);
+    expect(
+      sqlite!.prepare('SELECT status FROM capacity_sources WHERE id = ?').get(mirror.id)
+    ).toEqual({ status: 'active' });
+    expect(
+      sqlite!
+        .prepare(
+          "SELECT count(*) count FROM capacity_pool_candidates WHERE capacity_source_id = ? AND status = 'active'"
+        )
+        .get(canonical.id)
+    ).toEqual({ count: 0 });
+  });
+
+  it('does not suppress a usable composable connection for a null legacy ID', async () => {
+    const db = await saveGcp(createDb());
+    sqlite!
+      .exec(`UPDATE cc_configurations SET settings_json = '{"managedBy":"legacy-gcp-credential"}';
+      UPDATE credentials SET id = NULL WHERE credential_type = 'cloud-provider'`);
+    expect(await listManagedGcpCredentialMirrors(db, 'user-1')).toEqual([]);
+    const seeds = await listUserProviderCatalogSeeds(db, { userId: 'user-1' });
+    expect(seeds.some((seed) => seed.externalSourceRef?.startsWith('cc_attachments:'))).toBe(true);
+  });
+
+  it('preserves canonical-only and mirror-only selections without enabling jointly excluded offerings', async () => {
+    const { db, options, canonical, mirror } = await existingCopies();
+    const rows = getRows<{ id: string; location: string }>(
+      `SELECT id, location FROM capacity_pool_candidates WHERE capacity_source_id = '${canonical.id}' ORDER BY id`
+    );
+    const locations = [...new Set(rows.map((row) => row.location))];
+    expect(locations.length).toBeGreaterThanOrEqual(3);
+    const [canonicalOnly, mirrorOnly] = locations;
+    sqlite!
+      .prepare(
+        "UPDATE capacity_pool_candidates SET status = CASE WHEN location = ? THEN 'active' ELSE 'deleted' END WHERE capacity_source_id = ?"
+      )
+      .run(canonicalOnly, canonical.id);
+    sqlite!
+      .prepare(
+        "UPDATE capacity_pool_candidates SET status = CASE WHEN location = ? THEN 'active' ELSE 'deleted' END WHERE capacity_source_id = ?"
+      )
+      .run(mirrorOnly, mirror.id);
+    const after = await ensureDefaultCapacityPoolsForExistingCredentials(db, options);
+    expect(after.user?.sources.map((source) => source.id)).toEqual([canonical.id]);
+    expect(
+      new Set(
+        after.user?.candidates
+          .filter((candidate) => candidate.status === 'active')
+          .map((candidate) => candidate.location)
+      )
+    ).toEqual(new Set([canonicalOnly, mirrorOnly]));
+    expect(
+      after.user?.candidates
+        .filter((candidate) => ![canonicalOnly, mirrorOnly].includes(candidate.location!))
+        .every((candidate) => candidate.status !== 'active')
+    ).toBe(true);
+  });
+
+  it.each([
+    'pool edit',
+    'source refresh',
+    'credential rotation',
+    'candidate insert',
+    'candidate price update',
+  ])('defers the entire repair on a concurrent %s', async (race) => {
+    const { options, canonical, mirror } = await existingCopies();
+    const database = createSqliteD1WithBindLimit(sqlite!, 100);
+    const repairStatements = new WeakSet<object>();
+    let raced = false;
+    const racingDatabase = {
+      ...database,
+      prepare(query: string) {
+        const statement = database.prepare(query);
+        return {
+          ...statement,
+          bind(...values: unknown[]) {
+            const bound = statement.bind(...values);
+            if (query.includes('pair.legacyId')) repairStatements.add(bound);
+            return bound;
+          },
+        };
+      },
+      async batch(statements: D1PreparedStatement[]) {
+        if (!raced && statements.some((statement) => repairStatements.has(statement))) {
+          raced = true;
+          if (race === 'pool edit')
+            sqlite!.exec('UPDATE capacity_pools SET revision = revision + 1');
+          if (race === 'source refresh')
+            sqlite!
+              .prepare(
+                'UPDATE capacity_sources SET source_generation = source_generation + 100 WHERE id = ?'
+              )
+              .run(mirror.id);
+          if (race === 'credential rotation')
+            sqlite!.exec("UPDATE cc_credentials SET iv = 'rotated'");
+          if (race === 'candidate insert') {
+            const columns = getRows<{ name: string }>(
+              'PRAGMA table_info(capacity_pool_candidates)'
+            ).map((column) => column.name);
+            sqlite!
+              .prepare(
+                `INSERT INTO capacity_pool_candidates (${columns.join(',')})
+                SELECT ${columns.map((column) => (column === 'id' ? "'racing-new-candidate'" : column)).join(',')}
+                FROM capacity_pool_candidates WHERE capacity_source_id = ? LIMIT 1`
+              )
+              .run(canonical.id);
           }
-          return database.batch(statements);
-        },
-      } as D1Database;
-      await ensureDefaultCapacityPoolsForExistingCredentials(
-        drizzleD1(racingDatabase, { schema }),
-        options
-      );
-      expect(raced).toBe(true);
-      expect(
-        sqlite!.prepare('SELECT status FROM capacity_sources WHERE id = ?').get(mirror.id)
-      ).toEqual({ status: 'active' });
-      expect(
-        sqlite!
-          .prepare(
-            "SELECT count(*) count FROM capacity_pool_candidates WHERE capacity_source_id = ? AND status = 'active'"
-          )
-          .get(canonical.id)
-      ).toEqual({ count: 0 });
-    }
-  );
+          if (race === 'candidate price update')
+            sqlite!
+              .prepare(
+                'UPDATE capacity_pool_candidates SET provider_instance_price_hourly_micros = 999 WHERE capacity_source_id = ?'
+              )
+              .run(canonical.id);
+        }
+        return database.batch(statements);
+      },
+    } as D1Database;
+    await ensureDefaultCapacityPoolsForExistingCredentials(
+      drizzleD1(racingDatabase, { schema }),
+      options
+    );
+    expect(raced).toBe(true);
+    expect(
+      sqlite!.prepare('SELECT status FROM capacity_sources WHERE id = ?').get(mirror.id)
+    ).toEqual({ status: 'active' });
+    expect(
+      sqlite!
+        .prepare(
+          "SELECT count(*) count FROM capacity_pool_candidates WHERE capacity_source_id = ? AND status = 'active'"
+        )
+        .get(canonical.id)
+    ).toEqual({ count: 0 });
+  });
+
+  async function repairInputs(db: ReturnType<typeof createDb>, canonicalId: string) {
+    const [pool] = await db.select().from(schema.capacityPools);
+    const source = (await db.select().from(schema.capacitySources)).find(
+      (row) => row.id === canonicalId
+    )!;
+    const [mirror] = await listManagedGcpCredentialMirrors(db, 'user-1');
+    return {
+      scope: { scope: 'user' as const, ownerUserId: 'user-1', ownerProjectId: null },
+      pool: pool!,
+      mirror: mirror!,
+      guard: {
+        revision: pool!.revision,
+        updatedAt: pool!.updatedAt,
+        status: pool!.status,
+        sourceGenerations: [{ id: source.id, generation: source.sourceGeneration }],
+      },
+    };
+  }
+
+  it('does not adopt a newer canonical publisher that has not completed its candidates', async () => {
+    const { db, canonical, mirror } = await existingCopies();
+    const input = await repairInputs(db, canonical.id);
+    sqlite!
+      .prepare('UPDATE capacity_sources SET source_generation = source_generation + 1 WHERE id = ?')
+      .run(canonical.id);
+    expect(
+      await reconcileManagedGcpPoolMirror(
+        db,
+        input.scope,
+        input.pool.id,
+        input.guard,
+        input.mirror,
+        Number.MAX_SAFE_INTEGER
+      )
+    ).toBeNull();
+    expect(
+      sqlite!.prepare('SELECT status FROM capacity_sources WHERE id = ?').get(mirror.id)
+    ).toEqual({ status: 'active' });
+  });
+
+  it('refreshes retained matching mirror catalog rows while leaving unmatched overrides intact', async () => {
+    const { db, canonical, mirror } = await existingCopies();
+    const oldRows = getRows<{
+      id: string;
+      location: string;
+      workload_role: string;
+      provider_instance_type: string;
+    }>(
+      `SELECT * FROM capacity_pool_candidates WHERE capacity_source_id = '${mirror.id}' ORDER BY id`
+    );
+    const unmatched = oldRows[0]!;
+    const matched = oldRows[1]!;
+    sqlite!
+      .prepare(
+        "UPDATE capacity_pool_candidates SET provider_instance_image = 'custom-image' WHERE id = ?"
+      )
+      .run(unmatched.id);
+    const preserved = sqlite!
+      .prepare('SELECT * FROM capacity_pool_candidates WHERE id = ?')
+      .get(unmatched.id);
+    const originalAuthority = sqlite!
+      .prepare('SELECT authority_generation FROM capacity_sources WHERE id = ?')
+      .get(mirror.id);
+    sqlite!
+      .prepare(
+        `UPDATE capacity_pool_candidates SET provider_instance_price_hourly_micros = 98765,
+      catalog_availability = 'last-known-unavailable' WHERE capacity_source_id = ?`
+      )
+      .run(canonical.id);
+    const input = await repairInputs(db, canonical.id);
+    const result = await reconcileManagedGcpPoolMirror(
+      db,
+      input.scope,
+      input.pool.id,
+      input.guard,
+      input.mirror,
+      Number.MAX_SAFE_INTEGER,
+      2
+    );
+    expect(result).not.toBeNull();
+    expect(
+      sqlite!.prepare('SELECT * FROM capacity_pool_candidates WHERE id = ?').get(unmatched.id)
+    ).toEqual(preserved);
+    expect(
+      sqlite!
+        .prepare(
+          'SELECT provider_instance_price_hourly_micros, catalog_availability FROM capacity_pool_candidates WHERE id = ?'
+        )
+        .get(matched.id)
+    ).toEqual({
+      provider_instance_price_hourly_micros: 98765,
+      catalog_availability: 'last-known-unavailable',
+    });
+    expect(
+      sqlite!.prepare('SELECT status FROM capacity_sources WHERE id = ?').get(mirror.id)
+    ).toEqual({ status: 'active' });
+    expect(
+      sqlite!
+        .prepare('SELECT authority_generation FROM capacity_sources WHERE id = ?')
+        .get(mirror.id)
+    ).toEqual(originalAuthority);
+    expect(
+      await reconcileManagedGcpPoolMirror(
+        db,
+        input.scope,
+        input.pool.id,
+        result!,
+        input.mirror,
+        Number.MAX_SAFE_INTEGER,
+        2
+      )
+    ).toBeNull();
+    expect(
+      sqlite!
+        .prepare(
+          "SELECT count(*) count FROM capacity_pool_candidates WHERE capacity_source_id = ? AND status = 'active'"
+        )
+        .get(canonical.id)
+    ).toEqual({ count: 0 });
+  });
+
+  it('bounds authority payloads with a small publication budget and thousands of historical rows', async () => {
+    const { db, canonical, mirror } = await existingCopies();
+    const columns = getRows<{ name: string }>('PRAGMA table_info(capacity_pool_candidates)').map(
+      (column) => column.name
+    );
+    sqlite!
+      .prepare(
+        `WITH RECURSIVE history(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM history WHERE n < 2000)
+      INSERT INTO capacity_pool_candidates (${columns.join(',')})
+      SELECT ${columns.map((column) => (column === 'id' ? "'historical-' || history.n" : column === 'provider_instance_type' ? "'historical-type-' || history.n" : 'base.' + column)).join(',')}
+      FROM history CROSS JOIN (SELECT * FROM capacity_pool_candidates WHERE capacity_source_id = ? LIMIT 1) base`
+      )
+      .run(canonical.id);
+    const input = await repairInputs(db, canonical.id);
+    const database = createSqliteD1WithBindLimit(sqlite!, 100);
+    const payloadLengths: number[] = [];
+    const tracked = {
+      ...database,
+      prepare(query: string) {
+        const statement = database.prepare(query);
+        return {
+          ...statement,
+          bind(...values: unknown[]) {
+            if (
+              query.startsWith('update "capacity_pool_candidates"') &&
+              query.includes('json_each')
+            ) {
+              for (const value of values)
+                if (typeof value === 'string' && value.startsWith('[{'))
+                  payloadLengths.push(JSON.parse(value).length);
+            }
+            return statement.bind(...values);
+          },
+        };
+      },
+    } as D1Database;
+    await reconcileManagedGcpPoolMirror(
+      drizzleD1(tracked, { schema }),
+      input.scope,
+      input.pool.id,
+      input.guard,
+      input.mirror,
+      Number.MAX_SAFE_INTEGER,
+      2
+    );
+    expect(payloadLengths.length).toBeGreaterThan(1);
+    expect(Math.max(...payloadLengths)).toBeLessThanOrEqual(2);
+    expect(
+      sqlite!.prepare('SELECT status FROM capacity_sources WHERE id = ?').get(mirror.id)
+    ).toEqual({ status: 'disabled' });
+    expect(
+      sqlite!
+        .prepare("SELECT count(*) count FROM capacity_pool_candidates WHERE id LIKE 'historical-%'")
+        .get()
+    ).toEqual({ count: 2000 });
+  });
 
   it('rolls back selection transfer if retirement fails', async () => {
     const { db, options, canonical, mirror } = await existingCopies();

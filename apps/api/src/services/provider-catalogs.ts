@@ -20,4 +20,5 @@ export {
   listInstallationProviderCatalogSeeds,
   listProjectProviderCatalogSeeds,
   listUserProviderCatalogSeeds,
+  listUserProviderCatalogSeedSnapshot,
 } from './provider-catalogs-seeds';

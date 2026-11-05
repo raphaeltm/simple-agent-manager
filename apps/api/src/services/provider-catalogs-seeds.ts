@@ -9,7 +9,10 @@ import {
   platformCredentialReference,
   timestampVersion,
 } from './default-capacity-pool-helpers';
-import { listManagedGcpCredentialMirrors } from './gcp-credential-mirrors';
+import {
+  listManagedGcpCredentialMirrors,
+  type ManagedGcpCredentialMirror,
+} from './gcp-credential-mirrors';
 import { type Db, type ProviderCatalogCredentialSeed } from './provider-catalogs-common';
 
 export async function listAuthenticatedProviderCatalogSeeds(
@@ -23,6 +26,17 @@ export async function listUserProviderCatalogSeeds(
   db: Db,
   input: { userId: string; activeOnly?: boolean }
 ): Promise<ProviderCatalogCredentialSeed[]> {
+  return (await listUserProviderCatalogSeedSnapshot(db, input)).seeds;
+}
+
+/** Carry the exact mirror exclusions into pool reconciliation to prevent stale retirement. */
+export async function listUserProviderCatalogSeedSnapshot(
+  db: Db,
+  input: { userId: string; activeOnly?: boolean }
+): Promise<{
+  seeds: ProviderCatalogCredentialSeed[];
+  managedGcpMirrors: ManagedGcpCredentialMirror[];
+}> {
   const seeds = dedupeCatalogSeeds([
     ...(await listComposableProviderCatalogSeeds(db, {
       userId: input.userId,
@@ -35,14 +49,18 @@ export async function listUserProviderCatalogSeeds(
       activeOnly: input.activeOnly,
     })),
   ]);
-  if (!seeds.some((seed) => seed.provider === 'gcp' && seed.externalSourceRef)) return seeds;
+  if (!seeds.some((seed) => seed.provider === 'gcp' && seed.externalSourceRef))
+    return { seeds, managedGcpMirrors: [] };
   const mirrors = await listManagedGcpCredentialMirrors(db, input.userId);
   const mirroredAttachments = new Set(
     mirrors.map((mirror) => composableAttachmentReference(mirror.attachmentId))
   );
-  return seeds.filter(
-    (seed) => !seed.externalSourceRef || !mirroredAttachments.has(seed.externalSourceRef)
-  );
+  return {
+    seeds: seeds.filter(
+      (seed) => !seed.externalSourceRef || !mirroredAttachments.has(seed.externalSourceRef)
+    ),
+    managedGcpMirrors: mirrors,
+  };
 }
 
 export async function listProjectProviderCatalogSeeds(

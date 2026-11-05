@@ -31,6 +31,7 @@ export function managedGcpCredentialMirrorsQuery(userId: string) {
       AND credential.owner_id = attachment.user_id AND credential.kind = 'cloud-provider'
       AND attachment.is_active = 1 AND configuration.is_active = 1
       AND credential.is_active = 1 AND legacy.is_active = 1
+      AND legacy.id IS NOT NULL
       AND credential.encrypted_token != '' AND credential.iv != ''
       AND CASE WHEN json_valid(configuration.settings_json)
         THEN json_extract(configuration.settings_json, '$.managedBy') END = 'legacy-gcp-credential'
@@ -47,6 +48,7 @@ export function managedGcpCredentialMirrorsQuery(userId: string) {
       )`;
 }
 
-export async function listManagedGcpCredentialMirrors(db: Db, userId: string) {
+/** Read confirmed compatibility pairs without exposing encrypted credential bytes. */
+export function listManagedGcpCredentialMirrors(db: Db, userId: string) {
   return db.all<ManagedGcpCredentialMirror>(managedGcpCredentialMirrorsQuery(userId));
 }

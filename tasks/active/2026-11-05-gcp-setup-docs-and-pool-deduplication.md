@@ -38,3 +38,8 @@ Code: gcp-credential-store.ts, provider-catalogs-seeds.ts, default-capacity-pool
 
 ## Post-mortem
 Random-ID managed dual writes introduced by b00b2952d (#1612) were missed by a catalog reader that only recognized older deterministic mirror prefixes. Writer-only storage tests did not assert logical source count downstream. Scoped rule 44 now requires reader inventory and real writer-to-consumer count tests with distinct-account controls. Runtime repair preserves selections and references under atomic revision/source/identity fences.
+
+## CodeRabbit follow-up
+PR #2540 CI passed at head 0ebe85960. CodeRabbit was requested once after green CI and returned five findings after an active review. Shared seed/mirror snapshot and non-null legacy identity fixes have regression coverage. The repair now compares an ordered candidate snapshot before acquiring a unique source-generation lease; authority updates use bounded chunks in one atomic batch. Matched retained candidates refresh catalog state independently of source-wide retirement, while unmatched overrides remain unchanged. Canonical-only selections now have explicit union coverage. Revised checks and follow-up staging verification are required before merge; the earlier staging result applies to the original runtime only.
+
+Follow-up local validation: 28 focused GCP regressions and all 138 default-capacity-pools tests pass, including 2,000 historical rows with a two-row update chunk budget, candidate insertion/update races, source publication ownership, retained catalog freshness/idempotence, and preserved canonical-only selections. Independent correctness review passes.
