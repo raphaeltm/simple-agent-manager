@@ -97,7 +97,7 @@ either way, and a target with no running turn gets an ordinary wake prompt (veri
   is retired. Using `hasPendingWake` here, not `hasQueuedWake`, keeps a matched-but-unbatched
   pre-deploy notice from being dropped.
 - Self-publication suppression (`isSelfOriginatedChannelWake`) keys on `resolved =
-  queued_for_prompt_delivery`, so it already covers `runtime_steer` follows; the echo test now
+queued_for_prompt_delivery`, so it already covers `runtime_steer` follows; the echo test now
   includes a steering follower.
 - Discrimination (Workers): managed mode reverted to queue → 4/4 red; reuse ignoring mode → the
   two rotation tests red; old drain rule (queued only) → the drain test red; service default
@@ -111,11 +111,11 @@ Each VM target chat created `create_project_event_subscription` on `feature.evst
 Instant chat ("Claude Code Chat") called `send_durable_message` to the target task and
 `publish_channel_event` on that channel. Transcript rows read back through the API:
 
-| Agent (VM) | Peer notice | Channel event wake | Same turn |
-| --- | --- | --- | --- |
-| Claude Code (session 75dd7e53) | `intent=steer outcome=steered`, 18:49:57 | steered, 18:50:00 (`runtime_steer` prefix) | ran PEERSTEER, EVENTSTEER after step4, before step5 |
-| Codex C2.3 (session 2031f7fd) | steered, 19:13:03 | steered, 19:13:06 | ran both after step2, before step3 |
-| OpenCode sam-s1 (session 77c4a1ea) | steered, 19:04:46 | steered, 19:04:49 | ran both after step3, before step4 |
+| Agent (VM)                         | Peer notice                              | Channel event wake                         | Same turn                                           |
+| ---------------------------------- | ---------------------------------------- | ------------------------------------------ | --------------------------------------------------- |
+| Claude Code (session 75dd7e53)     | `intent=steer outcome=steered`, 18:49:57 | steered, 18:50:00 (`runtime_steer` prefix) | ran PEERSTEER, EVENTSTEER after step4, before step5 |
+| Codex C2.3 (session 2031f7fd)      | steered, 19:13:03                        | steered, 19:13:06                          | ran both after step2, before step3                  |
+| OpenCode sam-s1 (session 77c4a1ea) | steered, 19:04:46                        | steered, 19:04:49                          | ran both after step3, before step4                  |
 
 The event wake carrying the `runtime_steer` prefix shows that the subscription created without
 `requestedDelivery` defaulted to `runtime_steer`. Each agent read both events with `get_event`
