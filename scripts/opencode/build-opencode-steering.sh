@@ -32,11 +32,11 @@ cmp -s "$patch" <(git -C "$source_dir" diff -- packages/cli)
 
 (
   cd "$source_dir"
-  # Lifecycle scripts stay on: upstream's build needs its root postinstall (fix-node-pty) and
-  # the install scripts of its trustedDependencies (esbuild, node-pty, protobufjs, electron).
-  # Bun runs dependency scripts only for that allowlist, the lockfile is frozen, and the
-  # source is the pinned, verified commit above.
-  bun install --frozen-lockfile
+  # No dependency lifecycle scripts run. The only install step the build needs is upstream's
+  # root postinstall, which marks node-pty's prebuilt spawn-helper executable; run it
+  # explicitly. The archives this produces match the published digests (opencode_install.sh).
+  bun install --frozen-lockfile --ignore-scripts
+  bun run --cwd packages/core fix-node-pty
   cd packages/cli
   bun run typecheck
   bun test --timeout 30000 test/acp
