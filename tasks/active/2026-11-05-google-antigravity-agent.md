@@ -72,9 +72,9 @@ Probed the real `agy-acp-server` 1.4.5 Linux x86_64 release locally (`.tmp/agy/p
       store) restore-rejecting
 - [x] Installer test that runs the real script (digest, arch, musl, replace, cleanup)
 - [x] Playwright: Antigravity connect step at 375px and 1280px
-- [ ] Marketing surfaces (`integrations/index.astro`, `Comparison.astro`, `Roadmap.astro`,
-      `reference/roadmap.md`, `guides/idea-execution.md`): deliberately deferred until staging
-      shows a real prompt answered, so the site does not claim an unverified agent
+- [x] Marketing surfaces (`integrations/index.astro`, `Comparison.astro`, `Roadmap.astro`,
+      `reference/roadmap.md`, `guides/idea-execution.md`, plus an integrations entry in
+      `apps/www/src/data/integrations.ts`): added after staging showed real replies
 
 ## Acceptance Criteria
 

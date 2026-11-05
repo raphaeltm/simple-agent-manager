@@ -56,6 +56,8 @@ SAM downloads the release from Google when a workspace or Instant session first 
 
 This release writes a `skills/system/run-workflow/SKILL.md` file into the repository when a session starts, so SAM turns off the tool that does it.
 
+Antigravity does not support live steering: a message sent with **Steer** while it is working is sent as the next message when the turn ends. Google may answer "This model is currently experiencing high demand" for a busy model; pick another Gemini model in the profile if that happens.
+
 ### Mistral Vibe
 
 | Property      | Value                                                  |

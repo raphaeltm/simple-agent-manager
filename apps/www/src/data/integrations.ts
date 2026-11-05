@@ -194,6 +194,45 @@ export const integrations: Integration[] = [
     models: ['Gemini 3.8 Flash', 'Gemini 3.1 Pro Preview', 'Gemini 3.5 Flash-Lite'],
   },
   {
+    slug: 'google-antigravity',
+    name: 'Google Antigravity',
+    shortName: 'Antigravity',
+    category: 'ai-agents',
+    categoryLabel: 'AI Coding Agents',
+    tagline: "Run Google's Antigravity agent on your cloud",
+    description:
+      "Google Antigravity is Google's agentic coding tool. SAM runs its ACP server in your devcontainer or an Instant session, signs it in with your Gemini API key, and gives it Gemini models to work with.",
+    color: '#1A73E8',
+    logoPath: '/images/integrations/google-gemini.svg',
+    seoTitle: 'Run Google Antigravity in Cloud Workspaces | SAM',
+    seoDescription:
+      'Run Google Antigravity coding agents on your own infrastructure or in Instant sessions. SAM installs Antigravity, signs it in with your Gemini API key, and manages the agent lifecycle.',
+    features: [
+      { title: 'Gemini Models', description: 'Choose Gemini 3.8 Flash, Gemini 3.5 Flash, Gemini 3.1 Pro or another Gemini model Antigravity offers.' },
+      { title: 'Gemini API Key Auth', description: 'Add a Gemini API key from Google AI Studio and SAM signs Antigravity in for you.' },
+      { title: 'Verified Install', description: 'SAM downloads the pinned Antigravity release from Google on first use and checks its SHA-256 digest.' },
+      { title: 'Permission Modes', description: "SAM's permission modes map to Antigravity's own modes, so Bypass Permissions runs unattended and Manual asks before acting." },
+    ],
+    howItWorks: [
+      { step: 'Add Your API Key', description: 'Enter your Gemini API key under Google Antigravity in SAM settings.' },
+      { step: 'Select Google Antigravity', description: 'Choose Google Antigravity as the agent in a profile or project.' },
+      { step: 'Describe Your Task', description: 'Start a chat or submit a task in plain language.' },
+      { step: 'Agent Executes', description: 'SAM installs Antigravity on first use, starts it in your workspace, and runs your task.' },
+    ],
+    useCases: [
+      { title: 'Trying Google\'s agent on real repos', description: 'Compare Antigravity with Gemini CLI, Claude Code or Codex on the same project without installing anything locally.' },
+      { title: 'Gemini-powered tasks in parallel', description: 'Run several Antigravity chats at once, each in its own workspace.' },
+    ],
+    faq: [
+      { question: 'Which models are available?', answer: 'Gemini models only. Antigravity offers Claude and GPT models only to clients Google recognizes by name, and SAM is not one of them yet.' },
+      { question: 'Can I send a message while Antigravity is working?', answer: 'Yes. Antigravity cannot take a message into a running turn, so SAM sends it as the next message when the current turn ends.' },
+      { question: 'Does it work in Instant sessions?', answer: 'Yes. The first start downloads about 320 MB, so it takes longer than later starts.' },
+    ],
+    relatedSlugs: ['gemini-cli', 'claude-code', 'gcp'],
+    externalUrl: 'https://antigravity.google',
+    models: ['Gemini 3.8 Flash', 'Gemini 3.5 Flash', 'Gemini 3.1 Pro'],
+  },
+  {
     slug: 'mistral-vibe',
     name: 'Mistral Vibe',
     shortName: 'Vibe',
