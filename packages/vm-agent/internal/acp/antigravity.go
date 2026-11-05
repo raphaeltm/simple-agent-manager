@@ -17,7 +17,7 @@ var antigravityInstallScript string
 // antigravityVersionCheckCommand checks the launcher the installer writes.
 // agy_acp_server.par has no flag that prints its release version.
 func antigravityVersionCheckCommand() string {
-	return `grep -qx '# sam-antigravity-version=` + antigravityVersion + `' "$(command -v agy-acp)"`
+	return `grep -Fqx '# sam-antigravity-version=` + antigravityVersion + `' "$(command -v agy-acp)"`
 }
 
 // antigravityAuthMethodID selects Gemini API key auth. Antigravity refuses
@@ -47,20 +47,27 @@ func acpSessionMeta(agentType string) map[string]any {
 
 // antigravitySessionModes maps SAM permission modes to the session modes
 // agy-acp-server 1.4.5 advertises (default, auto_edit, yolo). It has no plan
-// mode, so Plan Mode is sent unchanged and the agent keeps asking.
+// mode; its default mode asks before acting, the closest safe equivalent.
+// Every mode is sent explicitly, including default: a loaded session may
+// otherwise keep a more permissive mode from an earlier run.
 var antigravitySessionModes = map[string]string{
+	"default":           "default",
+	"plan":              "default",
 	"acceptEdits":       "auto_edit",
 	"bypassPermissions": "yolo",
 }
 
 // acpSessionModeID translates a SAM permission mode to the agent's mode id.
-func acpSessionModeID(agentType, permissionMode string) string {
+// ok is false when no SetSessionMode request should be sent.
+func acpSessionModeID(agentType, permissionMode string) (modeID string, ok bool) {
 	if agentType == "google-antigravity" {
-		if modeID, ok := antigravitySessionModes[permissionMode]; ok {
-			return modeID
-		}
+		modeID, ok = antigravitySessionModes[permissionMode]
+		return modeID, ok
 	}
-	return permissionMode
+	if permissionMode == "" || permissionMode == "default" {
+		return "", false
+	}
+	return permissionMode, true
 }
 
 // acpClientFsCapabilities returns the file-system methods SAM serves to the agent.

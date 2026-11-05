@@ -42,7 +42,10 @@ mkdir "$stage/release"
 unzip -q "$stage/archive.zip" agy_acp_server.par localharness_external -d "$stage/release"
 rm "$stage/archive.zip"
 chmod 755 "$stage/release/agy_acp_server.par" "$stage/release/localharness_external"
-rm -rf "$lib/$version"
+# Keep a working release in place until its replacement has moved in.
+if [ -e "$lib/$version" ]; then
+  mv "$lib/$version" "$stage/previous"
+fi
 mv "$stage/release" "$lib/$version"
 # The server finds its harness beside its real path, not through a symlink, so
 # launch through a script that names the harness explicitly.
@@ -55,10 +58,12 @@ exec '$lib/$version/agy_acp_server.par' "\$@"
 EOF
 chmod 755 "$stage/agy-acp"
 mv -f "$stage/agy-acp" "$bin/agy-acp"
-# Remove superseded releases; each is about 1 GB.
-for old in "$lib"/*; do
-  [ "$old" = "$lib/$version" ] || rm -rf "$old"
+# Remove superseded releases (about 1 GB each) and stages left by killed
+# installs. Installs are serialized by the VM agent, so no other stage is live.
+for old in "$lib"/* "$lib"/.install.*; do
+  [ -e "$old" ] || continue
+  [ "$old" = "$lib/$version" ] || [ "$old" = "$stage" ] || rm -rf "$old"
 done
 hash -r
 # Validate the command that the agent launcher will resolve, not just the stage.
-grep -qx "# sam-antigravity-version=$version" "$(command -v agy-acp)"
+grep -Fqx "# sam-antigravity-version=$version" "$(command -v agy-acp)"

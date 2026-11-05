@@ -447,9 +447,11 @@ func TestSnapshotHomeArchiveValidationStillAcceptsRegenerableCaches(t *testing.T
 	if _, err := validateSnapshotHomeTar(accepted, 1<<20, 1<<30); err != nil {
 		t.Fatalf("archive from an older agent with regenerable caches was rejected: %v", err)
 	}
-	rejected := writeSnapshotTestTar(t, ".ssh/id_ed25519")
-	if _, err := validateSnapshotHomeTar(rejected, 1<<20, 1<<30); err == nil || !strings.Contains(err.Error(), "excluded path") {
-		t.Fatalf("credential path validation error = %v, want excluded-path rejection", err)
+	for _, credential := range []string{".ssh/id_ed25519", ".config/antigravity/plugin-secrets.json"} {
+		rejected := writeSnapshotTestTar(t, credential)
+		if _, err := validateSnapshotHomeTar(rejected, 1<<20, 1<<30); err == nil || !strings.Contains(err.Error(), "excluded path") {
+			t.Fatalf("%s validation error = %v, want excluded-path rejection", credential, err)
+		}
 	}
 }
 

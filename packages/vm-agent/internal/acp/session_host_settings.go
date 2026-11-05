@@ -43,13 +43,12 @@ func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentS
 		}
 	}
 
-	if settings.PermissionMode != "" && settings.PermissionMode != "default" {
+	if modeID, ok := acpSessionModeID(h.agentType, settings.PermissionMode); ok {
 		// Codex (openai-codex) does not support SetSessionMode — skip to avoid
 		// a guaranteed error on every session start.
 		if h.agentType == "openai-codex" {
 			slog.Info("ACP: skipping SetSessionMode for openai-codex (unsupported)", "mode", settings.PermissionMode)
 		} else {
-			modeID := acpSessionModeID(h.agentType, settings.PermissionMode)
 			slog.Info("ACP: setting session mode", "mode", settings.PermissionMode, "modeId", modeID)
 			if _, err := h.acpConn.SetSessionMode(ctx, acpsdk.SetSessionModeRequest{
 				SessionId: h.sessionID,

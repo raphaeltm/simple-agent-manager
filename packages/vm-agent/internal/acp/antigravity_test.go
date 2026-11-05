@@ -266,7 +266,8 @@ func TestAntigravityStartupMapsSAMPermissionModes(t *testing.T) {
 	}{
 		{permissionMode: "bypassPermissions", want: []string{"yolo"}},
 		{permissionMode: "acceptEdits", want: []string{"auto_edit"}},
-		{permissionMode: "default", want: nil},
+		{permissionMode: "default", want: []string{"default"}},
+		{permissionMode: "plan", want: []string{"default"}},
 	} {
 		t.Run(tc.permissionMode, func(t *testing.T) {
 			got := startFakeAntigravityWithMode(t, "google-antigravity", antigravity145AuthMethods, "", tc.permissionMode)

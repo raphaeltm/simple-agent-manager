@@ -51,28 +51,48 @@ Probed the real `agy-acp-server` 1.4.5 Linux x86_64 release locally (`.tmp/agy/p
 
 ## Implementation Checklist
 
-- [ ] Shared: add `google-antigravity` to `AGENT_TYPE_VALUES`, `AGENT_CATALOG`,
+- [x] Shared: add `google-antigravity` to `AGENT_TYPE_VALUES`, `AGENT_CATALOG`,
       `HARNESS_CAPABILITIES`, model catalog; tests
-- [ ] Install manifest entry (new `binary-archive` method) + quality check support
-- [ ] VM agent: `antigravity_install.sh` (pinned, sha256-verified, launcher script), embedded
+- [x] Install manifest entry (new `binary-archive` method) + quality check support
+- [x] VM agent: `antigravity_install.sh` (pinned, sha256-verified, launcher script), embedded
       in Go; `getAgentCommandInfo` case; extra env
-- [ ] VM agent: per-agent ACP auth method (`gemini-api-key`) called after initialize when
+- [x] VM agent: per-agent ACP auth method (`gemini-api-key`) called after initialize when
       advertised
-- [ ] VM agent: per-agent session `_meta` disabling `run_workflow` on new and load
-- [ ] VM agent: per-agent client fs capability (disabled for Antigravity)
-- [ ] VM agent tests for each of the above
-- [ ] Instant image: add `unzip`
-- [ ] Web: model placeholders and provider meta
-- [ ] Docs: agents guide and other agent lists
-- [ ] Quality: lint, typecheck, test, build, Go tests, manifest check
+- [x] VM agent: per-agent session `_meta` disabling `run_workflow` on new and load
+- [x] VM agent: per-agent client fs capability (disabled for Antigravity)
+- [x] VM agent tests for each of the above
+- [x] Instant image: add `unzip`
+- [x] Web: model placeholders and provider meta
+- [x] Docs: agents guide and other agent lists
+- [x] Quality: lint, typecheck, test, build, Go tests, manifest check
+- [x] Map SAM permission modes to Antigravity session modes (found during docs work: without
+      it Antigravity stays in `default` and asks before every tool call); send every mode
+      explicitly so a loaded session cannot keep `yolo`
+- [x] Snapshot: `.gemini/antigravity/bin` capture-only; `.config/antigravity` (plugin secret
+      store) restore-rejecting
+- [x] Installer test that runs the real script (digest, arch, musl, replace, cleanup)
+- [x] Playwright: Antigravity connect step at 375px and 1280px
+- [ ] Marketing surfaces (`integrations/index.astro`, `Comparison.astro`, `Roadmap.astro`,
+      `reference/roadmap.md`, `guides/idea-execution.md`): deliberately deferred until staging
+      shows a real prompt answered, so the site does not claim an unverified agent
 
 ## Acceptance Criteria
 
-- [ ] `google-antigravity` can be selected and configured with a Gemini API key and a model
-- [ ] The VM agent installs Antigravity, verifies the archive digest, launches it, authenticates
+- [x] `google-antigravity` can be selected and configured with a Gemini API key and a model
+- [x] The VM agent installs Antigravity, verifies the archive digest, launches it, authenticates
       with `gemini-api-key`, and opens a session without writing into the repo
 - [ ] Draft PR with green CI
 - [ ] (After Raphaël connects a key) staging: a real prompt answered by Antigravity
+
+## Verification Notes
+
+- Real binary probes (`.tmp/agy/probe.py`): auth requirement, `gemini-api-key` authenticate,
+  `run_workflow` suppression, `session/set_mode yolo` accepted, invalid key reaches Google.
+- Installer run for real against `dl.google.com` into a scratch `SAM_AGENT_HOME`: digest OK,
+  ~10 s, launcher validated, full prompt through the launcher reached Google.
+- Every guard was reverted once and the intended test went red: authenticate, session `_meta`,
+  fs capabilities, mode mapping (bypass/accept and plan/default), snapshot exclusion, installer
+  cleanup glob, manifest digest and `unzip` checks.
 
 ## References
 
