@@ -57,27 +57,27 @@ either way, and a target with no running turn gets an ordinary wake prompt (veri
 
 ## Implementation checklist
 
-- [ ] `agent-message-subscriptions.ts`: one exported `AGENT_MESSAGE_REQUESTED_DELIVERY = 'runtime_steer'`
+- [x] `agent-message-subscriptions.ts`: one exported `AGENT_MESSAGE_REQUESTED_DELIVERY = 'runtime_steer'`
       constant used for the created subscription; a row with a different `requested_delivery` is not
       reusable (retired, or drained if it owes a queued wake).
-- [ ] `create_project_event_subscription`: `requestedDelivery` optional, default `runtime_steer`
+- [x] `create_project_event_subscription`: `requestedDelivery` optional, default `runtime_steer`
       (shared `DEFAULT_PROJECT_EVENT_REQUESTED_DELIVERY` constant), in the service so MCP and REST agree;
       MCP schema no longer requires it; description says steer is the default.
-- [ ] `follow_event_channel`: MCP enum adds `runtime_steer`; description recommends it for waking follows
+- [x] `follow_event_channel`: MCP enum adds `runtime_steer`; description recommends it for waking follows
       (default stays `record_only`, a history feed).
-- [ ] Guidance and docs recommend `runtime_steer` for wakes: instruction-eventing-guidance, dispatch
+- [x] Guidance and docs recommend `runtime_steer` for wakes: instruction-eventing-guidance, dispatch
       coordination text, `.claude/commands/do.md`, `guides/agents.md`, `reference/api.md`, api-reference
       skill, env-reference skill.
-- [ ] Tests:
-  - [ ] Workers: peer `send_durable_message` creates a `runtime_steer` managed subscription and its wake
+- [x] Tests:
+  - [x] Workers: peer `send_durable_message` creates a `runtime_steer` managed subscription and its wake
         rides the steer lane, steered into a running turn (real MCP, materializer, delivery alarm).
-  - [ ] Workers: the same peer wake to an idle runtime falls back and is delivered once through the queue.
-  - [ ] Workers: an existing `existing_session_prompt` managed subscription is replaced on the next send;
+  - [x] Workers: the same peer wake to an idle runtime falls back and is delivered once through the queue.
+  - [x] Workers: an existing `existing_session_prompt` managed subscription is replaced on the next send;
         one owing a queued wake drains and is not cancelled.
-  - [ ] Workers/unit: `create_project_event_subscription` with no `requestedDelivery` stores `runtime_steer`;
+  - [x] Workers/unit: `create_project_event_subscription` with no `requestedDelivery` stores `runtime_steer`;
         an explicit `existing_session_prompt` is still honoured.
-  - [ ] Update unit tests that assert the missing-requestedDelivery rejection.
-  - [ ] Each new guard proven discriminating (revert, see red, restore).
+  - [x] Update unit tests that assert the missing-requestedDelivery rejection (none existed; related unit suites pass unchanged).
+  - [x] Each new guard proven discriminating (revert, see red, restore).
 
 ## Acceptance criteria
 
@@ -88,6 +88,21 @@ either way, and a target with no running turn gets an ordinary wake prompt (veri
 - [ ] Existing managed pair subscriptions switch to steering on their next message without dropping a
       queued wake.
 - [ ] An explicit `existing_session_prompt` subscription keeps queueing.
+
+## Implementation notes
+
+- No DO migration: `ensureManagedSubscription` treats a row whose `requested_delivery` is not
+  `AGENT_MESSAGE_REQUESTED_DELIVERY` as not reusable. It drains while it owes any wake (matched
+  or queued; its match keys are removed so the replacement alone matches new messages), else it
+  is retired. Using `hasPendingWake` here, not `hasQueuedWake`, keeps a matched-but-unbatched
+  pre-deploy notice from being dropped.
+- Self-publication suppression (`isSelfOriginatedChannelWake`) keys on `resolved =
+  queued_for_prompt_delivery`, so it already covers `runtime_steer` follows; the echo test now
+  includes a steering follower.
+- Discrimination (Workers): managed mode reverted to queue → 4/4 red; reuse ignoring mode → the
+  two rotation tests red; old drain rule (queued only) → the drain test red; service default
+  removed → "steers by default" red. All restored green.
+- Main is push-protected, so the task file travels on the feature branch.
 
 ## References
 
