@@ -609,6 +609,9 @@ async function sendCheckinToAgent(
       acceptedAt: null,
       adapterProtocolVersion: null,
       receiptSupported: null,
+      deliveryIntent: 'queue',
+      steerOutcome: null,
+      steerReason: null,
     },
   };
 

@@ -5,9 +5,13 @@
  * get_pending_messages: Retrieve unacked messages for the calling agent's session.
  * ack_message: Acknowledge receipt of a delivered message.
  */
-import type { MessageClass } from '@simple-agent-manager/shared';
-import { MESSAGE_CLASSES } from '@simple-agent-manager/shared';
-import { isUrgentMessageClass } from '@simple-agent-manager/shared';
+import type { MessageClass, PromptDeliveryIntent } from '@simple-agent-manager/shared';
+import {
+  canSteerMessageClass,
+  isUrgentMessageClass,
+  MESSAGE_CLASSES,
+  PROMPT_DELIVERY_INTENTS,
+} from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
@@ -15,7 +19,10 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import * as projectDataService from '../../services/project-data';
-import { composeUrgentDeliveryContent } from '../../services/urgent-delivery-content';
+import {
+  composePeerSteerContent,
+  composeUrgentDeliveryContent,
+} from '../../services/urgent-delivery-content';
 import {
   getMcpLimits,
   INTERNAL_ERROR,
@@ -68,6 +75,24 @@ export async function handleSendDurableMessage(
     );
   }
 
+  const deliveryIntent =
+    typeof params.deliveryIntent === 'string' ? params.deliveryIntent : 'queue';
+  if (!(PROMPT_DELIVERY_INTENTS as readonly string[]).includes(deliveryIntent)) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      `Invalid deliveryIntent. Must be one of: ${PROMPT_DELIVERY_INTENTS.join(', ')}`
+    );
+  }
+  if (deliveryIntent === 'steer' && !canSteerMessageClass(messageClass as MessageClass)) {
+    // Stopping a turn is the interrupt path; a steer must never become one.
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'deliveryIntent "steer" requires messageClass "notify" or "deliver"'
+    );
+  }
+
   let metadata: Record<string, unknown> | null = null;
   if (params.metadata && typeof params.metadata === 'object') {
     const serialized = JSON.stringify(params.metadata);
@@ -94,20 +119,24 @@ export async function handleSendDurableMessage(
   const resolution = await resolveProjectAgentForMailbox(requestId, targetTaskId, tokenData, db);
   if ('jsonrpc' in resolution) return resolution;
 
-  // Preview: notify/deliver over the SAM-managed pair channel when enabled.
-  const channelResponse = await trySendOverAgentMessageChannel(requestId, tokenData, env, {
-    tool: 'send_durable_message',
-    messageClass,
-    message,
-    idempotencyKey: idempotencyKey.value,
-    metadata,
-    senderSourceTaskId: resolution.callerSourceTaskId,
-    recipient: {
-      taskId: targetTaskId,
-      sourceTaskId: resolution.targetSourceTaskId,
-      chatSessionId: resolution.chatSessionId,
-    },
-  });
+  // Preview: notify/deliver over the SAM-managed pair channel when enabled. A steer
+  // targets the recipient's running turn, which only durable delivery can reach.
+  const channelResponse =
+    deliveryIntent === 'steer'
+      ? null
+      : await trySendOverAgentMessageChannel(requestId, tokenData, env, {
+          tool: 'send_durable_message',
+          messageClass,
+          message,
+          idempotencyKey: idempotencyKey.value,
+          metadata,
+          senderSourceTaskId: resolution.callerSourceTaskId,
+          recipient: {
+            taskId: targetTaskId,
+            sourceTaskId: resolution.targetSourceTaskId,
+            chatSessionId: resolution.chatSessionId,
+          },
+        });
   if (channelResponse) return channelResponse;
 
   const { resolveDurableExecutionConfig } =
@@ -129,7 +158,10 @@ export async function handleSendDurableMessage(
               message,
               senderTaskId: tokenData.taskId,
             })
-          : message,
+          : deliveryIntent === 'steer'
+            ? composePeerSteerContent({ message, senderTaskId: tokenData.taskId })
+            : message,
+        deliveryIntent: deliveryIntent as PromptDeliveryIntent,
         sourceTaskId: tokenData.taskId,
         senderType: 'agent',
         senderId: tokenData.workspaceId,
@@ -147,6 +179,7 @@ export async function handleSendDurableMessage(
             text: JSON.stringify({
               messageId: accepted.message.id,
               deliveryState: accepted.message.deliveryState,
+              deliveryIntent: accepted.message.deliveryIntent,
               delivered: false,
               accepted: true,
             }),

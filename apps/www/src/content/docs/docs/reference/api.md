@@ -131,7 +131,7 @@ Responses report `accepted: true, delivered: false` with `transport`, `channel`,
 `eventId` and `sequence`; an optional `idempotencyKey` replays a lost-response retry,
 and changed content under the same key is rejected as a conflict. Messages are capped
 by `PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES` and pair channels by
-`AGENT_MESSAGE_CHANNEL_MAX_CHANNELS`. Managed deployments enable the transport in `wrangler.toml`; the code fallback is off and `AGENT_MESSAGE_CHANNELS_ENABLED=false` selects the legacy path.
+`AGENT_MESSAGE_CHANNEL_MAX_CHANNELS`. Managed deployments enable the transport in `wrangler.toml`; the code fallback is off and `AGENT_MESSAGE_CHANNELS_ENABLED=false` selects the legacy path. A message sent with `deliveryIntent: "steer"` never uses the pair channel: it targets the recipient's running turn, so durable delivery injects the text, fenced and labelled as another agent's message, into that turn (see [Live steering](#live-steering)).
 
 Pair-channel events match only subscriptions targeting one of the two participant
 chats (`subscriptionCanMatchProjectEvent`), `follow_event_channel` rejects
@@ -343,6 +343,49 @@ The Resources drawer reads a whole chat session through two endpoints, both scop
 The index returns `{ sessionId, runs, chunks, totalChunkCount, omittedChunkCount, maxChunks, collection, runtime }`. `chunks` is ascending by start time and covers every workspace the session ran on (each wake is a new workspace); each carries its `summary` and a columnar per-minute `rollup` (`null` for chunks uploaded before rollups existed). `runs` groups chunks by workspace with that workspace's `reservation` (`cpuMillis`, `memoryMb`, or `null`). Past `WORKSPACE_RESOURCE_TIMELINE_MAX_CHUNKS` (1000) the oldest chunks are left out and counted in `omittedChunkCount`. When there are no chunks, `collection` explains why: `unsupported` (an Instant session), `expired` (samples passed retention; the summary remains), or `pending` (nothing uploaded yet). The chunk endpoint returns the same shape as `detail` above and `404`s for a chunk that belongs to another project or session.
 
 Agents read the same data with the `get_resource_history` MCP tool, which takes no `projectId` — the project comes from the verified token. With no arguments it returns the caller's own session; supplying any one of `sessionId`, `taskId`, or `workspaceId` replaces the caller's defaults entirely rather than narrowing within them.
+
+### Live steering
+
+A message can carry a delivery intent: `queue` (the default) waits for the target's next turn,
+and `steer` adds it to the turn the target is running, without stopping it (see
+[Sending a message while the agent works](/docs/guides/chat-features/#sending-a-message-while-the-agent-works)).
+Steering needs durable prompt delivery.
+
+- `POST /api/projects/:id/sessions/:sessionId/prompt` accepts `"deliveryIntent": "steer"`. It
+  returns `409` when durable delivery is off and `400` with attachments, which travel only with a
+  queued prompt. The response echoes `deliveryIntent`.
+- The MCP tool `send_durable_message` takes `deliveryIntent` (`queue` or `steer`); `steer` is
+  accepted only with the `notify` and `deliver` classes, so a steer never stops a turn. Urgent
+  classes keep stop-and-deliver.
+- An event subscription with `requestedDelivery: "runtime_steer"` wakes its chat through the same
+  queue with the steer intent: a chat that is mid-turn on a steering runtime gets the batch in that
+  turn, and an idle, sleeping or non-steering chat gets an ordinary wake prompt. Like the other
+  prompt-delivery modes, it never matches the publisher's own channel publications.
+
+A delivery ID belongs to one intent: reusing it with the other intent is rejected. Steers are a
+separate lane from queued prompts, so a steer is not held behind a queued prompt waiting for the
+turn to end, and steers for one chat are admitted one at a time, in order. Steering never wakes a
+sleeping chat. When the target cannot take the steer (no running turn, chat asleep, an agent or VM
+agent without steering, a runtime that changed), SAM converts it to an ordinary queued prompt and
+records why. A steer whose result is unknown, for example because the runtime restarted while it
+was in flight, becomes `ambiguous` and is never replayed. A steer the runtime took does not start a
+new prompt epoch, reset the turn's timeouts, or mark the chat idle.
+
+The chat socket broadcasts `mailbox.delivery_updated` with `promptMessageId` (the transcript row),
+`deliveryIntent`, `deliveryState`, and for steers `steerOutcome` (`steered` or `queued_fallback`)
+and `steerReason`. The transcript row of a message sent as a steer keeps `deliveryIntent: "steer"`
+in its `toolMetadata`, plus `steerOutcome` (`steered`, `queued_fallback`, `unconfirmed` or
+`failed`) and `steerReason` once known, so the label survives a reload.
+
+On the VM, `GET /workspaces/:workspaceId/agent-capabilities` advertises `steering` (`supported`, `version`, `lookup`,
+receipt `states`) when the VM agent can steer; older VM agents omit it and every steer to them
+falls back to the queue. The control plane calls
+`POST /workspaces/:workspaceId/agent-sessions/:sessionId/steer` with
+`{ protocolVersion, deliveryId, messageId, prompt }` and recovers a lost response from
+`GET .../steer-receipts/:deliveryId` instead of steering again. Each receipt is `accepted`,
+`in_flight`, `injected`, `not_consumed` or `ambiguous`; a repeated `deliveryId` with the same
+prompt returns its existing receipt, and with a different prompt returns `409`. The VM agent bounds
+one steering request to the adapter with `ACP_STEER_TIMEOUT` (default `20s`).
 
 ### Agent requests
 

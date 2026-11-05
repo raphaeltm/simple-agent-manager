@@ -586,6 +586,10 @@ func (h *SessionHost) writeOpenCodeStartupConfig(ctx context.Context, cred *agen
 	}
 
 	startup.envVars = append(startup.envVars, "OPENCODE_CONFIG_CONTENT="+string(configJSON))
+	// SAM pins its own OpenCode build (ACP live steering, opencode_install.go). Its
+	// updater must never replace that binary with an upstream release mid-session.
+	startup.envVars = removeEnvVar(startup.envVars, opencodeDisableAutoupdateEnvName)
+	startup.envVars = append(startup.envVars, opencodeDisableAutoupdateEnvName+"=1")
 	provider := DefaultOpencodeProvider
 	if startup.settings != nil && startup.settings.OpencodeProvider != "" {
 		provider = startup.settings.OpencodeProvider

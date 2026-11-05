@@ -40,14 +40,14 @@
     "agentType": "opencode",
     "method": "github-release",
     "package": "opencode",
-    "version": "2.2.5",
+    "version": "2.2.5-sam-s1",
     "bin": "opencode",
-    "repository": "anomalyco/opencode",
+    "repository": "raphaeltm/simple-agent-manager",
     "assets": {
-      "linux-x64-baseline": "09f44302c10fd036912f59c81fd1aef5df45dd06f649197f9dfc9bbe2a79614e",
-      "linux-x64-baseline-musl": "889389e99ffa39fa41d512b2c9c15316522d97398fb912503ef667f80e22a827",
-      "linux-arm64": "5a528f42caf576c6cdece6a191eb273d3db54effa5518e0402684d8f8026aeb6",
-      "linux-arm64-musl": "bbf927e3f7a92040f25fd78436c251f41deb25cefac1c906e79c01aa572bf73b"
+      "linux-x64-baseline": "3547aad5f40c4dd701423b7566875eb232948192762ab4300db94f17a7d8586e",
+      "linux-x64-baseline-musl": "28d84822ce270d830c1db79a43d82f4631c16e56124b0daaacc7377170074d0c",
+      "linux-arm64": "b1850c2332f2352b8e2b2a9fda76d7854756151a62879f2c8e266420ea710a81",
+      "linux-arm64-musl": "b0337cff62d5b755969609da3a3bd52024fc3084dfcacca176610290fc775b16"
     }
   },
   {

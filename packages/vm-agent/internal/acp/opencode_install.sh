@@ -1,7 +1,7 @@
 #!/bin/sh
 set -eu
 
-version=2.2.5
+version=2.2.5-sam-s1
 if ! command -v curl >/dev/null || ! command -v tar >/dev/null || ! command -v sha256sum >/dev/null || ! command -v gzip >/dev/null; then
   if command -v apt-get >/dev/null; then
     apt-get update -qq
@@ -30,10 +30,10 @@ case "$target" in
   *) : ;;
 esac
 case "$target" in
-  linux-x64-baseline) digest=09f44302c10fd036912f59c81fd1aef5df45dd06f649197f9dfc9bbe2a79614e ;;
-  linux-x64-baseline-musl) digest=889389e99ffa39fa41d512b2c9c15316522d97398fb912503ef667f80e22a827 ;;
-  linux-arm64) digest=5a528f42caf576c6cdece6a191eb273d3db54effa5518e0402684d8f8026aeb6 ;;
-  linux-arm64-musl) digest=bbf927e3f7a92040f25fd78436c251f41deb25cefac1c906e79c01aa572bf73b ;;
+  linux-x64-baseline) digest=3547aad5f40c4dd701423b7566875eb232948192762ab4300db94f17a7d8586e ;;
+  linux-x64-baseline-musl) digest=28d84822ce270d830c1db79a43d82f4631c16e56124b0daaacc7377170074d0c ;;
+  linux-arm64) digest=b1850c2332f2352b8e2b2a9fda76d7854756151a62879f2c8e266420ea710a81 ;;
+  linux-arm64-musl) digest=b0337cff62d5b755969609da3a3bd52024fc3084dfcacca176610290fc775b16 ;;
   *) echo 'OpenCode: unsupported release target' >&2; exit 1 ;;
 esac
 
@@ -52,7 +52,7 @@ mkdir -p "$destination"
 stage=$(mktemp -d "$destination/.opencode-install.XXXXXX")
 trap 'rm -rf "$stage"' 0
 trap 'exit 1' HUP INT TERM
-curl --proto =https --proto-redir =https -fLsS --retry 2 "https://github.com/anomalyco/opencode/releases/download/v$version/opencode-$target.tar.gz" -o "$stage/archive.tar.gz"
+curl --proto =https --proto-redir =https -fLsS --retry 2 "https://github.com/raphaeltm/simple-agent-manager/releases/download/opencode-v$version/opencode-$target.tar.gz" -o "$stage/archive.tar.gz"
 printf '%s  %s\n' "$digest" "$stage/archive.tar.gz" | sha256sum -c -
 tar -xzf "$stage/archive.tar.gz" -C "$stage" opencode
 chmod 755 "$stage/opencode"

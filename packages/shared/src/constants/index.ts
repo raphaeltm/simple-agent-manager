@@ -205,6 +205,8 @@ export {
 export {
   buildVmPromptDeliveryCapabilitiesPath,
   buildVmPromptDeliveryReceiptPath,
+  buildVmSteerDeliveryPath,
+  buildVmSteerReceiptPath,
   DEFAULT_ACP_CHECKPOINT_PREEMPT_GRACE_MS,
   DEFAULT_ACP_LONG_TURN_CHECKPOINT_MS,
   DEFAULT_ACP_LONG_TURN_SUPERVISOR_ENABLED,
@@ -226,6 +228,7 @@ export {
   MAX_ORCHESTRATOR_WAIT_CHILDREN,
   VM_PROMPT_DELIVERY_PROTOCOL_VERSION,
   VM_PROMPT_DELIVERY_RECEIPTS_CAPABILITY,
+  VM_STEER_DELIVERY_PROTOCOL_VERSION,
 } from './durable-execution';
 
 // Node Pooling & Idle Timeout

@@ -40,6 +40,8 @@ export interface SessionTranscript {
   firstItemIndex: number;
   /** Adds live rows (socket deliveries, optimistic sends) in transcript order. */
   appendMessages: (incoming: ChatMessageResponse[]) => void;
+  /** Merges server-reported fields into one loaded row's tool metadata (delivery state). */
+  patchMessageMetadata: (messageId: string, patch: Record<string, unknown>) => void;
   /**
    * Reads and adds every row persisted after the newest loaded one (the socket subscribed).
    * `afterReadsSettle` runs once no transcript read is in flight, for other state to re-read.
@@ -113,6 +115,23 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
         (current) =>
           current && { ...current, messages: mergeMessages(current.messages, incoming, 'append') }
       );
+    },
+    [queryClient, queryKey]
+  );
+
+  const patchMessageMetadata = useCallback(
+    (messageId: string, patch: Record<string, unknown>) => {
+      queryClient.setQueryData<ChatSessionDetailResponse>(queryKey, (current) => {
+        if (!current?.messages.some((message) => message.id === messageId)) return current;
+        return {
+          ...current,
+          messages: current.messages.map((message) =>
+            message.id === messageId
+              ? { ...message, toolMetadata: { ...(message.toolMetadata ?? {}), ...patch } }
+              : message
+          ),
+        };
+      });
     },
     [queryClient, queryKey]
   );
@@ -275,6 +294,7 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
     loadingMore: olderLoadsInFlight > 0,
     firstItemIndex,
     appendMessages,
+    patchMessageMetadata,
     catchUpTail,
     mergeRecentWindow,
     loadMore,

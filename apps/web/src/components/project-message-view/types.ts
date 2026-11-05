@@ -7,7 +7,7 @@ import { isExpiredTask, type SessionUndeliveredPrompt } from '@simple-agent-mana
 
 import type { ChatMessageResponse, ChatSessionResponse, SessionStateSnapshot } from '../../lib/api';
 import { maybeJsonRecord } from '../../lib/runtime-validation';
-import { userMessageAttribution } from './message-attribution';
+import { userMessageAttribution, userMessageDelivery } from './message-attribution';
 import { APPROVAL_CARD_TOOL } from './tool-cards/approval-card-data';
 import { DOCUMENT_CARD_TOOLS, normalizeToolName } from './tool-cards/document-card-data';
 
@@ -232,6 +232,7 @@ export function chatMessagesToConversationItems(
   const items = dedupedMsgs.reduce<ConversationItem[]>((acc, msg) => {
     if (msg.role === 'user') {
       const attribution = userMessageAttribution(msg, undelivered.get(msg.id));
+      const delivery = userMessageDelivery(msg);
       acc.push({
         kind: 'user_message',
         id: msg.id,
@@ -239,6 +240,7 @@ export function chatMessagesToConversationItems(
         timestamp: msg.createdAt,
         origin: msg.origin === 'system' ? 'system' : 'user',
         ...(attribution ? { attribution } : {}),
+        ...(delivery ? { delivery } : {}),
       });
     } else if (msg.role === 'assistant') {
       // Merge consecutive assistant chunks into one item. The merged roles are

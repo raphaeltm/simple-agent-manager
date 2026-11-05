@@ -101,6 +101,8 @@ export const PROJECT_EVENT_SUBSCRIPTION_TOOLS = [
           description:
             'Requested delivery policy. record_only stays pull-only. existing_session_prompt resolves to a durable same-chat prompt queue when the caller target supports it. ' +
             'runtime_interrupt also rides that prompt queue but with the interrupt mailbox class: its wakes may stop an in-flight turn on the target chat so the batch is delivered immediately (stop-and-deliver). ' +
+            'runtime_steer rides the same queue with the steer intent: when the target chat is mid-turn on a runtime that supports live steering, ' +
+            'the batch is added to that turn without stopping it; an idle, sleeping or non-steering target gets an ordinary wake prompt. ' +
             'Other injection modes are recorded_not_injected until their adapters are enabled.',
         },
         target: DELIVERY_TARGET_SCHEMA,

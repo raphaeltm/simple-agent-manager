@@ -161,6 +161,7 @@ func Load() (*Config, error) {
 		ACPPongTimeout:                    getEnvDuration("ACP_PONG_TIMEOUT", 10*time.Second),
 		ACPPromptTimeout:                  getEnvDuration("ACP_PROMPT_TIMEOUT", 0),
 		ACPPromptCancelGrace:              getEnvDuration("ACP_PROMPT_CANCEL_GRACE_PERIOD", 5*time.Second),
+		ACPSteerTimeout:                   getEnvDuration("ACP_STEER_TIMEOUT", 20*time.Second),
 		ACPPromptRetryMaxRetries:          getEnvInt("ACP_PROMPT_RETRY_MAX_RETRIES", 2),
 		ACPPromptRetryInitial:             getEnvDuration("ACP_PROMPT_RETRY_INITIAL_BACKOFF", 15*time.Second),
 		ACPPromptRetryMax:                 getEnvDuration("ACP_PROMPT_RETRY_MAX_BACKOFF", 2*time.Minute),

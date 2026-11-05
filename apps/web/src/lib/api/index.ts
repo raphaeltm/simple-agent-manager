@@ -529,6 +529,7 @@ export {
   shareSessionAccess,
   sleepChatSession,
 } from './session-access';
+export { resetIdleTimer, sendFollowUpPrompt } from './session-prompts';
 export type {
   ActivityEventResponse,
   ActivityEventsListResponse,
@@ -556,9 +557,7 @@ export {
   listActivityEvents,
   listChatMessages,
   listChatSessions,
-  resetIdleTimer,
   resolveAttentionAnswer,
-  sendFollowUpPrompt,
   startInstantChatSession,
   stopChatSession,
 } from './sessions';

@@ -197,7 +197,7 @@ func runPinnedCodexProcessCase(t *testing.T, completionBeforeAnswer, withoutComp
 	if err != nil {
 		t.Fatalf("ACP initialize: %v", err)
 	}
-	if initialized.AgentInfo == nil || initialized.AgentInfo.Version != "2.1.1-sam-c2.2" {
+	if initialized.AgentInfo == nil || initialized.AgentInfo.Version != "2.1.1-sam-c2.3" {
 		t.Fatalf("ACP agent identity does not match patched build")
 	}
 	session, err := client.NewSession(ctx, acpsdk.NewSessionRequest{Cwd: home, McpServers: []acpsdk.McpServer{{Http: &acpsdk.McpServerHttpInline{

@@ -4,6 +4,7 @@
  * Extracted from the adapter to respect `.claude/rules/18-file-size-limits.md`.
  */
 import {
+  VM_STEER_RECEIPT_STATES,
   type VmPromptDeliveryCapabilities,
   type VmPromptDeliveryReceipt,
   type VmPromptDeliveryResponse,
@@ -38,6 +39,31 @@ export const CapabilitiesSchema = v.object({
     maxGraceMs: v.number(),
     operationTimeoutMs: v.number(),
   }),
+  // Absent on VM agents that predate live steering; they get the queued fallback.
+  steering: v.optional(
+    v.object({
+      supported: v.boolean(),
+      version: v.number(),
+      lookup: v.boolean(),
+      states: v.array(v.picklist(VM_STEER_RECEIPT_STATES)),
+    })
+  ),
+});
+
+export const SteerReceiptSchema = v.object({
+  deliveryId: v.string(),
+  state: v.picklist(VM_STEER_RECEIPT_STATES),
+  reason: v.optional(v.string()),
+  runtimeIdentity: RuntimeIdentitySchema,
+  promptEpoch: v.optional(v.nullable(v.number()), null),
+  acceptedAt: v.nullable(v.number()),
+  completedAt: v.nullable(v.number()),
+});
+
+export const SteerResponseSchema = v.object({
+  status: v.picklist([...VM_STEER_RECEIPT_STATES, 'conflict']),
+  sessionId: v.string(),
+  receipt: SteerReceiptSchema,
 });
 
 export const ReceiptSchema = v.object({

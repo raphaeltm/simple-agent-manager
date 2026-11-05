@@ -660,14 +660,20 @@ describe('useSessionLifecycle loading semantics', () => {
     expect(mocks.sendFollowUpPrompt).not.toHaveBeenCalled();
     act(() => result.current.setFollowUp('Read the file'));
     await act(async () => result.current.handleSendFollowUp());
-    expect(mocks.sendFollowUpPrompt).toHaveBeenCalledWith('proj-1', 'sess-1', 'Read the file', [
-      {
-        uploadId: 'upload-1',
-        filename: 'context.txt',
-        size: 5,
-        contentType: 'text/plain',
-      },
-    ]);
+    expect(mocks.sendFollowUpPrompt).toHaveBeenCalledWith(
+      'proj-1',
+      'sess-1',
+      'Read the file',
+      [
+        {
+          uploadId: 'upload-1',
+          filename: 'context.txt',
+          size: 5,
+          contentType: 'text/plain',
+        },
+      ],
+      'queue'
+    );
     expect(result.current.attachments).toEqual([]);
     expect(mocks.wsSend).not.toHaveBeenCalled();
   });

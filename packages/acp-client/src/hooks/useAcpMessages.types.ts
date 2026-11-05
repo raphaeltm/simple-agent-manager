@@ -19,6 +19,18 @@ export interface UserMessage {
    * owner's own messages.
    */
   attribution?: UserMessageAttribution;
+  /** Present when the sender asked to steer the agent's running turn. */
+  delivery?: UserMessageDelivery;
+}
+
+/**
+ * What became of a message sent with "Steer now". `steered` means the agent's runtime
+ * accepted it into the running turn, not that the model has acted on it yet.
+ */
+export interface UserMessageDelivery {
+  status: 'steering' | 'steered' | 'queued_instead' | 'unconfirmed' | 'not_delivered';
+  /** For `queued_instead`: why it waits for the next turn instead. */
+  reason?: 'turn_finished' | 'agent_asleep' | 'not_supported' | 'other';
 }
 
 export interface UserMessageAttribution {

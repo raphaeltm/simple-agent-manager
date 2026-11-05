@@ -198,8 +198,11 @@ type SessionHost struct {
 	// agentSupportsLoadSession is captured from ACP Initialize so prompt error
 	// handling can decide whether a process crash is recoverable.
 	agentSupportsLoadSession bool
-	status                   SessionHostStatus
-	statusErr                string
+	// steering is what the loaded adapter proved at ACP Initialize
+	// (session_host_steering.go). Cleared whenever the ACP connection is.
+	steering  steeringSupport
+	status    SessionHostStatus
+	statusErr string
 	// selectionInProgress is set for the duration of a selectAgent call (from
 	// beginAgentSelection until selectAgent returns). It guards the fresh-host
 	// window where h.process is still nil during the multi-second
@@ -264,6 +267,10 @@ type SessionHost struct {
 	bufMu      sync.RWMutex
 	messageBuf []BufferedMessage
 	seqCounter uint64
+
+	// steerMu admits and sends live steers one at a time per host, in order.
+	// Independent of the prompt gate: a steer never takes promptMu across an RPC.
+	steerMu sync.Mutex
 
 	// Prompt lifecycle state.
 	// promptMu guards promptInFlight (serialization gate only).
@@ -692,6 +699,7 @@ func (h *SessionHost) stopCurrentAgentLocked() {
 	h.acpConn = nil
 	h.setSessionIDLocked("")
 	h.agentSupportsLoadSession = false
+	h.steering = steeringSupport{}
 	// Clear credential metadata so stale values don't leak across agent switches.
 	h.credInjectionMode = ""
 	h.credAuthFilePath = ""

@@ -14,6 +14,8 @@ import type { ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { FakeWebSocket } from '../helpers/fake-websocket';
+
 const mocks = vi.hoisted(() => ({
   getChatSession: vi.fn(),
   getChatSessionState: vi.fn(),
@@ -56,41 +58,6 @@ vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => {
 
 const { WorkspaceChatView } = await import('../../../src/pages/workspace/WorkspaceChatView');
 const { resetVirtuosoMock } = await import('../../helpers/virtuoso-mock');
-
-class FakeWebSocket {
-  static readonly CONNECTING = 0;
-  static readonly OPEN = 1;
-  static readonly CLOSING = 2;
-  static readonly CLOSED = 3;
-  static instances: FakeWebSocket[] = [];
-
-  readyState = FakeWebSocket.CONNECTING;
-  onopen: ((event: unknown) => void) | null = null;
-  onmessage: ((event: unknown) => void) | null = null;
-  onclose: ((event: unknown) => void) | null = null;
-  onerror: ((event: unknown) => void) | null = null;
-
-  constructor(readonly url: string) {
-    FakeWebSocket.instances.push(this);
-  }
-
-  send() {}
-
-  close(code = 1000) {
-    if (this.readyState === FakeWebSocket.CLOSED) return;
-    this.readyState = FakeWebSocket.CLOSED;
-    this.onclose?.({ code });
-  }
-
-  open() {
-    this.readyState = FakeWebSocket.OPEN;
-    this.onopen?.({});
-  }
-
-  deliver(data: unknown) {
-    this.onmessage?.({ data: JSON.stringify(data) });
-  }
-}
 
 const SESSION_ID = 'ws-session-1';
 const EXPIRED: SessionUndeliveredPrompt = {

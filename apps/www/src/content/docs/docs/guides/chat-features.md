@@ -32,6 +32,37 @@ lasts; the files are their own uploads and go only into that chat's workspace.
 
 Agent output streams directly to your browser via WebSocket. You see code being written, terminal commands executing, and the agent's thought process as it happens — no waiting for a complete response.
 
+## Sending a Message While the Agent Works
+
+While the agent is in the middle of a turn, the chat input offers two choices above the message
+box:
+
+- **Steer now** (the default) adds your message to the turn the agent is running, without stopping
+  it. The agent picks it up at its next step, so it may finish the step it is on first. Use it to
+  correct course ("use tabs, not spaces") without throwing away the work in progress. If the agent
+  can't take it, it is sent as the next message instead, and the message says so.
+- **Queue next** sends your message after the current turn finishes, as the agent's next prompt.
+
+To stop the turn instead, select **Interrupt** (the red button above the message box). The choice
+goes back to **Steer now** when the turn ends. A message with files attached always queues, because
+a steer carries text only.
+
+A message you send with **Steer now** shows what happened to it underneath:
+
+| Label                     | Meaning                                                                                                                                                                                                       |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Steering…**             | SAM is handing it to the agent.                                                                                                                                                                               |
+| **Added to current turn** | The agent's runtime took it into the running turn. This doesn't mean the agent has read or acted on it yet.                                                                                                   |
+| **Sent as next message**  | It couldn't join the turn, so SAM queued it as the next prompt instead. The label says why: the turn had already ended, the agent was asleep, or the agent can't take messages mid-turn.                      |
+| **Delivery unconfirmed**  | SAM couldn't confirm whether the agent got it (for example, the agent restarted at that moment). SAM won't send it again, because a duplicate could repeat work; resend it if the agent didn't respond to it. |
+| **Not delivered**         | It never reached the agent.                                                                                                                                                                                   |
+
+Steering works with Claude Code, OpenCode, and Codex when the chat uses SAM's Codex runtime (a
+profile with `SAM_CODEX_C2_CANDIDATE=1`, or Codex forms and links enabled). For other agents, and on
+VMs started before steering shipped, a steered message is sent as the next message instead, and its
+label says so. A sleeping chat is never woken just to steer it: the message queues and wakes the
+chat as usual.
+
 ## When the Agent Needs You
 
 Sometimes an agent stops and waits for you. It wants permission before it runs a command or edits a

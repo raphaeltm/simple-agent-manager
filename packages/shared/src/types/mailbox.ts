@@ -50,6 +50,33 @@ export function isUrgentMessageClass(messageClass: MessageClass): boolean {
   return MESSAGE_CLASS_URGENCY[messageClass] >= TURN_STOP_URGENCY_THRESHOLD;
 }
 
+// ─── Delivery Intent (separate from urgency) ───────────────────────────────
+
+/**
+ * What the sender wants done with a message to a working agent. `queue` waits for
+ * the next turn. `steer` adds it to the running turn when the agent's runtime can
+ * take live input, and otherwise falls back, visibly, to `queue`. Urgency
+ * (`MessageClass`) is independent: stopping a turn stays the `interrupt` path,
+ * and an urgent class never steers.
+ */
+export const PROMPT_DELIVERY_INTENTS = ['queue', 'steer'] as const;
+
+export type PromptDeliveryIntent = (typeof PROMPT_DELIVERY_INTENTS)[number];
+
+/** True when a message class may carry the `steer` intent. */
+export function canSteerMessageClass(messageClass: MessageClass): boolean {
+  return !isUrgentMessageClass(messageClass);
+}
+
+/**
+ * What became of a `steer`. `steered`: the runtime accepted it into the running
+ * turn (not proof the model acted on it). `queued_fallback`: it was not taken and
+ * is now an ordinary next-turn message; `steerReason` says why.
+ */
+export const STEER_OUTCOMES = ['steered', 'queued_fallback'] as const;
+
+export type SteerOutcome = (typeof STEER_OUTCOMES)[number];
+
 // ─── Delivery State Machine ────────────────────────────────────────────────
 
 export const DELIVERY_STATES = [
@@ -120,6 +147,13 @@ export interface VmPromptDeliveryCapabilities {
     lookup: boolean;
     states: readonly VmPromptReceiptState[];
   };
+  /** Absent on VM agents that predate live steering. */
+  steering?: {
+    supported: boolean;
+    version: number;
+    lookup: boolean;
+    states: readonly VmSteerReceiptState[];
+  };
   checkpointRollover: {
     supported: boolean;
     automatic: boolean;
@@ -142,6 +176,35 @@ export interface VmPromptDeliveryResponse {
   status: 'accepted' | 'duplicate' | 'not_ready' | 'conflict';
   sessionId: string;
   receipt: VmPromptDeliveryReceipt;
+}
+
+export const VM_STEER_RECEIPT_STATES = [
+  'accepted',
+  'in_flight',
+  'injected',
+  'not_consumed',
+  'ambiguous',
+  'not_found',
+] as const;
+
+export type VmSteerReceiptState = (typeof VM_STEER_RECEIPT_STATES)[number];
+
+/** The VM's durable record of one steer. `not_consumed` guarantees the agent never saw it. */
+export interface VmSteerReceipt {
+  deliveryId: string;
+  state: VmSteerReceiptState;
+  reason?: string;
+  runtimeIdentity: string;
+  /** Start of the prompt turn the steer attached to (Unix ms). */
+  promptEpoch: number | null;
+  acceptedAt: number | null;
+  completedAt: number | null;
+}
+
+export interface VmSteerResponse {
+  status: VmSteerReceiptState | 'conflict';
+  sessionId: string;
+  receipt: VmSteerReceipt;
 }
 
 // ─── Sender identity ──────────────────────────────────────────────────────
@@ -183,6 +246,9 @@ export interface AgentMailboxMessage {
   acceptedAt: number | null;
   adapterProtocolVersion: number | null;
   receiptSupported: boolean | null;
+  deliveryIntent: PromptDeliveryIntent;
+  steerOutcome: SteerOutcome | null;
+  steerReason: string | null;
 }
 
 // ─── API request/response shapes ───────────────────────────────────────────
@@ -191,6 +257,7 @@ export interface SendDurableMessageRequest {
   targetTaskId: string;
   message: string;
   messageClass: MessageClass;
+  deliveryIntent?: PromptDeliveryIntent;
   metadata?: Record<string, unknown>;
 }
 

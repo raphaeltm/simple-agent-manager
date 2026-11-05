@@ -7,6 +7,7 @@ import { createModuleLogger } from '../../lib/logger';
 import { recordDurableExecutionMetric } from '../../services/telemetry';
 import type {
   VmPromptDeliveryAdapter,
+  VmPromptDeliveryAdapterInput,
   VmPromptDeliveryTarget,
 } from '../../services/vm-prompt-delivery-adapter';
 import * as activity from './activity';
@@ -37,6 +38,7 @@ import {
   sourceTaskGuardForClaim,
   sourceValidationReadFailure,
 } from './prompt-delivery-source-guards';
+import { labelSteerOutcomeOnTranscript } from './prompt-delivery-steer';
 import * as sessionState from './session-state';
 import type { Env } from './types';
 import { raiseSessionWakeFailure } from './wake-failure';
@@ -53,6 +55,70 @@ export interface PromptDeliveryRunnerHooks {
   nudgeDeliveries: (chatSessionId: string) => number;
   /** Refresh D1 session summaries after marker/message changes. */
   scheduleSummarySync: () => void;
+}
+
+async function dispatchClaim(
+  adapter: VmPromptDeliveryAdapter,
+  claim: PromptDeliveryClaim,
+  input: VmPromptDeliveryAdapterInput
+): Promise<PromptDeliveryResult> {
+  if (claim.message.deliveryIntent !== 'steer') {
+    return claim.mode === 'submit' ? adapter.submit(input) : adapter.reconcile(input);
+  }
+  const steer = claim.mode === 'submit' ? adapter.steer : adapter.reconcileSteer;
+  if (!steer) {
+    // Nothing was sent: an adapter without live steering hands the message to the queue.
+    return {
+      kind: 'steer_fallback',
+      reason: 'runtime_steering_unsupported',
+      error: 'This delivery adapter does not support live steering',
+      runtimeIdentity: null,
+      capabilities: null,
+    };
+  }
+  return steer.call(adapter, input);
+}
+
+/**
+ * The `mailbox.delivery_updated` payload the web app renders delivery state from.
+ * `promptMessageId` names the transcript row; the steer fields say what the
+ * runtime did with a steer. A pending steer changes nothing visible.
+ */
+export function deliveryUpdateForResult(
+  claim: PromptDeliveryClaim,
+  result: PromptDeliveryResult
+): Record<string, unknown> | null {
+  const base = {
+    messageId: claim.message.id,
+    promptMessageId: claim.message.promptMessageId,
+    deliveryIntent: claim.message.deliveryIntent,
+  };
+  switch (result.kind) {
+    case 'steer_pending':
+      return null;
+    case 'steered':
+      return {
+        ...base,
+        deliveryState: claim.message.ackRequired ? 'delivered' : 'acked',
+        steerOutcome: 'steered',
+      };
+    case 'steer_fallback':
+      return {
+        ...base,
+        deliveryIntent: 'queue',
+        deliveryState: 'queued',
+        steerOutcome: 'queued_fallback',
+        steerReason: result.reason,
+      };
+    case 'accepted':
+      return { ...base, deliveryState: claim.message.ackRequired ? 'delivered' : 'acked' };
+    case 'retry':
+      return { ...base, deliveryState: 'retry_wait' };
+    case 'failed':
+      return { ...base, deliveryState: 'failed' };
+    case 'ambiguous':
+      return { ...base, deliveryState: 'ambiguous' };
+  }
 }
 
 export async function runPromptDeliveryClaim(
@@ -132,7 +198,9 @@ export async function runPromptDeliveryClaim(
       beforeSubmit: (capabilities: VmPromptDeliveryCapabilities) =>
         markPromptDeliverySubmitting(sql, claim, capabilities),
       sourceTaskGuard,
-      ...(isUrgentMessageClass(claim.message.messageClass)
+      // A steer is never urgent (`canSteerMessageClass`); it must not stop a turn.
+      ...(isUrgentMessageClass(claim.message.messageClass) &&
+      claim.message.deliveryIntent !== 'steer'
         ? {
             onBusyTurn: async (target: VmPromptDeliveryTarget) => {
               urgentStopOutcome = await stopBusyTurnForUrgentDelivery(
@@ -147,9 +215,7 @@ export async function runPromptDeliveryClaim(
           }
         : {}),
     };
-    result =
-      (await validateDeliveryTarget()) ??
-      (claim.mode === 'submit' ? await adapter.submit(input) : await adapter.reconcile(input));
+    result = (await validateDeliveryTarget()) ?? (await dispatchClaim(adapter, claim, input));
   } catch (error) {
     result = {
       kind: 'ambiguous',
@@ -184,6 +250,15 @@ export async function runPromptDeliveryClaim(
     }
   }
   const applied = applyPromptDeliveryResult(sql, claim, result, config);
+  // A message sent as a steer keeps a truthful label to the end, including after it
+  // fell back to the queue (its inbox intent is then `queue`; the row still says steer,
+  // which the label's own predicate checks).
+  if (applied && result.kind === 'ambiguous') {
+    labelSteerOutcomeOnTranscript(sql, claim, 'unconfirmed', result.reason);
+  }
+  if (applied && result.kind === 'failed') {
+    labelSteerOutcomeOnTranscript(sql, claim, 'failed', result.reason);
+  }
   if (applied) {
     advanceProjectEventPromptAttemptCheckpoint(sql, hooks.projectId, claim, result);
   }
@@ -221,14 +296,17 @@ export async function runPromptDeliveryClaim(
     hooks.scheduleSummarySync();
   }
 
-  const metric =
-    result.kind === 'accepted'
-      ? 'prompt_delivery_accepted'
-      : result.kind === 'retry'
-        ? 'prompt_delivery_retry'
-        : result.kind === 'failed'
-          ? 'prompt_delivery_failed'
-          : 'prompt_delivery_ambiguous';
+  const metric = (
+    {
+      accepted: 'prompt_delivery_accepted',
+      retry: 'prompt_delivery_retry',
+      failed: 'prompt_delivery_failed',
+      ambiguous: 'prompt_delivery_ambiguous',
+      steered: 'prompt_delivery_steered',
+      steer_fallback: 'prompt_delivery_steer_fallback',
+      steer_pending: 'prompt_delivery_steer_pending',
+    } as const
+  )[result.kind];
   recordDurableExecutionMetric(
     {
       metric,
@@ -272,23 +350,15 @@ export async function runPromptDeliveryClaim(
             .toArray()[0]?.ready_at ?? null,
       })
     );
-    hooks.broadcastEvent(
-      'mailbox.delivery_updated',
-      {
-        messageId: claim.message.id,
-        deliveryState:
-          result.kind === 'accepted'
-            ? claim.message.ackRequired
-              ? 'delivered'
-              : 'acked'
-            : result.kind === 'retry'
-              ? 'retry_wait'
-              : result.kind === 'failed'
-                ? 'failed'
-                : 'ambiguous',
-      },
-      claim.message.targetSessionId
-    );
+    const update = deliveryUpdateForResult(claim, result);
+    if (update) {
+      hooks.broadcastEvent('mailbox.delivery_updated', update, claim.message.targetSessionId);
+    }
+    if (result.kind === 'steer_fallback') {
+      // The message is now an ordinary queued prompt; deliver it as soon as the
+      // queue lane allows (behind a busy turn, it waits like any other).
+      hooks.nudgeDeliveries(claim.message.targetSessionId);
+    }
   } else {
     log.info('prompt_delivery.stale_result_ignored', {
       messageId: claim.message.id,

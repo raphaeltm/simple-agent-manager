@@ -1553,8 +1553,7 @@ func (s *Server) handleSendPrompt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body sendPromptRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if !decodePromptRequestBody(w, r, &body) {
 		return
 	}
 	body.Prompt = strings.TrimSpace(body.Prompt)
@@ -1896,6 +1895,7 @@ func (s *Server) agentCapabilities() map[string]interface{} {
 			"noWaiterStatus":    "no_waiter",
 			"staleStatus":       "stale_generation",
 		},
+		"steering": steeringCapability(),
 		"checkpointRollover": map[string]interface{}{
 			"supported": true,
 			"automatic": false,
