@@ -137,7 +137,7 @@ runtimes have (or can cheaply get) a harness-level steering path: ACP extension
 
 ## Acceptance criteria
 
-- [ ] Steer to each shipped runtime (Claude 0.81.2, Codex C2.3, OpenCode patched) during a long
+- [x] Steer to each shipped runtime (Claude 0.81.2, Codex C2.3, OpenCode patched) during a long
       multistep turn changes a later action before the original turn completes (staging evidence)
 - [x] Idle/turn-end race → queued fallback, never a detached turn (real-adapter idle steer = prompt_required for all 3; steer-lane fallback test)
 - [x] Duplicate delivery ID / lost response → no duplicate injection; runtime change → ambiguous (VM steering tests; adapter receipt-recovery + steer-lane reconcile tests)
@@ -167,7 +167,18 @@ provably delivered before the original turn completes and changes the next model
 - Steering composer audit: `apps/web/tests/playwright/steering-composer-audit.spec.ts` (12 cases,
   375/1280, dark/light); desktop label truncation fixed.
 
+### Staging evidence (2026-11-05, deploy runs 41971201346 + 41977927018)
+
+Real agents in project `hono`, steered from the composer mid-turn (3× `sleep 25 && echo stepN`):
+- Claude Code (Instant): Added to current turn (4 s); ran `echo STEERED-OK` after step2; one turn. Session 943ca888.
+- Codex C2.3 (Instant, `SAM_CODEX_C2_CANDIDATE=1`): Added to current turn (6 s); ran it after step2; one turn. Session 182dc38d.
+- OpenCode sam-s1 (VM): Added to current turn (3 s); applied at the next step (after step3, model call already in flight); one turn. Session 7731c7d3.
+- Fallbacks seen, all visible: Codex stock Instant adapter (`adapter_idle_behavior_unverified`), Codex VM (`adapter_does_not_advertise_steering`: VM hosts only pick C2 when ACP interactions are enabled, default off), OpenCode steer before the VM's first turn began (`no_running_turn`).
+- Live check after redeploy: steer chip clear of the phone toggle (chip right 251 px, toggle left 259 px).
+- Cleanup: 3 test VMs and 2 test profiles deleted.
+
 ### Known limitations (for PR)
+- Codex chats on VM hosts do not steer today: VMs read the C2 selector only from ACP interaction config (`ACP_INTERACTIONS_ENABLED` + forms/URLs, default off); the profile env selector is read only on Instant hosts.
 - Stock npm codex-acp 2.1.1 sessions are not steerable (visible queued fallback). Codex steering needs
   SAM's C2 runtime (`SAM_CODEX_C2_CANDIDATE=1` or Codex forms/URL interactions enabled).
 - CI and workspace OpenCode builds are not byte-identical across environments; the CI build is published.
