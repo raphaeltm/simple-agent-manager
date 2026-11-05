@@ -37,6 +37,8 @@ import {
   scrubCapacitySourceCredentialSecrets,
 } from '../../../src/services/default-capacity-source-credentials';
 import { encrypt } from '../../../src/services/encryption';
+import { listManagedGcpCredentialMirrors } from '../../../src/services/gcp-credential-mirrors';
+import { replaceUserGcpCredential } from '../../../src/services/gcp-credential-store';
 import {
   capacityPlacementSnapshotForTaskStart,
   PlacementResolutionError,
@@ -45,6 +47,7 @@ import {
   resolveTaskStartPlacement,
 } from '../../../src/services/placement-resolver';
 import { buildCapacityPoolSelection } from '../../../src/services/placement-resolver-capacity';
+import { listUserProviderCatalogSeeds } from '../../../src/services/provider-catalogs';
 import { applyCapacityPoolSchemaMigrations } from '../../helpers/capacity-pool-migrations';
 import { createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
@@ -6154,5 +6157,267 @@ describe('empty live Hetzner inventory through the credential-backed catalog pat
       env: catalogEnv(),
     });
     expect(fetchMock.mock.calls.length).toBeGreaterThan(firstPassCalls);
+  });
+});
+
+describe('GCP managed compatibility copies', () => {
+  async function saveGcp(db: ReturnType<typeof createDb>) {
+    await replaceUserGcpCredential(
+      catalogEnv(createSqliteD1WithBindLimit(sqlite!, 100)),
+      'user-1',
+      {
+        version: 1,
+        provider: 'gcp',
+        authType: 'workload-identity',
+        gcpProjectId: 'example-vms',
+        gcpProjectNumber: '123456',
+        serviceAccountEmail: 'sam@example-vms.iam.gserviceaccount.com',
+        wifPoolId: 'sam-pool',
+        wifProviderId: 'sam-provider',
+        defaultZone: 'europe-west3-a',
+      }
+    );
+    return db;
+  }
+
+  it('discovers one catalog and one editor-visible source after real WIF credential storage', async () => {
+    const db = await saveGcp(createDb());
+    expect(await listUserProviderCatalogSeeds(db, { userId: 'user-1' })).toHaveLength(1);
+    const result = await ensureDefaultCapacityPoolsForExistingCredentials(db, {
+      userId: 'user-1',
+      includeInstallation: false,
+    });
+    expect(result.user?.sources).toHaveLength(1);
+    expect(new Set(result.user?.candidates.map((c) => c.capacitySourceId)).size).toBe(1);
+  });
+
+  it.each([
+    ['unmarked', "UPDATE cc_configurations SET settings_json = '{}'"],
+    ['malformed metadata', "UPDATE cc_configurations SET settings_json = '{'"],
+    [
+      'wrong explicit legacy ID',
+      `UPDATE cc_configurations SET settings_json = '{"managedBy":"legacy-gcp-credential","legacyCredentialId":"another"}'`,
+    ],
+    ['different ciphertext', "UPDATE cc_credentials SET encrypted_token = 'different'"],
+    ['different IV', "UPDATE cc_credentials SET iv = 'different'"],
+    ['another credential owner', "UPDATE cc_credentials SET owner_id = 'user-2'"],
+    ['project attachment', "UPDATE cc_attachments SET project_id = 'project-1'"],
+    ['disabled connection', 'UPDATE cc_attachments SET is_active = 0'],
+    ['disabled legacy', 'UPDATE credentials SET is_active = 0'],
+  ])('does not collapse %s records', async (_label, mutation) => {
+    const db = await saveGcp(createDb());
+    sqlite!.exec(mutation);
+    expect(await listManagedGcpCredentialMirrors(db, 'user-1')).toEqual([]);
+  });
+
+  it('keeps unmarked equal credentials and ambiguous legacy matches as separate accounts', async () => {
+    const db = await saveGcp(createDb());
+    sqlite!.exec("UPDATE cc_configurations SET settings_json = '{}'");
+    expect(await listUserProviderCatalogSeeds(db, { userId: 'user-1' })).toHaveLength(2);
+    sqlite!
+      .exec(`UPDATE cc_configurations SET settings_json = '{"managedBy":"legacy-gcp-credential"}';
+      INSERT INTO credentials (id,user_id,provider,credential_type,encrypted_token,iv)
+      SELECT 'another-legacy',user_id,provider,credential_type,encrypted_token,iv FROM credentials LIMIT 1`);
+    expect(await listManagedGcpCredentialMirrors(db, 'user-1')).toEqual([]);
+    expect(await listUserProviderCatalogSeeds(db, { userId: 'user-1' })).toHaveLength(3);
+  });
+
+  async function existingCopies() {
+    const db = await saveGcp(createDb());
+    sqlite!.exec("UPDATE cc_configurations SET settings_json = '{}'");
+    const options = { userId: 'user-1', includeInstallation: false };
+    const before = await ensureDefaultCapacityPoolsForExistingCredentials(db, options);
+    const canonical = before.user!.sources.find((source) => !source.externalSourceRef)!;
+    const mirror = before.user!.sources.find((source) => source.externalSourceRef)!;
+    sqlite!
+      .prepare(
+        "UPDATE capacity_pool_candidates SET status = 'deleted' WHERE capacity_source_id = ?"
+      )
+      .run(canonical.id);
+    sqlite!.exec(
+      `UPDATE cc_configurations SET settings_json = '{"managedBy":"legacy-gcp-credential"}'`
+    );
+    return { db, options, canonical, mirror };
+  }
+
+  it.each(['pool edit', 'source refresh', 'credential rotation'])(
+    'defers the entire repair on a concurrent %s',
+    async (race) => {
+      const { options, canonical, mirror } = await existingCopies();
+      const database = createSqliteD1WithBindLimit(sqlite!, 100);
+      const repairStatements = new WeakSet<object>();
+      let raced = false;
+      const racingDatabase = {
+        ...database,
+        prepare(query: string) {
+          const statement = database.prepare(query);
+          return {
+            ...statement,
+            bind(...values: unknown[]) {
+              const bound = statement.bind(...values);
+              if (query.includes('pair.legacyId')) repairStatements.add(bound);
+              return bound;
+            },
+          };
+        },
+        async batch(statements: D1PreparedStatement[]) {
+          if (!raced && statements.some((statement) => repairStatements.has(statement))) {
+            raced = true;
+            if (race === 'pool edit')
+              sqlite!.exec('UPDATE capacity_pools SET revision = revision + 1');
+            if (race === 'source refresh')
+              sqlite!
+                .prepare(
+                  'UPDATE capacity_sources SET source_generation = source_generation + 100 WHERE id = ?'
+                )
+                .run(mirror.id);
+            if (race === 'credential rotation')
+              sqlite!.exec("UPDATE cc_credentials SET iv = 'rotated'");
+          }
+          return database.batch(statements);
+        },
+      } as D1Database;
+      await ensureDefaultCapacityPoolsForExistingCredentials(
+        drizzleD1(racingDatabase, { schema }),
+        options
+      );
+      expect(raced).toBe(true);
+      expect(
+        sqlite!.prepare('SELECT status FROM capacity_sources WHERE id = ?').get(mirror.id)
+      ).toEqual({ status: 'active' });
+      expect(
+        sqlite!
+          .prepare(
+            "SELECT count(*) count FROM capacity_pool_candidates WHERE capacity_source_id = ? AND status = 'active'"
+          )
+          .get(canonical.id)
+      ).toEqual({ count: 0 });
+    }
+  );
+
+  it('rolls back selection transfer if retirement fails', async () => {
+    const { db, options, canonical, mirror } = await existingCopies();
+    sqlite!.exec(`CREATE TRIGGER fail_gcp_retirement BEFORE UPDATE ON capacity_sources
+      WHEN NEW.id = '${mirror.id}' AND NEW.status = 'disabled'
+      BEGIN SELECT RAISE(ABORT, 'injected retirement failure'); END`);
+    await expect(ensureDefaultCapacityPoolsForExistingCredentials(db, options)).rejects.toThrow();
+    expect(
+      sqlite!.prepare('SELECT status FROM capacity_sources WHERE id = ?').get(mirror.id)
+    ).toEqual({ status: 'active' });
+    expect(
+      sqlite!
+        .prepare(
+          "SELECT count(*) count FROM capacity_pool_candidates WHERE capacity_source_id = ? AND status = 'active'"
+        )
+        .get(canonical.id)
+    ).toEqual({ count: 0 });
+  });
+
+  it.each([
+    'provider_instance_type',
+    'provider_instance_image',
+    'provider_instance_boot_disk_size_gb',
+  ])('preserves unmatched selected %s rather than retiring it', async (column) => {
+    const { db, options, mirror } = await existingCopies();
+    sqlite!
+      .prepare(`UPDATE capacity_pool_candidates SET ${column} = ? WHERE capacity_source_id = ?`)
+      .run(column.endsWith('_gb') ? 100 : 'custom-value', mirror.id);
+    const after = await ensureDefaultCapacityPoolsForExistingCredentials(db, options);
+    expect(after.user?.sources).toHaveLength(2);
+    expect(
+      sqlite!.prepare('SELECT status FROM capacity_sources WHERE id = ?').get(mirror.id)
+    ).toEqual({ status: 'active' });
+  });
+
+  it('keeps a separately connected GCP account in catalog and pool', async () => {
+    const db = await saveGcp(createDb());
+    seedComposableCloudCredential({
+      credentialId: 'other-gcp',
+      configurationId: 'other-config',
+      attachmentId: 'other-attachment',
+      provider: 'gcp',
+      encryptedToken: 'independent',
+      iv: 'independent-iv',
+    });
+    expect(await listUserProviderCatalogSeeds(db, { userId: 'user-1' })).toHaveLength(2);
+    const result = await ensureDefaultCapacityPoolsForExistingCredentials(db, {
+      userId: 'user-1',
+      includeInstallation: false,
+    });
+    expect(result.user?.sources).toHaveLength(2);
+  });
+
+  it('repairs existing duplicate sources once, preserving selections and historical rows', async () => {
+    const db = await saveGcp(createDb());
+    // Reproduce the shipped duplicate materialization, then restore its actual managed marker.
+    sqlite!.exec("UPDATE cc_configurations SET settings_json = '{}'");
+    const options = { userId: 'user-1', includeInstallation: false };
+    const before = await ensureDefaultCapacityPoolsForExistingCredentials(db, options);
+    expect(before.user?.sources).toHaveLength(2);
+    const canonical = before.user!.sources.find((s) => !s.externalSourceRef)!;
+    const mirror = before.user!.sources.find((s) => s.externalSourceRef)!;
+    const chosen = before.user!.candidates.find((c) => c.capacitySourceId === canonical.id)!;
+    sqlite!
+      .prepare(
+        "UPDATE capacity_pool_candidates SET status = 'deleted' WHERE capacity_source_id = ?"
+      )
+      .run(canonical.id);
+    sqlite!
+      .prepare(
+        "UPDATE capacity_pool_candidates SET status = 'deleted' WHERE capacity_source_id = ? AND location != ?"
+      )
+      .run(mirror.id, chosen.location);
+    sqlite!
+      .prepare(
+        `INSERT INTO nodes (id,user_id,name,status,capacity_source_id,capacity_pool_candidate_id)
+      VALUES ('gcp-running-node','user-1','Existing GCP node','running',?,?)`
+      )
+      .run(mirror.id, before.user!.candidates.find((c) => c.capacitySourceId === mirror.id)!.id);
+    const nodeBefore = sqlite!.prepare('SELECT * FROM nodes WHERE id = ?').get('gcp-running-node');
+    const originalCount = getRows<{ count: number }>(
+      'SELECT count(*) count FROM capacity_pool_candidates'
+    )[0]!.count;
+    sqlite!.exec(
+      `UPDATE cc_configurations SET settings_json = '{"managedBy":"legacy-gcp-credential"}'`
+    );
+    const after = await ensureDefaultCapacityPoolsForExistingCredentials(db, options);
+    expect(after.user?.sources.map((s) => s.id)).toEqual([canonical.id]);
+    expect(
+      after.user?.candidates
+        .filter((c) => c.status === 'active')
+        .every((c) => c.location === chosen.location)
+    ).toBe(true);
+    expect(after.user?.candidates.some((c) => c.status === 'active')).toBe(true);
+    expect(
+      getRows<{ count: number }>('SELECT count(*) count FROM capacity_pool_candidates')[0]!.count
+    ).toBe(originalCount);
+    expect(
+      getRows<{ status: string }>(
+        `SELECT status FROM capacity_sources WHERE id = '${mirror.id}'`
+      )[0]!.status
+    ).toBe('disabled');
+    expect(sqlite!.prepare('SELECT * FROM nodes WHERE id = ?').get('gcp-running-node')).toEqual(
+      nodeBefore
+    );
+    expect(after.user?.pool.configurationState).toBe('configured-ready');
+    const digest = sqlite!
+      .prepare('SELECT selection_digest FROM capacity_pools WHERE id = ?')
+      .get(after.user!.pool.id);
+    const stable = await ensureDefaultCapacityPoolsForExistingCredentials(db, options);
+    expect(stable.user?.pool.revision).toBe(after.user?.pool.revision);
+    expect(
+      sqlite!
+        .prepare('SELECT selection_digest FROM capacity_pools WHERE id = ?')
+        .get(after.user!.pool.id)
+    ).toEqual(digest);
+    // User removes the merged selection. A later reconciliation must not resurrect the old copy.
+    sqlite!
+      .prepare(
+        "UPDATE capacity_pool_candidates SET status = 'deleted' WHERE capacity_source_id = ?"
+      )
+      .run(canonical.id);
+    const again = await ensureDefaultCapacityPoolsForExistingCredentials(db, options);
+    expect(again.user?.sources).toHaveLength(1);
+    expect(again.user?.candidates.some((c) => c.status === 'active')).toBe(false);
   });
 });

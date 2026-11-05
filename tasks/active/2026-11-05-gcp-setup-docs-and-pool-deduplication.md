@@ -11,8 +11,8 @@ Publish today's GCP learnings in public docs ASAP, then deploy a fix for one con
 ## Checklist
 - [ ] Publish GCP setup/troubleshooting guide and navigation links in independent docs release.
 - [ ] Validate www lint, typecheck, build and links; independent docs/task review; CI and CodeRabbit gate; confirm public deployment.
-- [ ] Implement canonical mirror identity/deduplication for GCP connections and safely reconcile existing pool duplicates without losing selections or breaking references.
-- [ ] Add meaningful regressions for connection-to-catalog/pool flow and distinct accounts.
+- [x] Implement canonical mirror identity/deduplication for GCP connections and safely reconcile existing pool duplicates without losing selections or breaking references.
+- [x] Add meaningful regressions for connection-to-catalog/pool flow and distinct accounts.
 - [ ] Run API validation and independent Cloudflare/security/test/constitution/task reviews.
 - [ ] Verify deployed staging behavior before fix PR; merge and monitor production rollout with bounded smoke.
 - [ ] Update known-issue docs when fix ships.
@@ -23,3 +23,6 @@ Public guidance precedes fix deployment. One logical GCP connection yields one p
 ## References
 Ideas 01M6NGW3JR03WBJGF932RR821H (error messages; deferred separately) and 01M6NK4EWSZ9X2QKY05G0EZC6E (duplicate source).
 Code: gcp-credential-store.ts, provider-catalogs-seeds.ts, default-capacity-pool-sources.ts, gcp-errors.ts.
+
+## Implementation validation
+20 focused regressions pass, including revision/source/credential races, batch rollback, unmatched selections, distinct connections, live references, and idempotent digest/revision. Independent security/Cloudflare and test/constitution reviews pass. Full API checks and staging pending.

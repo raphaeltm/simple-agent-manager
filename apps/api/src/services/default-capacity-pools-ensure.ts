@@ -7,7 +7,7 @@ import {
   DEFAULT_CAPACITY_POOL_CANDIDATE_PUBLISH_BATCH_SIZE,
   ensureCandidatesForSource,
 } from './default-capacity-pool-candidates';
-import { defaultPoolId } from './default-capacity-pool-helpers';
+import { composableAttachmentReference, defaultPoolId } from './default-capacity-pool-helpers';
 import {
   disableCapacitySourceAvailability,
   disableCapacitySourcesMissingFromSeeds,
@@ -47,6 +47,11 @@ import {
   ensureCapacitySourceCredentialAnchor,
   resolveOfferingsForSeed,
 } from './default-capacity-source-credentials';
+import {
+  listManagedGcpCredentialMirrors,
+  type ManagedGcpCredentialMirror,
+} from './gcp-credential-mirrors';
+import { reconcileManagedGcpPoolMirror } from './gcp-pool-mirror-reconciliation';
 import {
   listInstallationProviderCatalogSeeds,
   listProjectProviderCatalogSeeds,
@@ -103,7 +108,10 @@ export async function ensureUserDefaultPool(
     scope,
     seedSnapshotGeneration,
     catalogSeedsToCapacitySeeds(scope, seeds),
-    options
+    options,
+    seeds.some((seed) => seed.provider === 'gcp' && !seed.externalSourceRef)
+      ? await listManagedGcpCredentialMirrors(db, userId)
+      : []
   );
 }
 
@@ -165,7 +173,8 @@ export async function ensureDefaultPoolForCredentialSeeds(
   scope: ScopeIdentity,
   seedSnapshotGeneration: number,
   seeds: CredentialCapacitySeed[],
-  options: DefaultCapacityPoolsBackfillOptions
+  options: DefaultCapacityPoolsBackfillOptions,
+  managedGcpMirrors: ManagedGcpCredentialMirror[] = []
 ): Promise<CapacityPoolSummary | null> {
   const activeSeeds = seeds.filter((seed) => seed.active);
   const existingPool = await findDefaultPool(db, scope);
@@ -182,7 +191,7 @@ export async function ensureDefaultPoolForCredentialSeeds(
       ...scope,
       createdBy: activeSeeds[0]?.createdBy ?? null,
     }));
-  const poolGuard: PoolPublicationGuard = {
+  let poolGuard: PoolPublicationGuard = {
     revision: pool.revision,
     updatedAt: pool.updatedAt,
     status: pool.status,
@@ -277,8 +286,28 @@ export async function ensureDefaultPoolForCredentialSeeds(
   if (publications.some((published) => published === false))
     return readDefaultPoolSummary(db, scope, { includeDisabled: true });
 
+  let selectionRevisionAlreadyBumped = false;
+  for (const mirror of managedGcpMirrors) {
+    // Never let generic retirement discard choices if the fenced repair deferred.
+    activeSeedKeys.add(`external:${composableAttachmentReference(mirror.attachmentId)}`);
+    const repairedGuard = await reconcileManagedGcpPoolMirror(
+      db,
+      scope,
+      pool.id,
+      poolGuard,
+      mirror,
+      seedSnapshotGeneration
+    );
+    if (repairedGuard) {
+      poolGuard = repairedGuard;
+      selectionRevisionAlreadyBumped = true;
+    }
+  }
   await disableCapacitySourcesMissingFromSeeds(db, scope, activeSeedKeys, seedSnapshotGeneration);
-  await reconcileDefaultPoolStatus(db, pool.id, poolGuard, { publicationComplete });
+  await reconcileDefaultPoolStatus(db, pool.id, poolGuard, {
+    publicationComplete,
+    selectionRevisionAlreadyBumped,
+  });
   return readDefaultPoolSummary(db, scope, { includeDisabled: true });
 }
 
