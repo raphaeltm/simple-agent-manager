@@ -237,11 +237,20 @@ func (s *Server) applyWorkspaceDeletion(ctx context.Context, d *workspaceDeletio
 	if d.Completed {
 		return s.finishWorkspaceDeletion(ctx, d)
 	}
-	if meta == nil {
-		return errors.New("workspace metadata missing before physical deletion")
-	}
 	if runtime, ok := s.getWorkspaceRuntime(d.WorkspaceID); ok && runtime.EvictionGeneration != d.WorkspaceGeneration {
 		return errors.New("runtime generation changed")
+	}
+	if meta == nil {
+		// Older reconcilers could overwrite completion after metadata removal.
+		// Recover only by observing absence, never by deleting unowned artifacts.
+		if err := s.verifyDeletionAbsent(ctx, d); err != nil {
+			return fmt.Errorf("workspace metadata missing before physical deletion: %w", err)
+		}
+		d.Completed = true
+		if err := s.saveWorkspaceDeletion(d); err != nil {
+			return err
+		}
+		return s.finishWorkspaceDeletion(ctx, d)
 	}
 	if err := validateDeletionRoot(d.Root); err != nil {
 		return err

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"time"
 
@@ -22,26 +23,43 @@ func (s *Server) reconcileWorkspaceDeletions(ctx context.Context) {
 	if err != nil {
 		return
 	}
-	for _, payload := range items {
-		var d workspaceDeletionIntent
-		if json.Unmarshal([]byte(payload), &d) != nil || d.Finalized {
-			continue
-		}
-		lock := s.workspaceLifecycleLock(d.WorkspaceID)
-		if lock.Lock(ctx) != nil {
-			return
-		}
-		attemptCtx, cancel := context.WithTimeout(ctx, s.workspaceDeletionAttemptTimeout())
-		err := s.applyWorkspaceDeletion(attemptCtx, &d)
-		cancel()
-		if err != nil {
-			_ = s.saveWorkspaceDeletion(&d)
-		}
-		lock.Unlock()
-		if err != nil {
-			slog.Warn("Workspace physical cleanup remains pending", "workspace", d.WorkspaceID, "error", err)
+	for id := range items {
+		if err := s.reconcileWorkspaceDeletion(ctx, id); err != nil {
+			slog.Warn("Workspace physical cleanup remains pending", "workspace", id, "error", err)
 		}
 	}
+}
+
+func (s *Server) reconcileWorkspaceDeletion(ctx context.Context, id string) error {
+	lock := s.workspaceLifecycleLock(id)
+	if err := lock.Lock(ctx); err != nil {
+		return err
+	}
+	defer lock.Unlock()
+	// The list is only a work queue. An inline delete may have finalized the
+	// record while we waited for its lock; never act on or write that old copy.
+	payload, err := s.store.GetWorkspaceDeletion(id)
+	if err != nil || payload == "" {
+		return err
+	}
+	var d workspaceDeletionIntent
+	if err := json.Unmarshal([]byte(payload), &d); err != nil {
+		return err
+	}
+	if d.WorkspaceID != id {
+		return errors.New("deletion record workspace identity mismatch")
+	}
+	if d.Finalized {
+		return nil
+	}
+	attemptCtx, cancel := context.WithTimeout(ctx, s.workspaceDeletionAttemptTimeout())
+	defer cancel()
+	// The deletion steps persist their own progress. Rotate failed attempts
+	// without rewriting their payload or regressing a completion tombstone.
+	if err := s.applyWorkspaceDeletion(attemptCtx, &d); err != nil {
+		return errors.Join(err, s.store.TouchWorkspaceDeletion(id))
+	}
+	return nil
 }
 
 func (s *Server) startWorkspaceDeletionReconciler() {
