@@ -1,0 +1,47 @@
+name: OpenCode Steering Build
+
+# Builds SAM's patched OpenCode release from the pinned tag and patch. The archives are
+# retained for review and compared against the published release digests in
+# packages/vm-agent/internal/acp/opencode_install.sh; publication is a separate step.
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/opencode-steering-build.yml'
+      - 'scripts/opencode/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: opencode-steering-build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Install pinned Bun
+        run: |
+          set -euo pipefail
+          release=https://github.com/oven-sh/bun/releases/download/bun-v1.4.4
+          curl -fsSL --retry 2 "$release/bun-linux-x64-baseline.zip" -o "$RUNNER_TEMP/bun.zip"
+          curl -fsSL --retry 2 "$release/SHASUMS256.txt" -o "$RUNNER_TEMP/SHASUMS256.txt"
+          expected=$(awk '$2 == "bun-linux-x64-baseline.zip" { print $1 }' "$RUNNER_TEMP/SHASUMS256.txt")
+          [[ -n "$expected" ]]
+          printf '%s  %s\n' "$expected" "$RUNNER_TEMP/bun.zip" | sha256sum --check
+          unzip -q "$RUNNER_TEMP/bun.zip" -d "$RUNNER_TEMP/bun"
+          echo "$RUNNER_TEMP/bun/bun-linux-x64-baseline" >> "$GITHUB_PATH"
+      - name: Build patched OpenCode
+        run: bash scripts/opencode/build-opencode-steering.sh "$RUNNER_TEMP/opencode-build" "$RUNNER_TEMP/opencode-release"
+      - name: Retain release archives
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: opencode-steering-${{ github.sha }}
+          path: ${{ runner.temp }}/opencode-release
+          if-no-files-found: error
+          retention-days: 14
