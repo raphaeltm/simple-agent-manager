@@ -114,3 +114,7 @@ Probed the real `agy-acp-server` 1.4.5 Linux x86_64 release locally (`.tmp/agy/p
 - I am next after live-steering (task 01M6MHNBM96JSAMJ0GNTPM2AYP); wait for its release message.
 - After my staging run, send "staging released" to the account-map task 01M6P9ZR711CNEDH6TVBG64D06
   (send_durable_message). It is queued behind me.
+- 19:47 UTC: deployed c8bf0342e to staging (run 42097177329, success). At about 20:32 I released staging to
+  account-map without the real-key check, because it was waiting on the human. Queue is now
+  account-map, then reliable-shutdown (01M6NAWT7RTBEQHXJTVMMX1W97, about 45 minutes), then me.
+  Reliable-shutdown will message me when it releases staging. Then I redeploy, ask for the key and run the real chats.
