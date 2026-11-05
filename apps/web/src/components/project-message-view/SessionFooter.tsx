@@ -1,6 +1,6 @@
 import type { SlashCommand } from '@simple-agent-manager/acp-client';
 import { PlanModal } from '@simple-agent-manager/acp-client';
-import type { AgentProfile } from '@simple-agent-manager/shared';
+import type { AgentProfile, PromptDeliveryIntent } from '@simple-agent-manager/shared';
 import { isExpiredTask } from '@simple-agent-manager/shared';
 import { Button, Pane } from '@simple-agent-manager/ui';
 import { type ReactNode, type RefObject, useEffect, useMemo, useState } from 'react';
@@ -8,6 +8,7 @@ import { type ReactNode, type RefObject, useEffect, useMemo, useState } from 're
 import { IMMERSIVE_CHROME } from '../shell/chat-immersive-transition';
 import { ArchivedForkComposer } from './ArchivedForkComposer';
 import { CompletionDock } from './CompletionDock';
+import { DeliveryIntentControl } from './DeliveryIntentControl';
 import { FollowUpInput, ReadOnlyFollowUp } from './FollowUpInput';
 import { accessClockTime, accessTimeLeft, useServerNow } from './session-access-time';
 import { currentPlanToPlanItem, ElapsedTime } from './session-view-utils';
@@ -75,6 +76,17 @@ export function SessionFooter({
       lc.currentPlan && lc.currentPlan.length > 0 ? currentPlanToPlanItem(lc.currentPlan) : null,
     [lc.currentPlan]
   );
+  // Steering only means something while a turn runs. A new turn starts on "Queue next";
+  // a message with files always queues, because a steer carries text only.
+  const agentWorking =
+    !lc.isWaking && (lc.agentActivity === 'prompting' || lc.agentActivity === 'responding');
+  const [deliveryIntent, setDeliveryIntent] = useState<PromptDeliveryIntent>('queue');
+  useEffect(() => {
+    if (!agentWorking) setDeliveryIntent('queue');
+  }, [agentWorking]);
+  const hasAttachments = lc.attachments.length > 0;
+  const sendIntent: PromptDeliveryIntent =
+    agentWorking && !hasAttachments ? deliveryIntent : 'queue';
   const sessionOwnerLabel = ownerLabelFor(lc.session);
   const viewerGrant = viewer.isGrantee
     ? lc.session?.access?.grants.find((grant) => grant.grantee.id === viewerId)
@@ -173,8 +185,17 @@ export function SessionFooter({
           value={lc.followUp}
           onChange={lc.setFollowUp}
           onSend={() => {
-            void lc.handleSendFollowUp();
+            void lc.handleSendFollowUp(sendIntent);
           }}
+          deliveryControl={
+            agentWorking ? (
+              <DeliveryIntentControl
+                value={deliveryIntent}
+                onChange={setDeliveryIntent}
+                hasAttachments={hasAttachments}
+              />
+            ) : undefined
+          }
           // A teammate's files are their own uploads; the server copies them only into this
           // chat's workspace while their access lasts.
           onUploadFiles={(files) => {

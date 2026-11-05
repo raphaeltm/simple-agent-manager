@@ -8,6 +8,7 @@
 
 import type {
   NodeResponse,
+  PromptDeliveryIntent,
   SessionAccessSummary,
   TaskExecutionStep,
   WorkspaceResponse,
@@ -72,7 +73,8 @@ export interface UseSessionLifecycleResult {
   cancelling: boolean;
   /** Message from a failed interrupt attempt, surfaced beside the control. */
   cancelError: string | null;
-  handleSendFollowUp: () => Promise<void>;
+  /** `steer` adds the message to the running turn when the agent's runtime can; else it queues. */
+  handleSendFollowUp: (deliveryIntent?: PromptDeliveryIntent) => Promise<void>;
   handleUploadFiles: (files: FileList | File[] | null) => void;
   attachments: import('../../pages/project-chat/useAttachments').AttachmentUploadState[];
   removeAttachment: (index: number) => void;

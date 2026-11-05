@@ -1,4 +1,4 @@
-import type { UserMessageAttribution } from '@simple-agent-manager/acp-client';
+import type { UserMessageAttribution, UserMessageDelivery } from '@simple-agent-manager/acp-client';
 import type { SessionUndeliveredReason } from '@simple-agent-manager/shared';
 
 import type { ChatMessageResponse } from '../../lib/api';
@@ -6,6 +6,48 @@ import { maybeJsonRecord } from '../../lib/runtime-validation';
 
 function nonEmptyString(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+/** Why a steer became a next-turn message, in the words the chip uses. */
+function steerFallbackReason(value: unknown): UserMessageDelivery['reason'] {
+  if (value === 'no_running_turn' || value === 'turn_stopping' || value === 'turn_cancelling') {
+    return 'turn_finished';
+  }
+  if (value === 'session_not_awake') return 'agent_asleep';
+  if (
+    typeof value === 'string' &&
+    (value === 'runtime_steering_unsupported' ||
+      value.startsWith('adapter_') ||
+      value === 'unsupported')
+  ) {
+    return 'not_supported';
+  }
+  return 'other';
+}
+
+/**
+ * What became of a message sent with "Steer now", from the server-written transcript
+ * metadata (`deliveryIntent`, then `steerOutcome` once the runtime answered). Queued
+ * messages carry no delivery chip.
+ */
+export function userMessageDelivery(
+  message: Pick<ChatMessageResponse, 'role' | 'toolMetadata'>
+): UserMessageDelivery | undefined {
+  if (message.role !== 'user') return undefined;
+  const meta = maybeJsonRecord(message.toolMetadata);
+  if (!meta || meta.deliveryIntent !== 'steer') return undefined;
+  switch (meta.steerOutcome) {
+    case 'steered':
+      return { status: 'steered' };
+    case 'queued_fallback':
+      return { status: 'queued_instead', reason: steerFallbackReason(meta.steerReason) };
+    case 'unconfirmed':
+      return { status: 'unconfirmed' };
+    case 'failed':
+      return { status: 'not_delivered' };
+    default:
+      return { status: 'steering' };
+  }
 }
 
 /** The server's `deliveryCancelled` reason, as what the bubble says. */
