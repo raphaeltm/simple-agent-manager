@@ -15,7 +15,7 @@ User request: restore the layout controls and keep the revealed navbar open whil
 - [x] Leaving the peek closes it; Escape dismisses; keyboard focus can keep it open.
 - [x] Browser regression fails before fix and passes after.
 - [x] Desktop/mobile mock-data screenshots reviewed, video uploaded to library.
-- [ ] Web lint, typecheck, tests, build; independent specialist review.
+- [x] Web lint, typecheck, tests, build; independent specialist review.
 - [ ] Open PR green; staging skipped per user; no merge requested.
 
 ## Variants
@@ -28,7 +28,7 @@ Reuse DesktopSidebar (selected: consistent controls, minimal duplication); add o
 - Desktop/mobile focus audit: 12 pass in first run, one repeated-switch test timed out under cold concurrent checks; isolated pointer rerun passed (29.2s), final recording run passed (30s). Keyboard/Escape and stress scenarios passed.
 - Repeated-switch test has a 60s total bound for six animated switches plus screenshots; recording is opt-in through ZEN_RECORD_VIDEO.
 - Light fixture asserts actual sam-light DOM theme. Screenshots inspected in both themes and mobile; no clipping, overflow or readability issues.
-- Lint passes with three existing warnings; typecheck and Vite production build pass. Full web unit suite running.
+- Lint passes with three existing warnings; typecheck and Vite production build pass. Full web suite: 390 files / 4,883 tests passed (812.52s). Wrapper returned 143 after full passing summary; affected-component rerun and CI confirm clean exit.
 - Independent local zen_review: implementation/browser PASS, no actionable findings. UI rubric 4/4/4/4/5. Completion pending full unit suite and green open PR.
 - Library MP4: 01M6MG0KBWMC7VSHVRFFHKC62H; screenshot IDs recorded in PR evidence.
 
