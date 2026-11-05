@@ -170,23 +170,21 @@ func (h *SessionHost) admitSteer() (steerTarget, SteerResult, bool) {
 	if !support.PromptRequired {
 		return steerTarget{}, SteerResult{Outcome: SteerUnsupported, Reason: "adapter_idle_behavior_unverified"}, false
 	}
-	if conn == nil || sessionID == "" || status != HostPrompting {
-		return steerTarget{}, SteerResult{Outcome: SteerPromptRequired, Reason: "no_running_turn"}, false
-	}
-	if rollover != nil {
-		return steerTarget{}, SteerResult{Outcome: SteerPromptRequired, Reason: "checkpoint_in_progress"}, false
-	}
-
 	h.promptMu.Lock()
 	attempt := h.promptAttempt
 	inFlight := h.promptInFlight && attempt != nil && !attempt.isTerminal()
 	fenced := h.evictionPending || h.guardedCancelPending
 	h.promptMu.Unlock()
-	if !inFlight {
-		return steerTarget{}, SteerResult{Outcome: SteerPromptRequired, Reason: "no_running_turn"}, false
+	// A rollover or stop in progress is reported before "no running turn": the turn it is
+	// ending may already have returned, and the stop is the more precise reason.
+	if rollover != nil {
+		return steerTarget{}, SteerResult{Outcome: SteerPromptRequired, Reason: "checkpoint_in_progress"}, false
 	}
 	if fenced {
 		return steerTarget{}, SteerResult{Outcome: SteerPromptRequired, Reason: "turn_stopping"}, false
+	}
+	if conn == nil || sessionID == "" || status != HostPrompting || !inFlight {
+		return steerTarget{}, SteerResult{Outcome: SteerPromptRequired, Reason: "no_running_turn"}, false
 	}
 	if h.isPromptCancelRequested(attempt.id) {
 		return steerTarget{}, SteerResult{Outcome: SteerPromptRequired, Reason: "turn_cancelling"}, false

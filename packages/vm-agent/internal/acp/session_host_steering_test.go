@@ -417,7 +417,11 @@ func TestSteerRefusedWhileGuardedCancelStopsTheProcess(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("guarded cancel did not reach process stop")
 	}
-	// The fence, not the cancel request, refuses it: the reason says the turn is stopping.
+	// The cancelled turn has returned while the process stop still holds the fence (the
+	// interleaving a fast CI runner hits). The fence is reported, not "no running turn".
+	if c := h.nextCompletion(t); c.stopReason != "cancelled" {
+		t.Fatalf("turn completion = %+v, want cancelled", c)
+	}
 	call := awaitSteer(t, h.steerAsync("x", "m", nil))
 	if call.result.Outcome != SteerPromptRequired || call.result.Reason != "turn_stopping" || call.claimed {
 		t.Fatalf("result = %+v claimed=%v", call.result, call.claimed)
