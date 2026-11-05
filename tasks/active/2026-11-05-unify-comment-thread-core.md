@@ -98,12 +98,12 @@ Readers moved: `archive-sharding.ts` fence + digest, `project-comment-inbox.ts`,
 
 Inventory via `GET /api/projects/:id/comments` as the primary smoke user (`.tmp/staging/baseline/`):
 
-| Project | Message threads | File threads | Replies | Notes |
-| --- | --- | --- | --- | --- |
-| `01KJNR9R3TEN3KX1ETE33852R8` Test Project 1 | 35 (15 sessions) | 0 | 10 | 14 sent (mostly by teammate dfv31 via shared access), 13 with mentions, quotes, resolved + open |
-| `01KTKXZ4ZZAT6MJFXRW1ZTQ7RB` hono | 20 (3 sessions) | 4 (file `01KWMJ2QMRVV57SRK6P9C0343M`, 2 quoted) | 10 | open/sent/resolved |
-| `01KWHD8XS7MQ7R6KWXJYRHDVH4` Potato | 3 | 0 | 2 | resolved, quoted |
-| `01KJVGMWX26SGQ5DX94GMTJRQN` Test Project 2 | 0 | 1 | 1 | resolved file thread |
+| Project                                     | Message threads  | File threads                                    | Replies | Notes                                                                                           |
+| ------------------------------------------- | ---------------- | ----------------------------------------------- | ------- | ----------------------------------------------------------------------------------------------- |
+| `01KJNR9R3TEN3KX1ETE33852R8` Test Project 1 | 35 (15 sessions) | 0                                               | 10      | 14 sent (mostly by teammate dfv31 via shared access), 13 with mentions, quotes, resolved + open |
+| `01KTKXZ4ZZAT6MJFXRW1ZTQ7RB` hono           | 20 (3 sessions)  | 4 (file `01KWMJ2QMRVV57SRK6P9C0343M`, 2 quoted) | 10      | open/sent/resolved                                                                              |
+| `01KWHD8XS7MQ7R6KWXJYRHDVH4` Potato         | 3                | 0                                               | 2       | resolved, quoted                                                                                |
+| `01KJVGMWX26SGQ5DX94GMTJRQN` Test Project 2 | 0                | 1                                               | 1       | resolved file thread                                                                            |
 
 ## Implementation notes
 
@@ -113,6 +113,12 @@ Inventory via `GET /api/projects/:id/comments` as the primary smoke user (`.tmp/
   frozen fragments, like the existing wake/link fragments.
 - The Send-to-agent directive moved to `services/message-comment-directive.ts` (message-comments.ts
   was already over 500 lines).
+
+## Migration cost (rule 81)
+
+Copy + parity run once per project object in its constructor. Measured on better-sqlite3 with
+100,000 threads + 100,000 replies (~200 bytes each): copy 1.9 s, parity 1.4 s, against the 30 s
+`blockConcurrencyWhile` budget. Largest staging project: 35 threads.
 
 ## Rollback
 

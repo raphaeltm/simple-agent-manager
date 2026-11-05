@@ -24,6 +24,11 @@
  * unwritten (`anchored-comment-writer-inventory.test.ts`), as the recovery path; dropping
  * them is a separate, later change (tasks/backlog/2026-11-05-drop-frozen-legacy-comment-tables.md).
  *
+ * Cost (rule 81): both steps run in-engine, inside the constructor's blockConcurrencyWhile
+ * (30 s budget). Measured on better-sqlite3 with 100,000 threads and 100,000 replies of ~200
+ * bytes each: copy 1.9 s, parity 1.4 s. Comment threads are capped per session
+ * (`COMMENT_THREADS_PER_SESSION_MAX`); the largest staging project had 35 threads.
+ *
  * Parity is checked after the copy and logged. A mismatch is logged as an error and does
  * NOT throw: migrations run inside the DO constructor's transaction, and a throw would take
  * the whole project object down rather than leave comments partly visible.
