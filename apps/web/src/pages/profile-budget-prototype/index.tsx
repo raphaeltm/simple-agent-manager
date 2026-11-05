@@ -1,20 +1,22 @@
 /**
  * PROTOTYPE — never merge to main. Agent Profiles that answer "which agent
  * should I use next?" by showing each account's remaining plan budget.
- * Route: /prototype/profile-budgets?v=profiles|accounts|reset
+ * Route: /prototype/profile-budgets?v=strip|table|ring|reset
  */
 import { Button, SegmentedControl } from '@simple-agent-manager/ui';
 import { Plus } from 'lucide-react';
 import { useSearchParams } from 'react-router';
 
 import { ResetComparison } from './ResetComparison';
-import { VariantAccounts } from './VariantAccounts';
-import { VariantProfiles } from './VariantProfiles';
+import { VariantRing } from './VariantRing';
+import { VariantStrip } from './VariantStrip';
+import { VariantTable } from './VariantTable';
 
 const VARIANTS = [
-  { id: 'profiles', label: 'A · Profiles' },
-  { id: 'accounts', label: 'B · By account' },
-  { id: 'reset', label: 'Reset fix' },
+  { id: 'strip', label: 'A1 Strip' },
+  { id: 'table', label: 'A2 Table' },
+  { id: 'ring', label: 'A3 Ring' },
+  { id: 'reset', label: 'Reset' },
 ] as const;
 type VariantId = (typeof VARIANTS)[number]['id'];
 
@@ -23,11 +25,11 @@ export function ProfileBudgetPrototype() {
   const requested = params.get('v');
   const variant: VariantId = VARIANTS.some((v) => v.id === requested)
     ? (requested as VariantId)
-    : 'profiles';
+    : 'strip';
 
   return (
     <div style={{ height: '100vh', overflow: 'auto' }} data-testid="prototype-scroll">
-      <div className="mx-auto w-full min-w-0 max-w-3xl px-4 py-6">
+      <div className="mx-auto w-full min-w-0 max-w-4xl px-4 py-6">
         <div className="mb-3 flex items-center justify-between gap-3">
           <h1 className="m-0 text-lg font-semibold text-fg-primary">Agent Profiles</h1>
           <Button size="sm">
@@ -43,8 +45,9 @@ export function ProfileBudgetPrototype() {
             options={VARIANTS.map((v) => ({ value: v.id, label: v.label }))}
           />
         </div>
-        {variant === 'profiles' && <VariantProfiles />}
-        {variant === 'accounts' && <VariantAccounts />}
+        {variant === 'strip' && <VariantStrip />}
+        {variant === 'table' && <VariantTable />}
+        {variant === 'ring' && <VariantRing />}
         {variant === 'reset' && <ResetComparison />}
       </div>
     </div>

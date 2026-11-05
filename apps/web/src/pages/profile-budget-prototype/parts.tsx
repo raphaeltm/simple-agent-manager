@@ -1,10 +1,10 @@
 import type { CredentialLimitCredentialSummary } from '@simple-agent-manager/shared';
-import { Chip, DropdownMenu } from '@simple-agent-manager/ui';
-import { Copy, Pencil, Trash2, Zap } from 'lucide-react';
+import { DropdownMenu } from '@simple-agent-manager/ui';
+import { Copy, Pencil, Trash2 } from 'lucide-react';
 
 import { ProviderMark } from '../../components/accounts/AccountBits';
 import { getAccountProvider } from '../../components/accounts/provider-meta';
-import { type AccountBudget, type EffectiveWindow, levelColor, READINESS } from './budget';
+import { type EffectiveWindow, levelColor } from './budget';
 import type { MockProfile } from './mock-data';
 import { UNSAMPLED_ACCOUNTS } from './mock-data';
 
@@ -25,7 +25,6 @@ export function ProfileFacts({ profile }: Readonly<{ profile: MockProfile }>) {
   const facts = [
     profile.effort ? EFFORT[profile.effort] : null,
     profile.taskMode === 'task' ? 'Task' : 'Chat',
-    profile.runtime === 'instant' ? 'Instant' : profile.vmSize ? `VM ${profile.vmSize}` : 'VM',
     profile.permissionMode === 'bypassPermissions' ? 'No approvals' : null,
   ].filter(Boolean);
   return (
@@ -35,20 +34,10 @@ export function ProfileFacts({ profile }: Readonly<{ profile: MockProfile }>) {
       </span>
       {facts.map((fact) => (
         <span key={fact} className="whitespace-nowrap">
-          {fact === 'Instant' && <Zap size={11} aria-hidden="true" className="mr-0.5 inline" />}
           {fact}
         </span>
       ))}
     </div>
-  );
-}
-
-export function ReadinessChip({ budget }: Readonly<{ budget: AccountBudget }>) {
-  const meta = READINESS[budget.readiness];
-  return (
-    <Chip tone={meta.tone} size="sm" dot>
-      {meta.label}
-    </Chip>
   );
 }
 

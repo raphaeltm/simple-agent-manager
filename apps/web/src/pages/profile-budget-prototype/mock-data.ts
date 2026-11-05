@@ -5,7 +5,7 @@
  *
  * NOW is pinned so screenshots are deterministic.
  */
-import type { CredentialLimitCredentialSummary } from '@simple-agent-manager/shared';
+import type { CredentialLimitCredentialSummary, ResourceRequirements } from '@simple-agent-manager/shared';
 
 export const NOW = Date.UTC(2026, 10, 5, 17, 45);
 const MIN = 60_000;
@@ -23,6 +23,8 @@ export interface MockProfile {
   vmSize: string | null;
   runtime: 'vm' | 'instant';
   permissionMode: string | null;
+  /** Explicit resource request on the profile; null = inherit (or legacy `vmSize`). */
+  resources: ResourceRequirements | null;
   /** Credential reference this profile resolves to (profile pin → project pin → default → platform). */
   accountRef: string;
   /** Which tier picked the account. */
@@ -119,6 +121,7 @@ export const PROFILES: MockProfile[] = [
     vmSize: null,
     runtime: 'vm',
     permissionMode: null,
+    resources: null,
     accountRef: 'cc_credentials:codex-team',
     accountVia: 'profile pin',
   },
@@ -133,6 +136,7 @@ export const PROFILES: MockProfile[] = [
     vmSize: 'medium',
     runtime: 'vm',
     permissionMode: null,
+    resources: null,
     accountRef: 'cc_credentials:work-pro',
     accountVia: 'project pin',
   },
@@ -147,6 +151,7 @@ export const PROFILES: MockProfile[] = [
     vmSize: null,
     runtime: 'vm',
     permissionMode: 'bypassPermissions',
+    resources: { minVcpu: 4, minMemoryGb: 7.5, minDiskGb: 60 },
     accountRef: 'cc_credentials:raph-max',
     accountVia: 'default',
   },
@@ -161,6 +166,7 @@ export const PROFILES: MockProfile[] = [
     vmSize: null,
     runtime: 'vm',
     permissionMode: null,
+    resources: null,
     accountRef: 'cc_credentials:raph-max',
     accountVia: 'default',
   },
@@ -175,6 +181,7 @@ export const PROFILES: MockProfile[] = [
     vmSize: 'medium',
     runtime: 'vm',
     permissionMode: null,
+    resources: null,
     accountRef: 'cc_credentials:raph-max',
     accountVia: 'default',
   },
@@ -189,6 +196,7 @@ export const PROFILES: MockProfile[] = [
     vmSize: null,
     runtime: 'instant',
     permissionMode: null,
+    resources: null,
     accountRef: 'cc_credentials:work-pro',
     accountVia: 'project pin',
   },
@@ -203,6 +211,7 @@ export const PROFILES: MockProfile[] = [
     vmSize: 'medium',
     runtime: 'vm',
     permissionMode: null,
+    resources: null,
     accountRef: 'cc_credentials:work-pro',
     accountVia: 'project pin',
   },
@@ -214,9 +223,10 @@ export const PROFILES: MockProfile[] = [
     model: 'gpt-6-astra',
     effort: 'low',
     taskMode: 'conversation',
-    vmSize: 'medium',
+    vmSize: null,
     runtime: 'vm',
     permissionMode: null,
+    resources: { minVcpu: 1, minMemoryGb: 2 },
     accountRef: 'cc_credentials:codex-team',
     accountVia: 'profile pin',
   },
@@ -231,6 +241,7 @@ export const PROFILES: MockProfile[] = [
     vmSize: null,
     runtime: 'instant',
     permissionMode: null,
+    resources: null,
     accountRef: 'cc_credentials:oc-go',
     accountVia: 'default',
   },
@@ -246,6 +257,7 @@ export const PROFILES: MockProfile[] = [
     vmSize: 'large',
     runtime: 'vm',
     permissionMode: null,
+    resources: { minVcpu: 8, minMemoryGb: 15.5, minDiskGb: 160, exclusiveNode: true },
     accountRef: 'cc_credentials:gemini-key',
     accountVia: 'default',
   },
@@ -260,6 +272,7 @@ export const PROFILES: MockProfile[] = [
     vmSize: null,
     runtime: 'instant',
     permissionMode: null,
+    resources: null,
     accountRef: 'platform_credentials:sam',
     accountVia: 'platform',
   },
