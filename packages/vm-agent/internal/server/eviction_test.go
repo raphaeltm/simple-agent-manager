@@ -96,7 +96,7 @@ func TestCaptureEvictionSessionSnapshotUsesSynchronousHibernateInput(t *testing.
 		return map[string]interface{}{"status": "available"}, nil
 	}
 
-	err = s.captureEvictionSessionSnapshot(context.Background(), resourcemon.EvictionTarget{
+	_, err = s.captureEvictionSessionSnapshot(context.Background(), resourcemon.EvictionTarget{
 		WorkspaceID:    "workspace-1",
 		ContainerID:    evictionTestContainerID,
 		RuntimeVersion: s.workspaces["workspace-1"].UpdatedAt.UTC().Format(time.RFC3339Nano),
@@ -133,7 +133,7 @@ func TestCaptureEvictionSessionSnapshotRequiresChatSessionID(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := s.captureEvictionSessionSnapshot(context.Background(), resourcemon.EvictionTarget{
+	_, err := s.captureEvictionSessionSnapshot(context.Background(), resourcemon.EvictionTarget{
 		WorkspaceID:    "workspace-1",
 		ContainerID:    evictionTestContainerID,
 		RuntimeVersion: s.workspaces["workspace-1"].UpdatedAt.UTC().Format(time.RFC3339Nano),
@@ -161,7 +161,7 @@ func TestCaptureOOMEvictionSnapshotsExitedVictimThroughIsolatedHelper(t *testing
 		captured = input.containerTarget
 		return map[string]interface{}{"status": "available"}, nil
 	}
-	err = s.captureEvictionSessionSnapshot(context.Background(), resourcemon.EvictionTarget{
+	_, err = s.captureEvictionSessionSnapshot(context.Background(), resourcemon.EvictionTarget{
 		WorkspaceID:    "workspace-1",
 		ContainerID:    evictionTestContainerID,
 		RuntimeVersion: s.workspaces["workspace-1"].UpdatedAt.UTC().Format(time.RFC3339Nano),
@@ -179,10 +179,10 @@ func TestCaptureOOMEvictionSnapshotsExitedVictimThroughIsolatedHelper(t *testing
 		t.Fatal(err)
 	}
 	for _, want := range []string{
-		"commit " + evictionTestContainerID,
+		"commit --change LABEL sam.snapshot-helper.workspace=workspace-1 " + evictionTestContainerID,
 		"--volumes-from " + evictionTestContainerID,
-		"--label devcontainer.local_folder=sam-eviction-snapshot-helper",
-		"--network none --cap-drop ALL --security-opt no-new-privileges",
+		"--label devcontainer.local_folder=sam-eviction-snapshot-helper --label sam.snapshot-helper.workspace=workspace-1",
+		"--network none --cap-drop ALL --security-opt no-new-privileges --memory 1g --pids-limit 256",
 		"start " + helperID,
 		"rm --force --volumes sam-eviction-snapshot-",
 		"image rm --force sam-eviction-snapshot:",
@@ -196,12 +196,12 @@ func TestCaptureOOMEvictionSnapshotsExitedVictimThroughIsolatedHelper(t *testing
 func TestCaptureOOMEvictionRefusesHelperForRunningContainer(t *testing.T) {
 	s := newEvictionTestServer()
 	logPath := setupExitedEvictionDocker(t, evictionTestContainerID, strings.Repeat("b", 64))
-	t.Setenv("SAM_EVICTION_TEST_CONTAINER_STATE", "true false 0")
+	setEvictionTestSourceState(t, "true|false|0|2026-11-05T01:00:00Z|0001-01-01T00:00:00Z")
 	if _, _, err := s.agentSessions.Create("workspace-1", "agent-session-1", "Agent", ""); err != nil {
 		t.Fatal(err)
 	}
 
-	err := s.captureEvictionSessionSnapshot(context.Background(), resourcemon.EvictionTarget{
+	_, err := s.captureEvictionSessionSnapshot(context.Background(), resourcemon.EvictionTarget{
 		WorkspaceID:    "workspace-1",
 		ContainerID:    evictionTestContainerID,
 		RuntimeVersion: s.workspaces["workspace-1"].UpdatedAt.UTC().Format(time.RFC3339Nano),
@@ -403,19 +403,35 @@ esac
 	return logPath
 }
 
+// setupExitedEvictionDocker fakes the Docker CLI for the stopped-source helper flow.
+// Optional environment shapes each answer: SAM_EVICTION_TEST_STATE_FILE (source state,
+// re-read on every inspect so a test can "restart" the source mid-capture),
+// SAM_EVICTION_TEST_RUNNING (running container IDs), SAM_EVICTION_TEST_MOUNTS (mount
+// inspect output), SAM_EVICTION_TEST_SIZE_RW, SAM_EVICTION_TEST_DOCKER_ROOT and
+// SAM_EVICTION_TEST_LEAKED (helpers left by an earlier crash).
 func setupExitedEvictionDocker(t *testing.T, currentID, helperID string) string {
 	t.Helper()
 	dir := t.TempDir()
 	command := filepath.Join(dir, "docker")
 	logPath := filepath.Join(dir, "calls")
+	stateFile := filepath.Join(dir, "state")
 	script := `#!/bin/sh
 printf '%s\n' "$*" >> "$SAM_EVICTION_TEST_CALLS"
 case "$1" in
   ps)
     case " $* " in
       *" --all "*) printf '%s\n' "$SAM_EVICTION_TEST_CURRENT_ID" ;;
+      *" -aq "*) [ -n "$SAM_EVICTION_TEST_LEAKED" ] && printf '%s\n' "$SAM_EVICTION_TEST_LEAKED" ;;
+      *" -q "*) [ -n "$SAM_EVICTION_TEST_RUNNING" ] && printf '%s\n' "$SAM_EVICTION_TEST_RUNNING" ;;
+    esac
+    exit 0 ;;
+  inspect)
+    case "$*" in
+      *Mounts*) printf '%s\n' "$SAM_EVICTION_TEST_MOUNTS" ;;
+      *) cat "$SAM_EVICTION_TEST_STATE_FILE" ;;
     esac ;;
-  inspect) printf '%s\n' "$SAM_EVICTION_TEST_CONTAINER_STATE" ;;
+  container) printf '%s\n' "${SAM_EVICTION_TEST_SIZE_RW:-1024}" ;;
+  info) printf '%s\n' "${SAM_EVICTION_TEST_DOCKER_ROOT:-/}" ;;
   commit|start|rm) exit 0 ;;
   create) printf '%s\n' "$SAM_EVICTION_TEST_HELPER_ID" ;;
   image) exit 0 ;;
@@ -428,9 +444,17 @@ esac
 	t.Setenv("SAM_DOCKER_CLI_PATH", command)
 	t.Setenv("SAM_EVICTION_TEST_CURRENT_ID", currentID)
 	t.Setenv("SAM_EVICTION_TEST_HELPER_ID", helperID)
-	t.Setenv("SAM_EVICTION_TEST_CONTAINER_STATE", "false true 137")
+	t.Setenv("SAM_EVICTION_TEST_STATE_FILE", stateFile)
+	setEvictionTestSourceState(t, "false|true|137|2026-11-05T01:00:00Z|2026-11-05T01:09:00Z")
 	t.Setenv("SAM_EVICTION_TEST_CALLS", logPath)
 	return logPath
+}
+
+func setEvictionTestSourceState(t *testing.T, state string) {
+	t.Helper()
+	if err := os.WriteFile(os.Getenv("SAM_EVICTION_TEST_STATE_FILE"), []byte(state+"\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestEvictionResolverUsesActualLabelAndIncludesExitedVictim(t *testing.T) {
@@ -456,7 +480,7 @@ func TestEvictionRejectsReplacementBeforeSnapshotAndStop(t *testing.T) {
 	logPath := setupEvictionDocker(t, strings.Repeat("b", 64))
 	target := resourcemon.EvictionTarget{WorkspaceID: "workspace-1", ContainerID: evictionTestContainerID,
 		RuntimeVersion: s.workspaces["workspace-1"].UpdatedAt.UTC().Format(time.RFC3339Nano)}
-	if err := s.captureEvictionSessionSnapshot(context.Background(), target); err == nil {
+	if _, err := s.captureEvictionSessionSnapshot(context.Background(), target); err == nil {
 		t.Fatal("snapshotted replacement")
 	}
 	if err := s.stopEvictedWorkspaceContainer(context.Background(), target); err == nil {

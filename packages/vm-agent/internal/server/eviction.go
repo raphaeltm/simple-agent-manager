@@ -32,7 +32,7 @@ func (s *Server) newResourceEvictionController() (*resourcemon.EvictionControlle
 	if s.resourceGuard == nil {
 		return nil, nil
 	}
-	return resourcemon.NewEvictionController(resourcemon.EvictionControllerConfig{
+	cfg := resourcemon.EvictionControllerConfig{
 		Source:               s.resourceGuard,
 		DebounceWindow:       s.config.EvictionDebounceWindow,
 		SnapshotTimeout:      s.config.EvictionSnapshotTimeout,
@@ -43,53 +43,50 @@ func (s *Server) newResourceEvictionController() (*resourcemon.EvictionControlle
 		MarkWorkspaceEvicted: s.markWorkspaceEvicted,
 		NotifyEviction:       s.notifyWorkspaceEvicted,
 		Logger:               slog.Default(),
-	})
+	}
+	if !s.config.IsStandaloneMode() {
+		cfg.FinalSnapshot = s.captureQuiescedEvictionSnapshot
+		cfg.FinalSnapshotTimeout = s.config.SnapshotHelper.WithDefaults().FinalSnapshotTimeout
+	}
+	return resourcemon.NewEvictionController(cfg)
 }
 
-func (s *Server) captureEvictionSessionSnapshot(ctx context.Context, target resourcemon.EvictionTarget) error {
+func (s *Server) captureEvictionSessionSnapshot(ctx context.Context, target resourcemon.EvictionTarget) (resourcemon.EvictionSnapshotOutcome, error) {
 	input, err := s.evictionSessionSnapshotInput(target.WorkspaceID)
 	if err != nil {
-		return err
+		return resourcemon.EvictionSnapshotOutcome{}, err
 	}
 	snapshotLock := s.sessionSnapshotLock(input.chatSessionID)
 	if err := snapshotLock.Lock(ctx); err != nil {
-		return err
+		return resourcemon.EvictionSnapshotOutcome{}, err
 	}
 	defer snapshotLock.Unlock()
 	// Acquire lifecycle ownership only after the snapshot queue: a capture
 	// queued behind another operation must not block a newer restart claim.
 	lifecycleLock := s.workspaceLifecycleLock(target.WorkspaceID)
 	if err := lifecycleLock.Lock(ctx); err != nil {
-		return err
+		return resourcemon.EvictionSnapshotOutcome{}, err
 	}
 	defer lifecycleLock.Unlock()
 	if !s.evictionTargetIsCurrent(ctx, target) {
-		return fmt.Errorf("eviction target is no longer current")
+		return resourcemon.EvictionSnapshotOutcome{}, fmt.Errorf("eviction target is no longer current")
 	}
 	// Freeze the Docker identity after both waits. The shared snapshot runner
 	// must never rediscover a successor container for this eviction's snapshot.
 	input.containerTarget, err = s.resolveContainerSnapshotTarget(ctx, input.runtime)
-	cleanupSnapshotHelper := noopSnapshotHelperCleanup
-	usingSnapshotHelper := false
 	if err != nil {
 		if target.Reason != resourcemon.EvictionReasonOOMKill {
-			return err
+			return resourcemon.EvictionSnapshotOutcome{}, err
 		}
-		input.containerTarget, cleanupSnapshotHelper, err = s.startExitedEvictionSnapshotHelper(ctx, target, input.runtime)
-		if err != nil {
-			return err
-		}
-		usingSnapshotHelper = true
+		// The OOM victim already exited, so this capture is final if nothing restarts it.
+		return s.runStoppedSourceSnapshot(ctx, input, target, true)
 	}
-	defer cleanupSnapshotHelper()
-	if !usingSnapshotHelper {
-		if !dockerContainerIdentityMatches(input.containerTarget.containerID, target.ContainerID) {
-			return fmt.Errorf("snapshot container no longer matches eviction target")
-		}
-		input.containerTarget.containerID = target.ContainerID
+	if !dockerContainerIdentityMatches(input.containerTarget.containerID, target.ContainerID) {
+		return resourcemon.EvictionSnapshotOutcome{}, fmt.Errorf("snapshot container no longer matches eviction target")
 	}
+	input.containerTarget.containerID = target.ContainerID
 	_, err = s.runSessionSnapshot(ctx, input)
-	return err
+	return resourcemon.EvictionSnapshotOutcome{}, err
 }
 
 func (s *Server) evictionSessionSnapshotInput(workspaceID string) (*sessionSnapshotHandlerInput, error) {

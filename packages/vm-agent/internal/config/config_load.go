@@ -251,6 +251,7 @@ func Load() (*Config, error) {
 		EvictionDockerStopTimeout:        time.Duration(getEnvInt(EnvDefaultEvictionDockerStopTimeoutSeconds, DefaultEvictionDockerStopTimeoutSeconds)) * time.Second,
 		EvictionCallbackRetryMaxInterval: time.Duration(getEnvInt(EnvDefaultEvictionCallbackRetryMaxSeconds, DefaultEvictionCallbackRetryMaxSeconds)) * time.Second,
 		EvictionResolveTimeout:           time.Duration(getEnvInt(EnvDefaultEvictionResolveTimeoutSeconds, DefaultEvictionResolveTimeoutSeconds)) * time.Second,
+		SnapshotHelper:                   loadSnapshotHelperConfig(),
 		ResourceHistorySampleInterval:    getEnvDuration(EnvResourceHistorySampleInterval, 5*time.Second),
 		ResourceHistoryChunkInterval:     getEnvDuration(EnvResourceHistoryChunkInterval, 15*time.Minute),
 		ResourceHistorySpoolDir:          getEnv(EnvResourceHistorySpoolDir, "/var/lib/vm-agent/resource-history"),

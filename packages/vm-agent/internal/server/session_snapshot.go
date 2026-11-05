@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -99,6 +100,9 @@ type sessionSnapshotHandlerInput struct {
 	workspaceCallbackToken string
 	acpSessionID           string
 	containerTarget        *containerSnapshotTarget
+	// quiescence, when set, is re-checked immediately before completion. The capture is
+	// reported quiesced only if it passes: the source never ran and nothing else wrote.
+	quiescence func(context.Context) error
 }
 
 func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Request, restoring bool) (*sessionSnapshotHandlerInput, bool) {
@@ -292,11 +296,19 @@ func (s *Server) hibernateSessionSnapshot(ctx context.Context, input *sessionSna
 	}
 	manifest.Skipped = boundSnapshotSkippedEntries(manifest.Skipped, snapshotSkippedEntriesBudget(prepare))
 	nextLifecyclePhase(ctx, "complete")
-	err = s.completeSnapshot(ctx, runtime.ID, sessionID, chatSessionID, runtimeName, prepare.Generation, callbackToken, manifest)
+	quiesced := false
+	if input.quiescence != nil && manifest.Status == "available" {
+		if err := input.quiescence(ctx); err != nil {
+			slog.Warn("Snapshot source was not quiesced; reporting an ordinary capture", "workspaceId", runtime.ID, "chatSessionId", chatSessionID, "generation", prepare.Generation, "error", err)
+		} else {
+			quiesced = true
+		}
+	}
+	err = s.completeSnapshot(ctx, runtime.ID, sessionID, chatSessionID, runtimeName, prepare.Generation, callbackToken, manifest, quiesced)
 	if err != nil {
 		return nil, &sessionSnapshotCaptureError{generation: prepare.Generation, err: err}
 	}
-	return map[string]interface{}{"status": manifest.Status, "degradation": manifest.Degradation, "skipped": manifest.Skipped}, nil
+	return map[string]interface{}{"status": manifest.Status, "degradation": manifest.Degradation, "skipped": manifest.Skipped, "quiesced": quiesced}, nil
 }
 
 func (s *Server) downloadAndExtractTar(ctx context.Context, downloadPath, token string, idleTimeout time.Duration) error {

@@ -108,7 +108,7 @@ func TestEvictionSnapshotRejectsSuccessorAfterWaitingForSnapshotLock(t *testing.
 		t.Fatal(err)
 	}
 	done := make(chan error, 1)
-	go func() { done <- s.captureEvictionSessionSnapshot(context.Background(), target) }()
+	go func() { _, err := s.captureEvictionSessionSnapshot(context.Background(), target); done <- err }()
 	// A newer lifecycle can claim while the eviction is queued for snapshotting.
 	lifecycle := s.workspaceLifecycleLock("workspace-1")
 	if err := lifecycle.Lock(context.Background()); err != nil {

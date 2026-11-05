@@ -47,11 +47,20 @@ type EvictionTarget struct {
 	EvictionGeneration string
 }
 
+// EvictionSnapshotOutcome describes one completed eviction capture.
+type EvictionSnapshotOutcome struct {
+	// Quiesced is true only for a capture taken from a stopped source with no other
+	// writer. Only a quiesced capture can prove the source's final state was preserved.
+	Quiesced bool
+}
+
 // EvictionResult captures all side effects attempted for one eviction.
 type EvictionResult struct {
 	Target             EvictionTarget
 	SnapshotCaptured   bool
+	SnapshotQuiesced   bool
 	SnapshotError      error
+	FinalSnapshotError error
 	ContainerStopped   bool
 	ContainerStopError error
 	NotifyError        error
@@ -61,13 +70,18 @@ type EvictionResult struct {
 
 // EvictionControllerConfig configures ResourceGuard-triggered workspace eviction.
 type EvictionControllerConfig struct {
-	Source               PressureSource
-	DebounceWindow       time.Duration
-	SnapshotTimeout      time.Duration
-	ResolveTimeout       time.Duration
-	ResolveWorkspace     func(context.Context, ContainerMetric) (WorkspaceContainer, bool)
-	SnapshotWorkspace    func(context.Context, EvictionTarget) error
-	StopContainer        func(context.Context, EvictionTarget) error
+	Source            PressureSource
+	DebounceWindow    time.Duration
+	SnapshotTimeout   time.Duration
+	ResolveTimeout    time.Duration
+	ResolveWorkspace  func(context.Context, ContainerMetric) (WorkspaceContainer, bool)
+	SnapshotWorkspace func(context.Context, EvictionTarget) (EvictionSnapshotOutcome, error)
+	StopContainer     func(context.Context, EvictionTarget) error
+	// FinalSnapshot optionally recaptures the stopped source before the eviction is
+	// recorded. It runs only when the pre-stop capture was not already quiesced; its
+	// failure keeps the pre-stop capture and never blocks the eviction.
+	FinalSnapshot        func(context.Context, EvictionTarget) (EvictionSnapshotOutcome, error)
+	FinalSnapshotTimeout time.Duration
 	MarkWorkspaceEvicted func(EvictionResult) bool
 	NotifyEviction       func(context.Context, EvictionResult) error
 	Clock                func() time.Time
@@ -97,6 +111,9 @@ func (c EvictionControllerConfig) Validate() error {
 	}
 	if c.StopContainer == nil {
 		errs = append(errs, errors.New("StopContainer is required"))
+	}
+	if c.FinalSnapshot != nil && c.FinalSnapshotTimeout <= 0 {
+		errs = append(errs, fmt.Errorf("FinalSnapshotTimeout must be > 0 when FinalSnapshot is set, got %s", c.FinalSnapshotTimeout))
 	}
 	if c.MarkWorkspaceEvicted == nil {
 		errs = append(errs, errors.New("MarkWorkspaceEvicted is required"))
@@ -389,7 +406,8 @@ func (c *EvictionController) performEviction(ctx context.Context, target Evictio
 	}
 
 	snapshotCtx, cancel := context.WithTimeout(ctx, c.cfg.SnapshotTimeout)
-	if err := c.cfg.SnapshotWorkspace(snapshotCtx, target); err != nil {
+	outcome, err := c.cfg.SnapshotWorkspace(snapshotCtx, target)
+	if err != nil {
 		result.SnapshotError = err
 		cancel()
 		c.logger.Warn("resourcemon: eviction snapshot failed; leaving workspace recoverable",
@@ -402,6 +420,7 @@ func (c *EvictionController) performEviction(ctx context.Context, target Evictio
 		return false // Never acknowledge or deliberately stop work without a restorable snapshot.
 	}
 	result.SnapshotCaptured = true
+	result.SnapshotQuiesced = outcome.Quiesced
 	cancel()
 
 	if ctx.Err() != nil {
@@ -422,6 +441,7 @@ func (c *EvictionController) performEviction(ctx context.Context, target Evictio
 		return false // Leave the workspace eligible for a later pressure retry.
 	}
 	result.ContainerStopped = true
+	c.captureFinalSnapshot(ctx, &result)
 
 	result.CompletedAt = c.now()
 	if !c.cfg.MarkWorkspaceEvicted(result) {
@@ -438,6 +458,28 @@ func (c *EvictionController) performEviction(ctx context.Context, target Evictio
 		)
 	}
 	return true
+}
+
+// captureFinalSnapshot recaptures the now-stopped source so the snapshot the wake restores
+// is its final state, not a live checkpoint taken while the agent was still writing.
+func (c *EvictionController) captureFinalSnapshot(ctx context.Context, result *EvictionResult) {
+	if result.SnapshotQuiesced || c.cfg.FinalSnapshot == nil || ctx.Err() != nil {
+		return
+	}
+	finalCtx, cancel := context.WithTimeout(ctx, c.cfg.FinalSnapshotTimeout)
+	defer cancel()
+	outcome, err := c.cfg.FinalSnapshot(finalCtx, result.Target)
+	if err != nil {
+		result.FinalSnapshotError = err
+		c.logger.Warn("resourcemon: final eviction snapshot failed; keeping the pre-stop capture",
+			"workspaceId", result.Target.WorkspaceID,
+			"containerId", result.Target.ContainerID,
+			"reason", result.Target.Reason,
+			"error", err,
+		)
+		return
+	}
+	result.SnapshotQuiesced = outcome.Quiesced
 }
 
 func (c *EvictionController) now() time.Time {

@@ -6,65 +6,124 @@ import (
 	"fmt"
 	"log/slog"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
+	"syscall"
 
+	"github.com/workspace/vm-agent/internal/bootstrap"
 	"github.com/workspace/vm-agent/internal/container"
-	"github.com/workspace/vm-agent/internal/resourcemon"
+)
+
+const (
+	// snapshotHelperWorkspaceLabel scopes a helper container and its committed image to the
+	// workspace it captures, so deletion and the startup reaper can find leaked helpers.
+	snapshotHelperWorkspaceLabel = "sam.snapshot-helper.workspace"
+	// snapshotHelperRootLabelValue replaces the inherited root label: a helper must never
+	// match the workspace's own container filter, or deletion would refuse "unknown" IDs.
+	snapshotHelperRootLabelValue = "sam-eviction-snapshot-helper"
+	snapshotHelperImageRepo      = "sam-eviction-snapshot"
 )
 
 func noopSnapshotHelperCleanup() {
 	// No helper resources exist when snapshot-helper setup fails.
 }
 
-// startExitedEvictionSnapshotHelper mounts an exact stopped OOM victim's
-// volumes into a short-lived container created from that victim's writable
-// layer. The original entrypoint never runs, while the ordinary snapshot code
-// can still capture HOME and the worktree through docker exec.
-func (s *Server) startExitedEvictionSnapshotHelper(ctx context.Context, target resourcemon.EvictionTarget, runtime *WorkspaceRuntime) (*containerSnapshotTarget, func(), error) {
-	if err := s.verifyExitedOOMContainer(ctx, target.ContainerID); err != nil {
+// snapshotSourceState is the identity of a stopped source container at one moment.
+// A restart between two reads changes StartedAt, so equal reads prove nothing ran.
+type snapshotSourceState struct {
+	running    bool
+	oomKilled  bool
+	exitCode   string
+	startedAt  string
+	finishedAt string
+}
+
+func (s *Server) inspectSnapshotSource(ctx context.Context, containerID string) (snapshotSourceState, error) {
+	out, err := s.runEvictionDockerCommand(ctx, "inspect", "--format",
+		"{{.State.Running}}|{{.State.OOMKilled}}|{{.State.ExitCode}}|{{.State.StartedAt}}|{{.State.FinishedAt}}", containerID)
+	if err != nil {
+		return snapshotSourceState{}, fmt.Errorf("inspect snapshot source: %w", err)
+	}
+	fields := strings.Split(strings.TrimSpace(out), "|")
+	if len(fields) != 5 {
+		return snapshotSourceState{}, fmt.Errorf("snapshot source state unavailable")
+	}
+	return snapshotSourceState{
+		running:    fields[0] == "true",
+		oomKilled:  fields[1] == "true",
+		exitCode:   fields[2],
+		startedAt:  fields[3],
+		finishedAt: fields[4],
+	}, nil
+}
+
+// startStoppedSnapshotHelper mounts an exact stopped source container's volumes into a
+// short-lived container created from that source's writable layer. The original entrypoint
+// never runs, so nothing but the capture's own docker exec commands touches the files.
+// requireOOM keeps the original OOM-victim contract for the pre-stop capture path.
+func (s *Server) startStoppedSnapshotHelper(ctx context.Context, workspaceID, sourceID string, runtime *WorkspaceRuntime, requireOOM bool) (*containerSnapshotTarget, func(), error) {
+	state, err := s.inspectSnapshotSource(ctx, sourceID)
+	if err != nil {
 		return nil, noopSnapshotHelperCleanup, err
 	}
+	if state.running || (requireOOM && !state.oomKilled && state.exitCode != "137") {
+		if requireOOM {
+			return nil, noopSnapshotHelperCleanup, fmt.Errorf("OOM snapshot source is not an exited OOM container")
+		}
+		return nil, noopSnapshotHelperCleanup, fmt.Errorf("snapshot source container is still running")
+	}
+	if err := s.requireSnapshotHelperDiskHeadroom(ctx, sourceID); err != nil {
+		return nil, noopSnapshotHelperCleanup, err
+	}
+	limits := s.config.SnapshotHelper.WithDefaults()
 	suffix := randomEventID()
-	image := "sam-eviction-snapshot:" + suffix
-	name := "sam-eviction-snapshot-" + suffix
+	image := snapshotHelperImageRepo + ":" + suffix
+	name := snapshotHelperImageRepo + "-" + suffix
+	workspaceLabel := snapshotHelperWorkspaceLabel + "=" + workspaceID
 	cleanup := func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), s.config.EvictionSnapshotTimeout)
 		defer cancel()
 		if _, err := s.runEvictionDockerCommand(cleanupCtx, "rm", "--force", "--volumes", name); err != nil {
-			slog.Warn("Failed to remove OOM snapshot helper container", "name", name, "error", err)
+			slog.Warn("Failed to remove snapshot helper container; deletion and startup reap it", "name", name, "error", err)
 		}
 		if _, err := s.runEvictionDockerCommand(cleanupCtx, "image", "rm", "--force", image); err != nil {
-			slog.Warn("Failed to remove OOM snapshot helper image", "image", image, "error", err)
+			slog.Warn("Failed to remove snapshot helper image; deletion and startup reap it", "image", image, "error", err)
 		}
 	}
 
-	if _, err := s.runEvictionDockerCommand(ctx, "commit", target.ContainerID, image); err != nil {
-		return nil, noopSnapshotHelperCleanup, fmt.Errorf("commit stopped OOM container for snapshot: %w", err)
+	// The image label makes a commit left behind by a crash findable by workspace.
+	if _, err := s.runEvictionDockerCommand(ctx, "commit", "--change", "LABEL "+workspaceLabel, sourceID, image); err != nil {
+		cleanup()
+		return nil, noopSnapshotHelperCleanup, fmt.Errorf("commit stopped container for snapshot: %w", err)
 	}
 	helperID, err := s.runEvictionDockerCommand(ctx,
 		"create",
 		"--name", name,
-		"--label", s.config.ContainerLabelKey+"=sam-eviction-snapshot-helper",
-		"--volumes-from", target.ContainerID,
+		"--label", s.config.ContainerLabelKey+"="+snapshotHelperRootLabelValue,
+		"--label", workspaceLabel,
+		"--volumes-from", sourceID,
 		"--network", "none",
 		"--cap-drop", "ALL",
 		"--security-opt", "no-new-privileges",
+		"--memory", limits.MemoryLimit,
+		"--pids-limit", strconv.Itoa(limits.PidsLimit),
 		"--entrypoint", "/bin/sh",
 		image,
 		"-c", "exec tail -f /dev/null",
 	)
 	if err != nil {
 		cleanup()
-		return nil, noopSnapshotHelperCleanup, fmt.Errorf("create stopped OOM snapshot helper: %w", err)
+		return nil, noopSnapshotHelperCleanup, fmt.Errorf("create stopped snapshot helper: %w", err)
 	}
 	helperID = strings.TrimSpace(helperID)
 	if !isValidContainerID(helperID) {
 		cleanup()
-		return nil, noopSnapshotHelperCleanup, fmt.Errorf("stopped OOM snapshot helper identity unavailable")
+		return nil, noopSnapshotHelperCleanup, fmt.Errorf("stopped snapshot helper identity unavailable")
 	}
 	if _, err := s.runEvictionDockerCommand(ctx, "start", helperID); err != nil {
 		cleanup()
-		return nil, noopSnapshotHelperCleanup, fmt.Errorf("start stopped OOM snapshot helper: %w", err)
+		return nil, noopSnapshotHelperCleanup, fmt.Errorf("start stopped snapshot helper: %w", err)
 	}
 	return &containerSnapshotTarget{
 		containerID: helperID,
@@ -73,21 +132,120 @@ func (s *Server) startExitedEvictionSnapshotHelper(ctx context.Context, target r
 	}, cleanup, nil
 }
 
-func (s *Server) verifyExitedOOMContainer(ctx context.Context, containerID string) error {
-	state, err := s.runEvictionDockerCommand(
-		ctx,
-		"inspect",
-		"--format", "{{.State.Running}} {{.State.OOMKilled}} {{.State.ExitCode}}",
-		containerID,
-	)
+// requireSnapshotHelperDiskHeadroom refuses a commit that would leave less than the
+// configured headroom on the Docker root filesystem. docker commit copies the whole
+// writable layer, so a large layer on a nearly full disk could starve other tenants.
+func (s *Server) requireSnapshotHelperDiskHeadroom(ctx context.Context, sourceID string) error {
+	sizeText, err := s.runEvictionDockerCommand(ctx, "container", "inspect", "--size", "--format", "{{.SizeRw}}", sourceID)
 	if err != nil {
-		return fmt.Errorf("inspect OOM snapshot source: %w", err)
+		return fmt.Errorf("measure snapshot source writable layer: %w", err)
 	}
-	fields := strings.Fields(state)
-	if len(fields) != 3 || fields[0] != "false" || (fields[1] != "true" && fields[2] != "137") {
-		return fmt.Errorf("OOM snapshot source is not an exited OOM container")
+	layerBytes, err := strconv.ParseInt(strings.TrimSpace(sizeText), 10, 64)
+	if err != nil || layerBytes < 0 {
+		return fmt.Errorf("snapshot source writable layer size unavailable")
+	}
+	root, err := s.runEvictionDockerCommand(ctx, "info", "--format", "{{.DockerRootDir}}")
+	if err != nil {
+		return fmt.Errorf("resolve docker root for snapshot helper: %w", err)
+	}
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(filepath.Clean(strings.TrimSpace(root)), &stat); err != nil {
+		return fmt.Errorf("measure docker root free space: %w", err)
+	}
+	free := int64(stat.Bavail) * int64(stat.Bsize) //nolint:gosec // block counts fit in int64 on supported hosts
+	headroom := s.config.SnapshotHelper.WithDefaults().MinFreeBytes
+	// Compared without adding, so a huge layer size cannot overflow into a pass.
+	if layerBytes > free || free-layerBytes < headroom {
+		return fmt.Errorf("snapshot helper needs %d bytes plus %d headroom on the docker root, %d available", layerBytes, headroom, free)
 	}
 	return nil
+}
+
+// reapSnapshotHelpers removes helper containers and committed images left by a capture
+// that never ran its cleanup (agent crash, failed rm). An empty workspaceID reaps every
+// helper, including legacy ones created before helpers carried a workspace label; only the
+// startup path does that, when no capture can be in flight. A leaked helper holds a
+// --volumes-from reference that makes `docker volume rm` fail, so deletion calls this first.
+func (s *Server) reapSnapshotHelpers(ctx context.Context, workspaceID string) error {
+	containerFilters := []string{"label=" + snapshotHelperWorkspaceLabel + "=" + workspaceID}
+	imageFilters := containerFilters
+	if workspaceID == "" {
+		containerFilters = []string{
+			"label=" + snapshotHelperWorkspaceLabel,
+			"label=" + s.config.ContainerLabelKey + "=" + snapshotHelperRootLabelValue,
+		}
+		imageFilters = []string{"label=" + snapshotHelperWorkspaceLabel, "reference=" + snapshotHelperImageRepo}
+	}
+	for _, filter := range containerFilters {
+		ids, err := s.runEvictionDockerCommand(ctx, "ps", "-aq", "--no-trunc", "--filter", filter)
+		if err != nil {
+			return fmt.Errorf("list snapshot helpers: %w", err)
+		}
+		for _, id := range strings.Fields(ids) {
+			if _, err := s.runEvictionDockerCommand(ctx, "rm", "--force", "--volumes", id); err != nil {
+				return fmt.Errorf("remove snapshot helper: %w", err)
+			}
+			slog.Info("Reaped leaked snapshot helper container", "workspaceId", workspaceID, "containerId", id)
+		}
+	}
+	for _, filter := range imageFilters {
+		ids, err := s.runEvictionDockerCommand(ctx, "image", "ls", "-q", "--no-trunc", "--filter", filter)
+		if err != nil {
+			return fmt.Errorf("list snapshot helper images: %w", err)
+		}
+		for _, id := range strings.Fields(ids) {
+			if _, err := s.runEvictionDockerCommand(ctx, "image", "rm", "--force", id); err != nil {
+				return fmt.Errorf("remove snapshot helper image: %w", err)
+			}
+			slog.Info("Reaped leaked snapshot helper image", "workspaceId", workspaceID, "imageId", id)
+		}
+	}
+	return nil
+}
+
+// requireNoForeignWorkspaceWriters proves no running container other than the helper can
+// write the files a deletion destroys: the workspace's SAM volume and its host root. A
+// sidecar or sibling that mounts either one makes the capture a live capture, never final.
+func (s *Server) requireNoForeignWorkspaceWriters(ctx context.Context, workspaceID, hostRoot, helperID string) error {
+	ids, err := s.runEvictionDockerCommand(ctx, "ps", "-q", "--no-trunc")
+	if err != nil {
+		return fmt.Errorf("list running containers: %w", err)
+	}
+	running := strings.Fields(ids)
+	if len(running) == 0 {
+		return nil
+	}
+	args := append([]string{"inspect", "--format", "{{.Id}}{{range .Mounts}}|{{.Type}}:{{.Name}}:{{.Source}}{{end}}"}, running...)
+	out, err := s.runEvictionDockerCommand(ctx, args...)
+	if err != nil {
+		return fmt.Errorf("inspect running container mounts: %w", err)
+	}
+	volume := bootstrap.VolumeNameForWorkspace(workspaceID)
+	root := filepath.Clean(hostRoot)
+	for _, line := range strings.Split(out, "\n") {
+		fields := strings.Split(strings.TrimSpace(line), "|")
+		if len(fields) == 0 || fields[0] == "" || dockerContainerIdentityMatches(fields[0], helperID) {
+			continue
+		}
+		for _, mount := range fields[1:] {
+			parts := strings.SplitN(mount, ":", 3)
+			if len(parts) != 3 {
+				continue
+			}
+			source := filepath.Clean(parts[2])
+			if parts[1] == volume || (hostRoot != "" && (source == root || strings.HasPrefix(source, root+string(filepath.Separator)))) {
+				return fmt.Errorf("running container %s mounts workspace storage", shortContainerID(fields[0]))
+			}
+		}
+	}
+	return nil
+}
+
+func shortContainerID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
 }
 
 func (s *Server) runEvictionDockerCommand(ctx context.Context, args ...string) (string, error) {

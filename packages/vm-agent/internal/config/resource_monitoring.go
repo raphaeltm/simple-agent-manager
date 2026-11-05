@@ -1,5 +1,11 @@
 package config
 
+import (
+	"fmt"
+	"strings"
+	"time"
+)
+
 const (
 	// EnvDefaultResourceEventBufferSize configures each bounded pressure event queue.
 	EnvDefaultResourceEventBufferSize = "DEFAULT_RESOURCE_EVENT_BUFFER_SIZE"
@@ -75,3 +81,75 @@ const (
 // IsValidPSIThreshold accepts finite stall percentages in (0, 100].
 // Positive comparisons deliberately reject NaN as well as infinities.
 func IsValidPSIThreshold(value float64) bool { return value > 0 && value <= 100 }
+
+const (
+	// EnvEvictionFinalSnapshotTimeoutSeconds bounds the post-stop quiesced eviction capture.
+	EnvEvictionFinalSnapshotTimeoutSeconds = "EVICTION_FINAL_SNAPSHOT_TIMEOUT_SECONDS"
+	// EnvSnapshotHelperMemoryLimit is the docker --memory value for a snapshot helper container.
+	EnvSnapshotHelperMemoryLimit = "SNAPSHOT_HELPER_MEMORY_LIMIT"
+	// EnvSnapshotHelperPidsLimit is the docker --pids-limit value for a snapshot helper container.
+	EnvSnapshotHelperPidsLimit = "SNAPSHOT_HELPER_PIDS_LIMIT"
+	// EnvSnapshotHelperMinFreeBytes is the disk headroom kept free beyond the committed layer.
+	EnvSnapshotHelperMinFreeBytes = "SNAPSHOT_HELPER_MIN_FREE_BYTES"
+
+	// DefaultEvictionFinalSnapshotTimeoutSeconds allows a multi-GiB writable layer to commit
+	// (~100-300 MB/s) plus a full HOME/WIP capture and upload, while bounding how long a
+	// relocation waits for it. A timeout keeps the live capture and grants no preservation.
+	DefaultEvictionFinalSnapshotTimeoutSeconds = 300
+	// DefaultSnapshotHelperMemoryLimit bounds git/tar inside the helper.
+	DefaultSnapshotHelperMemoryLimit = "1g"
+	// DefaultSnapshotHelperPidsLimit bounds processes inside the helper.
+	DefaultSnapshotHelperPidsLimit = 256
+	// DefaultSnapshotHelperMinFreeBytes keeps 1 GiB free after committing the writable layer.
+	DefaultSnapshotHelperMinFreeBytes int64 = 1 << 30
+)
+
+// SnapshotHelperConfig bounds the temporary container that captures a stopped workspace.
+type SnapshotHelperConfig struct {
+	FinalSnapshotTimeout time.Duration
+	MemoryLimit          string
+	PidsLimit            int
+	MinFreeBytes         int64
+}
+
+func loadSnapshotHelperConfig() SnapshotHelperConfig {
+	return SnapshotHelperConfig{
+		FinalSnapshotTimeout: time.Duration(getEnvInt(EnvEvictionFinalSnapshotTimeoutSeconds, DefaultEvictionFinalSnapshotTimeoutSeconds)) * time.Second,
+		MemoryLimit:          strings.TrimSpace(getEnv(EnvSnapshotHelperMemoryLimit, DefaultSnapshotHelperMemoryLimit)),
+		PidsLimit:            getEnvInt(EnvSnapshotHelperPidsLimit, DefaultSnapshotHelperPidsLimit),
+		MinFreeBytes:         getEnvInt64(EnvSnapshotHelperMinFreeBytes, DefaultSnapshotHelperMinFreeBytes),
+	}
+}
+
+// WithDefaults fills unset fields, so a Config built without loadSnapshotHelperConfig
+// (tests, older call sites) still gets bounded helpers.
+func (c SnapshotHelperConfig) WithDefaults() SnapshotHelperConfig {
+	if c.FinalSnapshotTimeout <= 0 {
+		c.FinalSnapshotTimeout = DefaultEvictionFinalSnapshotTimeoutSeconds * time.Second
+	}
+	if c.MemoryLimit == "" {
+		c.MemoryLimit = DefaultSnapshotHelperMemoryLimit
+	}
+	if c.PidsLimit <= 0 {
+		c.PidsLimit = DefaultSnapshotHelperPidsLimit
+	}
+	if c.MinFreeBytes <= 0 {
+		c.MinFreeBytes = DefaultSnapshotHelperMinFreeBytes
+	}
+	return c
+}
+
+// validate rejects explicitly invalid operator values; unset values use WithDefaults.
+func (c SnapshotHelperConfig) validate() []error {
+	var errs []error
+	if c.FinalSnapshotTimeout < 0 {
+		errs = append(errs, fmt.Errorf("%s must be > 0, got %s", EnvEvictionFinalSnapshotTimeoutSeconds, c.FinalSnapshotTimeout))
+	}
+	if c.PidsLimit < 0 {
+		errs = append(errs, fmt.Errorf("%s must be > 0, got %d", EnvSnapshotHelperPidsLimit, c.PidsLimit))
+	}
+	if c.MinFreeBytes < 0 {
+		errs = append(errs, fmt.Errorf("%s must be >= 0, got %d", EnvSnapshotHelperMinFreeBytes, c.MinFreeBytes))
+	}
+	return errs
+}

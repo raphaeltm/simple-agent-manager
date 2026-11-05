@@ -57,7 +57,7 @@ func testEvictionController(
 				ContainerName: metric.Name,
 			}, true
 		},
-		SnapshotWorkspace: func(context.Context, EvictionTarget) error { return nil },
+		SnapshotWorkspace: snapshotOutcome(func(context.Context, EvictionTarget) error { return nil }),
 		StopContainer:     func(context.Context, EvictionTarget) error { return nil },
 		MarkWorkspaceEvicted: func(EvictionResult) bool {
 			return true
@@ -103,12 +103,12 @@ func TestEvictionControllerSnapshotsBeforeStoppingContainerFromPressureEvents(t 
 	var calls []string
 
 	controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
-		cfg.SnapshotWorkspace = func(context.Context, EvictionTarget) error {
+		cfg.SnapshotWorkspace = snapshotOutcome(func(context.Context, EvictionTarget) error {
 			mu.Lock()
 			defer mu.Unlock()
 			calls = append(calls, "snapshot")
 			return nil
-		}
+		})
 		cfg.StopContainer = func(context.Context, EvictionTarget) error {
 			mu.Lock()
 			defer mu.Unlock()
@@ -155,10 +155,10 @@ func TestEvictionControllerDebouncesDuplicateContainerEvictions(t *testing.T) {
 	var stops atomic.Int32
 	controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
 		cfg.DebounceWindow = time.Minute
-		cfg.SnapshotWorkspace = func(context.Context, EvictionTarget) error {
+		cfg.SnapshotWorkspace = snapshotOutcome(func(context.Context, EvictionTarget) error {
 			snapshots.Add(1)
 			return nil
-		}
+		})
 		cfg.StopContainer = func(context.Context, EvictionTarget) error {
 			stops.Add(1)
 			return nil
@@ -185,7 +185,7 @@ func TestEvictionControllerSerializesConcurrentEvictions(t *testing.T) {
 	release := make(chan struct{})
 	controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
 		cfg.DebounceWindow = time.Millisecond
-		cfg.SnapshotWorkspace = func(context.Context, EvictionTarget) error {
+		cfg.SnapshotWorkspace = snapshotOutcome(func(context.Context, EvictionTarget) error {
 			current := active.Add(1)
 			for {
 				observed := maxActive.Load()
@@ -197,7 +197,7 @@ func TestEvictionControllerSerializesConcurrentEvictions(t *testing.T) {
 			<-release
 			active.Add(-1)
 			return nil
-		}
+		})
 	})
 
 	var wg sync.WaitGroup
@@ -240,10 +240,10 @@ func TestEvictionControllerKeepsWorkspaceRecoverableAfterSnapshotTimeout(t *test
 	var notified atomic.Bool
 	controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
 		cfg.SnapshotTimeout = 20 * time.Millisecond
-		cfg.SnapshotWorkspace = func(ctx context.Context, _ EvictionTarget) error {
+		cfg.SnapshotWorkspace = snapshotOutcome(func(ctx context.Context, _ EvictionTarget) error {
 			<-ctx.Done()
 			return ctx.Err()
-		}
+		})
 		cfg.StopContainer = func(context.Context, EvictionTarget) error {
 			stopped.Store(true)
 			return nil
@@ -271,9 +271,9 @@ func TestEvictionControllerKeepsWorkspaceRecoverableAfterSnapshotFailure(t *test
 	var marked atomic.Bool
 	var notified atomic.Bool
 	controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
-		cfg.SnapshotWorkspace = func(context.Context, EvictionTarget) error {
+		cfg.SnapshotWorkspace = snapshotOutcome(func(context.Context, EvictionTarget) error {
 			return errors.New("snapshot failed")
-		}
+		})
 		cfg.StopContainer = func(context.Context, EvictionTarget) error {
 			stopped.Store(true)
 			return nil
@@ -300,13 +300,13 @@ func TestEvictionControllerRetriesDieEventAfterOOMSnapshotRace(t *testing.T) {
 	var snapshots, stops, notifications int
 	controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
 		cfg.DebounceWindow = time.Minute
-		cfg.SnapshotWorkspace = func(context.Context, EvictionTarget) error {
+		cfg.SnapshotWorkspace = snapshotOutcome(func(context.Context, EvictionTarget) error {
 			snapshots++
 			if snapshots == 1 {
 				return errors.New("container still transitioning")
 			}
 			return nil
-		}
+		})
 		cfg.StopContainer = func(context.Context, EvictionTarget) error {
 			stops++
 			return nil
@@ -344,10 +344,10 @@ func TestEvictionControllerSelectsLargestMemoryConsumerForSystemCriticalPressure
 			}
 			return WorkspaceContainer{WorkspaceID: "workspace-small", ContainerID: metric.ID, ContainerName: metric.Name}, true
 		}
-		cfg.SnapshotWorkspace = func(_ context.Context, target EvictionTarget) error {
+		cfg.SnapshotWorkspace = snapshotOutcome(func(_ context.Context, target EvictionTarget) error {
 			evicted = target
 			return nil
-		}
+		})
 	})
 
 	controller.handleEvent(context.Background(), PressureEvent{
@@ -377,10 +377,10 @@ func TestEvictionControllerBoundsWorkspaceResolution(t *testing.T) {
 			<-ctx.Done()
 			return WorkspaceContainer{}, false
 		}
-		cfg.SnapshotWorkspace = func(context.Context, EvictionTarget) error {
+		cfg.SnapshotWorkspace = snapshotOutcome(func(context.Context, EvictionTarget) error {
 			snapshots.Add(1)
 			return nil
-		}
+		})
 	})
 
 	start := time.Now()
@@ -403,10 +403,10 @@ func TestEvictionControllerWarningPressureDoesNotEvict(t *testing.T) {
 	var snapshots atomic.Int32
 	var stops atomic.Int32
 	controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
-		cfg.SnapshotWorkspace = func(context.Context, EvictionTarget) error {
+		cfg.SnapshotWorkspace = snapshotOutcome(func(context.Context, EvictionTarget) error {
 			snapshots.Add(1)
 			return nil
-		}
+		})
 		cfg.StopContainer = func(context.Context, EvictionTarget) error {
 			stops.Add(1)
 			return nil
@@ -431,7 +431,7 @@ func TestEvictionControllerRejectsUnverifiedOOMWorkspace(t *testing.T) {
 			var snapshots int
 			controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
 				cfg.ResolveWorkspace = func(context.Context, ContainerMetric) (WorkspaceContainer, bool) { return WorkspaceContainer{}, false }
-				cfg.SnapshotWorkspace = func(context.Context, EvictionTarget) error { snapshots++; return nil }
+				cfg.SnapshotWorkspace = snapshotOutcome(func(context.Context, EvictionTarget) error { snapshots++; return nil })
 			})
 			controller.handleEvent(context.Background(), oomPressureEvent(claimed, "container-1"))
 			if snapshots != 0 {
@@ -445,7 +445,7 @@ func TestEvictionControllerResolvesExitedOOMWithoutMetricsOrWorkspaceLabel(t *te
 	source := newFakePressureSource()
 	var target EvictionTarget
 	controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
-		cfg.SnapshotWorkspace = func(_ context.Context, got EvictionTarget) error { target = got; return nil }
+		cfg.SnapshotWorkspace = snapshotOutcome(func(_ context.Context, got EvictionTarget) error { target = got; return nil })
 	})
 	controller.handleEvent(context.Background(), oomPressureEvent("", "container-1"))
 	if target.WorkspaceID != "workspace-1" || target.ContainerID != "container-1" {
@@ -493,7 +493,7 @@ func TestEvictionControllerSkipsRecoveredPressureAndSupersededRuntime(t *testing
 	source := newFakePressureSource()
 	var snapshots, notifications int
 	controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
-		cfg.SnapshotWorkspace = func(context.Context, EvictionTarget) error { snapshots++; return nil }
+		cfg.SnapshotWorkspace = snapshotOutcome(func(context.Context, EvictionTarget) error { snapshots++; return nil })
 		cfg.MarkWorkspaceEvicted = func(EvictionResult) bool { return false }
 		cfg.NotifyEviction = func(context.Context, EvictionResult) error { notifications++; return nil }
 	})
@@ -531,7 +531,7 @@ func TestEvictionControllerCloseCancelsSnapshotWithoutStopping(t *testing.T) {
 	var stops atomic.Int32
 	controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
 		cfg.SnapshotTimeout = time.Hour
-		cfg.SnapshotWorkspace = func(ctx context.Context, _ EvictionTarget) error { close(entered); <-ctx.Done(); return ctx.Err() }
+		cfg.SnapshotWorkspace = snapshotOutcome(func(ctx context.Context, _ EvictionTarget) error { close(entered); <-ctx.Done(); return ctx.Err() })
 		cfg.StopContainer = func(context.Context, EvictionTarget) error { stops.Add(1); return nil }
 	})
 	if err := controller.Start(context.Background()); err != nil {
@@ -600,14 +600,20 @@ func TestEvictionControllerDoesNotStopAfterPressureRecoversDuringSnapshot(t *tes
 	source.setPressure(ResourcePressure{Level: PressureLevelCritical, Containers: []ContainerMetric{{ID: "first"}}})
 	var stops int
 	controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
-		cfg.SnapshotWorkspace = func(context.Context, EvictionTarget) error {
+		cfg.SnapshotWorkspace = snapshotOutcome(func(context.Context, EvictionTarget) error {
 			source.setPressure(ResourcePressure{Level: PressureLevelNone})
 			return nil
-		}
+		})
 		cfg.StopContainer = func(context.Context, EvictionTarget) error { stops++; return nil }
 	})
 	controller.handleEvent(context.Background(), PressureEvent{Type: PressureEventSystemMemory, Level: PressureLevelCritical})
 	if stops != 0 {
 		t.Fatal("stopped workload after pressure recovered during snapshot")
+	}
+}
+
+func snapshotOutcome(fn func(context.Context, EvictionTarget) error) func(context.Context, EvictionTarget) (EvictionSnapshotOutcome, error) {
+	return func(ctx context.Context, target EvictionTarget) (EvictionSnapshotOutcome, error) {
+		return EvictionSnapshotOutcome{}, fn(ctx, target)
 	}
 }
