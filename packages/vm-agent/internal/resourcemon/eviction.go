@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -45,13 +44,6 @@ type EvictionTarget struct {
 	TriggeredAt        time.Time
 	RuntimeVersion     string
 	EvictionGeneration string
-}
-
-// EvictionSnapshotOutcome describes one completed eviction capture.
-type EvictionSnapshotOutcome struct {
-	// Quiesced is true only for a capture taken from a stopped source with no other
-	// writer. Only a quiesced capture can prove the source's final state was preserved.
-	Quiesced bool
 }
 
 // EvictionResult captures all side effects attempted for one eviction.
@@ -344,24 +336,6 @@ func (c *EvictionController) selectTarget(ctx context.Context, event PressureEve
 	return EvictionTarget{}, false
 }
 
-func evictionMetricsForEvent(event PressureEvent, containers []ContainerMetric) []ContainerMetric {
-	metrics := sortedMemoryConsumers(containers)
-	if event.Type == PressureEventContainerOOM {
-		// An exited OOM victim is absent from docker stats. Resolve its immutable
-		// ID directly; Docker labels supplied by the event are only hints.
-		if strings.TrimSpace(event.ContainerID) == "" {
-			return nil
-		}
-		metric := ContainerMetric{ID: event.ContainerID, Name: event.ContainerName}
-		if sampled := metricForEvent(event, metrics); sampled != nil {
-			metric = *sampled
-			metric.ID = event.ContainerID // Never substitute a same-name replacement.
-		}
-		metrics = []ContainerMetric{metric}
-	}
-	return metrics
-}
-
 func (c *EvictionController) resolveWorkspace(ctx context.Context, metric ContainerMetric) (WorkspaceContainer, bool) {
 	if c.cfg.ResolveWorkspace == nil {
 		return WorkspaceContainer{}, false
@@ -460,28 +434,6 @@ func (c *EvictionController) performEviction(ctx context.Context, target Evictio
 	return true
 }
 
-// captureFinalSnapshot recaptures the now-stopped source so the snapshot the wake restores
-// is its final state, not a live checkpoint taken while the agent was still writing.
-func (c *EvictionController) captureFinalSnapshot(ctx context.Context, result *EvictionResult) {
-	if result.SnapshotQuiesced || c.cfg.FinalSnapshot == nil || ctx.Err() != nil {
-		return
-	}
-	finalCtx, cancel := context.WithTimeout(ctx, c.cfg.FinalSnapshotTimeout)
-	defer cancel()
-	outcome, err := c.cfg.FinalSnapshot(finalCtx, result.Target)
-	if err != nil {
-		result.FinalSnapshotError = err
-		c.logger.Warn("resourcemon: final eviction snapshot failed; keeping the pre-stop capture",
-			"workspaceId", result.Target.WorkspaceID,
-			"containerId", result.Target.ContainerID,
-			"reason", result.Target.Reason,
-			"error", err,
-		)
-		return
-	}
-	result.SnapshotQuiesced = outcome.Quiesced
-}
-
 func (c *EvictionController) now() time.Time {
 	return c.cfg.Clock().UTC()
 }
@@ -497,65 +449,4 @@ func evictionDebounceKey(target EvictionTarget) string {
 		return "workspace:" + workspaceID
 	}
 	return ""
-}
-
-func sortedMemoryConsumers(metrics []ContainerMetric) []ContainerMetric {
-	if len(metrics) == 0 {
-		return nil
-	}
-	out := cloneContainerMetrics(metrics)
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].MemUsageBytes != out[j].MemUsageBytes {
-			return out[i].MemUsageBytes > out[j].MemUsageBytes
-		}
-		if out[i].MemPercent != out[j].MemPercent {
-			return out[i].MemPercent > out[j].MemPercent
-		}
-		return out[i].ID < out[j].ID
-	})
-	return out
-}
-
-func largestMemoryConsumer(metrics []ContainerMetric) *ContainerMetric {
-	sorted := sortedMemoryConsumers(metrics)
-	if len(sorted) == 0 {
-		return nil
-	}
-	return &sorted[0]
-}
-
-func metricForEvent(event PressureEvent, metrics []ContainerMetric) *ContainerMetric {
-	for i := range metrics {
-		metric := metrics[i]
-		if event.ContainerID != "" && containerIDMatches(event.ContainerID, metric.ID) {
-			return &metric
-		}
-		if event.ContainerName != "" && containerNameMatches(event.ContainerName, metric.Name) {
-			return &metric
-		}
-	}
-	return nil
-}
-
-func cloneMetricPointer(metric *ContainerMetric) *ContainerMetric {
-	if metric == nil {
-		return nil
-	}
-	copy := *metric
-	return &copy
-}
-
-func containerIDMatches(a, b string) bool {
-	a = strings.TrimSpace(a)
-	b = strings.TrimSpace(b)
-	if a == "" || b == "" {
-		return false
-	}
-	return a == b || strings.HasPrefix(a, b) || strings.HasPrefix(b, a)
-}
-
-func containerNameMatches(a, b string) bool {
-	a = strings.Trim(strings.TrimSpace(a), "/")
-	b = strings.Trim(strings.TrimSpace(b), "/")
-	return a != "" && b != "" && a == b
 }

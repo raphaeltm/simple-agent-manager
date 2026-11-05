@@ -629,6 +629,9 @@ usually to keep something safe. Most of these clear by themselves:
 | `lost_race`                                     | The node changed while SAM was checking; it checks again shortly.                                                                                            |
 | `strict_provider_ownership_or_deletion_failure` | SAM tried to delete the server at your provider and couldn't, or couldn't prove the server is yours. See [SAM can't delete a node](#sam-cant-delete-a-node). |
 
+A running machine with no active workspaces that is blocked only by `unproven_workspace_deletion` or
+`unproven_snapshot_source` is moved to the warm pool, so it can be reused and then retired normally.
+
 A workspace machine that is stopped or being deleted, and stays blocked for 30 minutes (the admin
 setting `operations.nodeCleanupBlockedRetirementMs`), is retired anyway so it isn't billed
 indefinitely, unless a workspace on it is still running, SAM is about to reuse it, or SAM can't prove
