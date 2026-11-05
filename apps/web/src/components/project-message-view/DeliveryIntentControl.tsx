@@ -1,29 +1,41 @@
 import type { PromptDeliveryIntent } from '@simple-agent-manager/shared';
-import { SegmentedControl, type SegmentedOption } from '@simple-agent-manager/ui';
 import { CornerDownRight, ListEnd } from 'lucide-react';
 
-import { useIsMobile } from '../../hooks/useIsMobile';
-
-// Hoisted: the options never change, so the control keeps stable props across renders.
-const OPTIONS: SegmentedOption<PromptDeliveryIntent>[] = [
-  {
-    value: 'queue',
-    label: 'Queue next',
-    icon: <ListEnd size={14} aria-hidden="true" />,
-    title: 'Send when the current turn ends',
+const CHIP: Record<
+  PromptDeliveryIntent,
+  { label: string; name: string; detail: string; tone: string }
+> = {
+  steer: {
+    label: 'Steer',
+    name: 'Steer now',
+    detail: 'Joins this turn if the agent can take it, else sent next.',
+    tone: 'border-[rgba(34,197,94,0.35)] bg-[rgba(34,197,94,0.1)] text-[var(--sam-status-success-fg)]',
   },
-  {
-    value: 'steer',
-    label: 'Steer now',
-    icon: <CornerDownRight size={14} aria-hidden="true" />,
-    title: 'Try to add this to the turn the agent is working on',
+  queue: {
+    label: 'Queue',
+    name: 'Queue next',
+    detail: 'Sent when this turn ends.',
+    tone: 'border-[rgba(148,163,184,0.3)] bg-[rgba(148,163,184,0.08)] text-fg-primary',
   },
-];
+};
 
 /**
- * While the agent works, the choice between adding a message to the running turn
- * and sending it after the turn. Files always go with the next message, because a
- * steer carries text only (the server refuses a steer with attachments).
+ * What the composer's placeholder says while the agent works, so no hint row is needed. Kept
+ * short enough for one line in a 375px composer: a wrapped placeholder is clipped.
+ */
+export function deliveryIntentPlaceholder(
+  intent: PromptDeliveryIntent,
+  hasAttachments: boolean
+): string {
+  return intent === 'steer' && !hasAttachments ? 'Steer the agent...' : 'Queue next...';
+}
+
+/**
+ * While the agent works, the choice between adding a message to the running turn and
+ * sending it after the turn: one chip in the lifecycle dock's row, tapped to switch, so it
+ * costs the composer no height. Files always go with the next message, because a steer
+ * carries text only (the server refuses a steer with attachments), so the chip then shows
+ * Queue and cannot be switched.
  */
 export function DeliveryIntentControl({
   value,
@@ -34,28 +46,35 @@ export function DeliveryIntentControl({
   onChange: (value: PromptDeliveryIntent) => void;
   hasAttachments: boolean;
 }) {
-  const isMobile = useIsMobile();
-  const hint = hasAttachments
-    ? 'Messages with files are sent when this turn ends.'
-    : value === 'steer'
-      ? 'Joins this turn if the agent can take it, else sent next.'
-      : 'Sent when this turn ends.';
+  const shown: PromptDeliveryIntent = hasAttachments ? 'queue' : value;
+  const other: PromptDeliveryIntent = shown === 'steer' ? 'queue' : 'steer';
+  const chip = CHIP[shown];
+  const Icon = shown === 'steer' ? CornerDownRight : ListEnd;
+  const detail = hasAttachments ? 'Messages with files are sent when this turn ends.' : chip.detail;
   return (
-    <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-      {!hasAttachments && (
-        <SegmentedControl
-          options={OPTIONS}
-          value={value}
-          onChange={onChange}
-          label="When to deliver your message"
-          size={isMobile ? 'lg' : 'md'}
-          // Fixed width past mobile: shrink-to-content truncates the selected (bolder) label.
-          className="w-full shrink-0 sm:w-64"
-        />
-      )}
-      <p className="m-0 min-w-0 text-xs text-fg-muted" aria-live="polite">
-        {hint}
-      </p>
-    </div>
+    <>
+      <button
+        type="button"
+        disabled={hasAttachments}
+        onClick={() => onChange(other)}
+        aria-label={
+          hasAttachments
+            ? `${chip.name}: messages with files are sent when this turn ends`
+            : `${chip.name}. Switch to ${CHIP[other].name}`
+        }
+        title={detail}
+        data-testid="delivery-intent-chip"
+        data-intent={shown}
+        className={`pointer-events-auto flex h-[26px] shrink-0 cursor-pointer items-center gap-1 rounded-full border px-2.5 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-focus-ring disabled:cursor-default disabled:opacity-60 ${chip.tone}`}
+      >
+        <Icon size={13} aria-hidden="true" />
+        {chip.label}
+      </button>
+      {/* A focused button whose label changes is not reliably re-announced, so a switch is
+          spoken here; the live region stays mounted and only its text changes. */}
+      <span className="sr-only" aria-live="polite" data-testid="delivery-intent-announcement">
+        {`${chip.name}. ${detail}`}
+      </span>
+    </>
   );
 }
