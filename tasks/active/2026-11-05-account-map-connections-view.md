@@ -22,7 +22,8 @@ tests). Normal gates (staging, review, PR, deploy monitoring) still apply.
   (`idea_session` links ideas to chats), truncation flags, `ideaScan`, `activeOnly` param.
 - No PR state or cost in the response: the shipped view must not show them (prototype did, from mock data).
 - The old map shipped ideas with real idea links (`/projects/:id/ideas/:ideaId`, #2434). The new
-  view keeps idea links (on the chat's path) and per-project idea counts.
+  view keeps idea links (on chat rows and in the chat's path). Per-project idea counts were dropped:
+  the API only returns ideas linked to visible chats, so a count would mislead.
 - Rule 48/60: new or materially changed fetch surfaces use TanStack Query with identity-scoped keys
   (`useQueryScope`, `lib/query-options/*`).
 - `/account-map` is not a full-bleed route: the page renders inside the shell's content pane and
@@ -56,7 +57,7 @@ tests). Normal gates (staging, review, PR, deploy monitoring) still apply.
 - [x] Selecting an item highlights its chain and shows its path with working links
 - [x] Filters and search narrow the view; "Include finished" refetches with `activeOnly=false`
 - [x] Phone layout has no horizontal overflow and shows each chat's path
-- [x] No React Flow code remains; no prototype route remains
+- [x] No React Flow code remains in the Account Map (the workflow run graph keeps it); no prototype route remains
 - [ ] Staging: the page renders real data for the smoke user and selection works
 
 ## Implementation Notes
