@@ -8,6 +8,7 @@
  */
 import type { MessageCommentReply, MessageCommentThread } from '@simple-agent-manager/shared';
 
+import { chunk, D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
 import {
   createReplyRecord,
   createThreadRecord,
@@ -184,11 +185,13 @@ export function readSessionTopics(
   sql: SqlStorage,
   sessionIds: string[]
 ): ProjectCommentSessionTopic[] {
-  if (sessionIds.length === 0) return [];
-  const placeholders = sessionIds.map(() => '?').join(', ');
-  const rows = sql
-    .exec(`SELECT id, topic FROM chat_sessions WHERE id IN (${placeholders})`, ...sessionIds)
-    .toArray();
+  // Batched under the bind-parameter ceiling: an inbox page can name up to 300 sessions.
+  const rows = chunk(sessionIds, D1_MAX_BOUND_PARAMETERS).flatMap((batch) => {
+    const placeholders = batch.map(() => '?').join(', ');
+    return sql
+      .exec(`SELECT id, topic FROM chat_sessions WHERE id IN (${placeholders})`, ...batch)
+      .toArray();
+  });
 
   const topics: ProjectCommentSessionTopic[] = [];
   for (const row of rows) {

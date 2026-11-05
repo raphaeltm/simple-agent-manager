@@ -11,6 +11,7 @@ import type { CommentAnchorKind, CommentMention } from '@simple-agent-manager/sh
 import { COMMENT_ANCHOR_KINDS, COMMENT_STATUSES } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
+import { chunk, D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
 import { createModuleLogger } from '../../lib/logger';
 import {
   ANCHOR_SCOPE_PREDICATE,
@@ -182,17 +183,21 @@ function readReplies(sql: SqlStorage, threadIds: string[]): Map<string, CommentR
   for (const threadId of threadIds) byThread.set(threadId, []);
   if (threadIds.length === 0) return byThread;
 
-  const placeholders = threadIds.map(() => '?').join(', ');
-  const rows = sql
-    .exec(
-      `SELECT id, thread_id, body, author_type, author_id, author_name, created_at, sequence,
-              client_mutation_id, mentions_json
-       FROM anchored_comment_replies
-       WHERE thread_id IN (${placeholders})
-       ORDER BY thread_id ASC, sequence ASC`,
-      ...threadIds
-    )
-    .toArray();
+  // DO SQLite rejects more than D1_MAX_BOUND_PARAMETERS binds per statement, and list limits
+  // go up to 500 threads, so the id list is read in batches.
+  const rows = chunk(threadIds, D1_MAX_BOUND_PARAMETERS).flatMap((batch) => {
+    const placeholders = batch.map(() => '?').join(', ');
+    return sql
+      .exec(
+        `SELECT id, thread_id, body, author_type, author_id, author_name, created_at, sequence,
+                client_mutation_id, mentions_json
+         FROM anchored_comment_replies
+         WHERE thread_id IN (${placeholders})
+         ORDER BY thread_id ASC, sequence ASC`,
+        ...batch
+      )
+      .toArray();
+  });
   for (const row of rows) {
     try {
       const reply = mapReply(row);
@@ -375,14 +380,17 @@ export function hydrateThreadRecordsByIds(
   threadIds: string[]
 ): CommentThreadRecord[] {
   if (threadIds.length === 0) return [];
-  const placeholders = threadIds.map(() => '?').join(', ');
-  const rows = sql
-    .exec(
-      `SELECT ${THREAD_SELECT_COLUMNS}
-       FROM anchored_comment_threads
-       WHERE id IN (${placeholders})`,
-      ...threadIds
-    )
-    .toArray();
+  // Batched under the bind-parameter ceiling, like `readReplies`.
+  const rows = chunk(threadIds, D1_MAX_BOUND_PARAMETERS).flatMap((batch) => {
+    const placeholders = batch.map(() => '?').join(', ');
+    return sql
+      .exec(
+        `SELECT ${THREAD_SELECT_COLUMNS}
+         FROM anchored_comment_threads
+         WHERE id IN (${placeholders})`,
+        ...batch
+      )
+      .toArray();
+  });
   return restoreThreadOrder(threadIds, hydrateThreadRows(sql, rows));
 }

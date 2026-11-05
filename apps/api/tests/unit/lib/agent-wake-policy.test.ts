@@ -6,6 +6,7 @@ import {
   decideAgentWake,
   DEFAULT_AGENT_WAKE_POLICY_MODE,
   HUMAN_AGENT_WAKE_TRIGGERS,
+  HUMAN_PROMPT_DELIVERY_TRIGGERS,
 } from '../../../src/lib/agent-wake-policy';
 
 const base = { sessionId: 'session-1', trigger: 'comment_directive' as const };
@@ -89,6 +90,12 @@ describe('agent wake policy (trusted_project)', () => {
   });
 
   it('owns the list of prompt sources the delivery fence checks', () => {
-    expect(SESSION_WRITER_PROMPT_SOURCES).toBe(HUMAN_AGENT_WAKE_TRIGGERS);
+    expect(SESSION_WRITER_PROMPT_SOURCES).toBe(HUMAN_PROMPT_DELIVERY_TRIGGERS);
+    // Attention answers go straight to the live agent, so they are a wake but not a queued source.
+    expect(HUMAN_AGENT_WAKE_TRIGGERS).toEqual([
+      'user_followup',
+      'comment_directive',
+      'attention_answer',
+    ]);
   });
 });

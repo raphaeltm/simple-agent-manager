@@ -20,10 +20,11 @@ import {
   requireProjectCapability,
 } from '../middleware/project-auth';
 import { parseOptionalBody, ResolveAttentionAnswerSchema } from '../schemas';
+import { authorizeAgentWake } from '../services/agent-wake-authorization';
 import { getCommentContextLimits } from '../services/collaboration-settings';
 import { getConnectorReadLimits } from '../services/connector-read-settings';
 import * as projectDataService from '../services/project-data';
-import { recordSharedSessionAnswer, requireSessionWriter } from '../services/session-access';
+import { recordSharedSessionAnswer } from '../services/session-access';
 import { getSessionMessageLimit } from './chat-message-query';
 import { preparePromptForLiveAgent, sendPreparedPromptToLiveAgent } from './chat-prompt-forward';
 
@@ -151,7 +152,12 @@ export async function answerAttention(
   const db = drizzle(env.DATABASE, { schema });
 
   await requireProjectCapability(db, projectId, userId, 'task:write');
-  const writer = await requireSessionWriter(env, projectId, sessionId, userId, {
+  // The answer reaches the agent as a new prompt, so the agent-wake policy decides.
+  const { writer } = await authorizeAgentWake(env, {
+    projectId,
+    sessionId,
+    actorUserId: userId,
+    trigger: 'attention_answer',
     db,
     action: 'answer the agent in this session',
   });

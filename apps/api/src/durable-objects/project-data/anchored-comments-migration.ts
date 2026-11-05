@@ -24,6 +24,13 @@
  * unwritten (`anchored-comment-writer-inventory.test.ts`), as the recovery path; dropping
  * them is a separate, later change (tasks/backlog/2026-11-05-drop-frozen-legacy-comment-tables.md).
  *
+ * Rollback: this migration is recorded once per object and never re-runs. If the Worker is
+ * rolled back to code from before 072, that code reads and writes only the legacy tables, and
+ * anything written during the rollback window is invisible after rolling forward again. Roll
+ * forward with a new migration that calls `copyLegacyCommentRows` (idempotent: it adds only
+ * missing rows). Status changes made during the window to rows that already exist here are
+ * not merged.
+ *
  * Cost (rule 81): both steps run in-engine, inside the constructor's blockConcurrencyWhile
  * (30 s budget). Measured on better-sqlite3 with 100,000 threads and 100,000 replies of ~200
  * bytes each: copy 1.9 s, parity 1.4 s. Comment threads are capped per session

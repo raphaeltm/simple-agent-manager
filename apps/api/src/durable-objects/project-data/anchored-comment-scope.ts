@@ -13,11 +13,14 @@
  * are the project-wide inbox ranking and its by-id hydration, which are project-wide by
  * design because this Durable Object is the project.
  *
- * Adding an anchor kind (human_task, later): add a member to `CommentAnchorScope`, an entry
- * to `ANCHOR_KIND_RULES`, and one additive migration
+ * Adding an anchor kind (human_task, later): add a member to `CommentAnchorScope` (the
+ * exhaustive switch below then fails to compile until it is mapped), an entry to
+ * `ANCHOR_KIND_RULES`, one additive migration
  * `ALTER TABLE anchored_comment_threads ADD COLUMN human_task_id TEXT CHECK (...)` whose
- * column CHECK ties `scope_key` to the new column. No table is recreated, and no existing
- * predicate changes.
+ * column CHECK ties `scope_key` to the new column, the new column in the store's row schema,
+ * record and the thread INSERT in `createThreadRecord`, and a small adapter beside
+ * `comments.ts` / `library-file-comments.ts` mapping records to the kind's API shape. No
+ * table is recreated, and no existing predicate changes.
  */
 import type { CommentAnchorKind } from '@simple-agent-manager/shared';
 

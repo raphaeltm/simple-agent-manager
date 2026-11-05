@@ -6,7 +6,7 @@
  * undelivered prompts and marks the expiry handled. The fence refuses any queued prompt whose
  * sender no longer controls the session, whichever way their access ended.
  */
-import { decideAgentWake, isAgentWakeTrigger } from '../../lib/agent-wake-policy';
+import { decideAgentWake, isHumanPromptDeliveryTrigger } from '../../lib/agent-wake-policy';
 import { createModuleLogger } from '../../lib/logger';
 import {
   cancelUndeliveredSenderPrompts,
@@ -153,7 +153,7 @@ export function senderLacksSessionAccess(
   },
   now: number = Date.now()
 ): SenderAccessDenial | null {
-  if (!isAgentWakeTrigger(delivery.sourceKind)) return null;
+  if (!isHumanPromptDeliveryTrigger(delivery.sourceKind)) return null;
   if (delivery.senderType !== 'human') return null;
   if (!delivery.senderId) {
     return { error: 'Prompt sender identity is missing', deliveryCancelled: null };

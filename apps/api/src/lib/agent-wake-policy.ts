@@ -3,9 +3,15 @@
  *
  * Every human-originated agent wake asks this function: the Send-to-agent route
  * (`routes/chat-comments.ts`), a typed or connector message (`services/send-chat.ts`
- * `authorizeSendChat`), and the delivery-time fence that re-checks a queued prompt just
- * before it reaches the agent (`project-data/session-access-expiry.ts`
- * `senderLacksSessionAccess`). A future human-task comment wake must call it too.
+ * `authorizeSendChat`), an answer to the agent's attention request, which is sent to the
+ * agent as a new prompt (`routes/chat-attention.ts` `answerAttention`), and the
+ * delivery-time fence that re-checks a queued prompt just before it reaches the agent
+ * (`project-data/session-access-expiry.ts` `senderLacksSessionAccess`). A future
+ * human-task comment wake must call it too.
+ *
+ * Not a wake, so not asked: answering an ACP permission or question request
+ * (`routes/chat-acp-interactions.ts`). That replies inside a turn the agent already started
+ * and is blocked on; it never starts agent work. It still requires a session writer.
  *
  * The decision is pure: callers resolve the actor's session access (owner, active grantee,
  * none) and pass it in. The API side also checks that a grantee and the owner are still
@@ -25,16 +31,25 @@
  *   carries what the rule needs, so existing triggers are unaffected.
  */
 
-/** Prompt sources a human originates. Each is an agent wake this policy governs. */
-export const HUMAN_AGENT_WAKE_TRIGGERS = ['user_followup', 'comment_directive'] as const;
+/**
+ * Durable prompt sources a human originates. The delivery fence re-asks the policy for these
+ * just before delivery, using the source kind as the trigger.
+ */
+export const HUMAN_PROMPT_DELIVERY_TRIGGERS = ['user_followup', 'comment_directive'] as const;
+/** Every human action that starts agent work. */
+export const HUMAN_AGENT_WAKE_TRIGGERS = [
+  ...HUMAN_PROMPT_DELIVERY_TRIGGERS,
+  'attention_answer',
+] as const;
 export type AgentWakeTrigger = (typeof HUMAN_AGENT_WAKE_TRIGGERS)[number];
+export type HumanPromptDeliveryTrigger = (typeof HUMAN_PROMPT_DELIVERY_TRIGGERS)[number];
 
 export const AGENT_WAKE_POLICY_MODES = ['trusted_project'] as const;
 export type AgentWakePolicyMode = (typeof AGENT_WAKE_POLICY_MODES)[number];
 export const DEFAULT_AGENT_WAKE_POLICY_MODE: AgentWakePolicyMode = 'trusted_project';
 
-export function isAgentWakeTrigger(value: string): value is AgentWakeTrigger {
-  return (HUMAN_AGENT_WAKE_TRIGGERS as readonly string[]).includes(value);
+export function isHumanPromptDeliveryTrigger(value: string): value is HumanPromptDeliveryTrigger {
+  return (HUMAN_PROMPT_DELIVERY_TRIGGERS as readonly string[]).includes(value);
 }
 
 /** The actor's access to the target session, as the session-access resolver reports it. */
