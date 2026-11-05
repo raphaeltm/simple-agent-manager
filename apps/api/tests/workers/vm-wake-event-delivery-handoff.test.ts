@@ -328,9 +328,10 @@ async function inboxRow(f: Fixture) {
     delivery_state: string;
     delivery_attempts: number;
     last_error: string | null;
+    delivery_intent: string;
   }>(
     f.stub,
-    'SELECT delivery_state, delivery_attempts, last_error FROM session_inbox WHERE id = ?',
+    'SELECT delivery_state, delivery_attempts, last_error, delivery_intent FROM session_inbox WHERE id = ?',
     f.deliveryId
   );
   return row;
@@ -375,6 +376,11 @@ function authorityRevocations(warn: ReturnType<typeof vi.spyOn>): Record<string,
  * `agent_session` alarm and stop it inside the VM restore. Returns the in-flight alarm.
  */
 async function wakeToHeldRestore(f: Fixture) {
+  // Agent-message notices steer by default. A steer never wakes a runtime, so the sleeping
+  // chat hands it straight to the queue, whose next claim starts the wake.
+  const steered = await runDueDelivery(f);
+  expect(steered).toMatchObject({ kind: 'steer_fallback', reason: 'session_not_awake' });
+  expect(await inboxRow(f)).toMatchObject({ delivery_intent: 'queue' });
   const claimed = await runDueDelivery(f);
   expect(claimed).toMatchObject({
     kind: 'retry',

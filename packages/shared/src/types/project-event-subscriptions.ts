@@ -55,7 +55,8 @@ export type ProjectEventSubscriptionCreateRequest = {
   owner?: ProjectEventSubscriptionOwner | null;
   idempotencyKey: string;
   filter: ProjectEventFilterV1;
-  requestedDelivery: ProjectEventRequestedDeliveryMode;
+  /** Defaults to DEFAULT_PROJECT_EVENT_REQUESTED_DELIVERY (`runtime_steer`). */
+  requestedDelivery?: ProjectEventRequestedDeliveryMode;
   target?: ProjectEventDeliveryPreference['target'] | null;
   reason?: string | null;
   expiresAt?: number | null;
