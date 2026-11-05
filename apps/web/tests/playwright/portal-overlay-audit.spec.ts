@@ -204,62 +204,6 @@ const MOCK_NODE_WORKSPACES = [
   },
 ];
 
-const MOCK_ACCOUNT_MAP = {
-  projects: [
-    {
-      id: 'proj-test-1',
-      name: 'Portal Test Project',
-      repository: 'testuser/portal-repo',
-      status: 'active',
-      lastActivityAt: new Date(Date.now() - 60_000).toISOString(),
-      activeSessionCount: 1,
-    },
-  ],
-  nodes: [
-    {
-      id: 'node-1',
-      name: 'portal-node-running-with-a-very-long-name',
-      status: 'running',
-      vmSize: 'medium',
-      vmLocation: 'fsn1',
-      cloudProvider: 'hetzner',
-      ipAddress: '192.0.2.10',
-      healthStatus: 'healthy',
-      lastHeartbeatAt: new Date(Date.now() - 60_000).toISOString(),
-      lastMetrics: null,
-    },
-  ],
-  workspaces: [
-    {
-      id: 'workspace-node-1',
-      nodeId: 'node-1',
-      projectId: 'proj-test-1',
-      displayName: 'Portal Workspace',
-      branch: 'main',
-      status: 'running',
-      vmSize: 'medium',
-      chatSessionId: 'sess-1',
-    },
-  ],
-  sessions: [
-    {
-      id: 'sess-1',
-      projectId: 'proj-test-1',
-      topic: 'Account map tooltip session',
-      status: 'running',
-      messageCount: 12,
-      workspaceId: 'workspace-node-1',
-      taskId: null,
-    },
-  ],
-  tasks: [],
-  relationships: [
-    { source: 'proj-test-1', target: 'workspace-node-1', type: 'has_workspace', active: true },
-    { source: 'workspace-node-1', target: 'node-1', type: 'runs_on', active: true },
-    { source: 'proj-test-1', target: 'sess-1', type: 'has_session', active: true },
-  ],
-};
-
 // ---------------------------------------------------------------------------
 // Setup — single handler pattern (proven to work with BetterAuth)
 // ---------------------------------------------------------------------------
@@ -299,10 +243,6 @@ async function setupApiMocks(page: Page) {
 
     if (pathName === '/api/workspaces') {
       return respond(200, MOCK_NODE_WORKSPACES);
-    }
-
-    if (pathName === '/api/account-map') {
-      return respond(200, MOCK_ACCOUNT_MAP);
     }
 
     // Credentials
@@ -686,21 +626,4 @@ test.describe('Portal Overlays — Desktop', () => {
   });
 
   registerSharedOverlayScenarios('desktop');
-
-  test('Account map hover tooltip portal renders with blurred surface', async ({ page }) => {
-    await page.goto('/account-map');
-    await page.waitForTimeout(1200);
-
-    const node = page.locator('.react-flow__node').first();
-    await expect(node).toBeVisible();
-    await node.hover();
-    await page.waitForTimeout(400);
-    await screenshot(page, 'portal-account-map-tooltip-desktop');
-
-    await assertFixedBlurredWithinViewport(
-      page.locator('body > .glass-surface').filter({ hasText: 'Portal Test Project' })
-    );
-
-    await assertNoOverflow(page);
-  });
 });

@@ -29,6 +29,7 @@
  * the `projects/detail` case documented in `query-persist-config.ts` shows.
  */
 
+export { accountMapQueryKeys, accountMapQueryOptions } from './account-map';
 export {
   accountQueryKeys,
   ccAttachmentsQueryOptions,

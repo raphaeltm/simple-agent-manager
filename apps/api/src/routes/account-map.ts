@@ -43,7 +43,8 @@ const DEFAULT_MAX_SESSIONS_PER_PROJECT = 20;
 
 /** KV cache TTL in seconds. Configurable via ACCOUNT_MAP_CACHE_TTL_SECONDS. */
 const DEFAULT_CACHE_TTL_SECONDS = 30;
-const ACCOUNT_MAP_CACHE_VERSION = 'v3';
+// v4: sessions carry `attention`, tasks carry `outputPrUrl`.
+const ACCOUNT_MAP_CACHE_VERSION = 'v4';
 
 interface SessionSummary {
   id: string;
@@ -53,6 +54,8 @@ interface SessionSummary {
   messageCount: number;
   workspaceId: string | null;
   taskId: string | null;
+  /** The chat's open "waiting on you" marker, if any (from ProjectData attention markers). */
+  attention: { kind: string; reason: string | null; createdAt: number } | null;
 }
 
 interface Relationship {
@@ -61,6 +64,24 @@ interface Relationship {
   type: string;
   active: boolean;
   primary?: boolean;
+}
+
+/** Narrow the DO's attention summary to what the map shows; anything malformed reads as none. */
+function toAttentionSummary(value: unknown): SessionSummary['attention'] {
+  if (!value || typeof value !== 'object') return null;
+  const { kind, reason, createdAt } = value as Record<string, unknown>;
+  if (typeof kind !== 'string' || typeof createdAt !== 'number') return null;
+  return { kind, reason: typeof reason === 'string' ? reason : null, createdAt };
+}
+
+/** The map renders this as a link, so only an https URL is passed through. */
+function toHttpsUrl(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    return new URL(value).protocol === 'https:' ? value : null;
+  } catch {
+    return null;
+  }
 }
 
 const accountMapRoutes = new Hono<{ Bindings: Env }>();
@@ -220,6 +241,7 @@ accountMapRoutes.get('/', async (c) => {
           messageCount: (s.messageCount as number) ?? 0,
           workspaceId: (s.workspaceId as string) ?? null,
           taskId: (s.taskId as string) ?? null,
+          attention: toAttentionSummary(s.attention),
         })),
       };
     })
@@ -392,6 +414,7 @@ accountMapRoutes.get('/', async (c) => {
       executionStep: t.executionStep,
       priority: t.priority,
       agentActivityState: t.agentActivityState,
+      outputPrUrl: toHttpsUrl(t.outputPrUrl),
     })),
     ideas: ideas.map(({ id, projectId, title, status }) => ({ id, projectId, title, status })),
     ideaScan: { projectLimit: linkProjectCap, candidateLimit: ideaCap },

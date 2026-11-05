@@ -1,66 +1,128 @@
-import { Spinner } from '@simple-agent-manager/ui';
-import { useEffect, useState } from 'react';
+import {
+  buttonClassName,
+  Pane,
+  SearchField,
+  SegmentedControl,
+  Spinner,
+} from '@simple-agent-manager/ui';
+import { keepPreviousData, useQuery } from '@tanstack/react-query';
+import { useCallback, useMemo, useState } from 'react';
 
-import { AccountMapCanvas } from '../components/account-map/AccountMapCanvas';
-import { AccountMapEmptyState } from '../components/account-map/AccountMapEmptyState';
-import { AccountMapToolbar } from '../components/account-map/AccountMapToolbar';
-import { useAccountMapData } from '../components/account-map/hooks/useAccountMapData';
-import { useMapFilters } from '../components/account-map/hooks/useMapFilters';
+import {
+  buildConnectionsModel,
+  chainOf,
+  type ConnectionsModel,
+  type MapFilter,
+  selectConnectionsView,
+} from '../components/account-map/connections-model';
+import { ConnectionsColumns } from '../components/account-map/ConnectionsColumns';
+import { ConnectionsList } from '../components/account-map/ConnectionsList';
+import { ConnectionsPathBar } from '../components/account-map/ConnectionsPath';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useQueryScope } from '../hooks/useQueryScope';
+import type { AccountMapResponse } from '../lib/api';
+import { accountMapQueryOptions } from '../lib/query-options';
+
+/** What the server left out, in one sentence, so a partial map never passes for a full one. */
+function truncationNotice(data: AccountMapResponse): string {
+  const { truncation, ideaScan } = data;
+  const omitted = [
+    truncation.projects && 'projects',
+    truncation.nodes && 'machines',
+    truncation.workspaces && 'workspaces',
+    truncation.sessions && 'chats',
+    truncation.tasks && 'tasks',
+  ].filter(Boolean);
+  const parts = [
+    truncation.incomplete && 'Some map data could not be loaded. Refresh to try again.',
+    truncation.linkProjects &&
+      (ideaScan?.projectLimit
+        ? `Ideas checked in the ${ideaScan.projectLimit} most recent projects.`
+        : 'Ideas checked in recent projects only.'),
+    truncation.ideas &&
+      (ideaScan?.candidateLimit
+        ? `Only the ${ideaScan.candidateLimit} newest ideas were checked for chat links.`
+        : 'Only recent ideas were checked for chat links.'),
+    omitted.length > 0 && `Some ${omitted.join(', ')} were omitted.`,
+    truncation.links && 'Some idea-to-chat links may be omitted.',
+  ].filter(Boolean);
+  return parts.length > 0 ? `${parts.join(' ')} Open a project or idea for its full history.` : '';
+}
+
+function filterCounts(model: ConnectionsModel) {
+  let attention = 0;
+  let live = 0;
+  for (const w of model.work) {
+    if (w.state === 'needs-you' || w.state === 'failed') attention += 1;
+    if (w.state === 'needs-you' || w.state === 'working') live += 1;
+  }
+  return { all: model.work.length, attention, live };
+}
 
 export function AccountMap() {
   const isMobile = useIsMobile();
-  const [activeOnly, setActiveOnly] = useState(true);
+  const queryScope = useQueryScope();
+  const [showFinished, setShowFinished] = useState(false);
+  const [filter, setFilter] = useState<MapFilter>('all');
+  const [search, setSearch] = useState('');
+  const [showQuiet, setShowQuiet] = useState(false);
+  // `undefined` until the user picks something: until then the first chat waiting on them is picked.
+  const [picked, setPicked] = useState<string | null | undefined>(undefined);
 
-  const {
-    nodes,
-    edges,
-    loading,
-    error,
-    isEmpty,
-    stats,
-    truncation,
-    ideaScan,
-    refresh,
-    reorganize,
-  } = useAccountMapData({ isMobile, activeOnly });
+  const query = useQuery({
+    ...accountMapQueryOptions(queryScope, !showFinished),
+    enabled: Boolean(queryScope),
+    // Keep the current map on screen while "Show finished" loads the larger one.
+    placeholderData: keepPreviousData,
+  });
 
-  const {
-    filteredNodes,
-    filteredEdges,
-    searchQuery,
-    setSearchQuery,
-    activeFilters,
-    toggleFilter,
-    resetFilters,
-    hasActiveFilters,
-    matchCount,
-    totalCount,
-    filterNodeCountChanged,
-  } = useMapFilters({ nodes, edges });
+  const model = useMemo(
+    () => (query.data ? buildConnectionsModel(query.data) : null),
+    [query.data]
+  );
+  const view = useMemo(
+    () => (model ? selectConnectionsView(model, filter, search) : null),
+    [model, filter, search]
+  );
 
-  // Auto-reorganize when type filters add/remove nodes from the graph
-  useEffect(() => {
-    if (filterNodeCountChanged) {
-      reorganize();
-    }
-  }, [filterNodeCountChanged, reorganize]);
+  const visibleIds = useMemo(() => {
+    if (!view) return new Set<string>();
+    return new Set([
+      ...view.projects.map((p) => p.id),
+      ...(showQuiet ? view.quietProjects.map((p) => p.id) : []),
+      ...view.work.map((w) => w.id),
+      ...view.machines.map((m) => m.id),
+    ]);
+  }, [view, showQuiet]);
+  const wanted =
+    picked === undefined ? (view?.work.find((w) => w.state === 'needs-you')?.id ?? null) : picked;
+  const selectedId = wanted && visibleIds.has(wanted) ? wanted : null;
+  const chain = useMemo(
+    () => (model ? chainOf(model, selectedId) : new Set<string>()),
+    [model, selectedId]
+  );
+  const select = useCallback((id: string) => setPicked((cur) => (cur === id ? null : id)), []);
 
-  if (loading) {
+  if (query.isLoading || (!query.data && !query.isError)) {
     return (
-      <div className="flex items-center justify-center h-full">
+      <div className="flex h-full items-center justify-center">
         <Spinner size="lg" />
       </div>
     );
   }
 
-  if (error) {
+  if (!query.data || !model || !view) {
+    const reason = query.error instanceof Error ? query.error.message : 'Failed to load the map';
     return (
-      <div className="flex flex-col items-center justify-center h-full gap-3 px-6">
-        <p className="sam-type-body text-danger">{error}</p>
+      <div
+        role="alert"
+        className="flex h-full flex-col items-center justify-center gap-3 px-6 text-center"
+      >
+        <p className="m-0 text-[15px] text-fg-primary">{reason}</p>
         <button
-          onClick={() => void refresh()}
-          className="px-3 py-1.5 text-sm bg-accent text-fg-on-accent rounded-md border-none cursor-pointer hover:opacity-90 transition-opacity"
+          type="button"
+          onClick={() => void query.refetch()}
+          className={buttonClassName({ variant: 'accent', size: 'sm' })}
         >
           Retry
         </button>
@@ -68,65 +130,114 @@ export function AccountMap() {
     );
   }
 
-  if (isEmpty) {
-    return <AccountMapEmptyState />;
+  const counts = filterCounts(model);
+  const notice = truncationNotice(query.data);
+  const empty = model.work.length === 0 && model.machines.length === 0;
+
+  const header = (
+    <Pane variant="slab" as="header" className="flex shrink-0 flex-col gap-3 px-4 py-3.5 sm:px-5">
+      <div>
+        <h1 className="m-0 text-[22px] font-bold text-fg-primary sm:text-[24px]">
+          How it all connects
+        </h1>
+        <p className="m-0 mt-1 text-[13.5px] text-fg-muted">
+          Each chat, the project it belongs to, and the machine it runs on.
+        </p>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <SegmentedControl<MapFilter>
+          label="Show"
+          value={filter}
+          onChange={setFilter}
+          className={isMobile ? 'w-full' : 'w-[340px]'}
+          options={[
+            {
+              value: 'all',
+              label: 'Everything',
+              count: counts.all,
+              ariaLabel: `Everything, ${counts.all}`,
+            },
+            {
+              value: 'attention',
+              label: 'Needs you',
+              count: counts.attention,
+              ariaLabel: `Needs you, ${counts.attention}`,
+            },
+            { value: 'live', label: 'Live', count: counts.live, ariaLabel: `Live, ${counts.live}` },
+          ]}
+        />
+        <SearchField
+          value={search}
+          onValueChange={setSearch}
+          label="Search the map"
+          placeholder="Search chats, projects, machines"
+          className="min-w-0 flex-1 basis-[220px]"
+        />
+        <button
+          type="button"
+          aria-pressed={showFinished}
+          onClick={() => setShowFinished((v) => !v)}
+          className={buttonClassName({ variant: 'raised', size: 'sm' })}
+        >
+          {showFinished ? 'Hide finished' : 'Show finished'}
+        </button>
+        {query.isFetching && <Spinner size="sm" />}
+      </div>
+      {!isMobile && !empty && (
+        <div className="flex min-h-[46px] items-center border-0 border-t border-solid border-[var(--sam-hairline)] pt-3">
+          <ConnectionsPathBar model={model} selectedId={selectedId} />
+        </div>
+      )}
+    </Pane>
+  );
+
+  const body = empty ? (
+    <div className="flex flex-col items-center gap-2 px-6 py-12 text-center">
+      <p className="m-0 text-[15px] font-semibold text-fg-primary">Nothing to connect yet</p>
+      <p className="m-0 max-w-[360px] text-[13px] text-fg-muted">
+        {showFinished
+          ? 'Start a chat in a project and it shows up here, linked to the machine it runs on.'
+          : 'Nothing is running right now. Start a chat, or show finished work.'}
+      </p>
+    </div>
+  ) : isMobile ? (
+    <ConnectionsList model={model} view={view} selectedId={selectedId} onSelect={select} />
+  ) : (
+    <ConnectionsColumns
+      model={model}
+      view={view}
+      chain={chain}
+      selectedId={selectedId}
+      onSelect={select}
+      showQuiet={showQuiet}
+      onToggleQuiet={() => setShowQuiet((v) => !v)}
+    />
+  );
+
+  const noticeLine = notice && (
+    <p role="status" className="m-0 px-1 text-[12px] text-fg-muted">
+      {notice}
+    </p>
+  );
+
+  if (isMobile) {
+    return (
+      <div
+        data-testid="account-map-root"
+        className="flex w-full min-w-0 flex-col gap-2.5 p-2.5 pb-8"
+      >
+        {header}
+        {noticeLine}
+        {body}
+      </div>
+    );
   }
 
-  const omittedTypes = truncation
-    ? [
-        truncation.projects && 'projects',
-        truncation.nodes && 'nodes',
-        truncation.workspaces && 'workspaces',
-        truncation.sessions && 'chats',
-        truncation.tasks && 'tasks',
-      ].filter(Boolean)
-    : [];
-  const truncationNotice = truncation
-    ? [
-        truncation.incomplete && 'Some map data could not be loaded. Refresh to try again.',
-        truncation.linkProjects &&
-          (ideaScan?.projectLimit
-            ? `Ideas checked in the ${ideaScan.projectLimit} most recent projects.`
-            : 'Ideas checked in recent projects only.'),
-        truncation.ideas &&
-          (ideaScan?.candidateLimit
-            ? `Only the ${ideaScan.candidateLimit} newest ideas were checked for chat links.`
-            : 'Only recent ideas were checked for chat links.'),
-        omittedTypes.length > 0 && `Some ${omittedTypes.join(', ')} were omitted.`,
-        truncation.links && 'Some idea-to-chat links may be omitted.',
-      ]
-        .filter(Boolean)
-        .join(' ')
-    : '';
-
   return (
-    <div className="flex flex-col h-full min-h-0">
-      <AccountMapToolbar
-        searchQuery={searchQuery}
-        onSearchChange={setSearchQuery}
-        activeFilters={activeFilters}
-        onToggleFilter={toggleFilter}
-        onResetFilters={resetFilters}
-        onReorganize={reorganize}
-        hasActiveFilters={hasActiveFilters}
-        matchCount={matchCount}
-        totalCount={totalCount}
-        stats={stats}
-        isMobile={isMobile}
-        activeOnly={activeOnly}
-        onToggleActiveOnly={() => setActiveOnly((v) => !v)}
-      />
-      {truncationNotice && (
-        <p
-          className="px-3 py-1.5 text-xs text-fg-muted bg-surface border-b border-border-default"
-          role="status"
-        >
-          {truncationNotice} Open a project or idea for its full history.
-        </p>
-      )}
-      <div className="flex-1 min-h-0">
-        <AccountMapCanvas nodes={filteredNodes} edges={filteredEdges} isMobile={isMobile} />
-      </div>
+    <div data-testid="account-map-root" className="flex h-full w-full min-w-0 flex-col gap-3 p-4">
+      {header}
+      {noticeLine}
+      <div className="relative min-h-0 flex-1 overflow-y-auto">{body}</div>
     </div>
   );
 }

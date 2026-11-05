@@ -12,6 +12,13 @@
  */
 const projectRoot = (projectId: string) => `/projects/${encodeURIComponent(projectId)}`;
 
+/** The project itself (its default view). */
+export const projectPath = (projectId: string) => projectRoot(projectId);
+
+/** A task in the project; the route forwards to the task's chat when it has one. */
+export const projectTaskPath = (projectId: string, taskId: string) =>
+  `${projectRoot(projectId)}/tasks/${encodeURIComponent(taskId)}`;
+
 /** A chat in the project: the chats automations start, and the chats linked work points at. */
 export const projectChatPath = (projectId: string, sessionId: string) =>
   `${projectRoot(projectId)}/chat/${encodeURIComponent(sessionId)}`;

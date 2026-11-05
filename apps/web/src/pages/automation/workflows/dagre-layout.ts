@@ -1,4 +1,4 @@
-import type { Edge,Node } from '@xyflow/react';
+import type { Edge, Node } from '@xyflow/react';
 import dagre from 'dagre';
 
 interface LayoutOptions {

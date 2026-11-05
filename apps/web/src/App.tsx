@@ -225,10 +225,6 @@ const Setup = lazyNamed(() => import('./pages/Setup'), 'Setup');
 const TaskRedirect = lazyNamed(() => import('./pages/TaskRedirect'), 'TaskRedirect');
 const Tools = lazyNamed(() => import('./pages/Tools'), 'Tools');
 const ToolsCli = lazyNamed(() => import('./pages/ToolsCli'), 'ToolsCli');
-const AccountMapPrototype = lazyNamed(
-  () => import('./pages/account-map-prototype'),
-  'AccountMapPrototype'
-);
 const TrialChatGateHarness = lazyNamed(
   () => import('./pages/TrialChatGateHarness'),
   'TrialChatGateHarness'
@@ -317,10 +313,6 @@ export default function App() {
                         <Route
                           path="/__test/trial-chat-gate"
                           element={page(<TrialChatGateHarness />)}
-                        />
-                        <Route
-                          path="/prototype/account-map"
-                          element={page(<AccountMapPrototype />)}
                         />
                         <Route
                           path="/__test/error-boundary"

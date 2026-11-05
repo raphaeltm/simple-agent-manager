@@ -1,16 +1,15 @@
 /**
- * Unit tests for the AccountMap page component.
+ * Rendered tests for the Account Map page: real QueryClient, real model, the API mocked.
  */
-import { act,render, screen, waitFor } from '@testing-library/react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-// ---------------------------------------------------------------------------
-// Module mocks (must come before component import)
-// ---------------------------------------------------------------------------
-
 const mocks = vi.hoisted(() => ({
   getAccountMap: vi.fn(),
+  isMobile: false,
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -19,230 +18,214 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
 }));
 
 vi.mock('../../../src/hooks/useIsMobile', () => ({
-  useIsMobile: () => false,
+  useIsMobile: () => mocks.isMobile,
 }));
 
 vi.mock('../../../src/components/AuthProvider', () => ({
-  useAuth: () => ({
-    user: { id: 'user_123', email: 'dev@example.com', name: 'Dev User' },
-  }),
+  useAuth: () => ({ user: { id: 'user_123', email: 'dev@example.com', name: 'Dev User' } }),
 }));
 
-// Mock React Flow — it requires browser APIs not available in jsdom
-vi.mock('@xyflow/react', () => {
-  const actual = {
-    Position: { Top: 'top', Bottom: 'bottom', Left: 'left', Right: 'right' },
-    BackgroundVariant: { Dots: 'dots' },
-  };
-  return {
-    ...actual,
-    ReactFlow: ({ nodes, edges }: { nodes: any[]; edges: any[] }) => (
-      <div data-testid="react-flow">
-        <span data-testid="node-count">{nodes?.length ?? 0}</span>
-        <span data-testid="edge-count">{edges?.length ?? 0}</span>
-      </div>
-    ),
-    ReactFlowProvider: ({ children }: { children: React.ReactNode }) => <>{children}</>,
-    MiniMap: () => <div data-testid="minimap" />,
-    Controls: () => <div data-testid="controls" />,
-    Background: () => <div data-testid="background" />,
-    Handle: () => null,
-    getBezierPath: () => ['M0,0'],
-    useNodesState: (initial: any[]) => [initial, vi.fn(), vi.fn()],
-    useEdgesState: (initial: any[]) => [initial, vi.fn(), vi.fn()],
-  };
-});
-
-// ---------------------------------------------------------------------------
-// Import after mocks
-// ---------------------------------------------------------------------------
-
 import { AccountMap } from '../../../src/pages/AccountMap';
+import { accountMapFixture } from '../components/account-map/fixtures';
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+// jsdom has no ResizeObserver; the columns only need it to exist.
+globalThis.ResizeObserver ??= class {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+} as unknown as typeof ResizeObserver;
 
 function renderAccountMap() {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <MemoryRouter initialEntries={['/account-map']}>
-      <AccountMap />
-    </MemoryRouter>
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={['/account-map']}>
+        <AccountMap />
+      </MemoryRouter>
+    </QueryClientProvider>
   );
 }
 
-function makeAccountMapResponse(overrides: Partial<{
-  projects: any[];
-  nodes: any[];
-  workspaces: any[];
-  sessions: any[];
-  tasks: any[];
-  relationships: any[];
-}> = {}) {
-  return {
-    projects: overrides.projects ?? [],
-    nodes: overrides.nodes ?? [],
-    workspaces: overrides.workspaces ?? [],
-    sessions: overrides.sessions ?? [],
-    tasks: overrides.tasks ?? [],
-    relationships: overrides.relationships ?? [],
-  };
-}
-
-// ---------------------------------------------------------------------------
-// Tests
-// ---------------------------------------------------------------------------
+const pathBar = () => screen.getByRole('list', { name: 'How this connects' });
 
 describe('AccountMap page', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mocks.isMobile = false;
+    mocks.getAccountMap.mockResolvedValue(accountMapFixture());
   });
 
-  it('shows loading spinner initially', () => {
-    mocks.getAccountMap.mockReturnValue(new Promise(() => {})); // never resolves
+  it('shows a spinner before the first response', () => {
+    mocks.getAccountMap.mockReturnValue(new Promise(() => {}));
     renderAccountMap();
-    // Component should render without crashing during loading state
-    expect(document.querySelector('[class*="animate-spin"], [role="status"]')).toBeTruthy();
+    expect(screen.getByRole('status', { name: 'Loading' })).toBeInTheDocument();
   });
 
-  it('shows empty state when user has no entities', async () => {
-    mocks.getAccountMap.mockResolvedValue(makeAccountMapResponse());
+  it('asks for active work by default', async () => {
     renderAccountMap();
-
-    await waitFor(() => {
-      expect(screen.getByText('Your account map is empty')).toBeInTheDocument();
-    });
+    await screen.findByText('How it all connects');
+    expect(mocks.getAccountMap).toHaveBeenCalledWith({ activeOnly: true });
   });
 
-  it('renders React Flow canvas with entities', async () => {
-    mocks.getAccountMap.mockResolvedValue(
-      makeAccountMapResponse({
-        projects: [
-          { id: 'proj-1', name: 'My Project', repository: 'user/repo', status: 'active', lastActivityAt: null, activeSessionCount: 1 },
-        ],
-        nodes: [
-          { id: 'node-1', name: 'node-1', status: 'active', vmSize: 'cax11', vmLocation: 'nbg1', cloudProvider: 'hetzner', ipAddress: '1.2.3.4', healthStatus: 'healthy', lastHeartbeatAt: null, lastMetrics: null },
-        ],
-        workspaces: [
-          { id: 'ws-1', nodeId: 'node-1', projectId: 'proj-1', displayName: 'dev-ws', branch: 'main', status: 'running', vmSize: 'cax11', chatSessionId: null },
-        ],
-        relationships: [
-          { source: 'proj-1', target: 'ws-1', type: 'has_workspace', active: true },
-        ],
-      })
+  it('draws projects, chats and tasks, and machines in their own columns', async () => {
+    renderAccountMap();
+    const columns = await screen.findByTestId('account-map-columns');
+    const projects = columns.querySelector('[data-column="projects"]') as HTMLElement;
+    const work = columns.querySelector('[data-column="work"]') as HTMLElement;
+    const machines = columns.querySelector('[data-column="machines"]') as HTMLElement;
+    expect(within(projects).getByText('SAM')).toBeInTheDocument();
+    expect(within(work).getByText('Show wake progress')).toBeInTheDocument();
+    expect(within(work).getByText('Fix subtitle drift')).toBeInTheDocument();
+    expect(within(machines).getByText('sam-fsn1-01')).toBeInTheDocument();
+    expect(within(machines).getByText('Not responding')).toBeInTheDocument();
+    expect(within(machines).getByText('No machine')).toBeInTheDocument();
+    // The quiet project waits behind its toggle.
+    expect(within(projects).queryByText('Quiet project')).not.toBeInTheDocument();
+    await userEvent.click(within(projects).getByRole('button', { name: 'Show 1 quiet projects' }));
+    expect(within(projects).getByText('Quiet project')).toBeInTheDocument();
+  });
+
+  it('opens on the chat waiting for you and spells out its path with real links', async () => {
+    renderAccountMap();
+    await screen.findByTestId('account-map-columns');
+    expect(screen.getByRole('button', { name: /Show wake progress/ })).toHaveAttribute(
+      'aria-pressed',
+      'true'
     );
-    renderAccountMap();
-
-    await waitFor(() => {
-      expect(screen.getByTestId('react-flow')).toBeInTheDocument();
-    });
-
-    // Should show 3 nodes (project + node + workspace)
-    expect(screen.getByTestId('node-count')).toHaveTextContent('3');
-    expect(screen.getByTestId('edge-count')).toHaveTextContent('1');
-  });
-
-  it('shows error state with retry button on API failure', async () => {
-    mocks.getAccountMap.mockRejectedValue(new Error('Network error'));
-    renderAccountMap();
-
-    await waitFor(() => {
-      expect(screen.getByText('Network error')).toBeInTheDocument();
-    });
-
-    expect(screen.getByText('Retry')).toBeInTheDocument();
-  });
-
-  it('renders filter chips in toolbar', async () => {
-    mocks.getAccountMap.mockResolvedValue(
-      makeAccountMapResponse({
-        projects: [
-          { id: 'proj-1', name: 'My Project', repository: null, status: 'active', lastActivityAt: null, activeSessionCount: 0 },
-        ],
-      })
+    const bar = pathBar();
+    expect(within(bar).getByRole('link', { name: 'SAM' })).toHaveAttribute(
+      'href',
+      '/projects/p-sam'
     );
-    renderAccountMap();
-
-    await waitFor(() => {
-      expect(screen.getByTestId('react-flow')).toBeInTheDocument();
-    });
-
-    // Toolbar should show filter chips
-    expect(screen.getByText('Projects')).toBeInTheDocument();
-    expect(screen.getByText('Nodes')).toBeInTheDocument();
-    expect(screen.getByText('Workspaces')).toBeInTheDocument();
-    expect(screen.getByText('Sessions')).toBeInTheDocument();
-    expect(screen.getByText('Tasks')).toBeInTheDocument();
-  });
-
-  it('renders search input and reorganize button', async () => {
-    mocks.getAccountMap.mockResolvedValue(
-      makeAccountMapResponse({
-        projects: [
-          { id: 'proj-1', name: 'My Project', repository: null, status: 'active', lastActivityAt: null, activeSessionCount: 0 },
-        ],
-      })
+    expect(within(bar).getByRole('link', { name: 'Wake progress you can see' })).toHaveAttribute(
+      'href',
+      '/projects/p-sam/ideas/i-1'
     );
-    renderAccountMap();
-
-    await waitFor(() => {
-      expect(screen.getByTestId('react-flow')).toBeInTheDocument();
-    });
-
-    expect(screen.getByPlaceholderText('Search entities...')).toBeInTheDocument();
-    expect(screen.getByText('Reorganize')).toBeInTheDocument();
-  });
-
-  it('renders Active/All toggle button', async () => {
-    mocks.getAccountMap.mockResolvedValue(
-      makeAccountMapResponse({
-        projects: [
-          { id: 'proj-1', name: 'My Project', repository: null, status: 'active', lastActivityAt: null, activeSessionCount: 0 },
-        ],
-      })
+    expect(
+      within(bar).getByRole('link', { name: /Show wake progress: Which branch should I use\?/ })
+    ).toHaveAttribute('href', '/projects/p-sam/chat/s-1');
+    expect(within(bar).getByText('sam/wake-progress')).toBeInTheDocument();
+    expect(within(bar).getByRole('link', { name: /sam-fsn1-01/ })).toHaveAttribute(
+      'href',
+      '/nodes/n-1'
     );
-    renderAccountMap();
-
-    await waitFor(() => {
-      expect(screen.getByTestId('react-flow')).toBeInTheDocument();
-    });
-
-    // Should show "Active" text on the toggle button (desktop mode, activeOnly=true by default)
-    expect(screen.getByText('Active')).toBeInTheDocument();
+    const pr = within(bar).getByRole('link', { name: '#12' });
+    expect(pr).toHaveAttribute('href', 'https://github.com/o/r/pull/12');
+    expect(pr).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
-  it('calls getAccountMap with activeOnly by default', async () => {
-    mocks.getAccountMap.mockResolvedValue(makeAccountMapResponse());
+  it('picking another item moves the selection and its path; picking it again clears it', async () => {
+    const user = userEvent.setup();
     renderAccountMap();
-
-    await waitFor(() => {
-      expect(mocks.getAccountMap).toHaveBeenCalledWith({ activeOnly: true });
-    });
-  });
-
-  it('toggles to show all when Active button is clicked', async () => {
-    mocks.getAccountMap.mockResolvedValue(
-      makeAccountMapResponse({
-        projects: [
-          { id: 'proj-1', name: 'My Project', repository: null, status: 'active', lastActivityAt: null, activeSessionCount: 0 },
-        ],
-      })
+    await screen.findByTestId('account-map-columns');
+    const task = screen.getByRole('button', { name: /Fix subtitle drift/ });
+    await user.click(task);
+    expect(task).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /Show wake progress/ })).toHaveAttribute(
+      'aria-pressed',
+      'false'
     );
+    // A task without a chat links to the task route.
+    expect(within(pathBar()).getByRole('link', { name: 'Fix subtitle drift' })).toHaveAttribute(
+      'href',
+      '/projects/p-ttv/tasks/t-2'
+    );
+    await user.click(task);
+    expect(task).toHaveAttribute('aria-pressed', 'false');
+    expect(
+      screen.getByText('Pick a chat, project or machine to see how it connects.')
+    ).toBeInTheDocument();
+  });
+
+  it('picking a machine fades what does not run on it', async () => {
+    const user = userEvent.setup();
     renderAccountMap();
+    await screen.findByTestId('account-map-columns');
+    await user.click(screen.getByRole('button', { name: /sam-fsn1-01/ }));
+    expect(screen.getByText(/sam-fsn1-01 runs 2 workspaces/)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Fix subtitle drift/ }).className).not.toContain(
+      'opacity-40'
+    );
+    expect(screen.getByRole('button', { name: /Lobby drops players/ }).className).toContain(
+      'opacity-40'
+    );
+  });
 
-    await waitFor(() => {
-      expect(screen.getByTestId('react-flow')).toBeInTheDocument();
-    });
+  it('filters to what needs you, and search narrows further', async () => {
+    const user = userEvent.setup();
+    renderAccountMap();
+    await screen.findByTestId('account-map-columns');
+    const show = screen.getByRole('group', { name: 'Show' });
+    await user.click(within(show).getByRole('button', { name: 'Needs you, 2' }));
+    const work = screen
+      .getByTestId('account-map-columns')
+      .querySelector('[data-column="work"]') as HTMLElement;
+    expect(
+      within(work)
+        .getAllByRole('button')
+        .map((b) => b.textContent)
+    ).toEqual([
+      expect.stringContaining('Show wake progress'),
+      expect.stringContaining('Retire stale nodes'),
+    ]);
+    await user.click(within(show).getByRole('button', { name: 'Everything, 6' }));
+    await user.type(screen.getByRole('textbox', { name: 'Search the map' }), 'subtitle');
+    expect(within(work).getAllByRole('button')).toHaveLength(1);
+    expect(within(work).getByText('Fix subtitle drift')).toBeInTheDocument();
+  });
 
-    // Click the Active/All toggle
-    const toggleBtn = screen.getByText('Active').closest('button')!;
-    await act(async () => {
-      toggleBtn.click();
-    });
+  it('"Show finished" asks for everything and keeps the current map on screen meanwhile', async () => {
+    const user = userEvent.setup();
+    renderAccountMap();
+    await screen.findByTestId('account-map-columns');
+    let release: (value: unknown) => void = () => {};
+    mocks.getAccountMap.mockReturnValueOnce(new Promise((resolve) => (release = resolve)));
+    await user.click(screen.getByRole('button', { name: 'Show finished' }));
+    expect(mocks.getAccountMap).toHaveBeenLastCalledWith({ activeOnly: false });
+    // Mid-fetch: the previous map is still there.
+    expect(screen.getByText('Show wake progress')).toBeInTheDocument();
+    release(accountMapFixture({ sessions: [], tasks: [], workspaces: [], nodes: [] }));
+    await screen.findByText('Nothing to connect yet');
+    expect(screen.getByRole('button', { name: 'Hide finished' })).toHaveAttribute(
+      'aria-pressed',
+      'true'
+    );
+  });
 
-    // Should re-fetch with activeOnly=false
-    await waitFor(() => {
-      expect(mocks.getAccountMap).toHaveBeenCalledWith({ activeOnly: false });
+  it('shows the truncation notice when the server left things out', async () => {
+    const data = accountMapFixture();
+    mocks.getAccountMap.mockResolvedValue({
+      ...data,
+      truncation: { ...data.truncation, ideas: true, sessions: true },
     });
+    renderAccountMap();
+    expect(
+      await screen.findByText(
+        'Only the 100 newest ideas were checked for chat links. Some chats were omitted. Open a project or idea for its full history.'
+      )
+    ).toBeInTheDocument();
+  });
+
+  it('shows the error with a working retry', async () => {
+    mocks.getAccountMap.mockRejectedValueOnce(new Error('Network error'));
+    renderAccountMap();
+    expect(await screen.findByText('Network error')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Retry' }));
+    expect(await screen.findByTestId('account-map-columns')).toBeInTheDocument();
+  });
+
+  it("on phones, groups by project and opens the picked chat's path inline", async () => {
+    mocks.isMobile = true;
+    const user = userEvent.setup();
+    renderAccountMap();
+    const sam = await screen.findByRole('region', { name: 'SAM' });
+    expect(screen.queryByTestId('account-map-columns')).not.toBeInTheDocument();
+    // The waiting chat starts open; others show where they run.
+    expect(within(sam).getByRole('list', { name: 'How this connects' })).toBeInTheDocument();
+    expect(within(sam).getByText('on sam-hel1-02 · not responding')).toBeInTheDocument();
+    const ttv = screen.getByRole('region', { name: 'TTV' });
+    await user.click(within(ttv).getByRole('button', { name: /Pick a voice/ }));
+    expect(within(ttv).getByRole('list', { name: 'How this connects' })).toBeInTheDocument();
+    expect(within(sam).queryByRole('list', { name: 'How this connects' })).not.toBeInTheDocument();
   });
 });

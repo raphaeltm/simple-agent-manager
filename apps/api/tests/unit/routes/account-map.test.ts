@@ -254,7 +254,7 @@ describe('GET /account-map', () => {
     expect(res.status).toBe(200);
 
     // Cache key should include :active suffix
-    expect(mockEnv.KV.get).toHaveBeenCalledWith('account-map:v3:user-123:active', 'json');
+    expect(mockEnv.KV.get).toHaveBeenCalledWith('account-map:v4:user-123:active', 'json');
     expect(agentActivityService.listAgentActivityTasks).toHaveBeenCalledWith(
       mockEnv,
       expect.objectContaining({ activeOnly: true, userId: 'user-123' })
@@ -271,7 +271,7 @@ describe('GET /account-map', () => {
     expect(res.status).toBe(200);
 
     // Cache key should include :all suffix
-    expect(mockEnv.KV.get).toHaveBeenCalledWith('account-map:v3:user-123:all', 'json');
+    expect(mockEnv.KV.get).toHaveBeenCalledWith('account-map:v4:user-123:all', 'json');
     expect(agentActivityService.listAgentActivityTasks).toHaveBeenCalledWith(
       mockEnv,
       expect.objectContaining({ activeOnly: false, userId: 'user-123' })
@@ -391,5 +391,47 @@ describe('GET /account-map', () => {
     expect(body.sessions).toEqual([]);
     expect(body.truncation.incomplete).toBe(true);
     expect(mockEnv.KV.put).not.toHaveBeenCalled();
+  });
+  it("passes each chat's open attention marker and only https task PR links", async () => {
+    const tasks = [
+      agentTaskFixture({ id: 'task-pr', outputPrUrl: 'https://github.com/o/r/pull/7' }),
+      agentTaskFixture({ id: 'task-js', workspaceId: null, outputPrUrl: 'javascript:alert(1)' }),
+      agentTaskFixture({ id: 'task-none', workspaceId: null, outputPrUrl: null }),
+    ];
+    buildMockDB([projectFixture()], [], [], tasks);
+    (projectDataService.listSessions as any).mockResolvedValue({
+      sessions: [
+        sessionFixture({
+          id: 'sess-waiting',
+          attention: {
+            markerId: 'm-1',
+            kind: 'needs_input',
+            createdAt: 1_700_000_000_000,
+            expiresAt: null,
+            reason: 'Which branch should I use?',
+            options: ['main', 'dev'],
+          },
+        }),
+        sessionFixture({ id: 'sess-malformed', attention: { kind: 42 } }),
+        sessionFixture({ id: 'sess-quiet', attention: null }),
+      ],
+      total: 3,
+    });
+
+    const res = await buildApp().request('/account-map', {}, mockEnv);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as any;
+    const byId = new Map(body.sessions.map((s: any) => [s.id, s]));
+    expect((byId.get('sess-waiting') as any).attention).toEqual({
+      kind: 'needs_input',
+      reason: 'Which branch should I use?',
+      createdAt: 1_700_000_000_000,
+    });
+    expect((byId.get('sess-malformed') as any).attention).toBeNull();
+    expect((byId.get('sess-quiet') as any).attention).toBeNull();
+    const prById = new Map(body.tasks.map((t: any) => [t.id, t.outputPrUrl]));
+    expect(prById.get('task-pr')).toBe('https://github.com/o/r/pull/7');
+    expect(prById.get('task-js')).toBeNull();
+    expect(prById.get('task-none')).toBeNull();
   });
 });
