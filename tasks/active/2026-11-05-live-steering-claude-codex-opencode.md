@@ -1,10 +1,11 @@
 # Live steering across Claude, Codex and OpenCode
 
-## HARD CONSTRAINT (from Raphaël's brief, task 01M6MHNBM96JSAMJ0GNTPM2AYP)
+## Scope (task 01M6MHNBM96JSAMJ0GNTPM2AYP)
 
-**DRAFT PR ONLY.** Do not mark ready, do not merge, do not deploy to production. Stop at a
-reviewable draft PR with implementation, validation evidence and honest remaining limitations.
-Staging validation is permitted under normal coordination/cost/cleanup rules.
+Originally draft-only. Raphaël then changed it (2026-11-05): "Switch to steer. Turn it on. Test it.
+Make sure all three can steer on vms. If proven, deploy to prod." So: make Steer now the default,
+enable what VM Codex needs on staging (production already had it), prove all three agents on VMs
+on staging, then the normal merge gates and production deploy monitoring.
 
 - SAM idea: 01M2EPH9WGDYFDQBZCP9QY1FDE (section "2026-11-05 implementation proposal")
 - Related: idea 01M6MFTF86JXR0NA90BH0YVZQG (prompt retry noise), parent research session
@@ -177,8 +178,26 @@ Real agents in project `hono`, steered from the composer mid-turn (3× `sleep 25
 - Live check after redeploy: steer chip clear of the phone toggle (chip right 251 px, toggle left 259 px).
 - Cleanup: 3 test VMs and 2 test profiles deleted.
 
+### Staging evidence on VMs, Steer now default (2026-11-05, deploy runs 42000737654 + 42010024341)
+
+The composer opened on **Steer now** (`aria-pressed=true`) in every run, and the test sent with that
+default without clicking it. Staging's GitHub Environment now has `ACP_INTERACTIONS_ENABLED`,
+`ACP_INTERACTION_FORMS_ENABLED` and `ACP_INTERACTION_URLS_ENABLED` = true, matching production
+(confirmed on the deployed `sam-api-prod` Worker), so VM Codex sessions select the C2 runtime.
+- Codex C2.3 (VM): Added to current turn (3 s), `outcome=steered`; ran `echo STEERED-OK` after step2,
+  before step3; summary `step1, step2, STEERED-OK, step3`; one turn. Session 8be4db68.
+- Claude Code (VM): Added to current turn (4 s), `outcome=steered`; "Got it — I'll run step2, then
+  `echo STEERED-OK`, then step3"; same order and summary; one turn. Session d1c021c8. Claude refuses
+  foreground `sleep` (it backgrounds it and ends the turn), so this run used a 20-second busy loop.
+- OpenCode sam-s1 (VM, full devcontainer): Added to current turn (3 s), `outcome=steered`; ran
+  `echo STEERED-OK` after step2, before step3; same summary; one turn. Session 2723d081.
+- Shared staging: two other branches deployed over the first window, so those runs were discarded
+  and repeated on a redeploy. A later foreign deploy (run 42015513919) had not reached its Worker
+  upload when the OpenCode steer completed.
+- Cleanup: test nodes 01M6NJYGG…, 01M6NMSV… and workspace 01M6NJYBG… deleted (API 200).
+
 ### Known limitations (for PR)
-- Codex chats on VM hosts do not steer today: VMs read the C2 selector only from ACP interaction config (`ACP_INTERACTIONS_ENABLED` + forms/URLs, default off); the profile env selector is read only on Instant hosts.
+- Codex on VM hosts steers only where ACP interactions are enabled (`ACP_INTERACTIONS_ENABLED` + forms/URLs), which selects C2. Production and staging enable them; the code default is off, so self-hosters who leave them off get the visible queued fallback. The profile env selector is read only on Instant hosts.
 - Stock npm codex-acp 2.1.1 sessions are not steerable (visible queued fallback). Codex steering needs
   SAM's C2 runtime (`SAM_CODEX_C2_CANDIDATE=1` or Codex forms/URL interactions enabled).
 - CI and workspace OpenCode builds are not byte-identical across environments; the CI build is published.
@@ -186,7 +205,7 @@ Real agents in project `hono`, steered from the composer mid-turn (3× `sleep 25
 - "Added to current turn" means the runtime accepted it, not that the model acted on it.
 - A checkpoint/cancel during an in-flight steer RPC may drop the steer (reported ambiguous / fallback).
 - A steer that expires by TTL before delivery is not labelled on the transcript (TTL is 24h; steers claim immediately).
-- UI default is "Queue next" pending product decision.
+- UI default is "Steer now" (Raphaël, 2026-11-05); it falls back to the next message when the agent can't take it.
 
 ### Artifacts
 - Codex runtime release: https://github.com/raphaeltm/simple-agent-manager/releases/tag/acp-codex-runtime-c2.3-codemode2
