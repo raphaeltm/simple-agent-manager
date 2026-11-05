@@ -32,6 +32,7 @@ export function ZenPeekRail({
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(false);
+  const pointerInside = useRef(false);
   const buttonRef = useRef<HTMLButtonElement>(null);
   const isTop = edge === 'nav';
   const panelWidth = edge === 'nav' ? 220 : 288;
@@ -41,20 +42,29 @@ export function ZenPeekRail({
       <div
         role="presentation"
         className={`fixed left-0 z-40 h-1/2 w-3 ${isTop ? 'top-0' : 'bottom-0'}`}
-        onMouseEnter={() => setOpen(true)}
+        onMouseEnter={() => {
+          pointerInside.current = true;
+          setOpen(true);
+        }}
         onMouseLeave={(e) => {
+          pointerInside.current = false;
           // Keep the panel open while focus lives inside it (e.g. tabbing
           // through sidebar links) so the pointer leaving doesn't yank it shut.
           if (!e.currentTarget.contains(document.activeElement)) setOpen(false);
         }}
         onFocusCapture={() => setOpen(true)}
         onBlurCapture={(e) => {
-          if (!e.currentTarget.contains(e.relatedTarget as Node)) setOpen(false);
+          // A carousel can make its focused outgoing panel inert. Wait until
+          // focus has moved to the incoming panel before deciding to dismiss.
+          const wrapper = e.currentTarget;
+          queueMicrotask(() => {
+            if (!pointerInside.current && !wrapper.contains(document.activeElement)) setOpen(false);
+          });
         }}
         onKeyDown={(e) => {
           if (e.key === 'Escape' && open) {
-            setOpen(false);
             buttonRef.current?.focus();
+            setOpen(false);
           }
         }}
       >
@@ -80,7 +90,7 @@ export function ZenPeekRail({
           <aside
             // The peek is the screen's one overlay (SAM Glass): a pane with the live blur,
             // inset from the edge like every other pane.
-            className={`absolute left-3 ${isTop ? 'top-2' : 'bottom-2'} ${paneClassName('overlay')} flex flex-col overflow-hidden`}
+            className={`absolute left-3 ${isTop ? 'top-2' : 'bottom-2'} ${paneClassName('overlay')} flex flex-col overflow-x-hidden overflow-y-auto`}
             style={{ width: panelWidth, height: 'calc(200% - 1rem)' }}
           >
             {children}
