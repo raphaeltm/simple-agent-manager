@@ -108,3 +108,9 @@ Probed the real `agy-acp-server` 1.4.5 Linux x86_64 release locally (`.tmp/agy/p
 - pingdotgg/t3code#31158, t3code `apps/server/src/provider/acp/AntigravityAcpSupport.ts`
 - agentclientprotocol/registry `antigravity-acp/agent.json`
 - `tasks/archive/2026-05-19-gemini-cli-agent-integration.md`
+
+## Staging queue (2026-11-05 18:4x UTC)
+
+- I am next after live-steering (task 01M6MHNBM96JSAMJ0GNTPM2AYP); wait for its release message.
+- After my staging run, send "staging released" to the account-map task 01M6P9ZR711CNEDH6TVBG64D06
+  (send_durable_message). It is queued behind me.
