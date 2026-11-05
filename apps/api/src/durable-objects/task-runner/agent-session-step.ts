@@ -233,7 +233,8 @@ export async function handleAgentSession(
     }
     // Record the restore on the source's receipt now, before the successor can capture and
     // move the snapshot row. Deletion is queued only after the commit below; the eviction
-    // fence accepts this runner's own restore (`evictionRecoveryRestoredByRunner`).
+    // fence accepts this runner's own restore once the source is deleted
+    // (`evictionRecoveryRestoredByRunner`).
     const { releaseRestoredSourceWorkspaces } =
       await import('../../services/workspace-preservation-receipt');
     await releaseRestoredSourceWorkspaces(rc.env, {

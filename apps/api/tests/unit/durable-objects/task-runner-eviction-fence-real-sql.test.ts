@@ -84,4 +84,26 @@ describe('eviction fence after this runner restored the snapshot', () => {
       'Eviction generation changed before replacement allocation'
     );
   });
+
+  // An explicit Restart moves the source to a new generation while the handoff is held. The
+  // wake must lose to it even after its own restore, or the conversation runs twice.
+  it('still refuses a restarted source after this runner restored the snapshot', async () => {
+    restore('target');
+    sqlite.exec(
+      "UPDATE workspaces SET status = 'running', eviction_generation = 'generation-2' WHERE id = 'source'"
+    );
+    await expect(check()).rejects.toThrow(
+      'Eviction generation changed before replacement allocation'
+    );
+  });
+
+  it('still refuses a deleted source of a different generation', async () => {
+    restore('target');
+    sqlite.exec(
+      "UPDATE workspaces SET status = 'deleted', eviction_generation = 'generation-2' WHERE id = 'source'"
+    );
+    await expect(check()).rejects.toThrow(
+      'Eviction generation changed before replacement allocation'
+    );
+  });
 });

@@ -33,22 +33,33 @@ export async function evictionRecoveryFenceMatches(
 
 /**
  * The fence guards replacement allocation. Once this exact wake restored the snapshot into
- * its own workspace (`completeSessionSnapshotRecovery`), the replacement exists and the
- * source may already be released for deletion (`releaseRestoredSourceWorkspaces`), so a
- * source that is no longer `evicted` must not revoke the wake that replaced it.
+ * its own workspace (`completeSessionSnapshotRecovery`), the source of that exact generation
+ * may already be deleted (its receipt is stamped at restore, `releaseRestoredSourceWorkspaces`),
+ * and that release must not revoke the wake that replaced it. Only deletion is tolerated: an
+ * explicit Restart moves the source to a new generation, and the wake must still lose to it.
  */
 export async function evictionRecoveryRestoredByRunner(
   env: Env,
-  runner: { taskId: string; workspaceId: string; recoveryAttemptId: string | null }
+  runner: { taskId: string; workspaceId: string; recoveryAttemptId: string | null },
+  fence: NonNullable<SessionRecoveryOptions['evictionFence']>
 ): Promise<boolean> {
   const row = await env.DATABASE.prepare(
     `SELECT 1 AS restored
-       FROM session_snapshots
-      WHERE recovery_task_id = ? AND recovery_workspace_id = ? AND recovery_status = 'restored'
-        AND recovery_attempt_id IS ?
+       FROM session_snapshots s
+       JOIN workspaces source ON source.id = ? AND source.node_id = ?
+        AND source.eviction_generation IS ? AND source.status = 'deleted'
+      WHERE s.recovery_task_id = ? AND s.recovery_workspace_id = ? AND s.recovery_status = 'restored'
+        AND s.recovery_attempt_id IS ?
       LIMIT 1`
   )
-    .bind(runner.taskId, runner.workspaceId, runner.recoveryAttemptId)
+    .bind(
+      fence.workspaceId,
+      fence.nodeId,
+      fence.generation,
+      runner.taskId,
+      runner.workspaceId,
+      runner.recoveryAttemptId
+    )
     .first<{ restored: number }>();
   return row?.restored === 1;
 }

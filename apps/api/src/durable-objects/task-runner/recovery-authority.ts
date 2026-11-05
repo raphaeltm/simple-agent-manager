@@ -132,11 +132,15 @@ export async function assertRecoveryAuthority(
     !(await evictionRecoveryFenceMatches(env, evictionFence)) &&
     !(
       restoredWorkspaceId &&
-      (await evictionRecoveryRestoredByRunner(env, {
-        taskId: input.taskId,
-        workspaceId: restoredWorkspaceId,
-        recoveryAttemptId: input.config.recoveryAttemptId ?? null,
-      }))
+      (await evictionRecoveryRestoredByRunner(
+        env,
+        {
+          taskId: input.taskId,
+          workspaceId: restoredWorkspaceId,
+          recoveryAttemptId: input.config.recoveryAttemptId ?? null,
+        },
+        evictionFence
+      ))
     )
   ) {
     throw Object.assign(new Error('Eviction generation changed before replacement allocation'), {

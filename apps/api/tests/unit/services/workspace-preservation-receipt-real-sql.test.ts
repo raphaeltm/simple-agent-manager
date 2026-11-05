@@ -478,18 +478,24 @@ describe('evicted source cleanup through real writers and real SQL', () => {
         VALUES ('target', 'user', 'project', 'target-node', 'chat', 'running');
       UPDATE session_snapshots SET recovery_status = 'waking', recovery_task_id = 'wake-task';
     `);
-    expect(await evictionRecoveryRestoredByRunner(env, runner)).toBe(false);
+    expect(await evictionRecoveryRestoredByRunner(env, runner, fence)).toBe(false);
     expect(await completeSessionSnapshotRecovery(db(), 'chat', 'wake-task', 'target')).toBe(true);
     sqlite.exec("UPDATE workspaces SET status = 'deleted' WHERE id = 'workspace'");
     expect(await evictionRecoveryFenceMatches(env, fence)).toBe(false);
-    expect(await evictionRecoveryRestoredByRunner(env, runner)).toBe(true);
+    expect(await evictionRecoveryRestoredByRunner(env, runner, fence)).toBe(true);
     // Another task, another workspace, or another wake attempt is not this restore.
-    expect(await evictionRecoveryRestoredByRunner(env, { ...runner, taskId: 'other' })).toBe(false);
+    expect(await evictionRecoveryRestoredByRunner(env, { ...runner, taskId: 'other' }, fence)).toBe(
+      false
+    );
     expect(
-      await evictionRecoveryRestoredByRunner(env, { ...runner, workspaceId: 'workspace' })
+      await evictionRecoveryRestoredByRunner(env, { ...runner, workspaceId: 'workspace' }, fence)
     ).toBe(false);
     expect(
-      await evictionRecoveryRestoredByRunner(env, { ...runner, recoveryAttemptId: 'attempt-2' })
+      await evictionRecoveryRestoredByRunner(
+        env,
+        { ...runner, recoveryAttemptId: 'attempt-2' },
+        fence
+      )
     ).toBe(false);
   });
 
