@@ -66,36 +66,28 @@ function PermissionStack(props: {
   const { interactions, projectId, sessionId, canAnswer, onRefresh } = props;
   return (
     <div className="min-w-0" data-testid="acp-permission-stack">
-      {interactions.map((interaction) =>
-        interaction.kind === 'url' ? (
-          <AcpUrlCard
-            key={interaction.interactionId}
-            interaction={interaction}
-            projectId={projectId}
-            sessionId={sessionId}
-            canAnswer={canAnswer}
-            onRefresh={onRefresh}
-          />
-        ) : interaction.kind === 'form' ? (
-          <AcpFormCard
-            key={interaction.interactionId}
-            interaction={interaction}
-            projectId={projectId}
-            sessionId={sessionId}
-            canAnswer={canAnswer}
-            onRefresh={onRefresh}
-          />
-        ) : (
-          <AcpPermissionCard
-            key={interaction.interactionId}
-            interaction={interaction}
-            projectId={projectId}
-            sessionId={sessionId}
-            canAnswer={canAnswer}
-            onRefresh={onRefresh}
-          />
-        )
-      )}
+      {interactions.map((interaction) => interaction.kind === 'url' ? <AcpUrlCard
+          key={interaction.interactionId}
+          interaction={interaction}
+          projectId={projectId}
+          sessionId={sessionId}
+          canAnswer={canAnswer}
+          onRefresh={onRefresh}
+        /> : interaction.kind === 'form' ? <AcpFormCard
+          key={interaction.interactionId}
+          interaction={interaction}
+          projectId={projectId}
+          sessionId={sessionId}
+          canAnswer={canAnswer}
+          onRefresh={onRefresh}
+        /> : <AcpPermissionCard
+          key={interaction.interactionId}
+          interaction={interaction}
+          projectId={projectId}
+          sessionId={sessionId}
+          canAnswer={canAnswer}
+          onRefresh={onRefresh}
+        />)}
     </div>
   );
 }
