@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { D1_MAX_BOUND_PARAMETERS } from '../../../src/lib/d1-limits';
 import { AppError } from '../../../src/middleware/error';
 import { nodesRoutes } from '../../../src/routes/nodes';
 import {
@@ -21,7 +22,7 @@ import {
 import {
   createAllSchemaTables,
   createDeclaredIndexes,
-  createSqliteD1,
+  createSqliteD1WithBindLimit,
 } from '../../helpers/sqlite-d1';
 
 const auth = vi.hoisted(() => ({ userId: 'owner-1' }));
@@ -111,7 +112,8 @@ function fixture() {
   databases.push(sqlite);
   createAllSchemaTables(sqlite, schema);
   const env = {
-    DATABASE: createSqliteD1(sqlite),
+    // Enforces D1's real bind limit, so an oversized chunk statement fails here.
+    DATABASE: createSqliteD1WithBindLimit(sqlite, D1_MAX_BOUND_PARAMETERS),
     PROJECT_DATA_ARCHIVE_R2: makeR2(),
     BASE_DOMAIN: 'example.test',
   } as unknown as Env;
