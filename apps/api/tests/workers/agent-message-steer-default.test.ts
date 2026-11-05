@@ -23,7 +23,14 @@ import {
   type WakeFixture,
   withQuietAlarms,
 } from './helpers/event-wake-harness';
-import { accepted, capabilities, deliveryPass, snapshot } from './helpers/steer-wake-harness';
+import {
+  accepted,
+  capabilities,
+  deliveryPass,
+  expectSteeredOnce,
+  mockSteered,
+  snapshot,
+} from './helpers/steer-wake-harness';
 
 type ManagedRow = {
   id: string;
@@ -97,31 +104,10 @@ describe('agent-message notices steer by default', () => {
           delivery_intent: 'steer',
           message_class: 'deliver',
         });
-        const steer = vi
-          .spyOn(DefaultVmPromptDeliveryAdapter.prototype, 'steer')
-          .mockImplementation(async (input) => {
-            expect(input.beforeSubmit?.(capabilities)).toBe(true);
-            expect(input.claim.message.content).toMatch(/^SAM notice \(system-generated/);
-            return {
-              kind: 'steered',
-              promptEpoch: 1,
-              runtimeIdentity: 'runtime',
-              capabilities,
-              receipt: null,
-            };
-          });
-        const submit = vi.spyOn(DefaultVmPromptDeliveryAdapter.prototype, 'submit');
-
-        await deliveryPass(f);
-
-        expect(steer).toHaveBeenCalledTimes(1);
-        expect(steer.mock.calls[0]![0].claim.message.id).toBe(batchId);
-        expect(submit).not.toHaveBeenCalled();
-        expect(await snapshot(f, batchId)).toMatchObject({
-          inbox: { delivery_intent: 'steer', steer_outcome: 'steered' },
-          batch: { state: 'delivered' },
-          attempts: ['accepted'],
-        });
+        const steer = mockSteered((input) =>
+          expect(input.claim.message.content).toMatch(/^SAM notice \(system-generated/)
+        );
+        await expectSteeredOnce(f, batchId, steer);
       });
     });
   });

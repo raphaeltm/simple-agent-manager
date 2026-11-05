@@ -16,7 +16,14 @@ import {
   withAgentMessageChannels,
 } from './helpers/agent-message-channels';
 import { materialize, type WakeFixture, withQuietAlarms } from './helpers/event-wake-harness';
-import { accepted, capabilities, deliveryPass, snapshot } from './helpers/steer-wake-harness';
+import {
+  accepted,
+  capabilities,
+  deliveryPass,
+  expectSteeredOnce,
+  mockSteered,
+  snapshot,
+} from './helpers/steer-wake-harness';
 
 /**
  * Subscribe agent A's chat through the MCP tool, admit one event, materialize. Omitting
@@ -74,30 +81,7 @@ describe('runtime_steer event wakes through the materializer and delivery alarm'
           delivery_intent: 'steer',
           message_class: 'deliver',
         });
-        const steer = vi
-          .spyOn(DefaultVmPromptDeliveryAdapter.prototype, 'steer')
-          .mockImplementation(async (input) => {
-            expect(input.beforeSubmit?.(capabilities)).toBe(true);
-            return {
-              kind: 'steered',
-              promptEpoch: 1,
-              runtimeIdentity: 'runtime',
-              capabilities,
-              receipt: null,
-            };
-          });
-        const submit = vi.spyOn(DefaultVmPromptDeliveryAdapter.prototype, 'submit');
-
-        await deliveryPass(f);
-
-        expect(steer).toHaveBeenCalledTimes(1);
-        expect(steer.mock.calls[0]![0].claim.message.id).toBe(batchId);
-        expect(submit).not.toHaveBeenCalled();
-        expect(await snapshot(f, batchId)).toMatchObject({
-          inbox: { delivery_intent: 'steer', steer_outcome: 'steered' },
-          batch: { state: 'delivered' },
-          attempts: ['accepted'],
-        });
+        await expectSteeredOnce(f, batchId, mockSteered());
       });
     });
   });
@@ -154,28 +138,7 @@ describe('runtime_steer event wakes through the materializer and delivery alarm'
       const f = await twoAgentProject();
       await withQuietAlarms(f, async () => {
         const batchId = await steerWakeBatch(f, { expected: 'runtime_steer' });
-        const steer = vi
-          .spyOn(DefaultVmPromptDeliveryAdapter.prototype, 'steer')
-          .mockImplementation(async (input) => {
-            expect(input.beforeSubmit?.(capabilities)).toBe(true);
-            return {
-              kind: 'steered',
-              promptEpoch: 1,
-              runtimeIdentity: 'runtime',
-              capabilities,
-              receipt: null,
-            };
-          });
-        const submit = vi.spyOn(DefaultVmPromptDeliveryAdapter.prototype, 'submit');
-
-        await deliveryPass(f);
-
-        expect(steer).toHaveBeenCalledTimes(1);
-        expect(submit).not.toHaveBeenCalled();
-        expect(await snapshot(f, batchId)).toMatchObject({
-          inbox: { delivery_intent: 'steer', steer_outcome: 'steered' },
-          batch: { state: 'delivered' },
-        });
+        await expectSteeredOnce(f, batchId, mockSteered());
       });
     });
   });

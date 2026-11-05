@@ -5,7 +5,7 @@
  */
 import type { VmPromptDeliveryCapabilities } from '@simple-agent-manager/shared';
 import { runInDurableObject } from 'cloudflare:test';
-import { expect } from 'vitest';
+import { expect, vi } from 'vitest';
 
 import {
   type DurabilityFoundationHooks,
@@ -15,7 +15,7 @@ import {
   nudgePromptDeliveriesForTarget,
   type PromptDeliveryResult,
 } from '../../../src/durable-objects/project-data/prompt-delivery';
-import type { DefaultVmPromptDeliveryAdapter } from '../../../src/services/vm-prompt-delivery-adapter';
+import { DefaultVmPromptDeliveryAdapter } from '../../../src/services/vm-prompt-delivery-adapter';
 import { versionedPromptCapabilities } from '../../helpers/vm-prompt-delivery-fixtures';
 import { testEnv } from './agent-message-channels';
 import type { WakeFixture } from './event-wake-harness';
@@ -90,4 +90,43 @@ export function accepted(input: Parameters<DefaultVmPromptDeliveryAdapter['submi
     capabilities,
     receipt: null,
   } satisfies PromptDeliveryResult;
+}
+
+type SteerInput = Parameters<DefaultVmPromptDeliveryAdapter['steer']>[0];
+
+/** Stub the VM so the running turn takes every steer; `check` inspects each steer request. */
+export function mockSteered(check?: (input: SteerInput) => void) {
+  return vi
+    .spyOn(DefaultVmPromptDeliveryAdapter.prototype, 'steer')
+    .mockImplementation(async (input) => {
+      expect(input.beforeSubmit?.(capabilities)).toBe(true);
+      check?.(input);
+      return {
+        kind: 'steered',
+        promptEpoch: 1,
+        runtimeIdentity: 'runtime',
+        capabilities,
+        receipt: null,
+      };
+    });
+}
+
+/** Run one delivery pass and assert the batch was steered into the running turn exactly once. */
+export async function expectSteeredOnce(
+  f: WakeFixture,
+  batchId: string,
+  steer: ReturnType<typeof mockSteered>
+) {
+  const submit = vi.spyOn(DefaultVmPromptDeliveryAdapter.prototype, 'submit');
+
+  await deliveryPass(f);
+
+  expect(steer).toHaveBeenCalledTimes(1);
+  expect(steer.mock.calls[0]![0].claim.message.id).toBe(batchId);
+  expect(submit).not.toHaveBeenCalled();
+  expect(await snapshot(f, batchId)).toMatchObject({
+    inbox: { delivery_intent: 'steer', steer_outcome: 'steered' },
+    batch: { state: 'delivered' },
+    attempts: ['accepted'],
+  });
 }
