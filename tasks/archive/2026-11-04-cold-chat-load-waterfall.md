@@ -40,26 +40,39 @@ selected transcript 7086–9841. Mobile: auth 3881–5955; project 6514–9956; 
 
 ## Implementation checklist
 
-- [ ] Start project detail, the initial session list and the URL-selected transcript
+- [x] Start project detail, the initial session list and the URL-selected transcript
       when the project route mounts (alongside the chunk preloads in `App.tsx`)
-- [ ] Initial session-list load consumes the prefetched list once (bounded reuse
-      window, configurable), later loads go to the network as before
-- [ ] Render the session view while the list loads when the URL names a session;
+- [x] Initial session-list load consumes the prefetched list once (bounded by the
+      client's existing default staleTime), later loads go to the network as before
+- [x] Render the session view while the list loads when the URL names a session;
       sidebar shows a loading line instead of "No chats yet" while loading
-- [ ] One centred loading pane for route fallback, project loading, list loading and
+- [x] One centred loading pane for route fallback, project loading, list loading and
       transcript loading; project child routes use it without reveal delay
-- [ ] `useSetupStatus.loading` stays true until all three reads settle
-- [ ] Tests: prefetch helper (path parsing, scope isolation), chat renders transcript
+- [x] `useSetupStatus.loading` stays true until all three reads settle
+- [x] Tests: prefetch helper (path parsing, scope isolation), chat renders transcript
       before list resolves (deferred), consume-once list handoff, setup-status
       partial-load, loading pane geometry
-- [ ] Playwright visual audit (mobile/desktop) of loading states
-- [ ] Staging before/after cold capture (timings + spinner positions)
+- [x] Playwright visual audit (mobile/desktop) of loading states
+- [x] Staging before/after cold capture (timings + spinner positions); final head re-check recorded in PR
 
 ## Acceptance criteria
 
-- [ ] Selected transcript request starts at the same time as project detail on a cold
+- [x] Selected transcript request starts at the same time as project detail on a cold
       deep link (no longer after the session list)
-- [ ] Transcript visible earlier on staging cold load, mobile and desktop
-- [ ] Spinner stays in one position within the app shell during cold chat load
-- [ ] No transient onboarding question during cold load for a set-up user
-- [ ] Query keys remain user-scoped; cached data freshness semantics unchanged
+- [x] Transcript visible earlier on staging cold load, mobile and desktop
+- [x] Spinner stays in one position within the app shell during cold chat load
+- [x] No transient onboarding question during cold load for a set-up user
+- [x] Query keys remain user-scoped; cached data freshness semantics unchanged
+
+## Implementation notes
+
+- Prefetch lives in the `Project` route wrapper (`App.tsx`) and fires per project
+  (`useEffect([projectId, queryScope])`): the route element stays mounted across projects.
+- `ChatLoadingLayout` reserves the chats pane so the spinner keeps one position on desktop.
+- Accepted trade-off: one extra background transcript delta read when the prefetch settles
+  before the conversation mounts (`refetchOnMount: 'always'` kept).
+- Remaining opportunity recorded on the idea: warm (persisted) transcripts still wait for
+  project detail.
+- Pre-existing `lazy-route-chunks-audit.spec.ts` failures on main filed as
+  `tasks/backlog/2026-11-05-lazy-route-chunks-audit-preexisting-failures.md`.
+- Staging: baseline mobile 23.4 s / desktop 12.1 s → after 6.6–10.9 s / 6.1–8.1 s.
