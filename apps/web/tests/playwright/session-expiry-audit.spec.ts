@@ -330,7 +330,14 @@ test('expired transcript, neutral label, and Fork remain usable', async ({ page 
     localStorage.setItem('sam-onboarding-wizard-dismissed-user-1', 'true')
   );
   await page.goto('/projects/proj-agent-1/chat/chat-session-1');
-  await expect(page.getByText('Expired', { exact: true }).first()).toBeVisible();
+  if ((page.viewportSize()?.width ?? 1280) <= 767) {
+    // The one-row phone header shows the state as a dot; its name is on the title button.
+    await expect(
+      page.getByRole('button', { name: /\. Expired\. Show session info$/ })
+    ).toBeVisible();
+  } else {
+    await expect(page.getByText('Expired', { exact: true }).first()).toBeVisible();
+  }
   await expect(
     page.getByText('Your earlier work remains readable in this transcript.')
   ).toBeVisible();
