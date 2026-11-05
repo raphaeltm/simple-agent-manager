@@ -175,6 +175,8 @@ export interface CompletionDockProps {
   cancelError?: string | null;
   /** Optional elapsed-time node rendered on the right while working. */
   elapsed?: ReactNode;
+  /** PROTOTYPE: extra control rendered on the left of the bar, after the plan pill. */
+  leftAccessory?: ReactNode;
 }
 
 export function CompletionDock({
@@ -192,6 +194,7 @@ export function CompletionDock({
   sleepError,
   cancelError,
   elapsed,
+  leftAccessory,
 }: CompletionDockProps) {
   const reducedMotion = usePrefersReducedMotion();
   const [archiveConfirmOpen, setArchiveConfirmOpen] = useState(false);
@@ -305,24 +308,28 @@ export function CompletionDock({
               : 'Session sleeping'}
       </span>
       <div ref={ref} className="relative w-full select-none" style={{ height: totalH }}>
-
         {/* Left cluster: plan pill */}
-        {hasPlan && (
-          <button
-            type="button"
-            onClick={onOpenPlan}
-            aria-label="View plan"
-            className={`pointer-events-auto absolute flex items-center gap-1 text-xs rounded-md px-2 py-1 border text-fg-primary cursor-pointer focus-visible:outline-2 focus-visible:outline-focus-ring focus-visible:-outline-offset-2 ${
-              working
-                ? 'border-[rgba(34,197,94,0.2)] bg-[rgba(34,197,94,0.06)]'
-                : 'border-[rgba(148,163,184,0.22)] bg-[rgba(148,163,184,0.06)] opacity-75'
-            }`}
-            style={{ left: 12, top: yB + (BAR_H - 26) / 2, zIndex: 2 }}
-          >
-            <ListTodo size={13} />
-            Plan
-          </button>
-        )}
+        <div
+          className="absolute flex items-center gap-1.5"
+          style={{ left: 12, top: yB + (BAR_H - 26) / 2, zIndex: 2 }}
+        >
+          {hasPlan && (
+            <button
+              type="button"
+              onClick={onOpenPlan}
+              aria-label="View plan"
+              className={`pointer-events-auto flex h-[26px] items-center gap-1 text-xs rounded-md px-2 py-1 border text-fg-primary cursor-pointer focus-visible:outline-2 focus-visible:outline-focus-ring focus-visible:-outline-offset-2 ${
+                working
+                  ? 'border-[rgba(34,197,94,0.2)] bg-[rgba(34,197,94,0.06)]'
+                  : 'border-[rgba(148,163,184,0.22)] bg-[rgba(148,163,184,0.06)] opacity-75'
+              }`}
+            >
+              <ListTodo size={13} />
+              Plan
+            </button>
+          )}
+          {leftAccessory}
+        </div>
 
         {/* Right cluster: elapsed time (only while working) */}
         {working && elapsed && (
@@ -346,9 +353,7 @@ export function CompletionDock({
           // lacks. `motion-safe:` matches the spinner ring's own guard, so
           // reduced-motion users get the dim + label change only.
           className={`pointer-events-auto absolute flex items-center justify-center rounded-full cursor-pointer border-0 shadow-lg disabled:cursor-not-allowed disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-focus-ring focus-visible:outline-offset-2${
-            cancelling && effectiveCenterAction === 'interrupt'
-              ? ' motion-safe:animate-pulse'
-              : ''
+            cancelling && effectiveCenterAction === 'interrupt' ? ' motion-safe:animate-pulse' : ''
           }`}
           style={{
             width: BTN,

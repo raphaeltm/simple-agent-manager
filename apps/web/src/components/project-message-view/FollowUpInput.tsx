@@ -24,6 +24,9 @@ export function FollowUpInput({
   slashCommands,
   agentProfiles,
   deliveryControl,
+  sendIcon,
+  sendAddon,
+  belowInput,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -40,6 +43,10 @@ export function FollowUpInput({
   agentProfiles?: AgentProfile[];
   /** Steer/queue choice, shown above the composer while the agent works. */
   deliveryControl?: ReactNode;
+  /** PROTOTYPE pass-throughs for the steering alternatives. */
+  sendIcon?: ReactNode;
+  sendAddon?: ReactNode;
+  belowInput?: ReactNode;
 }) {
   const isMobile = useIsMobile();
 
@@ -70,7 +77,10 @@ export function FollowUpInput({
               }
             : undefined
         }
-        showShortcutHint={!isMobile}
+        showShortcutHint={!isMobile && !belowInput}
+        sendIcon={sendIcon}
+        sendAddon={sendAddon}
+        belowInput={belowInput}
       />
     </div>
   );

@@ -12,7 +12,7 @@ import {
 import type { AgentProfile, AgentSkill } from '@simple-agent-manager/shared';
 import { formatMentionName, getMentionQuery } from '@simple-agent-manager/shared';
 import { ArrowRight, ArrowUp, Paperclip, X } from 'lucide-react';
-import type { MutableRefObject } from 'react';
+import type { MutableRefObject, ReactNode } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useIsMobile } from '../../hooks/useIsMobile';
@@ -56,6 +56,12 @@ interface ProjectChatComposerProps {
   submitLabel?: string;
   readOnly?: boolean;
   focusOnMount?: boolean;
+  /** PROTOTYPE: replaces the phone send arrow (steer/queue icon). */
+  sendIcon?: ReactNode;
+  /** PROTOTYPE: joined to the right of the send button (split-button caret). */
+  sendAddon?: ReactNode;
+  /** PROTOTYPE: rendered under the input row. */
+  belowInput?: ReactNode;
 }
 
 const TEXTAREA_MAX_HEIGHT_PX = 120;
@@ -90,6 +96,9 @@ export function ProjectChatComposer({
   submitLabel = 'Send',
   readOnly = false,
   focusOnMount = true,
+  sendIcon,
+  sendAddon,
+  belowInput,
 }: ProjectChatComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const internalFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -323,7 +332,11 @@ export function ProjectChatComposer({
                 aria-label={attachTitle}
                 title={attachTitle}
               >
-                <Paperclip size={20} strokeWidth={1.75} className={uploading ? 'animate-pulse' : ''} />
+                <Paperclip
+                  size={20}
+                  strokeWidth={1.75}
+                  className={uploading ? 'animate-pulse' : ''}
+                />
               </button>
             )}
           </>
@@ -381,31 +394,37 @@ export function ProjectChatComposer({
           disabled={sending || disabled || readOnly}
           apiUrl={transcribeApiUrl}
         />
-        <button
-          type="button"
-          onClick={onSend}
-          disabled={sendDisabled}
-          title={sendButtonTitle}
-          aria-keyshortcuts={sendShortcutAriaKey}
-          aria-label={iconOnlySend ? (sending ? 'Sending...' : submitLabel) : undefined}
-          className={`flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-[14px] border-0 text-base font-semibold text-[var(--sam-on-accent)] transition-[filter,opacity] ${
-            submitLabel === 'Fork' ? 'min-h-[56px]' : 'min-h-12'
-          } ${iconOnlySend ? 'w-12' : 'px-5'} bg-[linear-gradient(180deg,var(--sam-accent-top),var(--sam-accent-bottom))] shadow-[inset_0_1px_0_rgb(255_255_255/0.32),inset_0_-1px_0_rgb(0_0_0/0.2),var(--sam-shadow-accent)] ${
-            sendDisabled ? 'cursor-default opacity-45 shadow-none' : 'cursor-pointer hover:brightness-105'
-          } focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring`}
-        >
-          {iconOnlySend ? (
-            <ArrowUp size={22} strokeWidth={2.25} aria-hidden="true" />
-          ) : (
-            <>
-              {sending ? (submitLabel === 'Fork' ? 'Forking...' : 'Sending...') : submitLabel}
-              {submitLabel === 'Send' && !sending && (
-                <ArrowRight size={18} strokeWidth={2.25} aria-hidden="true" />
-              )}
-            </>
-          )}
-        </button>
+        <div className="flex shrink-0 items-end gap-0.5">
+          <button
+            type="button"
+            onClick={onSend}
+            disabled={sendDisabled}
+            title={sendButtonTitle}
+            aria-keyshortcuts={sendShortcutAriaKey}
+            aria-label={iconOnlySend ? (sending ? 'Sending...' : submitLabel) : undefined}
+            className={`flex shrink-0 items-center justify-center gap-2 whitespace-nowrap ${sendAddon ? 'rounded-l-[14px] rounded-r-[4px]' : 'rounded-[14px]'} border-0 text-base font-semibold text-[var(--sam-on-accent)] transition-[filter,opacity] ${
+              submitLabel === 'Fork' ? 'min-h-[56px]' : 'min-h-12'
+            } ${iconOnlySend ? 'w-12' : 'px-5'} bg-[linear-gradient(180deg,var(--sam-accent-top),var(--sam-accent-bottom))] shadow-[inset_0_1px_0_rgb(255_255_255/0.32),inset_0_-1px_0_rgb(0_0_0/0.2),var(--sam-shadow-accent)] ${
+              sendDisabled
+                ? 'cursor-default opacity-45 shadow-none'
+                : 'cursor-pointer hover:brightness-105'
+            } focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring`}
+          >
+            {iconOnlySend ? (
+              (sendIcon ?? <ArrowUp size={22} strokeWidth={2.25} aria-hidden="true" />)
+            ) : (
+              <>
+                {sending ? (submitLabel === 'Fork' ? 'Forking...' : 'Sending...') : submitLabel}
+                {submitLabel === 'Send' && !sending && (
+                  <ArrowRight size={18} strokeWidth={2.25} aria-hidden="true" />
+                )}
+              </>
+            )}
+          </button>
+          {sendAddon}
+        </div>
       </div>
+      {belowInput}
       {showShortcutHint && (
         <div className="mt-1.5 px-1 text-xs text-fg-muted">{sendShortcutHint}</div>
       )}

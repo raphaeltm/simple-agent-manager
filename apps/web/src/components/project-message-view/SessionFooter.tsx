@@ -9,6 +9,14 @@ import { IMMERSIVE_CHROME } from '../shell/chat-immersive-transition';
 import { ArchivedForkComposer } from './ArchivedForkComposer';
 import { CompletionDock } from './CompletionDock';
 import { DeliveryIntentControl } from './DeliveryIntentControl';
+import {
+  DockModeChip,
+  InlineIntentLine,
+  intentPlaceholder,
+  readSteerUiVariant,
+  SplitSendCaret,
+  SplitSendIcon,
+} from './DeliveryIntentPrototypes';
 import { FollowUpInput, ReadOnlyFollowUp } from './FollowUpInput';
 import { accessClockTime, accessTimeLeft, useServerNow } from './session-access-time';
 import { currentPlanToPlanItem, ElapsedTime } from './session-view-utils';
@@ -68,6 +76,7 @@ export function SessionFooter({
   accessNoticeRef,
 }: Readonly<SessionFooterProps>) {
   const [showPlanModal, setShowPlanModal] = useState(false);
+  const [steerUi] = useState(readSteerUiVariant);
 
   // Close plan modal when agent transitions to idle
   useEffect(() => {
@@ -167,6 +176,15 @@ export function SessionFooter({
             elapsed={
               lc.promptStartedAt ? <ElapsedTime startedAt={lc.promptStartedAt} /> : undefined
             }
+            leftAccessory={
+              steerUi === 'dock' && agentWorking ? (
+                <DockModeChip
+                  value={deliveryIntent}
+                  onChange={setDeliveryIntent}
+                  hasAttachments={hasAttachments}
+                />
+              ) : undefined
+            }
           />
         )}
       {planItem && (
@@ -193,8 +211,29 @@ export function SessionFooter({
             void lc.handleSendFollowUp(sendIntent);
           }}
           deliveryControl={
-            agentWorking ? (
+            agentWorking && steerUi === 'current' ? (
               <DeliveryIntentControl
+                value={deliveryIntent}
+                onChange={setDeliveryIntent}
+                hasAttachments={hasAttachments}
+              />
+            ) : undefined
+          }
+          sendIcon={
+            steerUi === 'split' && agentWorking ? <SplitSendIcon intent={sendIntent} /> : undefined
+          }
+          sendAddon={
+            steerUi === 'split' && agentWorking ? (
+              <SplitSendCaret
+                value={deliveryIntent}
+                onChange={setDeliveryIntent}
+                hasAttachments={hasAttachments}
+              />
+            ) : undefined
+          }
+          belowInput={
+            steerUi === 'line' && agentWorking ? (
+              <InlineIntentLine
                 value={deliveryIntent}
                 onChange={setDeliveryIntent}
                 hasAttachments={hasAttachments}
@@ -217,13 +256,15 @@ export function SessionFooter({
             // invites the duplicate wake this feature exists to prevent.
             lc.isWaking
               ? 'Waking the agent — your message will be delivered...'
-              : lc.agentActivity === 'prompting' || lc.agentActivity === 'responding'
-                ? 'Agent is working...'
-                : lc.sessionState === 'idle'
-                  ? 'Send a message to resume the agent...'
-                  : lc.sessionState === 'sleeping'
-                    ? 'Send a message to wake the agent...'
-                    : 'Send a message...'
+              : agentWorking && steerUi !== 'current'
+                ? intentPlaceholder(deliveryIntent, hasAttachments)
+                : lc.agentActivity === 'prompting' || lc.agentActivity === 'responding'
+                  ? 'Agent is working...'
+                  : lc.sessionState === 'idle'
+                    ? 'Send a message to resume the agent...'
+                    : lc.sessionState === 'sleeping'
+                      ? 'Send a message to wake the agent...'
+                      : 'Send a message...'
           }
           transcribeApiUrl={lc.transcribeApiUrl}
           agentProfiles={agentProfiles}
