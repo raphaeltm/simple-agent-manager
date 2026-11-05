@@ -38,6 +38,12 @@ const DO_MIGRATION_FILES = [
     import.meta.dirname,
     '../../apps/api/src/durable-objects/notification-migrations.ts'
   ),
+  // Migration 072's DDL and legacy-row copy live beside the comment core (it is invoked
+  // from migrations.ts); scan it like the ledger itself.
+  resolve(
+    import.meta.dirname,
+    '../../apps/api/src/durable-objects/project-data/anchored-comments-migration.ts'
+  ),
   // trial-counter.ts has inline DDL (CREATE TABLE IF NOT EXISTS) — scan it too
   resolve(
     import.meta.dirname,

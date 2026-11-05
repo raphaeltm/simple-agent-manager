@@ -11,14 +11,18 @@
  */
 import * as v from 'valibot';
 
+import { HUMAN_AGENT_WAKE_TRIGGERS } from '../../lib/agent-wake-policy';
 import { createModuleLogger } from '../../lib/logger';
 import { cancelCreatorSchedulesForSession } from './project-event-schedules-storage';
 import { parseRow } from './row-schemas';
 
 const log = createModuleLogger('project_data.session_access');
 
-/** Prompt sources a human session writer can originate; only these are sender-fenced. */
-export const SESSION_WRITER_PROMPT_SOURCES = ['user_followup', 'comment_directive'] as const;
+/**
+ * Prompt sources a human originates; only these are sender-fenced. The agent-wake policy owns
+ * the list (`HUMAN_AGENT_WAKE_TRIGGERS`), so a new human wake trigger is fenced automatically.
+ */
+export const SESSION_WRITER_PROMPT_SOURCES = HUMAN_AGENT_WAKE_TRIGGERS;
 
 /** Terminal reason recorded on a queued delivery cancelled because its sender lost access. */
 export const SENDER_ACCESS_REVOKED_REASON = 'sender_access_revoked';

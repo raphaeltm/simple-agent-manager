@@ -120,6 +120,15 @@ describe('sendChat in a shared session', () => {
         senderName: 'Grace Grantee',
         onBehalfOfUserId: 'owner-1',
         grantId: 'grant-1',
+        wake: {
+          trigger: 'user_followup',
+          policyMode: 'trusted_project',
+          triggeredByUserId: 'grantee-1',
+          onBehalfOfUserId: 'owner-1',
+          actorRole: 'grantee',
+          teammateInput: true,
+          grantId: 'grant-1',
+        },
       },
     });
     // The transcript shows what they typed; the agent's copy names who is speaking.
@@ -145,7 +154,19 @@ describe('sendChat in a shared session', () => {
     const [, , input] = mocks.accept.mock.calls[0]!;
     expect(input.senderId).toBe('owner-1');
     expect(input.deliveryContent).toBe('Ship it');
-    expect(input.metadata).toEqual({ userId: 'owner-1' });
+    expect(input.metadata).toEqual({
+      userId: 'owner-1',
+      // Every prompt records who woke the agent and for whom; the owner's is not teammate input.
+      wake: {
+        trigger: 'user_followup',
+        policyMode: 'trusted_project',
+        triggeredByUserId: 'owner-1',
+        onBehalfOfUserId: 'owner-1',
+        actorRole: 'owner',
+        teammateInput: false,
+        grantId: null,
+      },
+    });
   });
 
   it('falls back to a name from the email when a teammate has no display name', async () => {
@@ -203,6 +224,15 @@ describe('sendChat in a shared session', () => {
     expect(env.R2.head).toHaveBeenCalledWith('temp-uploads/owner-1/upload-1/context.txt');
     expect(mocks.accept.mock.calls[0]![2].metadata).toEqual({
       userId: 'owner-1',
+      wake: {
+        trigger: 'user_followup',
+        policyMode: 'trusted_project',
+        triggeredByUserId: 'owner-1',
+        onBehalfOfUserId: 'owner-1',
+        actorRole: 'owner',
+        teammateInput: false,
+        grantId: null,
+      },
       attachments: [attachment],
     });
   });

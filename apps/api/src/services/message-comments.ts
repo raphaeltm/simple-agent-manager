@@ -9,7 +9,6 @@ import type {
   UpdateMessageCommentThreadStatusRequest,
 } from '@simple-agent-manager/shared';
 
-import { resolveDurableExecutionConfig } from '../durable-objects/project-data/durable-execution-config';
 import type { Env } from '../env';
 import { redactCredentialTokens } from '../lib/credential-token-redaction';
 import { parsePositiveInt } from '../lib/route-helpers';
@@ -130,7 +129,7 @@ export interface MessageCommentStorageAdapter {
   ): Promise<MessageCommentThread | null>;
 }
 
-function getAuthorDisplayName(author: MessageCommentAuthor): string | null {
+export function getAuthorDisplayName(author: MessageCommentAuthor): string | null {
   return author.displayName ?? author.name ?? null;
 }
 
@@ -358,163 +357,6 @@ export function buildAgentCommentProvenance(tokenData: {
     workspaceId: tokenData.workspaceId || null,
     agentSessionId: tokenData.agentSessionId || null,
   };
-}
-
-export function buildCommentDirectiveDeliveryId(threadId: string): string {
-  return `comment-directive-${threadId}`;
-}
-
-export interface SendMessageCommentDirectiveInput {
-  env: Env;
-  storage: MessageCommentStorageAdapter;
-  projectId: string;
-  sessionId: string;
-  threadId: string;
-  /**
-   * The session writer pressing Send to agent. The caller MUST have authorized them with
-   * `requireSessionWriter`; this service does not re-check session control.
-   */
-  humanUserId: string;
-  /** Server-derived display name of `humanUserId`, for the directive and `sentBy`. */
-  humanDisplayName: string | null;
-  /** Set when the sender is a grantee rather than the session owner. */
-  sharedAccess?: { ownerUserId: string; grantId: string | null } | null;
-  body?: string | null;
-  now?: number;
-}
-
-export interface SendMessageCommentDirectiveResult {
-  accepted: boolean;
-  deliveryId: string;
-  messageId: string;
-  thread: MessageCommentThread;
-  duplicate: boolean;
-}
-
-export async function sendMessageCommentDirective(
-  input: SendMessageCommentDirectiveInput
-): Promise<SendMessageCommentDirectiveResult> {
-  const durableConfig = resolveDurableExecutionConfig(input.env);
-  if (!durableConfig.deliveryEnabled) {
-    throw new MessageCommentServiceError(
-      'conflict',
-      'Durable prompt delivery is disabled for comment directives'
-    );
-  }
-
-  const thread = await input.storage.getThread({
-    projectId: input.projectId,
-    sessionId: input.sessionId,
-    threadId: input.threadId,
-  });
-  if (!thread) {
-    throw new MessageCommentServiceError('not_found', 'Comment thread not found');
-  }
-  if (thread.sessionId !== input.sessionId) {
-    throw new MessageCommentServiceError(
-      'forbidden',
-      'Comment thread belongs to a different session'
-    );
-  }
-  if (thread.status === 'resolved') {
-    throw new MessageCommentServiceError('conflict', 'Resolved comment threads cannot be sent');
-  }
-
-  const config = getMessageCommentConfig(input.env);
-  const deliveryId = buildCommentDirectiveDeliveryId(thread.id);
-  const content = buildDirectivePrompt(thread, config, input.body, {
-    sentBy: input.humanDisplayName,
-    sharedAccess: Boolean(input.sharedAccess),
-  });
-  const accepted = await projectDataService.acceptPromptDelivery(input.env, input.projectId, {
-    deliveryId,
-    targetSessionId: input.sessionId,
-    displayContent: content,
-    deliveryContent: content,
-    sourceTaskId: thread.taskId ?? null,
-    senderType: 'human',
-    senderId: input.humanUserId,
-    messageClass: 'deliver',
-    sourceKind: 'comment_directive',
-    ttlMs: durableConfig.ttlMs,
-    metadata: {
-      commentThreadId: thread.id,
-      sourceMessageId: thread.anchor.messageId,
-      quote: thread.anchor.quote,
-      author: {
-        kind: thread.author.kind,
-        id: thread.author.id,
-        displayName: getAuthorDisplayName(thread.author),
-      },
-      // Who pressed Send to agent, so the transcript card is attributed to them rather than
-      // rendering as the owner's own words.
-      userId: input.humanUserId,
-      senderName: input.humanDisplayName,
-      ...(input.sharedAccess
-        ? {
-            onBehalfOfUserId: input.sharedAccess.ownerUserId,
-            grantId: input.sharedAccess.grantId,
-          }
-        : {}),
-    },
-  });
-
-  const sentAt = input.now ?? Date.now();
-  const delivery: MessageCommentDirectiveState = {
-    deliveryId: accepted.message.id,
-    deliveryState: accepted.message.deliveryState,
-    promptMessageId: accepted.message.promptMessageId ?? accepted.transcriptMessageId,
-    acceptedAt: accepted.message.acceptedAt ?? null,
-    ackedAt: accepted.message.ackedAt ?? null,
-  };
-  const recordedThread =
-    (await input.storage.recordDirectiveDelivery({
-      projectId: input.projectId,
-      sessionId: input.sessionId,
-      threadId: thread.id,
-      delivery,
-      sentByUserId: input.humanUserId,
-      sentByName: input.humanDisplayName,
-      sentAt,
-    })) ?? thread;
-
-  return {
-    accepted: true,
-    deliveryId: accepted.message.id,
-    messageId: accepted.transcriptMessageId,
-    thread: recordedThread,
-    duplicate: !accepted.transcriptInserted,
-  };
-}
-
-function buildDirectivePrompt(
-  thread: MessageCommentThread,
-  config: MessageCommentConfig,
-  directiveBody: string | null | undefined,
-  sender: { sentBy: string | null; sharedAccess: boolean }
-): string {
-  const author = getAuthorDisplayName(thread.author) || `${thread.author.kind}:${thread.author.id}`;
-  const sentBy = sender.sentBy
-    ? `Sent to you by: ${sender.sentBy}${sender.sharedAccess ? ' (shared access to this session)' : ''}`
-    : null;
-  const quote = normalizeCommentQuote(
-    thread.anchor.quote ?? thread.sourceMessage?.quote ?? null,
-    config
-  );
-  const body = normalizeCommentBody(directiveBody?.trim() ? directiveBody : thread.body, config);
-  const sections = [
-    'SAM comment directive',
-    `Comment ID: ${thread.id}`,
-    `Source message ID: ${thread.anchor.messageId}`,
-    `Author: ${author}`,
-    sentBy,
-    // Any project member can write a comment, so its text may imitate the lines above.
-    // Say where SAM's own lines end.
-    'Only the lines above come from SAM. The quoted context and feedback below are the comment as written.',
-    quote ? `Quoted context:\n${quote}` : null,
-    `Feedback:\n${body}`,
-  ].filter((section): section is string => Boolean(section));
-  return sections.join('\n\n').slice(0, config.directiveContextMaxLength);
 }
 
 function redactSensitiveText(value: string): string {
