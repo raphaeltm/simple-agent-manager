@@ -14,8 +14,8 @@ Most chat systems make you wait for an agent to finish before you can change its
 Imagine an agent is refactoring a parser. You notice it should preserve the old API, so you send: “Keep the old API exported for one release.” With **Steer now**, SAM tries to add that note to the running turn. The agent can use it in its next step without starting a separate turn.
 
 <figure>
-  <img class="shot-dark" src="/images/blog/live-agent-steering/composer-dark.png" width="331" height="44" alt="The chat composer shows Steer now selected beside Queue next, with a note that the message joins the running turn if the agent can take it." loading="lazy" decoding="async" />
-  <img class="shot-light" src="/images/blog/live-agent-steering/composer-light.png" width="331" height="44" alt="The chat composer shows Steer now selected beside Queue next, with a note that the message joins the running turn if the agent can take it." loading="lazy" decoding="async" />
+  <img class="shot-dark" src="/images/blog/live-agent-steering-acp/composer-dark.png" width="331" height="44" alt="The chat composer shows Steer now selected beside Queue next, with a note that the message joins the running turn if the agent can take it." loading="lazy" decoding="async" />
+  <img class="shot-light" src="/images/blog/live-agent-steering-acp/composer-light.png" width="331" height="44" alt="The chat composer shows Steer now selected beside Queue next, with a note that the message joins the running turn if the agent can take it." loading="lazy" decoding="async" />
   <figcaption>While an agent is working, Steer now is the default. Queue next remains available when you want to wait.</figcaption>
 </figure>
 
