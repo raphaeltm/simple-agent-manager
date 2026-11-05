@@ -29,10 +29,11 @@ jobs:
         run: |
           set -euo pipefail
           release=https://github.com/oven-sh/bun/releases/download/bun-v1.4.4
-          curl -fsSL --retry 2 "$release/bun-linux-x64-baseline.zip" -o "$RUNNER_TEMP/bun.zip"
-          curl -fsSL --retry 2 "$release/SHASUMS256.txt" -o "$RUNNER_TEMP/SHASUMS256.txt"
-          expected=$(awk '$2 == "bun-linux-x64-baseline.zip" { print $1 }' "$RUNNER_TEMP/SHASUMS256.txt")
-          [[ -n "$expected" ]]
+          # Pinned digest of bun-linux-x64-baseline.zip (from that release's SHASUMS256.txt),
+          # so the check does not trust a checksum fetched from the same place as the zip.
+          expected=e0446eb55995772eb9894bebae9a6be368d985a8b9271ee124486f9946eedd76
+          curl -fsSL --proto '=https' --proto-redir '=https' --retry 2 \
+            "$release/bun-linux-x64-baseline.zip" -o "$RUNNER_TEMP/bun.zip"
           printf '%s  %s\n' "$expected" "$RUNNER_TEMP/bun.zip" | sha256sum --check
           unzip -q "$RUNNER_TEMP/bun.zip" -d "$RUNNER_TEMP/bun"
           echo "$RUNNER_TEMP/bun/bun-linux-x64-baseline" >> "$GITHUB_PATH"

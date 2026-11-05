@@ -32,6 +32,10 @@ cmp -s "$patch" <(git -C "$source_dir" diff -- packages/cli)
 
 (
   cd "$source_dir"
+  # Lifecycle scripts stay on: upstream's build needs its root postinstall (fix-node-pty) and
+  # the install scripts of its trustedDependencies (esbuild, node-pty, protobufjs, electron).
+  # Bun runs dependency scripts only for that allowlist, the lockfile is frozen, and the
+  # source is the pinned, verified commit above.
   bun install --frozen-lockfile
   cd packages/cli
   bun run typecheck
