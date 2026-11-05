@@ -146,3 +146,24 @@ runtimes have (or can cheaply get) a harness-level steering path: ACP extension
 - [ ] UI distinguishes Steer now / Queue next / Stop with truthful states (screenshots)
 
 ## Notes / limitations log
+
+### Real shipped-adapter evidence (2026-11-05, local, mock model, no API keys)
+
+`packages/vm-agent/internal/acp/session_host_real_adapter_steering_test.go` (opt-in env vars)
+drives each shipped build through the real `SessionHost.HandlePrompt` + `SessionHost.Steer`:
+
+| Adapter build | Idle steer | Mid-turn steer | Steer seen by | Completions |
+| --- | --- | --- | --- | --- |
+| claude-agent-acp 0.81.2 + claude-code 2.1.281 | prompt_required | injected | model call 2 of 2 | 1 |
+| codex-acp 2.1.1-sam-c2.3 + codex-cli 0.160.0-sam-c2.2 (CI run 41948124473) | prompt_required | injected | model call 2 of 2 | 1 |
+| opencode 2.2.5-sam-s1 (CI run 41952487055) | prompt_required | injected | model call 3 of 3 (call 2 = title side request) | 1 |
+
+The first agent-turn model call is held while the steer is sent, so the steer is
+provably delivered before the original turn completes and changes the next model call.
+
+### Artifacts
+- Codex runtime release: https://github.com/raphaeltm/simple-agent-manager/releases/tag/acp-codex-runtime-c2.3-codemode2
+  (archive sha256 384d0071…5bd65bd, 136243963 bytes; deterministic repackage; CLI byte-identical to c2.2).
+- OpenCode release: https://github.com/raphaeltm/simple-agent-manager/releases/tag/opencode-v2.2.5-sam-s1
+  (two builds in one environment are byte-identical; CI vs workspace builds differ, so the CI
+  build is the published artifact).
