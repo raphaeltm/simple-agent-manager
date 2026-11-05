@@ -81,6 +81,23 @@ const loadProjectShell = memoizeRouteImport(() => import('./pages/Project'));
 const loadProjectChat = memoizeRouteImport(() => import('./pages/project-chat'));
 const loadProjectSettings = memoizeRouteImport(() => import('./pages/ProjectSettings'));
 const ProjectShell = lazyNamed(loadProjectShell, 'Project');
+/** Matches the project routes that render the chat: its index (a redirect) and `chat/*`. */
+const PROJECT_CHAT_PATH = /\/projects\/[^/]+(?:\/chat(?:\/|$)|\/?$)/;
+
+/**
+ * The project shell's chunk fallback. On a chat route it is the chat's own loading
+ * layout, so the spinner is already where the project and transcript spinners that
+ * follow it will be.
+ */
+function ProjectRouteFallback() {
+  const { pathname } = useLocation();
+  return PROJECT_CHAT_PATH.test(pathname) ? (
+    <ChatLoadingLayout testId="route-fallback" />
+  ) : (
+    <RouteFallback />
+  );
+}
+
 function Project() {
   const { pathname } = useLocation();
   const queryScope = useQueryScope();
@@ -96,7 +113,7 @@ function Project() {
   void loadProjectShell().catch(() => undefined);
   if (/\/settings(?:\/|$)/.test(pathname)) {
     void loadProjectSettings().catch(() => undefined);
-  } else if (/\/projects\/[^/]+(?:\/chat(?:\/|$)|\/?$)/.test(pathname)) {
+  } else if (PROJECT_CHAT_PATH.test(pathname)) {
     void loadProjectChat().catch(() => undefined);
   }
   return <ProjectShell />;
@@ -315,7 +332,10 @@ export default function App() {
                       <Route path="/projects/invite/:token" element={page(<ProjectInvite />)} />
 
                       {/* Project detail — shell with sub-routes */}
-                      <Route path="/projects/:id" element={page(<Project />)}>
+                      <Route
+                        path="/projects/:id"
+                        element={page(<Project />, <ProjectRouteFallback />)}
+                      >
                         <Route index element={<Navigate to="chat" replace />} />
                         <Route
                           path="chat"

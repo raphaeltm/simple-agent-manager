@@ -151,6 +151,9 @@ for (const viewport of [
     test.use({
       viewport: { width: viewport.width, height: viewport.height },
       isMobile: viewport.isMobile,
+      // The PWA service worker precaches route chunks, and requests it serves bypass
+      // `page.route`, so the held shell chunk could arrive unheld.
+      serviceWorkers: 'block',
     });
 
     test('reads in parallel and keeps one loading indicator in place', async ({ page }) => {
@@ -159,7 +162,20 @@ for (const viewport of [
       });
       const gates = { project: gate(), list: gate(), transcript: gate() };
       await setupMocks(page, gates);
+      // Hold the project shell's route chunk too: its fallback is the first spinner
+      // drawn inside the app shell.
+      const shellChunk = gate();
+      await page.route(/\/assets\/Project-[^/]+\.js$/, async (route) => {
+        shellChunk.markRequested();
+        await shellChunk.wait;
+        await route.continue();
+      });
       await page.goto(`/projects/${PROJECT_ID}/chat/session-1`);
+
+      await shellChunk.requested;
+      await expect(page.getByTestId('route-fallback')).toBeVisible();
+      const shellSpinner = await spinnerCentre(page);
+      shellChunk.release();
 
       // 1. Everything the URL names is requested while the project is still held.
       await Promise.all([
@@ -169,6 +185,8 @@ for (const viewport of [
       ]);
       await expect(page.getByTestId('project-loading')).toBeVisible();
       const projectSpinner = await spinnerCentre(page);
+      expect(Math.abs(projectSpinner.x - shellSpinner.x)).toBeLessThanOrEqual(4);
+      expect(Math.abs(projectSpinner.y - shellSpinner.y)).toBeLessThanOrEqual(4);
       await screenshot(page, `chat-cold-load-project-${viewport.name}`);
 
       // 2. Project lands; the transcript is still held. Same spinner height.
