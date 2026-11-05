@@ -503,6 +503,7 @@ export { NOTIFICATION_CHANNELS, NOTIFICATION_TYPES, NOTIFICATION_URGENCIES } fro
 export type {
   DecideOperationsActionApprovalRequest,
   DecideOperationsActionApprovalResponse,
+  GetOperationsActionApprovalResponse,
   ListOperationsActionApprovalsResponse,
   OperationsAction,
   OperationsActionApproval,

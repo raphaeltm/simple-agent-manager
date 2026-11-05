@@ -96,6 +96,10 @@ export interface ListOperationsActionApprovalsResponse {
   approvals: OperationsActionApproval[];
 }
 
+export interface GetOperationsActionApprovalResponse {
+  approval: OperationsActionApproval;
+}
+
 export interface DecideOperationsActionApprovalRequest {
   decision: OperationsApprovalDecision;
   note?: string;

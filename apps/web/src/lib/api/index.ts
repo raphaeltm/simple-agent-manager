@@ -102,7 +102,11 @@ export {
   updatePlatformCredential,
   updateSignupApprovalConfig,
 } from './admin';
-export { decideOperationsApproval, fetchOperationsApprovals } from './admin-operations-approvals';
+export {
+  decideOperationsApproval,
+  fetchOperationsApproval,
+  fetchOperationsApprovals,
+} from './admin-operations-approvals';
 export {
   abandonAdminProjectDataArchiveMigration,
   closeAdminProjectDataArchiveCircuitBreaker,

@@ -1,5 +1,6 @@
 import type {
   DecideOperationsActionApprovalResponse,
+  GetOperationsActionApprovalResponse,
   ListOperationsActionApprovalsResponse,
   OperationsApprovalDecision,
 } from '@simple-agent-manager/shared';
@@ -7,7 +8,7 @@ import type {
 import { request } from './client';
 
 // =============================================================================
-// Operations action approvals (Admin → Approvals tab)
+// Operations action approvals (Admin → Approvals tab and the in-chat approval card)
 // =============================================================================
 
 export async function fetchOperationsApprovals(
@@ -16,6 +17,16 @@ export async function fetchOperationsApprovals(
   return request<ListOperationsActionApprovalsResponse>('/api/admin/operations/approvals', {
     signal,
   });
+}
+
+export async function fetchOperationsApproval(
+  approvalId: string,
+  signal?: AbortSignal
+): Promise<GetOperationsActionApprovalResponse> {
+  return request<GetOperationsActionApprovalResponse>(
+    `/api/admin/operations/approvals/${encodeURIComponent(approvalId)}`,
+    { signal }
+  );
 }
 
 export async function decideOperationsApproval(

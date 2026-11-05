@@ -113,7 +113,7 @@ interface ProjectChatMockOptions {
   project: unknown;
   session: unknown;
   messages: unknown[];
-  user?: { id: string; name: string; email: string };
+  user?: { id: string; name: string; email: string; role?: string };
 }
 
 /**
