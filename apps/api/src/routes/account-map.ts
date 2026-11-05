@@ -75,7 +75,7 @@ function toAttentionSummary(value: unknown): SessionSummary['attention'] {
 }
 
 /** The map renders this as a link, so only an https URL is passed through. */
-function toHttpsUrl(value: string | null): string | null {
+function toHttpsUrl(value: string | null | undefined): string | null {
   if (!value) return null;
   try {
     return new URL(value).protocol === 'https:' ? value : null;

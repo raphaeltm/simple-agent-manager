@@ -412,10 +412,14 @@ describe('GET /account-map', () => {
             options: ['main', 'dev'],
           },
         }),
-        sessionFixture({ id: 'sess-malformed', attention: { kind: 42 } }),
+        sessionFixture({ id: 'sess-malformed', attention: { kind: 42, createdAt: 1 } }),
+        sessionFixture({
+          id: 'sess-bad-time',
+          attention: { kind: 'needs_input', createdAt: 'not-a-number', reason: null },
+        }),
         sessionFixture({ id: 'sess-quiet', attention: null }),
       ],
-      total: 3,
+      total: 4,
     });
 
     const res = await buildApp().request('/account-map', {}, mockEnv);
@@ -428,6 +432,7 @@ describe('GET /account-map', () => {
       createdAt: 1_700_000_000_000,
     });
     expect((byId.get('sess-malformed') as any).attention).toBeNull();
+    expect((byId.get('sess-bad-time') as any).attention).toBeNull();
     expect((byId.get('sess-quiet') as any).attention).toBeNull();
     const prById = new Map(body.tasks.map((t: any) => [t.id, t.outputPrUrl]));
     expect(prById.get('task-pr')).toBe('https://github.com/o/r/pull/7');
