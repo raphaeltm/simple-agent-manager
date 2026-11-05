@@ -83,7 +83,11 @@ export async function automaticDeletionPreservationExpiresAt(
     Date.parse(snapshot.expiresAt) <= Date.now()
   )
     return null;
+  // The eviction callback also marks the snapshot sleeping, but an evicted source anchors
+  // its wake until a replacement restores it (see `preservationReceiptExpiresAt`).
+  const evictionSource = snapshot.evictionRecoveryWorkspaceId === expected.workspaceId;
   const completedSleep =
+    !evictionSource &&
     snapshot.sleepStatus === 'sleeping' &&
     (Boolean(snapshot.sleepingAt) || purpose === 'vm_retirement');
   if (!completedSleep) {

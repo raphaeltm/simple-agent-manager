@@ -184,6 +184,15 @@ export async function sweepStaleStoppedWorkspaces(
        ) OR json_valid(w.preservation_receipt_json))
        -- The receipt outlives the snapshot row's pointer at this workspace; the queue
        -- re-verifies it (workspace-preservation-receipt.ts) before any deletion.
+       -- An evicted source anchors its wake until a replacement restores it; the queue
+       -- refuses it before then, so selecting it would only pin the head of this page.
+       AND (w.status != 'evicted'
+         OR CASE WHEN json_valid(w.preservation_receipt_json)
+           THEN json_extract(w.preservation_receipt_json, '$.restoredAt') END IS NOT NULL
+         OR EXISTS (
+           SELECT 1 FROM session_snapshots r
+           WHERE r.workspace_id = w.id AND r.recovery_status = 'restored'
+         ))
        AND (n.id IS NULL OR n.node_class != 'user-owned')
        AND w.updated_at < ?
      ORDER BY w.updated_at ASC

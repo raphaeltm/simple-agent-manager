@@ -21,6 +21,7 @@ const {
   getAcpSessionMock,
   insertedAgentSessions,
   prepareAcpSessionForFreshStartMock,
+  releaseRestoredSourceWorkspacesMock,
   revokeMcpTokenMock,
   restoreAgentSessionOnNodeMock,
   startAgentSessionOnNodeMock,
@@ -36,6 +37,7 @@ const {
   getAcpSessionMock: vi.fn(async () => null),
   insertedAgentSessions: [] as Array<Record<string, unknown>>,
   prepareAcpSessionForFreshStartMock: vi.fn(async () => ({ id: 'agent-session-new' })),
+  releaseRestoredSourceWorkspacesMock: vi.fn(async () => 0),
   revokeMcpTokenMock: vi.fn(async () => undefined),
   restoreAgentSessionOnNodeMock: vi.fn(async () => ({ status: 'restored' })),
   startAgentSessionOnNodeMock: vi.fn(async () => undefined),
@@ -73,6 +75,10 @@ vi.mock('../../../src/services/project-data', () => ({
 vi.mock('../../../src/services/session-snapshots', () => ({
   completeSessionSnapshotRecovery: completeSessionSnapshotRecoveryMock,
   failSessionSnapshotRecovery: failSessionSnapshotRecoveryMock,
+}));
+
+vi.mock('../../../src/services/workspace-preservation-receipt', () => ({
+  releaseRestoredSourceWorkspaces: releaseRestoredSourceWorkspacesMock,
 }));
 
 vi.mock('drizzle-orm/d1', () => ({
@@ -813,5 +819,42 @@ describe('handleAgentSession', () => {
     );
 
     expect(completeSessionSnapshotRecoveryMock).not.toHaveBeenCalled();
+    expect(releaseRestoredSourceWorkspacesMock).not.toHaveBeenCalled();
+  });
+
+  it('releases the evicted source only after the wake commits, so its own fence cannot revoke it', async () => {
+    // Staging 2026-11-05: the release ran before the final authority check, the source was
+    // deleted within seconds, and the eviction fence (source must stay `evicted`) failed the wake.
+    let sourceStatus = 'evicted';
+    releaseRestoredSourceWorkspacesMock.mockImplementation(async () => {
+      sourceStatus = 'deleted';
+      return 1;
+    });
+    const state = makeState({
+      config: {
+        ...makeState().config,
+        resumeSnapshotChatSessionId: 'chat-1',
+        evictionFence: { workspaceId: 'source', nodeId: 'source-node', generation: 'g' },
+      },
+    });
+    const { rc, statusEvents } = makeContext();
+    // `assertRecoveryAuthority`'s fence: `evictionRecoveryFenceMatches` requires status 'evicted'.
+    vi.mocked(rc.assertRecoveryAuthority).mockImplementation(async (checked: TaskRunnerState) => {
+      if (checked.config.evictionFence && sourceStatus !== 'evicted') {
+        throw new Error('Eviction generation changed before replacement allocation');
+      }
+    });
+
+    await handleAgentSession(state, rc);
+
+    expect(statusEvents.map((event) => event.toStatus)).toEqual(['in_progress']);
+    expect(releaseRestoredSourceWorkspacesMock).toHaveBeenCalledWith(rc.env, {
+      chatSessionId: 'chat-1',
+      restoredWorkspaceId: 'workspace-1',
+    });
+    expect(sourceStatus).toBe('deleted');
+    expect(state.config.evictionFence).toBeNull();
+    // Every later alarm re-runs the authority check; the released source must not fail it.
+    await expect(rc.assertRecoveryAuthority(state)).resolves.toBeUndefined();
   });
 });

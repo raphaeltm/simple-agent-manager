@@ -15,6 +15,8 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { workspaceEvictionCallbackRoute } from '../../../src/routes/projects/workspace-eviction-callback';
+import { emptyResult, resolveCleanupConfig } from '../../../src/scheduled/node-cleanup/shared';
+import { sweepStaleStoppedWorkspaces } from '../../../src/scheduled/node-cleanup/workspace-phases';
 import { completeSessionSnapshot } from '../../../src/services/session-snapshot-persistence';
 import { prepareSessionSnapshot } from '../../../src/services/session-snapshot-prepare';
 import { finalizeSessionSnapshotSleeping } from '../../../src/services/session-snapshot-sleep-lifecycle';
@@ -255,7 +257,7 @@ describe('evicted source cleanup through real writers and real SQL', () => {
     return automaticDeletionPreservationExpiresAt(env, identity);
   }
 
-  it('a quiesced final capture grants preservation and a durable receipt at eviction', async () => {
+  it('a quiesced final capture grants a durable receipt; the source is released only by a restore', async () => {
     await capture('workspace', 'node', false); // live pre-stop capture
     const final = await capture('workspace', 'node', true); // final capture after docker stop
     await evict();
@@ -277,6 +279,14 @@ describe('evicted source cleanup through real writers and real SQL', () => {
       nodeId: 'node',
       nodeRuntimeIncarnationId: 'incarnation',
       workspaceGeneration: 'generation',
+    });
+    // Staging 2026-11-05: releasing the source before its wake committed failed the wake's
+    // eviction fence. Until a replacement restores this generation the source anchors it.
+    expect(await sourcePreservation()).toBeNull();
+    await wakeOnto('target');
+    await releaseRestoredSourceWorkspaces(env, {
+      chatSessionId: 'chat',
+      restoredWorkspaceId: 'target',
     });
     expect(await sourcePreservation()).not.toBeNull();
   });
@@ -373,11 +383,52 @@ describe('evicted source cleanup through real writers and real SQL', () => {
     expect(await sourcePreservation()).toBeNull();
   });
 
-  it('an unrestored receipt needs its artifacts and an unexpired bound', async () => {
+  it('an unrestored eviction receipt never releases its source, through either path', async () => {
     await capture('workspace', 'node', true);
     await evict();
-    expect(await sourcePreservation()).not.toBeNull();
-    // The legacy row path is also satisfied here; isolate the receipt by moving the row away.
+    // Verified artifacts, the eviction's sleeping row and a valid receipt: still anchored.
+    expect(await sourcePreservation()).toBeNull();
+    sqlite.exec("UPDATE session_snapshots SET workspace_id = 'elsewhere'");
+    expect(await sourcePreservation()).toBeNull();
+  });
+
+  it('the stopped-workspace sweep leaves an unrestored evicted source to its wake', async () => {
+    // The fixture helper does not apply column defaults; the sweep excludes non-managed nodes.
+    sqlite.exec("UPDATE nodes SET node_class = 'managed'");
+    await capture('workspace', 'node', true);
+    await evict();
+    const sweep = async () => {
+      mocks.scheduleWorkspaceDeletion.mockClear();
+      await sweepStaleStoppedWorkspaces(
+        db(),
+        env,
+        new Date('2099-01-01T00:00:00Z'),
+        resolveCleanupConfig(env),
+        emptyResult()
+      );
+      return mocks.scheduleWorkspaceDeletion.mock.calls.map((call) => call[1]);
+    };
+    // Refused by the queue anyway; selecting it would pin the head of the bounded page.
+    expect(await sweep()).toEqual([]);
+    await wakeOnto('target');
+    // Restored (snapshot row): selectable.
+    expect(await sweep()).toEqual(['workspace']);
+    await releaseRestoredSourceWorkspaces(env, {
+      chatSessionId: 'chat',
+      restoredWorkspaceId: 'target',
+    });
+    await capture('target', 'target-node', false);
+    // The successor moved the row; the receipt's restoredAt still selects it.
+    expect(await sweep()).toEqual(['workspace']);
+  });
+
+  it('an unrestored sleep receipt needs its artifacts and an unexpired bound', async () => {
+    await capture('workspace', 'node', true);
+    await evict();
+    // Isolate the receipt path: a sleep receipt, and the per-chat row moved away.
+    sqlite.exec(
+      "UPDATE workspaces SET preservation_receipt_json = json_set(preservation_receipt_json, '$.reason', 'sleep')"
+    );
     sqlite.exec("UPDATE session_snapshots SET workspace_id = 'elsewhere'");
     expect(await sourcePreservation()).not.toBeNull();
     const home = receipt()?.homeR2Key ?? '';

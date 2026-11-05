@@ -11,8 +11,9 @@
  * preservation (a verified full sleep, or a quiesced final eviction capture). Deletion
  * authority then reads the receipt: the identity must still match, and either the
  * generation's artifacts are still verifiably in R2 or that exact generation was restored
- * into a replacement workspace. Receipts never grant preservation on their own; only the
- * two writers above create them.
+ * into a replacement workspace. An eviction receipt authorizes nothing until that restore:
+ * the evicted source anchors its own wake. Receipts never grant preservation on their own;
+ * only the two writers above create them.
  */
 import * as v from 'valibot';
 
@@ -163,6 +164,10 @@ export async function preservationReceiptExpiresAt(
     ).toISOString();
     return Date.parse(receipt.expiresAt) > Date.now() ? receipt.expiresAt : restoredHorizon;
   }
+  // An evicted source anchors its own wake: the replacement's eviction fence and the
+  // failed-wake retry (`scheduled/workspace-eviction-recovery.ts`) both require it to stay
+  // `evicted`. Verified artifacts alone never release it; a restore of this generation does.
+  if (receipt.reason === 'quiesced_eviction') return null;
   if (
     !Number.isFinite(Date.parse(receipt.expiresAt)) ||
     Date.parse(receipt.expiresAt) <= Date.now()
