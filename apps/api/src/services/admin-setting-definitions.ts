@@ -26,6 +26,11 @@ export type AdminSettingName =
   | FleetOpsSettingName
   | OperationsTelemetrySettingName
   | 'chat.profileUsageWindowDays'
+  | 'nodes.usageWindowMinutes'
+  | 'nodes.usageChunkLookbackMinutes'
+  | 'nodes.usageMaxHistoryWorkspaces'
+  | 'nodes.usageMaxWorkspaces'
+  | 'nodes.usageMaxChunksPerWorkspace'
   | 'chat.profilePinCandidateLimit'
   | 'collaboration.ideaUpdateBodyMaxLength'
   | 'collaboration.ideaUpdateQuoteMaxLength'
@@ -125,6 +130,33 @@ export interface AdminSettingDefinition {
   readonly choices?: readonly string[];
   readonly validate: (value: unknown) => boolean;
 }
+
+/** Minutes of CPU and memory history the Nodes page draws per machine and session (`GET /api/nodes/resource-usage`). */
+export const DEFAULT_NODE_USAGE_WINDOW_MINUTES = 60;
+
+/**
+ * How far before the Nodes page window a resource-history chunk may start and still be read.
+ * VM agents upload a chunk every 15 minutes by default, so 60 leaves room for slow uploads
+ * while letting the chunk index bound the scan by time.
+ */
+export const DEFAULT_NODE_USAGE_CHUNK_LOOKBACK_MINUTES = 60;
+
+/** Most workspaces whose history the Nodes page reads in one request; the rest are disclosed. */
+export const DEFAULT_NODE_USAGE_MAX_HISTORY_WORKSPACES = 150;
+
+/**
+ * Most workspaces the Nodes page lists in one request. Workspaces on a person's own nodes are
+ * not swept by the stopped-workspace TTL, so stopped rows accumulate; live ones come first and
+ * the rest are disclosed.
+ */
+export const DEFAULT_NODE_USAGE_MAX_WORKSPACES = 500;
+
+/**
+ * Most history chunks read per workspace in one request, newest first. At the default 15-minute
+ * chunks and a 60 + 60 minute window and lookback a workspace has 8; the cap only bites on an
+ * agent that uploads far shorter chunks, and the page says so.
+ */
+export const DEFAULT_NODE_USAGE_MAX_CHUNKS_PER_WORKSPACE = 48;
 
 /** Days of a person's own new chats that order their new-chat profile picker (idea 01M5EW9H86VD88S7E3WWA1D9X1). */
 export const DEFAULT_PROFILE_USAGE_WINDOW_DAYS = 30;

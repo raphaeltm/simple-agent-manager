@@ -195,6 +195,7 @@ export type {
   NodeStatus,
   NodeSystemInfo,
   NodeTransport,
+  NodeWorkspaceMemoryMetric,
   PortsResponse,
   UpdateWorkspaceRequest,
   VMLocation,
@@ -982,6 +983,13 @@ export type {
   SandboxFileReadResult,
 } from './sandbox';
 
+// Nodes page resource usage
+export type {
+  NodeResourceReservation,
+  NodeResourceUsageResponse,
+  NodeResourceUsageSeries,
+  NodeWorkspaceResourceUsage,
+} from './node-resource-usage';
 // Resource Requirements & Reservations
 export type {
   LegacyVmSizeResolutionInput,

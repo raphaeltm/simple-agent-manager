@@ -130,6 +130,7 @@ export {
 export {
   nodeListQueryOptions,
   nodeQueryKeys,
+  nodeResourceUsageQueryOptions,
   providerCatalogQueryOptions,
   workspaceListQueryOptions,
   workspacePortsQueryOptions,
