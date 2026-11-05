@@ -39,7 +39,7 @@ export function getHierarchyRole(
 }
 
 /** Compact hierarchy trigger size for dense chat-list rows. */
-const HIERARCHY_BUTTON_SIZE_PX = 22;
+const HIERARCHY_BUTTON_SIZE_PX = 26;
 
 const ROLE_CONFIG = {
   parent: {
@@ -103,8 +103,8 @@ export function HierarchyIndicator({
       style={{
         width: HIERARCHY_BUTTON_SIZE_PX,
         height: HIERARCHY_BUTTON_SIZE_PX,
-        borderRadius: 4,
-        borderColor: cfg.color,
+        borderRadius: 8,
+        borderColor: `color-mix(in srgb, ${cfg.color} 40%, transparent)`,
         color: cfg.color,
         background: `color-mix(in srgb, ${cfg.color} ${cfg.bgAlpha}, transparent)`,
       }}
@@ -117,7 +117,7 @@ export function HierarchyIndicator({
           `color-mix(in srgb, ${cfg.color} ${cfg.bgAlpha}, transparent)`;
       }}
     >
-      <Icon size={11} />
+      <Icon size={14} strokeWidth={1.9} />
     </button>
   );
 }

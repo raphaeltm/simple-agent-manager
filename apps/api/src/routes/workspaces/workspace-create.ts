@@ -30,9 +30,11 @@ import { scheduleDirectProvisioning } from '../../services/direct-provisioning';
 import { getRuntimeLimits } from '../../services/limits';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import {
-  assertNodeAllocationPlanCurrent,
-  createNodeRecord,
-} from '../../services/nodes';
+  isNodePastLifetimeAdmissionCutoff,
+  LIFETIME_ADMISSION_CUTOFF_REASON,
+  resolvePlacementAdmissionPolicy,
+} from '../../services/node-lifetime-admission';
+import { assertNodeAllocationPlanCurrent, createNodeRecord } from '../../services/nodes';
 import {
   PlacementResolutionError,
   resolveTaskStartPlacement,
@@ -40,10 +42,7 @@ import {
 import * as projectDataService from '../../services/project-data';
 import { recordNodeRoutingMetric } from '../../services/telemetry';
 import { resolveUniqueWorkspaceDisplayName } from '../../services/workspace-names';
-import {
-  reserveWorkspacePlacement,
-} from '../../services/workspace-placement';
-import { resolveWorkspaceAdmissionPolicy } from '../../services/workspace-resource-capacity';
+import { reserveWorkspacePlacement } from '../../services/workspace-placement';
 import { requireRepositoryUserAccess } from '../projects/_helpers';
 import { getOwnedNode, getOwnedWorkspace } from './_helpers';
 import {
@@ -360,7 +359,7 @@ export function registerWorkspaceCreateRoute(crudRoutes: Hono<{ Bindings: Env }>
 
       const workspaceId = ulid();
 
-      const admissionPolicy = resolveWorkspaceAdmissionPolicy(c.env);
+      const admissionPolicy = await resolvePlacementAdmissionPolicy(c.env);
       if (mustProvisionNode) {
         await db.insert(schema.workspaces).values({
           id: workspaceId,
@@ -414,7 +413,13 @@ export function registerWorkspaceCreateRoute(crudRoutes: Hono<{ Bindings: Env }>
         );
         if (!placementReserved) {
           throw errors.conflict(
-            'Selected node lost capacity or placement authority before workspace creation'
+            (await isNodePastLifetimeAdmissionCutoff(
+              c.env.DATABASE,
+              targetNodeId,
+              admissionPolicy.lifetimeAdmissionCutoffAgeMs
+            ))
+              ? `Selected node: ${LIFETIME_ADMISSION_CUTOFF_REASON}`
+              : 'Selected node lost capacity or placement authority before workspace creation'
           );
         }
       }
@@ -522,16 +527,33 @@ export function registerWorkspaceCreateRoute(crudRoutes: Hono<{ Bindings: Env }>
         userId,
         workspace: {
           placement: {
-            id: workspaceId, nodeId: targetNodeId, projectId: linkedProject.id, userId,
-            installationId: resolvedInstallationId, name: workspaceName,
-            displayName: uniqueName.displayName, normalizedDisplayName: uniqueName.normalizedDisplayName,
-            repository: resolvedRepository, branch, vmSize: workspaceVmSize, vmLocation: workspaceVmLocation,
-            workspaceProfile: DEFAULT_WORKSPACE_PROFILE, devcontainerConfigName: null, agentProfileHint: null,
-            resourceRequirementsJson, capacityPlacementSnapshot, authorityNodeClass, resolvedReservation, createdAt: now,
+            id: workspaceId,
+            nodeId: targetNodeId,
+            projectId: linkedProject.id,
+            userId,
+            installationId: resolvedInstallationId,
+            name: workspaceName,
+            displayName: uniqueName.displayName,
+            normalizedDisplayName: uniqueName.normalizedDisplayName,
+            repository: resolvedRepository,
+            branch,
+            vmSize: workspaceVmSize,
+            vmLocation: workspaceVmLocation,
+            workspaceProfile: DEFAULT_WORKSPACE_PROFILE,
+            devcontainerConfigName: null,
+            agentProfileHint: null,
+            resourceRequirementsJson,
+            capacityPlacementSnapshot,
+            authorityNodeClass,
+            resolvedReservation,
+            createdAt: now,
           },
           linkedProject: { id: linkedProject.id, repoProvider: linkedProject.repoProvider },
-          taskId: chatTaskId, chatSessionId, mustProvisionNode,
-          gitUserName: auth.user.name ?? null, gitUserEmail: auth.user.email ?? null,
+          taskId: chatTaskId,
+          chatSessionId,
+          mustProvisionNode,
+          gitUserName: auth.user.name ?? null,
+          gitUserEmail: auth.user.email ?? null,
         },
       });
 

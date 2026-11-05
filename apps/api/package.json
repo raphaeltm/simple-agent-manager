@@ -30,7 +30,7 @@
     "@cloudflare/workers-oauth-provider": "1.2.4",
     "@hono/node-server": "1.19.9",
     "@hono/valibot-validator": "0.6.1",
-    "@mastra/core": "1.77.0",
+    "@mastra/core": "1.81.0",
     "@modelcontextprotocol/server": "2.3.1",
     "@simple-agent-manager/cloud-init": "workspace:*",
     "@simple-agent-manager/providers": "workspace:*",
@@ -53,7 +53,7 @@
   "devDependencies": {
     "@cloudflare/vitest-pool-workers": "0.17.0",
     "@cloudflare/workers-types": "catalog:",
-    "@modelcontextprotocol/client": "2.3.1",
+    "@modelcontextprotocol/client": "2.4.0",
     "@types/better-sqlite3": "^7.6.13",
     "@types/diff": "^8.0.0",
     "@typescript-eslint/eslint-plugin": "catalog:",

@@ -4,47 +4,28 @@ import type {
   TaskDetailResponse,
   WorkspaceResponse,
 } from '@simple-agent-manager/shared';
-import { isExpiredTask } from '@simple-agent-manager/shared';
-import { Spinner } from '@simple-agent-manager/ui';
-import { CheckCircle2, Clock, Globe, Hash, MessageSquare, Tag, Timer, User2 } from 'lucide-react';
+import { AvatarStack, paneClassName } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { useIsMobile } from '../../hooks/useIsMobile';
 import type { ChatSessionResponse } from '../../lib/api';
 import { getPortAccessUrl, getProjectTask, listChatMessages } from '../../lib/api';
+import { sessionPeople } from '../../lib/session-people';
 import { stripMarkdown } from '../../lib/text-utils';
 import { sanitizeUrl } from '../../lib/url-utils';
 import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils';
-import { SessionCredentialLimitChip } from '../credential-limits/SessionCredentialLimitChip';
-import { CopyableId } from './CopyableId';
+import { useAuth } from '../AuthProvider';
 import { PublicPortsToggleRow } from './PublicPortsToggleRow';
-import { SessionCommentChip } from './SessionCommentChip';
-import { WorkspaceProfileBadge } from './SessionHeaderBadges';
-import {
-  formatDuration,
-  formatExecutionStep,
-  formatTime,
-  getCreatorLabel,
-} from './SessionHeaderFormatters';
-import { SessionHeaderInfrastructure } from './SessionHeaderInfrastructure';
-import { SessionHeaderPullRequestRow } from './SessionHeaderPullRequestRow';
-import { SessionRunDetails } from './SessionRunDetails';
-import { SessionSourceContextRow } from './SessionSourceContextRow';
-import { SessionTriggerOrigin } from './SessionTriggerOrigin';
-import { SessionWorkingOnChip } from './SessionWorkingOnChip';
+import { SessionPortList } from './SessionHeaderBadges';
+import { SessionHeaderChips, sessionStateLabel, sessionStateTone } from './SessionHeaderChips';
+import { SessionHeaderDetails } from './SessionHeaderDetails';
+import { SessionHeaderMobile } from './SessionHeaderMobile';
 import type { SessionState } from './types';
 import { usePublicPortsToggle } from './usePublicPortsToggle';
 import { resolvePrimaryPullRequest, type SessionLinkedWork } from './useSessionLinkedWork';
-import { WorkloadIdentityDetails } from './WorkloadIdentityDetails';
 
 /** Hoisted so the fallback resolve below keeps a stable argument identity. */
 const EMPTY_PULL_REQUESTS: never[] = [];
-
-const SESSION_STATE_LABELS: Partial<Record<SessionState, string>> = {
-  active: 'Active',
-  idle: 'Idle',
-  sleeping: 'Sleeping',
-  terminated: 'Stopped',
-};
 
 /**
  * Session header — title, status chips, and an expandable details panel.
@@ -55,6 +36,10 @@ const SESSION_STATE_LABELS: Partial<Record<SessionState, string>> = {
  * They now live in `SessionToolRail`, and the disclosure is controlled by the rail's
  * "Details" action (see `useSessionTools`). This component is presentational: it owns
  * no action state and triggers no mutations.
+ *
+ * On a phone (`useIsMobile`) the header is one row (`SessionHeaderMobile`) and `expanded` opens
+ * the session-info sheet, which holds the chips, every port, the public-ports switch and the
+ * details. Desktop keeps the title, chip row and inline disclosure.
  */
 export function SessionHeader({
   projectId,
@@ -72,11 +57,9 @@ export function SessionHeader({
   lineageText,
   initialPromptFallback = null,
   sourceContext,
-  hasContentBelow = false,
   onShowHierarchy,
   expanded,
   onExpandedChange,
-  flushRight = false,
   completeError = null,
   onDismissCompleteError,
   linkedWork,
@@ -101,8 +84,6 @@ export function SessionHeader({
   initialPromptFallback?: string | null;
   /** Parent/source details for forked or retried sessions. */
   sourceContext?: SessionSourceContext;
-  /** When true, suppress bottom rounding and glow (content follows below). */
-  hasContentBelow?: boolean;
   /** Open hierarchy modal for the given task. */
   onShowHierarchy?: (taskId: string) => void;
   /**
@@ -111,15 +92,6 @@ export function SessionHeader({
    */
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
-  /**
-   * True when the tool rail sits directly to the right of this card.
-   *
-   * The card's bottom corners are rounded so it reads as a panel hanging from the top of
-   * the conversation. Against the rail that curve is wrong: it leaves a lens-shaped gap
-   * between the card's rounded corner and the rail's straight edge. Squaring the right
-   * side lets the two butt flush and read as one continuous piece of chrome.
-   */
-  flushRight?: boolean;
   /** Surfaced by the owner's mark-complete flow, which lives with the rail. */
   completeError?: string | null;
   onDismissCompleteError?: () => void;
@@ -130,6 +102,7 @@ export function SessionHeader({
    */
   linkedWork?: SessionLinkedWork | null;
 }) {
+  const viewerId = useAuth().user?.id ?? null;
   const [initialPrompt, setInitialPrompt] = useState<string | null>(initialPromptFallback);
   const [initialPromptLoading, setInitialPromptLoading] = useState(false);
   const [initialPromptError, setInitialPromptError] = useState<string | null>(null);
@@ -208,340 +181,165 @@ export function SessionHeader({
     [publicPorts.enabled, workspace]
   );
 
+  const isMobile = useIsMobile();
   const sessionTitle = session.topic
     ? stripMarkdown(session.topic)
     : `Chat ${session.id.slice(0, 8)}`;
-  const creatorLabel = getCreatorLabel(session);
-  const sortedPorts = detectedPorts.slice().sort((a, b) => a.port - b.port);
-  const firstPort = sortedPorts[0];
-  const extraPortCount = Math.max(0, sortedPorts.length - 1);
+  const sortedPorts = useMemo(
+    () => detectedPorts.slice().sort((a, b) => a.port - b.port),
+    [detectedPorts]
+  );
+  const people = sessionPeople(session.access, viewerId);
+  const peopleStack =
+    people.length > 1 ? (
+      <AvatarStack
+        people={people}
+        size={26}
+        label={`People with access: ${people.map((person) => person.name).join(', ')}`}
+        className="mt-0.5 shrink-0"
+      />
+    ) : null;
+
+  const chips = (surface: 'header' | 'sheet') => (
+    <SessionHeaderChips
+      projectId={projectId}
+      session={session}
+      sessionState={sessionState}
+      taskEmbed={taskEmbed}
+      workspace={workspace}
+      sortedPorts={sortedPorts}
+      getWorkspacePortHref={getWorkspacePortHref}
+      onShowMorePorts={() => onExpandedChange(true)}
+      onOpenComments={onOpenComments}
+      unresolvedCommentCount={unresolvedCommentCount}
+      needsAttentionCommentCount={needsAttentionCommentCount}
+      linkedWork={linkedWork}
+      lineageText={lineageText}
+      surface={surface}
+    />
+  );
+
+  // Mark-complete failures stay on screen outside the disclosure: the action that produces
+  // this error lives in the tool rail, so the details are usually closed when it fails.
+  const completeErrorRow = completeError ? (
+    <div className="flex items-center gap-2 border-t border-[var(--sam-danger-edge)] px-4 py-1.5 md:px-6">
+      <span className="text-xs text-danger-fg">{completeError}</span>
+      {onDismissCompleteError && (
+        <button
+          type="button"
+          onClick={onDismissCompleteError}
+          className="cursor-pointer border-none bg-transparent text-xs text-fg-muted underline"
+        >
+          Dismiss
+        </button>
+      )}
+    </div>
+  ) : null;
+
+  const publicPortsRow =
+    workspace && detectedPorts.length > 0 ? (
+      <PublicPortsToggleRow
+        enabled={publicPorts.enabled}
+        saving={publicPorts.saving}
+        error={publicPorts.error}
+        onToggle={publicPorts.toggle}
+      />
+    ) : null;
+
+  const details = (
+    <SessionHeaderDetails
+      projectId={projectId}
+      session={session}
+      sessionTitle={sessionTitle}
+      sessionState={sessionState}
+      idleCountdownMs={idleCountdownMs}
+      taskEmbed={taskEmbed}
+      workspace={workspace}
+      node={node}
+      // The sheet lists the ports in their own section above the details.
+      detectedPorts={isMobile ? [] : detectedPorts}
+      getWorkspacePortHref={getWorkspacePortHref}
+      initialPrompt={initialPrompt}
+      initialPromptLoading={initialPromptLoading}
+      initialPromptError={initialPromptError}
+      primaryPullRequest={primaryPullRequest}
+      triggerDetail={triggerDetail}
+      sourceContext={sourceContext}
+      onShowHierarchy={onShowHierarchy}
+      surface={isMobile ? 'sheet' : 'inline'}
+    />
+  );
+
+  if (isMobile) {
+    return (
+      <SessionHeaderMobile
+        title={sessionTitle}
+        stateLabel={sessionStateLabel(sessionState, taskEmbed)}
+        stateTone={sessionStateTone(sessionState)}
+        firstPort={sortedPorts[0]}
+        getWorkspacePortHref={getWorkspacePortHref}
+        unresolvedCommentCount={unresolvedCommentCount}
+        needsAttentionCommentCount={needsAttentionCommentCount}
+        onOpenComments={onOpenComments}
+        expanded={expanded}
+        onExpandedChange={onExpandedChange}
+        people={peopleStack}
+        belowRow={completeErrorRow}
+        sheetContent={
+          <>
+            <div className="px-4 pt-1 pb-3">{chips('sheet')}</div>
+            {sortedPorts.length > 0 && (
+              <section
+                aria-label="Forwarded ports"
+                className="border-t border-[var(--sam-hairline)] px-2 pt-2"
+              >
+                <SessionPortList ports={sortedPorts} getHref={getWorkspacePortHref} />
+              </section>
+            )}
+            {publicPortsRow}
+            {details}
+          </>
+        }
+      />
+    );
+  }
 
   return (
     <div
       data-testid="session-header"
-      className={`relative glass-chrome border-t-0 shrink-0${hasContentBelow ? '' : `${flushRight ? ' rounded-bl-2xl' : ' rounded-b-2xl'}` + " after:content-[''] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10"}`}
-      style={{
-        boxShadow: hasContentBelow
-          ? '0 4px 24px rgba(0, 0, 0, 0.4)'
-          : '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(34, 197, 94, 0.08)',
-      }}
+      // Only the open details panel may give up height (it scrolls); the title and chips never
+      // get clipped, whatever else shares the column.
+      className={`${paneClassName('slab')} flex flex-col overflow-hidden ${expanded ? 'min-h-0 shrink' : 'shrink-0'}`}
     >
-      {/* Opacity scrim: Chromium does not sample composited scroll-container
-          content for backdrop-filter, so the glass blur silently no-ops over
-          the message list and scrolled messages collide with the header text.
-          This underlay keeps the header legible without depending on blur. */}
-      <div
-        aria-hidden="true"
-        className="absolute inset-0 rounded-[inherit] -z-10 pointer-events-none"
-        style={{
-          backgroundColor: 'color-mix(in srgb, var(--sam-color-bg-canvas) 78%, transparent)',
-        }}
-      />
-      <div className="px-4 py-2 min-h-[54px] space-y-1.5">
-        {/* Retry / Fork / the details chevron used to sit to the right of this title as
-            unlabeled 14px icons. They are now named, grouped controls in
-            `SessionToolRail`, so the title gets the full width. */}
-        <div
-          // Focus target after an in-chat link opens another chat (session-focus-handoff).
-          data-session-title
-          tabIndex={-1}
-          className="text-sm font-semibold text-fg-primary min-w-0 leading-snug rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
-          title={sessionTitle}
-          style={{
-            display: '-webkit-box',
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: 'vertical',
-            overflow: 'hidden',
-            overflowWrap: 'anywhere',
-          }}
-        >
-          {sessionTitle}
-        </div>
-
-        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 min-w-0">
-          <span
-            className="inline-flex items-center gap-1 text-xs font-medium shrink-0"
+      <div className="shrink-0 space-y-2.5 px-4 pt-3 pb-3.5 md:px-6 md:pt-4">
+        <div className="flex items-start gap-3">
+          {/* Retry / Fork / the details chevron live in `SessionToolRail`, so the title
+              gets the full width. */}
+          <div
+            // Focus target after an in-chat link opens another chat (session-focus-handoff).
+            data-session-title
+            tabIndex={-1}
+            className="min-w-0 flex-1 rounded-sm text-[17px] leading-snug font-semibold text-fg-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring md:text-[19px]"
+            title={sessionTitle}
             style={{
-              color:
-                sessionState === 'active'
-                  ? 'var(--sam-color-success)'
-                  : sessionState === 'idle'
-                    ? 'var(--sam-color-warning, #f59e0b)'
-                    : sessionState === 'sleeping'
-                      ? 'var(--sam-color-info, #3b82f6)'
-                      : 'var(--sam-color-fg-muted)',
+              display: '-webkit-box',
+              WebkitLineClamp: 2,
+              WebkitBoxOrient: 'vertical',
+              overflow: 'hidden',
+              overflowWrap: 'anywhere',
             }}
           >
-            <span className="w-[6px] h-[6px] rounded-full bg-current" />
-            {isExpiredTask(taskEmbed)
-              ? 'Expired'
-              : (SESSION_STATE_LABELS[sessionState] ?? 'Stopped')}
-          </span>
-
-          {workspace && <WorkspaceProfileBadge workspace={workspace} />}
-
-          <SessionCredentialLimitChip
-            projectId={projectId}
-            agentSessionId={session.agentSessionId ?? null}
-          />
-
-          {creatorLabel && (
-            <span
-              className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 ${
-                session.isMine ? 'text-fg-secondary bg-surface' : 'text-fg-muted bg-surface'
-              }`}
-              title={session.isMine ? 'Created by you' : `Created by ${creatorLabel}`}
-            >
-              <User2 size={10} aria-hidden="true" />
-              <span>{session.isMine ? 'Your session' : creatorLabel}</span>
-            </span>
-          )}
-
-          {firstPort && (
-            <a
-              href={getWorkspacePortHref(firstPort)}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-0.5 text-[10px] font-mono font-medium px-1.5 py-0.5 rounded no-underline shrink-0"
-              style={{
-                backgroundColor: 'var(--sam-color-accent-tint, rgba(59, 130, 246, 0.1))',
-                color: 'var(--sam-color-accent-primary)',
-              }}
-              title={`${firstPort.label} — ${firstPort.url}`}
-            >
-              <Globe size={10} aria-hidden="true" />
-              {firstPort.port}
-            </a>
-          )}
-
-          {extraPortCount > 0 && (
-            <button
-              type="button"
-              onClick={() => onExpandedChange(true)}
-              className="text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 bg-transparent border cursor-pointer whitespace-nowrap hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary"
-              style={{
-                color: 'var(--sam-color-fg-muted)',
-                borderColor: 'var(--sam-color-border-default)',
-              }}
-              aria-label={`Show ${extraPortCount} more forwarded ${extraPortCount === 1 ? 'port' : 'ports'}`}
-            >
-              +{extraPortCount} more
-            </button>
-          )}
-
-          {onOpenComments && (
-            <SessionCommentChip
-              unresolvedCommentCount={unresolvedCommentCount}
-              needsAttentionCommentCount={needsAttentionCommentCount}
-              onOpenComments={onOpenComments}
-            />
-          )}
-
-          {linkedWork?.workingOn && (
-            <SessionWorkingOnChip projectId={projectId} workingOn={linkedWork.workingOn} />
-          )}
-
-          {lineageText && (
-            <span
-              className="text-[10px] font-medium shrink-0"
-              style={{ color: 'var(--sam-color-fg-muted)' }}
-              title={lineageText}
-            >
-              {lineageText.startsWith('⑂') ? '⑂ fork' : lineageText}
-            </span>
-          )}
+            {sessionTitle}
+          </div>
+          {peopleStack}
         </div>
+
+        {chips('header')}
       </div>
 
-      {/* Mark-complete failures. Rendered OUTSIDE the disclosure: the action that
-          produces this error now lives in the tool rail, so the user has no reason to
-          have the details panel open when it fails. */}
-      {completeError && (
-        <div className="flex items-center gap-2 border-t border-[rgba(239,68,68,0.16)] px-4 py-1.5">
-          <span className="text-xs" style={{ color: 'var(--sam-color-danger)' }}>
-            {completeError}
-          </span>
-          {onDismissCompleteError && (
-            <button
-              type="button"
-              onClick={onDismissCompleteError}
-              className="text-xs bg-transparent border-none cursor-pointer underline"
-              style={{ color: 'var(--sam-color-fg-muted)' }}
-            >
-              Dismiss
-            </button>
-          )}
-        </div>
-      )}
-
-      {workspace && detectedPorts.length > 0 && (
-        <PublicPortsToggleRow
-          enabled={publicPorts.enabled}
-          saving={publicPorts.saving}
-          error={publicPorts.error}
-          onToggle={publicPorts.toggle}
-        />
-      )}
-
-      {expanded && (
-        <div className="border-t border-[rgba(34,197,94,0.08)] px-4 py-2 space-y-2">
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-1 text-[10px] font-medium text-fg-muted uppercase tracking-wide">
-              <Tag size={10} />
-              Title
-            </div>
-            <div
-              className="text-sm font-semibold text-fg-primary"
-              style={{ overflowWrap: 'anywhere' }}
-            >
-              {sessionTitle}
-            </div>
-          </div>
-
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-1 text-[10px] font-medium text-fg-muted uppercase tracking-wide">
-              <MessageSquare size={10} />
-              Initial prompt
-            </div>
-            {initialPromptLoading ? (
-              <div role="status" className="inline-flex items-center gap-2 text-xs text-fg-muted">
-                <Spinner size="sm" />
-                Loading initial prompt...
-              </div>
-            ) : initialPrompt ? (
-              <div
-                className="text-xs leading-relaxed rounded p-2 max-h-32 overflow-y-auto whitespace-pre-wrap text-fg-primary"
-                style={{
-                  background: 'var(--sam-color-bg-inset, rgba(255,255,255,0.03))',
-                  overflowWrap: 'anywhere',
-                }}
-              >
-                {initialPrompt}
-              </div>
-            ) : (
-              <div className="text-xs text-fg-muted">
-                {initialPromptError ?? 'No initial user prompt found.'}
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-1.5">
-            <div className="flex items-center gap-1 text-[10px] font-medium text-fg-muted uppercase tracking-wide">
-              <Hash size={10} />
-              References
-            </div>
-            <div className="flex flex-wrap gap-1.5">
-              {taskEmbed?.id && (
-                <CopyableId label="Task" value={taskEmbed.id} icon={<Tag size={9} />} />
-              )}
-              <CopyableId label="Session" value={session.id} icon={<Hash size={9} />} />
-              {session.workspaceId && <CopyableId label="Workspace" value={session.workspaceId} />}
-              {session.agentSessionId && <CopyableId label="ACP" value={session.agentSessionId} />}
-            </div>
-          </div>
-
-          <WorkloadIdentityDetails key={session.id} projectId={projectId} sessionId={session.id} />
-
-          <SessionRunDetails
-            projectId={projectId}
-            sessionId={session.id}
-            agentType={session.agentType}
-            taskMode={taskEmbed?.taskMode}
-            agentProfileHint={taskEmbed?.agentProfileHint}
-          />
-
-          {(taskEmbed?.id || session.startedAt) && (
-            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-fg-muted">
-              {taskEmbed?.executionStep && taskEmbed.status === 'in_progress' && (
-                <span className="inline-flex items-center gap-1">
-                  <Spinner size="sm" />
-                  <span
-                    className="font-medium"
-                    style={{ color: 'var(--sam-color-accent-primary)' }}
-                  >
-                    {formatExecutionStep(taskEmbed.executionStep)}
-                  </span>
-                </span>
-              )}
-              {taskEmbed?.status && (
-                <span
-                  className="inline-flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded"
-                  style={{
-                    backgroundColor:
-                      taskEmbed.status === 'completed'
-                        ? 'var(--sam-color-success-tint)'
-                        : taskEmbed.status === 'failed'
-                          ? 'color-mix(in srgb, var(--sam-color-danger) 10%, transparent)'
-                          : taskEmbed.status === 'in_progress'
-                            ? 'var(--sam-color-accent-tint, rgba(59, 130, 246, 0.1))'
-                            : 'var(--sam-color-surface-hover)',
-                    color:
-                      taskEmbed.status === 'completed'
-                        ? 'var(--sam-color-success)'
-                        : taskEmbed.status === 'failed'
-                          ? 'var(--sam-color-danger)'
-                          : taskEmbed.status === 'in_progress'
-                            ? 'var(--sam-color-accent-primary)'
-                            : 'var(--sam-color-fg-muted)',
-                  }}
-                >
-                  {taskEmbed.status === 'completed' && <CheckCircle2 size={10} />}
-                  {taskEmbed.status.charAt(0).toUpperCase() +
-                    taskEmbed.status.slice(1).replace(/_/g, ' ')}
-                </span>
-              )}
-              {session.startedAt && (
-                <span className="inline-flex items-center gap-1">
-                  <Clock size={11} className="opacity-60" />
-                  {formatTime(session.startedAt)}
-                </span>
-              )}
-              {session.startedAt && (
-                <span className="inline-flex items-center gap-1">
-                  <Timer size={11} className="opacity-60" />
-                  {session.endedAt
-                    ? formatDuration(session.endedAt - session.startedAt)
-                    : formatDuration(Date.now() - session.startedAt)}
-                  {!session.endedAt && <span className="text-[10px] opacity-50">(running)</span>}
-                </span>
-              )}
-            </div>
-          )}
-
-          {/* PR link (with its state) & idle countdown — separate row above buttons */}
-          <SessionHeaderPullRequestRow
-            sessionState={sessionState}
-            idleCountdownMs={idleCountdownMs}
-            pullRequest={primaryPullRequest}
-          />
-
-          {/* Trigger info — shown when task was spawned by an automation trigger */}
-          {triggerDetail?.trigger && (
-            <SessionTriggerOrigin projectId={projectId} detail={triggerDetail} />
-          )}
-
-          {sourceContext && (
-            <SessionSourceContextRow
-              projectId={projectId}
-              sourceContext={sourceContext}
-              onShowHierarchy={onShowHierarchy}
-            />
-          )}
-
-          {/* The action row that used to live here — Files, Git, Workspace, Timeline,
-              Comments, Report, Complete — moved to `SessionToolRail`. This panel is
-              now purely reference material: title, initial prompt, IDs, infrastructure. */}
-
-          <SessionHeaderInfrastructure
-            session={session}
-            workspace={workspace}
-            node={node}
-            taskEmbed={taskEmbed}
-            detectedPorts={detectedPorts}
-            getWorkspacePortHref={getWorkspacePortHref}
-          />
-        </div>
-      )}
+      {completeErrorRow}
+      {publicPortsRow}
+      {expanded && details}
     </div>
   );
 }

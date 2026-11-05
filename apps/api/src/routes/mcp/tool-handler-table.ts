@@ -63,6 +63,25 @@ import {
   handlePublishMissionState,
 } from './mission-tools';
 import { handleOpsGetAccessStatus } from './operations-tools';
+import { handleOpsExecuteAction, handleOpsRequestAction } from './ops-action-tools';
+import {
+  handleOpsCaptureDebugPackage,
+  handleOpsNodeContainers,
+  handleOpsNodeEvents,
+  handleOpsNodeLogs,
+  handleOpsNodeSystemInfo,
+  handleOpsWorkspaceAgentSessions,
+} from './ops-node-tools';
+import {
+  handleOpsFindAnomalies,
+  handleOpsGetNode,
+  handleOpsGetSessionStory,
+  handleOpsListNodes,
+  handleOpsQueryWorkerLogs,
+  handleOpsSearchErrors,
+  handleOpsTimeline,
+} from './ops-read-tools';
+import { handleOpsGetNodeLogCapture, handleOpsWhyIsNodeAlive } from './ops-telemetry-tools';
 import { handleSendMessageToSubtask, handleStopSubtask } from './orchestration-comms';
 import {
   handleAddDependency,
@@ -144,7 +163,26 @@ export type McpToolHandler = (
 export const OPERATIONS_TOOL_HANDLERS: ReadonlyMap<string, McpToolHandler> = new Map<
   string,
   McpToolHandler
->([['ops_get_access_status', handleOpsGetAccessStatus]]);
+>([
+  ['ops_get_access_status', handleOpsGetAccessStatus],
+  ['ops_find_anomalies', handleOpsFindAnomalies],
+  ['ops_list_nodes', handleOpsListNodes],
+  ['ops_get_node', handleOpsGetNode],
+  ['ops_get_session_story', handleOpsGetSessionStory],
+  ['ops_timeline', handleOpsTimeline],
+  ['ops_search_errors', handleOpsSearchErrors],
+  ['ops_query_worker_logs', handleOpsQueryWorkerLogs],
+  ['ops_node_logs', handleOpsNodeLogs],
+  ['ops_node_system_info', handleOpsNodeSystemInfo],
+  ['ops_node_events', handleOpsNodeEvents],
+  ['ops_node_containers', handleOpsNodeContainers],
+  ['ops_workspace_agent_sessions', handleOpsWorkspaceAgentSessions],
+  ['ops_capture_debug_package', handleOpsCaptureDebugPackage],
+  ['ops_why_is_node_alive', handleOpsWhyIsNodeAlive],
+  ['ops_get_node_log_capture', handleOpsGetNodeLogCapture],
+  ['ops_request_action', handleOpsRequestAction],
+  ['ops_execute_action', handleOpsExecuteAction],
+]);
 
 export const MCP_TOOL_HANDLERS: ReadonlyMap<string, McpToolHandler> = new Map<
   string,

@@ -1,8 +1,10 @@
 import { classifyFailure } from '@simple-agent-manager/shared';
+import { paneClassName } from '@simple-agent-manager/ui';
 
 import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils';
 import { TruncatedSummary } from '../chat/TruncatedSummary';
 import { FailureCard } from '../debug/FailureCard';
+import { IMMERSIVE_CHROME } from '../shell/chat-immersive-transition';
 import { SessionHeader } from './SessionHeader';
 import type { useSessionLifecycle } from './useSessionLifecycle';
 import type { SessionLinkedWork } from './useSessionLinkedWork';
@@ -16,12 +18,9 @@ interface FloatingHeaderProps {
   needsAttentionCommentCount?: number;
   sourceContext?: SessionSourceContext;
   onShowHierarchy?: (taskId: string) => void;
-  containerRef?: (el: HTMLDivElement | null) => void;
   /** Details-panel visibility, owned by `useSessionTools` alongside the tool rail. */
   expanded: boolean;
   onExpandedChange: (expanded: boolean) => void;
-  /** True when the tool rail is beside the header — squares its right corner. */
-  flushRight?: boolean;
   completeError?: string | null;
   onDismissCompleteError?: () => void;
   /** What this chat is related to — the header's "Working on" chip and the PR's state. */
@@ -38,10 +37,8 @@ export function FloatingHeader({
   needsAttentionCommentCount,
   sourceContext,
   onShowHierarchy,
-  containerRef,
   expanded,
   onExpandedChange,
-  flushRight,
   completeError,
   onDismissCompleteError,
   linkedWork,
@@ -62,18 +59,24 @@ export function FloatingHeader({
   const failureClassification = lc.taskEmbed?.errorMessage
     ? classifyFailure(lc.taskEmbed.errorMessage, lc.taskEmbed.executionStep ?? undefined)
     : null;
-  const failureShellClassName = failureClassification?.diagnosable
-    ? "glass-chrome px-3 py-2 rounded-b-2xl relative after:content-[''] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(239,68,68,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10"
-    : `glass-chrome px-3 py-2 ${flushRight ? 'rounded-bl-2xl' : 'rounded-b-2xl'} relative`;
-  const failureShellBoxShadow = failureClassification?.diagnosable
-    ? '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(239, 68, 68, 0.08)'
-    : '0 4px 24px rgba(0, 0, 0, 0.4)';
+  // A diagnosable failure lights the slab's lower edge red, the way the session slab's lower
+  // edge is lit green. The shell scrolls itself so a long report cannot push the
+  // conversation off screen.
+  // The failure card scrolls, so it gives up height before the session header does, down to
+  // its first line.
+  const failureShellClassName = `${paneClassName('slab')} min-h-11 max-h-[40vh] shrink overflow-y-auto px-3 py-2 ${
+    failureClassification?.diagnosable
+      ? 'shadow-[inset_0_-1px_0_var(--sam-danger-edge),var(--sam-glass-v2-depth-slab)]'
+      : ''
+  }`;
 
   return (
     <div
-      ref={containerRef}
-      className="absolute top-0 left-0 right-0 z-10"
+      // Shrinks (with the details panel scrolling inside the slab) rather than squeezing the
+      // conversation below its minimum height on a short phone screen.
+      className="relative z-10 flex min-h-0 shrink flex-col gap-2"
       data-testid="session-floating-header"
+      data-immersive-chrome={IMMERSIVE_CHROME.sessionHeader}
     >
       <SessionHeader
         projectId={projectId}
@@ -91,28 +94,15 @@ export function FloatingHeader({
         lineageText={sourceContext?.lineageText}
         initialPromptFallback={initialPromptFallback}
         sourceContext={sourceContext}
-        hasContentBelow={!!lc.taskEmbed?.errorMessage}
         onShowHierarchy={onShowHierarchy}
         expanded={expanded}
         onExpandedChange={onExpandedChange}
-        flushRight={flushRight}
         completeError={completeError}
         onDismissCompleteError={onDismissCompleteError}
         linkedWork={linkedWork}
       />
       {lc.taskEmbed?.errorMessage && (
-        <div
-          data-testid="failure-card-shell"
-          className={failureShellClassName}
-          style={{ boxShadow: failureShellBoxShadow }}
-        >
-          <div
-            aria-hidden="true"
-            className="absolute inset-0 rounded-[inherit] -z-10 pointer-events-none"
-            style={{
-              backgroundColor: 'color-mix(in srgb, var(--sam-color-bg-canvas) 78%, transparent)',
-            }}
-          />
+        <div data-testid="failure-card-shell" className={failureShellClassName}>
           <FailureCard
             projectId={projectId}
             taskEmbed={lc.taskEmbed}

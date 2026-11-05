@@ -149,7 +149,7 @@ export function ProjectSettingsGeneral() {
         </div>
       </section>
 
-      <section className="bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_60%,transparent)] backdrop-blur-[12px] rounded-lg border border-danger p-4 grid gap-3">
+      <section className="bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_60%,transparent)] rounded-lg border border-danger p-4 grid gap-3">
         <div>
           <h2 className="sam-type-section-heading m-0 text-danger">Danger Zone</h2>
           <p className="m-0 mt-1 text-xs text-fg-muted">

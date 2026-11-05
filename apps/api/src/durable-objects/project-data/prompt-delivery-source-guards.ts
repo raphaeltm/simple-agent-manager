@@ -181,6 +181,9 @@ export function sourceTaskGuardForClaim(
     claim.message.sourceKind !== 'project_event_wake' &&
     claim.message.sourceKind !== 'github_trigger' &&
     claim.message.sourceKind !== 'scheduled_action' &&
+    // An Operations decision wakes the requesting agent only while its task (or that task's
+    // own session-recovery successor) is live; a finished task has nothing to act on.
+    claim.message.sourceKind !== 'operations_decision' &&
     // A continuation re-wakes the chat only while its own task is live: unguarded, the
     // recovery claim would reactivate even a terminal task.
     claim.message.sourceKind !== 'checkpoint_continuation'

@@ -26,7 +26,8 @@ export const OCTET_STREAM_MIME = 'application/octet-stream';
 /**
  * Curated filename-extension → base MIME type map. Values are bare (no
  * `; charset=...`) to match the stored/served types the preview code compares
- * against. Extensions here that are already previewable (md, html, images, pdf)
+ * against. Extensions here that are already previewable (md, html, images, pdf,
+ * video)
  * let an octet-stream-stored file of that type preview; the rest (txt, log,
  * yaml, toml, csv, json, xml) resolve to a correct — but not previewable — type,
  * matching the current preview policy.
@@ -52,6 +53,11 @@ const EXTENSION_MIME_TYPES: Readonly<Record<string, string>> = {
   gif: 'image/gif',
   webp: 'image/webp',
   avif: 'image/avif',
+  mp4: 'video/mp4',
+  m4v: 'video/mp4',
+  webm: 'video/webm',
+  mov: 'video/quicktime',
+  ogv: 'video/ogg',
 };
 
 /**
@@ -104,7 +110,7 @@ export function mimeTypeFromFilename(filename: string | null | undefined): strin
  */
 export function resolveEffectiveMimeType(
   storedMimeType: string | null | undefined,
-  filename?: string | null,
+  filename?: string | null
 ): string {
   const base = normalizeMimeType(storedMimeType ?? '');
   if (!isUnknownMimeType(base)) {

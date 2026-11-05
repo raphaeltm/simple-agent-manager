@@ -135,6 +135,17 @@ export function sleptFallbackRecord(snapshot: {
 }
 
 /** SQL predicate: the row's sleep episode ended blocked (`sleep_status='terminal_failed'`). */
+/** `blockedSleepEpisodeSql` on a row already read: the episode ended blocked. */
+export function isBlockedSleepEpisode(row: {
+  sleepStatus?: string | null;
+  sleepFallbackJson?: string | null;
+}): boolean {
+  return (
+    row.sleepStatus === 'terminal_failed' &&
+    parseSessionSleepFallbackRecord(row.sleepFallbackJson ?? null)?.outcome === 'blocked'
+  );
+}
+
 export function blockedSleepEpisodeSql(alias: string): string {
   if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(alias)) {
     throw new Error('Invalid SQL alias for blocked sleep episode predicate');

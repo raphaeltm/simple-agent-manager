@@ -20,7 +20,7 @@ export function createIncompatibleCapacityFixture() {
  INSERT INTO capacity_pools (id, scope, owner_user_id, name, is_default, status, strategy, exhaustion_policy, max_nodes)
  VALUES ('pool-1', 'user', 'user-1', 'Pool', 1, 'active', 'pack', 'queue', 1);
  INSERT INTO nodes (id,user_id,name,status,capacity_pool_id,node_role,node_class,runtime,agent_version,created_at)
- VALUES ('existing-node','user-1','Old host','running','pool-1','workspace','managed','vm','old-agent','2026-10-01T00:00:00.000Z');
+ VALUES ('existing-node','user-1','Old host','running','pool-1','workspace','managed','vm','old-agent','2026-10-05T06:00:00.000Z');
  INSERT INTO tasks (id,project_id,user_id,status,auto_provisioned_node_id) VALUES ('old-task','project-1','user-1','completed','existing-node');
  INSERT INTO tasks (id,project_id,user_id,status) VALUES ('task-1','project-1','user-1','queued');
  INSERT INTO workspaces (id,user_id,node_id,project_id,chat_session_id,status,created_at,updated_at,last_activity_at)

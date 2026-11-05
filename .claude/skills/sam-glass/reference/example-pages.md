@@ -13,7 +13,7 @@ Void, then four panes left to right:
 
 ## Mobile chat and chat list (canvas: Mobile · Chat, Mobile · Chat list)
 
-App bar slab (menu, logo, project name, Recent chats + Notifications in a well, chat list button raised), session info slab (two-line title, Active and Claude chips, avatars + share), conversation, message box slab. The chat list is a drawer from the right with live blur (the only one on screen), over the dimmed chat: Chats + close, search + New chat, Mine / Others / All at 40px, person filter row shown only under Others, then session rows at least 60px tall.
+App bar slab (menu, logo, project name, Recent chats + Notifications in a well, chat list button raised), session info slab (two-line title, Active and Claude chips, avatars + share), conversation, message box slab. The chat list is a drawer from the right with live blur over the dimmed chat (the panes beneath are frosted too): Chats + close, search + New chat, Mine / Others / All at 40px, person filter row shown only under Others, then session rows at least 60px tall.
 
 ## Project settings → Access
 

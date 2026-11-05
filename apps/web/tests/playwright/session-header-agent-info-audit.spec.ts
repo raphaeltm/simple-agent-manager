@@ -305,6 +305,29 @@ async function expandHeader(page: Page) {
   await page.waitForTimeout(300);
 }
 
+/** Matches `useIsMobile`: at 767px and below the header is one row and opens a sheet. */
+function isPhone(page: Page): boolean {
+  return (page.viewportSize()?.width ?? 1280) <= 767;
+}
+
+/** On a phone the chips and the public-ports switch live in the session-info sheet. */
+async function openSessionInfoOnPhone(page: Page) {
+  if (!isPhone(page)) return;
+  await page.getByRole('button', { name: /Show session info/ }).click();
+  await expect(page.getByTestId('session-info-sheet')).toBeVisible();
+}
+
+async function expectSessionState(page: Page, label: string) {
+  if (isPhone(page)) {
+    // The phone row shows the state as a dot; its name is on the title button.
+    await expect(
+      page.getByRole('button', { name: new RegExp(`\\. ${label}\\. Show session info`) })
+    ).toBeVisible();
+  } else {
+    await expect(page.getByText(label, { exact: true }).first()).toBeVisible();
+  }
+}
+
 async function assertNoOverflow(page: Page) {
   const overflow = await page.evaluate(
     () => document.documentElement.scrollWidth > window.innerWidth
@@ -374,7 +397,7 @@ test.describe('SessionHeader Agent Info — Mobile', () => {
     });
     await page.goto('/projects/proj-agent-1/chat/chat-session-1');
 
-    await expect(page.getByText('Sleeping', { exact: true }).first()).toBeVisible();
+    await expectSessionState(page, 'Sleeping');
     const composer = page.getByPlaceholder('Send a message to wake the agent...');
     await expect(composer).toBeEnabled();
     const promptRequest = page.waitForRequest(
@@ -518,7 +541,7 @@ test.describe('SessionHeader Agent Info — Mobile', () => {
     await expandHeader(page);
     await screenshot(page, 'session-header-source-context-mobile');
 
-    await expect(page.getByText('Source')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Source' })).toBeVisible();
     await expect(
       page.getByRole('link', { name: /Parent session title with a very long description/ })
     ).toBeVisible();
@@ -550,11 +573,22 @@ test.describe('SessionHeader Agent Info — Mobile', () => {
     });
 
     await page.goto('/projects/proj-agent-1/chat/chat-session-1');
-    await expect(page.getByRole('button', { name: 'Show 49 more forwarded ports' })).toBeVisible();
+    if (isPhone(page)) {
+      // One row: the lowest port stays on screen, the other 49 are in the sheet.
+      await expect(page.getByRole('link', { name: 'Open port 3000' })).toBeVisible();
+    } else {
+      await expect(
+        page.getByRole('button', { name: 'Show 49 more forwarded ports' })
+      ).toBeVisible();
+    }
     await expandHeader(page);
     await expect(page.getByText('Initial prompt', { exact: true })).toBeVisible();
     await expect(page.getByText(/Please review the production conversation header/)).toBeVisible();
-    await expect(page.getByText('Ports (50)')).toBeVisible();
+    if (isPhone(page)) {
+      await expect(page.getByTestId('session-port-list').getByRole('link')).toHaveCount(50);
+    } else {
+      await expect(page.getByText('Ports (50)')).toBeVisible();
+    }
     await screenshot(page, 'session-header-title-led-stress-mobile');
     await assertNoOverflow(page);
   });
@@ -570,7 +604,7 @@ test.describe('SessionHeader Agent Info — Desktop', () => {
     });
     await page.goto('/projects/proj-agent-1/chat/chat-session-1');
 
-    await expect(page.getByText('Sleeping', { exact: true }).first()).toBeVisible();
+    await expectSessionState(page, 'Sleeping');
     const composer = page.getByPlaceholder('Send a message to wake the agent...');
     await expect(composer).toBeEnabled();
     await assertNoOverflow(page);
@@ -617,7 +651,7 @@ test.describe('SessionHeader Agent Info — Desktop', () => {
     await expandHeader(page);
     await screenshot(page, 'session-header-source-context-desktop');
 
-    await expect(page.getByText('Source')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Source' })).toBeVisible();
     await expect(page.getByRole('link', { name: 'Parent implementation session' })).toBeVisible();
     await assertNoOverflow(page);
   });
@@ -665,6 +699,7 @@ test.describe('SessionHeader Public Ports', () => {
   test('mobile switch toggles without overflow', async ({ page }) => {
     await setupApiMocks(page, { ports, workspace: { portsPublicEnabled: false } });
     await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+    await openSessionInfoOnPhone(page);
 
     const toggle = page.getByRole('switch', { name: 'Enable public forwarded ports' });
     await expect(toggle).toBeVisible();
@@ -684,6 +719,7 @@ test.describe('SessionHeader Public Ports', () => {
   test('desktop switch shows enabled state without overflow', async ({ page }) => {
     await setupApiMocks(page, { ports, workspace: { portsPublicEnabled: true } });
     await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+    await openSessionInfoOnPhone(page);
 
     await expect(
       page.getByRole('switch', { name: 'Disable public forwarded ports' })
@@ -844,5 +880,73 @@ test.describe('Session details: which account ran it', () => {
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
     await screenshot(page, `session-details-credential-member-${viewportName()}`);
+  });
+});
+
+test.describe('Phone header and session-info sheet', () => {
+  test('one row on screen; the sheet holds the chips, every port, the switch and the details', async ({
+    page,
+  }) => {
+    test.skip(!isPhone(page), 'The one-row header and sheet are the phone layout (<=767px)');
+    await setupApiMocks(page, {
+      session: makeSession({ topic: STRESS_TITLE, messageCount: 75 }),
+      detailHasMore: true,
+      messageLookupMessages: [makeStressInitialMessage()],
+      ports: makeStressPorts(),
+      workspace: { portsPublicEnabled: false },
+    });
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+
+    // The header is one row: it used to take ~231px at 375px wide.
+    const header = page.getByTestId('session-header');
+    await expect(header).toHaveAttribute('data-layout', 'mobile');
+    const headerBox = await header.boundingBox();
+    expect(headerBox!.height).toBeLessThanOrEqual(56);
+    await expect(page.getByRole('switch')).toHaveCount(0);
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+    await screenshot(page, 'session-header-phone-row-mobile');
+
+    await page.getByRole('button', { name: /Show session info/ }).click();
+    const sheet = page.getByTestId('session-info-sheet');
+    await expect(sheet).toBeVisible();
+    // A bottom sheet: it meets the bottom edge and spans the width of the screen.
+    const viewport = page.viewportSize()!;
+    await expect
+      .poll(async () => {
+        const box = await sheet.boundingBox();
+        return box ? Math.round(box.y + box.height) : -1;
+      })
+      .toBe(viewport.height);
+    const sheetBox = await sheet.boundingBox();
+    expect(Math.round(sheetBox!.width)).toBe(viewport.width);
+    await expect(
+      sheet.getByRole('heading', { name: /Investigate a crowded mobile session/ })
+    ).toBeVisible();
+    await expect(sheet.getByTestId('session-port-list').getByRole('link')).toHaveCount(50);
+    await expect(
+      sheet.getByRole('switch', { name: 'Enable public forwarded ports' })
+    ).toBeVisible();
+    await expect(sheet.getByRole('heading', { name: 'References' })).toBeVisible();
+    await expect(sheet.getByText('Workload identity (OIDC)', { exact: true })).toBeVisible();
+    await assertNoClippedOverflow(page);
+    await screenshot(page, 'session-info-sheet-top-mobile');
+
+    // Scroll inside the sheet to the details and open the OIDC section.
+    await sheet.getByText('Workload identity (OIDC)', { exact: true }).scrollIntoViewIfNeeded();
+    await sheet.getByText('Workload identity (OIDC)', { exact: true }).click();
+    await expect(
+      sheet.getByText(/Identity details are unavailable|Loading identity details/)
+    ).toBeVisible();
+    await screenshot(page, 'session-info-sheet-details-mobile');
+
+    await page.emulateMedia({ colorScheme: 'light' });
+    await expect(page.locator('html')).toHaveAttribute('data-ui-theme', 'sam-light');
+    await sheet.getByRole('heading', { name: 'References' }).scrollIntoViewIfNeeded();
+    await screenshot(page, 'session-info-sheet-details-light-mobile');
+
+    await page.getByRole('button', { name: 'Close session info' }).click();
+    await expect(sheet).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /Show session info/ })).toBeVisible();
   });
 });

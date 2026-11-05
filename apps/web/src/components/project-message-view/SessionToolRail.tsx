@@ -21,9 +21,12 @@
  * The slot/panel split is also what lets labels mode overlay on mobile: the slot stays
  * at icon width while the panel renders wider and extends left over the conversation.
  */
+import { Count, paneClassName } from '@simple-agent-manager/ui';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import type { CSSProperties } from 'react';
 
+import { useChatImmersive } from '../shell/chat-immersive-context';
+import { IMMERSIVE_CHROME } from '../shell/chat-immersive-transition';
 import {
   isToolGroupStart,
   nextToolStripMode,
@@ -38,6 +41,18 @@ const RAIL_WIDTH_PX: Record<ToolStripMode, number> = {
   labels: 158,
   hidden: 0,
 };
+
+/**
+ * On desktop the rail is its own SAM Glass pane beside the conversation column, wide enough
+ * for 44px targets with the pane's padding (the design's 3.75rem).
+ */
+const DESKTOP_ICON_RAIL_WIDTH_PX = 60;
+const DESKTOP_LABEL_RAIL_WIDTH_PX = 168;
+
+function railWidth(mode: ToolStripMode, isMobile: boolean): number {
+  if (isMobile || mode === 'hidden') return RAIL_WIDTH_PX[mode];
+  return mode === 'icons' ? DESKTOP_ICON_RAIL_WIDTH_PX : DESKTOP_LABEL_RAIL_WIDTH_PX;
+}
 
 /** Width of the pull-tab shown in `hidden` mode. */
 const RAIL_TAB_WIDTH_PX = 26;
@@ -74,7 +89,7 @@ export function sessionToolRailGutter(mode: ToolStripMode, isMobile: boolean): n
    */
   if (mode === 'hidden') return 0;
   if (mode === 'labels' && isMobile) return RAIL_WIDTH_PX.icons;
-  return RAIL_WIDTH_PX[mode];
+  return railWidth(mode, isMobile);
 }
 
 /**
@@ -96,45 +111,29 @@ function ToolBadge({
   /** Renders "N+" — the server could only establish a minimum count. */
   isLowerBound: boolean;
 }>) {
-  const accent = needsAttention ? 'var(--sam-color-warning)' : 'var(--sam-color-fg-muted)';
-
   if (compact) {
     return (
       <span
         aria-hidden="true"
-        className="absolute top-1.5 right-1.5 h-[7px] w-[7px] rounded-full ring-2"
-        style={{
-          backgroundColor: accent,
-          // Ring matches the rail surface so the dot reads as lifted, not clipped.
-          ['--tw-ring-color' as string]: 'var(--sam-color-bg-surface)',
-        }}
+        className={`absolute top-1.5 right-1.5 h-[7px] w-[7px] rounded-full shadow-[0_0_0_2px_var(--sam-separator)] ${
+          needsAttention ? 'bg-[var(--sam-color-warning)]' : 'bg-[var(--sam-color-fg-muted)]'
+        }`}
       />
     );
   }
+  // Amber only when someone is waiting on you; otherwise a muted count (SAM Glass).
   return (
-    <span
-      className="ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none tabular-nums"
-      style={{
-        backgroundColor: needsAttention
-          ? 'var(--sam-color-warning-tint)'
-          : 'var(--sam-color-bg-surface)',
-        color: needsAttention ? 'var(--sam-color-warning-fg)' : 'var(--sam-color-fg-muted)',
-      }}
-    >
-      {count}
-      {isLowerBound ? '+' : ''}
-    </span>
+    <Count
+      value={`${count}${isLowerBound ? '+' : ''}`}
+      tone={needsAttention ? 'attention' : 'muted'}
+      asText
+      className="ml-auto"
+    />
   );
 }
 
 function RailDivider() {
-  return (
-    <div
-      aria-hidden="true"
-      className="mx-2 my-1 h-px"
-      style={{ backgroundColor: 'var(--sam-chrome-accent-active)' }}
-    />
-  );
+  return <div aria-hidden="true" className="mx-2.5 my-1.5 h-px bg-[var(--sam-hairline)]" />;
 }
 
 /** One rail row. Renders an anchor for navigating actions and a button for the rest. */
@@ -151,15 +150,20 @@ function RailAction({
 }>) {
   const Icon = action.icon;
   const color =
-    action.tone === 'success' ? 'var(--sam-color-success)' : 'var(--sam-color-fg-muted)';
-  // Shorter rows on mobile so more of the tool set clears the fold.
-  const iconRowHeight = isMobile ? 'h-9' : 'h-10';
-  const className = `relative flex w-full items-center border-none bg-transparent transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent-primary ${
-    compact ? `${iconRowHeight} justify-center px-0` : 'h-9 gap-2.5 px-2.5 text-left'
+    action.tone === 'success' ? 'var(--sam-status-success-fg)' : 'var(--sam-color-fg-muted)';
+  // Shorter rows on mobile so more of the tool set clears the fold. On desktop each icon is
+  // a 44px target, rounded like every SAM Glass control.
+  const iconRowHeight = isMobile ? 'h-9 w-full' : 'mx-auto h-11 w-11';
+  const className = `relative flex items-center border-none bg-transparent transition-colors hover:bg-[var(--sam-glass-v2-raised)] hover:text-fg-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus-ring ${
+    isMobile ? '' : 'rounded-[var(--sam-radius-control)]'
+  } ${
+    compact
+      ? `${iconRowHeight} justify-center px-0`
+      : `${isMobile ? 'h-9' : 'h-10'} w-full gap-2.5 px-2.5 text-left`
   } ${action.disabled ? 'cursor-default opacity-60' : 'cursor-pointer'}`;
 
   const label = !compact && (
-    <span className="min-w-0 truncate text-xs font-medium">{action.label}</span>
+    <span className="min-w-0 truncate text-[13px] font-medium">{action.label}</span>
   );
 
   return (
@@ -174,7 +178,7 @@ function RailAction({
       className={className}
       style={{ color }}
     >
-      <Icon size={17} className="shrink-0" aria-hidden="true" />
+      <Icon size={isMobile ? 17 : 19} strokeWidth={1.75} className="shrink-0" aria-hidden="true" />
       {label}
       {action.badge !== undefined && (
         <ToolBadge
@@ -214,7 +218,10 @@ export function SessionToolRail({
   // It must be a flex CHILD, not absolutely positioned against the messages container:
   // that container is `flex-col` below `lg`, so a sibling spacer reserved no horizontal
   // space at all on mobile and the expanded details panel slid underneath the rail.
-  const gutter = sessionToolRailGutter(mode, isMobile);
+  // The immersive chat view slides the rail away, so its slot stops reserving width and the
+  // conversation takes the whole row (`shell/chat-immersive-transition.ts`).
+  const immersive = useChatImmersive().active;
+  const gutter = immersive ? 0 : sessionToolRailGutter(mode, isMobile);
 
   // `meta` (Report / Complete / Details) is pinned; everything else scrolls. See the
   // comment on the scrolling list below for why.
@@ -230,18 +237,9 @@ export function SessionToolRail({
           aria-label={cycleLabel}
           title={cycleLabel}
           data-testid="session-tool-rail-tab"
-          className="absolute right-0 z-30 flex cursor-pointer flex-col items-center justify-center gap-1 rounded-l-lg border border-r-0 py-3 transition-colors hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary"
-          style={{
-            ...RAIL_TAB_STYLE,
-            width: RAIL_TAB_WIDTH_PX,
-            borderColor: 'var(--sam-color-border-default)',
-            backgroundColor: 'color-mix(in srgb, var(--sam-color-bg-surface) 92%, transparent)',
-            color: 'var(--sam-color-fg-muted)',
-            // Collapsed, the tab genuinely floats over the conversation, so it earns an
-            // elevation. Tokenized rather than hardcoded: the previous rgba(0,0,0,0.28)
-            // ignored the theme and rendered as the heaviest edge on a light background.
-            boxShadow: 'var(--sam-shadow-rail-tab)',
-          }}
+          data-immersive-chrome={IMMERSIVE_CHROME.toolRail}
+          className="sam-raised absolute right-0 z-30 flex cursor-pointer flex-col items-center justify-center gap-1 rounded-l-[var(--sam-radius-control)] border-0 py-3 text-fg-muted shadow-[var(--sam-glass-v2-depth-slab)] transition-colors hover:text-fg-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring"
+          style={{ ...RAIL_TAB_STYLE, width: RAIL_TAB_WIDTH_PX }}
         >
           <ChevronLeft size={13} aria-hidden="true" />
           <span
@@ -265,37 +263,20 @@ export function SessionToolRail({
     <div className="relative shrink-0" style={{ width: gutter }}>
       <aside
         data-testid="session-tool-rail"
+        data-immersive-chrome={IMMERSIVE_CHROME.toolRail}
         data-mode={mode}
         aria-label="Session tools"
-        className="absolute inset-y-0 right-0 z-20 flex flex-col overflow-hidden border-l"
-        style={{
-          width: RAIL_WIDTH_PX[mode],
-          /*
-           * `--sam-color-border-default`, not `--sam-chrome-accent-divider`. The divider
-           * token is what `RailDivider` uses for the rail's own internal group splits, so
-           * using it here made the chrome/content boundary exactly as strong as a
-           * subdivision inside it. With the icons-mode shadow gone the border is the only
-           * thing separating rail from conversation, and measured against the light
-           * canvas the old pairing came to 1.20:1 — under the 3:1 WCAG 1.4.11 asks of a
-           * component boundary.
-           */
-          borderColor: 'var(--sam-color-border-default)',
-          // Surface, not canvas: `color-mix(bg-canvas 88%, transparent)` composites to
-          // approximately the canvas, leaving the rail with a 1.045:1 value delta in light
-          // mode — invisible without the shadow that used to carry it.
-          backgroundColor: overlaying
-            ? 'var(--sam-color-bg-surface)'
-            : 'color-mix(in srgb, var(--sam-color-bg-surface) 92%, transparent)',
-          backdropFilter: 'blur(12px)',
-          /*
-           * An elevation only where one is TRUE. In icons mode — and in labels mode on
-           * desktop — the rail owns a layout slot and PUSHES the conversation; it sits
-           * beside the content, not above it, so a drop shadow was asserting a
-           * relationship that does not exist. The hairline border carries the separation.
-           * Only the mobile labels rail actually floats over the conversation.
-           */
-          boxShadow: overlaying ? 'var(--sam-shadow-rail-overlay)' : 'none',
-        }}
+        className={`absolute inset-y-0 right-0 z-20 flex flex-col overflow-hidden ${
+          isMobile
+            ? // Inside the conversation pane: a hairline sets it apart; the mobile labels rail
+              // floats over the conversation, so it takes the overlay pane's fill and shadow.
+              overlaying
+              ? `${paneClassName('overlay')} rounded-none rounded-l-[var(--sam-radius-pane)]`
+              : 'border-l border-[var(--sam-hairline)]'
+            : // Desktop: its own pane beside the conversation column (SAM Glass "tool rail").
+              `${paneClassName('pane')} py-1`
+        }`}
+        style={{ width: railWidth(mode, isMobile) }}
       >
         <button
           type="button"
@@ -303,7 +284,9 @@ export function SessionToolRail({
           aria-label={cycleLabel}
           title={cycleLabel}
           data-testid="session-tool-rail-cycle"
-          className={`flex h-8 shrink-0 cursor-pointer items-center gap-1 border-none bg-transparent text-fg-muted transition-colors hover:bg-surface-hover hover:text-fg-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-accent-primary ${
+          className={`flex shrink-0 cursor-pointer items-center gap-1 border-none bg-transparent text-fg-muted transition-colors hover:text-fg-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-focus-ring ${
+            isMobile ? 'h-8' : 'h-11'
+          } ${
             compact
               ? 'justify-center px-0'
               : // Tinted ONLY in labels mode, where the segment carries the word "TOOLS"
@@ -316,14 +299,18 @@ export function SessionToolRail({
                 // A class, not an inline style: inline `backgroundColor` outranks every
                 // class selector, which silently killed `hover:bg-surface-hover` on this
                 // button. The `hover:` variant beats a plain utility on specificity.
-                'justify-between bg-[var(--sam-chrome-accent-active-subtle)] px-2.5'
+                'justify-between px-3'
           }`}
-          style={{ borderBottom: '1px solid var(--sam-chrome-accent-active)' }}
+          style={isMobile ? { borderBottom: '1px solid var(--sam-hairline)' } : undefined}
         >
           {!compact && (
             <span className="text-[9px] font-semibold uppercase tracking-[0.14em]">Tools</span>
           )}
-          {compact ? <ChevronLeft size={13} /> : <ChevronRight size={13} />}
+          {compact ? (
+            <ChevronLeft size={isMobile ? 13 : 18} strokeWidth={1.75} />
+          ) : (
+            <ChevronRight size={isMobile ? 13 : 18} strokeWidth={1.75} />
+          )}
         </button>
 
         {/*
@@ -365,8 +352,7 @@ export function SessionToolRail({
         {pinnedActions.length > 0 && (
           <div
             data-testid="session-tool-rail-pinned"
-            className="shrink-0 py-1"
-            style={{ borderTop: '1px solid var(--sam-chrome-accent-active)' }}
+            className="shrink-0 border-t border-[var(--sam-hairline)] py-1"
           >
             {pinnedActions.map((action) => (
               <RailAction

@@ -63,8 +63,9 @@ export function downloadContentType(storedMimeType: string): string {
  */
 export const INERT_DOCUMENT_CSP = "default-src 'none'; style-src 'unsafe-inline'; sandbox";
 
-/** MIME types safe to render inline in a browser (images, PDF, markdown, inert HTML text).
- *  Keep in sync with PREVIEWABLE_IMAGE_MIMES + PREVIEWABLE_MIMES in apps/web/src/lib/file-utils.ts */
+/** MIME types safe to render inline in a browser (images, PDF, markdown, inert HTML text, video).
+ *  Keep in sync with PREVIEWABLE_IMAGE_MIMES + PREVIEWABLE_VIDEO_MIMES + PREVIEWABLE_MIMES in
+ *  apps/web/src/lib/file-utils.ts */
 const PREVIEWABLE_MIMES = new Set([
   'image/png',
   'image/jpeg',
@@ -74,6 +75,10 @@ const PREVIEWABLE_MIMES = new Set([
   'application/pdf',
   'text/markdown',
   'text/html',
+  'video/mp4',
+  'video/webm',
+  'video/quicktime',
+  'video/ogg',
 ]);
 
 export function isInlinePreviewable(effectiveMimeType: string): boolean {
@@ -97,7 +102,7 @@ export function hasPreviewableContent(effectiveMimeType: string, bytes: ArrayBuf
   return effectiveMimeType !== 'application/pdf' || startsWithPdfSignature(bytes);
 }
 
-/** No preview runs script: they only ever render images, PDFs and text. */
+/** No preview runs script: they only ever render images, PDFs, video and text. */
 function previewSources(effectiveMimeType: string): string {
   switch (effectiveMimeType) {
     // Browser PDF viewers embed the document as an object and style their own
@@ -130,4 +135,39 @@ export function previewHeaders(
       effectiveMimeType === 'text/html' ? 'text/plain; charset=utf-8' : effectiveMimeType,
     contentSecurityPolicy: `${previewSources(effectiveMimeType)}; ${appFrameAncestors(env)}`,
   };
+}
+
+/** An inclusive byte range of a response body. */
+export interface ByteRange {
+  readonly start: number;
+  readonly end: number;
+}
+
+/**
+ * The single byte range a `Range` header asks for (RFC 9110 §14.1.2), so a
+ * `<video>` can seek: Safari will not play a video at all without one.
+ *
+ * Returns `null` when there is no header, or one this does not serve (several
+ * ranges, another unit, malformed): the caller then sends the whole body, which
+ * the RFC allows. Returns `'unsatisfiable'` when the range starts past the end.
+ */
+export function parseByteRange(
+  header: string | undefined,
+  size: number
+): ByteRange | 'unsatisfiable' | null {
+  const match = header ? /^bytes=(\d*)-(\d*)$/i.exec(header.trim()) : null;
+  if (!match) return null;
+  const [, first = '', last = ''] = match;
+  if (first === '' && last === '') return null;
+  if (first === '') {
+    // Suffix range: the final N bytes.
+    const length = Number(last);
+    if (length === 0 || size === 0) return 'unsatisfiable';
+    return { start: Math.max(0, size - length), end: size - 1 };
+  }
+  const start = Number(first);
+  const end = last === '' ? size - 1 : Math.min(Number(last), size - 1);
+  if (last !== '' && Number(last) < start) return null;
+  if (start >= size) return 'unsatisfiable';
+  return { start, end };
 }

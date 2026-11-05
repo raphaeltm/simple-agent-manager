@@ -343,6 +343,46 @@ describe('listUserCredentialLimits', () => {
   });
 });
 
+describe('credential names', () => {
+  it("names the caller's own composable credentials and never another member's", async () => {
+    const { sqlite, env, seedWindow } = setup();
+    sqlite
+      .prepare('INSERT INTO cc_credentials (id, owner_id, name) VALUES (?, ?, ?), (?, ?, ?)')
+      .run('cred-owner', 'owner-1', 'Work Max', 'cred-shared', 'member-2', "Member 2's Pro");
+    // Owner-path control: the caller's own credential gets its Settings name.
+    seedWindow({});
+    // ATTACK FIXTURE: a project-shared credential owned by another member is
+    // visible, but its owner's private naming must not be.
+    seedWindow({
+      credentialReference: 'cc_credentials:cred-shared',
+      credentialSource: 'project',
+      userId: 'member-2',
+    });
+    seedWindow({
+      credentialReference: 'platform_credentials:plat-1',
+      credentialSource: 'platform',
+      userId: 'member-3',
+    });
+
+    const response = await listProjectCredentialLimits(env, {
+      projectId: 'project-1',
+      userId: 'owner-1',
+    });
+    const names = Object.fromEntries(
+      response.credentials.map((c) => [c.credentialReference, c.credentialName])
+    );
+    expect(names).toEqual({
+      'cc_credentials:cred-owner': 'Work Max',
+      'cc_credentials:cred-shared': null,
+      'platform_credentials:plat-1': null,
+    });
+
+    // The Settings view names the same credential too.
+    const mine = await listUserCredentialLimits(env, { userId: 'owner-1' });
+    expect(mine.credentials.map((c) => c.credentialName)).toEqual(['Work Max']);
+  });
+});
+
 describe('listUserCredentialLimits cap', () => {
   it('reads at most CREDENTIAL_LIMIT_READ_MAX_ROWS rows, newest first', async () => {
     const { env, seedWindow } = setup();

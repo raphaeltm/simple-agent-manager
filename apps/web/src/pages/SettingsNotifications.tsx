@@ -55,6 +55,10 @@ const TYPE_LABELS: Record<NotificationType, { label: string; description: string
     label: 'Shared sessions',
     description: 'When a chat is shared with you, or your access to one is removed',
   },
+  operations_approval: {
+    label: 'Operations approvals',
+    description: 'When an Operations-project agent asks you to approve an action',
+  },
 };
 
 /** A global preference is one not scoped to any project (`projectId === null`). */

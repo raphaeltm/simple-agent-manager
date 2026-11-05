@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 type containerSnapshotTarget struct {
@@ -39,6 +40,45 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 	}
 	_, _ = b.buffer.Write(p)
 	return originalLen, nil
+}
+
+// snapshotCommandStderrBytes bounds the stderr kept from one snapshot/restore command.
+const snapshotCommandStderrBytes = 64 * 1024
+
+// tailBuffer keeps the LAST maxBytes written. A failing command prints its reason last, so a
+// head-capped stderr buffer would discard exactly the diagnostic it exists to preserve
+// (rule 53 §5c). Use cappedBuffer for stdout, where the caller needs to know it overflowed.
+type tailBuffer struct {
+	data      []byte
+	maxBytes  int
+	truncated bool
+}
+
+func newTailBuffer(maxBytes int) *tailBuffer {
+	return &tailBuffer{maxBytes: maxBytes}
+}
+
+func (b *tailBuffer) Write(p []byte) (int, error) {
+	originalLen := len(p)
+	if b.maxBytes <= 0 {
+		b.truncated = b.truncated || originalLen > 0
+		return originalLen, nil
+	}
+	b.data = append(b.data, p...)
+	if over := len(b.data) - b.maxBytes; over > 0 {
+		b.data = append(b.data[:0], b.data[over:]...)
+		b.truncated = true
+	}
+	return originalLen, nil
+}
+
+// String returns the kept tail, starting at a valid UTF-8 boundary.
+func (b *tailBuffer) String() string {
+	start := 0
+	for start < len(b.data) && start < utf8.UTFMax && !utf8.Valid(b.data[start:]) {
+		start++
+	}
+	return string(b.data[start:])
 }
 
 type cappedFileWriter struct {
@@ -86,9 +126,10 @@ func (s *Server) runSnapshotWorkspaceCommand(ctx context.Context, target *contai
 	if err != nil {
 		return nil, err
 	}
-	var stdout, stderr bytes.Buffer
+	var stdout bytes.Buffer
+	stderr := newTailBuffer(snapshotCommandStderrBytes)
 	cmd.Stdout = &stdout
-	cmd.Stderr = &stderr
+	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
 		message := strings.TrimSpace(stderr.String())
 		if message == "" {
@@ -105,11 +146,11 @@ func (s *Server) runSnapshotWorkspaceCommandBounded(ctx context.Context, target 
 		return nil, err
 	}
 	stdout := &cappedBuffer{maxBytes: maxOutputBytes}
-	stderr := &cappedBuffer{maxBytes: 64 * 1024}
+	stderr := newTailBuffer(snapshotCommandStderrBytes)
 	cmd.Stdout = stdout
 	cmd.Stderr = stderr
 	if err := cmd.Run(); err != nil {
-		message := strings.TrimSpace(stderr.buffer.String())
+		message := strings.TrimSpace(stderr.String())
 		if message == "" {
 			message = err.Error()
 		}

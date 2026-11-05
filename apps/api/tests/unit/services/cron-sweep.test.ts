@@ -76,6 +76,8 @@ vi.mock('drizzle-orm/d1', () => ({
 }));
 
 vi.mock('drizzle-orm', () => ({
+  asc: vi.fn((col: unknown) => col),
+  gt: vi.fn((_col: unknown, val: unknown) => ['gt', val]),
   eq: vi.fn((_col: unknown, val: unknown) => ['eq', val]),
   and: vi.fn((...args: unknown[]) => ['and', ...args]),
   count: vi.fn(() => 'count'),
@@ -153,7 +155,10 @@ describe('runCronTriggerSweep', () => {
     // admission owns concurrency, sequence allocation, execution rows, and submission.
     queryResults = [[trigger], [{ name: 'My Project' }]];
 
-    const stats = await runCronTriggerSweep({ DATABASE: {} } as any);
+    const stats = await runCronTriggerSweep({
+      KV: { get: async () => null, put: async () => {} },
+      DATABASE: { prepare: () => ({ bind: () => ({ first: async () => null }) }) },
+    } as any);
 
     expect(stats.checked).toBe(1);
     expect(stats.fired).toBe(1);

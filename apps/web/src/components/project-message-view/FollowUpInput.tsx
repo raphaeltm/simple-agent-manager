@@ -41,7 +41,7 @@ export function FollowUpInput({
   const isMobile = useIsMobile();
 
   return (
-    <div className="relative shrink-0 glass-chrome border-x-0 border-b-0 px-4 py-3 before:content-[''] before:absolute before:top-0 before:left-[15%] before:right-[15%] before:h-px before:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.18)_0%,transparent_70%)] before:pointer-events-none">
+    <div className="relative shrink-0 px-3 py-3 md:px-4">
       {uploadError && (
         <p role="alert" className="text-danger text-sm">
           {uploadError}
@@ -93,11 +93,11 @@ export function ReadOnlyFollowUp({
   noticeRef?: Ref<HTMLDivElement>;
 }) {
   return (
-    <div className="relative shrink-0 glass-chrome border-x-0 border-b-0 px-4 py-3 before:content-[''] before:absolute before:top-0 before:left-[15%] before:right-[15%] before:h-px before:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.18)_0%,transparent_70%)] before:pointer-events-none">
+    <div className="relative shrink-0 px-3 py-3 md:px-4">
       <div
         ref={noticeRef}
         tabIndex={-1}
-        className="flex items-center gap-3 rounded-md border border-border-default bg-surface/50 px-3 py-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        className="sam-well flex items-center gap-3 rounded-[14px] px-3 py-2.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
         <div className="min-w-0 flex-1">
           <div className="text-xs font-medium text-fg-primary break-words">
@@ -119,7 +119,7 @@ export function ReadOnlyFollowUp({
           <button
             type="button"
             onClick={onNewChat}
-            className="shrink-0 rounded-md border border-accent/40 bg-accent/10 px-3 py-1.5 text-xs font-medium text-accent hover:bg-accent/15 transition-colors"
+            className="sam-raised min-h-10 shrink-0 cursor-pointer rounded-[var(--sam-radius-control)] border-0 px-3 text-xs font-medium text-[var(--sam-status-success-fg)] transition-[filter] hover:brightness-110"
           >
             Start your own chat
           </button>

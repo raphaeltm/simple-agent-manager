@@ -24,6 +24,7 @@ import {
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
+import { D1_MAX_BOUND_PARAMETERS } from '../../lib/d1-limits';
 import { log } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { composableCredentialReference } from '../default-capacity-pool-helpers';
@@ -181,6 +182,7 @@ function summarize(
       summary = {
         credentialReference: parsed.credentialReference,
         credentialId: credentialIdFromReference(parsed.credentialReference),
+        credentialName: null,
         credentialSource: parsed.credentialSource,
         provider: parsed.provider,
         providerMode: parsed.providerMode,
@@ -247,6 +249,7 @@ export async function listProjectCredentialLimits(
   // session filter resolves any project member's session, and a backfilled id
   // embeds the legacy ciphertext, so another member's credential stays a digest.
   await restoreOwnCredentialReferences(env, credentials, input.userId);
+  await attachOwnCredentialNames(env, credentials, input.userId);
   return { credentials, generatedAt: Date.now() };
 }
 
@@ -268,6 +271,7 @@ export async function listUserCredentialLimits(
 
   const credentials = summarize(result.results ?? [], true);
   await restoreOwnCredentialReferences(env, credentials, input.userId);
+  await attachOwnCredentialNames(env, credentials, input.userId);
   return { credentials, generatedAt: Date.now() };
 }
 
@@ -330,6 +334,46 @@ async function restoreOwnCredentialReferences(
     if (key && key !== reference) referencesByKey.set(key, reference);
   }
   restoreCredentialReferences(credentials, referencesByKey);
+}
+
+/** One statement's bound parameters, less the owner id. Beyond it, the least recent go unnamed. */
+const MAX_NAMED_CREDENTIAL_IDS = D1_MAX_BOUND_PARAMETERS - 1;
+
+/**
+ * Attach the Settings name of each of the caller's own composable credentials,
+ * so the usage panel can say which account it is. One indexed D1 read, skipped
+ * when no summary has a credential id. Another member's credential keeps a null
+ * name: the owner predicate is in SQL, so their naming never leaks.
+ */
+async function attachOwnCredentialNames(
+  env: Env,
+  credentials: CredentialLimitCredentialSummary[],
+  userId: string
+): Promise<void> {
+  const ids = [
+    ...new Set(
+      credentials
+        .map((credential) => credential.credentialId)
+        .filter((id): id is string => Boolean(id))
+    ),
+  ].slice(0, MAX_NAMED_CREDENTIAL_IDS);
+  if (ids.length === 0) return;
+  const rows = await env.DATABASE.prepare(
+    `SELECT id, name FROM cc_credentials
+      WHERE owner_id = ? AND id IN (${ids.map(() => '?').join(', ')})`
+  )
+    .bind(userId, ...ids)
+    .all<{ id: unknown; name: unknown }>();
+  const namesById = new Map<string, string>();
+  for (const row of rows.results ?? []) {
+    const name = nonEmptyString(row.name);
+    if (typeof row.id === 'string' && name) namesById.set(row.id, name.trim());
+  }
+  for (const credential of credentials) {
+    if (credential.credentialId) {
+      credential.credentialName = namesById.get(credential.credentialId) ?? null;
+    }
+  }
 }
 
 /**

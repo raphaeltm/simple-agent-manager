@@ -20,6 +20,7 @@ import { resolveCanonicalVmAllocationPlan } from '../services/canonical-vm-alloc
 import { scheduleDirectProvisioning } from '../services/direct-provisioning';
 import { getRuntimeLimits } from '../services/limits';
 import { stopWorkspaceOnNode } from '../services/node-agent';
+import { getNodeResourceUsage } from '../services/node-resource-usage';
 import { createNodeRecord, stopNodeResources } from '../services/nodes';
 import { recordNodeRoutingMetric } from '../services/telemetry';
 import { deleteNodeRoute } from './nodes/delete';
@@ -210,6 +211,11 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
 
   await scheduleDirectProvisioning(c.env, { nodeId: created.id, userId });
   return c.json(created, 201);
+});
+
+// Registered before `/:id`, which would otherwise capture "resource-usage" as a node id.
+nodesRoutes.get('/resource-usage', async (c) => {
+  return c.json(await getNodeResourceUsage(c.env, getUserId(c)));
 });
 
 nodesRoutes.get('/:id', async (c) => {

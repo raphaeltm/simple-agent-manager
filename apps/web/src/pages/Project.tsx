@@ -6,6 +6,7 @@ import { Outlet, useLocation, useParams } from 'react-router';
 
 import { useAppShell } from '../components/AppShell';
 import { useAuth } from '../components/AuthProvider';
+import { LoadingPane } from '../components/LoadingPane';
 import { useIsMobile } from '../hooks/useIsMobile';
 import {
   mcpConnectionsQueryOptions,
@@ -13,6 +14,8 @@ import {
   projectQueryKeys,
   projectRuntimeConfigQueryOptions,
 } from '../lib/query-options';
+import { isFullBleedRoute, isProjectChatRoute } from '../lib/shell-routes';
+import { ChatLoadingLayout } from './project-chat/ChatLoadingLayout';
 import { ProjectContext } from './ProjectContext';
 
 export function Project() {
@@ -41,9 +44,7 @@ export function Project() {
 
   // Chat routes, and the comment reader (a conversation with its own scroller), get a
   // full-bleed layout (no PageLayout wrapper)
-  const isChatRoute =
-    /\/(chat|agent)(\/|$)/.test(location.pathname) ||
-    /\/comments\/[^/]+\/[^/]+\/?$/.test(location.pathname);
+  const isChatRoute = isFullBleedRoute(location.pathname);
 
   const isSettingsRoute = /\/settings(?:\/|$)/.test(location.pathname);
   const independentSettings = /\/settings\/(runtime|deploy)(?:\/|$)/.test(location.pathname);
@@ -98,10 +99,13 @@ export function Project() {
     return (
       <div className="flex-1 min-h-0 flex flex-col">
         {projectLoading ? (
-          <div className="flex items-center justify-center flex-1 gap-2">
-            <Spinner size="md" />
-            <span className="text-fg-muted text-sm">Loading project...</span>
-          </div>
+          // Only the chat has a chats pane to reserve; the agent chat and comment reader
+          // centre their loading state across the full width.
+          isProjectChatRoute(location.pathname) ? (
+            <ChatLoadingLayout testId="project-loading" />
+          ) : (
+            <LoadingPane testId="project-loading" />
+          )
         ) : !project ? (
           <div className="p-4">
             <Alert variant="error">{error ?? 'Project not found.'}</Alert>

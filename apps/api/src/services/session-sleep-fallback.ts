@@ -5,10 +5,11 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { getNodeAgentBackgroundRequestTimeoutMs } from './node-agent';
 import * as projectDataService from './project-data';
 import {
-  idlenessStateChanged,
   sessionSleepDeferralReason,
+  sleepStateChanged,
   sleepTeardownSafetyGate,
 } from './session-sleep-eligibility';
 import {
@@ -33,6 +34,8 @@ import {
   revertSessionSnapshotFallbackStopping,
 } from './session-sleep-fallback-state';
 import { assessSessionSleepRecoveryPoint } from './session-sleep-recovery-point';
+import { endAgentTurnForRequiredSleep } from './session-sleep-required-turn-end';
+import { isPersonRequiredSleepEpisode, resolveSleepRequirement } from './session-sleep-requirement';
 import { sessionSleepRuntimeChanged } from './session-sleep-runtime-identity';
 import {
   completeSleepTeardown,
@@ -75,6 +78,7 @@ async function loadEpisode(
   projectId: string | null;
   runtime: string;
   sleepEpisodeStartedAt: string | null;
+  sleepRequiredEpisodeStartedAt: string | null;
   sleepEpisodeFailures: number | null;
   captureGeneration: string | null;
 } | null> {
@@ -84,6 +88,7 @@ async function loadEpisode(
         projectId: schema.sessionSnapshots.projectId,
         runtime: schema.sessionSnapshots.runtime,
         sleepEpisodeStartedAt: schema.sessionSnapshots.sleepEpisodeStartedAt,
+        sleepRequiredEpisodeStartedAt: schema.sessionSnapshots.sleepRequiredEpisodeStartedAt,
         sleepEpisodeFailures: schema.sessionSnapshots.sleepEpisodeFailures,
         captureGeneration: schema.sessionSnapshots.captureGeneration,
       })
@@ -226,14 +231,28 @@ export async function runSessionSleepFallback(
     }
     const fallbackTrigger = currentTrigger ?? input.trigger;
     const agentSession = await loadResumableAgentSession(db, workspace.id);
-    const classify = sleepTeardownSafetyGate(env, workspace);
+    const requirement = await resolveSleepRequirement(env, workspace, now, {
+      // The fallback of a person's failed Sleep is still required (migration 0217).
+      requestedByPerson: isPersonRequiredSleepEpisode(await loadEpisode(db, chatSessionId)),
+    });
+    if (requirement === 'required') {
+      // The attempt budget is spent and the runtime is about to be torn down, so the turn
+      // end is recorded even when the agent cannot confirm it (policy a3780107).
+      await endAgentTurnForRequiredSleep(env, workspace, agentSession.id, {
+        reason: SESSION_SLEEP_FALLBACK_REASON,
+        confirmWithoutAgent: true,
+        requestTimeoutMs: getNodeAgentBackgroundRequestTimeoutMs(env),
+      });
+    }
+    const classify = sleepTeardownSafetyGate(env, workspace, requirement);
     const stateBefore = await projectDataService.getSessionState(
       env,
       workspace.projectId,
       agentSession.id
     );
-    const idlenessBefore = classify(stateBefore);
-    if (!stateBefore || !idlenessBefore.idle) {
+    const idlenessBefore = await classify(stateBefore);
+    const stateMissingBlocks = requirement !== 'required';
+    if ((!stateBefore && stateMissingBlocks) || !idlenessBefore.idle) {
       await deferSessionSnapshotSleepBeforeClaim(
         db,
         env,
@@ -287,9 +306,9 @@ export async function runSessionSleepFallback(
       agentSession.id
     );
     if (
-      !stateAfter ||
-      !classify(stateAfter).idle ||
-      idlenessStateChanged(stateBefore, stateAfter)
+      (!stateAfter && stateMissingBlocks) ||
+      !(await classify(stateAfter)).idle ||
+      sleepStateChanged(stateBefore, stateAfter, requirement)
     ) {
       await deferSessionSnapshotSleepBeforeClaim(
         db,
@@ -372,6 +391,7 @@ export async function runSessionSleepFallback(
     pointOfNoReturn = true;
     const slept = await completeSleepTeardown(env, workspace, agentSession, claimId, snapshot, {
       fallback: true,
+      requirement,
     });
     await finishSleepCleanup(
       db,

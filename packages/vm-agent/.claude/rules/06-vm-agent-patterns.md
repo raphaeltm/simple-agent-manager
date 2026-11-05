@@ -113,3 +113,7 @@ in the same change. Run `pnpm quality:agent-install-manifest`, execute installed
 version checks against stale adapter/current CLI pairs, and verify a real model
 prompt before shipping. A successful ACP initialization alone does not prove that
 the provider accepts the bundled SDK version.
+
+## Durable Deletion Records
+
+Treat pre-lock queue reads as identifiers only; reload the intent under the workspace lifecycle lock before acting. Never save an old intent merely because an attempt failed. Metadata absence is not deletion proof: recovery must verify directory, containers and volume absence while retaining identity and preservation guards. Exercise the inline/background interleaving with barriers in regression tests.

@@ -3,7 +3,7 @@ import type {
   UpdateAgentProfileRequest,
   WorkspaceProfile,
 } from '@simple-agent-manager/shared';
-import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
+import { ATTACHMENT_DEFAULTS } from '@simple-agent-manager/shared';
 import { Paperclip, Settings, X } from 'lucide-react';
 import { type FC, useCallback, useEffect, useId, useRef, useState } from 'react';
 
@@ -15,7 +15,7 @@ import {
   requestAttachmentUpload,
   uploadAttachmentToR2,
 } from '../../lib/api';
-import { formatFileSize } from '../../lib/file-utils';
+import { formatFileSize, withSafeFilename } from '../../lib/file-utils';
 import { ProfileFormDialog } from '../agent-profiles/ProfileFormDialog';
 import { ProfileSelector } from '../agent-profiles/ProfileSelector';
 import {
@@ -174,19 +174,13 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
       const currentTotal = attachments.reduce((sum, a) => sum + a.file.size, 0);
       let runningTotal = currentTotal;
 
-      for (const file of Array.from(files)) {
+      for (const file of Array.from(files).map(withSafeFilename)) {
         if (attachments.length + newFiles.length >= maxFiles) {
           setError(`Maximum ${maxFiles} files allowed`);
           break;
         }
         if (file.size > maxBytes) {
           setError(`${file.name} exceeds ${formatFileSize(maxBytes)} limit`);
-          continue;
-        }
-        if (!SAFE_FILENAME_REGEX.test(file.name)) {
-          setError(
-            `${file.name} has invalid characters. Only letters, numbers, dots, dashes, underscores, and spaces allowed.`
-          );
           continue;
         }
         if (runningTotal + file.size > batchMax) {
