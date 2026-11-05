@@ -1,8 +1,8 @@
 import type { QueryClient } from '@tanstack/react-query';
 import { matchPath } from 'react-router';
 
-import { CHAT_SESSION_LIST_LIMIT } from '../pages/project-chat/types';
 import { type ChatSessionListItem, listChatSessions } from './api';
+import { CHAT_SESSION_LIST_LIMIT } from './chat-query-config';
 import {
   chatSessionMessagesQueryOptions,
   projectChatSessionsQueryOptions,

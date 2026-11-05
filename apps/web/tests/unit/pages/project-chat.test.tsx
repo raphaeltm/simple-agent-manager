@@ -1,4 +1,5 @@
 import type { Task } from '@simple-agent-manager/shared';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -194,6 +195,7 @@ vi.mock('../../../src/components/project-message-view', () => ({
   },
 }));
 
+import { prefetchProjectRoute } from '../../../src/lib/project-route-prefetch';
 import { ProjectChat } from '../../../src/pages/project-chat';
 import { ProvisioningIndicator } from '../../../src/pages/project-chat/ProvisioningIndicator';
 import { ProjectContext, type ProjectContextValue } from '../../../src/pages/ProjectContext';
@@ -533,6 +535,41 @@ describe('ProjectChat new chat button', () => {
     });
     expect(screen.getByTestId('message-view')).toHaveTextContent('session-1');
     expect(await screen.findAllByText('First chat')).not.toHaveLength(0);
+  });
+
+  it('consumes the session list the project route prefetched, reading it once', async () => {
+    // Production order: the project route starts the list read, the chat page mounts
+    // later (after the project detail) and must join that read, not issue its own.
+    let resolveList: (value: { sessions: unknown[]; total: number }) => void = () => undefined;
+    mocks.listChatSessions.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveList = resolve;
+      })
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    prefetchProjectRoute(client, 'user-1', `/projects/${PROJECT_ID}/chat/session-1`);
+    expect(mocks.listChatSessions).toHaveBeenCalledTimes(1);
+
+    render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={[`/projects/${PROJECT_ID}/chat/session-1`]}>
+          <ProjectContext.Provider
+            value={{ projectId: PROJECT_ID, project: null, installations: [], reload: vi.fn() }}
+          >
+            <Routes>
+              <Route path="/projects/:id/chat/:sessionId" element={<ProjectChat />} />
+            </Routes>
+          </ProjectContext.Provider>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+    expect(await screen.findByTestId('message-view')).toHaveTextContent('session-1');
+
+    await act(async () => {
+      resolveList({ sessions: [SESSION_1, SESSION_2], total: 2 });
+    });
+    expect(await screen.findAllByText('Second chat')).not.toHaveLength(0);
+    expect(mocks.listChatSessions).toHaveBeenCalledTimes(1);
   });
 
   it('waits for the list on the bare chat route, then shows the new-chat screen', async () => {

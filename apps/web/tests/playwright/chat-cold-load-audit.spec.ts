@@ -8,8 +8,8 @@
  *
  *  1. the session list and the URL-named transcript are requested while the project
  *     detail is still outstanding;
- *  2. the spinner keeps the same vertical position from the project-loading state to
- *     the transcript-loading state (measured coordinates, not a screenshot);
+ *  2. the spinner keeps the same position from the project-loading state to the
+ *     transcript-loading state (measured coordinates, not a screenshot);
  *  3. the transcript renders while the session list is still outstanding.
  */
 
@@ -176,9 +176,8 @@ for (const viewport of [
       await expect(page.getByTestId('chat-loading')).toBeVisible();
       const transcriptSpinner = await spinnerCentre(page);
       expect(Math.abs(transcriptSpinner.y - projectSpinner.y)).toBeLessThanOrEqual(4);
-      if (viewport.isMobile) {
-        expect(Math.abs(transcriptSpinner.x - projectSpinner.x)).toBeLessThanOrEqual(4);
-      }
+      // On desktop too: the project-loading state reserves the chats sidebar column.
+      expect(Math.abs(transcriptSpinner.x - projectSpinner.x)).toBeLessThanOrEqual(4);
       await screenshot(page, `chat-cold-load-transcript-${viewport.name}`);
 
       // 3. Transcript lands while the session list is still held.

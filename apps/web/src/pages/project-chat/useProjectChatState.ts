@@ -35,6 +35,7 @@ import {
   startInstantChatSession,
   submitTask,
 } from '../../lib/api';
+import { CHAT_SESSION_LIST_LIMIT } from '../../lib/chat-query-config';
 import { getSessionState } from '../../lib/chat-session-utils';
 import { readInitialSessionList } from '../../lib/project-route-prefetch';
 import { applyMessageCommentRealtimeEventToQueryCache } from '../../lib/query-options';
@@ -48,7 +49,6 @@ import {
 } from './submitRequest';
 import type { ProvisioningState } from './types';
 import {
-  CHAT_SESSION_LIST_LIMIT,
   CHAT_TASK_LIST_LIMIT,
   SESSION_RECONCILE_INTERVAL_MS,
   SESSION_SYNC_INTERVAL_MS,

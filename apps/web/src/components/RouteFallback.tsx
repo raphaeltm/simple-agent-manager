@@ -47,15 +47,3 @@ export function RouteFallback() {
     />
   );
 }
-
-/**
- * Suspense fallback for a route nested inside a parent that already shows a
- * {@link LoadingPane} while it loads (the project shell's child routes).
- *
- * It appears without the reveal delay: the parent's spinner is already on screen, and
- * hiding this one for the delay would blank the indicator before bringing it back in the
- * same place.
- */
-export function NestedRouteFallback() {
-  return <LoadingPane testId="route-fallback" />;
-}

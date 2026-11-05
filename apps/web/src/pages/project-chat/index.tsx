@@ -5,7 +5,6 @@ import { useLocation, useNavigate } from 'react-router';
 
 import { useAppShell } from '../../components/AppShell';
 import { BootLogPanel } from '../../components/chat/BootLogPanel';
-import { LoadingPane } from '../../components/LoadingPane';
 import { NewChatProfileCards, visibleProfiles } from '../../components/project-chat/profile-picker';
 import { ProjectMessageView } from '../../components/project-message-view';
 import { useCommentDeepLink } from '../../components/project-message-view/comments/useCommentDeepLink';
@@ -16,6 +15,7 @@ import { resolveAttentionAnswer } from '../../lib/api';
 import { sessionWidthForMode } from '../../lib/focus-mode';
 import { AttentionAnswerNotice, type AttentionAnswerStatus } from './AttentionAnswerNotice';
 import { ChatInput } from './ChatInput';
+import { ChatLoadingLayout } from './ChatLoadingLayout';
 import { DerivedSessionBanner } from './DerivedSessionBanner';
 import { FocusStrip } from './FocusStrip';
 import { getSessionSourceContext } from './lineageUtils';
@@ -204,7 +204,7 @@ export function ProjectChat() {
   // session list: its transcript loads (or was prefetched) on its own. Only the bare chat
   // route waits, because what it shows depends on whether the project has any chats.
   if (state.loading && state.sessions.length === 0 && !state.sessionId) {
-    return <LoadingPane testId="chat-sessions-loading" />;
+    return <ChatLoadingLayout testId="chat-sessions-loading" />;
   }
 
   // Two or more visible profiles make choosing one worth a step of its own: show the

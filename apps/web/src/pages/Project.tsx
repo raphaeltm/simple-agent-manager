@@ -6,7 +6,6 @@ import { Outlet, useLocation, useParams } from 'react-router';
 
 import { useAppShell } from '../components/AppShell';
 import { useAuth } from '../components/AuthProvider';
-import { LoadingPane } from '../components/LoadingPane';
 import { useIsMobile } from '../hooks/useIsMobile';
 import {
   mcpConnectionsQueryOptions,
@@ -15,6 +14,7 @@ import {
   projectRuntimeConfigQueryOptions,
 } from '../lib/query-options';
 import { isFullBleedRoute } from '../lib/shell-routes';
+import { ChatLoadingLayout } from './project-chat/ChatLoadingLayout';
 import { ProjectContext } from './ProjectContext';
 
 export function Project() {
@@ -98,7 +98,7 @@ export function Project() {
     return (
       <div className="flex-1 min-h-0 flex flex-col">
         {projectLoading ? (
-          <LoadingPane testId="project-loading" />
+          <ChatLoadingLayout testId="project-loading" />
         ) : !project ? (
           <div className="p-4">
             <Alert variant="error">{error ?? 'Project not found.'}</Alert>

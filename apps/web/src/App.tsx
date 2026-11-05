@@ -1,6 +1,14 @@
 import { QueryClientProvider } from '@tanstack/react-query';
-import { type ReactNode, Suspense, useEffect, useState } from 'react';
-import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from 'react-router';
+import { type ReactNode, Suspense, useEffect, useRef } from 'react';
+import {
+  BrowserRouter,
+  Navigate,
+  Outlet,
+  Route,
+  Routes,
+  useLocation,
+  useParams,
+} from 'react-router';
 
 import { AppShell } from './components/AppShell';
 import { AuthProvider, useAuth } from './components/AuthProvider';
@@ -8,7 +16,7 @@ import { BackgroundFetchIndicator } from './components/BackgroundFetchIndicator'
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { PageViewTracker } from './components/PageViewTracker';
 import { ProtectedRoute } from './components/ProtectedRoute';
-import { NestedRouteFallback, RouteFallback } from './components/RouteFallback';
+import { RouteFallback } from './components/RouteFallback';
 import { GlobalAudioProvider } from './contexts/GlobalAudioContext';
 import { ThemeProvider } from './contexts/ThemeContext';
 import { useQueryScope } from './hooks/useQueryScope';
@@ -20,6 +28,7 @@ import { queryClient } from './lib/query-client';
 // Every other page below is code-split via lazyNamed(). Do NOT add static page imports here.
 import { Dashboard } from './pages/Dashboard';
 import { Landing } from './pages/Landing';
+import { ChatLoadingLayout } from './pages/project-chat/ChatLoadingLayout';
 import { LegacyCloudProviderRedirect, SettingsRedirect } from './pages/settings-redirects';
 
 const AccountMap = lazyNamed(() => import('./pages/AccountMap'), 'AccountMap');
@@ -75,12 +84,15 @@ const ProjectShell = lazyNamed(loadProjectShell, 'Project');
 function Project() {
   const { pathname } = useLocation();
   const queryScope = useQueryScope();
-  // The URL this project route was entered through. Later in-project navigation is read by
-  // the mounted pages themselves; only the cold entry has nothing in flight yet.
-  const [entryPath] = useState(pathname);
+  const projectId = useParams<{ id: string }>().id;
+  // Read the path when the project changes, not on every in-project navigation: this route
+  // element stays mounted across projects, and a session switch inside one project is read
+  // by the chat page that is already mounted.
+  const pathnameRef = useRef(pathname);
+  pathnameRef.current = pathname;
   useEffect(() => {
-    prefetchProjectRoute(queryClient, queryScope, entryPath);
-  }, [entryPath, queryScope]);
+    if (projectId) prefetchProjectRoute(queryClient, queryScope, pathnameRef.current);
+  }, [projectId, queryScope]);
   void loadProjectShell().catch(() => undefined);
   if (/\/settings(?:\/|$)/.test(pathname)) {
     void loadProjectSettings().catch(() => undefined);
@@ -307,11 +319,17 @@ export default function App() {
                         <Route index element={<Navigate to="chat" replace />} />
                         <Route
                           path="chat"
-                          element={page(<ProjectChat />, <NestedRouteFallback />)}
+                          element={page(
+                            <ProjectChat />,
+                            <ChatLoadingLayout testId="chat-route-fallback" />
+                          )}
                         />
                         <Route
                           path="chat/:sessionId"
-                          element={page(<ProjectChat />, <NestedRouteFallback />)}
+                          element={page(
+                            <ProjectChat />,
+                            <ChatLoadingLayout testId="chat-route-fallback" />
+                          )}
                         />
                         <Route path="agent" element={page(<ProjectAgentChat />)} />
                         <Route path="library" element={page(<ProjectLibrary />)} />

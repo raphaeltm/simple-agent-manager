@@ -1,5 +1,5 @@
 import { QueryClient } from '@tanstack/react-query';
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -15,13 +15,13 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   getChatSession: mocks.getChatSession,
 }));
 
+import { CHAT_SESSION_LIST_LIMIT } from '../../../src/lib/chat-query-config';
 import {
   initialChatSessionListQueryOptions,
   prefetchProjectRoute,
   readInitialSessionList,
 } from '../../../src/lib/project-route-prefetch';
 import { chatQueryKeys, projectQueryKeys } from '../../../src/lib/query-options';
-import { CHAT_SESSION_LIST_LIMIT } from '../../../src/pages/project-chat/types';
 
 const SESSIONS = [{ id: 'session-1', topic: 'First', status: 'active' }];
 
@@ -147,7 +147,10 @@ vi.mock('../../../src/components/AuthProvider', () => ({
 vi.mock('../../../src/components/ProtectedRoute', () => ({
   ProtectedRoute: ({ children }: { children: React.ReactNode }) => <>{children}</>,
 }));
-vi.mock('../../../src/components/AppShell', () => ({
+vi.mock('../../../src/components/AppShell', async (importOriginal) => ({
+  // The real hook: it falls back to a default shell context outside an AppShell.
+  useAppShell: (await importOriginal<typeof import('../../../src/components/AppShell')>())
+    .useAppShell,
   AppShell: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 vi.mock('../../../src/components/ErrorBoundary', () => ({
@@ -164,9 +167,11 @@ vi.mock('../../../src/pages/project-chat', () => ({
 }));
 
 describe('App project route', () => {
-  afterEach(() => {
+  afterEach(async () => {
     cleanup();
     window.history.replaceState({}, '', '/');
+    // The app's own client is a module singleton; start each test with a cold cache.
+    (await import('../../../src/lib/query-client')).queryClient.clear();
   });
 
   it('starts the transcript and session list when a chat deep link mounts, not after the project loads', async () => {
@@ -185,5 +190,38 @@ describe('App project route', () => {
     // The project read was started too, and is still outstanding.
     expect(mocks.getProject).toHaveBeenCalledWith('proj-1', expect.anything());
     expect(await view.findByTestId('project-shell')).toBeInTheDocument();
+  });
+
+  it("starts the next project's reads after an in-app jump to another project, but not on a session switch", async () => {
+    mocks.getProject.mockReturnValue(new Promise(() => undefined));
+    window.history.replaceState({}, '', '/projects/proj-1/chat/session-1');
+    const { default: App } = await import('../../../src/App');
+    render(<App />);
+    await waitFor(() =>
+      expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'session-1', expect.anything())
+    );
+
+    // A session switch inside the project: the mounted chat page reads it itself.
+    vi.clearAllMocks();
+    await act(async () => {
+      window.history.pushState({}, '', '/projects/proj-1/chat/session-2');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    expect(mocks.getProject).not.toHaveBeenCalled();
+    expect(mocks.listChatSessions).not.toHaveBeenCalled();
+
+    // The recent-chats menu jumps straight into another project's chat; the project route
+    // element stays mounted, so the jump must still start that project's reads.
+    await act(async () => {
+      window.history.pushState({}, '', '/projects/proj-2/chat/session-9');
+      window.dispatchEvent(new PopStateEvent('popstate'));
+    });
+    await waitFor(() => {
+      expect(mocks.getProject).toHaveBeenCalledWith('proj-2', expect.anything());
+      expect(mocks.getChatSession).toHaveBeenCalledWith('proj-2', 'session-9', expect.anything());
+      expect(mocks.listChatSessions).toHaveBeenCalledWith('proj-2', {
+        limit: CHAT_SESSION_LIST_LIMIT,
+      });
+    });
   });
 });

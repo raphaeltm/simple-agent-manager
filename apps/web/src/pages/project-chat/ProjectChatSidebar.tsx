@@ -123,7 +123,8 @@ export function ProjectChatSidebar({
           )}
         </nav>
       ) : state.loading ? (
-        <div className="flex flex-1 items-center justify-center p-4" role="status">
+        // Not a status region: the conversation column's spinner already announces loading.
+        <div className="flex flex-1 items-center justify-center p-4">
           <span className="text-center text-[13px] text-fg-muted">Loading chats…</span>
         </div>
       ) : (
