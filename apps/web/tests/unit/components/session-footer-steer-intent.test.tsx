@@ -91,7 +91,7 @@ describe('steer or queue while the agent works', () => {
     const lc = lifecycle();
     renderFooter(lc);
     fireEvent.click(screen.getByRole('button', { name: /steer now/i }));
-    expect(screen.getByText(/added to the current turn if the agent can take it/i)).toBeVisible();
+    expect(screen.getByText(/joins this turn if the agent can take it/i)).toBeVisible();
     send();
     expect(lc.handleSendFollowUp).toHaveBeenCalledWith('steer');
   });
@@ -117,7 +117,7 @@ describe('steer or queue while the agent works', () => {
       />
     );
     expect(choice()).toBeNull();
-    expect(screen.getByText(/messages with files are sent after the current turn/i)).toBeVisible();
+    expect(screen.getByText(/messages with files are sent when this turn ends/i)).toBeVisible();
     send();
     expect(lc.handleSendFollowUp).toHaveBeenCalledWith('queue');
   });

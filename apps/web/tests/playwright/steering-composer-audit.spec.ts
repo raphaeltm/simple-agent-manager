@@ -313,6 +313,28 @@ async function collectChipLabels(page: Page): Promise<string[]> {
   });
 }
 
+/** Scroll the virtualized list top-down until a row containing `text` is mounted. */
+async function scrollUntilMounted(page: Page, text: string): Promise<void> {
+  const found = await page.evaluate(async (needle) => {
+    const scroller = document.querySelector<HTMLElement>('[data-testid="virtuoso-scroller"]');
+    if (!scroller) return false;
+    scroller.scrollTop = 0;
+    for (let step = 0; step < 80; step++) {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      const row = [...scroller.querySelectorAll<HTMLElement>('[data-index]')].find((el) =>
+        (el.textContent ?? '').includes(needle)
+      );
+      if (row) {
+        row.scrollIntoView({ block: 'center' });
+        return true;
+      }
+      scroller.scrollTop += scroller.clientHeight / 2;
+    }
+    return false;
+  }, text);
+  expect(found).toBe(true);
+}
+
 const deliveryGroup = (page: Page) =>
   page.getByRole('group', { name: 'When to deliver your message' });
 const composer = (page: Page) => page.getByPlaceholder(/^(Agent is working|Send a message)\.\.\.$/);
@@ -344,6 +366,11 @@ for (const theme of ['dark', 'light'] as const) {
           if (scroller) scroller.scrollTop = 0;
         });
         await screenshot(page, `steering-chips-top-${theme}-${viewport}`);
+        // The long-URL and special-character rows sit mid-list.
+        await scrollUntilMounted(page, 'before you change the signature');
+        await expect(page.getByText(/before you change the signature/).first()).toBeVisible();
+        await assertNoOverflow(page);
+        await screenshot(page, `steering-chips-middle-${theme}-${viewport}`);
         // The first owner prompt is ordinary: no chip.
         await expect(deliveryGroup(page)).toBeVisible();
         await expect(page.getByRole('button', { name: /queue next/i })).toHaveAttribute(
@@ -366,9 +393,7 @@ for (const theme of ['dark', 'light'] as const) {
         const api = await setupApiMocks(page, { working: true });
         await gotoChat(page);
         await page.getByRole('button', { name: /steer now/i }).click();
-        await expect(
-          page.getByText(/added to the current turn if the agent can take it/i)
-        ).toBeVisible();
+        await expect(page.getByText(/joins this turn if the agent can take it/i)).toBeVisible();
         await composer(page).fill('Prefer a generator over a callback here.');
         await screenshot(page, `steering-steer-selected-${theme}-${viewport}`);
         await page.getByRole('button', { name: /^send/i }).click();

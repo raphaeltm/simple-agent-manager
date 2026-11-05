@@ -10,13 +10,13 @@ const OPTIONS: SegmentedOption<PromptDeliveryIntent>[] = [
     value: 'queue',
     label: 'Queue next',
     icon: <ListEnd size={14} aria-hidden="true" />,
-    title: 'Send after the current turn finishes',
+    title: 'Send when the current turn ends',
   },
   {
     value: 'steer',
     label: 'Steer now',
     icon: <CornerDownRight size={14} aria-hidden="true" />,
-    title: 'Add to the turn the agent is working on',
+    title: 'Try to add this to the turn the agent is working on',
   },
 ];
 
@@ -36,10 +36,10 @@ export function DeliveryIntentControl({
 }) {
   const isMobile = useIsMobile();
   const hint = hasAttachments
-    ? 'Messages with files are sent after the current turn.'
+    ? 'Messages with files are sent when this turn ends.'
     : value === 'steer'
-      ? 'Added to the current turn if the agent can take it, otherwise sent next.'
-      : 'Sent after the current turn finishes.';
+      ? 'Joins this turn if the agent can take it, else sent next.'
+      : 'Sent when this turn ends.';
   return (
     <div className="mb-2 flex flex-wrap items-center gap-x-3 gap-y-1">
       {!hasAttachments && (
