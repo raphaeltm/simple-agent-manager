@@ -131,7 +131,7 @@ Responses report `accepted: true, delivered: false` with `transport`, `channel`,
 `eventId` and `sequence`; an optional `idempotencyKey` replays a lost-response retry,
 and changed content under the same key is rejected as a conflict. Messages are capped
 by `PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES` and pair channels by
-`AGENT_MESSAGE_CHANNEL_MAX_CHANNELS`. Managed deployments enable the transport in `wrangler.toml`; the code fallback is off and `AGENT_MESSAGE_CHANNELS_ENABLED=false` selects the legacy path.
+`AGENT_MESSAGE_CHANNEL_MAX_CHANNELS`. Managed deployments enable the transport in `wrangler.toml`; the code fallback is off and `AGENT_MESSAGE_CHANNELS_ENABLED=false` selects the legacy path. A message sent with `deliveryIntent: "steer"` never uses the pair channel: it targets the recipient's running turn, so durable delivery injects the text, fenced and labelled as another agent's message, into that turn (see [Live steering](#live-steering)).
 
 Pair-channel events match only subscriptions targeting one of the two participant
 chats (`subscriptionCanMatchProjectEvent`), `follow_event_channel` rejects
