@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { verifySessionSnapshotArtifactsForSleep } from './session-snapshot-artifacts';
 import type { WorkspaceDeletionIdentity } from './workspace-deletion';
 import {
@@ -143,7 +144,13 @@ export async function automaticDeletionPreservationExpiresAt(
     nowIso: new Date().toISOString(),
   })
     .run()
-    .catch(() => undefined);
+    .catch((error: unknown) => {
+      log.warn('workspace_deletion.preservation_receipt_backfill_failed', {
+        workspaceId: expected.workspaceId,
+        chatSessionId: snapshot.chatSessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   return snapshot.expiresAt;
 }
 

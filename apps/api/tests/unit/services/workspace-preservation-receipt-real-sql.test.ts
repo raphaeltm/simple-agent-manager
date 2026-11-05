@@ -19,6 +19,7 @@ import { completeSessionSnapshot } from '../../../src/services/session-snapshot-
 import { prepareSessionSnapshot } from '../../../src/services/session-snapshot-prepare';
 import { finalizeSessionSnapshotSleeping } from '../../../src/services/session-snapshot-sleep-lifecycle';
 import { completeSessionSnapshotRecovery } from '../../../src/services/session-snapshot-wake-outcome';
+import { cleanupWorkspaceForDeletion } from '../../../src/services/workspace-cleanup';
 import {
   attemptWorkspaceDeletion,
   loadWorkspaceDeletionIdentity,
@@ -47,6 +48,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../../src/services/jwt', () => ({ verifyCallbackToken: mocks.verifyCallbackToken }));
 vi.mock('../../../src/services/project-data', () => ({
   getSession: vi.fn(async () => null),
+  persistMessage: vi.fn(async () => undefined),
+  repairFailedSessionForSnapshotRecovery: vi.fn(async () => undefined),
+  linkSessionToWorkspace: vi.fn(async () => undefined),
   sleepSession: mocks.sleepSession,
   stopSession: mocks.stopSession,
   cleanupWorkspaceActivity: mocks.cleanupWorkspaceActivity,
@@ -55,6 +59,14 @@ vi.mock('../../../src/services/project-data', () => ({
 vi.mock('../../../src/services/workspace-eviction-recovery', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/services/workspace-eviction-recovery')>()),
   recoverWorkspaceAfterEviction: mocks.recoverWorkspaceAfterEviction,
+}));
+vi.mock('../../../src/services/task-runner-do', () => ({
+  ensureTaskRunnerStarted: vi.fn(async () => false),
+  startTaskRunnerDO: vi.fn(async () => undefined),
+}));
+vi.mock('../../../src/services/project-lifecycle-events', () => ({
+  recordTaskLifecycleEventBestEffort: vi.fn(async () => undefined),
+  isLifecycleTaskStatus: () => true,
 }));
 vi.mock('../../../src/services/node-agent', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/services/node-agent')>()),
@@ -127,6 +139,9 @@ describe('evicted source cleanup through real writers and real SQL', () => {
         idFromName: (name: string) => name,
         get: () => ({
           scheduleWorkspaceDeletion: mocks.scheduleWorkspaceDeletion,
+          claimWorkspaceDeletionAttempt: async () => 'claimed',
+          confirmWorkspaceDeletion: async () => undefined,
+          markIdle: async () => ({ status: 'active' }),
           getWorkspaceDeletionAttemptState: async () => ({ pending: false }),
           finalizeWorkspaceEviction: (identity: WorkspaceEvictionIdentity) => {
             const result = finalizationQueue
@@ -468,5 +483,180 @@ describe('evicted source cleanup through real writers and real SQL', () => {
         'UPDATE session_snapshots SET sleep_status = NULL, sleeping_at = NULL, sleep_fallback_json = NULL'
       );
     }
+  });
+
+  it('end to end through the real eviction recovery and wake writers', async () => {
+    sqlite.exec(`
+      INSERT INTO users (id, name, email, github_id, status) VALUES ('user', 'User', 'u@example.com', 'gh-u', 'active');
+      INSERT INTO credentials (id, user_id, provider, credential_type, credential_kind, is_active, encrypted_token, iv, created_at, updated_at)
+        VALUES ('credential', 'user', 'hetzner', 'cloud-provider', 'api-key', 1, 'encrypted', 'iv', '2026-11-05T00:00:00Z', '2026-11-05T00:00:00Z');
+      INSERT INTO projects (id, name, repository, installation_id, default_branch, created_by, created_at, updated_at)
+        VALUES ('project', 'Project', 'owner/repo', 'install', 'main', 'user', '2026-11-05T00:00:00Z', '2026-11-05T00:00:00Z');
+      INSERT INTO project_members (project_id, user_id, role, status) VALUES ('project', 'user', 'owner', 'active');
+      INSERT INTO tasks (id, project_id, user_id, chat_session_id, workspace_id, title, description, status, priority, task_mode, dispatch_depth, created_by, created_at, updated_at)
+        VALUES ('conversation', 'project', 'user', 'chat', 'workspace', 'Conversation', 'Work', 'sleeping', 0, 'conversation', 0, 'user', '2026-11-05T00:00:00Z', '2026-11-05T00:00:00Z');
+    `);
+    await capture('workspace', 'node', false); // live pre-stop capture
+    await capture('workspace', 'node', true); // final capture after docker stop
+    const queued = await loadWorkspaceDeletionIdentity(env.DATABASE, 'workspace');
+    await evict();
+
+    // The eviction callback's own recovery entry point (mocked for the route above).
+    const { recoverWorkspaceAfterEviction } = await vi.importActual<
+      typeof import('../../../src/services/workspace-eviction-recovery')
+    >('../../../src/services/workspace-eviction-recovery');
+    expect(
+      await recoverWorkspaceAfterEviction(env, {
+        projectId: 'project',
+        workspaceId: 'workspace',
+        chatSessionId: 'chat',
+        nodeId: 'node',
+        generation: 'generation',
+      })
+    ).toMatchObject({ status: 'waking' });
+    // What the real wake writer left: the source unbound, the snapshot claimed.
+    expect(
+      sqlite
+        .prepare(
+          "SELECT w.chat_session_id AS chat, s.recovery_status AS recovery, s.recovery_task_id AS task FROM workspaces w JOIN session_snapshots s ON s.workspace_id = w.id WHERE w.id = 'workspace'"
+        )
+        .get()
+    ).toEqual({ chat: null, recovery: 'waking', task: 'conversation' });
+
+    // The TaskRunner places the replacement and binds the chat (outside this slice).
+    sqlite.exec(`INSERT INTO workspaces (id, user_id, project_id, node_id, chat_session_id, status, eviction_generation)
+      VALUES ('target', 'user', 'project', 'target-node', 'chat', 'running', 'target-generation')`);
+    expect(await completeSessionSnapshotRecovery(db(), 'chat', 'conversation', 'target')).toBe(
+      true
+    );
+    expect(
+      await releaseRestoredSourceWorkspaces(env, {
+        chatSessionId: 'chat',
+        restoredWorkspaceId: 'target',
+      })
+    ).toBe(1);
+    await capture('target', 'target-node', false); // successor's first capture
+
+    const outcome = await attemptWorkspaceDeletion({
+      env,
+      expected: queued!,
+      attempt: 1,
+      source: 'test',
+      mode: 'automatic',
+    });
+    expect(outcome).toMatchObject({ status: 'confirmed', proof: 'vm_agent_confirmed' });
+    expect(mocks.stopSession).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'project',
+      'chat',
+      expect.anything()
+    );
+    expect(
+      sqlite
+        .prepare("SELECT chat_session_id AS chat, status FROM workspaces WHERE id = 'target'")
+        .get()
+    ).toEqual({
+      chat: 'chat',
+      status: 'running',
+    });
+  });
+
+  it('a lost deletion response leaves the workspace stopping and the retry reaches proof', async () => {
+    await capture('workspace', 'node', true);
+    await evict();
+    await wakeOnto('target');
+    await releaseRestoredSourceWorkspaces(env, {
+      chatSessionId: 'chat',
+      restoredWorkspaceId: 'target',
+    });
+    const queued = await loadWorkspaceDeletionIdentity(env.DATABASE, 'workspace');
+    // The VM deleted everything, but the response never arrived.
+    mocks.deleteWorkspaceOnNode.mockRejectedValueOnce(new Error('Request timed out after 5000ms'));
+    const first = await attemptWorkspaceDeletion({
+      env,
+      expected: { ...queued!, chatSessionId: 'chat' },
+      attempt: 1,
+      source: 'test',
+      mode: 'automatic',
+    });
+    expect(first.status).toBe('retry');
+    expect(
+      sqlite
+        .prepare(
+          "SELECT status, runtime_deletion_proof AS proof FROM workspaces WHERE id = 'workspace'"
+        )
+        .get()
+    ).toEqual({
+      status: 'stopping',
+      proof: null,
+    });
+    // The retry reaches the VM's durable tombstone, which answers success idempotently.
+    const second = await attemptWorkspaceDeletion({
+      env,
+      expected: { ...queued!, chatSessionId: 'chat' },
+      attempt: 2,
+      source: 'test',
+      mode: 'automatic',
+    });
+    expect(second).toMatchObject({ status: 'confirmed', proof: 'vm_agent_confirmed' });
+  });
+
+  it.each([
+    ['released by a wake', null, 'confirmed'],
+    ['rebound to another chat (control)', 'other-chat', 'fenced'],
+  ] as const)(
+    'automatic cleanup from a row read before the binding was %s',
+    async (_case, currentChat, expected) => {
+      await capture('workspace', 'node', true);
+      await evict();
+      await wakeOnto('target');
+      await releaseRestoredSourceWorkspaces(env, {
+        chatSessionId: 'chat',
+        restoredWorkspaceId: 'target',
+      });
+      // A sweep read the row while it was still bound (terminal-node-lifecycle-repair, trial-expire).
+      const stale = (await db().query.workspaces.findFirst({
+        where: (w, { eq }) => eq(w.id, 'workspace'),
+      }))!;
+      sqlite
+        .prepare("UPDATE workspaces SET chat_session_id = ? WHERE id = 'workspace'")
+        .run(currentChat);
+      const outcome = await cleanupWorkspaceForDeletion({
+        db: db(),
+        env,
+        workspace: { ...stale, chatSessionId: 'chat' },
+        userId: 'user',
+        mode: 'automatic',
+        deleteConfirmedRow: false,
+      });
+      expect(outcome.status).toBe(expected);
+      expect(mocks.deleteWorkspaceOnNode).toHaveBeenCalledTimes(expected === 'confirmed' ? 1 : 0);
+    }
+  );
+
+  it('backfills the receipt for a workspace preserved before receipts existed', async () => {
+    const prepared = await capture('workspace', 'node', false);
+    sqlite.exec(
+      "UPDATE workspaces SET status = 'sleeping'; UPDATE session_snapshots SET sleep_status = 'stopping', sleep_claim_id = 'claim'"
+    );
+    await finalizeSessionSnapshotSleeping(db(), env, 'chat', 'claim', new Date(), {
+      expectedGeneration: prepared.generation,
+    });
+    // Rows slept before migration 0224 carry the grant but no receipt.
+    sqlite.exec('UPDATE workspaces SET preservation_receipt_json = NULL');
+
+    expect(await sourcePreservation()).not.toBeNull(); // legacy snapshot-row path
+    expect(receipt()).toMatchObject({ reason: 'sleep', snapshotGeneration: prepared.generation });
+
+    // The backfilled receipt then survives a wake and the successor's first capture.
+    await wakeOnto('target');
+    expect(
+      await releaseRestoredSourceWorkspaces(env, {
+        chatSessionId: 'chat',
+        restoredWorkspaceId: 'target',
+      })
+    ).toBe(1);
+    await capture('target', 'target-node', false);
+    expect(await sourcePreservation()).not.toBeNull();
   });
 });
