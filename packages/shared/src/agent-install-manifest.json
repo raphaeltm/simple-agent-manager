@@ -29,6 +29,17 @@
     "bin": "gemini"
   },
   {
+    "agentType": "google-antigravity",
+    "method": "binary-archive",
+    "package": "agy-acp-server",
+    "version": "1.4.5",
+    "bin": "agy-acp",
+    "assets": {
+      "linux-x86_64": "923923a0d7dc8073f66cc6f78647a3107e3a7ee2b7e1a24df8b3927b5188013b",
+      "linux-arm64": "7d64246633ae094f67e3bbcd2d679e89048f91346d5339313336e7483f40f056"
+    }
+  },
+  {
     "agentType": "mistral-vibe",
     "method": "uv-tool",
     "package": "mistral-vibe",

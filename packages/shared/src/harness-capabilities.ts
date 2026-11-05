@@ -59,6 +59,14 @@ export const HARNESS_CAPABILITIES: readonly HarnessCapability[] = [
     proxyProviderTag: '',
   },
   {
+    agentType: 'google-antigravity',
+    dialects: ['gemini'],
+    authEnvVar: 'GEMINI_API_KEY',
+    authStyle: 'api-key',
+    proxyRouteSegment: '',
+    proxyProviderTag: '',
+  },
+  {
     agentType: 'mistral-vibe',
     dialects: ['native'],
     authEnvVar: 'MISTRAL_API_KEY',

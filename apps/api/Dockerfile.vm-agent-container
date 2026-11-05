@@ -18,7 +18,7 @@ LABEL org.opencontainers.image.title="SAM vm-agent instant runtime" \
 
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends bash coreutils gzip tar util-linux libssl3 liblzma5 libgcc-s1 ca-certificates curl git jq openssh-client procps wget; \
+    apt-get install -y --no-install-recommends bash coreutils gzip tar unzip util-linux libssl3 liblzma5 libgcc-s1 ca-certificates curl git jq openssh-client procps wget; \
     mkdir -p -m 755 /etc/apt/keyrings; \
     wget -qO- https://cli.github.com/packages/githubcli-archive-keyring.gpg > /etc/apt/keyrings/githubcli-archive-keyring.gpg; \
     chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg; \

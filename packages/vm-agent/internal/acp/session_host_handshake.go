@@ -16,6 +16,9 @@ func (h *SessionHost) establishACPSession(ctx context.Context, agentType string,
 	if err != nil {
 		return err
 	}
+	if err := h.authenticateACP(ctx, agentType, initResp.AuthMethods, timeouts.initialize); err != nil {
+		return err
+	}
 	loaded, err := h.tryLoadPreviousACPSession(ctx, agentType, settings, previousAcpSessionID, initResp.AgentCapabilities.LoadSession, timeouts.loadSession, !requireLoadSession)
 	if loaded {
 		return err
@@ -54,7 +57,7 @@ func (h *SessionHost) initializeACP(ctx context.Context, agentType string, timeo
 	slog.Info("ACP: sending Initialize request", "timeout", timeout)
 	h.reportLifecycle("info", "ACP Initialize started", map[string]interface{}{"agentType": agentType})
 	capabilities := acpsdk.ClientCapabilities{
-		Fs: acpsdk.FileSystemCapabilities{ReadTextFile: true, WriteTextFile: true},
+		Fs: acpClientFsCapabilities(agentType),
 	}
 	if config := h.acpInteractionConfigSnapshot(); config.Enabled && config.validate() == nil && (config.FormsEnabled || config.URLsEnabled) {
 		capabilities.Elicitation = &acpsdk.ElicitationCapabilities{}
@@ -94,6 +97,47 @@ func (h *SessionHost) initializeACP(ctx context.Context, agentType string, timeo
 		"steeringSupported":   h.steering.Advertised && h.steering.PromptRequired,
 	})
 	return resp, nil
+}
+
+// authenticateACP selects the agent's ACP auth method when SAM's credential
+// needs one. The method must be advertised: a release that drops it would
+// otherwise fail later at session/new with a less specific error.
+func (h *SessionHost) authenticateACP(ctx context.Context, agentType string, advertised []acpsdk.AuthMethod, timeout time.Duration) error {
+	methodID := acpAuthMethodID(agentType)
+	if methodID == "" {
+		return nil
+	}
+	if !authMethodAdvertised(advertised, methodID) {
+		h.reportLifecycle("warn", "ACP auth method not advertised", map[string]interface{}{
+			"agentType": agentType,
+			"methodId":  methodID,
+		})
+		return fmt.Errorf("agent %s does not offer ACP auth method %q", agentType, methodID)
+	}
+	authCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	if _, err := h.acpConn.Authenticate(authCtx, acpsdk.AuthenticateRequest{MethodId: methodID}); err != nil {
+		h.reportLifecycle("warn", "ACP Authenticate failed", map[string]interface{}{
+			"agentType": agentType,
+			"methodId":  methodID,
+			"error":     err.Error(),
+		})
+		return fmt.Errorf("ACP authenticate (%s) failed: %w", methodID, err)
+	}
+	h.reportLifecycle("info", "ACP Authenticate succeeded", map[string]interface{}{
+		"agentType": agentType,
+		"methodId":  methodID,
+	})
+	return nil
+}
+
+func authMethodAdvertised(methods []acpsdk.AuthMethod, methodID string) bool {
+	for _, method := range methods {
+		if authMethodID(method) == methodID {
+			return true
+		}
+	}
+	return false
 }
 
 func (h *SessionHost) tryLoadPreviousACPSession(
@@ -142,7 +186,7 @@ func (h *SessionHost) tryLoadPreviousACPSession(
 		SessionId:  acpsdk.SessionId(previousAcpSessionID),
 		Cwd:        h.config.ContainerWorkDir,
 		McpServers: buildAcpMcpServers(h.config.McpServers, agentType),
-		Meta:       harnessLifecycleSessionMeta(agentType),
+		Meta:       acpSessionMeta(agentType),
 	})
 	cancel()
 	if loadErr != nil {
@@ -185,7 +229,7 @@ func (h *SessionHost) startNewACPSession(ctx context.Context, agentType string, 
 	sessResp, err := h.acpConn.NewSession(newCtx, acpsdk.NewSessionRequest{
 		Cwd:        h.config.ContainerWorkDir,
 		McpServers: buildAcpMcpServers(h.config.McpServers, agentType),
-		Meta:       harnessLifecycleSessionMeta(agentType),
+		Meta:       acpSessionMeta(agentType),
 	})
 	if err != nil {
 		h.reportLifecycle("warn", "ACP NewSession failed", map[string]interface{}{

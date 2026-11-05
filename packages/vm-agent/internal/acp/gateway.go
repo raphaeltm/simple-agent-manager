@@ -1059,6 +1059,14 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 			validationCmd: versionCheckCommand("gemini", strings.TrimPrefix(geminiInstallPackage, "@google/gemini-cli@")),
 			isNpmBased:    true,
 		}
+	case "google-antigravity":
+		return agentCommandInfo{
+			command:       "agy-acp",
+			args:          []string{"--uid="},
+			envVarName:    "GEMINI_API_KEY",
+			installCmd:    antigravityInstallScript,
+			validationCmd: antigravityVersionCheckCommand(),
+		}
 	case "mistral-vibe":
 		return agentCommandInfo{
 			command:       "vibe-acp",

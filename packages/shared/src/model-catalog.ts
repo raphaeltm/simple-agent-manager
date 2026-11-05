@@ -314,6 +314,23 @@ const GEMINI_MODELS: ModelGroup[] = [
 ];
 
 // ---------------------------------------------------------------------------
+// Google Antigravity models
+// ---------------------------------------------------------------------------
+
+// Values of the `model` session config option advertised by agy-acp-server 1.4.5 with
+// Gemini API key auth. Antigravity offers Claude and GPT models only to ACP clients it
+// recognises by name, and SAM is not one of them.
+const ANTIGRAVITY_MODELS: ModelGroup[] = [
+  modelGroupFromTuples('Gemini', [
+    ['gemini-3.8-flash', 'Gemini 3.8 Flash'],
+    ['gemini-3.7-flash', 'Gemini 3.7 Flash'],
+    ['gemini-3.6-flash', 'Gemini 3.6 Flash'],
+    ['gemini-3.5-flash', 'Gemini 3.5 Flash'],
+    ['gemini-3.1-pro', 'Gemini 3.1 Pro'],
+  ]),
+];
+
+// ---------------------------------------------------------------------------
 // Registry
 // ---------------------------------------------------------------------------
 
@@ -323,6 +340,7 @@ const MODEL_CATALOG: Partial<Record<AgentType, ModelGroup[]>> = {
   'openai-codex': CODEX_MODELS,
   'mistral-vibe': MISTRAL_MODELS,
   'google-gemini': GEMINI_MODELS,
+  'google-antigravity': ANTIGRAVITY_MODELS,
   opencode: OPENCODE_MODELS,
 };
 

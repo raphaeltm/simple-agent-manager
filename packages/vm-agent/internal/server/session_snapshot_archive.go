@@ -357,6 +357,10 @@ var homeExcludePrefixes = []string{
 //   - globally installed npm packages, including the agent CLIs reinstalled at
 //     session start (.npm-global)
 //   - uv tool and Python installs (.local/share/uv)
+//   - Antigravity's embedded helper binaries, unpacked on each launch
+//     (.gemini/antigravity/bin), and its plugin secret store
+//     (.config/antigravity), which must not reach R2. Conversations that
+//     LoadSession resumes live in .gemini/antigravity-acp and are kept.
 //
 // They count against the snapshot budget for nothing. Their symlinks also used
 // to mark otherwise complete snapshots "entries-skipped", which keeps a session
@@ -366,7 +370,10 @@ var homeExcludePrefixes = []string{
 // that contains an excluded path (validateSnapshotHomeTar and the standalone
 // extractor), and snapshots captured before these prefixes were skipped
 // legitimately contain them and must still wake.
-var homeCaptureExcludePrefixes = []string{".codex/cache", ".npm-global", ".local/share/uv"}
+var homeCaptureExcludePrefixes = []string{
+	".codex/cache", ".npm-global", ".local/share/uv",
+	".gemini/antigravity/bin", ".config/antigravity",
+}
 
 // homeExcludeFiles are exact HOME-relative files excluded from the tar. Their
 // parent directories (.claude, .codex) ALSO hold harness transcript/session

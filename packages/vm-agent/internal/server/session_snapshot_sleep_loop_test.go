@@ -381,6 +381,9 @@ func TestSnapshotCaptureSkipsRegenerableHomeCaches(t *testing.T) {
 		".local/share/uv/tools/ruff/bin/ruff":                  "tool",
 		".codex/sessions/2026/10/03/rollout.jsonl":             "conversation",
 		".codex/plugins/cache/curated/skill/SKILL.md":          "plugin",
+		".gemini/antigravity/bin/webm_encoder":                 "helper",
+		".config/antigravity/plugin-secrets.json":              "secret",
+		".gemini/antigravity-acp/conversations/agy.db":         "conversation",
 	} {
 		path := filepath.Join(home, name)
 		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
@@ -403,14 +406,14 @@ func TestSnapshotCaptureSkipsRegenerableHomeCaches(t *testing.T) {
 		t.Fatalf("skipped = %#v: excluded caches must not be recorded as lost state (their symlinks used to mark snapshots degraded)", skipped)
 	}
 	names := snapshotTarNames(t, tarPath)
-	for _, excluded := range []string{".npm-global/", ".codex/cache/", ".local/share/uv/"} {
+	for _, excluded := range []string{".npm-global/", ".codex/cache/", ".local/share/uv/", ".gemini/antigravity/bin/", ".config/antigravity/"} {
 		for _, name := range names {
 			if strings.HasPrefix(name, excluded) {
 				t.Fatalf("snapshot captured regenerable %s", name)
 			}
 		}
 	}
-	for _, kept := range []string{".codex/sessions/2026/10/03/rollout.jsonl", ".codex/plugins/cache/curated/skill/SKILL.md"} {
+	for _, kept := range []string{".codex/sessions/2026/10/03/rollout.jsonl", ".codex/plugins/cache/curated/skill/SKILL.md", ".gemini/antigravity-acp/conversations/agy.db"} {
 		if !containsString(names, kept) {
 			t.Fatalf("snapshot names %v are missing harness state %s", names, kept)
 		}
