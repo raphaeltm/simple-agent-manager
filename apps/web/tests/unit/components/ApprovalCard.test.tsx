@@ -212,7 +212,16 @@ describe('approval card in chat', () => {
     renderCard(compactApprovalMetadata());
 
     expect(await screen.findByText('Delete node')).toBeInTheDocument();
-    expect(screen.getByText(/requested from another project/)).toBeInTheDocument();
+    expect(screen.getByText(/not requested from this project/)).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+  });
+
+  it('hides Approve and Deny when the conversation has no project', async () => {
+    fetchOperationsApproval.mockResolvedValue({ approval: approval() });
+
+    render(<AcpConversationItemView item={itemFor(compactApprovalMetadata())} />);
+
+    expect(await screen.findByText('Delete node')).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
   });
 

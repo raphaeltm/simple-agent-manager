@@ -207,7 +207,7 @@ async function auditStates(page: Page, name: string) {
 
   const cards = page.getByTestId('approval-card');
   const foreign = cards.filter({ hasText: 'Restart VM agent' });
-  await expect(foreign.getByText(/requested from another project/)).toBeVisible();
+  await expect(foreign.getByText(/not requested from this project/)).toBeVisible();
   await expect(foreign.getByText('expired', { exact: true })).toBeVisible();
   // The unknown approval shows a retryable error rather than an empty card.
   await expect(page.getByText(/Couldn't load this approval/)).toBeVisible();

@@ -82,8 +82,9 @@ export const ApprovalCard: FC<ApprovalCardProps> = ({ item, projectId }) => {
   }
 
   // An approval from another project is still shown (the server record is the truth), but it is
-  // decided where its own conversation is, or in Admin → Approvals.
-  const fromThisConversation = !projectId || approval.requestingProjectId === projectId;
+  // decided where its own conversation is, or in Admin → Approvals. Without a known project the
+  // buttons stay hidden (fail closed).
+  const fromThisConversation = Boolean(projectId) && approval.requestingProjectId === projectId;
   const deciding =
     decide.isPending && decide.variables?.id === approval.id ? decide.variables.decision : null;
 
@@ -105,7 +106,7 @@ export const ApprovalCard: FC<ApprovalCardProps> = ({ item, projectId }) => {
       )}
       {!fromThisConversation && (
         <div className="px-4 pt-3 text-xs text-fg-muted">
-          This approval was requested from another project. Decide it in Approvals.
+          Decide this approval in Approvals: it was not requested from this project.
         </div>
       )}
       <ApprovalItem
