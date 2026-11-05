@@ -79,6 +79,7 @@ export async function sendChat(
   const shared = writer.role === 'grantee';
 
   const content = validateSendChatContent(body);
+  const deliveryIntent = body.deliveryIntent ?? 'queue';
 
   // Every refusal comes before the first side effect (validating uploads, cancelling a
   // scheduled sleep), so a refused prompt changes nothing.
@@ -93,6 +94,13 @@ export async function sendChat(
   }
   if (attachments.length > 0 && !durableConfig.deliveryEnabled) {
     throw errors.badRequest('Attachment messages require durable prompt delivery to be enabled');
+  }
+  if (deliveryIntent === 'steer' && !durableConfig.deliveryEnabled) {
+    throw errors.conflict('Steering requires durable prompt delivery');
+  }
+  if (deliveryIntent === 'steer' && attachments.length > 0) {
+    // A steer carries text into the running turn; files travel with a queued prompt.
+    throw errors.badRequest('Attachments cannot be sent as a steer; queue the message instead');
   }
   if (attachments.length > 0) {
     const validation = await validateAttachments(env, userId, attachments);
@@ -126,6 +134,7 @@ export async function sendChat(
       senderType: 'human',
       senderId: userId,
       messageClass: 'deliver',
+      deliveryIntent,
       sourceKind: 'user_followup',
       ttlMs: durableConfig.ttlMs,
       metadata: {
@@ -143,6 +152,7 @@ export async function sendChat(
     return {
       accepted: true,
       status: 'queued',
+      deliveryIntent,
       deliveryId: accepted.message.id,
       messageId: accepted.transcriptMessageId,
     };

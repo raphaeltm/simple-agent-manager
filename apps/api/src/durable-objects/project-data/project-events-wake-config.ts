@@ -10,7 +10,8 @@ export function isProjectEventWakeEnabled(env: Env): boolean {
  * Requested delivery modes whose event wakes ride the durable prompt queue.
  * `runtime_interrupt` maps to the `interrupt` mailbox class (stop-and-deliver
  * phase 1, idea 01M2EPH9WGDYFDQBZCP9QY1FDE): its wakes may cancel the target's
- * in-flight turn so the wake prompt is delivered immediately.
+ * in-flight turn so the wake prompt is delivered immediately. `runtime_steer` carries
+ * the `steer` delivery intent: the batch joins a running turn without stopping it.
  *
  * Frozen literal tuple: the values are interpolated into the SQL predicate
  * constants below, so both the type and the runtime assertion keep them
@@ -20,6 +21,7 @@ export function isProjectEventWakeEnabled(env: Env): boolean {
 export const PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_MODES = [
   'existing_session_prompt',
   'runtime_interrupt',
+  'runtime_steer',
 ] as const satisfies readonly ProjectEventRequestedDeliveryMode[];
 
 for (const mode of PROMPT_QUEUE_WAKE_REQUESTED_DELIVERY_MODES) {
