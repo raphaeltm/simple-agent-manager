@@ -354,6 +354,7 @@ describe('POST /sessions/:sessionId/prompt', () => {
     await expect(response.json()).resolves.toEqual({
       accepted: true,
       status: 'queued',
+      deliveryIntent: 'queue',
       deliveryId: 'delivery-1',
       messageId: 'delivery-1',
     });
@@ -364,6 +365,7 @@ describe('POST /sessions/:sessionId/prompt', () => {
         targetSessionId: 'chat-1',
         displayContent: 'hello agent',
         sourceKind: 'user_followup',
+        deliveryIntent: 'queue',
       })
     );
     expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
