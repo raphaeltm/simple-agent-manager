@@ -73,6 +73,8 @@ export interface AccountMapResponse {
     messageCount: number;
     workspaceId: string | null;
     taskId: string | null;
+    /** The chat's open "waiting on you" marker, if any. */
+    attention?: { kind: string; reason: string | null; createdAt: number } | null;
   }>;
   tasks: Array<{
     id: string;
@@ -83,6 +85,8 @@ export interface AccountMapResponse {
     executionStep: string | null;
     priority: number | null;
     agentActivityState: AgentActivityState;
+    /** The task's pull request (https only). */
+    outputPrUrl?: string | null;
   }>;
   ideas: Array<{
     id: string;

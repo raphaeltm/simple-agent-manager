@@ -33,7 +33,9 @@ import * as projectDataService from '../services/project-data';
  */
 const ACTIVE_NODE_STATUSES = ['pending', 'creating', 'running', 'stopping'];
 const ACTIVE_WORKSPACE_STATUSES = ['pending', 'creating', 'running', 'recovery', 'stopping'];
-const ACTIVE_SESSION_STATUSES = ['active', 'running'];
+// Sleeping chats are resumable work, so they belong on the active map (their tasks already are).
+// Errored chats are history: they appear with "Show finished" (activeOnly=false), like failed tasks.
+const ACTIVE_SESSION_STATUSES = ['active', 'running', 'sleeping'];
 
 /** Default max entities per type from D1. Configurable via ACCOUNT_MAP_MAX_ENTITIES. */
 const DEFAULT_MAX_ENTITIES = 200;
@@ -43,7 +45,8 @@ const DEFAULT_MAX_SESSIONS_PER_PROJECT = 20;
 
 /** KV cache TTL in seconds. Configurable via ACCOUNT_MAP_CACHE_TTL_SECONDS. */
 const DEFAULT_CACHE_TTL_SECONDS = 30;
-const ACCOUNT_MAP_CACHE_VERSION = 'v3';
+// v5: sessions carry `attention` (unexpired only), tasks carry `outputPrUrl`; sleeping chats are active.
+const ACCOUNT_MAP_CACHE_VERSION = 'v5';
 
 interface SessionSummary {
   id: string;
@@ -53,6 +56,8 @@ interface SessionSummary {
   messageCount: number;
   workspaceId: string | null;
   taskId: string | null;
+  /** The chat's open "waiting on you" marker, if any (from ProjectData attention markers). */
+  attention: { kind: string; reason: string | null; createdAt: number } | null;
 }
 
 interface Relationship {
@@ -61,6 +66,30 @@ interface Relationship {
   type: string;
   active: boolean;
   primary?: boolean;
+}
+
+/**
+ * Narrow the DO's attention summary to what the map shows; anything malformed reads as none.
+ * A marker past its `expiresAt` is no longer waiting on anyone, even before the DO alarm
+ * resolves it.
+ */
+function toAttentionSummary(value: unknown, nowMs: number): SessionSummary['attention'] {
+  if (!value || typeof value !== 'object') return null;
+  const { kind, reason, createdAt, expiresAt } = value as Record<string, unknown>;
+  if (typeof kind !== 'string' || typeof createdAt !== 'number') return null;
+  if (typeof expiresAt === 'number' && expiresAt <= nowMs) return null;
+  return { kind, reason: typeof reason === 'string' ? reason : null, createdAt };
+}
+
+/** The map renders this as a link, so only an https URL is passed through. */
+function toHttpsUrl(value: string | null | undefined): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' ? url.href : null;
+  } catch {
+    return null;
+  }
 }
 
 const accountMapRoutes = new Hono<{ Bindings: Env }>();
@@ -220,6 +249,7 @@ accountMapRoutes.get('/', async (c) => {
           messageCount: (s.messageCount as number) ?? 0,
           workspaceId: (s.workspaceId as string) ?? null,
           taskId: (s.taskId as string) ?? null,
+          attention: toAttentionSummary(s.attention, Date.now()),
         })),
       };
     })
@@ -392,6 +422,7 @@ accountMapRoutes.get('/', async (c) => {
       executionStep: t.executionStep,
       priority: t.priority,
       agentActivityState: t.agentActivityState,
+      outputPrUrl: toHttpsUrl(t.outputPrUrl),
     })),
     ideas: ideas.map(({ id, projectId, title, status }) => ({ id, projectId, title, status })),
     ideaScan: { projectLimit: linkProjectCap, candidateLimit: ideaCap },

@@ -38,7 +38,7 @@ import {
   useState,
 } from 'react';
 
-import { applyDagreLayout } from '../../../components/account-map/layout/dagre-layout';
+import { applyDagreLayout } from './dagre-layout';
 import { stagesOf, stepStatusMeta } from './model';
 import { StepMark, TONE_COLOR } from './ui';
 
