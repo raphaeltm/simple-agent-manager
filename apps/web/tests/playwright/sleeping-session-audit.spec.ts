@@ -132,9 +132,9 @@ async function dismissOnboarding(page: Page) {
 }
 
 async function expectNoProvisioningBlock(page: Page) {
-  // Both strings are unique to ProvisioningIndicator's non-terminal branch.
-  await expect(page.getByText('Usually takes 2-4 minutes.')).toHaveCount(0);
-  await expect(page.getByText('Waiting for task runner...')).toHaveCount(0);
+  // The test id is on every branch of ProvisioningIndicator, so this cannot go stale
+  // when its wording changes.
+  await expect(page.getByTestId('provisioning-indicator')).toHaveCount(0);
 }
 
 for (const viewport of [

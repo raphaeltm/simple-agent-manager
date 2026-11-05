@@ -1100,11 +1100,11 @@ describe('ProvisioningIndicator', () => {
       { wrapper: QueryTestWrapper }
     );
 
-    expect(screen.getByText('Installing dependencies (3/4)')).toBeInTheDocument();
-    expect(screen.getByText(/Usually takes 2-4 minutes/)).toBeInTheDocument();
-    expect(screen.getByText('1. Provisioning VM')).toBeInTheDocument();
-    expect(screen.getByText('4. Starting agent')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'View Logs' })).toBeInTheDocument();
+    expect(screen.getByText('Installing dependencies · 3 of 4')).toBeInTheDocument();
+    expect(screen.getByText(/This usually takes 2–4 minutes/)).toBeInTheDocument();
+    expect(screen.getByText('Provisioning VM')).toBeInTheDocument();
+    expect(screen.getByText('Starting agent')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'View logs' })).toBeInTheDocument();
   });
 });
 
