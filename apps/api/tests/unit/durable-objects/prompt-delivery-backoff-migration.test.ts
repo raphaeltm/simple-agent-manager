@@ -31,7 +31,16 @@ describe('prompt target backoff additive migration', () => {
       const before = db.prepare('SELECT * FROM session_inbox ORDER BY rowid').all();
       runMigrations(sql);
       runMigrations(sql);
-      expect(db.prepare('SELECT * FROM session_inbox ORDER BY rowid').all()).toEqual(before);
+      // Later additive migrations only append columns: 072 reads every existing row as
+      // the queue lane with no steer outcome.
+      expect(db.prepare('SELECT * FROM session_inbox ORDER BY rowid').all()).toEqual(
+        before.map((row) => ({
+          ...(row as Record<string, unknown>),
+          delivery_intent: 'queue',
+          steer_outcome: null,
+          steer_reason: null,
+        }))
+      );
       const config = resolveDurableExecutionConfig({});
       expect(computePromptDeliveryAlarmTime(sql, config, 1000)).toBe(50000);
       expect(claimDuePromptDeliveries(sql, config, 49999)).toEqual([]);

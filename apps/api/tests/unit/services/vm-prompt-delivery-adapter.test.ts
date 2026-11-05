@@ -57,6 +57,9 @@ const protocolFixture = JSON.parse(
 ) as {
   capabilities: Record<string, unknown>;
   ambiguousReceipt: Record<string, unknown>;
+  injectedSteer: Record<string, unknown>;
+  notConsumedSteer: Record<string, unknown>;
+  ambiguousSteer: Record<string, unknown>;
   conflictPrompt: Record<string, unknown>;
   duplicatePrompt: Record<string, unknown>;
   newPrompt: Record<string, unknown>;
@@ -69,6 +72,7 @@ const promptProtocolCapabilities = {
   runtimeIdentity: protocolFixture.capabilities.runtimeIdentity,
   promptReceipts: protocolFixture.capabilities.promptReceipts,
   checkpointRollover: protocolFixture.capabilities.checkpointRollover,
+  steering: protocolFixture.capabilities.steering,
   interactions: {
     supported: true,
     version: 1,
