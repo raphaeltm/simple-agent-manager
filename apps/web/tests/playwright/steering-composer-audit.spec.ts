@@ -395,6 +395,18 @@ for (const theme of ['dark', 'light'] as const) {
         await page.getByRole('button', { name: /steer now/i }).click();
         await expect(page.getByText(/joins this turn if the agent can take it/i)).toBeVisible();
         await composer(page).fill('Prefer a generator over a callback here.');
+        if (viewport === 'mobile') {
+          // The newest chip must not sit under the phone-only conversation toggle.
+          const chipBox = await page
+            .getByTestId('user-message-delivery')
+            .last()
+            .locator(':scope > span')
+            .boundingBox();
+          const toggleBox = await page.getByTestId('chat-immersive-toggle').boundingBox();
+          expect(chipBox && toggleBox).toBeTruthy();
+          // Unconditional: every chip on a phone ends left of the toggle's column.
+          expect(chipBox!.x + chipBox!.width).toBeLessThanOrEqual(toggleBox!.x);
+        }
         await screenshot(page, `steering-steer-selected-${theme}-${viewport}`);
         await page.getByRole('button', { name: /^send/i }).click();
         await expect.poll(() => api.prompts.length).toBe(1);

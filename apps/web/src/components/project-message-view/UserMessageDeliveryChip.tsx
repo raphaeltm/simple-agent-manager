@@ -82,7 +82,9 @@ export function UserMessageDeliveryChip({ delivery }: { delivery: UserMessageDel
   const { tone, icon, label, detail } = chipContent(delivery);
   const t = NOTICE_TONES[tone];
   return (
-    <div className="-mt-2 mb-4 flex justify-end" data-testid="user-message-delivery">
+    // On phones the newest message's bottom-right corner belongs to the floating "just the
+    // conversation" toggle (ImmersiveChatToggle), so the chip stops short of that column.
+    <div className="-mt-2 mb-4 flex justify-end max-md:pr-14" data-testid="user-message-delivery">
       <span
         className="inline-flex min-w-0 max-w-[92%] items-center gap-1.5 rounded-full border bg-[var(--sam-chip-bg)] px-2 py-0.5 text-xs text-fg-muted sm:max-w-[80%]"
         style={{ borderColor: t.edge }}
