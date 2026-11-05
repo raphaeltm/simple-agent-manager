@@ -1,5 +1,9 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
+test.use({
+  video: process.env.ZEN_RECORD_VIDEO ? { mode: 'on', size: { width: 1280, height: 800 } } : 'off',
+});
+
 // ---------------------------------------------------------------------------
 // Visual audit for desktop Focus Mode sidebar collapse.
 //
@@ -59,7 +63,7 @@ function makeSession(
   taskId: string,
   topic: string,
   status = 'active',
-  lastMessageAt = NOW - 30000,
+  lastMessageAt = NOW - 30000
 ) {
   return {
     id,
@@ -101,7 +105,7 @@ const SESSIONS = [
     's-2',
     't-2',
     'Refactor the credential resolution layer with a deliberately long topic that should wrap and never push controls off the canvas in any focus state',
-    'needs_input',
+    'needs_input'
   ),
   makeSession('s-3', 't-3', 'Fix overflow bug <>& in sidebar', 'stopped'),
   makeSession('s-4', 't-4', 'Add collapse peek seams', 'completed'),
@@ -113,7 +117,15 @@ const TASKS = [
   makeTask('t-4', 'Add collapse peek seams', 'completed'),
 ];
 
-async function setupApiMocks(page: Page) {
+async function setupApiMocks(
+  page: Page,
+  options: { projects?: (typeof MOCK_PROJECT)[]; projectError?: boolean; theme?: string } = {}
+) {
+  await page.addInitScript(() => {
+    localStorage.setItem('sam-onboarding-wizard-dismissed-user-test-1', 'true');
+  });
+  if (options.theme)
+    await page.addInitScript((theme) => localStorage.setItem('sam-theme', theme), options.theme);
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -155,7 +167,9 @@ async function setupApiMocks(page: Page) {
     }
 
     if (path === '/api/projects') {
-      return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
+      return options.projectError
+        ? respond(500, { error: 'Project list unavailable' })
+        : respond(200, { projects: options.projects ?? [MOCK_PROJECT], nextCursor: null });
     }
     return respond(200, {});
   });
@@ -171,7 +185,7 @@ async function screenshot(page: Page, name: string) {
 
 async function assertNoOverflow(page: Page) {
   const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth,
+    () => document.documentElement.scrollWidth > window.innerWidth
   );
   expect(overflow).toBe(false);
 }
@@ -198,7 +212,7 @@ test.describe('Focus Mode sidebars — Desktop', () => {
   test.beforeEach(({ browserName }, testInfo) => {
     test.skip(
       !testInfo.project.name.includes('Desktop'),
-      `Desktop audit skipped for ${testInfo.project.name} on ${browserName}`,
+      `Desktop audit skipped for ${testInfo.project.name} on ${browserName}`
     );
   });
 
@@ -206,7 +220,9 @@ test.describe('Focus Mode sidebars — Desktop', () => {
     await gotoProject(page);
     // The segmented toggle group exposes all three modes as buttons.
     await expect(page.getByRole('group', { name: 'Focus Mode' })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Default', exact: true, pressed: true })).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Default', exact: true, pressed: true })
+    ).toBeVisible();
     await assertNoOverflow(page);
     await screenshot(page, 'focus-mode-default-desktop');
   });
@@ -217,7 +233,7 @@ test.describe('Focus Mode sidebars — Desktop', () => {
     await page.waitForTimeout(400);
     // The collapsed nav shows the compact cycle control instead of the segmented group.
     await expect(
-      page.getByRole('button', { name: /Focus Mode: Focus\. Activate to switch to Zen/ }),
+      page.getByRole('button', { name: /Focus Mode: Focus\. Activate to switch to Zen/ })
     ).toBeVisible();
     // The session strip exposes a compact New chat affordance.
     await expect(page.getByRole('button', { name: 'New chat' })).toBeVisible();
@@ -231,36 +247,127 @@ test.describe('Focus Mode sidebars — Desktop', () => {
     await page.waitForTimeout(400);
     // Both zen peek seams render as expand buttons parented to the grid edges.
     await expect(
-      page.getByRole('button', { name: /Navigation \(Zen mode\)\. Activate to expand\./ }),
+      page.getByRole('button', { name: /Navigation \(Zen mode\)\. Activate to expand\./ })
     ).toBeVisible();
     await expect(
-      page.getByRole('button', { name: /Chats \(Zen mode\)\. Activate to expand\./ }),
+      page.getByRole('button', { name: /Chats \(Zen mode\)\. Activate to expand\./ })
     ).toBeVisible();
     await assertNoOverflow(page);
     await screenshot(page, 'focus-mode-zen-desktop');
   });
 
+  test('Zen peek keeps layout controls and stays open when switching navigation', async ({
+    page,
+  }) => {
+    await gotoProject(page);
+    await page.getByRole('button', { name: 'Zen', exact: true }).click();
+    const seam = page.getByRole('button', { name: /Navigation \(Zen mode\)/ });
+    await seam.hover();
+    await expect(
+      page.getByRole('button', { name: 'Zen', exact: true, pressed: true })
+    ).toBeVisible();
+    await screenshot(page, 'zen-navigation-project-desktop');
+    for (let i = 0; i < 3; i++) {
+      await page.getByRole('button', { name: 'Show global navigation' }).click();
+      await expect(
+        page.getByRole('navigation', { name: 'Primary navigation', exact: true })
+      ).toBeVisible();
+      await page.getByRole('button', { name: /Back to .* navigation/ }).click();
+      await expect(
+        page.getByRole('navigation', { name: 'Project navigation', exact: true })
+      ).toBeVisible();
+    }
+    await page.getByRole('button', { name: 'Show global navigation' }).click();
+    await screenshot(page, 'zen-navigation-global-desktop');
+    await page.getByRole('button', { name: 'Default', exact: true }).click();
+    await expect(seam).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: 'Default', exact: true, pressed: true })
+    ).toBeVisible();
+    await assertNoOverflow(page);
+    await screenshot(page, 'zen-navigation-exited-desktop');
+  });
+
+  test('keyboard switching retains focus and Escape dismisses the Zen peek', async ({ page }) => {
+    await gotoProject(page);
+    await page.getByRole('button', { name: 'Zen', exact: true }).click();
+    await page.mouse.move(700, 400);
+    const seam = page.getByRole('button', { name: /Navigation \(Zen mode\)/ });
+    await seam.focus();
+    const toGlobal = page.getByRole('button', { name: 'Show global navigation' });
+    await toGlobal.focus();
+    await page.keyboard.press('Enter');
+    const toProject = page.getByRole('button', { name: /Back to .* navigation/ });
+    await expect(toProject).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(toGlobal).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('group', { name: 'Focus Mode' })).toHaveCount(0);
+    await expect(seam).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(page.getByRole('group', { name: 'Focus Mode' })).toHaveCount(0);
+    await seam.hover();
+    await expect(page.getByRole('group', { name: 'Focus Mode' })).toBeVisible();
+    await page.mouse.move(700, 400);
+    await expect(page.getByRole('group', { name: 'Focus Mode' })).toHaveCount(0);
+  });
+
+  for (const scenario of ['many', 'empty', 'error', 'light'] as const) {
+    test(`Zen navigation handles ${scenario} project data`, async ({ page }) => {
+      await setupApiMocks(page, {
+        projects:
+          scenario === 'empty'
+            ? []
+            : Array.from({ length: 35 }, (_, i) => ({
+                ...MOCK_PROJECT,
+                id: `stress-${i}`,
+                name: i === 0 ? 'Long project 🚀 <script> & '.repeat(12) : `Project ${i}`,
+              })),
+        projectError: scenario === 'error',
+        theme: scenario === 'light' ? 'light' : 'dark',
+      });
+      await page.goto('/projects/proj-1/chat');
+      await expect(page.locator('html')).toHaveAttribute(
+        'data-ui-theme',
+        scenario === 'light' ? 'sam-light' : 'sam'
+      );
+      await page.getByRole('button', { name: 'Zen', exact: true }).click();
+      await page.getByRole('button', { name: /Navigation \(Zen mode\)/ }).hover();
+      await page.getByRole('button', { name: 'Show global navigation' }).click();
+      await expect(
+        page.getByRole('navigation', { name: 'Primary navigation', exact: true })
+      ).toBeVisible();
+      await expect(page.getByRole('group', { name: 'Focus Mode' })).toBeVisible();
+      await assertNoOverflow(page);
+      await screenshot(page, `zen-navigation-${scenario}-desktop`);
+    });
+  }
+
   test('the F key cycles default -> focus -> zen -> default', async ({ page }) => {
     await gotoProject(page);
-    await expect(page.getByRole('button', { name: 'Default', exact: true, pressed: true })).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Default', exact: true, pressed: true })
+    ).toBeVisible();
 
     await page.keyboard.press('f');
     await page.waitForTimeout(300);
     await expect(
-      page.getByRole('button', { name: /Focus Mode: Focus\. Activate to switch to Zen/ }),
+      page.getByRole('button', { name: /Focus Mode: Focus\. Activate to switch to Zen/ })
     ).toBeVisible();
     await assertNoOverflow(page);
 
     await page.keyboard.press('f');
     await page.waitForTimeout(300);
     await expect(
-      page.getByRole('button', { name: /Navigation \(Zen mode\)\. Activate to expand\./ }),
+      page.getByRole('button', { name: /Navigation \(Zen mode\)\. Activate to expand\./ })
     ).toBeVisible();
     await assertNoOverflow(page);
 
     await page.keyboard.press('f');
     await page.waitForTimeout(300);
-    await expect(page.getByRole('button', { name: 'Default', exact: true, pressed: true })).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Default', exact: true, pressed: true })
+    ).toBeVisible();
     await assertNoOverflow(page);
   });
 
@@ -273,7 +380,9 @@ test.describe('Focus Mode sidebars — Desktop', () => {
       .click();
     await page.waitForTimeout(400);
     // Back to default: the segmented toggle is visible again.
-    await expect(page.getByRole('button', { name: 'Default', exact: true, pressed: true })).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Default', exact: true, pressed: true })
+    ).toBeVisible();
     await assertNoOverflow(page);
     await screenshot(page, 'focus-mode-zen-expanded-desktop');
   });
@@ -287,8 +396,24 @@ test.describe('Focus Mode sidebars — Mobile', () => {
   test.beforeEach(({ browserName }, testInfo) => {
     test.skip(
       testInfo.project.name.includes('Desktop'),
-      `Mobile audit skipped for ${testInfo.project.name} on ${browserName}`,
+      `Mobile audit skipped for ${testInfo.project.name} on ${browserName}`
     );
+  });
+
+  test('mobile navigation still switches global and project menus', async ({ page }) => {
+    await gotoProject(page);
+    await page.getByRole('button', { name: 'Open navigation menu' }).click();
+    await page.getByRole('button', { name: 'Show global navigation' }).click();
+    await expect(
+      page.getByRole('navigation', { name: 'Primary navigation', exact: true })
+    ).toBeVisible();
+    await screenshot(page, 'zen-navigation-global-mobile');
+    await page.getByRole('button', { name: /Back to .* navigation/ }).click();
+    await expect(
+      page.getByRole('navigation', { name: 'Project navigation', exact: true })
+    ).toBeVisible();
+    await assertNoOverflow(page);
+    await screenshot(page, 'zen-navigation-project-mobile');
   });
 
   test('mobile never renders the Focus Mode toggle and has no overflow', async ({ page }) => {
@@ -299,7 +424,7 @@ test.describe('Focus Mode sidebars — Mobile', () => {
     await page.keyboard.press('f');
     await page.waitForTimeout(300);
     await expect(
-      page.getByRole('button', { name: /Zen mode\)\. Activate to expand\./ }),
+      page.getByRole('button', { name: /Zen mode\)\. Activate to expand\./ })
     ).toHaveCount(0);
     await assertNoOverflow(page);
     await screenshot(page, 'focus-mode-mobile');

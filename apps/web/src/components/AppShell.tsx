@@ -29,7 +29,7 @@ import { CredentialHealthNavItem } from './CredentialHealthNavItem';
 import { GlobalAudioPlayer } from './GlobalAudioPlayer';
 import { GlobalCommandPalette } from './GlobalCommandPalette';
 import { MobileNavDrawer, type MobileNavItem } from './MobileNavDrawer';
-import { extractProjectId, getGlobalNavItems, NavSidebar, PROJECT_NAV_ITEMS } from './NavSidebar';
+import { extractProjectId, getGlobalNavItems, PROJECT_NAV_ITEMS } from './NavSidebar';
 import { OnboardingProvider } from './onboarding';
 import { ChoosePathWizard } from './onboarding/choose-path/ChoosePathWizard';
 import { ChatImmersiveContext } from './shell/chat-immersive-context';
@@ -393,7 +393,13 @@ export function AppShell({ children }: AppShellProps) {
                 onExpand={() => setFocusMode('default')}
                 gridRow="1"
               >
-                <NavSidebar
+                <DesktopSidebar
+                  focusMode={focusMode}
+                  onSelectFocusMode={setFocusMode}
+                  onCycleFocusMode={cycleFocusMode}
+                  onOpenCommandPalette={commandPalette.open}
+                  user={user ?? null}
+                  onSignOut={signOutHandler}
                   projectName={projectName}
                   showGlobalNav={showGlobalNav}
                   onToggleGlobalNav={handleToggleGlobalNav}

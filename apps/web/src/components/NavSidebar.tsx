@@ -23,7 +23,7 @@ import {
   Wrench,
   Zap,
 } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { type ReactNode, useLayoutEffect, useRef } from 'react';
 import { useLocation } from 'react-router';
 
 import { useSamSettings } from '../hooks/useSamSettings';
@@ -134,6 +134,20 @@ export function NavSidebar({
 
   const projectId = extractProjectId(location.pathname);
   const insideProject = Boolean(projectId);
+  const projectToggleRef = useRef<HTMLButtonElement>(null);
+  const globalToggleRef = useRef<HTMLButtonElement>(null);
+  const restoreToggleFocus = useRef(false);
+
+  useLayoutEffect(() => {
+    if (!restoreToggleFocus.current) return;
+    restoreToggleFocus.current = false;
+    (showGlobalNav ? globalToggleRef : projectToggleRef).current?.focus();
+  }, [showGlobalNav]);
+
+  const toggleNavigation = () => {
+    restoreToggleFocus.current = true;
+    onToggleGlobalNav?.();
+  };
 
   const renderItem = (item: NavItem, to: string, active: boolean) => (
     <GlassNavItem
@@ -194,7 +208,8 @@ export function NavSidebar({
           >
             {/* Toggle to global nav */}
             <button
-              onClick={onToggleGlobalNav}
+              ref={projectToggleRef}
+              onClick={toggleNavigation}
               className={`${TOGGLE_CLASS} ${iconOnly ? 'justify-center px-0' : 'px-3'}`}
               aria-label="Show global navigation"
               title={iconOnly ? 'Back to Projects' : undefined}
@@ -231,7 +246,8 @@ export function NavSidebar({
           >
             {/* Toggle back to project nav */}
             <button
-              onClick={onToggleGlobalNav}
+              ref={globalToggleRef}
+              onClick={toggleNavigation}
               className={`${TOGGLE_CLASS} ${iconOnly ? 'justify-center px-0' : 'px-3'}`}
               aria-label={`Back to ${projectName || 'project'} navigation`}
               title={iconOnly ? `Back to ${projectName || 'Project'}` : undefined}
@@ -268,7 +284,9 @@ export function NavSidebar({
       aria-label="Primary navigation"
       className={`flex min-h-0 flex-1 flex-col gap-0.5 overflow-y-auto px-3 py-2 ${className ?? ''}`}
     >
-      {globalItems.map((item) => renderItem(item, item.path, isActive(item.path, location.pathname)))}
+      {globalItems.map((item) =>
+        renderItem(item, item.path, isActive(item.path, location.pathname))
+      )}
 
       {onboardingResume}
 
