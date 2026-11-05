@@ -15,14 +15,18 @@ const labelStyle = { fontSize: 'var(--sam-type-secondary-size)' } as const;
 
 /** The Nodes page's "Create Node" form: provider, location and offering from the compute pool. */
 export function CreateNodeForm({
+  creating,
+  onCreatingChange,
   onCreated,
   onError,
 }: {
+  /** Owned by the page so it outlives the form; see `Nodes.tsx`. */
+  creating: boolean;
+  onCreatingChange: (creating: boolean) => void;
   onCreated: (node: NodeResponse) => void;
   onError: (message: string | null) => void;
 }) {
   const queryScope = useQueryScope();
-  const [creating, setCreating] = useState(false);
   const [newNodeLocation, setNewNodeLocation] = useState('');
   const [newNodeVmSize, setNewNodeVmSize] = useState<VMSize>('medium');
   const [nativeInstanceType, setNativeInstanceType] = useState('');
@@ -70,9 +74,9 @@ export function CreateNodeForm({
   );
 
   const handleCreateNode = async () => {
-    if (!canCreateNode) return;
+    if (!canCreateNode || creating) return;
     try {
-      setCreating(true);
+      onCreatingChange(true);
       onError(null);
       const timestamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '').toLowerCase();
       const provider = effectiveProvider;
@@ -88,7 +92,7 @@ export function CreateNodeForm({
     } catch (err) {
       onError(err instanceof Error ? err.message : 'Failed to create node');
     } finally {
-      setCreating(false);
+      onCreatingChange(false);
     }
   };
 

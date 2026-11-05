@@ -58,6 +58,9 @@ export function Nodes() {
   const clock = useClock();
 
   const [showCreateForm, setShowCreateForm] = useState(false);
+  // Lives here, not in the form: closing the form mid-create must not let a reopened form
+  // submit a second node, because POST /api/nodes does not deduplicate.
+  const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const {
@@ -173,6 +176,14 @@ export function Nodes() {
                   {usage.historyOmittedCount === 1 ? '' : 's'} was not loaded.
                 </span>
               )}
+              {usage && usage.historyTruncatedCount > 0 && (
+                <span>
+                  {usage.historyTruncatedCount} session
+                  {usage.historyTruncatedCount === 1 ? '' : 's'} uploaded more history than this
+                  page reads; the oldest minutes are not shown.
+                </span>
+              )}
+              {usage?.workspacesOmitted && <span>Older stopped sessions are not listed.</span>}
               <span className="flex items-center gap-1.5">
                 <Swatch color={MEMORY_COLOR} /> Memory goes up
               </span>
@@ -190,6 +201,7 @@ export function Nodes() {
         <Button
           onClick={() => setShowCreateForm((v) => !v)}
           variant={showCreateForm ? 'secondary' : 'primary'}
+          disabled={creating}
         >
           {showCreateForm ? 'Cancel' : 'Create Node'}
         </Button>
@@ -198,6 +210,8 @@ export function Nodes() {
       {showCreateForm && (
         <div className="mb-4">
           <CreateNodeForm
+            creating={creating}
+            onCreatingChange={setCreating}
             onError={setError}
             onCreated={(created) => {
               setShowCreateForm(false);

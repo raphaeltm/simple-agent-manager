@@ -75,3 +75,24 @@ Evidence: `apps/api/tests/unit/routes/node-resource-usage.test.ts` (12 tests, re
 
 - Prototype branch `sam/feel-keep-talking-redoing-4s1nfy`; library `/design/nodes-page-2026-11-04/`
 - `.claude/rules/28-credential-resolution-fallback-tests.md` (real SQL for SQL-predicate guards), `apps/api/.claude/rules/50-list-read-row-fault-isolation.md`, `.claude/rules/60-request-io-and-bundle-budgets.md`, `.claude/rules/81-work-bounds-must-state-throughput.md`, `apps/web/.claude/rules/17-ui-visual-testing.md`, `apps/web/.claude/rules/80-sam-glass.md`
+
+## CodeRabbit round (2026-11-05)
+
+CodeRabbit reviewed PR #2528 with 16 comments. Fixed, each with a regression test that fails when its guard is removed:
+
+- Project fields (name, chat topic, task title, chat link) are joined only through the caller's active `project_members` row. A workspace in a project the caller left keeps its usage, with a neutral `Workspace <id>` title.
+- The workspace list is capped by `nodes.usageMaxWorkspaces` (default 500), live first; `workspacesOmitted` discloses the cap.
+- Chunk reads are capped per workspace by `nodes.usageMaxChunksPerWorkspace` (default 48), newest first, via `ROW_NUMBER()`; `historyTruncated` and `historyTruncatedCount` disclose it.
+- The history cap ranks each node's best workspace before any node's second, and breaks ties by id.
+- Stored buckets snap to the response's `bucketMs` grid by midpoint.
+- The create-in-flight state moved to `Nodes.tsx`, and Cancel is disabled while a create runs.
+- The chart breaks its lines at missing buckets.
+- A machine with no hardware info is named "Machine" (never `node.name`).
+- A live memory reading is never treated as newer than its heartbeat.
+- Machine totals and set-aside count only reservation-holding sessions (`holdsReservation`). Totals say "partial" when a running session has no reading. The machine's live dot appears only when every running session has a live reading.
+- The refetch-failure test now waits for the query error state.
+
+Not changed, with replies on the PR:
+
+- `specs/001-mvp/contracts/api.md`: rule 01 forbids editing `specs/` outside a spec context; `reference/api.md` is the API reference and is updated.
+- Chunks starting before the lookback: `nodes.usageChunkLookbackMinutes` is documented as having to cover the longest uploaded chunk. Dropping the started_at bound would scan a workspace's full history.

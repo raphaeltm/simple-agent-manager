@@ -6,7 +6,9 @@ import {
   DEFAULT_COMMENT_CONTEXT_MESSAGES,
   DEFAULT_COMMENT_MENTIONS_MAX,
   DEFAULT_NODE_USAGE_CHUNK_LOOKBACK_MINUTES,
+  DEFAULT_NODE_USAGE_MAX_CHUNKS_PER_WORKSPACE,
   DEFAULT_NODE_USAGE_MAX_HISTORY_WORKSPACES,
+  DEFAULT_NODE_USAGE_MAX_WORKSPACES,
   DEFAULT_NODE_USAGE_WINDOW_MINUTES,
   DEFAULT_PROFILE_PIN_CANDIDATE_LIMIT,
   DEFAULT_PROFILE_USAGE_WINDOW_DAYS,
@@ -211,6 +213,20 @@ export const FEATURE_SETTINGS: AdminSettingDefinition[] = [
     'Operations',
     'Most workspaces per person whose CPU and memory history the Nodes page reads in one request. Running and most recently changed workspaces come first; the page says how many it left out.',
     { min: 1, max: 500 }
+  ),
+  integerDefinition(
+    'nodes.usageMaxWorkspaces',
+    DEFAULT_NODE_USAGE_MAX_WORKSPACES,
+    'Operations',
+    'Most workspaces per person the Nodes page lists in one request. Running workspaces come first, then the most recently changed; the page says how many it left out.',
+    { min: 50, max: 2000 }
+  ),
+  integerDefinition(
+    'nodes.usageMaxChunksPerWorkspace',
+    DEFAULT_NODE_USAGE_MAX_CHUNKS_PER_WORKSPACE,
+    'Operations',
+    'Most CPU and memory history chunks the Nodes page reads per workspace in one request, newest first. At 15-minute chunks a workspace has about 8 in the default window; the page says when a workspace had more.',
+    { min: 4, max: 500 }
   ),
   integerDefinition(
     'chat.profileUsageWindowDays',

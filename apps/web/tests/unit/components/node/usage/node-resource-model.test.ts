@@ -39,8 +39,8 @@ describe('node resource model', () => {
     expect(spec.title).toBe('Hetzner cx53');
     expect(spec.vcpu).toBe(16);
     expect(spec.memoryMb).toBe(32768);
-    // No hardware at all: fall back to the stored name rather than an empty title.
-    expect(machineSpec(baseNode).title).toBe('Auto: some task title');
+    // No hardware at all: a neutral label, never the stored "Auto: <task title>" name.
+    expect(machineSpec(baseNode).title).toBe('Machine');
     expect(
       machineSpec({
         ...baseNode,
@@ -85,6 +85,26 @@ describe('node resource model', () => {
       ['fresh', 5],
       ['heartbeat-time', 9],
     ]);
+  });
+
+  it('never treats a reading as newer than the heartbeat that carried it', () => {
+    const now = Date.parse('2026-11-04T12:00:00Z');
+    const node = {
+      ...baseNode,
+      heartbeatStaleAfterSeconds: 180,
+      // Heartbeats stopped 10 minutes ago; the agent clock ran an hour ahead.
+      lastHeartbeatAt: '2026-11-04T11:50:00Z',
+      lastMetrics: {
+        workspaceMemory: [
+          { workspaceId: 'skewed', memoryUsageBytes: 5, collectedAt: '2026-11-04T12:50:00Z' },
+        ],
+      },
+    };
+    expect(liveMemoryByWorkspace(node, now).size).toBe(0);
+    // Control: the same skewed reading on a current heartbeat is still live.
+    expect([
+      ...liveMemoryByWorkspace({ ...node, lastHeartbeatAt: '2026-11-04T11:59:30Z' }, now),
+    ]).toEqual([['skewed', 5]]);
   });
 
   it('treats memory over its reservation as over, and CPU over its reservation separately', () => {

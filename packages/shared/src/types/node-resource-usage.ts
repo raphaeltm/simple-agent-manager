@@ -28,12 +28,18 @@ export interface NodeWorkspaceResourceUsage {
   projectId: string | null;
   projectName: string | null;
   chatSessionId: string | null;
-  /** Chat topic, then task title, then the workspace's display name. */
+  /**
+   * Chat topic, then task title, then the workspace's display name. When the caller is no
+   * longer an active member of the workspace's project, a neutral "Workspace <id>" label, and
+   * `projectId`, `projectName` and `chatSessionId` are null.
+   */
   title: string;
   ownerUserId: string | null;
   ownerName: string | null;
   isMine: boolean;
   status: WorkspaceStatus;
+  /** True while the status still holds its reservation on the machine (running, creating, recovery). */
+  holdsReservation: boolean;
   createdAt: string;
   reservation: NodeResourceReservation | null;
   series: NodeResourceUsageSeries;
@@ -41,6 +47,8 @@ export interface NodeWorkspaceResourceUsage {
   historyEndsAt: number | null;
   /** True when this workspace's history was left out because the request hit its cap. */
   historyOmitted: boolean;
+  /** True when the workspace had more history chunks in the window than one request reads; the oldest are missing. */
+  historyTruncated: boolean;
 }
 
 export interface NodeResourceUsageResponse {
@@ -51,5 +59,9 @@ export interface NodeResourceUsageResponse {
   bucketMs: number;
   /** Workspaces whose history was left out because the request hit its cap. */
   historyOmittedCount: number;
+  /** Workspaces whose oldest history in the window was left out by the per-workspace chunk cap. */
+  historyTruncatedCount: number;
+  /** True when the caller has more workspaces than one request lists; older stopped ones are left out. */
+  workspacesOmitted: boolean;
   workspaces: NodeWorkspaceResourceUsage[];
 }

@@ -57,7 +57,9 @@ const GB = 1024 * 1024 * 1024;
 function node(overrides: Partial<NodeResponse> = {}): NodeResponse {
   return {
     id: 'node-1',
-    name: 'Node 1',
+    name: 'Auto: Node 1 task',
+    cloudProvider: 'hetzner',
+    providerInstanceType: 'cx33',
     status: 'running',
     healthStatus: 'healthy',
     vmSize: 'medium',
@@ -83,6 +85,8 @@ function usageResponse(
     windowEnd: now,
     bucketMs: MINUTE,
     historyOmittedCount: workspaces.filter((w) => w.historyOmitted).length,
+    historyTruncatedCount: workspaces.filter((w) => w.historyTruncated).length,
+    workspacesOmitted: false,
     workspaces,
   };
 }
@@ -105,6 +109,7 @@ function session(
     ownerName: 'Test User',
     isMine: true,
     status: 'running',
+    holdsReservation: true,
     createdAt: new Date(Date.now() - 90 * MINUTE).toISOString(),
     reservation: { cpuMillis: 1000, memoryMb: 4096, diskMb: 10240, exclusiveNode: false },
     series: {
@@ -114,6 +119,7 @@ function session(
     },
     historyEndsAt: end,
     historyOmitted: false,
+    historyTruncated: false,
     ...rest,
   };
 }
@@ -186,7 +192,7 @@ describe('Nodes page', () => {
 
   it('renders node list', async () => {
     renderPage();
-    expect(await screen.findByRole('heading', { name: 'Node 1' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Hetzner cx33' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /create node/i })).toBeInTheDocument();
   });
 
@@ -295,13 +301,100 @@ describe('Nodes page', () => {
     expect(within(cpuRow as HTMLElement).queryByText('over limit')).not.toBeInTheDocument();
   });
 
+  it('counts only sessions that still hold their reservation in the machine totals', async () => {
+    mocks.getNodeResourceUsage.mockResolvedValue(
+      usageResponse([
+        session({ workspaceId: 'run', title: 'Running one' }),
+        // Stopped, with an exclusive reservation still stored: it must not fill the machine.
+        session({
+          workspaceId: 'gone',
+          title: 'Stopped one',
+          chatSessionId: 'chat-2',
+          status: 'stopped',
+          holdsReservation: false,
+          memoryGb: 6,
+          reservation: { cpuMillis: 4000, memoryMb: 8192, diskMb: 10240, exclusiveNode: true },
+        }),
+      ])
+    );
+    renderPage();
+    const chart = await screen.findByTestId('machine-chart');
+    expect(within(chart).getByText('set aside 4.0 GB')).toBeInTheDocument();
+    expect(within(chart).getByText('set aside 1.0 vCPU')).toBeInTheDocument();
+    expect(within(chart).getByText(/memory 2\.0 GB/)).toBeInTheDocument();
+    // The stopped session is still listed.
+    expect(screen.getByRole('link', { name: 'Stopped one' })).toBeInTheDocument();
+  });
+
+  it('labels a machine total as partial when a running session has no reading yet', async () => {
+    mocks.getNodeResourceUsage.mockResolvedValue(
+      usageResponse([
+        session({ workspaceId: 'a', title: 'Has data' }),
+        session({
+          workspaceId: 'b',
+          title: 'No data yet',
+          chatSessionId: 'chat-2',
+          series: { start: [], cpuMillis: [], memoryBytes: [] },
+          historyEndsAt: null,
+        }),
+      ])
+    );
+    const { unmount } = renderPage();
+    const chart = await screen.findByTestId('machine-chart');
+    expect(within(chart).getAllByLabelText(/partial: No reading yet for 1 session/)).toHaveLength(
+      2
+    );
+    unmount();
+
+    // Control: every session has data, so the totals are not labelled partial.
+    mocks.getNodeResourceUsage.mockResolvedValue(
+      usageResponse([session({ workspaceId: 'a', title: 'Has data' })])
+    );
+    renderPage();
+    const complete = await screen.findByTestId('machine-chart');
+    expect(within(complete).queryByText(/partial/)).not.toBeInTheDocument();
+  });
+
+  it('draws the machine’s live dot only when every running session has a live reading', async () => {
+    const fresh = new Date().toISOString();
+    const withLive = (ids: string[]) =>
+      node({
+        lastHeartbeatAt: fresh,
+        lastMetrics: {
+          workspaceMemory: ids.map((workspaceId) => ({
+            workspaceId,
+            memoryUsageBytes: 3 * GB,
+            collectedAt: fresh,
+          })),
+        },
+      });
+    const sessions = [
+      session({ workspaceId: 'a', title: 'First' }),
+      session({ workspaceId: 'b', title: 'Second', chatSessionId: 'chat-2' }),
+    ];
+    mocks.getNodeResourceUsage.mockResolvedValue(usageResponse(sessions));
+    mocks.listNodes.mockResolvedValue([withLive(['a'])]);
+    const { unmount } = renderPage();
+    const chart = await screen.findByTestId('machine-chart');
+    expect(within(chart).queryByTestId('live-memory-dot')).not.toBeInTheDocument();
+    // Liveness: the session that has a live reading still shows its own dot.
+    const firstRow = screen.getByRole('link', { name: 'First' }).closest('li') as HTMLElement;
+    expect(within(firstRow).getByTestId('live-memory-dot')).toBeInTheDocument();
+    unmount();
+
+    mocks.listNodes.mockResolvedValue([withLive(['a', 'b'])]);
+    renderPage();
+    const allLive = await screen.findByTestId('machine-chart');
+    expect(within(allLive).getByTestId('live-memory-dot')).toBeInTheDocument();
+  });
+
   it('shows an empty machine as idle, and a usage failure without hiding the machines', async () => {
     mocks.getNodeResourceUsage.mockRejectedValue(new Error('usage boom'));
     renderPage();
     expect(
       await screen.findByText(/Couldn.t load sessions and usage: usage boom/)
     ).toBeInTheDocument();
-    expect(screen.getByRole('heading', { name: 'Node 1' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Hetzner cx33' })).toBeInTheDocument();
   });
 
   it('says when a session’s usage was left out rather than calling it empty', async () => {
@@ -344,20 +437,20 @@ describe('Nodes page', () => {
   it('stops and deletes a node from its actions menu', async () => {
     const user = userEvent.setup();
     renderPage();
-    await screen.findByRole('heading', { name: 'Node 1' });
+    await screen.findByRole('heading', { name: 'Hetzner cx33' });
 
-    await user.click(screen.getByRole('button', { name: /actions for node 1/i }));
+    await user.click(screen.getByRole('button', { name: /actions for hetzner cx33/i }));
     await user.click(screen.getByRole('menuitem', { name: 'Stop' }));
     await waitFor(() => expect(mocks.stopNode).toHaveBeenCalledWith('node-1'));
 
-    await user.click(screen.getByRole('button', { name: /actions for node 1/i }));
+    await user.click(screen.getByRole('button', { name: /actions for hetzner cx33/i }));
     await user.click(screen.getByRole('menuitem', { name: 'Delete' }));
     await waitFor(() => expect(mocks.deleteNode).toHaveBeenCalledWith('node-1'));
   });
 
   it('links to the node detail page', async () => {
     renderPage();
-    await screen.findByRole('heading', { name: 'Node 1' });
+    await screen.findByRole('heading', { name: 'Hetzner cx33' });
     fireEvent.click(screen.getByRole('link', { name: /details/i }));
     expect(await screen.findByTestId('node-detail-page')).toBeInTheDocument();
   });
@@ -395,6 +488,33 @@ describe('Nodes page', () => {
     expect(await screen.findByTestId('node-detail-page')).toBeInTheDocument();
   });
 
+  it('keeps Cancel disabled and blocks a second submit while a create is in flight', async () => {
+    let resolveCreate: (value: NodeResponse) => void = () => {};
+    mocks.createNode.mockReturnValueOnce(
+      new Promise<NodeResponse>((resolve) => {
+        resolveCreate = resolve;
+      })
+    );
+    renderPage();
+    await waitFor(() => expect(mocks.listNodes).toHaveBeenCalled());
+    fireEvent.click(screen.getByRole('button', { name: /create node/i }));
+    fireEvent.change(await screen.findByLabelText('Native offering'), {
+      target: { value: 'cx43' },
+    });
+    const submit = screen.getByRole('button', { name: /create node/i });
+    fireEvent.click(submit);
+    await waitFor(() => expect(mocks.createNode).toHaveBeenCalledTimes(1));
+
+    // Mid-create: the form cannot be closed and reopened to submit again.
+    expect(screen.getByRole('button', { name: /cancel/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+    fireEvent.click(submit);
+    expect(mocks.createNode).toHaveBeenCalledTimes(1);
+
+    resolveCreate(node({ id: 'node-2', status: 'creating' }));
+    expect(await screen.findByTestId('node-detail-page')).toBeInTheDocument();
+  });
+
   it('surfaces load error instead of empty state when initial load fails', async () => {
     // Regression: a failed initial load left nodesLoading=false with no data, so
     // the render gate fell through to the "No nodes yet" empty state — telling the
@@ -413,24 +533,26 @@ describe('Nodes page', () => {
   });
 
   it('keeps stale nodes visible when a background refetch fails (does not show error)', async () => {
-    mocks.listNodes.mockResolvedValue([node({ name: 'Persisted Node' })]);
+    mocks.listNodes.mockResolvedValue([node({ providerInstanceType: 'cx43' })]);
     const { queryClient } = renderPage();
-    expect(await screen.findByRole('heading', { name: 'Persisted Node' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Hetzner cx43' })).toBeInTheDocument();
 
     mocks.listNodes.mockRejectedValueOnce(new Error('Nodes refetch boom'));
     void queryClient.invalidateQueries({ queryKey: nodeQueryKeys.all(SCOPE) });
 
+    // Wait for the rejected refetch to settle, so the assertions below see its outcome.
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Persisted Node' })).toBeInTheDocument();
+      expect(queryClient.getQueryState(nodeQueryKeys.list(SCOPE))?.status).toBe('error');
     });
+    expect(screen.getByRole('heading', { name: 'Hetzner cx43' })).toBeInTheDocument();
     expect(screen.queryByText('Nodes refetch boom')).not.toBeInTheDocument();
     expect(screen.queryByText('No nodes yet')).not.toBeInTheDocument();
   });
 
   it('keeps stale node list visible during background refetch', async () => {
-    mocks.listNodes.mockResolvedValue([node({ name: 'Stale Node' })]);
+    mocks.listNodes.mockResolvedValue([node({ providerInstanceType: 'cx22' })]);
     const { queryClient } = renderPage();
-    expect(await screen.findByRole('heading', { name: 'Stale Node' })).toBeInTheDocument();
+    expect(await screen.findByRole('heading', { name: 'Hetzner cx22' })).toBeInTheDocument();
 
     let resolveRefetch: (value: unknown) => void = () => {};
     mocks.listNodes.mockReturnValueOnce(
@@ -441,11 +563,11 @@ describe('Nodes page', () => {
     void queryClient.invalidateQueries({ queryKey: nodeQueryKeys.all(SCOPE) });
 
     // Content must stay visible while refetch is in-flight
-    expect(screen.getByRole('heading', { name: 'Stale Node' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Hetzner cx22' })).toBeInTheDocument();
 
-    resolveRefetch([node({ name: 'Fresh Node' })]);
+    resolveRefetch([node({ providerInstanceType: 'cx52' })]);
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Fresh Node' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Hetzner cx52' })).toBeInTheDocument();
     });
   });
 });

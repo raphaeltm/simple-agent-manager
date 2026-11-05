@@ -81,7 +81,10 @@ function makeSession(
   overrides: Record<string, unknown> & { cpu?: number; mem?: number; seed?: number }
 ) {
   const { cpu = 600, mem = 2, seed = 7, ...rest } = overrides;
+  const status = (rest.status as string | undefined) ?? 'running';
   return {
+    holdsReservation: ['running', 'creating', 'recovery'].includes(status),
+    historyTruncated: false,
     workspaceId: 'ws-1',
     nodeId: 'node-1',
     projectId: 'proj-sam',
@@ -269,6 +272,8 @@ function usage(workspaces: unknown[]) {
     windowEnd: NOW,
     bucketMs: MINUTE,
     historyOmittedCount: 0,
+    historyTruncatedCount: 0,
+    workspacesOmitted: false,
     workspaces,
   };
 }

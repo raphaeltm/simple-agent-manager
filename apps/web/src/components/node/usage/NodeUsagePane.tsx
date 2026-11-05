@@ -82,6 +82,17 @@ function emptyNote(node: NodeResponse): string {
   }
 }
 
+/** Marks a machine total that leaves out sessions with no reading yet. */
+function PartialNote({ unknown }: { unknown: number }) {
+  if (unknown === 0) return null;
+  const label = `No reading yet for ${unknown} session${unknown === 1 ? '' : 's'}`;
+  return (
+    <span className="text-fg-muted" title={label} aria-label={`partial: ${label}`}>
+      · partial
+    </span>
+  );
+}
+
 export interface NodeUsagePaneProps {
   node: NodeResponse;
   /** Sessions on this node; undefined while the usage request has not answered. */
@@ -115,17 +126,25 @@ export const NodeUsagePane = memo(function NodeUsagePane({
   );
 
   // Machine totals: capacity from the hardware, set aside from reservations, "now" from
-  // live memory where the heartbeat has it and the newest history minute otherwise.
-  const exclusive = rows.some((r) => r.usage.reservation?.exclusiveNode);
+  // live memory where the heartbeat has it and the newest history minute otherwise. Only
+  // sessions that still hold their reservation count: a stopped or evicted workspace keeps its
+  // stored reservation but no longer has the room. The chart's history keeps every session.
+  const active = rows.filter((r) => r.usage.holdsReservation);
+  const exclusive = active.some((r) => r.usage.reservation?.exclusiveNode);
   const memoryCapacity = spec.memoryMb ? spec.memoryMb * MB : null;
   const cpuCapacity = spec.vcpu ? spec.vcpu * 1000 : null;
-  const reservedMemory = rows.reduce((t, r) => t + (r.now.reservedMemoryBytes ?? 0), 0);
-  const reservedCpu = rows.reduce((t, r) => t + (r.now.reservedCpuMillis ?? 0), 0);
-  const memoryNow = rows.reduce((t, r) => t + (r.now.memoryBytes ?? 0), 0);
-  const cpuNow = rows.reduce((t, r) => t + (r.now.cpuMillis ?? 0), 0);
+  const reservedMemory = active.reduce((t, r) => t + (r.now.reservedMemoryBytes ?? 0), 0);
+  const reservedCpu = active.reduce((t, r) => t + (r.now.reservedCpuMillis ?? 0), 0);
+  const memoryNow = active.reduce((t, r) => t + (r.now.memoryBytes ?? 0), 0);
+  const cpuNow = active.reduce((t, r) => t + (r.now.cpuMillis ?? 0), 0);
+  // Sessions with no reading yet; their share is missing from the totals, which say so.
+  const memoryUnknown = active.filter((r) => r.now.memoryBytes == null).length;
+  const cpuUnknown = active.filter((r) => r.now.cpuMillis == null).length;
   // Recomputed only when new history arrives, not on every poll or clock tick.
   const total = useMemo(() => sumSeries((sessions ?? []).map((usage) => usage.series)), [sessions]);
-  const liveTotal = rows.some((r) => r.live !== undefined) ? memoryNow : null;
+  // The dot is live memory only when every counted session has a live reading.
+  const liveTotal =
+    active.length > 0 && active.every((r) => r.live !== undefined) ? memoryNow : null;
   const memoryMax =
     memoryCapacity ??
     Math.max(reservedMemory, memoryNow, ...total.memoryBytes.map((v) => v ?? 0)) * 1.1;
@@ -213,12 +232,13 @@ export const NodeUsagePane = memo(function NodeUsagePane({
           {usageWindow && (total.start.length > 0 || reservedMemory > 0 || reservedCpu > 0) && (
             <div className="flex flex-col gap-1.5" data-testid="machine-chart">
               <div className="flex items-center justify-between gap-2 font-mono text-[10.5px]">
-                <span className="flex min-w-0 items-center gap-1.5 text-fg-primary">
+                <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-fg-primary [&>span]:whitespace-nowrap">
                   <Swatch color={MEMORY_COLOR} />
-                  memory {formatGb(memoryNow)}
+                  <span>memory {formatGb(memoryNow)}</span>
                   {memoryCapacity && (
                     <span className="text-fg-muted">of {formatGb(memoryCapacity)}</span>
                   )}
+                  <PartialNote unknown={memoryUnknown} />
                 </span>
                 <span className="shrink-0 text-fg-muted">set aside {formatGb(memorySetAside)}</span>
               </div>
@@ -237,12 +257,13 @@ export const NodeUsagePane = memo(function NodeUsagePane({
                 />
               </div>
               <div className="flex items-center justify-between gap-2 font-mono text-[10.5px]">
-                <span className="flex min-w-0 items-center gap-1.5 text-fg-primary">
+                <span className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-fg-primary [&>span]:whitespace-nowrap">
                   <Swatch color={CPU_COLOR} />
-                  cpu {formatVcpuBare(cpuNow)}
+                  <span>cpu {formatVcpuBare(cpuNow)}</span>
                   {cpuCapacity && (
                     <span className="text-fg-muted">of {formatVcpu(cpuCapacity)}</span>
                   )}
+                  <PartialNote unknown={cpuUnknown} />
                 </span>
                 <span className="shrink-0 text-fg-muted">set aside {formatVcpu(cpuSetAside)}</span>
               </div>

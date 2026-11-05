@@ -28,23 +28,31 @@ function yFor(value: number, max: number, up: boolean): number {
   return up ? 50 - h : 50 + h;
 }
 
-/** Contiguous runs of non-null buckets, so a gap in history draws as a gap. */
+/**
+ * Contiguous runs of buckets with a value, so a gap in history draws as a gap. The API omits
+ * minutes with no samples, so a run also ends where consecutive buckets are more than one
+ * bucket apart (half a bucket of slack absorbs timer jitter).
+ */
 function runs(
   series: NodeResourceUsageSeries,
   values: Array<number | null>,
   xFor: (start: number) => number,
+  bucketMs: number,
   max: number,
   up: boolean
 ): Point[][] {
   const result: Point[][] = [];
   let current: Point[] = [];
+  let previousStart: number | null = null;
   series.start.forEach((start, i) => {
     const value = values[i];
-    if (value == null) {
+    const gap = previousStart !== null && start - previousStart > bucketMs * 1.5;
+    previousStart = start;
+    if (value == null || gap) {
       if (current.length > 0) result.push(current);
       current = [];
-      return;
     }
+    if (value == null) return;
     current.push({ x: xFor(start), y: yFor(value, max, up) });
   });
   if (current.length > 0) result.push(current);
@@ -138,8 +146,8 @@ export const MirrorChart = memo(function MirrorChart({
     const xFor = (start: number) =>
       Math.min(100, Math.max(0, ((start + bucketMs / 2 - windowStart) / span) * 100));
     return {
-      memoryRuns: runs(series, series.memoryBytes, xFor, safeMemoryMax, true),
-      cpuRuns: runs(series, series.cpuMillis, xFor, safeCpuMax, false),
+      memoryRuns: runs(series, series.memoryBytes, xFor, bucketMs, safeMemoryMax, true),
+      cpuRuns: runs(series, series.cpuMillis, xFor, bucketMs, safeCpuMax, false),
     };
   }, [series, windowStart, windowEnd, bucketMs, safeMemoryMax, safeCpuMax]);
   return (

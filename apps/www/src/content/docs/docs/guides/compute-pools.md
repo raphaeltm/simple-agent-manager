@@ -45,9 +45,11 @@ These are settings tabs. **Infrastructure** in the main navigation is something 
 ### What each machine is using
 
 On the **Nodes** page each machine is named for what it is (provider, type and location, with its
-vCPU, memory and disk), not for the task that first started it. Its chart covers the last hour by default:
+vCPU, memory and disk), not for the task that first started it; a machine whose hardware is not
+known yet is just called **Machine**. Its chart covers the last hour by default:
 memory rises above the middle line, CPU hangs below it, and the dashed lines mark what SAM set aside
-for the sessions running there. Under the chart, each session is a row with its chat's title (select
+for the sessions running there. Stopped sessions stay in the list, but what was set aside for them
+no longer counts. When a running session has no reading yet, the machine's totals say **partial**. Under the chart, each session is a row with its chat's title (select
 it to open the chat), who started it, the project and how long it has been running, a small chart of
 its own, and what it is using against what was set aside, for example **2.9/4.0 GB** and
 **1.3/2.0 vCPU**.
@@ -62,6 +64,10 @@ of a chart fills in later. When a machine reports its sessions' memory with its 
 at the right edge shows that latest reading, and the numbers use it. How far back the charts go is the admin setting `nodes.usageWindowMinutes`
 ([Admin settings](/docs/guides/admin-settings/#the-settings)). Workspace links and the machine's full
 hardware details are under **Advanced**.
+
+A session in a project you have since left still shows its usage, because it runs on your machine,
+but not the project's name, the chat title or a link to the chat. If you have a very large number of
+sessions, or a session uploads unusually many history batches, the page says what it left out.
 
 Each panel sums the pool up in one sentence (which provider, which regions, the smallest and
 largest machine), lists its settings in plain words, and shows the machine types it allows with the

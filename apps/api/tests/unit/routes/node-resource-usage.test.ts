@@ -28,6 +28,8 @@ const auth = vi.hoisted(() => ({ userId: 'owner-1' }));
 const settings = vi.hoisted(() => ({
   windowMinutes: 60 as unknown,
   maxHistoryWorkspaces: undefined as unknown,
+  maxWorkspaces: undefined as unknown,
+  maxChunks: undefined as unknown,
 }));
 
 vi.mock('../../../src/middleware/auth', async (load) => ({
@@ -43,7 +45,11 @@ vi.mock('../../../src/services/admin-settings', async (load) => ({
       ? settings.windowMinutes
       : name === 'nodes.usageMaxHistoryWorkspaces'
         ? settings.maxHistoryWorkspaces
-        : undefined
+        : name === 'nodes.usageMaxWorkspaces'
+          ? settings.maxWorkspaces
+          : name === 'nodes.usageMaxChunksPerWorkspace'
+            ? settings.maxChunks
+            : undefined
   ),
 }));
 
@@ -64,6 +70,8 @@ afterEach(() => {
   auth.userId = 'owner-1';
   settings.windowMinutes = 60;
   settings.maxHistoryWorkspaces = undefined;
+  settings.maxWorkspaces = undefined;
+  settings.maxChunks = undefined;
 });
 
 function base64(bytes: Uint8Array): string {
@@ -121,10 +129,24 @@ function fixture() {
       sqlite
         .prepare(`INSERT INTO users (id, name, email) VALUES (?, ?, ?)`)
         .run(id, name, `${id}@x.test`),
-    project: (id: string, name: string, userId: string) =>
+    // Creating a project also creates its owner's membership, as `createOwnerProjectMembership` does.
+    project: (id: string, name: string, userId: string) => {
       sqlite
         .prepare(`INSERT INTO projects (id, name, user_id) VALUES (?, ?, ?)`)
-        .run(id, name, userId),
+        .run(id, name, userId);
+      sqlite
+        .prepare(
+          `INSERT INTO project_members (project_id, user_id, role, status) VALUES (?, ?, 'owner', 'active')`
+        )
+        .run(id, userId);
+    },
+    member: (projectId: string, userId: string, status: 'active' | 'removed') =>
+      sqlite
+        .prepare(
+          `INSERT INTO project_members (project_id, user_id, role, status) VALUES (?, ?, 'member', ?)
+           ON CONFLICT (project_id, user_id) DO UPDATE SET status = excluded.status`
+        )
+        .run(projectId, userId, status),
     node: (id: string, userId: string, status = 'running') =>
       sqlite
         .prepare(
@@ -246,10 +268,17 @@ async function getUsage(f: ReturnType<typeof fixture>) {
     windowStart: number;
     windowEnd: number;
     bucketMs: number;
+    historyOmittedCount: number;
+    historyTruncatedCount: number;
+    workspacesOmitted: boolean;
     workspaces: Array<{
       workspaceId: string;
       nodeId: string;
+      projectId: string | null;
       projectName: string | null;
+      holdsReservation: boolean;
+      historyOmitted: boolean;
+      historyTruncated: boolean;
       chatSessionId: string | null;
       title: string;
       ownerName: string | null;
@@ -575,7 +604,7 @@ describe('GET /api/nodes/resource-usage', () => {
       const chunkSql = statements.find((sql) => sql.includes('FROM workspace_resource_chunks'));
       expect(chunkSql).toBeDefined();
       const plan = prepare(`EXPLAIN QUERY PLAN ${chunkSql}`)
-        .all('p1', 'w1', 0, 0)
+        .all('p1', 'w1', 0, 0, 48)
         .map((row) => (row as { detail: string }).detail)
         .join('\n');
       // The started_at bound is inside the index search, so old history is never read.
@@ -645,5 +674,245 @@ describe('GET /api/nodes/resource-usage', () => {
         series: { start: [] },
       });
     });
+  });
+
+  describe('project access', () => {
+    it('hides project data once the caller is no longer an active member, and still shows their usage', async () => {
+      const f = fixture();
+      f.sql.user('owner-1', 'Owner One');
+      f.sql.user('lead', 'Project Lead');
+      f.sql.node('node-1', 'owner-1');
+      // Owner control: a project the caller still belongs to.
+      f.sql.project('p1', 'SAM', 'owner-1');
+      f.sql.session('chat-1', 'p1', 'Kept topic', 'owner-1');
+      f.sql.workspace({
+        id: 'kept',
+        userId: 'owner-1',
+        nodeId: 'node-1',
+        projectId: 'p1',
+        chatSessionId: 'chat-1',
+      });
+      // Attack: the caller was removed from p2, but their workspace is still on their own node.
+      f.sql.project('p2', 'Secret project', 'lead');
+      f.sql.member('p2', 'owner-1', 'removed');
+      f.sql.session('chat-2', 'p2', 'Secret topic', 'lead');
+      f.sql.task('t2', 'p2', 'lead', 'chat-2', 'Secret task title');
+      f.sql.workspace({
+        id: 'ws-left-01ABCD',
+        userId: 'owner-1',
+        nodeId: 'node-1',
+        projectId: 'p2',
+        chatSessionId: 'chat-2',
+        displayName: 'Secret task title',
+      });
+      const start = minuteFloor(f.now) - 30 * MINUTE;
+      await upload(f.env, { projectId: 'p2', workspaceId: 'ws-left-01ABCD', sequence: 1, start });
+
+      const body = await getUsage(f);
+      const byId = Object.fromEntries(body.workspaces.map((w) => [w.workspaceId, w]));
+      expect(byId.kept).toMatchObject({
+        projectId: 'p1',
+        projectName: 'SAM',
+        chatSessionId: 'chat-1',
+        title: 'Kept topic',
+      });
+      expect(byId['ws-left-01ABCD']).toMatchObject({
+        projectId: null,
+        projectName: null,
+        chatSessionId: null,
+        title: 'Workspace 01abcd',
+      });
+      expect(JSON.stringify(body)).not.toContain('Secret');
+      // Liveness: the caller's own machine usage is still there.
+      expect(byId['ws-left-01ABCD']?.series.start).toHaveLength(15);
+    });
+  });
+
+  describe('caps that drop work disclose it', () => {
+    it('lists at most nodes.usageMaxWorkspaces workspaces, live first, and says more exist', async () => {
+      const f = fixture();
+      f.sql.user('owner-1', 'Owner One');
+      f.sql.project('p1', 'SAM', 'owner-1');
+      f.sql.node('node-1', 'owner-1');
+      const iso = (minutesAgo: number) => new Date(f.now - minutesAgo * MINUTE).toISOString();
+      f.sql.workspace({
+        id: 'live-old',
+        userId: 'owner-1',
+        nodeId: 'node-1',
+        projectId: 'p1',
+        updatedAt: iso(600),
+      });
+      f.sql.workspace({
+        id: 'stopped-new',
+        userId: 'owner-1',
+        nodeId: 'node-1',
+        projectId: 'p1',
+        status: 'stopped',
+        updatedAt: iso(1),
+      });
+      f.sql.workspace({
+        id: 'stopped-older',
+        userId: 'owner-1',
+        nodeId: 'node-1',
+        projectId: 'p1',
+        status: 'stopped',
+        updatedAt: iso(5),
+      });
+      settings.maxWorkspaces = 2;
+
+      const body = await getUsage(f);
+      expect(body.workspaces.map((w) => w.workspaceId)).toEqual(['live-old', 'stopped-new']);
+      expect(body.workspacesOmitted).toBe(true);
+
+      // Control: under the cap nothing is dropped or flagged.
+      settings.maxWorkspaces = 3;
+      const all = await getUsage(f);
+      expect(all.workspaces).toHaveLength(3);
+      expect(all.workspacesOmitted).toBe(false);
+    });
+
+    it('reads at most nodes.usageMaxChunksPerWorkspace chunks per workspace, newest first, and flags the rest', async () => {
+      const f = fixture();
+      f.sql.user('owner-1', 'Owner One');
+      f.sql.project('p1', 'SAM', 'owner-1');
+      f.sql.node('node-1', 'owner-1');
+      f.sql.workspace({ id: 'busy', userId: 'owner-1', nodeId: 'node-1', projectId: 'p1' });
+      f.sql.workspace({ id: 'calm', userId: 'owner-1', nodeId: 'node-1', projectId: 'p1' });
+      const first = minuteFloor(f.now) - 60 * MINUTE;
+      for (let i = 0; i < 4; i++) {
+        await upload(f.env, {
+          projectId: 'p1',
+          workspaceId: 'busy',
+          sequence: i,
+          start: first + i * 15 * MINUTE,
+        });
+      }
+      await upload(f.env, {
+        projectId: 'p1',
+        workspaceId: 'calm',
+        sequence: 1,
+        start: first + 45 * MINUTE,
+      });
+      settings.maxChunks = 2;
+
+      const body = await getUsage(f);
+      const byId = Object.fromEntries(body.workspaces.map((w) => [w.workspaceId, w]));
+      expect(body.historyTruncatedCount).toBe(1);
+      expect(byId.busy?.historyTruncated).toBe(true);
+      // The two newest chunks: 30 minutes, starting at the third chunk.
+      expect(byId.busy?.series.start).toHaveLength(30);
+      expect(byId.busy?.series.start[0]).toBe(first + 30 * MINUTE);
+      // Control: a workspace under the cap is complete and unflagged.
+      expect(byId.calm).toMatchObject({ historyTruncated: false });
+      expect(byId.calm?.series.start).toHaveLength(15);
+    });
+  });
+
+  describe('history ranking under the cap', () => {
+    it('gives a running session on a second machine history before a busy machine fills the cap', async () => {
+      const f = fixture();
+      f.sql.user('owner-1', 'Owner One');
+      f.sql.project('p1', 'SAM', 'owner-1');
+      f.sql.node('busy-node', 'owner-1');
+      f.sql.node('quiet-node', 'owner-1');
+      const iso = (minutesAgo: number) => new Date(f.now - minutesAgo * MINUTE).toISOString();
+      const start = minuteFloor(f.now) - 30 * MINUTE;
+      for (const [id, nodeId, minutesAgo] of [
+        ['busy-a', 'busy-node', 1],
+        ['busy-b', 'busy-node', 2],
+        ['busy-c', 'busy-node', 3],
+        ['quiet-a', 'quiet-node', 30],
+      ] as const) {
+        f.sql.workspace({
+          id,
+          userId: 'owner-1',
+          nodeId,
+          projectId: 'p1',
+          updatedAt: iso(minutesAgo),
+        });
+        await upload(f.env, { projectId: 'p1', workspaceId: id, sequence: 1, start });
+      }
+      settings.maxHistoryWorkspaces = 2;
+
+      const body = await getUsage(f);
+      const withHistory = body.workspaces
+        .filter((w) => !w.historyOmitted)
+        .map((w) => w.workspaceId)
+        .sort();
+      expect(withHistory).toEqual(['busy-a', 'quiet-a']);
+      expect(body.historyOmittedCount).toBe(2);
+    });
+
+    it('breaks ties by workspace id, so identical requests read the same workspaces', async () => {
+      const f = fixture();
+      f.sql.user('owner-1', 'Owner One');
+      f.sql.project('p1', 'SAM', 'owner-1');
+      f.sql.node('node-1', 'owner-1');
+      const same = new Date(f.now - MINUTE).toISOString();
+      for (const id of ['w-c', 'w-a', 'w-b']) {
+        f.sql.workspace({
+          id,
+          userId: 'owner-1',
+          nodeId: 'node-1',
+          projectId: 'p1',
+          updatedAt: same,
+        });
+      }
+      settings.maxHistoryWorkspaces = 1;
+
+      const body = await getUsage(f);
+      expect(body.workspaces.filter((w) => !w.historyOmitted).map((w) => w.workspaceId)).toEqual([
+        'w-a',
+      ]);
+    });
+  });
+
+  it('marks only running, creating and recovery workspaces as holding their reservation', async () => {
+    const f = fixture();
+    f.sql.user('owner-1', 'Owner One');
+    f.sql.project('p1', 'SAM', 'owner-1');
+    f.sql.node('node-1', 'owner-1');
+    for (const status of ['running', 'creating', 'recovery', 'stopped', 'evicted', 'error']) {
+      f.sql.workspace({
+        id: `w-${status}`,
+        userId: 'owner-1',
+        nodeId: 'node-1',
+        projectId: 'p1',
+        status,
+      });
+    }
+
+    const body = await getUsage(f);
+    const holding = body.workspaces
+      .filter((w) => w.holdsReservation)
+      .map((w) => w.status)
+      .sort();
+    expect(holding).toEqual(['creating', 'recovery', 'running']);
+    expect(body.workspaces).toHaveLength(6);
+  });
+
+  it('places buckets stored at an older rollup width on the width the response reports', async () => {
+    const f = fixture();
+    f.sql.user('owner-1', 'Owner One');
+    f.sql.project('p1', 'SAM', 'owner-1');
+    f.sql.node('node-1', 'owner-1');
+    f.sql.workspace({ id: 'w1', userId: 'owner-1', nodeId: 'node-1', projectId: 'p1' });
+    const start = minuteFloor(f.now) - 30 * MINUTE;
+    // Uploaded while the rollup width was 30 seconds...
+    (
+      f.env as { WORKSPACE_RESOURCE_ROLLUP_BUCKET_MS?: string }
+    ).WORKSPACE_RESOURCE_ROLLUP_BUCKET_MS = '30000';
+    await upload(f.env, { projectId: 'p1', workspaceId: 'w1', sequence: 1, start });
+    // ...and read after it changed to one minute.
+    (
+      f.env as { WORKSPACE_RESOURCE_ROLLUP_BUCKET_MS?: string }
+    ).WORKSPACE_RESOURCE_ROLLUP_BUCKET_MS = '60000';
+
+    const body = await getUsage(f);
+    const series = body.workspaces[0]?.series;
+    expect(body.bucketMs).toBe(60_000);
+    expect(series?.start).toHaveLength(15);
+    expect(series?.start.every((t) => t % 60_000 === 0)).toBe(true);
+    expect(series?.cpuMillis.every((v) => v === 500)).toBe(true);
   });
 });

@@ -43,7 +43,8 @@ export function machineSpec(node: NodeResponse): MachineSpec {
   // Instant sessions run in a Cloudflare container, not a VM with a provider type.
   const instant = type === INSTANT_CONTAINER_TYPE;
   return {
-    title: instant ? 'Instant container' : [provider, type].filter(Boolean).join(' ') || node.name,
+    // `node.name` is "Auto: <task title>" for task-provisioned nodes, so it is never the title.
+    title: instant ? 'Instant container' : [provider, type].filter(Boolean).join(' ') || 'Machine',
     location: instant
       ? 'Cloudflare'
       : location
@@ -73,14 +74,20 @@ function timestampMs(value: string | null | undefined): number | null {
 
 /**
  * Live memory per workspace from the node's last heartbeat, dropped once the heartbeat is
- * stale so a dead node does not keep showing its last reading as "now".
+ * stale so a dead node does not keep showing its last reading as "now". A reading is never
+ * newer than the heartbeat that carried it, so an agent clock running ahead cannot keep it
+ * "live" after the heartbeats stop.
  */
 export function liveMemoryByWorkspace(node: NodeResponse, now: number): Map<string, number> {
   const result = new Map<string, number>();
   const staleMs = (node.heartbeatStaleAfterSeconds ?? DEFAULT_NODE_HEARTBEAT_STALE_SECONDS) * 1000;
   const heartbeatAt = timestampMs(node.lastHeartbeatAt);
   for (const entry of node.lastMetrics?.workspaceMemory ?? []) {
-    const at = timestampMs(entry.collectedAt) ?? heartbeatAt;
+    const collectedAt = timestampMs(entry.collectedAt);
+    const at =
+      collectedAt !== null && heartbeatAt !== null
+        ? Math.min(collectedAt, heartbeatAt)
+        : (collectedAt ?? heartbeatAt);
     if (at === null || now - at > staleMs) continue;
     if (Number.isFinite(entry.memoryUsageBytes) && entry.memoryUsageBytes >= 0) {
       result.set(entry.workspaceId, entry.memoryUsageBytes);
