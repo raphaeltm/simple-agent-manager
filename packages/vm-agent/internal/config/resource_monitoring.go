@@ -2,6 +2,9 @@ package config
 
 import (
 	"fmt"
+	"math"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -146,6 +149,13 @@ func (c SnapshotHelperConfig) validate() []error {
 	if c.FinalSnapshotTimeout < 0 {
 		errs = append(errs, fmt.Errorf("%s must be >= 0 (0 uses the default), got %s", EnvEvictionFinalSnapshotTimeoutSeconds, c.FinalSnapshotTimeout))
 	}
+	// An empty value resolves to the default, but a value that parses to zero bytes would
+	// reach `docker create --memory` as 0, which Docker treats as unlimited.
+	if c.MemoryLimit != "" {
+		if bytes, ok := dockerMemoryBytes(c.MemoryLimit); !ok || bytes <= 0 {
+			errs = append(errs, fmt.Errorf("%s must be a positive Docker memory size such as 1g, got %q", EnvSnapshotHelperMemoryLimit, c.MemoryLimit))
+		}
+	}
 	if c.PidsLimit < 0 {
 		errs = append(errs, fmt.Errorf("%s must be >= 0 (0 uses the default), got %d", EnvSnapshotHelperPidsLimit, c.PidsLimit))
 	}
@@ -153,4 +163,26 @@ func (c SnapshotHelperConfig) validate() []error {
 		errs = append(errs, fmt.Errorf("%s must be >= 0, got %d", EnvSnapshotHelperMinFreeBytes, c.MinFreeBytes))
 	}
 	return errs
+}
+
+// dockerMemorySize is the grammar Docker's --memory flag accepts (go-units RAMInBytes).
+var dockerMemorySize = regexp.MustCompile(`^(\d+(\.\d+)*) ?([kKmMgGtTpP])?[iI]?[bB]?$`)
+
+// dockerMemoryBytes parses a --memory value the way Docker does, with binary multipliers.
+func dockerMemoryBytes(value string) (int64, bool) {
+	match := dockerMemorySize.FindStringSubmatch(value)
+	if match == nil {
+		return 0, false
+	}
+	size, err := strconv.ParseFloat(match[1], 64)
+	if err != nil {
+		return 0, false
+	}
+	if unit := strings.ToLower(match[3]); unit != "" {
+		size *= float64(int64(1) << (10 * (strings.Index("kmgtp", unit) + 1)))
+	}
+	if size >= math.MaxInt64 {
+		return 0, false
+	}
+	return int64(size), true
 }

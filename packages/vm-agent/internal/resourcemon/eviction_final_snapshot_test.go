@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -122,8 +123,8 @@ func TestFinalSnapshotRequiresTimeout(t *testing.T) {
 	cfg := EvictionControllerConfig{FinalSnapshot: func(context.Context, EvictionTarget) (EvictionSnapshotOutcome, error) {
 		return EvictionSnapshotOutcome{}, nil
 	}}
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("FinalSnapshot without a timeout validated")
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "FinalSnapshotTimeout") {
+		t.Fatalf("FinalSnapshot without a timeout validated, or failed for another reason: %v", err)
 	}
 }
 
@@ -171,11 +172,14 @@ func TestSlowFinalSnapshotDoesNotBlockTheNextEviction(t *testing.T) {
 		defer mu.Unlock()
 		return len(notified) == 1 && notified[0] == "workspace-2"
 	}, "second eviction waited for the first one's final capture")
+	// Copy under the lock and assert after it: a failing t.Fatalf runs the deferred Close,
+	// which waits for workspace-1's finalizer, whose NotifyEviction needs mu.
 	mu.Lock()
-	if !reflect.DeepEqual(snapshots, []string{"workspace-1", "workspace-2"}) {
-		t.Fatalf("snapshots = %v", snapshots)
-	}
+	gotSnapshots := append([]string(nil), snapshots...)
 	mu.Unlock()
+	if !reflect.DeepEqual(gotSnapshots, []string{"workspace-1", "workspace-2"}) {
+		t.Fatalf("snapshots = %v", gotSnapshots)
+	}
 	close(release)
 	waitForEvictionTest(t, func() bool {
 		mu.Lock()

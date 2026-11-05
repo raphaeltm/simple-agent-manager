@@ -413,9 +413,11 @@ esac
 // setupExitedEvictionDocker fakes the Docker CLI for the stopped-source helper flow.
 // Optional environment shapes each answer: SAM_EVICTION_TEST_STATE_FILE (source state,
 // re-read on every inspect so a test can "restart" the source mid-capture),
-// SAM_EVICTION_TEST_RUNNING (running container IDs), SAM_EVICTION_TEST_MOUNTS (mount
-// inspect output), SAM_EVICTION_TEST_SIZE_RW, SAM_EVICTION_TEST_DOCKER_ROOT and
-// SAM_EVICTION_TEST_LEAKED (helpers left by an earlier crash).
+// SAM_EVICTION_TEST_RUNNING (container IDs `docker ps -aq` lists), SAM_EVICTION_TEST_MOUNTS
+// ("<id> <running> <finishedAt> <mounts JSON>" inspect output), SAM_EVICTION_TEST_SIZE_RW,
+// SAM_EVICTION_TEST_DOCKER_ROOT, SAM_EVICTION_TEST_LEAKED (helpers left by an earlier crash),
+// SAM_EVICTION_TEST_RM_DELAY (seconds every `docker rm` stalls) and
+// SAM_EVICTION_TEST_COMMIT_DELAY (seconds every `docker commit` takes; its end is logged).
 func setupExitedEvictionDocker(t *testing.T, currentID, helperID string) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -428,9 +430,9 @@ case "$1" in
   ps)
     case " $* " in
       *" --all "*) printf '%s\n' "$SAM_EVICTION_TEST_CURRENT_ID" ;;
-      *" -aq "*) [ -n "$SAM_EVICTION_TEST_LEAKED" ] && printf '%s\n' "$SAM_EVICTION_TEST_LEAKED" ;;
+      *" -aq "*" --filter "*) [ -n "$SAM_EVICTION_TEST_LEAKED" ] && printf '%s\n' "$SAM_EVICTION_TEST_LEAKED" ;;
+      *" -aq "*) [ -n "$SAM_EVICTION_TEST_RUNNING" ] && printf '%s\n' "$SAM_EVICTION_TEST_RUNNING" ;;
       *" -a "*) [ -n "$SAM_EVICTION_TEST_STALE" ] && printf '%b\n' "$SAM_EVICTION_TEST_STALE" ;;
-      *" -q "*) [ -n "$SAM_EVICTION_TEST_RUNNING" ] && printf '%s\n' "$SAM_EVICTION_TEST_RUNNING" ;;
     esac
     exit 0 ;;
   inspect)
@@ -440,7 +442,10 @@ case "$1" in
     esac ;;
   container) printf '%s\n' "${SAM_EVICTION_TEST_SIZE_RW:-1024}" ;;
   info) printf '%s\n' "${SAM_EVICTION_TEST_DOCKER_ROOT:-/}" ;;
-  commit|start|rm) exit 0 ;;
+  commit) [ -n "$SAM_EVICTION_TEST_COMMIT_DELAY" ] && sleep "$SAM_EVICTION_TEST_COMMIT_DELAY"
+    printf 'commit-done\n' >> "$SAM_EVICTION_TEST_CALLS"; exit 0 ;;
+  start) exit 0 ;;
+  rm) [ -n "$SAM_EVICTION_TEST_RM_DELAY" ] && sleep "$SAM_EVICTION_TEST_RM_DELAY"; exit 0 ;;
   create) printf '%s\n' "$SAM_EVICTION_TEST_HELPER_ID" ;;
   image)
     case "$2 $*" in

@@ -104,6 +104,10 @@ type sessionSnapshotHandlerInput struct {
 	// quiescence, when set, is re-checked immediately before completion. The capture is
 	// reported quiesced only if it passes: the source never ran and nothing else wrote.
 	quiescence func(context.Context) error
+	// finalEvictionCapture reports a degraded capture as failed instead of completing it.
+	// The eviction's pre-stop generation always exists by then, a degraded capture is never
+	// quiesced, and completing it would delete that generation's artifacts.
+	finalEvictionCapture bool
 }
 
 func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Request, restoring bool) (*sessionSnapshotHandlerInput, bool) {
@@ -144,13 +148,11 @@ func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Requ
 			return nil, false
 		}
 	}
-	// A freshly-woken container never ran create-workspace, so its
-	// runtime.CallbackToken (the workspace-scoped token used by the message
-	// reporter and the snapshot callbacks) is unset. Persist the token the
-	// control plane provides on the restore request so chat replies and
-	// snapshot callbacks can authenticate after a wake.
-	if wsToken := strings.TrimSpace(body.WorkspaceCallbackToken); wsToken != "" && !restoring {
-		s.upsertWorkspaceRuntime(workspaceID, "", "", "", wsToken, workspaceRuntimeOpts{ChatSessionID: body.ChatSessionID})
+	if !restoring {
+		if status, err := s.bindHibernateRequestRuntime(r.Context(), workspaceID, body.ChatSessionID, body.WorkspaceCallbackToken); err != nil {
+			writeError(w, status, err.Error())
+			return nil, false
+		}
 	}
 	runtime, ok := s.getWorkspaceRuntime(workspaceID)
 	if !ok {
@@ -162,9 +164,6 @@ func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Requ
 			writeError(w, http.StatusBadRequest, err.Error())
 			return nil, false
 		}
-	}
-	if !restoring {
-		s.recordWorkspaceChatSessionID(workspaceID, body.ChatSessionID)
 	}
 	callbackToken := s.callbackTokenForWorkspace(workspaceID)
 	if restoring && strings.TrimSpace(body.WorkspaceCallbackToken) != "" {
@@ -301,6 +300,9 @@ func (s *Server) hibernateSessionSnapshot(ctx context.Context, input *sessionSna
 	}
 	manifest.Skipped = boundSnapshotSkippedEntries(manifest.Skipped, snapshotSkippedEntriesBudget(prepare))
 	nextLifecyclePhase(ctx, "complete")
+	if input.finalEvictionCapture && manifest.Status != "available" {
+		return nil, &sessionSnapshotCaptureError{generation: prepare.Generation, err: fmt.Errorf("final eviction capture is %s (%s); keeping the pre-stop capture", manifest.Status, manifest.Degradation)}
+	}
 	quiesced := false
 	if input.quiescence != nil && manifest.Status == "available" {
 		if err := input.quiescence(ctx); err != nil {

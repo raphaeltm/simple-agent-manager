@@ -29,8 +29,31 @@ const (
 	snapshotHelperImageRepo      = "sam-eviction-snapshot"
 )
 
+// snapshotHelperDiskLock holds a headroom check together with the commit it measures.
+// The check reserves nothing, so two captures (for different workspaces) checked against
+// the same free space could commit together past the headroom. One per process: every
+// capture on the node commits to the same Docker root.
+var snapshotHelperDiskLock = newSessionSnapshotLock()
+
 func noopSnapshotHelperCleanup() {
 	// No helper resources exist when snapshot-helper setup fails.
+}
+
+// awaitSnapshotHelperCleanup waits for a helper's cleanup only while the capture's own
+// deadline allows. finishEviction waits for the capture before it records the eviction, so a
+// stalled `docker rm` must not stretch the capture past its bound. The cleanup keeps running
+// under its own timeout; the startup reaper, the stale-helper reaper and deletion's reap
+// before volume removal remove the helper if it never finishes.
+func awaitSnapshotHelperCleanup(ctx context.Context, cleanup func()) {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		cleanup()
+	}()
+	select {
+	case <-done:
+	case <-ctx.Done():
+	}
 }
 
 // snapshotSourceState is the identity of a stopped source container at one moment.
@@ -77,7 +100,11 @@ func (s *Server) startStoppedSnapshotHelper(ctx context.Context, workspaceID, so
 		}
 		return nil, noopSnapshotHelperCleanup, fmt.Errorf("snapshot source container is still running")
 	}
+	if err := snapshotHelperDiskLock.Lock(ctx); err != nil {
+		return nil, noopSnapshotHelperCleanup, err
+	}
 	if err := s.requireSnapshotHelperDiskHeadroom(ctx, sourceID); err != nil {
+		snapshotHelperDiskLock.Unlock()
 		return nil, noopSnapshotHelperCleanup, err
 	}
 	limits := s.config.SnapshotHelper.WithDefaults()
@@ -103,8 +130,10 @@ func (s *Server) startStoppedSnapshotHelper(ctx context.Context, workspaceID, so
 	}
 
 	// The image label makes a commit left behind by a crash findable by workspace.
-	if _, err := s.runEvictionDockerCommand(ctx, "commit", "--change", "LABEL "+workspaceLabel, sourceID, image); err != nil {
-		cleanup()
+	_, err = s.runEvictionDockerCommand(ctx, "commit", "--change", "LABEL "+workspaceLabel, sourceID, image)
+	snapshotHelperDiskLock.Unlock()
+	if err != nil {
+		awaitSnapshotHelperCleanup(ctx, cleanup)
 		return nil, noopSnapshotHelperCleanup, fmt.Errorf("commit stopped container for snapshot: %w", err)
 	}
 	helperID, err := s.runEvictionDockerCommand(ctx,
@@ -123,16 +152,16 @@ func (s *Server) startStoppedSnapshotHelper(ctx context.Context, workspaceID, so
 		"-c", "exec tail -f /dev/null",
 	)
 	if err != nil {
-		cleanup()
+		awaitSnapshotHelperCleanup(ctx, cleanup)
 		return nil, noopSnapshotHelperCleanup, fmt.Errorf("create stopped snapshot helper: %w", err)
 	}
 	helperID = strings.TrimSpace(helperID)
 	if !isValidContainerID(helperID) {
-		cleanup()
+		awaitSnapshotHelperCleanup(ctx, cleanup)
 		return nil, noopSnapshotHelperCleanup, fmt.Errorf("stopped snapshot helper identity unavailable")
 	}
 	if _, err := s.runEvictionDockerCommand(ctx, "start", helperID); err != nil {
-		cleanup()
+		awaitSnapshotHelperCleanup(ctx, cleanup)
 		return nil, noopSnapshotHelperCleanup, fmt.Errorf("start stopped snapshot helper: %w", err)
 	}
 	return &containerSnapshotTarget{
@@ -217,30 +246,58 @@ func (s *Server) reapSnapshotHelpers(ctx context.Context, workspaceID string) er
 	return nil
 }
 
-// requireNoForeignWorkspaceWriters proves no running container other than the helper can
-// write the files a deletion destroys: the workspace's SAM volume and its host root. A
-// sidecar or sibling that mounts either one makes the capture a live capture, never final.
-func (s *Server) requireNoForeignWorkspaceWriters(ctx context.Context, workspaceID, hostRoot, helperID string) error {
-	ids, err := s.runEvictionDockerCommand(ctx, "ps", "-q", "--no-trunc")
+// requireNoForeignWorkspaceWriters proves no container other than the source and the
+// helper could have written the files a deletion destroys since `since`: the workspace's
+// SAM volume and its host root, or any directory above that root. A sidecar or sibling that
+// mounts either one makes the capture a live capture, never final.
+//
+// It reads every container, not only running ones: one that starts, writes and exits inside
+// the capture is invisible to two `docker ps` snapshots, but its FinishedAt records that it
+// ran. A container removed again before this check (`docker run --rm`) leaves no record;
+// `docker events --since` does not close that gap, because the daemon replays only a short
+// in-memory buffer that the capture's own `docker exec` events can overrun.
+func (s *Server) requireNoForeignWorkspaceWriters(ctx context.Context, workspaceID, hostRoot string, since time.Time, ownIDs ...string) error {
+	ids, err := s.runEvictionDockerCommand(ctx, "ps", "-aq", "--no-trunc")
 	if err != nil {
-		return fmt.Errorf("list running containers: %w", err)
+		return fmt.Errorf("list containers: %w", err)
 	}
-	running := strings.Fields(ids)
-	if len(running) == 0 {
+	containers := strings.Fields(ids)
+	if len(containers) == 0 {
 		return nil
 	}
-	// One line per container: "<id> <mounts JSON>". JSON keeps any byte a path may hold.
-	args := append([]string{"inspect", "--format", "{{.Id}} {{json .Mounts}}"}, running...)
+	// One line per container: "<id> <running> <finishedAt> <mounts JSON>". JSON keeps any
+	// byte a path may hold.
+	args := append([]string{"inspect", "--format", "{{.Id}} {{.State.Running}} {{.State.FinishedAt}} {{json .Mounts}}"}, containers...)
 	out, err := s.runEvictionDockerCommand(ctx, args...)
 	if err != nil {
-		return fmt.Errorf("inspect running container mounts: %w", err)
+		return fmt.Errorf("inspect container mounts: %w", err)
 	}
 	volume := bootstrap.VolumeNameForWorkspace(workspaceID)
 	root := filepath.Clean(hostRoot)
+lines:
 	for _, line := range strings.Split(out, "\n") {
-		id, mountsJSON, ok := strings.Cut(strings.TrimSpace(line), " ")
-		if !ok || id == "" || dockerContainerIdentityMatches(id, helperID) {
+		fields := strings.SplitN(strings.TrimSpace(line), " ", 4)
+		if len(fields) == 1 && fields[0] == "" {
 			continue
+		}
+		if len(fields) != 4 {
+			return fmt.Errorf("container state unavailable: %q", line)
+		}
+		id, running, finished, mountsJSON := fields[0], fields[1], fields[2], fields[3]
+		for _, own := range ownIDs {
+			if dockerContainerIdentityMatches(id, own) {
+				continue lines
+			}
+		}
+		if running != "true" {
+			finishedAt, err := time.Parse(time.RFC3339Nano, finished)
+			if err != nil {
+				// An unknown end time cannot prove the container stayed out of the window.
+				return fmt.Errorf("parse finish time of container %s: %w", shortContainerID(id), err)
+			}
+			if finishedAt.Before(since) {
+				continue // Exited before the capture began; its writes were captured.
+			}
 		}
 		var mounts []struct {
 			Name   string `json:"Name"`
@@ -248,16 +305,28 @@ func (s *Server) requireNoForeignWorkspaceWriters(ctx context.Context, workspace
 		}
 		if err := json.Unmarshal([]byte(mountsJSON), &mounts); err != nil {
 			// Unknown mounts cannot be proven harmless: refuse certification.
-			return fmt.Errorf("parse mounts of running container %s: %w", shortContainerID(id), err)
+			return fmt.Errorf("parse mounts of container %s: %w", shortContainerID(id), err)
 		}
 		for _, mount := range mounts {
 			source := filepath.Clean(mount.Source)
-			if mount.Name == volume || (hostRoot != "" && (source == root || strings.HasPrefix(source, root+string(filepath.Separator)))) {
-				return fmt.Errorf("running container %s mounts workspace storage", shortContainerID(id))
+			if mount.Name == volume || (hostRoot != "" && (pathContains(root, source) || pathContains(source, root))) {
+				return fmt.Errorf("container %s mounted workspace storage during the capture", shortContainerID(id))
 			}
 		}
 	}
 	return nil
+}
+
+// pathContains reports whether child is parent or lies below it, by whole path component:
+// /work does not contain /workspace. Both paths are clean.
+func pathContains(parent, child string) bool {
+	if parent == child {
+		return true
+	}
+	if parent == string(filepath.Separator) {
+		return strings.HasPrefix(child, parent)
+	}
+	return strings.HasPrefix(child, parent+string(filepath.Separator))
 }
 
 func shortContainerID(id string) string {

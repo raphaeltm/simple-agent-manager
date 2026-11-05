@@ -8,6 +8,7 @@ package server
 // workspace stayed `running` in D1 with its container stopped.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -177,5 +178,71 @@ func TestUnwrittenEvictionIntentLeavesNoFinalizingMark(t *testing.T) {
 	}
 	if s.isEvictionFinalizing("workspace-1") {
 		t.Fatal("an eviction that never wrote its intent stayed marked finalizing")
+	}
+}
+
+func hibernateRequestForEvictionTest(t *testing.T, s *Server, body string) *httptest.ResponseRecorder {
+	t.Helper()
+	validator, key := newWorkspaceCreateJWTValidator(t, "node-1")
+	s.jwtValidator = validator
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/workspace-1/agent-sessions/agent-1/hibernate", bytes.NewBufferString(body))
+	req.SetPathValue("workspaceId", "workspace-1")
+	req.SetPathValue("sessionId", "agent-1")
+	req.Header.Set("Authorization", "Bearer "+signWorkspaceCreateNodeToken(t, key, "node-1", "workspace-1"))
+	req.Header.Set("X-SAM-Node-Id", "node-1")
+	req.Header.Set("X-SAM-Workspace-Id", "workspace-1")
+	recorder := httptest.NewRecorder()
+	s.handleHibernateAgentSession(recorder, req)
+	return recorder
+}
+
+// A hibernate request carries a callback token and chat binding, and writing either bumps
+// the runtime's UpdatedAt. The eviction records itself only while UpdatedAt still equals
+// the runtime version it stopped, so a request arriving during the final capture used to
+// make markWorkspaceEvicted return false silently and the eviction was never recorded.
+func TestHibernateRequestDuringFinalizingEvictionLeavesTheRuntimeUntouched(t *testing.T) {
+	s := newEvictionTestServer()
+	initializeEvictionTestStore(t, s)
+	setupEvictionDocker(t, evictionTestContainerID)
+	callbacks := evictionCallbackRecorder(t, s)
+	target := evictionTargetFixture(s)
+	if err := s.stopEvictedWorkspaceContainer(context.Background(), target); err != nil {
+		t.Fatalf("stop: %v", err)
+	}
+	before := *s.workspaces["workspace-1"]
+
+	for _, background := range []string{"false", "true"} {
+		rec := hibernateRequestForEvictionTest(t, s, `{"chatSessionId":"chat-session-2","runtime":"vm","background":`+background+`,"workspaceCallbackToken":"fresh-workspace-token"}`)
+		if rec.Code != http.StatusConflict {
+			t.Fatalf("background=%s: hibernate during finalizing = %d %s, want 409", background, rec.Code, rec.Body.String())
+		}
+	}
+	after := s.workspaces["workspace-1"]
+	if !after.UpdatedAt.Equal(before.UpdatedAt) || after.CallbackToken != before.CallbackToken || after.ChatSessionID != before.ChatSessionID {
+		t.Fatalf("finalizing runtime mutated: updatedAt %v -> %v, token %q -> %q, chat %q -> %q",
+			before.UpdatedAt, after.UpdatedAt, before.CallbackToken, after.CallbackToken, before.ChatSessionID, after.ChatSessionID)
+	}
+	result := resourcemon.EvictionResult{Target: target, SnapshotCaptured: true, ContainerStopped: true, CompletedAt: time.Now().UTC()}
+	if !s.markWorkspaceEvicted(result) {
+		t.Fatal("the eviction could not record itself after a hibernate request")
+	}
+	if err := s.notifyWorkspaceEvicted(context.Background(), result); err != nil {
+		t.Fatal(err)
+	}
+	expectEvictionCallback(t, callbacks)
+}
+
+// Control: outside an eviction the same request still binds the chat session and captures.
+func TestHibernateRequestOutsideAnEvictionStillBindsTheRuntime(t *testing.T) {
+	s := newEvictionTestServer()
+	s.sessionSnapshotRunner = func(context.Context, *sessionSnapshotHandlerInput) (map[string]interface{}, error) {
+		return map[string]interface{}{"status": "available"}, nil
+	}
+	rec := hibernateRequestForEvictionTest(t, s, `{"chatSessionId":"chat-session-2","runtime":"vm","workspaceCallbackToken":"fresh-workspace-token"}`)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("hibernate = %d %s", rec.Code, rec.Body.String())
+	}
+	if got := s.workspaces["workspace-1"].ChatSessionID; got != "chat-session-2" {
+		t.Fatalf("chat session = %q, want the hibernate request's binding", got)
 	}
 }

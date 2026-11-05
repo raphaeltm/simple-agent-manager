@@ -92,10 +92,14 @@ func TestFinalEvictionSnapshotCapturesStoppedSourceThroughHelper(t *testing.T) {
 
 func TestFinalEvictionSnapshotIsNotQuiescedWhenAnotherContainerMountsWorkspaceStorage(t *testing.T) {
 	const sidecar = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+	const running = sidecar + " true 0001-01-01T00:00:00Z "
 	for name, mounts := range map[string]string{
-		"workspace volume": sidecar + ` [{"Type":"volume","Name":"sam-ws-workspace-1","Source":"/var/lib/docker/volumes/sam-ws-workspace-1/_data"}]`,
-		"host root":        sidecar + ` [{"Type":"bind","Name":"","Source":"/workspace/repo/.cache"}]`,
-		"unparseable":      sidecar + ` not-json`,
+		"workspace volume":      running + `[{"Type":"volume","Name":"sam-ws-workspace-1","Source":"/var/lib/docker/volumes/sam-ws-workspace-1/_data"}]`,
+		"host root":             running + `[{"Type":"bind","Name":"","Source":"/workspace/repo/.cache"}]`,
+		"ancestor of host root": running + `[{"Type":"bind","Name":"","Source":"/workspace"}]`,
+		"filesystem root":       running + `[{"Type":"bind","Name":"","Source":"/"}]`,
+		"unparseable":           running + `not-json`,
+		"unknown finish time":   sidecar + " false garbage []",
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, _ := newFinalSnapshotTestServer(t)
@@ -112,14 +116,46 @@ func TestFinalEvictionSnapshotIsNotQuiescedWhenAnotherContainerMountsWorkspaceSt
 			}
 		})
 	}
-	// Control: an unrelated tenant's running container never blocks certification.
+	// Control: an unrelated tenant's running container never blocks certification, including
+	// mounts that share a string prefix with the host root but not a path component.
 	s, _ := newFinalSnapshotTestServer(t)
 	t.Setenv("SAM_EVICTION_TEST_RUNNING", sidecar)
-	t.Setenv("SAM_EVICTION_TEST_MOUNTS", sidecar+` [{"Type":"volume","Name":"sam-ws-other-workspace","Source":"/var/lib/docker/volumes/sam-ws-other-workspace/_data"},{"Type":"bind","Name":"","Source":"/workspace/repo-other|odd:path"}]`)
+	t.Setenv("SAM_EVICTION_TEST_MOUNTS", running+`[{"Type":"volume","Name":"sam-ws-other-workspace","Source":"/var/lib/docker/volumes/sam-ws-other-workspace/_data"},{"Type":"bind","Name":"","Source":"/workspace/repo-other|odd:path"},{"Type":"bind","Name":"","Source":"/work"},{"Type":"bind","Name":"","Source":"/workspace/rep"}]`)
 	s.sessionSnapshotRunner = runnerEvaluatingQuiescence(nil)
 	outcome, err := s.captureQuiescedEvictionSnapshot(context.Background(), finalSnapshotTarget(s))
 	if err != nil || !outcome.Quiesced {
 		t.Fatalf("neighbor container blocked certification: outcome=%+v err=%v", outcome, err)
+	}
+}
+
+// A container that starts, writes the workspace volume and exits while the helper captures
+// is not running at either quiescence check. Its FinishedAt is what proves it ran.
+func TestFinalEvictionSnapshotIsNotQuiescedWhenAWriterStartsAndExitsMidCapture(t *testing.T) {
+	const writer = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+	const volumeMount = `[{"Type":"volume","Name":"sam-ws-workspace-1","Source":"/var/lib/docker/volumes/sam-ws-workspace-1/_data"}]`
+	for name, tc := range map[string]struct {
+		finishedAt   func() string
+		wantQuiesced bool
+	}{
+		"exited during the capture": {func() string { return time.Now().UTC().Format(time.RFC3339Nano) }, false},
+		// Control: a container that exited before the capture began wrote nothing it missed.
+		"exited before the capture": {func() string { return "2020-01-01T00:00:00Z" }, true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			s, _ := newFinalSnapshotTestServer(t)
+			s.sessionSnapshotRunner = runnerEvaluatingQuiescence(func() {
+				// Nothing else existed at the first check; the writer ran and exited since.
+				t.Setenv("SAM_EVICTION_TEST_RUNNING", writer)
+				t.Setenv("SAM_EVICTION_TEST_MOUNTS", writer+" false "+tc.finishedAt()+" "+volumeMount)
+			})
+			outcome, err := s.captureQuiescedEvictionSnapshot(context.Background(), finalSnapshotTarget(s))
+			if err != nil {
+				t.Fatalf("final capture: %v", err)
+			}
+			if outcome.Quiesced != tc.wantQuiesced {
+				t.Fatalf("quiesced = %v, want %v", outcome.Quiesced, tc.wantQuiesced)
+			}
+		})
 	}
 }
 
@@ -214,6 +250,78 @@ func TestFinalEvictionSnapshotReleasesFailedCaptureGeneration(t *testing.T) {
 	}
 	if calls := readCalls(t, logPath); !strings.Contains(calls, "rm --force --volumes sam-eviction-snapshot-") {
 		t.Fatalf("helper not cleaned up after a failed capture:\n%s", calls)
+	}
+}
+
+// finishEviction waits for the final capture before it records the eviction, so a stalled
+// helper cleanup must not stretch the capture past its deadline. The cleanup still finishes
+// in the background.
+func TestFinalEvictionSnapshotReturnsAtItsDeadlineWhileHelperCleanupStalls(t *testing.T) {
+	s, logPath := newFinalSnapshotTestServer(t)
+	s.config.EvictionSnapshotTimeout = 30 * time.Second // The cleanup's own bound.
+	t.Setenv("SAM_EVICTION_TEST_RM_DELAY", "3")
+	s.sessionSnapshotRunner = runnerEvaluatingQuiescence(nil)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+	defer cancel()
+
+	started := time.Now()
+	outcome, err := s.captureQuiescedEvictionSnapshot(ctx, finalSnapshotTarget(s))
+	if elapsed := time.Since(started); elapsed > 2*time.Second {
+		t.Fatalf("final capture returned after %s, past its 1s deadline", elapsed)
+	}
+	if err != nil || !outcome.Quiesced {
+		t.Fatalf("final capture: outcome=%+v err=%v", outcome, err)
+	}
+	// Control: the detached cleanup still removes the helper image after the stalled rm.
+	deadline := time.Now().Add(10 * time.Second)
+	for !strings.Contains(readCalls(t, logPath), "image rm --force sam-eviction-snapshot:") {
+		if time.Now().After(deadline) {
+			t.Fatalf("background cleanup never finished:\n%s", readCalls(t, logPath))
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+}
+
+// Final captures for different workspaces can overlap. Each headroom check must be followed
+// by its own commit before another check runs, or two commits measured against the same free
+// space could together exhaust the headroom.
+func TestConcurrentStoppedSourceCapturesSerializeHeadroomCheckAndCommit(t *testing.T) {
+	s, logPath := newFinalSnapshotTestServer(t)
+	t.Setenv("SAM_EVICTION_TEST_COMMIT_DELAY", "0.3")
+	s.sessionSnapshotRunner = runnerEvaluatingQuiescence(nil)
+	var wg sync.WaitGroup
+	errs := make(chan error, 2)
+	for _, workspaceID := range []string{"workspace-a", "workspace-b"} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			input := &sessionSnapshotHandlerInput{workspaceID: workspaceID, chatSessionID: "chat-" + workspaceID,
+				runtime: &WorkspaceRuntime{ID: workspaceID, ContainerWorkDir: "/workspaces/repo", ContainerLabelValue: "/workspace/" + workspaceID}}
+			target := resourcemon.EvictionTarget{WorkspaceID: workspaceID, ContainerID: evictionTestContainerID}
+			_, err := s.runStoppedSourceSnapshot(context.Background(), input, target, false)
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatalf("capture: %v", err)
+		}
+	}
+	var sequence []string
+	for _, line := range strings.Split(readCalls(t, logPath), "\n") {
+		switch {
+		case strings.HasPrefix(line, "container inspect --size"):
+			sequence = append(sequence, "check")
+		case strings.HasPrefix(line, "commit "):
+			sequence = append(sequence, "commit")
+		case line == "commit-done":
+			sequence = append(sequence, "done")
+		}
+	}
+	if want := []string{"check", "commit", "done", "check", "commit", "done"}; strings.Join(sequence, ",") != strings.Join(want, ",") {
+		t.Fatalf("headroom checks and commits interleaved: %v", sequence)
 	}
 }
 
@@ -312,12 +420,16 @@ func readCalls(t *testing.T, path string) string {
 // and is sent only when the capture is complete and the check passed.
 func TestHibernateReportsQuiescedOnlyWhenCheckPasses(t *testing.T) {
 	for name, tc := range map[string]struct {
-		check func(context.Context) error
-		want  bool
+		check    func(context.Context) error
+		degraded bool
+		want     bool
 	}{
-		"no check (sleep, live eviction)": {nil, false},
-		"check passes":                    {func(context.Context) error { return nil }, true},
-		"check fails":                     {func(context.Context) error { return errors.New("source ran") }, false},
+		"no check (sleep, live eviction)": {nil, false, false},
+		"check passes":                    {func(context.Context) error { return nil }, false, true},
+		"check fails":                     {func(context.Context) error { return errors.New("source ran") }, false, false},
+		// A degraded capture is never final, even from a quiet source: the check passing must
+		// not put `quiesced` on it.
+		"check passes, capture degraded": {func(context.Context) error { return nil }, true, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			repo, _, _ := initSnapshotRemoteRepoWithHistory(t, 4096)
@@ -330,18 +442,23 @@ func TestHibernateReportsQuiescedOnlyWhenCheckPasses(t *testing.T) {
 			t.Setenv("HOME", home)
 			plane := serveEnforcingSnapshotControlPlane(t, 256*1024)
 			s := &Server{config: &config.Config{Role: config.RoleStandalone, ControlPlaneURL: plane.url}}
+			acpSessionID, wantStatus := "acp-1", "available"
+			if tc.degraded {
+				// No resumable harness identity: the capture degrades to agent-context-skipped.
+				acpSessionID, wantStatus = "", "degraded"
+			}
 			result, err := s.hibernateSessionSnapshot(context.Background(), &sessionSnapshotHandlerInput{
 				workspaceID: "ws-1", sessionID: "agent-1", chatSessionID: "chat-1", runtimeName: "vm",
 				runtime:       &WorkspaceRuntime{ID: "ws-1", WorkspaceDir: t.TempDir()},
-				callbackToken: "token", agentType: "claude-code", acpSessionID: "acp-1",
+				callbackToken: "token", agentType: "claude-code", acpSessionID: acpSessionID,
 				containerTarget: &containerSnapshotTarget{workDir: repo},
 				quiescence:      tc.check,
 			})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if result["status"] != "available" {
-				t.Fatalf("capture status = %v; the flag is only meaningful for a complete capture", result["status"])
+			if result["status"] != wantStatus {
+				t.Fatalf("capture status = %v, want %v", result["status"], wantStatus)
 			}
 			bodies := *plane.bodies
 			if len(bodies) != 1 {
@@ -359,5 +476,83 @@ func TestHibernateReportsQuiescedOnlyWhenCheckPasses(t *testing.T) {
 				t.Fatalf("result quiesced = %v, want %v", result["quiesced"], tc.want)
 			}
 		})
+	}
+}
+
+// snapshotLifecycleControlPlane records the completion and failure callbacks of a real
+// hibernateSessionSnapshot run.
+type snapshotLifecycleControlPlane struct {
+	mu          sync.Mutex
+	completions []map[string]interface{}
+	failures    []map[string]interface{}
+}
+
+func serveSnapshotLifecycleControlPlane(t *testing.T, s *Server) *snapshotLifecycleControlPlane {
+	t.Helper()
+	plane := &snapshotLifecycleControlPlane{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		_ = json.NewDecoder(r.Body).Decode(&body)
+		plane.mu.Lock()
+		defer plane.mu.Unlock()
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/session-snapshot/prepare"):
+			_, _ = w.Write([]byte(`{"generation":"01FINALGEN","config":{"totalBudgetBytes":262144,"entryThresholdBytes":262144,"transferIdleTimeoutMs":30000,"jsonBodyMaxBytes":262144},"upload":{"home":"/upload/home","wip":"/upload/wip"}}`))
+		case strings.HasSuffix(r.URL.Path, "/session-snapshot/complete"):
+			plane.completions = append(plane.completions, body)
+			_, _ = w.Write([]byte(`{"status":"degraded","degradation":"transcript-only"}`))
+		case strings.HasSuffix(r.URL.Path, "/session-snapshot/failure"):
+			plane.failures = append(plane.failures, body)
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			w.WriteHeader(http.StatusNoContent)
+		}
+	}))
+	t.Cleanup(server.Close)
+	s.config.ControlPlaneURL = server.URL
+	return plane
+}
+
+// Completing a degraded final capture would replace the eviction's pre-stop generation and
+// delete its HOME/WIP objects. The final capture reports the failure instead, which releases
+// its own generation and leaves the pre-stop capture authoritative. The fake Docker CLI
+// fails every `docker exec`, so the real capture degrades to transcript-only.
+func TestDegradedFinalEvictionCaptureIsReleasedInsteadOfCompleted(t *testing.T) {
+	s, _ := newFinalSnapshotTestServer(t)
+	plane := serveSnapshotLifecycleControlPlane(t, s)
+
+	if _, err := s.captureQuiescedEvictionSnapshot(context.Background(), finalSnapshotTarget(s)); err == nil ||
+		snapshotCaptureErrorGeneration(err) != "01FINALGEN" || !strings.Contains(err.Error(), "keeping the pre-stop capture") {
+		t.Fatalf("degraded final capture err = %v", err)
+	}
+	plane.mu.Lock()
+	defer plane.mu.Unlock()
+	if len(plane.completions) != 0 {
+		t.Fatalf("degraded final capture completed and replaced the pre-stop generation: %v", plane.completions)
+	}
+	if len(plane.failures) != 1 || plane.failures[0]["generation"] != "01FINALGEN" {
+		t.Fatalf("final capture generation was not released: %v", plane.failures)
+	}
+}
+
+// Control: the OOM pre-stop capture runs through the same stopped-source helper, but nothing
+// precedes it, so a degraded capture must still complete or the eviction has no snapshot.
+func TestDegradedOOMPreStopCaptureStillCompletes(t *testing.T) {
+	s, _ := newFinalSnapshotTestServer(t)
+	setEvictionTestSourceState(t, "false|true|137|2026-11-05T01:00:00Z|2026-11-05T01:09:00Z")
+	plane := serveSnapshotLifecycleControlPlane(t, s)
+	target := finalSnapshotTarget(s)
+	target.Reason = resourcemon.EvictionReasonOOMKill
+
+	if _, err := s.captureEvictionSessionSnapshot(context.Background(), target); err != nil {
+		t.Fatalf("OOM pre-stop capture: %v", err)
+	}
+	plane.mu.Lock()
+	defer plane.mu.Unlock()
+	if len(plane.completions) != 1 || plane.completions[0]["status"] != "degraded" || len(plane.failures) != 0 {
+		t.Fatalf("completions = %v, failures = %v", plane.completions, plane.failures)
+	}
+	if _, present := plane.completions[0]["quiesced"]; present {
+		t.Fatal("a degraded capture was sent as quiesced")
 	}
 }

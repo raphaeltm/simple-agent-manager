@@ -311,6 +311,44 @@ func TestStoppedSourceHelperIsNotQuiescedWhileASidecarMountsTheVolume(t *testing
 	}
 }
 
+// A writer that starts, writes the workspace volume and exits while the helper captures is
+// not running at either quiescence check; only its FinishedAt shows it ran.
+func TestStoppedSourceHelperIsNotQuiescedWhenAWriterStartsAndExitsDuringCapture(t *testing.T) {
+	d := newIntegrationDocker(t)
+	suffix := randomEventID()
+	workspaceID := "it-" + suffix
+	hostRoot := "/tmp/sam-helper-it-root-" + suffix
+	wsVolume, remoteVolume := "sam-ws-"+workspaceID, "sam-it-remote-"+suffix
+	d.volume(wsVolume)
+	d.volume(remoteVolume)
+	source := d.container("sam-it-source-"+suffix, wsVolume, remoteVolume, "devcontainer.local_folder="+hostRoot)
+	seedWorkspaceState(d, source)
+	d.run("stop", "-t", "1", source)
+
+	cp := newSnapshotControlPlane(t)
+	s := helperIntegrationServer(cp.server.URL)
+	s.sessionSnapshotRunner = func(ctx context.Context, input *sessionSnapshotHandlerInput) (map[string]interface{}, error) {
+		writer := "sam-it-writer-" + suffix
+		d.cleanup = append(d.cleanup, func() { _, _ = d.try("rm", "-f", writer) })
+		d.run("run", "--name", writer, "-v", wsVolume+":/data", helperIntegrationImage, "sh", "-c", "echo late > /data/late")
+		return s.hibernateSessionSnapshot(ctx, input)
+	}
+	outcome, err := s.runStoppedSourceSnapshot(context.Background(), helperIntegrationInput(workspaceID, hostRoot),
+		resourcemon.EvictionTarget{WorkspaceID: workspaceID, ContainerID: source}, false)
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if outcome.Quiesced {
+		t.Fatal("a capture during which a writer ran on the workspace volume was certified final")
+	}
+	if len(cp.completions) != 1 || cp.completions[0]["status"] != "available" {
+		t.Fatalf("the capture itself must still complete: %#v", cp.completions)
+	}
+	if _, present := cp.completions[0]["quiesced"]; present {
+		t.Fatal("quiesced flag sent for a non-final capture")
+	}
+}
+
 // A VM agent that crashes mid-capture leaves its helper behind; the helper's
 // --volumes-from reference blocks `docker volume rm` until the startup reaper runs.
 func TestLeakedHelperBlocksVolumeRemovalUntilReaped(t *testing.T) {

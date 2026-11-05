@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/workspace/vm-agent/internal/resourcemon"
 )
@@ -15,7 +16,7 @@ import (
 // final dirty or untracked files were saved, so the control plane never lets it authorize
 // deleting the source. This capture runs in a quiet helper built from the stopped
 // container's writable layer and volumes. It is reported quiesced only when the source
-// stayed stopped and no other running container could write the workspace's storage,
+// stayed stopped and no other container ran with the workspace's storage mounted meanwhile,
 // which is what lets the control plane grant preservation and delete the source once the
 // conversation is restored elsewhere. A failure leaves the pre-stop capture in place.
 func (s *Server) captureQuiescedEvictionSnapshot(ctx context.Context, target resourcemon.EvictionTarget) (resourcemon.EvictionSnapshotOutcome, error) {
@@ -43,6 +44,7 @@ func (s *Server) captureQuiescedEvictionSnapshot(ctx context.Context, target res
 	if !s.evictionTargetIsCurrent(ctx, target) {
 		return resourcemon.EvictionSnapshotOutcome{}, fmt.Errorf("eviction target is no longer current")
 	}
+	input.finalEvictionCapture = true
 	outcome, err := s.runStoppedSourceSnapshot(ctx, input, target, false)
 	if err != nil {
 		s.releaseFailedEvictionCapture(input, err)
@@ -53,6 +55,7 @@ func (s *Server) captureQuiescedEvictionSnapshot(ctx context.Context, target res
 // runStoppedSourceSnapshot captures an exact stopped source container through a helper.
 // Callers hold the chat snapshot lock and the workspace lifecycle lock.
 func (s *Server) runStoppedSourceSnapshot(ctx context.Context, input *sessionSnapshotHandlerInput, target resourcemon.EvictionTarget, requireOOM bool) (resourcemon.EvictionSnapshotOutcome, error) {
+	windowStart := time.Now()
 	before, err := s.inspectSnapshotSource(ctx, target.ContainerID)
 	if err != nil {
 		return resourcemon.EvictionSnapshotOutcome{}, err
@@ -61,10 +64,10 @@ func (s *Server) runStoppedSourceSnapshot(ctx context.Context, input *sessionSna
 	if err != nil {
 		return resourcemon.EvictionSnapshotOutcome{}, err
 	}
-	defer cleanup()
+	defer awaitSnapshotHelperCleanup(ctx, cleanup)
 	hostRoot := input.runtime.ContainerLabelValue
 	verify := func(checkCtx context.Context) error {
-		return s.verifySnapshotSourceQuiesced(checkCtx, target, before, hostRoot, helper.containerID)
+		return s.verifySnapshotSourceQuiesced(checkCtx, target, before, hostRoot, helper.containerID, windowStart)
 	}
 	// Checked before the capture and again just before completion: a source that restarts
 	// or a writer present at either point makes this an ordinary (non-final) capture.
@@ -85,8 +88,8 @@ func (s *Server) runStoppedSourceSnapshot(ctx context.Context, input *sessionSna
 }
 
 // verifySnapshotSourceQuiesced proves the source did not run since `before` and that no
-// other running container mounts the storage a later deletion destroys.
-func (s *Server) verifySnapshotSourceQuiesced(ctx context.Context, target resourcemon.EvictionTarget, before snapshotSourceState, hostRoot, helperID string) error {
+// other container ran with the storage a later deletion destroys since windowStart.
+func (s *Server) verifySnapshotSourceQuiesced(ctx context.Context, target resourcemon.EvictionTarget, before snapshotSourceState, hostRoot, helperID string, windowStart time.Time) error {
 	now, err := s.inspectSnapshotSource(ctx, target.ContainerID)
 	if err != nil {
 		return err
@@ -94,7 +97,7 @@ func (s *Server) verifySnapshotSourceQuiesced(ctx context.Context, target resour
 	if now.running || now.startedAt != before.startedAt || now.finishedAt != before.finishedAt {
 		return errors.New("snapshot source ran during the capture")
 	}
-	return s.requireNoForeignWorkspaceWriters(ctx, target.WorkspaceID, hostRoot, helperID)
+	return s.requireNoForeignWorkspaceWriters(ctx, target.WorkspaceID, hostRoot, windowStart, target.ContainerID, helperID)
 }
 
 // releaseFailedEvictionCapture tells the control plane a capture generation will never
