@@ -77,19 +77,25 @@ export function WorkStateChip({ state }: { state: WorkState }) {
   );
 }
 
-/** What a machine is doing, in the words on its chip. Health wins over a "running" status. */
+/**
+ * What a machine is doing, in the words on its chip. Lifecycle states come first: a sleeping or
+ * stopped machine reports unhealthy because it stopped heartbeating on purpose, and must not read
+ * as "Not responding". Health only judges a machine that is supposed to be up.
+ */
 export function machineState(machine: MapMachine): { label: string; tone: ChipTone } {
   if (machine.placeholder === 'instant') return { label: 'Instant', tone: 'info' };
   if (machine.placeholder === 'unlisted') return { label: 'Not listed', tone: 'muted' };
-  if (machine.status === 'error' || machine.health === 'unhealthy')
-    return { label: 'Not responding', tone: 'danger' };
+  if (machine.status === 'error') return { label: 'Error', tone: 'danger' };
+  if (machine.status === 'sleeping') return { label: 'Asleep', tone: 'muted' };
+  if (machine.status === 'stopping') return { label: 'Stopping', tone: 'muted' };
+  if (machine.status === 'stopped' || machine.status === 'deleted')
+    return { label: 'Stopped', tone: 'muted' };
+  if (machine.status === 'pending' || machine.status === 'creating')
+    return { label: 'Starting', tone: 'info' };
+  if (machine.health === 'unhealthy') return { label: 'Not responding', tone: 'danger' };
   if (machine.health === 'stale') return { label: 'No recent heartbeat', tone: 'muted' };
   if (machine.status === 'running' || machine.status === 'recovery')
     return { label: 'Running', tone: 'success' };
-  if (machine.status === 'pending' || machine.status === 'creating')
-    return { label: 'Starting', tone: 'info' };
-  if (machine.status === 'sleeping') return { label: 'Asleep', tone: 'muted' };
-  if (machine.status === 'stopping') return { label: 'Stopping', tone: 'muted' };
   return { label: 'Stopped', tone: 'muted' };
 }
 

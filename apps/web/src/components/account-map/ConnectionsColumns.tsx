@@ -10,6 +10,7 @@ import type { ConnectionsModel, ConnectionsView, MapEdge } from './connections-m
 import {
   machineDetail,
   MachineIcon,
+  machineState,
   MachineStateChip,
   ProjectMark,
   STEPPED_BACK,
@@ -102,9 +103,11 @@ export function ConnectionsColumns({
     <div
       ref={rootRef}
       data-testid="account-map-columns"
-      className="relative grid items-start gap-x-14 px-4 pb-6"
+      className="relative grid items-start gap-x-10 px-4 pb-6"
+      // Minimums sum to 560px plus 80px of gaps and 32px of padding: 672px, which fits the
+      // ~726px the default shell leaves at the 1024px breakpoint.
       style={{
-        gridTemplateColumns: 'minmax(150px, 0.8fr) minmax(240px, 1.4fr) minmax(220px, 1.1fr)',
+        gridTemplateColumns: 'minmax(140px, 0.8fr) minmax(220px, 1.4fr) minmax(200px, 1.1fr)',
       }}
     >
       <svg
@@ -202,7 +205,7 @@ export function ConnectionsColumns({
             className={`min-w-0 rounded-[var(--sam-radius-control)] border border-solid p-2 transition-colors ${
               dim(m.id)
                 ? STEPPED_BACK
-                : m.status === 'error' || m.health === 'unhealthy'
+                : machineState(m).tone === 'danger'
                   ? 'border-[var(--sam-danger-edge)] bg-[var(--sam-chip-bg)]'
                   : 'border-[var(--sam-chip-edge)] bg-[var(--sam-chip-bg)]'
             }`}

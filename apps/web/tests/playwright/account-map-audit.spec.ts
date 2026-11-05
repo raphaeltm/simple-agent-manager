@@ -167,19 +167,27 @@ test.describe('Account Map', () => {
         const root = document.querySelector('[data-testid="account-map-columns"]') as HTMLElement;
         const box = root.getBoundingClientRect();
         const edge = root.querySelector('path[data-edge="s-1>w-1"]') as SVGPathElement;
-        const [x1, , , , , , x2] = (edge.getAttribute('d') ?? '').match(/-?[\d.]+/g)!.map(Number);
+        const [x1, y1, , , , , x2, y2] = (edge.getAttribute('d') ?? '')
+          .match(/-?[\d.]+/g)!
+          .map(Number);
         const from = root.querySelector('[data-node="s-1"]')!.getBoundingClientRect();
         const to = root.querySelector('[data-node="w-1"]')!.getBoundingClientRect();
         return {
           x1,
+          y1,
           x2,
+          y2,
           fromRight: from.right - box.left,
+          fromMid: from.top + from.height / 2 - box.top,
           toLeft: to.left - box.left,
+          toMid: to.top + to.height / 2 - box.top,
           lit: edge.dataset.lit,
         };
       });
       expect(Math.abs(ends.x1! - ends.fromRight)).toBeLessThan(1);
       expect(Math.abs(ends.x2! - ends.toLeft)).toBeLessThan(1);
+      expect(Math.abs(ends.y1! - ends.fromMid)).toBeLessThan(1);
+      expect(Math.abs(ends.y2! - ends.toMid)).toBeLessThan(1);
       expect(ends.lit).toBe('true');
       await expect(page.locator('path[data-lit="true"]')).toHaveCount(2);
     }
@@ -247,5 +255,27 @@ test.describe('Account Map — light theme', () => {
     await expect(page.getByRole('list', { name: 'How this connects' })).toBeVisible();
     await assertNoOverflow(page);
     await screenshot(page, 'account-map-light', { scopeToProject: true });
+  });
+});
+
+test.describe('Account Map — columns at the 1024px breakpoint', () => {
+  test.use({ viewport: { width: 1024, height: 768 }, isMobile: false });
+
+  test('the three columns fit the content pane without scrolling sideways', async ({ page }) => {
+    await setup(page, accountMapFixture());
+    await page.goto('/account-map');
+    const columns = page.getByTestId('account-map-columns');
+    await expect(columns).toBeVisible();
+    const fit = await columns.evaluate((grid) => {
+      const scroller = grid.parentElement as HTMLElement;
+      return {
+        gridRight: grid.getBoundingClientRect().right,
+        scrollerRight: scroller.getBoundingClientRect().right,
+        overflow: scroller.scrollWidth - scroller.clientWidth,
+      };
+    });
+    expect(fit.gridRight).toBeLessThanOrEqual(fit.scrollerRight + 1);
+    expect(fit.overflow).toBeLessThanOrEqual(1);
+    await assertNoOverflow(page);
   });
 });
