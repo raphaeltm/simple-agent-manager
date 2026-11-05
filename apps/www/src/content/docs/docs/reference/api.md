@@ -50,7 +50,7 @@ Project eventing uses a pull loop over the canonical ProjectData `project_event_
 
 `dispatch_task` also accepts an optional `coordinationChannel`: an ordinary project event channel name (`agent-dm.` is reserved) shared by a feature's agents. When omitted, the child inherits the dispatching task's channel, so every descendant shares one channel; `retry_subtask` and session recovery copy it onto replacement tasks. The child's description gains a short "Coordination channel" section and `get_instructions` returns `task.coordinationChannel` with guidance. Channels stay project-visible, so this routes work and is not an access boundary. Implementation: `parseCoordinationChannelParam` in `apps/api/src/routes/mcp/dispatch-coordination-channel.ts`.
 
-After subscribing, call `list_subscription_events` with the `subscriptionId` to replay missed or queued matches. The list response is payload-free: it returns summaries, delivery IDs, delivery state, `hasMore`, and an opaque `nextCursor` that is valid only for the same subscription. Call `get_event` only when a summary needs full stored event details, then call `ack_event_delivery` after processing each returned `deliveryId`; ack is idempotent. The pull tools themselves record matches, delivery decisions, and pull acknowledgements only — they do not steer runtimes, spawn tasks, or expose human/UI controls. Delivery happens out of band: `existing_session_prompt` and `runtime_interrupt` subscriptions wake the target chat through the durable prompt queue, and `runtime_interrupt` wakes carry the `interrupt` mailbox class, which may cancel an in-flight turn so the wake is delivered immediately. Wakes for one subscription are at least the platform cooldown apart (`PROJECT_EVENT_WAKE_SUBSCRIPTION_COOLDOWN_MS`). A subscription created with `minWakeIntervalSeconds` is spaced by that longer interval instead, counted from when the previous wake reached the agent; events in between are bundled into the next wake. The interval is accepted only for waking subscriptions, cannot exceed `PROJECT_EVENT_WAKE_SUBSCRIPTION_LIFETIME_MS`, and is returned as the effective `minWakeIntervalMs` on the subscription.
+After subscribing, call `list_subscription_events` with the `subscriptionId` to replay missed or queued matches. The list response is payload-free: it returns summaries, delivery IDs, delivery state, `hasMore`, and an opaque `nextCursor` that is valid only for the same subscription. Call `get_event` only when a summary needs full stored event details, then call `ack_event_delivery` after processing each returned `deliveryId`; ack is idempotent. The pull tools themselves record matches, delivery decisions, and pull acknowledgements only — they do not steer runtimes, spawn tasks, or expose human/UI controls. Delivery happens out of band: `runtime_steer` (the default), `existing_session_prompt` and `runtime_interrupt` subscriptions wake the target chat through the durable prompt queue. `runtime_steer` wakes join a running turn without stopping it (see [Live steering](#live-steering)), and `runtime_interrupt` wakes carry the `interrupt` mailbox class, which may cancel an in-flight turn so the wake is delivered immediately. Wakes for one subscription are at least the platform cooldown apart (`PROJECT_EVENT_WAKE_SUBSCRIPTION_COOLDOWN_MS`). A subscription created with `minWakeIntervalSeconds` is spaced by that longer interval instead, counted from when the previous wake reached the agent; events in between are bundled into the next wake. The interval is accepted only for waking subscriptions, cannot exceed `PROJECT_EVENT_WAKE_SUBSCRIPTION_LIFETIME_MS`, and is returned as the effective `minWakeIntervalMs` on the subscription.
 
 ## Event subscriptions
 
@@ -89,7 +89,8 @@ Concurrent publications are included through either catch-up or live matching.
 Replaying a follow key retains the original watermark and deadline; a retention
 gap or expired checkpoint requires a new explicit history/follow decision.
 Omit the history cursor when only future events are wanted.
-Following defaults to recording events. With `requestedDelivery: existing_session_prompt`,
+Following defaults to recording events. With `requestedDelivery: runtime_steer` (recommended) or
+`existing_session_prompt`,
 follow and catch-up responses include the ordinary subscription checkpoint/end-turn
 instructions and explain that a no-match expiry delivers no wake prompt.
 Add `minWakeIntervalSeconds` to be woken at most once per that many seconds on a busy
@@ -103,7 +104,7 @@ Payload, fanout, channel cardinality and history page limits are configurable.
 Empty idle catalog generations may be reclaimed, while live subscriptions continue
 to follow the stable channel name.
 
-A channel publication never matches the publisher's own `existing_session_prompt` or
+A channel publication never matches the publisher's own `runtime_steer`, `existing_session_prompt` or
 `runtime_interrupt` subscription, live or through catch-up, so publishing never wakes
 the publisher (`isSelfOriginatedChannelWake`). Record-only followers still see their
 own publications in their pull feed. Channel names starting with `agent-dm.` are
@@ -122,9 +123,12 @@ prompt delivery are enabled, `send_durable_message` (classes `notify` and `deliv
 and `send_message_to_subtask` stop injecting the sender's text into the recipient's
 prompt. One ProjectData transaction (`sendAgentChannelMessage`) finds or creates the
 canonical `agent-dm.<pair digest>` channel for the two chat sessions, ensures a
-SAM-managed prompt-delivery subscription for each chat, and publishes the message
-with its server-derived sender. The recipient is woken with a SAM-authored notice
-that carries event IDs only; it reads the text with `get_event`
+SAM-managed `runtime_steer` subscription for each chat (`ensureManagedSubscription`), and
+publishes the message with its server-derived sender. The recipient gets a SAM-authored
+notice that carries event IDs only: added to its running turn when it has one and supports
+live steering, otherwise delivered or woken as an ordinary prompt. A managed subscription
+created with another delivery mode is replaced on the pair's next message, after draining
+any wake it still owes. The recipient reads the text with `get_event`
 (`event.metadata.actor` is the verified sender), replies with `send_durable_message`,
 and acknowledges with `ack_event_delivery`. Urgent classes keep stop-and-deliver.
 Responses report `accepted: true, delivered: false` with `transport`, `channel`,
@@ -361,6 +365,9 @@ Steering needs durable prompt delivery.
   queue with the steer intent: a chat that is mid-turn on a steering runtime gets the batch in that
   turn, and an idle, sleeping or non-steering chat gets an ordinary wake prompt. Like the other
   prompt-delivery modes, it never matches the publisher's own channel publications.
+  `runtime_steer` is the default for `create_project_event_subscription`
+  (`DEFAULT_PROJECT_EVENT_REQUESTED_DELIVERY`) and for the notices of agent messages sent over a
+  pair channel; pass `existing_session_prompt` to wait for the running turn to end instead.
 
 A delivery ID belongs to one intent: reusing it with the other intent is rejected. Steers are a
 separate lane from queued prompts, so a steer is not held behind a queued prompt waiting for the

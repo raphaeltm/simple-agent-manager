@@ -449,7 +449,7 @@ per-slice and per-run admission budgets, and the verified R2 manifest writes.
 - `PROJECT_EVENT_WATCH_COOLDOWN_MIN_MS` — Minimum time between standing watch executions (default: `60000`)
 - `PROJECT_EVENT_WATCH_MAX_EXECUTIONS` — Maximum configurable executions per standing watch (default: `100`)
 - `PROJECT_EVENT_WATCH_MAX_CONCURRENT` — Maximum configurable concurrent actions per standing watch (default: `3`)
-- `PROJECT_EVENT_WAKE_ENABLED` — Enables same-chat ProjectData event wake materialization for v2 `existing_session_prompt` and `runtime_interrupt` subscriptions; unset or `false` leaves event delivery pull-only (default: `false`)
+- `PROJECT_EVENT_WAKE_ENABLED` — Enables same-chat ProjectData event wake materialization for v2 `runtime_steer` (the default), `existing_session_prompt` and `runtime_interrupt` subscriptions; unset or `false` leaves event delivery pull-only (default: `false`)
 - `PROJECT_EVENT_WAKE_MATERIALIZATION_MIN_ALARM_DELAY_MS` — Minimum delay before a ProjectData alarm retries wake materialization after due matches are present (default: `1000`)
 - `PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_BASE_MS` — Initial persisted backoff for a failed event-wake materialization or retention alarm phase (default: `5000`)
 - `PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_MAX_MS` — Maximum persisted backoff for repeated event-wake materialization or retention alarm failures (default: `300000`)
