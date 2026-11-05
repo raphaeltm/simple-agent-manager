@@ -19,6 +19,7 @@ import * as projectDataService from '../../services/project-data';
 import { classifySessionRecoveryRefusal } from '../../services/session-recovery-refusals';
 import { finalizeWorkspaceEvictionOnNode } from '../../services/workspace-eviction-lifecycle';
 import {
+  evictedWorkspacePreservationReceiptStatement,
   evictedWorkspaceSnapshotSleepStatement,
   markEvictedWorkspaceSnapshotSleeping,
   recoverWorkspaceAfterEviction,
@@ -409,6 +410,11 @@ workspaceEvictionCallbackRoute.post(
                 interruptedWork: body.interruptedWork,
               },
               now,
+              now
+            ),
+            evictedWorkspacePreservationReceiptStatement(
+              c.env.DATABASE,
+              { chatSessionId: workspace.chatSessionId },
               now
             ),
           ]

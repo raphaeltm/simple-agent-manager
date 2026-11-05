@@ -11,6 +11,7 @@ import {
   getSessionSnapshotConfig,
   sessionLifecycleError,
 } from './session-snapshot-artifacts';
+import { preservationReceiptStatement } from './workspace-preservation-receipt';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -199,9 +200,10 @@ async function markSessionSnapshotSleepingWithConfig(
             degradation: sql`CASE WHEN json_extract(${schema.sessionSnapshots.sleepFallbackJson}, '$.recoveryPoint') IS NULL THEN 'transcript-only' ELSE ${schema.sessionSnapshots.degradation} END`,
           }
         : {}),
-      // Only a verified full sleep grants preservation authority. Eviction and
-      // degraded fallback writers must never turn an old checkpoint into proof
-      // that the source runtime's latest dirty/untracked data was captured.
+      // A verified full sleep grants preservation authority here. Degraded fallback
+      // writers must never turn an old checkpoint into proof that the source runtime's
+      // latest dirty/untracked data was captured. The only other grant is an eviction
+      // whose final capture was quiesced (`evictedWorkspaceSnapshotSleepStatement`).
       ...(!fallback && expectedGeneration
         ? {
             cleanupIdentityJson: sql`CASE WHEN json_valid(${schema.sessionSnapshots.cleanupIdentityJson})
@@ -301,6 +303,23 @@ export async function finalizeSessionSnapshotSleeping(
     options.fallback ?? false,
     options.runtimeGuard
   );
+  if (finalized && !options.fallback && options.expectedGeneration) {
+    // Durable receipt of the generation that just granted preservation, on the source
+    // workspace itself. Best effort: the deletion preservation check backfills it from
+    // the snapshot row while that row still names this workspace.
+    await preservationReceiptStatement(env.DATABASE, {
+      chatSessionId,
+      reason: 'sleep',
+      nowIso: now.toISOString(),
+    })
+      .run()
+      .catch((err: unknown) => {
+        log.warn('session_sleep.preservation_receipt_failed', {
+          chatSessionId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+  }
   if (finalized) {
     // Every sleep finalizes here — the sleep sweep and an Instant container's own
     // idle sleep alike — so a failed task's incomplete capture is surfaced

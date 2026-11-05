@@ -176,12 +176,14 @@ export async function sweepStaleStoppedWorkspaces(
      FROM workspaces w
      LEFT JOIN nodes n ON n.id = w.node_id
      WHERE w.status IN ('stopped', 'sleeping', 'stopping', 'evicted')
-       AND EXISTS (
+       AND (EXISTS (
          SELECT 1 FROM session_snapshots s
          WHERE s.workspace_id = w.id AND s.node_id = w.node_id AND s.user_id = w.user_id
            AND CASE WHEN json_valid(s.cleanup_identity_json)
              THEN json_extract(s.cleanup_identity_json, '$.preserved') ELSE NULL END = 1
-       )
+       ) OR json_valid(w.preservation_receipt_json))
+       -- The receipt outlives the snapshot row's pointer at this workspace; the queue
+       -- re-verifies it (workspace-preservation-receipt.ts) before any deletion.
        AND (n.id IS NULL OR n.node_class != 'user-owned')
        AND w.updated_at < ?
      ORDER BY w.updated_at ASC

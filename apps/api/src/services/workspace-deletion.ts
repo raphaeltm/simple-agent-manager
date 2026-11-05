@@ -1,4 +1,5 @@
 import {
+  CHAT_BINDING_RELEASE_TOLERANT_SQL,
   sameOwnership,
   sameOwnershipExceptTerminalNode,
   workspaceDeletionIdentityLogContext,
@@ -238,7 +239,7 @@ async function persistDeletionDiagnostic(
         WHERE id = ?
           AND user_id = ?
           AND project_id IS ?
-          AND chat_session_id IS ?
+          AND ${CHAT_BINDING_RELEASE_TOLERANT_SQL}
           AND node_id IS ?
           AND eviction_generation IS ?
           AND (
@@ -287,7 +288,7 @@ async function claimDeletionTransition(
         WHERE id = ?
           AND user_id = ?
           AND project_id IS ?
-          AND chat_session_id IS ?
+          AND ${CHAT_BINDING_RELEASE_TOLERANT_SQL}
           AND node_id IS ?
           AND eviction_generation IS ?
           AND (
@@ -446,7 +447,7 @@ async function finalizeConfirmedDeletion(
       WHERE id = ?
         AND user_id = ?
         AND project_id IS ?
-        AND chat_session_id IS ?
+        AND ${CHAT_BINDING_RELEASE_TOLERANT_SQL}
         AND node_id IS ?
           AND eviction_generation IS ?
         AND status = ?

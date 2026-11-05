@@ -1806,6 +1806,11 @@ export const workspaces = sqliteTable(
     evictionFinalizedAt: text('eviction_finalized_at'),
     /** VM Stop acknowledged; explicit Stop can retry internal cleanup without stopping again. */
     stopRuntimeConfirmedAt: text('stop_runtime_confirmed_at'),
+    /**
+     * Preservation receipt for this runtime generation (JSON, `workspace-preservation-receipt.ts`).
+     * Survives the successor rewriting the per-chat snapshot row.
+     */
+    preservationReceiptJson: text('preservation_receipt_json'),
     dispatchedAt: text('dispatched_at'),
     /** Agent profile ID used for this workspace's task — drives GitHub CLI policy enforcement. */
     agentProfileHint: text('agent_profile_hint'),

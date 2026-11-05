@@ -191,6 +191,14 @@ export async function completeSessionSnapshot(
       wipSha256: input.artifactSha256?.wipSha256 ?? null,
       baseCommit: input.baseCommit,
       manifestJson,
+      ...(input.quiesced && input.status === 'available' && input.degradation === 'none'
+        ? {
+            cleanupIdentityJson: sql`CASE WHEN json_valid(${schema.sessionSnapshots.cleanupIdentityJson})
+              AND json_extract(${schema.sessionSnapshots.cleanupIdentityJson}, '$.snapshotGeneration') = ${captureGeneration}
+              THEN json_set(${schema.sessionSnapshots.cleanupIdentityJson}, '$.quiesced', 1)
+              ELSE ${schema.sessionSnapshots.cleanupIdentityJson} END`,
+          }
+        : {}),
       expiresAt: snapshotExpiry(completedAt, getSessionSnapshotConfig(env).ttlDays),
       updatedAt: completedAt.toISOString(),
     })

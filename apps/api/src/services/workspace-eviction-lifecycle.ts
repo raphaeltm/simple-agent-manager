@@ -1,4 +1,5 @@
 import type { Env } from '../env';
+import { CHAT_BINDING_RELEASE_TOLERANT_SQL } from './workspace-deletion-identity';
 import { finalizeWorkspaceLifecycleClosure } from './workspace-lifecycle-finalizer';
 
 export interface WorkspaceEvictionIdentity {
@@ -19,8 +20,10 @@ export async function finalizeWorkspaceStopInNode(
   env: Env,
   identity: WorkspaceStopIdentity
 ): Promise<boolean> {
+  // A wake may release the chat binding while the stop is finalizing; the closure below
+  // reads the row's current (NULL) binding and leaves the successor's chat alone.
   const predicate = `id = ? AND node_id = ? AND eviction_generation IS ? AND user_id = ?
-    AND project_id IS ? AND chat_session_id IS ? AND updated_at = ?
+    AND project_id IS ? AND ${CHAT_BINDING_RELEASE_TOLERANT_SQL} AND updated_at = ?
     AND status = 'stopping' AND stop_runtime_confirmed_at IS NOT NULL
     AND runtime_deletion_confirmed_at IS NULL`;
   const bindings = [

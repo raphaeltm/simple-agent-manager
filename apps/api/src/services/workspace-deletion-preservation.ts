@@ -5,6 +5,10 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { verifySessionSnapshotArtifactsForSleep } from './session-snapshot-artifacts';
 import type { WorkspaceDeletionIdentity } from './workspace-deletion';
+import {
+  preservationReceiptExpiresAt,
+  preservationReceiptStatement,
+} from './workspace-preservation-receipt';
 
 /**
  * Snapshot recovery states in which a wake still holds the snapshot's claim. A wake releases the
@@ -63,6 +67,10 @@ export async function automaticDeletionPreservationExpiresAt(
     expected.nodeUserId !== expected.userId
   )
     return null;
+  // The source's own receipt survives the replacement rewriting the per-chat snapshot
+  // row. Rows preserved before receipts existed fall through to the snapshot-row path.
+  const receiptExpiresAt = await preservationReceiptExpiresAt(env, expected);
+  if (receiptExpiresAt) return receiptExpiresAt;
   const snapshot = await findPreservationSnapshot(env, expected);
   if (
     !snapshot ||
@@ -126,6 +134,16 @@ export async function automaticDeletionPreservationExpiresAt(
     Date.parse(snapshot.expiresAt) <= Date.now()
   )
     return null;
+  // Backfill the durable receipt while the row still names this workspace: covers rows
+  // preserved before receipts existed and a receipt write lost after a sleep finalized.
+  await preservationReceiptStatement(env.DATABASE, {
+    chatSessionId: snapshot.chatSessionId,
+    reason:
+      snapshot.evictionRecoveryWorkspaceId === expected.workspaceId ? 'quiesced_eviction' : 'sleep',
+    nowIso: new Date().toISOString(),
+  })
+    .run()
+    .catch(() => undefined);
   return snapshot.expiresAt;
 }
 

@@ -1,4 +1,5 @@
 import type { WorkspaceDeletionIdentity } from '../services/workspace-deletion';
+import { chatBindingAllowsDeletion } from '../services/workspace-deletion-identity';
 import type { PendingWorkspaceDeletion } from './node-lifecycle-workspace-deletion-support';
 
 export function deletionEntryClaimedWithoutNodeIncarnation(
@@ -31,7 +32,7 @@ export function deletionEntryMatchesScheduledIdentity(
       entry.nodeRuntimeIncarnationId === identity.nodeRuntimeIncarnationId) &&
     entry.userId === identity.userId &&
     entry.projectId === identity.projectId &&
-    entry.chatSessionId === identity.chatSessionId
+    chatBindingAllowsDeletion(identity.chatSessionId, entry.chatSessionId ?? null)
   );
 }
 
@@ -117,7 +118,7 @@ export function deletionEntryMatchesClaimIdentity(input: {
       : entry.nodeRuntimeIncarnationId) === expected.nodeRuntimeIncarnationId &&
     entry.userId === input.userId &&
     (entry.projectId ?? expected.projectId) === expected.projectId &&
-    (entry.chatSessionId ?? expected.chatSessionId) === expected.chatSessionId
+    chatBindingAllowsDeletion(expected.chatSessionId, entry.chatSessionId ?? expected.chatSessionId)
   );
 }
 

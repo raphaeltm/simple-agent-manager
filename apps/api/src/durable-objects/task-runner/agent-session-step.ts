@@ -231,6 +231,19 @@ export async function handleAgentSession(
         { permanent: true }
       );
     }
+    // The restored generation now lives here; release the retired source's files.
+    // Best effort: the stale-workspace sweep re-queues any receipt-bearing source.
+    const { releaseRestoredSourceWorkspaces } =
+      await import('../../services/workspace-preservation-receipt');
+    await releaseRestoredSourceWorkspaces(rc.env, {
+      chatSessionId: state.config.resumeSnapshotChatSessionId,
+      restoredWorkspaceId: state.stepResults.workspaceId,
+    }).catch((error: unknown) => {
+      log.warn('task_runner.restored_source_release_failed', {
+        taskId: state.taskId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
   await queueRestoredSessionPromptIfNeeded(state, rc, started);
