@@ -81,13 +81,13 @@ either way, and a target with no running turn gets an ordinary wake prompt (veri
 
 ## Acceptance criteria
 
-- [ ] A peer agent message reaches a running Claude, Codex and OpenCode turn on a staging VM as a steer
+- [x] A peer agent message reaches a running Claude, Codex and OpenCode turn on a staging VM as a steer
       (`steer_outcome = steered`), without waiting for the turn to end.
-- [ ] A subscription created without `requestedDelivery` steers its event into a running VM turn on staging.
-- [ ] An idle target still receives the same wakes as an ordinary prompt (fallback, delivered once).
-- [ ] Existing managed pair subscriptions switch to steering on their next message without dropping a
+- [x] A subscription created without `requestedDelivery` steers its event into a running VM turn on staging.
+- [x] An idle target still receives the same wakes as an ordinary prompt (fallback, delivered once).
+- [x] Existing managed pair subscriptions switch to steering on their next message without dropping a
       queued wake.
-- [ ] An explicit `existing_session_prompt` subscription keeps queueing.
+- [x] An explicit `existing_session_prompt` subscription keeps queueing.
 
 ## Implementation notes
 
@@ -97,12 +97,44 @@ either way, and a target with no running turn gets an ordinary wake prompt (veri
   is retired. Using `hasPendingWake` here, not `hasQueuedWake`, keeps a matched-but-unbatched
   pre-deploy notice from being dropped.
 - Self-publication suppression (`isSelfOriginatedChannelWake`) keys on `resolved =
-  queued_for_prompt_delivery`, so it already covers `runtime_steer` follows; the echo test now
+queued_for_prompt_delivery`, so it already covers `runtime_steer` follows; the echo test now
   includes a steering follower.
 - Discrimination (Workers): managed mode reverted to queue → 4/4 red; reuse ignoring mode → the
   two rotation tests red; old drain rule (queued only) → the drain test red; service default
   removed → "steers by default" red. All restored green.
 - Main is push-protected, so the task file travels on the feature branch.
+
+## Staging evidence (2026-11-05, deploy run 42083339183, head ece33c165)
+
+Each VM target chat created `create_project_event_subscription` on `feature.evsteer-<tag>` with no
+`requestedDelivery`, then ran six 30-second foreground steps. Once step 1 was running, a separate
+Instant chat ("Claude Code Chat") called `send_durable_message` to the target task and
+`publish_channel_event` on that channel. Transcript rows read back through the API:
+
+| Agent (VM)                         | Peer notice                              | Channel event wake                         | Same turn                                           |
+| ---------------------------------- | ---------------------------------------- | ------------------------------------------ | --------------------------------------------------- |
+| Claude Code (session 75dd7e53)     | `intent=steer outcome=steered`, 18:49:57 | steered, 18:50:00 (`runtime_steer` prefix) | ran PEERSTEER, EVENTSTEER after step4, before step5 |
+| Codex C2.3 (session 2031f7fd)      | steered, 19:13:03                        | steered, 19:13:06                          | ran both after step2, before step3                  |
+| OpenCode sam-s1 (session 77c4a1ea) | steered, 19:04:46                        | steered, 19:04:49                          | ran both after step3, before step4                  |
+
+The event wake carrying the `runtime_steer` prefix shows that the subscription created without
+`requestedDelivery` defaulted to `runtime_steer`. Each agent read both events with `get_event`
+and acked them.
+
+Idle target (Claude VM, after its turn ended): a third peer message became
+`intent=steer outcome=queued_fallback reason=no_running_turn` and was delivered as an ordinary
+prompt; the agent read it and ran IDLEWAKE.
+
+Discarded runs: OpenCode run 1 (the sender's model refused the wording; it was softened), Codex
+run 1 (queued for staging VM capacity; the runner was restarted), and Codex run 2 (the reattached
+runner polled from a blank page and saw nothing).
+
+Found and backlogged: an Instant follow-up failed to wake a sleeping sender chat
+(`tasks/backlog/2026-11-05-instant-sleeping-container-cannot-wake.md`), and a transient 503 on the
+task GET poll (`tasks/backlog/2026-11-05-transient-503-on-task-get.md`). Neither touches this change.
+
+Cleanup: test nodes 01M6PG992Y…, 01M6PGHPF… and 01M6PH7AQ… and workspaces 01M6PGTE7… and
+01M6PH6SQ… deleted (API 200). Staging was released to the next queued task at 19:45Z.
 
 ## References
 
