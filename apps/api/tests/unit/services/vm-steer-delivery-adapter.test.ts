@@ -149,7 +149,8 @@ describe('live steer delivery adapter', () => {
   });
 
   it('gives an old VM agent the queue without sending anything', async () => {
-    const { steering: _steering, ...oldCapabilities } = fixture.capabilities;
+    const oldCapabilities: Record<string, unknown> = { ...fixture.capabilities };
+    delete oldCapabilities.steering;
     vm({ capabilities: oldCapabilities, steer: () => fixture.injectedSteer });
     const input = steerInput();
     expect(await submitSteerDelivery(envWithTarget(runningRow), input)).toMatchObject({
