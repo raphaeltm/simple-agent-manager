@@ -127,8 +127,9 @@ SAM-managed `runtime_steer` subscription for each chat (`ensureManagedSubscripti
 publishes the message with its server-derived sender. The recipient gets a SAM-authored
 notice that carries event IDs only: added to its running turn when it has one and supports
 live steering, otherwise delivered or woken as an ordinary prompt. A managed subscription
-created with another delivery mode is replaced on the pair's next message, after draining
-any wake it still owes. The recipient reads the text with `get_event`
+created with another delivery mode is replaced on the pair's next message: the replacement
+receives that message and later ones at once, while the old subscription loses its match keys
+and only delivers the wakes it already owed, in its original mode. The recipient reads the text with `get_event`
 (`event.metadata.actor` is the verified sender), replies with `send_durable_message`,
 and acknowledges with `ack_event_delivery`. Urgent classes keep stop-and-deliver.
 Responses report `accepted: true, delivered: false` with `transport`, `channel`,

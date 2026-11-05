@@ -612,8 +612,9 @@ SAM now backs chat sessions with task records across more runtime paths. In prac
 
 Any agent working in a project can message another active agent in the same project: a
 coordinator redirecting a subtask it started, for example, or a subtask reporting back. If the
-recipient is in the middle of a turn, the message is added to that turn without stopping it (on
-agents that support live steering; otherwise it arrives when the turn ends). An idle recipient gets
+recipient is in the middle of a turn, the message is added to that turn without stopping it. That
+needs agent message channels, which managed deployments turn on (`AGENT_MESSAGE_CHANNELS_ENABLED`),
+and an agent that supports live steering; otherwise the message arrives when the turn ends. An idle recipient gets
 it straight away, and a sleeping one is woken. An urgent message
 can instead stop the recipient's current turn, the same way the stop button does, so it reads the
 message straight away.
@@ -745,7 +746,7 @@ If a busy channel keeps interrupting an agent, ask it in plain words, for exampl
 
 To wait on a pull request without polling, the agent calls `create_project_event_subscription` and ends its turn. Delivery defaults to `runtime_steer`: if the agent is still working when an event arrives, the notice is added to its running turn; otherwise the event wakes the chat with an ordinary prompt. `existing_session_prompt` always waits for the running turn to end, and `record_only` only records events and never wakes the chat. Use source `github` with subjectType `pull_request` and subjectId set to the PR number for reviews, review comments, PR comments and PR events. CI events are keyed by commit, so use subjectType `commit` with the PR's full 40-character head SHA (a short SHA matches nothing). Event types include the action and must match exactly: a finished CI run is `check_run.completed`, `check_suite.completed`, or `workflow_run.completed`, and a bare `check_run` matches nothing. Check the PR's current head and checks on GitHub before subscribing and again right after, in case CI already finished. An expired subscription wakes no one, so also schedule one follow-up message to the agent's own chat with `create_project_schedule` as a fallback. A PR comment waking an idle, live chat has been verified end to end; waking a sleeping chat, and CI or review delivery, have not. An agent that resumed from the fallback rather than from an event should say so in its report.
 
-To coordinate several agents on one feature, publish a short kickoff to a project channel and pass it as `coordinationChannel` to `dispatch_task`. Children and their descendants inherit it and are told to publish findings, decisions, blockers and completion evidence with `publish_channel_event`, and to read it with `get_channel_history` or follow it with `follow_event_channel`, adding `minWakeIntervalSeconds` so channel traffic wakes them at most that often. A publication never wakes its own author.
+To coordinate several agents on one feature, publish a short kickoff to a project channel and pass it as `coordinationChannel` to `dispatch_task`. Children and their descendants inherit it and are told to publish findings, decisions, blockers and completion evidence with `publish_channel_event`, and to read it with `get_channel_history` or follow it with `follow_event_channel`, passing `requestedDelivery: "runtime_steer"` to be woken and `minWakeIntervalSeconds` so channel traffic wakes them at most that often. A publication never wakes its own author.
 
 To see who subscribes to a project channel, use `list_channel_subscribers` with its name. It returns owner and target identities, subscription state and expiry. Follow `nextCursor` for more results; use `state: "any"` to include cancelled or expired subscriptions. A subscription means its filter matches that channel's messages—it does not prove the agent read or acknowledged them.
 

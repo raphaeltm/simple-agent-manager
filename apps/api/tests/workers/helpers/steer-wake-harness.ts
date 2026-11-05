@@ -124,9 +124,16 @@ export async function expectSteeredOnce(
   expect(steer).toHaveBeenCalledTimes(1);
   expect(steer.mock.calls[0]![0].claim.message.id).toBe(batchId);
   expect(submit).not.toHaveBeenCalled();
-  expect(await snapshot(f, batchId)).toMatchObject({
+  const after = await snapshot(f, batchId);
+  expect(after).toMatchObject({
     inbox: { delivery_intent: 'steer', steer_outcome: 'steered' },
     batch: { state: 'delivered' },
     attempts: ['accepted'],
   });
+  expect(after.inbox?.delivery_state).toBe('acked');
+
+  // A later pass must not steer or submit the same batch again.
+  await deliveryPass(f);
+  expect(steer).toHaveBeenCalledTimes(1);
+  expect(submit).not.toHaveBeenCalled();
 }
