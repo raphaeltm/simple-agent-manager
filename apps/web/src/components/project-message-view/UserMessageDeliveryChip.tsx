@@ -91,7 +91,12 @@ export function UserMessageDeliveryChip({ delivery }: { delivery: UserMessageDel
         <span aria-hidden="true" className="flex shrink-0" style={{ color: t.fg }}>
           {icon}
         </span>
-        <span className="min-w-0 break-words font-medium text-fg-primary">{label}</span>
+        <span
+          className="min-w-0 break-words font-medium text-fg-primary"
+          data-testid="user-message-delivery-label"
+        >
+          {label}
+        </span>
         <span className="sr-only">{detail}</span>
       </span>
     </div>

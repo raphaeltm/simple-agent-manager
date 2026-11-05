@@ -49,7 +49,8 @@ export function DeliveryIntentControl({
           onChange={onChange}
           label="When to deliver your message"
           size={isMobile ? 'lg' : 'md'}
-          className="w-full sm:w-auto"
+          // Fixed width past mobile: shrink-to-content truncates the selected (bolder) label.
+          className="w-full shrink-0 sm:w-64"
         />
       )}
       <p className="m-0 min-w-0 text-xs text-fg-muted" aria-live="polite">
