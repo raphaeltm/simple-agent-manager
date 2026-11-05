@@ -30,3 +30,25 @@ export async function evictionRecoveryFenceMatches(
     .first<{ valid: number }>();
   return row?.valid === 1;
 }
+
+/**
+ * The fence guards replacement allocation. Once this exact wake restored the snapshot into
+ * its own workspace (`completeSessionSnapshotRecovery`), the replacement exists and the
+ * source may already be released for deletion (`releaseRestoredSourceWorkspaces`), so a
+ * source that is no longer `evicted` must not revoke the wake that replaced it.
+ */
+export async function evictionRecoveryRestoredByRunner(
+  env: Env,
+  runner: { taskId: string; workspaceId: string; recoveryAttemptId: string | null }
+): Promise<boolean> {
+  const row = await env.DATABASE.prepare(
+    `SELECT 1 AS restored
+       FROM session_snapshots
+      WHERE recovery_task_id = ? AND recovery_workspace_id = ? AND recovery_status = 'restored'
+        AND recovery_attempt_id IS ?
+      LIMIT 1`
+  )
+    .bind(runner.taskId, runner.workspaceId, runner.recoveryAttemptId)
+    .first<{ restored: number }>();
+  return row?.restored === 1;
+}

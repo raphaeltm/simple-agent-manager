@@ -17,6 +17,10 @@ import { AppError } from '../../../src/middleware/error';
 import { workspaceEvictionCallbackRoute } from '../../../src/routes/projects/workspace-eviction-callback';
 import { emptyResult, resolveCleanupConfig } from '../../../src/scheduled/node-cleanup/shared';
 import { sweepStaleStoppedWorkspaces } from '../../../src/scheduled/node-cleanup/workspace-phases';
+import {
+  evictionRecoveryFenceMatches,
+  evictionRecoveryRestoredByRunner,
+} from '../../../src/services/session-recovery-eviction';
 import { completeSessionSnapshot } from '../../../src/services/session-snapshot-persistence';
 import { prepareSessionSnapshot } from '../../../src/services/session-snapshot-prepare';
 import { finalizeSessionSnapshotSleeping } from '../../../src/services/session-snapshot-sleep-lifecycle';
@@ -420,6 +424,83 @@ describe('evicted source cleanup through real writers and real SQL', () => {
     await capture('target', 'target-node', false);
     // The successor moved the row; the receipt's restoredAt still selects it.
     expect(await sweep()).toEqual(['workspace']);
+  });
+
+  it('a restore stamped at commit survives a lost release and the successor moving the row', async () => {
+    sqlite.exec("UPDATE nodes SET node_class = 'managed'");
+    await capture('workspace', 'node', true);
+    await evict();
+    await wakeOnto('target');
+    // The TaskRunner stamps right after the restore commits; then the release is lost.
+    expect(
+      await releaseRestoredSourceWorkspaces(env, {
+        chatSessionId: 'chat',
+        restoredWorkspaceId: 'target',
+        stampOnly: true,
+      })
+    ).toBe(1);
+    expect(mocks.scheduleWorkspaceDeletion).not.toHaveBeenCalled();
+    const stampedAt = receipt()?.restoredAt;
+    expect(stampedAt).toBeTruthy();
+    // The release, when it does run, re-matches and keeps the first stamp.
+    expect(
+      await releaseRestoredSourceWorkspaces(env, {
+        chatSessionId: 'chat',
+        restoredWorkspaceId: 'target',
+      })
+    ).toBe(1);
+    expect(receipt()?.restoredAt).toBe(stampedAt);
+    mocks.scheduleWorkspaceDeletion.mockClear();
+    // Without that release, the successor's first capture moves the row away.
+    await capture('target', 'target-node', false);
+    expect(await sourcePreservation()).not.toBeNull();
+    await sweepStaleStoppedWorkspaces(
+      db(),
+      env,
+      new Date('2099-01-01T00:00:00Z'),
+      resolveCleanupConfig(env),
+      emptyResult()
+    );
+    expect(mocks.scheduleWorkspaceDeletion.mock.calls.map((call) => call[1])).toEqual([
+      'workspace',
+    ]);
+  });
+
+  it('the eviction fence accepts only the wake that restored the snapshot', async () => {
+    await capture('workspace', 'node', true);
+    await evict();
+    const fence = { workspaceId: 'workspace', nodeId: 'node', generation: 'generation' };
+    const runner = { taskId: 'wake-task', workspaceId: 'target', recoveryAttemptId: null };
+    expect(await evictionRecoveryFenceMatches(env, fence)).toBe(true);
+    // Claimed but not yet restored: the fence alone decides.
+    sqlite.exec(`
+      INSERT INTO workspaces (id, user_id, project_id, node_id, chat_session_id, status)
+        VALUES ('target', 'user', 'project', 'target-node', 'chat', 'running');
+      UPDATE session_snapshots SET recovery_status = 'waking', recovery_task_id = 'wake-task';
+    `);
+    expect(await evictionRecoveryRestoredByRunner(env, runner)).toBe(false);
+    expect(await completeSessionSnapshotRecovery(db(), 'chat', 'wake-task', 'target')).toBe(true);
+    sqlite.exec("UPDATE workspaces SET status = 'deleted' WHERE id = 'workspace'");
+    expect(await evictionRecoveryFenceMatches(env, fence)).toBe(false);
+    expect(await evictionRecoveryRestoredByRunner(env, runner)).toBe(true);
+    // Another task, another workspace, or another wake attempt is not this restore.
+    expect(await evictionRecoveryRestoredByRunner(env, { ...runner, taskId: 'other' })).toBe(false);
+    expect(
+      await evictionRecoveryRestoredByRunner(env, { ...runner, workspaceId: 'workspace' })
+    ).toBe(false);
+    expect(
+      await evictionRecoveryRestoredByRunner(env, { ...runner, recoveryAttemptId: 'attempt-2' })
+    ).toBe(false);
+  });
+
+  it('without a receipt, the eviction snapshot row also waits for a restore (legacy path)', async () => {
+    await capture('workspace', 'node', true);
+    await evict();
+    // A row preserved before receipts existed, or a receipt write that was lost.
+    sqlite.exec("UPDATE workspaces SET preservation_receipt_json = NULL WHERE id = 'workspace'");
+    expect(await sourcePreservation()).toBeNull();
+    await wakeOnto('target');
+    expect(await sourcePreservation()).not.toBeNull();
   });
 
   it('an unrestored sleep receipt needs its artifacts and an unexpired bound', async () => {

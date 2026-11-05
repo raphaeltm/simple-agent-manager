@@ -826,10 +826,13 @@ describe('handleAgentSession', () => {
     // Staging 2026-11-05: the release ran before the final authority check, the source was
     // deleted within seconds, and the eviction fence (source must stay `evicted`) failed the wake.
     let sourceStatus = 'evicted';
-    releaseRestoredSourceWorkspacesMock.mockImplementation(async () => {
-      sourceStatus = 'deleted';
-      return 1;
-    });
+    releaseRestoredSourceWorkspacesMock.mockImplementation(
+      async (_env: unknown, input: { stampOnly?: boolean }) => {
+        // Stamping records the restore; only the queued deletion removes the source.
+        if (!input.stampOnly) sourceStatus = 'deleted';
+        return 1;
+      }
+    );
     const state = makeState({
       config: {
         ...makeState().config,
@@ -848,10 +851,14 @@ describe('handleAgentSession', () => {
     await handleAgentSession(state, rc);
 
     expect(statusEvents.map((event) => event.toStatus)).toEqual(['in_progress']);
-    expect(releaseRestoredSourceWorkspacesMock).toHaveBeenCalledWith(rc.env, {
-      chatSessionId: 'chat-1',
-      restoredWorkspaceId: 'workspace-1',
-    });
+    // The restore is stamped as soon as it commits; deletion is queued after the wake commits.
+    expect(releaseRestoredSourceWorkspacesMock.mock.calls.map((call) => call[1])).toEqual([
+      { chatSessionId: 'chat-1', restoredWorkspaceId: 'workspace-1', stampOnly: true },
+      { chatSessionId: 'chat-1', restoredWorkspaceId: 'workspace-1' },
+    ]);
+    expect(completeSessionSnapshotRecoveryMock.mock.invocationCallOrder[0]).toBeLessThan(
+      releaseRestoredSourceWorkspacesMock.mock.invocationCallOrder[0]
+    );
     expect(sourceStatus).toBe('deleted');
     expect(state.config.evictionFence).toBeNull();
     // Every later alarm re-runs the authority check; the released source must not fail it.

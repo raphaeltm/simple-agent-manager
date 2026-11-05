@@ -231,6 +231,21 @@ export async function handleAgentSession(
         { permanent: true }
       );
     }
+    // Record the restore on the source's receipt now, before the successor can capture and
+    // move the snapshot row. Deletion is queued only after the commit below; the eviction
+    // fence accepts this runner's own restore (`evictionRecoveryRestoredByRunner`).
+    const { releaseRestoredSourceWorkspaces } =
+      await import('../../services/workspace-preservation-receipt');
+    await releaseRestoredSourceWorkspaces(rc.env, {
+      chatSessionId: state.config.resumeSnapshotChatSessionId,
+      restoredWorkspaceId: state.stepResults.workspaceId,
+      stampOnly: true,
+    }).catch((error: unknown) => {
+      log.warn('task_runner.restored_source_stamp_failed', {
+        taskId: state.taskId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   }
 
   await queueRestoredSessionPromptIfNeeded(state, rc, started);

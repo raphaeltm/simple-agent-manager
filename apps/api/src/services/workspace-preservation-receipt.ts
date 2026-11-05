@@ -202,26 +202,31 @@ export async function preservationReceiptExpiresAt(
 
 /**
  * A wake restored the conversation into `restoredWorkspaceId`. Record that on the source
- * receipt of exactly the restored generation, then queue the source for deletion: it is
- * no longer needed for any retry of this wake, and nothing else would release its node.
- * Best effort: the stale-workspace safety net re-queues any receipt-bearing source.
+ * receipt of exactly the restored generation, then (unless `stampOnly`) queue the source for
+ * deletion: it is no longer needed for any retry of this wake, and nothing else would
+ * release its node. The TaskRunner stamps right after the restore commits, so the record
+ * survives a crash before the release and the successor's first capture moving the
+ * snapshot row; the stale-workspace safety net then re-queues the source from the receipt.
+ * Idempotent per restored workspace: a repeat keeps the first `restoredAt`.
  */
 export async function releaseRestoredSourceWorkspaces(
   env: Env,
-  input: { chatSessionId: string; restoredWorkspaceId: string }
+  input: { chatSessionId: string; restoredWorkspaceId: string; stampOnly?: boolean }
 ): Promise<number> {
   const nowIso = new Date().toISOString();
   const stamped = await env.DATABASE.prepare(
     `UPDATE workspaces
         SET preservation_receipt_json = json_set(preservation_receipt_json,
-              '$.restoredAt', ?, '$.restoredWorkspaceId', ?)
+              '$.restoredAt', COALESCE(json_extract(preservation_receipt_json, '$.restoredAt'), ?),
+              '$.restoredWorkspaceId', ?)
       WHERE id IN (
           SELECT workspace_id FROM session_snapshots WHERE chat_session_id = ?
           UNION SELECT eviction_recovery_workspace_id FROM session_snapshots WHERE chat_session_id = ?)
         AND id != ?
         AND json_valid(preservation_receipt_json)
         AND json_extract(preservation_receipt_json, '$.chatSessionId') = ?
-        AND json_extract(preservation_receipt_json, '$.restoredAt') IS NULL
+        AND (json_extract(preservation_receipt_json, '$.restoredAt') IS NULL
+          OR json_extract(preservation_receipt_json, '$.restoredWorkspaceId') = ?)
         AND json_extract(preservation_receipt_json, '$.snapshotGeneration') = (
           SELECT snapshot_generation FROM session_snapshots
            WHERE chat_session_id = ? AND recovery_status = 'restored' AND recovery_workspace_id = ?)
@@ -234,10 +239,12 @@ export async function releaseRestoredSourceWorkspaces(
       input.chatSessionId,
       input.restoredWorkspaceId,
       input.chatSessionId,
+      input.restoredWorkspaceId,
       input.chatSessionId,
       input.restoredWorkspaceId
     )
     .all<{ id: string; nodeId: string | null; userId: string; status: string }>();
+  if (input.stampOnly) return stamped.results?.length ?? 0;
   let queued = 0;
   for (const source of stamped.results ?? []) {
     if (!source.nodeId) continue;

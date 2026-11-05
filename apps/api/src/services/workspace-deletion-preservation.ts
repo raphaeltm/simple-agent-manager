@@ -85,6 +85,8 @@ export async function automaticDeletionPreservationExpiresAt(
     return null;
   // The eviction callback also marks the snapshot sleeping, but an evicted source anchors
   // its wake until a replacement restores it (see `preservationReceiptExpiresAt`).
+  // `eviction_recovery_workspace_id` is written once at eviction and never cleared; workspace
+  // ids are never reused, so it names only the evicted source.
   const evictionSource = snapshot.evictionRecoveryWorkspaceId === expected.workspaceId;
   const completedSleep =
     !evictionSource &&

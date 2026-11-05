@@ -14,7 +14,10 @@ import {
   isSessionRecoveryAttemptCurrent,
   type SessionRecoveryAuthorityCheck,
 } from '../../services/session-recovery-authority';
-import { evictionRecoveryFenceMatches } from '../../services/session-recovery-eviction';
+import {
+  evictionRecoveryFenceMatches,
+  evictionRecoveryRestoredByRunner,
+} from '../../services/session-recovery-eviction';
 import { assertTaskRunnerStartGuard } from '../../services/task-runner-start-guard';
 import { revokeRecoveryAuthority } from './recovery-revocation';
 import { assertTaskExecutionAuthority } from './task-execution-authority';
@@ -123,7 +126,19 @@ export async function assertRecoveryAuthority(
   options: { requireStartGuardQueued?: boolean } = {}
 ): Promise<void> {
   const evictionFence = input.config.evictionFence ?? null;
-  if (evictionFence && !(await evictionRecoveryFenceMatches(env, evictionFence))) {
+  const restoredWorkspaceId = 'stepResults' in input ? input.stepResults.workspaceId : null;
+  if (
+    evictionFence &&
+    !(await evictionRecoveryFenceMatches(env, evictionFence)) &&
+    !(
+      restoredWorkspaceId &&
+      (await evictionRecoveryRestoredByRunner(env, {
+        taskId: input.taskId,
+        workspaceId: restoredWorkspaceId,
+        recoveryAttemptId: input.config.recoveryAttemptId ?? null,
+      }))
+    )
+  ) {
     throw Object.assign(new Error('Eviction generation changed before replacement allocation'), {
       permanent: true,
     });
