@@ -157,7 +157,9 @@ describe('steer lane through the delivery alarm', () => {
   function promptEpochState() {
     return db.prepare('SELECT * FROM session_state').all();
   }
-  function accepted(input: Parameters<DefaultVmPromptDeliveryAdapter['submit']>[0]): PromptDeliveryResult {
+  function accepted(
+    input: Parameters<DefaultVmPromptDeliveryAdapter['submit']>[0]
+  ): PromptDeliveryResult {
     expect(input.beforeSubmit?.(capabilities)).toBe(true);
     return {
       kind: 'accepted',
@@ -320,16 +322,18 @@ describe('steer lane through the delivery alarm', () => {
   });
 
   it('surfaces an unconfirmed steer and never replays it', async () => {
-    vi.spyOn(DefaultVmPromptDeliveryAdapter.prototype, 'steer').mockImplementation(async (input) => {
-      expect(input.beforeSubmit?.(capabilities)).toBe(true);
-      return {
-        kind: 'steer_pending',
-        reason: 'in_flight',
-        error: 'still deciding',
-        runtimeIdentity: 'runtime',
-        capabilities,
-      };
-    });
+    vi.spyOn(DefaultVmPromptDeliveryAdapter.prototype, 'steer').mockImplementation(
+      async (input) => {
+        expect(input.beforeSubmit?.(capabilities)).toBe(true);
+        return {
+          kind: 'steer_pending',
+          reason: 'in_flight',
+          error: 'still deciding',
+          runtimeIdentity: 'runtime',
+          capabilities,
+        };
+      }
+    );
     const reconcileSteer = vi
       .spyOn(DefaultVmPromptDeliveryAdapter.prototype, 'reconcileSteer')
       .mockResolvedValue({
