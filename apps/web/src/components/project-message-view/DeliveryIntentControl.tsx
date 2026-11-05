@@ -50,23 +50,31 @@ export function DeliveryIntentControl({
   const other: PromptDeliveryIntent = shown === 'steer' ? 'queue' : 'steer';
   const chip = CHIP[shown];
   const Icon = shown === 'steer' ? CornerDownRight : ListEnd;
+  const detail = hasAttachments ? 'Messages with files are sent when this turn ends.' : chip.detail;
   return (
-    <button
-      type="button"
-      disabled={hasAttachments}
-      onClick={() => onChange(other)}
-      aria-label={
-        hasAttachments
-          ? `${chip.name}: messages with files are sent when this turn ends`
-          : `${chip.name}. Switch to ${CHIP[other].name}`
-      }
-      title={hasAttachments ? 'Messages with files are sent when this turn ends.' : chip.detail}
-      data-testid="delivery-intent-chip"
-      data-intent={shown}
-      className={`pointer-events-auto flex h-[26px] shrink-0 cursor-pointer items-center gap-1 rounded-full border px-2.5 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-focus-ring disabled:cursor-default disabled:opacity-60 ${chip.tone}`}
-    >
-      <Icon size={13} aria-hidden="true" />
-      {chip.label}
-    </button>
+    <>
+      <button
+        type="button"
+        disabled={hasAttachments}
+        onClick={() => onChange(other)}
+        aria-label={
+          hasAttachments
+            ? `${chip.name}: messages with files are sent when this turn ends`
+            : `${chip.name}. Switch to ${CHIP[other].name}`
+        }
+        title={detail}
+        data-testid="delivery-intent-chip"
+        data-intent={shown}
+        className={`pointer-events-auto flex h-[26px] shrink-0 cursor-pointer items-center gap-1 rounded-full border px-2.5 text-xs font-medium transition-colors focus-visible:outline-2 focus-visible:outline-focus-ring disabled:cursor-default disabled:opacity-60 ${chip.tone}`}
+      >
+        <Icon size={13} aria-hidden="true" />
+        {chip.label}
+      </button>
+      {/* A focused button whose label changes is not reliably re-announced, so a switch is
+          spoken here; the live region stays mounted and only its text changes. */}
+      <span className="sr-only" aria-live="polite" data-testid="delivery-intent-announcement">
+        {`${chip.name}. ${detail}`}
+      </span>
+    </>
   );
 }

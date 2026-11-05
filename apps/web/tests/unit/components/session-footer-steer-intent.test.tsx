@@ -87,7 +87,10 @@ describe('steer or queue while the agent works', () => {
     expect(chip()).toHaveAttribute('data-intent', 'steer');
     expect(placeholder()).toBe('Steer the agent...');
     // The choice costs the composer no row: no hint line above or below the message box.
-    expect(screen.queryByText(/joins this turn/i)).toBeNull();
+    // (Only the screen-reader announcement carries that text.)
+    expect(
+      screen.queryAllByText(/joins this turn/i).filter((el) => !el.classList.contains('sr-only'))
+    ).toEqual([]);
     send();
     expect(lc.handleSendFollowUp).toHaveBeenCalledWith('steer');
   });
@@ -95,11 +98,16 @@ describe('steer or queue while the agent works', () => {
   it('queues once the chip is tapped, and steers again on a second tap', () => {
     const lc = lifecycle();
     renderFooter(lc);
+    const announcement = screen.getByTestId('delivery-intent-announcement');
+    expect(announcement).toHaveAttribute('aria-live', 'polite');
     fireEvent.click(chip()!);
     expect(chip()).toHaveAttribute('data-intent', 'queue');
     expect(screen.getByRole('button', { name: /^queue next\. switch to steer now$/i })).toBe(
       chip()
     );
+    // The switch is spoken through the same live region, which stays mounted.
+    expect(screen.getByTestId('delivery-intent-announcement')).toBe(announcement);
+    expect(announcement).toHaveTextContent('Queue next. Sent when this turn ends.');
     expect(placeholder()).toBe('Queue next...');
     send();
     expect(lc.handleSendFollowUp).toHaveBeenLastCalledWith('queue');
