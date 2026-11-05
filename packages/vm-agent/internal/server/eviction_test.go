@@ -157,11 +157,13 @@ func TestCaptureOOMEvictionSnapshotsExitedVictimThroughIsolatedHelper(t *testing
 	}
 
 	var captured *containerSnapshotTarget
-	s.sessionSnapshotRunner = func(_ context.Context, input *sessionSnapshotHandlerInput) (map[string]interface{}, error) {
+	s.sessionSnapshotRunner = func(ctx context.Context, input *sessionSnapshotHandlerInput) (map[string]interface{}, error) {
 		captured = input.containerTarget
-		return map[string]interface{}{"status": "available"}, nil
+		// hibernateSessionSnapshot evaluates the quiescence check just before completion.
+		quiesced := input.quiescence != nil && input.quiescence(ctx) == nil
+		return map[string]interface{}{"status": "available", "quiesced": quiesced}, nil
 	}
-	_, err = s.captureEvictionSessionSnapshot(context.Background(), resourcemon.EvictionTarget{
+	outcome, err := s.captureEvictionSessionSnapshot(context.Background(), resourcemon.EvictionTarget{
 		WorkspaceID:    "workspace-1",
 		ContainerID:    evictionTestContainerID,
 		RuntimeVersion: s.workspaces["workspace-1"].UpdatedAt.UTC().Format(time.RFC3339Nano),
@@ -169,6 +171,11 @@ func TestCaptureOOMEvictionSnapshotsExitedVictimThroughIsolatedHelper(t *testing
 	})
 	if err != nil {
 		t.Fatalf("captureEvictionSessionSnapshot: %v", err)
+	}
+	// The OOM victim had already exited, so this capture is final and no post-stop
+	// recapture is needed.
+	if !outcome.Quiesced {
+		t.Fatal("helper capture of an exited OOM victim was not reported quiesced")
 	}
 	if captured == nil || captured.containerID != helperID || captured.workDir != "/workspaces/repo" || captured.user != "node" {
 		t.Fatalf("snapshot helper target = %#v", captured)

@@ -137,6 +137,25 @@ func TestFinalEvictionSnapshotIsNotQuiescedWhenSourceRestartsMidCapture(t *testi
 	}
 }
 
+// A restart admitted between the stop and the final capture rotates the runtime; the final
+// capture must not certify (or even commit) anything for the superseded eviction.
+func TestFinalEvictionSnapshotAbortsWhenTheRuntimeWasReplaced(t *testing.T) {
+	s, logPath := newFinalSnapshotTestServer(t)
+	target := finalSnapshotTarget(s)
+	s.workspaces["workspace-1"].UpdatedAt = s.workspaces["workspace-1"].UpdatedAt.Add(time.Second)
+	s.sessionSnapshotRunner = func(context.Context, *sessionSnapshotHandlerInput) (map[string]interface{}, error) {
+		t.Fatal("captured a replaced runtime")
+		return nil, nil
+	}
+	if _, err := s.captureQuiescedEvictionSnapshot(context.Background(), target); err == nil ||
+		!strings.Contains(err.Error(), "no longer current") {
+		t.Fatalf("final capture of a replaced runtime: %v", err)
+	}
+	if calls := readCalls(t, logPath); strings.Contains(calls, "commit ") {
+		t.Fatalf("helper commit ran for a replaced runtime:\n%s", calls)
+	}
+}
+
 func TestFinalEvictionSnapshotRefusesRunningSourceAndShortDisk(t *testing.T) {
 	for name, setup := range map[string]func(t *testing.T){
 		"source still running": func(t *testing.T) {
