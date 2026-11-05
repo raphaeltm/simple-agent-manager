@@ -1,5 +1,7 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
+import { assertNoClippedOverflow, assertNoOverflow } from './audit-helpers';
+
 test.use({
   video: process.env.ZEN_RECORD_VIDEO ? { mode: 'on', size: { width: 1280, height: 800 } } : 'off',
 });
@@ -168,7 +170,7 @@ async function setupApiMocks(
 
     if (path === '/api/projects') {
       return options.projectError
-        ? respond(500, { error: 'Project list unavailable' })
+        ? respond(500, { error: 'INTERNAL_ERROR', message: 'Project list unavailable' })
         : respond(200, { projects: options.projects ?? [MOCK_PROJECT], nextCursor: null });
     }
     return respond(200, {});
@@ -181,13 +183,6 @@ async function screenshot(page: Page, name: string) {
     path: `../../.codex/tmp/playwright-screenshots/${name}.png`,
     fullPage: true,
   });
-}
-
-async function assertNoOverflow(page: Page) {
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth
-  );
-  expect(overflow).toBe(false);
 }
 
 async function assertChatPageRendered(page: Page) {
@@ -259,6 +254,7 @@ test.describe('Focus Mode sidebars — Desktop', () => {
   test('Zen peek keeps layout controls and stays open when switching navigation', async ({
     page,
   }) => {
+    test.setTimeout(60_000);
     await gotoProject(page);
     await page.getByRole('button', { name: 'Zen', exact: true }).click();
     const seam = page.getByRole('button', { name: /Navigation \(Zen mode\)/ });
@@ -266,18 +262,27 @@ test.describe('Focus Mode sidebars — Desktop', () => {
     await expect(
       page.getByRole('button', { name: 'Zen', exact: true, pressed: true })
     ).toBeVisible();
+    await assertNoClippedOverflow(page);
     await screenshot(page, 'zen-navigation-project-desktop');
     for (let i = 0; i < 3; i++) {
       await page.getByRole('button', { name: 'Show global navigation' }).click();
       await expect(
         page.getByRole('navigation', { name: 'Primary navigation', exact: true })
       ).toBeVisible();
+      await expect(page.getByRole('button', { name: /Back to .* navigation/ })).toBeInViewport();
+      expect(
+        await page
+          .locator('[data-intentional-clip]')
+          .first()
+          .evaluate((el) => el.scrollLeft)
+      ).toBe(0);
       await page.getByRole('button', { name: /Back to .* navigation/ }).click();
       await expect(
         page.getByRole('navigation', { name: 'Project navigation', exact: true })
       ).toBeVisible();
     }
     await page.getByRole('button', { name: 'Show global navigation' }).click();
+    await assertNoClippedOverflow(page);
     await screenshot(page, 'zen-navigation-global-desktop');
     await page.getByRole('button', { name: 'Default', exact: true }).click();
     await expect(seam).toHaveCount(0);
@@ -287,6 +292,23 @@ test.describe('Focus Mode sidebars — Desktop', () => {
     await assertNoOverflow(page);
     await screenshot(page, 'zen-navigation-exited-desktop');
   });
+
+  for (const mode of ['Default', 'Focus'] as const) {
+    test(`leaving Zen preserves keyboard focus on ${mode}`, async ({ page }) => {
+      await gotoProject(page);
+      await page.getByRole('button', { name: 'Zen', exact: true }).click();
+      await page.mouse.move(700, 400);
+      await page.getByRole('button', { name: /Navigation \(Zen mode\)/ }).focus();
+      await page.getByRole('button', { name: mode, exact: true }).focus();
+      await page.keyboard.press('Enter');
+      await expect(page.getByRole('button', { name: /Navigation \(Zen mode\)/ })).toHaveCount(0);
+      const replacement =
+        mode === 'Default'
+          ? page.getByRole('button', { name: 'Default', exact: true, pressed: true })
+          : page.getByRole('button', { name: /Focus Mode: Focus\. Activate to switch to Zen/ });
+      await expect(replacement).toBeFocused();
+    });
+  }
 
   test('keyboard switching retains focus and Escape dismisses the Zen peek', async ({ page }) => {
     await gotoProject(page);
@@ -338,7 +360,17 @@ test.describe('Focus Mode sidebars — Desktop', () => {
         page.getByRole('navigation', { name: 'Primary navigation', exact: true })
       ).toBeVisible();
       await expect(page.getByRole('group', { name: 'Focus Mode' })).toBeVisible();
+      if (scenario === 'empty') {
+        await expect(page.getByRole('status').filter({ hasText: 'No projects yet' })).toBeVisible();
+      } else if (scenario === 'error') {
+        await expect(
+          page.getByRole('status').filter({ hasText: 'Projects unavailable' })
+        ).toBeVisible();
+      } else {
+        await expect(page.getByText('Project 1', { exact: true })).toBeVisible();
+      }
       await assertNoOverflow(page);
+      await assertNoClippedOverflow(page);
       await screenshot(page, `zen-navigation-${scenario}-desktop`);
     });
   }

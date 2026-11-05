@@ -41,3 +41,7 @@ PR: https://github.com/raphaeltm/simple-agent-manager/pull/2532. Desktop/mobile 
 ## Release tracking
 
 Implementation is archived per /do Phase 4 after local validation and independent review. CI, best-effort CodeRabbit, merge and basic production smoke remain required workflow gates and are tracked in the live PR. This archive does not claim release is complete.
+
+## CodeRabbit follow-up
+
+Addressed review 5778212163: restore focus to the replacement Default/Focus control after leaving Zen; prevent browser scroll during carousel focus transfer; use shared overflow diagnostics plus blocking clipped-content assertions. Stress cases now assert actual project rows/empty/error text; error fixtures use the real API error shape. Both keyboard exit tests fail before the focus fix and pass after it. Updated desktop/mobile audit passed across the full run and corrected-error/repeated-interaction rerun; 54 affected unit tests, typecheck and changed-file lint pass. Independent follow-up review: PASS, no findings. Final CI and incremental review are tracked in the PR.

@@ -141,7 +141,7 @@ export function NavSidebar({
   useLayoutEffect(() => {
     if (!restoreToggleFocus.current) return;
     restoreToggleFocus.current = false;
-    (showGlobalNav ? globalToggleRef : projectToggleRef).current?.focus();
+    (showGlobalNav ? globalToggleRef : projectToggleRef).current?.focus({ preventScroll: true });
   }, [showGlobalNav]);
 
   const toggleNavigation = () => {

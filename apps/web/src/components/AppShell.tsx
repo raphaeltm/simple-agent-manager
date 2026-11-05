@@ -5,7 +5,9 @@ import {
   useCallback,
   useContext,
   useEffect,
+  useLayoutEffect,
   useMemo,
+  useRef,
   useState,
 } from 'react';
 import { Outlet, useLocation, useNavigate } from 'react-router';
@@ -78,6 +80,8 @@ export function AppShell({ children }: AppShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [projectName, setProjectNameState] = useState<string | undefined>(undefined);
   const [showGlobalNav, setShowGlobalNav] = useState(false);
+  const desktopSidebarRef = useRef<HTMLElement>(null);
+  const restorePeekFocus = useRef(false);
   const [focusModeState, setFocusModeState] = useState<FocusMode>('default');
   const [screenAction, setScreenAction] = useState<ShellScreenAction | null>(null);
   const [chatImmersiveOn, setChatImmersiveOn] = useState(false);
@@ -108,6 +112,14 @@ export function AppShell({ children }: AppShellProps) {
       // localStorage unavailable (private mode / quota) — in-memory state still works.
     }
   }, []);
+
+  const selectPeekFocusMode = useCallback(
+    (mode: FocusMode) => {
+      restorePeekFocus.current = mode !== 'zen';
+      setFocusMode(mode);
+    },
+    [setFocusMode]
+  );
 
   const cycleFocusMode = useCallback(() => {
     setFocusModeState((prev) => {
@@ -267,6 +279,18 @@ export function AppShell({ children }: AppShellProps) {
   // consumers never collapse on small viewports.
   const focusMode: FocusMode = isMobile ? 'default' : focusModeState;
 
+  // The peek unmounts on exit. Keep keyboard users at the replacement mode control.
+  useLayoutEffect(() => {
+    if (!restorePeekFocus.current || focusMode === 'zen') return;
+    restorePeekFocus.current = false;
+    if (isMobile) return;
+    desktopSidebarRef.current
+      ?.querySelector<HTMLButtonElement>(
+        '[aria-label="Focus Mode"] button[aria-pressed="true"], button[aria-label^="Focus Mode:"]'
+      )
+      ?.focus({ preventScroll: true });
+  }, [focusMode, isMobile]);
+
   // The immersive chat view is phone-only. `ImmersiveChatToggle` owns ending it when the screen
   // leaves the phone layout (it also unpins the chrome); this guard only keeps the frame and the
   // tool rail in their normal shape for the render in between.
@@ -390,12 +414,12 @@ export function AppShell({ children }: AppShellProps) {
               <ZenPeekRail
                 edge="nav"
                 label="Navigation"
-                onExpand={() => setFocusMode('default')}
+                onExpand={() => selectPeekFocusMode('default')}
                 gridRow="1"
               >
                 <DesktopSidebar
                   focusMode={focusMode}
-                  onSelectFocusMode={setFocusMode}
+                  onSelectFocusMode={selectPeekFocusMode}
                   onCycleFocusMode={cycleFocusMode}
                   onOpenCommandPalette={commandPalette.open}
                   user={user ?? null}
@@ -413,6 +437,7 @@ export function AppShell({ children }: AppShellProps) {
                where the header, search, layout control and footer no longer fit, so sign-out
                stays reachable. */
               <aside
+                ref={desktopSidebarRef}
                 aria-label="Sidebar"
                 className="sam-glass sam-glass-rim relative z-30 flex min-h-0 flex-col overflow-x-hidden overflow-y-auto rounded-[var(--sam-radius-pane)]"
                 style={{ gridRow: '1' }}
