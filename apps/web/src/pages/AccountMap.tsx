@@ -19,6 +19,7 @@ import { ConnectionsColumns } from '../components/account-map/ConnectionsColumns
 import { ConnectionsList } from '../components/account-map/ConnectionsList';
 import { ConnectionsPathBar } from '../components/account-map/ConnectionsPath';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 import { useQueryScope } from '../hooks/useQueryScope';
 import type { AccountMapResponse } from '../lib/api';
 import { accountMapQueryOptions } from '../lib/query-options';
@@ -49,6 +50,9 @@ function truncationNotice(data: AccountMapResponse): string {
   return parts.length > 0 ? `${parts.join(' ')} Open a project or idea for its full history.` : '';
 }
 
+/** Below this width the three columns and their lines do not fit, so work is listed by project. */
+const COLUMNS_QUERY = '(min-width: 1024px)';
+
 function filterCounts(model: ConnectionsModel) {
   let attention = 0;
   let live = 0;
@@ -61,6 +65,7 @@ function filterCounts(model: ConnectionsModel) {
 
 export function AccountMap() {
   const isMobile = useIsMobile();
+  const columns = useMediaQuery(COLUMNS_QUERY) && !isMobile;
   const queryScope = useQueryScope();
   const [showFinished, setShowFinished] = useState(false);
   const [filter, setFilter] = useState<MapFilter>('all');
@@ -183,7 +188,7 @@ export function AccountMap() {
         </button>
         {query.isFetching && <Spinner size="sm" />}
       </div>
-      {!isMobile && !empty && (
+      {columns && !empty && (
         <div className="flex min-h-[46px] items-center border-0 border-t border-solid border-[var(--sam-hairline)] pt-3">
           <ConnectionsPathBar model={model} selectedId={selectedId} />
         </div>
@@ -200,7 +205,7 @@ export function AccountMap() {
           : 'Nothing is running right now. Start a chat, or show finished work.'}
       </p>
     </div>
-  ) : isMobile ? (
+  ) : !columns ? (
     <ConnectionsList model={model} view={view} selectedId={selectedId} onSelect={select} />
   ) : (
     <ConnectionsColumns

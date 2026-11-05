@@ -21,6 +21,11 @@ vi.mock('../../../src/hooks/useIsMobile', () => ({
   useIsMobile: () => mocks.isMobile,
 }));
 
+// The only other media query on the page is the columns breakpoint: wide unless on a phone.
+vi.mock('../../../src/hooks/useMediaQuery', () => ({
+  useMediaQuery: () => !mocks.isMobile,
+}));
+
 vi.mock('../../../src/components/AuthProvider', () => ({
   useAuth: () => ({ user: { id: 'user_123', email: 'dev@example.com', name: 'Dev User' } }),
 }));
