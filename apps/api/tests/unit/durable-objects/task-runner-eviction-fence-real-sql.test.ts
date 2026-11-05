@@ -85,6 +85,14 @@ describe('eviction fence after this runner restored the snapshot', () => {
     );
   });
 
+  // The sweep can start deleting a restored source before this runner's retry re-checks the fence;
+  // deletion holds the source in `stopping` until the VM confirms. That release is not a Restart.
+  it('accepts a source still being deleted once this runner restored the snapshot', async () => {
+    restore('target');
+    sqlite.exec("UPDATE workspaces SET status = 'stopping' WHERE id = 'source'");
+    await expect(check()).resolves.toBeUndefined();
+  });
+
   // An explicit Restart moves the source to a new generation while the handoff is held. The
   // wake must lose to it even after its own restore, or the conversation runs twice.
   it('still refuses a restarted source after this runner restored the snapshot', async () => {

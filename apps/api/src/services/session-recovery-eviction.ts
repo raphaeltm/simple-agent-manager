@@ -34,9 +34,11 @@ export async function evictionRecoveryFenceMatches(
 /**
  * The fence guards replacement allocation. Once this exact wake restored the snapshot into
  * its own workspace (`completeSessionSnapshotRecovery`), the source of that exact generation
- * may already be deleted (its receipt is stamped at restore, `releaseRestoredSourceWorkspaces`),
- * and that release must not revoke the wake that replaced it. Only deletion is tolerated: an
- * explicit Restart moves the source to a new generation, and the wake must still lose to it.
+ * may already be in teardown (its receipt is stamped at restore, `releaseRestoredSourceWorkspaces`,
+ * and the stale-stopped sweep selects a restored source), and that release must not revoke the
+ * wake that replaced it. The generation is what discriminates: an explicit Restart always mints a
+ * new one (`routes/workspaces/lifecycle.ts`), and the wake must still lose to it. Deletion keeps
+ * the generation through `stopping` and `deleted`, so no status is required here.
  */
 export async function evictionRecoveryRestoredByRunner(
   env: Env,
@@ -47,7 +49,7 @@ export async function evictionRecoveryRestoredByRunner(
     `SELECT 1 AS restored
        FROM session_snapshots s
        JOIN workspaces source ON source.id = ? AND source.node_id = ?
-        AND source.eviction_generation IS ? AND source.status = 'deleted'
+        AND source.eviction_generation IS ?
       WHERE s.recovery_task_id = ? AND s.recovery_workspace_id = ? AND s.recovery_status = 'restored'
         AND s.recovery_attempt_id IS ?
       LIMIT 1`
