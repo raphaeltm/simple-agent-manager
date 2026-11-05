@@ -240,3 +240,34 @@ func TestSteerResponsesMatchSharedProtocolFixture(t *testing.T) {
 		Receipt: receipt(persistence.SteerReceiptAmbiguous, "runtime_changed_after_invocation_claim", &epoch, &ambiguousAt)},
 		fixture.AmbiguousSteer)
 }
+
+func TestPromptAndSteerBodiesAreBounded(t *testing.T) {
+	t.Setenv("PROMPT_REQUEST_MAX_BYTES", "256")
+	h := newSteerTestServer(t)
+	calls := fakeSteer(t, func(claim func(int64) error) acp.SteerResult {
+		_ = claim(1)
+		return acp.SteerResult{Outcome: acp.SteerInjected, PromptEpoch: 1}
+	})
+	if code, _ := h.steer(t, "delivery-big", strings.Repeat("x", 512)); code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized steer status = %d, want 413", code)
+	}
+	if *calls != 0 {
+		t.Fatalf("oversized steer reached the session host %d times", *calls)
+	}
+	// Liveness: a body under the limit is still steered.
+	if code, _ := h.steer(t, "delivery-small", "use tabs"); code != http.StatusOK || *calls != 1 {
+		t.Fatalf("small steer status = %d calls = %d", code, *calls)
+	}
+
+	body := `{"protocolVersion":1,"deliveryId":"prompt-big","prompt":"` + strings.Repeat("x", 512) + `"}`
+	req := httptest.NewRequest(http.MethodPost, "/workspaces/ws/agent-sessions/session/prompt", strings.NewReader(body))
+	req.SetPathValue("workspaceId", "ws")
+	req.SetPathValue("sessionId", "session")
+	req.Header.Set("Authorization", "Bearer "+h.token)
+	req.Header.Set("X-SAM-Workspace-Id", "ws")
+	rec := httptest.NewRecorder()
+	h.s.handleSendPrompt(rec, req)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("oversized prompt status = %d %s, want 413", rec.Code, rec.Body.String())
+	}
+}

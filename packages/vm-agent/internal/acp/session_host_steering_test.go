@@ -22,6 +22,9 @@ type steerFakeAgent struct {
 	writeMu sync.Mutex
 	prompts chan json.RawMessage
 	steers  chan steerRequestSeen
+	// closes signals session/close, which the fake never answers, so a
+	// checkpoint rollover stays inside its close grace until cancelled.
+	closes chan struct{}
 }
 
 type steerRequestSeen struct {
@@ -48,6 +51,8 @@ func (a *steerFakeAgent) serve() {
 			a.prompts <- append(json.RawMessage(nil), msg.ID...)
 		case steeringMethod:
 			a.steers <- steerRequestSeen{id: append(json.RawMessage(nil), msg.ID...), params: msg.Params}
+		case "session/close":
+			a.closes <- struct{}{}
 		}
 	}
 }
@@ -129,6 +134,7 @@ func newSteerHarness(t *testing.T, support steeringSupport) *steerHarness {
 		writer:  agentWriter,
 		prompts: make(chan json.RawMessage, 4),
 		steers:  make(chan steerRequestSeen, 4),
+		closes:  make(chan struct{}, 4),
 	}
 	go agent.serve()
 	t.Cleanup(func() {
@@ -358,6 +364,130 @@ func TestSteerRefusesCancellingTurn(t *testing.T) {
 	call := awaitSteer(t, h.steerAsync("x", "m", nil))
 	if call.result.Outcome != SteerPromptRequired || call.result.Reason != "turn_cancelling" || call.claimed {
 		t.Fatalf("result = %+v claimed=%v", call.result, call.claimed)
+	}
+	h.agent.assertNoSteer(t)
+}
+
+// stopGateProcess holds Stop until released, keeping a guarded cancel's
+// admission fence closed the way a slow process stop does in production.
+type stopGateProcess struct {
+	*fakeAgentProcess
+	stopping chan struct{}
+	release  chan struct{}
+}
+
+func (p *stopGateProcess) Stop() error {
+	p.stopping <- struct{}{}
+	<-p.release
+	return p.fakeAgentProcess.Stop()
+}
+
+func TestSteerRefusedWhileEvictionIsPending(t *testing.T) {
+	h := newSteerHarness(t, verifiedSteering)
+	_, _ = h.startTurn(t)
+	_, rollback := h.host.PrepareEviction()
+	call := awaitSteer(t, h.steerAsync("x", "m", nil))
+	if call.result.Outcome != SteerPromptRequired || call.result.Reason != "turn_stopping" || call.claimed {
+		t.Fatalf("result = %+v claimed=%v", call.result, call.claimed)
+	}
+	h.agent.assertNoSteer(t)
+
+	// Control: the same turn is steerable once the eviction is rolled back.
+	rollback()
+	done := h.steerAsync("x", "m", nil)
+	h.agent.result(h.agent.nextSteer(t).id, map[string]any{"outcome": "injected"})
+	if call := awaitSteer(t, done); call.result.Outcome != SteerInjected || !call.claimed {
+		t.Fatalf("after rollback result = %+v claimed=%v", call.result, call.claimed)
+	}
+}
+
+func TestSteerRefusedWhileGuardedCancelStopsTheProcess(t *testing.T) {
+	h := newSteerHarness(t, verifiedSteering)
+	gate := &stopGateProcess{stopping: make(chan struct{}, 1), release: make(chan struct{})}
+	h.host.mu.Lock()
+	gate.fakeAgentProcess = h.host.process.(*fakeAgentProcess)
+	h.host.process = gate
+	h.host.mu.Unlock()
+	_, attempt := h.startTurn(t)
+
+	cancelled := make(chan string, 1)
+	go func() { cancelled <- h.host.CancelPromptGuarded(attempt.startedAt.UnixMilli()) }()
+	select {
+	case <-gate.stopping:
+	case <-time.After(2 * time.Second):
+		t.Fatal("guarded cancel did not reach process stop")
+	}
+	// The fence, not the cancel request, refuses it: the reason says the turn is stopping.
+	call := awaitSteer(t, h.steerAsync("x", "m", nil))
+	if call.result.Outcome != SteerPromptRequired || call.result.Reason != "turn_stopping" || call.claimed {
+		t.Fatalf("result = %+v claimed=%v", call.result, call.claimed)
+	}
+	h.agent.assertNoSteer(t)
+	close(gate.release)
+	if got := <-cancelled; got != "cancelled" {
+		t.Fatalf("guarded cancel = %q", got)
+	}
+}
+
+func TestSteerRefusedDuringCheckpointRollover(t *testing.T) {
+	h := newSteerHarness(t, verifiedSteering)
+	h.host.mu.Lock()
+	h.host.agentSupportsLoadSession = true
+	h.host.mu.Unlock()
+	_, _ = h.startTurn(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	rolled := make(chan error, 1)
+	go func() {
+		_, err := h.host.CheckpointRollover(ctx, 5*time.Second)
+		rolled <- err
+	}()
+	select {
+	case <-h.agent.closes:
+	case <-time.After(2 * time.Second):
+		t.Fatal("checkpoint rollover did not reach session/close")
+	}
+	call := awaitSteer(t, h.steerAsync("x", "m", nil))
+	if call.result.Outcome != SteerPromptRequired || call.result.Reason != "checkpoint_in_progress" || call.claimed {
+		t.Fatalf("result = %+v claimed=%v", call.result, call.claimed)
+	}
+	h.agent.assertNoSteer(t)
+	cancel()
+	select {
+	case <-rolled:
+	case <-time.After(2 * time.Second):
+		t.Fatal("checkpoint rollover did not stop after cancel")
+	}
+}
+
+func TestStopIsNotHeldUpByAnOutstandingSteer(t *testing.T) {
+	h := newSteerHarness(t, verifiedSteering)
+	_, attempt := h.startTurn(t)
+	done := h.steerAsync("x", "m", nil)
+	steer := h.agent.nextSteer(t) // the adapter holds the steer response
+
+	cancelled := make(chan string, 1)
+	go func() { cancelled <- h.host.CancelPromptGuarded(attempt.startedAt.UnixMilli()) }()
+	select {
+	case got := <-cancelled:
+		if got != "cancelled" {
+			t.Fatalf("guarded cancel = %q", got)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("guarded cancel waited for the outstanding steer")
+	}
+	if c := h.nextCompletion(t); c.stopReason != "cancelled" {
+		t.Fatalf("turn completion = %+v, want cancelled", c)
+	}
+
+	// The late adapter answer still resolves the steer, and the next steer finds no turn.
+	h.agent.result(steer.id, map[string]any{"outcome": "injected"})
+	if call := awaitSteer(t, done); call.result.Outcome != SteerInjected || !call.claimed {
+		t.Fatalf("late steer result = %+v claimed=%v", call.result, call.claimed)
+	}
+	next := awaitSteer(t, h.steerAsync("y", "m2", nil))
+	if next.result.Outcome != SteerPromptRequired || next.result.Reason != "no_running_turn" {
+		t.Fatalf("steer after cancelled turn = %+v", next.result)
 	}
 	h.agent.assertNoSteer(t)
 }

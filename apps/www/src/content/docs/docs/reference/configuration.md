@@ -912,6 +912,8 @@ Task-managed ACP prompts use control-plane inactivity classification and the tas
 | `ACP_NOTIF_SERIALIZE_TIMEOUT`          | `5s`    | Notification serialization timeout                               |
 | `ACP_STEER_TIMEOUT`                    | `20s`   | Bound on one live-steering request to the agent adapter          |
 
+`PROMPT_REQUEST_MAX_BYTES` (default `4194304`) caps the body of a prompt or steer request from the control plane; the VM agent answers `413` above it.
+
 ## MCP (Agent Tools)
 
 | Variable                              | Default           | Description                                     |

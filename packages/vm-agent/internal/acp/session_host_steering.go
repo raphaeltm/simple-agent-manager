@@ -154,11 +154,16 @@ type steerTarget struct {
 
 // admitSteer binds a steer to the in-flight prompt attempt, or explains why
 // none is steerable. It holds no lock on return.
+//
+// h.mu is held (read) across the nested promptMu section, in the same order as
+// PrepareEviction, CheckpointRollover and beginGuardedCancel, so a checkpoint
+// rollover or guarded cancel cannot begin between reading the connection and
+// reading the prompt-admission flags. promptCancelMu is a leaf lock.
 func (h *SessionHost) admitSteer() (steerTarget, SteerResult, bool) {
 	h.mu.RLock()
+	defer h.mu.RUnlock()
 	conn, sessionID, status := h.acpConn, h.sessionID, h.status
 	support, rollover := h.steering, h.checkpointRollover
-	h.mu.RUnlock()
 	if !support.Advertised {
 		return steerTarget{}, SteerResult{Outcome: SteerUnsupported, Reason: "adapter_does_not_advertise_steering"}, false
 	}
@@ -257,6 +262,10 @@ func classifySteerResponse(raw json.RawMessage, err error) (SteerOutcome, string
 		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			return SteerUnknown, "steer_timeout"
+		}
+		// The host lifecycle ended (Stop) while the request was outstanding.
+		if errors.Is(err, context.Canceled) {
+			return SteerUnknown, "host_stopped"
 		}
 		return SteerUnknown, "transport_error"
 	}

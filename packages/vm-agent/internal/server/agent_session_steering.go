@@ -30,6 +30,27 @@ type steerPromptResponse struct {
 	Receipt   persistence.SteerDeliveryReceipt `json:"receipt"`
 }
 
+// DefaultPromptRequestMaxBytes bounds a prompt or steer request body from the
+// control plane (PROMPT_REQUEST_MAX_BYTES). Prompts are text; files travel as
+// separate uploads, so this is far above any real prompt.
+const DefaultPromptRequestMaxBytes = 4 << 20
+
+// decodePromptRequestBody decodes a bounded JSON prompt/steer body, answering
+// 413 when it is too large and 400 when it is malformed.
+func decodePromptRequestBody(w http.ResponseWriter, r *http.Request, v any) bool {
+	limit := int64(secretExecLimit("PROMPT_REQUEST_MAX_BYTES", DefaultPromptRequestMaxBytes))
+	if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, limit)).Decode(v); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			writeError(w, http.StatusRequestEntityTooLarge, "request body too large")
+			return false
+		}
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return false
+	}
+	return true
+}
+
 func steeringCapability() map[string]interface{} {
 	return map[string]interface{}{
 		"supported": true,
@@ -64,8 +85,7 @@ func (s *Server) handleSteerPrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body steerPromptRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if !decodePromptRequestBody(w, r, &body) {
 		return
 	}
 	body.Prompt = strings.TrimSpace(body.Prompt)
