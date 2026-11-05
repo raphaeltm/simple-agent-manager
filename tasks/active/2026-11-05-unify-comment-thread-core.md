@@ -114,6 +114,32 @@ Inventory via `GET /api/projects/:id/comments` as the primary smoke user (`.tmp/
 - The Send-to-agent directive moved to `services/message-comment-directive.ts` (message-comments.ts
   was already over 500 lines).
 
+## Staging evidence — window 1 (run 42003862079, 09:56–~10:08 UTC, then replaced by another branch)
+
+| Check | Result |
+| --- | --- |
+| Pre-existing data read back through new tables (4 projects, 63 threads: every per-session list, per-file list, inbox) | Byte-identical JSON to the pre-deploy dump |
+| Parity logs (`project_data.anchored_comments_migration.comments.migration_parity`, Workers Observability) | 15 project objects, all `ok: true`, 0 mismatched; e.g. `01KJNR9R3TEN3KX1ETE33852R8` threads 35/35, replies 10/10, status mutations 33/33; `01KTKXZ4ZZAT6MJFXRW1ZTQ7RB` 20+4 threads, 8+2 replies, 10 mutations |
+| Old message thread `2c4c6087…` via comment reader (desktop): reply, resolve, reopen | All persisted; resolvedBy/reopenedBy recorded; 0 console errors |
+| Old message thread `99e2048a…` via comment reader (mobile 375px): reply | Posted |
+| New thread with quote + @mention of dfv31 | 201, quote kept, mention notification delivered to dfv31 (type `mention`) |
+| File comments (file `01KWMJ2QMRVV57SRK6P9C0343M`): new thread with quote, reply, resolve, reopen; old thread `ce9ef7d0…` reopen, reply, resolve | All 200/201 |
+| Cross-file route (`/library/not-this-file/comments/ce9ef7d0…/resolve`) and cross-session route (old thread via another session) | 404 / 404 |
+| Comments page desktop + mobile, both projects | Counts 37 (35+2 new) and 25 (24+1 new); 0 console errors |
+| Send to agent on `521480b8…` (owner) | 202; transcript row carries `metadata.wake` (`comment_directive`, `trusted_project`, owner, `teammateInput:false`). Agent not reached: that chat's Instant container runtime was gone (`container_runtime_unavailable`), unrelated to this change |
+
+Other branches deployed over this build while it was being verified, so those builds (pre-072 code) read
+and write the legacy tables. Writes made under them are not in the anchored tables (the documented
+rollback behaviour, observed for real).
+
+## Migration numbering
+
+Branch `sam/build-draft-pr-implementing-pm2ayp` (task `01M6MHNBM96JSAMJ0GNTPM2AYP`) also adds a
+`072-…` DO migration (`072-prompt-delivery-intent`). `runMigrations` keys on the full name, so both
+apply. Whichever merges second renumbers to `073-…`. Renaming makes this migration run again on
+objects that already ran it, which is safe: tables are `CREATE … IF NOT EXISTS` and the copy is
+`INSERT … WHERE NOT EXISTS`. A re-run also copies legacy-only rows written by older builds in between.
+
 ## Migration cost (rule 81)
 
 Copy + parity run once per project object in its constructor. Measured on better-sqlite3 with
