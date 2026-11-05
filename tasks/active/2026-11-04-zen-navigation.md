@@ -28,10 +28,12 @@ Reuse DesktopSidebar (selected: consistent controls, minimal duplication); add o
 - Desktop/mobile focus audit: 12 pass in first run, one repeated-switch test timed out under cold concurrent checks; isolated pointer rerun passed (29.2s), final recording run passed (30s). Keyboard/Escape and stress scenarios passed.
 - Repeated-switch test has a 60s total bound for six animated switches plus screenshots; recording is opt-in through ZEN_RECORD_VIDEO.
 - Light fixture asserts actual sam-light DOM theme. Screenshots inspected in both themes and mobile; no clipping, overflow or readability issues.
-- Lint passes with three existing warnings; typecheck and Vite production build pass. Full web suite: 390 files / 4,883 tests passed (812.52s). Wrapper returned 143 after full passing summary; affected-component rerun and CI confirm clean exit.
+- Lint passes with three existing warnings; typecheck and Vite production build pass. Full web suite: 390 files / 4,883 tests passed (812.52s). Wrapper returned 143 after full passing summary; affected-component rerun: 54 tests passed with exit 0; CI checks the full suite.
 - Independent local zen_review: implementation/browser PASS, no actionable findings. UI rubric 4/4/4/4/5. Completion pending full unit suite and green open PR.
 - Library MP4: 01M6MG0KBWMC7VSHVRFFHKC62H; screenshot IDs recorded in PR evidence.
 
 ## Post-mortem
 
 The original Focus Mode implementation (f1fa86644, #1375) rendered NavSidebar alone in Zen, omitting layout controls. Its blur handler dismissed when the carousel made the outgoing focused panel inert. Existing audits tested mode cycling and seam expansion without using the revealed menu. The expanded audit now tests the actual hover, carousel, visible exit controls, keyboard focus, and dismissal. Existing scoped guidance already requires these interaction checks, so no duplicate standing rule is added.
+
+PR: https://github.com/raphaeltm/simple-agent-manager/pull/2532. Desktop/mobile evidence: PR comment #issuecomment-6645711930. Final MP4 library file: 01M6MG0KBWMC7VSHVRFFHKC62H. Staging waived; leave PR open after green CI.
