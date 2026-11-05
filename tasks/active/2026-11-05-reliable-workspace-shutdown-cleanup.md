@@ -106,18 +106,20 @@ production release (basic smoke only).
 - [x] Docs: architecture/lifecycle docs updated
 - [x] Tests (Go): controller ordering/failure; helper flow with fake docker (labels, limits, writer refusal, restart mid-capture, cleanup); deletion reaps leaked helper before volume rm; startup reaper; real-Docker round trip (stop → helper capture → restore: HOME, staged/unstaged/untracked)
 - [x] Tests (TS, real SQL / workers): quiesced eviction grants receipt; live eviction does not; successor capture before cleanup still preserved via restoredAt; chat detachment mid-deletion completes; X→Y chat still fenced; lost deletion response; non-target tenant untouched; warm handoff after artifact-only refusal; stopped-node deadline then applies
-- [ ] Staging: real VM eviction → final capture → restore elsewhere → source container+volume+root removed with proof → empty node released; neighbor untouched; cleanup
+- [x] Staging: real VM eviction → final capture → restore elsewhere → source container+volume+root removed with proof → empty node released; neighbor untouched; cleanup (run 5 on f3f92f54d; node retirement observed in run 2)
+- [x] API: eviction callback recovery survives the callback client's disconnect (`completeEvictionRecovery`, waitUntil) — found by staging run 4
+- [x] API: eviction fence tolerates only a deleted source of this runner's own restore; a Restart still revokes (CI workers test)
 - [ ] Production: basic smoke, read-only observation; report `01M6MK1T` quarantine (needs authorized remediation path)
 
 ## Acceptance Criteria
 
-- [ ] A memory-pressure or OOM eviction whose final capture is quiesced yields physical-deletion proof for the source after the wake is restored, without operator action.
-- [ ] A live-only (non-quiesced) eviction capture never grants preservation.
-- [ ] A successor capture before source deletion does not strand the source.
-- [ ] A wake that detaches the chat during deletion does not dead-letter it and never touches the successor; a different chat still fences.
-- [ ] An empty running node refused only for artifact proof reaches warm handoff in the same tick; residue is bounded by the existing deadline.
-- [ ] Helpers never outlive their capture across agent restarts and never block volume removal.
-- [ ] Verified end to end on staging with a real VM.
+- [x] A memory-pressure or OOM eviction whose final capture is quiesced yields physical-deletion proof for the source after the wake is restored, without operator action.
+- [x] A live-only (non-quiesced) eviction capture never grants preservation.
+- [x] A successor capture before source deletion does not strand the source.
+- [x] A wake that detaches the chat during deletion does not dead-letter it and never touches the successor; a different chat still fences.
+- [x] An empty running node refused only for artifact proof reaches warm handoff in the same tick; residue is bounded by the existing deadline.
+- [x] Helpers never outlive their capture across agent restarts and never block volume removal.
+- [x] Verified end to end on staging with a real VM.
 
 ## Implementation Notes
 
@@ -136,6 +138,16 @@ production release (basic smoke only).
 - Production: workspace 01M6MK1T is still `stopping` with a dead-lettered entry. After deploy, a
   dead-lettered entry is not re-attempted automatically; an explicit (owner) delete promotes it,
   or the node's retirement deadline proves it. Report; no unauthorized mutation.
+
+- Staging run 4 (d81128230): the eviction callback hit the agent's 10 s client timeout. The Worker
+  was cancelled after the wake claim and before the TaskRunner start, and the retry inside the
+  10-minute claim lease saw `waking` and stopped, stranding the conversation. This predates the
+  branch: recovery was synchronous on main. Fixed by registering the callback's recovery with
+  `waitUntil` while still awaiting it.
+- CI had failed since 2c692573d on `eviction-restored-session-prompt` (fence refuses an explicit
+  Restart). I missed it because I treated the workers shard as noise; read every failing shard.
+- A wake that never restores leaves its evicted source preserved; the escape is the stranded-node
+  deadline or a user action (documented in the PR).
 
 ## Notes
 
