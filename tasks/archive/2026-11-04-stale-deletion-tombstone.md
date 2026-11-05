@@ -22,7 +22,7 @@ The November 4 recap chat accepted a user reply but could not wake: workspace 01
 - [x] Document lifecycle behavior and incident lesson.
 - [x] Run Go focused/race/full tests, vet and build; relevant repository checks.
 - [x] Local Go/security/test/completion/doc/constitution reviews; resolve findings.
-- [ ] Staging fresh VM heartbeat/access plus sleep→delete→wake; cleanup resources.
+- [x] Staging fresh VM heartbeat/access plus sleep→delete→wake; cleanup resources.
 - [ ] PR and CI; CodeRabbit request and bounded wait; merge and verify production deploy.
 - [ ] Verify affected workspace deletion proof through safe recovery; do not wake recap or repost.
 
@@ -49,8 +49,14 @@ The November 4 recap chat accepted a user reply but could not wake: workspace 01
 
 ### Candidate refresh
 
-Merged released main SQLite update (#2510) into candidate before staging. The updated full Go suite passes; focused race/vet/build repeat pending. Repository build passes (9 tasks). The broad repository test attempt encountered infrastructure import timeouts under contention (all infra tests subsequently passed); five UI files failed in the parallel run and all 52 tests pass with one worker. The interrupted broad run did not produce a complete-suite summary; no TypeScript implementation changes are in this fix.
+Merged released main SQLite update (#2510) into candidate before staging. The updated full Go suite passes; focused race/vet/build repeat passed. Repository build passes (9 tasks). The broad repository test attempt encountered infrastructure import timeouts under contention (all infra tests subsequently passed); five UI files failed in the parallel run and all 52 tests pass with one worker. The interrupted broad run did not produce a complete-suite summary; no TypeScript implementation changes are in this fix.
 
 ### Release work remaining
 
 Implementation is complete; staging, PR/CI/CodeRabbit and production verification below remain release gates. Staging is reserved by the cold-chat task, which will explicitly release it. No fixture has been created.
+
+### Staging evidence
+
+Deploy41942967094 succeeded, including smoke. Cloudflare version568b6a7a-293b-44e0-ba45-1cffe530b1e6 serves candidatefbd2e261a at100%. Fresh cx23 VM heartbeat reported the same agent release. A smaller replacement reservation reused that VM after the initial oversized test hit measured-memory admission; follow-up Idea01M6MKX6RVAGHX1HDCQB24ZA7T records that separate issue.
+
+Test chat77f63ef8-ac49-4c00-94c7-1d2ad0a1845a replied READY, slept successfully, and its old workspace acquired durable deletion proof at2026-11-05T01:11:06.383Z. Snapshot degradation was none. A user prompt woke it into replacement workspace01M6MM86DPGJRBW5R93XJD83VC and it replied AWAKE-DELETION-CHECK. Playwright loaded the restored conversation; screenshot visually reviewed. Cleanup passed: Stop200, node DELETE200, D1 confirms own task cancelled and own node/workspace absent. Shared staging released01:18UTC; peer fixture untouched.
