@@ -8,7 +8,7 @@ import { type ReactNode, type RefObject, useEffect, useMemo, useState } from 're
 import { IMMERSIVE_CHROME } from '../shell/chat-immersive-transition';
 import { ArchivedForkComposer } from './ArchivedForkComposer';
 import { CompletionDock } from './CompletionDock';
-import { DeliveryIntentControl } from './DeliveryIntentControl';
+import { DeliveryIntentControl, deliveryIntentPlaceholder } from './DeliveryIntentControl';
 import { FollowUpInput, ReadOnlyFollowUp } from './FollowUpInput';
 import { accessClockTime, accessTimeLeft, useServerNow } from './session-access-time';
 import { currentPlanToPlanItem, ElapsedTime } from './session-view-utils';
@@ -167,6 +167,15 @@ export function SessionFooter({
             elapsed={
               lc.promptStartedAt ? <ElapsedTime startedAt={lc.promptStartedAt} /> : undefined
             }
+            deliveryControl={
+              agentWorking ? (
+                <DeliveryIntentControl
+                  value={deliveryIntent}
+                  onChange={setDeliveryIntent}
+                  hasAttachments={hasAttachments}
+                />
+              ) : undefined
+            }
           />
         )}
       {planItem && (
@@ -192,15 +201,6 @@ export function SessionFooter({
           onSend={() => {
             void lc.handleSendFollowUp(sendIntent);
           }}
-          deliveryControl={
-            agentWorking ? (
-              <DeliveryIntentControl
-                value={deliveryIntent}
-                onChange={setDeliveryIntent}
-                hasAttachments={hasAttachments}
-              />
-            ) : undefined
-          }
           // A teammate's files are their own uploads; the server copies them only into this
           // chat's workspace while their access lasts.
           onUploadFiles={(files) => {
@@ -217,8 +217,8 @@ export function SessionFooter({
             // invites the duplicate wake this feature exists to prevent.
             lc.isWaking
               ? 'Waking the agent — your message will be delivered...'
-              : lc.agentActivity === 'prompting' || lc.agentActivity === 'responding'
-                ? 'Agent is working...'
+              : agentWorking
+                ? deliveryIntentPlaceholder(deliveryIntent, hasAttachments)
                 : lc.sessionState === 'idle'
                   ? 'Send a message to resume the agent...'
                   : lc.sessionState === 'sleeping'

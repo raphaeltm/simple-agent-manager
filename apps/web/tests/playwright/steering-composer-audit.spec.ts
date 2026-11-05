@@ -10,8 +10,8 @@ import {
 } from './chat-audit-fixtures';
 
 // ---------------------------------------------------------------------------
-// Live steering in the REAL project chat: the Steer now / Queue next choice the
-// composer offers while the agent works, and the delivery chip under a message
+// Live steering in the REAL project chat: the Steer / Queue chip the lifecycle dock
+// offers while the agent works, and the delivery chip under a message
 // sent with Steer now, in every state the server can report. The working state
 // comes from the session detail's `state.activity === 'prompting'`, as in
 // production; chip states come from the transcript row metadata the server writes
@@ -143,12 +143,18 @@ const MESSAGES = ROWS.map((row, i) => ({
   sequence: i + 1,
 }));
 
-function chatState(working: boolean) {
+const PLAN = [
+  { content: 'Swap the buffered parse for a streaming reader', status: 'completed' },
+  { content: 'Update the callers', status: 'in_progress' },
+  { content: 'Add a regression test for the 10k-row file', status: 'pending' },
+];
+
+function chatState(working: boolean, withPlan = false) {
   return {
     activity: working ? 'prompting' : 'idle',
     activityAt: NOW,
     statusError: null,
-    currentPlan: null,
+    currentPlan: withPlan ? PLAN : null,
     planUpdatedAt: null,
     promptStartedAt: working ? NOW - 45000 : null,
     agentType: 'claude-code',
@@ -156,7 +162,7 @@ function chatState(working: boolean) {
   };
 }
 
-async function setupApiMocks(page: Page, opts: { working: boolean }) {
+async function setupApiMocks(page: Page, opts: { working: boolean; withPlan?: boolean }) {
   const prompts: Array<Record<string, unknown>> = [];
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
@@ -191,7 +197,7 @@ async function setupApiMocks(page: Page, opts: { working: boolean }) {
           session,
           messages: MESSAGES,
           hasMore: false,
-          state: chatState(opts.working),
+          state: chatState(opts.working, opts.withPlan),
         });
       }
       if (subPath.match(/\/sessions\/[^/]+\/messages/)) {
@@ -269,9 +275,9 @@ async function scrollUntilMounted(page: Page, text: string): Promise<void> {
   expect(found).toBe(true);
 }
 
-const deliveryGroup = (page: Page) =>
-  page.getByRole('group', { name: 'When to deliver your message' });
-const composer = (page: Page) => page.getByPlaceholder(/^(Agent is working|Send a message)\.\.\.$/);
+const chip = (page: Page) => page.getByTestId('delivery-intent-chip');
+const composer = (page: Page) =>
+  page.getByPlaceholder(/^(Steer the agent|Queue next|Send a message)\.\.\.$/);
 
 for (const theme of ['dark', 'light'] as const) {
   for (const viewport of ['mobile', 'desktop'] as const) {
@@ -305,25 +311,12 @@ for (const theme of ['dark', 'light'] as const) {
         await expect(page.getByText(/before you change the signature/).first()).toBeVisible();
         await assertNoOverflow(page);
         await screenshot(page, `steering-chips-middle-${theme}-${viewport}`);
-        // The first owner prompt is ordinary: no chip.
-        await expect(deliveryGroup(page)).toBeVisible();
-        // Steer now is the default while the agent works.
-        await expect(page.getByRole('button', { name: /steer now/i })).toHaveAttribute(
-          'aria-pressed',
-          'true'
-        );
-        // Neither label is cut off whichever is selected (the selected one is bolder, so it
-        // truncates first).
-        const truncatedLabels = () =>
-          deliveryGroup(page).evaluate((group) =>
-            [...group.querySelectorAll('button span.truncate')]
-              .filter((label) => label.scrollWidth > label.clientWidth)
-              .map((label) => label.textContent)
-          );
-        expect(await truncatedLabels()).toEqual([]);
-        await page.getByRole('button', { name: /queue next/i }).click();
-        await expect(page.getByText(/sent when this turn ends/i)).toBeVisible();
-        expect(await truncatedLabels()).toEqual([]);
+        // Steer is the default while the agent works, and the placeholder says so.
+        await expect(chip(page)).toHaveAttribute('data-intent', 'steer');
+        await expect(page.getByPlaceholder('Steer the agent...')).toBeVisible();
+        await chip(page).click();
+        await expect(chip(page)).toHaveAttribute('data-intent', 'queue');
+        await expect(page.getByPlaceholder('Queue next...')).toBeVisible();
         await screenshot(page, `steering-chips-queue-${theme}-${viewport}`);
         await assertNoOverflow(page);
       });
@@ -334,8 +327,8 @@ for (const theme of ['dark', 'light'] as const) {
         await seedTheme(page, theme);
         const api = await setupApiMocks(page, { working: true });
         await gotoChat(page);
-        // No click: Steer now is already selected.
-        await expect(page.getByText(/joins this turn if the agent can take it/i)).toBeVisible();
+        // No click: Steer is already selected.
+        await expect(chip(page)).toHaveAttribute('data-intent', 'steer');
         await composer(page).fill('Prefer a generator over a callback here.');
         if (viewport === 'mobile') {
           // The newest chip must not sit under the phone-only conversation toggle.
@@ -361,13 +354,46 @@ for (const theme of ['dark', 'light'] as const) {
         await assertNoOverflow(page);
       });
 
+      test('the chip shares the dock row with the plan pill without touching Interrupt', async ({
+        page,
+      }) => {
+        await seedTheme(page, theme);
+        await setupApiMocks(page, { working: true, withPlan: true });
+        await gotoChat(page);
+        const planBox = await page.getByRole('button', { name: 'View plan' }).boundingBox();
+        const chipBox = await chip(page).boundingBox();
+        const stopBox = await page.getByRole('button', { name: 'Interrupt agent' }).boundingBox();
+        const composerBox = await composer(page).boundingBox();
+        expect(planBox && chipBox && stopBox && composerBox).toBeTruthy();
+        // Plan pill, then the chip, on one row, ending left of the centre button.
+        expect(planBox!.x + planBox!.width).toBeLessThanOrEqual(chipBox!.x);
+        expect(chipBox!.x + chipBox!.width).toBeLessThanOrEqual(stopBox!.x);
+        expect(
+          Math.abs(planBox!.y + planBox!.height / 2 - (chipBox!.y + chipBox!.height / 2))
+        ).toBeLessThan(2);
+        // The row sits above the message box: the choice takes no row of its own.
+        expect(chipBox!.y + chipBox!.height).toBeLessThanOrEqual(composerBox!.y);
+        // Both placeholders fit the empty message box on one line (a wrapped one is clipped).
+        for (const intent of ['steer', 'queue'] as const) {
+          if (intent === 'queue') await chip(page).click();
+          await expect(chip(page)).toHaveAttribute('data-intent', intent);
+          const box = await composer(page).evaluate((el) => ({
+            content: el.scrollHeight,
+            visible: el.clientHeight,
+          }));
+          expect(box.content).toBeLessThanOrEqual(box.visible + 1);
+        }
+        await screenshot(page, `steering-chip-with-plan-${theme}-${viewport}`);
+        await assertNoOverflow(page);
+      });
+
       test('no steer choice while the agent is idle', async ({ page }) => {
         await seedTheme(page, theme);
         const api = await setupApiMocks(page, { working: false });
         await gotoChat(page);
         // Liveness: the composer is there, the choice is not.
         await expect(composer(page)).toBeVisible();
-        await expect(deliveryGroup(page)).toHaveCount(0);
+        await expect(chip(page)).toHaveCount(0);
         await composer(page).fill('Next, wire the new reader into the CLI.');
         await page.getByRole('button', { name: /^send/i }).click();
         await expect.poll(() => api.prompts.length).toBe(1);

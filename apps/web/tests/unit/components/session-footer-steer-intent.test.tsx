@@ -1,6 +1,7 @@
 /**
- * Steer now / Queue next in the chat composer. Rendered through the real SessionFooter and
- * the real composer, so the choice must reach the lifecycle's send exactly as a click does.
+ * The Steer / Queue chip in the lifecycle dock's row. Rendered through the real SessionFooter,
+ * the real dock and the real composer, so the choice must reach the lifecycle's send exactly
+ * as a tap does.
  */
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
@@ -72,29 +73,40 @@ function renderFooter(lc: UseSessionLifecycleResult) {
   );
 }
 
-const choice = () => screen.queryByRole('group', { name: 'When to deliver your message' });
+const chip = () => screen.queryByTestId('delivery-intent-chip');
+const placeholder = () => screen.getByRole('combobox').getAttribute('placeholder');
 const send = () => fireEvent.click(screen.getByRole('button', { name: /^send/i }));
 
 describe('steer or queue while the agent works', () => {
-  it('starts on Steer now and steers', () => {
+  it('starts on Steer and steers', () => {
     const lc = lifecycle();
     renderFooter(lc);
-    expect(screen.getByRole('button', { name: /steer now/i })).toHaveAttribute(
-      'aria-pressed',
-      'true'
+    expect(screen.getByRole('button', { name: /^steer now\. switch to queue next$/i })).toBe(
+      chip()
     );
-    expect(screen.getByText(/joins this turn if the agent can take it/i)).toBeVisible();
+    expect(chip()).toHaveAttribute('data-intent', 'steer');
+    expect(placeholder()).toBe('Steer the agent...');
+    // The choice costs the composer no row: no hint line above or below the message box.
+    expect(screen.queryByText(/joins this turn/i)).toBeNull();
     send();
     expect(lc.handleSendFollowUp).toHaveBeenCalledWith('steer');
   });
 
-  it('queues once Queue next is chosen', () => {
+  it('queues once the chip is tapped, and steers again on a second tap', () => {
     const lc = lifecycle();
     renderFooter(lc);
-    fireEvent.click(screen.getByRole('button', { name: /queue next/i }));
-    expect(screen.getByText(/sent when this turn ends/i)).toBeVisible();
+    fireEvent.click(chip()!);
+    expect(chip()).toHaveAttribute('data-intent', 'queue');
+    expect(screen.getByRole('button', { name: /^queue next\. switch to steer now$/i })).toBe(
+      chip()
+    );
+    expect(placeholder()).toBe('Queue next...');
     send();
-    expect(lc.handleSendFollowUp).toHaveBeenCalledWith('queue');
+    expect(lc.handleSendFollowUp).toHaveBeenLastCalledWith('queue');
+    fireEvent.click(chip()!);
+    expect(chip()).toHaveAttribute('data-intent', 'steer');
+    send();
+    expect(lc.handleSendFollowUp).toHaveBeenLastCalledWith('steer');
   });
 
   it('queues a message with files, and says so, because a steer carries text only', () => {
@@ -103,22 +115,11 @@ describe('steer or queue while the agent works', () => {
         { file: new File(['x'], 'trace.log'), status: 'complete', progress: 100 },
       ] as unknown as UseSessionLifecycleResult['attachments'],
     });
-    const { rerender } = renderFooter(lifecycle());
-    fireEvent.click(screen.getByRole('button', { name: /steer now/i }));
-    const viewer = resolveSessionViewerCapabilities(lc.session, 'owner-1');
-    rerender(
-      <SessionFooter
-        projectId="project-1"
-        lc={lc}
-        viewer={viewer}
-        viewerId="owner-1"
-        selectedTextComposer={null}
-        agentProfiles={[]}
-        slashCommands={[]}
-      />
-    );
-    expect(choice()).toBeNull();
-    expect(screen.getByText(/messages with files are sent when this turn ends/i)).toBeVisible();
+    renderFooter(lc);
+    expect(chip()).toHaveAttribute('data-intent', 'queue');
+    expect(chip()).toBeDisabled();
+    expect(chip()).toHaveAccessibleName(/messages with files are sent when this turn ends/i);
+    expect(placeholder()).toBe('Queue next...');
     send();
     expect(lc.handleSendFollowUp).toHaveBeenCalledWith('queue');
   });
@@ -128,17 +129,18 @@ describe('steer or queue while the agent works', () => {
     ['waking', lifecycle({ isWaking: true })],
   ])('offers no steer while the agent is %s', (_name, lc) => {
     renderFooter(lc);
-    expect(choice()).toBeNull();
+    expect(chip()).toBeNull();
     // Liveness: the composer itself rendered.
     expect(screen.getByRole('button', { name: /^send/i })).toBeVisible();
     send();
     expect(lc.handleSendFollowUp).toHaveBeenCalledWith('queue');
   });
 
-  it('returns to Steer now when the turn ends', () => {
+  it('returns to Steer when the turn ends', () => {
     const working = lifecycle();
     const { rerender } = renderFooter(working);
-    fireEvent.click(screen.getByRole('button', { name: /queue next/i }));
+    fireEvent.click(chip()!);
+    expect(chip()).toHaveAttribute('data-intent', 'queue');
     const viewer = resolveSessionViewerCapabilities(chatSession, 'owner-1');
     const props = {
       projectId: 'project-1',
@@ -156,10 +158,7 @@ describe('steer or queue while the agent works', () => {
     );
     const next = lifecycle();
     rerender(<SessionFooter {...props} lc={next} />);
-    expect(screen.getByRole('button', { name: /steer now/i })).toHaveAttribute(
-      'aria-pressed',
-      'true'
-    );
+    expect(chip()).toHaveAttribute('data-intent', 'steer');
     send();
     expect(next.handleSendFollowUp).toHaveBeenCalledWith('steer');
   });

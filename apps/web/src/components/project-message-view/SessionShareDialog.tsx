@@ -188,11 +188,7 @@ export function SessionShareDialog({
       data-sam-modal-root=""
       className="fixed inset-0 z-dialog-backdrop flex items-end justify-center sm:items-center sm:p-4"
     >
-      <div
-        className="fixed inset-0 sam-scrim"
-        onClick={onClose}
-        aria-hidden="true"
-      />
+      <div className="fixed inset-0 sam-scrim" onClick={onClose} aria-hidden="true" />
       <div
         ref={panelRef}
         role="dialog"
