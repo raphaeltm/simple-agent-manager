@@ -3,13 +3,17 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
+	"math"
+	"math/bits"
 	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/workspace/vm-agent/internal/bootstrap"
 	"github.com/workspace/vm-agent/internal/container"
@@ -152,7 +156,11 @@ func (s *Server) requireSnapshotHelperDiskHeadroom(ctx context.Context, sourceID
 	if err := syscall.Statfs(filepath.Clean(strings.TrimSpace(root)), &stat); err != nil {
 		return fmt.Errorf("measure docker root free space: %w", err)
 	}
-	free := int64(stat.Bavail) * int64(stat.Bsize) //nolint:gosec // block counts fit in int64 on supported hosts
+	hi, lo := bits.Mul64(stat.Bavail, uint64(stat.Bsize)) //nolint:gosec // Bsize is a positive block size
+	free := int64(math.MaxInt64)
+	if hi == 0 && lo <= math.MaxInt64 {
+		free = int64(lo)
+	}
 	headroom := s.config.SnapshotHelper.WithDefaults().MinFreeBytes
 	// Compared without adding, so a huge layer size cannot overflow into a pass.
 	if layerBytes > free || free-layerBytes < headroom {
@@ -215,7 +223,8 @@ func (s *Server) requireNoForeignWorkspaceWriters(ctx context.Context, workspace
 	if len(running) == 0 {
 		return nil
 	}
-	args := append([]string{"inspect", "--format", "{{.Id}}{{range .Mounts}}|{{.Type}}:{{.Name}}:{{.Source}}{{end}}"}, running...)
+	// One line per container: "<id> <mounts JSON>". JSON keeps any byte a path may hold.
+	args := append([]string{"inspect", "--format", "{{.Id}} {{json .Mounts}}"}, running...)
 	out, err := s.runEvictionDockerCommand(ctx, args...)
 	if err != nil {
 		return fmt.Errorf("inspect running container mounts: %w", err)
@@ -223,18 +232,22 @@ func (s *Server) requireNoForeignWorkspaceWriters(ctx context.Context, workspace
 	volume := bootstrap.VolumeNameForWorkspace(workspaceID)
 	root := filepath.Clean(hostRoot)
 	for _, line := range strings.Split(out, "\n") {
-		fields := strings.Split(strings.TrimSpace(line), "|")
-		if len(fields) == 0 || fields[0] == "" || dockerContainerIdentityMatches(fields[0], helperID) {
+		id, mountsJSON, ok := strings.Cut(strings.TrimSpace(line), " ")
+		if !ok || id == "" || dockerContainerIdentityMatches(id, helperID) {
 			continue
 		}
-		for _, mount := range fields[1:] {
-			parts := strings.SplitN(mount, ":", 3)
-			if len(parts) != 3 {
-				continue
-			}
-			source := filepath.Clean(parts[2])
-			if parts[1] == volume || (hostRoot != "" && (source == root || strings.HasPrefix(source, root+string(filepath.Separator)))) {
-				return fmt.Errorf("running container %s mounts workspace storage", shortContainerID(fields[0]))
+		var mounts []struct {
+			Name   string `json:"Name"`
+			Source string `json:"Source"`
+		}
+		if err := json.Unmarshal([]byte(mountsJSON), &mounts); err != nil {
+			// Unknown mounts cannot be proven harmless: refuse certification.
+			return fmt.Errorf("parse mounts of running container %s: %w", shortContainerID(id), err)
+		}
+		for _, mount := range mounts {
+			source := filepath.Clean(mount.Source)
+			if mount.Name == volume || (hostRoot != "" && (source == root || strings.HasPrefix(source, root+string(filepath.Separator)))) {
+				return fmt.Errorf("running container %s mounts workspace storage", shortContainerID(id))
 			}
 		}
 	}
@@ -262,4 +275,49 @@ func (s *Server) runEvictionDockerCommand(ctx context.Context, args ...string) (
 		return "", fmt.Errorf("docker %s failed: %s", args[0], message)
 	}
 	return strings.TrimSpace(stdout.String()), nil
+}
+
+// dockerCreatedAtLayout is the format of `{{.CreatedAt}}` in `docker ps` / `docker image ls`.
+const dockerCreatedAtLayout = "2006-01-02 15:04:05 -0700 MST"
+
+// snapshotHelperMaxAge is longer than any capture can hold a helper: the pre-stop OOM
+// capture is bounded by EvictionSnapshotTimeout and the final capture by its own timeout.
+func (s *Server) snapshotHelperMaxAge() time.Duration {
+	return 2 * (s.config.EvictionSnapshotTimeout + s.config.SnapshotHelper.WithDefaults().FinalSnapshotTimeout)
+}
+
+// reapStaleSnapshotHelpers removes helpers older than any capture can run, so a helper
+// whose cleanup failed while the agent kept running does not keep a full copy of a
+// workspace's writable layer on the node until the next restart or that workspace's
+// deletion. Younger helpers may belong to a capture in flight and are left alone.
+func (s *Server) reapStaleSnapshotHelpers(ctx context.Context, now time.Time) error {
+	maxAge := s.snapshotHelperMaxAge()
+	filter := "label=" + snapshotHelperWorkspaceLabel
+	for _, kind := range []struct {
+		list   []string
+		remove []string
+	}{
+		{list: []string{"ps", "-a", "--no-trunc", "--filter", filter, "--format", "{{.ID}}\t{{.CreatedAt}}"}, remove: []string{"rm", "--force", "--volumes"}},
+		{list: []string{"image", "ls", "--no-trunc", "--filter", filter, "--format", "{{.ID}}\t{{.CreatedAt}}"}, remove: []string{"image", "rm", "--force"}},
+	} {
+		out, err := s.runEvictionDockerCommand(ctx, kind.list...)
+		if err != nil {
+			return fmt.Errorf("list snapshot helpers: %w", err)
+		}
+		for _, line := range strings.Split(out, "\n") {
+			id, created, ok := strings.Cut(strings.TrimSpace(line), "\t")
+			if !ok {
+				continue
+			}
+			createdAt, err := time.Parse(dockerCreatedAtLayout, strings.TrimSpace(created))
+			if err != nil || now.Sub(createdAt) < maxAge {
+				continue // Unknown age is treated as possibly in flight.
+			}
+			if _, err := s.runEvictionDockerCommand(ctx, append(kind.remove, id)...); err != nil {
+				return fmt.Errorf("remove stale snapshot helper: %w", err)
+			}
+			slog.Info("Reaped stale snapshot helper", "id", id, "createdAt", createdAt)
+		}
+	}
+	return nil
 }

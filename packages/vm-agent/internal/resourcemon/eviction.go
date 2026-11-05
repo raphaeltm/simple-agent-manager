@@ -415,23 +415,18 @@ func (c *EvictionController) performEviction(ctx context.Context, target Evictio
 		return false // Leave the workspace eligible for a later pressure retry.
 	}
 	result.ContainerStopped = true
-	c.captureFinalSnapshot(ctx, &result)
-
-	result.CompletedAt = c.now()
-	if !c.cfg.MarkWorkspaceEvicted(result) {
-		return false // A concurrent lifecycle change superseded this eviction.
+	if c.needsFinalSnapshot(ctx, result) {
+		// The container is stopped and its memory released. The final capture can take
+		// minutes for a large writable layer, so it must not hold the single pressure
+		// loop: another workspace may need evicting meanwhile. Close waits for it.
+		c.wg.Add(1)
+		go func() {
+			defer c.wg.Done()
+			c.finishEviction(ctx, result)
+		}()
+		return true
 	}
-	if err := c.cfg.NotifyEviction(ctx, result); err != nil {
-		result.NotifyError = err
-		c.logger.Warn("resourcemon: eviction callback failed",
-			"workspaceId", target.WorkspaceID,
-			"containerId", target.ContainerID,
-			"containerName", target.ContainerName,
-			"reason", target.Reason,
-			"error", err,
-		)
-	}
-	return true
+	return c.finishEviction(ctx, result)
 }
 
 func (c *EvictionController) now() time.Time {

@@ -139,14 +139,15 @@ func (c SnapshotHelperConfig) WithDefaults() SnapshotHelperConfig {
 	return c
 }
 
-// validate rejects explicitly invalid operator values; unset values use WithDefaults.
+// validate rejects explicitly invalid operator values. Zero means "not supplied" for every
+// field and resolves through WithDefaults.
 func (c SnapshotHelperConfig) validate() []error {
 	var errs []error
 	if c.FinalSnapshotTimeout < 0 {
-		errs = append(errs, fmt.Errorf("%s must be > 0, got %s", EnvEvictionFinalSnapshotTimeoutSeconds, c.FinalSnapshotTimeout))
+		errs = append(errs, fmt.Errorf("%s must be >= 0 (0 uses the default), got %s", EnvEvictionFinalSnapshotTimeoutSeconds, c.FinalSnapshotTimeout))
 	}
 	if c.PidsLimit < 0 {
-		errs = append(errs, fmt.Errorf("%s must be > 0, got %d", EnvSnapshotHelperPidsLimit, c.PidsLimit))
+		errs = append(errs, fmt.Errorf("%s must be >= 0 (0 uses the default), got %d", EnvSnapshotHelperPidsLimit, c.PidsLimit))
 	}
 	if c.MinFreeBytes < 0 {
 		errs = append(errs, fmt.Errorf("%s must be >= 0, got %d", EnvSnapshotHelperMinFreeBytes, c.MinFreeBytes))

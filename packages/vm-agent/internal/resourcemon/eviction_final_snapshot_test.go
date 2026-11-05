@@ -126,3 +126,60 @@ func TestFinalSnapshotRequiresTimeout(t *testing.T) {
 		t.Fatal("FinalSnapshot without a timeout validated")
 	}
 }
+
+// A slow final capture must not hold the single pressure loop: a second workspace that
+// needs evicting meanwhile is handled before the first one's final capture finishes.
+func TestSlowFinalSnapshotDoesNotBlockTheNextEviction(t *testing.T) {
+	source := newFakePressureSource()
+	release := make(chan struct{})
+	var mu sync.Mutex
+	var snapshots, notified []string
+	controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
+		cfg.SnapshotWorkspace = func(_ context.Context, target EvictionTarget) (EvictionSnapshotOutcome, error) {
+			mu.Lock()
+			snapshots = append(snapshots, target.WorkspaceID)
+			mu.Unlock()
+			return EvictionSnapshotOutcome{}, nil
+		}
+		cfg.FinalSnapshotTimeout = time.Minute
+		cfg.FinalSnapshot = func(ctx context.Context, target EvictionTarget) (EvictionSnapshotOutcome, error) {
+			if target.WorkspaceID == "workspace-1" {
+				select {
+				case <-release:
+				case <-ctx.Done():
+					return EvictionSnapshotOutcome{}, ctx.Err()
+				}
+			}
+			return EvictionSnapshotOutcome{Quiesced: true}, nil
+		}
+		cfg.NotifyEviction = func(_ context.Context, result EvictionResult) error {
+			mu.Lock()
+			notified = append(notified, result.Target.WorkspaceID)
+			mu.Unlock()
+			return nil
+		}
+	})
+	if err := controller.Start(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	defer controller.Close()
+
+	source.events <- oomPressureEvent("workspace-1", "container-1")
+	source.events <- oomPressureEvent("workspace-2", "container-2")
+	waitForEvictionTest(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(notified) == 1 && notified[0] == "workspace-2"
+	}, "second eviction waited for the first one's final capture")
+	mu.Lock()
+	if !reflect.DeepEqual(snapshots, []string{"workspace-1", "workspace-2"}) {
+		t.Fatalf("snapshots = %v", snapshots)
+	}
+	mu.Unlock()
+	close(release)
+	waitForEvictionTest(t, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return len(notified) == 2
+	}, "first eviction never finished after its final capture")
+}

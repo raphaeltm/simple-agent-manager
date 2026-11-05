@@ -36,6 +36,10 @@ func (s *Server) captureQuiescedEvictionSnapshot(ctx context.Context, target res
 		return resourcemon.EvictionSnapshotOutcome{}, err
 	}
 	defer lifecycleLock.Unlock()
+	// Same guard as every other capture path: a durable deletion intent owns the workspace.
+	if err := s.requireNoWorkspaceDeletion(target.WorkspaceID); err != nil {
+		return resourcemon.EvictionSnapshotOutcome{}, err
+	}
 	if !s.evictionTargetIsCurrent(ctx, target) {
 		return resourcemon.EvictionSnapshotOutcome{}, fmt.Errorf("eviction target is no longer current")
 	}

@@ -429,6 +429,7 @@ case "$1" in
     case " $* " in
       *" --all "*) printf '%s\n' "$SAM_EVICTION_TEST_CURRENT_ID" ;;
       *" -aq "*) [ -n "$SAM_EVICTION_TEST_LEAKED" ] && printf '%s\n' "$SAM_EVICTION_TEST_LEAKED" ;;
+      *" -a "*) [ -n "$SAM_EVICTION_TEST_STALE" ] && printf '%b\n' "$SAM_EVICTION_TEST_STALE" ;;
       *" -q "*) [ -n "$SAM_EVICTION_TEST_RUNNING" ] && printf '%s\n' "$SAM_EVICTION_TEST_RUNNING" ;;
     esac
     exit 0 ;;
@@ -441,7 +442,11 @@ case "$1" in
   info) printf '%s\n' "${SAM_EVICTION_TEST_DOCKER_ROOT:-/}" ;;
   commit|start|rm) exit 0 ;;
   create) printf '%s\n' "$SAM_EVICTION_TEST_HELPER_ID" ;;
-  image) exit 0 ;;
+  image)
+    case "$2 $*" in
+      ls*--format*) [ -n "$SAM_EVICTION_TEST_STALE_IMAGES" ] && printf '%b\n' "$SAM_EVICTION_TEST_STALE_IMAGES" ;;
+    esac
+    exit 0 ;;
   *) exit 1 ;;
 esac
 `

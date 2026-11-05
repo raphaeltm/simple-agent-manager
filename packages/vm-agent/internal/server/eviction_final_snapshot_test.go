@@ -93,8 +93,9 @@ func TestFinalEvictionSnapshotCapturesStoppedSourceThroughHelper(t *testing.T) {
 func TestFinalEvictionSnapshotIsNotQuiescedWhenAnotherContainerMountsWorkspaceStorage(t *testing.T) {
 	const sidecar = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
 	for name, mounts := range map[string]string{
-		"workspace volume": sidecar + "|volume:sam-ws-workspace-1:/var/lib/docker/volumes/sam-ws-workspace-1/_data",
-		"host root":        sidecar + "|bind::/workspace/repo/.cache",
+		"workspace volume": sidecar + ` [{"Type":"volume","Name":"sam-ws-workspace-1","Source":"/var/lib/docker/volumes/sam-ws-workspace-1/_data"}]`,
+		"host root":        sidecar + ` [{"Type":"bind","Name":"","Source":"/workspace/repo/.cache"}]`,
+		"unparseable":      sidecar + ` not-json`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			s, _ := newFinalSnapshotTestServer(t)
@@ -114,7 +115,7 @@ func TestFinalEvictionSnapshotIsNotQuiescedWhenAnotherContainerMountsWorkspaceSt
 	// Control: an unrelated tenant's running container never blocks certification.
 	s, _ := newFinalSnapshotTestServer(t)
 	t.Setenv("SAM_EVICTION_TEST_RUNNING", sidecar)
-	t.Setenv("SAM_EVICTION_TEST_MOUNTS", sidecar+"|volume:sam-ws-other-workspace:/var/lib/docker/volumes/sam-ws-other-workspace/_data")
+	t.Setenv("SAM_EVICTION_TEST_MOUNTS", sidecar+` [{"Type":"volume","Name":"sam-ws-other-workspace","Source":"/var/lib/docker/volumes/sam-ws-other-workspace/_data"},{"Type":"bind","Name":"","Source":"/workspace/repo-other|odd:path"}]`)
 	s.sessionSnapshotRunner = runnerEvaluatingQuiescence(nil)
 	outcome, err := s.captureQuiescedEvictionSnapshot(context.Background(), finalSnapshotTarget(s))
 	if err != nil || !outcome.Quiesced {
@@ -232,6 +233,30 @@ func TestStartupReapRemovesEveryLeakedHelperIncludingLegacyOnes(t *testing.T) {
 	} {
 		if !strings.Contains(calls, want) {
 			t.Fatalf("missing %q in Docker calls:\n%s", want, calls)
+		}
+	}
+}
+
+func TestStaleHelperReaperRemovesOnlyHelpersOlderThanAnyCapture(t *testing.T) {
+	s := newEvictionTestServer()
+	logPath := setupExitedEvictionDocker(t, evictionTestContainerID, strings.Repeat("b", 64))
+	now := time.Date(2026, 11, 5, 12, 0, 0, 0, time.UTC)
+	stale := now.Add(-3 * time.Hour).Format(dockerCreatedAtLayout)
+	young := now.Add(-time.Minute).Format(dockerCreatedAtLayout)
+	t.Setenv("SAM_EVICTION_TEST_STALE", "oldhelper\t"+stale+"\nnewhelper\t"+young)
+	t.Setenv("SAM_EVICTION_TEST_STALE_IMAGES", "sha256:oldimage\t"+stale+"\nsha256:newimage\t"+young)
+	if err := s.reapStaleSnapshotHelpers(context.Background(), now); err != nil {
+		t.Fatal(err)
+	}
+	calls := readCalls(t, logPath)
+	for _, want := range []string{"rm --force --volumes oldhelper", "image rm --force sha256:oldimage"} {
+		if !strings.Contains(calls, want) {
+			t.Fatalf("missing %q in Docker calls:\n%s", want, calls)
+		}
+	}
+	for _, unwanted := range []string{"newhelper", "sha256:newimage"} {
+		if strings.Contains(calls, "rm --force --volumes "+unwanted) || strings.Contains(calls, "image rm --force "+unwanted) {
+			t.Fatalf("a helper young enough to be in flight was removed:\n%s", calls)
 		}
 	}
 }
