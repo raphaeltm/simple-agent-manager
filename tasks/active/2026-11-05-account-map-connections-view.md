@@ -32,29 +32,42 @@ tests). Normal gates (staging, review, PR, deploy monitoring) still apply.
 
 ## Implementation Checklist
 
-- [ ] Pure view-model builder `buildConnectionsModel(response)` → projects, work items (a chat and
+- [x] Pure view-model builder `buildConnectionsModel(response)` → projects, work items (a chat and
       its task merged into one item), machines with their workspaces, edges, idea links
-- [ ] State derivation: working / needs attention (failed task) / idle / asleep / done, from real fields only
-- [ ] Filters: Everything / Live / Needs attention (failed) + search + "Include finished" (activeOnly=false)
-- [ ] Chain highlight (upstream + downstream, never sideways) and path bar with real links
+- [x] State derivation: working / needs attention (failed task) / idle / asleep / done, from real fields only
+- [x] Filters: Everything / Live / Needs attention (failed) + search + "Include finished" (activeOnly=false)
+- [x] Chain highlight (upstream + downstream, never sideways) and path bar with real links
       (project, idea, chat, machine)
-- [ ] Desktop three columns with SVG lines measured from the DOM; phone layout grouped by project with inline path
-- [ ] Workspaces without a node (Instant/containers) grouped under an "Instant" machine entry
-- [ ] Loading, error (retry), empty and truncation notice states
-- [ ] TanStack Query options in `lib/query-options/account-map.ts`, identity-scoped
-- [ ] Remove the React Flow canvas, node/edge components, dagre layout, old hooks, and the
+- [x] Desktop three columns with SVG lines measured from the DOM; phone layout grouped by project with inline path
+- [x] Workspaces without a node (Instant/containers) grouped under an "Instant" machine entry
+- [x] Loading, error (retry), empty and truncation notice states
+- [x] TanStack Query options in `lib/query-options/account-map.ts`, identity-scoped
+- [x] Remove the React Flow canvas, node/edge components, dagre layout, old hooks, and the
       `@xyflow/react` / `dagre` deps if nothing else uses them
-- [ ] Remove the prototype (`pages/account-map-prototype/`, dev route in `App.tsx`)
-- [ ] Unit tests for the view-model (chat+task merge, edges, chain, filters, Instant grouping)
-- [ ] Rendered page tests (filters, selection → path bar links, activeOnly toggle refetch, error/empty)
-- [ ] Playwright audit at 375 and 1280 with normal, long text, many items, empty and error data; overflow asserted
-- [ ] Docs: update any public docs that describe the Account Map
+- [x] Remove the prototype (`pages/account-map-prototype/`, dev route in `App.tsx`)
+- [x] Unit tests for the view-model (chat+task merge, edges, chain, filters, Instant grouping)
+- [x] Rendered page tests (filters, selection → path bar links, activeOnly toggle refetch, error/empty)
+- [x] Playwright audit at 375 and 1280 with normal, long text, many items, empty and error data; overflow asserted
+- [x] Docs: update any public docs that describe the Account Map
 
 ## Acceptance Criteria
 
-- [ ] `/account-map` shows projects → chats and tasks → machines with lines between related items
-- [ ] Selecting an item highlights its chain and shows its path with working links
-- [ ] Filters and search narrow the view; "Include finished" refetches with `activeOnly=false`
-- [ ] Phone layout has no horizontal overflow and shows each chat's path
-- [ ] No React Flow code remains; no prototype route remains
+- [x] `/account-map` shows projects → chats and tasks → machines with lines between related items
+- [x] Selecting an item highlights its chain and shows its path with working links
+- [x] Filters and search narrow the view; "Include finished" refetches with `activeOnly=false`
+- [x] Phone layout has no horizontal overflow and shows each chat's path
+- [x] No React Flow code remains; no prototype route remains
 - [ ] Staging: the page renders real data for the smoke user and selection works
+
+## Implementation Notes
+
+- API now passes `sessions[].attention` (open attention marker: kind, reason, createdAt) and
+  `tasks[].outputPrUrl` (https only; anything else becomes null). KV cache key bumped to `v4`.
+  No new I/O: both fields were already read and then dropped.
+- `@xyflow/react` and `dagre` stay as dependencies: the workflow run graph uses both. The dagre
+  helper moved to `pages/automation/workflows/dagre-layout.ts`.
+- Ideas with no chat on the map are not drawn (the API only returns ideas linked to visible chats);
+  linked ideas show on chat rows and in the path with links to the idea page.
+- Below 1024px (tablets and phones) the page uses the grouped list; three columns need ~760px.
+- Old "Reorganize" and per-type chips are gone: there is no free layout to reorganize, and the
+  Everything / Needs you / Live filter plus search replace the type chips.
