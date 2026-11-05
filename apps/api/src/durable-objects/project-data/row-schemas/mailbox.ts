@@ -2,8 +2,10 @@ import {
   type AgentMailboxMessage,
   DELIVERY_STATES,
   MESSAGE_CLASSES,
+  PROMPT_DELIVERY_INTENTS,
   PROMPT_DELIVERY_SOURCES,
   SENDER_TYPES,
+  STEER_OUTCOMES,
   VM_PROMPT_RECEIPT_STATES,
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
@@ -53,6 +55,10 @@ const MailboxMessageRowSchema = v.object({
   accepted_at: v.nullable(v.number()),
   adapter_protocol_version: v.nullable(v.number()),
   receipt_supported: v.nullable(v.number()),
+  // Migration 072 columns (absent only in fixtures that predate it)
+  delivery_intent: v.optional(v.picklist(PROMPT_DELIVERY_INTENTS), 'queue'),
+  steer_outcome: v.optional(v.nullable(v.picklist(STEER_OUTCOMES)), null),
+  steer_reason: v.optional(v.nullable(v.string()), null),
 });
 
 export function parseMailboxMessageRow(row: unknown): AgentMailboxMessage {
@@ -89,6 +95,9 @@ export function parseMailboxMessageRow(row: unknown): AgentMailboxMessage {
     acceptedAt: r.accepted_at,
     adapterProtocolVersion: r.adapter_protocol_version,
     receiptSupported: r.receipt_supported === null ? null : r.receipt_supported === 1,
+    deliveryIntent: r.delivery_intent,
+    steerOutcome: r.steer_outcome,
+    steerReason: r.steer_reason,
   };
 }
 
