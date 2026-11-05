@@ -54,7 +54,7 @@ export interface ToolCallGroupSummary {
 }
 
 /**
- * Typed document cards (`display_from_library`, `upload_to_library`, …) are
+ * Typed cards (library documents, Operations approval requests) are
  * user-facing content the agent deliberately chose to show, so they are NOT
  * absorbable and break the run (policy `bb0b7af1`).
  */

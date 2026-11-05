@@ -1,6 +1,8 @@
 import type { ToolCallItem } from '@simple-agent-manager/acp-client';
 import type { FC } from 'react';
 
+import { extractApprovalId, isApprovalCardTool } from './approval-card-data';
+import { ApprovalCard } from './ApprovalCard';
 import {
   DOCUMENT_CARD_TOOLS,
   extractDocumentCardData,
@@ -11,7 +13,7 @@ import { DocumentCard } from './DocumentCard';
 /** Props every typed tool-call card receives. */
 export interface ToolCardProps {
   item: ToolCallItem;
-  /** Project the card belongs to — needed for library preview URLs. */
+  /** Project the card belongs to — needed for library preview URLs and approval scoping. */
   projectId?: string;
 }
 
@@ -56,6 +58,11 @@ export function matchToolCard(item: ToolCallItem): FC<ToolCardProps> | null {
 }
 
 function resolveToolCard(item: ToolCallItem): FC<ToolCardProps> | null {
+  // Operations approval request: the card needs the approval ID from the result. While the
+  // call runs, or when it failed, the generic card shows it instead.
+  if (isApprovalCardTool(item)) {
+    return extractApprovalId(item) ? ApprovalCard : null;
+  }
   const base = normalizeToolName(item.toolName ?? item.title);
   if (!base || !DOCUMENT_CARD_TOOLS.has(base)) {
     return null;

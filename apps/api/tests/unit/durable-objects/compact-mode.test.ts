@@ -17,6 +17,7 @@ import {
   parseChatMessageRowCompact,
   stripToolMetadataContent,
 } from '../../../src/durable-objects/project-data/row-schemas';
+import { UNTRUSTED_TEXT_GUIDANCE } from '../../../src/operations/untrusted-text';
 
 describe('stripToolMetadataContent', () => {
   it('strips content array and adds contentSize', () => {
@@ -205,6 +206,74 @@ describe('stripToolMetadataContent', () => {
     expect(result.content).toBeUndefined();
     expect(result.contentSize).toBeGreaterThan(0);
     expect(result.rawOutput).toBeUndefined();
+  });
+});
+
+describe('stripToolMetadataContent — Operations approval card', () => {
+  const approvalId = '01M6NBQ7Z2W8X3Y4V5T6S7R8P9';
+  // The text `runOpsActTool` returns for ops_request_action: the untrusted envelope plus the
+  // public approval, with agent-written reason and evidence.
+  const resultText = JSON.stringify({
+    untrustedContent: true,
+    untrustedTextGuidance: UNTRUSTED_TEXT_GUIDANCE,
+    approval: {
+      id: approvalId,
+      action: 'delete_node',
+      targetType: 'node',
+      targetId: 'node-1',
+      reason: 'Agent-written reason that must not be persisted again',
+      evidenceSummary: 'agent evidence',
+      status: 'pending',
+    },
+    next: 'A superadmin was asked to approve this.',
+  });
+
+  it('keeps only the approval ID for the Claude tool name', () => {
+    const result = stripToolMetadataContent({
+      toolCallId: 'tc-approval',
+      title: 'mcp__sam-mcp__ops_request_action',
+      toolName: 'mcp__sam-mcp__ops_request_action',
+      status: 'completed',
+      content: [{ type: 'content', content: { type: 'text', text: resultText } }],
+    }) as Record<string, unknown>;
+
+    expect(result.content).toBeUndefined();
+    const rawOutput = result.rawOutput as Array<{ type: string; text: string }>;
+    expect(rawOutput).toEqual([
+      { type: 'text', text: JSON.stringify({ approval: { id: approvalId } }) },
+    ]);
+  });
+
+  it('matches the Codex <server>/<tool> title with no toolName', () => {
+    const result = stripToolMetadataContent({
+      toolCallId: 'tc-approval',
+      title: 'sam-mcp/ops_request_action',
+      status: 'completed',
+      content: [{ type: 'content', text: resultText }],
+    }) as Record<string, unknown>;
+
+    expect(JSON.parse((result.rawOutput as Array<{ text: string }>)[0]!.text)).toEqual({
+      approval: { id: approvalId },
+    });
+  });
+
+  it('keeps nothing for a failed request or another Operations tool', () => {
+    const failed = stripToolMetadataContent({
+      toolCallId: 'tc-approval',
+      title: 'mcp__sam-mcp__ops_request_action',
+      status: 'failed',
+      content: [{ type: 'content', text: 'action must be one of: …' }],
+    }) as Record<string, unknown>;
+    expect(failed.rawOutput).toBeUndefined();
+    expect(failed.contentSize).toBeGreaterThan(0);
+
+    const execute = stripToolMetadataContent({
+      toolCallId: 'tc-execute',
+      title: 'mcp__sam-mcp__ops_execute_action',
+      status: 'completed',
+      content: [{ type: 'content', text: resultText }],
+    }) as Record<string, unknown>;
+    expect(execute.rawOutput).toBeUndefined();
   });
 });
 
