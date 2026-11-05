@@ -22,8 +22,7 @@
 import type { CommentAnchorKind } from '@simple-agent-manager/shared';
 
 export type CommentAnchorScope =
-  | { kind: 'message'; sessionId: string }
-  | { kind: 'library_file'; fileId: string };
+  { kind: 'message'; sessionId: string } | { kind: 'library_file'; fileId: string };
 
 export interface AnchorScopeParams {
   anchorKind: CommentAnchorKind;

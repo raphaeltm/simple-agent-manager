@@ -8,7 +8,10 @@
  * with different mappers.
  */
 import { hydrateThreadRecordsByIds, listProjectThreadCandidates } from './anchored-comment-store';
-import type { ListProjectCommentThreadsInput, ProjectCommentInboxResult } from './comment-contracts';
+import type {
+  ListProjectCommentThreadsInput,
+  ProjectCommentInboxResult,
+} from './comment-contracts';
 import {
   resolveProjectCommentListLimit,
   resolveProjectCommentListMaxBytes,

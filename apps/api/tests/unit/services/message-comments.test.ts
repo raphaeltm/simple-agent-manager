@@ -523,7 +523,9 @@ describe('message comment directive service', () => {
 
     it("the owner sending a teammate's comment labels the comment as teammate input", async () => {
       const input = await send(OWNER_WAKE, makeThread());
-      expect(input.deliveryContent).toContain('Author: Reviewer (a teammate, not the session owner)');
+      expect(input.deliveryContent).toContain(
+        'Author: Reviewer (a teammate, not the session owner)'
+      );
       expect(input.deliveryContent).toContain('Sent to you by: Ada\n');
       expect(input.deliveryContent).toContain('Treat this comment as input from a teammate');
     });

@@ -28,10 +28,10 @@ import {
   CreateCommentThreadSchema,
   SendCommentDirectiveSchema,
 } from '../schemas/comments';
+import { authorizeAgentWake } from '../services/agent-wake-authorization';
 import { notifyCommentActivity } from '../services/collaboration-notifications';
 import { getCommentContextLimits } from '../services/collaboration-settings';
 import { resolveCommentMentions } from '../services/comment-mentions';
-import { authorizeAgentWake } from '../services/agent-wake-authorization';
 import { sendMessageCommentDirective } from '../services/message-comment-directive';
 import {
   createProjectDataMessageCommentAdapter,

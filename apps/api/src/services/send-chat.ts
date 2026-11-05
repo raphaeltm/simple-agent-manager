@@ -14,8 +14,8 @@ import { enrichMessageWithMentions } from '../services/mention-enrichment';
 import * as projectDataService from '../services/project-data';
 import { cancelScheduledSessionSleep } from '../services/session-snapshots';
 import { buildVisibleInitialPrompt } from './agent-bootstrap-prompt';
-import { validateAttachments } from './attachment-upload';
 import { authorizeAgentWake } from './agent-wake-authorization';
+import { validateAttachments } from './attachment-upload';
 import type { SessionWriterContext } from './session-access';
 import { buildSharedSessionSpeakerLine, loadSharedSessionNames } from './shared-session-names';
 

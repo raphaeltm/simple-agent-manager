@@ -59,11 +59,13 @@ const THREAD_COLUMNS = {
   sent_by_id: 'TEXT',
   sent_by_name: 'TEXT',
   resolved_at: 'INTEGER',
-  resolved_by_type: "TEXT CHECK (resolved_by_type IS NULL OR resolved_by_type IN ('human', 'agent'))",
+  resolved_by_type:
+    "TEXT CHECK (resolved_by_type IS NULL OR resolved_by_type IN ('human', 'agent'))",
   resolved_by_id: 'TEXT',
   resolved_by_name: 'TEXT',
   reopened_at: 'INTEGER',
-  reopened_by_type: "TEXT CHECK (reopened_by_type IS NULL OR reopened_by_type IN ('human', 'agent'))",
+  reopened_by_type:
+    "TEXT CHECK (reopened_by_type IS NULL OR reopened_by_type IN ('human', 'agent'))",
   reopened_by_id: 'TEXT',
   reopened_by_name: 'TEXT',
   mentions_json: 'TEXT',
@@ -110,11 +112,11 @@ const SHARED_THREAD_COPY_COLUMNS = [
 
 const SENT_COLUMNS = 'sent_at, sent_by_type, sent_by_id, sent_by_name';
 
-export function createAnchoredCommentTables(sql: SqlStorage): void {
-  sql.exec(`CREATE TABLE IF NOT EXISTS anchored_comment_threads (
+const CREATE_STATEMENTS: readonly string[] = [
+  `CREATE TABLE IF NOT EXISTS anchored_comment_threads (
   ${columnList(THREAD_COLUMNS, THREAD_CONSTRAINTS)}
-)`);
-  sql.exec(`CREATE TABLE IF NOT EXISTS anchored_comment_replies (
+)`,
+  `CREATE TABLE IF NOT EXISTS anchored_comment_replies (
   id TEXT PRIMARY KEY,
   thread_id TEXT NOT NULL REFERENCES anchored_comment_threads(id) ON DELETE CASCADE,
   anchor_kind TEXT NOT NULL,
@@ -129,8 +131,8 @@ export function createAnchoredCommentTables(sql: SqlStorage): void {
   client_mutation_fingerprint TEXT,
   mentions_json TEXT,
   UNIQUE (thread_id, client_mutation_id)
-)`);
-  sql.exec(`CREATE TABLE IF NOT EXISTS anchored_comment_status_mutations (
+)`,
+  `CREATE TABLE IF NOT EXISTS anchored_comment_status_mutations (
   thread_id TEXT NOT NULL REFERENCES anchored_comment_threads(id) ON DELETE CASCADE,
   anchor_kind TEXT NOT NULL,
   scope_key TEXT NOT NULL,
@@ -139,19 +141,66 @@ export function createAnchoredCommentTables(sql: SqlStorage): void {
   thread_version INTEGER NOT NULL,
   created_at INTEGER NOT NULL,
   PRIMARY KEY (thread_id, client_mutation_id)
-)`);
+)`,
+  'CREATE INDEX IF NOT EXISTS idx_anchored_comment_threads_scope_sequence ON anchored_comment_threads(anchor_kind, scope_key, sequence)',
+  'CREATE INDEX IF NOT EXISTS idx_anchored_comment_threads_scope_status ON anchored_comment_threads(anchor_kind, scope_key, status, sequence)',
+  'CREATE INDEX IF NOT EXISTS idx_anchored_comment_threads_message ON anchored_comment_threads(anchor_kind, scope_key, message_id, sequence)',
+  'CREATE INDEX IF NOT EXISTS idx_anchored_comment_threads_updated_at ON anchored_comment_threads(updated_at DESC, id)',
+  'CREATE INDEX IF NOT EXISTS idx_anchored_comment_threads_status_updated_at ON anchored_comment_threads(status, updated_at DESC, id)',
+  'CREATE INDEX IF NOT EXISTS idx_anchored_comment_replies_thread_sequence ON anchored_comment_replies(thread_id, sequence)',
+  'CREATE INDEX IF NOT EXISTS idx_anchored_comment_replies_scope ON anchored_comment_replies(anchor_kind, scope_key)',
+];
 
-  const indexes = [
-    'idx_anchored_comment_threads_scope_sequence ON anchored_comment_threads(anchor_kind, scope_key, sequence)',
-    'idx_anchored_comment_threads_scope_status ON anchored_comment_threads(anchor_kind, scope_key, status, sequence)',
-    'idx_anchored_comment_threads_message ON anchored_comment_threads(anchor_kind, scope_key, message_id, sequence)',
-    'idx_anchored_comment_threads_updated_at ON anchored_comment_threads(updated_at DESC, id)',
-    'idx_anchored_comment_threads_status_updated_at ON anchored_comment_threads(status, updated_at DESC, id)',
-    'idx_anchored_comment_replies_thread_sequence ON anchored_comment_replies(thread_id, sequence)',
-    'idx_anchored_comment_replies_scope ON anchored_comment_replies(anchor_kind, scope_key)',
-  ];
-  for (const index of indexes) sql.exec(`CREATE INDEX IF NOT EXISTS ${index}`);
+export function createAnchoredCommentTables(sql: SqlStorage): void {
+  for (const statement of CREATE_STATEMENTS) sql.exec(statement);
 }
+
+const REPLY_COPY_COLUMNS =
+  'id, thread_id, body, author_type, author_id, author_name, created_at, sequence, client_mutation_id, client_mutation_fingerprint';
+const MUTATION_COPY_COLUMNS =
+  'thread_id, client_mutation_id, target_status, thread_version, created_at';
+
+/** Threads first, so replies and mutations satisfy their foreign keys. */
+const COPY_STATEMENTS: readonly string[] = [
+  `INSERT INTO anchored_comment_threads
+    (${SHARED_THREAD_COPY_COLUMNS}, anchor_kind, scope_key, session_id, message_id, file_id,
+     ${SENT_COLUMNS}, mentions_json)
+  SELECT ${SHARED_THREAD_COPY_COLUMNS}, 'message', session_id, session_id, message_id, NULL,
+     ${SENT_COLUMNS}, mentions_json
+  FROM comment_threads legacy
+  WHERE NOT EXISTS (SELECT 1 FROM anchored_comment_threads a WHERE a.id = legacy.id)`,
+  `INSERT INTO anchored_comment_threads
+    (${SHARED_THREAD_COPY_COLUMNS}, anchor_kind, scope_key, session_id, message_id, file_id)
+  SELECT ${SHARED_THREAD_COPY_COLUMNS}, 'library_file', file_id, NULL, NULL, file_id
+  FROM library_file_comment_threads legacy
+  WHERE NOT EXISTS (SELECT 1 FROM anchored_comment_threads a WHERE a.id = legacy.id)`,
+  `INSERT INTO anchored_comment_replies
+    (${REPLY_COPY_COLUMNS}, anchor_kind, scope_key, mentions_json)
+  SELECT ${REPLY_COPY_COLUMNS}, 'message', session_id, mentions_json
+  FROM comment_replies legacy
+  WHERE NOT EXISTS (SELECT 1 FROM anchored_comment_replies a WHERE a.id = legacy.id)`,
+  `INSERT INTO anchored_comment_replies
+    (${REPLY_COPY_COLUMNS}, anchor_kind, scope_key)
+  SELECT ${REPLY_COPY_COLUMNS}, 'library_file', file_id
+  FROM library_file_comment_replies legacy
+  WHERE NOT EXISTS (SELECT 1 FROM anchored_comment_replies a WHERE a.id = legacy.id)`,
+  `INSERT INTO anchored_comment_status_mutations
+    (${MUTATION_COPY_COLUMNS}, anchor_kind, scope_key)
+  SELECT ${MUTATION_COPY_COLUMNS}, 'message', session_id
+  FROM comment_status_mutations legacy
+  WHERE NOT EXISTS (
+    SELECT 1 FROM anchored_comment_status_mutations a
+    WHERE a.thread_id = legacy.thread_id AND a.client_mutation_id = legacy.client_mutation_id
+  )`,
+  `INSERT INTO anchored_comment_status_mutations
+    (${MUTATION_COPY_COLUMNS}, anchor_kind, scope_key)
+  SELECT ${MUTATION_COPY_COLUMNS}, 'library_file', file_id
+  FROM library_file_comment_status_mutations legacy
+  WHERE NOT EXISTS (
+    SELECT 1 FROM anchored_comment_status_mutations a
+    WHERE a.thread_id = legacy.thread_id AND a.client_mutation_id = legacy.client_mutation_id
+  )`,
+];
 
 /**
  * Copy every legacy row that is not already in the anchored tables. Safe to run again:
@@ -159,50 +208,7 @@ export function createAnchoredCommentTables(sql: SqlStorage): void {
  * foreign keys.
  */
 export function copyLegacyCommentRows(sql: SqlStorage): void {
-  sql.exec(`INSERT INTO anchored_comment_threads
-    (${SHARED_THREAD_COPY_COLUMNS}, anchor_kind, scope_key, session_id, message_id, file_id,
-     ${SENT_COLUMNS}, mentions_json)
-  SELECT ${SHARED_THREAD_COPY_COLUMNS}, 'message', session_id, session_id, message_id, NULL,
-     ${SENT_COLUMNS}, mentions_json
-  FROM comment_threads legacy
-  WHERE NOT EXISTS (SELECT 1 FROM anchored_comment_threads a WHERE a.id = legacy.id)`);
-  sql.exec(`INSERT INTO anchored_comment_threads
-    (${SHARED_THREAD_COPY_COLUMNS}, anchor_kind, scope_key, session_id, message_id, file_id)
-  SELECT ${SHARED_THREAD_COPY_COLUMNS}, 'library_file', file_id, NULL, NULL, file_id
-  FROM library_file_comment_threads legacy
-  WHERE NOT EXISTS (SELECT 1 FROM anchored_comment_threads a WHERE a.id = legacy.id)`);
-
-  const replyColumns =
-    'id, thread_id, body, author_type, author_id, author_name, created_at, sequence, client_mutation_id, client_mutation_fingerprint';
-  sql.exec(`INSERT INTO anchored_comment_replies
-    (${replyColumns}, anchor_kind, scope_key, mentions_json)
-  SELECT ${replyColumns}, 'message', session_id, mentions_json
-  FROM comment_replies legacy
-  WHERE NOT EXISTS (SELECT 1 FROM anchored_comment_replies a WHERE a.id = legacy.id)`);
-  sql.exec(`INSERT INTO anchored_comment_replies
-    (${replyColumns}, anchor_kind, scope_key)
-  SELECT ${replyColumns}, 'library_file', file_id
-  FROM library_file_comment_replies legacy
-  WHERE NOT EXISTS (SELECT 1 FROM anchored_comment_replies a WHERE a.id = legacy.id)`);
-
-  const mutationColumns =
-    'thread_id, client_mutation_id, target_status, thread_version, created_at';
-  sql.exec(`INSERT INTO anchored_comment_status_mutations
-    (${mutationColumns}, anchor_kind, scope_key)
-  SELECT ${mutationColumns}, 'message', session_id
-  FROM comment_status_mutations legacy
-  WHERE NOT EXISTS (
-    SELECT 1 FROM anchored_comment_status_mutations a
-    WHERE a.thread_id = legacy.thread_id AND a.client_mutation_id = legacy.client_mutation_id
-  )`);
-  sql.exec(`INSERT INTO anchored_comment_status_mutations
-    (${mutationColumns}, anchor_kind, scope_key)
-  SELECT ${mutationColumns}, 'library_file', file_id
-  FROM library_file_comment_status_mutations legacy
-  WHERE NOT EXISTS (
-    SELECT 1 FROM anchored_comment_status_mutations a
-    WHERE a.thread_id = legacy.thread_id AND a.client_mutation_id = legacy.client_mutation_id
-  )`);
+  for (const statement of COPY_STATEMENTS) sql.exec(statement);
 }
 
 export interface CommentParityCheck {
@@ -263,17 +269,25 @@ const PARITY_CHECKS: Array<{ name: string; legacy: string; anchored: string }> =
   },
 ];
 
-function count(sql: SqlStorage, query: string): number {
-  const row = sql.exec(`SELECT COUNT(*) AS count FROM (${query})`).toArray()[0];
+/** The three counting statements per check, built at module load. */
+const PARITY_COUNT_STATEMENTS = PARITY_CHECKS.map(({ name, legacy, anchored }) => ({
+  name,
+  legacy: `SELECT COUNT(*) AS count FROM (${legacy})`,
+  anchored: `SELECT COUNT(*) AS count FROM (${anchored})`,
+  mismatched: `SELECT COUNT(*) AS count FROM (${legacy} EXCEPT ${anchored})`,
+}));
+
+function count(sql: SqlStorage, statement: string): number {
+  const row = sql.exec(statement).toArray()[0];
   return typeof row?.count === 'number' ? row.count : 0;
 }
 
 export function checkLegacyCommentParity(sql: SqlStorage): CommentParityReport {
-  const checks = PARITY_CHECKS.map(({ name, legacy, anchored }) => ({
-    name,
-    legacyCount: count(sql, legacy),
-    anchoredCount: count(sql, anchored),
-    mismatched: count(sql, `${legacy} EXCEPT ${anchored}`),
+  const checks = PARITY_COUNT_STATEMENTS.map((statements) => ({
+    name: statements.name,
+    legacyCount: count(sql, statements.legacy),
+    anchoredCount: count(sql, statements.anchored),
+    mismatched: count(sql, statements.mismatched),
   }));
   return {
     ok: checks.every((c) => c.mismatched === 0 && c.legacyCount === c.anchoredCount),

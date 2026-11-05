@@ -65,7 +65,11 @@ describe('ProjectData project comment inbox', () => {
       body,
       actor: HUMAN,
     });
-    sql.exec(`UPDATE anchored_comment_threads SET updated_at = ? WHERE id = ?`, updatedAt, thread.id);
+    sql.exec(
+      `UPDATE anchored_comment_threads SET updated_at = ? WHERE id = ?`,
+      updatedAt,
+      thread.id
+    );
     return thread.id;
   }
 
@@ -290,13 +294,13 @@ describe('ProjectData project comment inbox', () => {
     seedMessage('s-1', 'm-1', 1);
     const openMessage = messageThreadAt('s-1', 'm-1', 'still open', 3_000);
     const resolvedMessage = messageThreadAt('s-1', 'm-1', 'done', 2_000);
-    sql.exec(`UPDATE anchored_comment_threads SET status = 'resolved' WHERE id = ?`, resolvedMessage);
-    const openFile = fileThreadAt('file-1', 'still open', 1_500);
-    const resolvedFile = fileThreadAt('file-1', 'done', 1_000);
     sql.exec(
       `UPDATE anchored_comment_threads SET status = 'resolved' WHERE id = ?`,
-      resolvedFile
+      resolvedMessage
     );
+    const openFile = fileThreadAt('file-1', 'still open', 1_500);
+    const resolvedFile = fileThreadAt('file-1', 'done', 1_000);
+    sql.exec(`UPDATE anchored_comment_threads SET status = 'resolved' WHERE id = ?`, resolvedFile);
 
     const open = listProjectCommentInbox(sql, env, { status: 'open' });
 
@@ -446,13 +450,15 @@ describe('ProjectData project comment inbox', () => {
     expect(inbox.totalCount).toBe(2);
 
     const hydrateThreadCall = calls.find(
-      (call) => call.statement.includes('FROM anchored_comment_threads') && call.statement.includes('id IN')
+      (call) =>
+        call.statement.includes('FROM anchored_comment_threads') && call.statement.includes('id IN')
     );
     expect(hydrateThreadCall?.params).toEqual([selectedSmall]);
 
     const hydrateReplyCall = calls.find(
       (call) =>
-        call.statement.includes('FROM anchored_comment_replies') && call.statement.includes('thread_id IN')
+        call.statement.includes('FROM anchored_comment_replies') &&
+        call.statement.includes('thread_id IN')
     );
     expect(hydrateReplyCall?.params).toEqual([selectedSmall]);
   });

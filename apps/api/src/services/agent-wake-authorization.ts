@@ -6,6 +6,7 @@
  * both the writer context they already used for resource resolution and the wake grant they
  * must record on the delivery.
  */
+import type { Env } from '../env';
 import {
   type AgentWakeGrant,
   type AgentWakeTrigger,
@@ -14,7 +15,6 @@ import {
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 import type { AppDb } from '../middleware/project-auth';
-import type { Env } from '../env';
 import { requireSessionWriter, type SessionWriterContext } from './session-access';
 
 export interface AuthorizeAgentWakeInput {

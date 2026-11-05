@@ -306,11 +306,20 @@ export interface UpdateThreadStatusRecordInput {
   actor: CommentActor;
 }
 
-/** The column prefix each status transition stamps with who did it and when. */
-const STATUS_ACTOR_COLUMNS: Record<CommentStatus, 'sent' | 'resolved' | 'reopened'> = {
-  sent: 'sent',
-  resolved: 'resolved',
-  open: 'reopened',
+/**
+ * One statement per status transition, built at module load: each stamps its own
+ * who-and-when columns (`sent_*`, `resolved_*`, `reopened_*`).
+ */
+function statusUpdateSql(prefix: 'sent' | 'resolved' | 'reopened'): string {
+  return `UPDATE anchored_comment_threads
+    SET status = ?, ${prefix}_at = ?, ${prefix}_by_type = ?, ${prefix}_by_id = ?,
+        ${prefix}_by_name = ?, updated_at = ?, version = version + 1
+    WHERE id = ? AND ${ANCHOR_SCOPE_PREDICATE}`;
+}
+const STATUS_UPDATE_SQL: Record<CommentStatus, string> = {
+  sent: statusUpdateSql('sent'),
+  resolved: statusUpdateSql('resolved'),
+  open: statusUpdateSql('reopened'),
 };
 
 export function updateThreadStatusRecord(
@@ -353,12 +362,8 @@ export function updateThreadStatusRecord(
       // 'sent' is the Send-to-agent transition; anchors without it reject rather than no-op.
       throw new CommentValidationError('library file comments support open or resolved only');
     }
-    const prefix = STATUS_ACTOR_COLUMNS[input.status];
     sql.exec(
-      `UPDATE anchored_comment_threads
-       SET status = ?, ${prefix}_at = ?, ${prefix}_by_type = ?, ${prefix}_by_id = ?,
-           ${prefix}_by_name = ?, updated_at = ?, version = version + 1
-       WHERE id = ? AND ${ANCHOR_SCOPE_PREDICATE}`,
+      STATUS_UPDATE_SQL[input.status],
       input.status,
       now,
       actor.kind,

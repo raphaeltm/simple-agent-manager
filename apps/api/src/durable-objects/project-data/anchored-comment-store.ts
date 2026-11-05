@@ -12,7 +12,11 @@ import { COMMENT_ANCHOR_KINDS, COMMENT_STATUSES } from '@simple-agent-manager/sh
 import * as v from 'valibot';
 
 import { createModuleLogger } from '../../lib/logger';
-import { ANCHOR_SCOPE_PREDICATE, anchorScopeParams, type CommentAnchorScope } from './anchored-comment-scope';
+import {
+  ANCHOR_SCOPE_PREDICATE,
+  anchorScopeParams,
+  type CommentAnchorScope,
+} from './anchored-comment-scope';
 import type { CommentActor, ListProjectCommentThreadCandidatesPage } from './comment-contracts';
 import { actorFromColumns } from './comment-normalization';
 import { parseProjectCommentThreadCandidates, restoreThreadOrder } from './comment-read-helpers';

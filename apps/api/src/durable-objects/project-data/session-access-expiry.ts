@@ -164,7 +164,11 @@ export function senderLacksSessionAccess(
     trigger: delivery.sourceKind,
     sessionId: delivery.targetSessionId,
     actorUserId: delivery.senderId,
-    access: { role: access.role, ownerUserId: access.ownerUserId, grantId: access.grant?.id ?? null },
+    access: {
+      role: access.role,
+      ownerUserId: access.ownerUserId,
+      grantId: access.grant?.id ?? null,
+    },
   });
   if (decision.allowed) return null;
   if (readUnrevokedGrant(sql, delivery.targetSessionId, delivery.senderId)) {

@@ -25,7 +25,9 @@ const OWNER = { kind: 'human' as const, id: 'user-owner', name: 'Owner' };
 
 /** Apply every migration before 072 and record them, as an existing project object has. */
 function migrateTo071(sql: SqlStorage): void {
-  sql.exec('CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)');
+  sql.exec(
+    'CREATE TABLE IF NOT EXISTS migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)'
+  );
   for (const migration of MIGRATIONS) {
     if (migration.name === MIGRATION_072) break;
     migration.run(sql);
@@ -163,11 +165,15 @@ describe('DO migration 072: anchored comment threads', () => {
 
   it('records the migration once, so the runner does not copy again', () => {
     runMigrations(sql);
-    expect(count(sql, `SELECT COUNT(*) AS count FROM migrations WHERE name = '${MIGRATION_072}'`)).toBe(1);
+    expect(
+      count(sql, `SELECT COUNT(*) AS count FROM migrations WHERE name = '${MIGRATION_072}'`)
+    ).toBe(1);
   });
 
   it('detects a copy that lost or changed a row', () => {
-    sql.exec("UPDATE anchored_comment_threads SET body = 'tampered' WHERE id = 'legacy-thread-sent'");
+    sql.exec(
+      "UPDATE anchored_comment_threads SET body = 'tampered' WHERE id = 'legacy-thread-sent'"
+    );
     sql.exec("DELETE FROM anchored_comment_replies WHERE id = 'legacy-file-reply'");
     const report = checkLegacyCommentParity(sql);
     expect(report.ok).toBe(false);
@@ -272,7 +278,10 @@ describe('DO migration 072: anchored comment threads', () => {
     sql.exec("DELETE FROM chat_messages WHERE id = 'message-b1'");
     expect(comments.getCommentThread(sql, 'session-b', 'legacy-thread-resolved')).toBeNull();
     expect(
-      count(sql, "SELECT COUNT(*) AS count FROM comment_threads WHERE id = 'legacy-thread-resolved'")
+      count(
+        sql,
+        "SELECT COUNT(*) AS count FROM comment_threads WHERE id = 'legacy-thread-resolved'"
+      )
     ).toBe(0);
   });
 });
@@ -282,7 +291,12 @@ function seedLegacy(sql: SqlStorage): void {
     ['session-a', 'message-a1'],
     ['session-b', 'message-b1'],
   ]) {
-    sql.exec('INSERT INTO chat_sessions (id, topic, started_at) VALUES (?, ?, ?)', session, session, 1);
+    sql.exec(
+      'INSERT INTO chat_sessions (id, topic, started_at) VALUES (?, ?, ?)',
+      session,
+      session,
+      1
+    );
     sql.exec(
       `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence)
        VALUES (?, ?, 'assistant', 'hello', NULL, 1, 1)`,
@@ -341,7 +355,14 @@ function seedLegacy(sql: SqlStorage): void {
      VALUES ('legacy-file-thread', 'file-1', 'library_file', 'file quote', 'Typo in heading',
        'human', 'user-owner', 'Owner', 'resolved', 3000, 3200, 1, 2, 'client-file-1', ?, 3200,
        'human', 'user-owner', 'Owner')`,
-    JSON.stringify(['file_thread', 'file-1', 'Typo in heading', 'file quote', 'human', 'user-owner'])
+    JSON.stringify([
+      'file_thread',
+      'file-1',
+      'Typo in heading',
+      'file quote',
+      'human',
+      'user-owner',
+    ])
   );
   sql.exec(
     `INSERT INTO library_file_comment_replies

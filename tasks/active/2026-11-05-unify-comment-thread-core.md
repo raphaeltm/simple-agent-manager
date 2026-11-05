@@ -45,42 +45,42 @@ tasks will add a third wake path where a teammate's comment prompts someone else
 
 ## Writer enumeration of the old tables (rule 44)
 
-| Writer | Old table(s) | Decision |
-| --- | --- | --- |
-| `comments.ts` `createCommentThread` | `comment_threads` | switched to the shared core |
-| `comments.ts` `createCommentReply` | `comment_replies`, `comment_threads` (version bump) | switched |
-| `comments.ts` `updateCommentThreadStatus` | `comment_threads`, `comment_status_mutations` | switched |
-| `library-file-comments.ts` `createFileCommentThread` | `library_file_comment_threads` | switched |
-| `library-file-comments.ts` `createFileCommentReply` | `library_file_comment_replies`, threads | switched |
-| `library-file-comments.ts` `updateFileCommentThreadStatus` | threads, `library_file_comment_status_mutations` | switched |
-| FK `ON DELETE CASCADE` from `chat_sessions` / `chat_messages` | message tables | unchanged; the new tables carry the same cascade, and archive refuses sessions with comments |
-| migration 064 | `ALTER TABLE ... ADD COLUMN mentions_json` | historical, schema only |
+| Writer                                                        | Old table(s)                                        | Decision                                                                                     |
+| ------------------------------------------------------------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `comments.ts` `createCommentThread`                           | `comment_threads`                                   | switched to the shared core                                                                  |
+| `comments.ts` `createCommentReply`                            | `comment_replies`, `comment_threads` (version bump) | switched                                                                                     |
+| `comments.ts` `updateCommentThreadStatus`                     | `comment_threads`, `comment_status_mutations`       | switched                                                                                     |
+| `library-file-comments.ts` `createFileCommentThread`          | `library_file_comment_threads`                      | switched                                                                                     |
+| `library-file-comments.ts` `createFileCommentReply`           | `library_file_comment_replies`, threads             | switched                                                                                     |
+| `library-file-comments.ts` `updateFileCommentThreadStatus`    | threads, `library_file_comment_status_mutations`    | switched                                                                                     |
+| FK `ON DELETE CASCADE` from `chat_sessions` / `chat_messages` | message tables                                      | unchanged; the new tables carry the same cascade, and archive refuses sessions with comments |
+| migration 064                                                 | `ALTER TABLE ... ADD COLUMN mentions_json`          | historical, schema only                                                                      |
 
 Readers moved: `archive-sharding.ts` fence + digest, `project-comment-inbox.ts`, both modules' reads.
 
 ## Implementation checklist
 
-- [ ] DO migration `072-anchored-comment-threads`: new `anchored_comment_threads` /
+- [x] DO migration `072-anchored-comment-threads`: new `anchored_comment_threads` /
       `anchored_comment_replies` / `anchored_comment_status_mutations`, per-kind CHECKs, indexes
-- [ ] Idempotent copy (ids, sequences, versions, fingerprints, mentions preserved), parity check
+- [x] Idempotent copy (ids, sequences, versions, fingerprints, mentions preserved), parity check
       (counts + EXCEPT content diff, per kind and table), logged per DO
-- [ ] Shared core: scope type + predicate, store (reads), mutations (create/reply/status)
-- [ ] Message adapter (`comments.ts`) and file adapter (`library-file-comments.ts`) on the core,
+- [x] Shared core: scope type + predicate, store (reads), mutations (create/reply/status)
+- [x] Message adapter (`comments.ts`) and file adapter (`library-file-comments.ts`) on the core,
       public API and output shapes unchanged
-- [ ] Inbox reads one table
-- [ ] Archive fence + digest read the new tables
-- [ ] Add the migration module to `check-do-migration-safety.ts`
-- [ ] Machine-checked writer inventory: nothing in `src/` writes the old tables
-- [ ] `lib/agent-wake-policy.ts` (pure decision, mode `trusted_project`) +
+- [x] Inbox reads one table
+- [x] Archive fence + digest read the new tables
+- [x] Add the migration module to `check-do-migration-safety.ts`
+- [x] Machine-checked writer inventory: nothing in `src/` writes the old tables
+- [x] `lib/agent-wake-policy.ts` (pure decision, mode `trusted_project`) +
       `services/agent-wake-authorization.ts`; used by comment send, `authorizeSendChat`, and the DO
       delivery fence
-- [ ] Wake record in delivery metadata (`wake`: triggeredBy, onBehalfOf, actorRole, mode, trigger)
-- [ ] Teammate attribution in the directive prompt (sender and comment author)
-- [ ] Tests: migration copy/parity/idempotent re-run/replay, cross-session + cross-file +
+- [x] Wake record in delivery metadata (`wake`: triggeredBy, onBehalfOf, actorRole, mode, trigger)
+- [x] Teammate attribution in the directive prompt (sender and comment author)
+- [x] Tests: migration copy/parity/idempotent re-run/replay, cross-session + cross-file +
       cross-kind attacks with owner controls (proven discriminating), policy decisions, wake
       metadata, prompt attribution, existing suites updated
-- [ ] Backlog task: drop the frozen old tables later (separately approved)
-- [ ] Docs: architecture/collaboration docs that describe comment storage
+- [x] Backlog task: drop the frozen old tables later (separately approved)
+- [x] Docs: architecture/collaboration docs that describe comment storage
 - [ ] Staging: pre-existing comment data inventory before deploy, verify after deploy
 
 ## Acceptance criteria
@@ -93,6 +93,26 @@ Readers moved: `archive-sharding.ts` fence + digest, `project-comment-inbox.ts`,
   project-wide inbox and by-id hydration of ids it ranked)
 - Send-to-agent permissions are exactly as before
 - All files under 500 lines
+
+## Staging baseline (captured before deploying the branch, current staging build)
+
+Inventory via `GET /api/projects/:id/comments` as the primary smoke user (`.tmp/staging/baseline/`):
+
+| Project | Message threads | File threads | Replies | Notes |
+| --- | --- | --- | --- | --- |
+| `01KJNR9R3TEN3KX1ETE33852R8` Test Project 1 | 35 (15 sessions) | 0 | 10 | 14 sent (mostly by teammate dfv31 via shared access), 13 with mentions, quotes, resolved + open |
+| `01KTKXZ4ZZAT6MJFXRW1ZTQ7RB` hono | 20 (3 sessions) | 4 (file `01KWMJ2QMRVV57SRK6P9C0343M`, 2 quoted) | 10 | open/sent/resolved |
+| `01KWHD8XS7MQ7R6KWXJYRHDVH4` Potato | 3 | 0 | 2 | resolved, quoted |
+| `01KJVGMWX26SGQ5DX94GMTJRQN` Test Project 2 | 0 | 1 | 1 | resolved file thread |
+
+## Implementation notes
+
+- Scope proof: replacing `ANCHOR_SCOPE_PREDICATE` with a version without `scope_key` reddened 10
+  cross-session/cross-file tests; without `anchor_kind` reddened exactly the 2 cross-kind tests.
+- `quality:ast-checks` learns `ANCHOR_SCOPE_PREDICATE` (2 binds) and `THREAD_SELECT_COLUMNS` (0) as
+  frozen fragments, like the existing wake/link fragments.
+- The Send-to-agent directive moved to `services/message-comment-directive.ts` (message-comments.ts
+  was already over 500 lines).
 
 ## Rollback
 

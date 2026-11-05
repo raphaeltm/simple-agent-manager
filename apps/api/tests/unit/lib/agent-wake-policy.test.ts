@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 
+import { SESSION_WRITER_PROMPT_SOURCES } from '../../../src/durable-objects/project-data/session-access-store';
 import {
   agentWakeRecord,
   decideAgentWake,
   DEFAULT_AGENT_WAKE_POLICY_MODE,
   HUMAN_AGENT_WAKE_TRIGGERS,
 } from '../../../src/lib/agent-wake-policy';
-import { SESSION_WRITER_PROMPT_SOURCES } from '../../../src/durable-objects/project-data/session-access-store';
 
 const base = { sessionId: 'session-1', trigger: 'comment_directive' as const };
 
@@ -55,7 +55,10 @@ describe('agent wake policy (trusted_project)', () => {
   it.each([
     ['a project member with no grant', { role: 'none', ownerUserId: 'owner-1', grantId: null }],
     ['a grantee whose grant is gone', { role: 'grantee', ownerUserId: 'owner-1', grantId: null }],
-    ['anyone on a session with no recorded owner', { role: 'owner', ownerUserId: null, grantId: null }],
+    [
+      'anyone on a session with no recorded owner',
+      { role: 'owner', ownerUserId: null, grantId: null },
+    ],
   ] as const)('refuses %s', (_label, access) => {
     expect(
       decideAgentWake({ ...base, trigger: 'user_followup', actorUserId: 'member-1', access })

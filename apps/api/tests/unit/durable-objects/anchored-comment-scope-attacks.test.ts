@@ -58,7 +58,11 @@ describe('anchored comment scope isolation', () => {
       ['session-a', 'message-a'],
       ['session-b', 'message-b'],
     ]) {
-      sql.exec('INSERT INTO chat_sessions (id, topic, started_at) VALUES (?, ?, 1)', session, session);
+      sql.exec(
+        'INSERT INTO chat_sessions (id, topic, started_at) VALUES (?, ?, 1)',
+        session,
+        session
+      );
       sql.exec(
         `INSERT INTO chat_messages (id, session_id, role, content, tool_metadata, created_at, sequence)
          VALUES (?, ?, 'assistant', 'hi', NULL, 1, 1)`,
