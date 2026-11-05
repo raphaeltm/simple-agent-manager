@@ -130,7 +130,7 @@ export async function replaceUserGcpCredential(
       ccConfigurationId,
       userId,
       ccCredentialId,
-      JSON.stringify({ managedBy: 'legacy-gcp-credential' }),
+      JSON.stringify({ managedBy: 'legacy-gcp-credential', legacyCredentialId: legacyId }),
       now,
       now,
     ),

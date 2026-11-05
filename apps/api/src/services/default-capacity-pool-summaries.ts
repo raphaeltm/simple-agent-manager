@@ -21,6 +21,7 @@ import {
   toCapacityPoolCandidate,
   toCapacitySourceIdentity,
 } from './capacity-pools';
+import { composableAttachmentReference } from './default-capacity-pool-helpers';
 import {
   ACTIVE_STATUS,
   DISABLED_STATUS,
@@ -35,6 +36,7 @@ import {
   type ReadDefaultPoolSummaryOptions,
   type ScopeIdentity,
 } from './default-capacity-pool-types';
+import { listManagedGcpCredentialMirrors } from './gcp-credential-mirrors';
 
 export function toSafeEffectiveCapacityPoolSummary(
   summary: CapacityPoolSummary | null
@@ -243,7 +245,7 @@ export async function reconcileDefaultPoolStatus(
         SELECT 1 FROM capacity_sources current_source
         WHERE current_source.id = json_extract(expected.value, '$.id')
           AND current_source.source_generation = json_extract(expected.value, '$.generation')
-          AND current_source.status = 'active'
+          AND current_source.status = COALESCE(json_extract(expected.value, '$.status'), 'active')
       )
     )`);
   }
@@ -356,11 +358,42 @@ export async function readDefaultPoolSummary(
       asc(schema.capacityPoolCandidates.id)
     );
 
+  const retiredMirrors = new Set<string>();
+  if (
+    scope.scope === 'user' &&
+    scope.ownerUserId &&
+    options.includeDisabled &&
+    rows.some(
+      (row) =>
+        row.source.provider === 'gcp' &&
+        row.source.status === DISABLED_STATUS &&
+        row.source.externalSourceRef
+    )
+  ) {
+    for (const mirror of await listManagedGcpCredentialMirrors(db, scope.ownerUserId)) {
+      if (
+        rows.some(
+          (row) =>
+            row.source.status === ACTIVE_STATUS &&
+            row.source.credentialId === mirror.legacyId &&
+            !row.source.externalSourceRef
+        )
+      ) {
+        retiredMirrors.add(composableAttachmentReference(mirror.attachmentId));
+      }
+    }
+  }
   const sourcesById = new Map<string, CapacitySourceIdentity>();
   const candidates: CapacityPoolCandidateDto[] = [];
   let activeCandidateCount = 0;
   let availableCandidateCount = 0;
   for (const row of rows) {
+    if (
+      row.source.status === DISABLED_STATUS &&
+      row.source.externalSourceRef &&
+      retiredMirrors.has(row.source.externalSourceRef)
+    )
+      continue;
     sourcesById.set(row.source.id, toCapacitySourceIdentity(row.source));
     const candidate = toCapacityPoolCandidate(row.candidate);
     // Counts describe the user-visible offering set, never the role-expanded row set.
