@@ -30,6 +30,25 @@ function nullableEqual(left: string | null, right: string | null): boolean {
   return left === right;
 }
 
+/**
+ * The workspace's chat binding still allows deleting the identity that was queued.
+ * A wake releases the source's binding (`reactivateSleepingTask`) while its deletion is
+ * queued or claimed, and that release is authorized: the closure then skips the chat,
+ * because it reads the row's current (NULL) binding, so the successor is never touched.
+ * Directional on purpose: a different chat, or a binding appearing on a workspace queued
+ * unbound, still fences. SQL twin: `CHAT_BINDING_RELEASE_TOLERANT_SQL`.
+ */
+export function chatBindingAllowsDeletion(
+  currentChatSessionId: string | null,
+  expectedChatSessionId: string | null
+): boolean {
+  return currentChatSessionId === expectedChatSessionId || currentChatSessionId === null;
+}
+
+/** `chat_session_id` predicate for deletion writes; bind the queued (expected) chat once. */
+export const CHAT_BINDING_RELEASE_TOLERANT_SQL =
+  '(chat_session_id IS ? OR chat_session_id IS NULL)';
+
 export function sameOwnership(
   current: WorkspaceDeletionIdentity,
   expected: WorkspaceDeletionIdentity
@@ -39,7 +58,7 @@ export function sameOwnership(
     (current.workspaceGeneration ?? null) === (expected.workspaceGeneration ?? null) &&
     current.userId === expected.userId &&
     nullableEqual(current.projectId, expected.projectId) &&
-    nullableEqual(current.chatSessionId, expected.chatSessionId) &&
+    chatBindingAllowsDeletion(current.chatSessionId, expected.chatSessionId) &&
     nullableEqual(current.nodeId, expected.nodeId) &&
     nullableEqual(current.nodeUserId, expected.nodeUserId) &&
     nullableEqual(current.nodeRuntime, expected.nodeRuntime) &&
@@ -57,7 +76,7 @@ export function sameOwnershipExceptTerminalNode(
     (current.workspaceGeneration ?? null) === (expected.workspaceGeneration ?? null) &&
     current.userId === expected.userId &&
     nullableEqual(current.projectId, expected.projectId) &&
-    nullableEqual(current.chatSessionId, expected.chatSessionId) &&
+    chatBindingAllowsDeletion(current.chatSessionId, expected.chatSessionId) &&
     (current.nodeId === null ||
       (nullableEqual(current.nodeId, expected.nodeId) &&
         nullableEqual(current.nodeUserId, expected.nodeUserId) &&

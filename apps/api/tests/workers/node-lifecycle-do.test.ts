@@ -1339,6 +1339,79 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     );
   });
 
+  // Production 2026-11-05 (workspace 01M6MK1T8EQA8QNS3HMRRSN753): the deletion was queued while
+  // the workspace still held its chat, then a wake released that binding. Every queued and
+  // claimed identity compared chat_session_id exactly, so the next attempt was dead-lettered
+  // ("identity or status changed") and the workspace stayed `stopping` with no proof.
+  describe('a queued deletion whose chat binding a wake released after enqueue', () => {
+    async function queuedThenDetached(label: string, rebindTo: string | null) {
+      const nodeId = `nl-detach-${label}`;
+      const wsId = `ws-detach-${label}`;
+      await seedTestNode(nodeId);
+      await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'sleeping' });
+      const stub = getStub(nodeId);
+      await pauseNodeAlarms(nodeId);
+      // Queued from the bound row, as the sleep path does.
+      expect(await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID)).toBe(true);
+      // The wake's binding release (and the wake claim that explains it).
+      await env.DATABASE.prepare(
+        `UPDATE session_snapshots SET recovery_status = 'waking', recovery_task_id = 'wake-task',
+           recovery_attempt_id = 'wake-1' WHERE workspace_id = ?`
+      )
+        .bind(wsId)
+        .run();
+      await env.DATABASE.prepare('UPDATE workspaces SET chat_session_id = ? WHERE id = ?')
+        .bind(rebindTo, wsId)
+        .run();
+      await runInDurableObject(stub, async (instance) => {
+        const pending = await instance.ctx.storage.get<PendingWorkspaceDeletion>(
+          `ws-delete:${wsId}`
+        );
+        await putIndexedWorkspaceDeletion(instance.ctx.storage, {
+          ...pending!,
+          deleteAt: Date.now() - 1,
+        });
+        await instance.alarm();
+      });
+      return { stub, wsId };
+    }
+    const row = (wsId: string) =>
+      env.DATABASE.prepare('SELECT status, runtime_deletion_proof FROM workspaces WHERE id = ?')
+        .bind(wsId)
+        .first();
+
+    it('completes the deletion with VM proof instead of quarantining it', async () => {
+      const fetchMock = vi.fn(async () => deletionResponse('ws-detach-released'));
+      vi.stubGlobal('fetch', fetchMock);
+      const { stub, wsId } = await queuedThenDetached('released', null);
+      await vi.waitFor(async () => {
+        expect(await row(wsId)).toEqual({
+          status: 'deleted',
+          runtime_deletion_proof: 'vm_agent_confirmed',
+        });
+        expect(await stub.getWorkspaceDeletionAttemptState(wsId)).toEqual({
+          pending: false,
+          attemptStarted: false,
+        });
+      });
+      expect(fetchMock).toHaveBeenCalledOnce();
+    });
+
+    it('still fences a workspace rebound to a different chat (control)', async () => {
+      const fetchMock = vi.fn(async () => deletionResponse('ws-detach-rebound'));
+      vi.stubGlobal('fetch', fetchMock);
+      const { stub, wsId } = await queuedThenDetached('rebound', 'another-chat');
+      await vi.waitFor(async () => {
+        const entry = await runInDurableObject(stub, async (instance) =>
+          instance.ctx.storage.get<PendingWorkspaceDeletion>(`ws-delete:${wsId}`)
+        );
+        expect(entry?.deadLetteredAt).toEqual(expect.any(Number));
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(await row(wsId)).toMatchObject({ runtime_deletion_proof: null });
+    });
+  });
+
   it('does not schedule physical cleanup for unpreserved or expired source data', async () => {
     const nodeId = 'nl-protected-no-snapshot';
     const wsId = 'ws-protected-no-snapshot';

@@ -3,8 +3,13 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { verifySessionSnapshotArtifactsForSleep } from './session-snapshot-artifacts';
 import type { WorkspaceDeletionIdentity } from './workspace-deletion';
+import {
+  preservationReceiptExpiresAt,
+  preservationReceiptStatement,
+} from './workspace-preservation-receipt';
 
 /**
  * Snapshot recovery states in which a wake still holds the snapshot's claim. A wake releases the
@@ -63,6 +68,10 @@ export async function automaticDeletionPreservationExpiresAt(
     expected.nodeUserId !== expected.userId
   )
     return null;
+  // The source's own receipt survives the replacement rewriting the per-chat snapshot
+  // row. Rows preserved before receipts existed fall through to the snapshot-row path.
+  const receiptExpiresAt = await preservationReceiptExpiresAt(env, expected);
+  if (receiptExpiresAt) return receiptExpiresAt;
   const snapshot = await findPreservationSnapshot(env, expected);
   if (
     !snapshot ||
@@ -74,7 +83,13 @@ export async function automaticDeletionPreservationExpiresAt(
     Date.parse(snapshot.expiresAt) <= Date.now()
   )
     return null;
+  // The eviction callback also marks the snapshot sleeping, but an evicted source anchors
+  // its wake until a replacement restores it (see `preservationReceiptExpiresAt`).
+  // `eviction_recovery_workspace_id` is written once at eviction and never cleared; workspace
+  // ids are never reused, so it names only the evicted source.
+  const evictionSource = snapshot.evictionRecoveryWorkspaceId === expected.workspaceId;
   const completedSleep =
+    !evictionSource &&
     snapshot.sleepStatus === 'sleeping' &&
     (Boolean(snapshot.sleepingAt) || purpose === 'vm_retirement');
   if (!completedSleep) {
@@ -103,6 +118,9 @@ export async function automaticDeletionPreservationExpiresAt(
       !['running', 'recovery', 'sleeping'].includes(target.status)
     )
       return null;
+    // An evicted source anchors its wake until that wake commits: the eviction fence and the
+    // failed-wake retry both require it.
+    if (evictionSource && !(await evictionWakeCommitted(env, snapshot))) return null;
   }
   let identity: Record<string, unknown>;
   try {
@@ -126,7 +144,55 @@ export async function automaticDeletionPreservationExpiresAt(
     Date.parse(snapshot.expiresAt) <= Date.now()
   )
     return null;
+  // Backfill the durable receipt while the row still names this workspace: covers rows
+  // preserved before receipts existed and a receipt write lost after a sleep finalized.
+  await preservationReceiptStatement(env.DATABASE, {
+    chatSessionId: snapshot.chatSessionId,
+    reason:
+      snapshot.evictionRecoveryWorkspaceId === expected.workspaceId ? 'quiesced_eviction' : 'sleep',
+    nowIso: new Date().toISOString(),
+  })
+    .run()
+    .catch((error: unknown) => {
+      log.warn('workspace_deletion.preservation_receipt_backfill_failed', {
+        workspaceId: expected.workspaceId,
+        chatSessionId: snapshot.chatSessionId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
   return snapshot.expiresAt;
+}
+
+/**
+ * The wake that restored the snapshot row `alias` brought back its files and committed. The
+ * VM agent reports `restore_status = 'restored'` only for a complete restore (any HOME, WIP or
+ * git failure reports `degraded`), and the commit (`transitionToInProgress`) starts the
+ * recovery task after the restore, so a start before it belongs to an earlier run of that
+ * task. Shared with the stale-workspace sweep.
+ */
+export function evictionWakeCommittedSql(alias: string): string {
+  return `(${alias}.restore_status = 'restored' AND EXISTS (SELECT 1 FROM tasks t
+    WHERE t.id = ${alias}.recovery_task_id
+      AND ${alias}.restored_at IS NOT NULL AND t.started_at >= ${alias}.restored_at))`;
+}
+
+/** The same check for a loaded snapshot row (`evictionWakeCommittedSql`). */
+async function evictionWakeCommitted(
+  env: Env,
+  snapshot: {
+    recoveryTaskId: string | null;
+    restoredAt: string | null;
+    restoreStatus: string | null;
+  }
+): Promise<boolean> {
+  if (!snapshot.recoveryTaskId || !snapshot.restoredAt || snapshot.restoreStatus !== 'restored')
+    return false;
+  const task = await drizzle(env.DATABASE, { schema })
+    .select({ startedAt: schema.tasks.startedAt })
+    .from(schema.tasks)
+    .where(eq(schema.tasks.id, snapshot.recoveryTaskId))
+    .get();
+  return Boolean(task?.startedAt && task.startedAt >= snapshot.restoredAt);
 }
 
 export async function automaticDeletionPreservationAvailable(

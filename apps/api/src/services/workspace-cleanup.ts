@@ -17,6 +17,7 @@ import {
   type WorkspaceDeletionOutcome,
   type WorkspaceDeletionSnapshot,
 } from './workspace-deletion';
+import { chatBindingAllowsDeletion } from './workspace-deletion-identity';
 import { automaticDeletionPreservationAvailable } from './workspace-deletion-preservation';
 import { deleteWorkspaceResourceHistoryObjectsForWorkspace } from './workspace-resource-history';
 
@@ -72,7 +73,8 @@ function deletionSnapshotMatchesRequest(
     (expected.workspaceGeneration ?? null) === (workspace.evictionGeneration ?? null) &&
     expected.nodeId === workspace.nodeId &&
     expected.projectId === workspace.projectId &&
-    expected.chatSessionId === workspace.chatSessionId
+    // `expected` is the fresh row; `workspace` may predate a wake releasing the binding.
+    chatBindingAllowsDeletion(expected.chatSessionId, workspace.chatSessionId)
   );
 }
 

@@ -87,6 +87,11 @@ func (s *Server) startWorkspaceDeletionReconciler() {
 			ctx, cancel := context.WithTimeout(lifetime, interval)
 			s.reconcileWorkspaceDeletions(ctx)
 			s.inventoryWorkspaceCleanup(ctx)
+			if s.config.Role == config.RoleWorkspace && !s.config.IsStandaloneMode() {
+				if err := s.reapStaleSnapshotHelpers(ctx, time.Now()); err != nil {
+					slog.Warn("Stale snapshot helper reap failed", "error", err)
+				}
+			}
 			retention := s.config.WorkspaceDeletionTombstoneRetention
 			if retention <= 0 {
 				retention = config.DefaultWorkspaceDeletionTombstoneRetention

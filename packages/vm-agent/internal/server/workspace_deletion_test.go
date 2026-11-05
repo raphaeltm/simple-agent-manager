@@ -54,15 +54,28 @@ func newDeletionFixture(t *testing.T) deletionFixture {
 	if err := os.Mkdir(filepath.Join(state, "volume-data"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	// Snapshot-helper reaping is logged separately so command counts stay about the
+	// workspace's own artifacts. A leaked helper (state file "helper") pins the volume.
 	fake := `#!/bin/sh
 set -eu
+case "$*" in
+ *sam.snapshot-helper.workspace=workspace-1*|'rm --force --volumes helper-1'|'image rm --force helper-image-1')
+  printf '%s\n' "$*" >> "$SAM_DELETE_TEST_STATE/helper-commands"
+  case "$1 $2" in
+   'ps -aq') if test -f "$SAM_DELETE_TEST_STATE/helper"; then printf '%s\n' helper-1; fi ;;
+   'image ls') if test -f "$SAM_DELETE_TEST_STATE/helper-image"; then printf '%s\n' helper-image-1; fi ;;
+   'rm --force') rm -f "$SAM_DELETE_TEST_STATE/helper" ;;
+   'image rm') rm -f "$SAM_DELETE_TEST_STATE/helper-image" ;;
+  esac
+  exit 0 ;;
+esac
 printf '%s\n' "$*" >> "$SAM_DELETE_TEST_STATE/commands"
 case "$1 $2" in
  'ps -aq') if test -n "${SAM_DELETE_TEST_PS_GATE:-}"; then while ! test -f "$SAM_DELETE_TEST_PS_GATE"; do sleep 0.02; done; fi; if test -f "$SAM_DELETE_TEST_STATE/container"; then printf '%s\n' "${SAM_DELETE_TEST_CONTAINER:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}"; fi ;;
  'rm -f') rm -f "$SAM_DELETE_TEST_STATE/container" ;;
  'volume ls') printf '%s\n' user-nested-volume; if test -f "$SAM_DELETE_TEST_STATE/volume"; then printf '%s\n' sam-ws-workspace-1; fi ;;
  'volume inspect') printf '%s\n' "sam-ws-workspace-1|created-1|$SAM_DELETE_TEST_STATE/volume-data|workspace-1|node-1|incarnation-1|${SAM_DELETE_TEST_OWNER:-user-1}" ;;
- 'volume rm') if test -f "$SAM_DELETE_TEST_STATE/fail-volume"; then if test -f "$SAM_DELETE_TEST_STATE/fail-volume-once"; then rm -f "$SAM_DELETE_TEST_STATE/fail-volume" "$SAM_DELETE_TEST_STATE/fail-volume-once"; fi; echo busy >&2; exit 1; fi; rm -f "$SAM_DELETE_TEST_STATE/volume" ;;
+ 'volume rm') if test -f "$SAM_DELETE_TEST_STATE/helper"; then echo "volume is in use by helper-1" >&2; exit 1; fi; if test -f "$SAM_DELETE_TEST_STATE/fail-volume"; then if test -f "$SAM_DELETE_TEST_STATE/fail-volume-once"; then rm -f "$SAM_DELETE_TEST_STATE/fail-volume" "$SAM_DELETE_TEST_STATE/fail-volume-once"; fi; echo busy >&2; exit 1; fi; rm -f "$SAM_DELETE_TEST_STATE/volume" ;;
  *) echo unexpected >&2; exit 1 ;;
 esac
 `

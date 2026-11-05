@@ -913,6 +913,10 @@ Generated deployments validate and pass these values through cloud-init to newly
 - `DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS` — Grace period passed to `docker stop --time` during eviction, in seconds (default: 10)
 - `DEFAULT_EVICTION_CALLBACK_RETRY_MAX_SECONDS` — Durable callback backoff cap, in seconds (default: 300). Retry eligibility also respects the complete operation lease (default: 60 seconds), which can exceed the cap; delivery is heartbeat-paced
 - `DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS` — Deadline for resolving a pressured Docker container to a workspace before eviction, in seconds (default: 5)
+- `EVICTION_FINAL_SNAPSHOT_TIMEOUT_SECONDS` — VM-agent deadline for the post-stop final eviction capture (default `300`); on timeout the pre-stop capture is kept
+- `SNAPSHOT_HELPER_MEMORY_LIMIT` — `docker --memory` for a stopped-workspace snapshot helper (default `1g`)
+- `SNAPSHOT_HELPER_PIDS_LIMIT` — `docker --pids-limit` for a stopped-workspace snapshot helper (default `256`)
+- `SNAPSHOT_HELPER_MIN_FREE_BYTES` — free space kept on the Docker root after committing a source's writable layer (default `1073741824`)
 
 ### Repeated agent check-ins
 

@@ -267,6 +267,11 @@ func (s *Server) applyWorkspaceDeletion(ctx context.Context, d *workspaceDeletio
 	s.shutdownReporter(d.WorkspaceID)
 	s.stopResourceHistoryForWorkspace(d.WorkspaceID, ctx)
 	if !d.Standalone {
+		// A snapshot helper left by a crashed capture mounts this workspace's volume with
+		// --volumes-from, which would make the volume removal below fail on every retry.
+		if err := s.reapSnapshotHelpers(ctx, d.WorkspaceID); err != nil {
+			return err
+		}
 		ids, err := deletionDocker(ctx, "ps", "-aq", "--no-trunc", "--filter", "label="+s.config.ContainerLabelKey+"="+d.Root)
 		if err != nil {
 			return err

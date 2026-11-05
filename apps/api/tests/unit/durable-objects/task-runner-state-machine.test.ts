@@ -1,9 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import {
-  failTask,
-  transitionToInProgress,
-} from '../../../src/durable-objects/task-runner/state-machine';
+import { transitionToInProgress } from '../../../src/durable-objects/task-runner/in-progress-transition';
+import { failTask } from '../../../src/durable-objects/task-runner/state-machine';
 import type {
   TaskRunnerContext,
   TaskRunnerState,
@@ -143,6 +141,10 @@ function createD1Database(
   options: { onFailureStatusRead?: (task: TaskRow) => void } = {}
 ) {
   return {
+    // A wake's commit runs with its receipt stamp as one transaction (`transitionToInProgress`).
+    batch: vi.fn(async (statements: Array<{ run: () => Promise<unknown> }>) =>
+      Promise.all(statements.map((statement) => statement.run()))
+    ),
     prepare: vi.fn((sql: string) => ({
       bind: (...params: unknown[]) => ({
         first: async () => {

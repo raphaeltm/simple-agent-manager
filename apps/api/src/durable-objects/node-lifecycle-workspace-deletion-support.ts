@@ -11,6 +11,7 @@ import type {
   WorkspaceDeletionIdentity,
   WorkspaceDeletionMode,
 } from '../services/workspace-deletion';
+import { CHAT_BINDING_RELEASE_TOLERANT_SQL } from '../services/workspace-deletion-identity';
 
 export type NodeLifecycleDeletionEnv = {
   DATABASE: D1Database;
@@ -106,7 +107,7 @@ export async function claimWorkspaceDeletionInD1(
       WHERE id = ?
         AND user_id = ?
         AND project_id IS ?
-        AND chat_session_id IS ?
+        AND ${CHAT_BINDING_RELEASE_TOLERANT_SQL}
         AND node_id IS ?
         AND eviction_generation IS ?
         AND (

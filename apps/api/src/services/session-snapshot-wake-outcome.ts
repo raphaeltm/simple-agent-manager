@@ -48,6 +48,32 @@ export async function completeSessionSnapshotRecovery(
   recoverySourceTaskId?: string | null,
   recoveryAttemptId?: string
 ): Promise<boolean> {
+  return (
+    (await completeSessionSnapshotRecoveryGeneration(
+      db,
+      chatSessionId,
+      taskId,
+      workspaceId,
+      recoverySourceTaskId,
+      recoveryAttemptId
+    )) !== null
+  );
+}
+
+/**
+ * As `completeSessionSnapshotRecovery`, returning the generation this restore committed
+ * (`snapshotGeneration` may be null for rows captured before generations existed), or null
+ * when the completion was refused. A successor capture later replaces the row's live
+ * generation, so callers that must name exactly what was restored keep this value.
+ */
+export async function completeSessionSnapshotRecoveryGeneration(
+  db: Db,
+  chatSessionId: string,
+  taskId: string,
+  workspaceId: string,
+  recoverySourceTaskId?: string | null,
+  recoveryAttemptId?: string
+): Promise<{ snapshotGeneration: string | null } | null> {
   const recoveryTask = alias(schema.tasks, 'snapshot_recovery_task');
   const recoverySourceTask = alias(schema.tasks, 'snapshot_recovery_source_task');
   const liveSourceCondition = recoverySourceTaskId
@@ -107,7 +133,11 @@ export async function completeSessionSnapshotRecovery(
       sleepingAt: null,
       recoveryAttempts: 0,
       recoveryFailedAt: null,
-      restoredAt: new Date().toISOString(),
+      // Set when the claim turns into a restore, never on a retry: the wake's commit starts
+      // its task after this, and a later rewrite would read as an uncommitted restore
+      // (`evictionWakeCommittedSql`).
+      restoredAt: sql`CASE WHEN ${schema.sessionSnapshots.recoveryStatus} = 'restored'
+        THEN ${schema.sessionSnapshots.restoredAt} ELSE ${new Date().toISOString()} END`,
       updatedAt: new Date().toISOString(),
     })
     .where(
@@ -120,8 +150,9 @@ export async function completeSessionSnapshotRecovery(
         inArray(schema.sessionSnapshots.recoveryStatus, ['waking', 'restored']),
         liveSourceCondition
       )
-    );
-  return (result.meta.changes ?? 0) > 0;
+    )
+    .returning({ snapshotGeneration: schema.sessionSnapshots.snapshotGeneration });
+  return result[0] ?? null;
 }
 
 /** Record the in-place Cloudflare Container wake after its DO restored the runtime. */

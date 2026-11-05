@@ -519,7 +519,7 @@ func TestSnapshotSkippedEntriesBudgetFallsBackToDefaultLimit(t *testing.T) {
 
 func completionRequestSize(t *testing.T, manifest snapshotManifest) int {
 	t.Helper()
-	encoded, err := json.Marshal(snapshotCompletionPayload("agent-1", "chat-1", "vm", "01GENERATION", manifest))
+	encoded, err := json.Marshal(snapshotCompletionPayload("agent-1", "chat-1", "vm", "01GENERATION", manifest, false))
 	if err != nil {
 		t.Fatal(err)
 	}

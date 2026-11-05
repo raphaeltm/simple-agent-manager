@@ -34,7 +34,11 @@ import {
 import { repairRetiredVmSleepSnapshots } from '../../services/retired-vm-sleep-repair';
 import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
 import { claimNodeForCleanup, releaseNodeCleanupClaim } from './cleanup-claim';
-import { diagnoseCleanupRefusal, recordCleanupRefusal } from './cleanup-refusal';
+import {
+  diagnoseCleanupRefusal,
+  handOffArtifactBlockedEmptyNode,
+  recordCleanupRefusal,
+} from './cleanup-refusal';
 export { claimNodeForCleanup, sleepingContainerRetentionGuardSql } from './cleanup-claim';
 import type { CleanupConfig } from './config';
 
@@ -353,7 +357,7 @@ export async function destroyNodeForCleanup(
         requireWorkspaceIdle: options.requireWorkspaceIdle,
       }
     );
-    if (refusal)
+    if (refusal) {
       await recordCleanupRefusal(
         env,
         node,
@@ -363,6 +367,8 @@ export async function destroyNodeForCleanup(
         options.blockedRetirementMs,
         options.refusalWarnAfterMs
       );
+      await handOffArtifactBlockedEmptyNode(env, node, refusal);
+    }
     await recordSweepDecision(
       env,
       node,

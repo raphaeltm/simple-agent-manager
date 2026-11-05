@@ -26,6 +26,7 @@ import {
   sleepLifecycleOwnsTerminalTaskWorkspaceSql,
 } from '../../services/sleep-preserved-task-status';
 import { loadWorkspaceDeletionIdentity } from '../../services/workspace-deletion';
+import { evictionWakeCommittedSql } from '../../services/workspace-deletion-preservation';
 import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
 import type { CleanupConfig, CleanupDb, NodeCleanupResult } from './shared';
 
@@ -159,6 +160,20 @@ export async function sweepOrphanedWorkspaces(
 }
 
 /**
+ * The source's receipt records a committed restore of its generation, and still names this
+ * workspace's runtime. Only such a receipt grants deletion
+ * (`preservationReceiptExpiresAt`), so a stale or mismatched one is never selected to be
+ * refused, which would hold the head of this page.
+ */
+const RECEIPT_RESTORED_SQL = `(CASE WHEN json_valid(w.preservation_receipt_json)
+    THEN json_extract(w.preservation_receipt_json, '$.restoredAt') END IS NOT NULL
+  AND json_extract(w.preservation_receipt_json, '$.workspaceId') = w.id
+  AND json_extract(w.preservation_receipt_json, '$.nodeId') IS w.node_id
+  AND json_extract(w.preservation_receipt_json, '$.userId') = w.user_id
+  AND json_extract(w.preservation_receipt_json, '$.workspaceGeneration')
+    = COALESCE(w.eviction_generation, ''))`;
+
+/**
  * Phase 6 — safety net for stopped workspaces the DO alarm never deleted.
  */
 export async function sweepStaleStoppedWorkspaces(
@@ -176,12 +191,24 @@ export async function sweepStaleStoppedWorkspaces(
      FROM workspaces w
      LEFT JOIN nodes n ON n.id = w.node_id
      WHERE w.status IN ('stopped', 'sleeping', 'stopping', 'evicted')
-       AND EXISTS (
+       AND (EXISTS (
          SELECT 1 FROM session_snapshots s
          WHERE s.workspace_id = w.id AND s.node_id = w.node_id AND s.user_id = w.user_id
            AND CASE WHEN json_valid(s.cleanup_identity_json)
              THEN json_extract(s.cleanup_identity_json, '$.preserved') ELSE NULL END = 1
-       )
+       ) OR ${RECEIPT_RESTORED_SQL})
+       -- The receipt outlives the snapshot row's pointer at this workspace, but grants only
+       -- once a committed wake restored its generation; the queue re-verifies it
+       -- (workspace-preservation-receipt.ts) before any deletion.
+       -- An evicted source anchors its wake until that wake commits; the queue refuses it
+       -- before then, so selecting it would only pin the head of this page.
+       AND (w.status != 'evicted'
+         OR ${RECEIPT_RESTORED_SQL}
+         OR EXISTS (
+           SELECT 1 FROM session_snapshots r
+           WHERE r.workspace_id = w.id AND r.recovery_status = 'restored'
+             AND ${evictionWakeCommittedSql('r')}
+         ))
        AND (n.id IS NULL OR n.node_class != 'user-owned')
        AND w.updated_at < ?
      ORDER BY w.updated_at ASC

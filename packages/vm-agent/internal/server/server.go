@@ -79,6 +79,7 @@ type Server struct {
 	buildQueue             chan struct{}
 	readyRetryMu           sync.Mutex // guards retryPendingReadyCallbacks — only one run at a time
 	evictionDeliveryMu     sync.Mutex // One bounded eviction callback delivery at a time.
+	evictionFinalizing     sync.Map   // Workspaces between the eviction stop intent and the recorded eviction.
 	eventMu                sync.RWMutex
 	nodeEvents             []EventRecord
 	workspaceEvents        map[string][]EventRecord
@@ -1049,9 +1050,18 @@ func (s *Server) startResourceGuard() {
 		return
 	}
 	if s.resourceEviction != nil {
-		if err := s.resourceEviction.Start(context.Background()); err != nil {
-			slog.Warn("Resource eviction controller failed to start", "error", err)
-		}
+		// Reap helpers a crashed agent left behind before any new capture can create
+		// one: the reaper removes every helper, so it must not race a live capture.
+		go func() {
+			reapCtx, cancel := context.WithTimeout(context.Background(), s.config.EvictionSnapshotTimeout)
+			if err := s.reapSnapshotHelpers(reapCtx, ""); err != nil {
+				slog.Warn("Startup snapshot helper reap failed; workspace deletion reaps per workspace", "error", err)
+			}
+			cancel()
+			if err := s.resourceEviction.Start(context.Background()); err != nil {
+				slog.Warn("Resource eviction controller failed to start", "error", err)
+			}
+		}()
 		return
 	}
 	go func() {

@@ -602,6 +602,7 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/complete', async (c) => {
     manifest,
     artifactSizes,
     artifactSha256,
+    quiesced: body.quiesced === true,
   });
 
   await markVmAgentContainerActiveWorkEndedBestEffort(

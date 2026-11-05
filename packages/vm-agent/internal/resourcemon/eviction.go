@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -51,7 +50,9 @@ type EvictionTarget struct {
 type EvictionResult struct {
 	Target             EvictionTarget
 	SnapshotCaptured   bool
+	SnapshotQuiesced   bool
 	SnapshotError      error
+	FinalSnapshotError error
 	ContainerStopped   bool
 	ContainerStopError error
 	NotifyError        error
@@ -61,13 +62,18 @@ type EvictionResult struct {
 
 // EvictionControllerConfig configures ResourceGuard-triggered workspace eviction.
 type EvictionControllerConfig struct {
-	Source               PressureSource
-	DebounceWindow       time.Duration
-	SnapshotTimeout      time.Duration
-	ResolveTimeout       time.Duration
-	ResolveWorkspace     func(context.Context, ContainerMetric) (WorkspaceContainer, bool)
-	SnapshotWorkspace    func(context.Context, EvictionTarget) error
-	StopContainer        func(context.Context, EvictionTarget) error
+	Source            PressureSource
+	DebounceWindow    time.Duration
+	SnapshotTimeout   time.Duration
+	ResolveTimeout    time.Duration
+	ResolveWorkspace  func(context.Context, ContainerMetric) (WorkspaceContainer, bool)
+	SnapshotWorkspace func(context.Context, EvictionTarget) (EvictionSnapshotOutcome, error)
+	StopContainer     func(context.Context, EvictionTarget) error
+	// FinalSnapshot optionally recaptures the stopped source before the eviction is
+	// recorded. It runs only when the pre-stop capture was not already quiesced; its
+	// failure keeps the pre-stop capture and never blocks the eviction.
+	FinalSnapshot        func(context.Context, EvictionTarget) (EvictionSnapshotOutcome, error)
+	FinalSnapshotTimeout time.Duration
 	MarkWorkspaceEvicted func(EvictionResult) bool
 	NotifyEviction       func(context.Context, EvictionResult) error
 	Clock                func() time.Time
@@ -98,6 +104,9 @@ func (c EvictionControllerConfig) Validate() error {
 	if c.StopContainer == nil {
 		errs = append(errs, errors.New("StopContainer is required"))
 	}
+	if c.FinalSnapshot != nil && c.FinalSnapshotTimeout <= 0 {
+		errs = append(errs, fmt.Errorf("FinalSnapshotTimeout must be > 0 when FinalSnapshot is set, got %s", c.FinalSnapshotTimeout))
+	}
 	if c.MarkWorkspaceEvicted == nil {
 		errs = append(errs, errors.New("MarkWorkspaceEvicted is required"))
 	}
@@ -115,10 +124,13 @@ type EvictionController struct {
 	cfg    EvictionControllerConfig
 	logger *slog.Logger
 
-	startOnce sync.Once
-	closeOnce sync.Once
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
+	// lifecycleMu orders Start against Close: the server starts the controller only after
+	// its startup helper reap, which can finish after shutdown already closed it.
+	lifecycleMu sync.Mutex
+	started     bool
+	closed      bool
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
 
 	evictionMu        sync.Mutex
 	debounceMu        sync.Mutex
@@ -149,23 +161,35 @@ func (c *EvictionController) Start(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	c.startOnce.Do(func() {
-		runCtx, cancel := context.WithCancel(ctx)
-		c.cancel = cancel
-		c.wg.Add(1)
-		go c.loop(runCtx)
-	})
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	if c.started || c.closed {
+		return nil
+	}
+	c.started = true
+	runCtx, cancel := context.WithCancel(ctx)
+	c.cancel = cancel
+	c.wg.Add(1)
+	go c.loop(runCtx)
 	return nil
 }
 
-// Close stops the controller and waits for its event loop to exit.
+// Close stops the controller and waits for its event loop to exit. A Start after Close does
+// nothing.
 func (c *EvictionController) Close() {
-	c.closeOnce.Do(func() {
-		if c.cancel != nil {
-			c.cancel()
-		}
-		c.wg.Wait()
-	})
+	c.lifecycleMu.Lock()
+	if c.closed {
+		c.lifecycleMu.Unlock()
+		c.wg.Wait() // A concurrent Close still returns only once the loop has exited.
+		return
+	}
+	c.closed = true
+	cancel := c.cancel
+	c.lifecycleMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	c.wg.Wait()
 }
 
 func (c *EvictionController) loop(ctx context.Context) {
@@ -327,24 +351,6 @@ func (c *EvictionController) selectTarget(ctx context.Context, event PressureEve
 	return EvictionTarget{}, false
 }
 
-func evictionMetricsForEvent(event PressureEvent, containers []ContainerMetric) []ContainerMetric {
-	metrics := sortedMemoryConsumers(containers)
-	if event.Type == PressureEventContainerOOM {
-		// An exited OOM victim is absent from docker stats. Resolve its immutable
-		// ID directly; Docker labels supplied by the event are only hints.
-		if strings.TrimSpace(event.ContainerID) == "" {
-			return nil
-		}
-		metric := ContainerMetric{ID: event.ContainerID, Name: event.ContainerName}
-		if sampled := metricForEvent(event, metrics); sampled != nil {
-			metric = *sampled
-			metric.ID = event.ContainerID // Never substitute a same-name replacement.
-		}
-		metrics = []ContainerMetric{metric}
-	}
-	return metrics
-}
-
 func (c *EvictionController) resolveWorkspace(ctx context.Context, metric ContainerMetric) (WorkspaceContainer, bool) {
 	if c.cfg.ResolveWorkspace == nil {
 		return WorkspaceContainer{}, false
@@ -389,7 +395,8 @@ func (c *EvictionController) performEviction(ctx context.Context, target Evictio
 	}
 
 	snapshotCtx, cancel := context.WithTimeout(ctx, c.cfg.SnapshotTimeout)
-	if err := c.cfg.SnapshotWorkspace(snapshotCtx, target); err != nil {
+	outcome, err := c.cfg.SnapshotWorkspace(snapshotCtx, target)
+	if err != nil {
 		result.SnapshotError = err
 		cancel()
 		c.logger.Warn("resourcemon: eviction snapshot failed; leaving workspace recoverable",
@@ -402,6 +409,7 @@ func (c *EvictionController) performEviction(ctx context.Context, target Evictio
 		return false // Never acknowledge or deliberately stop work without a restorable snapshot.
 	}
 	result.SnapshotCaptured = true
+	result.SnapshotQuiesced = outcome.Quiesced
 	cancel()
 
 	if ctx.Err() != nil {
@@ -422,22 +430,18 @@ func (c *EvictionController) performEviction(ctx context.Context, target Evictio
 		return false // Leave the workspace eligible for a later pressure retry.
 	}
 	result.ContainerStopped = true
-
-	result.CompletedAt = c.now()
-	if !c.cfg.MarkWorkspaceEvicted(result) {
-		return false // A concurrent lifecycle change superseded this eviction.
+	if c.needsFinalSnapshot(ctx, result) {
+		// The container is stopped and its memory released. The final capture can take
+		// minutes for a large writable layer, so it must not hold the single pressure
+		// loop: another workspace may need evicting meanwhile. Close waits for it.
+		c.wg.Add(1)
+		go func() {
+			defer c.wg.Done()
+			c.finishEviction(ctx, result)
+		}()
+		return true
 	}
-	if err := c.cfg.NotifyEviction(ctx, result); err != nil {
-		result.NotifyError = err
-		c.logger.Warn("resourcemon: eviction callback failed",
-			"workspaceId", target.WorkspaceID,
-			"containerId", target.ContainerID,
-			"containerName", target.ContainerName,
-			"reason", target.Reason,
-			"error", err,
-		)
-	}
-	return true
+	return c.finishEviction(ctx, result)
 }
 
 func (c *EvictionController) now() time.Time {
@@ -455,65 +459,4 @@ func evictionDebounceKey(target EvictionTarget) string {
 		return "workspace:" + workspaceID
 	}
 	return ""
-}
-
-func sortedMemoryConsumers(metrics []ContainerMetric) []ContainerMetric {
-	if len(metrics) == 0 {
-		return nil
-	}
-	out := cloneContainerMetrics(metrics)
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].MemUsageBytes != out[j].MemUsageBytes {
-			return out[i].MemUsageBytes > out[j].MemUsageBytes
-		}
-		if out[i].MemPercent != out[j].MemPercent {
-			return out[i].MemPercent > out[j].MemPercent
-		}
-		return out[i].ID < out[j].ID
-	})
-	return out
-}
-
-func largestMemoryConsumer(metrics []ContainerMetric) *ContainerMetric {
-	sorted := sortedMemoryConsumers(metrics)
-	if len(sorted) == 0 {
-		return nil
-	}
-	return &sorted[0]
-}
-
-func metricForEvent(event PressureEvent, metrics []ContainerMetric) *ContainerMetric {
-	for i := range metrics {
-		metric := metrics[i]
-		if event.ContainerID != "" && containerIDMatches(event.ContainerID, metric.ID) {
-			return &metric
-		}
-		if event.ContainerName != "" && containerNameMatches(event.ContainerName, metric.Name) {
-			return &metric
-		}
-	}
-	return nil
-}
-
-func cloneMetricPointer(metric *ContainerMetric) *ContainerMetric {
-	if metric == nil {
-		return nil
-	}
-	copy := *metric
-	return &copy
-}
-
-func containerIDMatches(a, b string) bool {
-	a = strings.TrimSpace(a)
-	b = strings.TrimSpace(b)
-	if a == "" || b == "" {
-		return false
-	}
-	return a == b || strings.HasPrefix(a, b) || strings.HasPrefix(b, a)
-}
-
-func containerNameMatches(a, b string) bool {
-	a = strings.Trim(strings.TrimSpace(a), "/")
-	b = strings.Trim(strings.TrimSpace(b), "/")
-	return a != "" && b != "" && a == b
 }

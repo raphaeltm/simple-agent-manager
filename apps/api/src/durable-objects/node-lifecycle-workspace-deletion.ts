@@ -11,6 +11,7 @@ import {
   workspaceDeletionIdentityLogContext,
   type WorkspaceDeletionMode,
 } from '../services/workspace-deletion';
+import { chatBindingAllowsDeletion } from '../services/workspace-deletion-identity';
 import { automaticDeletionPreservationAvailable } from '../services/workspace-deletion-preservation';
 import {
   claimedDeletionEntry,
@@ -67,6 +68,7 @@ function isWorkspaceDeletionEligibleStatus(status: string): boolean {
   return WORKSPACE_DELETION_ELIGIBLE_STATUSES.has(status);
 }
 
+/** `left` is the workspace's current identity, `right` the queued or expected one. */
 function sameDeletionIdentity(
   left: WorkspaceDeletionIdentity,
   right: WorkspaceDeletionIdentity
@@ -81,7 +83,7 @@ function sameDeletionIdentity(
     left.nodeRuntimeIncarnationId === right.nodeRuntimeIncarnationId &&
     left.userId === right.userId &&
     left.projectId === right.projectId &&
-    left.chatSessionId === right.chatSessionId
+    chatBindingAllowsDeletion(left.chatSessionId, right.chatSessionId)
   );
 }
 
