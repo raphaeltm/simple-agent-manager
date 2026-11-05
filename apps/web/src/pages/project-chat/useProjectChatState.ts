@@ -28,21 +28,17 @@ import { useTrialStatus } from '../../hooks/useTrialStatus';
 import { useVisibilityAwarePoll } from '../../hooks/useVisibilityAwarePoll';
 import type { ChatSessionResponse } from '../../lib/api';
 import {
-  closeConversationTask,
   getProjectTask,
   getTranscribeApiUrl,
   listChatSessions,
   listProjectTasks,
-  sleepChatSession,
   startInstantChatSession,
-  stopChatSession,
   submitTask,
 } from '../../lib/api';
+import { CHAT_SESSION_LIST_LIMIT } from '../../lib/chat-query-config';
 import { getSessionState } from '../../lib/chat-session-utils';
-import {
-  applyMessageCommentRealtimeEventToQueryCache,
-  chatQueryKeys,
-} from '../../lib/query-options';
+import { readInitialSessionList } from '../../lib/project-route-prefetch';
+import { applyMessageCommentRealtimeEventToQueryCache } from '../../lib/query-options';
 import { stripMarkdown } from '../../lib/text-utils';
 import { useProjectContext } from '../ProjectContext';
 import { buildForkMessage } from './profileWizardHelpers';
@@ -53,13 +49,13 @@ import {
 } from './submitRequest';
 import type { ProvisioningState } from './types';
 import {
-  CHAT_SESSION_LIST_LIMIT,
   CHAT_TASK_LIST_LIMIT,
   SESSION_RECONCILE_INTERVAL_MS,
   SESSION_SYNC_INTERVAL_MS,
 } from './types';
 import { DEFAULT_ATTACHMENT_MESSAGE, useAttachments } from './useAttachments';
 import { useComposerPrefill } from './useComposerPrefill';
+import { useConversationActions } from './useConversationActions';
 import { useProfileChoice } from './useProfileChoice';
 import { useProjectSkills } from './useProjectSkills';
 import { useProvisioningTracker } from './useProvisioningTracker';
@@ -95,6 +91,12 @@ export function useProjectChatState() {
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const hasLoadedRef = useRef(false);
+  // A list read has succeeded: only then does an empty list mean "no chats".
+  const [listLoaded, setListLoaded] = useState(false);
+  // The read in flight when the page mounted, for handlers that need the selected session.
+  const initialLoadRef = useRef<Promise<ChatSessionResponse[]>>(Promise.resolve([]));
+  // The first list came from the route prefetch; see the first-socket-open refresh below.
+  const listFromPrefetchRef = useRef(false);
   // Credentials, trial status, provider catalog, agent catalog and agent profiles all
   // come from shared TanStack queries. Before this migration each was fetched by a
   // mount effect local to this hook, duplicating requests that the settings pages,
@@ -233,12 +235,6 @@ export function useProjectChatState() {
 
   const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
 
-  // Conversation lifecycle state
-  const [sleepingConversation, setSleepingConversation] = useState(false);
-  const [sleepError, setSleepError] = useState<string | null>(null);
-  const [closingConversation, setClosingConversation] = useState(false);
-  const [closeError, setCloseError] = useState<string | null>(null);
-
   const { filteredRecent, filteredStale, effectiveShowStale } = useSessionFilters(
     sessions,
     taskInfoMap,
@@ -271,12 +267,18 @@ export function useProjectChatState() {
     if (hasLoadedRef.current) setIsRefreshing(true);
     try {
       const scope = multiplayerActive ? sessionScope : 'all';
-      const sessionResult = await listChatSessions(projectId, {
-        limit: CHAT_SESSION_LIST_LIMIT,
-        scope,
-      });
-      resetSessions(sessionResult.sessions);
+      let sessions: ChatSessionResponse[];
+      if (!hasLoadedRef.current && scope === 'all') {
+        const initial = await readInitialSessionList(queryClient, queryScope, projectId);
+        sessions = initial.sessions;
+        listFromPrefetchRef.current = initial.prefetched;
+      } else {
+        sessions = (await listChatSessions(projectId, { limit: CHAT_SESSION_LIST_LIMIT, scope }))
+          .sessions;
+      }
+      resetSessions(sessions);
       hasLoadedRef.current = true;
+      setListLoaded(true);
 
       listProjectTasks(projectId, { limit: CHAT_TASK_LIST_LIMIT })
         .then((tasksResult) => {
@@ -289,13 +291,21 @@ export function useProjectChatState() {
           /* task titles are cosmetic */
         });
 
-      return sessionResult.sessions;
+      return sessions;
     } catch {
       return [];
     } finally {
       setIsRefreshing(false);
     }
-  }, [projectId, sessionScope, multiplayerActive, resetSessions, replaceTaskInfoMap]);
+  }, [
+    projectId,
+    sessionScope,
+    multiplayerActive,
+    resetSessions,
+    replaceTaskInfoMap,
+    queryClient,
+    queryScope,
+  ]);
 
   const handleSessionEvent = useCallback(
     (raw: RawSessionEvent) => {
@@ -331,8 +341,21 @@ export function useProjectChatState() {
 
   useEffect(() => {
     setLoading(true);
-    void loadSessions().finally(() => setLoading(false));
+    const load = loadSessions();
+    initialLoadRef.current = load;
+    void load.finally(() => setLoading(false));
   }, [loadSessions]);
+
+  /**
+   * The selected session, waiting for the page's first list read when it has not landed.
+   * A deep link shows its conversation before the list arrives, so its actions must not
+   * read "not in the list yet" as "no such session".
+   */
+  const findSession = useCallback(
+    async (id: string) =>
+      sessions.find((s) => s.id === id) ?? (await initialLoadRef.current).find((s) => s.id === id),
+    [sessions]
+  );
 
   // Session-list freshness has two modes, and exactly one is active at a time.
   //
@@ -350,6 +373,13 @@ export function useProjectChatState() {
   // tabs. Reconnect catch-up is handled by `onReconnected` above; disconnect and
   // tab-return catch-up come from the hook's elapsed-gated refresh.
   const wsConnected = connectionState === 'connected';
+  // The route prefetch read the list before this socket subscribed, and the server replays
+  // nothing on subscribe: read it once more when the socket first opens.
+  useEffect(() => {
+    if (!wsConnected || !listLoaded || !listFromPrefetchRef.current) return;
+    listFromPrefetchRef.current = false;
+    void loadSessions();
+  }, [wsConnected, listLoaded, loadSessions]);
   useVisibilityAwarePoll(loadSessions, SESSION_SYNC_INTERVAL_MS, {
     enabled: !loading,
     paused: wsConnected,
@@ -597,52 +627,12 @@ export function useProjectChatState() {
     [navigate, projectId]
   );
 
-  const handleSleepConversation = useCallback(async () => {
-    const selectedSession = sessions.find((s) => s.id === sessionId);
-    if (!selectedSession) return;
-    if (!selectedSession.workspaceId) {
-      setSleepError('This session has no workspace to sleep.');
-      return;
-    }
-
-    setSleepingConversation(true);
-    setSleepError(null);
-    try {
-      // Session-scoped: works for the owner and for anyone they shared the session with.
-      await sleepChatSession(projectId, selectedSession.id);
-      if (queryScope) {
-        await queryClient.invalidateQueries({
-          queryKey: chatQueryKeys.sessionMessages(queryScope, projectId, selectedSession.id),
-        });
-      }
-      void loadSessions();
-    } catch (err) {
-      console.warn('Failed to sleep conversation:', err);
-      setSleepError(err instanceof Error ? err.message : 'Failed to sleep conversation');
-    } finally {
-      setSleepingConversation(false);
-    }
-  }, [loadSessions, projectId, queryClient, queryScope, sessionId, sessions]);
-
-  const handleCloseConversation = useCallback(async () => {
-    const selectedSession = sessions.find((s) => s.id === sessionId);
-    if (!selectedSession) return;
-    setClosingConversation(true);
-    setCloseError(null);
-    try {
-      if (selectedSession.taskId) {
-        await closeConversationTask(projectId, selectedSession.taskId);
-      } else {
-        await stopChatSession(projectId, selectedSession.id);
-      }
-      void loadSessions();
-    } catch (err) {
-      console.warn('Failed to close conversation:', err);
-      setCloseError(err instanceof Error ? err.message : 'Failed to close conversation');
-    } finally {
-      setClosingConversation(false);
-    }
-  }, [projectId, sessionId, sessions, loadSessions]);
+  const conversationActions = useConversationActions({
+    projectId,
+    sessionId,
+    findSession,
+    loadSessions,
+  });
 
   const handleTaskModeChange = useCallback((mode: TaskMode) => {
     userSetTaskModeRef.current = true;
@@ -653,7 +643,9 @@ export function useProjectChatState() {
   // Derived state
   // ---------------------------------------------------------------------------
 
-  const showNewChatInput = !sessionId || sessions.length === 0;
+  // Until a list read succeeds an empty list means "not loaded", not "no chats", so a
+  // deep-linked conversation stays on screen while it loads or after it fails.
+  const showNewChatInput = !sessionId || (listLoaded && !loading && sessions.length === 0);
   const hasSessions = sessions.length > 0;
 
   return {
@@ -667,6 +659,7 @@ export function useProjectChatState() {
     hasSessions,
     showNewChatInput,
     loadSessions,
+    findSession,
     realtimeDegraded,
     sidebarOpen,
     setSidebarOpen,
@@ -730,12 +723,7 @@ export function useProjectChatState() {
     setPendingDerived,
     handleFork,
     handleRetry,
-    sleepingConversation,
-    sleepError,
-    handleSleepConversation,
-    closingConversation,
-    closeError,
-    handleCloseConversation,
+    ...conversationActions,
     transcribeApiUrl,
     getSessionState,
   };

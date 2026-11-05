@@ -19,7 +19,7 @@ export interface SetupStatus {
    * itself a decision the user makes inside onboarding.
    */
   isComplete: boolean;
-  /** True only before any of the three reads has produced data. */
+  /** True until all three reads have settled (with data or an error). */
   loading: boolean;
 }
 
@@ -49,15 +49,15 @@ export function useSetupStatus(queryScope: string): SetupStatus {
   const hasGitHub = (installationsQuery.data ?? []).length > 0;
   const hasAgent = agentCredentials.credentials.some((credential) => credential.isActive);
 
-  // Each read fails soft — the pre-migration code used `Promise.allSettled` and
-  // treated a rejected read as "absent", so a transient failure must not be able to
-  // hold the caller in a permanent loading state.
+  // Loading until every read has settled. Deciding on the first read to land read the
+  // two still in flight as "absent": a fully set-up user on a fresh browser was shown
+  // the onboarding overlay for as long as the slowest read took, then had it vanish.
+  // Each read still fails soft — the pre-migration code used `Promise.allSettled` and
+  // treated a rejected read as "absent" — because a settled error is not pending, so a
+  // failed read cannot hold the caller in a permanent loading state.
   const loading =
     Boolean(queryScope) &&
-    (credentials.loading || agentCredentials.loading || installationsQuery.isPending) &&
-    credentials.credentials.length === 0 &&
-    agentCredentials.credentials.length === 0 &&
-    installationsQuery.data === undefined;
+    (credentials.loading || agentCredentials.loading || installationsQuery.isPending);
 
   return { hasCloud, hasGitHub, hasAgent, isComplete: hasAgent && hasCloud && hasGitHub, loading };
 }

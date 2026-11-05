@@ -12,3 +12,8 @@ export function isFullBleedRoute(pathname: string): boolean {
     /^\/projects\/[^/]+\/comments\/[^/]+\/[^/]+\/?$/.test(pathname)
   );
 }
+
+/** The project routes that render the project chat: its index (a redirect) and `chat/*`. */
+export function isProjectChatRoute(pathname: string): boolean {
+  return /\/projects\/[^/]+(?:\/chat(?:\/|$)|\/?$)/.test(pathname);
+}

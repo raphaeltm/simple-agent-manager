@@ -1,4 +1,4 @@
-import { Pane, Spinner } from '@simple-agent-manager/ui';
+import { Pane } from '@simple-agent-manager/ui';
 import { PanelRight } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
@@ -15,6 +15,7 @@ import { resolveAttentionAnswer } from '../../lib/api';
 import { sessionWidthForMode } from '../../lib/focus-mode';
 import { AttentionAnswerNotice, type AttentionAnswerStatus } from './AttentionAnswerNotice';
 import { ChatInput } from './ChatInput';
+import { ChatLoadingLayout } from './ChatLoadingLayout';
 import { DerivedSessionBanner } from './DerivedSessionBanner';
 import { FocusStrip } from './FocusStrip';
 import { getSessionSourceContext } from './lineageUtils';
@@ -177,15 +178,27 @@ export function ProjectChat() {
     return `${attention.markerId}:${attention.reason ?? ''}`;
   }, [chatSessions, sessionId]);
 
+  // A deep-linked conversation can show before the session list lands: wait for it then.
+  const { findSession } = state;
+  const withActiveSession = useCallback(
+    (act: (session: (typeof chatSessions)[number]) => void) => {
+      if (!sessionId) return;
+      const loaded = chatSessions.find((sess) => sess.id === sessionId);
+      if (loaded) act(loaded);
+      else void findSession(sessionId).then((session) => session && act(session));
+    },
+    [chatSessions, findSession, sessionId]
+  );
+
   const handleRetryActiveSession = useCallback(() => {
-    const session = chatSessions.find((sess) => sess.id === sessionId);
-    if (session?.taskId) handleRetry(session);
-  }, [chatSessions, sessionId, handleRetry]);
+    withActiveSession((session) => {
+      if (session.taskId) handleRetry(session);
+    });
+  }, [withActiveSession, handleRetry]);
 
   const handleForkActiveSession = useCallback(() => {
-    const session = chatSessions.find((sess) => sess.id === sessionId);
-    if (session) handleFork(session);
-  }, [chatSessions, sessionId, handleFork]);
+    withActiveSession(handleFork);
+  }, [withActiveSession, handleFork]);
 
   const handleSessionMutated = useCallback(() => {
     void loadSessions();
@@ -199,13 +212,11 @@ export function ProjectChat() {
     return getSessionSourceContext(session.taskId, state.taskInfoMap, state.sessions);
   }, [state.sessionId, state.sessions, state.taskInfoMap]);
 
-  // Loading state
-  if (state.loading && state.sessions.length === 0) {
-    return (
-      <div className="flex-1 flex items-center justify-center">
-        <Spinner size="lg" />
-      </div>
-    );
+  // A deep link names its session, so the conversation does not wait for the sidebar's
+  // session list: its transcript loads (or was prefetched) on its own. Only the bare chat
+  // route waits, because what it shows depends on whether the project has any chats.
+  if (state.loading && state.sessions.length === 0 && !state.sessionId) {
+    return <ChatLoadingLayout testId="chat-sessions-loading" />;
   }
 
   // Two or more visible profiles make choosing one worth a step of its own: show the
