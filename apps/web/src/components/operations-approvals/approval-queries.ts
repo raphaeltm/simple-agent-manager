@@ -1,4 +1,7 @@
-import type { OperationsApprovalDecision } from '@simple-agent-manager/shared';
+import type {
+  GetOperationsActionApprovalResponse,
+  OperationsApprovalDecision,
+} from '@simple-agent-manager/shared';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 
 import { decideOperationsApproval } from '../../lib/api';
@@ -13,12 +16,21 @@ export const operationsApprovalKeys = {
     [...operationsApprovalKeys.all(scope), approvalId] as const,
 };
 
-/** Approve or deny one approval, then refresh every approvals query for this user. */
+/**
+ * Approve or deny one approval. The returned record is written to the detail cache at once, so a
+ * card shows the decided status even if the follow-up refetch fails; then every approvals query
+ * for this user is refreshed.
+ */
 export function useDecideOperationsApproval(scope: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (input: { id: string; decision: OperationsApprovalDecision }) =>
       decideOperationsApproval(input.id, input.decision),
+    onSuccess: (response) =>
+      queryClient.setQueryData<GetOperationsActionApprovalResponse>(
+        operationsApprovalKeys.detail(scope, response.approval.id),
+        { approval: response.approval }
+      ),
     onSettled: () => queryClient.invalidateQueries({ queryKey: operationsApprovalKeys.all(scope) }),
   });
 }

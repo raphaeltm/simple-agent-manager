@@ -33,6 +33,9 @@ vi.mock('../../../src/components/AuthProvider', async (importOriginal) => ({
   useAuth: () => ({ user: { id: 'admin-1' }, isSuperadmin: auth.isSuperadmin, isLoading: false }),
 }));
 
+// Short refresh interval so the polling behaviour is observable; read when the card module loads.
+vi.stubEnv('VITE_APPROVAL_CARD_REFRESH_MS', '40');
+
 const { AcpConversationItemView } =
   await import('../../../src/components/project-message-view/AcpConversationItemView');
 const { chatMessagesToConversationItems } =
@@ -216,6 +219,76 @@ describe('approval card in chat', () => {
     expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
   });
 
+  it('keeps the decided status when the refetch after deciding fails', async () => {
+    fetchOperationsApproval.mockResolvedValueOnce({ approval: approval() });
+    fetchOperationsApproval.mockRejectedValue(new Error('network down'));
+    decideOperationsApproval.mockResolvedValue({
+      approval: approval({ status: 'denied' }),
+      delivered: true,
+    });
+
+    renderCard(compactApprovalMetadata());
+    fireEvent.click(await screen.findByRole('button', { name: 'Deny' }));
+
+    expect(await screen.findByText('denied')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Approve' })).not.toBeInTheDocument();
+  });
+
+  it('warns when the agent was not confirmed to have been told', async () => {
+    let current = approval();
+    fetchOperationsApproval.mockImplementation(async () => ({ approval: current }));
+    decideOperationsApproval.mockImplementation(async () => {
+      current = approval({ status: 'approved' });
+      return { approval: current, delivered: false };
+    });
+
+    renderCard(compactApprovalMetadata());
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+
+    expect(
+      await screen.findByText(/agent was not confirmed to have been told/)
+    ).toBeInTheDocument();
+    expect(screen.getByText('approved')).toBeInTheDocument();
+  });
+
+  it('does not warn when the decision reached the agent', async () => {
+    let current = approval();
+    fetchOperationsApproval.mockImplementation(async () => ({ approval: current }));
+    decideOperationsApproval.mockImplementation(async () => {
+      current = approval({ status: 'approved' });
+      return { approval: current, delivered: true };
+    });
+
+    renderCard(compactApprovalMetadata());
+    fireEvent.click(await screen.findByRole('button', { name: 'Approve' }));
+
+    expect(await screen.findByText('approved')).toBeInTheDocument();
+    expect(screen.queryByText(/not confirmed/)).not.toBeInTheDocument();
+  });
+
+  it('keeps refreshing an approved card until the agent has run it, then stops', async () => {
+    let calls = 0;
+    fetchOperationsApproval.mockImplementation(async () => {
+      calls += 1;
+      return calls < 3
+        ? { approval: approval({ status: 'approved' }) }
+        : {
+            approval: approval({
+              status: 'executed',
+              executedAt: '2026-11-05T11:10:00.000Z',
+              executionResult: { message: 'Node deleted' },
+            }),
+          };
+    });
+
+    renderCard(compactApprovalMetadata());
+
+    expect(await screen.findByText('Result: Node deleted')).toBeInTheDocument();
+    const settledCalls = fetchOperationsApproval.mock.calls.length;
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(fetchOperationsApproval.mock.calls.length).toBe(settledCalls);
+  });
+
   it('hides Approve and Deny when the conversation has no project', async () => {
     fetchOperationsApproval.mockResolvedValue({ approval: approval() });
 
@@ -247,7 +320,46 @@ describe('approval card in chat', () => {
   });
 });
 
+describe('approval reason clamp', () => {
+  it('offers Show more only when the clamped reason actually hides text', async () => {
+    // jsdom has no layout: a reason fits unless the element reports a taller scroll height.
+    const scroll = vi
+      .spyOn(HTMLElement.prototype, 'scrollHeight', 'get')
+      .mockImplementation(function (this: HTMLElement) {
+        return this.textContent?.includes('line one') ? 120 : 0;
+      });
+    const client = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(60);
+    try {
+      // Short in characters, but its line breaks overflow three lines.
+      fetchOperationsApproval.mockResolvedValue({
+        approval: approval({ reason: 'line one\nline two\nline three\nline four' }),
+      });
+      renderCard(compactApprovalMetadata());
+
+      const toggle = await screen.findByRole('button', { name: 'Show more' });
+      fireEvent.click(toggle);
+      expect(screen.getByRole('button', { name: 'Show less' })).toBeInTheDocument();
+    } finally {
+      scroll.mockRestore();
+      client.mockRestore();
+    }
+  });
+
+  it('does not offer Show more for a reason that fits', async () => {
+    fetchOperationsApproval.mockResolvedValue({ approval: approval({ reason: 'Short.' }) });
+    renderCard(compactApprovalMetadata());
+
+    expect(await screen.findByText('Short.')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show more' })).not.toBeInTheDocument();
+  });
+});
+
 describe('approval card matching', () => {
+  it('falls back to the generic card when a failed call still carries an approval ID', () => {
+    const item = itemFor(compactApprovalMetadata({ status: 'failed' }));
+    expect(matchToolCard(item as Parameters<typeof matchToolCard>[0])).toBeNull();
+  });
+
   it('falls back to the generic card while the call runs or when it failed', () => {
     for (const status of ['in_progress', 'failed']) {
       const item = itemFor(compactApprovalMetadata({ status, rawOutput: undefined }));

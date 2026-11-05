@@ -59,9 +59,9 @@ export function matchToolCard(item: ToolCallItem): FC<ToolCardProps> | null {
 
 function resolveToolCard(item: ToolCallItem): FC<ToolCardProps> | null {
   // Operations approval request: the card needs the approval ID from the result. While the
-  // call runs, or when it failed, the generic card shows it instead.
+  // call runs, or when it failed, the generic card shows it (and any error) instead.
   if (isApprovalCardTool(item)) {
-    return extractApprovalId(item) ? ApprovalCard : null;
+    return item.status !== 'failed' && extractApprovalId(item) ? ApprovalCard : null;
   }
   const base = normalizeToolName(item.toolName ?? item.title);
   if (!base || !DOCUMENT_CARD_TOOLS.has(base)) {

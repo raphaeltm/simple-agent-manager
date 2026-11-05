@@ -21,6 +21,17 @@ export interface ApprovalCardProps {
   projectId?: string;
 }
 
+/**
+ * How often an open card re-reads an approval that can still change (pending: decided elsewhere
+ * or expires; approved: the agent runs it). TanStack pauses this while the tab is hidden.
+ * Override via VITE_APPROVAL_CARD_REFRESH_MS.
+ */
+const DEFAULT_APPROVAL_CARD_REFRESH_MS = 15_000;
+const APPROVAL_CARD_REFRESH_MS = import.meta.env.VITE_APPROVAL_CARD_REFRESH_MS
+  ? parseInt(import.meta.env.VITE_APPROVAL_CARD_REFRESH_MS, 10)
+  : DEFAULT_APPROVAL_CARD_REFRESH_MS;
+const CHANGING_STATUSES = new Set(['pending', 'approved']);
+
 const CARD_CLASS = 'glass-surface my-1 rounded-md border border-border-default';
 
 function adminApprovalsHref(approvalId: string): string {
@@ -41,6 +52,8 @@ export const ApprovalCard: FC<ApprovalCardProps> = ({ item, projectId }) => {
     queryKey: operationsApprovalKeys.detail(scope, approvalId ?? ''),
     queryFn: ({ signal }) => fetchOperationsApproval(approvalId as string, signal),
     enabled: Boolean(scope && approvalId && isSuperadmin),
+    refetchInterval: (q) =>
+      CHANGING_STATUSES.has(q.state.data?.approval.status ?? '') ? APPROVAL_CARD_REFRESH_MS : false,
   });
   const decide = useDecideOperationsApproval(scope);
 
@@ -87,6 +100,8 @@ export const ApprovalCard: FC<ApprovalCardProps> = ({ item, projectId }) => {
   const fromThisConversation = Boolean(projectId) && approval.requestingProjectId === projectId;
   const deciding =
     decide.isPending && decide.variables?.id === approval.id ? decide.variables.decision : null;
+  const notificationUnconfirmed =
+    decide.data?.approval.id === approval.id && decide.data.delivered === false;
 
   return (
     <div className={CARD_CLASS} data-testid="approval-card">
@@ -102,6 +117,14 @@ export const ApprovalCard: FC<ApprovalCardProps> = ({ item, projectId }) => {
       {decide.error && (
         <div role="alert" className="border-b border-border-default px-4 py-2">
           <Body className="text-sm text-danger-fg">{decide.error.message}</Body>
+        </div>
+      )}
+      {notificationUnconfirmed && (
+        <div role="alert" className="border-b border-border-default px-4 py-2">
+          <Body className="text-sm text-warning-fg">
+            Decision saved, but the agent was not confirmed to have been told. Tell it in this chat
+            before it relies on this decision.
+          </Body>
         </div>
       )}
       {!fromThisConversation && (

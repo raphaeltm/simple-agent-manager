@@ -5,7 +5,7 @@ import {
   type OperationsApprovalDecision,
 } from '@simple-agent-manager/shared';
 import { Body, Button } from '@simple-agent-manager/ui';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 
 const STATUS_STYLES: Record<OperationsActionApproval['status'], { bg: string; text: string }> = {
   pending: { bg: 'var(--sam-color-warning-tint)', text: 'var(--sam-color-warning-fg)' },
@@ -14,9 +14,6 @@ const STATUS_STYLES: Record<OperationsActionApproval['status'], { bg: string; te
   denied: { bg: 'var(--sam-color-danger-tint)', text: 'var(--sam-color-danger-fg)' },
   expired: { bg: 'var(--sam-color-warning-tint)', text: 'var(--sam-color-fg-primary)' },
 };
-
-/** Reasons longer than this start clamped to three lines, with Show more. */
-const REASON_CLAMP_CHARS = 240;
 
 function formatTime(value: string | null) {
   if (!value) return '—';
@@ -57,6 +54,26 @@ function TargetFacts({ approval }: { approval: OperationsActionApproval }) {
   );
 }
 
+/**
+ * True while the clamped reason hides text. Measured, not guessed from length: a short reason
+ * with line breaks, or a narrow phone, can still exceed three lines.
+ */
+function useReasonClipped(reason: string, expanded: boolean) {
+  const ref = useRef<HTMLDivElement>(null);
+  const [clipped, setClipped] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current?.firstElementChild;
+    if (!el || expanded) return;
+    const measure = () => setClipped(el.scrollHeight > el.clientHeight + 1);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [reason, expanded]);
+  return { ref, clipped };
+}
+
 function executionMessage(approval: OperationsActionApproval): string | null {
   const message = approval.executionResult?.message;
   return typeof message === 'string' ? message : null;
@@ -85,6 +102,7 @@ export function ApprovalItem({
     if (highlighted) ref.current?.scrollIntoView({ block: 'center' });
   }, [highlighted]);
   const [reasonExpanded, setReasonExpanded] = useState(false);
+  const reasonClamp = useReasonClipped(approval.reason, reasonExpanded);
   const pending = approval.status === 'pending';
   const irreversible = OPERATIONS_IRREVERSIBLE_ACTIONS.includes(approval.action);
   const result = executionMessage(approval);
@@ -135,13 +153,13 @@ export function ApprovalItem({
           ⚠ Cannot be undone: approving permanently deletes this {approval.targetType}.
         </div>
       )}
-      <div>
+      <div ref={reasonClamp.ref}>
         <Body
           className={`whitespace-pre-wrap break-words text-sm ${reasonExpanded ? '' : 'line-clamp-3'}`}
         >
           {approval.reason}
         </Body>
-        {approval.reason.length > REASON_CLAMP_CHARS && (
+        {(reasonExpanded || reasonClamp.clipped) && (
           <button
             type="button"
             className="mt-1 text-xs text-accent hover:underline"
