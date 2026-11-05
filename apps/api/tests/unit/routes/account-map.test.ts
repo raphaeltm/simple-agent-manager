@@ -254,7 +254,7 @@ describe('GET /account-map', () => {
     expect(res.status).toBe(200);
 
     // Cache key should include :active suffix
-    expect(mockEnv.KV.get).toHaveBeenCalledWith('account-map:v4:user-123:active', 'json');
+    expect(mockEnv.KV.get).toHaveBeenCalledWith('account-map:v5:user-123:active', 'json');
     expect(agentActivityService.listAgentActivityTasks).toHaveBeenCalledWith(
       mockEnv,
       expect.objectContaining({ activeOnly: true, userId: 'user-123' })
@@ -271,7 +271,7 @@ describe('GET /account-map', () => {
     expect(res.status).toBe(200);
 
     // Cache key should include :all suffix
-    expect(mockEnv.KV.get).toHaveBeenCalledWith('account-map:v4:user-123:all', 'json');
+    expect(mockEnv.KV.get).toHaveBeenCalledWith('account-map:v5:user-123:all', 'json');
     expect(agentActivityService.listAgentActivityTasks).toHaveBeenCalledWith(
       mockEnv,
       expect.objectContaining({ activeOnly: false, userId: 'user-123' })
@@ -337,8 +337,9 @@ describe('GET /account-map', () => {
           status: 'error',
           messageCount: 0,
         }),
+        sessionFixture({ id: 'sess-sleeping', topic: 'Sleeping chat', status: 'sleeping' }),
       ],
-      total: 3,
+      total: 4,
     });
 
     const app = buildApp();
@@ -346,9 +347,8 @@ describe('GET /account-map', () => {
 
     expect(res.status).toBe(200);
     const body = (await res.json()) as any;
-    // Only the active session should be returned
-    expect(body.sessions).toHaveLength(1);
-    expect(body.sessions[0].id).toBe('sess-active');
+    // Active and sleeping (resumable) chats stay; stopped and errored ones wait for Show finished.
+    expect(body.sessions.map((s: any) => s.id).sort()).toEqual(['sess-active', 'sess-sleeping']);
   });
 
   it('returns all sessions when activeOnly=false', async () => {
@@ -418,8 +418,12 @@ describe('GET /account-map', () => {
           attention: { kind: 'needs_input', createdAt: 'not-a-number', reason: null },
         }),
         sessionFixture({ id: 'sess-quiet', attention: null }),
+        sessionFixture({
+          id: 'sess-expired',
+          attention: { kind: 'needs_input', createdAt: 1, expiresAt: 2, reason: 'Too late' },
+        }),
       ],
-      total: 4,
+      total: 5,
     });
 
     const res = await buildApp().request('/account-map', {}, mockEnv);
@@ -434,6 +438,8 @@ describe('GET /account-map', () => {
     expect((byId.get('sess-malformed') as any).attention).toBeNull();
     expect((byId.get('sess-bad-time') as any).attention).toBeNull();
     expect((byId.get('sess-quiet') as any).attention).toBeNull();
+    // Past its expiry, a marker is not waiting on anyone.
+    expect((byId.get('sess-expired') as any).attention).toBeNull();
     const prById = new Map(body.tasks.map((t: any) => [t.id, t.outputPrUrl]));
     expect(prById.get('task-pr')).toBe('https://github.com/o/r/pull/7');
     expect(prById.get('task-js')).toBeNull();

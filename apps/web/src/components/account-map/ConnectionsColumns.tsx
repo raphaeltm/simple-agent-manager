@@ -202,7 +202,7 @@ export function ConnectionsColumns({
             className={`min-w-0 rounded-[var(--sam-radius-control)] border border-solid p-2 transition-colors ${
               dim(m.id)
                 ? STEPPED_BACK
-                : m.status === 'error' || m.health === 'unhealthy' || m.placeholder === 'gone'
+                : m.status === 'error' || m.health === 'unhealthy'
                   ? 'border-[var(--sam-danger-edge)] bg-[var(--sam-chip-bg)]'
                   : 'border-[var(--sam-chip-edge)] bg-[var(--sam-chip-bg)]'
             }`}

@@ -86,6 +86,7 @@ function manyMap(): AccountMapResponse {
 
 const EMPTY: AccountMapResponse = {
   ...accountMapFixture(),
+  projects: [],
   nodes: [],
   workspaces: [],
   sessions: [],

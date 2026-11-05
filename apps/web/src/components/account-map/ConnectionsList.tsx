@@ -1,13 +1,22 @@
 /**
  * Phone Account Map: columns do not fit, so chats and tasks are grouped by project, and picking
- * one opens its chain (idea → workspace → machine → pull request) underneath it.
+ * one opens its chain (idea → workspace → machine → pull request) underneath it. Machines follow
+ * in their own section, so infrastructure shows even when no chat runs on it.
  */
 import { Link } from 'react-router';
 
 import { projectPath } from '../../lib/project-routes';
 import type { ConnectionsModel, ConnectionsView } from './connections-model';
 import { machineOf } from './connections-model';
-import { machineState, ProjectMark, WorkRow, WorkStateChip } from './connections-parts';
+import {
+  machineDetail,
+  MachineIcon,
+  machineState,
+  MachineStateChip,
+  ProjectMark,
+  WorkRow,
+  WorkStateChip,
+} from './connections-parts';
 import { ConnectionsPathSteps } from './ConnectionsPath';
 
 export function ConnectionsList({
@@ -78,8 +87,8 @@ export function ConnectionsList({
                       }`}
                     >
                       {machine
-                        ? machine.placeholder === 'gone'
-                          ? 'on a machine that no longer exists'
+                        ? machine.placeholder === 'unlisted'
+                          ? 'on a machine not listed here'
                           : `on ${machine.placeholder === 'instant' ? 'Instant' : machine.name}${state?.tone === 'danger' ? ` · ${state.label.toLowerCase()}` : ''}`
                         : 'not running anywhere'}
                     </p>
@@ -90,6 +99,41 @@ export function ConnectionsList({
           </div>
         </section>
       ))}
+      {view.machines.length > 0 && (
+        <section aria-label="Machines" className="flex flex-col gap-2 pt-1">
+          <h2 className="m-0 px-1 text-[11px] font-semibold uppercase tracking-wide text-fg-muted">
+            Machines
+          </h2>
+          {view.machines.map((m) => (
+            <div
+              key={m.id}
+              className="rounded-[var(--sam-radius-control)] border border-solid border-[var(--sam-chip-edge)] bg-[var(--sam-chip-bg)] p-2.5"
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <MachineIcon machine={m} />
+                <span className="min-w-0 flex-1">
+                  <span
+                    className={`block truncate text-[13px] font-semibold text-fg-primary ${m.placeholder ? '' : 'font-mono'}`}
+                  >
+                    {m.name}
+                  </span>
+                  <span className="block truncate text-[11.5px] text-fg-muted">
+                    {machineDetail(m)}
+                  </span>
+                </span>
+                <MachineStateChip machine={m} />
+              </div>
+              <p className="m-0 line-clamp-3 break-words pt-1.5 text-[12px] text-fg-muted [overflow-wrap:anywhere]">
+                {m.workspaces.length === 0
+                  ? 'No workspaces'
+                  : `${m.workspaces.length} ${m.workspaces.length === 1 ? 'workspace' : 'workspaces'}: ${m.workspaces
+                      .map((w) => w.label)
+                      .join(', ')}`}
+              </p>
+            </div>
+          ))}
+        </section>
+      )}
       {quiet.length > 0 && (
         <button
           type="button"

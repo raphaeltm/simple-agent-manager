@@ -41,6 +41,7 @@ interface ImportMetaEnv {
   readonly VITE_PROJECT_CREATE_CONFIG_STALE_TIME_MS?: string;
   readonly VITE_CREDENTIAL_LIMITS_STALE_TIME_MS?: string;
   readonly VITE_CREDENTIAL_LIMITS_REFETCH_INTERVAL_MS?: string;
+  readonly VITE_ACCOUNT_MAP_REFETCH_INTERVAL_MS?: string;
   readonly VITE_AUTOMATION_POLL_MS?: string;
   readonly VITE_DEPLOYMENTS_ACTIVE_POLL_MS?: string;
   readonly VITE_DEPLOYMENTS_IDLE_POLL_MS?: string;

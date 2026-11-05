@@ -5,12 +5,7 @@
 import { ArrowRight } from 'lucide-react';
 import { Link } from 'react-router';
 
-import {
-  projectChatPath,
-  projectIdeaPath,
-  projectPath,
-  projectTaskPath,
-} from '../../lib/project-routes';
+import { projectChatPath, projectIdeaPath, projectPath } from '../../lib/project-routes';
 import { sanitizeUrl } from '../../lib/url-utils';
 import { type ConnectionsModel, machineOf, type MapWork, workspaceOf } from './connections-model';
 import { machineDetail, prLabel, WORK_STATE_LABEL } from './connections-parts';
@@ -51,11 +46,9 @@ function workPath(model: ConnectionsModel, work: MapWork): PathStep[] {
     key: 'work',
     label: `${work.kind === 'task' ? 'Task' : 'Chat'} · ${WORK_STATE_LABEL[work.state]}`,
     value: work.attentionReason ? `${work.title}: ${work.attentionReason}` : work.title,
-    to: work.sessionId
-      ? projectChatPath(work.projectId, work.sessionId)
-      : work.taskId
-        ? projectTaskPath(work.projectId, work.taskId)
-        : undefined,
+    // A task with no chat has no page of its own (the task route forwards to its chat, or to a
+    // new chat when there is none), so it is shown without a link.
+    to: work.sessionId ? projectChatPath(work.projectId, work.sessionId) : undefined,
   });
   steps.push(
     workspace

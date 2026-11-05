@@ -33,7 +33,9 @@ import * as projectDataService from '../services/project-data';
  */
 const ACTIVE_NODE_STATUSES = ['pending', 'creating', 'running', 'stopping'];
 const ACTIVE_WORKSPACE_STATUSES = ['pending', 'creating', 'running', 'recovery', 'stopping'];
-const ACTIVE_SESSION_STATUSES = ['active', 'running'];
+// Sleeping chats are resumable work, so they belong on the active map (their tasks already are).
+// Errored chats are history: they appear with "Show finished" (activeOnly=false), like failed tasks.
+const ACTIVE_SESSION_STATUSES = ['active', 'running', 'sleeping'];
 
 /** Default max entities per type from D1. Configurable via ACCOUNT_MAP_MAX_ENTITIES. */
 const DEFAULT_MAX_ENTITIES = 200;
@@ -43,8 +45,8 @@ const DEFAULT_MAX_SESSIONS_PER_PROJECT = 20;
 
 /** KV cache TTL in seconds. Configurable via ACCOUNT_MAP_CACHE_TTL_SECONDS. */
 const DEFAULT_CACHE_TTL_SECONDS = 30;
-// v4: sessions carry `attention`, tasks carry `outputPrUrl`.
-const ACCOUNT_MAP_CACHE_VERSION = 'v4';
+// v5: sessions carry `attention` (unexpired only), tasks carry `outputPrUrl`; sleeping chats are active.
+const ACCOUNT_MAP_CACHE_VERSION = 'v5';
 
 interface SessionSummary {
   id: string;
@@ -66,11 +68,16 @@ interface Relationship {
   primary?: boolean;
 }
 
-/** Narrow the DO's attention summary to what the map shows; anything malformed reads as none. */
-function toAttentionSummary(value: unknown): SessionSummary['attention'] {
+/**
+ * Narrow the DO's attention summary to what the map shows; anything malformed reads as none.
+ * A marker past its `expiresAt` is no longer waiting on anyone, even before the DO alarm
+ * resolves it.
+ */
+function toAttentionSummary(value: unknown, nowMs: number): SessionSummary['attention'] {
   if (!value || typeof value !== 'object') return null;
-  const { kind, reason, createdAt } = value as Record<string, unknown>;
+  const { kind, reason, createdAt, expiresAt } = value as Record<string, unknown>;
   if (typeof kind !== 'string' || typeof createdAt !== 'number') return null;
+  if (typeof expiresAt === 'number' && expiresAt <= nowMs) return null;
   return { kind, reason: typeof reason === 'string' ? reason : null, createdAt };
 }
 
@@ -242,7 +249,7 @@ accountMapRoutes.get('/', async (c) => {
           messageCount: (s.messageCount as number) ?? 0,
           workspaceId: (s.workspaceId as string) ?? null,
           taskId: (s.taskId as string) ?? null,
-          attention: toAttentionSummary(s.attention),
+          attention: toAttentionSummary(s.attention, Date.now()),
         })),
       };
     })

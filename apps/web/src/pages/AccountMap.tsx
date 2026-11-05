@@ -106,7 +106,11 @@ export function AccountMap() {
     () => (model ? chainOf(model, selectedId) : new Set<string>()),
     [model, selectedId]
   );
-  const select = useCallback((id: string) => setPicked((cur) => (cur === id ? null : id)), []);
+  // Toggle against what is shown, not what was clicked: the auto-picked row must clear on its first click.
+  const select = useCallback(
+    (id: string) => setPicked(selectedId === id ? null : id),
+    [selectedId]
+  );
 
   if (query.isLoading || (!query.data && !query.isError)) {
     return (
@@ -137,7 +141,9 @@ export function AccountMap() {
 
   const counts = filterCounts(model);
   const notice = truncationNotice(query.data);
-  const empty = model.work.length === 0 && model.machines.length === 0;
+  // Projects alone are enough to show the map: their quiet-projects toggle stays reachable.
+  const empty =
+    model.work.length === 0 && model.machines.length === 0 && model.projects.length === 0;
 
   const header = (
     <Pane variant="slab" as="header" className="flex shrink-0 flex-col gap-3 px-4 py-3.5 sm:px-5">

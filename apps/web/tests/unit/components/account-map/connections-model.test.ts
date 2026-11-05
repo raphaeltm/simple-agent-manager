@@ -3,10 +3,10 @@ import { describe, expect, it } from 'vitest';
 import {
   buildConnectionsModel,
   chainOf,
-  GONE_MACHINE_ID,
   machineOf,
   NO_MACHINE_ID,
   selectConnectionsView,
+  UNLISTED_MACHINE_ID,
 } from '../../../../src/components/account-map/connections-model';
 import { accountMapFixture } from './fixtures';
 
@@ -54,7 +54,7 @@ describe('buildConnectionsModel', () => {
     expect(machineOf(model, 'w-4')?.placeholder).toBe('instant');
   });
 
-  it('puts workspaces whose machine is no longer listed under "Machine gone", not Instant', () => {
+  it('puts workspaces whose machine is not in the response under "Machine not listed", not Instant', () => {
     const base = accountMapFixture();
     const m = buildConnectionsModel(
       accountMapFixture({
@@ -70,8 +70,12 @@ describe('buildConnectionsModel', () => {
         ],
       })
     );
-    const gone = machineOf(m, 'w-stuck');
-    expect(gone).toMatchObject({ id: GONE_MACHINE_ID, placeholder: 'gone', name: 'Machine gone' });
+    // Stopped, past the cap, or deleted: the map cannot tell which, so it does not say "gone".
+    expect(machineOf(m, 'w-stuck')).toMatchObject({
+      id: UNLISTED_MACHINE_ID,
+      placeholder: 'unlisted',
+      name: 'Machine not listed',
+    });
     expect(machineOf(m, 'w-4')?.id).toBe(NO_MACHINE_ID);
   });
 
@@ -91,6 +95,52 @@ describe('buildConnectionsModel', () => {
       })
     );
     expect(m.work.map((w) => w.state)).toEqual(['done', 'done']);
+  });
+
+  it('treats a superseded task as done even when it failed', () => {
+    const base = accountMapFixture();
+    const m = buildConnectionsModel(
+      accountMapFixture({
+        sessions: [],
+        tasks: [
+          { ...base.tasks[1]!, id: 'old', status: 'failed', agentActivityState: 'superseded' },
+        ],
+      })
+    );
+    expect(m.work[0]?.state).toBe('done');
+  });
+
+  it('shows a retried task once, through its newest chat', () => {
+    const base = accountMapFixture();
+    const m = buildConnectionsModel(
+      accountMapFixture({
+        sessions: [
+          { ...base.sessions[0]!, id: 's-new', taskId: 't-1', attention: null },
+          { ...base.sessions[0]!, id: 's-old', taskId: 't-1' },
+        ],
+      })
+    );
+    expect(m.work.filter((w) => w.taskId === 't-1').map((w) => w.id)).toEqual(['s-new']);
+  });
+
+  it("uses the first of a chat's workspace candidates that is actually on the map", () => {
+    const base = accountMapFixture();
+    const m = buildConnectionsModel(
+      accountMapFixture({
+        sessions: [{ ...base.sessions[0]!, workspaceId: 'w-deleted' }],
+      })
+    );
+    // s-1 names a deleted workspace; its task names w-1, which is listed.
+    expect(m.work.find((w) => w.id === 's-1')?.workspaceId).toBe('w-1');
+  });
+
+  it("gives work from a project past the server's cap a placeholder project row", () => {
+    const base = accountMapFixture();
+    const m = buildConnectionsModel(
+      accountMapFixture({ projects: base.projects.filter((p) => p.id !== 'p-ttv') })
+    );
+    expect(m.projects.find((p) => p.id === 'p-ttv')?.name).toBe('Project not listed');
+    expect(selectConnectionsView(m, 'all', '').projects.map((p) => p.id)).toContain('p-ttv');
   });
 });
 
@@ -149,6 +199,14 @@ describe('selectConnectionsView', () => {
     expect(none.work).toEqual([]);
     expect(none.machines).toEqual([]);
   });
+
+  it('search finds projects and machines by name even with no work on them', () => {
+    const quiet = selectConnectionsView(model, 'all', 'quiet project');
+    expect(quiet.work).toEqual([]);
+    expect(quiet.projects.map((p) => p.id)).toEqual(['p-quiet']);
+    const idle = selectConnectionsView(model, 'all', 'nbg1-03');
+    expect(idle.machines.map((m) => m.id)).toEqual(['n-3']);
+  });
 });
 
 describe('chainOf', () => {
@@ -170,6 +228,28 @@ describe('chainOf', () => {
     for (const id of ['s-1', 's-3', 's-4', 't-3', 'w-1', 'w-3', 'n-1', 'n-2'])
       expect(chain.has(id)).toBe(true);
     for (const id of ['t-2', 'w-2', 'p-ttv', 's-2']) expect(chain.has(id)).toBe(false);
+  });
+
+  it('connects a workspace to its project even when no chat on the map runs in it', () => {
+    const base = accountMapFixture();
+    const m = buildConnectionsModel(
+      accountMapFixture({
+        workspaces: [
+          ...base.workspaces,
+          {
+            ...base.workspaces[0]!,
+            id: 'w-idle',
+            nodeId: 'n-3',
+            chatSessionId: null,
+            projectId: 'p-quiet',
+          },
+        ],
+      })
+    );
+    const fromProject = chainOf(m, 'p-quiet');
+    expect(fromProject.has('w-idle')).toBe(true);
+    expect(fromProject.has('n-3')).toBe(true);
+    expect(chainOf(m, 'n-3').has('p-quiet')).toBe(true);
   });
 
   it('is empty with nothing picked', () => {

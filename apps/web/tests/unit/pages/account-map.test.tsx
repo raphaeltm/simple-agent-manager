@@ -130,13 +130,24 @@ describe('AccountMap page', () => {
       'aria-pressed',
       'false'
     );
-    // A task without a chat links to the task route.
-    expect(within(pathBar()).getByRole('link', { name: 'Fix subtitle drift' })).toHaveAttribute(
-      'href',
-      '/projects/p-ttv/tasks/t-2'
-    );
+    // A task without a chat has no page of its own, so its step is text, not a link.
+    expect(within(pathBar()).getByText('Fix subtitle drift')).toBeInTheDocument();
+    expect(within(pathBar()).queryByRole('link', { name: 'Fix subtitle drift' })).toBeNull();
     await user.click(task);
     expect(task).toHaveAttribute('aria-pressed', 'false');
+    expect(
+      screen.getByText('Pick a chat, project or machine to see how it connects.')
+    ).toBeInTheDocument();
+  });
+
+  it('the auto-picked chat clears on its first click', async () => {
+    const user = userEvent.setup();
+    renderAccountMap();
+    await screen.findByTestId('account-map-columns');
+    const waiting = screen.getByRole('button', { name: /Show wake progress/ });
+    expect(waiting).toHaveAttribute('aria-pressed', 'true');
+    await user.click(waiting);
+    expect(waiting).toHaveAttribute('aria-pressed', 'false');
     expect(
       screen.getByText('Pick a chat, project or machine to see how it connects.')
     ).toBeInTheDocument();
@@ -197,7 +208,9 @@ describe('AccountMap page', () => {
     expect(mocks.getAccountMap).toHaveBeenLastCalledWith({ activeOnly: false });
     // Mid-fetch: the previous map is still there.
     expect(screen.getByText('Show wake progress')).toBeInTheDocument();
-    release(accountMapFixture({ sessions: [], tasks: [], workspaces: [], nodes: [] }));
+    release(
+      accountMapFixture({ projects: [], sessions: [], tasks: [], workspaces: [], nodes: [] })
+    );
     await screen.findByText('Nothing to connect yet');
     expect(screen.getByRole('button', { name: 'Hide finished' })).toHaveAttribute(
       'aria-pressed',
@@ -240,6 +253,14 @@ describe('AccountMap page', () => {
     await user.click(within(ttv).getByRole('button', { name: /Pick a voice/ }));
     expect(within(ttv).getByRole('list', { name: 'How this connects' })).toBeInTheDocument();
     expect(within(sam).queryByRole('list', { name: 'How this connects' })).not.toBeInTheDocument();
+  });
+
+  it('on phones, machines show in their own section, including ones with no chats', async () => {
+    mocks.isMobile = true;
+    renderAccountMap();
+    const machines = await screen.findByRole('region', { name: 'Machines' });
+    expect(within(machines).getByText('sam-nbg1-03')).toBeInTheDocument();
+    expect(within(machines).getAllByText('No workspaces').length).toBeGreaterThan(0);
   });
 
   it('on phones, quiet projects are one tap away', async () => {
