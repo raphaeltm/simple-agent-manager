@@ -76,24 +76,25 @@ const choice = () => screen.queryByRole('group', { name: 'When to deliver your m
 const send = () => fireEvent.click(screen.getByRole('button', { name: /^send/i }));
 
 describe('steer or queue while the agent works', () => {
-  it('starts on Queue next and queues', () => {
+  it('starts on Steer now and steers', () => {
     const lc = lifecycle();
     renderFooter(lc);
-    expect(screen.getByRole('button', { name: /queue next/i })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: /steer now/i })).toHaveAttribute(
       'aria-pressed',
       'true'
     );
-    send();
-    expect(lc.handleSendFollowUp).toHaveBeenCalledWith('queue');
-  });
-
-  it('sends a steer once Steer now is chosen', () => {
-    const lc = lifecycle();
-    renderFooter(lc);
-    fireEvent.click(screen.getByRole('button', { name: /steer now/i }));
     expect(screen.getByText(/joins this turn if the agent can take it/i)).toBeVisible();
     send();
     expect(lc.handleSendFollowUp).toHaveBeenCalledWith('steer');
+  });
+
+  it('queues once Queue next is chosen', () => {
+    const lc = lifecycle();
+    renderFooter(lc);
+    fireEvent.click(screen.getByRole('button', { name: /queue next/i }));
+    expect(screen.getByText(/sent when this turn ends/i)).toBeVisible();
+    send();
+    expect(lc.handleSendFollowUp).toHaveBeenCalledWith('queue');
   });
 
   it('queues a message with files, and says so, because a steer carries text only', () => {
@@ -134,10 +135,10 @@ describe('steer or queue while the agent works', () => {
     expect(lc.handleSendFollowUp).toHaveBeenCalledWith('queue');
   });
 
-  it('returns to Queue next when the turn ends', () => {
+  it('returns to Steer now when the turn ends', () => {
     const working = lifecycle();
     const { rerender } = renderFooter(working);
-    fireEvent.click(screen.getByRole('button', { name: /steer now/i }));
+    fireEvent.click(screen.getByRole('button', { name: /queue next/i }));
     const viewer = resolveSessionViewerCapabilities(chatSession, 'owner-1');
     const props = {
       projectId: 'project-1',
@@ -155,11 +156,11 @@ describe('steer or queue while the agent works', () => {
     );
     const next = lifecycle();
     rerender(<SessionFooter {...props} lc={next} />);
-    expect(screen.getByRole('button', { name: /queue next/i })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: /steer now/i })).toHaveAttribute(
       'aria-pressed',
       'true'
     );
     send();
-    expect(next.handleSendFollowUp).toHaveBeenCalledWith('queue');
+    expect(next.handleSendFollowUp).toHaveBeenCalledWith('steer');
   });
 });

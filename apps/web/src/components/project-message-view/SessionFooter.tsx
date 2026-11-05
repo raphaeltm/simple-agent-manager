@@ -19,6 +19,9 @@ import {
 import { StaleActivityNotice } from './StaleActivityNotice';
 import type { UseSessionLifecycleResult } from './useSessionLifecycle.types';
 
+/** The composer's choice while the agent works, until the user picks the other one. */
+const DEFAULT_WORKING_INTENT: PromptDeliveryIntent = 'steer';
+
 interface SessionFooterProps {
   projectId: string;
   lc: UseSessionLifecycleResult;
@@ -76,13 +79,15 @@ export function SessionFooter({
       lc.currentPlan && lc.currentPlan.length > 0 ? currentPlanToPlanItem(lc.currentPlan) : null,
     [lc.currentPlan]
   );
-  // Steering only means something while a turn runs. A new turn starts on "Queue next";
-  // a message with files always queues, because a steer carries text only.
+  // Steering only means something while a turn runs. Each turn starts on "Steer now" (the
+  // runtime falls back to the queue, visibly, when it cannot take the message); a message
+  // with files always queues, because a steer carries text only.
   const agentWorking =
     !lc.isWaking && (lc.agentActivity === 'prompting' || lc.agentActivity === 'responding');
-  const [deliveryIntent, setDeliveryIntent] = useState<PromptDeliveryIntent>('queue');
+  const [deliveryIntent, setDeliveryIntent] =
+    useState<PromptDeliveryIntent>(DEFAULT_WORKING_INTENT);
   useEffect(() => {
-    if (!agentWorking) setDeliveryIntent('queue');
+    if (!agentWorking) setDeliveryIntent(DEFAULT_WORKING_INTENT);
   }, [agentWorking]);
   const hasAttachments = lc.attachments.length > 0;
   const sendIntent: PromptDeliveryIntent =

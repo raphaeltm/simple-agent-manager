@@ -307,26 +307,34 @@ for (const theme of ['dark', 'light'] as const) {
         await screenshot(page, `steering-chips-middle-${theme}-${viewport}`);
         // The first owner prompt is ordinary: no chip.
         await expect(deliveryGroup(page)).toBeVisible();
-        await expect(page.getByRole('button', { name: /queue next/i })).toHaveAttribute(
+        // Steer now is the default while the agent works.
+        await expect(page.getByRole('button', { name: /steer now/i })).toHaveAttribute(
           'aria-pressed',
           'true'
         );
-        // Neither choice is cut off (the selected label is bolder, so it truncates first).
-        const truncated = await deliveryGroup(page).evaluate((group) =>
-          [...group.querySelectorAll('button span.truncate')]
-            .filter((label) => label.scrollWidth > label.clientWidth)
-            .map((label) => label.textContent)
-        );
-        expect(truncated).toEqual([]);
+        // Neither label is cut off whichever is selected (the selected one is bolder, so it
+        // truncates first).
+        const truncatedLabels = () =>
+          deliveryGroup(page).evaluate((group) =>
+            [...group.querySelectorAll('button span.truncate')]
+              .filter((label) => label.scrollWidth > label.clientWidth)
+              .map((label) => label.textContent)
+          );
+        expect(await truncatedLabels()).toEqual([]);
+        await page.getByRole('button', { name: /queue next/i }).click();
+        await expect(page.getByText(/sent when this turn ends/i)).toBeVisible();
+        expect(await truncatedLabels()).toEqual([]);
         await screenshot(page, `steering-chips-queue-${theme}-${viewport}`);
         await assertNoOverflow(page);
       });
 
-      test('Steer now sends a steer and shows it steering', async ({ page }) => {
+      test('a message sent while the agent works steers by default and shows it steering', async ({
+        page,
+      }) => {
         await seedTheme(page, theme);
         const api = await setupApiMocks(page, { working: true });
         await gotoChat(page);
-        await page.getByRole('button', { name: /steer now/i }).click();
+        // No click: Steer now is already selected.
         await expect(page.getByText(/joins this turn if the agent can take it/i)).toBeVisible();
         await composer(page).fill('Prefer a generator over a callback here.');
         if (viewport === 'mobile') {

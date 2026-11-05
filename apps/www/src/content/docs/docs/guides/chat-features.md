@@ -37,14 +37,14 @@ Agent output streams directly to your browser via WebSocket. You see code being 
 While the agent is in the middle of a turn, the chat input offers two choices above the message
 box:
 
-- **Queue next** (the default) sends your message after the current turn finishes, as the agent's
-  next prompt.
-- **Steer now** adds your message to the turn the agent is running, without stopping it. The agent
-  picks it up at its next step, so it may finish the step it is on first. Use it to correct course
-  ("use tabs, not spaces") without throwing away the work in progress.
+- **Steer now** (the default) adds your message to the turn the agent is running, without stopping
+  it. The agent picks it up at its next step, so it may finish the step it is on first. Use it to
+  correct course ("use tabs, not spaces") without throwing away the work in progress. If the agent
+  can't take it, it is sent as the next message instead, and the message says so.
+- **Queue next** sends your message after the current turn finishes, as the agent's next prompt.
 
 To stop the turn instead, select **Interrupt** (the red button above the message box). The choice
-goes back to **Queue next** when the turn ends. A message with files attached always queues, because
+goes back to **Steer now** when the turn ends. A message with files attached always queues, because
 a steer carries text only.
 
 A message you send with **Steer now** shows what happened to it underneath:
