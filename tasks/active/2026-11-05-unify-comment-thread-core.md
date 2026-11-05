@@ -81,7 +81,7 @@ Readers moved: `archive-sharding.ts` fence + digest, `project-comment-inbox.ts`,
       metadata, prompt attribution, existing suites updated
 - [x] Backlog task: drop the frozen old tables later (separately approved)
 - [x] Docs: architecture/collaboration docs that describe comment storage
-- [ ] Staging: pre-existing comment data inventory before deploy, verify after deploy
+- [x] Staging: pre-existing comment data inventory before deploy, verify after deploy
 
 ## Acceptance criteria
 
@@ -116,17 +116,31 @@ Inventory via `GET /api/projects/:id/comments` as the primary smoke user (`.tmp/
 
 ## Staging evidence — window 1 (run 42003862079, 09:56–~10:08 UTC, then replaced by another branch)
 
-| Check | Result |
-| --- | --- |
-| Pre-existing data read back through new tables (4 projects, 63 threads: every per-session list, per-file list, inbox) | Byte-identical JSON to the pre-deploy dump |
-| Parity logs (`project_data.anchored_comments_migration.comments.migration_parity`, Workers Observability) | 15 project objects, all `ok: true`, 0 mismatched; e.g. `01KJNR9R3TEN3KX1ETE33852R8` threads 35/35, replies 10/10, status mutations 33/33; `01KTKXZ4ZZAT6MJFXRW1ZTQ7RB` 20+4 threads, 8+2 replies, 10 mutations |
-| Old message thread `2c4c6087…` via comment reader (desktop): reply, resolve, reopen | All persisted; resolvedBy/reopenedBy recorded; 0 console errors |
-| Old message thread `99e2048a…` via comment reader (mobile 375px): reply | Posted |
-| New thread with quote + @mention of dfv31 | 201, quote kept, mention notification delivered to dfv31 (type `mention`) |
-| File comments (file `01KWMJ2QMRVV57SRK6P9C0343M`): new thread with quote, reply, resolve, reopen; old thread `ce9ef7d0…` reopen, reply, resolve | All 200/201 |
-| Cross-file route (`/library/not-this-file/comments/ce9ef7d0…/resolve`) and cross-session route (old thread via another session) | 404 / 404 |
-| Comments page desktop + mobile, both projects | Counts 37 (35+2 new) and 25 (24+1 new); 0 console errors |
-| Send to agent on `521480b8…` (owner) | 202; transcript row carries `metadata.wake` (`comment_directive`, `trusted_project`, owner, `teammateInput:false`). Agent not reached: that chat's Instant container runtime was gone (`container_runtime_unavailable`), unrelated to this change |
+| Check                                                                                                                                           | Result                                                                                                                                                                                                                                            |
+| ----------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pre-existing data read back through new tables (4 projects, 63 threads: every per-session list, per-file list, inbox)                           | Byte-identical JSON to the pre-deploy dump                                                                                                                                                                                                        |
+| Parity logs (`project_data.anchored_comments_migration.comments.migration_parity`, Workers Observability)                                       | 15 project objects, all `ok: true`, 0 mismatched; e.g. `01KJNR9R3TEN3KX1ETE33852R8` threads 35/35, replies 10/10, status mutations 33/33; `01KTKXZ4ZZAT6MJFXRW1ZTQ7RB` 20+4 threads, 8+2 replies, 10 mutations                                    |
+| Old message thread `2c4c6087…` via comment reader (desktop): reply, resolve, reopen                                                             | All persisted; resolvedBy/reopenedBy recorded; 0 console errors                                                                                                                                                                                   |
+| Old message thread `99e2048a…` via comment reader (mobile 375px): reply                                                                         | Posted                                                                                                                                                                                                                                            |
+| New thread with quote + @mention of dfv31                                                                                                       | 201, quote kept, mention notification delivered to dfv31 (type `mention`)                                                                                                                                                                         |
+| File comments (file `01KWMJ2QMRVV57SRK6P9C0343M`): new thread with quote, reply, resolve, reopen; old thread `ce9ef7d0…` reopen, reply, resolve | All 200/201                                                                                                                                                                                                                                       |
+| Cross-file route (`/library/not-this-file/comments/ce9ef7d0…/resolve`) and cross-session route (old thread via another session)                 | 404 / 404                                                                                                                                                                                                                                         |
+| Comments page desktop + mobile, both projects                                                                                                   | Counts 37 (35+2 new) and 25 (24+1 new); 0 console errors                                                                                                                                                                                          |
+| Send to agent on `521480b8…` (owner)                                                                                                            | 202; transcript row carries `metadata.wake` (`comment_directive`, `trusted_project`, owner, `teammateInput:false`). Agent not reached: that chat's Instant container runtime was gone (`container_runtime_unavailable`), unrelated to this change |
+
+## Staging evidence — window 2 (run 42018946453, landed 11:45 UTC)
+
+| Check                                                            | Result                                                                                                                                                                                                                                              |
+| ---------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Window-1 threads visible again on this build                     | Yes (`d240ed93…`, `f84aedef…`, which only exist in the new tables)                                                                                                                                                                                  |
+| Owner Send to agent on a live VM chat (`42a13a98…`)              | 202, thread `sent`; agent woke and received the directive; `metadata.wake` owner record                                                                                                                                                             |
+| Agent MCP comment tools (in the woken agent)                     | list / reply / create / resolve / reopen / resolve on message threads, `list_library_files`, `create_library_file_comment_thread`, `list_library_file_comment_threads`: all OK (agent-created thread `f2e4cae9…` resolved; file thread `db8e4f70…`) |
+| Shared-access teammate send (dfv31 with a 10-minute grant)       | 202, `sentBy` dfv31; directive labels author and sender as a teammate, not the owner; `metadata.wake` `actorRole: grantee`, `teammateInput: true`, `onBehalfOfUserId` owner, `grantId`; agent replied `teammate-ack`                                |
+| Member without access sends                                      | 403 (same message as before)                                                                                                                                                                                                                        |
+| Desktop chat rail: comment on selected text                      | Created with the selected text as quote                                                                                                                                                                                                             |
+| Mobile chat: comment from the message composer                   | Created                                                                                                                                                                                                                                             |
+| Mobile comment reader on old thread `99e2048a…`: resolve, reopen | Both persisted, 0 console errors                                                                                                                                                                                                                    |
+| Cleanup                                                          | Grant revoked; test chat stopped and workspace deleted; smoke sessions signed out                                                                                                                                                                   |
 
 Other branches deployed over this build while it was being verified, so those builds (pre-072 code) read
 and write the legacy tables. Writes made under them are not in the anchored tables (the documented
