@@ -82,7 +82,7 @@ Probed the real `agy-acp-server` 1.4.5 Linux x86_64 release locally (`.tmp/agy/p
 - [x] The VM agent installs Antigravity, verifies the archive digest, launches it, authenticates
       with `gemini-api-key`, and opens a session without writing into the repo
 - [x] Draft PR with green CI (#2542)
-- [ ] (After Raphaël connects a key) staging: a real prompt answered by Antigravity
+- [x] (After Raphaël connects a key) staging: a real prompt answered by Antigravity
 
 ## Verification Notes
 
@@ -118,3 +118,15 @@ Probed the real `agy-acp-server` 1.4.5 Linux x86_64 release locally (`.tmp/agy/p
   account-map without the real-key check, because it was waiting on the human. Queue is now
   account-map, then reliable-shutdown (01M6NAWT7RTBEQHXJTVMMX1W97, about 45 minutes), then me.
   Reliable-shutdown will message me when it releases staging. Then I redeploy, ask for the key and run the real chats.
+
+## Staging with a real key (2026-11-05, run 42122233465, 17b695655)
+
+- Key saved under Google Antigravity by Raphaël (22:23 UTC).
+- `gemini-3.8-flash`: two turns on a VM each returned Google's "This model is currently
+  experiencing high demand" after about 10 minutes (Google-side capacity; key accepted).
+- `gemini-3.5-flash`: real replies on VM (task 01M6Q12XD78BRW0YA37H6MGX6Y) and Instant
+  (task 01M6Q133PST4ZG46TNPNR7882H); both also called the sam-mcp tools.
+- Live steering: Antigravity 1.4.5 does not advertise `_session/steering`. A mid-turn steer is
+  recorded `queued_fallback` / `adapter_does_not_advertise_steering` and delivered as the next
+  turn: the agent finished `sleep 45` ("DONE"), then answered the steer ("MANGO"). No loss.
+- Test workspaces and nodes deleted; test profiles now use `gemini-3.5-flash`.
