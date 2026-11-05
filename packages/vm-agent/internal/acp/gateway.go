@@ -199,6 +199,8 @@ type GatewayConfig struct {
 	// PromptCancelGracePeriod waits after cancel for the cancelled prompt to
 	// settle before finishing it as cancelled and restarting the agent.
 	PromptCancelGracePeriod time.Duration
+	// SteerTimeout bounds one `_session/steering` request. Zero uses DefaultSteerTimeout.
+	SteerTimeout time.Duration
 	// PromptRetryMaxRetries bounds transient provider prompt retries after the initial attempt.
 	PromptRetryMaxRetries int
 	// PromptRetryInitialDelay is the first backoff before retrying a transient provider prompt error.

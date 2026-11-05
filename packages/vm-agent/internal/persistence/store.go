@@ -158,6 +158,7 @@ func (s *Store) migrate() error {
 		migrateV18,
 		migrateV19,
 		migrateV20,
+		migrateV21,
 	}
 
 	for i := version; i < len(migrations); i++ {

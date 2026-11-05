@@ -1896,6 +1896,7 @@ func (s *Server) agentCapabilities() map[string]interface{} {
 			"noWaiterStatus":    "no_waiter",
 			"staleStatus":       "stale_generation",
 		},
+		"steering": steeringCapability(),
 		"checkpointRollover": map[string]interface{}{
 			"supported": true,
 			"automatic": false,
