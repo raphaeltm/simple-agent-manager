@@ -45,7 +45,7 @@ export function HumanTasksPrototype() {
           <div className="sam-glass sam-glass--slab sam-glass-rim flex items-center gap-2 rounded-[var(--sam-radius-slab)] px-3 py-2">
             <img src="/sam-head.png" alt="SAM" className="h-7 w-7 object-contain" />
             <span className="flex-1 truncate text-sm font-semibold text-fg-primary">
-              Acme Billing
+              {state.view === 'home' ? 'Home' : 'Acme Billing'}
             </span>
             <SegmentedControl
               className="w-[156px] shrink-0"

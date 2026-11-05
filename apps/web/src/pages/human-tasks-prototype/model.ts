@@ -316,6 +316,8 @@ export const SCENES: Record<string, { mode: Mode; actions: Action[] }> = {
         text: '"Unlimited seats" isn\'t true on the Team plan. Can you fix that line?',
       },
       { type: 'complete', id: 'ht-pricing-copy' },
+      { type: 'viewer', viewer: 'raph' },
+      { type: 'select', id: 'ht-pricing-copy' },
     ],
   },
   'team-done-chat': {
@@ -385,8 +387,12 @@ export function sceneState(name: string | null): State {
 }
 
 /** Which tasks a viewer sees under each filter. */
+/** The project these screens belong to; other projects' tasks only show on Home. */
+export const CURRENT_PROJECT = 'Acme Billing';
+
 export function visibleTasks(state: State): HumanTask[] {
-  const { tasks, viewer, filter } = state;
+  const { viewer, filter } = state;
+  const tasks = state.tasks.filter((t) => t.project === CURRENT_PROJECT);
   if (filter === 'done') return tasks.filter((t) => t.status !== 'open');
   const open = tasks.filter((t) => t.status === 'open');
   if (filter === 'team') return open;
@@ -398,6 +404,7 @@ export function visibleTasks(state: State): HumanTask[] {
 export function mineCount(state: State): number {
   return state.tasks.filter(
     (t) =>
+      t.project === CURRENT_PROJECT &&
       t.status === 'open' &&
       ((t.assignee.kind === 'person' && t.assignee.id === state.viewer) ||
         t.claimedBy === state.viewer)

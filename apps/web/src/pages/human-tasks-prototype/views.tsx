@@ -330,7 +330,7 @@ export function HomeView({ state, dispatch }: { state: State; dispatch: Dispatch
         className="px-5 py-4 text-xs leading-relaxed text-fg-muted"
         data-testid="home-note"
       >
-        No push notification was sent for these. You get one quiet daily digest; agents only ping
+        No push notification was sent for these. They arrive in-app at low urgency; agents only ping
         you directly with
         <span className="font-mono"> request_human_input</span> when they are actually stuck.
       </Pane>
