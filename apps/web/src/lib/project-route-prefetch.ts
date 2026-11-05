@@ -43,6 +43,21 @@ export async function readInitialSessionList(
   }
 }
 
+/** Transcript queries a route prefetch is reading for a conversation that has not opened yet. */
+const routePrefetchedTranscripts = new Set<string>();
+
+/**
+ * Whether the route prefetch started this transcript's read for the conversation now
+ * opening. Consumed by that first open.
+ *
+ * Opening a chat normally reconciles its cached transcript with the server however fresh
+ * it is (`useSessionTranscript`). A transcript the route read moments ago, for this very
+ * open, has nothing to reconcile, so that open reconciles only if it has gone stale.
+ */
+export function takeRoutePrefetchedTranscript(queryHash: string): boolean {
+  return routePrefetchedTranscripts.delete(queryHash);
+}
+
 /**
  * Starts the reads a cold project deep link will need, at the moment the project route
  * mounts — beside its route-chunk preloads, instead of each read waiting for the
@@ -80,8 +95,11 @@ export function prefetchProjectRoute(
   void queryClient.prefetchQuery(initialChatSessionListQueryOptions(queryScope, projectId));
   const sessionId = selected?.params.sessionId;
   if (sessionId) {
-    void queryClient.prefetchQuery(
-      chatSessionMessagesQueryOptions(queryScope, projectId, sessionId)
-    );
+    const transcript = chatSessionMessagesQueryOptions(queryScope, projectId, sessionId);
+    void queryClient.prefetchQuery(transcript);
+    // Only a read actually in flight is fresh for the open: a cached copy the prefetch
+    // judged fresh enough to skip still gets the open's reconcile.
+    const query = queryClient.getQueryCache().find({ queryKey: transcript.queryKey, exact: true });
+    if (query?.state.fetchStatus === 'fetching') routePrefetchedTranscripts.add(query.queryHash);
   }
 }

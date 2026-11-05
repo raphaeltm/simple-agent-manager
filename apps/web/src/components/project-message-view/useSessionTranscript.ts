@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { hashKey, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
@@ -13,6 +13,7 @@ import {
   oldestPersistedCursor,
   readMessagesAfter,
 } from '../../lib/message-paging';
+import { takeRoutePrefetchedTranscript } from '../../lib/project-route-prefetch';
 import {
   chatQueryKeys,
   chatSessionMessagesQueryOptions,
@@ -70,12 +71,19 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
     [projectId, queryScope, sessionId]
   );
 
+  const options = chatSessionMessagesQueryOptions(queryScope, projectId, sessionId);
+  // Read once per open, so a later render cannot change how this open reconciles.
+  const [routePrefetched] = useState(() =>
+    takeRoutePrefetchedTranscript(hashKey(options.queryKey))
+  );
   const query = useQuery({
-    ...chatSessionMessagesQueryOptions(queryScope, projectId, sessionId),
+    ...options,
     enabled: Boolean(queryScope && projectId && sessionId),
     // Opening a chat always reconciles its cached copy with the server, however
-    // fresh the cache is: a message persisted while it was closed must appear.
-    refetchOnMount: 'always',
+    // fresh the cache is: a message persisted while it was closed must appear. The
+    // exception is the open a route prefetch just read the transcript for; it
+    // reconciles only once that read has gone stale.
+    refetchOnMount: routePrefetched ? true : 'always',
   });
   const detail = query.data;
   const messages = detail?.messages ?? NO_MESSAGES;

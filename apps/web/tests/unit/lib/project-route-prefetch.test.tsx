@@ -1,4 +1,4 @@
-import { QueryClient } from '@tanstack/react-query';
+import { hashKey, QueryClient } from '@tanstack/react-query';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -20,6 +20,7 @@ import {
   initialChatSessionListQueryOptions,
   prefetchProjectRoute,
   readInitialSessionList,
+  takeRoutePrefetchedTranscript,
 } from '../../../src/lib/project-route-prefetch';
 import { chatQueryKeys, projectQueryKeys } from '../../../src/lib/query-options';
 
@@ -92,6 +93,41 @@ describe('prefetchProjectRoute', () => {
     expect(mocks.listChatSessions).not.toHaveBeenCalled();
     expect(mocks.getChatSession).not.toHaveBeenCalled();
     expect(client.getQueryCache().getAll()).toHaveLength(0);
+  });
+});
+
+describe('takeRoutePrefetchedTranscript', () => {
+  const transcriptHash = (scope: string) =>
+    hashKey(chatQueryKeys.sessionMessages(scope, 'proj-1', 'session-1'));
+
+  // Marks are module state; drop any an earlier test's prefetch left behind.
+  beforeEach(() => {
+    takeRoutePrefetchedTranscript(transcriptHash('user-1'));
+    takeRoutePrefetchedTranscript(transcriptHash('user-2'));
+  });
+
+  it('marks a transcript the route is reading, for exactly one open', () => {
+    prefetchProjectRoute(newClient(), 'user-1', '/projects/proj-1/chat/session-1');
+    expect(takeRoutePrefetchedTranscript(transcriptHash('user-1'))).toBe(true);
+    // A later open of the same chat reconciles as usual.
+    expect(takeRoutePrefetchedTranscript(transcriptHash('user-1'))).toBe(false);
+  });
+
+  it('does not mark a cached transcript the prefetch skipped as fresh', () => {
+    const client = newClient();
+    client.setQueryData(chatQueryKeys.sessionMessages('user-1', 'proj-1', 'session-1'), {
+      session: { id: 'session-1' },
+      messages: [],
+    });
+    prefetchProjectRoute(client, 'user-1', '/projects/proj-1/chat/session-1');
+    expect(mocks.getChatSession).not.toHaveBeenCalled();
+    expect(takeRoutePrefetchedTranscript(transcriptHash('user-1'))).toBe(false);
+  });
+
+  it("keys the mark by user, so another user's open is unaffected", () => {
+    prefetchProjectRoute(newClient(), 'user-1', '/projects/proj-1/chat/session-1');
+    expect(takeRoutePrefetchedTranscript(transcriptHash('user-2'))).toBe(false);
+    expect(takeRoutePrefetchedTranscript(transcriptHash('user-1'))).toBe(true);
   });
 });
 
