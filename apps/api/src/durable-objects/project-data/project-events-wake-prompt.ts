@@ -32,13 +32,19 @@ export function buildWakePromptInput(
   // class, so stop-and-deliver may cancel the target's in-flight turn to
   // deliver this batch immediately (urgent delivery phase 1).
   const interruptWake = options.subscription.deliveryPreference.requested === 'runtime_interrupt';
+  // runtime_steer wakes add the batch to a running turn (live steering); an idle or
+  // sleeping target receives it as an ordinary wake prompt instead.
+  const steerWake = options.subscription.deliveryPreference.requested === 'runtime_steer';
   const agentMessageChannel = agentMessageChannelForSubscription(options.subscription);
   const urgentPrefix = interruptWake
     ? 'Urgent project event wake (runtime_interrupt) — this batch was important enough ' +
       'to stop an in-flight turn for immediate delivery. If your previous turn was cut ' +
       'short, review the transcript above to see where you left off, then process this ' +
       'batch first. '
-    : '';
+    : steerWake
+      ? 'Project event update added to your current turn (runtime_steer) — it does not stop ' +
+        'your work; fold it in if it is relevant. '
+      : '';
   const content = agentMessageChannel
     ? agentMessageWakeContent({
         batchId: options.batchId,
@@ -59,6 +65,7 @@ export function buildWakePromptInput(
     senderType: 'system',
     senderId: 'project-data',
     messageClass: interruptWake ? 'interrupt' : 'deliver',
+    deliveryIntent: steerWake ? 'steer' : 'queue',
     sourceKind: 'project_event_wake',
     metadata: {
       projectEventWake: true,
@@ -69,6 +76,7 @@ export function buildWakePromptInput(
       createdAt: options.now,
       payloadPolicy: 'ids_only',
       ...(interruptWake ? { runtimeInterrupt: true } : {}),
+      ...(steerWake ? { runtimeSteer: true } : {}),
       ...(agentMessageChannel ? { agentMessageChannel } : {}),
     },
     ttlMs: options.ttlMs,

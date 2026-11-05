@@ -355,9 +355,9 @@ function attemptStateForPromptResult(
     case 'accepted':
     case 'steered':
       return 'accepted';
-    case 'retry':
     // A steer the runtime did not take is now an ordinary queued wake; its later
     // queue-lane delivery records the terminal attempt.
+    case 'retry':
     case 'steer_fallback':
     case 'steer_pending':
       return 'retry';
