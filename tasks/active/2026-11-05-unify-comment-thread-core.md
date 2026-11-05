@@ -146,11 +146,24 @@ Other branches deployed over this build while it was being verified, so those bu
 and write the legacy tables. Writes made under them are not in the anchored tables (the documented
 rollback behaviour, observed for real).
 
+## Staging evidence — window 3 (merge head `e126fe39b`, run 42057544180, landed ~16:05 UTC)
+
+Rebased on main after `072-prompt-delivery-intent` merged; this migration is now `073-anchored-comment-threads`.
+
+| Check                                                                                                       | Result                                                                                                                                                                                                                                                                                                                                                                  |
+| ----------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Live comment events                                                                                         | Client A had the chat's Comments panel open; client B (dfv31) created, replied to and resolved a thread through the API. A's project socket received three `comment.thread.changed` frames (version 1→2→3, open→resolved), and the new thread appeared in the panel without a reload. The project Comments page does not subscribe to live events (unchanged behaviour) |
+| Pre-existing + earlier-window thread ids                                                                    | All present                                                                                                                                                                                                                                                                                                                                                             |
+| Old message thread `2c4c6087…`: reply, resolve, reopen; old file thread `ce9ef7d0…`: reopen, reply, resolve | All OK                                                                                                                                                                                                                                                                                                                                                                  |
+| Cross-session / cross-file routes                                                                           | 404 / 404                                                                                                                                                                                                                                                                                                                                                               |
+| Mention → notification; non-writer Send                                                                     | Notified / 403                                                                                                                                                                                                                                                                                                                                                          |
+| 073 re-run parity logs                                                                                      | 12 projects `ok: true`. 2 report `migration_parity_mismatch`, as expected on a re-run: Test Project 1 has 2 changed legacy rows and hono has 1, exactly the old threads mutated after the first copy (`2c4c6087`, `99e2048a`, `ce9ef7d0`). Anchored counts are higher only by post-migration rows. No legacy row is missing. Production runs 073 once, as a first copy  |
+
 ## Migration numbering
 
 Branch `sam/build-draft-pr-implementing-pm2ayp` (task `01M6MHNBM96JSAMJ0GNTPM2AYP`) also adds a
 `072-…` DO migration (`072-prompt-delivery-intent`). `runMigrations` keys on the full name, so both
-apply. Whichever merges second renumbers to `073-…`. Renaming makes this migration run again on
+apply. This branch merged second and is now `073-anchored-comment-threads`; the old name is recorded as retired in `migrations.ts`. Renaming makes this migration run again on
 objects that already ran it, which is safe: tables are `CREATE … IF NOT EXISTS` and the copy is
 `INSERT … WHERE NOT EXISTS`. A re-run also copies legacy-only rows written by older builds in between.
 
