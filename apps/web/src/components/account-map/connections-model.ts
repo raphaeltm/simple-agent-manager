@@ -49,8 +49,12 @@ export interface MapWorkspace {
 
 export interface MapMachine {
   id: string;
-  /** Workspaces that have no machine (Instant containers, or not placed yet) share this entry. */
-  placeholder: boolean;
+  /**
+   * Not a real node: `instant` collects workspaces with no node (Instant containers, or not
+   * placed yet); `gone` collects workspaces whose node is no longer listed, which usually means
+   * their cleanup is stuck.
+   */
+  placeholder: false | 'instant' | 'gone';
   name: string;
   provider: string | null;
   size: string | null;
@@ -85,6 +89,8 @@ export interface ConnectionsView {
 
 /** Id of the shared entry for workspaces without a machine. */
 export const NO_MACHINE_ID = 'account-map:no-machine';
+/** Id of the shared entry for workspaces whose machine is no longer listed. */
+export const GONE_MACHINE_ID = 'account-map:machine-gone';
 
 const STATE_ORDER: Record<WorkState, number> = {
   'needs-you': 0,
@@ -172,23 +178,29 @@ export function buildConnectionsModel(data: AccountMapResponse): ConnectionsMode
     workspaces: [],
   }));
   const machinesById = new Map(machines.map((m) => [m.id, m]));
-  let noMachine: MapMachine | null = null;
-  for (const w of data.workspaces) {
-    let machine = w.nodeId ? machinesById.get(w.nodeId) : undefined;
-    if (!machine) {
-      noMachine ??= {
-        id: NO_MACHINE_ID,
-        placeholder: true,
-        name: 'No machine',
+  const placeholders = new Map<'instant' | 'gone', MapMachine>();
+  const placeholderFor = (kind: 'instant' | 'gone'): MapMachine => {
+    let entry = placeholders.get(kind);
+    if (!entry) {
+      entry = {
+        id: kind === 'instant' ? NO_MACHINE_ID : GONE_MACHINE_ID,
+        placeholder: kind,
+        name: kind === 'instant' ? 'No machine' : 'Machine gone',
         provider: null,
         size: null,
         location: null,
-        status: 'running',
+        status: kind === 'instant' ? 'running' : 'deleted',
         health: null,
         workspaces: [],
       };
-      machine = noMachine;
+      placeholders.set(kind, entry);
     }
+    return entry;
+  };
+  for (const w of data.workspaces) {
+    const machine = w.nodeId
+      ? (machinesById.get(w.nodeId) ?? placeholderFor('gone'))
+      : placeholderFor('instant');
     machine.workspaces.push({
       id: w.id,
       projectId: w.projectId,
@@ -197,7 +209,10 @@ export function buildConnectionsModel(data: AccountMapResponse): ConnectionsMode
       status: w.status,
     });
   }
-  if (noMachine) machines.push(noMachine);
+  for (const kind of ['instant', 'gone'] as const) {
+    const entry = placeholders.get(kind);
+    if (entry) machines.push(entry);
+  }
 
   return {
     projects: data.projects.map((p) => ({

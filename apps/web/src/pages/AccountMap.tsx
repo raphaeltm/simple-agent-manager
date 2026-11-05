@@ -158,7 +158,8 @@ export function AccountMap() {
           options={[
             {
               value: 'all',
-              label: 'Everything',
+              // "Everything" does not fit beside the other two options on a 375px phone.
+              label: isMobile ? 'All' : 'Everything',
               count: counts.all,
               ariaLabel: `Everything, ${counts.all}`,
             },

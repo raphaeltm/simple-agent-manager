@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   buildConnectionsModel,
   chainOf,
+  GONE_MACHINE_ID,
   machineOf,
   NO_MACHINE_ID,
   selectConnectionsView,
@@ -50,7 +51,28 @@ describe('buildConnectionsModel', () => {
     expect(byId.get('n-2')).toEqual(['w-3']);
     expect(byId.get('n-3')).toEqual([]);
     expect(byId.get(NO_MACHINE_ID)).toEqual(['w-4']);
-    expect(machineOf(model, 'w-4')?.placeholder).toBe(true);
+    expect(machineOf(model, 'w-4')?.placeholder).toBe('instant');
+  });
+
+  it('puts workspaces whose machine is no longer listed under "Machine gone", not Instant', () => {
+    const base = accountMapFixture();
+    const m = buildConnectionsModel(
+      accountMapFixture({
+        workspaces: [
+          ...base.workspaces,
+          {
+            ...base.workspaces[0]!,
+            id: 'w-stuck',
+            nodeId: 'n-deleted',
+            status: 'stopping',
+            chatSessionId: null,
+          },
+        ],
+      })
+    );
+    const gone = machineOf(m, 'w-stuck');
+    expect(gone).toMatchObject({ id: GONE_MACHINE_ID, placeholder: 'gone', name: 'Machine gone' });
+    expect(machineOf(m, 'w-4')?.id).toBe(NO_MACHINE_ID);
   });
 
   it('treats a cancelled or superseded task as done, not idle', () => {

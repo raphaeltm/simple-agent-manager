@@ -79,7 +79,8 @@ export function WorkStateChip({ state }: { state: WorkState }) {
 
 /** What a machine is doing, in the words on its chip. Health wins over a "running" status. */
 export function machineState(machine: MapMachine): { label: string; tone: ChipTone } {
-  if (machine.placeholder) return { label: 'Instant', tone: 'info' };
+  if (machine.placeholder === 'instant') return { label: 'Instant', tone: 'info' };
+  if (machine.placeholder === 'gone') return { label: 'Gone', tone: 'danger' };
   if (machine.status === 'error' || machine.health === 'unhealthy')
     return { label: 'Not responding', tone: 'danger' };
   if (machine.health === 'stale') return { label: 'No recent heartbeat', tone: 'muted' };
@@ -102,7 +103,7 @@ export function MachineStateChip({ machine }: { machine: MapMachine }) {
 }
 
 export function MachineIcon({ machine }: { machine: MapMachine }) {
-  return machine.placeholder ? (
+  return machine.placeholder === 'instant' ? (
     <Zap size={16} aria-hidden="true" className="shrink-0 text-[var(--sam-status-info-fg)]" />
   ) : (
     <Server size={16} aria-hidden="true" className="shrink-0 text-fg-muted" />
@@ -111,7 +112,8 @@ export function MachineIcon({ machine }: { machine: MapMachine }) {
 
 /** "Hetzner · cx43 · fsn1", skipping what the node does not report. */
 export function machineDetail(machine: MapMachine): string {
-  if (machine.placeholder) return 'Instant workspaces, or not placed yet';
+  if (machine.placeholder === 'instant') return 'Instant workspaces, or not placed yet';
+  if (machine.placeholder === 'gone') return 'Their machine no longer exists';
   const provider = machine.provider
     ? (PROVIDER_LABELS[machine.provider as keyof typeof PROVIDER_LABELS] ?? machine.provider)
     : null;

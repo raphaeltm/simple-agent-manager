@@ -9,7 +9,7 @@ The map has three columns:
 
 - **Projects**: projects that have chats, tasks or workspaces on the map. Projects with nothing on it are hidden behind **Show quiet projects**.
 - **Chats and tasks**: each piece of work once. A task and its chat share one row. The icon shows its state: working, needs you, idle, asleep, failed or done. A row also shows the ideas the chat works on, and the task's pull request when it has one.
-- **Machines**: your nodes and the workspaces running on each one. Workspaces without a node, such as Instant workspaces, are grouped under **No machine**.
+- **Machines**: your nodes and the workspaces running on each one. Workspaces without a node, such as Instant workspaces, are grouped under **No machine**. Workspaces whose node no longer exists are grouped under **Machine gone**, which usually means their cleanup is stuck.
 
 Lines join each project to its chats and tasks, and each chat or task to the workspace it runs in. Amber lines lead to work that needs you, and green lines to work in progress.
 

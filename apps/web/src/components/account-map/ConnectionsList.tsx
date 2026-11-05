@@ -78,7 +78,9 @@ export function ConnectionsList({
                       }`}
                     >
                       {machine
-                        ? `on ${machine.placeholder ? 'Instant' : machine.name}${state?.tone === 'danger' ? ` · ${state.label.toLowerCase()}` : ''}`
+                        ? machine.placeholder === 'gone'
+                          ? 'on a machine that no longer exists'
+                          : `on ${machine.placeholder === 'instant' ? 'Instant' : machine.name}${state?.tone === 'danger' ? ` · ${state.label.toLowerCase()}` : ''}`
                         : 'not running anywhere'}
                     </p>
                   )}

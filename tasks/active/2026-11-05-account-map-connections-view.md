@@ -58,7 +58,7 @@ tests). Normal gates (staging, review, PR, deploy monitoring) still apply.
 - [x] Filters and search narrow the view; "Include finished" refetches with `activeOnly=false`
 - [x] Phone layout has no horizontal overflow and shows each chat's path
 - [x] No React Flow code remains in the Account Map (the workflow run graph keeps it); no prototype route remains
-- [ ] Staging: the page renders real data for the smoke user and selection works
+- [x] Staging: the page renders real data for the smoke user and selection works (2026-11-05 20:59Z, deploy run 42105126672)
 
 ## Implementation Notes
 
@@ -72,3 +72,8 @@ tests). Normal gates (staging, review, PR, deploy monitoring) still apply.
 - Below 1024px (tablets and phones) the page uses the grouped list; three columns need ~760px.
 - Old "Reorganize" and per-type chips are gone: there is no free layout to reorganize, and the
   Everything / Needs you / Live filter plus search replace the type chips.
+
+## Staging Notes
+
+- Verified on staging at 20:59Z, deploy run 42105126672. The smoke user's account: 31 projects, 47 chats and tasks, 21 workspaces. Selection, path links (followed to the task page), filters, search, Show finished (`activeOnly=false`: 199 sessions / 200 tasks), phone inline path and light theme all worked, with 0 console errors and 0 failed API calls. Dashboard, projects, settings and nodes still load.
+- Real data showed 21 workspaces in `stopping`, 19 of them on nodes that no longer exist. They had been grouped as "No machine (Instant)", which was misleading. They now get their own **Machine gone** entry with a red "Gone" chip. The phone filter label is shortened to "All" because "Everything" truncated at 375px. Both changes are covered by the unit and Playwright tests and were not re-deployed to staging (labels and grouping only).
