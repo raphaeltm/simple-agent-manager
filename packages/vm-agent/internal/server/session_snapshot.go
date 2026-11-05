@@ -4,6 +4,7 @@ import (
 	"archive/tar"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -208,6 +209,10 @@ func (s *Server) handleHibernateAgentSession(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	result, err := s.captureSessionSnapshot(r.Context(), input)
+	if errors.Is(err, errWorkspaceEvicting) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

@@ -110,3 +110,42 @@ func (s *Server) releaseFailedEvictionCapture(input *sessionSnapshotHandlerInput
 		slog.Warn("Final eviction snapshot failure report failed", "workspaceId", input.workspaceID, "chatSessionId", input.chatSessionID, "generation", generation, "error", reportErr)
 	}
 }
+
+// errWorkspaceEvicting refuses an ordinary snapshot while the workspace is being evicted.
+// A capture prepared then would replace the eviction's final generation as the snapshot
+// the control plane evaluates, and it fails anyway once the container is stopped.
+var errWorkspaceEvicting = errors.New("workspace eviction in progress; snapshot refused")
+
+// markEvictionFinalizing covers the window from the eviction's write-ahead stop intent to
+// the recorded eviction (markWorkspaceEvicted), which now spans the final capture. During it
+// the intent's delivery must not be reconciled as an interrupted stop, and no other capture
+// may start. The mark is in memory: after an agent restart nothing is in flight, so the
+// reconciler owns the intent as before.
+func (s *Server) markEvictionFinalizing(workspaceID string) {
+	s.evictionFinalizing.Store(workspaceID, struct{}{})
+}
+
+func (s *Server) clearEvictionFinalizing(workspaceID string) {
+	s.evictionFinalizing.Delete(workspaceID)
+}
+
+func (s *Server) isEvictionFinalizing(workspaceID string) bool {
+	_, ok := s.evictionFinalizing.Load(workspaceID)
+	return ok
+}
+
+// requireWorkspaceNotEvicting is checked by ordinary snapshot entry points under the
+// workspace lifecycle lock, before anything is prepared on the control plane.
+func (s *Server) requireWorkspaceNotEvicting(workspaceID string) error {
+	if s.isEvictionFinalizing(workspaceID) {
+		return errWorkspaceEvicting
+	}
+	s.workspaceMu.RLock()
+	runtime := s.workspaces[workspaceID]
+	evicted := runtime != nil && runtime.Status == "evicted"
+	s.workspaceMu.RUnlock()
+	if evicted {
+		return errWorkspaceEvicting
+	}
+	return nil
+}

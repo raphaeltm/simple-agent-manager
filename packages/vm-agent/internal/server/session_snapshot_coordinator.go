@@ -79,6 +79,9 @@ func (s *Server) captureSessionSnapshot(ctx context.Context, input *sessionSnaps
 	if err := s.requireNoWorkspaceDeletion(input.workspaceID); err != nil {
 		return nil, err
 	}
+	if err := s.requireWorkspaceNotEvicting(input.workspaceID); err != nil {
+		return nil, err
+	}
 	return s.runSessionSnapshot(ctx, input)
 }
 
@@ -104,6 +107,9 @@ func (s *Server) startBackgroundSessionSnapshot(input *sessionSnapshotHandlerInp
 		}
 		defer lifecycle.Unlock()
 		if err := s.requireNoWorkspaceDeletion(input.workspaceID); err != nil {
+			return
+		}
+		if s.requireWorkspaceNotEvicting(input.workspaceID) != nil {
 			return
 		}
 		result, err := s.runSessionSnapshot(ctx, input)

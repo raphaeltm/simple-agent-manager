@@ -79,6 +79,7 @@ type Server struct {
 	buildQueue             chan struct{}
 	readyRetryMu           sync.Mutex // guards retryPendingReadyCallbacks — only one run at a time
 	evictionDeliveryMu     sync.Mutex // One bounded eviction callback delivery at a time.
+	evictionFinalizing     sync.Map   // Workspaces between the eviction stop intent and the recorded eviction.
 	eventMu                sync.RWMutex
 	nodeEvents             []EventRecord
 	workspaceEvents        map[string][]EventRecord

@@ -316,7 +316,14 @@ func (s *Server) stopEvictedWorkspaceContainer(ctx context.Context, target resou
 	if err := s.prepareWorkspaceEvictionStop(ctx, target); err != nil {
 		return err
 	}
-	return s.stopEvictionContainer(ctx, containerID)
+	// Cleared by markWorkspaceEvicted once the eviction is recorded, after any final capture.
+	s.markEvictionFinalizing(target.WorkspaceID)
+	if err := s.stopEvictionContainer(ctx, containerID); err != nil {
+		// A failed stop is not finalizing: the reconciler retries the intent.
+		s.clearEvictionFinalizing(target.WorkspaceID)
+		return err
+	}
+	return nil
 }
 
 func (s *Server) stopEvictionContainer(ctx context.Context, containerID string) error {
@@ -349,6 +356,7 @@ func evictionDockerStopCommandTimeout(stopTimeout time.Duration) time.Duration {
 
 func (s *Server) markWorkspaceEvicted(result resourcemon.EvictionResult) bool {
 	workspaceID := result.Target.WorkspaceID
+	defer s.clearEvictionFinalizing(workspaceID)
 	if workspaceID == "" || !result.ContainerStopped || s.store == nil {
 		return false
 	}

@@ -88,6 +88,12 @@ func (s *Server) startStoppedSnapshotHelper(ctx context.Context, workspaceID, so
 	cleanup := func() {
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), s.config.EvictionSnapshotTimeout)
 		defer cancel()
+		// Staging saw Docker `oom` events for helpers whose captures still completed; record
+		// the helper's end state so the next one says whether a process was really killed.
+		if state, err := s.runEvictionDockerCommand(cleanupCtx, "inspect", "--format",
+			"oomKilled={{.State.OOMKilled}} running={{.State.Running}} exitCode={{.State.ExitCode}}", name); err == nil {
+			slog.Info("Snapshot helper finished", "workspaceId", workspaceID, "name", name, "state", strings.TrimSpace(state))
+		}
 		if _, err := s.runEvictionDockerCommand(cleanupCtx, "rm", "--force", "--volumes", name); err != nil {
 			slog.Warn("Failed to remove snapshot helper container; deletion and startup reap it", "name", name, "error", err)
 		}
