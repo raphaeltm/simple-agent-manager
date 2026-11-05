@@ -159,6 +159,31 @@ Rebased on main after `072-prompt-delivery-intent` merged; this migration is now
 | Mention → notification; non-writer Send                                                                     | Notified / 403                                                                                                                                                                                                                                                                                                                                                          |
 | 073 re-run parity logs                                                                                      | 12 projects `ok: true`. 2 report `migration_parity_mismatch`, as expected on a re-run: Test Project 1 has 2 changed legacy rows and hono has 1, exactly the old threads mutated after the first copy (`2c4c6087`, `99e2048a`, `ce9ef7d0`). Anchored counts are higher only by post-migration rows. No legacy row is missing. Production runs 073 once, as a first copy  |
 
+## CodeRabbit review and staging window 4 (head `ba7243b98`, run 42079026912)
+
+CodeRabbit's review at 16:33Z was handled in `ba7243b98`:
+
+- **Fixed:**
+  - inbox keyset windows past oversized threads
+  - honest inbox docstring
+  - directive feedback never cut
+  - grantee attention answer records the wake on `session.shared_answer`
+  - extra tests
+- **Declined, with reasons on the PR:**
+  - session-list payload bound, which needs client pagination: `tasks/backlog/2026-11-05-bound-session-comment-list-payload.md`
+  - unverified constructor SQLITE_FULL
+  - docstring coverage
+
+Window 4 (18:16–18:20 UTC):
+
+- 13 known thread ids are present.
+- The inbox counts are consistent (P1 50, P2 25, 3, 1).
+- Old message-thread and file-thread mutations work.
+- Cross-scope routes return 404/404.
+- The mention notified the teammate, and a non-writer send is refused (403).
+- Send to agent with a quote and a 1.3 KB comment returned 202. The transcript directive (1,744 characters) keeps the quote and the full feedback.
+- Staging was released to live-steering at 18:20Z.
+
 ## Migration numbering
 
 Branch `sam/build-draft-pr-implementing-pm2ayp` (task `01M6MHNBM96JSAMJ0GNTPM2AYP`) also adds a
