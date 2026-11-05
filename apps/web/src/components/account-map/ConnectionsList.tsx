@@ -2,6 +2,9 @@
  * Phone Account Map: columns do not fit, so chats and tasks are grouped by project, and picking
  * one opens its chain (idea → workspace → machine → pull request) underneath it.
  */
+import { Link } from 'react-router';
+
+import { projectPath } from '../../lib/project-routes';
 import type { ConnectionsModel, ConnectionsView } from './connections-model';
 import { machineOf } from './connections-model';
 import { machineState, ProjectMark, WorkRow, WorkStateChip } from './connections-parts';
@@ -12,22 +15,33 @@ export function ConnectionsList({
   view,
   selectedId,
   onSelect,
+  showQuiet,
+  onToggleQuiet,
 }: {
   model: ConnectionsModel;
   view: ConnectionsView;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  showQuiet: boolean;
+  onToggleQuiet: () => void;
 }) {
-  const groups = view.projects
-    .map((project) => ({ project, work: view.work.filter((w) => w.projectId === project.id) }))
-    .filter((g) => g.work.length > 0);
-
-  if (groups.length === 0) {
-    return <p className="m-0 px-1 text-[13px] text-fg-muted">No chats or tasks match.</p>;
-  }
+  const all = view.projects.map((project) => ({
+    project,
+    work: view.work.filter((w) => w.projectId === project.id),
+  }));
+  const groups = all.filter((g) => g.work.length > 0);
+  // The list is grouped by work, so projects with none (including ones that only hold a
+  // workspace) sit behind the same "quiet projects" toggle the columns have.
+  const quiet = [
+    ...all.filter((g) => g.work.length === 0).map((g) => g.project),
+    ...view.quietProjects,
+  ];
 
   return (
     <div className="flex flex-col gap-2.5">
+      {groups.length === 0 && (
+        <p className="m-0 px-1 text-[13px] text-fg-muted">No chats or tasks match.</p>
+      )}
       {groups.map(({ project, work }) => (
         <section
           key={project.id}
@@ -74,6 +88,31 @@ export function ConnectionsList({
           </div>
         </section>
       ))}
+      {quiet.length > 0 && (
+        <button
+          type="button"
+          aria-expanded={showQuiet}
+          onClick={onToggleQuiet}
+          className="min-h-11 cursor-pointer rounded-[var(--sam-radius-control)] border-0 bg-transparent px-1 text-left text-[13px] text-fg-muted hover:text-fg-primary"
+        >
+          {showQuiet ? 'Hide quiet projects' : `Show ${quiet.length} quiet projects`}
+        </button>
+      )}
+      {showQuiet && quiet.length > 0 && (
+        <ul aria-label="Quiet projects" className="m-0 flex list-none flex-col gap-1 p-0">
+          {quiet.map((project) => (
+            <li key={project.id}>
+              <Link
+                to={projectPath(project.id)}
+                className="flex min-h-11 min-w-0 items-center gap-2 rounded-[var(--sam-radius-control)] px-2 text-[13.5px] text-fg-primary no-underline hover:bg-[var(--sam-chip-bg)]"
+              >
+                <ProjectMark name={project.name} />
+                <span className="min-w-0 flex-1 truncate">{project.name}</span>
+              </Link>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

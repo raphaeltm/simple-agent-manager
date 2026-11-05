@@ -63,7 +63,8 @@ export interface MapMachine {
 export interface MapEdge {
   from: string;
   to: string;
-  tone: 'attention' | 'live' | 'quiet';
+  /** Amber means waiting on you, red means failed: never one colour for both (SAM Glass). */
+  tone: 'attention' | 'failed' | 'live' | 'quiet';
 }
 
 export interface ConnectionsModel {
@@ -287,12 +288,14 @@ export function selectConnectionsView(
   const shownWorkspaces = new Set(machines.flatMap((m) => m.workspaces.map((w) => w.id)));
   const edges: MapEdge[] = [];
   for (const w of work) {
-    const tone =
-      w.state === 'needs-you' || w.state === 'failed'
+    const tone: MapEdge['tone'] =
+      w.state === 'needs-you'
         ? 'attention'
-        : w.state === 'working'
-          ? 'live'
-          : 'quiet';
+        : w.state === 'failed'
+          ? 'failed'
+          : w.state === 'working'
+            ? 'live'
+            : 'quiet';
     edges.push({ from: w.projectId, to: w.id, tone });
     if (w.workspaceId && shownWorkspaces.has(w.workspaceId))
       edges.push({ from: w.id, to: w.workspaceId, tone });

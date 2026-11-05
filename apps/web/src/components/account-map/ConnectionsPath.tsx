@@ -97,6 +97,7 @@ function StepValue({ step, className }: { step: PathStep; className: string }) {
     return (
       <Link
         to={step.to}
+        title={step.value}
         className={`${className} text-fg-primary underline decoration-[var(--sam-hairline)] underline-offset-2 hover:decoration-current`}
       >
         {step.value}
@@ -107,6 +108,7 @@ function StepValue({ step, className }: { step: PathStep; className: string }) {
     return (
       <a
         href={sanitizeUrl(step.href)}
+        title={step.value}
         target="_blank"
         rel="noopener noreferrer"
         className={`${className} text-fg-primary underline decoration-[var(--sam-hairline)] underline-offset-2 hover:decoration-current`}
@@ -115,7 +117,11 @@ function StepValue({ step, className }: { step: PathStep; className: string }) {
       </a>
     );
   }
-  return <span className={`${className} text-fg-primary`}>{step.value}</span>;
+  return (
+    <span title={step.value} className={`${className} text-fg-primary`}>
+      {step.value}
+    </span>
+  );
 }
 
 export function ConnectionsPathBar({
@@ -164,13 +170,13 @@ export function ConnectionsPathSteps({ model, work }: { model: ConnectionsModel;
       className="m-0 list-none border-0 border-l-2 border-solid border-[var(--sam-success-edge)] p-0 pl-3"
     >
       {workPath(model, work).map((step) => (
-        <li key={step.key} className="pb-2">
+        <li key={step.key} className="pb-1">
           <span className="block text-[10px] uppercase tracking-wide text-fg-muted">
             {step.label}
           </span>
           <StepValue
             step={step}
-            className={`block break-words text-[13px] [overflow-wrap:anywhere] ${step.mono ? 'font-mono' : ''}`}
+            className={`flex min-h-11 items-center break-words py-1 text-[13px] [overflow-wrap:anywhere] ${step.mono ? 'font-mono' : ''}`}
           />
         </li>
       ))}

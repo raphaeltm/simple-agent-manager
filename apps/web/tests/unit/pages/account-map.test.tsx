@@ -142,18 +142,26 @@ describe('AccountMap page', () => {
     ).toBeInTheDocument();
   });
 
-  it('picking a machine fades what does not run on it', async () => {
+  it('picking a machine steps back what does not run on it, without fading the text', async () => {
     const user = userEvent.setup();
     renderAccountMap();
     await screen.findByTestId('account-map-columns');
     await user.click(screen.getByRole('button', { name: /sam-fsn1-01/ }));
     expect(screen.getByText(/sam-fsn1-01 runs 2 workspaces/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Fix subtitle drift/ }).className).not.toContain(
-      'opacity-40'
-    );
-    expect(screen.getByRole('button', { name: /Lobby drops players/ }).className).toContain(
-      'opacity-40'
-    );
+    const onMachine = screen.getByRole('button', { name: /Fix subtitle drift/ });
+    const elsewhere = screen.getByRole('button', { name: /Lobby drops players/ });
+    expect(onMachine).not.toHaveAttribute('data-dimmed');
+    expect(elsewhere).toHaveAttribute('data-dimmed', 'true');
+    // Stepping back must not use opacity: text has to stay readable on the glass.
+    expect(elsewhere.className).not.toMatch(/opacity-/);
+  });
+
+  it("highlights the picked chat's own workspace, not its machine's other workspaces", async () => {
+    renderAccountMap();
+    const columns = await screen.findByTestId('account-map-columns');
+    // s-1 is picked on load; it runs in w-1, which shares n-1 with w-2.
+    expect(columns.querySelector('[data-node="w-1"]')).toHaveAttribute('data-lit', 'true');
+    expect(columns.querySelector('[data-node="w-2"]')).not.toHaveAttribute('data-lit');
   });
 
   it('filters to what needs you, and search narrows further', async () => {
@@ -232,5 +240,18 @@ describe('AccountMap page', () => {
     await user.click(within(ttv).getByRole('button', { name: /Pick a voice/ }));
     expect(within(ttv).getByRole('list', { name: 'How this connects' })).toBeInTheDocument();
     expect(within(sam).queryByRole('list', { name: 'How this connects' })).not.toBeInTheDocument();
+  });
+
+  it('on phones, quiet projects are one tap away', async () => {
+    mocks.isMobile = true;
+    const user = userEvent.setup();
+    renderAccountMap();
+    await screen.findByRole('region', { name: 'SAM' });
+    expect(screen.queryByRole('link', { name: /Quiet project/ })).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Show 1 quiet projects' }));
+    expect(screen.getByRole('link', { name: /Quiet project/ })).toHaveAttribute(
+      'href',
+      '/projects/p-quiet'
+    );
   });
 });

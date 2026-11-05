@@ -96,9 +96,9 @@ describe('selectConnectionsView', () => {
     expect(edges).toContainEqual({ from: 's-1', to: 'w-1', tone: 'attention' });
     expect(edges).toContainEqual({ from: 't-2', to: 'w-2', tone: 'live' });
     expect(edges).toContainEqual({ from: 's-3', to: 'w-3', tone: 'quiet' });
-    // Failed task with no workspace: only its project line.
+    // Failed task with no workspace: only its project line, in the failure tone (never amber).
     expect(edges.filter((e) => e.from === 't-3' || e.to === 't-3')).toEqual([
-      { from: 'p-sam', to: 't-3', tone: 'attention' },
+      { from: 'p-sam', to: 't-3', tone: 'failed' },
     ]);
   });
 

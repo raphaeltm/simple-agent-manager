@@ -142,6 +142,12 @@ export function ideaTitles(model: ConnectionsModel, work: MapWork): string[] {
     .filter((t): t is string => Boolean(t));
 }
 
+/**
+ * How a row looks when something else is picked: no fill, a hairline border and muted text.
+ * Not `opacity`, which would take text below 4.5:1 on the glass.
+ */
+export const STEPPED_BACK = 'border-[var(--sam-hairline)] bg-transparent';
+
 /** One chat or task. A button: picking it lights its chain. */
 export function WorkRow({
   model,
@@ -163,17 +169,22 @@ export function WorkRow({
       data-node={work.id}
       aria-pressed={selected}
       onClick={() => onSelect(work.id)}
-      className={`flex w-full min-w-0 cursor-pointer flex-col gap-1 rounded-[var(--sam-radius-control)] border border-solid px-3 py-2 text-left transition-opacity focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring ${
+      data-dimmed={dim || undefined}
+      className={`flex w-full min-w-0 cursor-pointer flex-col gap-1 rounded-[var(--sam-radius-control)] border border-solid px-3 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring ${
         selected
           ? 'sam-raised border-[var(--sam-success-edge)]'
-          : work.state === 'needs-you'
-            ? 'border-[var(--sam-warning-edge)] bg-[var(--sam-chip-bg)]'
-            : 'border-[var(--sam-chip-edge)] bg-[var(--sam-chip-bg)]'
-      } ${dim ? 'opacity-40' : ''}`}
+          : dim
+            ? STEPPED_BACK
+            : work.state === 'needs-you'
+              ? 'border-[var(--sam-warning-edge)] bg-[var(--sam-chip-bg)]'
+              : 'border-[var(--sam-chip-edge)] bg-[var(--sam-chip-bg)]'
+      }`}
     >
       <span className="flex min-w-0 items-start gap-2">
         <WorkStateIcon state={work.state} />
-        <span className="line-clamp-2 min-w-0 flex-1 break-words text-[13px] font-medium text-fg-primary [overflow-wrap:anywhere]">
+        <span
+          className={`line-clamp-2 min-w-0 flex-1 break-words text-[13px] font-medium [overflow-wrap:anywhere] ${dim ? 'text-fg-muted' : 'text-fg-primary'}`}
+        >
           {work.title}
         </span>
         {work.prUrl && (

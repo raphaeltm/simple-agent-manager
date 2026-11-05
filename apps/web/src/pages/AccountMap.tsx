@@ -206,7 +206,14 @@ export function AccountMap() {
       </p>
     </div>
   ) : !columns ? (
-    <ConnectionsList model={model} view={view} selectedId={selectedId} onSelect={select} />
+    <ConnectionsList
+      model={model}
+      view={view}
+      selectedId={selectedId}
+      onSelect={select}
+      showQuiet={showQuiet}
+      onToggleQuiet={() => setShowQuiet((v) => !v)}
+    />
   ) : (
     <ConnectionsColumns
       model={model}

@@ -12,6 +12,7 @@ import {
   MachineIcon,
   MachineStateChip,
   ProjectMark,
+  STEPPED_BACK,
   WorkRow,
 } from './connections-parts';
 
@@ -24,6 +25,7 @@ interface DrawnEdge {
 
 const EDGE_COLOR: Record<MapEdge['tone'], string> = {
   attention: 'var(--sam-status-warning-fg)',
+  failed: 'var(--sam-status-danger-fg)',
   live: 'var(--sam-status-success-fg)',
   quiet: 'var(--sam-color-fg-muted)',
 };
@@ -139,16 +141,21 @@ export function ConnectionsColumns({
             type="button"
             data-node={p.id}
             aria-pressed={selectedId === p.id}
+            data-dimmed={dim(p.id) || undefined}
             onClick={() => onSelect(p.id)}
-            className={`flex min-w-0 cursor-pointer items-center gap-2 rounded-[var(--sam-radius-control)] border border-solid px-2.5 py-2 text-left transition-opacity focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring ${
+            className={`flex min-w-0 cursor-pointer items-center gap-2 rounded-[var(--sam-radius-control)] border border-solid px-2.5 py-2 text-left transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring ${
               selectedId === p.id
                 ? 'sam-raised border-[var(--sam-success-edge)]'
-                : 'border-[var(--sam-chip-edge)] bg-[var(--sam-chip-bg)]'
-            } ${dim(p.id) ? 'opacity-40' : ''}`}
+                : dim(p.id)
+                  ? STEPPED_BACK
+                  : 'border-[var(--sam-chip-edge)] bg-[var(--sam-chip-bg)]'
+            }`}
           >
             <ProjectMark name={p.name} />
             <span className="min-w-0 flex-1">
-              <span className="line-clamp-2 break-words text-[13px] font-medium text-fg-primary [overflow-wrap:anywhere]">
+              <span
+                className={`line-clamp-2 break-words text-[13px] font-medium [overflow-wrap:anywhere] ${dim(p.id) ? 'text-fg-muted' : 'text-fg-primary'}`}
+              >
                 {p.name}
               </span>
               {p.repository && (
@@ -191,11 +198,14 @@ export function ConnectionsColumns({
         {view.machines.map((m) => (
           <div
             key={m.id}
-            className={`min-w-0 rounded-[var(--sam-radius-control)] border border-solid bg-[var(--sam-chip-bg)] p-2 transition-opacity ${
-              m.status === 'error' || m.health === 'unhealthy'
-                ? 'border-[var(--sam-danger-edge)]'
-                : 'border-[var(--sam-chip-edge)]'
-            } ${dim(m.id) ? 'opacity-40' : ''}`}
+            data-dimmed={dim(m.id) || undefined}
+            className={`min-w-0 rounded-[var(--sam-radius-control)] border border-solid p-2 transition-colors ${
+              dim(m.id)
+                ? STEPPED_BACK
+                : m.status === 'error' || m.health === 'unhealthy'
+                  ? 'border-[var(--sam-danger-edge)] bg-[var(--sam-chip-bg)]'
+                  : 'border-[var(--sam-chip-edge)] bg-[var(--sam-chip-bg)]'
+            }`}
           >
             <button
               type="button"
@@ -207,7 +217,7 @@ export function ConnectionsColumns({
               <MachineIcon machine={m} />
               <span className="min-w-0 flex-1">
                 <span
-                  className={`block truncate text-[12.5px] font-semibold text-fg-primary ${m.placeholder ? '' : 'font-mono'}`}
+                  className={`block truncate text-[12.5px] font-semibold ${dim(m.id) ? 'text-fg-muted' : 'text-fg-primary'} ${m.placeholder ? '' : 'font-mono'}`}
                 >
                   {m.name}
                 </span>
@@ -222,7 +232,12 @@ export function ConnectionsColumns({
                 <div
                   key={ws.id}
                   data-node={ws.id}
-                  className="sam-well mt-1.5 flex min-w-0 items-center gap-1.5 rounded-[9px] px-2 py-1.5 text-[11.5px] text-fg-muted"
+                  data-lit={selectedId !== null && chain.has(ws.id) ? 'true' : undefined}
+                  className={`sam-well mt-1.5 flex min-w-0 items-center gap-1.5 rounded-[9px] px-2 py-1.5 text-[11.5px] ${
+                    selectedId !== null && chain.has(ws.id)
+                      ? 'text-fg-primary ring-1 ring-[var(--sam-success-edge)]'
+                      : 'text-fg-muted'
+                  }`}
                 >
                   <GitBranch size={11} aria-hidden="true" className="shrink-0" />
                   <span className="min-w-0 flex-1 truncate font-mono">{ws.label}</span>
