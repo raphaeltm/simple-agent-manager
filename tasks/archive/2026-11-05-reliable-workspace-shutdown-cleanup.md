@@ -149,6 +149,10 @@ production release (basic smoke only).
 - A wake that never restores leaves its evicted source preserved; the escape is the stranded-node
   deadline or a user action (documented in the PR).
 
+- CodeRabbit (19:29 UTC) raised 18 items, all valid and fixed (8e421914a, a4fc0273a, db17fdafe, 5694f36cb). The main change: the source receipt is stamped atomically with the wake's commit, only for a complete (`restored`, not `degraded`) restore, matched on the generation the restore committed. A receipt grants deletion only after that stamp.
+- Final staging run on 5694f36cb (task 01M6PSTEG5GD014242EEKKZDSP) passed. The commit time 21:44:16.682 equals the receipt's `restoredAt`, and the source was deleted with `vm_agent_confirmed` 9 s later. Continuity verified.
+- CI note, not this PR: the `Test` job runs 16-19.5 min on main against a 20-minute timeout, and it timed out once here. `VM Agent Integration` `TestIntegration_InstallAgent_Devcontainer_WithNodeFeature` flaked once (npm from the node feature).
+
 ## Notes
 
 - Out of scope: over-eviction tuning (unproven hypothesis), Stop semantics, cf-container runtime
