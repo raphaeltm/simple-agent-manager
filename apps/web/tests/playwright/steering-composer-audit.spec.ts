@@ -1,6 +1,13 @@
 import { expect, type Page, type Route, test } from '@playwright/test';
 
 import { assertNoOverflow, seedTheme } from './audit-helpers';
+import {
+  MOCK_AGENT_CREDENTIALS,
+  MOCK_CLOUD_CREDENTIALS,
+  MOCK_GITHUB_INSTALLATIONS,
+  MOCK_PROJECT,
+  MOCK_USER,
+} from './chat-audit-fixtures';
 
 // ---------------------------------------------------------------------------
 // Live steering in the REAL project chat: the Steer now / Queue next choice the
@@ -10,79 +17,6 @@ import { assertNoOverflow, seedTheme } from './audit-helpers';
 // production; chip states come from the transcript row metadata the server writes
 // (`deliveryIntent: 'steer'` + `steerOutcome`/`steerReason`).
 // ---------------------------------------------------------------------------
-
-const MOCK_USER = {
-  user: {
-    id: 'user-test-1',
-    email: 'test@example.com',
-    name: 'Test User',
-    image: null,
-    role: 'superadmin',
-    status: 'active',
-    emailVerified: true,
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-  session: {
-    id: 'session-test-1',
-    userId: 'user-test-1',
-    expiresAt: new Date(Date.now() + 86400000).toISOString(),
-    token: 'mock-token',
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-};
-
-const MOCK_PROJECT = {
-  id: 'proj-test-1',
-  name: 'Test Project',
-  repository: 'testuser/test-repo',
-  defaultBranch: 'main',
-  userId: 'user-test-1',
-  githubInstallationId: 'inst-1',
-  defaultVmSize: null,
-  defaultAgentType: null,
-  defaultProvider: null,
-  workspaceIdleTimeoutMs: null,
-  nodeIdleTimeoutMs: null,
-  createdAt: '2026-01-01T00:00:00Z',
-  updatedAt: '2026-01-01T00:00:00Z',
-};
-
-const MOCK_CLOUD_CREDENTIALS = [
-  {
-    id: 'cred-cloud-1',
-    provider: 'hetzner',
-    connected: true,
-    createdAt: '2026-01-01T00:00:00Z',
-  },
-];
-
-const MOCK_AGENT_CREDENTIALS = {
-  credentials: [
-    {
-      agentType: 'claude-code',
-      provider: 'anthropic',
-      credentialKind: 'api-key',
-      isActive: true,
-      maskedKey: 'sk-ant-••••test',
-      createdAt: '2026-01-01T00:00:00Z',
-      updatedAt: '2026-01-01T00:00:00Z',
-    },
-  ],
-};
-
-const MOCK_GITHUB_INSTALLATIONS = [
-  {
-    id: 'gh-inst-1',
-    userId: 'user-test-1',
-    installationId: 'inst-1',
-    accountType: 'personal',
-    accountName: 'testuser',
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-];
 
 const NOW = Date.now();
 const LONG_URL =
