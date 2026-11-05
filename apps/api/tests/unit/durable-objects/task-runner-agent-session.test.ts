@@ -897,6 +897,28 @@ describe('handleAgentSession', () => {
     await expect(rc.assertRecoveryAuthority(state)).resolves.toBeUndefined();
   });
 
+  it('commits a degraded restore but neither stamps nor releases its source', async () => {
+    // `degraded` covers HOME, WIP and git restore failures: the replacement may lack files the
+    // source still holds.
+    restoreAgentSessionOnNodeMock.mockResolvedValueOnce({ status: 'degraded' });
+    const state = makeState({
+      config: {
+        ...makeState().config,
+        resumeSnapshotChatSessionId: 'chat-1',
+        evictionFence: { workspaceId: 'source', nodeId: 'source-node', generation: 'g' },
+      },
+    });
+    const { rc, statusEvents } = makeContext();
+
+    await handleAgentSession(state, rc);
+
+    expect(statusEvents.map((event) => event.toStatus)).toEqual(['in_progress']);
+    expect(lifecycleEvents).toEqual(['commit']);
+    expect(restoredSourceReceiptStampStatementMock).not.toHaveBeenCalled();
+    expect(releaseRestoredSourceWorkspacesMock).not.toHaveBeenCalled();
+    expect(state.stepResults.snapshotRestoreComplete).toBe(false);
+  });
+
   it('neither stamps nor releases the source when the commit is refused', async () => {
     const state = makeState({
       config: {

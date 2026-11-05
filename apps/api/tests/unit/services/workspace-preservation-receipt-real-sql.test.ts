@@ -21,7 +21,10 @@ import {
   evictionRecoveryFenceMatches,
   evictionRecoveryRestoredByRunner,
 } from '../../../src/services/session-recovery-eviction';
-import { completeSessionSnapshot } from '../../../src/services/session-snapshot-persistence';
+import {
+  completeSessionSnapshot,
+  recordSessionSnapshotRestoreResult,
+} from '../../../src/services/session-snapshot-persistence';
 import { prepareSessionSnapshot } from '../../../src/services/session-snapshot-prepare';
 import { finalizeSessionSnapshotSleeping } from '../../../src/services/session-snapshot-sleep-lifecycle';
 import {
@@ -242,7 +245,7 @@ describe('evicted source cleanup through real writers and real SQL', () => {
    * The wake claimed the snapshot (claimSessionSnapshotRecovery), released the binding and
    * restored into `target`. Returns the generation the restore committed.
    */
-  async function wakeOnto(target: string) {
+  async function wakeOnto(target: string, restoreStatus: 'restored' | 'degraded' = 'restored') {
     sqlite.exec(`
       INSERT INTO workspaces (id, user_id, project_id, node_id, chat_session_id, status, eviction_generation)
         VALUES ('${target}', 'user', 'project', 'target-node', NULL, 'running', 'target-generation');
@@ -252,6 +255,12 @@ describe('evicted source cleanup through real writers and real SQL', () => {
       UPDATE workspaces SET chat_session_id = NULL WHERE id = 'workspace';
       UPDATE workspaces SET chat_session_id = 'chat' WHERE id = '${target}';
     `);
+    // The VM agent reports how the restore went before the runner records it.
+    await recordSessionSnapshotRestoreResult(db(), env, {
+      chatSessionId: 'chat',
+      status: restoreStatus,
+      message: null,
+    });
     const restored = await completeSessionSnapshotRecoveryGeneration(
       db(),
       'chat',
@@ -543,6 +552,19 @@ describe('evicted source cleanup through real writers and real SQL', () => {
     expect(await sourcePreservation()).toBeNull();
     await commitWake('target', generation);
     expect(await sourcePreservation()).not.toBeNull();
+  });
+
+  it('a degraded restore never releases a legacy evicted source, even after its commit', async () => {
+    await capture('workspace', 'node', true);
+    await evict();
+    sqlite.exec("UPDATE workspaces SET preservation_receipt_json = NULL WHERE id = 'workspace'");
+    const generation = await wakeOnto('target', 'degraded');
+    await commitWake('target', generation);
+    // Liveness: the commit itself applied.
+    expect(sqlite.prepare("SELECT status FROM tasks WHERE id = 'wake-task'").get()).toEqual({
+      status: 'in_progress',
+    });
+    expect(await sourcePreservation()).toBeNull();
   });
 
   it('an unrestored receipt grants nothing on its own; the snapshot row decides', async () => {

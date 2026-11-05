@@ -173,6 +173,9 @@ export async function handleAgentSession(
     state.stepResults.agentSessionId = result.agentSessionId;
     state.stepResults.mcpToken = result.mcpToken;
     state.stepResults.agentStarted = true;
+    if (state.config.resumeSnapshotChatSessionId) {
+      state.stepResults.snapshotRestoreComplete = result.snapshotRestore === 'restored';
+    }
     stateChanged = true;
     started = result;
 
@@ -226,7 +229,10 @@ export async function handleAgentSession(
     // Keep exactly what was restored: the commit below stamps the source receipt of this
     // generation, and a successor capture may replace the row's live generation first. A
     // retry after a crash keeps the first value.
-    if (state.stepResults.restoredSnapshotGeneration === undefined) {
+    if (
+      state.stepResults.snapshotRestoreComplete === true &&
+      state.stepResults.restoredSnapshotGeneration === undefined
+    ) {
       state.stepResults.restoredSnapshotGeneration = restored.snapshotGeneration;
       stateChanged = true;
     }
@@ -254,7 +260,8 @@ export async function handleAgentSession(
     await rc.ctx.storage.put('state', state);
     // The restored generation now lives here; release the retired source's files. The
     // commit already stamped its receipt, so the stale-workspace sweep re-queues the source
-    // if this best-effort release is lost.
+    // if this best-effort release is lost. A degraded restore releases nothing.
+    if (state.stepResults.snapshotRestoreComplete !== true) return;
     const { releaseRestoredSourceWorkspaces } =
       await import('../../services/workspace-preservation-receipt');
     await releaseRestoredSourceWorkspaces(rc.env, {

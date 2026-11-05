@@ -88,10 +88,13 @@ export async function transitionToInProgress(
     state.config.recoveryAttemptId ?? null
   );
   // A wake's commit also records the restore on the retired source's receipt, in the same
-  // transaction: a source is released only by a committed wake, and the record cannot be lost
-  // between the commit and the release below (`releaseRestoredSourceWorkspaces`).
+  // transaction: a source is released only by a committed wake whose restore brought back the
+  // snapshot's files, and the record cannot be lost before the release
+  // (`releaseRestoredSourceWorkspaces`).
   const [result] =
-    recoveryChatSessionId && state.stepResults.workspaceId
+    recoveryChatSessionId &&
+    state.stepResults.workspaceId &&
+    state.stepResults.snapshotRestoreComplete === true
       ? await rc.env.DATABASE.batch([
           transition,
           restoredSourceReceiptStampStatement(

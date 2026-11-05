@@ -159,9 +159,19 @@ export async function sweepOrphanedWorkspaces(
   }
 }
 
-/** The source's receipt records a committed restore of its generation. */
-const RECEIPT_RESTORED_SQL = `CASE WHEN json_valid(w.preservation_receipt_json)
-  THEN json_extract(w.preservation_receipt_json, '$.restoredAt') END IS NOT NULL`;
+/**
+ * The source's receipt records a committed restore of its generation, and still names this
+ * workspace's runtime. Only such a receipt grants deletion
+ * (`preservationReceiptExpiresAt`), so a stale or mismatched one is never selected to be
+ * refused, which would hold the head of this page.
+ */
+const RECEIPT_RESTORED_SQL = `(CASE WHEN json_valid(w.preservation_receipt_json)
+    THEN json_extract(w.preservation_receipt_json, '$.restoredAt') END IS NOT NULL
+  AND json_extract(w.preservation_receipt_json, '$.workspaceId') = w.id
+  AND json_extract(w.preservation_receipt_json, '$.nodeId') IS w.node_id
+  AND json_extract(w.preservation_receipt_json, '$.userId') = w.user_id
+  AND json_extract(w.preservation_receipt_json, '$.workspaceGeneration')
+    = COALESCE(w.eviction_generation, ''))`;
 
 /**
  * Phase 6 — safety net for stopped workspaces the DO alarm never deleted.

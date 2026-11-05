@@ -80,6 +80,12 @@ export interface SamAwareAgentStartResult {
    * queued must deliver the wake's first prompt itself (`services/restored-session-prompt.ts`).
    */
   initialPromptSent: boolean;
+  /**
+   * Outcome of the snapshot restore this start ran, if any. `degraded` covers every restore
+   * failure the VM agent reports (HOME, WIP or git, not only the agent context), so only
+   * `restored` proves the replacement holds the snapshot's files.
+   */
+  snapshotRestore?: 'restored' | 'degraded';
 }
 
 async function runMaybePhased<T>(
@@ -464,6 +470,9 @@ export async function startSamAwareAgentSession(
       mcpToken,
       agentStarted: true,
       initialPromptSent: shouldStartFreshSession,
+      ...(restoreSnapshotChatSessionId
+        ? { snapshotRestore: shouldStartFreshSession ? 'degraded' : 'restored' }
+        : {}),
     };
   } catch (err) {
     // Once persisted by the caller, the token belongs to its retry lifecycle.

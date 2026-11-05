@@ -49,6 +49,12 @@ export interface StepResults {
    * have replaced the row's live generation by then.
    */
   restoredSnapshotGeneration?: string | null;
+  /**
+   * The restore brought back the snapshot's files (`snapshotRestore: 'restored'`). Only then
+   * may the commit record the restore on the source's receipt and release the source: a
+   * `degraded` restore can have left HOME or WIP behind. Unknown counts as incomplete.
+   */
+  snapshotRestoreComplete?: boolean;
   /** Opaque MCP token for agent platform awareness (stored in KV) */
   mcpToken: string | null;
   /** VM size actually provisioned for an auto-provisioned node. May be smaller

@@ -617,3 +617,54 @@ func snapshotOutcome(fn func(context.Context, EvictionTarget) error) func(contex
 		return EvictionSnapshotOutcome{}, fn(ctx, target)
 	}
 }
+
+// The server starts the controller only after its startup helper reap, which can finish after
+// shutdown already closed it. A Start after Close must not begin handling pressure.
+func TestEvictionControllerStartAfterCloseDoesNothing(t *testing.T) {
+	source := newFakePressureSource()
+	var snapshots atomic.Int32
+	controller := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
+		cfg.SnapshotWorkspace = snapshotOutcome(func(context.Context, EvictionTarget) error {
+			snapshots.Add(1)
+			return nil
+		})
+	})
+	controller.Close()
+	if err := controller.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	source.events <- oomPressureEvent("workspace-1", "container-1")
+	time.Sleep(50 * time.Millisecond)
+	if got := snapshots.Load(); got != 0 {
+		t.Fatalf("a closed controller handled %d evictions", got)
+	}
+	if len(source.events) != 1 {
+		t.Fatalf("a closed controller consumed the pressure event")
+	}
+
+	// Liveness control: an open controller handles the same event.
+	live := testEvictionController(t, source, func(cfg *EvictionControllerConfig) {
+		cfg.SnapshotWorkspace = snapshotOutcome(func(context.Context, EvictionTarget) error {
+			snapshots.Add(1)
+			return nil
+		})
+	})
+	if err := live.Start(context.Background()); err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	defer live.Close()
+	waitForEvictionTest(t, func() bool { return snapshots.Load() == 1 }, "open controller did not evict")
+}
+
+func TestEvictionControllerStartAndCloseRaceSafely(t *testing.T) {
+	for i := 0; i < 50; i++ {
+		controller := testEvictionController(t, newFakePressureSource(), nil)
+		var wg sync.WaitGroup
+		wg.Add(3)
+		go func() { defer wg.Done(); _ = controller.Start(context.Background()) }()
+		go func() { defer wg.Done(); controller.Close() }()
+		go func() { defer wg.Done(); controller.Close() }()
+		wg.Wait()
+		controller.Close()
+	}
+}

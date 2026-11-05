@@ -124,10 +124,13 @@ type EvictionController struct {
 	cfg    EvictionControllerConfig
 	logger *slog.Logger
 
-	startOnce sync.Once
-	closeOnce sync.Once
-	cancel    context.CancelFunc
-	wg        sync.WaitGroup
+	// lifecycleMu orders Start against Close: the server starts the controller only after
+	// its startup helper reap, which can finish after shutdown already closed it.
+	lifecycleMu sync.Mutex
+	started     bool
+	closed      bool
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
 
 	evictionMu        sync.Mutex
 	debounceMu        sync.Mutex
@@ -158,23 +161,35 @@ func (c *EvictionController) Start(ctx context.Context) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	c.startOnce.Do(func() {
-		runCtx, cancel := context.WithCancel(ctx)
-		c.cancel = cancel
-		c.wg.Add(1)
-		go c.loop(runCtx)
-	})
+	c.lifecycleMu.Lock()
+	defer c.lifecycleMu.Unlock()
+	if c.started || c.closed {
+		return nil
+	}
+	c.started = true
+	runCtx, cancel := context.WithCancel(ctx)
+	c.cancel = cancel
+	c.wg.Add(1)
+	go c.loop(runCtx)
 	return nil
 }
 
-// Close stops the controller and waits for its event loop to exit.
+// Close stops the controller and waits for its event loop to exit. A Start after Close does
+// nothing.
 func (c *EvictionController) Close() {
-	c.closeOnce.Do(func() {
-		if c.cancel != nil {
-			c.cancel()
-		}
-		c.wg.Wait()
-	})
+	c.lifecycleMu.Lock()
+	if c.closed {
+		c.lifecycleMu.Unlock()
+		c.wg.Wait() // A concurrent Close still returns only once the loop has exited.
+		return
+	}
+	c.closed = true
+	cancel := c.cancel
+	c.lifecycleMu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	c.wg.Wait()
 }
 
 func (c *EvictionController) loop(ctx context.Context) {

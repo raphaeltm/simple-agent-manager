@@ -118,7 +118,12 @@ export function deletionEntryMatchesClaimIdentity(input: {
       : entry.nodeRuntimeIncarnationId) === expected.nodeRuntimeIncarnationId &&
     entry.userId === input.userId &&
     (entry.projectId ?? expected.projectId) === expected.projectId &&
-    chatBindingAllowsDeletion(expected.chatSessionId, entry.chatSessionId ?? expected.chatSessionId)
+    // An entry written before chat bindings were recorded (`undefined`) is not compared; a
+    // workspace queued unbound (`null`) still fences a chat that binds it later.
+    chatBindingAllowsDeletion(
+      expected.chatSessionId,
+      entry.chatSessionId === undefined ? expected.chatSessionId : entry.chatSessionId
+    )
   );
 }
 

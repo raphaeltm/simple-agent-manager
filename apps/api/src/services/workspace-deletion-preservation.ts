@@ -164,21 +164,29 @@ export async function automaticDeletionPreservationExpiresAt(
 }
 
 /**
- * The wake that restored the snapshot row `alias` committed: the commit
- * (`transitionToInProgress`) starts the recovery task after the restore, so a start before it
- * belongs to an earlier run of that task. Shared with the stale-workspace sweep.
+ * The wake that restored the snapshot row `alias` brought back its files and committed. The
+ * VM agent reports `restore_status = 'restored'` only for a complete restore (any HOME, WIP or
+ * git failure reports `degraded`), and the commit (`transitionToInProgress`) starts the
+ * recovery task after the restore, so a start before it belongs to an earlier run of that
+ * task. Shared with the stale-workspace sweep.
  */
 export function evictionWakeCommittedSql(alias: string): string {
-  return `EXISTS (SELECT 1 FROM tasks t WHERE t.id = ${alias}.recovery_task_id
-    AND ${alias}.restored_at IS NOT NULL AND t.started_at >= ${alias}.restored_at)`;
+  return `(${alias}.restore_status = 'restored' AND EXISTS (SELECT 1 FROM tasks t
+    WHERE t.id = ${alias}.recovery_task_id
+      AND ${alias}.restored_at IS NOT NULL AND t.started_at >= ${alias}.restored_at))`;
 }
 
 /** The same check for a loaded snapshot row (`evictionWakeCommittedSql`). */
 async function evictionWakeCommitted(
   env: Env,
-  snapshot: { recoveryTaskId: string | null; restoredAt: string | null }
+  snapshot: {
+    recoveryTaskId: string | null;
+    restoredAt: string | null;
+    restoreStatus: string | null;
+  }
 ): Promise<boolean> {
-  if (!snapshot.recoveryTaskId || !snapshot.restoredAt) return false;
+  if (!snapshot.recoveryTaskId || !snapshot.restoredAt || snapshot.restoreStatus !== 'restored')
+    return false;
   const task = await drizzle(env.DATABASE, { schema })
     .select({ startedAt: schema.tasks.startedAt })
     .from(schema.tasks)
