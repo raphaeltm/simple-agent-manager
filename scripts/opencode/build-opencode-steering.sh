@@ -42,9 +42,10 @@ for target in $targets; do
   (
     cd "$source_dir/packages/cli"
     OPENCODE_VERSION="$version" OPENCODE_CHANNEL="$channel" OPENCODE_TARGET="$target" \
-      bun run script/build.ts --outdir="$build_dir/dist"
+      bun run script/build.ts --outdir="$build_dir/dist-$target"
   )
-  binary="$build_dir/dist/cli-$target/bin/opencode"
+  # build.ts empties its --outdir, so every target gets its own.
+  binary="$build_dir/dist-$target/cli-$target/bin/opencode"
   [[ -x "$binary" ]]
   tar --sort=name --owner=0 --group=0 --numeric-owner --mtime=@0 --mode=755 \
     -C "$(dirname -- "$binary")" -cf - opencode | gzip -n -9 > "$output_dir/opencode-$target.tar.gz"
@@ -56,7 +57,7 @@ case "$(uname -m)" in
   *) native= ;;
 esac
 if [[ -n "$native" ]]; then
-  [[ "$("$build_dir/dist/cli-$native/bin/opencode" --version)" == "opencode v$version" ]]
+  [[ "$("$build_dir/dist-$native/cli-$native/bin/opencode" --version)" == "opencode v$version" ]]
 fi
 cp -- "$provenance" "$output_dir/SOURCE-PROVENANCE"
 cp -- "$source_dir/LICENSE" "$output_dir/OPENCODE-LICENSE"
