@@ -398,8 +398,20 @@ async function openSettings(page: Page, scenario: LimitsScenario) {
  * The chip must sit inside the header card horizontally: its right edge may not
  * pass the header's right edge (rule 17: assert the relationship in coordinates).
  */
+/**
+ * Where the session's chips live: the header on desktop, and on a phone (<=767px, the
+ * `useIsMobile` breakpoint) the session-info sheet opened from the one-row header's title.
+ */
+async function sessionChipsScope(page: Page) {
+  if ((page.viewportSize()?.width ?? 1280) > 767) return page.getByTestId('session-header');
+  await page.getByRole('button', { name: /Show session info/ }).click();
+  const sheet = page.getByTestId('session-info-sheet');
+  await expect(sheet).toBeVisible();
+  return sheet;
+}
+
 async function expectChipInsideHeader(page: Page) {
-  const header = page.getByTestId('session-header');
+  const header = await sessionChipsScope(page);
   const chip = header.getByTestId('credential-limit-chip');
   await expect(chip).toBeVisible();
   const headerBox = await header.boundingBox();
@@ -473,14 +485,14 @@ function surfaceTests() {
     page,
   }) => {
     await openChat(page, 'empty', CLAUDE_CRED);
-    await expect(page.getByTestId('session-header')).toContainText('Active');
+    await expect(await sessionChipsScope(page)).toContainText('Active');
     await expect(page.getByTestId('credential-limit-chip')).toHaveCount(0);
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
     await screenshot(page, 'credential-limits-chat-empty', { scopeToProject: true });
 
     await openChat(page, 'error', CLAUDE_CRED);
-    await expect(page.getByTestId('session-header')).toContainText('Active');
+    await expect(await sessionChipsScope(page)).toContainText('Active');
     await expect(page.getByTestId('credential-limit-chip')).toHaveCount(0);
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);

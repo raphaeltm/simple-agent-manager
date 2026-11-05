@@ -415,7 +415,8 @@ async function assertDetailsInfrastructure(page: Page, viewport: MatrixViewport)
   await expect(page.getByText('References')).toBeVisible();
   await expect(page.getByText('Loading infrastructure details...')).toHaveCount(0);
 
-  const header = page.getByTestId('session-header');
+  // The details render inline in the desktop header and in the session-info sheet on a phone.
+  const header = page.getByTestId('session-header-details');
   await expect(header.getByText('Workspace:')).toBeVisible();
   await expect(header.getByText('tool-rail')).toBeVisible();
   await expect(header.locator('a[href*="/workspaces/"]')).toHaveCount(0);
@@ -873,8 +874,10 @@ for (const theme of ['dark', 'light'] as const) {
 
       const header = (await page.getByTestId('session-header').boundingBox())!;
       const rail = (await page.getByTestId('session-tool-rail').boundingBox())!;
-      const horizontal = Math.min(header.x + header.width, rail.x + rail.width) - Math.max(header.x, rail.x);
-      const vertical = Math.min(header.y + header.height, rail.y + rail.height) - Math.max(header.y, rail.y);
+      const horizontal =
+        Math.min(header.x + header.width, rail.x + rail.width) - Math.max(header.x, rail.x);
+      const vertical =
+        Math.min(header.y + header.height, rail.y + rail.height) - Math.max(header.y, rail.y);
       expect(horizontal <= 0 || vertical <= 0).toBe(true);
       // The rail starts below the header slab, inside the conversation pane.
       expect(rail.y).toBeGreaterThanOrEqual(header.y + header.height);

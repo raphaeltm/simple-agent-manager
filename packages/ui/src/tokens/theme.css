@@ -634,6 +634,25 @@
     animation: sam-glass-drawer-panel-out 250ms cubic-bezier(0.32, 0.72, 0, 1) both;
   }
 
+  /* Bottom sheets rise from the bottom edge. `backwards` (not `both`) so the panel keeps no
+     transform once it lands: a transformed pane would trap non-portaled fixed children. */
+  @keyframes sam-sheet-panel-in {
+    from {
+      transform: translate3d(0, 100%, 0);
+    }
+    to {
+      transform: translate3d(0, 0, 0);
+    }
+  }
+
+  .sam-sheet-backdrop {
+    animation: sam-glass-drawer-backdrop-in 300ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  }
+
+  .sam-sheet-panel {
+    animation: sam-sheet-panel-in 320ms cubic-bezier(0.32, 0.72, 0, 1) backwards;
+  }
+
   .sam-glass-card-motion {
     transform: translateZ(0);
     transition: transform 200ms ease;

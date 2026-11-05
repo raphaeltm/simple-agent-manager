@@ -28,3 +28,7 @@ does not see them.
       conversation column is not ~180px wide
 - [ ] Re-enable the tablet clipped-overflow assertion in `chat-immersive-audit.spec.ts`
 - [ ] `acp-permission-chat-audit.spec.ts` passes on `Tablet (768x1024)`
+- [ ] At 768px the tool rail's scroller (`session-tool-rail-scroller`) covers the composer's Send
+      button, so `session-header-agent-info-audit.spec.ts` "sleeping VM session stays visible and
+      the composer queues its wake" times out on `Tablet (768x1024)`. Reproduced on unmodified
+      `main` at 1df45ee7e (found 2026-11-05 while shipping the one-row phone header).

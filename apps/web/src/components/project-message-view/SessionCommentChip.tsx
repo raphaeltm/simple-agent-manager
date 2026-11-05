@@ -39,7 +39,8 @@ export function SessionCommentChip({
       type="button"
       onClick={onOpenComments}
       // Amber only when someone is waiting on you; otherwise a neutral chip (SAM Glass).
-      className={`${chipClassName({ tone: hasAttention ? 'warning' : 'neutral' })} cursor-pointer transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring`}
+      // The pseudo-element widens the tap target to 44px without growing the chip.
+      className={`${chipClassName({ tone: hasAttention ? 'warning' : 'neutral' })} relative cursor-pointer transition-[filter] after:absolute after:-inset-y-2 after:inset-x-0 after:content-[''] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring`}
       aria-label={ariaLabel}
       title="Open comments"
     >

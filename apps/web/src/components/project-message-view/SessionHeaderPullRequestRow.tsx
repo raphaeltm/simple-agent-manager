@@ -36,13 +36,9 @@ export function SessionHeaderPullRequestRow({
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
       {showCountdown && (
         <span
-          className="sam-type-caption font-mono"
-          style={{
-            color:
-              (idleCountdownMs ?? 0) < 5 * 60 * 1000
-                ? 'var(--sam-color-danger)'
-                : 'var(--sam-color-warning)',
-          }}
+          className={`sam-type-caption font-mono ${
+            (idleCountdownMs ?? 0) < 5 * 60 * 1000 ? 'text-danger-fg' : 'text-warning-fg'
+          }`}
         >
           Cleanup in {formatCountdown(idleCountdownMs ?? 0)}
         </span>
@@ -55,8 +51,7 @@ export function SessionHeaderPullRequestRow({
             href={sanitizeUrl(pullRequest.url)}
             target="_blank"
             rel="noopener noreferrer"
-            className="sam-type-caption inline-flex shrink-0 items-center gap-1 font-medium no-underline"
-            style={{ color: 'var(--sam-color-accent-primary)' }}
+            className="sam-type-caption inline-flex min-h-7 shrink-0 items-center gap-1 font-medium text-accent no-underline hover:underline"
             data-testid="session-view-pr"
           >
             <GitPullRequest size={12} aria-hidden="true" />

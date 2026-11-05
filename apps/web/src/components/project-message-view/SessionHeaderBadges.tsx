@@ -9,7 +9,8 @@ function getWorkspaceProfileLabel(workspace: WorkspaceResponse): string {
   return workspace.workspaceProfile === 'lightweight' ? 'Lightweight' : 'Full';
 }
 
-const RECOVERY_CONTAINER_HELP = 'The devcontainer build failed, so SAM started a fallback recovery container to keep this chat usable. Open the workspace and check Boot Logs for the devcontainer error output.';
+const RECOVERY_CONTAINER_HELP =
+  'The devcontainer build failed, so SAM started a fallback recovery container to keep this chat usable. Open the workspace and check Boot Logs for the devcontainer error output.';
 
 export function WorkspaceProfileBadge({ workspace }: Readonly<{ workspace: WorkspaceResponse }>) {
   const [open, setOpen] = useState(false);
@@ -19,7 +20,11 @@ export function WorkspaceProfileBadge({ workspace }: Readonly<{ workspace: Works
   const isRecovery = workspace.status === 'recovery';
   const label = getWorkspaceProfileLabel(workspace);
   const badgeClassName = chipClassName({
-    tone: isRecovery ? 'warning' : workspace.workspaceProfile === 'lightweight' ? 'info' : 'success',
+    tone: isRecovery
+      ? 'warning'
+      : workspace.workspaceProfile === 'lightweight'
+        ? 'info'
+        : 'success',
   });
 
   useLayoutEffect(() => {
@@ -29,7 +34,10 @@ export function WorkspaceProfileBadge({ workspace }: Readonly<{ workspace: Works
       if (!trigger) return;
       const rect = trigger.getBoundingClientRect();
       const tooltipWidth = Math.min(280, window.innerWidth - 32);
-      const left = Math.max(16, Math.min(rect.right - tooltipWidth, window.innerWidth - tooltipWidth - 16));
+      const left = Math.max(
+        16,
+        Math.min(rect.right - tooltipWidth, window.innerWidth - tooltipWidth - 16)
+      );
       setTooltipStyle({
         position: 'fixed',
         left,
@@ -49,10 +57,7 @@ export function WorkspaceProfileBadge({ workspace }: Readonly<{ workspace: Works
 
   if (!isRecovery) {
     return (
-      <span
-        className={badgeClassName}
-        aria-label={`Workspace profile: ${label}`}
-      >
+      <span className={badgeClassName} aria-label={`Workspace profile: ${label}`}>
         {label}
       </span>
     );
@@ -75,21 +80,23 @@ export function WorkspaceProfileBadge({ workspace }: Readonly<{ workspace: Works
         <AlertTriangle size={13} aria-hidden="true" />
         {label}
       </button>
-      {open && typeof document !== 'undefined' && createPortal(
-        <span
-          id={tooltipId}
-          role="tooltip"
-          className="rounded-sm glass-surface bg-[var(--sam-tooltip-bg)] px-3 py-2 text-left text-fg-primary shadow-tooltip whitespace-normal pointer-events-none"
-          style={{
-            fontSize: 'var(--sam-type-caption-size)',
-            lineHeight: 'var(--sam-type-caption-line-height)',
-            ...tooltipStyle,
-          }}
-        >
-          {RECOVERY_CONTAINER_HELP}
-        </span>,
-        document.body,
-      )}
+      {open &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <span
+            id={tooltipId}
+            role="tooltip"
+            className="rounded-sm glass-surface bg-[var(--sam-tooltip-bg)] px-3 py-2 text-left text-fg-primary shadow-tooltip whitespace-normal pointer-events-none"
+            style={{
+              fontSize: 'var(--sam-type-caption-size)',
+              lineHeight: 'var(--sam-type-caption-line-height)',
+              ...tooltipStyle,
+            }}
+          >
+            {RECOVERY_CONTAINER_HELP}
+          </span>,
+          document.body
+        )}
     </span>
   );
 }
@@ -115,8 +122,7 @@ export function PortsContextItem({
               href={getHref(p)}
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1 font-mono text-[11px] no-underline hover:underline"
-              style={{ color: 'var(--sam-color-accent-primary)' }}
+              className="inline-flex items-center gap-1 font-mono text-[11px] text-accent no-underline hover:underline"
               title={p.label}
             >
               {p.port}
@@ -126,5 +132,45 @@ export function PortsContextItem({
           ))}
       </span>
     </div>
+  );
+}
+
+function isLocalAddress(port: DetectedPort): boolean {
+  return port.address === '127.0.0.1' || port.address === '::1';
+}
+
+/** Every forwarded port as a full-width 44px row: the phone's session-info sheet lists them. */
+export function SessionPortList({
+  ports,
+  getHref,
+}: Readonly<{
+  ports: DetectedPort[];
+  getHref: (port: DetectedPort) => string;
+}>) {
+  return (
+    <ul className="m-0 flex list-none flex-col p-0" data-testid="session-port-list">
+      {ports.map((port) => (
+        <li key={port.port}>
+          <a
+            href={getHref(port)}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex min-h-11 items-center gap-2.5 rounded-[var(--sam-radius-control)] px-2 text-sm text-fg-primary no-underline transition-colors hover:bg-[var(--sam-glass-v2-raised)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+          >
+            <Globe
+              size={15}
+              aria-hidden="true"
+              className="shrink-0 text-[var(--sam-status-success-fg)]"
+            />
+            <span className="shrink-0 font-mono">{port.port}</span>
+            <span className="min-w-0 flex-1 truncate text-fg-muted">
+              {port.label}
+              {isLocalAddress(port) ? ' (local)' : ''}
+            </span>
+            <ExternalLink size={14} aria-hidden="true" className="shrink-0 text-fg-muted" />
+          </a>
+        </li>
+      ))}
+    </ul>
   );
 }

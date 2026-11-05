@@ -1,6 +1,6 @@
 import type { NodeResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ChatSessionResponse } from '../../../src/lib/api';
 import { QueryTestWrapper } from '../../test-utils/query-test-utils';
@@ -751,6 +751,142 @@ describe('SessionHeader', () => {
       const outer = container.firstElementChild as HTMLElement;
       expect(outer.className).toContain('sam-glass--slab');
       expect(outer.className).toContain('rounded-[var(--sam-radius-slab)]');
+    });
+  });
+
+  describe('on a phone', () => {
+    const PHONE_PORTS = [
+      {
+        port: 8787,
+        address: '0.0.0.0',
+        label: 'Wrangler',
+        url: 'https://ws-1--8787.example.org',
+        detectedAt: '',
+      },
+      {
+        port: 5173,
+        address: '0.0.0.0',
+        label: 'Vite',
+        url: 'https://ws-1--5173.example.org',
+        detectedAt: '',
+      },
+    ];
+
+    beforeEach(() => {
+      // `useIsMobile` reads `(max-width: 767px)`; every other query stays unmatched.
+      vi.mocked(window.matchMedia).mockImplementation(
+        (query: string) =>
+          ({
+            matches: query.includes('max-width: 767px'),
+            media: query,
+            onchange: null,
+            addListener: vi.fn(),
+            removeListener: vi.fn(),
+            addEventListener: vi.fn(),
+            removeEventListener: vi.fn(),
+            dispatchEvent: vi.fn(),
+          }) as unknown as MediaQueryList
+      );
+    });
+
+    afterEach(() => {
+      vi.mocked(window.matchMedia).mockImplementation(
+        (query: string) =>
+          ({
+            matches: false,
+            media: query,
+            onchange: null,
+            addListener: vi.fn(),
+            removeListener: vi.fn(),
+            addEventListener: vi.fn(),
+            removeEventListener: vi.fn(),
+            dispatchEvent: vi.fn(),
+          }) as unknown as MediaQueryList
+      );
+    });
+
+    const openInfo = () =>
+      fireEvent.click(screen.getByRole('button', { name: /Show session info/ }));
+
+    it('collapses to one row: title, the lowest port, and no chips or public-ports switch', () => {
+      renderHeader({ detectedPorts: PHONE_PORTS });
+      const header = screen.getByTestId('session-header');
+      expect(header).toHaveAttribute('data-layout', 'mobile');
+      expect(
+        screen.getByRole('button', { name: /Test Session\. Active\. Show session info/ })
+      ).toBeInTheDocument();
+      // The lowest port is the one kept on screen, as on desktop.
+      expect(screen.getByRole('link', { name: 'Open port 5173' })).toHaveAttribute(
+        'href',
+        expect.stringContaining('/api/workspaces/ws-1/port-access?port=5173')
+      );
+      expect(screen.queryByText('Active')).not.toBeInTheDocument();
+      expect(screen.queryByRole('switch')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('session-info-sheet')).not.toBeInTheDocument();
+    });
+
+    it('opens the session-info sheet from the title with chips, every port, the switch and the full details', () => {
+      renderHeader({ detectedPorts: PHONE_PORTS });
+      openInfo();
+      const sheet = within(screen.getByTestId('session-info-sheet'));
+      expect(sheet.getByRole('heading', { name: 'Test Session' })).toBeInTheDocument();
+      expect(sheet.getByText('Active')).toBeInTheDocument();
+      expect(sheet.getAllByRole('link', { name: /Wrangler|Vite/ })).toHaveLength(2);
+      expect(sheet.getByRole('switch')).toBeInTheDocument();
+      expect(sheet.getByText('References')).toBeInTheDocument();
+      expect(sheet.getByText('Workload identity (OIDC)')).toBeInTheDocument();
+      // The sheet's own heading carries the title, so the details do not repeat it.
+      expect(sheet.queryByText('Title')).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Show session info/ })).toHaveAttribute(
+        'aria-expanded',
+        'true'
+      );
+    });
+
+    it("opens the same sheet from the rail's Details action", () => {
+      renderHeader();
+      fireEvent.click(screen.getByLabelText(DETAILS_CONTROL));
+      expect(
+        within(screen.getByTestId('session-info-sheet')).getByText('References')
+      ).toBeInTheDocument();
+    });
+
+    it('closes from its close button, from Escape and from the scrim', () => {
+      renderHeader();
+      openInfo();
+      fireEvent.click(screen.getByRole('button', { name: 'Close session info' }));
+      expect(screen.queryByTestId('session-info-sheet')).not.toBeInTheDocument();
+
+      openInfo();
+      fireEvent.keyDown(document, { key: 'Escape' });
+      expect(screen.queryByTestId('session-info-sheet')).not.toBeInTheDocument();
+
+      openInfo();
+      fireEvent.click(screen.getByTestId('session-info-sheet-backdrop'));
+      expect(screen.queryByTestId('session-info-sheet')).not.toBeInTheDocument();
+      // Liveness: the one-line header is still there after every close.
+      expect(screen.getByRole('button', { name: /Show session info/ })).toHaveAttribute(
+        'aria-expanded',
+        'false'
+      );
+    });
+
+    it('keeps unresolved comments visible in the row, and hides the chip when there are none', () => {
+      const onOpenComments = vi.fn();
+      const { unmount } = renderHeader({ onOpenComments, unresolvedCommentCount: 2 });
+      fireEvent.click(screen.getByRole('button', { name: '2 unresolved comments' }));
+      expect(onOpenComments).toHaveBeenCalledTimes(1);
+      unmount();
+
+      renderHeader({ onOpenComments, unresolvedCommentCount: 0 });
+      expect(screen.queryByRole('button', { name: 'Comments' })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /Show session info/ })).toBeInTheDocument();
+    });
+
+    it('keeps a mark-complete error on screen with the sheet closed', () => {
+      renderHeader({ completeError: 'Could not complete the task' });
+      expect(screen.getByText('Could not complete the task')).toBeInTheDocument();
+      expect(screen.queryByTestId('session-info-sheet')).not.toBeInTheDocument();
     });
   });
 });
