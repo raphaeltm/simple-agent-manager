@@ -84,6 +84,16 @@ func (s *Server) handleWorkspacePortProxy(w http.ResponseWriter, r *http.Request
 		}
 	}
 
+	if s.isOwnListenerTarget(targetHost, port) {
+		slog.Warn("Port proxy refused: target is the vm-agent's own listener",
+			"workspaceId", workspaceID,
+			"port", port,
+			"targetHost", targetHost,
+			"action", "rejected")
+		writeError(w, http.StatusForbidden, reservedAgentPortMessage(port))
+		return
+	}
+
 	targetURLStr := fmt.Sprintf("http://%s:%d", targetHost, port)
 
 	// Extract the remainder path after /workspaces/{id}/ports/{port}.
@@ -134,6 +144,7 @@ func (s *Server) servePortProxy(w http.ResponseWriter, r *http.Request, workspac
 		req.URL.Path = forwardPath
 		req.URL.RawPath = ""
 		req.Host = publicHost
+		markProxiedRequest(req.Header)
 		// Strip the auth token — it is consumed by the VM agent for authentication
 		// and must not leak to the container app running on the forwarded port.
 		q := req.URL.Query()
@@ -177,11 +188,11 @@ func (s *Server) handleListWorkspacePorts(w http.ResponseWriter, r *http.Request
 
 	// Build diagnostic info to help debug port scanning issues.
 	diag := map[string]interface{}{
-		"scannerActive":    scanner != nil,
-		"discoveryActive":  wsDiscovery != nil,
-		"portScanEnabled":  s.config.PortScanEnabled,
-		"containerMode":    s.config.ContainerMode,
-		"version":          "v2-pathrw",
+		"scannerActive":   scanner != nil,
+		"discoveryActive": wsDiscovery != nil,
+		"portScanEnabled": s.config.PortScanEnabled,
+		"containerMode":   s.config.ContainerMode,
+		"version":         "v2-pathrw",
 	}
 	if wsDiscovery != nil {
 		if containerID, err := wsDiscovery.GetContainerID(); err == nil {

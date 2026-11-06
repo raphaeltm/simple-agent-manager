@@ -16,6 +16,13 @@ import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 import { runCloudflareRuntimePhase } from './cloudflare-runtime-phase';
 
+/**
+ * Marks a request that SAM relayed to the vm-agent. The vm-agent never grants
+ * peer-address (loopback) trust to a relayed request. Must match
+ * `proxiedRequestHeader` in packages/vm-agent/internal/server/proxy_guard.go.
+ */
+export const SAM_PROXIED_REQUEST_HEADER = 'X-SAM-Proxied-Request';
+
 export interface VmAgentContainerConfig {
   enabled: boolean;
   vmAgentPort: number;
