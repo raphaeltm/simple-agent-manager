@@ -39,25 +39,25 @@ Raphaël for this task (2026-11-06).
 
 ## Implementation checklist
 
-- [ ] shared: `credentialLimitWindowAsOf` / `credentialLimitSummaryAsOf` (reset-elapsed → 0%, ok, `resetElapsed: true`), type field
-- [ ] api: apply in `summarize()` at read time; MCP text says the window reset
-- [ ] web: chip + details apply the same helper with client `now`; countdown says "reset Xm ago"
-- [ ] web: `useProfileBudgets` hook (profile → resolved account + usage)
-- [ ] web: compact usage strip (opens existing details dialog)
-- [ ] web: resource request line
-- [ ] web: ProfileList → table on md+, strip rows on phones; ⋯ menu for edit/delete; sort Name / Most room
-- [ ] tests: shared helper, api summarize, chip, ProfileList vertical slice (real hooks, API mocked)
-- [ ] Playwright audit 375/1280, light/dark, long names
-- [ ] docs: usage-limits behaviour where documented
-- [ ] remove prototype route + directory
+- [x] shared: `credentialLimitWindowAsOf` / `credentialLimitSummaryAsOf` (reset-elapsed → 0%, ok, `resetElapsed: true`), type field
+- [x] api: apply in `summarize()` at read time; MCP text says the window reset
+- [x] web: chip + details apply the same helper with client `now`; countdown says "reset Xm ago"
+- [x] web: `useProfileBudgets` hook (profile → resolved account + usage)
+- [x] web: compact usage strip (opens existing details dialog)
+- [x] web: resource request line
+- [x] web: ProfileList → table on md+, strip rows on phones; ⋯ menu for edit/delete; sort Name / Most room
+- [x] tests: shared helper, api summarize, chip, ProfileList vertical slice (real hooks, API mocked)
+- [x] Playwright audit 375/1280, light/dark, long names
+- [x] docs: usage-limits behaviour where documented
+- [x] remove prototype route + directory
 
 ## Acceptance criteria
 
-- [ ] Desktop (≥768px) shows one row per profile with Runs / Requests / Usage columns
-- [ ] Phones show three-line rows: name, model + settings, resources + usage strip
-- [ ] Usage strip shows the account the profile actually resolves to (profile pin → project → default → platform)
-- [ ] A window whose reset passed reads 0% with "reset X ago", everywhere limits show (chip, dialog, MCP)
-- [ ] Tapping the strip opens the usage details dialog
-- [ ] Edit / delete still work
-- [ ] No horizontal overflow at 375px with long names/models
-- [ ] Prototype removed
+- [x] Desktop (≥768px) shows one row per profile with Runs / Requests / Usage columns
+- [x] Phones show three-line rows: name, model + settings, resources + usage strip
+- [x] Usage strip shows the account the profile actually resolves to (profile pin → project → default → platform)
+- [x] A window whose reset passed reads 0% with "reset X ago", everywhere limits show (chip, dialog, MCP)
+- [x] Tapping the strip opens the usage details dialog
+- [x] Edit / delete still work
+- [x] No horizontal overflow at 375px with long names/models
+- [x] Prototype removed

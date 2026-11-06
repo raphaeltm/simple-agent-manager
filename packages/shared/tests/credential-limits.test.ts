@@ -1,10 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import type {
-  CredentialLimitCredentialSummary,
-  CredentialLimitWindowSummary,
-} from '../src/types/credential-limits';
-
 import {
   credentialIdFromReference,
   credentialLimitFamilyLabel,
@@ -15,6 +10,10 @@ import {
   formatCredentialLimitWindowMinutes,
   worstCredentialLimitLevel,
 } from '../src/credential-limits';
+import type {
+  CredentialLimitCredentialSummary,
+  CredentialLimitWindowSummary,
+} from '../src/types/credential-limits';
 
 describe('credential limit helpers', () => {
   it('ranks the worst level across windows and ignores unknown values', () => {
