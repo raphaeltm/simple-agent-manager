@@ -106,7 +106,7 @@ export class InstallationBuilder{
   }
   return builderJson({error:'NOT_FOUND'},404);
  }
- publicJob(job){return job?{jobId:job.id,status:job.status,sourceCommit:job.config.sourceCommit,deadline:job.deadline,checkpoint:job.checkpoint,...(job.failure?{failure:job.failure}:{})}: {status:'idle'};}
+ publicJob(job){return job?{jobId:job.id,status:job.status,sourceCommit:job.config.sourceCommit,deadline:job.deadline,...(job.startedAt?{startedAt:job.startedAt}:{}),checkpoint:job.checkpoint,...(job.failure?{failure:job.failure}:{})}: {status:'idle'};}
  async persist(job){await this.ctx.storage.put('job',job);if(this.env.BUILDER_ARTIFACTS){try{await this.env.BUILDER_ARTIFACTS.put('installer/jobs/'+job.id+'/state.json',JSON.stringify(this.publicJob(job)));}catch{/* Durable Object remains the authoritative checkpoint. */}}}
  async launch(config,id,checkpoint,sourceValidation,sourceIdentity){
   const seconds=Number(this.env.BUILDER_MAX_SECONDS||3600),poll=Number(this.env.BUILDER_POLL_SECONDS||15),instance=this.env.BUILDER_INSTANCE||'standard-3';
@@ -114,7 +114,7 @@ export class InstallationBuilder{
   const required=['CF_API_TOKEN','CF_RUNTIME_API_TOKEN','R2_ACCESS_KEY_ID','R2_SECRET_ACCESS_KEY','PULUMI_CONFIG_PASSPHRASE','SAM_ARTIFACTS_BUCKET'];
   if(required.some(key=>typeof this.env[key]!=='string'||!this.env[key]))throw new Error('Missing builder authority');
   const nonce=[...crypto.getRandomValues(new Uint8Array(32))].map(x=>x.toString(16).padStart(2,'0')).join('');
-  const job={id,config,checkpoint,sourceValidation,sourceIdentity,status:'starting',deadline:Date.now()+seconds*1000,nonce,pollSeconds:poll};
+  const job={id,config,checkpoint,sourceValidation,sourceIdentity,status:'starting',startedAt:Date.now(),deadline:Date.now()+seconds*1000,nonce,pollSeconds:poll};
   await this.persist(job);await this.ctx.storage.setAlarm(Math.min(job.deadline,Date.now()+poll*1000));
   const env={SAM_JOB_NONCE:nonce,SAM_SOURCE_COMMIT:config.sourceCommit,SAM_PREVIOUS_SOURCE_COMMIT:config.previousSourceCommit||'',SAM_ENGINE_CONFIG:JSON.stringify(config),SAM_JOB_DIRECTORY:'/sam/job',CF_ACCOUNT_ID:config.accountId,SAM_ENGINE_CHECKPOINT:checkpoint?JSON.stringify(checkpoint):''};
   if(sourceIdentity)env.SAM_SOURCE_IDENTITY=JSON.stringify(sourceIdentity);

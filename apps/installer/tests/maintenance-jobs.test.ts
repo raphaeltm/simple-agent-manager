@@ -409,3 +409,41 @@ it('tells the owner which setup step stopped a failed build', async () => {
     'Stopped while setting up the build (exit 2).'
   );
 });
+
+it('shows build progress as ordered stages that refresh themselves', async () => {
+  const f = await fixture();
+  expect((await f.request('/deploy', { confirmed: 'yes' })).status).toBeLessThan(400);
+  const manifest = f.values.get('installation') as { requestedJob: { id: string } };
+  f.setJob({
+    status: 'running',
+    sourceCommit: original,
+    jobId: manifest.requestedJob.id,
+    startedAt: Date.UTC(2026, 10, 6, 23, 39),
+    checkpoint: {
+      schemaVersion: 1,
+      fingerprint: 'e'.repeat(64),
+      completed: ['preflight'],
+      status: 'running',
+      activePhase: 'codex-source-build',
+    },
+  });
+  const response = await f.request('/');
+  const html = await response.text();
+  expect(response.headers.get('Refresh')).toBe('15');
+  expect(html).toContain('Step 3 of 13: <strong>Building the agent runtime</strong>');
+  expect(html).toContain('Started 23:39 UTC.');
+  expect(html).toContain('build-step--done');
+  expect(html).toContain('Preparing the approved source');
+  expect(html).not.toContain('Refresh progress');
+  expect(html).toMatch(/<details class="secondary-actions"><summary>Stop this build<\/summary>/);
+
+  f.setJob({
+    status: 'failed',
+    sourceCommit: original,
+    jobId: manifest.requestedJob.id,
+    failure: { step: 'bootstrap', code: 2 },
+  });
+  const failed = await f.request('/');
+  expect(failed.headers.get('Refresh')).toBeNull();
+  expect(await failed.text()).toContain('build-step--stopped');
+});
