@@ -10,6 +10,7 @@ import { maybeJsonRecord } from '../../lib/runtime-validation';
 import { userMessageAttribution, userMessageDelivery } from './message-attribution';
 import { APPROVAL_CARD_TOOL } from './tool-cards/approval-card-data';
 import { DOCUMENT_CARD_TOOLS, normalizeToolName } from './tool-cards/document-card-data';
+import { HUMAN_INPUT_CARD_TOOL } from './tool-cards/human-input-card-data';
 
 /** Default idle timeout in ms — matches the server-side default (NODE_WARM_TIMEOUT_MS). */
 export const DEFAULT_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
@@ -132,10 +133,13 @@ function inferToolNameFromTitle(title: string): string | undefined {
   return undefined;
 }
 
-/** Tools that render a typed card (library documents, Operations approval requests). */
+/** Tools that render a typed card (library documents, approval requests, agent questions). */
 function isTypedCardTool(toolName: string | undefined): boolean {
   const base = normalizeToolName(toolName);
-  return Boolean(base && (DOCUMENT_CARD_TOOLS.has(base) || base === APPROVAL_CARD_TOOL));
+  return Boolean(
+    base &&
+    (DOCUMENT_CARD_TOOLS.has(base) || base === APPROVAL_CARD_TOOL || base === HUMAN_INPUT_CARD_TOOL)
+  );
 }
 
 function parseJsonRecordFromToolContent(content: string): Record<string, unknown> | undefined {

@@ -8,6 +8,7 @@ import { useNavigate } from 'react-router';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { getAttentionRequestContext } from '../../lib/api/notifications';
+import { notificationQueryKeys } from '../../lib/query-options';
 import { RenderedMarkdown } from '../MarkdownRenderer';
 import { attentionRequest } from './attention-request';
 import { AttentionAnswerControls } from './AttentionAnswerControls';
@@ -32,7 +33,7 @@ export function NotificationQuestionDialog({
   const titleId = useId();
   useModalInteraction({ enabled: true, modalRef, onEscape: onClose });
   const query = useQuery({
-    queryKey: ['auth', scope, 'notification-question', projectId, sessionId, markerId],
+    queryKey: notificationQueryKeys.attentionRequest(scope, projectId, sessionId, markerId ?? ''),
     enabled: Boolean(scope && projectId && sessionId && markerId),
     queryFn: ({ signal }) =>
       getAttentionRequestContext(projectId, sessionId, markerId ?? '', false, signal),

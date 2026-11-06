@@ -277,6 +277,67 @@ describe('stripToolMetadataContent — Operations approval card', () => {
   });
 });
 
+describe('stripToolMetadataContent — human input card', () => {
+  // The text handleRequestHumanInput returns for request_human_input.
+  const resultText = JSON.stringify({
+    message: 'Human input request recorded. Notification delivery has been scheduled.',
+    humanInputRequest: { id: 'marker-1', sessionId: 'session-1' },
+    notificationScheduled: true,
+  });
+
+  it('keeps only the marker reference for the Claude tool name', () => {
+    const result = stripToolMetadataContent({
+      toolCallId: 'tc-ask',
+      title: 'mcp__sam-mcp__request_human_input',
+      toolName: 'mcp__sam-mcp__request_human_input',
+      status: 'completed',
+      content: [{ type: 'content', content: { type: 'text', text: resultText } }],
+    }) as Record<string, unknown>;
+
+    expect(result.content).toBeUndefined();
+    expect(result.rawOutput).toEqual([
+      {
+        type: 'text',
+        text: JSON.stringify({ humanInputRequest: { id: 'marker-1', sessionId: 'session-1' } }),
+      },
+    ]);
+  });
+
+  it('matches the Codex <server>/<tool> title with no toolName', () => {
+    const result = stripToolMetadataContent({
+      toolCallId: 'tc-ask',
+      title: 'sam-mcp/request_human_input',
+      status: 'completed',
+      content: [{ type: 'content', text: resultText }],
+    }) as Record<string, unknown>;
+
+    expect(JSON.parse((result.rawOutput as Array<{ text: string }>)[0]!.text)).toEqual({
+      humanInputRequest: { id: 'marker-1', sessionId: 'session-1' },
+    });
+  });
+
+  it('keeps nothing for the legacy plain-text result or a reference without a session', () => {
+    const legacy = stripToolMetadataContent({
+      toolCallId: 'tc-ask',
+      title: 'mcp__sam-mcp__request_human_input',
+      status: 'completed',
+      content: [{ type: 'content', text: 'Human input request recorded.' }],
+    }) as Record<string, unknown>;
+    expect(legacy.rawOutput).toBeUndefined();
+    expect(legacy.contentSize).toBeGreaterThan(0);
+
+    const noSession = stripToolMetadataContent({
+      toolCallId: 'tc-ask',
+      title: 'mcp__sam-mcp__request_human_input',
+      status: 'completed',
+      content: [
+        { type: 'content', text: JSON.stringify({ humanInputRequest: { id: 'marker-1' } }) },
+      ],
+    }) as Record<string, unknown>;
+    expect(noSession.rawOutput).toBeUndefined();
+  });
+});
+
 describe('parseChatMessageRowCompact', () => {
   const makeRow = (toolMetadata: unknown) => ({
     id: 'msg-1',

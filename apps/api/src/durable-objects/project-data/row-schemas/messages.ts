@@ -99,6 +99,11 @@ const DOCUMENT_CARD_TOOLS = new Set([
  * reads action, target, reason and status from the server record, never from chat text.
  */
 const APPROVAL_CARD_TOOL = 'ops_request_action';
+/**
+ * Agent question tool. Its chat card needs only the attention marker and session IDs: the
+ * card reads the question, options and answer state from the server marker.
+ */
+const HUMAN_INPUT_CARD_TOOL = 'request_human_input';
 const TOOL_NAME_SEPARATORS = /__|\/|\.|:/;
 
 type CardPayloadMatcher = (payload: Record<string, unknown>) => Record<string, unknown> | undefined;
@@ -131,12 +136,23 @@ function approvalPayload(payload: Record<string, unknown>): Record<string, unkno
   return typeof id === 'string' && id ? { approval: { id } } : undefined;
 }
 
+/** Keeps only the attention marker reference; the card re-reads the question from the server. */
+function humanInputPayload(payload: Record<string, unknown>): Record<string, unknown> | undefined {
+  const request = maybeJsonRecord(payload.humanInputRequest);
+  const id = request?.id;
+  const sessionId = request?.sessionId;
+  return typeof id === 'string' && id && typeof sessionId === 'string' && sessionId
+    ? { humanInputRequest: { id, sessionId } }
+    : undefined;
+}
+
 /** Which typed chat card a tool renders as, and how to recognise its result payload. */
 function cardPayloadMatcher(meta: Record<string, unknown>): CardPayloadMatcher | undefined {
   const base = normalizeToolName(meta.toolName) ?? normalizeToolName(meta.title);
   if (!base) return undefined;
   if (DOCUMENT_CARD_TOOLS.has(base)) return documentPayload;
   if (base === APPROVAL_CARD_TOOL) return approvalPayload;
+  if (base === HUMAN_INPUT_CARD_TOOL) return humanInputPayload;
   return undefined;
 }
 
