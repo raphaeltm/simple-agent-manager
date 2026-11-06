@@ -95,16 +95,19 @@ describe('secret scan policy', () => {
     expect(result.errors).toEqual(['A reviewed Gitleaks baseline entry has expired.']);
   });
 
-  it('rejects an expired exemption even when no findings match it', () => {
-    const result = evaluateGitleaksFindings(
-      '[]',
-      JSON.stringify(baseline('2026-11-07T00:00:00.000Z')),
-      new Date('2026-11-07T00:00:00.000Z')
-    );
+  it.each(['2026-11-07T00:00:00.000Z', '2026-11-07T00:00:01.000Z'])(
+    'rejects an expired exemption with no findings at %s',
+    (now) => {
+      const result = evaluateGitleaksFindings(
+        '[]',
+        JSON.stringify(baseline('2026-11-07T00:00:00.000Z')),
+        new Date(now)
+      );
 
-    expect(result).toMatchObject({ ok: false, totalFindingCount: 0 });
-    expect(result.errors).toEqual(['A reviewed Gitleaks baseline entry has expired.']);
-  });
+      expect(result).toMatchObject({ ok: false, totalFindingCount: 0 });
+      expect(result.errors).toEqual(['A reviewed Gitleaks baseline entry has expired.']);
+    }
+  );
 
   it.each([
     ['invalid JSON', '{'],

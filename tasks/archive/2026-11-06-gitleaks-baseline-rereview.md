@@ -61,3 +61,7 @@ Six exception groups expire November 7 or 9. Freshly review exact current-tree f
 Implementation complete; PR #2554 owns pending current-head CI/Sonar, CodeRabbit review, merge, main CI/release verification, basic production health, and final coordination evidence.
 
 Task-completion validator re-reviewed archive readiness at39a03ae96da7c050f348234fe2ed52508d169b79 and PASS: /do Phase4 archives implementation before Phase7release. Archive does not claim overall task/release completion or waive any gate. Durable reviewer and release evidence: https://github.com/raphaeltm/simple-agent-manager/pull/2554.
+
+## CodeRabbit follow-up
+
+CodeRabbit approved51efe86e183f4d9de7a2df3c443cd341b084ffb0 with two test nitpicks. Addressed both: empty-scan expiry rejection now covers boundary and one second later; release resolver fixture verifies all three embedded installers rotate the release. Independent completion/test-engineer re-review PASS, affected61/61 tests pass; baseline/runtime unchanged. Final-headCI/Sonar and incremental CodeRabbit wait remain PR-owned gates.
