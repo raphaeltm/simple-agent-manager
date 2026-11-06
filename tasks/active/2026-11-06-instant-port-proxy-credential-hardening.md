@@ -44,25 +44,25 @@ printed or stored).
 
 ## Implementation Checklist
 
-- [ ] vm-agent: port proxy refuses (403) when the target is loopback and the port is a
+- [x] vm-agent: port proxy refuses (403) when the target is loopback and the port is a
       vm-agent listen port
-- [ ] vm-agent: local forward applies the same refusal
-- [ ] vm-agent: both proxies mark forwarded requests with a SAM-proxied marker header
-- [ ] vm-agent: `/git-credential` refuses bearerless loopback trust when the marker is present,
+- [x] vm-agent: local forward applies the same refusal
+- [x] vm-agent: both proxies mark forwarded requests with a SAM-proxied marker header
+- [x] vm-agent: `/git-credential` refuses bearerless loopback trust when the marker is present,
       and when the request carries API-forwarding headers
-- [ ] API: cf-container route rejects `targetPort === vmAgentPort` with 403 before minting a
+- [x] API: cf-container route rejects `targetPort === vmAgentPort` with 403 before minting a
       port-proxy token
-- [ ] API: cf-container forwards set the same marker header (defense in depth for
+- [x] API: cf-container forwards set the same marker header (defense in depth for
       non-port routes)
-- [ ] Tests: attack through the real path (API cf-container port route + public ports →
+- [x] Tests: attack through the real path (API cf-container port route + public ports →
       vm-agent port proxy → handler) returns no credential
-- [ ] Tests: owner control, a dev-server port is still proxied with public ports on
-- [ ] Tests: discrimination check, each guard deleted in turn reddens the attack test
-- [ ] Tests: VM-runtime control, VM routing unchanged for the same port number
-- [ ] Tests: in-container credential helper (git and gh shim) still works
-- [ ] Update `tasks/backlog/2026-03-16-port-exposure-security-hardening.md` and
+- [x] Tests: owner control, a dev-server port is still proxied with public ports on
+- [x] Tests: discrimination check, each guard deleted in turn reddens the attack test
+- [x] Tests: VM-runtime control, VM routing unchanged for the same port number
+- [x] Tests: in-container credential helper (git and gh shim) still works
+- [x] Update `tasks/backlog/2026-03-16-port-exposure-security-hardening.md` and
       `tasks/backlog/2026-06-09-git-credential-loopback-container-binding.md`
-- [ ] Docs: note the reserved port in the public port-exposure docs if they list behaviour
+- [x] Docs: note the reserved port in the public port-exposure docs if they list behaviour
 
 ## Acceptance Criteria
 
@@ -78,3 +78,24 @@ printed or stored).
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md`, `.claude/rules/28-credential-resolution-fallback-tests.md`,
   `packages/vm-agent/.claude/rules/61-guards-must-cover-every-runtime.md`,
   `packages/vm-agent/.claude/rules/54-vm-agent-rollout-compatibility.md`
+
+## Implementation Notes
+
+- Staging repro on unpatched staging 2026-11-06 (Instant session, public ports on): the
+  vm-agent-port subdomain returned 200 with one credential line; public ports off → 401.
+  No credential value was printed or stored. Fixture workspace deleted.
+- Relay signal: explicit `X-SAM-Proxied-Request` marker (set by the vm-agent port proxy, local
+  forward and the API container forward) or `X-Forwarded-Host` (set on every SAM relay path,
+  never by in-workspace helpers). Presence-only, so a client that sets it can only lose access.
+- Discrimination (each guard removed alone, then restored):
+  - port-proxy own-listener → `TestPortProxyRefusesVMAgentOwnListenerOnPublicPortRoute` red
+  - local-forward own-listener → `TestLocalForwardRefusesVMAgentOwnListener` red
+  - port-proxy marker set → `TestPortProxyRelayToAgentRoutesGetsNoLoopbackCredentialTrust` red
+  - git-credential relay check → that test and `TestGitCredentialRefusesBearerlessRelayedRequest` red
+  - `X-Forwarded-Host` signal → `TestGitCredentialRefusesBearerlessRelayedRequest/API_Worker...` red
+  - marker signal → relay test and marker case red
+  - port-proxy own-listener + relay check together → attack test returns the (fake) credential
+  - API reserved-port check → two API reserved-port tests red; API marker → two marker tests red
+- In-container helper coverage: existing `standalone_credential_exchange_test.go`,
+  `standalone_git_test.go`, `workspace_exec_credentials_test.go` drive the real helper script
+  and gh shim against the real handler on loopback; all pass.

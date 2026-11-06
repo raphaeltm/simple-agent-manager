@@ -1,3 +1,11 @@
+> **Update 2026-11-06 (task `01M6QZBHRCQGW8W36W894Q3XDP`, idea `01M5R2BTGXBWVN8D51CT9GM7HD`):**
+> the premise "the loopback branch is only reachable from inside the node" did not hold for
+> Instant workspaces, where the vm-agent port proxy relays requests from loopback. Fixed by
+> refusing bearerless peer-address trust for any request a SAM proxy relayed
+> (`isRelayedRequest` in `packages/vm-agent/internal/server/proxy_guard.go`), plus refusing proxy
+> targets on the vm-agent's own listener. Binding a loopback caller to its own workspace
+> (Option B below) is still open.
+
 # Bind loopback git-credential requests to the calling container's own workspace
 
 > **Reconciliation 2026-09-30:** still open. It matters more now that GitLab-bound workspaces
