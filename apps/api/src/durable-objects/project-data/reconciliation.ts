@@ -12,9 +12,12 @@
  * - Sessions with active `needs_input` attention markers
  * - Sessions that already have an unresolved `reconciliation_checkin` marker
  */
+import { SAM_NOTICE_METADATA_KEY } from '@simple-agent-manager/shared';
+
 import type { Env as WorkerEnv } from '../../env';
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { cancelAgentSessionOnNode } from '../../services/node-agent';
+import { stallCheckinNotice } from '../../services/sam-notice-builders';
 import { classifyTaskRuntimeDelivery } from '../../services/task-runtime-liveness';
 import { DefaultVmPromptDeliveryAdapter } from '../../services/vm-prompt-delivery-adapter';
 import { recordActivityEventInternal } from './activity';
@@ -296,7 +299,10 @@ async function handleCheckinDelivery(
     );
   }
 
-  const metadata = checkinMetadata(intent.deliveryId);
+  const metadata = {
+    ...checkinMetadata(intent.deliveryId),
+    [SAM_NOTICE_METADATA_KEY]: stallCheckinNotice(candidate.idleDurationMs),
+  };
   const msgResult = persistMessage(
     sql,
     env,

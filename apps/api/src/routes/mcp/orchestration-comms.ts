@@ -14,6 +14,8 @@ import { log } from '../../lib/logger';
 import { sendPromptToAgentOnNode } from '../../services/node-agent';
 import { persistOrchestrationPrompt } from '../../services/orchestration-prompts';
 import * as projectDataService from '../../services/project-data';
+import { parentAgentMessageNotice } from '../../services/sam-notice-builders';
+import { loadTaskTitleForNotice } from '../../services/sam-notice-lookups';
 import {
   getMcpLimits,
   INTERNAL_ERROR,
@@ -93,6 +95,11 @@ export async function handleSendMessageToSubtask(
     await import('../../durable-objects/project-data/durable-execution-config');
   const durableConfig = resolveDurableExecutionConfig(env);
   if (durableConfig.deliveryEnabled) {
+    const parentTaskTitle = await loadTaskTitleForNotice(
+      env,
+      resolution.task.projectId,
+      tokenData.taskId
+    );
     const accepted = await projectDataService.acceptPromptDelivery(env, resolution.task.projectId, {
       targetSessionId: workspace.chatSessionId,
       displayContent: message,
@@ -107,6 +114,11 @@ export async function handleSendMessageToSubtask(
         parentTaskId: tokenData.taskId,
         childTaskId: taskId,
       },
+      notice: parentAgentMessageNotice({
+        parentTaskId: tokenData.taskId ?? null,
+        parentTaskTitle,
+        message,
+      }),
     });
     return jsonRpcSuccess(requestId, {
       content: [

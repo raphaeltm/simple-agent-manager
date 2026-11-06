@@ -1,6 +1,7 @@
 import { TASK_TERMINAL_STATUSES } from '@simple-agent-manager/shared';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
+import { parentWakeNotice } from '../../services/sam-notice-builders';
 import { promptDeliveryBackoffMs, resolveDurableExecutionConfig } from './durable-execution-config';
 import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from './prompt-delivery';
 import { failParentWakeDeliveries } from './prompt-delivery';
@@ -21,6 +22,8 @@ export interface TaskWaitSupervisorHooks {
 
 interface D1TaskObservation extends taskWaits.TaskObservation {
   chatSessionId: string | null;
+  /** For the chat notice only; never part of the agent's wake text. */
+  title: string | null;
 }
 
 export interface TaskWaitProcessResult {
@@ -72,6 +75,7 @@ function normalizeTaskRow(row: Record<string, unknown>): D1TaskObservation | nul
     taskId: row.id,
     status: row.status,
     chatSessionId: typeof row.chat_session_id === 'string' ? row.chat_session_id : null,
+    title: typeof row.title === 'string' ? row.title : null,
   };
 }
 
@@ -86,7 +90,7 @@ async function loadTaskObservations(
     const chunk = taskIds.slice(offset, offset + D1_TASK_IDS_PER_QUERY);
     const placeholders = chunk.map(() => '?').join(', ');
     const result = await env.DATABASE.prepare(
-      `SELECT id, status, chat_session_id
+      `SELECT id, status, chat_session_id, title
 		   FROM tasks
 		   WHERE project_id = ? AND id IN (${placeholders})`
     )
@@ -313,6 +317,17 @@ export async function processTaskWaits(
           childTaskIds: prepared.children.map((child) => child.childTaskId),
           resolutionReason: prepared.resolutionReason,
         },
+        notice: parentWakeNotice(
+          prepared.children.map((child) => {
+            const observation = observations.get(child.childTaskId);
+            return {
+              taskId: child.childTaskId,
+              status: observation?.status ?? 'missing',
+              title: observation?.title ?? null,
+            };
+          }),
+          prepared.resolutionReason === 'deadline_reached' ? 'deadline_reached' : 'condition_met'
+        ),
       });
       const resolved = hooks.transactionSync(() =>
         taskWaits.resolveTaskWait(

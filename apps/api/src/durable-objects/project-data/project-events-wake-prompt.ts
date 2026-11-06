@@ -3,7 +3,12 @@
  * prompt is SAM-authored and IDs-only: event content is read through the event
  * MCP tools, never injected into the prompt.
  */
-import type { ProjectEventSubscriptionRecord } from '@simple-agent-manager/shared';
+import type {
+  ProjectEventRecord,
+  ProjectEventSubscriptionRecord,
+} from '@simple-agent-manager/shared';
+
+import { projectEventWakeNotice, safeNotice } from '../../services/sam-notice-builders';
 
 import {
   agentMessageChannelForSubscription,
@@ -17,6 +22,8 @@ export type BuildWakePromptInputOptions = {
   subscription: ProjectEventSubscriptionRecord;
   sourceTaskGuard: ProjectEventWakeSourceTaskGuard;
   eventIds: string[];
+  /** The batch's events, for the chat notice only; the agent's text stays IDs-only. */
+  events?: readonly ProjectEventRecord[];
   now: number;
   ttlMs: number;
   maxMessages: number;
@@ -79,6 +86,10 @@ export function buildWakePromptInput(
       ...(steerWake ? { runtimeSteer: true } : {}),
       ...(agentMessageChannel ? { agentMessageChannel } : {}),
     },
+    notice: safeNotice(() => projectEventWakeNotice(options.events ?? []), {
+      batchId: options.batchId,
+      subscriptionId: options.subscription.id,
+    }),
     ttlMs: options.ttlMs,
     maxMessages: options.maxMessages,
   };

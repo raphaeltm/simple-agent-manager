@@ -26,6 +26,7 @@ import {
   parseWorkspaceId,
 } from './row-schemas';
 import { assertSessionIdentityGuard, type SessionIdentityGuard } from './sessions';
+import { withoutSamNotice } from './sam-notice-metadata';
 import { boundToolMetadataForStorage } from './tool-metadata-storage';
 import type { Env } from './types';
 import { generateId } from './types';
@@ -246,7 +247,10 @@ export function persistMessageBatch(
     // so ties are safe (see message-cursor.ts).
     const createdAt = new Date(msg.timestamp).getTime() || now;
     const sequence = msg.sequence ?? nextSeq++;
-    const boundedToolMetadata = boundToolMetadataForStorage(msg.toolMetadata, env);
+    const boundedToolMetadata = boundToolMetadataForStorage(
+      withoutSamNotice(msg.toolMetadata, sessionId, msg.messageId),
+      env
+    );
     if (boundedToolMetadata.truncated) {
       log.warn('messages.batch_tool_metadata_truncated_for_storage', {
         sessionId,

@@ -14,6 +14,7 @@ import type { AcceptPromptDeliveryInput } from '../durable-objects/project-data/
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import * as projectDataService from './project-data';
+import { restoredSessionNotice } from './sam-notice-builders';
 
 /** Sender recorded on the queued prompt and its transcript row. */
 export const RESTORED_SESSION_PROMPT_SENDER_ID = 'session-recovery';
@@ -59,6 +60,7 @@ export function restoredSessionPromptDelivery(
     senderId: RESTORED_SESSION_PROMPT_SENDER_ID,
     messageClass: 'deliver',
     sourceKind: 'checkpoint_continuation',
+    notice: restoredSessionNotice(),
     ttlMs,
   };
 }

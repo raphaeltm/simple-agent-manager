@@ -13,6 +13,7 @@ import { resolveDurableExecutionConfig } from '../../durable-objects/project-dat
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import * as projectDataService from '../project-data';
+import { operationsDecisionNotice, safeNotice } from '../sam-notice-builders';
 import type { StoredOperationsApproval } from './approvals';
 
 export function operationsDecisionDeliveryId(approvalId: string): string {
@@ -68,6 +69,7 @@ export async function deliverOperationsDecision(
         action: approval.action,
         targetId: approval.targetId,
       },
+      notice: safeNotice(() => operationsDecisionNotice(approval), { approvalId: approval.id }),
     });
     return true;
   } catch (error) {

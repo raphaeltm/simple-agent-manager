@@ -19,6 +19,8 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import * as projectDataService from '../../services/project-data';
+import { agentMailboxNotice } from '../../services/sam-notice-builders';
+import { loadTaskTitleForNotice } from '../../services/sam-notice-lookups';
 import {
   composePeerSteerContent,
   composeUrgentDeliveryContent,
@@ -149,6 +151,11 @@ export async function handleSendDurableMessage(
       // prompt. The submitted prompt carries stop context; the transcript row
       // keeps the sender's raw message.
       const urgent = isUrgentMessageClass(messageClass as MessageClass);
+      const senderTaskTitle = await loadTaskTitleForNotice(
+        env,
+        resolution.projectId,
+        tokenData.taskId
+      );
       const accepted = await projectDataService.acceptPromptDelivery(env, resolution.projectId, {
         targetSessionId: resolution.chatSessionId,
         displayContent: message,
@@ -168,6 +175,11 @@ export async function handleSendDurableMessage(
         messageClass: messageClass as MessageClass,
         sourceKind: 'agent_mailbox',
         metadata,
+        notice: agentMailboxNotice({
+          senderTaskId: tokenData.taskId ?? null,
+          senderTaskTitle,
+          message,
+        }),
         ackTimeoutMs: limits.mailboxAckTimeoutMs,
         ttlMs: durableConfig.ttlMs,
         maxMessages: limits.mailboxMaxMessagesPerProject,

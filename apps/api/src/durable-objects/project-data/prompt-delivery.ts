@@ -4,6 +4,7 @@ import {
   type MessageClass,
   type PromptDeliveryIntent,
   type PromptDeliverySource,
+  type SamNotice,
   type SenderType,
   type VmPromptDeliveryCapabilities,
   type VmPromptDeliveryReceipt,
@@ -21,6 +22,7 @@ import {
   type SteerDeliveryResult,
 } from './prompt-delivery-steer';
 import { parseMailboxMessageRow } from './row-schemas';
+import { promptDeliveryToolMetadata } from './sam-notice-metadata';
 import type { Env } from './types';
 
 const log = createModuleLogger('project_data.prompt_delivery');
@@ -43,6 +45,11 @@ export interface AcceptPromptDeliveryInput {
   deliveryIntent?: PromptDeliveryIntent;
   sourceKind: PromptDeliverySource;
   metadata?: Record<string, unknown> | null;
+  /**
+   * Server-built description of this message for the chat UI. Only trusted server code sets
+   * it; a `samNotice` key inside `metadata` (which can carry caller data) is discarded.
+   */
+  notice?: SamNotice | null;
   ackTimeoutMs?: number | null;
   ttlMs?: number | null;
   /** Absolute source deadline; retries cannot extend it. */
@@ -97,13 +104,9 @@ export function acceptPromptDeliveryInTransaction(
   }
 
   const deliveryId = input.deliveryId ?? ulid();
-  const toolMetadata = JSON.stringify({
-    ...(input.metadata ?? {}),
-    source: input.sourceKind,
-    kind: 'durable_prompt_delivery',
-    deliveryId,
-    ...(deliveryIntent === 'steer' ? { deliveryIntent } : {}),
-  });
+  const toolMetadata = JSON.stringify(
+    promptDeliveryToolMetadata(input, deliveryId, deliveryIntent)
+  );
   const persisted = messages.persistMessage(
     sql,
     env,
