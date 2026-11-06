@@ -28,8 +28,10 @@ describe('cloudflare client failures', () => {
       method: 'PUT',
       path: '/accounts/:account/workers/scripts/x',
       codes: [10000],
+      contentType: 'application/json',
     });
     expect(JSON.stringify(detail)).not.toContain('token-private');
+    expect(JSON.stringify(detail)).not.toContain('Authentication error');
     expect(JSON.stringify(detail)).not.toContain('a'.repeat(32));
   });
 

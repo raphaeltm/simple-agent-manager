@@ -42,6 +42,56 @@ function fake(existing?: unknown) {
   vi.stubGlobal('fetch', fetch);
   return fetch;
 }
+// Mirrors Cloudflare's scope rule: declaring a container in a script upload
+// needs containers.write. Bootstrap OAuth consent grants only
+// account-settings.read and workers-scripts.edit.
+function scopedCloudflare(grantedScopes: string[]) {
+  const fetch = vi.fn(async (url: string, init?: RequestInit) => {
+    if (url.endsWith('/settings'))
+      return Response.json({ success: false, result: null }, { status: 404 });
+    if (url.endsWith(`/scripts/${name}`) && init?.method === 'PUT') {
+      const metadata = JSON.parse(
+        await ((init.body as FormData).get('metadata') as Blob).text()
+      ) as { containers?: unknown[] };
+      if (metadata.containers?.length && !grantedScopes.includes('containers.write'))
+        return Response.json({ success: false, errors: [] }, { status: 403 });
+    }
+    const result = url.endsWith('/workers/subdomain')
+      ? { subdomain: 'account-existing' }
+      : url.endsWith('/r2/buckets')
+        ? { buckets: [{ name: `${name}-builds` }] }
+        : url.endsWith('/containers/applications')
+          ? []
+          : {};
+    return Response.json({ success: true, result });
+  });
+  vi.stubGlobal('fetch', fetch);
+  return fetch;
+}
+const BOOTSTRAP_SCOPES = ['account-settings.read', 'workers-scripts.edit'];
+describe('bootstrap upload under bootstrap consent scopes', () => {
+  it('creates the maintenance service without declaring a container', async () => {
+    const fetch = scopedCloudflare(BOOTSTRAP_SCOPES);
+    await expect(
+      provision('bootstrap-oauth', account, name, key, origin, Date.now() + 60000)
+    ).resolves.toBe(`https://${name}.account-existing.workers.dev`);
+    const upload = fetch.mock.calls.find(
+      ([url, init]) => url.endsWith(`/scripts/${name}`) && init?.method === 'PUT'
+    )?.[1]?.body as FormData;
+    const metadata = JSON.parse(await (upload.get('metadata') as Blob).text());
+    expect(metadata.containers).toBeUndefined();
+    expect(fetch.mock.calls.some(([url]) => url.includes('/containers/'))).toBe(false);
+  });
+  it('control: a full installation still declares its builder container, so the same scopes are refused', async () => {
+    scopedCloudflare(BOOTSTRAP_SCOPES);
+    await expect(
+      provision('bootstrap-oauth', account, name, key, origin, Date.now() + 60000, {
+        config,
+        credentials,
+      })
+    ).rejects.toMatchObject({ status: 403 });
+  });
+});
 describe('owner-account service provisioning', () => {
   it('uploads independent durable owner/builder bindings and distinct credentials, then registers native managed scheduling', async () => {
     const fetch = fake();

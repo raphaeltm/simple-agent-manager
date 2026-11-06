@@ -107,7 +107,11 @@ export class InstallerSession {
               ? { cleanupReceipt: this.receipt(), cleanupAccountId: cleanup.accountId }
               : {}),
             error:
-              'Cloudflare could not complete this step. Check your permissions and try again. No credentials were logged.',
+              error instanceof CloudflareError && error.status === 403
+                ? 'Cloudflare refused this step (HTTP 403). Check that the account has the Workers Paid plan and that you approved every requested permission, then try again. No credentials were logged.'
+                : error instanceof CloudflareError
+                  ? `Cloudflare could not complete this step (HTTP ${error.status}). Try again. No credentials were logged.`
+                  : 'Cloudflare could not complete this step. Check your permissions and try again. No credentials were logged.',
           },
           502
         );

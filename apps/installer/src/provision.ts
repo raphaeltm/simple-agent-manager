@@ -188,7 +188,10 @@ async function uploadMaintenance(
         JSON.stringify({
           main_module: 'worker.js',
           compatibility_date: '2026-10-01',
-          containers: [{ class_name: 'InstallationBuilder' }],
+          // Only full installations run builds. Declaring a container needs the
+          // containers.write scope, which bootstrap consent does not grant, so a
+          // bootstrap upload that declares one is rejected with 403.
+          ...(installation ? { containers: [{ class_name: 'InstallationBuilder' }] } : {}),
           migrations: {
             new_tag: 'v1',
             new_sqlite_classes: ['MaintenanceCoordinator', 'InstallationBuilder'],

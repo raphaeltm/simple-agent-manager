@@ -2,9 +2,15 @@ const API = 'https://api.cloudflare.com/client/v4';
 export class CloudflareError extends Error {
   constructor(
     public status: number,
-    // Diagnostic context only: method, account-masked API path and Cloudflare's
-    // numeric error codes. Never tokens, bodies or provider error messages.
-    public detail: { method?: string; path?: string; codes?: number[] } = {}
+    // Diagnostic context only: method, account-masked API path, Cloudflare's
+    // numeric error codes and the response content type. Never tokens, bodies
+    // or provider error text, which can echo request values.
+    public detail: {
+      method?: string;
+      path?: string;
+      codes?: number[];
+      contentType?: string;
+    } = {}
   ) {
     super(`Cloudflare request failed (${status}). Check the granted permissions and retry.`);
   }
@@ -34,6 +40,7 @@ export async function cloudflare<T>(
       codes: (data.errors ?? [])
         .map((error) => error.code)
         .filter((code): code is number => typeof code === 'number'),
+      contentType: response.headers.get('content-type') ?? '',
     });
   return data.result;
 }
