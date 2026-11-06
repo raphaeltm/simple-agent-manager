@@ -149,8 +149,9 @@ const PLAN = [
   { content: 'Add a regression test for the 10k-row file', status: 'pending' },
 ];
 
-function chatState(working: boolean, withPlan = false) {
+function chatState(working: boolean, withPlan = false, steeringSupported?: boolean) {
   return {
+    ...(steeringSupported === undefined ? {} : { steeringSupported }),
     activity: working ? 'prompting' : 'idle',
     activityAt: NOW,
     statusError: null,
@@ -162,7 +163,10 @@ function chatState(working: boolean, withPlan = false) {
   };
 }
 
-async function setupApiMocks(page: Page, opts: { working: boolean; withPlan?: boolean }) {
+async function setupApiMocks(
+  page: Page,
+  opts: { working: boolean; withPlan?: boolean; steeringSupported?: boolean }
+) {
   const prompts: Array<Record<string, unknown>> = [];
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
@@ -197,7 +201,7 @@ async function setupApiMocks(page: Page, opts: { working: boolean; withPlan?: bo
           session,
           messages: MESSAGES,
           hasMore: false,
-          state: chatState(opts.working, opts.withPlan),
+          state: chatState(opts.working, opts.withPlan, opts.steeringSupported),
         });
       }
       if (subPath.match(/\/sessions\/[^/]+\/messages/)) {
@@ -399,6 +403,23 @@ for (const theme of ['dark', 'light'] as const) {
         await expect.poll(() => api.prompts.length).toBe(1);
         expect(api.prompts[0]).not.toHaveProperty('deliveryIntent');
         await screenshot(page, `steering-idle-${theme}-${viewport}`);
+        await assertNoOverflow(page);
+      });
+
+      test('no steer choice while working when the agent cannot steer', async ({ page }) => {
+        await seedTheme(page, theme);
+        const api = await setupApiMocks(page, { working: true, steeringSupported: false });
+        await gotoChat(page);
+        // Liveness: the agent shows working (Interrupt) and the composer is there.
+        await expect(page.getByRole('button', { name: /interrupt/i })).toBeVisible();
+        await expect(composer(page)).toBeVisible();
+        await expect(chip(page)).toHaveCount(0);
+        await expect(composer(page)).toHaveAttribute('placeholder', 'Queue next...');
+        await composer(page).fill('Also cover the empty-file case.');
+        await page.getByRole('button', { name: /^send/i }).click();
+        await expect.poll(() => api.prompts.length).toBe(1);
+        expect(api.prompts[0]).not.toHaveProperty('deliveryIntent');
+        await screenshot(page, `steering-unsupported-${theme}-${viewport}`);
         await assertNoOverflow(page);
       });
     });
