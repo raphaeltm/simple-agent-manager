@@ -345,6 +345,11 @@ func (s *Server) getOrCreateSessionHostForRestore(hostKey, workspaceID, sessionI
 	if cfg.ProjectID == "" && s.config != nil && workspaceID == strings.TrimSpace(s.config.WorkspaceID) {
 		cfg.ProjectID = strings.TrimSpace(s.config.ProjectID)
 	}
+	var sessionTask *taskCallbackContext
+	if hasTaskCtx {
+		sessionTask = &taskCtx
+	}
+	cfg.SAMEnvFallback = s.sessionSAMEnvFallback(workspaceID, runtime, sessionTask)
 	if hasTaskCtx && s.config != nil && taskCtx.ProjectID != "" && taskCtx.TaskID != "" && taskCtx.WorkspaceID != "" {
 		cfg.OnPromptComplete = s.makeTaskCompletionCallback(s.config.ControlPlaneURL, taskCtx.ProjectID, taskCtx.TaskID, taskCtx.WorkspaceID, taskCtx.TaskMode)
 		cfg.OnPromptCompleteWithContext = func(reason string, err error, completion acp.PromptCompletionContext) {

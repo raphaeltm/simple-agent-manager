@@ -473,7 +473,6 @@ func New(cfg *config.Config) (*Server, error) {
 		RestartAttemptTimeout:            cfg.ACPRestartAttemptTimeout,
 		RecoveryWatchdogTimeout:          cfg.ACPRecoveryWatchdog,
 		RestartDecayWindow:               cfg.ACPRestartDecayWindow,
-		SAMEnvFallback:                   cfg.BuildSAMEnvFallback(),
 		HTTPClient:                       config.NewControlPlaneClient(cfg.HTTPCallbackTimeout),
 	}
 
