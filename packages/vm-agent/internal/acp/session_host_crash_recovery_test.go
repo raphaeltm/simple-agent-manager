@@ -415,8 +415,9 @@ func newRecoveryTestHost(t *testing.T, watchdog time.Duration) *SessionHost {
 			InitializeTimeoutMs:     500,
 			LoadSessionTimeoutMs:    500,
 		},
-		MessageBufferSize: 100,
-		ViewerSendBuffer:  32,
+		MessageBufferSize:  100,
+		ViewerSendBuffer:   32,
+		VerifyCodexRuntime: acceptCodexRuntime,
 	})
 }
 

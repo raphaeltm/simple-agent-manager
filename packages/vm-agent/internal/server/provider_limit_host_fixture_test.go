@@ -122,6 +122,14 @@ func runProviderWireThroughProductionHost(t *testing.T, name string, wire json.R
 				provider = "openai"
 			}
 			json.NewEncoder(w).Encode(map[string]any{"apiKey": "test-only", "credentialKind": "api-key", "credentialSource": "user", "credentialReference": "cc_credentials:provider-1", "credentialGeneration": 1, "credentialProvider": provider, "providerMode": "direct"})
+		case strings.HasSuffix(r.URL.Path, "/runtime-assets"):
+			// These shims are the stock npm adapters, so the profile opts out of SAM's
+			// default C2 Codex runtime (which needs its reviewed release on disk).
+			envVars := []map[string]any{}
+			if strings.HasPrefix(name, "Codex") {
+				envVars = append(envVars, map[string]any{"key": "SAM_CODEX_C2_CANDIDATE", "value": "0"})
+			}
+			json.NewEncoder(w).Encode(map[string]any{"workspaceId": "workspace-1", "envVars": envVars, "files": []any{}})
 		case strings.HasSuffix(r.URL.Path, "/status/callback"):
 			var body map[string]any
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -138,7 +146,8 @@ func runProviderWireThroughProductionHost(t *testing.T, name string, wire json.R
 	s := &Server{workspaceEvents: make(map[string][]EventRecord), store: store, config: &config.Config{ControlPlaneURL: control.URL, CallbackToken: "test-token"},
 		acpConfig:    acp.GatewayConfig{ControlPlaneURL: control.URL, CallbackToken: "test-token", NodeID: "node-1", ProcessLauncher: providerLimitFixtureLauncher{wire}, ContainerWorkDir: bin, Now: func() time.Time { return now }, SettingsResolved: true, TerminalActivityReportAttempts: 1, ActivityReportTimeout: time.Second},
 		sessionHosts: make(map[string]*acp.SessionHost), sessionTaskCtx: map[string]taskCallbackContext{key: {ProjectID: "project-1", TaskID: "task-1", WorkspaceID: "workspace-1", TaskMode: mode}}, sessionMcpServers: make(map[string][]acp.McpServerEntry), sessionProfileOvr: make(map[string]profileOverrides), agentSessions: agentsessions.NewManager(), workspaces: make(map[string]*WorkspaceRuntime)}
-	host := s.getOrCreateSessionHost(key, "workspace-1", "agent-1", agentsessions.Session{ID: "agent-1", WorkspaceID: "workspace-1"}, nil, "")
+	// A workspace runtime wires the per-session runtime-assets provider, as on a VM.
+	host := s.getOrCreateSessionHost(key, "workspace-1", "agent-1", agentsessions.Session{ID: "agent-1", WorkspaceID: "workspace-1"}, &WorkspaceRuntime{ID: "workspace-1"}, "")
 	defer host.Stop()
 	agentType := "claude-code"
 	if strings.HasPrefix(name, "Codex") {
