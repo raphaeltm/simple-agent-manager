@@ -187,12 +187,20 @@ func TestPortProxyRelayToAgentRoutesGetsNoLoopbackCredentialTrust(t *testing.T) 
 	h.serveAgentMux(second)
 	secondPort := second.Addr().(*net.TCPAddr).Port
 
-	status, body := doRelayRequest(t, h.apiPortRequest(secondPort, "/git-credential", "host=github.com", false))
+	for _, connection := range []string{"", "keep-alive, " + proxiedRequestHeader + ", X-Forwarded-Host"} {
+		// A client may name headers in Connection to have the proxy strip them
+		// as hop-by-hop after its Director runs; the marker must survive that.
+		req := h.apiPortRequest(secondPort, "/git-credential", "host=github.com", false)
+		if connection != "" {
+			req.Header.Set("Connection", connection)
+		}
+		status, body := doRelayRequest(t, req)
 
-	if status != http.StatusUnauthorized {
-		t.Fatalf("status = %d, want 401 (body %q)", status, body)
+		if status != http.StatusUnauthorized {
+			t.Fatalf("Connection %q: status = %d, want 401 (body %q)", connection, status, body)
+		}
+		assertNoCredential(t, h, body)
 	}
-	assertNoCredential(t, h, body)
 
 	// Liveness: the same second listener answers a direct loopback helper call,
 	// so the 401 above is the relay check and not a broken listener.
@@ -320,6 +328,25 @@ func TestGitCredentialLoopbackHelperAndBearerRelayStillAuthorized(t *testing.T) 
 				t.Fatalf("status = %d, want 200 with credential", rec.Code)
 			}
 		})
+	}
+}
+
+func TestMarkProxiedRequestKeepsOnlyUpgradeConnectionToken(t *testing.T) {
+	h := http.Header{}
+	h.Add("Connection", "keep-alive, Upgrade")
+	h.Add("Connection", proxiedRequestHeader)
+	markProxiedRequest(h)
+	if got := h.Values("Connection"); len(got) != 1 || got[0] != "Upgrade" {
+		t.Fatalf("Connection = %q, want [Upgrade]", got)
+	}
+	if h.Get(proxiedRequestHeader) != "1" {
+		t.Fatal("relay marker not set")
+	}
+
+	plain := http.Header{"Connection": {proxiedRequestHeader}}
+	markProxiedRequest(plain)
+	if _, ok := plain["Connection"]; ok {
+		t.Fatalf("Connection = %q, want removed", plain.Values("Connection"))
 	}
 }
 

@@ -14,7 +14,24 @@ import (
 // presence-only: a client that sets the header itself can only lose access.
 const proxiedRequestHeader = "X-SAM-Proxied-Request"
 
+// markProxiedRequest sets the relay marker on an outbound proxy request.
+// httputil.ReverseProxy removes every header named in the client's Connection
+// header after a Director runs, so a client could name the marker (or
+// X-Forwarded-Host) there to have it stripped. Only the Upgrade token, which
+// the proxy needs for WebSocket upgrades, is kept.
 func markProxiedRequest(h http.Header) {
+	upgrade := false
+	for _, value := range h.Values("Connection") {
+		for _, token := range strings.Split(value, ",") {
+			if strings.EqualFold(strings.TrimSpace(token), "upgrade") {
+				upgrade = true
+			}
+		}
+	}
+	h.Del("Connection")
+	if upgrade {
+		h.Set("Connection", "Upgrade")
+	}
 	h.Set(proxiedRequestHeader, "1")
 }
 
