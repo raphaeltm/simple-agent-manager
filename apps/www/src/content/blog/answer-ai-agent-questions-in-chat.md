@@ -24,8 +24,8 @@ The tool gives the conversation a reference to the saved request:
 ```json
 {
   "humanInputRequest": {
-    "id": "saved-request-id",
-    "sessionId": "chat-session-id"
+    "id": "…",
+    "sessionId": "…"
   }
 }
 ```
