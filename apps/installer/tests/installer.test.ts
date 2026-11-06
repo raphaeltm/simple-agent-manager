@@ -25,7 +25,7 @@ function fixture() {
     APP_ORIGIN: 'https://install.example.com',
     OAUTH_CLIENT_ID: 'client',
     OAUTH_CLIENT_SECRET: 'SECRET',
-    OAUTH_SCOPES: 'account-settings.read workers-scripts.edit',
+    OAUTH_SCOPES: 'account-settings.read workers-scripts.write',
     SESSION_TTL_SECONDS: '900',
     BUILD_SHA: 'test',
     SOURCE_URL: 'https://example.com/source',

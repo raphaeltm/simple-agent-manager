@@ -46,7 +46,9 @@ const fullScopes = [
   'aig.write',
   'workers-observability.read',
 ];
-const bootstrapScopes = ['account-settings.read', 'workers-scripts.edit'];
+const bootstrapScopes = ['account-settings.read', 'workers-scripts.write'];
+// Shipped before 2026-11-06; workers-scripts.edit (Workers Editor) cannot create Workers.
+const editorBootstrapScopes = ['account-settings.read', 'workers-scripts.edit'];
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
@@ -58,7 +60,7 @@ afterEach(() => {
   capture.run.mockClear();
 });
 interface Options {
-  existing?: 'bootstrap' | 'full';
+  existing?: 'bootstrap' | 'full' | 'editor-bootstrap';
   ready?: boolean;
   mode?: string;
   managementDenied?: boolean;
@@ -66,6 +68,12 @@ interface Options {
   sha?: string;
   missingScope?: boolean;
 }
+const existingScopes = (existing: Options['existing']) =>
+  existing === 'full'
+    ? fullScopes
+    : existing === 'editor-bootstrap'
+      ? editorBootstrapScopes
+      : bootstrapScopes;
 async function deploy(options: Options = {}) {
   vi.spyOn(process, 'chdir').mockImplementation(() => {});
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -84,7 +92,7 @@ async function deploy(options: Options = {}) {
         client_id: 'existing',
         client_name: 'sam-installer-staging',
         client_uri: 'https://install.sammy.party',
-        scopes: options.existing === 'full' ? [...fullScopes] : [...bootstrapScopes],
+        scopes: [...existingScopes(options.existing)],
         grant_types: ['authorization_code'],
         response_types: ['code'],
         redirect_uris: ['https://install.sammy.party/oauth/callback'],
@@ -117,7 +125,7 @@ async function deploy(options: Options = {}) {
         {
           name: 'OAUTH_SCOPES',
           type: 'plain_text',
-          text: (options.existing === 'full' ? fullScopes : bootstrapScopes).join(' '),
+          text: existingScopes(options.existing).join(' '),
         },
         ...(options.existing === 'full'
           ? [{ name: 'INSTALL_SOURCE_COMMIT', type: 'plain_text', text: 'c'.repeat(40) }]
@@ -228,6 +236,28 @@ describe('publisher-controlled installer deployment', () => {
     expect(capture.calls.find((call) => call.method === 'PATCH')?.body.scopes).toEqual(
       bootstrapScopes
     );
+  });
+  it('upgrades a preserved Workers Editor bootstrap consent before publishing', async () => {
+    await deploy({ existing: 'editor-bootstrap' });
+    expect(config().vars.INSTALL_SOURCE_COMMIT).toBeUndefined();
+    expect(config().vars.OAUTH_SCOPES.split(' ')).toEqual(bootstrapScopes);
+    const patch = capture.calls.find((call) => call.method === 'PATCH');
+    expect(patch?.body.scopes).toEqual(bootstrapScopes);
+    expect(capture.events.findIndex((entry) => entry.startsWith('PATCH '))).toBeLessThan(
+      capture.events.indexOf('write-config')
+    );
+  });
+  it('control: a preserved current bootstrap consent is left untouched', async () => {
+    await deploy({ existing: 'bootstrap', managementDenied: true });
+    expect(config().vars.OAUTH_SCOPES.split(' ')).toEqual(bootstrapScopes);
+    expect(capture.calls.some((call) => call.method === 'PATCH')).toBe(false);
+  });
+  it('refuses to publish the Editor upgrade without OAuth management permission', async () => {
+    await expect(deploy({ existing: 'editor-bootstrap', managementDenied: true })).rejects.toThrow(
+      'permissions'
+    );
+    expect(capture.run).not.toHaveBeenCalled();
+    expect(capture.writes).toHaveLength(0);
   });
   it('blocks full enablement before publishing when management permission or a live scope is missing', async () => {
     await expect(
