@@ -129,3 +129,14 @@ All on node `01M6RFFQ1839ZRQX0TDD8CYDS2`, booted for session A:
   task ID to export and defaulted to `task`.
 - Cleanup: test node deleted. Staging cf-container workspaces stuck in `stopping` predate this branch
   (some were created on 2026-11-05 under older builds), so C's archive reports cleanup pending.
+
+## Security review follow-up (6627c2e85)
+
+The adversarial security audit (policy 034747da) verified the fix and found: agent-session start wrote its `projectId`
+onto the workspace runtime without comparing it to the workspace's own project (MEDIUM, fixed: 409 before any state
+change, plus a second check in `workspaceSAMIdentity`), and the task mode wasn't allow-listed (LOW, fixed). The
+pre-existing `handleCreateAgentSession` project overwrite (MEDIUM) is deferred to Idea `01M6RJSYF3X9YSVMBME8AN3C1G`.
+
+Re-verified on staging (run 42230623891), node `01M6RKVHVPFS9DHDN99HSTASXE`: A2 conversation (boot workspace), Instant C2
+conversation, B2 task mode pinned to the same node after A2's workspace was removed. Each saw its own mode and IDs, and all
+started normally. The test node was deleted.
