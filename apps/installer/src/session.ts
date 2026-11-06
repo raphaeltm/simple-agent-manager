@@ -88,30 +88,38 @@ export class InstallerSession {
       try {
         return await this.handle(request);
       } catch (error) {
-        // Observability is disabled so callback URLs are never persisted; this
-        // line is visible only to live `wrangler tail` and carries no secrets.
+        // No tokens, bodies or provider text: method, account-masked path,
+        // status and Cloudflare's numeric codes, or the installer's own
+        // fixed-string check. Observability is disabled so callback URLs are
+        // never persisted; the same detail goes to the owner's browser, because
+        // live tail delivery of this event has proven unreliable.
+        const detail =
+          error instanceof CloudflareError
+            ? `${error.detail.method ?? 'GET'} ${error.detail.path ?? '?'} returned HTTP ${error.status}` +
+              (error.detail.codes?.length ? ` (codes ${error.detail.codes.join(', ')})` : '')
+            : error instanceof Error
+              ? error.message.slice(0, 160)
+              : 'unknown error';
         console.error(
           JSON.stringify({
             event: 'installer.step_failed',
             route: new URL(request.url).pathname,
             ...(error instanceof CloudflareError
               ? { status: error.status, ...error.detail }
-              : // Non-provider failures are the installer's own fixed-string checks.
-                { error: error instanceof Error ? error.message.slice(0, 160) : 'unknown' }),
+              : { error: detail }),
           })
         );
         const cleanup = await this.ctx.storage.get<CleanupJournal>('cleanupJournal');
+        const summary =
+          error instanceof CloudflareError && error.status === 403
+            ? 'Cloudflare refused this step (HTTP 403). Check that the account has the Workers Paid plan and that you approved every requested permission, then try again.'
+            : 'Cloudflare could not complete this step. Try again.';
         return json(
           {
             ...(cleanup
               ? { cleanupReceipt: this.receipt(), cleanupAccountId: cleanup.accountId }
               : {}),
-            error:
-              error instanceof CloudflareError && error.status === 403
-                ? 'Cloudflare refused this step (HTTP 403). Check that the account has the Workers Paid plan and that you approved every requested permission, then try again. No credentials were logged.'
-                : error instanceof CloudflareError
-                  ? `Cloudflare could not complete this step (HTTP ${error.status}). Try again. No credentials were logged.`
-                  : 'Cloudflare could not complete this step. Check your permissions and try again. No credentials were logged.',
+            error: `${summary} Details: ${detail}. No credentials were logged.`,
           },
           502
         );

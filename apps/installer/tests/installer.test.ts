@@ -187,6 +187,8 @@ describe('provisioning and handoff', () => {
     expect(text).not.toContain('SECRET TOKEN');
     expect(text).toContain('HTTP 403');
     expect(text).toContain('Workers Paid');
+    expect(text).toMatch(/Details: GET \/accounts\/:account\/[^ ]+ returned HTTP 403/);
+    expect(text).not.toContain(accountId);
     const name = (values.get('session') as Session).job!.name;
     await call('/install', { accountId, confirmed: true });
     expect((values.get('session') as Session).job!.name).toBe(name);
