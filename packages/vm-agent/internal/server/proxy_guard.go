@@ -49,6 +49,8 @@ func isRelayedRequest(r *http.Request) bool {
 // (standalone/cf-container mode, or a host without container discovery) and the
 // requested port is the vm-agent's listen port. Workspace ports must never be
 // able to reach the agent's own routes this way, whatever their auth model.
+// Callers pass either the loopback fallback or a container bridge IP; a caller
+// that resolves a target from the agent's own bind address must extend this.
 func (s *Server) isOwnListenerTarget(targetHost string, port int) bool {
 	if s.config == nil || s.config.Port <= 0 || port != s.config.Port {
 		return false

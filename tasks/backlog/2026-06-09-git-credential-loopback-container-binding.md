@@ -4,7 +4,10 @@
 > refusing bearerless peer-address trust for any request a SAM proxy relayed
 > (`isRelayedRequest` in `packages/vm-agent/internal/server/proxy_guard.go`), plus refusing proxy
 > targets on the vm-agent's own listener. Binding a loopback caller to its own workspace
-> (Option B below) is still open.
+> (Option B below) is still open. Note from that review: `isLocalGitCredentialExchange` trusts
+> `IsPrivate()` peers as well as loopback, so on a container-mode node any workspace container can
+> call the host vm-agent directly; Option B should bind by the caller's bridge IP and drop the
+> generic private-range trust.
 
 # Bind loopback git-credential requests to the calling container's own workspace
 
