@@ -59,16 +59,16 @@ learnt that from the chip after sending.
 - [x] Web: `useChatWebSocket` passes it; `useSessionLifecycle` holds `steeringSupported` (hydrate + WS); `SessionFooter` hides the Steer chip and sends `queue` when `false`
 - [x] Tests: Go selection (task mode, Instant, opt-out, invalid, latch); Go report field; DO upsert/absence/broadcast; route vertical slice; web footer behaviour
 - [x] Docs: `apps/www/.../guides/chat-features.md`, `scripts/diagnostics/acp-runtime-distribution.md`, superseded note in `scripts/diagnostics/acp-codex-staging-delivery.md`
-- [ ] Playwright visual audit of the footer (mobile + desktop)
-- [ ] Staging: delete nodes, deploy, task-mode Codex session steers ("Added to current turn"); Claude control still steers; clean up
+- [x] Playwright visual audit of the footer (mobile + desktop)
+- [x] Staging: delete nodes, deploy, task-mode Codex session steers ("Added to current turn"); Claude control still steers; clean up
 
 ## Acceptance Criteria
 
-- [ ] A task-mode Codex session on a VM starts on the C2 runtime and a steered message shows "Added to current turn"
-- [ ] An Instant Codex session without a profile marker uses C2
-- [ ] A profile with `SAM_CODEX_C2_CANDIDATE=0` runs stock Codex
-- [ ] When the session's adapter cannot steer, the composer shows no Steer chip while the agent works and sends as queue
-- [ ] Old VM agents (no field) keep today's behaviour (Steer offered)
+- [x] A task-mode Codex session on a VM starts on the C2 runtime and a steered message shows "Added to current turn"
+- [x] An Instant Codex session without a profile marker uses C2
+- [x] A profile with `SAM_CODEX_C2_CANDIDATE=0` runs stock Codex
+- [x] When the session's adapter cannot steer, the composer shows no Steer chip while the agent works and sends as queue
+- [x] Old VM agents (no field) keep today's behaviour (Steer offered)
 
 ## Implementation Notes
 
@@ -81,3 +81,29 @@ learnt that from the chip after sending.
   `TestCodexRuntimeDefaultIgnoresInteractionConfig` (conversation forms stays green); removing
   the report wiring reddens `TestActivityReportCarriesSteeringSupportFromInitialize`; dropping
   `COALESCE` reddens the workers vertical slice; forcing `canSteer = true` reddens the footer test.
+
+## Staging Evidence (2026-11-06, Deploy Staging run 42240226002)
+
+Old-version staging nodes were left alone (other agents' fixtures); the new VM-agent release made
+them ineligible, so the VM task provisioned a fresh node with the new binary (rule 27 intent).
+
+- **Task-mode Codex on a VM** (task `01M6RQQKQ6F077K8W3TH231GD3`, node `01M6RQR0NTM324EJKMSH4D5G05`,
+  lightweight workspace): `Agent binary verified/installed` with
+  `/opt/sam-codex-c2/current/bin/codex-acp`; `ACP Initialize succeeded` with
+  `adapterVersion 2.1.1-sam-c2.3, steeringSupported true`; composer offered Steer; the steered
+  message showed "Added to current turn"; `ACP steer injected outcome=injected`; final summary
+  `step1, step2, step3, STEERED-OK` in one turn. Session state returned `steeringSupported: true`.
+- **Instant Codex, no profile marker** (session `52cc143c`, and `e6070dd1` with the browser open
+  from the start): Steer offered, "Added to current turn", summary
+  `step1 -> STEERED-OK -> step2 -> step3 -> step4`.
+- **Instant Codex with `SAM_CODEX_C2_CANDIDATE=0`** (session `17e3ae9d`, browser open from the
+  start): stock adapter, ran normally; the dock chip rendered locked "Queue" with
+  "this agent can't take messages mid-turn", placeholder "Queue next...".
+- **Two early Instant failures** (sessions `4bcfe72a`, `f920ff0f`, 15:31Z and 15:35Z, within ~5
+  minutes of the deploy finishing): the whole container received SIGTERM during agent startup
+  ("Received signal, shutting down standalone agent", then "Container exited (code: 0)") with no
+  VmAgentContainer stop call before it. Every Instant run after 15:41Z (C2 and stock, with and
+  without an early browser) succeeded, and the C2 process tree measured ~350 MB locally, well under
+  `standard-1`. Consistent with the post-deploy container rollout; filed as
+  `tasks/backlog/2026-11-06-instant-container-sigterm-after-deploy.md`.
+- Cleanup: all seven test nodes deleted (D1 rows gone), three fixture profiles deleted.
