@@ -615,6 +615,8 @@ describe('deploy reusable workflow', () => {
       // Both installers live under the agent source path, which the release resolver hashes
       // (it excludes only .claude, AGENTS.md and tests), so editing either rotates the release.
       expect(embeds).toEqual([
+        'internal/acp/antigravity.go:\t_ "embed" // Register go:embed support for the shared installer below.',
+        'internal/acp/antigravity.go://go:embed antigravity_install.sh',
         'internal/acp/codex_runtime_distribution.go://go:embed codex_runtime_installer.sh',
         'internal/acp/opencode_install.go://go:embed opencode_install.sh',
         'internal/acp/opencode_install.go:import _ "embed" // Register go:embed support for the shared installer below.',
