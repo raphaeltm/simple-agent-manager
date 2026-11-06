@@ -233,10 +233,6 @@ const Try = lazyNamed(() => import('./pages/Try'), 'Try');
 const TryCapExceeded = lazyNamed(() => import('./pages/TryCapExceeded'), 'TryCapExceeded');
 const TryDiscovery = lazyNamed(() => import('./pages/TryDiscovery'), 'TryDiscovery');
 const TryWaitlistThanks = lazyNamed(() => import('./pages/TryWaitlistThanks'), 'TryWaitlistThanks');
-const ProfileBudgetPrototype = lazyNamed(
-  () => import('./pages/profile-budget-prototype'),
-  'ProfileBudgetPrototype'
-);
 const UiStandards = lazyNamed(() => import('./pages/UiStandards'), 'UiStandards');
 const Workspace = lazyNamed(() => import('./pages/workspace'), 'Workspace');
 
@@ -311,11 +307,6 @@ export default function App() {
                     <Route path="/oauth/consent" element={page(<ConnectorConsent />)} />
                     <Route path="/device" element={page(<DeviceAuth />)} />
                     <Route path="/setup" element={page(<Setup />)} />
-                    {/* PROTOTYPE — remove before merge */}
-                    <Route
-                      path="/prototype/profile-budgets"
-                      element={page(<ProfileBudgetPrototype />)}
-                    />
                     {showDevOnlyRoutes && (
                       <>
                         {/* Harness for Playwright audits — mounts trial components with mock data */}

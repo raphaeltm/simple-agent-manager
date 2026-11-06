@@ -1,5 +1,6 @@
 import type { CredentialLimitCredentialSummary } from '@simple-agent-manager/shared';
 import {
+  credentialLimitSummaryAsOf,
   credentialLimitWindowLabel,
   getAgentDefinition,
   isValidAgentType,
@@ -35,15 +36,18 @@ export function CredentialLimitChip({
   const [open, setOpen] = useState(false);
   const eyebrowId = useId();
   const headingId = useId();
-  const text = credentialChipText(credential);
-  const style = LEVEL_STYLES[credential.level];
+  // A window whose reset passed since its sample reads 0% here too (the API applies
+  // the same rule at read time; this covers resets between polls).
+  const current = credentialLimitSummaryAsOf(credential, now ?? Date.now());
+  const text = credentialChipText(current);
+  const style = LEVEL_STYLES[current.level];
 
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        aria-label={`Usage limits${credential.credentialName ? ` for ${credential.credentialName}` : ''}: ${text}. ${LEVEL_LABELS[credential.level]}. Open details`}
+        aria-label={`Usage limits${current.credentialName ? ` for ${current.credentialName}` : ''}: ${text}. ${LEVEL_LABELS[current.level]}. Open details`}
         data-testid="credential-limit-chip"
         className={`${chipClassName()} cursor-pointer transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring`}
       >
@@ -58,7 +62,7 @@ export function CredentialLimitChip({
         maxWidth="md"
       >
         <CredentialLimitDetails
-          credential={credential}
+          credential={current}
           now={now}
           eyebrowId={eyebrowId}
           headingId={headingId}
@@ -87,7 +91,8 @@ function agentLabel(agentType: string | null): string | null {
     : agentType;
 }
 
-function CredentialLimitDetails({
+/** Account usage breakdown: every window with its bar and reset countdown. */
+export function CredentialLimitDetails({
   credential,
   now,
   eyebrowId,
@@ -193,7 +198,10 @@ function CredentialLimitDetails({
                 />
               </div>
               <div className="mt-1.5 flex flex-wrap items-center justify-between gap-x-2 gap-y-0.5 text-xs text-fg-muted">
-                <span>{reset ?? 'reset time unknown'}</span>
+                <span className={window.resetElapsed ? 'text-info-fg' : undefined}>
+                  {reset ?? 'reset time unknown'}
+                  {window.resetElapsed && ' · no sample since'}
+                </span>
                 {staleSample && <span>{formatSampledAgo(window.observedAt, at)}</span>}
               </div>
             </li>

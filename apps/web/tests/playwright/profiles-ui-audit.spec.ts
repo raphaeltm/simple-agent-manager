@@ -1,314 +1,342 @@
-import { expect, type Page, type Route, test } from '@playwright/test';
+/**
+ * Visual audit for the project Agent Profiles list: a table on desktop, three-line
+ * rows on phones, with each profile's resource request and the usage of the
+ * account it runs on.
+ *
+ * Account rows come from the unit-test fixtures, so which account a profile
+ * resolves to is computed by the real account model and shared resolver.
+ */
+import { expect, type Page, test } from '@playwright/test';
+import type {
+  CCProfileAttachmentItem,
+  CredentialLimitCredentialSummary,
+  CredentialLimitWindowSummary,
+} from '@simple-agent-manager/shared';
 
-// ---------------------------------------------------------------------------
-// Mock Data
-// ---------------------------------------------------------------------------
+import { accountRows, mergeRows } from '../unit/components/accounts/fixtures';
+import {
+  assertNoOverflow,
+  type AuditResponder,
+  makeMockUser,
+  screenshot,
+  setupAuditRoutes,
+} from './audit-helpers';
+import { makeAgentProfile, respondToProfilePageRoute } from './profile-account-fixtures';
 
-const MOCK_USER = {
-  user: {
-    id: 'user-test-1',
-    email: 'test@example.com',
-    name: 'Test User',
-    image: null,
-    role: 'superadmin',
-    status: 'active',
-    emailVerified: true,
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-  session: {
-    id: 'session-test-1',
-    userId: 'user-test-1',
-    expiresAt: new Date(Date.now() + 86400000).toISOString(),
-    token: 'mock-token',
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-};
+const USER = makeMockUser({
+  email: 'raphael@example.com',
+  name: 'Raphaël',
+  sessionId: 'session-profiles-list',
+  userId: 'user-profiles-list',
+});
 
-const MOCK_PROJECT = {
-  id: 'proj-test-1',
-  name: 'Test Project',
-  repository: 'testuser/test-repo',
-  defaultBranch: 'main',
-  userId: 'user-test-1',
-  githubInstallationId: 'inst-1',
-  defaultVmSize: null,
-  createdAt: '2026-01-01T00:00:00Z',
-  updatedAt: '2026-01-01T00:00:00Z',
-};
+const PROJECTS = [{ id: 'p-web', name: 'Marketing site' }];
+const NOW = Date.now();
+const HOUR = 3_600_000;
+const LONG = 'Overnight-Migration-Reviewer-With-An-Unbroken-Name-'.repeat(3);
 
-interface ProfileOverrides {
-  id: string;
-  name: string;
-  description?: string | null;
-  agentType?: string;
-  model?: string | null;
-  permissionMode?: string | null;
-  vmSizeOverride?: string | null;
-  taskMode?: string | null;
-  isBuiltin?: boolean;
+type Profile = ReturnType<typeof makeAgentProfile>;
+
+function profile(id: string, name: string, overrides: Record<string, unknown> = {}): Profile {
+  return { ...makeAgentProfile(id, name, 'p-web', USER.user.id), ...overrides } as Profile;
 }
 
-function makeProfile(overrides: ProfileOverrides) {
+const NORMAL: Profile[] = [
+  profile('astra', 'Astra High', {
+    agentType: 'openai-codex',
+    model: 'gpt-6-astra',
+    effort: 'high',
+    taskMode: 'conversation',
+  }),
+  profile('backend', 'Backend Implementation', {
+    description: 'Write code and open pull requests focused on backend tasks.',
+    agentType: 'openai-codex',
+    model: 'gpt-6.1-sol',
+    effort: 'medium',
+    vmSizeOverride: 'medium',
+    taskMode: 'task',
+  }),
+  profile('claudiii', 'Claudiii', {
+    model: 'claude-opus-5-5',
+    effort: 'high',
+    permissionMode: 'bypassPermissions',
+    resourceRequirementsJson: JSON.stringify({ minVcpu: 4, minMemoryGb: 7.5, minDiskGb: 60 }),
+  }),
+  profile('fable', 'Fable chat', {
+    model: 'claude-fable-5-1',
+    effort: 'xhigh',
+    taskMode: 'conversation',
+  }),
+  profile('instant', 'Instant', {
+    description: 'Chat and explore with a lightweight workspace',
+    agentType: 'openai-codex',
+    model: 'gpt-6.1-sol',
+    effort: 'xhigh',
+    runtime: 'cf-container',
+    taskMode: 'conversation',
+  }),
+  profile('oc', 'OC', { agentType: 'opencode', model: 'kimi-k2.5', runtime: 'cf-container' }),
+];
+
+const LONG_TEXT: Profile[] = [
+  profile('long', `${LONG} <script>alert("x")</script> 日本語 🚀`, {
+    description: `A long description with a URL https://example.com/${LONG}`,
+    model: 'gemini-3.5-pro-preview-2026-10-experimental-extended-context-window',
+    agentType: 'claude-code',
+    effort: 'max',
+    taskMode: 'task',
+    permissionMode: 'acceptEdits',
+    resourceRequirementsJson: JSON.stringify({
+      minVcpu: 8,
+      minMemoryGb: 15.5,
+      minDiskGb: 160,
+      exclusiveNode: true,
+    }),
+    isBuiltin: true,
+  }),
+  profile('a', 'A'),
+  ...NORMAL.slice(0, 2),
+];
+
+const MANY: Profile[] = Array.from({ length: 30 }, (_, index) =>
+  profile(`many-${index}`, `Profile ${index + 1}`, {
+    agentType: index % 2 === 0 ? 'claude-code' : 'openai-codex',
+    model: index % 3 === 0 ? null : 'claude-opus-5-5',
+    vmSizeOverride: index % 4 === 0 ? 'large' : null,
+    taskMode: index % 2 === 0 ? 'task' : 'conversation',
+  })
+);
+
+const ROWS = mergeRows(
+  accountRows({
+    id: 'max',
+    name: 'Raph Max',
+    kind: 'agent',
+    target: 'claude-code',
+    credentialKind: 'oauth-token',
+    isDefault: true,
+  }),
+  accountRows({
+    id: 'work',
+    name: 'Work Pro (ChatGPT)',
+    kind: 'agent',
+    target: 'openai-codex',
+    credentialKind: 'oauth-token',
+    isDefault: true,
+  }),
+  accountRows({
+    id: 'team',
+    name: 'Codex Team seat',
+    kind: 'agent',
+    target: 'openai-codex',
+    credentialKind: 'oauth-token',
+  })
+);
+
+const PINS: CCProfileAttachmentItem[] = [
+  {
+    id: 'pin-astra',
+    configurationId: 'cfg-team',
+    agentProfileId: 'astra',
+    profileName: 'Astra High',
+    projectId: 'p-web',
+    projectName: 'Marketing site',
+    consumerKind: 'agent',
+    consumerTarget: 'openai-codex',
+    isActive: true,
+    createdAt: '2026-11-01T00:00:00.000Z',
+    updatedAt: '2026-11-01T00:00:00.000Z',
+  },
+];
+
+function limitWindow(
+  windowType: string,
+  utilizationPercent: number,
+  overrides: Partial<CredentialLimitWindowSummary> = {}
+): CredentialLimitWindowSummary {
   return {
-    projectId: 'proj-test-1',
-    userId: 'user-test-1',
-    systemPromptAppend: null,
-    maxTurns: null,
-    timeoutMinutes: null,
-    provider: null,
-    vmLocation: null,
-    workspaceProfile: null,
-    devcontainerConfigName: null,
-    createdAt: '2026-03-01T00:00:00Z',
-    updatedAt: '2026-03-01T00:00:00Z',
-    agentType: overrides.agentType ?? 'claude-code',
-    model: overrides.model ?? null,
-    permissionMode: overrides.permissionMode ?? null,
-    vmSizeOverride: overrides.vmSizeOverride ?? null,
-    taskMode: overrides.taskMode ?? null,
-    description: overrides.description ?? null,
-    isBuiltin: overrides.isBuiltin ?? false,
+    windowType,
+    provider: windowType.startsWith('claude') ? 'anthropic' : 'openai',
+    source: 'mock',
+    status: 'allowed',
+    level: 'ok',
+    utilizationPercent,
+    limitAmount: null,
+    remainingAmount: null,
+    windowMinutes: windowType.endsWith('primary') ? 300 : windowType.endsWith('secondary') ? 10080 : null,
+    resetsAt: NOW + 3 * HOUR,
+    observedAt: NOW - 2 * 60_000,
+    updatedAt: NOW - 2 * 60_000,
     ...overrides,
   };
 }
 
-// Sample datasets
-const NORMAL_PROFILES = [
-  makeProfile({
-    id: 'prof-1',
-    name: 'Fast Implementer',
-    description: 'Optimized for quick task execution with auto-approval',
-    agentType: 'claude-code',
-    model: 'claude-sonnet-4-6',
-    permissionMode: 'auto-accept',
-    vmSizeOverride: 'medium',
-    taskMode: 'task',
-  }),
-  makeProfile({
-    id: 'prof-2',
-    name: 'Code Reviewer',
-    description: 'Thorough code review with conversation mode',
-    agentType: 'claude-code',
-    model: 'claude-opus-4-6',
-    permissionMode: 'default',
-    taskMode: 'conversation',
-    isBuiltin: true,
-  }),
-  makeProfile({
-    id: 'prof-3',
-    name: 'Codex Worker',
-    description: null,
-    agentType: 'openai-codex',
-    model: 'codex',
-  }),
+function usage(
+  credentialId: string,
+  agentType: string,
+  windows: CredentialLimitWindowSummary[]
+): CredentialLimitCredentialSummary {
+  return {
+    credentialReference: `cc_credentials:${credentialId}`,
+    credentialId,
+    credentialName: null,
+    credentialSource: 'user',
+    provider: windows[0]!.provider,
+    providerMode: 'oauth',
+    agentType,
+    level: 'ok',
+    observedAt: Math.max(...windows.map((w) => w.observedAt)),
+    windows,
+  };
+}
+
+const LIMITS = [
+  usage('cred-max', 'claude-code', [
+    limitWindow('claude.five_hour', 72),
+    limitWindow('claude.seven_day', 31),
+    limitWindow('claude.seven_day_opus', 88, { level: 'warning', status: 'allowed_warning' }),
+  ]),
+  usage('cred-work', 'openai-codex', [
+    limitWindow('codex.primary', 94, { level: 'critical', status: 'allowed_warning' }),
+    limitWindow('codex.secondary', 46),
+  ]),
+  // The 5h window was 81% when sampled three hours ago and reset two hours ago.
+  usage('cred-team', 'openai-codex', [
+    limitWindow('codex.primary', 81, {
+      level: 'warning',
+      status: 'allowed_warning',
+      resetsAt: NOW - 2 * HOUR,
+      observedAt: NOW - 3 * HOUR,
+    }),
+    limitWindow('codex.secondary', 58, { observedAt: NOW - 3 * HOUR }),
+  ]),
 ];
 
-const LONG_TEXT_PROFILES = [
-  makeProfile({
-    id: 'lt-1',
-    name: 'This Is An Extremely Long Profile Name That Should Definitely Be Handled Gracefully On Mobile Screens Because It Contains Way Too Many Words And Characters To Fit In A Single Line',
-    description:
-      'This profile has a very detailed description explaining the full configuration including which model to use, what permission mode is active, how the VM should be sized, what workspace profile to apply, and why this particular configuration was chosen over alternatives. It really goes into great depth.',
-    agentType: 'claude-code',
-    model: 'claude-sonnet-4-6',
-    permissionMode: 'auto-accept',
-    vmSizeOverride: 'large',
-    taskMode: 'conversation',
-  }),
-  makeProfile({
-    id: 'lt-2',
-    name: 'A',
-    description: null,
-    agentType: 'claude-code',
-  }),
-  makeProfile({
-    id: 'lt-3',
-    name: 'Special chars: <script>alert("xss")</script> & "quotes" 日本語テスト',
-    description:
-      'Unicode: emojis and HTML: &amp; &lt; &gt; and URL: https://example.com/very/long/path/that/should/not/break/layout/at/all',
-    agentType: 'openai-codex',
-    model: 'codex',
-    permissionMode: 'plan',
-    vmSizeOverride: 'small',
-    taskMode: 'task',
-    isBuiltin: true,
-  }),
-];
+interface Scenario {
+  profiles: Profile[];
+  failProfiles?: boolean;
+}
 
-const MANY_PROFILES = Array.from({ length: 15 }, (_, i) =>
-  makeProfile({
-    id: `many-${i}`,
-    name: `Profile ${i + 1}: ${['Implementer', 'Reviewer', 'Debugger', 'Planner', 'Deployer'][i % 5]}`,
-    description: i % 2 === 0 ? `Description for profile ${i + 1}` : null,
-    agentType: i % 3 === 0 ? 'openai-codex' : 'claude-code',
-    model: i % 2 === 0 ? 'claude-sonnet-4-6' : null,
-    permissionMode: i % 3 === 0 ? 'auto-accept' : null,
-    vmSizeOverride: i % 4 === 0 ? 'large' : null,
-    taskMode: i % 2 === 0 ? 'task' : null,
-    isBuiltin: i === 0,
-  }),
-);
-
-// ---------------------------------------------------------------------------
-// API Mock Setup
-// ---------------------------------------------------------------------------
-
-async function setupApiMocks(
-  page: Page,
-  options: {
-    profiles?: ReturnType<typeof makeProfile>[];
-    profilesError?: boolean;
-  } = {},
-) {
-  const { profiles = NORMAL_PROFILES, profilesError = false } = options;
-
-  await page.route('**/api/**', async (route: Route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname;
-    const respond = (status: number, body: unknown) =>
-      route.fulfill({
-        status,
-        contentType: 'application/json',
-        body: JSON.stringify(body),
-      });
-
-    // Auth
-    if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
-
-    // Dashboard
-    if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
-
-    // GitHub installations
-    if (path === '/api/github/installations') return respond(200, []);
-
-    // Notifications
-    if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
-
-    // Agents
-    if (path === '/api/agents') return respond(200, []);
-
-    // Credentials
-    if (path.startsWith('/api/credentials')) return respond(200, { credentials: [] });
-
-    // Project-scoped routes
-    const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
-    if (projectMatch) {
-      const subPath = projectMatch[2] || '';
-
-      // Runtime config
-      if (subPath === '/runtime-config') return respond(200, { envVars: [], files: [] });
-
-      // Sessions
-      if (subPath.startsWith('/sessions')) return respond(200, { sessions: [], total: 0 });
-
-      // Tasks
-      if (subPath.startsWith('/tasks')) return respond(200, { tasks: [], total: 0 });
-
-      // Agent profiles
-      if (subPath === '/agent-profiles') {
-        if (profilesError) return respond(500, { error: 'INTERNAL_ERROR', message: 'Server error' });
-        return respond(200, { items: profiles });
-      }
-
-      // Triggers
-      if (subPath.startsWith('/triggers')) return respond(200, { triggers: [] });
-
-      // Project detail
-      return respond(200, MOCK_PROJECT);
+function handler(scenario: Scenario) {
+  return (path: string, respond: AuditResponder): Promise<void> | undefined => {
+    if (path === '/api/cc/credentials') return respond(200, { credentials: ROWS.credentials });
+    if (path === '/api/cc/configurations') {
+      return respond(200, { configurations: ROWS.configurations });
     }
-
-    // Projects list
-    if (path === '/api/projects') return respond(200, [MOCK_PROJECT]);
-
-    // Default: return empty success for any unmatched API route
-    return respond(200, {});
-  });
+    if (path === '/api/cc/attachments') return respond(200, { attachments: ROWS.attachments });
+    if (path === '/api/cc/profile-attachments') return respond(200, { attachments: PINS });
+    if (path === '/api/credentials/resolution-status') return respond(200, { consumers: [] });
+    if (path === '/api/credentials/limits') {
+      return respond(200, { credentials: LIMITS, generatedAt: NOW });
+    }
+    if (scenario.failProfiles && /^\/api\/projects\/[^/]+\/agent-profiles$/.test(path)) {
+      return respond(500, { error: 'INTERNAL_ERROR', message: 'Server error' });
+    }
+    return respondToProfilePageRoute(path, respond, {
+      user: USER,
+      projects: PROJECTS,
+      profiles: scenario.profiles,
+    });
+  };
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-async function screenshot(page: Page, name: string) {
-  await page.waitForTimeout(600);
-  await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/${name}.png`,
-    fullPage: true,
-  });
+async function openProfiles(page: Page, scenario: Scenario) {
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, USER.user.id);
+  await setupAuditRoutes(page, handler(scenario));
+  await page.goto('/projects/p-web/profiles');
 }
 
-async function assertNoOverflow(page: Page) {
-  const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth,
-  );
-  expect(overflow).toBe(false);
-}
+function audits(viewport: 'mobile' | 'desktop') {
+  const shot = (page: Page, name: string) => screenshot(page, `profiles-list-${name}-${viewport}`);
 
-// ---------------------------------------------------------------------------
-// Tests: Profiles List — Mobile
-// ---------------------------------------------------------------------------
-
-test.describe('Profiles List — Mobile', () => {
-  test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
-
-  test('normal data', async ({ page }) => {
-    await setupApiMocks(page, { profiles: NORMAL_PROFILES });
-    await page.goto('/projects/proj-test-1/profiles');
-    await page.waitForSelector('text=Fast Implementer');
-    await screenshot(page, 'profiles-list-normal-mobile');
+  test('shows each profile with its requests and its account usage', async ({ page }) => {
+    await openProfiles(page, { profiles: NORMAL });
+    await expect(page.getByTestId('profile-usage-strip')).toHaveCount(4);
+    const row = (name: string) =>
+      page.getByTestId('profile-row').filter({ has: page.getByRole('button', { name }) });
+    // Astra is pinned to the team seat, whose 5h window reset after the sample.
+    await expect(row('Astra High').getByTestId('profile-usage-strip')).toHaveText(/5h\s*0%\s*↻/);
+    await expect(row('Backend Implementation').getByTestId('profile-usage-strip')).toHaveText(
+      /5h\s*94%/
+    );
+    await expect(row('Claudiii')).toContainText('4 vCPU · 7.5 GB');
+    await expect(row('Backend Implementation')).toContainText('Medium VM');
+    await expect(row('Instant')).toContainText('Instant container');
+    await expect(row('OC')).toContainText('No account connected');
     await assertNoOverflow(page);
+    await shot(page, 'normal');
   });
 
-  test('long text wraps correctly', async ({ page }) => {
-    await setupApiMocks(page, { profiles: LONG_TEXT_PROFILES });
-    await page.goto('/projects/proj-test-1/profiles');
-    await page.waitForSelector('text=Special chars');
-    await screenshot(page, 'profiles-list-long-text-mobile');
+  test('opens the usage breakdown from the strip', async ({ page }) => {
+    await openProfiles(page, { profiles: NORMAL });
+    const strip = page
+      .getByTestId('profile-row')
+      .filter({ has: page.getByRole('button', { name: 'Astra High' }) })
+      .getByTestId('profile-usage-strip');
+    await strip.click();
+    const details = page.getByTestId('credential-limit-details');
+    await expect(details).toBeVisible();
+    await expect(details).toContainText('reset 2h ago · no sample since');
     await assertNoOverflow(page);
+    await shot(page, 'usage-details');
+  });
+
+  test('sorts by most room left', async ({ page }) => {
+    await openProfiles(page, { profiles: NORMAL });
+    await expect(page.getByTestId('profile-usage-strip')).toHaveCount(4);
+    await page.getByRole('button', { name: 'Most room' }).click();
+    // Codex Team seat: 42% left on the week; Raph Max: 12% left on Opus week.
+    await expect(page.getByTestId('profile-row').first()).toContainText('Astra High');
+    await shot(page, 'sorted');
+  });
+
+  test('long and special-character text wraps without overflow', async ({ page }) => {
+    await openProfiles(page, { profiles: LONG_TEXT });
+    await expect(page.getByTestId('profile-row')).toHaveCount(LONG_TEXT.length);
+    await expect(page.getByText('own node')).toBeVisible();
+    await assertNoOverflow(page);
+    await shot(page, 'long-text');
+  });
+
+  test('delete asks for confirmation from the actions menu', async ({ page }) => {
+    await openProfiles(page, { profiles: LONG_TEXT });
+    await page.getByRole('button', { name: /^Actions for Overnight/ }).click();
+    await page.getByRole('menuitem', { name: 'Delete' }).click();
+    await expect(page.getByRole('button', { name: /^Confirm delete Overnight/ })).toBeVisible();
+    await assertNoOverflow(page);
+    await shot(page, 'delete-confirm');
+  });
+
+  test('many profiles', async ({ page }) => {
+    await openProfiles(page, { profiles: MANY });
+    await expect(page.getByTestId('profile-row')).toHaveCount(30);
+    await assertNoOverflow(page);
+    await shot(page, 'many');
   });
 
   test('empty state', async ({ page }) => {
-    await setupApiMocks(page, { profiles: [] });
-    await page.goto('/projects/proj-test-1/profiles');
-    await page.waitForSelector('text=No profiles yet');
-    await screenshot(page, 'profiles-list-empty-mobile');
+    await openProfiles(page, { profiles: [] });
+    await expect(page.getByText(/No profiles yet/)).toBeVisible();
     await assertNoOverflow(page);
-  });
-
-  test('many items', async ({ page }) => {
-    await setupApiMocks(page, { profiles: MANY_PROFILES });
-    await page.goto('/projects/proj-test-1/profiles');
-    await page.waitForSelector('text=Profile 1');
-    await screenshot(page, 'profiles-list-many-mobile');
-    await assertNoOverflow(page);
+    await shot(page, 'empty');
   });
 
   test('error state', async ({ page }) => {
-    await setupApiMocks(page, { profilesError: true });
-    await page.goto('/projects/proj-test-1/profiles');
-    await page.waitForSelector('.text-danger', { timeout: 5000 });
-    await screenshot(page, 'profiles-list-error-mobile');
+    await openProfiles(page, { profiles: [], failProfiles: true });
+    await expect(page.locator('.text-danger')).toBeVisible();
     await assertNoOverflow(page);
+    await shot(page, 'error');
   });
+}
 
-  test('delete confirmation does not overflow', async ({ page }) => {
-    await setupApiMocks(page, { profiles: LONG_TEXT_PROFILES });
-    await page.goto('/projects/proj-test-1/profiles');
-    await page.waitForSelector('text=Special chars');
-    // Click the delete button on the first profile (long name)
-    const deleteBtn = page.locator('button[aria-label*="Delete"]').first();
-    await deleteBtn.click();
-    await page.waitForSelector('text=Confirm');
-    await screenshot(page, 'profiles-list-delete-confirm-mobile');
-    await assertNoOverflow(page);
-  });
+test.describe('Profiles list — mobile', () => {
+  test.use({ viewport: { width: 375, height: 667 }, isMobile: true });
+  audits('mobile');
 });
 
-// ---------------------------------------------------------------------------
-// Desktop tests skipped: pre-existing desktop test infrastructure issue
-// (error boundary crash on desktop layout before any page data loads;
-// same failure in triggers-ui-audit.spec.ts and other existing desktop tests).
-// The mobile tests above cover the fix for this PR.
-// ---------------------------------------------------------------------------
+test.describe('Profiles list — desktop', () => {
+  test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
+  audits('desktop');
+});
