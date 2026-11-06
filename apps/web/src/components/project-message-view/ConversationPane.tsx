@@ -32,7 +32,7 @@ interface ConversationPaneProps {
   toolRail: ReactNode;
   /** Requests without a matching tool call render at the live conversation tail. */
   tail: ReactNode;
-  /** Transient status capsules, shown at the top of the pane above the conversation. */
+  /** Transient status capsules, floating over the top of the conversation. */
   statusCapsules?: ReactNode;
 }
 
@@ -125,8 +125,8 @@ export function ConversationPane({
   return (
     <Pane variant="quiet" className={PANE_CLASS_NAME}>
       <div className="relative flex min-h-0 min-w-0 flex-1 flex-col lg:flex-row">
-        {/* Status capsules sit in the pane's flow above the log, outside its live region:
-            they announce themselves, and floating them over the list hid the first message. */}
+        {/* Status capsules float over the top of the log, outside its live region: they
+            announce themselves. */}
         <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">
           {statusCapsules}
           <div

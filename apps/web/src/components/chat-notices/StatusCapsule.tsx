@@ -21,8 +21,8 @@ export interface StatusCapsuleProps {
 
 /**
  * A small capsule for transient states (connecting, waking): a pill on one line; long labels
- * wrap. It sits inside the conversation pane rather than as a strip in the column, so the
- * session header and message box stay put as it comes and goes. An element on glass, so solid.
+ * wrap. It floats over the conversation pane rather than sitting as a strip in the column, so
+ * the session header, transcript and message box stay put as it comes and goes. An element on glass, so solid.
  * Place it with `StatusCapsuleSlot`.
  */
 export function StatusCapsule({
@@ -71,10 +71,15 @@ export function StatusCapsule({
 }
 
 /**
- * Centres capsules at the top of the conversation pane, in its flow above the messages, so a
- * capsule never covers the transcript (on a phone a short chat starts right under the pane's
- * top edge).
+ * Floats capsules centred over the top of the conversation pane, out of its flow, so a capsule
+ * coming and going never pushes the transcript down. The list aligns to the bottom, so a short
+ * chat sits clear of it; a long one scrolls underneath. The slot itself lets clicks through to
+ * the messages; only the capsules take them. The parent must be `relative`.
  */
 export function StatusCapsuleSlot({ children }: Readonly<{ children: ReactNode }>) {
-  return <div className="flex shrink-0 flex-col items-center gap-2 px-3 pt-3">{children}</div>;
+  return (
+    <div className="pointer-events-none absolute inset-x-0 top-0 z-20 flex flex-col items-center gap-2 px-3 pt-3 [&>*]:pointer-events-auto">
+      {children}
+    </div>
+  );
 }
