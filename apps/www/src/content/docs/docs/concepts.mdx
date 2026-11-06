@@ -47,6 +47,8 @@ https://ws-{workspaceId}--{port}.{baseDomain}
 
 For example, if your dev server starts on port 3000 in workspace `abc123`, you can open it at `https://ws-abc123--3000.example.com`. Common development ports get friendly labels automatically.
 
+In Instant workspaces the SAM workspace agent shares the workspace's network and listens on port 8080 by default. That port is reserved and cannot be opened this way, so run your own services on a different port.
+
 ## Nodes
 
 A **node** is a cloud VM that hosts one or more workspaces. You normally never think about nodes — SAM assigns your workspace to a healthy node or provisions a new one for you, from the machine types your [compute pool](#compute-pools) permits. To see them, select **Infrastructure** in the main navigation, which opens the **Nodes** page; each machine lists its workspaces.

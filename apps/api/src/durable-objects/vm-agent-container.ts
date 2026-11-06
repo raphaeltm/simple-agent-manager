@@ -20,6 +20,10 @@ import { prepareSessionRestoreMcp } from '../services/session-restore-mcp';
 import { assertSessionRuntimeContractCapability } from '../services/session-runtime-contract';
 import { signalSessionWakeReadyBestEffort } from '../services/session-wake-ready';
 import {
+  DEFAULT_CF_CONTAINER_VM_AGENT_PORT,
+  resolveVmAgentContainerPort,
+} from '../services/vm-agent-container-port';
+import {
   ACTIVE_WORK_KEY,
   type ActiveWorkRuntime,
   type ActiveWorkState,
@@ -130,8 +134,8 @@ function revokedSourceTaskResponse(): Response {
 }
 
 export class VmAgentContainer extends Container<Env> {
-  defaultPort = 8080;
-  requiredPorts = [8080];
+  defaultPort = DEFAULT_CF_CONTAINER_VM_AGENT_PORT;
+  requiredPorts = [DEFAULT_CF_CONTAINER_VM_AGENT_PORT];
   sleepAfter = DEFAULT_CF_CONTAINER_SLEEP_AFTER;
   enableInternet = true;
 
@@ -140,14 +144,8 @@ export class VmAgentContainer extends Container<Env> {
 
   constructor(ctx: DurableObjectState<Record<string, never>>, env: Env) {
     super(ctx, env);
-    const configuredPort = Number.parseInt(
-      env.CF_CONTAINER_VM_AGENT_PORT || env.SANDBOX_VM_AGENT_PORT || '',
-      10
-    );
-    if (Number.isFinite(configuredPort) && configuredPort > 0) {
-      this.defaultPort = configuredPort;
-      this.requiredPorts = [configuredPort];
-    }
+    this.defaultPort = resolveVmAgentContainerPort(env);
+    this.requiredPorts = [this.defaultPort];
     this.sleepAfter =
       env.CF_CONTAINER_SLEEP_AFTER || env.SANDBOX_SLEEP_AFTER || DEFAULT_CF_CONTAINER_SLEEP_AFTER;
   }

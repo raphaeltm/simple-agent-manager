@@ -392,6 +392,15 @@ func isAuthorizedGitCredentialRequest(s *Server, r *http.Request, workspaceID st
 	if bearerTokenFromHeader(r.Header.Get("Authorization")) != "" {
 		return s.isValidCallbackAuth(r, workspaceID)
 	}
+	// Bearerless trust rests on the peer address, which only identifies the
+	// caller when nothing relayed the request. A relayed request's peer is the
+	// relaying proxy (often loopback), so it gets no peer-address trust.
+	if isRelayedRequest(r) {
+		slog.Warn("Git credential request refused: bearerless request was relayed by a proxy",
+			"workspaceID", workspaceID,
+			"action", "rejected")
+		return false
+	}
 	return isLocalGitCredentialExchange(r) && isKnownWorkspaceGitCredentialRequest(s, workspaceID)
 }
 
