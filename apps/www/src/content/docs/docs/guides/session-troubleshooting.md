@@ -82,9 +82,9 @@ your work is safe and what to do next. Everything here applies to both
   → [Rephrase it, or update](#agent-profile-not-found-when-you-send-a-message)
 - **The chat runs another agent than the profile you picked**, such as OpenCode instead of Claude
   Code. A skill may be choosing the agent. → [Check the skill](#the-chat-runs-a-different-agent-than-its-profile)
-- **A message on your side of the chat that you didn't write, starting "SAM notice
-  (system-generated, not a human message)".** Another agent sent this chat a message; SAM wrote the
-  notice for the agent. You don't need to reply.
+- **A "Message from another agent" line, or (in older chats) a message on your side of the chat
+  that you didn't write, starting "SAM notice (system-generated, not a human message)".** Another
+  agent sent this chat a message; SAM wrote the notice for the agent. You don't need to reply.
   → [Messages between agents](/docs/guides/agents/#messages-between-agents)
 
 Anything else — including a message that delivery "could not be confirmed" — means SAM couldn't
@@ -198,8 +198,8 @@ Your work is safe: pausing check-ins doesn't stop the task, the workspace, or an
 left running.
 
 When an agent working on a task goes quiet without finishing, SAM checks in after about five minutes
-with a message asking it to report progress and carry on (it starts **[SAM Orchestrator
-Check-In]**). An agent that keeps stopping without making progress — often because the same error
+with a message asking it to report progress and carry on. The chat shows it as **SAM asked the agent
+for a progress update**; the text the agent received starts **[SAM Orchestrator Check-In]**. An agent that keeps stopping without making progress — often because the same error
 keeps coming back — would otherwise be nudged forever. SAM pauses and posts one of these in the chat:
 
 - **"SAM paused automatic check-ins after repeated attempts without confirmed progress."** This comes
