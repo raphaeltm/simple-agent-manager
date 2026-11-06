@@ -108,7 +108,9 @@ function assertSelectable(groups: PermissionGroup[], required: [string[], string
   if (!problems.size) return;
   const selectable = groups.filter((group) => group.is_selectable === true);
   // A short selectable list names the alternatives this credential can grant.
-  const names = [...new Set(selectable.map((group) => group.name))].sort();
+  const names = [...new Set(selectable.map((group) => group.name))].sort((a, b) =>
+    a.localeCompare(b)
+  );
   const available =
     names.length <= DIAGNOSTIC_SELECTABLE_NAMES ? `: ${names.join(', ') || 'none'}` : '';
   throw new Error(
