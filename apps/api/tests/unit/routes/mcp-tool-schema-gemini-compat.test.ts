@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
+import { LISTED_MCP_TOOLS } from '../../../src/routes/mcp/tool-catalog';
 import { MCP_TOOLS } from '../../../src/routes/mcp/tool-definitions';
 import {
   findAnyOfWithSiblings,
@@ -8,7 +9,10 @@ import {
 } from '../../helpers/gemini-tool-schema';
 
 type Tool = { name: string; inputSchema: Record<string, unknown> };
-const tools = MCP_TOOLS as unknown as Tool[];
+// Every callable tool plus the generated domain groups agents actually see in tools/list.
+const tools = [...(MCP_TOOLS as unknown as Tool[]), ...(LISTED_MCP_TOOLS as unknown as Tool[])].filter(
+  (tool, index, all) => all.findIndex((other) => other.name === tool.name) === index
+);
 
 function tool(name: string): Tool {
   const found = tools.find((candidate) => candidate.name === name);
