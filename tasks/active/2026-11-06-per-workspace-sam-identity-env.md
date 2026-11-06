@@ -112,4 +112,4 @@ Review-fix discrimination:
 Deferred (MEDIUM, test-engineer): after a VM-agent restart, a plain WebSocket reconnect to the
 node's boot workspace synthesizes the boot task context in `agent_ws.go` (pre-existing). It only
 matters if that workspace was later reassigned to another task, and closing it needs
-`WorkspaceRuntime.TaskID` persisted across restarts. Tracked as a SAM Idea.
+`WorkspaceRuntime.TaskID` persisted across restarts. Tracked as Idea `01M6RDKNEK7DCNQ26WCSKBSQF8`.
