@@ -1124,6 +1124,11 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusConflict, "workspace snapshot restore is in progress")
 		return
 	}
+	if s.requestProjectConflicts(workspaceID, projectID) {
+		s.sessionHostMu.Unlock()
+		writeError(w, http.StatusBadRequest, "projectId does not match the workspace's project")
+		return
+	}
 	session, idempotentHit, err := s.agentSessions.CreateRouted(workspaceID, strings.TrimSpace(body.SessionID), strings.TrimSpace(body.Label), idempotencyKey, projectID, chatSID)
 	s.sessionHostMu.Unlock()
 	if err != nil {
@@ -1311,6 +1316,11 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusConflict, "workspace session bootstrap is in progress")
 		return
 	}
+	if s.requestProjectConflicts(workspaceID, body.ProjectID) {
+		s.sessionHostMu.Unlock()
+		writeError(w, http.StatusBadRequest, "projectId does not match the workspace's project")
+		return
+	}
 	if s.sessionTaskCtx == nil {
 		s.sessionTaskCtx = make(map[string]taskCallbackContext)
 	}
@@ -1360,6 +1370,7 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusConflict, "workspace snapshot restore is in progress")
 		return
 	}
+	s.refreshSessionSAMEnv(host, hostKey, workspaceID, session, runtime)
 	s.appendNodeEvent(workspaceID, "info", "agent_session.starting", "Starting agent with initial prompt", map[string]interface{}{
 		"sessionId": sessionID,
 		"agentType": body.AgentType,

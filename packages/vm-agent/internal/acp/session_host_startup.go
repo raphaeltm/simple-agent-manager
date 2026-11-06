@@ -186,12 +186,7 @@ func (h *SessionHost) resolveAgentEnvVars(ctx context.Context, containerID strin
 	if containerID != "" {
 		envVars = ReadContainerEnvFiles(ctx, containerID)
 	}
-	for _, fallback := range h.config.SAMEnvFallback {
-		key, _, ok := strings.Cut(fallback, "=")
-		if ok && !hasEnvVar(envVars, key) {
-			envVars = append(envVars, fallback)
-		}
-	}
+	envVars = mergeSAMEnvFallback(envVars, h.samEnvFallbackSnapshot())
 
 	if h.config.GitTokenFetcher != nil && !hasManagedSecretPlaceholder(envVars, "GH_TOKEN") {
 		envVars = removeEnvVar(envVars, "GH_TOKEN")

@@ -30,8 +30,9 @@ The environment variable \`SAM_WORKSPACE_ID\` is present when running inside a S
 - \`SAM_API_URL\` — Control plane API URL
 - \`SAM_NODE_ID\` — The VM node this workspace runs on
 - \`SAM_PROJECT_ID\` — The SAM project this workspace belongs to
-- \`SAM_TASK_ID\` — The task being executed (if in task mode)
-- \`SAM_CHAT_SESSION_ID\` — The chat session (if in conversation mode)
+- \`SAM_TASK_ID\` — The task backing this session (every chat session has one)
+- \`SAM_TASK_MODE\` — \`task\` or \`conversation\`, for this session
+- \`SAM_CHAT_SESSION_ID\` — The chat session
 - \`SAM_REPOSITORY\` — The repository (e.g., \`owner/repo\`)
 - \`SAM_BRANCH\` — The git branch
 - \`GH_TOKEN\` — GitHub token for git operations and API calls

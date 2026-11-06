@@ -350,6 +350,7 @@ type SessionHost struct {
 	// Durable ACP permission waiters are in-memory by design: Cloudflare owns
 	// durable state, while only the live connection generation may consume an answer.
 	interactionMu           sync.Mutex
+	samEnvFallback          atomic.Pointer[[]string] // set by ConfigureSAMEnvFallback; nil means config.SAMEnvFallback
 	interactionConfig       AcpInteractionRuntimeConfig
 	interactionGeneration   string
 	interactionWaiters      map[string]*acpInteractionWaiter

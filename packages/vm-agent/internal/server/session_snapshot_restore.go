@@ -264,10 +264,9 @@ func (s *Server) primeRestoredMessageReporter(runtime *WorkspaceRuntime, chatSes
 		return
 	}
 	chatSessionID = strings.TrimSpace(chatSessionID)
-	projectID := strings.TrimSpace(runtime.ProjectID)
-	if projectID == "" {
-		projectID = strings.TrimSpace(s.config.ProjectID)
-	}
+	// Only the boot workspace may borrow the node's project; any other workspace
+	// would bind the reporter, and the runtime below, to another session's project.
+	projectID := s.workspaceSAMIdentity(runtime.ID, runtime, nil).ProjectID
 	if projectID == "" || chatSessionID == "" {
 		// Without a project + chat session the reporter cannot be created, so
 		// the restored agent's output would be silently dropped. Log loudly so
