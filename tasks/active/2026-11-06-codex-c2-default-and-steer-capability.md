@@ -34,8 +34,8 @@ learnt that from the chip after sending.
 - The profile marker reaches the VM only from the agent profile
   (`workspace-runtime-assets.ts`), not project/skill env.
 - Steering capability is known only on the VM (`SessionHost.steering`, set at ACP
-  initialize). Activity reports (`prepareActivityReport`) -> `POST
-  /api/projects/:id/acp-sessions/:sid/activity` -> admission/flush (`activityReportExtra`,
+  initialize). Activity reports (`prepareActivityReport`) -> the activity callback
+  route -> admission/flush (`activityReportExtra`,
   `withoutSensitiveActivityFields`) -> `projectDataService.reportAcpSessionActivity` -> DO
   `reportActivity` -> `session_state` upsert + `session.activity` broadcast. Browser reads
   `state` from session detail (`resolveChatAgentState`) and `session.activity` over WS
@@ -51,14 +51,14 @@ learnt that from the chip after sending.
 
 - [x] VM agent: C2 is the default Codex runtime; `SAM_CODEX_C2_CANDIDATE=0` opts out to stock; selection no longer reads interaction config
 - [x] VM agent: C2 verification/install failure names the requirements and the opt-out
-- [ ] VM agent: activity report carries `steeringSupported` once ACP initialize has run; included in the resend-dedupe snapshot
-- [ ] Shared fixture `tests/fixtures/acp-activity-report-v1.json` + Go/TS contract tests
-- [ ] API: schema, `AcpActivityCallbackReport`, admission copy, `activityReportExtra`, service/DO extra types
-- [ ] DO: migration `074-session-state-steering-supported`; upsert with COALESCE (absence keeps value); read; `session.activity` broadcast includes it
-- [ ] Shared `SessionStateSnapshot.steeringSupported`; web `sessions.ts` type; `chat-agent-state` plan-merge copy; `wake-state` EMPTY_STATE
-- [ ] Web: `useChatWebSocket` passes it; `useSessionLifecycle` holds `steeringSupported` (hydrate + WS); `SessionFooter` hides the Steer chip and sends `queue` when `false`
-- [ ] Tests: Go selection (task mode, Instant, opt-out, invalid, latch); Go report field; DO upsert/absence/broadcast; route vertical slice; web footer behaviour
-- [ ] Docs: `apps/www/.../guides/chat-features.md`, `scripts/diagnostics/acp-codex-staging-delivery.md` note
+- [x] VM agent: activity report carries `steeringSupported` once ACP initialize has run; included in the resend-dedupe snapshot
+- [x] Shared fixture `tests/fixtures/acp-activity-report-v1.json` + Go/TS contract tests
+- [x] API: schema, `AcpActivityCallbackReport`, admission copy, `activityReportExtra`, service/DO extra types
+- [x] DO: migration `074-session-state-steering-supported`; upsert with COALESCE (absence keeps value); read; `session.activity` broadcast includes it
+- [x] Shared `SessionStateSnapshot.steeringSupported`; web `sessions.ts` type; `chat-agent-state` plan-merge copy (`wake-state` EMPTY_STATE left alone: the field is optional and null means unknown)
+- [x] Web: `useChatWebSocket` passes it; `useSessionLifecycle` holds `steeringSupported` (hydrate + WS); `SessionFooter` hides the Steer chip and sends `queue` when `false`
+- [x] Tests: Go selection (task mode, Instant, opt-out, invalid, latch); Go report field; DO upsert/absence/broadcast; route vertical slice; web footer behaviour
+- [x] Docs: `apps/www/.../guides/chat-features.md`, `scripts/diagnostics/acp-runtime-distribution.md`, superseded note in `scripts/diagnostics/acp-codex-staging-delivery.md`
 - [ ] Playwright visual audit of the footer (mobile + desktop)
 - [ ] Staging: delete nodes, deploy, task-mode Codex session steers ("Added to current turn"); Claude control still steers; clean up
 
@@ -69,3 +69,15 @@ learnt that from the chip after sending.
 - [ ] A profile with `SAM_CODEX_C2_CANDIDATE=0` runs stock Codex
 - [ ] When the session's adapter cannot steer, the composer shows no Steer chip while the agent works and sends as queue
 - [ ] Old VM agents (no field) keep today's behaviour (Steer offered)
+
+## Implementation Notes
+
+- `VerifyCodexRuntime` is an internal `SessionHostConfig` test hook (beside `StartProcess`) so
+  generic Codex startup tests run the real default selection without the reviewed release on
+  disk. `verifyCodexRuntime` (`codex_runtime_distribution.go`) is the single check; its
+  failures are wrapped by `codexRuntimeUnavailable`, which names the opt-out.
+- Discrimination checks run: old interaction-gated selection reddens the task-mode and
+  disabled cases of `TestSelectAgentCodexVerifiesC2RuntimeInEveryMode` and
+  `TestCodexRuntimeDefaultIgnoresInteractionConfig` (conversation forms stays green); removing
+  the report wiring reddens `TestActivityReportCarriesSteeringSupportFromInitialize`; dropping
+  `COALESCE` reddens the workers vertical slice; forcing `canSteer = true` reddens the footer test.

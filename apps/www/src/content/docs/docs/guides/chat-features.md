@@ -58,10 +58,12 @@ A message you send with **Steer** shows what happened to it underneath:
 | **Delivery unconfirmed**  | SAM couldn't confirm whether the agent got it (for example, the agent restarted at that moment). SAM won't send it again, because a duplicate could repeat work; resend it if the agent didn't respond to it. |
 | **Not delivered**         | It never reached the agent.                                                                                                                                                                                   |
 
-Steering works with Claude Code, OpenCode, and Codex when the chat uses SAM's Codex runtime (a
-profile with `SAM_CODEX_C2_CANDIDATE=1`, or Codex forms and links enabled). For other agents, and on
-VMs started before steering shipped, a steered message is sent as the next message instead, and its
-label says so. A sleeping chat is never woken just to steer it: the message queues and wakes the
+Steering works with Claude Code, OpenCode, and Codex. Codex steers through SAM's Codex runtime,
+which every Codex chat and task uses unless its agent profile sets `SAM_CODEX_C2_CANDIDATE=0` (use
+that only for a devcontainer the runtime can't run in: it needs x86_64 and Node 22 or newer). When
+the agent can't steer, the composer offers no **Steer** choice while it works and every message is
+queued. On VMs started before this shipped, a steered message may still be sent as the next message
+instead, and its label says so. A sleeping chat is never woken just to steer it: the message queues and wakes the
 chat as usual.
 
 ## When the Agent Needs You

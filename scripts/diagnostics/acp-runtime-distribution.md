@@ -1,10 +1,13 @@
 # Codex C2 runtime distribution preparation
 
 This change distributes the reviewed Codex CLI/ACP adapter with a checksum-pinned
-publisher, download route, bounded VM bootstrap and baked Instant image. Fresh
-Codex hosts select it when trusted forms/URL configuration is enabled. Existing
-hosts retain their executable; permissions-only and disabled fresh hosts use stock.
-All ACP defaults remain false. Production activation is a separate release step.
+publisher, download route, bounded VM bootstrap and baked Instant image. Since
+2026-11-06 every fresh Codex host selects it (`selectSessionCodexRuntime` in
+`packages/vm-agent/internal/acp/codex_staging_candidate.go`), whatever the task mode
+or interaction configuration, because it is the only Codex adapter that can steer. A
+profile env var `SAM_CODEX_C2_CANDIDATE=0` opts that profile's sessions out to the
+stock npm adapter (no steering), for devcontainers C2 cannot run in (not x86_64, or
+Node older than 22). Existing hosts retain their executable.
 
 ## November 5: live steering (C2.3 adapter)
 
@@ -151,9 +154,8 @@ or already-deployed Worker is required for a fresh installation.
 The Dockerfile installs in a separate Node22/glibc stage and copies only the
 verified runtime tree into the final image before `USER node`. The compressed
 archive is not retained in final image layers. Stock binaries remain present;
-fresh Codex hosts use the patched runtime when the trusted session-start contract
-enables forms or URL requests. Permissions-only and disabled contracts retain stock.
-An explicit profile candidate marker remains available for bounded verification. Deployment
+fresh Codex hosts use the patched runtime unless the profile marker opts out with
+`SAM_CODEX_C2_CANDIDATE=0`. Deployment
 publishes that same prepared archive to the stack's R2 before Worker publication,
 including first installation and skip-agent deployments.
 
@@ -213,11 +215,12 @@ the subsequent window below.
 
 ## Runtime selection and UI follow-through
 
-The executable is selected once per host from validated session-start interaction
-configuration. Enabling forms or URLs on a fresh Codex host selects the reviewed
-runtime; changing capabilities on an existing host does not swap its executable.
-Explicit profile marker removal/change fails closed independently of automatic
-eligibility. A separate selection mutex preserves startup's existing host-lock
+The executable is selected once per host: the reviewed runtime by default, the stock
+adapter only for a profile marker of `0`. Until 2026-11-06 selection keyed on the
+session-start interaction configuration (forms or URLs on), which the control plane
+enables only for conversation-mode tasks, so task-mode Codex sessions ran stock and
+could not steer. Changing configuration on an existing host does not swap its
+executable, and a profile marker that is removed or changed fails closed. A separate selection mutex preserves startup's existing host-lock
 contract. Focused race tests cover flags, restart, invalid markers and config.
 
 Untitled form fields now display the schema property name rather than a UUID.

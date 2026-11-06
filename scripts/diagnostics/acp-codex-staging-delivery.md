@@ -144,6 +144,10 @@ These are local fixture
 results, not Cloudflare persistence evidence. No new staging cycle or rollout
 is authorized by this local preparation. The procedure below names the current seven-file local candidate and requires coordinator review before any staging use.
 
+> Superseded 2026-11-06: every Codex session now runs the C2 runtime by default, and the
+> marker's only remaining use is `SAM_CODEX_C2_CANDIDATE=0`, which opts a profile out to the
+> stock adapter. See `acp-runtime-distribution.md`. The record below is historical.
+
 The branch adds an explicit per-session selector, `SAM_CODEX_C2_CANDIDATE=1`,
 resolved through the authorized Cloudflare runtime-assets endpoint for a dedicated
 project fixture profile bound to one manual workspace agent session. No VM-agent
