@@ -95,6 +95,41 @@ describe('secret scan policy', () => {
     expect(result.errors).toEqual(['A reviewed Gitleaks baseline entry has expired.']);
   });
 
+  it('rejects an expired exemption even when no findings match it', () => {
+    const result = evaluateGitleaksFindings(
+      '[]',
+      JSON.stringify(baseline('2026-11-07T00:00:00.000Z')),
+      new Date('2026-11-07T00:00:00.000Z')
+    );
+
+    expect(result).toMatchObject({ ok: false, totalFindingCount: 0 });
+    expect(result.errors).toEqual(['A reviewed Gitleaks baseline entry has expired.']);
+  });
+
+  it.each([
+    ['invalid JSON', '{'],
+    ['invalid schema', JSON.stringify({ ...baseline(), matcherVersion: 'unknown' })],
+    [
+      'malformed digest',
+      JSON.stringify({
+        ...baseline(),
+        groups: [{ ...baseline().groups[0], digests: ['invalid'] }],
+      }),
+    ],
+    [
+      'invalid expiry',
+      JSON.stringify({
+        ...baseline(),
+        groups: [{ ...baseline().groups[0], expiresAt: 'invalid' }],
+      }),
+    ],
+  ])('rejects a malformed baseline (%s) even without findings', (_name, malformed) => {
+    const result = evaluateGitleaksFindings('[]', malformed);
+
+    expect(result).toMatchObject({ ok: false, totalFindingCount: 0 });
+    expect(result.errors).toHaveLength(1);
+  });
+
   it('redacts raw command output before logs or artifacts can expose values', () => {
     const redacted = redactSecretScanOutput(
       '{"Secret":"synthetic-not-a-real-secret-value","Match":"TOKEN=synthetic-not-a-real-secret-value"}'
