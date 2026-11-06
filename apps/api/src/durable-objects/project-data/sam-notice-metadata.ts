@@ -56,7 +56,8 @@ export function withoutSamNotice(
   }
   if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return toolMetadata;
   if (!(SAM_NOTICE_METADATA_KEY in parsed)) return toolMetadata;
-  const { [SAM_NOTICE_METADATA_KEY]: _dropped, ...rest } = parsed as Record<string, unknown>;
+  const rest: Record<string, unknown> = { ...(parsed as Record<string, unknown>) };
+  delete rest[SAM_NOTICE_METADATA_KEY];
   log.warn('messages.batch_sam_notice_dropped', { sessionId, messageId, action: 'dropped' });
   return JSON.stringify(rest);
 }

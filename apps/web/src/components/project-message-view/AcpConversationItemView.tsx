@@ -10,9 +10,9 @@ import { memo, useCallback } from 'react';
 
 import { useGlobalAudio } from '../../contexts/GlobalAudioContext';
 import { getTtsApiUrl } from '../../lib/api';
-import type { DisplayItem } from './tool-call-groups';
-import { NoticeRow } from './sam-notice/NoticeRow';
 import { noticeOf, systemRowNotice } from './sam-notice/notice-items';
+import { NoticeRow } from './sam-notice/NoticeRow';
+import type { DisplayItem } from './tool-call-groups';
 import { matchToolCard } from './tool-cards';
 import { AbsorbedConversationItemView, ToolCallGroupCard } from './ToolCallGroupCard';
 import { UserMessageDeliveryChip } from './UserMessageDeliveryChip';

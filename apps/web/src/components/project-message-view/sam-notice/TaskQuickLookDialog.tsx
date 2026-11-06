@@ -42,22 +42,19 @@ export function TaskQuickLookDialog({
   onClose,
 }: {
   projectId: string;
-  taskId: string | null;
+  taskId: string;
   onClose: () => void;
 }) {
   const queryScope = useQueryScope();
   const titleId = useId();
-  const task = useQuery({
-    ...taskDetailQueryOptions(queryScope, projectId, taskId ?? ''),
-    enabled: taskId !== null,
-  });
+  const task = useQuery(taskDetailQueryOptions(queryScope, projectId, taskId));
   const data = task.data;
   // Agents write outputPrUrl; only link it when it is a web URL.
   const prUrl =
     data?.outputPrUrl && /^https?:\/\//i.test(data.outputPrUrl) ? data.outputPrUrl : null;
 
   return (
-    <Dialog isOpen={taskId !== null} onClose={onClose} aria-labelledby={titleId} maxWidth="lg">
+    <Dialog isOpen onClose={onClose} aria-labelledby={titleId} maxWidth="lg">
       <div className="p-5" data-testid="sam-notice-task-dialog">
         <div className="mb-1 flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-wide text-fg-muted">
           <ListTodo size={13} aria-hidden="true" /> Task
@@ -102,15 +99,13 @@ export function TaskQuickLookDialog({
           <Button variant="raised" size="sm" onClick={onClose}>
             Close
           </Button>
-          {taskId && (
-            <Link
-              to={`/projects/${projectId}/tasks/${taskId}`}
-              onClick={onClose}
-              className={buttonClassName({ variant: 'raised', size: 'sm' })}
-            >
-              Open its chat
-            </Link>
-          )}
+          <Link
+            to={`/projects/${projectId}/tasks/${encodeURIComponent(taskId)}`}
+            onClick={onClose}
+            className={buttonClassName({ variant: 'raised', size: 'sm' })}
+          >
+            Open its chat
+          </Link>
           {prUrl && (
             <a
               href={prUrl}

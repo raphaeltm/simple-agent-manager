@@ -181,7 +181,8 @@ function NoticeRowImpl({ notice, rawText, rawLabel, timestamp, projectId }: Noti
         </div>
       )}
 
-      {projectId && (
+      {/* Mounted only while open, so a row never reads auth or the query cache until asked. */}
+      {projectId && openTaskId && (
         <TaskQuickLookDialog projectId={projectId} taskId={openTaskId} onClose={closeTask} />
       )}
     </div>

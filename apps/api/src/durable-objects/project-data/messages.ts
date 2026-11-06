@@ -25,8 +25,8 @@ import {
   parseMessageCount,
   parseWorkspaceId,
 } from './row-schemas';
-import { assertSessionIdentityGuard, type SessionIdentityGuard } from './sessions';
 import { withoutSamNotice } from './sam-notice-metadata';
+import { assertSessionIdentityGuard, type SessionIdentityGuard } from './sessions';
 import { boundToolMetadataForStorage } from './tool-metadata-storage';
 import type { Env } from './types';
 import { generateId } from './types';

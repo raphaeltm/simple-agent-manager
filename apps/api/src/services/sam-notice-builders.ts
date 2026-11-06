@@ -197,7 +197,8 @@ export function projectEventWakeNotice(events: readonly ProjectEventRecord[]): S
     const senders = [
       ...new Set(channelEvents.map(channelActorTaskId).filter((id): id is string => !!id)),
     ];
-    const first = channelMessageText(channelEvents[0]!);
+    const firstEvent = channelEvents[0];
+    const first = firstEvent ? channelMessageText(firstEvent) : null;
     return buildSamNotice({
       type: 'agent.message',
       headline:

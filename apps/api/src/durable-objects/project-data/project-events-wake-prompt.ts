@@ -9,7 +9,6 @@ import type {
 } from '@simple-agent-manager/shared';
 
 import { projectEventWakeNotice, safeNotice } from '../../services/sam-notice-builders';
-
 import {
   agentMessageChannelForSubscription,
   agentMessageWakeContent,
