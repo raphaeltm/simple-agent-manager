@@ -88,7 +88,15 @@ function NoticeRowImpl({ notice, rawText, rawLabel, timestamp, projectId }: Noti
   const showRaw = raw !== '' && raw !== notice.quote?.text.trim() && raw !== notice.headline;
 
   return (
-    <div className="min-w-0" data-testid="sam-notice-row" data-notice-type={notice.type}>
+    // pr-12 below md: the phone's floating chat toggle rests in the row's right-hand column at
+    // the newest message (index.css `.sam-immersive-toggle`), as permission cards stop at 80%.
+    <div
+      className="min-w-0 pr-12 md:pr-0"
+      data-testid="sam-notice-row"
+      data-notice-type={notice.type}
+    >
+      {/* Compact on purpose (36px, not the 44px SAM Glass default): the approved design is one
+          quiet line per notice, and the whole row is the target. */}
       <button
         type="button"
         onClick={toggle}

@@ -3544,7 +3544,15 @@ describe('ProjectMessageView — SAM notice rows', () => {
     toolMetadata: Record<string, unknown> | null,
     createdAt: number
   ) {
-    return { id, sessionId: 'session-1', role, content, toolMetadata, createdAt, sequence: createdAt };
+    return {
+      id,
+      sessionId: 'session-1',
+      role,
+      content,
+      toolMetadata,
+      createdAt,
+      sequence: createdAt,
+    };
   }
 
   function delivery(extra: Record<string, unknown> = {}) {
@@ -3638,15 +3646,89 @@ describe('ProjectMessageView — SAM notice rows', () => {
     // Task: a quick-look dialog with live data from the task API.
     fireEvent.click(cards[0]!);
     const dialog = await screen.findByTestId('sam-notice-task-dialog');
-    await waitFor(() =>
-      expect(dialog).toHaveTextContent('Fix login redirect loop (live title)')
-    );
+    await waitFor(() => expect(dialog).toHaveTextContent('Fix login redirect loop (live title)'));
     expect(mocks.getProjectTask).toHaveBeenCalledWith('proj-1', 'child-1');
     expect(dialog).toHaveTextContent('Cleared the cookie before redirecting.');
     expect(screen.getByRole('link', { name: 'Open its chat' })).toHaveAttribute(
       'href',
       '/projects/proj-1/tasks/child-1'
     );
+  });
+
+  it('says so in the quick look when the task cannot be loaded', async () => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [row('m2', 'user', RAW_WAKE, delivery(), 2_000)])
+    );
+    mocks.getProjectTask.mockRejectedValue(new Error('Not found'));
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: /Subtask finished/ }));
+    fireEvent.click(screen.getAllByTestId('sam-notice-ref')[0]!);
+
+    const dialog = await screen.findByTestId('sam-notice-task-dialog');
+    await waitFor(() =>
+      expect(dialog).toHaveTextContent('This task could not be loaded. It may have been deleted.')
+    );
+    expect(screen.getByRole('dialog')).toHaveAccessibleName(/could not be loaded/);
+  });
+
+  it('renders HTML and emoji in quoted text literally', async () => {
+    const quote = '<img src=x onerror=alert(1)> 🚀 &amp; done';
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        row(
+          'm3',
+          'user',
+          'SAM notice (system-generated, not a human message): …',
+          delivery({
+            source: 'project_event_wake',
+            samNotice: {
+              v: 1,
+              type: 'agent.message',
+              headline: 'Message from another agent',
+              severity: 'info',
+              quote: { from: 'Another agent', text: quote },
+              refs: [],
+            },
+          }),
+          3_000
+        ),
+      ])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+    fireEvent.click(await screen.findByRole('button', { name: /Message from another agent/ }));
+
+    expect(screen.getByText(quote)).toBeTruthy();
+    expect(document.querySelector('img[src="x"]')).toBeNull();
+  });
+
+  it.each([
+    ['project_event_wake', 'agent.message', 'Message from another agent'],
+    ['operations_decision', 'ops.approved', 'Approved: delete node'],
+    ['checkpoint_continuation', 'session.resumed', 'Chat woke up and picked up where it left off'],
+    ['scheduled_action', 'schedule.due', 'Scheduled reminder the agent set for itself'],
+    ['github_trigger', 'github.trigger', 'A GitHub trigger sent this chat a message'],
+  ])('renders a %s delivery as a notice row', async (source, type, headline) => {
+    mocks.getChatSession.mockResolvedValue(
+      makeSessionResponse('session-1', [
+        row('m1', 'user', 'Please split the work.', null, 1_000),
+        row(
+          'm2',
+          'user',
+          `raw ${source} text`,
+          delivery({ source, samNotice: { v: 1, type, headline, severity: 'info', refs: [] } }),
+          2_000
+        ),
+      ])
+    );
+
+    render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    await waitFor(() => expect(screen.getByText('Please split the work.')).toBeTruthy());
+    expect(screen.getByTestId('sam-notice-row')).toHaveTextContent(headline);
+    expect(screen.getAllByTestId('acp-message-user')).toHaveLength(1);
+    expect(screen.queryByText(`raw ${source} text`)).toBeNull();
   });
 
   it('does not render a notice on a row SAM did not deliver, even if its metadata carries one', async () => {

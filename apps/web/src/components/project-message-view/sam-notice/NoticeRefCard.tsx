@@ -128,7 +128,7 @@ export function NoticeRefCard({
           {REF_LABEL[noticeRef.kind]}
           {target.type === 'external' && <ExternalLink size={11} aria-label="Opens in a new tab" />}
         </span>
-        <span className="block truncate text-[13.5px] text-fg-primary">
+        <span className="line-clamp-2 break-words text-[13.5px] text-fg-primary">
           {noticeRef.label ?? REF_FALLBACK_TITLE[noticeRef.kind]}
         </span>
         {statusChip('mt-1.5 flex sm:hidden')}

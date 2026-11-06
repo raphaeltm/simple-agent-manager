@@ -54,7 +54,14 @@ export function TaskQuickLookDialog({
     data?.outputPrUrl && /^https?:\/\//i.test(data.outputPrUrl) ? data.outputPrUrl : null;
 
   return (
-    <Dialog isOpen onClose={onClose} aria-labelledby={titleId} maxWidth="lg">
+    <Dialog
+      isOpen
+      onClose={onClose}
+      // The title element exists once the task has loaded (or failed to); name it meanwhile.
+      aria-labelledby={task.isLoading ? undefined : titleId}
+      aria-label={task.isLoading ? 'Task' : undefined}
+      maxWidth="lg"
+    >
       <div className="p-5" data-testid="sam-notice-task-dialog">
         <div className="mb-1 flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-wide text-fg-muted">
           <ListTodo size={13} aria-hidden="true" /> Task

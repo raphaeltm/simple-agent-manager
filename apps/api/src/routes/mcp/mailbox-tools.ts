@@ -19,7 +19,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import * as projectDataService from '../../services/project-data';
-import { agentMailboxNotice } from '../../services/sam-notice-builders';
+import { agentMailboxNotice, safeNotice } from '../../services/sam-notice-builders';
 import { loadTaskTitleForNotice } from '../../services/sam-notice-lookups';
 import {
   composePeerSteerContent,
@@ -175,11 +175,15 @@ export async function handleSendDurableMessage(
         messageClass: messageClass as MessageClass,
         sourceKind: 'agent_mailbox',
         metadata,
-        notice: agentMailboxNotice({
-          senderTaskId: tokenData.taskId ?? null,
-          senderTaskTitle,
-          message,
-        }),
+        notice: safeNotice(
+          () =>
+            agentMailboxNotice({
+              senderTaskId: tokenData.taskId ?? null,
+              senderTaskTitle,
+              message,
+            }),
+          { senderTaskId: tokenData.taskId }
+        ),
         ackTimeoutMs: limits.mailboxAckTimeoutMs,
         ttlMs: durableConfig.ttlMs,
         maxMessages: limits.mailboxMaxMessagesPerProject,

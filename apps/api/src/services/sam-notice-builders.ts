@@ -20,6 +20,17 @@ import { log } from '../lib/logger';
 const PROJECT_LIFECYCLE_SOURCE = 'sam.lifecycle';
 
 /**
+ * Sources whose display titles SAM itself writes from fixed strings ("Task completed",
+ * "Scheduled action admitted"), so they may be a notice headline. Every other source,
+ * including SAM-owned ones whose titles callers can set (an agent channel publish chooses its
+ * own title), keeps its title on a card, never as SAM's words.
+ */
+const SAM_AUTHORED_TITLE_SOURCES: ReadonlySet<string> = new Set([
+  PROJECT_LIFECYCLE_SOURCE,
+  'sam.schedule',
+]);
+
+/**
  * A notice is display data. Building one must never stop the message it describes from being
  * delivered, so callers on delivery paths wrap the builder in this.
  */
@@ -141,6 +152,7 @@ function eventSeverity(event: ProjectEventRecord): SamNoticeSeverity {
 
 function sourceLabel(source: string): string {
   if (source === 'github') return 'GitHub';
+  if (source === PROJECT_EVENT_CHANNEL_SOURCE) return 'Channel';
   if (source.startsWith('sam.')) return 'SAM';
   return humanize(source);
 }
@@ -148,7 +160,9 @@ function sourceLabel(source: string): string {
 function eventHeadline(event: ProjectEventRecord): string {
   // SAM-sourced titles are SAM-authored ("Task completed"); external titles are not, so
   // they become card labels instead of the headline.
-  if (event.source.startsWith('sam.') && event.display.title) return event.display.title;
+  if (SAM_AUTHORED_TITLE_SOURCES.has(event.source) && event.display.title) {
+    return event.display.title;
+  }
   return `${sourceLabel(event.source)}: ${humanize(event.eventType)}`;
 }
 
@@ -318,7 +332,7 @@ export function scheduledMessageNotice(input: {
     headline: input.createdByThisChat
       ? 'Scheduled reminder the agent set for itself'
       : 'Scheduled message from another chat',
-    detail: input.reason,
+    // The reason is the scheduler's own words, so it is a card label, not SAM's detail line.
     severity: 'info',
     quote: { from: 'Scheduled message', text: input.prompt },
     refs: [{ kind: 'schedule', id: input.scheduleId, label: input.reason }],

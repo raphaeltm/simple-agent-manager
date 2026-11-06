@@ -105,7 +105,7 @@ const MESSAGES = [
       severity: 'info',
       quote: {
         from: 'Another agent',
-        text: `Heads up: #2551 changes the cookie name. See ${UNBROKEN}`,
+        text: `Heads up: #2551 changes the cookie name <b>&amp;</b> 🚀 See ${UNBROKEN}`,
       },
       refs: [{ kind: 'task', id: 'reviewer-1', label: 'Review open auth pull requests' }],
     })
@@ -260,6 +260,9 @@ for (const viewport of [
       const agent = noticeRow(page, 'agent.message');
       await agent.getByRole('button', { name: /Message from another agent/ }).click();
       await expect(agent.getByText('not written by SAM', { exact: false })).toBeVisible();
+      // Special characters render as text, never as markup.
+      await expect(agent.locator('blockquote')).toContainText('<b>&amp;</b> 🚀');
+      await expect(agent.locator('blockquote b')).toHaveCount(0);
       const many = noticeRow(page, 'subtask.failed');
       await many.locator('> button').click();
       await expect(many.getByTestId('sam-notice-ref')).toHaveCount(8);
@@ -268,8 +271,9 @@ for (const viewport of [
         '[data-testid="sam-notice-ref"], [data-testid="sam-notice-body"] figure'
       );
       await assertNoOverflow(page);
-      await agent.scrollIntoViewIfNeeded();
       await screenshot(page, `sam-notice-rows-stress-${viewport.name.toLowerCase()}`);
+      await many.scrollIntoViewIfNeeded();
+      await screenshot(page, `sam-notice-rows-many-cards-${viewport.name.toLowerCase()}`);
     });
 
     test('a task card opens a quick-look dialog with live task data', async ({ page }) => {

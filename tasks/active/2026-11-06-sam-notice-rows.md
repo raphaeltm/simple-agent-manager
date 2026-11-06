@@ -32,24 +32,34 @@ The orchestrator, event system, schedules, ops approvals and agent-to-agent mess
 
 ## Checklist
 
-- [ ] Shared: `packages/shared/src/types/sam-notices.ts` (types, version, metadata key, `buildSamNotice` clamp, `parseSamNotice` validator) and barrel exports.
-- [ ] API: `AcceptPromptDeliveryInput.notice`; one helper builds the tool metadata for both the persisted row and the broadcast; strip caller `samNotice`.
-- [ ] API: strip `samNotice` from vm-agent batch tool metadata.
-- [ ] API: notice builders (pure module), with unit tests.
-- [ ] Attach notices: parent wake, event wake (generic, lifecycle, GitHub, agent channel), ops decision, schedule (agent-created only), GitHub trigger, restored session, send_durable_message, send_message_to_subtask, stall check-in.
-- [ ] Web: map notices in `chatMessagesToConversationItems` (user rows with durable/orchestrator kind; system rows).
-- [ ] Web: `NoticeRow`, `NoticeRefCard`, task quick-look dialog (TanStack Query, existing task API).
-- [ ] Web: system rows render as compact notice rows (first line headline, full text expandable).
-- [ ] Tests: trust (forged notice ignored and stripped), builders, real-trigger integration for parent wake and event wake, web rendering behaviour.
-- [ ] Playwright visual audit (mobile and desktop, long text, many refs, no refs).
-- [ ] Docs: public docs mention of how SAM messages appear in chat.
-- [ ] Remove the prototype route and directory.
+- [x] Shared: `packages/shared/src/types/sam-notices.ts` (types, version, metadata key, `buildSamNotice` clamp, `parseSamNotice` validator) and barrel exports.
+- [x] API: `AcceptPromptDeliveryInput.notice`; one helper builds the tool metadata for both the persisted row and the broadcast; strip caller `samNotice`.
+- [x] API: strip `samNotice` from vm-agent batch tool metadata.
+- [x] API: notice builders (pure module), with unit tests.
+- [x] Attach notices: parent wake, event wake (generic, lifecycle, GitHub, agent channel), ops decision, schedule (agent-created only), GitHub trigger, restored session, send_durable_message, send_message_to_subtask, stall check-in.
+- [x] Web: map notices in `chatMessagesToConversationItems` (user rows with durable/orchestrator kind; system rows).
+- [x] Web: `NoticeRow`, `NoticeRefCard`, task quick-look dialog (TanStack Query, existing task API).
+- [x] Web: system rows render as compact notice rows (first line headline, full text expandable).
+- [x] Tests: trust (forged notice ignored and stripped), builders, real-trigger integration for parent wake and event wake, web rendering behaviour.
+- [x] Playwright visual audit (mobile and desktop, long text, many refs, no refs).
+- [x] Docs: public docs mention of how SAM messages appear in chat.
+- [x] Remove the prototype route and directory.
 
 ## Acceptance criteria
 
 - [ ] A parent wake, event wake, ops decision, agent message, stall check-in and restored-session prompt render as a compact SAM row, not the owner's bubble, both on reload and live.
-- [ ] Tapping expands it to show detail, quote, cards and the agent text. A task card opens a modal with live task data. Other cards link.
-- [ ] A `samNotice` supplied by an agent through `send_durable_message` metadata, or through the vm-agent batch, is not stored and not rendered.
-- [ ] Unknown notice versions fall back to the old rendering.
-- [ ] Agent-facing prompt text is unchanged.
+- [x] Tapping expands it to show detail, quote, cards and the agent text. A task card opens a modal with live task data. Other cards link.
+- [x] A `samNotice` supplied by an agent through `send_durable_message` metadata, or through the vm-agent batch, is not stored and not rendered.
+- [x] Unknown notice versions fall back to the old rendering.
+- [x] Agent-facing prompt text is unchanged.
 - [ ] Verified on staging with a real subtask wake and a real agent message.
+
+## Implementation notes
+
+- Prototype commit 726624039 removed in 6ef966564 (no `/prototype/notice-rows` route remains).
+- Live path: `message.new` carries the same metadata via `promptDeliveryToolMetadata` (`sam-notice-metadata.ts`), used by both the persisted row and the broadcast.
+- Check-in notice is added only to the persisted row; the VM delivery claim metadata is unchanged.
+- Schedules: only agent-created schedules (`creatorChatSessionId` set) get a notice; a person's scheduled message stays their bubble.
+- Comment directives keep their existing attribution rendering (a person's words), no notice.
+- Discrimination checks: removing the API strip turned 2 of 3 workers tests red (control stayed green); removing the web trust check turned the forged-row test red.
+- File size: prompt-delivery.ts (+3), messages.ts (+4), reconciliation.ts (+6) were already over 500 lines; new logic lives in new modules.

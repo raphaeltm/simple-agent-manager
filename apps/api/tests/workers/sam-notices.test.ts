@@ -144,3 +144,18 @@ describe('SAM notices: VM-agent message batches', () => {
     expect(plain?.tool_metadata).toBe(JSON.stringify({ toolCallId: 'call-2' }));
   });
 });
+
+describe('SAM notices: the persistMessage RPC', () => {
+  it('drops a notice that a Worker caller passes in tool metadata', async () => {
+    const f = await twoAgentProject();
+    await f.stub.persistMessage(
+      f.b.sessionId,
+      'system',
+      'a system row',
+      JSON.stringify({ source: 'node_health', [SAM_NOTICE_METADATA_KEY]: FORGED })
+    );
+    const row = (await chatRows(f.stub, f.b.sessionId)).find((r) => r.content === 'a system row');
+    // Liveness: the row itself was written, with its other metadata intact.
+    expect(JSON.parse(row!.tool_metadata!)).toEqual({ source: 'node_health' });
+  });
+});

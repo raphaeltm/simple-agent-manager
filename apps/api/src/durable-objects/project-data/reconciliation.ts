@@ -17,7 +17,7 @@ import { SAM_NOTICE_METADATA_KEY } from '@simple-agent-manager/shared';
 import type { Env as WorkerEnv } from '../../env';
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { cancelAgentSessionOnNode } from '../../services/node-agent';
-import { stallCheckinNotice } from '../../services/sam-notice-builders';
+import { safeNotice, stallCheckinNotice } from '../../services/sam-notice-builders';
 import { classifyTaskRuntimeDelivery } from '../../services/task-runtime-liveness';
 import { DefaultVmPromptDeliveryAdapter } from '../../services/vm-prompt-delivery-adapter';
 import { recordActivityEventInternal } from './activity';
@@ -299,9 +299,12 @@ async function handleCheckinDelivery(
     );
   }
 
+  const notice = safeNotice(() => stallCheckinNotice(candidate.idleDurationMs), {
+    sessionId: candidate.sessionId,
+  });
   const metadata = {
     ...checkinMetadata(intent.deliveryId),
-    [SAM_NOTICE_METADATA_KEY]: stallCheckinNotice(candidate.idleDurationMs),
+    ...(notice ? { [SAM_NOTICE_METADATA_KEY]: notice } : {}),
   };
   const msgResult = persistMessage(
     sql,

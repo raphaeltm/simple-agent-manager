@@ -14,7 +14,7 @@ import { log } from '../../lib/logger';
 import { sendPromptToAgentOnNode } from '../../services/node-agent';
 import { persistOrchestrationPrompt } from '../../services/orchestration-prompts';
 import * as projectDataService from '../../services/project-data';
-import { parentAgentMessageNotice } from '../../services/sam-notice-builders';
+import { parentAgentMessageNotice, safeNotice } from '../../services/sam-notice-builders';
 import { loadTaskTitleForNotice } from '../../services/sam-notice-lookups';
 import {
   getMcpLimits,
@@ -114,11 +114,15 @@ export async function handleSendMessageToSubtask(
         parentTaskId: tokenData.taskId,
         childTaskId: taskId,
       },
-      notice: parentAgentMessageNotice({
-        parentTaskId: tokenData.taskId ?? null,
-        parentTaskTitle,
-        message,
-      }),
+      notice: safeNotice(
+        () =>
+          parentAgentMessageNotice({
+            parentTaskId: tokenData.taskId ?? null,
+            parentTaskTitle,
+            message,
+          }),
+        { parentTaskId: tokenData.taskId, childTaskId: taskId }
+      ),
     });
     return jsonRpcSuccess(requestId, {
       content: [

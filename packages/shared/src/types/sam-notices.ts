@@ -56,7 +56,14 @@ export interface SamNotice {
   quote?: SamNoticeQuote | null;
 }
 
-/** Payload bounds. Notices are display data; anything longer is cut, never rejected. */
+/**
+ * Payload bounds. Notices are display data; anything longer is cut, never rejected.
+ *
+ * Fixed on purpose, not configurable (Principle XI exception): these are the wire format of
+ * a stored value, applied by both the server (`buildSamNotice`) and the browser
+ * (`parseSamNotice`). A per-deployment setting would apply to new rows only and let the two
+ * disagree about rows already stored. They bound display text, never gate access.
+ */
 export const SAM_NOTICE_LIMITS = {
   typeChars: 64,
   headlineChars: 200,

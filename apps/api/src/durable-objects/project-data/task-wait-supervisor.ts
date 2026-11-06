@@ -1,7 +1,7 @@
 import { TASK_TERMINAL_STATUSES } from '@simple-agent-manager/shared';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
-import { parentWakeNotice } from '../../services/sam-notice-builders';
+import { parentWakeNotice, safeNotice } from '../../services/sam-notice-builders';
 import { promptDeliveryBackoffMs, resolveDurableExecutionConfig } from './durable-execution-config';
 import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from './prompt-delivery';
 import { failParentWakeDeliveries } from './prompt-delivery';
@@ -317,16 +317,22 @@ export async function processTaskWaits(
           childTaskIds: prepared.children.map((child) => child.childTaskId),
           resolutionReason: prepared.resolutionReason,
         },
-        notice: parentWakeNotice(
-          prepared.children.map((child) => {
-            const observation = observations.get(child.childTaskId);
-            return {
-              taskId: child.childTaskId,
-              status: observation?.status ?? 'missing',
-              title: observation?.title ?? null,
-            };
-          }),
-          prepared.resolutionReason === 'deadline_reached' ? 'deadline_reached' : 'condition_met'
+        notice: safeNotice(
+          () =>
+            parentWakeNotice(
+              prepared.children.map((child) => {
+                const observation = observations.get(child.childTaskId);
+                return {
+                  taskId: child.childTaskId,
+                  status: observation?.status ?? 'missing',
+                  title: observation?.title ?? null,
+                };
+              }),
+              prepared.resolutionReason === 'deadline_reached'
+                ? 'deadline_reached'
+                : 'condition_met'
+            ),
+          { waitId: prepared.id }
         ),
       });
       const resolved = hooks.transactionSync(() =>
