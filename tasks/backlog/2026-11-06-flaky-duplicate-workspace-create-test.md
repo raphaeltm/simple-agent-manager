@@ -19,9 +19,11 @@ itself, but it can block `main` CI and therefore production deploys.
 
 - Seen on `main` CI run 42203232773 (attempt 1) for merge commit `734bb04c1` (PR #2550, unrelated
   change); the job passed on re-run.
-- Reproduced locally with `go test ./internal/server/ -run TestCreateWorkspaceDuplicateProvisioningReturnsIdempotentAccepted -count=300`
-  (hung in roughly 1 of 3 batches of 300; other batches passed), on both `83c87df44` and `734bb04c1`
-  over several batches.
+- Reproduced locally on `734bb04c1` with `go test ./internal/server/ -run TestCreateWorkspaceDuplicateProvisioningReturnsIdempotentAccepted -count=300`
+  (2 of 4 batches hung; the other 2 passed). The pre-change base `83c87df44` passed 3 batches (900
+  runs) in the same session. PR #2550 does not touch the create handler, the lifecycle lock or the
+  provisioning path (`workspaces.go`, `workspace_lifecycle_lock.go`, `workspace_provisioning.go`), so
+  the difference is attributed to timing; confirm with a larger sample when fixing.
 
 ## Acceptance Criteria
 
