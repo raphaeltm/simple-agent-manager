@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   uploadAttachmentToR2: vi.fn(),
   startVerifyDecayTimer: vi.fn(),
   stopVerifyDecayTimer: vi.fn(),
+  verifyTimerOptions: null as null | { onStateSnapshot?: (state: unknown) => void },
   connectionState: 'connected' as 'connected' | 'disconnected',
   wsOptions: [] as Array<{
     enabled: boolean;
@@ -85,10 +86,13 @@ vi.mock('../../../src/hooks/useWorkspacePorts', () => ({
   useWorkspacePorts: () => ({ ports: [] }),
 }));
 vi.mock('../../../src/components/project-message-view/useActivityVerifyTimer', () => ({
-  useActivityVerifyTimer: () => ({
-    startVerifyDecayTimer: mocks.startVerifyDecayTimer,
-    stopVerifyDecayTimer: mocks.stopVerifyDecayTimer,
-  }),
+  useActivityVerifyTimer: (options: { onStateSnapshot?: (state: unknown) => void }) => {
+    mocks.verifyTimerOptions = options;
+    return {
+      startVerifyDecayTimer: mocks.startVerifyDecayTimer,
+      stopVerifyDecayTimer: mocks.stopVerifyDecayTimer,
+    };
+  },
 }));
 vi.mock('../../../src/components/project-message-view/useConnectionRecovery', () => ({
   useConnectionRecovery: () => ({
@@ -920,6 +924,29 @@ describe('useSessionLifecycle loading semantics', () => {
     act(() => socket.onAgentActivity?.('idle', null));
     expect(result.current.agentActivity).toBe('idle');
     expect(result.current.steeringSupported).toBe(true);
+  });
+
+  it('takes steering support from an activity verification snapshot', async () => {
+    const loaded = detail([msg('a', 1000)], false, 'active');
+    mocks.getChatSession.mockResolvedValue(loaded);
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.session?.status).toBe('active'));
+    expect(result.current.steeringSupported).toBeNull();
+
+    // A missed capability push is caught by the next verification read.
+    act(() =>
+      mocks.verifyTimerOptions?.onStateSnapshot?.({
+        ...loaded.state,
+        activity: 'prompting',
+        steeringSupported: false,
+      })
+    );
+    expect(result.current.steeringSupported).toBe(false);
+    // A snapshot without the field (an older server) keeps it.
+    act(() => mocks.verifyTimerOptions?.onStateSnapshot?.({ ...loaded.state }));
+    expect(result.current.steeringSupported).toBe(false);
   });
 
   it('leaves steering support unknown when the server never reported it', async () => {

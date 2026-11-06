@@ -656,6 +656,7 @@ func (h *SessionHost) Stop() {
 func (h *SessionHost) ensureAgentInstalled(ctx context.Context, info agentCommandInfo) error {
 	if info.verifyOnly {
 		if err := h.verifyCodexRuntime(ctx, info); err != nil {
+			h.releaseCodexRuntimeSelection()
 			return codexRuntimeUnavailable(err)
 		}
 		return nil

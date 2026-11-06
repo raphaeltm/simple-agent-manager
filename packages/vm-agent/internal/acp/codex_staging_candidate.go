@@ -50,6 +50,17 @@ func (h *SessionHost) resolveCodexC2Selector(ctx context.Context, agentType stri
 	return selector, nil
 }
 
+// releaseCodexRuntimeSelection forgets a selection whose runtime failed verification.
+// Nothing ran on it, so the profile may choose again on this host, for example opting
+// out to the stock adapter after C2 could not run in its devcontainer.
+func (h *SessionHost) releaseCodexRuntimeSelection() {
+	h.codexC2SelectionMu.Lock()
+	defer h.codexC2SelectionMu.Unlock()
+	h.codexC2Selector = ""
+	h.codexC2EffectiveSelector = ""
+	h.codexC2SelectionLatched = false
+}
+
 // codexRuntimeUnavailable names the opt-out, because C2 is the default and a
 // devcontainer it cannot run in would otherwise leave Codex unusable.
 func codexRuntimeUnavailable(err error) error {

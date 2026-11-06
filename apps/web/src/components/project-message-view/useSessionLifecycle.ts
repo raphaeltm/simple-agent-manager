@@ -82,9 +82,12 @@ export function useSessionLifecycle(
     setAgentActivity('idle');
     setPromptStartedAt(null);
   }, []);
+  // Every state snapshot (load, fallback poll, activity verification) also carries the
+  // agent's steering capability; a snapshot without it leaves the known value alone.
   const hydratePlan = useCallback((s: SessionStateSnapshot | null | undefined) => {
     if (!s) return;
     setCurrentPlan(s.currentPlan ?? null);
+    if (typeof s.steeringSupported === 'boolean') setSteeringSupported(s.steeringSupported);
   }, []);
   const handleVerifiedStale = useCallback(() => setStaleNotice(true), []);
   const dismissStaleNotice = useCallback(() => setStaleNotice(false), []);
@@ -107,7 +110,6 @@ export function useSessionLifecycle(
       // Wake phase is folded in first so the banner has a phase to render in the
       // same commit that flips activity to 'recovering'.
       hydrateWakeProgress(s);
-      if (typeof s.steeringSupported === 'boolean') setSteeringSupported(s.steeringSupported);
       if (isWorkingActivity(s.activity)) {
         setAgentActivity(s.activity);
         setPromptStartedAt(s.promptStartedAt ?? null);
@@ -229,7 +231,8 @@ export function useSessionLifecycle(
         promptStartedAt?: number | null,
         reportedSteeringSupported?: boolean
       ) => {
-        if (reportedSteeringSupported !== undefined) setSteeringSupported(reportedSteeringSupported);
+        if (reportedSteeringSupported !== undefined)
+          setSteeringSupported(reportedSteeringSupported);
         const working = activity === 'prompting' || activity === 'recovering';
         setAgentActivity(working ? activity : 'idle');
         setPromptStartedAt(working ? (promptStartedAt ?? Date.now()) : null);

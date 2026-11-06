@@ -82,6 +82,37 @@ func TestSelectAgentCodexProfileOptOutUsesStockAdapter(t *testing.T) {
 	}
 }
 
+// C2 failing verification must not pin the host to it: the profile's opt-out has to work on
+// the next selection without a new session.
+func TestSelectAgentCodexOptOutAfterFailedC2Verification(t *testing.T) {
+	marker := ""
+	verifyCalls := 0
+	recorder := &selectionErrorRecorder{}
+	host := newCodexSelectionHost(t, recorder, func(context.Context) (RuntimeAssets, error) {
+		if marker == "" {
+			return RuntimeAssets{}, nil
+		}
+		return RuntimeAssets{EnvVars: []RuntimeEnvVar{{Key: codexC2CandidateEnv, Value: marker}}}, nil
+	}, func(context.Context, agentCommandInfo) error {
+		verifyCalls++
+		return errStopAtRuntimeCheck
+	})
+
+	host.SelectAgent(context.Background(), "openai-codex")
+	if verifyCalls != 1 || !strings.Contains(recorder.message, codexC2CandidateEnv+"=0") {
+		t.Fatalf("first selection: verify calls %d, error %q", verifyCalls, recorder.message)
+	}
+
+	marker = "0"
+	host.SelectAgent(context.Background(), "openai-codex")
+	if verifyCalls != 1 {
+		t.Fatalf("opted-out retry ran the C2 check again (%d calls)", verifyCalls)
+	}
+	if !strings.Contains(recorder.message, "Failed to install codex-acp") {
+		t.Fatalf("opted-out retry error %q, want the stock install attempt", recorder.message)
+	}
+}
+
 // A host with neither a process launcher nor a container resolver must refuse the
 // runtime with a reason, not panic on the nil resolver.
 func TestVerifyCodexRuntimeWithoutAgentContainerFailsClosed(t *testing.T) {

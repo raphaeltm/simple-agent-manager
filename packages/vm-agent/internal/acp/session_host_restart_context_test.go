@@ -288,6 +288,11 @@ func TestSessionHost_RestartAfterCancelSurvivesFinishedCallerRequest(t *testing.
 			if cp.count("error") != 0 {
 				t.Fatalf("activities = %v, want no error report after a recoverable restart", cp.activities())
 			}
+			// The restarted adapter's initialize is reported, so the composer learns
+			// whether it can steer (the fake adapter does not advertise steering).
+			if idle, ok := cp.lastWith("idle"); !ok || idle.SteeringSupported == nil || *idle.SteeringSupported {
+				t.Fatalf("restart idle report steeringSupported = %v, want false", idle.SteeringSupported)
+			}
 			if cp.count("recovering") < 1 {
 				t.Fatalf("activities = %v, want a recovering report before idle", cp.activities())
 			}
