@@ -4,7 +4,11 @@
  * usage breakdown the chat header chip opens.
  */
 import type { CredentialLimitWindowSummary } from '@simple-agent-manager/shared';
-import { credentialLimitSummaryAsOf, credentialLimitWindowLabel } from '@simple-agent-manager/shared';
+import {
+  credentialLimitSummaryAsOf,
+  credentialLimitWindowLabel,
+  worstCredentialLimitLevel,
+} from '@simple-agent-manager/shared';
 import { Dialog } from '@simple-agent-manager/ui';
 import { useId, useState } from 'react';
 
@@ -83,13 +87,15 @@ export function ProfileUsageStrip({
   }
 
   const current = credentialLimitSummaryAsOf(budget.usage, now ?? Date.now());
-  const dot = LEVEL_STYLES[current.level].color;
+  // The dot is the worst window, so it can never look calmer than the meters beside it.
+  const level = worstCredentialLimitLevel(current.windows.map((window) => window.level));
+  const dot = LEVEL_STYLES[level].color;
   return (
     <>
       <button
         type="button"
         onClick={() => setOpen(true)}
-        aria-label={`Usage for ${profileName} on ${budget.label}: ${LEVEL_LABELS[current.level]}. Open details`}
+        aria-label={`Usage for ${profileName} on ${budget.label}: ${LEVEL_LABELS[level]}. Open details`}
         title={budget.label}
         className="-mx-1 inline-flex min-w-0 max-w-full cursor-pointer flex-wrap items-center gap-x-2.5 gap-y-1 rounded-sm border-0 bg-transparent px-1 py-0.5 text-[11px] text-fg-primary hover:bg-[var(--sam-glass-v2-well-shade)] focus-visible:outline-2 focus-visible:outline-focus-ring"
         data-testid="profile-usage-strip"

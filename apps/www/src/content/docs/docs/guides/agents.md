@@ -358,6 +358,10 @@ coming before an agent stops on it.
   a few model calls); credentials that report nothing (see the list below) never show one.
 - **In Settings → Agents**, each account card shows the same chip once an agent has used that
   account. The raw credential list in **Settings → Advanced** shows it too.
+- **On a project's Profiles page**, each profile shows a short usage line for the account it runs on
+  (its own pin, the project's account, or your default), for example `● 5h 72%  Wk 31%  Opus 88%`.
+  Select it for the same details dialog. **Most room** sorts the profiles by how much is left on the
+  limit that will stop each one first, which helps pick the agent to use next.
 - **Agents** can read the same numbers with the `get_credential_limits` tool, so an agent
   coordinating others can pause before a limit and schedule itself to wake after the reset.
 
@@ -369,6 +373,11 @@ The chip's colour shows the most serious state among the limits, and the dialog 
 reached** (the provider is refusing requests). For your own subscription the percentages cover your
 whole account with that provider, so they include use outside SAM; a **Platform credential**'s
 numbers are SAM's shared limits.
+
+SAM only learns a limit's usage while an agent runs on that account. Once a limit's reset time has
+passed and no agent has run since, the old reading no longer applies: SAM shows that limit at **0%**
+and **OK**, marked **↻** in the usage line and **reset 2h ago · no sample since** in the dialog, until
+the next reading arrives. The `get_credential_limits` tool reports it the same way.
 
 When a limit is nearly used up, wait for the reset time shown in the dialog, or start new work with a
 profile for a different agent (Codex instead of Claude Code, say).
@@ -428,6 +437,12 @@ In **SAM** mode the proxy serves the models in the platform catalog, which an op
 ## Agent Profiles
 
 An **agent profile** bundles a connected agent, a model, and settings into a reusable configuration. Profiles are how you choose what runs: pick one when you start a chat ([see below](#choosing-a-profile-for-a-new-chat)), or attach one to a [trigger](/docs/guides/webhook-triggers/) for automated work. Create and manage profiles under a project's **Profiles** page.
+
+The **Profiles** page lists each profile with what it runs (model, effort, chat or task mode,
+permission mode), what it asks for (its vCPU and memory request, a legacy VM size, **Instant
+container**, or **Default resources**), and the [usage](#usage-limits) of the account it runs on. On
+a computer these are columns of a table; on a phone each profile takes three short lines. Select a
+profile's name to edit it, or use its **⋯** menu to edit or delete it.
 
 In a [shared project](/docs/guides/collaboration/), agent profiles (and skills, environment variables, secrets, and files) are project-scoped resources — any member can use profiles another member created. LLM cost follows the running member's own accounts: their choice for the profile, their project pin, or their default. Shared team accounts on profiles are not available yet.
 

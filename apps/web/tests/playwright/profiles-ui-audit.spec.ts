@@ -253,7 +253,7 @@ function audits(viewport: 'mobile' | 'desktop') {
 
   test('shows each profile with its requests and its account usage', async ({ page }) => {
     await openProfiles(page, { profiles: NORMAL });
-    await expect(page.getByTestId('profile-usage-strip')).toHaveCount(4);
+    await expect(page.getByTestId('profile-usage-strip')).toHaveCount(5);
     const row = (name: string) =>
       page.getByTestId('profile-row').filter({ has: page.getByRole('button', { name }) });
     // Astra is pinned to the team seat, whose 5h window reset after the sample.
@@ -285,7 +285,7 @@ function audits(viewport: 'mobile' | 'desktop') {
 
   test('sorts by most room left', async ({ page }) => {
     await openProfiles(page, { profiles: NORMAL });
-    await expect(page.getByTestId('profile-usage-strip')).toHaveCount(4);
+    await expect(page.getByTestId('profile-usage-strip')).toHaveCount(5);
     await page.getByRole('button', { name: 'Most room' }).click();
     // Codex Team seat: 42% left on the week; Raph Max: 12% left on Opus week.
     await expect(page.getByTestId('profile-row').first()).toContainText('Astra High');

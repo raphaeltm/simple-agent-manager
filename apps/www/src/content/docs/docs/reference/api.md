@@ -562,6 +562,10 @@ Latest provider usage windows for the authenticated user's personal credentials,
 `cc_credentials:<id>` references), `level` (`ok`, `warning`, `critical`, `rejected`) and its
 `windows` (`windowType`, `utilizationPercent`, `windowMinutes`, `resetsAt`, `observedAt`, `source`).
 Rows come from `credential_limit_windows`; the response is capped by `CREDENTIAL_LIMIT_READ_MAX_ROWS`.
+A window whose `resetsAt` passed after its latest sample is returned as `utilizationPercent: 0`,
+`level: "ok"`, `status: "allowed"` with `resetElapsed: true` and the original `resetsAt`
+(`credentialLimitWindowAsOf` in `packages/shared/src/credential-limits.ts`); both limit routes and the
+MCP tool apply this.
 
 ### `GET /api/projects/:id/credential-limits`
 
