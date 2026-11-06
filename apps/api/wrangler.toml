@@ -545,6 +545,7 @@ binding = "AI"
 crons = ["*/5 * * * *", "30 * * * *", "0 3 * * *", "0 4 * * *", "0 5 1 * *"]
 
 # Secrets (set via wrangler secret bulk):
+# - BOOTSTRAP_OWNER_EMAIL (optional — immutable verified first-owner identity for installer deployments)
 # - GITHUB_CLIENT_ID
 # - GITHUB_CLIENT_SECRET
 # - GITHUB_APP_ID

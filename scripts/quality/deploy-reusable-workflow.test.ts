@@ -599,9 +599,10 @@ describe('deploy reusable workflow', () => {
       expect(goflags).toContain('-buildvcs=false');
     });
 
-    it('embeds only the reviewed installer, which is a release input', () => {
+    it('embeds only the reviewed installers, which are release inputs', () => {
       const agentRoot = fileURLToPath(new URL('../../packages/vm-agent', import.meta.url));
-      const found = spawnSync('grep', ['-rn', '--include=*.go', 'go:embed', agentRoot], {
+      // Match directives only; a comment that mentions go:embed is not an embed.
+      const found = spawnSync('grep', ['-rn', '--include=*.go', '^//go:embed', agentRoot], {
         encoding: 'utf8',
       });
       expect(found.status, `grep failed: ${found.stderr}`).toBe(0);
@@ -617,24 +618,24 @@ describe('deploy reusable workflow', () => {
       expect(embeds).toEqual([
         'internal/acp/codex_runtime_distribution.go://go:embed codex_runtime_installer.sh',
         'internal/acp/opencode_install.go://go:embed opencode_install.sh',
-        'internal/acp/opencode_install.go:import _ "embed" // Register go:embed support for the shared installer below.',
       ]);
-      withAgentReleaseRepo((repo) => {
-        const path = join(
-          repo.directory,
-          'packages/vm-agent/internal/acp/codex_runtime_installer.sh'
-        );
-        writeFileSync(path, '#!/bin/bash\necho installer-v2\n');
-        execFileSync('git', ['add', '.'], { cwd: repo.directory });
-        execFileSync('git', ['commit', '-m', 'embedded installer change'], { cwd: repo.directory });
-        const head = execFileSync('git', ['rev-parse', 'HEAD'], {
-          cwd: repo.directory,
-          encoding: 'utf8',
-        }).trim();
-        const result = runReleaseResolver(repo.directory, head);
-        expect(result.status).toBe(0);
-        expect(releaseFieldsFrom(result.stdout).release).toBe(head);
-      });
+      for (const installer of ['codex_runtime_installer.sh', 'opencode_install.sh']) {
+        withAgentReleaseRepo((repo) => {
+          const path = join(repo.directory, 'packages/vm-agent/internal/acp', installer);
+          writeFileSync(path, '#!/bin/bash\necho installer-v2\n');
+          execFileSync('git', ['add', '.'], { cwd: repo.directory });
+          execFileSync('git', ['commit', '-m', 'embedded installer change'], {
+            cwd: repo.directory,
+          });
+          const head = execFileSync('git', ['rev-parse', 'HEAD'], {
+            cwd: repo.directory,
+            encoding: 'utf8',
+          }).trim();
+          const result = runReleaseResolver(repo.directory, head);
+          expect(result.status).toBe(0);
+          expect(releaseFieldsFrom(result.stdout).release).toBe(head);
+        });
+      }
     });
 
     it('fails closed on a shallow clone instead of falling back to the deploy commit', () => {
@@ -766,7 +767,11 @@ describe('deploy reusable workflow', () => {
       'Sync Wrangler Config \\(API \\+ Tail Worker\\)',
       'Deploy API Worker',
     ]) {
-      expect(stepBlock(name)).toContain('if: ${{ inputs.dry_run != true }}');
+      // Legacy mutations require both normal execution and the legacy route.
+      // Shared-engine runs must never fall through into a second deployment.
+      expect(stepBlock(name)).toContain(
+        'if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}'
+      );
     }
   });
 
