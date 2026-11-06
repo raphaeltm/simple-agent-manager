@@ -1,0 +1,5 @@
+services:
+  node:
+    build:
+      args:
+        SPIKE_OVERRIDE: present

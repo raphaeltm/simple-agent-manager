@@ -1,0 +1,32 @@
+{
+  "name": "sam-build-spike",
+  "main": "index.ts",
+  "compatibility_date": "2026-11-06",
+  "containers": [
+    {
+      "class_name": "BuildSpike",
+      "image": "./Dockerfile",
+      "instance_type": "standard-4",
+      "max_instances": 1
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "BUILD",
+        "class_name": "BuildSpike"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "BuildSpike"
+      ]
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}

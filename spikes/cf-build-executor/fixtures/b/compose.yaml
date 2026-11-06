@@ -1,0 +1,7 @@
+services:
+  node:
+    image: spike-b-node
+    build: ./node
+  python:
+    image: spike-b-python
+    build: ./python
