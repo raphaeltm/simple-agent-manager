@@ -1,9 +1,15 @@
 const API = 'https://api.cloudflare.com/client/v4';
 export class CloudflareError extends Error {
-  constructor(public status: number) {
+  constructor(
+    public status: number,
+    // Diagnostic context only: method, account-masked API path and Cloudflare's
+    // numeric error codes. Never tokens, bodies or provider error messages.
+    public detail: { method?: string; path?: string; codes?: number[] } = {}
+  ) {
     super(`Cloudflare request failed (${status}). Check the granted permissions and retry.`);
   }
 }
+const maskPath = (path: string) => path.replace(/\/accounts\/[^/]+/, '/accounts/:account');
 export async function cloudflare<T>(
   token: string,
   path: string,
@@ -16,8 +22,19 @@ export async function cloudflare<T>(
       ? AbortSignal.any([init.signal, AbortSignal.timeout(30_000)])
       : AbortSignal.timeout(30_000),
   });
-  const data = (await response.json()) as { success: boolean; result: T };
-  if (!response.ok || !data.success) throw new CloudflareError(response.status);
+  const data = (await response.json().catch(() => ({ success: false }))) as {
+    success: boolean;
+    result: T;
+    errors?: { code?: unknown }[];
+  };
+  if (!response.ok || !data.success)
+    throw new CloudflareError(response.status, {
+      method: init.method ?? 'GET',
+      path: maskPath(path),
+      codes: (data.errors ?? [])
+        .map((error) => error.code)
+        .filter((code): code is number => typeof code === 'number'),
+    });
   return data.result;
 }
 export async function revoke(token: string): Promise<boolean> {

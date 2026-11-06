@@ -87,7 +87,19 @@ export class InstallerSession {
     return this.serialize(async () => {
       try {
         return await this.handle(request);
-      } catch {
+      } catch (error) {
+        // Observability is disabled so callback URLs are never persisted; this
+        // line is visible only to live `wrangler tail` and carries no secrets.
+        console.error(
+          JSON.stringify({
+            event: 'installer.step_failed',
+            route: new URL(request.url).pathname,
+            ...(error instanceof CloudflareError
+              ? { status: error.status, ...error.detail }
+              : // Non-provider failures are the installer's own fixed-string checks.
+                { error: error instanceof Error ? error.message.slice(0, 160) : 'unknown' }),
+          })
+        );
         const cleanup = await this.ctx.storage.get<CleanupJournal>('cleanupJournal');
         return json(
           {
