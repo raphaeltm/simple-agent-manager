@@ -12,7 +12,7 @@ Type your description in the project chat input and submit. Submitting a message
 1. **Generate a title** — short messages are used as-is; longer ones get a concise AI-generated title (an Instant chat that gets no branch keeps the start of your message as its title)
 2. **Create an output branch** — a descriptive `sam/`-prefixed name off your default branch (except for an Instant chat that [gets no branch](/docs/guides/instant-sessions/#what-happens-to-your-work))
 3. **Provision a workspace** — already checked out on that branch; reuses a warm VM if available (an Instant chat that gets no branch starts a new container on your default branch instead)
-4. **Start the agent** — runs the agent from your selected profile (Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, or Amp) with your description
+4. **Start the agent** — runs the agent from your selected profile (Claude Code, Codex, Gemini CLI, Google Antigravity, Mistral Vibe, OpenCode, or Amp) with your description
 5. **Stream output** — watch the agent work in real time in the chat
 
 You can also start work from an idea you filed earlier, with **Start work** on its page. SAM then links the new chat to the idea, so the idea follows the work. See [Start work on an idea](/docs/guides/ideas/#start-work-on-an-idea).

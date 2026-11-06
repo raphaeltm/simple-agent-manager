@@ -156,6 +156,8 @@ export function AgentSettingsCard({ agent, settings, onSave, onReset }: AgentSet
         return 'e.g. gpt-5-codex, o3';
       case 'google-gemini':
         return 'e.g. gemini-2.5-pro';
+      case 'google-antigravity':
+        return 'e.g. gemini-3.8-flash';
       case 'opencode':
         return `e.g. ${DEFAULT_OPENCODE_ZEN_MODEL}`;
       default:

@@ -32,7 +32,7 @@ Browser-based terminal and structured agent interaction:
 
 Run your choice of coding agent:
 
-- Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, Amp.
+- Claude Code, Codex, Gemini CLI, Google Antigravity, Mistral Vibe, OpenCode, Amp.
 - Per-agent API key and OAuth credential management.
 - Agent profiles with custom configuration per project.
 

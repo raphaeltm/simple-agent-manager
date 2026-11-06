@@ -123,6 +123,16 @@ describe('model-catalog', () => {
       );
     });
 
+    it('returns the Gemini models Antigravity offers with API key auth', () => {
+      expect(getModelsForAgent('google-antigravity').map((model) => model.id)).toEqual([
+        'gemini-3.8-flash',
+        'gemini-3.7-flash',
+        'gemini-3.6-flash',
+        'gemini-3.5-flash',
+        'gemini-3.1-pro',
+      ]);
+    });
+
     it('returns empty array for unknown agent type', () => {
       expect(getModelGroupsForAgent('nonexistent')).toEqual([]);
     });

@@ -1,9 +1,9 @@
 ---
 title: AI Agents
-description: Configure and use AI coding agents in SAM — Claude Code, OpenAI Codex, Gemini CLI, Mistral Vibe, OpenCode, and Amp.
+description: Configure and use AI coding agents in SAM — Claude Code, OpenAI Codex, Gemini CLI, Google Antigravity, Mistral Vibe, OpenCode, and Amp.
 ---
 
-SAM supports six AI coding agents. You connect the ones you want to use, then choose which to run for a given chat by selecting an **agent profile**.
+SAM supports seven AI coding agents. You connect the ones you want to use, then choose which to run for a given chat by selecting an **agent profile**.
 
 ## Supported Agents
 
@@ -40,6 +40,23 @@ still available as a fallback.
 | **Provider**  | Google                                                 |
 | **API Key**   | `GEMINI_API_KEY`                                       |
 | **Get a Key** | [Google AI Studio](https://aistudio.google.com/apikey) |
+
+### Google Antigravity
+
+| Property          | Value                                                  |
+| ----------------- | ------------------------------------------------------ |
+| **Provider**      | Google                                                 |
+| **API Key**       | `GEMINI_API_KEY` (a Gemini Developer API key)          |
+| **OAuth Support** | No                                                     |
+| **Get a Key**     | [Google AI Studio](https://aistudio.google.com/apikey) |
+
+SAM runs Google's Antigravity ACP server, version 1.4.5, and signs it in with your Gemini API key. Only Gemini models are available: Antigravity offers its Claude and GPT models only to ACP clients it recognizes by name, and SAM is not one of them yet.
+
+SAM downloads the release from Google when a workspace or Instant session first starts Antigravity and checks its SHA-256 digest. The download is about 320 MB and unpacks to about 1 GB, so the first start takes longer than for other agents. It runs on Linux x86_64 and arm64 devcontainers with glibc; Alpine (musl) images are not supported.
+
+This release writes a `skills/system/run-workflow/SKILL.md` file into the repository when a session starts, so SAM turns off the tool that does it.
+
+Antigravity does not support live steering: a message sent with **Steer** while it is working is sent as the next message when the turn ends. Google may answer "This model is currently experiencing high demand" for a busy model; pick another Gemini model in the profile if that happens.
 
 ### Mistral Vibe
 
@@ -506,7 +523,9 @@ anything, and one in **Accept Edits** can edit files but not run commands that n
 Claude Code supports every mode. Even in Bypass Permissions it still asks about a few safety checks,
 and those questions appear in the chat. Codex always runs with full access. Other agents keep their
 own behavior when they don't support the chosen mode — Amp and Gemini CLI, for example, still ask
-before some actions even when SAM sets Bypass Permissions.
+before some actions even when SAM sets Bypass Permissions. Google Antigravity runs Bypass Permissions
+as its YOLO mode and Accept Edits as its Auto Edit mode. It has no plan mode, so in **Plan Mode** it
+asks before acting.
 
 #### After a chat wakes from sleep
 

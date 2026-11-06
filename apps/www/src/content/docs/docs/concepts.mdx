@@ -140,16 +140,17 @@ See [What Happens When You Send Work](/docs/guides/idea-execution/#agent-to-agen
 
 An **agent session** is an AI coding agent conversation running inside a workspace container. Sessions use the **Agent Communication Protocol (ACP)** to communicate between the browser and the agent process.
 
-SAM supports six AI coding agents:
+SAM supports seven AI coding agents:
 
-| Agent            | Provider                   | API Key Variable    |
-| ---------------- | -------------------------- | ------------------- |
-| **Claude Code**  | Anthropic                  | `ANTHROPIC_API_KEY` |
-| **OpenAI Codex** | OpenAI                     | `OPENAI_API_KEY`    |
-| **Gemini CLI**   | Google                     | `GEMINI_API_KEY`    |
-| **Mistral Vibe** | Mistral                    | `MISTRAL_API_KEY`   |
-| **OpenCode**     | OpenCode managed inference | `OPENCODE_API_KEY`  |
-| **Amp**          | Sourcegraph                | `AMP_API_KEY`       |
+| Agent                  | Provider                   | API Key Variable    |
+| ---------------------- | -------------------------- | ------------------- |
+| **Claude Code**        | Anthropic                  | `ANTHROPIC_API_KEY` |
+| **OpenAI Codex**       | OpenAI                     | `OPENAI_API_KEY`    |
+| **Gemini CLI**         | Google                     | `GEMINI_API_KEY`    |
+| **Google Antigravity** | Google                     | `GEMINI_API_KEY`    |
+| **Mistral Vibe**       | Mistral                    | `MISTRAL_API_KEY`   |
+| **OpenCode**           | OpenCode managed inference | `OPENCODE_API_KEY`  |
+| **Amp**                | Sourcegraph                | `AMP_API_KEY`       |
 
 You choose which agent to run by selecting an **agent profile** in the chat. See the [AI Agents guide](/docs/guides/agents/) for how to connect credentials and configure profiles.
 

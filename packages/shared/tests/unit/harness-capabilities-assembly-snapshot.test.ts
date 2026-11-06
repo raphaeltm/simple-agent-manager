@@ -85,6 +85,20 @@ describe('agent assembler harness capability snapshots', () => {
             "files": [],
           },
         },
+        "google-antigravity": {
+          "apiKey": {
+            "env": {
+              "GEMINI_API_KEY": "sk-google-antigravity",
+            },
+            "files": [],
+          },
+          "platform": {
+            "env": {
+              "GEMINI_API_KEY": "__platform_proxy__",
+            },
+            "files": [],
+          },
+        },
         "google-gemini": {
           "apiKey": {
             "env": {
