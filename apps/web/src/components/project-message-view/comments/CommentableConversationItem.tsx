@@ -2,6 +2,7 @@ import type { ToolCallContentItem } from '@simple-agent-manager/acp-client';
 import type { ReactNode } from 'react';
 
 import { AcpConversationItemView } from '../AcpConversationItemView';
+import { noticeOf } from '../sam-notice/notice-items';
 import type { DisplayItem } from '../tool-call-groups';
 import type { MessageCommentDraft, UiMessageCommentThread } from './comment-utils';
 import {
@@ -70,8 +71,10 @@ export function CommentableConversationItem({
   /** Durable interaction UI anchored directly after the message/tool row. */
   afterContent?: ReactNode;
 }) {
+  // A SAM notice row is not a message anyone wrote, so it takes no comments.
   const isCommentableMessage =
-    item.kind === 'agent_message' || (item.kind === 'user_message' && item.origin !== 'system');
+    item.kind === 'agent_message' ||
+    (item.kind === 'user_message' && item.origin !== 'system' && !noticeOf(item));
   const itemComments = isCommentableMessage
     ? getMessageComments(commentState.comments, item.id)
     : [];
