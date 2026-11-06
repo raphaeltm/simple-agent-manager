@@ -68,7 +68,9 @@ async function loadZones() {
       return option;
     })
   );
-  $('base-domain').value = zones[0] ? `sam.${zones[0].name}` : '';
+  // Default to the zone apex: Cloudflare's free certificate covers it and one
+  // label below, which is every hostname SAM serves to a browser.
+  $('base-domain').value = zones[0] ? zones[0].name : '';
 }
 function message(text, tone = 'notice') {
   $('message').dataset.tone = tone;
@@ -180,7 +182,11 @@ $('preview').addEventListener('click', async () => {
     $('plan-summary').setAttribute('role', plan.conflicts.length ? 'alert' : 'status');
     const summary = $('plan-summary');
     if (plan.conflicts.length) {
-      summary.textContent = `Existing DNS records block installation: ${plan.conflicts.map((record) => record.name).join(', ')}. Choose a fresh subdomain.`;
+      const names = (certificate) => plan.conflicts.filter((record) => (record.type === 'certificate') === certificate).map((record) => record.name).join(', ');
+      const parts = [];
+      if (names(false)) parts.push(`Existing DNS records block installation: ${names(false)}. Remove them in Cloudflare or choose another domain.`);
+      if (names(true)) parts.push(`No active Cloudflare certificate covers ${names(true)}. Install directly at ${plan.zoneName}, which Cloudflare's free certificate covers, or add an Advanced Certificate for these names.`);
+      summary.textContent = parts.join(' ');
     } else {
       const title = document.createElement('h3'); title.textContent = 'Your installation plan';
       const list = document.createElement('dl'); list.className = 'plan-list';
