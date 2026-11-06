@@ -1,12 +1,13 @@
 /**
- * One profile in the list. From `md` up it is a table row (Profile · Runs ·
- * Requests · Usage · actions); below that the same DOM stacks into three
+ * One profile in the list. From `md` up it is a table row (Profile · Model ·
+ * Resources · Usage · actions); below that the same DOM stacks into three
  * lines — name, what it runs, then resources and usage — via `md:contents`.
  */
 import type { AgentProfile } from '@simple-agent-manager/shared';
 import { getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
 import { DropdownMenu } from '@simple-agent-manager/ui';
 import { Cpu, Lock, Pencil, Trash2, Zap } from 'lucide-react';
+import { memo, useMemo } from 'react';
 
 import { ProviderMark } from '../accounts/AccountBits';
 import { getAccountProvider } from '../accounts/provider-meta';
@@ -25,7 +26,7 @@ function agentName(agentType: string): string {
 }
 
 function ResourceLine({ profile }: Readonly<{ profile: AgentProfile }>) {
-  const resources = profileResources(profile);
+  const resources = useMemo(() => profileResources(profile), [profile]);
   const base = 'inline-flex min-w-0 flex-wrap items-center gap-x-1 text-[11px] text-fg-muted';
   if (resources.kind === 'instant') {
     return (
@@ -57,7 +58,8 @@ function ResourceLine({ profile }: Readonly<{ profile: AgentProfile }>) {
   );
 }
 
-export function ProfileRow({
+/** Memoized: the list re-renders on sort, delete-confirm and every usage poll. */
+export const ProfileRow = memo(function ProfileRow({
   profile,
   budget,
   onEdit,
@@ -65,8 +67,8 @@ export function ProfileRow({
 }: Readonly<{
   profile: AgentProfile;
   budget: ProfileBudget | undefined;
-  onEdit: () => void;
-  onDelete: () => void;
+  onEdit: (profile: AgentProfile) => void;
+  onDelete: (profile: AgentProfile) => void;
 }>) {
   const agent = agentName(profile.agentType);
   return (
@@ -81,8 +83,8 @@ export function ProfileRow({
           </span>
           <button
             type="button"
-            onClick={onEdit}
-            className="min-w-0 cursor-pointer border-0 bg-transparent p-0 text-left text-sm font-medium text-fg-primary line-clamp-2 [overflow-wrap:anywhere] hover:underline focus-visible:outline-2 focus-visible:outline-focus-ring"
+            onClick={() => onEdit(profile)}
+            className="min-w-0 cursor-pointer border-0 bg-transparent p-0 text-left text-sm font-medium text-fg-primary line-clamp-2 [overflow-wrap:anywhere] hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
             title={profile.description ?? profile.name}
           >
             {profile.name}
@@ -124,18 +126,18 @@ export function ProfileRow({
               id: 'edit',
               label: 'Edit',
               icon: <Pencil size={14} aria-hidden="true" />,
-              onClick: onEdit,
+              onClick: () => onEdit(profile),
             },
             {
               id: 'delete',
               label: 'Delete',
               icon: <Trash2 size={14} aria-hidden="true" />,
               variant: 'danger',
-              onClick: onDelete,
+              onClick: () => onDelete(profile),
             },
           ]}
         />
       </div>
     </div>
   );
-}
+});

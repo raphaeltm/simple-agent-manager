@@ -53,11 +53,10 @@ export const ProfileList: FC<ProfileListProps> = ({
     // Most room first: ranked by the window that will stop each profile first.
     // Profiles without plan usage (platform, API keys, no samples) go last.
     const now = Date.now();
-    return [...profiles].sort(
-      (a, b) =>
-        (profileHeadroom(budgets?.get(b.id), now) ?? -1) -
-        (profileHeadroom(budgets?.get(a.id), now) ?? -1)
+    const headroom = new Map(
+      profiles.map((profile) => [profile.id, profileHeadroom(budgets?.get(profile.id), now) ?? -1])
     );
+    return [...profiles].sort((a, b) => (headroom.get(b.id) ?? -1) - (headroom.get(a.id) ?? -1));
   }, [profiles, budgets, sort]);
 
   // URL-driven edit modal — `?edit=profileId` or `?edit=new`
@@ -98,9 +97,12 @@ export const ProfileList: FC<ProfileListProps> = ({
     openForm();
   };
 
-  const handleEdit = (profile: AgentProfile) => {
-    openForm(profile.id);
-  };
+  const handleEdit = useCallback((profile: AgentProfile) => openForm(profile.id), [openForm]);
+
+  const handleDeleteRequest = useCallback((profile: AgentProfile) => {
+    setDeleteConfirmId(profile.id);
+    setDeleteError(null);
+  }, []);
 
   const handleSave = async (data: CreateAgentProfileRequest | UpdateAgentProfileRequest) => {
     if (editingProfile) {
@@ -174,8 +176,8 @@ export const ProfileList: FC<ProfileListProps> = ({
               className={`hidden border-b border-[var(--sam-hairline)] py-2 pl-3 pr-1.5 text-[10.5px] font-medium uppercase tracking-[0.08em] text-fg-muted ${PROFILE_ROW_GRID}`}
             >
               <span>Profile</span>
-              <span>Runs</span>
-              <span>Requests</span>
+              <span>Model</span>
+              <span>Resources</span>
               <span>Usage</span>
               <span className="w-9" />
             </div>
@@ -188,17 +190,12 @@ export const ProfileList: FC<ProfileListProps> = ({
                   <ProfileRow
                     profile={profile}
                     budget={budgets?.get(profile.id)}
-                    onEdit={() => handleEdit(profile)}
-                    onDelete={() => {
-                      setDeleteConfirmId(profile.id);
-                      setDeleteError(null);
-                    }}
+                    onEdit={handleEdit}
+                    onDelete={handleDeleteRequest}
                   />
                   {deleteConfirmId === profile.id && (
                     <div className="flex items-center justify-end gap-2 px-3 pb-3">
-                      <span className="mr-auto text-xs text-fg-muted">
-                        Delete {profile.name}?
-                      </span>
+                      <span className="mr-auto text-xs text-fg-muted">Delete this profile?</span>
                       <button
                         type="button"
                         onClick={() => {

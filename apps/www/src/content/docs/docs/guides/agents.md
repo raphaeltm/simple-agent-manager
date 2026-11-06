@@ -377,7 +377,9 @@ numbers are SAM's shared limits.
 SAM only learns a limit's usage while an agent runs on that account. Once a limit's reset time has
 passed and no agent has run since, the old reading no longer applies: SAM shows that limit at **0%**
 and **OK**, marked **↻** in the usage line and **reset 2h ago · no sample since** in the dialog, until
-the next reading arrives. The `get_credential_limits` tool reports it the same way.
+the next reading arrives. OpenCode's rolling limit only frees its oldest usage at that time, so it
+shows as unknown (**—**) instead of 0% until the next reading. The `get_credential_limits` tool reports the same 0% and OK, with the reset time and a note that no
+reading has arrived since.
 
 When a limit is nearly used up, wait for the reset time shown in the dialog, or start new work with a
 profile for a different agent (Codex instead of Claude Code, say).

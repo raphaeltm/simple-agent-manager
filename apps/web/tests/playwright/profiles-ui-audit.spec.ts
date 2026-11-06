@@ -19,6 +19,7 @@ import {
   type AuditResponder,
   makeMockUser,
   screenshot,
+  seedTheme,
   setupAuditRoutes,
 } from './audit-helpers';
 import { makeAgentProfile, respondToProfilePageRoute } from './profile-account-fixtures';
@@ -265,8 +266,21 @@ function audits(viewport: 'mobile' | 'desktop') {
     await expect(row('Backend Implementation')).toContainText('Medium VM');
     await expect(row('Instant')).toContainText('Instant container');
     await expect(row('OC')).toContainText('No account connected');
+    // Column labels belong to the desktop table only; phones stack each row instead.
+    const usageHeader = page.getByText('Usage', { exact: true });
+    if (viewport === 'desktop') await expect(usageHeader).toBeVisible();
+    else await expect(usageHeader).toBeHidden();
     await assertNoOverflow(page);
     await shot(page, 'normal');
+  });
+
+  test('reads in the light theme', async ({ page }) => {
+    await seedTheme(page, 'light');
+    await openProfiles(page, { profiles: NORMAL });
+    await expect(page.getByTestId('profile-usage-strip')).toHaveCount(5);
+    await expect(page.locator('html')).toHaveAttribute('data-ui-theme', 'sam-light');
+    await assertNoOverflow(page);
+    await shot(page, 'light');
   });
 
   test('opens the usage breakdown from the strip', async ({ page }) => {

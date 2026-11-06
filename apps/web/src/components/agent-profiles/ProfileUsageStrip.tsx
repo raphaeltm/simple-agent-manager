@@ -10,7 +10,7 @@ import {
   worstCredentialLimitLevel,
 } from '@simple-agent-manager/shared';
 import { Dialog } from '@simple-agent-manager/ui';
-import { useId, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 
 import { LEVEL_LABELS, LEVEL_STYLES } from '../credential-limits/credential-limit-format';
 import { CredentialLimitDetails } from '../credential-limits/CredentialLimitChip';
@@ -74,6 +74,12 @@ export function ProfileUsageStrip({
   const [open, setOpen] = useState(false);
   const eyebrowId = useId();
   const headingId = useId();
+  const usage = budget?.kind === 'account' ? budget.usage : null;
+  // Recomputed when a poll delivers new usage, not on every parent render.
+  const current = useMemo(
+    () => (usage ? credentialLimitSummaryAsOf(usage, now ?? Date.now()) : null),
+    [usage, now]
+  );
 
   // Still loading: render nothing rather than a spinner that reflows the row.
   if (!budget) return null;
@@ -82,11 +88,10 @@ export function ProfileUsageStrip({
   if (budget.kind === 'paused') {
     return <Quiet tone="warning">{`${budget.label ?? 'Account'} paused`}</Quiet>;
   }
-  if (!budget.usage || budget.usage.windows.length === 0) {
+  if (!current || current.windows.length === 0) {
     return <Quiet>{`${budget.label} · no usage yet`}</Quiet>;
   }
 
-  const current = credentialLimitSummaryAsOf(budget.usage, now ?? Date.now());
   // The dot is the worst window, so it can never look calmer than the meters beside it.
   const level = worstCredentialLimitLevel(current.windows.map((window) => window.level));
   const dot = LEVEL_STYLES[level].color;
@@ -97,7 +102,7 @@ export function ProfileUsageStrip({
         onClick={() => setOpen(true)}
         aria-label={`Usage for ${profileName} on ${budget.label}: ${LEVEL_LABELS[level]}. Open details`}
         title={budget.label}
-        className="-mx-1 inline-flex min-w-0 max-w-full cursor-pointer flex-wrap items-center gap-x-2.5 gap-y-1 rounded-sm border-0 bg-transparent px-1 py-0.5 text-[11px] text-fg-primary hover:bg-[var(--sam-glass-v2-well-shade)] focus-visible:outline-2 focus-visible:outline-focus-ring"
+        className="-mx-1 inline-flex min-w-0 max-w-full cursor-pointer flex-wrap items-center gap-x-2.5 gap-y-1 rounded-sm border-0 bg-transparent px-1 py-0.5 text-[11px] text-fg-primary hover:bg-[var(--sam-glass-v2-well-shade)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
         data-testid="profile-usage-strip"
       >
         <span

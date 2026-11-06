@@ -135,12 +135,20 @@ export function credentialLimitWindowLabel(
 }
 
 /**
+ * Sliding windows: the provider's `resetsAt` says when the oldest usage ages out,
+ * not that the counter returns to zero. OpenCode Go's "rolling" window is the
+ * only one today; nothing in its API contract promises a hard reset.
+ */
+const SLIDING_WINDOW_TYPES = new Set(['opencode.rolling']);
+
+/**
  * A window as it stands at `now`. A sample only describes usage up to the
  * window's reset: once `resetsAt` has passed and the sample predates it, the
  * provider has opened a new window SAM has not sampled yet, so the stale
  * percentage (or "limit reached") no longer applies. Such a window reads 0%,
  * level OK, and carries `resetElapsed` so callers can say it reset rather than
- * present 0% as a measurement.
+ * present 0% as a measurement. A sliding window only sheds its oldest usage at
+ * that time, so its usage becomes unknown (null) instead of 0%.
  */
 export function credentialLimitWindowAsOf(
   window: CredentialLimitWindowSummary,
@@ -151,12 +159,13 @@ export function credentialLimitWindowAsOf(
   if (window.resetElapsed) return window;
   if (resetsAt === null || !Number.isFinite(resetsAt)) return window;
   if (resetsAt > now || window.observedAt >= resetsAt) return window;
+  const sliding = SLIDING_WINDOW_TYPES.has(window.windowType);
   return {
     ...window,
     status: 'allowed',
     level: 'ok',
-    utilizationPercent: 0,
-    remainingAmount: window.limitAmount,
+    utilizationPercent: sliding ? null : 0,
+    remainingAmount: sliding ? null : window.limitAmount,
     resetElapsed: true,
   };
 }

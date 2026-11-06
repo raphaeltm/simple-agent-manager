@@ -128,6 +128,27 @@ describe('credential limit windows as of now', () => {
     expect(current.remainingAmount).toBeNull();
   });
 
+  it('reads a sliding window past its reset as unknown, not 0%', () => {
+    // OpenCode's rolling window only sheds its oldest usage at resetsAt.
+    const rolling = window({
+      windowType: 'opencode.rolling',
+      provider: 'opencode',
+      windowMinutes: null,
+      status: 'rejected',
+      level: 'rejected',
+      utilizationPercent: 100,
+      resetsAt: NOW - HOUR,
+      observedAt: NOW - 2 * HOUR,
+    });
+    expect(credentialLimitWindowAsOf(rolling, NOW)).toMatchObject({
+      level: 'ok',
+      status: 'allowed',
+      utilizationPercent: null,
+      remainingAmount: null,
+      resetElapsed: true,
+    });
+  });
+
   it('keeps a window whose reset is still ahead, unknown, or older than the sample', () => {
     const ahead = window({});
     expect(credentialLimitWindowAsOf(ahead, NOW)).toBe(ahead);
