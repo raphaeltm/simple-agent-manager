@@ -55,6 +55,7 @@ export const AcpSessionActivityReportSchema = v.object({
     )
   ),
   runtimeWorkProgressAt: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
+  steeringSupported: v.optional(v.boolean()),
 });
 
 export const AcpSessionUsageLimitObservationSchema = v.object({

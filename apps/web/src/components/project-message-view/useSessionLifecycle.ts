@@ -75,6 +75,9 @@ export function useSessionLifecycle(
   const [currentPlan, setCurrentPlan] = useState<SessionStateSnapshot['currentPlan']>(null);
   const [promptStartedAt, setPromptStartedAt] = useState<number | null>(null);
   const [staleNotice, setStaleNotice] = useState(false);
+  // Whether the agent's adapter can take a message mid-turn. Null until the VM agent says;
+  // older VM agents never do, so null keeps Steer on offer as before.
+  const [steeringSupported, setSteeringSupported] = useState<boolean | null>(null);
   const clearActivity = useCallback(() => {
     setAgentActivity('idle');
     setPromptStartedAt(null);
@@ -104,6 +107,7 @@ export function useSessionLifecycle(
       // Wake phase is folded in first so the banner has a phase to render in the
       // same commit that flips activity to 'recovering'.
       hydrateWakeProgress(s);
+      if (typeof s.steeringSupported === 'boolean') setSteeringSupported(s.steeringSupported);
       if (isWorkingActivity(s.activity)) {
         setAgentActivity(s.activity);
         setPromptStartedAt(s.promptStartedAt ?? null);
@@ -222,8 +226,10 @@ export function useSessionLifecycle(
     onAgentActivity: useCallback(
       (
         activity: 'prompting' | 'idle' | 'recovering' | 'error',
-        promptStartedAt?: number | null
+        promptStartedAt?: number | null,
+        reportedSteeringSupported?: boolean
       ) => {
+        if (reportedSteeringSupported !== undefined) setSteeringSupported(reportedSteeringSupported);
         const working = activity === 'prompting' || activity === 'recovering';
         setAgentActivity(working ? activity : 'idle');
         setPromptStartedAt(working ? (promptStartedAt ?? Date.now()) : null);
@@ -445,6 +451,7 @@ export function useSessionLifecycle(
     showConnectionBanner: recovery.showConnectionBanner,
     retryWs,
     agentActivity,
+    steeringSupported,
     completionDockWorking,
     /** True while a wake is in flight (hydrated from D1 or pushed over the socket). */
     isWaking: wake.isWaking,

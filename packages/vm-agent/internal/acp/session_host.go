@@ -653,7 +653,7 @@ func (h *SessionHost) ensureAgentInstalled(ctx context.Context, info agentComman
 	if info.verifyOnly {
 		if h.config.ProcessLauncher != nil {
 			if err := exec.CommandContext(ctx, localShellPath, "-c", info.validationCmd).Run(); err != nil {
-				return fmt.Errorf("staged Codex release verification failed: %w", err)
+				return codexRuntimeUnavailable(fmt.Errorf("staged Codex release verification failed: %w", err))
 			}
 			return nil
 		}
@@ -661,7 +661,10 @@ func (h *SessionHost) ensureAgentInstalled(ctx context.Context, info agentComman
 		if err != nil {
 			return fmt.Errorf("failed to discover devcontainer: %w", err)
 		}
-		return h.ensureCodexRuntimeInContainer(ctx, containerID, info)
+		if err := h.ensureCodexRuntimeInContainer(ctx, containerID, info); err != nil {
+			return codexRuntimeUnavailable(err)
+		}
+		return nil
 	}
 	if info.installCmd == "" {
 		return nil

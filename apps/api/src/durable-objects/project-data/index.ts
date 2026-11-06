@@ -2715,6 +2715,7 @@ export class ProjectData extends DurableObject<Env> {
       runtimeWorkCount?: number;
       runtimeWorkSource?: string;
       runtimeWorkProgressAt?: number | null;
+      steeringSupported?: boolean;
     }
   ): Promise<ActivityReportOutcome> {
     return durability.reportActivity(this.sql, this.durabilityHooks(), sessionId, activity, extra);

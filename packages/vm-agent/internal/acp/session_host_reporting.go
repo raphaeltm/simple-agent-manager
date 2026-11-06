@@ -209,6 +209,9 @@ type activityPayload struct {
 	RuntimeWorkCount      *int    `json:"runtimeWorkCount,omitempty"`
 	RuntimeWorkSource     string  `json:"runtimeWorkSource,omitempty"`
 	RuntimeWorkProgressAt *int64  `json:"runtimeWorkProgressAt,omitempty"`
+	// SteeringSupported is whether the loaded adapter can take input mid-turn.
+	// Omitted until the adapter's ACP initialize has run.
+	SteeringSupported *bool `json:"steeringSupported,omitempty"`
 }
 
 type activityReportRequest struct {
@@ -233,6 +236,8 @@ type activityReportSnapshot struct {
 	RuntimeWorkSource        string
 	RuntimeWorkProgressAt    int64
 	HasRuntimeWorkProgressAt bool
+	SteeringSupported        bool
+	HasSteeringSupported     bool
 }
 
 func activityReportSnapshotFromPayload(payload activityPayload) activityReportSnapshot {
@@ -259,6 +264,10 @@ func activityReportSnapshotFromPayload(payload activityPayload) activityReportSn
 	if payload.RuntimeWorkProgressAt != nil {
 		snapshot.RuntimeWorkProgressAt = *payload.RuntimeWorkProgressAt
 		snapshot.HasRuntimeWorkProgressAt = true
+	}
+	if payload.SteeringSupported != nil {
+		snapshot.SteeringSupported = *payload.SteeringSupported
+		snapshot.HasSteeringSupported = true
 	}
 	return snapshot
 }
@@ -308,6 +317,7 @@ func (h *SessionHost) prepareActivityReport(activity string) (activityReportRequ
 	agentType := h.agentType
 	restartCount := h.restartCount
 	statusErr := h.statusErr
+	steering := h.steering
 	h.mu.RUnlock()
 
 	payload := activityPayload{
@@ -315,6 +325,10 @@ func (h *SessionHost) prepareActivityReport(activity string) (activityReportRequ
 		NodeID:       nodeID,
 		AgentType:    agentType,
 		RestartCount: restartCount,
+	}
+	if steering.Known {
+		supported := steering.Supported()
+		payload.SteeringSupported = &supported
 	}
 	runtimeWork := h.harnessWorkSnapshot()
 	if runtimeWork.Source != "" {

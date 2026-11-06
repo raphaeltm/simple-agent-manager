@@ -50,6 +50,8 @@ export interface ActivityUpdate {
   runtimeWorkCount?: number;
   runtimeWorkSource?: string;
   runtimeWorkProgressAt?: number | null;
+  /** Whether the loaded adapter can steer. Absent (older agents) keeps the stored value. */
+  steeringSupported?: boolean;
   now?: number;
   /** Which end produced this value. Defaults to the VM agent's own report. */
   source?: SessionActivitySource;
@@ -111,9 +113,10 @@ export function upsertActivityState(
        agent_type, restart_count, status_error,
        activity_source, activity_reason, activity_probe_attempts,
        runtime_work_state, runtime_work_count, runtime_work_source,
-       runtime_work_updated_at, runtime_work_progress_at, work_at, reported_prompt_started_at
+       runtime_work_updated_at, runtime_work_progress_at, work_at, reported_prompt_started_at,
+       steering_supported
      )
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?)
 	     ON CONFLICT(session_id) DO UPDATE SET
 	       activity_source = excluded.activity_source,
 	       activity_reason = excluded.activity_reason,
@@ -137,6 +140,7 @@ export function upsertActivityState(
        END,
        agent_type = COALESCE(excluded.agent_type, session_state.agent_type),
        restart_count = COALESCE(excluded.restart_count, session_state.restart_count),
+       steering_supported = COALESCE(excluded.steering_supported, session_state.steering_supported),
 		   status_error = excluded.status_error,
 		   runtime_work_state = CASE
 		     WHEN ? = 1 AND (session_state.runtime_work_progress_at IS NULL OR excluded.runtime_work_progress_at >= session_state.runtime_work_progress_at)
@@ -196,6 +200,7 @@ export function upsertActivityState(
     hasRuntimeWorkUpdate ? (runtimeWorkProgressAt ?? null) : null,
     activityAt,
     reportedPromptStartedAt,
+    update.steeringSupported === undefined ? null : update.steeringSupported ? 1 : 0,
     ...Array(5).fill(hasRuntimeWorkUpdate ? 1 : 0),
     sameTurnRereport ? 1 : 0
   );

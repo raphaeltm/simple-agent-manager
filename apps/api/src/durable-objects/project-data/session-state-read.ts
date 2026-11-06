@@ -16,7 +16,8 @@ export function getSessionState(sql: SqlStorage, sessionId: string): SessionStat
               prompt_started_at, last_stop_reason, agent_type,
               activity_source, activity_reason,
               runtime_work_state, runtime_work_count, runtime_work_source,
-              runtime_work_updated_at, runtime_work_progress_at, work_at, reported_prompt_started_at
+              runtime_work_updated_at, runtime_work_progress_at, work_at, reported_prompt_started_at,
+              steering_supported
        FROM session_state WHERE session_id = ?`,
       sessionId
     )
@@ -57,6 +58,8 @@ export function getSessionState(sql: SqlStorage, sessionId: string): SessionStat
       typeof row.reported_prompt_started_at === 'number' && row.reported_prompt_started_at > 0
         ? row.reported_prompt_started_at
         : null,
+    steeringSupported:
+      typeof row.steering_supported === 'number' ? row.steering_supported === 1 : null,
   };
 }
 
