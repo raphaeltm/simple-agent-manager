@@ -191,14 +191,16 @@ export async function handleRequestHumanInput(
     hasOptions: options !== null,
   });
 
+  // JSON so the chat can render this call as an answerable card: the card reads the question
+  // from the attention marker by ID (see HumanInputCard in apps/web), never from chat text.
+  const payload = {
+    message: notificationScheduled
+      ? 'Human input request recorded. Notification delivery has been scheduled. You may continue working or end your turn.'
+      : 'Human input request recorded, but notification delivery was not scheduled. SAM will keep the task alive while waiting for delivery. You may continue working.',
+    humanInputRequest: { id: marker.id, sessionId },
+    notificationScheduled,
+  };
   return jsonRpcSuccess(requestId, {
-    content: [
-      {
-        type: 'text',
-        text: notificationScheduled
-          ? 'Human input request recorded. Notification delivery has been scheduled. You may continue working or end your turn.'
-          : 'Human input request recorded, but notification delivery was not scheduled. SAM will keep the task alive while waiting for delivery. You may continue working.',
-      },
-    ],
+    content: [{ type: 'text', text: JSON.stringify(payload) }],
   });
 }

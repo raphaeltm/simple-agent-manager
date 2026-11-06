@@ -89,7 +89,8 @@ For every kind of request:
 - **No notification is sent.** Watch the session list for **Needs input**; on a phone, open the list
   with the chat list button at the right end of the app bar. (Notifications cover a different kind of
   question, the one agents ask with their `request_human_input` tool — see
-  [Notifications](/docs/guides/notifications/).)
+  [Notifications](/docs/guides/notifications/). Those questions also show as a card in the
+  conversation, where you can answer them.)
 - **You don't have to stay on the page.** A request waits in SAM, not in your browser tab, so you can
   answer later or from another device until its deadline, which the card shows. Meanwhile a VM
   session stays awake, so its machine keeps running, billed to your cloud account if it's yours. If

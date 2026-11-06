@@ -4643,7 +4643,11 @@ describe('MCP Routes', () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.result.content[0].text).toContain('Human input request recorded');
+      const payload = JSON.parse(body.result.content[0].text);
+      expect(payload.message).toContain('Human input request recorded');
+      // The chat card reads the question from this marker; it must point at the stored one.
+      expect(payload.humanInputRequest).toEqual({ id: 'marker-1', sessionId: 'session-1' });
+      expect(payload.notificationScheduled).toBe(true);
       expect(mockNotificationStub.createNotification).toHaveBeenCalledWith(
         'user-789',
         expect.objectContaining({
@@ -4772,7 +4776,11 @@ describe('MCP Routes', () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.result.content[0].text).toContain('notification delivery was not scheduled');
+      const payload = JSON.parse(body.result.content[0].text);
+      expect(payload.message).toContain('notification delivery was not scheduled');
+      expect(payload.notificationScheduled).toBe(false);
+      // The question is still recorded, so the chat card can still be answered.
+      expect(payload.humanInputRequest).toEqual({ id: 'marker-1', sessionId: 'session-1' });
       expect(mockDoStub.createAttentionMarker).toHaveBeenCalledOnce();
     });
 

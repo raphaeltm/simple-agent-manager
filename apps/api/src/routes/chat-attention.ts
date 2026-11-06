@@ -3,6 +3,7 @@
  * (the owner or an active grantee) picks one. Split out of `chat.ts`
  * (`.claude/rules/18-file-size-limits.md`).
  */
+import { HUMAN_INPUT_CATEGORIES, type HumanInputCategory } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Hono } from 'hono';
 
@@ -12,6 +13,7 @@ import type { Env } from '../env';
 import { agentWakeRecord } from '../lib/agent-wake-policy';
 import { markRejectedBeforeEffects } from '../lib/operation-effect-boundary';
 import { requireRouteParam } from '../lib/route-helpers';
+import { parseJsonRecord } from '../lib/runtime-validation';
 import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import {
@@ -28,6 +30,19 @@ import * as projectDataService from '../services/project-data';
 import { recordSharedSessionAnswer } from '../services/session-access';
 import { getSessionMessageLimit } from './chat-message-query';
 import { preparePromptForLiveAgent, sendPreparedPromptToLiveAgent } from './chat-prompt-forward';
+
+/** The `request_human_input` category stored with the question, or null when absent/unknown. */
+function parseAttentionCategory(metadata: string | null): HumanInputCategory | null {
+  if (!metadata) return null;
+  try {
+    const category = parseJsonRecord(metadata, 'attention.metadata').category;
+    return (HUMAN_INPUT_CATEGORIES as readonly unknown[]).includes(category)
+      ? (category as HumanInputCategory)
+      : null;
+  } catch {
+    return null;
+  }
+}
 
 export function registerChatAttentionRoute(chatRoutes: Hono<{ Bindings: Env }>): void {
   // Read-only: no runtime contact or whole-conversation fetch. Context is opt-in.
@@ -109,6 +124,7 @@ export function registerChatAttentionRoute(chatRoutes: Hono<{ Bindings: Env }>):
         id: marker.id,
         reason: marker.reason,
         options: parseAttentionOptions(marker.metadata),
+        category: parseAttentionCategory(marker.metadata),
         createdAt: marker.createdAt,
         resolvedAt: marker.resolvedAt,
         resolvedAnswer: marker.resolvedAnswer,

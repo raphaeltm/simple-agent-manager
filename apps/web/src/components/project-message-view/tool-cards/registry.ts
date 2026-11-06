@@ -9,6 +9,8 @@ import {
   normalizeToolName,
 } from './document-card-data';
 import { DocumentCard } from './DocumentCard';
+import { extractHumanInputRequest, isHumanInputCardTool } from './human-input-card-data';
+import { HumanInputCard } from './HumanInputCard';
 
 /** Props every typed tool-call card receives. */
 export interface ToolCardProps {
@@ -62,6 +64,12 @@ function resolveToolCard(item: ToolCallItem): FC<ToolCardProps> | null {
   // call runs, or when it failed, the generic card shows it (and any error) instead.
   if (isApprovalCardTool(item)) {
     return item.status !== 'failed' && extractApprovalId(item) ? ApprovalCard : null;
+  }
+  // Agent question: the card needs the attention marker reference from the result. While the
+  // call runs, when it failed, or for results recorded before the structured payload, the
+  // generic card shows it instead.
+  if (isHumanInputCardTool(item)) {
+    return item.status !== 'failed' && extractHumanInputRequest(item) ? HumanInputCard : null;
   }
   const base = normalizeToolName(item.toolName ?? item.title);
   if (!base || !DOCUMENT_CARD_TOOLS.has(base)) {

@@ -54,7 +54,7 @@ export interface ToolCallGroupSummary {
 }
 
 /**
- * Typed cards (library documents, Operations approval requests) are
+ * Typed cards (library documents, Operations approval requests, agent questions) are
  * user-facing content the agent deliberately chose to show, so they are NOT
  * absorbable and break the run (policy `bb0b7af1`).
  */
