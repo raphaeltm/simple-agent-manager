@@ -238,3 +238,22 @@ it('expires rotation approval without invalidating the existing credential or co
   expect((await f.post('/confirm-rotate', { rotation, saved: 'yes' }, cookie)).status).toBe(409);
   expect((await f.post('/recover', { recovery: initialRecovery })).status).toBe(200);
 });
+it('tells a bootstrap owner plainly that installing SAM is not available, without a self-loop', async () => {
+  const f = await fixture(),
+    claimed = await f.claim();
+  const claimHtml = await claimed.text();
+  expect(claimed.status).toBe(200);
+  expect(claimHtml).toContain('Save your recovery credential');
+  expect(claimHtml).toContain('Installing SAM itself from this service is not available yet');
+  expect(claimHtml).toContain(`href="${origin}/self-host.html"`);
+  expect(claimHtml).not.toContain('Continue to installation controls');
+  const home = await f.coordinator.fetch(
+    new Request(target + '/', { headers: { Cookie: session(claimed) } })
+  );
+  const homeHtml = await home.text();
+  expect(home.status).toBe(200);
+  expect(homeHtml).toContain('Ownership handoff verified');
+  expect(homeHtml).toContain('Installing SAM itself from this service is not available yet');
+  expect(homeHtml).not.toContain('Continue to installation controls');
+  expect(homeHtml).not.toContain('<code>');
+});

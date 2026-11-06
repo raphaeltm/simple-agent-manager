@@ -15,7 +15,9 @@ function cookie(value,age){return COOKIE+'='+value+'; Path=/; Secure; HttpOnly; 
 function positive(value,fallback,max){const n=Number(value);return Number.isInteger(n)&&n>0&&n<=max?n:fallback;}
 function sessionTtl(env){const value=Number(env.OWNER_SESSION_TTL_SECONDS||86400);return Number.isInteger(value)&&value>=60&&value<=2592000?value:86400;}
 function recoveryForm(message=''){return '<span class="badge">Your account. Your service.</span><h1>Open your installation service</h1><p>'+escape(message||'Use the recovery credential saved when you claimed this service. Your Cloudflare deployment credentials are never used to sign in here.')+'</p><form method="post" action="/recover"><label for="recovery">Recovery credential</label><input id="recovery" name="recovery" type="password" autocomplete="off" required maxlength="128"><button>Sign in</button></form>';}
-function ownerPage(recovery){return '<span class="badge">Ownership verified</span><h1>Your account. Your installation service.</h1><p><strong>Ownership handoff verified.</strong> This Worker and its durable ownership record run in your Cloudflare account.</p>'+(recovery?'<h2>Save your recovery credential</h2><p>This is shown once. Save it in your password manager before leaving. It lets you return after this browser session expires, independently of the hosted installer.</p><code>'+escape(recovery)+'</code><p>Keep this credential private. Anyone holding it can administer this installation service.</p>':'')+'<p><a href="/">Continue to installation controls →</a></p><hr><p>Building SAM, installing its databases, and version updates are not connected yet. No ongoing Cloudflare deployment credential is stored here.</p><form method="post" action="/rotate"><p>Replace your recovery credential if it has been exposed. This invalidates the previous credential and all previous sessions.</p><button>Replace recovery credential</button></form><form method="post" action="/logout"><button>Sign out</button></form>';}
+function configuredNext(text){return '<p>'+text+'</p><p><a href="/">Continue to installation controls →</a></p>';}
+function bootstrapNext(origin){return '<h2>What happens next</h2><p>This preview creates only your installation service. Installing SAM itself from this service is not available yet, so there is nothing else to do here for now. No ongoing Cloudflare deployment credential is stored here.</p>'+(origin?'<p>To run SAM today, follow the <a href="'+escape(origin)+'/self-host.html">self-hosting guide</a>.</p>':'')+'<p>Keep your recovery credential. It is how you return to this service.</p>';}
+function ownerPage(recovery,next){return '<span class="badge">Ownership verified</span><h1>Your account. Your installation service.</h1><p><strong>Ownership handoff verified.</strong> This Worker and its durable ownership record run in your Cloudflare account.</p>'+(recovery?'<h2>Save your recovery credential</h2><p>This is shown once. Save it in your password manager before leaving. It lets you return after this browser session expires, independently of the hosted installer.</p><code>'+escape(recovery)+'</code><p>Keep this credential private. Anyone holding it can administer this installation service.</p>':'')+next+'<hr><form method="post" action="/rotate"><p>Replace your recovery credential if it has been exposed. This invalidates the previous credential and all previous sessions.</p><button>Replace recovery credential</button></form><form method="post" action="/logout"><button>Sign out</button></form>';}
 export class MaintenanceCoordinator{
  constructor(state,env){this.state=state;this.env=env;this.queue=Promise.resolve();}
  async fetch(request){const run=this.queue.then(()=>this.handle(request));this.queue=run.catch(()=>undefined);try{return await run;}catch{return page('<h1>Unable to complete this request</h1><p>Retry from this service. No credentials were logged.</p>',500);}}
@@ -50,7 +52,7 @@ export class MaintenanceCoordinator{
    const record={recoveryHash:await hash(recovery),sessionHash:await hash(session),sessionExpires:now+ttl*1000,claimedAt:now};
    const claimed=await this.state.storage.transaction(async storage=>{if(await storage.get('owner'))return false;await storage.put('owner',record);return true;});
    if(!claimed)return page('<h1>Already claimed</h1>',409);
-   return page((this.env.INSTALLATION_CONFIG?ownerPage(recovery).replace('Building SAM, installing its databases, and version updates are not connected yet. No ongoing Cloudflare deployment credential is stored here.','Your installation settings are ready. Continue to installation controls to approve the build.'):ownerPage(recovery)),200,cookie(session,ttl));
+   return page(ownerPage(recovery,this.env.INSTALLATION_CONFIG?configuredNext('Your installation settings are ready. Continue to installation controls to approve the build.'):bootstrapNext(this.env.INSTALLER_ORIGIN)),200,cookie(session,ttl));
   }
   if(!owner)return page('<h1>Not claimed</h1><p>Open this service using the installer handoff. Public recovery is unavailable until ownership is established.</p>',401);
   if(path==='/recover'){
@@ -63,7 +65,7 @@ export class MaintenanceCoordinator{
    if(typeof credential!=='string'||credential.length>128||!equal(await hash(credential),owner.recoveryHash))return page(recoveryForm('The recovery credential is invalid.'),401);
    const session=random(),ttl=sessionTtl(this.env);owner.sessionHash=await hash(session);owner.sessionExpires=now+ttl*1000;
    await this.state.storage.put('owner',owner);await this.state.storage.delete('recoveryAttempts');
-   return page((this.env.INSTALLATION_CONFIG?ownerPage().replace('Building SAM, installing its databases, and version updates are not connected yet. No ongoing Cloudflare deployment credential is stored here.','Your installation service is ready. Continue to installation controls to view progress.'):ownerPage()),200,cookie(session,ttl));
+   return page(ownerPage('',this.env.INSTALLATION_CONFIG?configuredNext('Your installation service is ready. Continue to installation controls to view progress.'):bootstrapNext(this.env.INSTALLER_ORIGIN)),200,cookie(session,ttl));
   }
   const token=request.headers.get('Cookie')?.split(';').map(x=>x.trim()).find(x=>x.startsWith(COOKIE+'='))?.slice(COOKIE.length+1);
   if(!token||token.length>128||now>=owner.sessionExpires||!equal(await hash(token),owner.sessionHash))return page(recoveryForm(),401);
@@ -82,10 +84,10 @@ export class MaintenanceCoordinator{
    owner.recoveryHash=pending.hash;delete owner.pendingRecovery;
    owner.sessionHash=await hash(session);owner.sessionExpires=now+ttl*1000;
    await this.state.storage.put('owner',owner);await this.state.storage.delete('recoveryAttempts');
-   return page('<h1>Recovery credential replaced</h1><p>Your saved new credential is now active. The previous credential and previous browser sessions have been revoked.</p><p><a href="/">Continue to installation controls →</a></p>',200,cookie(session,ttl));
+   return page('<h1>Recovery credential replaced</h1><p>Your saved new credential is now active. The previous credential and previous browser sessions have been revoked.</p><p><a href="/">Back to your installation service →</a></p>',200,cookie(session,ttl));
   }
   if(this.env.INSTALLATION_CONFIG)return page(await maintenanceDeploymentPanel(this)+'<details class="access-details"><summary>Access & recovery</summary><p>This service and your recovery credential are independent of the hosted installer. Recovery sign-in replaces the previous active session.</p><form method="post" action="/rotate"><button class="secondary">Replace recovery credential</button></form><form method="post" action="/logout"><button class="secondary">Sign out</button></form></details>');
-  return page(ownerPage());
+  return page(ownerPage('',bootstrapNext(this.env.INSTALLER_ORIGIN)));
  }
 }
 export default {async fetch(request,env){const stub=env.MAINTENANCE.get(env.MAINTENANCE.idFromName('owner'));return stub.fetch(request);}};
