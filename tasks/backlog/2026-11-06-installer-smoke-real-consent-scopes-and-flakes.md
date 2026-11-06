@@ -3,11 +3,13 @@
 ## Problem
 
 1. **The staging smoke cannot see a consent-scope failure.** `apps/installer/scripts/staging-smoke.ts`
-   calls `provision()` with the deployment API token (`CF_API_TOKEN`), which has Containers access.
-   Real users provision with an OAuth token limited to the bootstrap scopes
-   (`account-settings.read workers-scripts.edit`). Until `dbede9c7d`, the bootstrap upload declared
-   the `InstallationBuilder` container, so every real bootstrap install got HTTP 403 on
-   `PUT /accounts/:account/workers/scripts/:name`, while the smoke stayed green.
+   calls `provision()` with the deployment API token (`CF_API_TOKEN`), which can create Workers and
+   Containers. Real users provision with an OAuth token limited to the bootstrap scopes. Until
+   `0f72992c2` those were `account-settings.read workers-scripts.edit`, and `workers-scripts.edit`
+   is the Workers Editor role, which cannot create Workers. Every real bootstrap install got HTTP
+   403 on `PUT /accounts/:account/workers/scripts/:name`, while the smoke stayed green. (The upload
+   also declared a builder container, which needs `containers.write`; `dbede9c7d` removed that for
+   bootstrap.)
 2. **The smoke's owner-handoff check is flaky.** Deploy run 42205126502 failed twice in a row on a
    commit that did not touch the maintenance Worker, then passed on the third attempt:
    - attempt 1: `Owner handoff failed` (claim POST returned non-200; the status is not logged)
