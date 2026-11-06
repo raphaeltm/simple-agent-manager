@@ -475,7 +475,10 @@ function surfaceTests() {
     await expect(
       page.getByTestId('credential-limit-details').getByTestId('credential-limit-window')
     ).toHaveCount(5);
-    await expect(page.getByTestId('credential-limit-details')).toContainText('reset due');
+    // The Sonnet window's reset passed after its sample: it reads 0% and says so.
+    await expect(page.getByTestId('credential-limit-details')).toContainText(
+      'reset 1m ago · no sample since'
+    );
     await assertNoOverflow(page);
     await assertNoClippedOverflow(page);
     await screenshot(page, 'credential-limits-chat-many-details', { scopeToProject: true });

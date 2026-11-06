@@ -1,7 +1,7 @@
 import type { CredentialLimitCredentialSummary } from '@simple-agent-manager/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getProjectCredentialLimits: vi.fn(),
@@ -123,8 +123,9 @@ describe('credential limit formatting', () => {
     expect(formatResetCountdown(NOW + 26 * 3_600_000, NOW)).toBe('resets in 1d 2h');
     expect(formatResetCountdown(NOW + 48 * 3_600_000, NOW)).toBe('resets in 2d');
     expect(formatResetCountdown(NOW + 3 * 3_600_000, NOW)).toBe('resets in 3h');
-    expect(formatResetCountdown(NOW, NOW)).toBe('reset due');
-    expect(formatResetCountdown(NOW - 1, NOW)).toBe('reset due');
+    expect(formatResetCountdown(NOW, NOW)).toBe('reset 1m ago');
+    expect(formatResetCountdown(NOW - 1, NOW)).toBe('reset 1m ago');
+    expect(formatResetCountdown(NOW - 2 * 3_600_000, NOW)).toBe('reset 2h ago');
     expect(formatResetCountdown(null, NOW)).toBeNull();
     expect(formatSampledAgo(NOW - 10_000, NOW)).toBe('sampled just now');
     expect(formatSampledAgo(NOW - 3 * 60_000, NOW)).toBe('sampled 3m ago');
@@ -132,6 +133,32 @@ describe('credential limit formatting', () => {
 });
 
 describe('CredentialLimitChip', () => {
+  it('reads a window whose reset passed since its sample as 0% and says it reset', () => {
+    const base = makeCredential();
+    const stale = makeCredential({
+      level: 'warning',
+      observedAt: NOW - 3 * 3_600_000,
+      windows: [
+        {
+          ...base.windows[0],
+          utilizationPercent: 81,
+          level: 'warning',
+          resetsAt: NOW - 2 * 3_600_000,
+          observedAt: NOW - 3 * 3_600_000,
+        },
+        { ...base.windows[1], level: 'ok', observedAt: NOW - 3 * 3_600_000 },
+      ],
+    });
+    render(<CredentialLimitChip credential={stale} now={NOW} />);
+    const chip = screen.getByTestId('credential-limit-chip');
+    expect(chip).toHaveTextContent('Claude · 5h 0% · Week 31%');
+    expect(chip).toHaveAccessibleName(/OK/);
+    fireEvent.click(chip);
+    const [fiveHour] = screen.getAllByTestId('credential-limit-window');
+    expect(fiveHour).toHaveTextContent('0% used');
+    expect(fiveHour).toHaveTextContent('reset 2h ago · no sample since');
+  });
+
   it('shows the compact summary and opens details with every window', () => {
     render(<CredentialLimitChip credential={makeCredential()} now={NOW} />);
     const chip = screen.getByTestId('credential-limit-chip');
@@ -228,8 +255,13 @@ describe('SessionCredentialLimitChip', () => {
     return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
   }
 
+  // The session chip reads the real clock; pin it to the fixtures' NOW.
   beforeEach(() => {
     mocks.getProjectCredentialLimits.mockReset();
+    vi.useFakeTimers({ toFake: ['Date'], now: NOW });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('renders the chip for the session credential once samples arrive', async () => {

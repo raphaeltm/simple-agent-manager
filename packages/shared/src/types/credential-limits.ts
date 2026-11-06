@@ -33,6 +33,12 @@ export interface CredentialLimitWindowSummary {
   observedAt: number;
   /** Epoch ms when SAM last wrote this row. */
   updatedAt: number;
+  /**
+   * True when `resetsAt` passed after the latest sample, so the provider has
+   * started a new window SAM has not sampled yet. Usage then reads 0% and the
+   * level OK (see `credentialLimitWindowAsOf`); `resetsAt` keeps the reset time.
+   */
+  resetElapsed?: boolean;
 }
 
 export interface CredentialLimitCredentialSummary {
