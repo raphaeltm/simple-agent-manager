@@ -53,7 +53,7 @@ func (h *SessionHost) resolveCodexC2Selector(ctx context.Context, agentType stri
 // codexRuntimeUnavailable names the opt-out, because C2 is the default and a
 // devcontainer it cannot run in would otherwise leave Codex unusable.
 func codexRuntimeUnavailable(err error) error {
-	return fmt.Errorf("SAM Codex runtime unavailable (it needs an x86_64 container with Node 22 or newer; set %s=0 on the agent profile to run the stock adapter, which cannot steer): %w", codexC2CandidateEnv, err)
+	return fmt.Errorf("SAM Codex runtime unavailable: %w (the runtime needs an x86_64 container with Node 22 or newer; to run the stock adapter, which cannot steer, set %s=0 on the agent profile)", err, codexC2CandidateEnv)
 }
 
 func selectCodexC2Candidate(info agentCommandInfo, agentType, selector string) (agentCommandInfo, error) {

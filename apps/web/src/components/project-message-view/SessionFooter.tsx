@@ -91,7 +91,8 @@ export function SessionFooter({
   }, [agentWorking]);
   const hasAttachments = lc.attachments.length > 0;
   // An agent whose adapter reported it cannot steer gets no Steer choice: every message
-  // queues. Unknown (null, including older VM agents) keeps the choice on offer.
+  // queues. Unknown (null, including older VM agents) keeps the choice on offer. This is the
+  // composer's choice only; the VM agent refuses a steer its adapter cannot take regardless.
   const canSteer = lc.steeringSupported !== false;
   const workingIntent: PromptDeliveryIntent = canSteer ? deliveryIntent : 'queue';
   const sendIntent: PromptDeliveryIntent =
@@ -172,11 +173,12 @@ export function SessionFooter({
               lc.promptStartedAt ? <ElapsedTime startedAt={lc.promptStartedAt} /> : undefined
             }
             deliveryControl={
-              agentWorking && canSteer ? (
+              agentWorking ? (
                 <DeliveryIntentControl
                   value={deliveryIntent}
                   onChange={setDeliveryIntent}
                   hasAttachments={hasAttachments}
+                  steerUnavailable={!canSteer}
                 />
               ) : undefined
             }

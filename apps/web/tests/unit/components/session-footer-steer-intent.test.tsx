@@ -171,15 +171,52 @@ describe('steer or queue while the agent works', () => {
     expect(next.handleSendFollowUp).toHaveBeenCalledWith('steer');
   });
 
-  it('offers no Steer when the agent cannot steer, and queues', () => {
+  it('locks the chip to Queue, and says why, when the agent cannot steer', () => {
     const lc = lifecycle({ steeringSupported: false });
     renderFooter(lc);
-    expect(chip()).toBeNull();
-    // Liveness: the agent is still shown working, with its Interrupt control and composer.
+    expect(chip()).toHaveAttribute('data-intent', 'queue');
+    expect(chip()).toBeDisabled();
+    expect(chip()).toHaveAccessibleName(/can't take messages mid-turn/i);
+    // Liveness: the agent is still shown working, with its Interrupt control.
     expect(screen.getByRole('button', { name: /interrupt/i })).toBeVisible();
     expect(placeholder()).toBe('Queue next...');
     send();
     expect(lc.handleSendFollowUp).toHaveBeenCalledWith('queue');
+  });
+
+  it('announces and queues when steering support is lost mid-turn, and keeps the choice', () => {
+    const viewer = resolveSessionViewerCapabilities(chatSession, 'owner-1');
+    const props = {
+      projectId: 'project-1',
+      viewer,
+      viewerId: 'owner-1',
+      selectedTextComposer: null,
+      agentProfiles: [],
+      slashCommands: [],
+    };
+    const { rerender } = render(
+      <SessionFooter {...props} lc={lifecycle({ steeringSupported: null })} />
+    );
+    expect(chip()).toHaveAttribute('data-intent', 'steer');
+    const announcement = screen.getByTestId('delivery-intent-announcement');
+
+    // The same turn: only the reported capability changes.
+    const unsupported = lifecycle({ steeringSupported: false });
+    rerender(<SessionFooter {...props} lc={unsupported} />);
+    expect(chip()).toHaveAttribute('data-intent', 'queue');
+    expect(chip()).toBeDisabled();
+    // The live region is the same element, so the change is spoken.
+    expect(screen.getByTestId('delivery-intent-announcement')).toBe(announcement);
+    expect(announcement).toHaveTextContent(/can't take messages mid-turn/i);
+    send();
+    expect(unsupported.handleSendFollowUp).toHaveBeenCalledWith('queue');
+
+    // If the capability comes back within the turn, the user's Steer choice is intact.
+    const supported = lifecycle({ steeringSupported: true });
+    rerender(<SessionFooter {...props} lc={supported} />);
+    expect(chip()).toHaveAttribute('data-intent', 'steer');
+    send();
+    expect(supported.handleSendFollowUp).toHaveBeenCalledWith('steer');
   });
 
   it('keeps offering Steer while support is unknown (older VM agents never report it)', () => {

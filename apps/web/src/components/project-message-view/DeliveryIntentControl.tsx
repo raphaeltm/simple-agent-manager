@@ -35,32 +35,39 @@ export function deliveryIntentPlaceholder(
  * sending it after the turn: one chip in the lifecycle dock's row, tapped to switch, so it
  * costs the composer no height. Files always go with the next message, because a steer
  * carries text only (the server refuses a steer with attachments), so the chip then shows
- * Queue and cannot be switched.
+ * Queue and cannot be switched. The same holds when the agent's runtime reported it cannot
+ * take input mid-turn (`steerUnavailable`); the chip stays, so the reason stays visible.
  */
 export function DeliveryIntentControl({
   value,
   onChange,
   hasAttachments,
+  steerUnavailable = false,
 }: {
   value: PromptDeliveryIntent;
   onChange: (value: PromptDeliveryIntent) => void;
   hasAttachments: boolean;
+  steerUnavailable?: boolean;
 }) {
-  const shown: PromptDeliveryIntent = hasAttachments ? 'queue' : value;
+  const locked = steerUnavailable || hasAttachments;
+  const shown: PromptDeliveryIntent = locked ? 'queue' : value;
   const other: PromptDeliveryIntent = shown === 'steer' ? 'queue' : 'steer';
   const chip = CHIP[shown];
   const Icon = shown === 'steer' ? CornerDownRight : ListEnd;
-  const detail = hasAttachments ? 'Messages with files are sent when this turn ends.' : chip.detail;
+  const lockedReason = steerUnavailable
+    ? "this agent can't take messages mid-turn, so messages are sent when this turn ends"
+    : 'messages with files are sent when this turn ends';
+  const detail = locked
+    ? `${lockedReason.charAt(0).toUpperCase()}${lockedReason.slice(1)}.`
+    : chip.detail;
   return (
     <>
       <button
         type="button"
-        disabled={hasAttachments}
+        disabled={locked}
         onClick={() => onChange(other)}
         aria-label={
-          hasAttachments
-            ? `${chip.name}: messages with files are sent when this turn ends`
-            : `${chip.name}. Switch to ${CHIP[other].name}`
+          locked ? `${chip.name}: ${lockedReason}` : `${chip.name}. Switch to ${CHIP[other].name}`
         }
         title={detail}
         data-testid="delivery-intent-chip"

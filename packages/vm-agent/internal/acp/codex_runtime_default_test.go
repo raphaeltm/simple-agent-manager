@@ -82,6 +82,19 @@ func TestSelectAgentCodexProfileOptOutUsesStockAdapter(t *testing.T) {
 	}
 }
 
+// A host with neither a process launcher nor a container resolver must refuse the
+// runtime with a reason, not panic on the nil resolver.
+func TestVerifyCodexRuntimeWithoutAgentContainerFailsClosed(t *testing.T) {
+	host := NewSessionHost(SessionHostConfig{})
+	defer host.Stop()
+	err := host.ensureAgentInstalled(context.Background(), agentCommandInfo{
+		command: codexC2ReleaseRoot + "/current/bin/codex-acp", validationCmd: codexC2CandidateCheck, verifyOnly: true,
+	})
+	if err == nil || !strings.Contains(err.Error(), "no agent container") || !strings.Contains(err.Error(), codexC2CandidateEnv+"=0") {
+		t.Fatalf("error = %v, want a fail-closed refusal naming the opt-out", err)
+	}
+}
+
 func newCodexSelectionHost(
 	t *testing.T,
 	recorder *selectionErrorRecorder,

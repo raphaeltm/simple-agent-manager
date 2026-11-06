@@ -60,6 +60,7 @@ const EMPTY_STATE: SessionStateSnapshot = {
   runtimeWorkSource: null,
   runtimeWorkUpdatedAt: null,
   runtimeWorkProgressAt: null,
+  steeringSupported: null,
 };
 
 /**
