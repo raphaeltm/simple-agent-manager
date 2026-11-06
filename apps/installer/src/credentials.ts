@@ -52,6 +52,8 @@ const BUCKET_SCOPE = 'com.cloudflare.edge.r2.bucket';
 const TOKEN_PAGE_SIZE = 50; // Cloudflare account-token API maximum.
 const DEFAULT_MAX_TOKEN_PAGES = 20;
 const DEFAULT_CREATE_ATTEMPTS = 2;
+// Diagnostic only: list selectable group names when there are at most this many.
+const DIAGNOSTIC_SELECTABLE_NAMES = 40;
 // Current account-owned permission catalog names; legacy user-token names are
 // deliberately not guessed. Discovery also verifies scope and selectability.
 const DEPLOY_ACCOUNT = [
@@ -83,6 +85,37 @@ const DEPLOY_ZONE = [
 ];
 const RUNTIME_ZONE = ['DNS Write', 'Zone Read', 'SSL and Certificates Write'];
 const validId = (id: unknown): id is string => typeof id === 'string' && /^[a-f0-9]{32}$/.test(id);
+// Report every unusable required group at once, with why. is_selectable is
+// relative to the calling credential, so one failed attempt must show the whole
+// picture. Group names are public catalog vocabulary, safe to surface.
+function assertSelectable(groups: PermissionGroup[], required: [string[], string][]): void {
+  const problems = new Set<string>();
+  for (const [names, scope] of required)
+    for (const name of names) {
+      const named = groups.filter((group) => group.name === name);
+      const inScope = named.filter((group) => group.scopes?.includes(scope));
+      const usable = inScope.filter((group) => group.is_selectable === true && validId(group.id));
+      if (usable.length === 1) continue;
+      const reason = !named.length
+        ? 'absent'
+        : !inScope.length
+          ? 'wrong scope'
+          : usable.length
+            ? 'ambiguous'
+            : 'not selectable';
+      problems.add(`${name} (${reason})`);
+    }
+  if (!problems.size) return;
+  const selectable = groups.filter((group) => group.is_selectable === true);
+  // A short selectable list names the alternatives this credential can grant.
+  const names = [...new Set(selectable.map((group) => group.name))].sort();
+  const available =
+    names.length <= DIAGNOSTIC_SELECTABLE_NAMES ? `: ${names.join(', ') || 'none'}` : '';
+  throw new Error(
+    `Required selectable account-token permission unavailable: ${[...problems].join(', ')}; ` +
+      `${selectable.length} of ${groups.length} groups selectable${available}`
+  );
+}
 function select(groups: PermissionGroup[], names: string[], scope: string): { id: string }[] {
   return names.map((name) => {
     const matches = groups.filter(
@@ -150,6 +183,13 @@ export async function createInstallationCredentials(
   const groups = await cloudflare<PermissionGroup[]>(bootstrapToken, `${base}/permission_groups`, {
     signal: options.signal,
   });
+  assertSelectable(groups, [
+    [DEPLOY_ACCOUNT, ACCOUNT_SCOPE],
+    [RUNTIME_ACCOUNT, ACCOUNT_SCOPE],
+    [DEPLOY_ZONE, ZONE_SCOPE],
+    [RUNTIME_ZONE, ZONE_SCOPE],
+    [['Workers R2 Storage Bucket Item Write'], BUCKET_SCOPE],
+  ]);
   const policy = (names: string[], scope: string, resources: Record<string, string>): Policy => ({
     effect: 'allow',
     permission_groups: select(groups, names, scope),

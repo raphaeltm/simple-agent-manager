@@ -98,7 +98,7 @@ export class InstallerSession {
             ? `${error.detail.method ?? 'GET'} ${error.detail.path ?? '?'} returned HTTP ${error.status}` +
               (error.detail.codes?.length ? ` (codes ${error.detail.codes.join(', ')})` : '')
             : error instanceof Error
-              ? error.message.slice(0, 160)
+              ? error.message.slice(0, 1500)
               : 'unknown error';
         console.error(
           JSON.stringify({

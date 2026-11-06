@@ -116,6 +116,32 @@ describe('installation credential principals', () => {
       expect(runtime).toContain(group(name).id);
     expect(serialize).not.toMatch(/API Tokens|OAuth/);
   });
+  it('reports every unusable group with its reason in one failure', async () => {
+    const unselectable = new Set(['Workers Scripts Write', 'D1 Write']);
+    const groups = catalog
+      .filter((entry) => entry.name !== 'Pages Write')
+      .map((entry) => (unselectable.has(entry.name) ? { ...entry, is_selectable: false } : entry));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ success: true, result: groups }))
+    );
+    const error = await createInstallationCredentials('private', config, installation).catch(
+      (caught: unknown) => caught as Error
+    );
+    expect(error.message).toContain('Workers Scripts Write (not selectable)');
+    expect(error.message).toContain('D1 Write (not selectable)');
+    expect(error.message).toContain('Pages Write (absent)');
+    expect(error.message).toMatch(/\d+ of \d+ groups selectable$/);
+    const few = catalog.map((entry) => ({ ...entry, is_selectable: entry.name === 'Zone Read' }));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => Response.json({ success: true, result: few }))
+    );
+    const narrow = await createInstallationCredentials('private', config, installation).catch(
+      (caught: unknown) => caught as Error
+    );
+    expect(narrow.message).toMatch(/groups selectable: Zone Read$/);
+  });
   it.each(['missing', 'wrong-scope', 'unselectable'])(
     'fails before mutation on %s permission evidence',
     async (mode) => {
