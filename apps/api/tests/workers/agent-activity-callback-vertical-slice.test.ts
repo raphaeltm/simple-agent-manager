@@ -36,6 +36,7 @@ type ActivityBody = {
   runtimeWorkCount?: number;
   runtimeWorkSource?: string;
   runtimeWorkProgressAt?: number;
+  steeringSupported?: boolean;
 };
 
 type SeededCallbackSession = {
@@ -346,5 +347,59 @@ describe('ACP activity callback vertical slice', () => {
       runtimeWorkState: 'inactive',
       runtimeWorkCount: 0,
     });
+  });
+
+  // The composer hides Steer for a session whose adapter cannot steer. The VM agent
+  // reports that on activity callbacks; it must reach the state the browser loads, and a
+  // report without it (an older VM agent) must not erase it.
+  it('persists steering support from the callback and keeps it across reports that omit it', async () => {
+    const session = await seedCallbackSession(crypto.randomUUID());
+    const app = await createTestApp();
+    const { resolveChatAgentState } = await import('../../src/routes/chat-agent-state');
+    const browserState = async () =>
+      (
+        await resolveChatAgentState(testEnv, {
+          projectId: session.projectId,
+          sessionId: session.chatSessionId,
+          lookupFailureEvent: 'test.lookup_failed',
+        })
+      ).state;
+
+    // Liveness: the session state exists before any report carries the field.
+    const before = await postActivity(app, session, { activity: 'idle', nodeId: session.nodeId });
+    expect(before.status).toBe(204);
+    expect(await browserState()).toMatchObject({ activity: 'idle', steeringSupported: null });
+
+    const baseTime = Date.now() + 1_000;
+    vi.useFakeTimers();
+    vi.setSystemTime(baseTime);
+    const unsupported = await postActivity(app, session, {
+      activity: 'prompting',
+      nodeId: session.nodeId,
+      promptStartedAt: baseTime,
+      agentType: 'openai-codex',
+      steeringSupported: false,
+    });
+    expect(unsupported.status).toBe(204);
+    expect(await browserState()).toMatchObject({ activity: 'prompting', steeringSupported: false });
+
+    vi.setSystemTime(baseTime + 100);
+    const legacy = await postActivity(app, session, {
+      activity: 'idle',
+      nodeId: session.nodeId,
+      agentType: 'openai-codex',
+    });
+    expect(legacy.status).toBe(204);
+    expect(await browserState()).toMatchObject({ activity: 'idle', steeringSupported: false });
+
+    vi.setSystemTime(baseTime + 200);
+    const supported = await postActivity(app, session, {
+      activity: 'idle',
+      nodeId: session.nodeId,
+      agentType: 'openai-codex',
+      steeringSupported: true,
+    });
+    expect(supported.status).toBe(204);
+    expect(await browserState()).toMatchObject({ activity: 'idle', steeringSupported: true });
   });
 });

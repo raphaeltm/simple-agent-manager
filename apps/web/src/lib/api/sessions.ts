@@ -134,6 +134,8 @@ export interface SessionStateSnapshot {
   runtimeWorkSource: string | null;
   runtimeWorkUpdatedAt: number | null;
   runtimeWorkProgressAt: number | null;
+  /** Whether the session's agent adapter can steer; null until the VM agent reports it. */
+  steeringSupported?: boolean | null;
   recoveryStatus?: 'waking' | 'restored' | 'failed' | null;
   /**
    * Execution step of the replacement TaskRunner waking this session. Drives

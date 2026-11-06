@@ -47,6 +47,11 @@ export interface UseSessionLifecycleResult {
   showConnectionBanner: boolean;
   retryWs: () => void;
   agentActivity: AgentActivityState;
+  /**
+   * Whether the agent's adapter can take a message mid-turn. Null until the VM agent
+   * reports it (older agents never do).
+   */
+  steeringSupported: boolean | null;
   /** Debounced working signal used only by CompletionDock to swallow brief idle reversals. */
   completionDockWorking: boolean;
   /** True while a wake is in flight (hydrated from D1 or pushed over the socket). */

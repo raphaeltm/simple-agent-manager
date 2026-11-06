@@ -66,6 +66,8 @@ func (r SteerResult) Consumed() bool {
 
 // steeringSupport is what the loaded adapter proved at ACP initialize.
 type steeringSupport struct {
+	// Known is set once the adapter's ACP initialize has been read.
+	Known bool
 	// Advertised is InitializeResponse._meta.steering.supported.
 	Advertised bool
 	// PromptRequired means the adapter returns idle input unconsumed when the
@@ -88,8 +90,13 @@ var promptRequiredAdapters = map[string]func(version string) bool{
 	},
 }
 
+// Supported reports whether SAM will send steers to this adapter.
+func (s steeringSupport) Supported() bool {
+	return s.Advertised && s.PromptRequired
+}
+
 func steeringSupportFromInitialize(resp acpsdk.InitializeResponse) steeringSupport {
-	support := steeringSupport{}
+	support := steeringSupport{Known: true}
 	if resp.AgentInfo != nil {
 		support.Adapter = resp.AgentInfo.Name
 		support.Version = resp.AgentInfo.Version
@@ -136,7 +143,7 @@ func semverAtLeast(version string, major, minor, patch int) bool {
 func (h *SessionHost) SteeringSupported() bool {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-	return h.steering.Advertised && h.steering.PromptRequired
+	return h.steering.Supported()
 }
 
 func (h *SessionHost) steerTimeout() time.Duration {

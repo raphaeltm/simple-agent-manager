@@ -2646,6 +2646,23 @@ export const MIGRATIONS: Migration[] = [
     name: '073-anchored-comment-threads',
     run: migrateAnchoredComments,
   },
+  {
+    // Whether the session's loaded agent adapter can steer (take input mid-turn), from
+    // the VM agent's activity report. NULL means not yet reported (older agents never
+    // report it); the browser then keeps offering Steer as before.
+    name: '074-session-state-steering-supported',
+    run(sql) {
+      const existing = new Set(
+        sql
+          .exec('PRAGMA table_info(session_state)')
+          .toArray()
+          .map((column) => column.name)
+      );
+      if (!existing.has('steering_supported')) {
+        sql.exec('ALTER TABLE session_state ADD COLUMN steering_supported INTEGER');
+      }
+    },
+  },
   // Retired before release: `072-anchored-comment-threads` ran on staging only (renumbered to
   // 073 after another 072 merged first). That name may not be reused.
   // Retired before release: `059-message-upload-parts` ran on staging only. Objects

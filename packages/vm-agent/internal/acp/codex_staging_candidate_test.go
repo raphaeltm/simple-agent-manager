@@ -14,51 +14,59 @@ import (
 	"time"
 )
 
-func TestCodexC2CandidateSelectionIsExplicit(t *testing.T) {
+func TestCodexRuntimeSelectorValues(t *testing.T) {
 	stock := getAgentCommandInfo("openai-codex", "api-key")
 	if stock.command != "codex-acp" {
 		t.Fatalf("stock command = %q", stock.command)
 	}
-	info, err := selectCodexC2Candidate(stock, "openai-codex", "")
+	info, err := selectCodexC2Candidate(stock, "openai-codex", codexRuntimeStock)
 	if err != nil || info.command != stock.command || info.verifyOnly {
-		t.Fatalf("unset selector changed stock path: %+v, %v", info, err)
+		t.Fatalf("stock opt-out changed the stock path: %+v, %v", info, err)
 	}
-	info, err = selectCodexC2Candidate(stock, "openai-codex", "1")
+	info, err = selectCodexC2Candidate(stock, "openai-codex", codexRuntimeC2)
 	if err != nil || !info.verifyOnly || info.installCmd != "" || info.command != codexC2ReleaseRoot+"/current/bin/codex-acp" {
 		t.Fatalf("candidate path not selected: %+v, %v", info, err)
 	}
-	other, err := selectCodexC2Candidate(getAgentCommandInfo("claude-code", "api-key"), "claude-code", "1")
+	other, err := selectCodexC2Candidate(getAgentCommandInfo("claude-code", "api-key"), "claude-code", codexRuntimeC2)
 	if err != nil || other.command != "claude-agent-acp" || other.verifyOnly {
 		t.Fatalf("candidate altered other provider: %+v, %v", other, err)
 	}
-	if _, err := selectCodexC2Candidate(stock, "openai-codex", "unexpected"); err == nil {
-		t.Fatal("invalid selector accepted")
-	}
-	for _, value := range []string{" 1", "1 ", "true", "0"} {
+	for _, value := range []string{"", "unexpected", " 1", "1 ", "true", "false", "00"} {
 		if _, err := selectCodexC2Candidate(stock, "openai-codex", value); err == nil {
 			t.Fatalf("non-canonical selector %q accepted", value)
 		}
 	}
 }
 
-func TestCodexC2CandidateBoundToSessionRuntimeAssets(t *testing.T) {
-	t.Setenv(codexC2CandidateEnv, "1") // a host-wide marker must not select another session
+func TestCodexRuntimeBoundToSessionRuntimeAssets(t *testing.T) {
+	t.Setenv(codexC2CandidateEnv, "0") // a host-wide marker must not select another session
 	credential := &agentCredential{credential: "test-key", credentialKind: "api-key"}
-	selectedValue := "1"
-	selected := NewSessionHost(SessionHostConfig{
-		GatewayConfig: GatewayConfig{ContainerWorkDir: t.TempDir(), ProcessLauncher: LocalLauncher{}},
-		RuntimeAssetsProvider: func(context.Context) (RuntimeAssets, error) {
-			if selectedValue == "" {
-				return RuntimeAssets{}, nil
-			}
-			return RuntimeAssets{EnvVars: []RuntimeEnvVar{{Key: codexC2CandidateEnv, Value: selectedValue}}}, nil
-		},
-	})
-	defer selected.Stop()
-	if _, err := selected.selectSessionCodexRuntime("openai-codex", "1"); err != nil {
-		t.Fatal(err)
+	hostWithMarker := func(value *string) *SessionHost {
+		return NewSessionHost(SessionHostConfig{
+			GatewayConfig: GatewayConfig{ContainerWorkDir: t.TempDir(), ProcessLauncher: LocalLauncher{}},
+			RuntimeAssetsProvider: func(context.Context) (RuntimeAssets, error) {
+				if *value == "" {
+					return RuntimeAssets{}, nil
+				}
+				return RuntimeAssets{EnvVars: []RuntimeEnvVar{{Key: codexC2CandidateEnv, Value: *value}}}, nil
+			},
+		})
 	}
-	startup, err := selected.prepareAgentStartup(context.Background(), "openai-codex", credential, nil)
+
+	// No marker: the default is C2, whatever the host env says.
+	none := ""
+	defaulted := hostWithMarker(&none)
+	defer defaulted.Stop()
+	startup, err := defaulted.prepareAgentStartup(context.Background(), "openai-codex", credential, nil)
+	if err != nil || !startup.info.verifyOnly || startup.info.command != codexC2ReleaseRoot+"/current/bin/codex-acp" {
+		t.Fatalf("unmarked session did not default to C2: %+v, %v", startup, err)
+	}
+
+	// Explicit "1" keeps C2 and never leaks the marker to the adapter.
+	c2 := "1"
+	selected := hostWithMarker(&c2)
+	defer selected.Stop()
+	startup, err = selected.prepareAgentStartup(context.Background(), "openai-codex", credential, nil)
 	if err != nil || !startup.info.verifyOnly || startup.info.command != codexC2ReleaseRoot+"/current/bin/codex-acp" {
 		t.Fatalf("selected session did not retain candidate: %+v, %v", startup, err)
 	}
@@ -66,21 +74,29 @@ func TestCodexC2CandidateBoundToSessionRuntimeAssets(t *testing.T) {
 		t.Fatal("internal selector leaked into adapter environment")
 	}
 
-	stock := NewSessionHost(SessionHostConfig{
-		GatewayConfig:         GatewayConfig{ContainerWorkDir: t.TempDir(), ProcessLauncher: LocalLauncher{}},
-		RuntimeAssetsProvider: func(context.Context) (RuntimeAssets, error) { return RuntimeAssets{}, nil },
-	})
+	// "0" opts the profile out to the stock adapter, without leaking the marker.
+	optOut := "0"
+	stock := hostWithMarker(&optOut)
 	defer stock.Stop()
 	stockStartup, err := stock.prepareAgentStartup(context.Background(), "openai-codex", credential, nil)
 	if err != nil || stockStartup.info.verifyOnly || stockStartup.info.command != "codex-acp" {
-		t.Fatalf("unselected session changed stock path: %+v, %v", stockStartup, err)
+		t.Fatalf("opted-out session did not use the stock path: %+v, %v", stockStartup, err)
+	}
+	if hasEnvVar(stockStartup.envVars, codexC2CandidateEnv) {
+		t.Fatal("internal selector leaked into stock adapter environment")
 	}
 
-	selectedValue = "" // profile marker removed before a restart: fail closed
+	// A marker that changes before a restart fails closed in both directions: a running
+	// host never silently swaps its executable.
+	c2 = ""
 	if _, err := selected.prepareAgentStartup(context.Background(), "openai-codex", credential, nil); err == nil {
-		t.Fatal("candidate session silently fell back to stock after marker removal")
+		t.Fatal("candidate session silently changed runtime after marker removal")
 	}
-	selectedValue = "unexpected"
+	optOut = ""
+	if _, err := stock.prepareAgentStartup(context.Background(), "openai-codex", credential, nil); err == nil {
+		t.Fatal("stock session silently switched to C2 after marker removal")
+	}
+	c2 = "unexpected"
 	if _, err := selected.prepareAgentStartup(context.Background(), "openai-codex", credential, nil); err == nil {
 		t.Fatal("invalid marker accepted on restart")
 	}
@@ -315,14 +331,22 @@ func TestCodexC2CandidateMissingReleaseFailsClosed(t *testing.T) {
 	}
 }
 
-func TestCodexRuntimeAutomaticSelectionAndHostLifetime(t *testing.T) {
+// The incident: task-mode Codex sessions (permission interactions only, the shape
+// buildAcpInteractionRuntimeConfig sends for every non-conversation task) and hosts with
+// interactions disabled ran the stock adapter and could not steer. C2 must not depend on
+// the interaction configuration at all.
+func TestCodexRuntimeDefaultIgnoresInteractionConfig(t *testing.T) {
+	invalid := testFormConfig()
+	invalid.FormDeadlineMs = 0
 	for _, tc := range []struct {
 		name   string
 		config AcpInteractionRuntimeConfig
-		want   string
 	}{
-		{"forms", testFormConfig(), "1"}, {"urls", testURLConfig(), "1"},
-		{"permissions", testInteractionConfig(), ""}, {"disabled", AcpInteractionRuntimeConfig{}, ""},
+		{"task mode (permissions only)", testInteractionConfig()},
+		{"interactions disabled", AcpInteractionRuntimeConfig{}},
+		{"conversation forms", testFormConfig()},
+		{"conversation urls", testURLConfig()},
+		{"invalid forms config", invalid},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := NewSessionHost(SessionHostConfig{GatewayConfig: GatewayConfig{ContainerWorkDir: t.TempDir(), ProcessLauncher: LocalLauncher{}}})
@@ -331,17 +355,11 @@ func TestCodexRuntimeAutomaticSelectionAndHostLifetime(t *testing.T) {
 			h.mu.Lock() // real startSelectedAgent/restartAgentLocked callers hold this lock
 			start, err := h.prepareAgentStartup(context.Background(), "openai-codex", &agentCredential{credential: "test", credentialKind: "api-key"}, nil)
 			h.mu.Unlock()
-			if err != nil {
-				t.Fatal(err)
+			if err != nil || !start.info.verifyOnly || start.info.command != codexC2ReleaseRoot+"/current/bin/codex-acp" {
+				t.Fatalf("Codex did not select C2: %+v, %v", start, err)
 			}
-			if start.info.verifyOnly != (tc.want == "1") {
-				t.Fatalf("unexpected runtime %+v", start.info)
-			}
-			if tc.want == "1" {
-				h.ConfigureAcpInteractions(AcpInteractionRuntimeConfig{})
-			} else {
-				h.ConfigureAcpInteractions(testFormConfig())
-			}
+			// A later interaction-config change cannot swap the executable across a restart.
+			h.ConfigureAcpInteractions(AcpInteractionRuntimeConfig{})
 			next, err := h.prepareAgentStartup(context.Background(), "openai-codex", &agentCredential{credential: "test", credentialKind: "api-key"}, nil)
 			if err != nil || next.info.command != start.info.command || next.info.validationCmd != start.info.validationCmd {
 				t.Fatalf("runtime changed across restart: %+v %v", next, err)
@@ -349,30 +367,24 @@ func TestCodexRuntimeAutomaticSelectionAndHostLifetime(t *testing.T) {
 		})
 	}
 }
-func TestCodexRuntimeAutomaticSelectionDoesNotMaskExplicitChanges(t *testing.T) {
+
+func TestCodexRuntimeSelectionDoesNotMaskExplicitChanges(t *testing.T) {
 	h := NewSessionHost(SessionHostConfig{})
 	defer h.Stop()
-	h.ConfigureAcpInteractions(testFormConfig())
 	if _, err := h.selectSessionCodexRuntime("openai-codex", "invalid"); err == nil {
-		t.Fatal("invalid explicit marker masked by automatic selection")
+		t.Fatal("invalid explicit marker masked by the default")
 	}
 	if _, err := h.selectSessionCodexRuntime("openai-codex", "1"); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := h.selectSessionCodexRuntime("openai-codex", ""); err == nil {
-		t.Fatal("removed explicit marker masked by automatic selection")
+		t.Fatal("removed explicit marker masked by the default")
 	}
 }
-func TestCodexRuntimeAutomaticSelectionRequiresValidConfigAndProvider(t *testing.T) {
+
+func TestCodexRuntimeSelectionLeavesOtherAgentsAlone(t *testing.T) {
 	h := NewSessionHost(SessionHostConfig{})
 	defer h.Stop()
-	invalid := testFormConfig()
-	invalid.FormDeadlineMs = 0
-	h.ConfigureAcpInteractions(invalid)
-	if _, err := h.selectSessionCodexRuntime("openai-codex", ""); err == nil {
-		t.Fatal("invalid config selected runtime")
-	}
-	h.ConfigureAcpInteractions(testFormConfig())
 	if got, err := h.selectSessionCodexRuntime("claude-code", ""); err != nil || got != "" {
 		t.Fatalf("non-Codex changed: %q %v", got, err)
 	}

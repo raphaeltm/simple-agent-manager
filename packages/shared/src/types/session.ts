@@ -371,6 +371,11 @@ export interface SessionStateSnapshot {
    * starts; a re-report of the same turn, a cancel or a restart leaves it unchanged.
    */
   reportedPromptStartedAt?: number | null;
+  /**
+   * Whether the session's loaded agent adapter can take input mid-turn (steer). Null until
+   * the VM agent reports it; older VM agents never do.
+   */
+  steeringSupported?: boolean | null;
   /** D1-sourced recovery status from session_snapshots (sleep/wake lifecycle). */
   recoveryStatus?: 'waking' | 'restored' | 'failed' | null;
   /**

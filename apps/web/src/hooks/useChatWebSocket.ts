@@ -54,7 +54,9 @@ interface UseChatWebSocketOptions {
   /** Called when a session.activity event arrives (prompting/idle). */
   onAgentActivity?: (
     activity: 'prompting' | 'idle' | 'recovering' | 'error',
-    promptStartedAt?: number | null
+    promptStartedAt?: number | null,
+    /** Whether the agent's adapter can steer; absent when the server has no report yet. */
+    steeringSupported?: boolean
   ) => void;
   /** Called when the session metadata changes server-side. */
   onSessionUpdated?: (
@@ -288,7 +290,11 @@ export function useChatWebSocket({
               p.activity === 'recovering' ||
               p.activity === 'error'
             ) {
-              onAgentActivityRef.current?.(p.activity, p.promptStartedAt ?? null);
+              onAgentActivityRef.current?.(
+                p.activity,
+                p.promptStartedAt ?? null,
+                typeof p.steeringSupported === 'boolean' ? p.steeringSupported : undefined
+              );
             }
           } else if (data.type === 'mailbox.delivery_updated') {
             const update = parsePromptDeliveryUpdate(payload);

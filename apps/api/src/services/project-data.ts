@@ -2701,6 +2701,7 @@ export async function reportAcpSessionActivity(
     runtimeWorkCount?: number;
     runtimeWorkSource?: string;
     runtimeWorkProgressAt?: number | null;
+    steeringSupported?: boolean;
   }
 ): Promise<ActivityReportOutcome> {
   const stub = await getStub(env, projectId);

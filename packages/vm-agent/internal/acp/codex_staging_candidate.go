@@ -5,9 +5,18 @@ import (
 	"fmt"
 )
 
-// An explicit verification profile supplies this through the Cloudflare-authorized
-// per-session runtime-assets path. It is never read from the VM-agent host env.
+// Every Codex session runs SAM's reviewed C2 runtime: it is the only Codex
+// adapter that can steer (`promptRequired`, see session_host_steering.go). An
+// agent profile may opt out with SAM_CODEX_C2_CANDIDATE=0 to run the stock npm
+// pin instead, for a devcontainer C2 cannot run in (arm64, Node older than 22);
+// that session cannot steer. The marker arrives through the Cloudflare-authorized
+// per-session runtime-assets path and is never read from the VM-agent host env.
 const codexC2CandidateEnv = "SAM_CODEX_C2_CANDIDATE"
+
+const (
+	codexRuntimeC2    = "1"
+	codexRuntimeStock = "0"
+)
 const codexC2ReleaseRoot = "/opt/sam-codex-c2"
 const codexC2ReleaseIdentity = "sam-codex-acp-2.1.1-sam-c2.3+cli-0.160.0-sam-c2.2-codemode2"
 
@@ -41,14 +50,31 @@ func (h *SessionHost) resolveCodexC2Selector(ctx context.Context, agentType stri
 	return selector, nil
 }
 
+// releaseCodexRuntimeSelection forgets a selection whose runtime failed verification.
+// Nothing ran on it, so the profile may choose again on this host, for example opting
+// out to the stock adapter after C2 could not run in its devcontainer.
+func (h *SessionHost) releaseCodexRuntimeSelection() {
+	h.codexC2SelectionMu.Lock()
+	defer h.codexC2SelectionMu.Unlock()
+	h.codexC2Selector = ""
+	h.codexC2EffectiveSelector = ""
+	h.codexC2SelectionLatched = false
+}
+
+// codexRuntimeUnavailable names the opt-out, because C2 is the default and a
+// devcontainer it cannot run in would otherwise leave Codex unusable.
+func codexRuntimeUnavailable(err error) error {
+	return fmt.Errorf("SAM Codex runtime unavailable: %w (the runtime needs an x86_64 container with Node 22 or newer; to run the stock adapter, which cannot steer, set %s=0 on the agent profile)", err, codexC2CandidateEnv)
+}
+
 func selectCodexC2Candidate(info agentCommandInfo, agentType, selector string) (agentCommandInfo, error) {
 	if agentType != "openai-codex" {
 		return info, nil
 	}
 	switch selector {
-	case "":
+	case codexRuntimeStock:
 		return info, nil
-	case "1":
+	case codexRuntimeC2:
 		info.command = codexC2ReleaseRoot + "/current/bin/codex-acp"
 		info.installCmd = ""
 		info.isNpmBased = false
@@ -61,16 +87,17 @@ func selectCodexC2Candidate(info agentCommandInfo, agentType, selector string) (
 }
 
 // selectSessionCodexRuntime binds an executable to the host at its first Codex
-// selection. Later capability updates cannot silently replace that executable.
-// Explicit profile markers remain independently checked on every restart.
+// selection: C2 unless the profile opts out. The choice does not depend on the
+// session's task mode or interaction flags, so every Codex session can steer.
+// Profile markers remain independently checked on every restart, and a changed
+// marker never silently swaps the executable of a running host.
 func (h *SessionHost) selectSessionCodexRuntime(agentType, explicit string) (string, error) {
 	if agentType != "openai-codex" {
 		return "", nil
 	}
-	if explicit != "" && explicit != "1" {
+	if explicit != "" && explicit != codexRuntimeC2 && explicit != codexRuntimeStock {
 		return "", fmt.Errorf("invalid %s selector", codexC2CandidateEnv)
 	}
-	config := h.acpInteractionConfigSnapshot()
 	h.codexC2SelectionMu.Lock()
 	defer h.codexC2SelectionMu.Unlock()
 	if h.codexC2SelectionLatched {
@@ -80,11 +107,8 @@ func (h *SessionHost) selectSessionCodexRuntime(agentType, explicit string) (str
 		return h.codexC2EffectiveSelector, nil
 	}
 	effective := explicit
-	if effective == "" && config.Enabled && (config.FormsEnabled || config.URLsEnabled) {
-		if err := config.validate(); err != nil {
-			return "", fmt.Errorf("invalid Codex interaction runtime configuration: %w", err)
-		}
-		effective = "1"
+	if effective == "" {
+		effective = codexRuntimeC2
 	}
 	h.codexC2Selector = explicit
 	h.codexC2EffectiveSelector = effective

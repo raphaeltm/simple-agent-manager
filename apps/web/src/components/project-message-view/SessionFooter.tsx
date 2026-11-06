@@ -90,8 +90,13 @@ export function SessionFooter({
     if (!agentWorking) setDeliveryIntent(DEFAULT_WORKING_INTENT);
   }, [agentWorking]);
   const hasAttachments = lc.attachments.length > 0;
+  // An agent whose adapter reported it cannot steer gets no Steer choice: every message
+  // queues. Unknown (null, including older VM agents) keeps the choice on offer. This is the
+  // composer's choice only; the VM agent refuses a steer its adapter cannot take regardless.
+  const canSteer = lc.steeringSupported !== false;
+  const workingIntent: PromptDeliveryIntent = canSteer ? deliveryIntent : 'queue';
   const sendIntent: PromptDeliveryIntent =
-    agentWorking && !hasAttachments ? deliveryIntent : 'queue';
+    agentWorking && !hasAttachments ? workingIntent : 'queue';
   const sessionOwnerLabel = ownerLabelFor(lc.session);
   const viewerGrant = viewer.isGrantee
     ? lc.session?.access?.grants.find((grant) => grant.grantee.id === viewerId)
@@ -173,6 +178,7 @@ export function SessionFooter({
                   value={deliveryIntent}
                   onChange={setDeliveryIntent}
                   hasAttachments={hasAttachments}
+                  steerUnavailable={!canSteer}
                 />
               ) : undefined
             }
@@ -218,7 +224,7 @@ export function SessionFooter({
             lc.isWaking
               ? 'Waking the agent — your message will be delivered...'
               : agentWorking
-                ? deliveryIntentPlaceholder(deliveryIntent, hasAttachments)
+                ? deliveryIntentPlaceholder(workingIntent, hasAttachments)
                 : lc.sessionState === 'idle'
                   ? 'Send a message to resume the agent...'
                   : lc.sessionState === 'sleeping'

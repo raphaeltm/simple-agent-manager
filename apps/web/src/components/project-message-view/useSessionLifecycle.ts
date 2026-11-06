@@ -75,13 +75,19 @@ export function useSessionLifecycle(
   const [currentPlan, setCurrentPlan] = useState<SessionStateSnapshot['currentPlan']>(null);
   const [promptStartedAt, setPromptStartedAt] = useState<number | null>(null);
   const [staleNotice, setStaleNotice] = useState(false);
+  // Whether the agent's adapter can take a message mid-turn. Null until the VM agent says;
+  // older VM agents never do, so null keeps Steer on offer as before.
+  const [steeringSupported, setSteeringSupported] = useState<boolean | null>(null);
   const clearActivity = useCallback(() => {
     setAgentActivity('idle');
     setPromptStartedAt(null);
   }, []);
+  // Every state snapshot (load, fallback poll, activity verification) also carries the
+  // agent's steering capability; a snapshot without it leaves the known value alone.
   const hydratePlan = useCallback((s: SessionStateSnapshot | null | undefined) => {
     if (!s) return;
     setCurrentPlan(s.currentPlan ?? null);
+    if (typeof s.steeringSupported === 'boolean') setSteeringSupported(s.steeringSupported);
   }, []);
   const handleVerifiedStale = useCallback(() => setStaleNotice(true), []);
   const dismissStaleNotice = useCallback(() => setStaleNotice(false), []);
@@ -222,8 +228,11 @@ export function useSessionLifecycle(
     onAgentActivity: useCallback(
       (
         activity: 'prompting' | 'idle' | 'recovering' | 'error',
-        promptStartedAt?: number | null
+        promptStartedAt?: number | null,
+        reportedSteeringSupported?: boolean
       ) => {
+        if (reportedSteeringSupported !== undefined)
+          setSteeringSupported(reportedSteeringSupported);
         const working = activity === 'prompting' || activity === 'recovering';
         setAgentActivity(working ? activity : 'idle');
         setPromptStartedAt(working ? (promptStartedAt ?? Date.now()) : null);
@@ -445,6 +454,7 @@ export function useSessionLifecycle(
     showConnectionBanner: recovery.showConnectionBanner,
     retryWs,
     agentActivity,
+    steeringSupported,
     completionDockWorking,
     /** True while a wake is in flight (hydrated from D1 or pushed over the socket). */
     isWaking: wake.isWaking,

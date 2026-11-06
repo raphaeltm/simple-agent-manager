@@ -50,6 +50,29 @@
         "restartCount": 0,
         "promptStartedAt": 1786960000000
       }
+    },
+    {
+      "name": "steering_capability_unsupported",
+      "comment": "The loaded adapter cannot take input mid-turn (for example the stock Codex adapter). The browser hides Steer for this session.",
+      "payload": {
+        "activity": "prompting",
+        "nodeId": "01K0000000000000000000NODE",
+        "restartCount": 0,
+        "agentType": "openai-codex",
+        "promptStartedAt": 1786960000000,
+        "steeringSupported": false
+      }
+    },
+    {
+      "name": "steering_capability_supported",
+      "comment": "The loaded adapter steers. Agents report this once ACP initialize has run; older agents omit the field.",
+      "payload": {
+        "activity": "idle",
+        "nodeId": "01K0000000000000000000NODE",
+        "restartCount": 0,
+        "agentType": "claude-code",
+        "steeringSupported": true
+      }
     }
   ]
 }

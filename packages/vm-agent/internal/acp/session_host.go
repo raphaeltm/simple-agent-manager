@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -105,6 +104,11 @@ type SessionHostConfig struct {
 	// StartProcess is an internal test hook. Production code leaves it nil and
 	// uses StartProcess via startAgentProcess.
 	StartProcess func(*agentStartup) (agentProcess, error)
+
+	// VerifyCodexRuntime is an internal test hook that replaces the C2 runtime
+	// verification/installation, which needs the real reviewed release. Production
+	// code leaves it nil.
+	VerifyCodexRuntime func(context.Context, agentCommandInfo) error
 
 	// BeforeCheckpointProcessStop is an internal deterministic-race test hook.
 	// Production code leaves it nil.
@@ -652,17 +656,11 @@ func (h *SessionHost) Stop() {
 // on-demand if missing.
 func (h *SessionHost) ensureAgentInstalled(ctx context.Context, info agentCommandInfo) error {
 	if info.verifyOnly {
-		if h.config.ProcessLauncher != nil {
-			if err := exec.CommandContext(ctx, localShellPath, "-c", info.validationCmd).Run(); err != nil {
-				return fmt.Errorf("staged Codex release verification failed: %w", err)
-			}
-			return nil
+		if err := h.verifyCodexRuntime(ctx, info); err != nil {
+			h.releaseCodexRuntimeSelection()
+			return codexRuntimeUnavailable(err)
 		}
-		containerID, err := h.config.ContainerResolver()
-		if err != nil {
-			return fmt.Errorf("failed to discover devcontainer: %w", err)
-		}
-		return h.ensureCodexRuntimeInContainer(ctx, containerID, info)
+		return nil
 	}
 	if info.installCmd == "" {
 		return nil

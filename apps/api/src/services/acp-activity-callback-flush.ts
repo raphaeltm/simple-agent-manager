@@ -45,6 +45,7 @@ export function activityReportExtra(
   runtimeWorkCount?: number;
   runtimeWorkSource?: string;
   runtimeWorkProgressAt?: number | null;
+  steeringSupported?: boolean;
 } {
   return {
     observedAt,
@@ -56,6 +57,7 @@ export function activityReportExtra(
     runtimeWorkCount: body.runtimeWorkCount,
     runtimeWorkSource: body.runtimeWorkSource,
     runtimeWorkProgressAt: body.runtimeWorkProgressAt,
+    steeringSupported: body.steeringSupported,
   };
 }
 

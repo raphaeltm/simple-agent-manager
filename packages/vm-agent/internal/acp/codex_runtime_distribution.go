@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	_ "embed"
+	"errors"
 	"fmt"
 	"net/url"
 	"os"
@@ -51,6 +52,29 @@ func codexRuntimeInstallScript(controlPlaneURL string, budget, killGrace time.Du
 	// Killing docker's client alone does not stop exec processes in the container.
 	// This independent deadline also bounds work after the host context is cancelled.
 	return "timeout --kill-after=" + graceSeconds + " " + seconds + " bash -c " + quote(script), nil
+}
+
+// verifyCodexRuntime checks the pinned C2 release where the agent runs: in place
+// for a standalone (Instant) host, inside the devcontainer (installing it from the
+// control plane when absent) on a VM. It never falls back to the stock adapter.
+func (h *SessionHost) verifyCodexRuntime(ctx context.Context, info agentCommandInfo) error {
+	if h.config.VerifyCodexRuntime != nil {
+		return h.config.VerifyCodexRuntime(ctx, info)
+	}
+	if h.config.ProcessLauncher != nil {
+		if err := exec.CommandContext(ctx, localShellPath, "-c", info.validationCmd).Run(); err != nil {
+			return fmt.Errorf("staged Codex release verification failed: %w", err)
+		}
+		return nil
+	}
+	if h.config.ContainerResolver == nil {
+		return errors.New("no agent container to verify the runtime in")
+	}
+	containerID, err := h.config.ContainerResolver()
+	if err != nil {
+		return fmt.Errorf("failed to discover devcontainer: %w", err)
+	}
+	return h.ensureCodexRuntimeInContainer(ctx, containerID, info)
 }
 
 func (h *SessionHost) ensureCodexRuntimeInContainer(ctx context.Context, containerID string, info agentCommandInfo) error {
