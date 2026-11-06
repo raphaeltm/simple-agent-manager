@@ -349,7 +349,7 @@ func (s *Server) getOrCreateSessionHostForRestore(hostKey, workspaceID, sessionI
 	if hasTaskCtx {
 		sessionTask = &taskCtx
 	}
-	cfg.SAMEnvFallback = s.sessionSAMEnvFallback(workspaceID, runtime, sessionTask)
+	cfg.SAMEnvFallback = s.sessionSAMEnvFallback(workspaceID, runtime, sessionTask, session.RoutedChatSessionID())
 	if hasTaskCtx && s.config != nil && taskCtx.ProjectID != "" && taskCtx.TaskID != "" && taskCtx.WorkspaceID != "" {
 		cfg.OnPromptComplete = s.makeTaskCompletionCallback(s.config.ControlPlaneURL, taskCtx.ProjectID, taskCtx.TaskID, taskCtx.WorkspaceID, taskCtx.TaskMode)
 		cfg.OnPromptCompleteWithContext = func(reason string, err error, completion acp.PromptCompletionContext) {

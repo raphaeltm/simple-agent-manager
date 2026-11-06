@@ -4,6 +4,8 @@ import (
 	"log/slog"
 	"strings"
 
+	"github.com/workspace/vm-agent/internal/acp"
+	"github.com/workspace/vm-agent/internal/agentsessions"
 	"github.com/workspace/vm-agent/internal/config"
 )
 
@@ -67,22 +69,25 @@ func (s *Server) workspaceSAMIdentity(workspaceID string, runtime *WorkspaceRunt
 	return id
 }
 
-// sessionStartProjectConflicts reports whether an agent-session start names a
-// project other than the workspace's own. The start handler writes that project
-// onto the runtime (resource-history attribution) and into the session's task
-// context, so a mismatch would re-bind the workspace; it is refused instead.
-func (s *Server) sessionStartProjectConflicts(workspaceID string, runtime *WorkspaceRuntime, requested string) bool {
+// requestProjectConflicts reports whether an agent-session create or start
+// names a project other than the workspace's own. Both handlers write the
+// requested project onto the workspace runtime (and start also into the session
+// task context), so a mismatch would re-bind the workspace; it is refused.
+func (s *Server) requestProjectConflicts(workspaceID, requested string) bool {
 	requested = strings.TrimSpace(requested)
-	if requested == "" || runtime == nil {
+	if requested == "" {
 		return false
 	}
 	s.workspaceMu.RLock()
-	current := strings.TrimSpace(runtime.ProjectID)
+	current := ""
+	if rt, ok := s.workspaces[workspaceID]; ok {
+		current = strings.TrimSpace(rt.ProjectID)
+	}
 	s.workspaceMu.RUnlock()
 	if current == "" || current == requested {
 		return false
 	}
-	slog.Error("Agent session start rejected: project does not match workspace",
+	slog.Error("Agent session request rejected: project does not match workspace",
 		"workspaceId", workspaceID,
 		"expectedProjectId", current,
 		"receivedProjectId", requested,
@@ -134,11 +139,13 @@ func (s *Server) workspaceBootstrapConfig(runtime *WorkspaceRuntime, callbackTok
 	return cfg
 }
 
-// sessionSAMEnvFallback is the SAM env a session's agent gets for any key its
-// container env files lack. It is built per session because SAM_TASK_MODE only
-// ever comes from here, and a node-level list would give every session on the
-// node the boot session's mode and IDs.
-func (s *Server) sessionSAMEnvFallback(workspaceID string, runtime *WorkspaceRuntime, task *taskCallbackContext) []string {
+// sessionSAMEnvFallback is the SAM env a session's agent gets on top of its
+// container env files. It is built per session because SAM_TASK_MODE only ever
+// comes from here, and a node-level list would give every session on the node
+// the boot session's mode and IDs. routedChatSessionID, when set, is the chat
+// the agent session was created for; it beats the runtime's, which records only
+// the workspace's latest agent session.
+func (s *Server) sessionSAMEnvFallback(workspaceID string, runtime *WorkspaceRuntime, task *taskCallbackContext, routedChatSessionID string) []string {
 	if s.config == nil {
 		return nil
 	}
@@ -151,6 +158,21 @@ func (s *Server) sessionSAMEnvFallback(workspaceID string, runtime *WorkspaceRun
 		cfg.Repository = ""
 		cfg.Branch = ""
 	}
-	s.workspaceSAMIdentity(workspaceID, runtime, task).applyTo(&cfg)
+	id := s.workspaceSAMIdentity(workspaceID, runtime, task)
+	id.ChatSessionID = firstNonEmpty(strings.TrimSpace(routedChatSessionID), id.ChatSessionID)
+	id.applyTo(&cfg)
 	return cfg.BuildSAMEnvFallback()
+}
+
+// refreshSessionSAMEnv rebuilds a host's SAM env from the task context the
+// agent-session start just stored. Callers must not hold sessionHostMu.
+func (s *Server) refreshSessionSAMEnv(host *acp.SessionHost, hostKey, workspaceID string, session agentsessions.Session, runtime *WorkspaceRuntime) {
+	s.sessionHostMu.Lock()
+	taskCtx, ok := s.sessionTaskCtx[hostKey]
+	s.sessionHostMu.Unlock()
+	var task *taskCallbackContext
+	if ok {
+		task = &taskCtx
+	}
+	host.ConfigureSAMEnvFallback(s.sessionSAMEnvFallback(workspaceID, runtime, task, session.RoutedChatSessionID()))
 }

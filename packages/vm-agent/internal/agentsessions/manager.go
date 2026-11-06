@@ -352,3 +352,12 @@ func (s Session) matchesCreation(identity *creationIdentity) bool {
 func (s Session) MatchesRouting(projectID, chatSessionID string) bool {
 	return s.Status == StatusRunning && s.creationIdentity != nil && s.creationIdentity.ProjectID == projectID && s.creationIdentity.ChatSessionID == chatSessionID
 }
+
+// RoutedChatSessionID is the chat session this agent session was created for,
+// or "" when it carries no creation identity (a persisted tab after restart).
+func (s Session) RoutedChatSessionID() string {
+	if s.creationIdentity == nil {
+		return ""
+	}
+	return s.creationIdentity.ChatSessionID
+}

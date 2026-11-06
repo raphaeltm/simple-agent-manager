@@ -23,7 +23,22 @@ var sessionIdentityEnvKeys = map[string]bool{
 // session, so it carries this session's identity, never the identity of the
 // session that booted the node.
 func (h *SessionHost) SAMEnvFallback() []string {
-	return slices.Clone(h.config.SAMEnvFallback)
+	return slices.Clone(h.samEnvFallbackSnapshot())
+}
+
+// ConfigureSAMEnvFallback replaces this session's SAM env before the agent
+// starts. Agent-session start calls it because a viewer can attach, and build
+// the host, before the start delivers the session's task context.
+func (h *SessionHost) ConfigureSAMEnvFallback(env []string) {
+	env = slices.Clone(env)
+	h.samEnvFallback.Store(&env)
+}
+
+func (h *SessionHost) samEnvFallbackSnapshot() []string {
+	if env := h.samEnvFallback.Load(); env != nil {
+		return *env
+	}
+	return h.config.SAMEnvFallback
 }
 
 // mergeSAMEnvFallback layers the session's SAM env over the container env

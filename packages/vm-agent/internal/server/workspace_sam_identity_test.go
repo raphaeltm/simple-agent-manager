@@ -2,14 +2,17 @@ package server
 
 import (
 	"context"
+	"crypto/rsa"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/workspace/vm-agent/internal/acp"
+	"github.com/workspace/vm-agent/internal/auth"
 	"github.com/workspace/vm-agent/internal/bootlog"
 	"github.com/workspace/vm-agent/internal/bootstrap"
 	"github.com/workspace/vm-agent/internal/config"
@@ -41,6 +44,8 @@ type agentStartRequest struct {
 	workspaceID, sessionID, chatSessionID, projectID, taskID, taskMode string
 	// startProjectID overrides the project sent on agent-session start only.
 	startProjectID string
+	// beforeStart runs between create and start, e.g. to attach a viewer.
+	beforeStart func()
 }
 
 // startAgentSessionThroughHandlers drives the two calls the control plane makes
@@ -73,31 +78,12 @@ func startAgentSessionThroughHandlers(t *testing.T, s *Server, req agentStartReq
 // the start response.
 func postAgentSessionStart(t *testing.T, s *Server, req agentStartRequest) *httptest.ResponseRecorder {
 	t.Helper()
-	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-test")
-	s.jwtValidator = validator
-	s.executionRuntimeID = "runtime-1"
-	token := signWorkspaceCreateNodeToken(t, privateKey, "node-test", req.workspaceID)
-	call := func(handler http.HandlerFunc, path string, body map[string]any) *httptest.ResponseRecorder {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			t.Fatal(err)
-		}
-		r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(raw)))
-		r.SetPathValue("workspaceId", req.workspaceID)
-		r.SetPathValue("sessionId", req.sessionID)
-		r.Header.Set("Authorization", "Bearer "+token)
-		r.Header.Set("X-SAM-Node-Id", "node-test")
-		r.Header.Set("X-SAM-Workspace-Id", req.workspaceID)
-		rec := httptest.NewRecorder()
-		handler(rec, r)
-		return rec
-	}
-
-	created := call(s.handleCreateAgentSession, "/workspaces/"+req.workspaceID+"/agent-sessions", map[string]any{
-		"sessionId": req.sessionID, "chatSessionId": req.chatSessionID, "projectId": req.projectID,
-	})
+	created := postAgentSessionCreate(t, s, req.workspaceID, req.sessionID, req.chatSessionID, req.projectID)
 	if created.Code != http.StatusCreated {
 		t.Fatalf("create agent session = %d %s", created.Code, created.Body.String())
+	}
+	if req.beforeStart != nil {
+		req.beforeStart()
 	}
 
 	hash := agentStartDeliveryFingerprint(1, "message-1", "prompt", "", acp.AcpInteractionRuntimeConfig{})
@@ -107,12 +93,49 @@ func postAgentSessionStart(t *testing.T, s *Server, req agentStartRequest) *http
 	if _, claimed, err := s.store.ClaimPromptDelivery(req.workspaceID, req.sessionID, "delivery-1", s.executionRuntimeID); err != nil || !claimed {
 		t.Fatalf("claim prompt delivery: claimed=%v err=%v", claimed, err)
 	}
-	return call(s.handleStartAgentSession, "/workspaces/"+req.workspaceID+"/agent-sessions/"+req.sessionID+"/start", map[string]any{
-		"protocolVersion": 1, "deliveryId": "delivery-1", "messageId": "message-1",
-		"agentType": "claude-code", "initialPrompt": "prompt",
-		"projectId": firstNonEmpty(req.startProjectID, req.projectID), "taskId": req.taskID, "taskMode": req.taskMode,
-	})
+	return nodeManagementPOST(t, s, s.handleStartAgentSession, req.workspaceID, req.sessionID,
+		"/workspaces/"+req.workspaceID+"/agent-sessions/"+req.sessionID+"/start", map[string]any{
+			"protocolVersion": 1, "deliveryId": "delivery-1", "messageId": "message-1",
+			"agentType": "claude-code", "initialPrompt": "prompt",
+			"projectId": firstNonEmpty(req.startProjectID, req.projectID), "taskId": req.taskID, "taskMode": req.taskMode,
+		})
 }
+
+// postAgentSessionCreate is the control plane's create-agent-session call.
+func postAgentSessionCreate(t *testing.T, s *Server, workspaceID, sessionID, chatSessionID, projectID string) *httptest.ResponseRecorder {
+	t.Helper()
+	return nodeManagementPOST(t, s, s.handleCreateAgentSession, workspaceID, sessionID,
+		"/workspaces/"+workspaceID+"/agent-sessions", map[string]any{
+			"sessionId": sessionID, "chatSessionId": chatSessionID, "projectId": projectID,
+		})
+}
+
+// nodeManagementPOST sends a control-plane request with a node token scoped to
+// workspaceID, installing the JWT validator on first use.
+func nodeManagementPOST(t *testing.T, s *Server, handler http.HandlerFunc, workspaceID, sessionID, path string, body map[string]any) *httptest.ResponseRecorder {
+	t.Helper()
+	if s.jwtValidator == nil {
+		validator, key := newWorkspaceCreateJWTValidator(t, "node-test")
+		s.jwtValidator = validator
+		s.executionRuntimeID = "runtime-1"
+		nodeTestKeys[s] = key
+	}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := httptest.NewRequest(http.MethodPost, path, strings.NewReader(string(raw)))
+	r.SetPathValue("workspaceId", workspaceID)
+	r.SetPathValue("sessionId", sessionID)
+	r.Header.Set("Authorization", "Bearer "+signWorkspaceCreateNodeToken(t, nodeTestKeys[s], "node-test", workspaceID))
+	r.Header.Set("X-SAM-Node-Id", "node-test")
+	r.Header.Set("X-SAM-Workspace-Id", workspaceID)
+	rec := httptest.NewRecorder()
+	handler(rec, r)
+	return rec
+}
+
+var nodeTestKeys = map[*Server]*rsa.PrivateKey{}
 
 func TestSharedNodeSessionGetsItsOwnSAMIdentity(t *testing.T) {
 	cases := []struct {
@@ -225,8 +248,8 @@ func TestSessionStartTaskContextFeedsTheSessionEnv(t *testing.T) {
 }
 
 // A start naming another project would re-bind the workspace (runtime project,
-// resource attribution, session task context and env). It is refused before any
-// state changes.
+// resource attribution, session task context and env). It is refused with 400,
+// not a retryable 409, before any state changes.
 func TestSessionStartForAnotherProjectIsRejected(t *testing.T) {
 	s, _ := newMcpTestServer(t)
 	bootIdentity(s.config)
@@ -237,8 +260,8 @@ func TestSessionStartForAnotherProjectIsRejected(t *testing.T) {
 		chatSessionID: "chat-second", projectID: "proj-second", startProjectID: "proj-foreign",
 		taskID: "task-foreign", taskMode: config.TaskModeTask})
 
-	if rec.Code != http.StatusConflict {
-		t.Fatalf("start = %d %s, want 409", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("start = %d %s, want 400", rec.Code, rec.Body.String())
 	}
 	rt, _ := s.getWorkspaceRuntime("ws-second")
 	if rt.ProjectID != "proj-second" || rt.TaskID != "task-second" {
@@ -265,6 +288,93 @@ func TestWorkspaceSAMIdentityIgnoresTaskContextForAnotherProject(t *testing.T) {
 	want := samIdentity{ProjectID: "proj-second", TaskID: "task-second"}
 	if got != want {
 		t.Fatalf("identity = %+v, want %+v", got, want)
+	}
+}
+
+// A viewer's WebSocket can build the SessionHost before the control plane's
+// start arrives with the session's task context. The start must still reach the
+// agent's env.
+func TestSessionStartRefreshesAHostAViewerBuiltFirst(t *testing.T) {
+	s, _ := newMcpTestServer(t)
+	bootIdentity(s.config)
+	s.config.AllowedOrigins = []string{"*"}
+	s.config.WSReadBufferSize, s.config.WSWriteBufferSize = 4096, 4096
+	s.sessionManager = auth.NewSessionManager("session", false, time.Hour)
+	viewer, err := s.sessionManager.CreateSession(&auth.Claims{Workspace: "ws-second"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(http.HandlerFunc(s.handleAgentWS))
+	t.Cleanup(ts.Close)
+	s.upsertWorkspaceRuntime("ws-second", "octo/second", "sam/second", "running", "ws-token",
+		workspaceRuntimeOpts{ProjectID: "proj-second", TaskID: "task-second"})
+
+	env := startAgentSessionThroughHandlers(t, s, agentStartRequest{
+		workspaceID: "ws-second", sessionID: "sess-viewer", chatSessionID: "chat-second",
+		projectID: "proj-second", taskID: "task-second", taskMode: config.TaskModeTask,
+		beforeStart: func() {
+			conn := dialAgentWS(t, ts, viewer.ID, "ws-second", "sess-viewer")
+			t.Cleanup(func() { _ = conn.Close() })
+			host := waitForSessionHost(t, s, "ws-second:sess-viewer")
+			if mode := envMap(host.SAMEnvFallback())["SAM_TASK_MODE"]; mode != "" {
+				t.Fatalf("viewer-built host already has SAM_TASK_MODE=%q; the test cannot observe the refresh", mode)
+			}
+		},
+	})
+
+	if env["SAM_TASK_MODE"] != config.TaskModeTask || env["SAM_TASK_ID"] != "task-second" {
+		t.Fatalf("start did not refresh the viewer-built host: %v", env)
+	}
+}
+
+// The runtime records only the workspace's latest agent session's chat; each
+// agent session's env names the chat it was created for.
+func TestEachAgentSessionInAWorkspaceGetsItsOwnChat(t *testing.T) {
+	s, _ := newMcpTestServer(t)
+	bootIdentity(s.config)
+	s.upsertWorkspaceRuntime("ws-second", "octo/second", "sam/second", "running", "ws-token",
+		workspaceRuntimeOpts{ProjectID: "proj-second", TaskID: "task-second"})
+
+	env := startAgentSessionThroughHandlers(t, s, agentStartRequest{
+		workspaceID: "ws-second", sessionID: "sess-one", chatSessionID: "chat-one",
+		projectID: "proj-second", taskID: "task-second", taskMode: config.TaskModeConversation,
+		beforeStart: func() {
+			if rec := postAgentSessionCreate(t, s, "ws-second", "sess-two", "chat-two", "proj-second"); rec.Code != http.StatusCreated {
+				t.Fatalf("create second agent session = %d %s", rec.Code, rec.Body.String())
+			}
+			if rt, _ := s.getWorkspaceRuntime("ws-second"); rt.ChatSessionID != "chat-two" {
+				t.Fatalf("runtime chat = %q; the test needs the runtime to name the other session", rt.ChatSessionID)
+			}
+		},
+	})
+
+	if env["SAM_CHAT_SESSION_ID"] != "chat-one" {
+		t.Fatalf("SAM_CHAT_SESSION_ID = %q, want chat-one", env["SAM_CHAT_SESSION_ID"])
+	}
+}
+
+// Creating an agent session writes its project onto the workspace runtime; a
+// foreign project is refused before that happens.
+func TestAgentSessionCreateForAnotherProjectIsRejected(t *testing.T) {
+	s, _ := newMcpTestServer(t)
+	bootIdentity(s.config)
+	s.upsertWorkspaceRuntime("ws-second", "octo/second", "sam/second", "running", "ws-token",
+		workspaceRuntimeOpts{ProjectID: "proj-second", TaskID: "task-second"})
+
+	rec := postAgentSessionCreate(t, s, "ws-second", "sess-a", "chat-foreign", "proj-foreign")
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("create = %d %s, want 400", rec.Code, rec.Body.String())
+	}
+	rt, _ := s.getWorkspaceRuntime("ws-second")
+	if rt.ProjectID != "proj-second" || rt.ChatSessionID != "" {
+		t.Errorf("runtime re-bound to project %q chat %q", rt.ProjectID, rt.ChatSessionID)
+	}
+	if _, exists := s.agentSessions.Get("ws-second", "sess-a"); exists {
+		t.Error("rejected create still recorded the agent session")
+	}
+
+	if owner := postAgentSessionCreate(t, s, "ws-second", "sess-b", "chat-second", "proj-second"); owner.Code != http.StatusCreated {
+		t.Fatalf("owner create = %d %s, want 201", owner.Code, owner.Body.String())
 	}
 }
 
