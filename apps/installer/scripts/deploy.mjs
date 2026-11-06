@@ -247,9 +247,18 @@ try {
       if (value)
         await api(`${worker}/secrets`, 'PUT', { name: key, text: value, type: 'secret_text' });
   }
-  const secrets = await api(`${worker}/secrets`);
-  if (!SECRET_NAMES.every((key) => secrets.some((entry) => entry.name === key)))
-    throw new Error('OAuth secret missing after deployment; readiness was not established');
+  // The secrets list can lag a just-published version or secret write by a
+  // few seconds (observed 2026-11-06), so poll briefly before failing.
+  const visibleBy = Date.now() + Number(process.env.OAUTH_SECRETS_VISIBLE_TIMEOUT_MS || 30000);
+  for (;;) {
+    const secrets = await api(`${worker}/secrets`);
+    if (SECRET_NAMES.every((key) => secrets.some((entry) => entry.name === key))) break;
+    if (Date.now() >= visibleBy)
+      throw new Error('OAuth secret missing after deployment; readiness was not established');
+    await new Promise((resolve) =>
+      setTimeout(resolve, Number(process.env.OAUTH_SECRETS_POLL_MS || 2000))
+    );
+  }
   console.log(
     `Installer deployed: ${origin}. Mode: ${full ? 'full' : 'bootstrap'}. OAuth visibility was not promoted; public promotion remains a separate owner action.`
   );

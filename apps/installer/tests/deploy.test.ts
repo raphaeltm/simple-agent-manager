@@ -67,6 +67,8 @@ interface Options {
   registrationToken?: string;
   sha?: string;
   missingScope?: boolean;
+  laggingSecretReads?: number;
+  secretsNeverVisible?: boolean;
 }
 const existingScopes = (existing: Options['existing']) =>
   existing === 'full'
@@ -86,6 +88,9 @@ async function deploy(options: Options = {}) {
   vi.stubEnv('OAUTH_CLIENT_SECRET', '');
   vi.stubEnv('OAUTH_REGISTRATION_TOKEN', options.registrationToken || '');
   vi.stubEnv('GITHUB_SHA', options.sha ?? 'b'.repeat(40));
+  vi.stubEnv('OAUTH_SECRETS_POLL_MS', '1');
+  vi.stubEnv('OAUTH_SECRETS_VISIBLE_TIMEOUT_MS', options.secretsNeverVisible ? '0' : '30000');
+  let laggingSecretReads = options.laggingSecretReads ?? 0;
   const ready = options.ready ?? !!options.existing;
   let client: Record<string, unknown> | undefined = options.existing
     ? {
@@ -162,7 +167,8 @@ async function deploy(options: Options = {}) {
         if (method === 'PUT') {
           if (!secretNames.includes(String(body.name))) secretNames.push(String(body.name));
           result = {};
-        } else result = secretNames.map((name) => ({ name }));
+        } else if (options.secretsNeverVisible || laggingSecretReads-- > 0) result = [];
+        else result = secretNames.map((name) => ({ name }));
       } else throw new Error('Unexpected deployment API endpoint');
       return Response.json({ success: true, result });
     })
@@ -258,6 +264,19 @@ describe('publisher-controlled installer deployment', () => {
     );
     expect(capture.run).not.toHaveBeenCalled();
     expect(capture.writes).toHaveLength(0);
+  });
+  it('waits for a lagging secrets list instead of failing a completed full enablement', async () => {
+    await deploy({ existing: 'bootstrap', mode: 'full', laggingSecretReads: 2 });
+    const reads = capture.calls.filter(
+      (call) => call.method === 'GET' && call.path.endsWith('/secrets')
+    );
+    expect(reads).toHaveLength(3);
+    expect(config().vars.INSTALL_SOURCE_COMMIT).toBe('b'.repeat(40));
+  });
+  it('control: still fails readiness when the OAuth secrets never appear', async () => {
+    await expect(
+      deploy({ existing: 'bootstrap', mode: 'full', secretsNeverVisible: true })
+    ).rejects.toThrow('readiness was not established');
   });
   it('blocks full enablement before publishing when management permission or a live scope is missing', async () => {
     await expect(
