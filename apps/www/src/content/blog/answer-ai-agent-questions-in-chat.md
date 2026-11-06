@@ -10,8 +10,8 @@ excerpt: "SAM now puts an agent's approval or clarification request in the conve
 AI agents sometimes need a person to make a call before they can continue. In SAM, those questions now appear as answerable cards in the conversation. An agent can ask whether to open a pull request, offer a few choices, and receive your answer in the same chat.
 
 <figure>
-  <img class="shot-dark" src="/images/blog/agent-questions-in-chat/question-card-dark.png" width="300" height="288" alt="An approval card asks whether to open a pull request, with buttons to open it, wait for another review, or see the logs." loading="lazy" decoding="async" />
-  <img class="shot-light" src="/images/blog/agent-questions-in-chat/question-card-light.png" width="300" height="288" alt="An approval card asks whether to open a pull request, with buttons to open it, wait for another review, or see the logs." loading="lazy" decoding="async" />
+  <img class="shot-dark" src="/images/blog/answer-ai-agent-questions-in-chat/question-card-dark.png" width="300" height="288" alt="An approval card asks whether to open a pull request, with buttons to open it, wait for another review, or see the logs." loading="lazy" decoding="async" />
+  <img class="shot-light" src="/images/blog/answer-ai-agent-questions-in-chat/question-card-light.png" width="300" height="288" alt="An approval card asks whether to open a pull request, with buttons to open it, wait for another review, or see the logs." loading="lazy" decoding="async" />
   <figcaption>The question and its choices sit in the chat, ready for an answer.</figcaption>
 </figure>
 
