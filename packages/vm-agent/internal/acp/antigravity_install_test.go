@@ -15,7 +15,10 @@ import (
 type antigravityInstallCase struct {
 	name, arch, libc  string
 	corrupt, previous bool
-	wantAsset         string
+	// failReplace makes moving the new release into place fail, after the
+	// working release has already been moved aside.
+	failReplace bool
+	wantAsset   string
 }
 
 // Execute the real installer under /bin/sh. Only platform detection and the
@@ -27,13 +30,14 @@ func TestAntigravityReleaseInstaller(t *testing.T) {
 		{name: "arm64 fresh install", arch: "aarch64", wantAsset: "linux-arm64"},
 		{name: "reinstall replaces release and sweeps leftovers", arch: "x86_64", previous: true, wantAsset: "linux-x86_64"},
 		{name: "checksum mismatch preserves installed release", arch: "x86_64", previous: true, corrupt: true, wantAsset: "linux-x86_64"},
+		{name: "failed replacement restores installed release", arch: "x86_64", previous: true, failReplace: true, wantAsset: "linux-x86_64"},
 		{name: "musl rejects before download", arch: "x86_64", libc: "musl"},
 		{name: "unsupported arch rejects before download", arch: "riscv64"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newAntigravityInstallFixture(t, tt)
 			output, err := f.command().CombinedOutput()
-			wantOK := tt.wantAsset != "" && !tt.corrupt
+			wantOK := tt.wantAsset != "" && !tt.corrupt && !tt.failReplace
 			if (err == nil) != wantOK {
 				t.Fatalf("success=%v want %v: %s", err == nil, wantOK, output)
 			}
@@ -82,6 +86,9 @@ func newAntigravityInstallFixture(t *testing.T, tt antigravityInstallCase) antig
 		"uname": "case \"$1\" in -s) echo Linux;; -m) echo " + tt.arch + ";; esac\n",
 		"ldd":   "echo '" + tt.libc + " libc'\n",
 		"curl":  "printf '%s\\n' \"$@\" > \"$PROBE_LOG\"\nwhile [ \"$1\" != -o ]; do shift; done\ncp \"$PROBE_ARCHIVE\" \"$2\"\n",
+	}
+	if tt.failReplace {
+		stubs["mv"] = "case \"$1\" in */release) exit 1;; esac\nexec /bin/mv \"$@\"\n"
 	}
 	for name, script := range stubs {
 		writeOpenCodeFixtureFile(t, filepath.Join(f.tools, name), []byte("#!/bin/sh\n"+script), 0o755)
@@ -160,11 +167,29 @@ func (f antigravityInstallFixture) assertDownload(t *testing.T, wantAsset string
 func (f antigravityInstallFixture) assertInstalled(t *testing.T) {
 	t.Helper()
 	// The VM agent's own validation command must accept the result.
-	check := exec.Command(localShellPath, "-c", antigravityVersionCheckCommand())
-	check.Env = append(os.Environ(), "PATH="+filepath.Join(f.home, "bin")+":"+os.Getenv("PATH"))
-	if output, err := check.CombinedOutput(); err != nil {
+	check := func() *exec.Cmd {
+		cmd := exec.Command(localShellPath, "-c", antigravityVersionCheckCommand())
+		cmd.Env = append(os.Environ(), "PATH="+filepath.Join(f.home, "bin")+":"+os.Getenv("PATH"))
+		return cmd
+	}
+	if output, err := check().CombinedOutput(); err != nil {
 		t.Fatalf("validation command rejected the install: %v: %s", err, output)
 	}
+	// A release deleted under the launcher must fail the same check, so the VM
+	// agent reinstalls instead of launching missing files.
+	par := filepath.Join(f.lib, antigravityVersion, "agy_acp_server.par")
+	parBody, err := os.ReadFile(par)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(par); err != nil {
+		t.Fatal(err)
+	}
+	if output, err := check().CombinedOutput(); err == nil {
+		t.Fatalf("validation command accepted a launcher whose release is missing: %s", output)
+	}
+	writeOpenCodeFixtureFile(t, par, parBody, 0o755)
+
 	launch := exec.Command(filepath.Join(f.home, "bin", "agy-acp"), "--uid=")
 	launch.Env = append(os.Environ(), "ANTIGRAVITY_HARNESS_PATH=")
 	output, err := launch.Output()

@@ -130,3 +130,17 @@ Probed the real `agy-acp-server` 1.4.5 Linux x86_64 release locally (`.tmp/agy/p
   recorded `queued_fallback` / `adapter_does_not_advertise_steering` and delivered as the next
   turn: the agent finished `sleep 45` ("DONE"), then answered the steer ("MANGO"). No loss.
 - Test workspaces and nodes deleted; test profiles now use `gemini-3.5-flash`.
+
+## CodeRabbit review (2026-11-06, head 0c87d5854)
+
+Fixed: rejected Antigravity model or mode now stops startup; an unset permission mode maps to
+`default`; the installer restores the previous release if replacement fails, and the install
+check (`agy-acp --sam-check-install`) fails when the release files are missing;
+`.config/antigravity` is capture-only (rule 78) so older snapshots still wake; restored-session
+mode tests and container-capture coverage added; roadmap and proof strip say seven agents;
+Instant download FAQ clarified.
+
+Declined, with replies on the PR: `PLATFORM_AI_MODELS` entries (Antigravity has no proxy route;
+the invariant covers platform-routed agents only), Playwright submit test (generic connect flow),
+Plan mode mapping (Antigravity has no read-only mode; `default` asks before every write and the
+guide says so), XDG/plugin-secret/helper-regeneration notes.

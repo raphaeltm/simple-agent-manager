@@ -24,6 +24,10 @@ import (
 //   - the model is a "model" select config option.
 type fakeAntigravityACP struct {
 	authMethods []string
+	// rejectModel and rejectMode make the matching request fail, as an agent
+	// release that drops a model or a mode would.
+	rejectModel bool
+	rejectMode  bool
 
 	mu            sync.Mutex
 	authenticated []string
@@ -128,7 +132,7 @@ func (f *fakeAntigravityACP) handle(method string, raw json.RawMessage) (any, ma
 			ModeID string `json:"modeId"`
 		}
 		_ = json.Unmarshal(raw, &params)
-		if !slices.Contains([]string{"default", "auto_edit", "yolo"}, params.ModeID) {
+		if f.rejectMode || !slices.Contains([]string{"default", "auto_edit", "yolo"}, params.ModeID) {
 			return nil, map[string]any{"code": -32602, "message": "unknown mode"}
 		}
 		f.modes = append(f.modes, params.ModeID)
@@ -138,6 +142,9 @@ func (f *fakeAntigravityACP) handle(method string, raw json.RawMessage) (any, ma
 			Value string `json:"value"`
 		}
 		_ = json.Unmarshal(raw, &params)
+		if f.rejectModel {
+			return nil, map[string]any{"code": -32602, "message": "unknown model"}
+		}
 		f.modelValues = append(f.modelValues, params.Value)
 		return map[string]any{"configOptions": fakeAntigravityConfigOptions()}, nil
 	}
@@ -172,6 +179,11 @@ func startFakeAntigravity(t *testing.T, agentType string, authMethods []string, 
 
 func startFakeAntigravityWithMode(t *testing.T, agentType string, authMethods []string, previousSessionID, permissionMode string) antigravityStartupResult {
 	t.Helper()
+	return startFakeAntigravityAgent(t, agentType, &fakeAntigravityACP{authMethods: authMethods}, previousSessionID, permissionMode)
+}
+
+func startFakeAntigravityAgent(t *testing.T, agentType string, fake *fakeAntigravityACP, previousSessionID, permissionMode string) antigravityStartupResult {
+	t.Helper()
 	workDir := t.TempDir()
 	t.Setenv("HOME", t.TempDir())
 
@@ -181,7 +193,6 @@ func startFakeAntigravityWithMode(t *testing.T, agentType string, authMethods []
 		_ = agentStdin.Close()
 		_ = agentStdout.Close()
 	})
-	fake := &fakeAntigravityACP{authMethods: authMethods}
 	fake.serve(agentStdin, agentStdout)
 
 	var captured *agentStartup
@@ -260,27 +271,74 @@ func TestAntigravityStartupAuthenticatesWithGeminiKeyAndKeepsRepositoryClean(t *
 }
 
 func TestAntigravityStartupMapsSAMPermissionModes(t *testing.T) {
-	for _, tc := range []struct {
-		permissionMode string
-		want           []string
+	for _, session := range []struct {
+		name              string
+		previousSessionID string
+		wantSessionCall   string
 	}{
-		{permissionMode: "bypassPermissions", want: []string{"yolo"}},
-		{permissionMode: "acceptEdits", want: []string{"auto_edit"}},
-		{permissionMode: "default", want: []string{"default"}},
-		{permissionMode: "plan", want: []string{"default"}},
+		{name: "new", wantSessionCall: acpsdk.AgentMethodSessionNew},
+		{name: "restored", previousSessionID: "agy-previous", wantSessionCall: acpsdk.AgentMethodSessionLoad},
 	} {
-		t.Run(tc.permissionMode, func(t *testing.T) {
-			got := startFakeAntigravityWithMode(t, "google-antigravity", antigravity145AuthMethods, "", tc.permissionMode)
-			if got.err != nil {
-				t.Fatalf("Antigravity startup failed: %v", got.err)
+		for _, tc := range []struct {
+			permissionMode string
+			want           []string
+		}{
+			{permissionMode: "bypassPermissions", want: []string{"yolo"}},
+			{permissionMode: "acceptEdits", want: []string{"auto_edit"}},
+			{permissionMode: "default", want: []string{"default"}},
+			{permissionMode: "plan", want: []string{"default"}},
+			// An unset mode still resets a loaded session that ran as yolo.
+			{permissionMode: "", want: []string{"default"}},
+		} {
+			t.Run(session.name+"/"+tc.permissionMode, func(t *testing.T) {
+				got := startFakeAntigravityWithMode(t, "google-antigravity", antigravity145AuthMethods, session.previousSessionID, tc.permissionMode)
+				if got.err != nil {
+					t.Fatalf("Antigravity startup failed: %v", got.err)
+				}
+				got.fake.mu.Lock()
+				defer got.fake.mu.Unlock()
+				if !slices.Equal(got.fake.sessionCalls, []string{session.wantSessionCall}) {
+					t.Fatalf("session calls = %v, want [%s]", got.fake.sessionCalls, session.wantSessionCall)
+				}
+				if !slices.Equal(got.fake.modes, tc.want) {
+					t.Fatalf("session modes = %v, want %v", got.fake.modes, tc.want)
+				}
+				if len(got.fake.modelValues) != 1 {
+					t.Fatalf("model selections = %v, want one (startup reached settings)", got.fake.modelValues)
+				}
+			})
+		}
+	}
+}
+
+// A rejected model would otherwise run prompts on another model, and a rejected
+// mode would leave a loaded session in its earlier, possibly more permissive mode.
+func TestAntigravityStartupFailsWhenModelOrModeIsRejected(t *testing.T) {
+	for _, tc := range []struct {
+		name    string
+		fake    *fakeAntigravityACP
+		wantErr string
+	}{
+		{
+			name:    "model",
+			fake:    &fakeAntigravityACP{authMethods: antigravity145AuthMethods, rejectModel: true},
+			wantErr: `cannot apply requested Antigravity model "gemini-3.1-pro"`,
+		},
+		{
+			name:    "mode",
+			fake:    &fakeAntigravityACP{authMethods: antigravity145AuthMethods, rejectMode: true},
+			wantErr: `cannot apply Antigravity session mode "default"`,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got := startFakeAntigravityAgent(t, "google-antigravity", tc.fake, "agy-previous", "default")
+			if got.err == nil || !strings.Contains(got.err.Error(), tc.wantErr) {
+				t.Fatalf("startup error = %v, want %q", got.err, tc.wantErr)
 			}
 			got.fake.mu.Lock()
 			defer got.fake.mu.Unlock()
-			if !slices.Equal(got.fake.modes, tc.want) {
-				t.Fatalf("session modes = %v, want %v", got.fake.modes, tc.want)
-			}
-			if len(got.fake.modelValues) != 1 {
-				t.Fatalf("model selections = %v, want one (startup reached settings)", got.fake.modelValues)
+			if !slices.Equal(got.fake.sessionCalls, []string{acpsdk.AgentMethodSessionLoad}) {
+				t.Fatalf("session calls = %v, want the restored session loaded first", got.fake.sessionCalls)
 			}
 		})
 	}

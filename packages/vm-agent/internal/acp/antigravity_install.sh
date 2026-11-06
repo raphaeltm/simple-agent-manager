@@ -34,7 +34,9 @@ bin="$root/bin"
 mkdir -p "$lib" "$bin"
 # Stage beside the final location so the version directory appears atomically.
 stage=$(mktemp -d "$lib/.install.XXXXXX")
-trap 'rm -rf "$stage"' 0
+# If the install stops after the working release was moved aside, put it back
+# before the stage is removed, so the launcher never points at missing files.
+trap 'if [ -e "$stage/previous" ] && [ ! -e "$lib/$version" ]; then mv "$stage/previous" "$lib/$version"; fi; rm -rf "$stage"' 0
 trap 'exit 1' HUP INT TERM
 curl --proto =https --proto-redir =https -fLsS --retry 2 "https://dl.google.com/agy-extensions/releases/linux/agy-acp-server-$version-$asset.zip" -o "$stage/archive.zip"
 printf '%s  %s\n' "$digest" "$stage/archive.zip" | sha256sum -c -
@@ -49,11 +51,17 @@ fi
 mv "$stage/release" "$lib/$version"
 # The server finds its harness beside its real path, not through a symlink, so
 # launch through a script that names the harness explicitly.
+# --sam-check-install reports whether the release files it launches exist, so
+# the VM agent's install check also catches a release deleted under the launcher.
 cat >"$stage/agy-acp" <<EOF
 #!/bin/sh
 # sam-antigravity-version=$version
 ANTIGRAVITY_HARNESS_PATH='$lib/$version/localharness_external'
 export ANTIGRAVITY_HARNESS_PATH
+if [ "\${1-}" = --sam-check-install ]; then
+  [ -x '$lib/$version/agy_acp_server.par' ] && [ -x "\$ANTIGRAVITY_HARNESS_PATH" ]
+  exit
+fi
 exec '$lib/$version/agy_acp_server.par' "\$@"
 EOF
 chmod 755 "$stage/agy-acp"
@@ -66,4 +74,6 @@ for old in "$lib"/* "$lib"/.install.*; do
 done
 hash -r
 # Validate the command that the agent launcher will resolve, not just the stage.
-grep -Fqx "# sam-antigravity-version=$version" "$(command -v agy-acp)"
+launcher=$(command -v agy-acp)
+grep -Fqx "# sam-antigravity-version=$version" "$launcher"
+"$launcher" --sam-check-install

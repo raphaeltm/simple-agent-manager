@@ -19,9 +19,11 @@ func phaseTimeout(phaseMs int, fallback time.Duration) time.Duration {
 }
 
 // applySessionSettings calls SetSessionConfigOption for the model and
-// SetSessionMode on the ACP connection. A rejected explicit Codex model is fatal:
-// continuing would silently run a different model. Other adapter settings remain
-// best-effort for backward compatibility.
+// SetSessionMode on the ACP connection. A rejected explicit Codex or Antigravity
+// model is fatal: continuing would silently run a different model. A rejected
+// Antigravity mode is fatal too, because a loaded session could otherwise keep a
+// more permissive mode. Other adapter settings remain best-effort for backward
+// compatibility.
 func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentSettingsPayload) error {
 	if settings == nil || h.acpConn == nil || h.sessionID == "" {
 		return nil
@@ -38,8 +40,13 @@ func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentS
 	ctx = settingsCtx
 
 	if settings.Model != "" {
-		if err := h.applySessionModelConfigOption(ctx, settings.Model); err != nil && h.agentType == "openai-codex" {
-			return fmt.Errorf("cannot apply requested Codex model %q: %w", settings.Model, err)
+		if err := h.applySessionModelConfigOption(ctx, settings.Model); err != nil {
+			switch h.agentType {
+			case "openai-codex":
+				return fmt.Errorf("cannot apply requested Codex model %q: %w", settings.Model, err)
+			case "google-antigravity":
+				return fmt.Errorf("cannot apply requested Antigravity model %q: %w", settings.Model, err)
+			}
 		}
 	}
 
@@ -54,6 +61,9 @@ func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentS
 				SessionId: h.sessionID,
 				ModeId:    acpsdk.SessionModeId(modeID),
 			}); err != nil {
+				if h.agentType == "google-antigravity" {
+					return fmt.Errorf("cannot apply Antigravity session mode %q: %w", modeID, err)
+				}
 				slog.Warn("ACP SetSessionMode failed (non-fatal)", "mode", settings.PermissionMode, "error", err)
 				h.reportLifecycle("warn", "ACP SetSessionMode failed", map[string]interface{}{
 					"mode":  settings.PermissionMode,

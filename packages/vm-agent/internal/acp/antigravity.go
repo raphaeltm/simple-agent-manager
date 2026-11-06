@@ -14,10 +14,12 @@ const antigravityVersion = "1.4.5"
 //go:embed antigravity_install.sh
 var antigravityInstallScript string
 
-// antigravityVersionCheckCommand checks the launcher the installer writes.
+// antigravityVersionCheckCommand checks the launcher the installer writes: its
+// version marker, then that the release files it launches still exist.
 // agy_acp_server.par has no flag that prints its release version.
 func antigravityVersionCheckCommand() string {
-	return `grep -Fqx '# sam-antigravity-version=` + antigravityVersion + `' "$(command -v agy-acp)"`
+	return `launcher="$(command -v agy-acp)" && grep -Fqx '# sam-antigravity-version=` + antigravityVersion +
+		`' "$launcher" && "$launcher" --sam-check-install`
 }
 
 // antigravityAuthMethodID selects Gemini API key auth. Antigravity refuses
@@ -48,9 +50,10 @@ func acpSessionMeta(agentType string) map[string]any {
 // antigravitySessionModes maps SAM permission modes to the session modes
 // agy-acp-server 1.4.5 advertises (default, auto_edit, yolo). It has no plan
 // mode; its default mode asks before acting, the closest safe equivalent.
-// Every mode is sent explicitly, including default: a loaded session may
-// otherwise keep a more permissive mode from an earlier run.
+// Every mode is sent explicitly, including default and an unset mode: a loaded
+// session may otherwise keep a more permissive mode from an earlier run.
 var antigravitySessionModes = map[string]string{
+	"":                  "default",
 	"default":           "default",
 	"plan":              "default",
 	"acceptEdits":       "auto_edit",

@@ -346,9 +346,6 @@ var homeExcludePrefixes = []string{
 	".local/share/claude/versions",
 	// Credential-bearing paths — plaintext secrets must never be uploaded.
 	".ssh", ".aws", ".netrc", ".npmrc", ".config/gh", ".kube", ".azure", ".config/gcloud",
-	// Antigravity's plugin secret store. Antigravity was added after this list,
-	// so no earlier snapshot can contain it and restore may reject it.
-	".config/antigravity",
 	// Reserved snapshot namespace. HOME content must never be able to masquerade
 	// as a control-plane-selected external harness root.
 	snapshotExternalRootsPrefix,
@@ -364,6 +361,11 @@ var homeExcludePrefixes = []string{
 //     (.gemini/antigravity/bin). Conversations that LoadSession resumes live
 //     in .gemini/antigravity-acp and are kept.
 //
+// Antigravity's plugin secret store (.config/antigravity) is never uploaded
+// either. It is capture-only rather than a restore-rejecting credential path
+// because a user could have run Antigravity in a workspace before SAM excluded
+// it, and rejecting those snapshots would stop them from waking.
+//
 // They count against the snapshot budget for nothing. Their symlinks also used
 // to mark otherwise complete snapshots "entries-skipped", which keeps a session
 // awake now that sleep requires a complete snapshot.
@@ -374,7 +376,7 @@ var homeExcludePrefixes = []string{
 // legitimately contain them and must still wake.
 var homeCaptureExcludePrefixes = []string{
 	".codex/cache", ".npm-global", ".local/share/uv",
-	".gemini/antigravity/bin",
+	".gemini/antigravity/bin", ".config/antigravity",
 }
 
 // homeExcludeFiles are exact HOME-relative files excluded from the tar. Their

@@ -226,7 +226,7 @@ export const integrations: Integration[] = [
     faq: [
       { question: 'Which models are available?', answer: 'Gemini models only. Antigravity offers Claude and GPT models only to clients Google recognizes by name, and SAM is not one of them yet.' },
       { question: 'Can I send a message while Antigravity is working?', answer: 'Yes. Antigravity cannot take a message into a running turn, so SAM sends it as the next message when the current turn ends.' },
-      { question: 'Does it work in Instant sessions?', answer: 'Yes. The first start downloads about 320 MB, so it takes longer than later starts.' },
+      { question: 'Does it work in Instant sessions?', answer: 'Yes. Each new Instant container downloads Antigravity (about 320 MB) the first time it starts the agent, so that start takes longer. Later starts in the same container reuse the install.' },
     ],
     relatedSlugs: ['gemini-cli', 'claude-code', 'gcp'],
     externalUrl: 'https://antigravity.google',
