@@ -280,3 +280,52 @@ it('persists verified canonical source identity and binds offline resume to that
   await h.builder.alarm();
   expect((h.values.get('job') as { status: string }).status).toBe('failed');
 });
+// The first real full install failed in the container's source step with no
+// recorded reason (staging, 2026-11-06). The failing step must reach the owner.
+it('records which setup step failed and drops unsafe failure text', async () => {
+  const h = harness();
+  await h.call('/start', h.job);
+  h.setProgress({
+    state: 'failed',
+    failure: { step: 'source', reason: 'Source storage request failed (HTTP 403)' },
+  });
+  const status = await (await h.call('/status')).json();
+  expect(status.status).toBe('failed');
+  expect(status.failure).toEqual({
+    step: 'source',
+    reason: 'Source storage request failed (HTTP 403)',
+  });
+  const published = h.env.BUILDER_ARTIFACTS.put.mock.calls.at(-1) as unknown as [string, string];
+  expect(JSON.parse(published[1]).failure.step).toBe('source');
+
+  const unsafe = harness();
+  await unsafe.call('/start', unsafe.job);
+  unsafe.setProgress({
+    state: 'failed',
+    failure: {
+      step: 'source',
+      reason: 'Command failed: curl https://acct.r2.cloudflarestorage.com/x',
+      code: 63,
+    },
+  });
+  const sanitized = (await (await unsafe.call('/status')).json()).failure;
+  expect(sanitized).toEqual({ step: 'source', code: 63 });
+});
+it('supervisor reports only fixed-string errors or an exit code', () => {
+  const supervisor = JSON.parse(
+    /const BUILDER_SUPERVISOR=(".*?");\n/s.exec(builderSource)![1]!
+  ) as string;
+  const line = /const reason = (.*?);\n/.exec(supervisor)![1]!;
+  const reason = new Function(`return ${line}`)() as (error: unknown) => string;
+  expect(reason(new Error('Source storage request failed (HTTP 403)'))).toBe(
+    'Source storage request failed (HTTP 403)'
+  );
+  const curl = Object.assign(
+    new Error('Command failed: curl --config /x https://acct.example/key'),
+    {
+      status: 63,
+    }
+  );
+  expect(reason(curl)).toBe('exit 63');
+  expect(reason({})).toBe('unexpected error');
+});

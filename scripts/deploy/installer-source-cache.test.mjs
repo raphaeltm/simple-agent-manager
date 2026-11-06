@@ -117,3 +117,70 @@ test('keepNames compiled bootstrap runs cleanly, restores full history offline a
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+// The real repository has thousands of agent branches. '--all' bundled every
+// one of them (1.02 GiB), exceeding the 1 GiB source-object ceiling, and the
+// first real full install failed at read-back (staging, 2026-11-06). The
+// bundle must carry only the approved commit's own full history.
+test('publishes only the approved commit history, not unrelated branches', async () => {
+  const root = fs.mkdtempSync(join(tmpdir(), 'sam-source-scope-'));
+  try {
+    const remote = join(root, 'upstream');
+    fs.mkdirSync(remote);
+    const git = (...args) =>
+      execFileSync('/usr/bin/git', args, {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+    git('init', '-b', 'main', remote);
+    git('-C', remote, 'config', 'user.email', 'test@example.com');
+    git('-C', remote, 'config', 'user.name', 'Test');
+    fs.writeFileSync(join(remote, 'source'), 'baseline');
+    git('-C', remote, 'add', '.');
+    git('-C', remote, 'commit', '-m', 'first');
+    const first = git('-C', remote, 'rev-parse', 'HEAD');
+    git('-C', remote, 'checkout', '-b', 'unrelated');
+    fs.writeFileSync(join(remote, 'large-review-artifact'), 'x'.repeat(4096));
+    git('-C', remote, 'add', '.');
+    git('-C', remote, 'commit', '-m', 'unrelated branch');
+    const unrelated = git('-C', remote, 'rev-parse', 'HEAD');
+    git('-C', remote, 'checkout', 'main');
+    fs.writeFileSync(join(remote, 'source'), 'approved');
+    git('-C', remote, 'commit', '-am', 'second');
+    const commit = git('-C', remote, 'rev-parse', 'HEAD');
+    const objects = new Map();
+    const store = {
+      get(key, file) {
+        if (!objects.has(key)) return false;
+        fs.writeFileSync(file, objects.get(key));
+        return true;
+      },
+      put(key, file) {
+        if (!objects.has(key)) objects.set(key, fs.readFileSync(file));
+      },
+    };
+    const environment = { SAM_SOURCE_COMMIT: commit };
+    const published = await restoreCanonicalSource({
+      environment,
+      store,
+      remote,
+      directory: join(root, 'first'),
+      work: join(root, 'work'),
+    });
+    environment.SAM_SOURCE_IDENTITY = JSON.stringify(published);
+    fs.rmSync(remote, { recursive: true });
+    await restoreCanonicalSource({
+      environment,
+      store,
+      remote,
+      directory: join(root, 'restored'),
+      work: join(root, 'work'),
+    });
+    const restored = join(root, 'restored');
+    assert.equal(git('-C', restored, 'show', `${first}:source`), 'baseline');
+    assert.equal(git('-C', restored, 'rev-parse', '--is-shallow-repository'), 'false');
+    assert.throws(() => git('-C', restored, 'cat-file', '-e', `${unrelated}^{commit}`));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

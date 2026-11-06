@@ -383,3 +383,29 @@ it('revalidates immutable update source before consuming approval and preserves 
   expect(f.values.get('installation')).toEqual(before);
   expect(f.calls.filter((call) => call.path === '/start')).toHaveLength(1);
 });
+
+it('tells the owner which setup step stopped a failed build', async () => {
+  const f = await fixture();
+  expect((await f.request('/deploy', { confirmed: 'yes' })).status).toBeLessThan(400);
+  const manifest = f.values.get('installation') as { requestedJob: { id: string } };
+  f.setJob({
+    status: 'failed',
+    sourceCommit: original,
+    jobId: manifest.requestedJob.id,
+    failure: { step: 'source', reason: 'Source storage request failed (HTTP 403)' },
+  });
+  const html = await (await f.request('/')).text();
+  expect(html).toContain('Installation needs attention');
+  expect(html).toContain(
+    'Stopped while preparing the approved source: Source storage request failed (HTTP 403).'
+  );
+  f.setJob({
+    status: 'failed',
+    sourceCommit: original,
+    jobId: manifest.requestedJob.id,
+    failure: { step: 'bootstrap', code: 2 },
+  });
+  expect(await (await f.request('/')).text()).toContain(
+    'Stopped while setting up the build (exit 2).'
+  );
+});

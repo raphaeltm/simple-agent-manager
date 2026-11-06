@@ -9,6 +9,10 @@ const http = require('node:http');
 const fs = require('node:fs');
 const { spawn } = require('node:child_process');
 let state = 'running';
+// Records which setup step failed without command text: only the step, an exit
+// code, or one of the installer's own fixed-string errors.
+let failure;
+const reason = error => { const message = String(error && error.message || ''); return /^[A-Z][A-Za-z0-9 ()]{3,100}$/.test(message) ? message : (error && Number.isSafeInteger(error.status) ? 'exit ' + error.status : 'unexpected error'); };
 fs.mkdirSync('/sam/job', {recursive:true,mode:448});
 if(process.env.SAM_ENGINE_CHECKPOINT)fs.writeFileSync('/sam/job/checkpoint.json',process.env.SAM_ENGINE_CHECKPOINT,{mode:384});
 const boot = 'set -eu; umask 077; export DEBIAN_FRONTEND=noninteractive; apt-get update -qq; apt-get install -y -qq --no-install-recommends git ca-certificates; test "$(git -C /sam/source rev-parse HEAD)" = "$SAM_SOURCE_COMMIT"; exec bash /sam/source/scripts/deploy/installer-builder-bootstrap.sh';
@@ -17,14 +21,14 @@ async function begin(){
   if(process.env.SAM_BUILD_FIT_ONLY==='1'){const {execFileSync}=require('node:child_process');execFileSync('git',['clone','https://github.com/raphaeltm/simple-agent-manager.git','/sam/source'],{stdio:'ignore'});execFileSync('git',['-C','/sam/source','checkout','--detach',process.env.SAM_SOURCE_COMMIT],{stdio:'ignore'});}
   else await (${canonicalSourceBootstrap})();
   const child = spawn('sh', ['-c', boot], {stdio:'ignore',env:process.env});
-  child.once('error', () => {state='failed';});
-  child.once('close', code => {state=code===0?'completed':'failed';});
- }catch{state='failed';}
+  child.once('error', () => {failure={step:'bootstrap'};state='failed';});
+  child.once('close', code => {if(code!==0)failure={step:'bootstrap',code};state=code===0?'completed':'failed';});
+ }catch(error){failure={step:'source',reason:reason(error)};state='failed';}
 }
 // Initial OS tooling is required before signed source storage/bootstrap.
 const tools=spawn('sh',['-c','apt-get update -qq && apt-get install -y -qq --no-install-recommends git ca-certificates curl'],{stdio:'ignore'});
-tools.once('error',()=>{state='failed';});
-tools.once('close',code=>{if(code===0)void begin();else state='failed';});
+tools.once('error',()=>{failure={step:'tools'};state='failed';});
+tools.once('close',code=>{if(code===0)void begin();else{failure={step:'tools',code};state='failed';}});
 http.createServer((req,res) => {
  if(req.method!=='GET'||req.url!=='/status'||req.headers.authorization!=='Bearer '+process.env.SAM_JOB_NONCE){res.writeHead(403);res.end();return;}
  let checkpoint;
@@ -35,7 +39,7 @@ http.createServer((req,res) => {
  try { const s=fs.statSync('/sam/job/codex/installation-codex-trust.json');if(s.size<=32768)runtimeTrust=JSON.parse(fs.readFileSync('/sam/job/codex/installation-codex-trust.json','utf8')); }catch{}
  let result;
  try { const s=fs.statSync('/sam/job/checkpoint.json.result');if(s.size<=8192)result=JSON.parse(fs.readFileSync('/sam/job/checkpoint.json.result','utf8')); }catch{}
- res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({state,checkpoint,sourceIdentity,runtimeTrust,result}));
+ res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({state,failure,checkpoint,sourceIdentity,runtimeTrust,result}));
 }).listen(8080,'0.0.0.0');
 `;
 
@@ -54,6 +58,13 @@ function builderSafeTrust(value,older=true){
  if(!selected.archiveSHA256||!selected.catalogSHA256||!selected.noticesSHA256)return undefined;
  if(older&&value.previous){const previous=builderSafeTrust(value.previous,false);if(previous)selected.previous=previous;}
  return selected;
+}
+function builderSafeFailure(value){
+ if(!value||!['tools','source','bootstrap'].includes(value.step))return undefined;
+ const failure={step:value.step};
+ if(Number.isSafeInteger(value.code)&&value.code>=0&&value.code<=255)failure.code=value.code;
+ if(typeof value.reason==='string'&&/^[A-Za-z0-9 ()]{1,120}$/.test(value.reason))failure.reason=value.reason;
+ return failure;
 }
 function builderSafeCheckpoint(value){
  if(!value||value.schemaVersion!==1||!/^[a-f0-9]{64}$/.test(value.fingerprint)||!Array.isArray(value.completed)||value.completed.length>64||value.completed.some(x=>typeof x!=='string'||!/^[a-z][a-z0-9-]{0,63}$/.test(x))||!['running','failed','completed'].includes(value.status))return undefined;
@@ -95,7 +106,7 @@ export class InstallationBuilder{
   }
   return builderJson({error:'NOT_FOUND'},404);
  }
- publicJob(job){return job?{jobId:job.id,status:job.status,sourceCommit:job.config.sourceCommit,deadline:job.deadline,checkpoint:job.checkpoint}: {status:'idle'};}
+ publicJob(job){return job?{jobId:job.id,status:job.status,sourceCommit:job.config.sourceCommit,deadline:job.deadline,checkpoint:job.checkpoint,...(job.failure?{failure:job.failure}:{})}: {status:'idle'};}
  async persist(job){await this.ctx.storage.put('job',job);if(this.env.BUILDER_ARTIFACTS){try{await this.env.BUILDER_ARTIFACTS.put('installer/jobs/'+job.id+'/state.json',JSON.stringify(this.publicJob(job)));}catch{/* Durable Object remains the authoritative checkpoint. */}}}
  async launch(config,id,checkpoint,sourceValidation,sourceIdentity){
   const seconds=Number(this.env.BUILDER_MAX_SECONDS||3600),poll=Number(this.env.BUILDER_POLL_SECONDS||15),instance=this.env.BUILDER_INSTANCE||'standard-3';
@@ -138,6 +149,7 @@ export class InstallationBuilder{
    const checkpoint=builderSafeCheckpoint(value.checkpoint);if(checkpoint)job.checkpoint=checkpoint;
    if(value.result&&typeof value.result.setupToken==='string'&&value.result.setupToken.length>=16&&value.result.setupToken.length<=4096&&value.result.appUrl==='https://app.'+job.config.baseDomain)job.result={setupToken:value.result.setupToken,appUrl:value.result.appUrl};
    if(value.runtimeTrust&&this.env.BUILDER_ARTIFACTS){const selected=builderSafeTrust(value.runtimeTrust);if(selected)await this.env.BUILDER_ARTIFACTS.put('installer/jobs/'+job.id+'/codex-trust.json',JSON.stringify(selected));}
+   const failure=builderSafeFailure(value.failure);if(failure)job.failure=failure;
    if(value.state==='completed'||value.state==='failed'){await this.stop(job,value.state);return;}
    await this.persist(job);
   }catch{/* Status is advisory; the durable absolute deadline still stops compute. */}
