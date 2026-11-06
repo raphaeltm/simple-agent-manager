@@ -16,12 +16,12 @@ Six exception groups expire November 7 or 9. Freshly review exact current-tree f
 - [x] Run verified pinned current-tree scan; privately classify exact matches and remove obsolete digests in selected groups.
 - [x] Renew freshly reviewed exceptions with accurate review timestamp, 30-day expiry and sanitized specific rationale.
 - [x] Run meaningful policy tests for exact/changed/unknown/redacted and expired/malformed data; pinned current-tree and PR-range scans; relevant quality checks.
-- [x] Complete independent local security and fresh adversarial reviews, task-completion, constitution and documentation review (completion validator verifies before archive).
-- [x] Record config-only staging exemption, all reviewer outcomes and validation evidence in PR.
+- [x] Complete independent local security and fresh adversarial reviews, task-completion, constitution and documentation review.
+- [ ] Record config-only staging exemption, all reviewer outcomes and validation evidence in PR.
 
 ## Acceptance criteria
 
-- Only the six selected baseline groups change (plus focused policy regression tests and task record); no scanner, matcher, enforcement, thresholds or permissions changes.
+- Only the six selected baseline groups change (plus focused policy regression tests, the reproduced-main installer embed inventory test correction, and task record); no scanner, matcher, enforcement, thresholds or permissions changes.
 - Every retained selected digest has fresh private non-secret review; obsolete selected digests are removed.
 - Exact digest acceptance and changed/unknown/redacted/expired/malformed rejection remain demonstrated.
 - Independent reviewers pass with findings addressed before merge; current-head CI including Sonar passes, CodeRabbit requested and waited, normal release and basic production health verified.
@@ -48,5 +48,7 @@ Six exception groups expire November 7 or 9. Freshly review exact current-tree f
 
 - Security and fresh adversarial local reviews PASS: independently recomputed exact digests, verified RFC8291 vectors and test-only RSA/encryption usage. No findings.
 - Full quality scripts811/811 passed after two-line pre-existing Antigravity embed expectation correction in deploy-reusable-workflow.test.ts. Original failure reproduced unchanged main; installer is already included by release resolver. No runtime change.
-- Focused12 policy tests, ESLint and targeted Prettier passed; root lint and build passed. Root typecheck initially lacked per-workspace dependency links; dependency installation/recheck ongoing.
+- Focused12 policy tests, ESLint and targeted Prettier passed; root lint and build passed. Root typecheck passed after clean-worktree dependency installation; initial missing per-package link was setup-only. Formatting ratchet passed (1988/2225).
 - Constitution review: baseline config data intentionally stores exact digests/review dates, no new business constants. Documentation review: public/API/env interfaces unchanged; task evidence updated, no public doc sync required.
+
+- Task-completion local reviewer PASS for implementation readiness after correcting a premature PR-evidence checkbox and scope wording; release checklist remains explicitly pending. Independently ran60/60 affected tests; no unresolved findings.
