@@ -8,7 +8,11 @@
  * weekly primary only), see `.claude/rules/74-proxy-signals-must-match-the-condition.md`.
  */
 
-import type { CredentialLimitLevel } from './types/credential-limits';
+import type {
+  CredentialLimitCredentialSummary,
+  CredentialLimitLevel,
+  CredentialLimitWindowSummary,
+} from './types/credential-limits';
 
 const CREDENTIAL_LIMIT_LEVEL_RANK: Record<CredentialLimitLevel, number> = {
   ok: 0,
@@ -128,4 +132,45 @@ export function credentialLimitWindowLabel(
   }
   const suffix = windowType.split('.').slice(1).join('.');
   return suffix ? suffix.replace(/[_-]+/g, ' ') : 'Window';
+}
+
+/**
+ * A window as it stands at `now`. A sample only describes usage up to the
+ * window's reset: once `resetsAt` has passed and the sample predates it, the
+ * provider has opened a new window SAM has not sampled yet, so the stale
+ * percentage (or "limit reached") no longer applies. Such a window reads 0%,
+ * level OK, and carries `resetElapsed` so callers can say it reset rather than
+ * present 0% as a measurement.
+ */
+export function credentialLimitWindowAsOf(
+  window: CredentialLimitWindowSummary,
+  now: number
+): CredentialLimitWindowSummary {
+  const { resetsAt } = window;
+  // Already adjusted (the API applies this at read time, the UI again at render).
+  if (window.resetElapsed) return window;
+  if (resetsAt === null || !Number.isFinite(resetsAt)) return window;
+  if (resetsAt > now || window.observedAt >= resetsAt) return window;
+  return {
+    ...window,
+    status: 'allowed',
+    level: 'ok',
+    utilizationPercent: 0,
+    remainingAmount: window.limitAmount,
+    resetElapsed: true,
+  };
+}
+
+/** Every window of a credential as of `now`, with the worst level recomputed. */
+export function credentialLimitSummaryAsOf(
+  summary: CredentialLimitCredentialSummary,
+  now: number
+): CredentialLimitCredentialSummary {
+  const windows = summary.windows.map((window) => credentialLimitWindowAsOf(window, now));
+  if (windows.every((window, index) => window === summary.windows[index])) return summary;
+  return {
+    ...summary,
+    windows,
+    level: worstCredentialLimitLevel(windows.map((window) => window.level)),
+  };
 }

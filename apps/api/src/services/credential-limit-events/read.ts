@@ -20,6 +20,7 @@ import {
   credentialLimitWindowSortMinutes,
   type CredentialLimitWindowSummary,
   DEFAULT_CREDENTIAL_LIMIT_READ_MAX_ROWS,
+  credentialLimitWindowAsOf,
   worstCredentialLimitLevel,
 } from '@simple-agent-manager/shared';
 
@@ -164,7 +165,8 @@ function parseRow(row: WindowReadRow): ParsedRow | null {
  */
 function summarize(
   rows: WindowReadRow[],
-  collapseAcrossProjects: boolean
+  collapseAcrossProjects: boolean,
+  now: number
 ): CredentialLimitCredentialSummary[] {
   const byCredential = new Map<string, CredentialLimitCredentialSummary>();
   const seenWindows = new Set<string>();
@@ -193,7 +195,8 @@ function summarize(
       };
       byCredential.set(parsed.credentialReference, summary);
     }
-    summary.windows.push(parsed.window);
+    // A window whose reset passed after its sample reads 0% until the next sample.
+    summary.windows.push(credentialLimitWindowAsOf(parsed.window, now));
     summary.observedAt = Math.max(summary.observedAt, parsed.window.observedAt);
     if (!summary.agentType && parsed.agentType) summary.agentType = parsed.agentType;
   }
@@ -244,13 +247,14 @@ export async function listProjectCredentialLimits(
     .bind(...bindings)
     .all<WindowReadRow>();
 
-  const credentials = summarize(result.results ?? [], false);
+  const now = Date.now();
+  const credentials = summarize(result.results ?? [], false, now);
   // The filtered read restores only the caller's own credentials too: the
   // session filter resolves any project member's session, and a backfilled id
   // embeds the legacy ciphertext, so another member's credential stays a digest.
   await restoreOwnCredentialReferences(env, credentials, input.userId);
   await attachOwnCredentialNames(env, credentials, input.userId);
-  return { credentials, generatedAt: Date.now() };
+  return { credentials, generatedAt: now };
 }
 
 /** The caller's personal credentials across every project, newest sample per window. */
@@ -269,10 +273,11 @@ export async function listUserCredentialLimits(
     .bind(input.userId, readMaxRows(env))
     .all<WindowReadRow>();
 
-  const credentials = summarize(result.results ?? [], true);
+  const now = Date.now();
+  const credentials = summarize(result.results ?? [], true, now);
   await restoreOwnCredentialReferences(env, credentials, input.userId);
   await attachOwnCredentialNames(env, credentials, input.userId);
-  return { credentials, generatedAt: Date.now() };
+  return { credentials, generatedAt: now };
 }
 
 /**

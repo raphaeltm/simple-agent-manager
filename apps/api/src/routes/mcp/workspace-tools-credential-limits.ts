@@ -48,7 +48,11 @@ function summarizeCredentialLimits(response: CredentialLimitsResponse): string[]
           ? 'usage unknown'
           : `${Math.round(window.utilizationPercent)}% used`;
       const resets =
-        window.resetsAt === null ? '' : `, resets ${new Date(window.resetsAt).toISOString()}`;
+        window.resetsAt === null
+          ? ''
+          : window.resetElapsed
+            ? `, reset at ${new Date(window.resetsAt).toISOString()} (no sample since)`
+            : `, resets ${new Date(window.resetsAt).toISOString()}`;
       lines.push(
         `${family} ${label} (${credential.credentialSource} credential): ${used}, level ${window.level}${resets}`
       );

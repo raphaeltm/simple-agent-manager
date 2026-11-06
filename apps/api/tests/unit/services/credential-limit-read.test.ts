@@ -1,5 +1,5 @@
 import Database from 'better-sqlite3';
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
@@ -103,6 +103,61 @@ function setup() {
 
   return { sqlite, env, seedWindow, seedSession };
 }
+
+// Fixture samples carry 2023 reset times. Read at a clock before those resets so the
+// stored percentages apply; the reset-elapsed case below moves the clock past one.
+const FIXTURE_NOW = 1_700_000_100_000;
+beforeEach(() => {
+  vi.useFakeTimers({ toFake: ['Date'], now: FIXTURE_NOW });
+});
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe('reset-elapsed windows', () => {
+  it('reads a window whose reset passed after its sample as 0% and OK, with the real SQL read', async () => {
+    const { env, seedWindow } = setup();
+    // Sampled at 81% and warning; the 5h window reset 2h ago and nothing has run since.
+    seedWindow({
+      windowType: 'codex.primary',
+      provider: 'openai',
+      agentType: 'openai-codex',
+      utilizationPercent: 81,
+      lastEventLevel: 'warning',
+      status: 'allowed_warning',
+      resetsAt: FIXTURE_NOW - 7_200_000,
+      observedAt: FIXTURE_NOW - 10_800_000,
+    });
+    // Control: the weekly window has not reset, so its sample still applies.
+    seedWindow({
+      windowType: 'codex.secondary',
+      provider: 'openai',
+      agentType: 'openai-codex',
+      utilizationPercent: 58,
+      windowMinutes: 10_080,
+      resetsAt: FIXTURE_NOW + 86_400_000,
+      observedAt: FIXTURE_NOW - 10_800_000,
+    });
+
+    for (const response of [
+      await listProjectCredentialLimits(env, { projectId: 'project-1', userId: 'owner-1' }),
+      await listUserCredentialLimits(env, { userId: 'owner-1' }),
+    ]) {
+      const [credential] = response.credentials;
+      expect(credential.level).toBe('ok');
+      const byType = Object.fromEntries(credential.windows.map((w) => [w.windowType, w]));
+      expect(byType['codex.primary']).toMatchObject({
+        utilizationPercent: 0,
+        level: 'ok',
+        status: 'allowed',
+        resetElapsed: true,
+        resetsAt: FIXTURE_NOW - 7_200_000,
+      });
+      expect(byType['codex.secondary']).toMatchObject({ utilizationPercent: 58 });
+      expect(byType['codex.secondary'].resetElapsed).toBeUndefined();
+    }
+  });
+});
 
 describe('listProjectCredentialLimits', () => {
   it("orders each credential's windows shortest-span first, unknown spans last", async () => {
