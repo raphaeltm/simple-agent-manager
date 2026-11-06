@@ -80,7 +80,7 @@ node, for task `01M6R8VEAWPS7E8M8TJQHVMVM7` (`task_mode = 'task'` in D1), had
 - [x] `/etc/sam/env` for a non-boot workspace never contains the boot workspace's
       task or chat IDs.
 - [x] An Instant conversation session reports `SAM_TASK_MODE=conversation`.
-- [ ] Verified on staging with two sessions of different modes on one node.
+- [x] Verified on staging with two sessions of different modes on one node.
 
 ## References
 
@@ -113,3 +113,19 @@ Deferred (MEDIUM, test-engineer): after a VM-agent restart, a plain WebSocket re
 node's boot workspace synthesizes the boot task context in `agent_ws.go` (pre-existing). It only
 matters if that workspace was later reassigned to another task, and closing it needs
 `WorkspaceRuntime.TaskID` persisted across restarts. Tracked as Idea `01M6RDKNEK7DCNQ26WCSKBSQF8`.
+
+## Staging evidence (deploy run 42218675072, 2026-11-06)
+
+All on node `01M6RFFQ1839ZRQX0TDD8CYDS2`, booted for session A:
+
+- **A**, conversation, task `01M6RFF8XHJ14XFJZKF64HT7G1` (the node's boot workspace): agent saw
+  `SAM_TASK_MODE=conversation` and its own task, chat, project and workspace IDs.
+- A closed and its workspace removed, then **B**, task mode, task `01M6RFW2XVD5Q1ZB2ZFJPMPE7K`,
+  pinned to the same node (workspace `01M6RFW9XQ30F5D1NE88RJ1JG4`): agent saw `SAM_TASK_MODE=task`,
+  `SAM_TASK_ID=01M6RFW2…`, its own chat session and workspace; `/etc/sam/env` had B's task ID, not A's.
+  Before the fix B would have seen A's mode and task/chat IDs (the production symptom).
+- **C**, Instant (cf-container profile, conversation), task `01M6RFZ0VR3ZPV0892C1FA13NM`: agent saw
+  `SAM_TASK_MODE=conversation` and `SAM_TASK_ID=01M6RFZ0…`. Before the fix an Instant container had no
+  task ID to export and defaulted to `task`.
+- Cleanup: test node deleted. Staging cf-container workspaces stuck in `stopping` predate this branch
+  (some were created on 2026-11-05 under older builds), so C's archive reports cleanup pending.
