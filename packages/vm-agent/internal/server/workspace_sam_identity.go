@@ -1,6 +1,7 @@
 package server
 
 import (
+	"log/slog"
 	"strings"
 
 	"github.com/workspace/vm-agent/internal/config"
@@ -21,8 +22,9 @@ type samIdentity struct {
 // workspaces over its life, so only that boot workspace may fall back to it;
 // any other workspace uses its own runtime values, and an unknown value stays
 // empty rather than borrowing another session's. The session's task context
-// (sent on agent-session start) beats both, because it is the only source that
-// knows the task mode of the session actually running.
+// (sent on agent-session start) supplies the task ID and mode, because it is the
+// only source that knows the session actually running, but it never re-binds the
+// workspace to another project: a context naming a different project is ignored.
 func (s *Server) workspaceSAMIdentity(workspaceID string, runtime *WorkspaceRuntime, task *taskCallbackContext) samIdentity {
 	var id samIdentity
 	if runtime != nil {
@@ -35,9 +37,19 @@ func (s *Server) workspaceSAMIdentity(workspaceID string, runtime *WorkspaceRunt
 		s.workspaceMu.RUnlock()
 	}
 	if task != nil {
-		id.ProjectID = firstNonEmpty(strings.TrimSpace(task.ProjectID), id.ProjectID)
-		id.TaskID = firstNonEmpty(strings.TrimSpace(task.TaskID), id.TaskID)
-		id.TaskMode = strings.TrimSpace(task.TaskMode)
+		taskProjectID := strings.TrimSpace(task.ProjectID)
+		if taskProjectID != "" && id.ProjectID != "" && taskProjectID != id.ProjectID {
+			slog.Warn("Ignoring session task context for another project",
+				"workspaceId", workspaceID,
+				"expectedProjectId", id.ProjectID,
+				"receivedProjectId", taskProjectID,
+				"taskId", strings.TrimSpace(task.TaskID),
+				"action", "ignored")
+		} else {
+			id.ProjectID = firstNonEmpty(id.ProjectID, taskProjectID)
+			id.TaskID = firstNonEmpty(strings.TrimSpace(task.TaskID), id.TaskID)
+			id.TaskMode = validTaskMode(task.TaskMode)
+		}
 	}
 
 	boot := s.config
@@ -53,6 +65,38 @@ func (s *Server) workspaceSAMIdentity(workspaceID string, runtime *WorkspaceRunt
 		id.TaskMode = strings.TrimSpace(boot.TaskMode)
 	}
 	return id
+}
+
+// sessionStartProjectConflicts reports whether an agent-session start names a
+// project other than the workspace's own. The start handler writes that project
+// onto the runtime (resource-history attribution) and into the session's task
+// context, so a mismatch would re-bind the workspace; it is refused instead.
+func (s *Server) sessionStartProjectConflicts(workspaceID string, runtime *WorkspaceRuntime, requested string) bool {
+	requested = strings.TrimSpace(requested)
+	if requested == "" || runtime == nil {
+		return false
+	}
+	s.workspaceMu.RLock()
+	current := strings.TrimSpace(runtime.ProjectID)
+	s.workspaceMu.RUnlock()
+	if current == "" || current == requested {
+		return false
+	}
+	slog.Error("Agent session start rejected: project does not match workspace",
+		"workspaceId", workspaceID,
+		"expectedProjectId", current,
+		"receivedProjectId", requested,
+		"action", "rejected")
+	return true
+}
+
+// validTaskMode returns mode when it is a known task mode, else "".
+func validTaskMode(mode string) string {
+	switch mode = strings.TrimSpace(mode); mode {
+	case config.TaskModeTask, config.TaskModeConversation:
+		return mode
+	}
+	return ""
 }
 
 // applyTo replaces cfg's identity, including with empty values, so a copy of

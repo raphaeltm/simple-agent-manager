@@ -1296,6 +1296,10 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusNotFound, "workspace not found")
 		return
 	}
+	if s.sessionStartProjectConflicts(workspaceID, runtime, body.ProjectID) {
+		writeError(w, http.StatusConflict, "projectId does not match the workspace's project")
+		return
+	}
 
 	hostKey := workspaceID + ":" + sessionID
 	mcpServers, err := normalizeMcpServers(body.McpServers)

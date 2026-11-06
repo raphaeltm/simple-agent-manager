@@ -39,6 +39,8 @@ func envMap(entries []string) map[string]string {
 
 type agentStartRequest struct {
 	workspaceID, sessionID, chatSessionID, projectID, taskID, taskMode string
+	// startProjectID overrides the project sent on agent-session start only.
+	startProjectID string
 }
 
 // startAgentSessionThroughHandlers drives the two calls the control plane makes
@@ -46,6 +48,30 @@ type agentStartRequest struct {
 // The start is a duplicate delivery, so the real handler builds the SessionHost
 // and returns before launching an agent process.
 func startAgentSessionThroughHandlers(t *testing.T, s *Server, req agentStartRequest) map[string]string {
+	t.Helper()
+	started := postAgentSessionStart(t, s, req)
+	if started.Code != http.StatusOK || !strings.Contains(started.Body.String(), `"status":"duplicate"`) {
+		t.Fatalf("start agent session = %d %s", started.Code, started.Body.String())
+	}
+
+	s.sessionHostMu.Lock()
+	host := s.sessionHosts[req.workspaceID+":"+req.sessionID]
+	s.sessionHostMu.Unlock()
+	if host == nil {
+		t.Fatal("start did not build a SessionHost")
+	}
+	t.Cleanup(host.Stop)
+	env := envMap(host.SAMEnvFallback())
+	// Liveness: the env was built, so an absent value below is a real absence.
+	if env["SAM_API_URL"] != "https://api.example.com" {
+		t.Fatalf("SessionHost SAM env was not built: %v", env)
+	}
+	return env
+}
+
+// postAgentSessionStart creates the agent session and posts its start, returning
+// the start response.
+func postAgentSessionStart(t *testing.T, s *Server, req agentStartRequest) *httptest.ResponseRecorder {
 	t.Helper()
 	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-test")
 	s.jwtValidator = validator
@@ -81,28 +107,11 @@ func startAgentSessionThroughHandlers(t *testing.T, s *Server, req agentStartReq
 	if _, claimed, err := s.store.ClaimPromptDelivery(req.workspaceID, req.sessionID, "delivery-1", s.executionRuntimeID); err != nil || !claimed {
 		t.Fatalf("claim prompt delivery: claimed=%v err=%v", claimed, err)
 	}
-	started := call(s.handleStartAgentSession, "/workspaces/"+req.workspaceID+"/agent-sessions/"+req.sessionID+"/start", map[string]any{
+	return call(s.handleStartAgentSession, "/workspaces/"+req.workspaceID+"/agent-sessions/"+req.sessionID+"/start", map[string]any{
 		"protocolVersion": 1, "deliveryId": "delivery-1", "messageId": "message-1",
 		"agentType": "claude-code", "initialPrompt": "prompt",
-		"projectId": req.projectID, "taskId": req.taskID, "taskMode": req.taskMode,
+		"projectId": firstNonEmpty(req.startProjectID, req.projectID), "taskId": req.taskID, "taskMode": req.taskMode,
 	})
-	if started.Code != http.StatusOK || !strings.Contains(started.Body.String(), `"status":"duplicate"`) {
-		t.Fatalf("start agent session = %d %s", started.Code, started.Body.String())
-	}
-
-	s.sessionHostMu.Lock()
-	host := s.sessionHosts[req.workspaceID+":"+req.sessionID]
-	s.sessionHostMu.Unlock()
-	if host == nil {
-		t.Fatal("start did not build a SessionHost")
-	}
-	t.Cleanup(host.Stop)
-	env := envMap(host.SAMEnvFallback())
-	// Liveness: the env was built, so an absent value below is a real absence.
-	if env["SAM_API_URL"] != "https://api.example.com" {
-		t.Fatalf("SessionHost SAM env was not built: %v", env)
-	}
-	return env
 }
 
 func TestSharedNodeSessionGetsItsOwnSAMIdentity(t *testing.T) {
@@ -173,6 +182,89 @@ func TestSharedNodeSessionGetsItsOwnSAMIdentity(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// The session-start body is control-plane input: it names the task and its mode
+// for the workspace's own project, and an unknown mode never reaches the agent.
+func TestSessionStartTaskContextFeedsTheSessionEnv(t *testing.T) {
+	cases := []struct {
+		name string
+		req  agentStartRequest
+		want map[string]string
+	}{
+		{
+			name: "start names the workspace's own project (control)",
+			req: agentStartRequest{workspaceID: "ws-second", sessionID: "sess-b", chatSessionID: "chat-second",
+				projectID: "proj-second", taskID: "task-second", taskMode: config.TaskModeConversation},
+			want: map[string]string{"SAM_PROJECT_ID": "proj-second", "SAM_TASK_ID": "task-second", "SAM_TASK_MODE": config.TaskModeConversation},
+		},
+		{
+			name: "unknown task mode",
+			req: agentStartRequest{workspaceID: "ws-second", sessionID: "sess-c", chatSessionID: "chat-second",
+				projectID: "proj-second", taskID: "task-second", taskMode: "bogus"},
+			want: map[string]string{"SAM_PROJECT_ID": "proj-second", "SAM_TASK_ID": "task-second", "SAM_TASK_MODE": ""},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			s, _ := newMcpTestServer(t)
+			bootIdentity(s.config)
+			s.upsertWorkspaceRuntime("ws-second", "octo/second", "sam/second", "running", "ws-token",
+				workspaceRuntimeOpts{ProjectID: "proj-second", TaskID: "task-second"})
+
+			env := startAgentSessionThroughHandlers(t, s, tc.req)
+
+			for key, value := range tc.want {
+				if env[key] != value {
+					t.Errorf("%s = %q, want %q", key, env[key], value)
+				}
+			}
+		})
+	}
+}
+
+// A start naming another project would re-bind the workspace (runtime project,
+// resource attribution, session task context and env). It is refused before any
+// state changes.
+func TestSessionStartForAnotherProjectIsRejected(t *testing.T) {
+	s, _ := newMcpTestServer(t)
+	bootIdentity(s.config)
+	s.upsertWorkspaceRuntime("ws-second", "octo/second", "sam/second", "running", "ws-token",
+		workspaceRuntimeOpts{ProjectID: "proj-second", TaskID: "task-second"})
+
+	rec := postAgentSessionStart(t, s, agentStartRequest{workspaceID: "ws-second", sessionID: "sess-a",
+		chatSessionID: "chat-second", projectID: "proj-second", startProjectID: "proj-foreign",
+		taskID: "task-foreign", taskMode: config.TaskModeTask})
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("start = %d %s, want 409", rec.Code, rec.Body.String())
+	}
+	rt, _ := s.getWorkspaceRuntime("ws-second")
+	if rt.ProjectID != "proj-second" || rt.TaskID != "task-second" {
+		t.Errorf("runtime re-bound to %s/%s", rt.ProjectID, rt.TaskID)
+	}
+	s.sessionHostMu.Lock()
+	_, hasCtx := s.sessionTaskCtx["ws-second:sess-a"]
+	_, hasHost := s.sessionHosts["ws-second:sess-a"]
+	s.sessionHostMu.Unlock()
+	if hasCtx || hasHost {
+		t.Errorf("rejected start left state behind: taskCtx=%v host=%v", hasCtx, hasHost)
+	}
+}
+
+// Defence in depth for callers that bypass the start handler's check.
+func TestWorkspaceSAMIdentityIgnoresTaskContextForAnotherProject(t *testing.T) {
+	s, _ := newMcpTestServer(t)
+	bootIdentity(s.config)
+	runtime := &WorkspaceRuntime{ID: "ws-second", ProjectID: "proj-second", TaskID: "task-second"}
+
+	got := s.workspaceSAMIdentity("ws-second", runtime, &taskCallbackContext{
+		ProjectID: "proj-foreign", TaskID: "task-foreign", TaskMode: config.TaskModeTask,
+	})
+	want := samIdentity{ProjectID: "proj-second", TaskID: "task-second"}
+	if got != want {
+		t.Fatalf("identity = %+v, want %+v", got, want)
 	}
 }
 
