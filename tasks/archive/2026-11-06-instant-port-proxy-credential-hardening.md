@@ -66,12 +66,12 @@ printed or stored).
 
 ## Acceptance Criteria
 
-- [ ] With public ports on, a request to the vm-agent's own port on an Instant workspace returns
+- [x] With public ports on, a request to the vm-agent's own port on an Instant workspace returns
       403 and never reaches `/git-credential` (unit + staging)
-- [ ] A relayed request that does reach `/git-credential` without a bearer is refused (unit)
-- [ ] A normal public preview on another port still works (unit + staging)
-- [ ] `git` and `gh` still authenticate inside an Instant session (unit + staging)
-- [ ] VM runtime port routing unchanged (unit)
+- [x] A relayed request that does reach `/git-credential` without a bearer is refused (unit + staging)
+- [x] A normal public preview on another port still works (unit + staging)
+- [x] `git` and `gh` still authenticate inside an Instant session (unit + staging)
+- [x] VM runtime port routing unchanged (unit)
 
 ## References
 
@@ -99,3 +99,20 @@ printed or stored).
 - In-container helper coverage: existing `standalone_credential_exchange_test.go`,
   `standalone_git_test.go`, `workspace_exec_credentials_test.go` drive the real helper script
   and gh shim against the real handler on loopback; all pass.
+
+## Staging Verification (2026-11-06, deploy-staging run 42192674454, vm-agent release eefef00)
+
+Fresh Instant session (Test Project 1, node `agent_version` = eefef00), public ports on:
+
+- Unauthenticated public route to the agent port (`/git-credential`, `/health`): 403 from the API, no credential line.
+- Owner-authenticated relay into the agent's own port: 403 from the vm-agent own-listener guard.
+- Owner-authenticated non-port `/git-credential` (API relay marker): 401 from the relay check.
+- Public preview on port 3000 (node http server): 200.
+- Inside the session: `git ls-remote`, `git push` + delete of a throwaway branch, `gh api`, `gh pr list` all exit 0.
+- App: browser token login 200; dashboard, project and chat pages load with 0 console errors.
+
+Notes: the deploy needed 4 attempts because of Cloudflare API 503s during a Cloudflare partial outage. The
+Instant container application switched to the new image about 2 minutes after the deploy job finished,
+so the first post-deploy container ran the previous vm-agent (`agent_version` 114156f6); the probes above
+are from a container started after the switch. Test workspaces were deleted but remain in `stopping` due to
+`tasks/backlog/2026-11-03-cf-container-workspace-deletion-stuck-request-failed.md`.
