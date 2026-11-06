@@ -288,6 +288,16 @@ describe('human input card in chat', () => {
     expect(await screen.findByRole('button', { name: 'Start both' })).toBeInTheDocument();
   });
 
+  it('does not keep polling a question that failed to load', async () => {
+    getAttentionRequestContext.mockRejectedValue(new Error('Attention request not found'));
+
+    renderCard(compactMetadata());
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Attention request not found');
+    await new Promise((resolve) => setTimeout(resolve, 200));
+    expect(getAttentionRequestContext).toHaveBeenCalledTimes(1);
+  });
+
   it('points to the bell without fetching when the conversation has no project', () => {
     render(<AcpConversationItemView item={itemFor(compactMetadata())} />);
 

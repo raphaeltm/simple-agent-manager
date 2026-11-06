@@ -26,9 +26,14 @@ export interface HumanInputCardProps {
  * is hidden. Override via VITE_HUMAN_INPUT_CARD_REFRESH_MS.
  */
 const DEFAULT_HUMAN_INPUT_CARD_REFRESH_MS = 15_000;
-const HUMAN_INPUT_CARD_REFRESH_MS = import.meta.env.VITE_HUMAN_INPUT_CARD_REFRESH_MS
-  ? parseInt(import.meta.env.VITE_HUMAN_INPUT_CARD_REFRESH_MS, 10)
-  : DEFAULT_HUMAN_INPUT_CARD_REFRESH_MS;
+const configuredRefreshMs = Number.parseInt(
+  import.meta.env.VITE_HUMAN_INPUT_CARD_REFRESH_MS ?? '',
+  10
+);
+const HUMAN_INPUT_CARD_REFRESH_MS =
+  Number.isFinite(configuredRefreshMs) && configuredRefreshMs > 0
+    ? configuredRefreshMs
+    : DEFAULT_HUMAN_INPUT_CARD_REFRESH_MS;
 
 /** Questions longer than this start collapsed, so a long brief does not bury the buttons. */
 const COLLAPSIBLE_QUESTION_CHARS = 600;
@@ -132,8 +137,12 @@ export const HumanInputCard: FC<HumanInputCardProps> = ({ item, projectId }) => 
       ),
     enabled: Boolean(scope && projectId && ref),
     retry: false,
+    // A question that is settled cannot change; one that failed to load (gone, or access
+    // revoked) waits for Retry instead of polling an error forever.
     refetchInterval: (q) =>
-      isSettled(q.state.data?.request) ? false : HUMAN_INPUT_CARD_REFRESH_MS,
+      isSettled(q.state.data?.request) || (q.state.error && !q.state.data)
+        ? false
+        : HUMAN_INPUT_CARD_REFRESH_MS,
   });
 
   if (!ref) return null;
