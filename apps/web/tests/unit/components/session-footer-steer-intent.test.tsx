@@ -170,4 +170,23 @@ describe('steer or queue while the agent works', () => {
     send();
     expect(next.handleSendFollowUp).toHaveBeenCalledWith('steer');
   });
+
+  it('offers no Steer when the agent cannot steer, and queues', () => {
+    const lc = lifecycle({ steeringSupported: false });
+    renderFooter(lc);
+    expect(chip()).toBeNull();
+    // Liveness: the agent is still shown working, with its Interrupt control and composer.
+    expect(screen.getByRole('button', { name: /interrupt/i })).toBeVisible();
+    expect(placeholder()).toBe('Queue next...');
+    send();
+    expect(lc.handleSendFollowUp).toHaveBeenCalledWith('queue');
+  });
+
+  it('keeps offering Steer while support is unknown (older VM agents never report it)', () => {
+    const lc = lifecycle({ steeringSupported: null });
+    renderFooter(lc);
+    expect(chip()).toHaveAttribute('data-intent', 'steer');
+    send();
+    expect(lc.handleSendFollowUp).toHaveBeenCalledWith('steer');
+  });
 });

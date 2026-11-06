@@ -35,7 +35,11 @@ const mocks = vi.hoisted(() => ({
   wsOptions: [] as Array<{
     enabled: boolean;
     onMessage?: (msg: Msg) => void;
-    onAgentActivity?: (activity: 'prompting' | 'idle', promptStartedAt?: number | null) => void;
+    onAgentActivity?: (
+      activity: 'prompting' | 'idle',
+      promptStartedAt?: number | null,
+      steeringSupported?: boolean
+    ) => void;
     onCatchUp?: (messages: Msg[], session: unknown, state?: unknown) => void;
   }>,
 }));
@@ -893,6 +897,38 @@ describe('useSessionLifecycle loading semantics', () => {
 
     await waitFor(() => expect(result.current.sessionState).toBe('sleeping'));
     expect(result.current.agentActivity).toBe('idle');
+  });
+
+  // The composer hides Steer when the agent's adapter cannot steer; the hook learns that
+  // from the loaded session state and from session.activity pushes.
+  it('takes steering support from the loaded state and from activity pushes', async () => {
+    const loaded = detail([msg('a', 1000)], false, 'active');
+    mocks.getChatSession.mockResolvedValue({
+      ...loaded,
+      state: { ...loaded.state, steeringSupported: false },
+    });
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.session?.status).toBe('active'));
+    expect(result.current.steeringSupported).toBe(false);
+
+    const socket = mocks.wsOptions.at(-1)!;
+    act(() => socket.onAgentActivity?.('prompting', Date.now(), true));
+    expect(result.current.steeringSupported).toBe(true);
+    // A push without the field (an older server) leaves the known value alone.
+    act(() => socket.onAgentActivity?.('idle', null));
+    expect(result.current.agentActivity).toBe('idle');
+    expect(result.current.steeringSupported).toBe(true);
+  });
+
+  it('leaves steering support unknown when the server never reported it', async () => {
+    mocks.getChatSession.mockResolvedValue(detail([msg('a', 1000)], false, 'active'));
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.session?.status).toBe('active'));
+    expect(result.current.steeringSupported).toBeNull();
   });
 
   describe('workspace and node detail fetches', () => {
