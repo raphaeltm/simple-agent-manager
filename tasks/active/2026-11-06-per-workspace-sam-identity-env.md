@@ -48,30 +48,38 @@ node, for task `01M6R8VEAWPS7E8M8TJQHVMVM7` (`task_mode = 'task'` in D1), had
 
 ## Implementation checklist
 
-- [ ] Add a server helper that returns a workspace's SAM identity (project, chat
+- [x] Add a server helper that returns a workspace's SAM identity (project, chat
       session, task ID, task mode): runtime values first, session task context over
       them, boot config only for the boot workspace.
-- [ ] Use it in both config copies in `workspace_provisioning.go`, so `/etc/sam/env`
+- [x] Use it in both config copies in `workspace_provisioning.go`, so `/etc/sam/env`
       and `sam-env.sh` never carry another workspace's IDs.
-- [ ] Build `SAMEnvFallback` per SessionHost from that identity in
+- [x] Build `SAMEnvFallback` per SessionHost from that identity in
       `getOrCreateSessionHost`, instead of inheriting the node-level list.
-- [ ] Tests: a shared-node SessionHost for a non-boot workspace gets its own task mode,
+- [x] Tests: a shared-node SessionHost for a non-boot workspace gets its own task mode,
       task ID, chat session ID and project ID, and none of the boot values (driven
       through agent-session start, not the helper directly).
-- [ ] Tests: the boot workspace still gets the boot values when no session context
+- [x] Tests: the boot workspace still gets the boot values when no session context
       exists; session context beats boot config (Instant/standalone `task` default).
-- [ ] Tests: provisioning config for a non-boot workspace carries the runtime's
+- [x] Tests: provisioning config for a non-boot workspace carries the runtime's
       project/task IDs and does not inherit the boot chat session ID.
-- [ ] Prove the tests discriminate: revert each fix and confirm the intended tests fail.
-- [ ] Update the env var list in `onboarding-tools.ts`.
+- [x] Prove the tests discriminate: revert each fix and confirm the intended tests fail.
+- [x] Update the env var list in `onboarding-tools.ts`.
+- [x] Review (test-engineer, MEDIUM): session identity keys from the per-session fallback
+      replace stale `/etc/sam/env` values (a workspace reused by a later task keeps the
+      first task's IDs); other keys still only fill gaps (`acp/session_host_sam_env.go`
+      `mergeSAMEnvFallback`).
+- [x] Review (go-specialist, HIGH x2): `mcp_build.go` and `primeRestoredMessageReporter`
+      borrowed the boot project for any workspace (the restore path also persisted it);
+      both now use `workspaceSAMIdentity`. Attack + owner-control tests added.
+- [x] Review (go-specialist, MEDIUM): identity fields read under `workspaceMu.RLock`.
 
 ## Acceptance criteria
 
-- [ ] A second workspace on a shared node starts its agent with its own
+- [x] A second workspace on a shared node starts its agent with its own
       `SAM_TASK_MODE`, `SAM_TASK_ID`, `SAM_CHAT_SESSION_ID`, `SAM_PROJECT_ID`.
-- [ ] `/etc/sam/env` for a non-boot workspace never contains the boot workspace's
+- [x] `/etc/sam/env` for a non-boot workspace never contains the boot workspace's
       task or chat IDs.
-- [ ] An Instant conversation session reports `SAM_TASK_MODE=conversation`.
+- [x] An Instant conversation session reports `SAM_TASK_MODE=conversation`.
 - [ ] Verified on staging with two sessions of different modes on one node.
 
 ## References
@@ -79,3 +87,29 @@ node, for task `01M6R8VEAWPS7E8M8TJQHVMVM7` (`task_mode = 'task'` in D1), had
 - `.claude/rules/61-guards-must-cover-every-runtime.md` (VM + standalone)
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md`
 - `packages/vm-agent/.claude/rules/27-vm-agent-staging-refresh.md`
+
+## Notes
+
+Discrimination proof (each fix reverted alone, then restored):
+
+1. Session env built from the node config again (`s.config.BuildSAMEnvFallback()`): all three
+   `TestSharedNodeSessionGetsItsOwnSAMIdentity` cases fail, reproducing production
+   (`SAM_TASK_MODE = "conversation", want "task"`, `SAM_TASK_ID = "task-boot"`, every boot ID leaked).
+2. Identity not applied in `workspaceBootstrapConfig`: both
+   `TestProvisioningConfigCarriesTheWorkspaceIdentity` cases fail with the boot identity.
+3. Boot task-mode gate removed: only `TestBootWorkspaceSAMIdentity/boot_mode_never_describes_a_task_it_did_not_name` fails.
+
+The task-completion validator repeated reverts 1 and 2 independently with the same result.
+
+Review-fix discrimination:
+
+4. Identity override removed from `mergeSAMEnvFallback`: only
+   `TestMergeSAMEnvFallbackSessionIdentityBeatsStaleEnvFile` fails (`SAM_TASK_ID=task-first` kept).
+5. Old `mcp_build.go` fallback restored: only `TestMcpBuildAndPublish_OtherWorkspaceDoesNotBorrowBootProject` fails.
+6. Old restore-reporter fallback restored: only `TestPrimeRestoredMessageReporter_OtherWorkspaceDoesNotBorrowBootProject`
+   fails, showing the reporter bound to `proj-boot` and `proj-boot` persisted onto the other workspace.
+
+Deferred (MEDIUM, test-engineer): after a VM-agent restart, a plain WebSocket reconnect to the
+node's boot workspace synthesizes the boot task context in `agent_ws.go` (pre-existing). It only
+matters if that workspace was later reassigned to another task, and closing it needs
+`WorkspaceRuntime.TaskID` persisted across restarts. Tracked as a SAM Idea.

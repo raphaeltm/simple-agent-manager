@@ -26,8 +26,8 @@ func DeriveBaseDomain(controlPlaneURL string) string {
 }
 
 // BuildSAMEnvFallback returns KEY=value pairs for SAM environment variables
-// derived from the vm-agent config. Used as fallback injection into ACP sessions
-// when the bootstrap-written /etc/sam/env file is missing or incomplete.
+// derived from c. The server calls it on a per-session copy of the node config
+// whose workspace and identity fields describe that session.
 func (c *Config) BuildSAMEnvFallback() []string {
 	baseDomain := DeriveBaseDomain(c.ControlPlaneURL)
 

@@ -467,10 +467,11 @@ func TestMcpBuildAndPublish_MissingCallbackToken(t *testing.T) {
 // then proceeds past the project check (and fails later at the docker-dependent
 // build step, which is not reachable in unit tests, so we only assert it did NOT
 // fail with the project-link error).
-func TestMcpBuildAndPublish_ProjectIDFallsBackToConfig(t *testing.T) {
+func TestMcpBuildAndPublish_BootWorkspaceProjectIDFallsBackToConfig(t *testing.T) {
 	t.Parallel()
 	s, key := mcpBuildTestServer(t)
 	s.config.ProjectID = "proj-from-config"
+	s.config.WorkspaceID = "ws-001" // the workspace the node (or Instant container) booted for
 
 	s.workspaces["ws-001"] = &WorkspaceRuntime{
 		ID:           "ws-001",
@@ -489,6 +490,31 @@ func TestMcpBuildAndPublish_ProjectIDFallsBackToConfig(t *testing.T) {
 	decodeJSON(t, rec, &errResp)
 	if strings.Contains(errResp["error"], "workspace is not linked to a project") {
 		t.Errorf("config projectID should satisfy the project check, got %q", errResp["error"])
+	}
+}
+
+// On a shared node the config describes the boot session. Any other workspace
+// must not publish under the boot session's project.
+func TestMcpBuildAndPublish_OtherWorkspaceDoesNotBorrowBootProject(t *testing.T) {
+	t.Parallel()
+	s, key := mcpBuildTestServer(t)
+	s.config.ProjectID = "proj-boot"
+	s.config.WorkspaceID = "ws-boot"
+
+	s.workspaces["ws-002"] = &WorkspaceRuntime{
+		ID:            "ws-002",
+		Status:        "running",
+		WorkspaceDir:  "/workspace/WS_002",
+		CallbackToken: "tok",
+	}
+
+	rec := mcpBuildPOST(t, s, key, "/workspaces/ws-002/mcp/build-and-publish", "ws-002",
+		validMcpBuildRequest())
+
+	var errResp map[string]string
+	decodeJSON(t, rec, &errResp)
+	if rec.Code != http.StatusInternalServerError || !strings.Contains(errResp["error"], "workspace is not linked to a project") {
+		t.Fatalf("expected the project-link error, got %d %q", rec.Code, errResp["error"])
 	}
 }
 

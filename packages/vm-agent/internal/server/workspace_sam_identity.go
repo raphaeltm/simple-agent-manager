@@ -26,9 +26,13 @@ type samIdentity struct {
 func (s *Server) workspaceSAMIdentity(workspaceID string, runtime *WorkspaceRuntime, task *taskCallbackContext) samIdentity {
 	var id samIdentity
 	if runtime != nil {
+		// The runtime is the shared map entry; upsertWorkspaceRuntime writes these
+		// fields under workspaceMu. Callers must not hold workspaceMu.
+		s.workspaceMu.RLock()
 		id.ProjectID = strings.TrimSpace(runtime.ProjectID)
 		id.ChatSessionID = strings.TrimSpace(runtime.ChatSessionID)
 		id.TaskID = strings.TrimSpace(runtime.TaskID)
+		s.workspaceMu.RUnlock()
 	}
 	if task != nil {
 		id.ProjectID = firstNonEmpty(strings.TrimSpace(task.ProjectID), id.ProjectID)

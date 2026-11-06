@@ -267,9 +267,9 @@ type GatewayConfig struct {
 	// When nil, no callback fires. The string arg is the stop reason (e.g. "end_turn", "error").
 	OnPromptComplete            func(stopReason string, promptErr error)
 	OnPromptCompleteWithContext func(string, error, PromptCompletionContext)
-	// SAMEnvFallback provides fallback SAM environment variables (KEY=value pairs)
-	// injected into ACP sessions when the bootstrap-written /etc/sam/env file is
-	// missing or incomplete. Built from the vm-agent's own config at startup.
+	// SAMEnvFallback is this session's SAM env (KEY=value pairs), built per session
+	// by the server. Session identity keys override /etc/sam/env; other keys only
+	// fill gaps in it (mergeSAMEnvFallback).
 	SAMEnvFallback []string
 	// CredentialSyncer syncs updated file-based credentials (e.g. auth.json)
 	// back to the control plane after a session ends. When nil, no sync occurs.
