@@ -60,13 +60,13 @@ const DEPLOY_ACCOUNT = [
   'Workers R2 Storage Write',
   'D1 Write',
   'Pages Write',
-  'Containers Write',
+  'Workers Containers Write',
   'Workers AI Write',
-  'AI Gateway Edit',
+  'AI Gateway Write',
   'Account Settings Read',
 ];
 const RUNTIME_ACCOUNT = [
-  'Containers Write',
+  'Workers Containers Write',
   'Workers Scripts Read',
   'Workers Observability Read',
   'Workers AI Read',
@@ -94,7 +94,8 @@ function select(groups: PermissionGroup[], names: string[], scope: string): { id
     );
     const [match] = matches;
     if (matches.length !== 1 || !match)
-      throw new Error('Required selectable account-token permission unavailable');
+      // The group name is public catalog vocabulary, safe to surface for diagnosis.
+      throw new Error(`Required selectable account-token permission unavailable: ${name}`);
     return { id: match.id };
   });
 }

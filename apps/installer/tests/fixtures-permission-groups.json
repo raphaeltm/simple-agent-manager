@@ -1,0 +1,1634 @@
+{
+  "capturedAt": "2026-11-06",
+  "source": "GET /accounts/:id/tokens/permission_groups (names and scopes only)",
+  "groups": [
+    {
+      "name": "AI Audit Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "AI Audit Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "AI Gateway Metadata Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "AI Gateway Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "AI Gateway Run",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "AI Gateway Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "AI Search Index Engine",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "AI Search Metadata Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "AI Search Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "AI Search Run",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "AI Search Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Apps Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Apps Revoke",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Apps Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Apps and Policies Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Apps and Policies Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Access: Apps and Policies Revoke",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Apps and Policies Revoke",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Access: Apps and Policies Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Apps and Policies Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Access: Audit Logs Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Custom Pages Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Custom Pages Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Device Posture Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Device Posture Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Groups Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Groups Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Identity Providers Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Identity Providers Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Keys Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Keys Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Mutual TLS Certificates Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Mutual TLS Certificates Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Organizations Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Organizations Revoke",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Organizations Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Organizations, Identity Providers, and Groups Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Organizations, Identity Providers, and Groups Revoke",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Organizations, Identity Providers, and Groups Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Policies Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Policies Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Policy Test Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Policy Test Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: SAML Certificates Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: SAML Certificates Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: SCIM Logs Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: SCIM Population Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: SCIM Population Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: SSH Auditing Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: SSH Auditing Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Service Tokens Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Service Tokens Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Tags Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Tags Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Users Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Access: Users Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account API Gateway",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account API Gateway Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account API Tokens Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account API Tokens Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account Abuse Protection PII Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account Analytics Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account Custom Asset Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account Custom Asset Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account Custom Error Rules Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account Custom Error Rules Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account Custom Pages Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account Custom Pages Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account DNS Settings Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account DNS Settings Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account Firewall Access Rules Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account Firewall Access Rules Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account Rule Lists Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account Rule Lists Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account Rulesets Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account Rulesets Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account Security Center Insights Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account Security Center Insights Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account Security Insights Partner Integrations Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account Security Insights Partner Integrations Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account Settings Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account Settings Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account WAF Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account WAF Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account Waiting Rooms Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account: SSL and Certificates Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Account: SSL and Certificates Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Address Maps Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Address Maps Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Agent Memory Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Agents Gateway Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Agents Gateway Run",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Agents Gateway Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Allow Request Tracer Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Analytics Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Application Security Reports Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Apps Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Artifacts Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Artifacts Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Audit Logs Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Auto Rag Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Auto Rag Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Auto Rag Write Run Engine",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Billing Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Billing Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Bot Management Feedback Report Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Bot Management Feedback Report Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Bot Management Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Bot Management Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Browser Run Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Browser Run Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "CASB Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "CASB Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "CF Agents Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "CF Agents Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cache Purge",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Cache Settings Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Cache Settings Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Calls Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Calls Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "China Network Steering Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "China Network Steering Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloud Connector Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Cloud Connector Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Cloud Email Security: Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloud Email Security: Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloud Workload Security Deployment",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloud Workload Security Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloud Workload Security Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloudchamber Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloudchamber Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloudflare CDS Compute Account Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloudflare CDS Compute Account Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloudflare DEX Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloudflare DEX Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloudflare One Connector Monitoring: cloudflared",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloudflare One Connector: WARP Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloudflare One Connector: WARP Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloudflare One Connector: cloudflared Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloudflare One Connector: cloudflared Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloudflare One Connectors Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloudflare One Connectors Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloudflare One Networks Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloudflare One Networks Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloudflare Tunnel Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloudflare Tunnel Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloudflare Zero Trust Secure DNS Locations Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloudforce One Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Cloudforce One Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Config Settings Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Config Settings Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Connectivity Directory Admin",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Connectivity Directory Bind",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Connectivity Directory Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Constellation Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Constellation Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Custom Errors Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Custom Errors Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Custom Pages Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Custom Pages Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "D1 Metadata Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "D1 Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "D1 Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "DDoS Botnet Feed Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "DDoS Botnet Feed Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "DDoS Protection Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "DDoS Protection Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "DLS: Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "DLS: Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "DNS Firewall Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "DNS Firewall Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "DNS Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "DNS View Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "DNS View Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "DNS Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Disable ESC Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Disable ESC Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Disable ESC Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Disable ESC Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Domain API Gateway",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Domain API Gateway Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Domain Page Shield",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Domain Page Shield Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Dynamic URL Redirects Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Dynamic URL Redirects Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Email Routing Account Rules Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Email Routing Addresses Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Email Routing Addresses Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Email Routing Rules Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Email Routing Rules Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Email Routing Suppressions Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Email Routing Suppressions Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Email Security DMARC Reports Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Email Security DMARC Reports Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Email Sending Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Email Sending Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Field Extractors Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Field Extractors Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Firewall Services Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Firewall Services Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Firewall for AI Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Firewall for AI Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Flagship Evaluate",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Flagship Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Flagship Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Fraud Detection Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Fraud Detection Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Fraud Events Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Fraud Feedback Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Fraud Feedback Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "HTTP Applications Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "HTTP Applications Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "HTTP DDoS Managed Ruleset Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "HTTP DDoS Managed Ruleset Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Health Checks Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Health Checks Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Hyperdrive PlanetScale Setup",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Hyperdrive Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Hyperdrive Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "IOT Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "IOT Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "IP Prefixes: BGP On Demand Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "IP Prefixes: BGP On Demand Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "IP Prefixes: Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "IP Prefixes: Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Images Metadata Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Images Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Images Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Integration Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Intel Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Intel Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "K2 Config Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "K2 Config Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "K2 Consume",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "K2 Produce",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "L4 DDoS Managed Ruleset Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "L4 DDoS Managed Ruleset Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Load Balancers Account Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Load Balancers Account Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Load Balancers Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Load Balancers Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Load Balancing: Monitors and Pools Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Load Balancing: Monitors and Pools Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Logs Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Logs Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Logs Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Logs Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "MCP Portals Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "MCP Portals Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Magic Firewall Packet Captures - Read PCAPs API",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Magic Firewall Packet Captures - Write PCAPs API",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Magic Firewall Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Magic Firewall Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Magic Network Monitoring Admin",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Magic Network Monitoring Config Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Magic Network Monitoring Config Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Magic Transit Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Magic Transit Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Magic WAN Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Magic WAN Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Managed headers Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Managed headers Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Mass URL Redirects Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Mass URL Redirects Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Messaging Edit",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Messaging Metadata Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Messaging Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "MoQ Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "MoQ Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Network Quality Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Network Quality Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Notifications Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Notifications Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "OAuth Client Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "OAuth Client Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Origin Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Origin Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Page Rules Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Page Rules Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Page Shield",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Page Shield Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Page Shield Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Pages Metadata Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Pages Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Pages Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Payments Gateway Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Payments Gateway Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Pipelines Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Pipelines Send",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Pipelines Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Precursor Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Precursor Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Pubsub Configuration Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Pubsub Configuration Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Queues Metadata Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Queues Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Queues Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Radar Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Realtime",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Realtime Admin",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Realtime Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Registrar Domains Admin",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Registrar Domains Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Registrar Sandbox Domains Admin",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Registrar Sandbox Domains Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Resource Library Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Resource Library Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Resource Sharing Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Response Compression Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Response Compression Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Rule Policies Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Rule Policies Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "SCIM Provisioning",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "SSL and Certificates Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "SSL and Certificates Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "SSO Connector Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "SSO Connector Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Sanitize Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Sanitize Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Secrets Store Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Secrets Store Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Select Configuration Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Select Configuration Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Snippets Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Snippets Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Stream Metadata Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Stream Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Stream Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Tag Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Tag Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Transform Rules Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Transform Rules Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Trust and Safety Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Trust and Safety Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Turnstile Sites Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Turnstile Sites Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "URL Scanner Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "URL Scanner Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Vectorize Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Vectorize Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Waiting Rooms Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Waiting Rooms Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Web3 Hostnames Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Web3 Hostnames Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Websearch Metadata Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Websearch Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Websearch Run",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Websearch Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers AI Metadata Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers AI Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers AI Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers Admin",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers CI Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers CI Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers Containers Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers Containers Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers Content Read-Only",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers Editor",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers KV Storage Metadata Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers KV Storage Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers KV Storage Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers Metadata Read-Only",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers Observability Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers Observability Telemetry Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers Observability Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers R2 Data Catalog Read",
+      "scopes": ["com.cloudflare.api.account", "com.cloudflare.edge.r2.bucket"]
+    },
+    {
+      "name": "Workers R2 Data Catalog Write",
+      "scopes": ["com.cloudflare.api.account", "com.cloudflare.edge.r2.bucket"]
+    },
+    {
+      "name": "Workers R2 SQL Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers R2 Storage Bucket Item Read",
+      "scopes": ["com.cloudflare.edge.r2.bucket"]
+    },
+    {
+      "name": "Workers R2 Storage Bucket Item Write",
+      "scopes": ["com.cloudflare.edge.r2.bucket"]
+    },
+    {
+      "name": "Workers R2 Storage Metadata Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers R2 Storage Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers R2 Storage Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers Routes Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Workers Routes Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Workers Scripts Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers Scripts Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Workers Tail Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Zaraz Admin",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Zaraz Edit",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Zaraz Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Zero Trust Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Zero Trust Report",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Zero Trust Resilience Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Zero Trust Resilience Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Zero Trust Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Zero Trust: PII Read",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Zero Trust: Seats Write",
+      "scopes": ["com.cloudflare.api.account"]
+    },
+    {
+      "name": "Zone Custom Asset Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Zone Custom Asset Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Zone DNS Settings Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Zone DNS Settings Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Zone Observability Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Zone Observability Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Zone Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Zone Security Center Insights Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Zone Security Center Insights Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Zone Security Insights Partner Assets Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Zone Settings Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Zone Settings Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Zone Transform Rules Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Zone Transform Rules Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Zone Versioning Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Zone Versioning Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Zone WAF Read",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Zone WAF Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    },
+    {
+      "name": "Zone Write",
+      "scopes": ["com.cloudflare.api.account.zone"]
+    }
+  ]
+}
