@@ -15,6 +15,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 import { runCloudflareRuntimePhase } from './cloudflare-runtime-phase';
+import { resolveVmAgentContainerPort } from './vm-agent-container-port';
 
 /**
  * Marks a request that SAM relayed to the vm-agent. The vm-agent never grants
@@ -32,10 +33,7 @@ export interface VmAgentContainerConfig {
 export function getVmAgentContainerConfig(env: Env): VmAgentContainerConfig {
   return {
     enabled: (env.CF_CONTAINER_ENABLED ?? env.SANDBOX_ENABLED) === 'true',
-    vmAgentPort: Number.parseInt(
-      env.CF_CONTAINER_VM_AGENT_PORT || env.SANDBOX_VM_AGENT_PORT || '8080',
-      10
-    ),
+    vmAgentPort: resolveVmAgentContainerPort(env),
     sleepAfter:
       env.CF_CONTAINER_SLEEP_AFTER || env.SANDBOX_SLEEP_AFTER || DEFAULT_CF_CONTAINER_SLEEP_AFTER,
   };

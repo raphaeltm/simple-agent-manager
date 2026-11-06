@@ -75,9 +75,10 @@ const worker = await import('../../src/index');
 
 const WORKSPACE_ID = '01KR1000000000000000000001';
 const proxyHttp = vi.fn();
+const containerFetch = vi.fn();
 const containerBinding = {
   idFromName: vi.fn(() => 'do-id'),
-  get: vi.fn(() => ({ proxyHttp })),
+  get: vi.fn(() => ({ proxyHttp, fetch: containerFetch })),
 };
 
 function containerEnv(overrides: Record<string, string> = {}) {
@@ -115,6 +116,7 @@ describe('cf-container workspace port routes', () => {
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
     });
     proxyHttp.mockImplementation(async () => new Response('proxied', { status: 200 }));
+    containerFetch.mockImplementation(async () => new Response('upgraded', { status: 200 }));
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => new Response('vm proxied', { status: 200 }))
@@ -142,6 +144,40 @@ describe('cf-container workspace port routes', () => {
     expect(ordinary.status).toBe(200);
     expect(proxyHttp).toHaveBeenCalledTimes(1);
     expect(proxyHttp.mock.calls[0]?.[1]).toBe(9090);
+  });
+
+  it('falls back to the default reserved port when the configured port is malformed', async () => {
+    const env = containerEnv({ CF_CONTAINER_VM_AGENT_PORT: 'not-a-port' });
+
+    const reserved = await worker.default.fetch(publicPortRequest(8080), env);
+    expect(reserved.status).toBe(403);
+    expect(proxyHttp).not.toHaveBeenCalled();
+
+    const ordinary = await worker.default.fetch(publicPortRequest(3000, '/'), env);
+    expect(ordinary.status).toBe(200);
+    expect(proxyHttp.mock.calls[0]?.[1]).toBe(8080);
+  });
+
+  it('applies the reserved port and relay marker to WebSocket upgrades', async () => {
+    const upgrade = { upgrade: 'websocket', connection: 'Upgrade' };
+    const base = `https://ws-${WORKSPACE_ID.toLowerCase()}`;
+
+    const reserved = await worker.default.fetch(
+      new Request(`${base}--8080.workspaces.example.com/`, { headers: upgrade }),
+      containerEnv()
+    );
+    expect(reserved.status).toBe(403);
+    expect(containerFetch).not.toHaveBeenCalled();
+
+    const ordinary = await worker.default.fetch(
+      new Request(`${base}--3000.workspaces.example.com/ws`, { headers: upgrade }),
+      containerEnv()
+    );
+    expect(ordinary.status).toBe(200);
+    expect(proxyHttp).not.toHaveBeenCalled();
+    const [forwarded] = containerFetch.mock.calls[0] as [Request];
+    expect(new URL(forwarded.url).pathname).toBe(`/workspaces/${WORKSPACE_ID}/ports/3000/ws`);
+    expect(forwarded.headers.get('X-SAM-Proxied-Request')).toBe('1');
   });
 
   it('still proxies a dev-server port and marks the request as relayed', async () => {
