@@ -88,13 +88,13 @@ function NoticeRowImpl({ notice, rawText, rawLabel, timestamp, projectId }: Noti
   const showRaw = raw !== '' && raw !== notice.quote?.text.trim() && raw !== notice.headline;
 
   return (
-    <div className="mb-1.5 min-w-0" data-testid="sam-notice-row" data-notice-type={notice.type}>
+    <div className="min-w-0" data-testid="sam-notice-row" data-notice-type={notice.type}>
       <button
         type="button"
         onClick={toggle}
         aria-expanded={expanded}
         aria-controls={bodyId}
-        className="group flex w-full min-h-11 min-w-0 items-center gap-2.5 rounded-[12px] px-2 py-1.5 text-left transition-colors hover:bg-[var(--sam-glass-v2-raised)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
+        className="group flex w-full min-h-9 min-w-0 items-center gap-2.5 rounded-[12px] px-2 py-1 text-left transition-colors hover:bg-[var(--sam-glass-v2-raised)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
       >
         <Icon
           size={16}
@@ -151,7 +151,7 @@ function NoticeRowImpl({ notice, rawText, rawLabel, timestamp, projectId }: Noti
           )}
 
           {notice.refs.length > 0 && (
-            <div className="mb-3 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+            <div className="mb-3 grid min-w-0 max-w-2xl grid-cols-[minmax(0,1fr)] gap-2">
               {notice.refs.map((ref) => (
                 <NoticeRefCard
                   key={`${ref.kind}:${ref.id}`}
