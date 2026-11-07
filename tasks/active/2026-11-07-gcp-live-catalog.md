@@ -86,3 +86,9 @@ Waived by Raphaël for this work (session `eecddba8`, 2026-11-07). GCP is not co
   are covered separately: the live offering carries `machineSize`, and pool activation by
   `machineSize` is tested generically).
 - doc-sync LOW ×2: incomplete-read wording; providers AGENTS.md GCP entry.
+- Found while planning PR 3: `compactCapacityPoolSelectionForTaskRunner` (`task-runner-do.ts`) cut
+  an over-96 KiB selection to its first candidate. A live GCP catalog (~3 legacy-size types × ~100
+  zones active in a fresh pool) exceeds that, so a stockout would have had no zone to fall back to.
+  It now keeps the longest ranked prefix that fits (binary search) and logs what it dropped; the
+  existing 160-candidate test asserts more than one candidate survives, in order (red on the old
+  `slice(0, 1)`).
