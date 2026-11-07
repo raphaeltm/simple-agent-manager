@@ -21,7 +21,8 @@ Known resets must resume automatically. Rejections in one window currently burn 
 - [x] Parent cancellation if small; otherwise update related idea.
 - [x] Real entry point regression tests and guard reversion red/green evidence.
 - [x] UI mobile/desktop screenshot audit; lint/typecheck/test/build.
-- [ ] Specialist review, staging, PR/CI/CodeRabbit, merge/deploy.
+- [x] Specialist review and staging verification.
+- [ ] PR/CI/CodeRabbit, merge/deploy.
 - [ ] Update idea 01M6SKEAYHG5P9T8ES3Z331A37 with PR/outcome.
 
 ## References
@@ -49,3 +50,15 @@ Why missed: tests repeated identical callback receipts instead of distinct promp
 Process fix: real callback/admission/event-alarm and owner HTTP-to-recovery regressions plus guard-reversion proofs required by rules35/62; no duplicate standing rules added.
 
 - Full repository tests: all non-API packages passed, including web4994. Initial API run15263 passed/3 failed/2 skipped exposed an immutable transcript write, missing recovery-failure anchor and stale read-count assertion; all corrected and focused reruns green. Final full API rerun1055 files/15267 tests passed,1 file/2 tests skipped; final lint/typecheck/build35/35 passed. Staging/release gates remain tracked below and in the PR.
+
+## Staging verification — 2026-11-07
+
+Deployment [42325669128](https://github.com/raphaeltm/simple-agent-manager/actions/runs/42325669128) passed at runtime candidate `0b7b87d23`. No runtime code changed afterward. Live dashboard, projects and settings passed Playwright checks. Actual Worker settings restored both temporary background/idle overrides to absence, with normal code defaults; the preceding staging owner independently verified restoration.
+
+One disposable task `01M6SVSNJJNNTP1E7YVWHQVFFV` in the staging Potato project used one small VM, healthy heartbeat at02:04:11UTC. Normal session sleep saved an available snapshot. The read-only debug token could not seed the blocked fixture, so reviewed temporary manual action [42327947162](https://github.com/raphaeltm/simple-agent-manager/actions/runs/42327947162) used the existing staging deployment credential with exact staging account/database/task/project/session/nonce, available sleeping snapshot and one-row CAS guards. It updated exactly one test wait; deployment/audit jobs were skipped. The workflow was restored byte-for-byte, leaving no workflow diff.
+
+Live desktop/mobile chat showed Needs you and Resume task without mobile overflow. Clicking Resume task returned202 and the same task ran in a new workspace. Read-back confirmed provider wait null, recovery status restored, matching recovery workspace and no recovery error. The initial verifier incorrectly expected admission null; legitimate scheduler placement is placed, so corrected read-only proof accepts placed and verifies the cleared provider block. No second resume was attempted.
+
+Screenshots: desktop library `01M6SWEWXDXA9H6ZSMHYV44JVT`, mobile `01M6SWEZ083K3N8160J151MPKY`; both opened and reviewed. Cleanup cancelled the test task, removed both workspace records and verified the sole test node GET404. One VM ran approximately14 minutes; no production task was modified.
+
+The midnight formatting-baseline expiry was handled by reusing the exact reviewed date-only metadata from PR2559 commit `a7696132e4ce5c99b7fad81f525c35c75e508950`, retaining formatter/base/debt ceiling. Own ratchet passed1991/2225. Remaining release outcome belongs in the PR and idea after CI, CodeRabbit and deployment.
