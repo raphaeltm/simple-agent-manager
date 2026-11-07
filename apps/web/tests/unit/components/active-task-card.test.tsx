@@ -1,5 +1,6 @@
 import type { DashboardTask } from '@simple-agent-manager/shared';
 import { fireEvent, render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ActiveTaskCard } from '../../../src/components/ActiveTaskCard';
@@ -96,9 +97,12 @@ describe('ActiveTaskCard', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1/chat');
   });
 
-  it('navigates on keyboard Enter', () => {
+  it('navigates on keyboard Enter', async () => {
+    const user = userEvent.setup();
     render(<ActiveTaskCard task={makeTask()} />);
-    fireEvent.keyDown(screen.getByRole('button'), { key: 'Enter' });
+    await user.tab();
+    expect(screen.getByRole('button')).toHaveFocus();
+    await user.keyboard('{Enter}');
     expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1/chat/session-1');
   });
 
@@ -121,15 +125,22 @@ describe('ActiveTaskCard', () => {
   // Keyboard — Space key
   // ---------------------------------------------------------------------------
 
-  it('navigates on keyboard Space', () => {
+  it('navigates on keyboard Space', async () => {
+    const user = userEvent.setup();
     render(<ActiveTaskCard task={makeTask()} />);
-    fireEvent.keyDown(screen.getByRole('button'), { key: ' ' });
+    await user.tab();
+    expect(screen.getByRole('button')).toHaveFocus();
+    await user.keyboard(' ');
     expect(mockNavigate).toHaveBeenCalledWith('/projects/proj-1/chat/session-1');
   });
 
-  it('does not navigate on other keys', () => {
+  it('does not navigate on other keys', async () => {
+    const user = userEvent.setup();
     render(<ActiveTaskCard task={makeTask()} />);
-    fireEvent.keyDown(screen.getByRole('button'), { key: 'Tab' });
+    await user.tab();
+    expect(screen.getByRole('button')).toHaveFocus();
+    await user.keyboard('{ArrowDown}');
+    await user.tab();
     expect(mockNavigate).not.toHaveBeenCalled();
   });
 
