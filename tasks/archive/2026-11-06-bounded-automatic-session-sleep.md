@@ -12,7 +12,7 @@ Repeated idle reports advance activity_at, postponing unattended sleep forever d
 - [x] Revert each changed guard/default once and record discriminating failures.
 - [x] Prefer bounded conversation sleep at task absolute ceiling, preserving terminal fallback for failed sleep.
 - [x] Run quality checks and specialist reviews.
-- [ ] Estimate bounded VM staging cost; coordinate staging, verify real background process sleep, clean up.
+- [x] Estimate bounded VM staging cost; coordinate staging, verify real background process sleep, clean up.
 - [ ] PR, CI, CodeRabbit wait, merge and production health/deploy evidence; update idea.
 
 ## Workflow
@@ -26,7 +26,7 @@ Recovered focused suite: 3 files / 82 tests PASS. Root typecheck: 19 tasks PASS.
 Staging owners explicitly released; provider-limit task 01M6SKEXDWXRZJ7ZXDS8SNMZFP follows this slot. Cost estimate from live staging catalog: cx23 fsn1 2 vCPU/4 GB, €0.0088/hour; 30 minutes ≈ €0.0044 VM cost. Use one VM and existing Claude conversation profile, temporary 180000ms background/60000ms idle staging overrides, then restore both absent variables and delete own resources. Default two-hour behavior is exercised through the actual resolver in deterministic tests.
 
 ## Bounds
-With no further work, normal automatic sleep is eligible at work_at + 15 minutes, or (while background work remains leased) last real work + 2 hours; a five-minute sweep adds at most one normal tick for an uncontended candidate. A 60-second report changes neither deadline. At 24 hours of allocated runtime, conversation sleep gets the existing one-hour grace measured from immutable runtime generation age; repeat queue/claim timestamps cannot extend it. Candidate selection/batch volumes are unchanged; the ceiling branch adds indexed D1 sleep queue operations only, without remote runtime probes.
+With no further work, normal automatic sleep is eligible at work_at + 15 minutes, or (while background work remains leased) last real work + 2 hours; the sweep runs every five minutes, with preceding maintenance, contention and capture adding latency beyond eligibility. A 60-second report changes neither deadline. At 24 hours of allocated runtime, conversation sleep gets the existing one-hour grace measured from immutable runtime generation age; repeat queue/claim timestamps cannot extend it. Candidate selection/batch volumes are unchanged; the ceiling branch adds indexed D1 sleep queue operations only, without remote runtime probes.
 
 ## Final guard discrimination
 Every mutation below produced a failing behavioral test; fixed sources restored afterwards.
@@ -82,3 +82,9 @@ Manual node POST rejected400beforecreation because historical-node ledger limit;
 
 ## Real producer evidence — 2026-11-07 01:29 UTC
 Node delivered first heartbeat01:19:29 and ready01:20:46.995; D1 reports unchanged released agent1d9c9a13b7e80959c513ec99903a55e24ca37929. First task's2CPUreservation hit existing CPU saturation policy at100%; cancelled it beforeworkspace, reused same node explicitly with1CPU/2GBexclusive. No secondVM. Actual test task01M6SSHJS30JFA074TJXRC5R3X, chat428450c6-367a-4f5a-99f1-d74a8434424e, workspace01M6SSHS0CAXCTAPYMMXWMV0JX, agent session01M6SSJKXKCJHCCYBE4QQ2Y6CR. Real Claude Bashbackgroundsleep1200 started and turn ended01:23:04.639UTC, replyingBACKGROUND-KEEPALIVE-STARTED. WorkAt1794014584639,progress1794014583797; idle reports01:24:05.394,01:25:04.671,01:26:04.620,01:27:05.256,01:28:03.854 advance activityAt only. Stateidle/backgroundactivecount1, taskawaiting_followup. D1at01:25:27before3minbound shows agent/workspacerunning, snapshotpending,noqueued sleep. Bound01:26:04.639 passed; ordinary sweep awaited, no manual sleep requested. Playwright authenticated actual conversation page displays completed marker+idle state; screenshot locally retained. Cleanup/release not yet performed.
+
+## Staging PASS and cleanup — 2026-11-07 01:35 UTC
+Ordinary automatic sweep completed sleep at **01:33:30.558UTC** (no manualsleep). D1 confirmed snapshot **available**, sleep_status **sleeping**, sleep_errorNULL, agent-sessioncompleted, workspacedeleted; conversation task **sleeping**, noerror. Backgroundreportedactiveevery60sec through01:32with fixedworkclock; shutdownclearedtrackedbackgroundwork. Playwright actualchat displays **Session sleeping** and completedmarker. Sweep scheduling/maintenance and artifact capture add latency beyond eligibility; observed endturn→sleep10m26s with3minbound. Do not claim exact3minwallclock shutdown.
+OwnnodeDELETEreturned success; subsequentGET404. Onlyonephysicalcx23evercreated, runtime~18min, estimatedVMcost~€0.0026beforeproviderrounding (within30min/€0.0044plan). Firsttaskcancelledbeforeworkspace; secondworkspace automaticallydeletedbysleep. BothoriginallyabsentGitHubstagingoverridesDELETED; ghvariablelistconfirmedneither. Explicitrelease sent toproviderpeer01M6SKEXDWXRZJ7ZXDS8SNMZFP, awaitingtheiractualnextdeployandWorkerbindingrestoration; responsibilityretaineduntilverified. NoPRyet.
+
+Final completion-validator reconciliation: PASS for implementation and staging (A research/checklist, B diff/evidence, C tests/verification, vertical slice); UI/backend and resource-selection implementation N/A. Overall release remains open until actual Worker restoration, PR/CI/CodeRabbit, merge/production and idea update. Archive records implementation/staging completion, not a claim of release completion.
