@@ -351,6 +351,68 @@ describe('installation engine', () => {
     ).toBe('pnpm api exec wrangler r2 object');
   });
 
+  it('overlaps the Go builds with infrastructure and compiles linux/amd64 once', async () => {
+    // pulumi up is held open until both Go builds have started; under the previous
+    // sequential order they started only after infrastructure, so this would time out.
+    const f = fixture();
+    const started = { vmAgent: false, cli: false };
+    let release!: () => void;
+    const bothStarted = new Promise<void>((resolve) => (release = resolve));
+    const inner = f.runner;
+    const runner: EngineRunner = {
+      ...inner,
+      async run(command, options) {
+        const line = [command.executable, ...command.args].join(' ');
+        if (line.includes('packages/vm-agent build-all')) started.vmAgent = true;
+        if (line.includes('packages/cli build-all')) started.cli = true;
+        if (started.vmAgent && started.cli) release();
+        if (line === 'pulumi up --yes --skip-preview') {
+          const timeout = new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('Go builds did not overlap infrastructure')), 2000)
+          );
+          await Promise.race([bothStarted, timeout]);
+        }
+        return inner.run(command, options);
+      },
+    };
+    await runInstallerEngine(config, {
+      ...f,
+      runner,
+      environment: privateEnv,
+      emit() {},
+      save() {},
+    });
+    const makes = f.commands
+      .filter((entry) => entry.executable === 'make')
+      .map((entry) => entry.args.join(' '));
+    const buildAll = makes.findIndex((args) => args.includes('packages/vm-agent build-all'));
+    const prepare = makes.findIndex((args) => args.includes('prepare-container'));
+    expect(buildAll).toBeGreaterThanOrEqual(0);
+    expect(prepare).toBeGreaterThan(buildAll);
+    expect(makes[prepare]).toContain('-o build-linux-amd64');
+  });
+
+  it('reports a failed background Go build at the build phase, after infrastructure', async () => {
+    const f = fixture('build-all');
+    const events: Array<{ phase?: string; status?: string }> = [];
+    let state: EngineCheckpoint | undefined;
+    await expect(
+      runInstallerEngine(config, {
+        ...f,
+        environment: privateEnv,
+        emit: (event) => events.push(event as { phase?: string; status?: string }),
+        save: (value) => {
+          state = structuredClone(value);
+        },
+      })
+    ).rejects.toThrow('Installation phase build failed');
+    expect(state?.completed).toContain('infrastructure');
+    expect(state?.completed).not.toContain('build');
+    expect(events.filter((event) => event.status === 'failed').map((event) => event.phase)).toEqual(
+      ['build']
+    );
+  });
+
   it('runs the migration checks without capturing their progress output', async () => {
     // A clean install's migration output exceeds the capture limit (2026-11-07); parsed
     // outputs must still be captured.

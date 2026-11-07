@@ -300,6 +300,52 @@ export async function runInstallerEngine(
     passphrase: options.environment.PULUMI_CONFIG_PASSPHRASE,
     git: (args) => execute('git', args),
   });
+  // The Go builds need no infrastructure, so they start now and overlap the Pulumi
+  // and Cloudflare configuration phases; the phases that use their outputs await
+  // them. A failure surfaces where it is awaited. Both are cache-or-build steps.
+  const background = (work: () => Promise<void>) => {
+    const running = work();
+    running.catch(() => undefined);
+    return running;
+  };
+  const vmAgentBuild = background(() =>
+    // Keyed by the content-derived VM-agent release, so later commits that leave
+    // packages/vm-agent untouched reuse the same verified binaries.
+    cached(
+      'vm-agent',
+      {
+        release: String(env.VM_AGENT_RELEASE),
+        buildDate: String(env.VM_AGENT_BUILD_DATE),
+        go: goVersion,
+      },
+      VM_AGENT_OUTPUTS,
+      'packages/vm-agent',
+      async () => {
+        const version = [
+          `VERSION=${env.VM_AGENT_RELEASE}`,
+          `BUILD_DATE=${env.VM_AGENT_BUILD_DATE}`,
+        ];
+        // build-all already produces linux/amd64, so prepare-container reuses it
+        // instead of compiling it a second time.
+        if (!c.skipAgent)
+          await execute('make', ['-C', 'packages/vm-agent', 'build-all', ...version]);
+        await execute('make', [
+          '-C',
+          'packages/vm-agent',
+          '-o',
+          'prepare-codex-runtime',
+          ...(c.skipAgent ? [] : ['-o', 'build-linux-amd64']),
+          'prepare-container',
+          ...version,
+        ]);
+      }
+    )
+  );
+  const cliBuild = background(() =>
+    cached('cli', { commit: c.sourceCommit, go: goVersion }, CLI_OUTPUTS, 'packages/cli', () =>
+      execute('make', ['-C', 'packages/cli', 'build-all', 'version'])
+    )
+  );
   await phase('infrastructure', async () => {
     await execute(
       'bash',
@@ -339,37 +385,7 @@ export async function runInstallerEngine(
   });
   await phase('build', async () => {
     await pnpm('build');
-    // Keyed by the content-derived VM-agent release, so later commits that leave
-    // packages/vm-agent untouched reuse the same verified binaries.
-    await cached(
-      'vm-agent',
-      {
-        release: String(env.VM_AGENT_RELEASE),
-        buildDate: String(env.VM_AGENT_BUILD_DATE),
-        go: goVersion,
-      },
-      VM_AGENT_OUTPUTS,
-      'packages/vm-agent',
-      async () => {
-        await execute('make', [
-          '-C',
-          'packages/vm-agent',
-          '-o',
-          'prepare-codex-runtime',
-          'prepare-container',
-          `VERSION=${env.VM_AGENT_RELEASE}`,
-          `BUILD_DATE=${env.VM_AGENT_BUILD_DATE}`,
-        ]);
-        if (!c.skipAgent)
-          await execute('make', [
-            '-C',
-            'packages/vm-agent',
-            'build-all',
-            `VERSION=${env.VM_AGENT_RELEASE}`,
-            `BUILD_DATE=${env.VM_AGENT_BUILD_DATE}`,
-          ]);
-      }
-    );
+    await vmAgentBuild;
     if (options.reportArtifact)
       await options.reportArtifact(
         readContainerArtifact(root, String(env.VM_AGENT_RELEASE), String(env.VM_AGENT_BUILD_DATE))
@@ -460,13 +476,7 @@ export async function runInstallerEngine(
     await deployApi();
   });
   await phase('publish-cli', async () => {
-    await cached(
-      'cli',
-      { commit: c.sourceCommit, go: goVersion },
-      CLI_OUTPUTS,
-      'packages/cli',
-      () => execute('make', ['-C', 'packages/cli', 'build-all', 'version'])
-    );
+    await cliBuild;
     for (const file of [
       'sam-linux-amd64',
       'sam-linux-arm64',
