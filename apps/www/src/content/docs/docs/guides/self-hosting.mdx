@@ -239,7 +239,7 @@ Create a dedicated least-privilege identity rather than granting Project Owner:
 PROJECT_ID="your-gcp-project-id"
 SERVICE_ACCOUNT="sam-vm-manager@${PROJECT_ID}.iam.gserviceaccount.com"
 
-gcloud services enable compute.googleapis.com --project="${PROJECT_ID}"
+gcloud services enable compute.googleapis.com cloudbilling.googleapis.com --project="${PROJECT_ID}"
 gcloud iam service-accounts create sam-vm-manager \
   --project="${PROJECT_ID}" \
   --display-name="SAM VM manager"
@@ -254,7 +254,7 @@ gcloud iam service-accounts keys create sam-service-account.json \
   --project="${PROJECT_ID}"
 ```
 
-Vertex AI access is optional and is not required for VM provisioning. If your organization policy disables service-account key creation, use WIF or ask a Google Cloud administrator to approve an appropriate key-management policy; do not weaken the policy just for SAM.
+Cloud Billing (`cloudbilling.googleapis.com`) lets SAM read Google's public list prices for the machine catalog; it grants no access to your billing account. Without it, machines are still offered but show "Price unavailable". Vertex AI access is optional and is not required for VM provisioning. If your organization policy disables service-account key creation, use WIF or ask a Google Cloud administrator to approve an appropriate key-management policy; do not weaken the policy just for SAM.
 
 SAM encrypts the complete JSON in both credential stores with the configured credential-encryption key. Only safe metadata is returned to the browser. Derived Google access tokens are short-lived and cached only up to their returned expiry. Rotation verifies the new key before atomically replacing all SAM copies. Disconnect removes SAM's encrypted copies and cached tokens, but it cannot revoke the key in Google Cloud—disable or delete the old key there after a successful rotation or disconnect.
 

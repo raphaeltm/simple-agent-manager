@@ -207,7 +207,10 @@ An **offering** is one concrete, provider-native machine: a specific instance ty
 region, with real vCPU, RAM, disk, and price. Not `small`/`medium`/`large` — the actual
 `cpx31`-style SKU your provider sells.
 
-When SAM refreshes a pool it discovers your provider's **full** catalog for each source. The
+When SAM refreshes a pool it discovers your provider's **full** catalog for each source. For
+Google Cloud, the catalog is the machine types an admin has chosen, in every zone where Google has
+them, priced from Google's live list prices; see
+[Google Cloud](/docs/guides/google-cloud/#machine-types-zones-and-prices). The
 editor shows one row per machine type (its vCPU, RAM, disk, and price) with a chip for every region
 your provider sells it in. Select a region to allow that machine there; select it again to stop.
 Each chip is one of:

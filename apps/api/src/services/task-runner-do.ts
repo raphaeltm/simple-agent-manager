@@ -81,17 +81,52 @@ function compactCapacityPoolSelectionForTaskRunner(
     ),
   };
 
-  if (
-    new TextEncoder().encode(JSON.stringify(compactSelection)).length <=
-    TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES
-  ) {
-    return compactSelection;
+  const fits = (count: number) =>
+    selectionBytes({
+      ...compactSelection,
+      candidates: compactSelection.candidates.slice(0, count),
+    }) <= TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES;
+  const total = compactSelection.candidates.length;
+  if (fits(total)) return compactSelection;
+  if (!fits(1)) {
+    // Even the primary alone would push TaskRunner state toward the Durable Object value
+    // limit, where `start()` fails with a storage error that names nothing. Fail here instead.
+    const bytes = selectionBytes({
+      ...compactSelection,
+      candidates: compactSelection.candidates.slice(0, 1),
+    });
+    log.error('task_runner_do.capacity_selection_too_large', {
+      poolId: selection.poolId,
+      bytes,
+      maxBytes: TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES,
+    });
+    throw new Error(
+      `Capacity pool ${selection.poolId} selection is ${bytes} bytes with one candidate, over the ${TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES}-byte TaskRunner budget`
+    );
   }
 
-  return {
-    ...compactSelection,
-    candidates: compactSelection.candidates.slice(0, 1),
-  };
+  // Candidates are ranked best first and every one after the first is a fallback the
+  // exhaustion chain may try (another zone or machine type when one is sold out). Keep the
+  // longest ranked prefix that fits, not just the first: a live catalog spanning many zones
+  // otherwise reaches the TaskRunner with no fallback at all. Always keep at least one.
+  let low = 1;
+  let high = total - 1;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    if (fits(mid)) low = mid;
+    else high = mid - 1;
+  }
+  log.info('task_runner_do.capacity_candidates_truncated', {
+    poolId: selection.poolId,
+    kept: low,
+    dropped: total - low,
+    maxBytes: TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES,
+  });
+  return { ...compactSelection, candidates: compactSelection.candidates.slice(0, low) };
+}
+
+function selectionBytes(selection: TaskStartCapacityPoolSelection): number {
+  return new TextEncoder().encode(JSON.stringify(selection)).length;
 }
 
 function compactCapacityCandidateForTaskRunner(

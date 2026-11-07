@@ -19,7 +19,7 @@ provision/manage VMs without coupling to a specific cloud vendor.
 | `src/hetzner-server-create.ts` | `createVM`'s capacity-retry loop and placement fallback, delegated to by `HetznerProvider` |
 | `src/hetzner-volumes.ts` | Hetzner block-volume operations, delegated to by `HetznerProvider` |
 | `src/scaleway.ts` | Scaleway provider implementation |
-| `src/gcp.ts` | GCP provider (partial/placeholder) |
+| `src/gcp.ts` | GCP provider: VMs over workload identity or a service-account key; live catalog via `gcp-catalog.ts` and `gcp-pricing.ts` |
 | `src/provider-fetch.ts` | Shared HTTP fetch utilities for provider APIs |
 
 ## Commands

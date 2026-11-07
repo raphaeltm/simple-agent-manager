@@ -386,6 +386,30 @@ describe('task-runner-do service', () => {
     const serializedBytes = new TextEncoder().encode(JSON.stringify(forwarded.config)).length;
 
     expect(serializedBytes).toBeLessThan(131_072);
+    // Over budget, the ranked prefix that fits is kept, not just the first candidate: every
+    // later candidate is a fallback the exhaustion chain may need. Order is preserved.
+    const kept = forwarded.config.capacityPoolSelection?.candidates ?? [];
+    const selectionBytes = new TextEncoder().encode(
+      JSON.stringify(forwarded.config.capacityPoolSelection)
+    ).length;
+    expect(kept.length).toBeGreaterThan(1);
+    expect(kept.length).toBeLessThan(160);
+    expect(selectionBytes).toBeLessThanOrEqual(96 * 1024);
+    // The prefix is the longest that fits: one more compacted candidate would not.
+    const next = capacityPoolSelection({
+      provider: 'hetzner',
+      location: 'fsn1',
+      candidateCount: 160,
+    }).candidates[kept.length]!;
+    const withNext = {
+      ...forwarded.config.capacityPoolSelection,
+      // Compacted the way the service compacts a non-primary candidate.
+      candidates: [...kept, { ...next, snapshot: undefined, machineClass: null }],
+    };
+    expect(new TextEncoder().encode(JSON.stringify(withNext)).length).toBeGreaterThan(96 * 1024);
+    expect(kept.map((candidate: { candidateOrder: number }) => candidate.candidateOrder)).toEqual(
+      Array.from({ length: kept.length }, (_, index) => index)
+    );
     expect(forwarded.config.capacityPoolSelection?.candidates[0]).toMatchObject({
       provider: 'hetzner',
       location: 'fsn1',
@@ -393,6 +417,27 @@ describe('task-runner-do service', () => {
       providerInstancePriceDisplay: '€5.00/mo',
       providerInstancePriceCurrency: 'EUR',
     });
+  });
+  it('refuses a selection whose first candidate alone exceeds the budget', async () => {
+    const { env, start } = createTaskRunnerEnv();
+    const selection = capacityPoolSelection({
+      provider: 'hetzner',
+      location: 'fsn1',
+      candidateCount: 2,
+    });
+    selection.candidates[0]!.providerInstancePriceDisplay = 'x'.repeat(100 * 1024);
+
+    await expect(
+      startTaskRunnerDO(env, {
+        ...minimalStartInput,
+        cloudProvider: 'hetzner',
+        explicitVmLocation: false,
+        capacityPoolSelection: selection,
+      })
+    ).rejects.toThrow(
+      /selection is \d+ bytes with one candidate, over the 98304-byte TaskRunner budget/
+    );
+    expect(start).not.toHaveBeenCalled();
   });
 });
 
