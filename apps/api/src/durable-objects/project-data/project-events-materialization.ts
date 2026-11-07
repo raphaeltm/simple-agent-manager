@@ -3,6 +3,7 @@ import type {
   ProjectEventSubscriptionRecord,
 } from '@simple-agent-manager/shared';
 
+import { urgentAgentMessageClass } from './agent-message-notice';
 import { resolveProjectEventDelivery } from './project-events-delivery-resolver';
 import {
   refreshWakeDueAtForMatches,
@@ -336,6 +337,7 @@ function materializeCandidate(
     now,
     ttlMs: limits.wakePromptTtlMs,
     maxMessages: resolveMailboxMaxMessages(env),
+    urgentAgentMessageClass: urgentAgentMessageClass(authorized.events),
   });
   insertPromptQueueBatch(
     sql,

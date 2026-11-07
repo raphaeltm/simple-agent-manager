@@ -1,6 +1,6 @@
 /**
- * Mailbox tool helpers — same-project target resolution, immediate legacy
- * delivery, and caller chat-session lookup shared by the durable messaging tools.
+ * Mailbox tool helpers — same-project target resolution and caller chat-session
+ * lookup shared by the durable messaging tools.
  */
 import { and, desc, eq, inArray } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
@@ -8,10 +8,6 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
-import { log } from '../../lib/logger';
-import { sendPromptToAgentOnNode } from '../../services/node-agent';
-import { persistOrchestrationPrompt } from '../../services/orchestration-prompts';
-import * as projectDataService from '../../services/project-data';
 import {
   ACTIVE_STATUSES,
   AGENT_TARGET_STATUSES,
@@ -154,60 +150,6 @@ export async function resolveProjectAgentForMailbox(
     callerSourceTaskId: callerTask.recoverySourceTaskId ?? callerTask.id,
     targetSourceTaskId: targetTask.recoverySourceTaskId ?? targetTask.id,
   };
-}
-
-/**
- * Attempt immediate delivery by sending the message content to the agent via the node.
- */
-export async function attemptImmediateDelivery(
-  env: Env,
-  _db: DrizzleD1Database<typeof schema>,
-  messageId: string,
-  target: ResolvedMailboxTarget,
-  content: string,
-  userId: string
-): Promise<boolean> {
-  if (!target.agentSessionId) return false;
-
-  const persistedMessageId = await persistOrchestrationPrompt({
-    env,
-    projectId: target.projectId,
-    chatSessionId: target.chatSessionId,
-    content,
-    messageId,
-    source: 'agent_mailbox',
-    kind: 'mailbox_immediate_delivery',
-    mailboxMessageId: messageId,
-    senderId: userId,
-  });
-
-  try {
-    await sendPromptToAgentOnNode(
-      target.nodeId,
-      target.workspaceId,
-      target.agentSessionId,
-      content,
-      env,
-      userId,
-      persistedMessageId
-    );
-
-    // Mark as delivered in the DO
-    await projectDataService.markMailboxMessageDelivered(env, target.projectId, messageId);
-    return true;
-  } catch (err) {
-    const errorMessage = err instanceof Error ? err.message : String(err);
-    // 409 means agent busy — message stays queued for alarm-based delivery
-    if (errorMessage.includes('409')) {
-      log.info('mcp.mailbox.immediate_delivery_busy', {
-        messageId,
-        agentSessionId: target.agentSessionId,
-      });
-    } else {
-      log.warn('mcp.mailbox.immediate_delivery_failed', { messageId, error: errorMessage });
-    }
-    return false;
-  }
 }
 
 /**
