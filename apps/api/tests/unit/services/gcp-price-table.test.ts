@@ -256,7 +256,10 @@ describe('GCP price table', () => {
     const fetchMock = stubBilling(['disabled-gcp']);
 
     expect(await refreshGcpPriceTableIfDue(env, NOW)).toEqual({ status: 'failed', attempts: 1 });
-    expect(await env.KV.get(GCP_PRICE_TABLE_ATTEMPT_KV_KEY)).toBe(NOW.toISOString());
+    expect(await env.KV.get(GCP_PRICE_TABLE_ATTEMPT_KV_KEY, 'json')).toEqual({
+      at: NOW.toISOString(),
+      nextOffset: 1,
+    });
     // The previous table is still served.
     expect((await readGcpPriceTable(env))?.regions['us-east1']?.e2?.coreHourly).toBe(0.02);
 
@@ -286,7 +289,10 @@ describe('GCP price table', () => {
 
     expect(await refreshGcpPriceTableIfDue(env, NOW)).toEqual({ status: 'no-credential' });
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(await env.KV.get(GCP_PRICE_TABLE_ATTEMPT_KV_KEY)).toBe(NOW.toISOString());
+    expect(await env.KV.get(GCP_PRICE_TABLE_ATTEMPT_KV_KEY, 'json')).toEqual({
+      at: NOW.toISOString(),
+      nextOffset: 0,
+    });
     const queriesAfterFirst = prepare.mock.calls.length;
 
     const nextTick = new Date(NOW.getTime() + 5 * 60 * 1000);
@@ -299,21 +305,82 @@ describe('GCP price table', () => {
     ).toBe(false);
   });
 
-  it('does not query owned credentials when platform credentials fill the attempt limit', async () => {
+  it('moves past credentials that keep failing on later refreshes until a working one prices', async () => {
     for (const n of [1, 2, 3]) {
       await seedPlatform(`cred-platform-${n}`, `platform-gcp-${n}`, `2026-11-0${n}T00:00:00Z`);
     }
     await seedOwned('cred-user', 'user-gcp', { updatedAt: '2026-11-06T00:00:00Z' });
     stubBilling(['platform-gcp-1', 'platform-gcp-2', 'platform-gcp-3']);
-    const prepare = vi.spyOn(env.DATABASE, 'prepare');
 
+    // The failing platform credentials fill the per-refresh limit of three.
     expect(await refreshGcpPriceTableIfDue(env, NOW)).toEqual({ status: 'failed', attempts: 3 });
     expect(tokenCalls.map((call) => call.gcpProjectId)).toEqual([
       'platform-gcp-3',
       'platform-gcp-2',
       'platform-gcp-1',
     ]);
-    expect(prepare.mock.calls.some(([sql]) => /FROM credentials\b/.test(String(sql)))).toBe(false);
+    expect(await readGcpPriceTable(env)).toBeNull();
+
+    // Every five-minute tick inside the retry interval backs off without trying anything.
+    for (let minutes = 5; minutes < 60; minutes += 5) {
+      const tick = new Date(NOW.getTime() + minutes * 60 * 1000);
+      expect(await refreshGcpPriceTableIfDue(env, tick)).toMatchObject({ status: 'backoff' });
+    }
+    expect(tokenCalls).toHaveLength(3);
+
+    // The first tick past it starts after the credentials already tried.
+    const afterRetry = new Date(NOW.getTime() + 61 * 60 * 1000);
+    expect(await refreshGcpPriceTableIfDue(env, afterRetry)).toMatchObject({
+      status: 'refreshed',
+      credentialSource: 'user',
+    });
+    expect(tokenCalls.slice(3).map((call) => call.gcpProjectId)).toEqual(['user-gcp']);
+    expect((await readGcpPriceTable(env))?.regions['us-central1']?.e2?.coreHourly).toBeCloseTo(
+      0.021811
+    );
+    expect(await env.KV.get(GCP_PRICE_TABLE_ATTEMPT_KV_KEY)).toBeNull();
+  });
+
+  it('wraps back to the first credential once the order is exhausted', async () => {
+    await seedPlatform('cred-platform-1', 'platform-gcp-1', '2026-11-01T00:00:00Z');
+    await seedOwned('cred-user', 'user-gcp', { updatedAt: '2026-11-06T00:00:00Z' });
+    // Both credentials were tried last time; the platform one has since enabled the API.
+    await env.KV.put(
+      GCP_PRICE_TABLE_ATTEMPT_KV_KEY,
+      JSON.stringify({ at: '2026-11-07T10:00:00.000Z', nextOffset: 2 })
+    );
+    stubBilling(['user-gcp']);
+
+    expect(await refreshGcpPriceTableIfDue(env, NOW)).toMatchObject({
+      status: 'refreshed',
+      credentialSource: 'platform',
+    });
+    expect(tokenCalls.map((call) => call.gcpProjectId)).toEqual(['platform-gcp-1']);
+  });
+
+  it('keeps the previous table when Billing returns no usable rate, and tries the next credential', async () => {
+    const previous = {
+      fetchedAt: '2026-11-01T00:00:00.000Z',
+      table: {
+        currency: 'USD',
+        regions: { 'us-east1': { e2: { coreHourly: 0.02, ramGibHourly: 0.003 } } },
+      },
+    };
+    await env.KV.put(GCP_PRICE_TABLE_KV_KEY, JSON.stringify(previous));
+    await seedOwned('cred-a', 'core-only-gcp', { updatedAt: '2026-11-06T00:00:00Z' });
+    await seedOwned('cred-b', 'second-core-only-gcp', { updatedAt: '2026-11-05T00:00:00Z' });
+    // A core rate with no RAM rate prices nothing.
+    globalThis.fetch = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ skus: [sku('E2 Instance Core running in Americas', 0.02)] }))
+    ) as unknown as typeof fetch;
+
+    expect(await refreshGcpPriceTableIfDue(env, NOW)).toEqual({ status: 'failed', attempts: 2 });
+    expect(tokenCalls.map((call) => call.gcpProjectId)).toEqual([
+      'core-only-gcp',
+      'second-core-only-gcp',
+    ]);
+    expect(await env.KV.get(GCP_PRICE_TABLE_KV_KEY, 'json')).toEqual(previous);
   });
 
   it('stops trying further credentials once the refresh budget is spent', async () => {

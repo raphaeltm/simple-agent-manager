@@ -83,7 +83,7 @@ export const GCP_CATALOG_SETTINGS: readonly AdminSettingDefinition[] = [
     'gcpCatalog.priceRefreshCredentialAttempts',
     3,
     'Operations',
-    'Connected Google Cloud credentials tried per price refresh, platform credentials first, so one without the Cloud Billing API enabled does not block the rest.',
+    'Connected Google Cloud credentials tried per price refresh, platform credentials first. A retry after a failed refresh continues with the next credentials, so ones without the Cloud Billing API enabled do not block the rest.',
     { min: 1, max: 20 }
   ),
   integerDefinition(

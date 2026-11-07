@@ -41,6 +41,8 @@ SAM reads the Google Cloud machine catalog live; nothing about zones or prices i
 - **Machine types.** SAM offers the types named in the admin setting `gcpCatalog.machineTypes`
   (by default e2-medium plus the standard e2, n2d and t2d types up to 16 vCPUs). For each one it
   lists every zone where your project can create it, using the connection's own credentials.
+  Arm (ARM64) types such as t2a are skipped, because SAM boots Google Cloud nodes from an amd64
+  image.
 - **Prices.** SAM reads Google's public Compute Engine list prices (USD, on demand) from the Cloud
   Billing Catalog API and prices each machine as its vCPUs times the core price plus its memory
   times the RAM price for that region. Prices are the same for every Google project, so SAM keeps
@@ -51,12 +53,16 @@ SAM reads the Google Cloud machine catalog live; nothing about zones or prices i
   list price SAM recognises for a machine in a region, the machine is still offered but shows
   "Price unavailable". SAM never guesses a price. Enable `cloudbilling.googleapis.com` in the
   connected project to fix it; the next refresh picks it up within the retry interval
-  (`gcpCatalog.priceRetryMinutes`).
+  (`gcpCatalog.priceRetryMinutes`). Each retry tries the next connected credentials in turn, so
+  credentials without the API cannot keep a working one from being tried. A refresh where every
+  credential fails notifies operators as a failed scheduled sweep, and the previous price list is
+  kept. So is a refresh that returns no usable price.
 - **Credits and discounts are not reflected.** These are list prices. Committed-use discounts,
   free-tier usage and promotional credits apply on your Google invoice, not in SAM's ranking.
 
 If Google reports a zone as unreachable while SAM reads the catalog, SAM treats that read as
-incomplete: pools keep the machines they already had rather than marking that zone sold out.
+incomplete: pools keep the machines they already had rather than marking that zone sold out. A
+catalog response that does not list any zones is treated the same way.
 
 ## Troubleshoot connection errors
 

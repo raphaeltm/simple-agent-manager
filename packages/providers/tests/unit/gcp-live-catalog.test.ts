@@ -394,6 +394,31 @@ describe('GcpProvider live offerings', () => {
     ).rejects.toThrow(/expected machineTypes or warning/);
   });
 
+  it('a response without items fails the live catalog rather than reading it as empty', async () => {
+    globalThis.fetch = vi.fn(
+      async () => new Response(JSON.stringify({}))
+    ) as unknown as typeof fetch;
+    await expect(
+      provider().listInstanceOfferings({ preferApi: true, allowStaticFallback: false })
+    ).rejects.toThrow(/expected items/);
+  });
+
+  it('skips Arm machine types, which cannot boot the amd64 image', async () => {
+    stubMachineTypes({
+      'zones/us-central1-a': {
+        machineTypes: [
+          machineType('e2-standard-2', 'us-central1-a', 2, 8192, { architecture: 'X86_64' }),
+          machineType('n2d-standard-2', 'us-central1-a', 2, 8192, { architecture: 'ARM64' }),
+        ],
+      },
+    });
+    const offerings = await provider().listInstanceOfferings({
+      preferApi: true,
+      allowStaticFallback: false,
+    });
+    expect(offerings.map((o) => o.providerInstanceType)).toEqual(['e2-standard-2']);
+  });
+
   it('falls back to the static table when allowed and the live call fails', async () => {
     globalThis.fetch = vi.fn(
       async () => new Response(JSON.stringify({ error: { message: 'boom' } }), { status: 500 })

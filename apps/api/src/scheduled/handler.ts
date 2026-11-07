@@ -236,9 +236,15 @@ export async function scheduled(
   // gcpCatalog.priceRefreshBudgetMs (default 90 s); on other ticks it costs one KV read. Earlier
   // in the chain that budget would delay session_sleep (`.claude/rules/47`). Catalogs pick up a
   // refreshed table on their next build.
-  const gcpPriceTable = await sweeps.isolate('gcp_price_table', () =>
-    refreshGcpPriceTableIfDue(env)
-  );
+  // A refresh where every credential failed throws here so it reaches failed-sweep
+  // notifications; its backoff was already recorded, so the next tick still waits.
+  const gcpPriceTable = await sweeps.isolate('gcp_price_table', async () => {
+    const result = await refreshGcpPriceTableIfDue(env);
+    if (result.status === 'failed') {
+      throw new Error(`GCP price refresh failed for ${result.attempts} credential(s)`);
+    }
+    return result;
+  });
 
   // Runs after every lifecycle sweep on purpose. When its persisted cadence is due it copies
   // whole terminal sessions between ProjectData objects under PROJECT_DATA_ARCHIVE_WALL_TIME_MS

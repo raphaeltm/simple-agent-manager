@@ -71,18 +71,21 @@ export async function refreshGcpPriceTableIfDue(
   }
 
   const retryMs = Number(await resolveAdminSetting(env, 'gcpCatalog.priceRetryMinutes')) * 60_000;
-  const lastFailure = await env.KV.get(GCP_PRICE_TABLE_ATTEMPT_KV_KEY);
-  if (lastFailure && Date.parse(lastFailure) + retryMs > now.getTime()) {
+  const lastFailure = await readLastFailure(env);
+  if (lastFailure && Date.parse(lastFailure.at) + retryMs > now.getTime()) {
     return {
       status: 'backoff',
-      retryAt: new Date(Date.parse(lastFailure) + retryMs).toISOString(),
+      retryAt: new Date(Date.parse(lastFailure.at) + retryMs).toISOString(),
     };
   }
 
-  const candidates = await listPriceRefreshCredentials(env);
+  const { candidates, offset } = await listPriceRefreshCredentials(
+    env,
+    lastFailure?.nextOffset ?? 0
+  );
   if (candidates.length === 0) {
     // An installation without Google Cloud would otherwise probe D1 on every tick forever.
-    await env.KV.put(GCP_PRICE_TABLE_ATTEMPT_KV_KEY, now.toISOString());
+    await recordFailure(env, now, 0);
     return { status: 'no-credential' };
   }
 
@@ -99,7 +102,7 @@ export async function refreshGcpPriceTableIfDue(
     budgetMs
   );
   try {
-    return await refreshFromCandidates(env, candidates, options, budget.signal, now);
+    return await refreshFromCandidates(env, candidates, offset, options, budget.signal, now);
   } finally {
     clearTimeout(budgetTimer);
   }
@@ -108,6 +111,7 @@ export async function refreshGcpPriceTableIfDue(
 async function refreshFromCandidates(
   env: Env,
   candidates: PriceRefreshCredential[],
+  offset: number,
   options: { maxPages: number; requestTimeoutMs: number },
   signal: AbortSignal,
   now: Date
@@ -133,6 +137,11 @@ async function refreshFromCandidates(
         { scopes: [GCP_PRICE_CATALOG_SCOPE] }
       )({ signal });
       const table = await fetchGcpComputePriceTable(token, options, { signal });
+      // Caching a table with no usable rate would replace the previous one and unprice every
+      // offering for the whole TTL. Treat it as this credential's failure instead.
+      if (!hasUsableRate(table)) {
+        throw new Error('Cloud Billing returned no usable core and RAM rate pair');
+      }
       const fetchedAt = now.toISOString();
       await env.KV.put(GCP_PRICE_TABLE_KV_KEY, JSON.stringify({ fetchedAt, table }));
       await env.KV.delete(GCP_PRICE_TABLE_ATTEMPT_KV_KEY);
@@ -151,8 +160,41 @@ async function refreshFromCandidates(
       });
     }
   }
-  await env.KV.put(GCP_PRICE_TABLE_ATTEMPT_KV_KEY, now.toISOString());
+  // The next retry starts after the credentials tried here, so a few that can never read
+  // Billing do not hold every retry while another credential could.
+  await recordFailure(env, now, offset + attempts);
   return { status: 'failed', attempts };
+}
+
+function hasUsableRate(table: GcpPriceTable): boolean {
+  return Object.values(table.regions).some((series) =>
+    Object.values(series).some(
+      (prices) => prices.coreHourly !== null && prices.ramGibHourly !== null
+    )
+  );
+}
+
+interface LastFailure {
+  at: string;
+  /** Position in the credential order where the next refresh starts. */
+  nextOffset: number;
+}
+
+async function readLastFailure(env: Env): Promise<LastFailure | null> {
+  const raw = await env.KV.get(GCP_PRICE_TABLE_ATTEMPT_KV_KEY, 'json');
+  if (!raw || typeof raw !== 'object') return null;
+  const { at, nextOffset } = raw as { at?: unknown; nextOffset?: unknown };
+  if (typeof at !== 'string' || Number.isNaN(Date.parse(at))) return null;
+  return {
+    at,
+    nextOffset:
+      Number.isInteger(nextOffset) && (nextOffset as number) > 0 ? (nextOffset as number) : 0,
+  };
+}
+
+async function recordFailure(env: Env, now: Date, nextOffset: number): Promise<void> {
+  const failure: LastFailure = { at: now.toISOString(), nextOffset };
+  await env.KV.put(GCP_PRICE_TABLE_ATTEMPT_KV_KEY, JSON.stringify(failure));
 }
 
 interface PriceRefreshCredential {
@@ -165,48 +207,35 @@ interface PriceRefreshCredential {
 }
 
 /**
- * Credentials that may read the public price list, platform first. Prices are the same for every
- * Google project, so any connected credential answers for all; only its own token is used, and
- * only to read the catalog.
+ * Credentials that may read the public price list, platform first, starting at `offset` and
+ * wrapping to the start once past the end. Prices are the same for every Google project, so any
+ * connected credential answers for all; only its own token is used, and only to read the catalog.
  */
-async function listPriceRefreshCredentials(env: Env): Promise<PriceRefreshCredential[]> {
+async function listPriceRefreshCredentials(
+  env: Env,
+  offset: number
+): Promise<{ candidates: PriceRefreshCredential[]; offset: number }> {
   const limit = Number(await resolveAdminSetting(env, 'gcpCatalog.priceRefreshCredentialAttempts'));
-  const platform = await env.DATABASE.prepare(
-    `SELECT id, COALESCE(created_by, 'installation') AS userId, encrypted_token AS encryptedToken, iv
-       FROM platform_credentials
-      WHERE provider = 'gcp' AND credential_type = 'cloud-provider' AND is_enabled = 1
-      ORDER BY updated_at DESC LIMIT ?`
-  )
-    .bind(limit)
-    .all<{ id: string; userId: string; encryptedToken: string; iv: string }>();
-  const platformRows = platform.results ?? [];
-  const remaining = limit - platformRows.length;
-  if (remaining <= 0) {
-    return platformRows.map((row) => ({ ...row, credentialSource: 'platform', projectId: null }));
-  }
-  const owned = await env.DATABASE.prepare(
-    `SELECT id, user_id AS userId, project_id AS projectId, encrypted_token AS encryptedToken, iv
-       FROM credentials
-      WHERE provider = 'gcp' AND credential_type = 'cloud-provider' AND is_active = 1
-      ORDER BY updated_at DESC LIMIT ?`
-  )
-    .bind(remaining)
-    .all<{
-      id: string;
-      userId: string;
-      projectId: string | null;
-      encryptedToken: string;
-      iv: string;
-    }>();
-  return [
-    ...platformRows.map((row) => ({
-      ...row,
-      credentialSource: 'platform' as const,
-      projectId: null,
-    })),
-    ...(owned.results ?? []).map((row) => ({
-      ...row,
-      credentialSource: (row.projectId ? 'project' : 'user') as CredentialSource,
-    })),
-  ];
+  const page = (start: number) =>
+    env.DATABASE.prepare(
+      `SELECT id, userId, projectId, encryptedToken, iv, credentialSource FROM (
+         SELECT id, COALESCE(created_by, 'installation') AS userId, NULL AS projectId,
+                encrypted_token AS encryptedToken, iv, 'platform' AS credentialSource,
+                0 AS tier, updated_at AS updatedAt
+           FROM platform_credentials
+          WHERE provider = 'gcp' AND credential_type = 'cloud-provider' AND is_enabled = 1
+         UNION ALL
+         SELECT id, user_id, project_id, encrypted_token, iv,
+                CASE WHEN project_id IS NULL THEN 'user' ELSE 'project' END, 1, updated_at
+           FROM credentials
+          WHERE provider = 'gcp' AND credential_type = 'cloud-provider' AND is_active = 1
+       )
+       ORDER BY tier, updatedAt DESC, id
+       LIMIT ? OFFSET ?`
+    )
+      .bind(limit, start)
+      .all<PriceRefreshCredential>();
+  const rows = (await page(offset)).results ?? [];
+  if (rows.length > 0 || offset === 0) return { candidates: rows, offset };
+  return { candidates: (await page(0)).results ?? [], offset: 0 };
 }

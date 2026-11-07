@@ -94,7 +94,10 @@ export async function fetchGcpMachineTypes(
     'listMachineTypes.aggregated',
     async (payload) => {
       const root = expectObject(payload, 'gcp', 'machineTypes');
-      const items = optionalObject(root, 'items', 'gcp', 'machineTypes') ?? {};
+      // Every page lists every zone (an empty one carries a warning), so a page without
+      // `items` is malformed; reading it as empty would mark the whole catalog sold out.
+      const items = optionalObject(root, 'items', 'gcp', 'machineTypes');
+      if (!items) throw validationError('gcp', 'machineTypes', 'expected items');
       for (const [scopeKey, scopePayload] of Object.entries(items)) {
         const scopeContext = `machineTypes.items.${scopeKey}`;
         const scopeObj = expectObject(scopePayload, 'gcp', scopeContext);
@@ -139,6 +142,9 @@ function parseMachineType(raw: unknown, scopeKey: string, context: string): GcpM
   if (deprecated && typeof deprecated.state === 'string' && deprecated.state !== 'ACTIVE') {
     return null;
   }
+  // SAM boots GCP nodes from an amd64 image and ships an amd64 VM agent, so an Arm type
+  // (t2a, c4a) could be placed but never boot. Leave it out of the catalog.
+  if (entry.architecture === 'ARM64') return null;
   const zone = scopeKey.startsWith('zones/') ? scopeKey.slice('zones/'.length) : '';
   if (!zone) throw validationError('gcp', context, `unexpected scope ${scopeKey}`);
   return {

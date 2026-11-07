@@ -88,6 +88,22 @@ function compactCapacityPoolSelectionForTaskRunner(
     }) <= TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES;
   const total = compactSelection.candidates.length;
   if (fits(total)) return compactSelection;
+  if (!fits(1)) {
+    // Even the primary alone would push TaskRunner state toward the Durable Object value
+    // limit, where `start()` fails with a storage error that names nothing. Fail here instead.
+    const bytes = selectionBytes({
+      ...compactSelection,
+      candidates: compactSelection.candidates.slice(0, 1),
+    });
+    log.error('task_runner_do.capacity_selection_too_large', {
+      poolId: selection.poolId,
+      bytes,
+      maxBytes: TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES,
+    });
+    throw new Error(
+      `Capacity pool ${selection.poolId} selection is ${bytes} bytes with one candidate, over the ${TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES}-byte TaskRunner budget`
+    );
+  }
 
   // Candidates are ranked best first and every one after the first is a fallback the
   // exhaustion chain may try (another zone or machine type when one is sold out). Keep the
