@@ -25,6 +25,7 @@ import {
 import { runPromptDeliveryClaim } from '../../src/durable-objects/project-data/prompt-delivery-runner';
 import type { Env } from '../../src/env';
 import { getNodeBackendBaseUrl } from '../../src/services/node-agent-readiness';
+import * as projectData from '../../src/services/project-data';
 import { ensureSessionSnapshotForSleep } from '../../src/services/session-snapshot-prepare';
 import { claimSessionSnapshotSleep } from '../../src/services/session-snapshot-sleep-claim';
 import { failSessionSnapshotSleepBeforeTeardown } from '../../src/services/session-snapshot-sleep-failure';
@@ -34,13 +35,7 @@ import {
   acceptedPromptResponse,
   versionedPromptCapabilities,
 } from '../helpers/vm-prompt-delivery-fixtures';
-import {
-  inboxRows,
-  okBody,
-  sqlRows,
-  testEnv,
-  twoAgentProject,
-} from './helpers/agent-message-channels';
+import { inboxRows, sqlRows, testEnv, twoAgentProject } from './helpers/agent-message-channels';
 
 const config = resolveDurableExecutionConfig({});
 const RUNTIME_IDENTITY = 'sleep-claim-runtime';
@@ -52,18 +47,24 @@ afterEach(() => {
 
 type Fixture = Awaited<ReturnType<typeof twoAgentProject>> & { nodeId: string };
 
-/** Agent B's conversation is running; agent A queues a durable message for it. */
+/**
+ * Agent B's conversation is running and its owner queues a follow-up for it. (An agent's
+ * message would arrive as a channel notice instead: constitution XV.)
+ */
 async function runningConversationWithQueuedMessage(): Promise<Fixture> {
   const f = await twoAgentProject();
   const node = await env.DATABASE.prepare('SELECT node_id FROM workspaces WHERE id = ?')
     .bind(f.b.workspaceId)
     .first<{ node_id: string }>();
-  okBody(
-    await f.a.tool('send_durable_message', {
-      targetTaskId: f.b.taskId,
-      message: 'Stale handoff: please check production deploys.',
-    })
-  );
+  await projectData.acceptPromptDelivery(testEnv, f.projectId, {
+    targetSessionId: f.b.sessionId,
+    displayContent: 'Stale handoff: please check production deploys.',
+    senderType: 'human',
+    senderId: f.memberId,
+    messageClass: 'deliver',
+    sourceKind: 'user_followup',
+    ttlMs: config.ttlMs,
+  });
   const inbox = await inboxRows(f.stub);
   expect(inbox).toHaveLength(1);
   expect(inbox[0]).toMatchObject({ target_session_id: f.b.sessionId });
