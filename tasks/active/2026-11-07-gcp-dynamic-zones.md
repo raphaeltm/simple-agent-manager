@@ -15,9 +15,9 @@ GCP zones were an 8-entry hardcoded list in two places (`PROVIDER_LOCATIONS.gcp`
   candidate), task/node creation (`routes/nodes.ts`, `placement-field-resolution.ts`), project
   update and the GCP credential default-zone check.
 - `GcpProvider.listVMs` walked only the 8 zones. Its callers use the result as an inventory:
-  orphan reconciliation (`provider-orphan-reconciliation-core.ts`), strict deletion's "is it gone?"
-  check (`strict-node-deletion.ts`), allocation recovery (`node-allocation-recovery.ts`). A VM in
-  any other zone was invisible to all three.
+  orphan reconciliation (`provider-orphan-reconciliation-core.ts`) and allocation recovery
+  (`node-allocation-recovery.ts`). A VM in any other zone was invisible to both.
+  (`strict-node-deletion.ts` also calls `listVMs`, but only for Hetzner providerless VMs.)
 - `listVMs` also skipped a zone that returned 503, turning a partial inventory into "no VM there".
 
 ## Research findings
