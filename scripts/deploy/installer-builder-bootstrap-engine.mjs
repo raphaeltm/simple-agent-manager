@@ -58,7 +58,9 @@ if (process.argv[1] === new URL(import.meta.url).pathname) {
       '--state',
       '/sam/job/checkpoint.json',
     ],
-    { stdio: 'ignore', env: process.env }
+    // Pass the engine's phase events (and, on failure, its scrubbed tail) through
+    // to the builder supervisor, which keeps the last lines for the owner.
+    { stdio: ['ignore', 'inherit', 'inherit'], env: process.env }
   );
   child.once('error', () => {
     process.exitCode = 1;

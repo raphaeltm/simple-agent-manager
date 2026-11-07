@@ -172,7 +172,8 @@ function fixture(failOn?: string) {
   const runner: EngineRunner = {
     async run(command, options) {
       commands.push({ ...command, cwd: options.cwd, env: structuredClone(options.env) });
-      if (command.args.includes(failOn ?? '__never__')) throw new EngineCommandFailure(23, null);
+      if (command.args.includes(failOn ?? '__never__'))
+        throw new EngineCommandFailure(23, null, ['wrangler: D1 count failed for users']);
       if (command.args[0] === 'build-local-codex') stageRuntime(root);
       if (command.executable === 'make') simulateMake(root, command.args);
       if (command.executable === 'go') return 'go version go1.26.10 linux/amd64';
@@ -311,11 +312,30 @@ describe('installation engine', () => {
       operation: 'pnpm',
       exitCode: 23,
       signal: null,
+      tail: ['wrangler: D1 count failed for users'],
     });
     expect(checkpoint?.status).toBe('failed');
     expect(checkpoint?.activePhase).toBe('migrations');
     expect(f.commands.some((entry) => entry.args.includes('deploy'))).toBe(false);
     expect(JSON.stringify({ events, checkpoint })).not.toContain('secret-');
+  });
+  it('never reports the failure tail on the public CI profile', async () => {
+    const f = fixture('scripts/deploy/d1-migration-safety.ts');
+    const events: Record<string, unknown>[] = [];
+    await expect(
+      runInstallerEngine(
+        { ...config, ownerEmail: undefined, profile: 'legacy-ci' },
+        {
+          ...f,
+          environment: privateEnv,
+          emit: (event) => events.push(event as Record<string, unknown>),
+          save() {},
+        }
+      )
+    ).rejects.toThrow('phase migrations failed');
+    const failed = events.find((event) => event.status === 'failed');
+    expect(failed).toMatchObject({ phase: 'migrations', exitCode: 23 });
+    expect(failed).not.toHaveProperty('tail');
   });
   it('refuses mismatched checkpoints and resumes by reconciling ephemeral preparation', async () => {
     const f = fixture();

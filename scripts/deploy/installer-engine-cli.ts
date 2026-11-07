@@ -36,7 +36,12 @@ async function main(): Promise<void> {
     saveResult: (result) => {
       writeFileSync(`${path}.result`, JSON.stringify(result), { mode: 0o600 });
     },
-    emit: (event) => process.stdout.write(`${JSON.stringify(event)}\n`),
+    emit: (event) => {
+      // One line per tail entry: the builder supervisor keeps short lines only.
+      const { tail, ...summary } = event as typeof event & { tail?: string[] };
+      process.stdout.write(`${JSON.stringify(summary)}\n`);
+      for (const line of tail ?? []) process.stdout.write(`  ${line}\n`);
+    },
     // The engine opens this only for installations, with its own state bucket name.
     buildCache: ({ accountId, bucket, work }) =>
       r2CacheStore({

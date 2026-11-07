@@ -191,6 +191,42 @@ describe('D1 migration safety gates', () => {
     );
   });
 
+  it('does not count rows after migrating a database that was empty before', () => {
+    const runner = new FakeRunner(
+      { main: [[], ['d1_migrations', 'users', 'projects', 'tasks']] },
+      {}
+    );
+
+    runSafeRemoteMigrations({
+      environment: 'staging',
+      databases: [{ binding: 'DATABASE', name: 'main' }],
+      runner,
+    });
+
+    expect(
+      runner.commands.filter((command) =>
+        /COUNT\(\*\) as count FROM "(users|projects|tasks)"/.test(command)
+      )
+    ).toHaveLength(0);
+    expect(runner.commands.filter((command) => command.includes('migrations apply'))).toHaveLength(
+      1
+    );
+  });
+
+  it('control: still counts rows after migrating a database that held tables before', () => {
+    const runner = new FakeRunner({ main: ['d1_migrations', 'users'] }, { 'main:users': [3, 3] });
+
+    runSafeRemoteMigrations({
+      environment: 'production',
+      databases: [{ binding: 'DATABASE', name: 'main' }],
+      runner,
+    });
+
+    expect(
+      runner.commands.filter((command) => command.includes('COUNT(*) as count FROM "users"'))
+    ).toHaveLength(2);
+  });
+
   it('fails closed when an initialized upgrade database has no protected tables', () => {
     const runner = new FakeRunner({ main: ['d1_migrations'] }, {});
 

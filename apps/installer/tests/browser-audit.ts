@@ -662,6 +662,10 @@ async function auditMaintenance(browser: Browser) {
   await expect(page.locator('.build-steps li').first()).toBeHidden();
   await showStages.click();
   await expect(page.locator('.build-steps li').first()).toBeVisible();
+  // An open stage list must not freeze the page (staging, 2026-11-07): the page
+  // still reloads on its interval and the list comes back open afterwards.
+  await page.waitForEvent('load', { timeout: 25_000 });
+  await expect(page.locator('.build-steps li').first()).toBeVisible();
   const stop = page.locator('summary', { hasText: 'Stop this build' });
   await expect(stop).toBeVisible();
   await expect(page.getByRole('button', { name: 'Stop build', exact: true })).toBeHidden();

@@ -622,6 +622,10 @@ export function runSafeRemoteMigrations(options: SafeRemoteMigrationOptions): st
         )
       : validateChurningTableMaxDecreasePercent(options.maxChurningTableDecreasePercent);
   const migrationCountsBefore = new Map<string, number>();
+  // Databases that held no protected tables before migrating. Nothing existed to
+  // lose, so after-counts cannot detect anything; skipping them saves one Wrangler
+  // process per table (~140 tables, ~7 min on a first install, 2026-11-07).
+  const cleanInstallDatabases = new Set<string>();
 
   console.log('Recording D1 time-travel recovery timestamp before migrations...');
   console.log(`Pre-migration timestamp: ${backupTimestamp}`);
@@ -650,6 +654,7 @@ export function runSafeRemoteMigrations(options: SafeRemoteMigrationOptions): st
       );
 
       if (tables.length === 0) {
+        cleanInstallDatabases.add(databaseKey(db));
         console.log(
           `Clean install detected for ${db.binding} (${db.name}); initial migrations will create protected tables`
         );
@@ -700,6 +705,12 @@ export function runSafeRemoteMigrations(options: SafeRemoteMigrationOptions): st
         throw new MigrationSafetyError(
           `No protected tables discovered for ${db.binding} (${db.name}); refusing to migrate`
         );
+      }
+      if (cleanInstallDatabases.has(databaseKey(db))) {
+        console.log(
+          `Clean install of ${db.binding} (${db.name}): no data existed before migrations; skipping row counts`
+        );
+        continue;
       }
       after.push(...countProtectedTables(options.runner, options.environment, db, tables, cwd));
     }

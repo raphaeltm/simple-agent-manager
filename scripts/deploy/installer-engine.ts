@@ -134,7 +134,12 @@ export async function runInstallerEngine(
         status: 'failed',
         operation,
         ...(error instanceof EngineCommandFailure
-          ? { exitCode: error.exitCode, signal: error.signal }
+          ? {
+              exitCode: error.exitCode,
+              signal: error.signal,
+              // Installations report to the owner's own account; CI logs are public.
+              ...(c.profile === 'legacy-ci' ? {} : { tail: error.tail }),
+            }
           : {}),
       });
       throw new Error(`Installation phase ${name} failed; private tool output was withheld`);
