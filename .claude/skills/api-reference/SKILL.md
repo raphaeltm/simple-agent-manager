@@ -111,6 +111,7 @@ Comment threads are scoped to the ProjectData Durable Object addressed by `proje
 - `GET /api/projects/:projectId/tasks/:taskId` — Get task detail (includes dependencies + blocked state)
 - `PATCH /api/projects/:projectId/tasks/:taskId` — Update task fields (`title`, `description`, `priority`, `parentTaskId`)
 - `DELETE /api/projects/:projectId/tasks/:taskId` — Delete task
+- `POST /api/projects/:projectId/tasks/:taskId/provider-limit/resume` — Owner approves a blocked provider wait and resumes its retained snapshot or first-dispatch admission. Requires `task:write`; `202` waking, `409` if no longer blocked or snapshot unavailable.
 - `POST /api/projects/:projectId/tasks/:taskId/status` — Transition task status
 - `POST /api/projects/:projectId/tasks/:taskId/status/callback` — Trusted callback status update for delegated tasks
 - `POST /api/projects/:projectId/tasks/:taskId/build-started` — VM-agent callback JWT endpoint that tells the TaskRunner a queued workspace build has started so it can reset the workspace-ready timeout

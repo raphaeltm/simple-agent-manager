@@ -10,6 +10,23 @@ import { stableStringify } from './project-events-values';
 import { EVENT_WAKE_ADAPTER_ID } from './project-events-wake-delivery';
 import { generateId } from './types';
 
+/** Subscription authority, rather than a transport timeout, bounds deferred event wakes. */
+export function eventWakeAuthorityExpiresAt(
+  sql: SqlStorage,
+  subscriptionId: string
+): number | null {
+  const row = sql
+    .exec(
+      `SELECT expires_at, delivery_lifetime_expires_at FROM project_event_subscriptions WHERE id = ?`,
+      subscriptionId
+    )
+    .toArray()[0];
+  const ends = [row?.expires_at, row?.delivery_lifetime_expires_at].filter(
+    (value): value is number => typeof value === 'number'
+  );
+  return ends.length ? Math.min(...ends) : null;
+}
+
 export function insertPromptQueueBatch(
   sql: SqlStorage,
   projectId: string,
@@ -20,6 +37,7 @@ export function insertPromptQueueBatch(
   now: number,
   limits: ReturnType<typeof resolveProjectEventLimits>
 ): void {
+  const authorityExpiresAt = eventWakeAuthorityExpiresAt(sql, subscription.id);
   sql.exec(
     `INSERT INTO project_event_delivery_batches
      (id, project_id, subscription_id, idempotency_key, idempotency_fingerprint, state,
@@ -33,8 +51,8 @@ export function insertPromptQueueBatch(
     subscription.id,
     `event-wake:${batchId}`,
     stableStringify([projectId, subscription.id, matchIds]),
-    now + limits.wakePromptTtlMs,
-    now + limits.wakeReadGraceMs,
+    authorityExpiresAt ?? now + limits.wakePromptTtlMs,
+    Math.max(now + limits.wakeReadGraceMs, authorityExpiresAt ?? now),
     subscription.deliveryPreference.requested,
     'queued_for_prompt_delivery',
     stableStringify({

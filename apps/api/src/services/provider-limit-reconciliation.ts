@@ -11,6 +11,7 @@ import { parsePositiveInt } from '../lib/route-helpers';
 import { evaluateRunawayCostCeiling } from '../scheduled/stuck-task-ceiling';
 import { repairProviderLimitIntents } from './provider-limit-parking';
 import { parseProviderLimitWait } from './provider-limit-policy';
+import { presentBlockedProviderLimitWait } from './provider-limit-recovery';
 
 /** The bounded wait deadline, not queued/delegated timeout, owns admission.
  * A blocked task with no runtime is deliberately held for human action. A live
@@ -47,6 +48,7 @@ export async function preserveProviderLimitWait(
       /* Persisted intent survives; bounded deadline prevents immortal repair. */
     }
   }
+  if (current.phase === 'blocked') await presentBlockedProviderLimitWait(env, task, current);
   if (!task.workspaceId) return true;
   // A failed sleep remains visibly blocked without check-ins or stall diagnosis.
   // Only the existing absolute compute ceiling can terminalize retained compute.

@@ -682,6 +682,8 @@ export type AgentActivityState = (typeof AGENT_ACTIVITY_STATES)[number];
 /** An active task enriched with project + session info for the dashboard grid. */
 export interface DashboardTask {
   providerLimitReason?: string | null;
+  /** Opaque wait generation; changes when a new blocked wait replaces an accepted resume. */
+  providerLimitVersion?: string | null;
   triggeredBy?: string | null;
   connectorClientName?: string | null;
   id: string;
