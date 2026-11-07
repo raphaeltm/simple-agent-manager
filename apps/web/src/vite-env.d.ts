@@ -4,6 +4,10 @@ interface ImportMetaEnv {
   readonly VITE_API_URL?: string;
   readonly VITE_FILE_PREVIEW_INLINE_MAX_BYTES?: string;
   readonly VITE_FILE_PREVIEW_LOAD_MAX_BYTES?: string;
+  readonly VITE_ATTACHMENT_PREVIEW_TEXT_MAX_BYTES?: string;
+  readonly VITE_ATTACHMENT_PREVIEW_TEXT_MAX_LINES?: string;
+  readonly VITE_ATTACHMENT_PREVIEW_LINE_MAX_CHARS?: string;
+  readonly VITE_ATTACHMENT_LINE_COUNT_MAX_BYTES?: string;
   readonly VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES?: string;
   readonly VITE_PROJECT_LIST_LIMIT?: string;
   readonly VITE_SAM_SETTINGS_POLL_MS?: string;
