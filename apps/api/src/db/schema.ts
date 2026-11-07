@@ -3662,6 +3662,12 @@ export const capacityPools = sqliteTable(
      * invalidates prior placement authority. NULL = not yet computed.
      */
     selectionDigest: text('selection_digest'),
+    /**
+     * Provider order: JSON array of capacity source ids, most preferred first. NULL = all
+     * sources equal (the behaviour before ordering existed). Rank governs new VMs only;
+     * reuse of a running node never depends on it, so editing it does not bump `revision`.
+     */
+    sourceOrderJson: text('source_order_json'),
     migrationVersion: text('migration_version'),
     migrationState: text('migration_state').notNull().default('complete'),
     createdBy: text('created_by').references(() => users.id, { onDelete: 'set null' }),

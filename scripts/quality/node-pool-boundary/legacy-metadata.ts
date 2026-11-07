@@ -40,7 +40,7 @@ const METADATA_READERS = [
 const METADATA_ARGUMENTS = [
   ['apps/api/src/services/placement-resolver.ts', 'resolveTaskStartPlacement', 'resolveVmSize'],
   [
-    'apps/api/src/services/placement-resolver-capacity.ts',
+    'apps/api/src/services/placement-resolver-capacity-reuse.ts',
     'resolveReusableNodeCapacitySnapshot',
     'selectCandidateForReusableNode',
   ],

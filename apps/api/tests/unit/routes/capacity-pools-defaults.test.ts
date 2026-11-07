@@ -741,8 +741,22 @@ describe('default capacity pool update result contract', () => {
     unavailableCandidateIds: [],
     missingCatalogAdditions: [],
     unavailableCatalogAdditions: [],
+    missingSourceIds: [],
     conflict: false,
   };
+
+  it('rejects a provider order naming sources that do not serve the pool', () => {
+    try {
+      assertDefaultCapacityPoolUpdateResult(
+        { ...emptyResult, missingSourceIds: ['source-elsewhere'] },
+        'missing'
+      );
+      throw new Error('expected a 400');
+    } catch (error) {
+      expect(error).toBeInstanceOf(AppError);
+      expect((error as AppError).statusCode).toBe(400);
+    }
+  });
 
   it('surfaces a lost concurrent edit as 409 instead of reporting success', () => {
     try {

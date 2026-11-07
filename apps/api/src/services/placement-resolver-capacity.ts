@@ -109,6 +109,9 @@ export function buildCapacityPoolSelection(
   const poolSnapshot = capacityPoolSnapshotForPool(baseSelection);
 
   const effectiveState = summary.effectiveState ?? 'configured-ready';
+  const rankBySourceId = new Map(
+    (pool.sourceOrder ?? []).map((sourceId, index) => [sourceId, index + 1] as const)
+  );
   const candidates =
     effectiveState === 'configured-ready'
       ? classifyCandidatePriceComparability(
@@ -125,7 +128,14 @@ export function buildCapacityPoolSelection(
               effectiveState,
               hostMemoryReserveMb
             );
-            return normalized ? [normalized] : [];
+            return normalized
+              ? [
+                  {
+                    ...normalized,
+                    sourceRank: rankBySourceId.get(normalized.capacitySourceId) ?? null,
+                  },
+                ]
+              : [];
           })
         ).sort((a, b) =>
           compareCapacityCandidates(
