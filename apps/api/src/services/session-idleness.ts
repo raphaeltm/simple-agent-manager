@@ -5,8 +5,8 @@ export const DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS = 5 * 60 * 1000;
 
 /**
  * Absolute ceiling on how long harness-owned background work may defer sleep,
- * measured from the last real lifecycle PROGRESS edge (not from the last
- * heartbeat).
+ * measured from the last real session work (including lifecycle progress),
+ * never from the last heartbeat.
  *
  * The sliding lease alone is renewable forever: the VM agent re-reports the
  * active snapshot every `ActivityRereportInterval`, and each report refreshes
@@ -24,7 +24,7 @@ export const DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS = 5 * 60 * 1000;
  * and the `background_tasks_changed` wholesale replace (Claude) in
  * `packages/vm-agent/internal/acp/session_host_harness_work.go`.
  */
-export const DEFAULT_HARNESS_BACKGROUND_WORK_MAX_DURATION_MS = 30 * 60 * 1000;
+export const DEFAULT_HARNESS_BACKGROUND_WORK_MAX_DURATION_MS = 2 * 60 * 60 * 1000;
 
 /**
  * Default for `operations.sessionStaleTurnNoWorkMinutes`: how long an open turn on a running task
@@ -122,16 +122,11 @@ export function getFreshHarnessWorkLeaseExpiry(
   const expiresAt = state.runtimeWorkUpdatedAt + leaseMs;
   if (expiresAt <= now.getTime()) return null;
 
-  // Absolute ceiling anchored on the PROGRESS clock, which only advances on real
-  // harness lifecycle edges/progress — never on the periodic heartbeat re-report
-  // that refreshes `runtimeWorkUpdatedAt`. Work that has stopped progressing
-  // therefore releases the session even while the adapter keeps reporting it.
-  // Falls back to the heartbeat clock when no progress timestamp was reported,
-  // which is the conservative direction (sleep sooner, never later).
-  const progressAnchor =
-    state.runtimeWorkProgressAt && state.runtimeWorkProgressAt > 0
-      ? state.runtimeWorkProgressAt
-      : state.runtimeWorkUpdatedAt;
+  // Bound protection by real work across both foreground turns and harness
+  // progress. A partial/older reporter without a progress field still has the
+  // persisted work clock; heartbeat receipt must never renew this ceiling.
+  const progressAnchor = sessionWorkAnchor(state);
+  if (progressAnchor === null) return null;
   const ceiling = progressAnchor + maxDurationMs;
   if (ceiling <= now.getTime()) return null;
 
@@ -147,10 +142,9 @@ export function sessionWorkAnchor(state: SessionIdlenessActivityState | null): n
   if (!state) return null;
   const positive = (value: number | null | undefined): number | null =>
     typeof value === 'number' && value > 0 ? value : null;
-  const work =
-    positive(state.workAt) ?? positive(state.promptStartedAt) ?? positive(state.activityAt);
+  const work = positive(state.workAt) ?? positive(state.promptStartedAt);
   const progress = positive(state.runtimeWorkProgressAt);
-  if (work === null) return progress;
+  if (work === null) return progress ?? positive(state.activityAt);
   return progress === null ? work : Math.max(work, progress);
 }
 
@@ -209,11 +203,6 @@ export function classifySessionIdleness(input: {
       activity: null,
     };
   }
-
-  const activityAt =
-    typeof input.state.activityAt === 'number' && input.state.activityAt > 0
-      ? input.state.activityAt
-      : null;
 
   // Terminal tasks whose conversation is kept by sleep (completed, and failed —
   // see `SLEEP_PRESERVED_TERMINAL_TASK_STATUSES`) can retain a stale `prompting`
@@ -307,10 +296,12 @@ export function classifySessionIdleness(input: {
   }
 
   // Automatic sleep additionally waits out the idle interval. A missing
-  // `activityAt` means we cannot tell how long the session has been idle, so
+  // work anchor means we cannot tell how long the session has been idle, so
   // the unattended scheduler declines to reclaim it (a user can still sleep it
   // explicitly, which takes the `prompt-turn-ended` branch above).
-  const idleEligibleAt = activityAt === null ? null : activityAt + input.idleAfterMs;
+  // Same-state reports renew liveness, never the unattended idle deadline.
+  const workAnchor = sessionWorkAnchor(input.state);
+  const idleEligibleAt = workAnchor === null ? null : workAnchor + input.idleAfterMs;
   if (idleEligibleAt === null || idleEligibleAt > input.now.getTime()) {
     return {
       idle: false,
