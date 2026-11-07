@@ -1,6 +1,7 @@
 import type { AdminSettingDefinition } from './admin-setting-definitions';
 import { CORE_SETTINGS } from './admin-settings-core-definitions';
 import { FEATURE_SETTINGS } from './admin-settings-features-definitions';
+import { GCP_CATALOG_SETTINGS } from './admin-settings-gcp-catalog-definitions';
 import { LIFECYCLE_LATENCY_SETTINGS } from './admin-settings-lifecycle-latency-definitions';
 import { OPERATIONS_TELEMETRY_SETTINGS } from './admin-settings-operations-telemetry-definitions';
 import { OPERATOR_SETTINGS } from './admin-settings-operator-definitions';
@@ -22,6 +23,7 @@ export {
 const definitions = [
   ...CORE_SETTINGS,
   ...FEATURE_SETTINGS,
+  ...GCP_CATALOG_SETTINGS,
   ...OPERATOR_SETTINGS,
   ...LIFECYCLE_LATENCY_SETTINGS,
   ...OPERATIONS_TELEMETRY_SETTINGS,

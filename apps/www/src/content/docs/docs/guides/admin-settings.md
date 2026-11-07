@@ -603,6 +603,19 @@ Superadmins can search for these controls in **Admin → Settings**. Values are 
 
 The GitHub route returns `504 GITHUB_TIMEOUT` when its overall deadline expires. Admin agent-email reads return `504 AGENT_EMAIL_TIMEOUT` if configuration, authentication or verification exceeds its deadline. The initial email-settings lookup has a fixed 5000 ms bootstrap ceiling so an unreadable settings store cannot leave the request open. Optional project recent data fails softly to empty arrays, preserving the project response and CLI contract.
 
+### Google Cloud machine catalog
+
+These control the live Google Cloud catalog described in [Google Cloud](/docs/guides/google-cloud/#machine-types-zones-and-prices).
+
+| Setting                                     | Default                                         | Allowed range     | Applies to                                                                                            |
+| ------------------------------------------- | ----------------------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------- |
+| `gcpCatalog.machineTypes`                   | e2-medium; e2, n2d, t2d standard up to 16 vCPUs | 1–100 exact names | Machine types SAM offers from Google Cloud. Every zone where Google has the type is offered.          |
+| `gcpCatalog.priceTableTtlMinutes`           | 1440                                            | 60–10080          | How old the stored Google Cloud price list may get before the background step refreshes it.           |
+| `gcpCatalog.priceRetryMinutes`              | 60                                              | 5–1440            | Wait after a failed price refresh before trying again.                                                |
+| `gcpCatalog.priceMaxPages`                  | 20                                              | 1–200             | Most pages of price data read in one refresh; needing more fails rather than storing a partial list.  |
+| `gcpCatalog.priceRequestTimeoutMs`          | 30000                                           | 1000–120000       | Each request for a page of Google Cloud price data.                                                   |
+| `gcpCatalog.priceRefreshCredentialAttempts` | 3                                               | 1–20              | Connected Google Cloud credentials tried per refresh, platform credentials first.                     |
+
 ### Session and configuration read recovery
 
 `performance.configReadTimeoutMs` defaults to 5,000 ms (range 100–30,000) for shared platform

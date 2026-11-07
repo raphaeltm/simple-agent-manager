@@ -186,6 +186,8 @@ const VM_APIS = [
   'sts.googleapis.com',
   'compute.googleapis.com',
   'aiplatform.googleapis.com',
+  // Live Compute Engine list prices for the node-pool catalog (`gcp-price-table.ts`).
+  'cloudbilling.googleapis.com',
 ];
 
 export async function enableApis(
