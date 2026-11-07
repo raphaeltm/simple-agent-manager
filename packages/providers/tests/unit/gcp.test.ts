@@ -634,7 +634,11 @@ describe('GcpProvider', () => {
         aggregated({
           'zones/us-central1-a': { instances: [gcpInstance({ id: '1' })] },
           'zones/europe-west3-a': {
-            warning: { code: 'UNREACHABLE', message: 'zone europe-west3-a is unreachable' },
+            warning: {
+              code: 'UNREACHABLE',
+              message: 'zone europe-west3-a is unreachable',
+              data: [{ key: 'scope', value: 'zones/europe-west3-a' }],
+            },
           },
         })
       );
