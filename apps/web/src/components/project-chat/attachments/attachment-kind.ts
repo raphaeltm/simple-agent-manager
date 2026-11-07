@@ -66,7 +66,12 @@ type Category =
 /** Name the composer gives a long paste (`ProjectChatComposer` onPaste). */
 const PASTED_NAME = /^pasted-\d+\.txt$/;
 
-/** Extensions the shared MIME table doesn't cover, used only to pick an icon. */
+/**
+ * Extension → icon category, consulted after the MIME type. It is broader than
+ * `EXTENSION_MIME_TYPES` in `packages/shared/src/mime.ts` (code, archives, audio, office files),
+ * which decides what previews and how files are served. Adding a previewable type? Add it there
+ * too.
+ */
 const EXTENSION_CATEGORY: Readonly<Record<string, Category>> = {
   txt: 'text',
   md: 'text',

@@ -32,6 +32,9 @@ export const OCTET_STREAM_MIME = 'application/octet-stream';
  * yaml, toml, csv, json, xml) resolve to a correct — but not previewable — type,
  * matching the current preview policy.
  */
+// The composer's icon table (`EXTENSION_CATEGORY` in
+// apps/web/src/components/project-chat/attachments/attachment-kind.ts) also maps extensions;
+// keep previewable types in step with it.
 const EXTENSION_MIME_TYPES: Readonly<Record<string, string>> = {
   md: 'text/markdown',
   markdown: 'text/markdown',
