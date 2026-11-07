@@ -28,20 +28,30 @@
  * into a lower-precedence default, relax a hard constraint, or downgrade the
  * run to a different runtime.
  *
- * It additionally cannot cross a CREDENTIAL DOMAIN: the VM admission lease and
- * the provider-account cooldown are both keyed by credential domain, so an
- * attempt against a different domain would run outside the lease this task
- * holds and would attribute one account's exhaustion to another.
+ * PROVIDER TIERS
+ * --------------
+ * Attempts are grouped into tiers, one capacity source (credential domain) per
+ * tier. Within a tier the old fence holds: every alternative shares the tier's
+ * source, so its lease and cooldown domain. A later tier exists only when the pool
+ * has a provider order (`sourceRank`): when the most preferred source cannot
+ * allocate, the chain moves to the source ranked next, and the step switches the
+ * admission lease to that source's domain before the first attempt there
+ * (`node-provisioning-tier.ts`). Without an order the plan has one tier, exactly
+ * as before. Within one rank value only the first source is used: same-rank
+ * sources do not fall back to each other.
  */
 import type { VMSize } from '@simple-agent-manager/shared';
 
 import type { TaskStartCapacityCandidate } from '../../services/placement-resolver';
+import { DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER } from '../../services/provisioning-attempt-limits';
 import type { TaskRunnerState } from './types';
 
 /** One provisioning attempt: a concrete offering, or a legacy size-only run. */
 export interface ProvisioningAttempt {
   /** Null for an unpooled/legacy run that has no provider-native offering. */
   candidate: TaskStartCapacityCandidate | null;
+  /** 0 for the most preferred source; each later tier is the next-ranked source. */
+  tierIndex: number;
   vmSize: VMSize;
   provider: string | null;
   location: string | null;
@@ -71,8 +81,11 @@ export function exhaustionPolicyQueues(plan: ProvisioningExhaustionPlan): boolea
 
 export function buildProvisioningExhaustionPlan(
   state: TaskRunnerState,
-  rankedCandidates: readonly TaskStartCapacityCandidate[]
+  rankedCandidates: readonly TaskStartCapacityCandidate[],
+  options: { maxAttemptsPerTier?: number } = {}
 ): ProvisioningExhaustionPlan {
+  const maxAttemptsPerTier =
+    options.maxAttemptsPerTier ?? DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER;
   const selection = state.config.capacityPoolSelection ?? null;
   const requestedVmSize = state.config.vmSize;
   const diagnostics: string[] = [];
@@ -82,6 +95,7 @@ export function buildProvisioningExhaustionPlan(
       attempts: [
         {
           candidate: null,
+          tierIndex: 0,
           vmSize: requestedVmSize,
           provider: state.config.cloudProvider ?? null,
           location: state.config.vmLocation ?? null,
@@ -101,20 +115,73 @@ export function buildProvisioningExhaustionPlan(
   }
 
   const policy = selection.exhaustionPolicy;
-  const attempts: ProvisioningAttempt[] = [attemptFor(primary, requestedVmSize)];
+  const tierHeads: TaskStartCapacityCandidate[] = [primary];
+  const attempts: ProvisioningAttempt[] = [attemptFor(primary, requestedVmSize, 0)];
+  const tierAttempts: ProvisioningAttempt[][] = [attempts.slice()];
 
-  if (policy === 'fallback-chain') {
-    for (const candidate of rest) {
-      const exclusion = alternativeExclusionReason(primary, candidate);
+  for (const candidate of rest) {
+    const tierIndex = tierHeads.findIndex(
+      (head) => head.capacitySourceId === candidate.capacitySourceId
+    );
+    const head = tierHeads[tierIndex];
+    const tier = tierAttempts[tierIndex];
+    if (head && tier) {
+      const exclusion = alternativeExclusionReason(head, candidate);
       if (exclusion) {
         diagnostics.push(`${candidate.id}: ${exclusion}`);
         continue;
       }
-      attempts.push(attemptFor(candidate, requestedVmSize));
+      // `fail` and `queue` try one offering per tier; `fallback-chain` tries the best-ranked
+      // `maxAttemptsPerTier` of them, so a large catalog cannot hold the chain on one source.
+      if (policy !== 'fallback-chain') continue;
+      if (tier.length >= maxAttemptsPerTier) {
+        diagnostics.push(
+          `${candidate.id}: beyond the ${maxAttemptsPerTier} offerings tried per provider source`
+        );
+        continue;
+      }
+      tier.push(attemptFor(candidate, requestedVmSize, tierIndex));
+      continue;
     }
+    const exclusion = newTierExclusionReason(primary, tierHeads, candidate);
+    if (exclusion) {
+      diagnostics.push(`${candidate.id}: ${exclusion}`);
+      continue;
+    }
+    tierHeads.push(candidate);
+    tierAttempts.push([attemptFor(candidate, requestedVmSize, tierHeads.length - 1)]);
   }
 
-  return { attempts, policy, diagnostics };
+  return { attempts: tierAttempts.flat(), policy, diagnostics };
+}
+
+/** Rank as a sortable key: unranked sources share the last rank. */
+function rankKey(candidate: TaskStartCapacityCandidate): number {
+  return candidate.sourceRank ?? Number.POSITIVE_INFINITY;
+}
+
+/**
+ * Why `candidate`, from a source no tier uses yet, may not start a new tier.
+ *
+ * A new tier is another credential domain, so it is allowed only when the pool asks for it: the
+ * pool has a provider order, and the source holds a rank no earlier tier already holds.
+ */
+function newTierExclusionReason(
+  primary: TaskStartCapacityCandidate,
+  tierHeads: readonly TaskStartCapacityCandidate[],
+  candidate: TaskStartCapacityCandidate
+): string | null {
+  if (candidate.poolId !== primary.poolId) {
+    return 'candidate belongs to a different capacity pool';
+  }
+  if (primary.sourceRank === null || primary.sourceRank === undefined) {
+    return 'candidate resolves to a different capacity source credential, and the pool has no provider order';
+  }
+  const sameRank = tierHeads.find((head) => rankKey(head) === rankKey(candidate));
+  if (sameRank) {
+    return `candidate's source has the same provider rank as ${sameRank.capacitySourceId}, which is tried instead`;
+  }
+  return null;
 }
 
 /**
@@ -128,6 +195,7 @@ function alternativeExclusionReason(
   primary: TaskStartCapacityCandidate,
   candidate: TaskStartCapacityCandidate
 ): string | null {
+  // `primary` is the head of the candidate's own tier (same capacity source).
   if (candidate.poolId !== primary.poolId) {
     return 'candidate belongs to a different capacity pool';
   }
@@ -150,10 +218,12 @@ function alternativeExclusionReason(
 
 function attemptFor(
   candidate: TaskStartCapacityCandidate,
-  requestedVmSize: VMSize
+  requestedVmSize: VMSize,
+  tierIndex: number
 ): ProvisioningAttempt {
   return {
     candidate,
+    tierIndex,
     // `machineSize` is retained only so legacy consumers keep a readable label.
     // The provisioning payload is driven by `providerInstanceType`.
     vmSize: candidate.machineSize ?? requestedVmSize,
@@ -189,8 +259,25 @@ export function exhaustionTerminalMessage(
     const label = only?.providerInstanceType ?? only?.vmSize ?? 'requested';
     return `No capacity available for ${label}.${cause}`;
   }
+  const multiProvider = new Set(plan.attempts.map((attempt) => attempt.provider)).size > 1;
   const tried = plan.attempts
-    .map((attempt) => attempt.providerInstanceType ?? attempt.vmSize)
+    .map((attempt) => {
+      const label = attempt.providerInstanceType ?? attempt.vmSize;
+      return multiProvider && attempt.provider ? `${attempt.provider} ${label}` : label;
+    })
     .join(', ');
   return `No capacity for any permitted offering in this compute pool (tried ${tried}).${cause}`;
+}
+
+/** Index of the first attempt in a later tier than `index`, or null. */
+export function firstAttemptIndexAfterTier(
+  plan: ProvisioningExhaustionPlan,
+  index: number
+): number | null {
+  const tier = plan.attempts[index]?.tierIndex;
+  if (tier === undefined) return null;
+  const next = plan.attempts.findIndex(
+    (attempt, candidateIndex) => candidateIndex > index && attempt.tierIndex > tier
+  );
+  return next >= 0 ? next : null;
 }

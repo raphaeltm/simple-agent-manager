@@ -81,20 +81,14 @@ function compactCapacityPoolSelectionForTaskRunner(
     ),
   };
 
-  const fits = (count: number) =>
-    selectionBytes({
-      ...compactSelection,
-      candidates: compactSelection.candidates.slice(0, count),
-    }) <= TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES;
-  const total = compactSelection.candidates.length;
-  if (fits(total)) return compactSelection;
-  if (!fits(1)) {
+  const fitsCandidates = (candidates: TaskStartCapacityCandidate[]) =>
+    selectionBytes({ ...compactSelection, candidates }) <= TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES;
+  const all = compactSelection.candidates;
+  if (fitsCandidates(all)) return compactSelection;
+  if (!fitsCandidates(all.slice(0, 1))) {
     // Even the primary alone would push TaskRunner state toward the Durable Object value
     // limit, where `start()` fails with a storage error that names nothing. Fail here instead.
-    const bytes = selectionBytes({
-      ...compactSelection,
-      candidates: compactSelection.candidates.slice(0, 1),
-    });
+    const bytes = selectionBytes({ ...compactSelection, candidates: all.slice(0, 1) });
     log.error('task_runner_do.capacity_selection_too_large', {
       poolId: selection.poolId,
       bytes,
@@ -109,20 +103,49 @@ function compactCapacityPoolSelectionForTaskRunner(
   // exhaustion chain may try (another zone or machine type when one is sold out). Keep the
   // longest ranked prefix that fits, not just the first: a live catalog spanning many zones
   // otherwise reaches the TaskRunner with no fallback at all. Always keep at least one.
+  //
+  // With a provider order, rank sorts the first source's candidates ahead of every other, and
+  // a live GCP catalog alone exceeds the budget, so that prefix would drop every later provider
+  // tier. Keep each source's best `k` candidates instead, for the largest `k` that fits.
+  const perSource = hasProviderOrder(all) ? bestPerSource(all) : null;
+  const usePerSource = perSource !== null && fitsCandidates(perSource.take(1));
+  const take = usePerSource ? perSource.take : (k: number) => all.slice(0, k);
   let low = 1;
-  let high = total - 1;
+  let high = usePerSource ? perSource.largestSource : all.length - 1;
   while (low < high) {
     const mid = Math.ceil((low + high) / 2);
-    if (fits(mid)) low = mid;
+    if (fitsCandidates(take(mid))) low = mid;
     else high = mid - 1;
   }
+  const kept = take(low);
   log.info('task_runner_do.capacity_candidates_truncated', {
     poolId: selection.poolId,
-    kept: low,
-    dropped: total - low,
+    kept: kept.length,
+    dropped: all.length - kept.length,
+    perSource: usePerSource,
     maxBytes: TASK_RUNNER_COMPACT_SELECTION_MAX_BYTES,
   });
-  return { ...compactSelection, candidates: compactSelection.candidates.slice(0, low) };
+  return { ...compactSelection, candidates: kept };
+}
+
+function hasProviderOrder(candidates: readonly TaskStartCapacityCandidate[]): boolean {
+  return candidates.some(
+    (candidate) => candidate.sourceRank !== null && candidate.sourceRank !== undefined
+  );
+}
+
+/** `take(k)`: every source's first `k` candidates, in their original (ranked) order. */
+function bestPerSource(candidates: readonly TaskStartCapacityCandidate[]) {
+  const seen = new Map<string, number>();
+  const indexInSource = candidates.map((candidate) => {
+    const index = seen.get(candidate.capacitySourceId) ?? 0;
+    seen.set(candidate.capacitySourceId, index + 1);
+    return index;
+  });
+  return {
+    largestSource: Math.max(...seen.values()),
+    take: (k: number) => candidates.filter((_, index) => (indexInSource[index] ?? 0) < k),
+  };
 }
 
 function selectionBytes(selection: TaskStartCapacityPoolSelection): number {

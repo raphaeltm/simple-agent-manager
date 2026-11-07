@@ -138,7 +138,9 @@ before you try again.
 
 **Operations** also holds the [lifecycle latency budgets](#lifecycle-latency-monitoring), limits for [workflows](#workflows), [linked work](#linked-work), pull
 request tracking, the GitHub trigger queue, the Account Map, [workload identity](/docs/guides/workload-identity/)
-tokens, and the [SAM assistant](/docs/reference/configuration/#private-sam-assistant-runtime-controls).
+tokens, the [SAM assistant](/docs/reference/configuration/#private-sam-assistant-runtime-controls),
+the [Google Cloud machine catalog](#google-cloud-machine-catalog), and
+[provider fallback](#provider-fallback).
 Every card shows its own description, default, and range, so the tables below cover the limits
 you're most likely to change rather than every one.
 
@@ -616,6 +618,15 @@ These control the live Google Cloud catalog described in [Google Cloud](/docs/gu
 | `gcpCatalog.priceRequestTimeoutMs`          | 30000                                           | 1000–120000       | Each request for a page of Google Cloud price data.                                                     |
 | `gcpCatalog.priceRefreshCredentialAttempts` | 3                                               | 1–20              | Credentials tried per refresh, platform first; a retry continues with the next ones.                    |
 | `gcpCatalog.priceRefreshBudgetMs`           | 90000                                           | 10000–240000      | Most time one price refresh may take across every page and credential it tries.                         |
+
+### Provider fallback
+
+| Setting                                          | Default | Allowed range | Applies to                                                                                                                     |
+| ------------------------------------------------ | ------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `operations.provisioningAttemptsPerProviderTier` | 8       | 1–50          | Most offerings one task tries from one provider source under `fallback-chain` before moving to the pool's next-ranked provider |
+
+See [Provider order](/docs/guides/compute-pools/#provider-order). Each attempt is a create request
+to the provider, so this bounds the work one task does before it reaches the next provider.
 
 ### Session and configuration read recovery
 
