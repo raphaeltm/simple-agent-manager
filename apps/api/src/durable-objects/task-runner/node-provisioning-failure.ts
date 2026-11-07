@@ -5,15 +5,22 @@
  * Split out of `node-provisioning-step.ts` (rule 18). Decides what a failed
  * provider allocation means for the attempt chain, in this order:
  *
- *   1. A core quota with a smaller permitted offering left → descend to it
- *      (`node-provisioning-core-quota.ts`). No cooldown: a smaller server may
- *      still fit, for this task and for every other task in the domain.
- *   2. Any provider account quota → record the domain cooldown and park the
- *      task on `provider_account_capacity`; without an admission queue, fail
- *      with a message that says which limit was hit and what to do about it.
- *   3. Any other non-capacity failure → fail fast.
- *   4. Transient capacity → the next permitted offering, else the pool's
- *      exhaustion policy.
+ *   1. A core quota with a smaller permitted offering left from the same source
+ *      → descend to it (`node-provisioning-core-quota.ts`). No cooldown: a
+ *      smaller server may still fit, for this task and for every other task in
+ *      the domain.
+ *   2. The source refused the create outright (a provider account limit, or a
+ *      `quota_exceeded` from any provider) and the plan has a later provider
+ *      tier → record the domain cooldown and move to that tier.
+ *   3. Any provider account quota with no later tier → record the domain
+ *      cooldown and park the task on `provider_account_capacity`; without an
+ *      admission queue, fail with a message that says which limit was hit and
+ *      what to do about it.
+ *   4. Any other non-capacity failure → fail fast. `unknown`, timeouts, auth and
+ *      invalid config never move to another provider: they can mean a VM was
+ *      created after all, or that the credential is broken (rule 72).
+ *   5. Transient capacity → the next permitted offering (in this tier or the
+ *      next), else the pool's exhaustion policy.
  */
 import {
   classifyHetznerAccountLimit,
@@ -43,13 +50,15 @@ import {
 import {
   exhaustionPolicyQueues,
   exhaustionTerminalMessage,
+  firstAttemptIndexAfterTier,
   type ProvisioningExhaustionPlan,
 } from './node-provisioning-exhaustion';
 import { discardProviderRejectedNode } from './node-provisioning-rejected-node';
 import { persistPlacementDiagnostics } from './placement-diagnostics';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
-export type ProvisioningAttemptFailureOutcome = 'next-attempt' | 'waiting';
+export type ProvisioningAttemptFailureOutcome =
+  { kind: 'next-attempt'; nextIndex: number; providerMessage: string | null } | { kind: 'waiting' };
 
 export interface ProvisioningAttemptFailure {
   err: unknown;
@@ -57,7 +66,10 @@ export interface ProvisioningAttemptFailure {
   i: number;
   exhaustionPlan: ProvisioningExhaustionPlan;
   diagnosticAttempts: PlacementAttemptDiagnostic[];
+  /** The failed attempt's own domain: cooldowns are recorded here. */
   admissionIdentity: VmTaskAdmissionIdentity | null;
+  /** The most preferred tier's domain: an exhausted chain queues here. */
+  primaryAdmissionIdentity: VmTaskAdmissionIdentity | null;
   createdNode: { id: string };
   /**
    * Core-quota rejections recorded so far in this attempt chain. A new one is
@@ -68,8 +80,8 @@ export interface ProvisioningAttemptFailure {
 
 /**
  * Decide what a failed provider allocation means for the attempt chain. Returns
- * `'next-attempt'` to try the next permitted offering and `'waiting'` once the
- * task is parked on the admission queue; throws a permanent error otherwise.
+ * `next-attempt` with the index to try next and `waiting` once the task is
+ * parked on the admission queue; throws a permanent error otherwise.
  */
 export async function handleProvisioningAttemptFailure(
   state: TaskRunnerState,
@@ -82,6 +94,7 @@ export async function handleProvisioningAttemptFailure(
     exhaustionPlan,
     diagnosticAttempts,
     admissionIdentity,
+    primaryAdmissionIdentity,
     createdNode,
     coreQuotaRejections,
   } = failure;
@@ -97,7 +110,16 @@ export async function handleProvisioningAttemptFailure(
     recordCoreQuotaExclusions(exhaustionPlan, diagnosticAttempts, i, coreQuotaRejections);
   }
   const nextIndex = nextEligibleAttemptIndex(exhaustionPlan, i, coreQuotaRejections);
+  const sameTierNextIndex =
+    nextIndex !== null && exhaustionPlan.attempts[nextIndex]?.tierIndex === attempt.tierIndex
+      ? nextIndex
+      : null;
+  const laterTierIndex = firstAttemptIndexAfterTier(exhaustionPlan, i);
   const isCapacityFailure = providerError !== null && isTransientCapacityError(providerError);
+  // The source refused to create anything for this request: no VM exists, and another
+  // source's account is unaffected.
+  const sourceRefused = accountLimit !== null || providerError?.category === 'quota_exceeded';
+  const providerMessage = providerError ? providerError.message : null;
 
   diagnosticAttempt.outcome = isCapacityFailure || accountLimit ? 'capacity-exhausted' : 'failed';
   // Name the provider's own cause. A fixed string here is what made the originating
@@ -106,7 +128,12 @@ export async function handleProvisioningAttemptFailure(
   const providerDetail = providerError ? `: ${providerError.message}` : '';
   diagnosticAttempt.reason =
     accountLimit && providerError
-      ? accountLimitAttemptReason(accountLimit, providerError, rejection, nextIndex !== null)
+      ? accountLimitAttemptReason(
+          accountLimit,
+          providerError,
+          rejection,
+          sameTierNextIndex !== null
+        )
       : diagnosticAttempt.outcome === 'capacity-exhausted'
         ? `Provider offering has no available capacity${providerDetail}`
         : `Provider allocation failed${providerDetail}`;
@@ -117,9 +144,9 @@ export async function handleProvisioningAttemptFailure(
 
   // 1. A smaller offering may still fit under the core quota: descend without a
   //    domain cooldown, keeping this task's provisioning lease for the next attempt.
-  if (rejection && nextIndex !== null) {
+  if (rejection && sameTierNextIndex !== null) {
     await discardProviderRejectedNode(state, rc, createdNode.id);
-    const nextAttempt = exhaustionPlan.attempts[nextIndex];
+    const nextAttempt = exhaustionPlan.attempts[sameTierNextIndex];
     log.info('task_runner_do.node_provisioning.core_quota_descent', {
       taskId: state.taskId,
       policy: exhaustionPlan.policy,
@@ -131,10 +158,36 @@ export async function handleProvisioningAttemptFailure(
       capacityPoolId: state.config.capacityPoolSelection?.poolId ?? null,
       providerCode: providerError?.providerCode,
     });
-    return 'next-attempt';
+    return { kind: 'next-attempt', nextIndex: sameTierNextIndex, providerMessage };
   }
 
-  // 2. The account is out of this resource for every offering still permitted.
+  // 2. This source refused the create, and a lower-ranked source remains. Record the
+  //    domain's cooldown for every other task, then hand the chain to the next tier.
+  //    The step releases this tier's lease when it enters the next one.
+  if (sourceRefused && laterTierIndex !== null) {
+    if (admissionIdentity) {
+      await recordVmProviderCapacityFailure(rc.env, { scope: admissionIdentity, error: err });
+    }
+    await discardProviderRejectedNode(state, rc, createdNode.id);
+    clearFailedAllocation(state);
+    await rc.ctx.storage.put('state', state);
+    const nextAttempt = exhaustionPlan.attempts[laterTierIndex];
+    log.info('task_runner_do.node_provisioning.provider_tier_fallback', {
+      taskId: state.taskId,
+      policy: exhaustionPlan.policy,
+      fromProvider: attempt.provider,
+      toProvider: nextAttempt?.provider ?? null,
+      fromProviderInstanceType: attempt.providerInstanceType,
+      toProviderInstanceType: nextAttempt?.providerInstanceType ?? null,
+      fromTier: attempt.tierIndex,
+      toTier: nextAttempt?.tierIndex ?? null,
+      providerCategory: providerError?.category ?? null,
+      providerCode: providerError?.providerCode,
+    });
+    return { kind: 'next-attempt', nextIndex: laterTierIndex, providerMessage };
+  }
+
+  // 3. The account is out of this resource for every offering still permitted.
   if (admissionIdentity) {
     const providerCapacity = await recordVmProviderCapacityFailure(rc.env, {
       scope: admissionIdentity,
@@ -180,7 +233,7 @@ export async function handleProvisioningAttemptFailure(
         });
       }
       await scheduleAdmissionWait(state, rc, waitResult);
-      return 'waiting';
+      return { kind: 'waiting' };
     }
   }
 
@@ -202,7 +255,7 @@ export async function handleProvisioningAttemptFailure(
     });
   }
 
-  // 3. Any other non-capacity provider failure fails fast — never descend on
+  // 4. Any other non-capacity provider failure fails fast — never descend on
   //    invalid_config / auth_error / rate_limited / unknown.
   if (!isCapacityFailure) {
     await releaseVmProvisioningLease(
@@ -219,14 +272,12 @@ export async function handleProvisioningAttemptFailure(
     throw Object.assign(new Error(message), { permanent: true });
   }
 
-  // 4. transient_capacity: SKU/region scarcity for one offering. An account quota
-  // never reaches here — it either descended or waited above, because retrying
-  // same-or-larger offerings against an exhausted account multiplies cost without
-  // any chance of succeeding.
+  // 5. transient_capacity: SKU/region scarcity for one offering. An account quota
+  // never reaches here — it either descended, moved tier or waited above, because
+  // retrying same-or-larger offerings against an exhausted account multiplies cost
+  // without any chance of succeeding.
   // The failed node row was already deleted inside provisionNode (decision #1).
-  state.stepResults.nodeId = null;
-  state.stepResults.autoProvisioned = false;
-  state.stepResults.provisionedVmSize = null;
+  clearFailedAllocation(state);
   await rc.ctx.storage.put('state', state);
 
   if (nextIndex !== null) {
@@ -246,12 +297,36 @@ export async function handleProvisioningAttemptFailure(
       capacityPoolId: state.config.capacityPoolSelection?.poolId ?? null,
       providerCode: providerError?.providerCode,
     });
-    return 'next-attempt';
+    return { kind: 'next-attempt', nextIndex, providerMessage };
   }
 
-  // Every permitted offering is exhausted. The pool's `queue` policy parks
-  // the task on the SHARED admission queue instead of failing it; `fail`
-  // and `fallback-chain` terminalize with the list of offerings tried.
+  return terminalizeExhaustedPlan(
+    state,
+    rc,
+    exhaustionPlan,
+    primaryAdmissionIdentity,
+    providerMessage
+  );
+}
+
+function clearFailedAllocation(state: TaskRunnerState): void {
+  state.stepResults.nodeId = null;
+  state.stepResults.autoProvisioned = false;
+  state.stepResults.provisionedVmSize = null;
+}
+
+/**
+ * Every permitted offering is exhausted. The pool's `queue` policy parks the task on the SHARED
+ * admission queue of the most preferred tier instead of failing it, so the wake retries in
+ * preference order; `fail` and `fallback-chain` terminalize with the list of offerings tried.
+ */
+export async function terminalizeExhaustedPlan(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext,
+  exhaustionPlan: ProvisioningExhaustionPlan,
+  primaryAdmissionIdentity: VmTaskAdmissionIdentity | null,
+  lastProviderError: string | null
+): Promise<{ kind: 'waiting' }> {
   await releaseVmProvisioningLease(
     rc.env,
     state.admissionScopeKey,
@@ -263,14 +338,11 @@ export async function handleProvisioningAttemptFailure(
   state.admissionLeaseToken = null;
   await rc.ctx.storage.put('state', state);
 
-  const terminalMessage = exhaustionTerminalMessage(
-    exhaustionPlan,
-    providerError ? providerError.message : null
-  );
-  if (admissionIdentity && exhaustionPolicyQueues(exhaustionPlan)) {
+  const terminalMessage = exhaustionTerminalMessage(exhaustionPlan, lastProviderError);
+  if (primaryAdmissionIdentity && exhaustionPolicyQueues(exhaustionPlan)) {
     const waitResult = await waitForVmAdmissionCapacity(
       rc.env,
-      admissionIdentity,
+      primaryAdmissionIdentity,
       'provider_transient_capacity'
     );
     if (waitResult.kind === 'expired') {
@@ -285,7 +357,7 @@ export async function handleProvisioningAttemptFailure(
       throw Object.assign(new Error(terminalMessage), { permanent: true });
     }
     await scheduleAdmissionWait(state, rc, waitResult);
-    return 'waiting';
+    return { kind: 'waiting' };
   }
   throw Object.assign(new Error(terminalMessage), { permanent: true });
 }
