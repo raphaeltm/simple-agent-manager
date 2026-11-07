@@ -443,7 +443,7 @@ describe('chatStartRoutes', () => {
     });
 
     it('rejects an effort the resolved agent cannot run before creating anything', async () => {
-      mocks.skills.resolveSkillProfile.mockResolvedValueOnce({
+      const opencodeProfile = {
         profileId: 'profile-1',
         skillId: null,
         agentType: 'opencode',
@@ -453,7 +453,8 @@ describe('chatStartRoutes', () => {
         provider: null,
         runtime: 'cf-container',
         systemPromptAppend: null,
-      });
+      };
+      mocks.skills.resolveSkillProfile.mockResolvedValue(opencodeProfile);
       const res = await startWith({ effort: 'high' });
       expect(res.status).toBe(400);
       expect(await res.json<{ message: string }>()).toMatchObject({
@@ -461,6 +462,11 @@ describe('chatStartRoutes', () => {
       });
       expect(db.insert).not.toHaveBeenCalled();
       expect(mocks.instant.acceptInstantSession).not.toHaveBeenCalled();
+
+      // Owner-path control: the same OpenCode profile starts with an effort it supports.
+      const ok = await startWith({ effort: 'auto' });
+      expect(ok.status).toBe(202);
+      expect(launchedOverrides()).toMatchObject({ effort: 'auto' });
     });
   });
 });

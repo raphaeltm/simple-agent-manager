@@ -304,6 +304,10 @@ export const ModelSelect: FC<ModelSelectProps> = ({
           value={isOpen ? filterText : displayValue}
           onChange={handleInputChange}
           onFocus={handleFocus}
+          // A long id is scrolled to the caret while typing; show its start again afterwards.
+          onBlur={(e) => {
+            e.currentTarget.scrollLeft = 0;
+          }}
           onKeyDown={handleKeyDown}
           placeholder={isOpen && displayValue ? displayValue : placeholder}
           disabled={disabled}

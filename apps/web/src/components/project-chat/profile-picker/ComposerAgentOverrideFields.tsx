@@ -11,7 +11,7 @@ import {
 import { modelLabel } from './model';
 
 const SELECT_CLASSES =
-  'w-full min-h-11 rounded-sm border border-border-default bg-inset px-3 py-2 text-sm text-fg-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring disabled:opacity-50';
+  'w-full min-h-11 rounded-sm border border-border-default bg-inset px-3 py-2 text-sm focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring disabled:opacity-50';
 
 /**
  * Model and effort for one chat, over the profile/skill values shown as the defaults. Only
@@ -77,13 +77,14 @@ export function ComposerAgentOverrideFields({
               update({ effort: (event.target.value || null) as AgentEffort | null })
             }
             disabled={disabled}
-            className={SELECT_CLASSES}
+            // Muted while inheriting, like the Model field's placeholder.
+            className={`${SELECT_CLASSES} ${effort ? 'text-fg-primary' : 'text-fg-muted'}`}
           >
             <option value="">
               {defaults.effort ? `Default: ${EFFORT_LABELS[defaults.effort]}` : 'Default'}
             </option>
             {efforts.map((value) => (
-              <option key={value} value={value}>
+              <option key={value} value={value} className="text-fg-primary">
                 {EFFORT_LABELS[value]}
               </option>
             ))}

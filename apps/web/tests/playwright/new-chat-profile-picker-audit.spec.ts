@@ -614,6 +614,9 @@ test.describe('Chat options: per-chat model and effort', () => {
     await optionsButton(page).click();
     await modelBox(page).fill(`custom/${'very-long-model-identifier-'.repeat(8)}`);
     await modelBox(page).press('Escape');
+    await modelBox(page).blur();
+    // After editing, the id reads from its start (provider prefix), not from the caret.
+    expect(await modelBox(page).evaluate((input) => input.scrollLeft)).toBe(0);
     await screenshot(page, `chat-options-long-model-${getProjectSuffix(testInfo.project.name)}`);
     await assertFieldsInsidePanel(page);
     await assertNoOverflow(page);

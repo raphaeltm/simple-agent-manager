@@ -2353,6 +2353,64 @@ describe('ProjectChat agent profile selection', () => {
     expect(payload).not.toHaveProperty('effort');
   });
 
+  it('keeps a per-chat effort across a switch to another profile on the same agent', async () => {
+    mocks.listAgentProfiles.mockResolvedValue([
+      ...TEST_PROFILES,
+      makeAgentProfile({ id: 'prof-3', name: 'Careful Builder', agentType: 'claude-code' }),
+    ]);
+    renderProjectChat();
+
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Fast Implementer'));
+    fireEvent.click(screen.getByRole('button', { name: 'Chat options' }));
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Effort' }), {
+      target: { value: 'max' },
+    });
+    expect(screen.getByRole('button', { name: 'Chat options (1 set)' })).toBeInTheDocument();
+
+    const sheet = await openProfilePicker();
+    fireEvent.click(within(sheet).getByRole('button', { name: /Careful Builder/ }));
+    expect(getProfileControl()).toHaveTextContent('Careful Builder');
+    expect(screen.getByRole('button', { name: 'Chat options (1 set)' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Effort' })).toHaveValue('max');
+
+    fireEvent.change(screen.getByPlaceholderText('Describe what you want the agent to do...'), {
+      target: { value: 'Carefully' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(mocks.submitTask).toHaveBeenCalledTimes(1));
+    const [, payload] = mocks.submitTask.mock.calls[0] as [string, Record<string, unknown>];
+    expect(payload).toMatchObject({ agentProfileId: 'prof-3', effort: 'max' });
+    expect(payload).not.toHaveProperty('model');
+  });
+
+  it('offers the efforts of the agent a skill switches to', async () => {
+    mocks.listSkills.mockResolvedValue([
+      {
+        ...makeAgentProfile({ id: 'skill-codex', name: 'codex-review' }),
+        agentType: 'openai-codex',
+        effort: null,
+        resourceRequirementsJson: null,
+        defaultProfileId: null,
+      },
+    ]);
+    renderProjectChat();
+
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Fast Implementer'));
+    fireEvent.click(screen.getByRole('button', { name: 'Chat options' }));
+    const effort = await screen.findByRole('combobox', { name: 'Effort' });
+    expect(within(effort).getByRole('option', { name: 'Max' })).toBeInTheDocument();
+    fireEvent.change(effort, { target: { value: 'max' } });
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Skill' }), {
+      target: { value: 'skill-codex' },
+    });
+    const codexEffort = screen.getByRole('combobox', { name: 'Effort' });
+    expect(within(codexEffort).queryByRole('option', { name: 'Max' })).not.toBeInTheDocument();
+    expect(within(codexEffort).getByRole('option', { name: 'Extra high' })).toBeInTheDocument();
+    // Only the skill is counted now: the Claude-only effort no longer applies.
+    expect(screen.getByRole('button', { name: 'Chat options (1 set)' })).toBeInTheDocument();
+  });
+
   it('hides every profile not picked lately with the edit list’s suggestion', async () => {
     mocks.listAgentProfiles.mockResolvedValue([
       ...TEST_PROFILES,

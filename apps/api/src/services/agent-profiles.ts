@@ -127,9 +127,15 @@ export function resolveTaskAgentOverrides(
   inherited: Readonly<{ model?: string | null; effort?: AgentEffort | null }>
 ): TaskAgentRunSettings {
   validateProfileEffort(agentType, requested.effort);
+  // An inherited effort the launching agent can't run (an explicit agentType over the
+  // profile's) is dropped rather than sent, as `resolveSkillProfile` does for a skill's.
+  const inheritedEffort =
+    inherited.effort && isAgentEffortSupported(agentType, inherited.effort)
+      ? inherited.effort
+      : null;
   return {
     model: requested.model?.trim() || inherited.model || null,
-    effort: requested.effort ?? inherited.effort ?? null,
+    effort: requested.effort ?? inheritedEffort,
   };
 }
 
