@@ -55,7 +55,10 @@ vi.mock('../../../src/services/provider-catalogs', async (importOriginal) => {
 
 const { capacityPoolsRoutes } = await import('../../../src/routes/capacity-pools');
 const { adminCapacityPoolsRoutes } = await import('../../../src/routes/admin-capacity-pools');
-import { assertDefaultCapacityPoolUpdateResult } from '../../../src/routes/capacity-pool-update-request';
+import {
+  assertDefaultCapacityPoolUpdateResult,
+  parseDefaultCapacityPoolUpdateRequest,
+} from '../../../src/routes/capacity-pool-update-request';
 const providerCatalogs = await import('../../../src/services/provider-catalogs');
 
 function createApp() {
@@ -771,5 +774,31 @@ describe('default capacity pool update result contract', () => {
 
   it('accepts a published edit', () => {
     expect(() => assertDefaultCapacityPoolUpdateResult(emptyResult, 'missing')).not.toThrow();
+  });
+});
+
+describe('provider order request parsing', () => {
+  it('accepts an order alone, trimming ids', () => {
+    expect(parseDefaultCapacityPoolUpdateRequest({ sourceOrder: [' src-a ', 'src-b'] })).toEqual({
+      sourceOrder: ['src-a', 'src-b'],
+    });
+  });
+
+  it.each([[null], [[]]])('passes a clear (%j) through as present', (sourceOrder) => {
+    expect(parseDefaultCapacityPoolUpdateRequest({ sourceOrder })).toEqual({ sourceOrder });
+  });
+
+  it.each([
+    ['not an array', 'src-a'],
+    ['a non-string id', ['src-a', 7]],
+    ['an empty id', ['src-a', '  ']],
+    ['a duplicate', ['src-a', 'src-a']],
+    ['too many sources', Array.from({ length: 33 }, (_, i) => `src-${i}`)],
+  ])('rejects %s with a 400', (_label, sourceOrder) => {
+    expect(() => parseDefaultCapacityPoolUpdateRequest({ sourceOrder })).toThrow(AppError);
+  });
+
+  it('still requires some change', () => {
+    expect(() => parseDefaultCapacityPoolUpdateRequest({})).toThrow(/sourceOrder/);
   });
 });
