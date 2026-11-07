@@ -1,7 +1,7 @@
 import {
   DEFAULT_VM_LOCATION,
   DEFAULT_VM_SIZE,
-  getLocationsForProvider,
+  describeValidLocations,
   isValidLocationForProvider,
 } from '@simple-agent-manager/shared';
 import { and, desc, eq, ne } from 'drizzle-orm';
@@ -127,9 +127,8 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
 
   // Validate location against provider if provider is specified
   if (provider && !isValidLocationForProvider(provider, vmLocation)) {
-    const validLocations = getLocationsForProvider(provider).map((l) => l.id);
     throw errors.badRequest(
-      `Location '${vmLocation}' is not valid for provider '${provider}'. Valid locations: ${validLocations.join(', ')}`
+      `Location '${vmLocation}' is not valid for provider '${provider}'. Expected ${describeValidLocations(provider)}`
     );
   }
 

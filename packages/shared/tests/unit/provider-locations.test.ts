@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
+  describeValidLocations,
   getDefaultLocationForProvider,
   getLocationsForProvider,
   isValidLocationForProvider,
@@ -11,6 +12,16 @@ import {
   SCALING_PARAMS,
   VM_LOCATIONS,
 } from '../../src/constants';
+
+describe('describeValidLocations', () => {
+  it('describes the GCP zone shape instead of listing labelled zones', () => {
+    expect(describeValidLocations('gcp')).toBe('a Compute Engine zone name such as us-central1-a');
+  });
+
+  it('lists the exact locations for list-validated providers', () => {
+    expect(describeValidLocations('hetzner')).toContain('fsn1');
+  });
+});
 
 describe('Provider-Location Validation', () => {
   describe('isValidLocationForProvider', () => {
@@ -31,6 +42,40 @@ describe('Provider-Location Validation', () => {
     it('accepts valid GCP locations', () => {
       expect(isValidLocationForProvider('gcp', 'us-central1-a')).toBe(true);
       expect(isValidLocationForProvider('gcp', 'europe-west3-a')).toBe(true);
+    });
+
+    // Google adds zones over time; a hard-coded list silently dropped every zone it lacked.
+    it('accepts any well-formed GCP zone, including ones outside the labelled list', () => {
+      const labelled = PROVIDER_LOCATIONS.gcp.map((location) => location.id);
+      for (const zone of [
+        'northamerica-northeast2-b',
+        'me-central2-c',
+        'europe-southwest1-a',
+        'us-east4-c',
+      ]) {
+        expect(labelled).not.toContain(zone);
+        expect(isValidLocationForProvider('gcp', zone)).toBe(true);
+      }
+    });
+
+    it('rejects malformed GCP locations', () => {
+      for (const location of [
+        '',
+        'us-central1',
+        'us-central1-',
+        'us-central1-ab',
+        'US-central1-a',
+        'us-central-a',
+        'us-central1-a/../x',
+        'zones/us-central1-a',
+      ]) {
+        expect(isValidLocationForProvider('gcp', location)).toBe(false);
+      }
+    });
+
+    it('keeps exact-list validation for providers other than GCP', () => {
+      expect(isValidLocationForProvider('hetzner', 'fsn2')).toBe(false);
+      expect(isValidLocationForProvider('scaleway', 'fr-par-9')).toBe(false);
     });
 
     it('accepts valid Scaleway locations', () => {

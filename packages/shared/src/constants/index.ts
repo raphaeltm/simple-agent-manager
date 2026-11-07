@@ -19,6 +19,8 @@ export {
 // Providers & Locations
 export type { LocationMeta, ProviderHelpMeta } from './providers';
 export {
+  describeValidLocations,
+  GCP_ZONE_PATTERN,
   getDefaultLocationForProvider,
   getLocationsForProvider,
   hasByocComputeCredential,

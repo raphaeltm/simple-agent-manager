@@ -25,6 +25,21 @@ export async function findGcpInstanceByIdOrName(
   return await findAggregatedInstance(scope, idOrName, headers, context);
 }
 
+/**
+ * Read one instance by name from one zone. createVM uses this after creation: with zonal DNS a
+ * VM of the same name can exist in another zone, and a project-wide lookup could return it.
+ */
+export async function getGcpInstanceInZone(
+  scope: GcpApiScope,
+  zone: string,
+  name: string,
+  context?: ProviderRequestContext
+): Promise<GcpInstancePayload | null> {
+  throwIfProviderRequestAborted(context);
+  const headers = await scope.authHeaders(context);
+  return await findNamedInstance(scope, [zone], name, headers, context);
+}
+
 async function findNamedInstance(
   scope: GcpApiScope,
   zones: readonly string[],
