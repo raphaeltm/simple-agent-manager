@@ -383,3 +383,90 @@ it('revalidates immutable update source before consuming approval and preserves 
   expect(f.values.get('installation')).toEqual(before);
   expect(f.calls.filter((call) => call.path === '/start')).toHaveLength(1);
 });
+
+it('tells the owner which setup step stopped a failed build', async () => {
+  const f = await fixture();
+  expect((await f.request('/deploy', { confirmed: 'yes' })).status).toBeLessThan(400);
+  const manifest = f.values.get('installation') as { requestedJob: { id: string } };
+  f.setJob({
+    status: 'failed',
+    sourceCommit: original,
+    jobId: manifest.requestedJob.id,
+    failure: { step: 'source', reason: 'Source storage request failed (HTTP 403)' },
+  });
+  const html = await (await f.request('/')).text();
+  expect(html).toContain('Installation needs attention');
+  expect(html).toContain(
+    'Stopped while preparing the approved source: Source storage request failed (HTTP 403).'
+  );
+  f.setJob({
+    status: 'failed',
+    sourceCommit: original,
+    jobId: manifest.requestedJob.id,
+    failure: { step: 'bootstrap', code: 2 },
+  });
+  expect(await (await f.request('/')).text()).toContain(
+    'Stopped while setting up the build (exit 2).'
+  );
+});
+
+it('shows build progress as ordered stages that refresh themselves', async () => {
+  const f = await fixture();
+  expect((await f.request('/deploy', { confirmed: 'yes' })).status).toBeLessThan(400);
+  const manifest = f.values.get('installation') as { requestedJob: { id: string } };
+  f.setJob({
+    status: 'running',
+    sourceCommit: original,
+    jobId: manifest.requestedJob.id,
+    startedAt: Date.UTC(2026, 10, 6, 23, 39),
+    checkpoint: {
+      schemaVersion: 1,
+      fingerprint: 'e'.repeat(64),
+      completed: ['preflight'],
+      status: 'running',
+      activePhase: 'codex-source-build',
+    },
+  });
+  const response = await f.request('/');
+  const html = await response.text();
+  // Reload timing lives client-side (in the CSP-hashed script) so an open
+  // disclosure or an in-progress edit can suppress it; the server only ever
+  // advertises the interval via the data attribute, never an HTTP header that
+  // would force a full navigation regardless of in-page state.
+  expect(response.headers.get('Refresh')).toBeNull();
+  expect(html).toContain('data-auto-refresh="15"');
+  expect(html).toContain('Step 3 of 13: <strong>Building the agent runtime</strong>');
+  expect(html).toContain('Started 23:39 UTC.');
+  expect(html).toContain('build-step--done');
+  expect(html).toContain('Preparing the approved source');
+  expect(html).not.toContain('Refresh progress');
+  expect(html).toMatch(/<details class="secondary-actions"><summary>Stop this build<\/summary>/);
+
+  f.setJob({
+    status: 'failed',
+    sourceCommit: original,
+    jobId: manifest.requestedJob.id,
+    failure: { step: 'bootstrap', code: 2 },
+  });
+  const failed = await f.request('/');
+  const failedHtml = await failed.text();
+  expect(failed.headers.get('Refresh')).toBeNull();
+  expect(failedHtml).not.toContain('data-auto-refresh="');
+  expect(failedHtml).toContain('build-step--stopped');
+});
+
+it('shows the escaped engine output tail for a failed build under technical details', async () => {
+  const f = await fixture();
+  expect((await f.request('/deploy', { confirmed: 'yes' })).status).toBeLessThan(400);
+  const manifest = f.values.get('installation') as { requestedJob: { id: string } };
+  f.setJob({
+    status: 'failed',
+    sourceCommit: original,
+    jobId: manifest.requestedJob.id,
+    failure: { step: 'bootstrap', code: 1, tail: ['<script>route already exists</script>'] },
+  });
+  const html = await (await f.request('/')).text();
+  expect(html).toContain('<summary>Technical details</summary>');
+  expect(html).toContain('&lt;script&gt;route already exists&lt;/script&gt;');
+  expect(html).not.toContain('<script>route already exists');
+});

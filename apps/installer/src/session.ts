@@ -1,5 +1,6 @@
 import { BootstrapCleanup } from './cleanup';
 import { cloudflare, CloudflareError, revoke } from './cloudflare';
+import { installerShell } from './maintenance-brand.generated';
 import { challenge, escapeHtml, json, randomSecret } from './security';
 import {
   authorityLimits,
@@ -86,15 +87,39 @@ export class InstallerSession {
     return this.serialize(async () => {
       try {
         return await this.handle(request);
-      } catch {
+      } catch (error) {
+        // No tokens, bodies or provider text: method, account-masked path,
+        // status and Cloudflare's numeric codes, or the installer's own
+        // fixed-string check. Observability is disabled so callback URLs are
+        // never persisted; the same detail goes to the owner's browser, because
+        // live tail delivery of this event has proven unreliable.
+        const detail =
+          error instanceof CloudflareError
+            ? `${error.detail.method ?? 'GET'} ${error.detail.path ?? '?'} returned HTTP ${error.status}` +
+              (error.detail.codes?.length ? ` (codes ${error.detail.codes.join(', ')})` : '')
+            : error instanceof Error
+              ? error.message.slice(0, 1500)
+              : 'unknown error';
+        console.error(
+          JSON.stringify({
+            event: 'installer.step_failed',
+            route: new URL(request.url).pathname,
+            ...(error instanceof CloudflareError
+              ? { status: error.status, ...error.detail }
+              : { error: detail }),
+          })
+        );
         const cleanup = await this.ctx.storage.get<CleanupJournal>('cleanupJournal');
+        const summary =
+          error instanceof CloudflareError && error.status === 403
+            ? 'Cloudflare refused this step (HTTP 403). Check that the account has the Workers Paid plan and that you approved every requested permission, then try again.'
+            : 'Cloudflare could not complete this step. Try again.';
         return json(
           {
             ...(cleanup
               ? { cleanupReceipt: this.receipt(), cleanupAccountId: cleanup.accountId }
               : {}),
-            error:
-              'Cloudflare could not complete this step. Check your permissions and try again. No credentials were logged.',
+            error: `${summary} Details: ${detail}. No credentials were logged.`,
           },
           502
         );
@@ -248,11 +273,13 @@ export class InstallerSession {
     delete session.credentials;
     await this.ctx.storage.put('session', session);
     return new Response(
-      `<!doctype html><html lang="en"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Open your installation service</title><link rel="stylesheet" href="/style.css"><script type="module" src="/handoff.js"></script><main><p class="eyebrow">HANDOFF READY</p><h1>Continue in your account</h1><p>Our temporary Cloudflare credential has been deleted. This claim page remains available until its short session expires. ${revoked ? 'Cloudflare accepted the token revocation request.' : 'Revocation could not be confirmed. Revoke the installer authorization in your Cloudflare profile.'}</p><form id="maintenance-claim-form" method="post" action="${escapeHtml(url)}/claim"><input type="hidden" name="key" value="${escapeHtml(key)}"><input type="hidden" id="maintenance-recovery" name="recovery"><label for="maintenance-recovery-display">Save your recovery credential</label><input id="maintenance-recovery-display" readonly><p id="maintenance-handoff-status">Your browser creates this credential locally. Save it in your password manager before continuing. It is never sent to our hosted service.</p><label class="check"><input type="checkbox" id="maintenance-recovery-saved" required><span>I saved my recovery credential.</span></label><button id="maintenance-claim-submit" disabled>Open my installation service</button></form><p>Save the recovery credential shown by your service. It lets you return independently of this temporary installer session.</p></main></html>`,
+      installerShell.before +
+        `<script type="module" src="/handoff.js"></script><h1>Save this recovery credential</h1><p>It's the only way back into your installation service if you lose this browser session.${revoked ? '' : ' Revocation of the temporary Cloudflare credential could not be confirmed; revoke the installer authorization in your Cloudflare profile.'}</p><form id="maintenance-claim-form" method="post" action="${escapeHtml(url)}/claim"><input type="hidden" name="key" value="${escapeHtml(key)}"><input type="hidden" id="maintenance-recovery" name="recovery"><label for="maintenance-recovery-display">Recovery credential</label><div class="recovery-row"><input id="maintenance-recovery-display" readonly><button type="button" id="maintenance-recovery-copy" class="sam-btn sam-btn--secondary">Copy</button></div><p id="maintenance-handoff-status">Your browser creates this credential locally. It is never sent to our hosted service.</p><label class="check"><input type="checkbox" id="maintenance-recovery-saved" required><span>I saved it.</span></label><button class="sam-btn sam-btn--primary" id="maintenance-claim-submit" disabled>Open my installation service</button></form>` +
+        installerShell.after,
       {
         headers: {
           'Content-Type': 'text/html; charset=utf-8',
-          'Content-Security-Policy': `default-src 'none'; script-src 'self'; style-src 'self'; form-action ${url}; frame-ancestors 'none'; base-uri 'none'`,
+          'Content-Security-Policy': `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; form-action ${url}; frame-ancestors 'none'; base-uri 'none'`,
         },
       }
     );

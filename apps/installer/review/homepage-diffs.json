@@ -1,0 +1,106 @@
+[
+  {
+    "width": 375,
+    "theme": "light",
+    "before": {
+      "format": "raw",
+      "width": 375,
+      "height": 19071,
+      "channels": 3,
+      "depth": "uchar",
+      "premultiplied": false,
+      "hasAlpha": false,
+      "size": 21454875
+    },
+    "after": {
+      "format": "raw",
+      "width": 375,
+      "height": 19071,
+      "channels": 3,
+      "depth": "uchar",
+      "premultiplied": false,
+      "hasAlpha": false,
+      "size": 21454875
+    },
+    "changed": 2290,
+    "pct": 0.032020694597381716
+  },
+  {
+    "width": 375,
+    "theme": "dark",
+    "before": {
+      "format": "raw",
+      "width": 375,
+      "height": 19071,
+      "channels": 3,
+      "depth": "uchar",
+      "premultiplied": false,
+      "hasAlpha": false,
+      "size": 21454875
+    },
+    "after": {
+      "format": "raw",
+      "width": 375,
+      "height": 19071,
+      "channels": 3,
+      "depth": "uchar",
+      "premultiplied": false,
+      "hasAlpha": false,
+      "size": 21454875
+    },
+    "changed": 153,
+    "pct": 0.002139373918515023
+  },
+  {
+    "width": 1440,
+    "theme": "light",
+    "before": {
+      "format": "raw",
+      "width": 1440,
+      "height": 14459,
+      "channels": 3,
+      "depth": "uchar",
+      "premultiplied": false,
+      "hasAlpha": false,
+      "size": 62462880
+    },
+    "after": {
+      "format": "raw",
+      "width": 1440,
+      "height": 14459,
+      "channels": 3,
+      "depth": "uchar",
+      "premultiplied": false,
+      "hasAlpha": false,
+      "size": 62462880
+    },
+    "changed": 335,
+    "pct": 0.00160895559090455
+  },
+  {
+    "width": 1440,
+    "theme": "dark",
+    "before": {
+      "format": "raw",
+      "width": 1440,
+      "height": 14459,
+      "channels": 3,
+      "depth": "uchar",
+      "premultiplied": false,
+      "hasAlpha": false,
+      "size": 62462880
+    },
+    "after": {
+      "format": "raw",
+      "width": 1440,
+      "height": 14459,
+      "channels": 3,
+      "depth": "uchar",
+      "premultiplied": false,
+      "hasAlpha": false,
+      "size": 62462880
+    },
+    "changed": 12,
+    "pct": 0.00005763423012195403
+  }
+]

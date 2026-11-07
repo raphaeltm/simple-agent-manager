@@ -7,8 +7,8 @@
     "dev": "node scripts/build-scene.mjs && wrangler dev",
     "build": "node scripts/build-scene.mjs && wrangler deploy --dry-run --outdir dist",
     "deploy": "node scripts/build-scene.mjs && node scripts/deploy.mjs",
-    "typecheck": "node scripts/build-scene.mjs && tsc --noEmit",
-    "lint": "node scripts/build-scene.mjs && eslint src tests",
+    "typecheck": "node scripts/build-scene.mjs && astro check --tsconfig tsconfig.astro.json && tsc --noEmit",
+    "lint": "node scripts/build-scene.mjs && eslint 'src/**/*.{ts,astro}' 'tests/**/*.ts'",
     "test": "node scripts/build-scene.mjs && vitest run",
     "test:coverage": "node scripts/build-scene.mjs && vitest run --coverage",
     "test:browser": "node scripts/build-scene.mjs && tsx tests/browser-audit.ts"
@@ -20,6 +20,8 @@
     "vitest": "catalog:",
     "wrangler": "catalog:",
     "@playwright/test": "1.62.1",
-    "tsx": "catalog:"
+    "tsx": "catalog:",
+    "astro": "6.4.8",
+    "@astrojs/check": "catalog:"
   }
 }

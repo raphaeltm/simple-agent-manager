@@ -8,7 +8,7 @@ on:
         type: string
         required: true
       approval:
-        description: 'After explicit cost approval, enter one-cold-build-60-minutes (one standard-3, 60 min, conservative $2 incremental estimate)'
+        description: 'After explicit cost approval, enter one-cold-build-60-minutes (one standard-4, 60 min, conservative $2 incremental estimate)'
         type: string
         required: true
 

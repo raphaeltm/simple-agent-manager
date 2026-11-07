@@ -14,12 +14,9 @@ try{state.peakMemoryBytes=Number(readFileSync('/sys/fs/cgroup/memory.peak','utf8
 writeFileSync('/sam/job/fit.json',JSON.stringify(state),{mode:0o600});
 JS
 }
-phase codex-source-build
-bash scripts/deploy/installer-builder-bootstrap-source-build.sh /sam/job/codex-build /sam/job/codex
-# Completed build outputs survive in /sam/job/codex. Drop compiler intermediates
-# before SAM/Docker stages to bound peak disk; this is also the install strategy.
-phase codex-built
-rm -rf /sam/job/codex-build
+phase codex-runtime
+# The same checksum- and size-pinned publisher archive the installation engine stages.
+bash scripts/deploy/prepare-codex-runtime-artifact.sh apps/api/container-artifacts
 phase application-build
 pnpm build
 phase cli-build
@@ -30,7 +27,7 @@ make -C packages/vm-agent build-all VERSION="$SAM_SOURCE_COMMIT" BUILD_DATE="$(g
 phase runtime-image-build
 docker build --network=host --load --provenance=false --platform=linux/amd64 -t sam-fit-vm-agent -f apps/api/Dockerfile.vm-agent-container apps/api
 phase runtime-image-verify
-# This invokes the actual compiled GNU runtime in the production glibc base.
+# This invokes the pinned runtime archive in the production glibc base.
 docker run --rm --network=host --entrypoint /opt/sam-codex-c2/current/bin/codex sam-fit-vm-agent --version >/dev/null
 phase sandbox-image-build
 docker build --network=host --load --provenance=false --platform=linux/amd64 -t sam-fit-sandbox -f apps/api/Dockerfile.sandbox apps/api

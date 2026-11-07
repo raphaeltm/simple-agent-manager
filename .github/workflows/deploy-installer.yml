@@ -5,6 +5,11 @@ on:
     branches: [main, 'sam/**']
     paths:
       - 'apps/installer/**'
+      - 'apps/www/public/fonts/Chillax-Variable.woff*'
+      - 'apps/www/public/favicon.png'
+      - 'apps/www/public/images/sam-head.png'
+      - 'packages/ui/src/brand/**'
+      - 'packages/ui/src/glass/**'
   workflow_dispatch:
     inputs:
       environment:
@@ -76,15 +81,30 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
           INSTALLER_ENVIRONMENT: ${{ github.event_name == 'workflow_dispatch' && inputs.environment || (github.ref == 'refs/heads/main' && 'production' || 'staging') }}
-          INSTALLER_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || 'preserve' }}
+          # Automatic pushes use the environment's INSTALLER_MODE variable when set
+          # (staging opts in to full mode for live proofs), otherwise preserve.
+          INSTALLER_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || vars.INSTALLER_MODE || 'preserve' }}
           OAUTH_REGISTRATION_TOKEN: ${{ secrets.OAUTH_REGISTRATION_TOKEN }}
       - name: Verify deployed version
         env:
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
         run: |
           node --input-type=module - <<'JS'
-          const response = await fetch(`https://install.${process.env.BASE_DOMAIN}/health`);
-          const data = await response.json();
-          if (!response.ok || data.sha !== process.env.GITHUB_SHA || !data.oauthConfigured) throw new Error('Installer readiness check failed');
+          // A freshly written Worker secret or version can take a few seconds to
+          // reach every edge, so poll briefly instead of failing on the first read.
+          const deadline = Date.now() + Number(process.env.INSTALLER_READY_TIMEOUT_MS || 60000);
+          let last = 'no response';
+          for (;;) {
+            try {
+              const response = await fetch(`https://install.${process.env.BASE_DOMAIN}/health`, { cache: 'no-store' });
+              const data = await response.json();
+              last = `status=${response.status} sha=${data.sha} oauthConfigured=${data.oauthConfigured}`;
+              if (response.ok && data.sha === process.env.GITHUB_SHA && data.oauthConfigured) break;
+            } catch (error) {
+              last = `request failed: ${error instanceof Error ? error.name : 'unknown'}`;
+            }
+            if (Date.now() >= deadline) throw new Error(`Installer readiness check failed; ${last}`);
+            await new Promise((resolve) => setTimeout(resolve, 3000));
+          }
           console.log('Installer health and deployed commit verified');
           JS

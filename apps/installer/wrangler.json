@@ -4,7 +4,7 @@
   "main": "src/index.ts",
   "compatibility_date": "2026-10-01",
   "assets": {
-    "directory": "public",
+    "directory": "site-static",
     "binding": "ASSETS",
     "run_worker_first": true
   },
@@ -19,7 +19,9 @@
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["InstallerSession"]
+      "new_sqlite_classes": [
+        "InstallerSession"
+      ]
     }
   ],
   "observability": {
@@ -28,7 +30,7 @@
   "vars": {
     "APP_ORIGIN": "http://localhost:8787",
     "SESSION_TTL_SECONDS": "900",
-    "OAUTH_SCOPES": "account-settings.read workers-scripts.edit",
+    "OAUTH_SCOPES": "account-settings.read workers-scripts.write",
     "SOURCE_URL": "https://github.com/raphaeltm/simple-agent-manager/tree/main/apps/installer",
     "DOCS_URL": "/self-host.html",
     "BUILD_SHA": "local"

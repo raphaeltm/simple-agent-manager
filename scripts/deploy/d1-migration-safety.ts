@@ -320,6 +320,64 @@ export function discoverProtectedTables(
   return tables;
 }
 
+const DEFAULT_COUNT_BATCH_SIZE = 50;
+
+function countBatchSize(): number {
+  const raw = process.env.D1_MIGRATION_COUNT_BATCH_SIZE;
+  if (raw === undefined || raw === '') return DEFAULT_COUNT_BATCH_SIZE;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value < 1 || value > 500) {
+    throw new MigrationSafetyError(
+      'D1_MIGRATION_COUNT_BATCH_SIZE must be an integer from 1 to 500'
+    );
+  }
+  return value;
+}
+
+function countOneTable(
+  runner: D1MigrationSafetyRunner,
+  environment: string,
+  db: D1DatabaseTarget,
+  table: string,
+  cwd: string
+): D1TableCount {
+  let rows: Record<string, unknown>[];
+  try {
+    rows = parseD1Rows(
+      runner.executeJson(
+        WRANGLER_COMMAND,
+        wranglerArgs(
+          environment,
+          db.name,
+          `SELECT COUNT(*) as count FROM ${quoteSqlIdentifier(table)}`
+        ),
+        { cwd }
+      )
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new MigrationSafetyError(`Failed to count ${db.binding}.${table}: ${message}`);
+  }
+
+  if (rows.length !== 1 || !('count' in rows[0])) {
+    throw new MigrationSafetyError(`Failed to count ${db.binding}.${table}: missing count row`);
+  }
+
+  return {
+    database: db.name,
+    binding: db.binding,
+    table,
+    count: parseCountValue(rows[0].count, db, table),
+  };
+}
+
+/**
+ * Count rows in every protected table with one Wrangler call per batch of tables.
+ * One process per table took ~7 minutes for ~140 tables (2026-11-07); a batch is
+ * a single D1 query. Aliases are positional so table names never become column
+ * names. A batch that fails is recounted table by table, so the error still names
+ * the exact table and the check still fails closed.
+ */
 export function countProtectedTables(
   runner: D1MigrationSafetyRunner,
   environment: string,
@@ -327,36 +385,39 @@ export function countProtectedTables(
   tables: string[],
   cwd = APPS_API_DIR
 ): D1TableCount[] {
-  return tables.map((table) => {
-    let rows: Record<string, unknown>[];
+  const size = countBatchSize();
+  const counts: D1TableCount[] = [];
+  for (let offset = 0; offset < tables.length; offset += size) {
+    const batch = tables.slice(offset, offset + size);
+    const query =
+      'SELECT ' +
+      batch
+        .map((table, index) => `(SELECT COUNT(*) FROM ${quoteSqlIdentifier(table)}) AS "c${index}"`)
+        .join(', ');
+    let row: Record<string, unknown> | undefined;
     try {
-      rows = parseD1Rows(
-        runner.executeJson(
-          WRANGLER_COMMAND,
-          wranglerArgs(
-            environment,
-            db.name,
-            `SELECT COUNT(*) as count FROM ${quoteSqlIdentifier(table)}`
-          ),
-          { cwd }
-        )
+      const rows = parseD1Rows(
+        runner.executeJson(WRANGLER_COMMAND, wranglerArgs(environment, db.name, query), { cwd })
       );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      throw new MigrationSafetyError(`Failed to count ${db.binding}.${table}: ${message}`);
+      row = rows.length === 1 ? rows[0] : undefined;
+    } catch {
+      row = undefined;
     }
-
-    if (rows.length !== 1 || !('count' in rows[0])) {
-      throw new MigrationSafetyError(`Failed to count ${db.binding}.${table}: missing count row`);
+    if (!row || batch.some((_, index) => !(`c${index}` in row))) {
+      counts.push(...batch.map((table) => countOneTable(runner, environment, db, table, cwd)));
+      continue;
     }
-
-    return {
-      database: db.name,
-      binding: db.binding,
-      table,
-      count: parseCountValue(rows[0].count, db, table),
-    };
-  });
+    const values = row;
+    counts.push(
+      ...batch.map((table, index) => ({
+        database: db.name,
+        binding: db.binding,
+        table,
+        count: parseCountValue(values[`c${index}`], db, table),
+      }))
+    );
+  }
+  return counts;
 }
 
 function readAppliedMigrationNames(
@@ -622,6 +683,10 @@ export function runSafeRemoteMigrations(options: SafeRemoteMigrationOptions): st
         )
       : validateChurningTableMaxDecreasePercent(options.maxChurningTableDecreasePercent);
   const migrationCountsBefore = new Map<string, number>();
+  // Databases that held no protected tables before migrating. Nothing existed to
+  // lose, so after-counts cannot detect anything; skipping them saves one Wrangler
+  // process per table (~140 tables, ~7 min on a first install, 2026-11-07).
+  const cleanInstallDatabases = new Set<string>();
 
   console.log('Recording D1 time-travel recovery timestamp before migrations...');
   console.log(`Pre-migration timestamp: ${backupTimestamp}`);
@@ -650,6 +715,7 @@ export function runSafeRemoteMigrations(options: SafeRemoteMigrationOptions): st
       );
 
       if (tables.length === 0) {
+        cleanInstallDatabases.add(databaseKey(db));
         console.log(
           `Clean install detected for ${db.binding} (${db.name}); initial migrations will create protected tables`
         );
@@ -700,6 +766,12 @@ export function runSafeRemoteMigrations(options: SafeRemoteMigrationOptions): st
         throw new MigrationSafetyError(
           `No protected tables discovered for ${db.binding} (${db.name}); refusing to migrate`
         );
+      }
+      if (cleanInstallDatabases.has(databaseKey(db))) {
+        console.log(
+          `Clean install of ${db.binding} (${db.name}): no data existed before migrations; skipping row counts`
+        );
+        continue;
       }
       after.push(...countProtectedTables(options.runner, options.environment, db, tables, cwd));
     }

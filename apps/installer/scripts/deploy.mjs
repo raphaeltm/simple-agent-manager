@@ -107,19 +107,25 @@ const existingSecrets = bindings
   .map((binding) => binding.name);
 const ready = SECRET_NAMES.every((key) => existingSecrets.includes(key));
 const full = mode === 'full' || (mode === 'preserve' && !!currentVars.INSTALL_SOURCE_COMMIT);
-const scopes =
-  mode === 'preserve' && currentVars.OAUTH_SCOPES
-    ? currentVars.OAUTH_SCOPES.split(/\s+/).filter(Boolean)
-    : full
-      ? FULL_SCOPES
-      : template.vars.OAUTH_SCOPES.split(/\s+/);
 const sameScopes = (left, right) =>
   JSON.stringify([...new Set(left)].sort((a, b) => a.localeCompare(b))) ===
   JSON.stringify([...new Set(right)].sort((a, b) => a.localeCompare(b)));
-const scopesChanged = !sameScopes(
-  scopes,
-  (currentVars.OAUTH_SCOPES || '').split(/\s+/).filter(Boolean)
-);
+const deployedScopes = (currentVars.OAUTH_SCOPES || '').split(/\s+/).filter(Boolean);
+// Bootstrap consent sets that can never create the maintenance Worker:
+// workers-scripts.edit is Cloudflare's "Workers Editor" role, which cannot
+// create Workers. Preserving one would keep every bootstrap install failing
+// with 403, so a preserved deployment that still requests it is upgraded to
+// the current bootstrap template.
+const SUPERSEDED_BOOTSTRAP_SCOPES = [['account-settings.read', 'workers-scripts.edit']];
+const supersededBootstrap =
+  !full && SUPERSEDED_BOOTSTRAP_SCOPES.some((set) => sameScopes(set, deployedScopes));
+const scopes =
+  mode === 'preserve' && deployedScopes.length && !supersededBootstrap
+    ? deployedScopes
+    : full
+      ? FULL_SCOPES
+      : template.vars.OAUTH_SCOPES.split(/\s+/);
+const scopesChanged = !sameScopes(scopes, deployedScopes);
 if (full && !/^[a-f0-9]{40}$/.test(process.env.GITHUB_SHA || ''))
   throw new Error('Full installer mode requires the exact immutable GITHUB_SHA');
 const config = {
@@ -241,9 +247,18 @@ try {
       if (value)
         await api(`${worker}/secrets`, 'PUT', { name: key, text: value, type: 'secret_text' });
   }
-  const secrets = await api(`${worker}/secrets`);
-  if (!SECRET_NAMES.every((key) => secrets.some((entry) => entry.name === key)))
-    throw new Error('OAuth secret missing after deployment; readiness was not established');
+  // The secrets list can lag a just-published version or secret write by a
+  // few seconds (observed 2026-11-06), so poll briefly before failing.
+  const visibleBy = Date.now() + Number(process.env.OAUTH_SECRETS_VISIBLE_TIMEOUT_MS || 30000);
+  for (;;) {
+    const secrets = await api(`${worker}/secrets`);
+    if (SECRET_NAMES.every((key) => secrets.some((entry) => entry.name === key))) break;
+    if (Date.now() >= visibleBy)
+      throw new Error('OAuth secret missing after deployment; readiness was not established');
+    await new Promise((resolve) =>
+      setTimeout(resolve, Number(process.env.OAUTH_SECRETS_POLL_MS || 2000))
+    );
+  }
   console.log(
     `Installer deployed: ${origin}. Mode: ${full ? 'full' : 'bootstrap'}. OAuth visibility was not promoted; public promotion remains a separate owner action.`
   );

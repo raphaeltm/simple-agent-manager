@@ -83,6 +83,11 @@ export interface EngineArtifact {
   buildDate: string;
   sha256: string;
 }
+/** Object store for verified build outputs (installer-build-cache.mjs). */
+export interface BuildCacheStore {
+  get(key: string, file: string): Promise<boolean>;
+  put(key: string, file: string): Promise<void>;
+}
 export interface EngineOptions {
   root: string;
   environment: NodeJS.ProcessEnv;
@@ -91,6 +96,8 @@ export interface EngineOptions {
   emit(event: EngineEvent): void;
   reportArtifact?(artifact: EngineArtifact): void | Promise<void>;
   saveResult?(result: EngineResult): void | Promise<void>;
+  /** Installation profile only: opens the cache in the deterministic state bucket. */
+  buildCache?(location: { accountId: string; bucket: string; work: string }): BuildCacheStore;
   runner?: EngineRunner;
 }
 export const DEFAULT_COMMAND_TIMEOUT_MS = 60 * 60 * 1000;
@@ -141,7 +148,7 @@ function validateExecutionSettings(c: InstallerEngineConfig): void {
       !Array.isArray(command.args) ||
       command.args.some((arg) => typeof arg !== 'string' || arg.includes('\0'))
     ) {
-      throw new Error(`${key} source-build adapter is required`);
+      throw new Error(`${key} runtime adapter is required`);
     }
   }
   for (const key of ['commandTimeoutMs', 'healthAttempts', 'healthIntervalMs'] as const) {
@@ -187,10 +194,39 @@ export function engineFingerprint(config: InstallerEngineConfig): string {
 export class EngineCommandFailure extends Error {
   constructor(
     public readonly exitCode: number | null,
-    public readonly signal: string | null
+    public readonly signal: string | null,
+    /** Last output lines with secret environment values replaced; see failureTail(). */
+    public readonly tail: string[] = []
   ) {
     super('Deployment command failed');
   }
+}
+
+const SECRET_NAME = /TOKEN|SECRET|KEY|PASSPHRASE|PASSWORD|NONCE|CREDENTIAL/i;
+const FAILURE_TAIL_LINES = 30;
+const FAILURE_TAIL_LINE_CHARS = 300;
+
+/**
+ * The last lines of a failed command's stdout and stderr, bounded, with the exact
+ * value of every secret-named environment variable replaced. Only installations
+ * report it (to the owner's own account); public CI never prints it.
+ */
+export function failureTail(text: string, env: NodeJS.ProcessEnv): string[] {
+  const secrets = Object.entries(env)
+    .filter(
+      ([name, value]) => SECRET_NAME.test(name) && typeof value === 'string' && value.length >= 8
+    )
+    .map(([, value]) => value as string)
+    .sort((a, b) => b.length - a.length);
+  return text
+    .split('\n')
+    .filter((line) => line.trim())
+    .slice(-FAILURE_TAIL_LINES)
+    .map((line) => {
+      let scrubbed = line;
+      for (const value of secrets) scrubbed = scrubbed.split(value).join('[redacted]');
+      return scrubbed.slice(0, FAILURE_TAIL_LINE_CHARS);
+    });
 }
 
 export const processRunner: EngineRunner = {
@@ -206,6 +242,12 @@ export const processRunner: EngineRunner = {
       let output = '';
       let size = 0;
       let failed = false;
+      // Recent stdout+stderr, kept separately from the returned output and only
+      // used to describe a failure.
+      let recent = '';
+      const remember = (chunk: Buffer) => {
+        recent = (recent + chunk.toString()).slice(-64 * 1024);
+      };
       const child = spawn(command.executable, command.args, {
         cwd: options.cwd,
         env: options.env,
@@ -221,12 +263,21 @@ export const processRunner: EngineRunner = {
           child.kill('SIGKILL');
         } else output += chunk.toString();
       };
-      child.stdout.on('data', collect);
-      // Drain stderr, but do not return or expose it: tools may print credentials.
-      child.stderr.on('data', options.includeStderr ? collect : () => {});
+      child.stdout.on('data', (chunk: Buffer) => {
+        remember(chunk);
+        collect(chunk);
+      });
+      // Never return stderr; tools may print credentials. Its scrubbed tail only
+      // describes a failure.
+      child.stderr.on('data', (chunk: Buffer) => {
+        remember(chunk);
+        if (options.includeStderr) collect(chunk);
+      });
       child.once('error', () => reject(new Error('Deployment command could not start')));
       child.once('close', (code, signal) =>
-        code === 0 && !failed ? accept(output) : reject(new EngineCommandFailure(code, signal))
+        code === 0 && !failed
+          ? accept(output)
+          : reject(new EngineCommandFailure(code, signal, failureTail(recent, options.env)))
       );
     });
   },

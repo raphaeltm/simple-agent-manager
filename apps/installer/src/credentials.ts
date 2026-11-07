@@ -1,4 +1,4 @@
-import { cloudflare } from './cloudflare';
+import { cloudflare, CloudflareError } from './cloudflare';
 import { type InstallationConfig, validateInstallationConfig } from './installation-plan';
 import { digest, randomSecret } from './security';
 
@@ -60,13 +60,13 @@ const DEPLOY_ACCOUNT = [
   'Workers R2 Storage Write',
   'D1 Write',
   'Pages Write',
-  'Containers Write',
+  'Workers Containers Write',
   'Workers AI Write',
-  'AI Gateway Edit',
+  'AI Gateway Write',
   'Account Settings Read',
 ];
 const RUNTIME_ACCOUNT = [
-  'Containers Write',
+  'Workers Containers Write',
   'Workers Scripts Read',
   'Workers Observability Read',
   'Workers AI Read',
@@ -83,18 +83,42 @@ const DEPLOY_ZONE = [
 ];
 const RUNTIME_ZONE = ['DNS Write', 'Zone Read', 'SSL and Certificates Write'];
 const validId = (id: unknown): id is string => typeof id === 'string' && /^[a-f0-9]{32}$/.test(id);
+// Every required group must exist once in its scope. is_selectable is only
+// advisory ("Token creation performs the authoritative permission check",
+// Cloudflare permission-groups API) and is relative to the calling credential:
+// for an OAuth grant it marked even granted groups such as Account Settings
+// Read unselectable (staging, 2026-11-06). Creation decides; the not-selectable
+// names are returned so a refused creation can report them. Group names are
+// public catalog vocabulary, safe to surface.
+function resolveRequired(groups: PermissionGroup[], required: [string[], string][]): string[] {
+  const problems = new Set<string>();
+  const notSelectable = new Set<string>();
+  for (const [names, scope] of required)
+    for (const name of names) {
+      const named = groups.filter((group) => group.name === name);
+      const inScope = named.filter((group) => group.scopes?.includes(scope) && validId(group.id));
+      const [only] = inScope;
+      if (inScope.length === 1 && only) {
+        if (only.is_selectable !== true) notSelectable.add(name);
+        continue;
+      }
+      problems.add(
+        `${name} (${!named.length ? 'absent' : inScope.length ? 'ambiguous' : 'wrong scope'})`
+      );
+    }
+  if (problems.size)
+    throw new Error(`Required account-token permission unavailable: ${[...problems].join(', ')}`);
+  return [...notSelectable];
+}
 function select(groups: PermissionGroup[], names: string[], scope: string): { id: string }[] {
   return names.map((name) => {
     const matches = groups.filter(
-      (group) =>
-        group.name === name &&
-        group.is_selectable === true &&
-        group.scopes?.includes(scope) &&
-        validId(group.id)
+      (group) => group.name === name && group.scopes?.includes(scope) && validId(group.id)
     );
     const [match] = matches;
     if (matches.length !== 1 || !match)
-      throw new Error('Required selectable account-token permission unavailable');
+      // The group name is public catalog vocabulary, safe to surface for diagnosis.
+      throw new Error(`Required account-token permission unavailable: ${name}`);
     return { id: match.id };
   });
 }
@@ -149,6 +173,13 @@ export async function createInstallationCredentials(
   const groups = await cloudflare<PermissionGroup[]>(bootstrapToken, `${base}/permission_groups`, {
     signal: options.signal,
   });
+  const notSelectable = resolveRequired(groups, [
+    [DEPLOY_ACCOUNT, ACCOUNT_SCOPE],
+    [RUNTIME_ACCOUNT, ACCOUNT_SCOPE],
+    [DEPLOY_ZONE, ZONE_SCOPE],
+    [RUNTIME_ZONE, ZONE_SCOPE],
+    [['Workers R2 Storage Bucket Item Write'], BUCKET_SCOPE],
+  ]);
   const policy = (names: string[], scope: string, resources: Record<string, string>): Policy => ({
     effect: 'allow',
     permission_groups: select(groups, names, scope),
@@ -237,7 +268,7 @@ export async function createInstallationCredentials(
       pulumiPassphrase: randomSecret(),
       tokenIds: [...journal],
     };
-  } catch {
+  } catch (error) {
     cleanupSignal ??= AbortSignal.timeout(
       Math.max(
         1,
@@ -254,7 +285,11 @@ export async function createInstallationCredentials(
       Promise.resolve()
     );
     throw new Error(
-      'Could not provision installation credentials; inspect the persisted token journal and required permissions'
+      'Could not provision installation credentials' +
+        (error instanceof Error ? `: ${error.message}` : '') +
+        (notSelectable.length
+          ? `; Cloudflare marked these not selectable for this grant: ${notSelectable.join(', ')}`
+          : '')
     );
   }
 }
@@ -307,6 +342,7 @@ async function createPrincipal(
   remember: (id: string) => Promise<void>
 ): Promise<Required<Pick<AccountToken, 'id' | 'value'>>> {
   let result: AccountToken;
+  const label = plan.name.slice(plan.name.lastIndexOf('-') + 1);
   try {
     result = await cloudflare<AccountToken>(bootstrapToken, base, {
       method: 'POST',
@@ -314,10 +350,14 @@ async function createPrincipal(
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(plan),
     });
-  } catch {
+  } catch (error) {
     // A timed-out POST may have committed. Reconcile the exact owned principal.
     await reconcile(plan);
-    if (attempts === 1) throw new Error('Account-token creation did not complete');
+    if (attempts === 1)
+      throw new Error(
+        `Cloudflare did not create the ${label} account token` +
+          (error instanceof CloudflareError ? ` (HTTP ${error.status})` : '')
+      );
     return createPrincipal(bootstrapToken, base, plan, attempts - 1, signal, reconcile, remember);
   }
   if (validId(result?.id)) await remember(result.id);

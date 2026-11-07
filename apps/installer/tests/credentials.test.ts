@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { createInstallationCredentials, installationCredentialBuckets } from '../src/credentials';
+import realCatalog from './fixtures-permission-groups.json';
 const config = {
   accountId: 'a'.repeat(32),
   zoneId: 'b'.repeat(32),
@@ -10,46 +11,37 @@ const config = {
   sourceCommit: 'c'.repeat(40),
 };
 const installation = 'sam-maintenance-1234567890abcdef';
-const accountNames = [
-  'Workers Scripts Write',
-  'Workers KV Storage Write',
-  'Workers R2 Storage Write',
-  'D1 Write',
-  'Pages Write',
-  'Containers Write',
-  'Workers AI Write',
-  'AI Gateway Edit',
-  'Account Settings Read',
-  'Workers Scripts Read',
-  'Workers Observability Read',
-  'Workers AI Read',
-  'AI Gateway Read',
-  'AI Gateway Run',
-];
-const zoneNames = ['DNS Write', 'Zone Read', 'Workers Routes Write', 'SSL and Certificates Write'];
-const catalog = [
-  ...accountNames.map((name) => ({ name, scopes: ['com.cloudflare.api.account'] })),
-  ...zoneNames.map((name) => ({ name, scopes: ['com.cloudflare.api.account.zone'] })),
-  { name: 'Workers R2 Storage Bucket Item Write', scopes: ['com.cloudflare.edge.r2.bucket'] },
-].map((entry, index) => ({
-  ...entry,
-  id: (index + 1).toString(16).padStart(32, '0'),
-  is_selectable: true,
-}));
+// Real Cloudflare account-token permission catalog (names and scopes only),
+// captured 2026-11-06. is_selectable is caller-relative in the live API, so the
+// fixture marks every group selectable, as for a bootstrap grant that holds them.
+// Using the real names is what catches a required group that does not exist
+// ('Containers Write' and 'AI Gateway Edit' did not).
+const catalog = (realCatalog.groups as { name: string; scopes: string[] }[]).map(
+  (entry, index) => ({
+    ...entry,
+    id: (index + 1).toString(16).padStart(32, '0'),
+    is_selectable: true,
+  })
+);
+const group = (name: string, scope = 'com.cloudflare.api.account') =>
+  catalog.find((entry) => entry.name === name && entry.scopes.includes(scope))!;
+const bucketGroup = group('Workers R2 Storage Bucket Item Write', 'com.cloudflare.edge.r2.bucket');
 interface Stored {
   id: string;
   name: string;
   policies: unknown[];
 }
-function fixture(mode?: 'timeout-once' | 'runtime-fails' | 'invalid-value' | 'delete-fails') {
+function fixture(
+  mode?: 'timeout-once' | 'runtime-fails' | 'invalid-value' | 'delete-fails',
+  groups: typeof catalog = catalog
+) {
   const tokens = new Map<string, Stored>();
   const plans: Array<{ name: string; policies: unknown[] }> = [];
   const deleted: string[] = [];
   let count = 0;
   let timedOut = false;
   const fetch = vi.fn(async (url: string, init?: RequestInit) => {
-    if (url.endsWith('/permission_groups'))
-      return Response.json({ success: true, result: catalog });
+    if (url.endsWith('/permission_groups')) return Response.json({ success: true, result: groups });
     if (init?.method === 'DELETE') {
       const id = url.split('/').at(-1)!;
       if (mode === 'delete-fails') return Response.json({ success: false }, { status: 403 });
@@ -109,7 +101,7 @@ describe('installation credential principals', () => {
     expect(statePlan.policies).toEqual([
       {
         effect: 'allow',
-        permission_groups: [{ id: catalog.at(-1)!.id }],
+        permission_groups: [{ id: bucketGroup.id }],
         resources: Object.fromEntries(
           bucketNames.map((name) => [
             `com.cloudflare.edge.r2.bucket.${config.accountId}_default_${name}`,
@@ -119,17 +111,54 @@ describe('installation credential principals', () => {
       },
     ]);
     const runtime = JSON.stringify(f.plans.find((plan) => plan.name.endsWith('-runtime')));
-    for (const name of ['SSL and Certificates Write', 'Workers AI Write', 'AI Gateway Run'])
-      expect(runtime).toContain(catalog.find((group) => group.name === name)!.id);
+    expect(runtime).toContain(
+      group('SSL and Certificates Write', 'com.cloudflare.api.account.zone').id
+    );
+    for (const name of ['Workers AI Write', 'AI Gateway Run', 'Workers Containers Write'])
+      expect(runtime).toContain(group(name).id);
     expect(serialize).not.toMatch(/API Tokens|OAuth/);
   });
-  it.each(['missing', 'wrong-scope', 'unselectable'])(
+  // Observed on staging 2026-11-06: an OAuth grant saw Workers Scripts Write and
+  // Account Settings Read as not selectable although both were granted.
+  const markedUnselectable = (names: string[]) =>
+    catalog.map((entry) =>
+      names.includes(entry.name) ? { ...entry, is_selectable: false } : entry
+    );
+  it('lets Cloudflare token creation decide when groups are only marked not selectable', async () => {
+    const f = fixture(
+      undefined,
+      markedUnselectable(['Workers Scripts Write', 'Account Settings Read'])
+    );
+    const credentials = await createInstallationCredentials(
+      'bootstrap-secret',
+      config,
+      installation
+    );
+    expect(credentials.tokenIds).toHaveLength(3);
+    expect(JSON.stringify(f.plans)).toContain(group('Workers Scripts Write').id);
+  });
+  it('reports the refused token, its status and the not-selectable groups when creation is refused', async () => {
+    const f = fixture('runtime-fails', markedUnselectable(['Workers Scripts Write', 'D1 Write']));
+    const error = await createInstallationCredentials('private', config, installation).catch(
+      (caught: unknown) => caught as Error
+    );
+    expect(error.message).toContain(
+      'Cloudflare did not create the runtime account token (HTTP 403)'
+    );
+    expect(error.message).toContain(
+      'Cloudflare marked these not selectable for this grant: Workers Scripts Write, D1 Write'
+    );
+    expect(f.deleted).toHaveLength(1);
+  });
+  it.each(['missing', 'wrong-scope'])(
     'fails before mutation on %s permission evidence',
     async (mode) => {
-      const groups = structuredClone(catalog);
-      if (mode === 'missing') groups.pop();
-      else if (mode === 'wrong-scope') groups[0]!.scopes = ['com.cloudflare.api.user'];
-      else groups[0]!.is_selectable = false;
+      const required = group('Workers Scripts Write');
+      const groups = structuredClone(catalog).filter(
+        (entry) => mode !== 'missing' || entry.id !== required.id
+      );
+      const target = groups.find((entry) => entry.id === required.id);
+      if (mode === 'wrong-scope') target!.scopes = ['com.cloudflare.api.user'];
       const fetch = vi.fn(async () => Response.json({ success: true, result: groups }));
       vi.stubGlobal('fetch', fetch);
       await expect(createInstallationCredentials('private', config, installation)).rejects.toThrow(
@@ -161,7 +190,7 @@ describe('installation credential principals', () => {
           journal.push([...ids]);
         },
       })
-    ).rejects.toThrow('persisted token journal');
+    ).rejects.toThrow('Could not provision installation credentials');
     expect(f.deleted).toHaveLength(1);
     expect(f.tokens.size).toBe(0);
     expect(journal.at(-1)).toEqual([]);
@@ -184,7 +213,7 @@ describe('installation credential principals', () => {
           journal.push([...ids]);
         },
       })
-    ).rejects.toThrow('persisted token journal');
+    ).rejects.toThrow('Could not provision installation credentials');
     expect(f.tokens.size).toBe(1);
     expect(journal.at(-1)).toEqual(['1'.padStart(32, '0')]);
   });
@@ -193,7 +222,7 @@ describe('installation credential principals', () => {
     const unrelatedId = 'f'.repeat(32);
     f.tokens.set(unrelatedId, { id: unrelatedId, name: 'unrelated-service', policies: [] });
     await expect(createInstallationCredentials('private', config, installation)).rejects.toThrow(
-      'persisted token journal'
+      'Could not provision installation credentials'
     );
     expect([...f.tokens.keys()]).toEqual([unrelatedId]);
     expect(f.deleted).not.toContain(unrelatedId);
@@ -207,7 +236,7 @@ describe('installation credential principals', () => {
       policies: [],
     });
     await expect(createInstallationCredentials('private', config, installation)).rejects.toThrow(
-      'persisted token journal'
+      'Could not provision installation credentials'
     );
     expect(f.plans).toHaveLength(0);
     expect(f.deleted).toHaveLength(0);

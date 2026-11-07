@@ -25,7 +25,7 @@ function fixture() {
     APP_ORIGIN: 'https://install.example.com',
     OAUTH_CLIENT_ID: 'client',
     OAUTH_CLIENT_SECRET: 'SECRET',
-    OAUTH_SCOPES: 'account-settings.read workers-scripts.edit',
+    OAUTH_SCOPES: 'account-settings.read workers-scripts.write',
     SESSION_TTL_SECONDS: '900',
     BUILD_SHA: 'test',
     SOURCE_URL: 'https://example.com/source',
@@ -183,7 +183,12 @@ describe('provisioning and handoff', () => {
     );
     const response = await call('/install', { accountId, confirmed: true });
     expect(response.status).toBe(502);
-    expect(await response.text()).not.toContain('SECRET TOKEN');
+    const text = await response.text();
+    expect(text).not.toContain('SECRET TOKEN');
+    expect(text).toContain('HTTP 403');
+    expect(text).toContain('Workers Paid');
+    expect(text).toMatch(/Details: GET \/accounts\/:account\/[^ ]+ returned HTTP 403/);
+    expect(text).not.toContain(accountId);
     const name = (values.get('session') as Session).job!.name;
     await call('/install', { accountId, confirmed: true });
     expect((values.get('session') as Session).job!.name).toBe(name);

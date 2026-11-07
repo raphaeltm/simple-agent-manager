@@ -24,16 +24,17 @@ describe('installation approval', () => {
     const fetch = vi.fn(async (url: string, _init?: RequestInit) =>
       Response.json({
         success: true,
-        result: url.includes('/dns_records?')
-          ? [{ name: 'api.sam.example.com', type: 'CNAME' }]
-          : url.includes('/workers/subdomain')
-            ? { subdomain: 'existing' }
-            : {
-                id: config.zoneId,
-                name: config.zoneName,
-                account: { id: config.accountId },
-                status: 'active',
-              },
+        result:
+          url.includes('/dns_records?') || url.includes('/workers/routes')
+            ? [{ name: 'api.sam.example.com', type: 'CNAME' }]
+            : url.includes('/workers/subdomain')
+              ? { subdomain: 'existing' }
+              : {
+                  id: config.zoneId,
+                  name: config.zoneName,
+                  account: { id: config.accountId },
+                  status: 'active',
+                },
       })
     );
     vi.stubGlobal('fetch', fetch);
@@ -44,7 +45,7 @@ describe('installation approval', () => {
       'preview.sam.example.com',
       '*.sam.example.com',
     ]);
-    expect(plan.conflicts).toHaveLength(4);
+    expect(plan.conflicts.filter((conflict) => conflict.type === 'CNAME')).toHaveLength(4);
     expect(plan.workersDev).toEqual({ action: 'preserve', subdomain: 'existing' });
     expect(plan.fingerprint).toMatch(/^[a-f0-9]{64}$/);
     expect(fetch.mock.calls.every(([, init]) => !init?.method || init.method === 'GET')).toBe(true);
@@ -73,14 +74,15 @@ describe('installation approval', () => {
         return Response.json({ success: true, result: { subdomain: current } });
       return Response.json({
         success: true,
-        result: url.includes('/dns_records?')
-          ? []
-          : {
-              id: config.zoneId,
-              name: config.zoneName,
-              account: { id: config.accountId },
-              status: 'active',
-            },
+        result:
+          url.includes('/dns_records?') || url.includes('/workers/routes')
+            ? []
+            : {
+                id: config.zoneId,
+                name: config.zoneName,
+                account: { id: config.accountId },
+                status: 'active',
+              },
       });
     });
     vi.stubGlobal('fetch', fetch);
@@ -105,14 +107,15 @@ describe('installation approval', () => {
           );
         return Response.json({
           success: true,
-          result: url.includes('/dns_records?')
-            ? []
-            : {
-                id: config.zoneId,
-                name: config.zoneName,
-                account: { id: config.accountId },
-                status: 'active',
-              },
+          result:
+            url.includes('/dns_records?') || url.includes('/workers/routes')
+              ? []
+              : {
+                  id: config.zoneId,
+                  name: config.zoneName,
+                  account: { id: config.accountId },
+                  status: 'active',
+                },
         });
       })
     );
@@ -148,4 +151,91 @@ it('checks email syntax with bounded linear scanning and preserves the existing 
     }
     expect(isValidOwnerEmail(value), value).toBe(previous.test(value));
   }
+});
+describe('edge certificate coverage', () => {
+  const zone = {
+    id: config.zoneId,
+    name: config.zoneName,
+    account: { id: config.accountId },
+    status: 'active',
+  };
+  function cloudflareWith(packs: (() => Response) | unknown[]) {
+    const fetch = vi.fn(async (url: string) => {
+      if (url.includes('/ssl/certificate_packs'))
+        return typeof packs === 'function'
+          ? packs()
+          : Response.json({ success: true, result: packs });
+      return Response.json({
+        success: true,
+        result:
+          url.includes('/dns_records?') || url.includes('/workers/routes')
+            ? []
+            : url.includes('/workers/subdomain')
+              ? { subdomain: 'existing' }
+              : zone,
+      });
+    });
+    vi.stubGlobal('fetch', fetch);
+    return fetch;
+  }
+  const universal = [{ status: 'active', hosts: ['example.com', '*.example.com'] }];
+  const certificateConflicts = (plan: { conflicts: { name: string; type: string }[] }) =>
+    plan.conflicts.filter((conflict) => conflict.type === 'certificate').map((c) => c.name);
+  it('installs at the zone apex without consulting certificates', async () => {
+    const fetch = cloudflareWith(universal);
+    const plan = await previewInstallation('private', { ...config, baseDomain: 'example.com' });
+    expect(plan.conflicts).toEqual([]);
+    expect(fetch.mock.calls.some(([url]) => url.includes('/ssl/'))).toBe(false);
+  });
+  it('blocks a nested domain that only the free universal certificate covers', async () => {
+    cloudflareWith(universal);
+    expect(certificateConflicts(await previewInstallation('private', config))).toEqual([
+      'api.sam.example.com',
+      'preview.sam.example.com',
+      '*.sam.example.com',
+    ]);
+  });
+  it('accepts a nested domain with an active advanced certificate for its names', async () => {
+    cloudflareWith([
+      ...universal,
+      { status: 'active', hosts: ['sam.example.com', '*.sam.example.com'] },
+    ]);
+    expect(certificateConflicts(await previewInstallation('private', config))).toEqual([]);
+  });
+  it('fails closed when certificates cannot be read', async () => {
+    cloudflareWith(() =>
+      Response.json({ success: false, errors: [{ code: 9109 }] }, { status: 403 })
+    );
+    expect(certificateConflicts(await previewInstallation('private', config))).toHaveLength(3);
+  });
+});
+describe('workers route conflicts', () => {
+  it('blocks a leftover route with a pattern SAM creates and ignores unrelated routes', async () => {
+    const zone = {
+      id: config.zoneId,
+      name: config.zoneName,
+      account: { id: config.accountId },
+      status: 'active',
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        Response.json({
+          success: true,
+          result: url.includes('/workers/routes')
+            ? [
+                { pattern: '*.vm.example.com/*', script: null },
+                { pattern: 'blog.example.com/*', script: 'blog' },
+              ]
+            : url.includes('/dns_records?')
+              ? []
+              : url.includes('/workers/subdomain')
+                ? { subdomain: 'existing' }
+                : zone,
+        })
+      )
+    );
+    const plan = await previewInstallation('private', { ...config, baseDomain: 'example.com' });
+    expect(plan.conflicts).toEqual([{ name: '*.vm.example.com/*', type: 'route' }]);
+  });
 });

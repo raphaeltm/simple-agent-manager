@@ -97,6 +97,9 @@ it('requires internal authority, validates immutable jobs, and starts only one m
     env: Record<string, string>;
   };
   expect(options.image).toBe('cloudflare/debian-trixie');
+  expect((options as unknown as { instance: string }).instance).toBe('standard-4');
+  // The restore reads shared source from the same state bucket the engine derives.
+  expect(options.env.SAM_BUILD_CACHE_BUCKET).toBe('s123abc-pulumi-state-staging');
   expect(options.entrypoint.slice(0, 2)).toEqual(['node', '-e']);
   expect(options.env.CF_RUNTIME_API_TOKEN).toBe('runtime-secret');
   expect(options.env).not.toHaveProperty('BUILDER_CONTROL_SECRET');
@@ -139,6 +142,38 @@ it('keeps setup result private and stops a completed container', async () => {
   for (const args of h.env.BUILDER_ARTIFACTS.put.mock.calls)
     expect(JSON.stringify(args)).not.toContain('private-setup');
   expect(h.container.destroy).toHaveBeenLastCalledWith('SAM builder completed');
+});
+it('publishes only a well-formed pinned-runtime receipt', async () => {
+  const h = harness();
+  await h.call('/start', h.job);
+  const receipt = {
+    version: 2,
+    source: 'publisher',
+    archiveSHA256: 'a'.repeat(64),
+    archiveBytes: 136245837,
+    installerSHA256: 'b'.repeat(64),
+  };
+  h.setProgress({ state: 'running', runtimeTrust: { ...receipt, extra: 'private-detail' } });
+  await h.call('/status');
+  const trust = h.env.BUILDER_ARTIFACTS.put.mock.calls.find((args) =>
+    String((args as unknown as [string])[0]).endsWith('/codex-trust.json')
+  ) as unknown as [string, string];
+  expect(JSON.parse(trust[1])).toEqual(receipt);
+  h.env.BUILDER_ARTIFACTS.put.mock.calls.length = 0;
+  // The retired in-account build receipt and malformed digests are not published.
+  for (const runtimeTrust of [
+    { ...receipt, version: 1 },
+    { ...receipt, source: 'installation' },
+    { ...receipt, archiveSHA256: 'not-a-digest' },
+  ]) {
+    h.setProgress({ state: 'running', runtimeTrust });
+    await h.call('/status');
+  }
+  expect(
+    h.env.BUILDER_ARTIFACTS.put.mock.calls.some((args) =>
+      String((args as unknown as [string])[0]).endsWith('/codex-trust.json')
+    )
+  ).toBe(false);
 });
 it('cancels and explicitly resumes a job after destroying uncertain old processes', async () => {
   const h = harness();
@@ -279,4 +314,95 @@ it('persists verified canonical source identity and binds offline resume to that
   h.setProgress({ state: 'running', sourceIdentity: { ...sourceIdentity, tree: 'f'.repeat(40) } });
   await h.builder.alarm();
   expect((h.values.get('job') as { status: string }).status).toBe('failed');
+});
+// The first real full install failed in the container's source step with no
+// recorded reason (staging, 2026-11-06). The failing step must reach the owner.
+it('records which setup step failed and drops unsafe failure text', async () => {
+  const h = harness();
+  await h.call('/start', h.job);
+  h.setProgress({
+    state: 'failed',
+    failure: { step: 'source', reason: 'Source storage request failed (HTTP 403)' },
+  });
+  const status = await (await h.call('/status')).json();
+  expect(status.status).toBe('failed');
+  expect(status.failure).toEqual({
+    step: 'source',
+    reason: 'Source storage request failed (HTTP 403)',
+  });
+  const published = h.env.BUILDER_ARTIFACTS.put.mock.calls.at(-1) as unknown as [string, string];
+  expect(JSON.parse(published[1]).failure.step).toBe('source');
+
+  const unsafe = harness();
+  await unsafe.call('/start', unsafe.job);
+  unsafe.setProgress({
+    state: 'failed',
+    failure: {
+      step: 'source',
+      reason: 'Command failed: curl https://acct.r2.cloudflarestorage.com/x',
+      code: 63,
+    },
+  });
+  const sanitized = (await (await unsafe.call('/status')).json()).failure;
+  expect(sanitized).toEqual({ step: 'source', code: 63 });
+});
+it('supervisor reports only fixed-string errors or an exit code', () => {
+  const supervisor = JSON.parse(
+    /const BUILDER_SUPERVISOR=(".*?");\n/s.exec(builderSource)![1]!
+  ) as string;
+  const line = /const reason = (.*?);\n/.exec(supervisor)![1]!;
+  const reason = new Function(`return ${line}`)() as (error: unknown) => string;
+  expect(reason(new Error('Source storage request failed (HTTP 403)'))).toBe(
+    'Source storage request failed (HTTP 403)'
+  );
+  const curl = Object.assign(
+    new Error('Command failed: curl --config /x https://acct.example/key'),
+    {
+      status: 63,
+    }
+  );
+  expect(reason(curl)).toBe('exit 63');
+  expect(reason({})).toBe('unexpected error');
+});
+it('scrubs secret environment values from the engine output tail', () => {
+  const supervisor = JSON.parse(
+    /const BUILDER_SUPERVISOR=(".*?");\n/s.exec(builderSource)![1]!
+  ) as string;
+  const pick = (name: string) => new RegExp(`(const ${name} = .*?;)\\n`).exec(supervisor)![1]!;
+  const make = new Function(
+    'process',
+    `${pick('secrets')}\n${pick('tail')}\n${pick('keep')}\nreturn { keep, tail };`
+  ) as (process: { env: Record<string, string> }) => {
+    keep: (line: string) => void;
+    tail: string[];
+  };
+  const { keep, tail } = make({
+    env: {
+      CF_API_TOKEN: 'cf-token-private-value',
+      R2_SECRET_ACCESS_KEY: 'r2-secret-private',
+      CF_ACCOUNT_ID: 'a'.repeat(32),
+    },
+  });
+  keep('pulumi error: authorization cf-token-private-value rejected for account ' + 'a'.repeat(32));
+  keep('upload with r2-secret-private failed');
+  for (let index = 0; index < 50; index++) keep(`line ${index}`);
+  expect(tail).toHaveLength(40);
+  const early = make({ env: { CF_API_TOKEN: 'cf-token-private-value' } });
+  early.keep('using cf-token-private-value now');
+  expect(early.tail).toEqual(['using [redacted] now']);
+});
+it('keeps a bounded engine output tail in the failure report', async () => {
+  const h = harness();
+  await h.call('/start', h.job);
+  h.setProgress({
+    state: 'failed',
+    failure: {
+      step: 'bootstrap',
+      code: 1,
+      tail: ['error: route already exists', 7, 'x'.repeat(900)],
+    },
+  });
+  const failure = (await (await h.call('/status')).json()).failure;
+  expect(failure.code).toBe(1);
+  expect(failure.tail).toEqual(['error: route already exists', 'x'.repeat(400)]);
 });

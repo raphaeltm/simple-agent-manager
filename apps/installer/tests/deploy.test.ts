@@ -46,7 +46,9 @@ const fullScopes = [
   'aig.write',
   'workers-observability.read',
 ];
-const bootstrapScopes = ['account-settings.read', 'workers-scripts.edit'];
+const bootstrapScopes = ['account-settings.read', 'workers-scripts.write'];
+// Shipped before 2026-11-06; workers-scripts.edit (Workers Editor) cannot create Workers.
+const editorBootstrapScopes = ['account-settings.read', 'workers-scripts.edit'];
 afterEach(() => {
   vi.unstubAllEnvs();
   vi.unstubAllGlobals();
@@ -58,14 +60,22 @@ afterEach(() => {
   capture.run.mockClear();
 });
 interface Options {
-  existing?: 'bootstrap' | 'full';
+  existing?: 'bootstrap' | 'full' | 'editor-bootstrap';
   ready?: boolean;
   mode?: string;
   managementDenied?: boolean;
   registrationToken?: string;
   sha?: string;
   missingScope?: boolean;
+  laggingSecretReads?: number;
+  secretsNeverVisible?: boolean;
 }
+const existingScopes = (existing: Options['existing']) =>
+  existing === 'full'
+    ? fullScopes
+    : existing === 'editor-bootstrap'
+      ? editorBootstrapScopes
+      : bootstrapScopes;
 async function deploy(options: Options = {}) {
   vi.spyOn(process, 'chdir').mockImplementation(() => {});
   vi.spyOn(console, 'log').mockImplementation(() => {});
@@ -78,13 +88,16 @@ async function deploy(options: Options = {}) {
   vi.stubEnv('OAUTH_CLIENT_SECRET', '');
   vi.stubEnv('OAUTH_REGISTRATION_TOKEN', options.registrationToken || '');
   vi.stubEnv('GITHUB_SHA', options.sha ?? 'b'.repeat(40));
+  vi.stubEnv('OAUTH_SECRETS_POLL_MS', '1');
+  vi.stubEnv('OAUTH_SECRETS_VISIBLE_TIMEOUT_MS', options.secretsNeverVisible ? '0' : '30000');
+  let laggingSecretReads = options.laggingSecretReads ?? 0;
   const ready = options.ready ?? !!options.existing;
   let client: Record<string, unknown> | undefined = options.existing
     ? {
         client_id: 'existing',
         client_name: 'sam-installer-staging',
         client_uri: 'https://install.sammy.party',
-        scopes: options.existing === 'full' ? [...fullScopes] : [...bootstrapScopes],
+        scopes: [...existingScopes(options.existing)],
         grant_types: ['authorization_code'],
         response_types: ['code'],
         redirect_uris: ['https://install.sammy.party/oauth/callback'],
@@ -117,7 +130,7 @@ async function deploy(options: Options = {}) {
         {
           name: 'OAUTH_SCOPES',
           type: 'plain_text',
-          text: (options.existing === 'full' ? fullScopes : bootstrapScopes).join(' '),
+          text: existingScopes(options.existing).join(' '),
         },
         ...(options.existing === 'full'
           ? [{ name: 'INSTALL_SOURCE_COMMIT', type: 'plain_text', text: 'c'.repeat(40) }]
@@ -154,7 +167,8 @@ async function deploy(options: Options = {}) {
         if (method === 'PUT') {
           if (!secretNames.includes(String(body.name))) secretNames.push(String(body.name));
           result = {};
-        } else result = secretNames.map((name) => ({ name }));
+        } else if (options.secretsNeverVisible || laggingSecretReads-- > 0) result = [];
+        else result = secretNames.map((name) => ({ name }));
       } else throw new Error('Unexpected deployment API endpoint');
       return Response.json({ success: true, result });
     })
@@ -228,6 +242,41 @@ describe('publisher-controlled installer deployment', () => {
     expect(capture.calls.find((call) => call.method === 'PATCH')?.body.scopes).toEqual(
       bootstrapScopes
     );
+  });
+  it('upgrades a preserved Workers Editor bootstrap consent before publishing', async () => {
+    await deploy({ existing: 'editor-bootstrap' });
+    expect(config().vars.INSTALL_SOURCE_COMMIT).toBeUndefined();
+    expect(config().vars.OAUTH_SCOPES.split(' ')).toEqual(bootstrapScopes);
+    const patch = capture.calls.find((call) => call.method === 'PATCH');
+    expect(patch?.body.scopes).toEqual(bootstrapScopes);
+    expect(capture.events.findIndex((entry) => entry.startsWith('PATCH '))).toBeLessThan(
+      capture.events.indexOf('write-config')
+    );
+  });
+  it('control: a preserved current bootstrap consent is left untouched', async () => {
+    await deploy({ existing: 'bootstrap', managementDenied: true });
+    expect(config().vars.OAUTH_SCOPES.split(' ')).toEqual(bootstrapScopes);
+    expect(capture.calls.some((call) => call.method === 'PATCH')).toBe(false);
+  });
+  it('refuses to publish the Editor upgrade without OAuth management permission', async () => {
+    await expect(deploy({ existing: 'editor-bootstrap', managementDenied: true })).rejects.toThrow(
+      'permissions'
+    );
+    expect(capture.run).not.toHaveBeenCalled();
+    expect(capture.writes).toHaveLength(0);
+  });
+  it('waits for a lagging secrets list instead of failing a completed full enablement', async () => {
+    await deploy({ existing: 'bootstrap', mode: 'full', laggingSecretReads: 2 });
+    const reads = capture.calls.filter(
+      (call) => call.method === 'GET' && call.path.endsWith('/secrets')
+    );
+    expect(reads).toHaveLength(3);
+    expect(config().vars.INSTALL_SOURCE_COMMIT).toBe('b'.repeat(40));
+  });
+  it('control: still fails readiness when the OAuth secrets never appear', async () => {
+    await expect(
+      deploy({ existing: 'bootstrap', mode: 'full', secretsNeverVisible: true })
+    ).rejects.toThrow('readiness was not established');
   });
   it('blocks full enablement before publishing when management permission or a live scope is missing', async () => {
     await expect(

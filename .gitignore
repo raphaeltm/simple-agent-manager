@@ -100,3 +100,12 @@ apps/installer/.dev.vars
 # Compiled shared installer scene (generated before dev/build/deploy)
 apps/installer/public/scene/
 apps/installer/src/maintenance-brand.generated.ts
+
+# Installer build-time brand/static output
+apps/installer/site-static/
+apps/installer/.astro/
+apps/installer/public/fonts/
+apps/installer/public/brand-icon.png
+apps/installer/public/sam-head.png
+apps/installer/public/theme-init.js
+packages/ui/.astro/
