@@ -178,7 +178,7 @@ Server:
  Runtimes: runc io.containerd.runc.v2
  Default Runtime: runc
  Init Binary: docker-init
- containerd version: 
+ containerd version:
  runc version: v1.5.2-0-g29dd3dc
  init version: de40ad0
  Security Options:
