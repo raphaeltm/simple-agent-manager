@@ -6181,6 +6181,64 @@ describe('GCP managed compatibility copies', () => {
     return db;
   }
 
+  // Google adds zones over time. A zone outside the labelled suggestion list used to fail
+  // `isValidLocationForProvider`, so `normalizeCapacityCandidate` silently dropped it.
+  it('keeps a candidate in a zone outside the labelled list through placement selection', async () => {
+    const db = await saveGcp(createDb());
+    const gcpOffering = (location: string) =>
+      liveHetznerOffering({
+        provider: 'gcp',
+        location,
+        providerInstanceType: 'e2-standard-2',
+        displayName: 'e2-standard-2',
+        machineSize: 'medium',
+        vcpu: 2,
+        ramGb: 8,
+        memoryGb: 8,
+        memoryMb: 8192,
+        storageGb: 50,
+        diskGb: 50,
+        price: '~$49/mo',
+        priceMonthly: 49,
+        priceHourly: 0.067,
+        currency: 'USD',
+      });
+    const newZone = 'northamerica-northeast2-b';
+    expect(getLocationsForProvider('gcp').map((l) => l.id)).not.toContain(newZone);
+    await ensureDefaultCapacityPoolsForExistingCredentials(db, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => [gcpOffering('us-central1-a'), gcpOffering(newZone)],
+    });
+    const summary = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
+      userId: 'user-1',
+      projectId: null,
+      ensure: false,
+      includeInstallation: false,
+    });
+    const placement = resolveTaskStartPlacement({
+      entryPoint: 'task-submit',
+      taskId: 'gcp-new-zone-task',
+      projectId: 'project-1',
+      userId: 'user-1',
+      project: {
+        id: 'project-1',
+        defaultProvider: 'gcp',
+        defaultLocation: 'us-central1-a',
+        defaultVmSize: 'medium',
+      },
+      credentialProjectPolicy: 'current-project-unless-inherited',
+      taskModeDefault: 'task',
+      resourceRequirements: {},
+    });
+
+    const selection = buildCapacityPoolSelection(summary!, placement, 'workspace');
+
+    expect(selection?.candidates.map((c) => c.location).sort()).toEqual(
+      [newZone, 'us-central1-a'].sort()
+    );
+  });
+
   it('discovers one catalog and one editor-visible source after real WIF credential storage', async () => {
     const db = await saveGcp(createDb());
     expect(await listUserProviderCatalogSeeds(db, { userId: 'user-1' })).toHaveLength(1);

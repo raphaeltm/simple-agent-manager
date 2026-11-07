@@ -150,7 +150,10 @@ export const SIZE_MAP: Record<VMSize, SizeConfig> = {
   large: { type: 'e2-standard-4', price: '~$97/mo', vcpu: 4, ramGb: 16, storageGb: 50 },
 };
 
-/** Available GCP zones */
+/**
+ * Labelled GCP zones: display names, and the per-zone fast path in instance lookup. Not a gate:
+ * any well-formed zone is valid, and `listVMs` uses the project-wide aggregated list.
+ */
 export const GCP_LOCATIONS = [
   'us-central1-a',
   'us-east1-b',

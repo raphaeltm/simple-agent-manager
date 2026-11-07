@@ -3,10 +3,9 @@ import { providerDelay, providerFetch, throwIfProviderRequestAborted } from './p
 import type { ProviderRequestContext } from './types';
 import { ProviderError } from './types';
 import {
-  type GcpInstancePayload,
+  type GcpAggregatedScope,
   parseProviderJson,
   validateGcpAggregatedInstances,
-  validateGcpInstancesList,
   validateGcpOperation,
 } from './validation';
 
@@ -73,35 +72,38 @@ export async function pollGcpOperation(
   );
 }
 
-type GcpInstancesPage = { items?: GcpInstancePayload[]; nextPageToken?: string };
 type GcpAggregatedInstancesPage = {
-  items?: Record<string, { instances?: GcpInstancePayload[] }>;
+  items?: Record<string, GcpAggregatedScope>;
   nextPageToken?: string;
 };
 
-export async function fetchPaginatedGcpInstances(
-  scope: GcpApiScope,
-  baseUrl: string,
-  baseParams: URLSearchParams,
-  headers: Record<string, string>,
-  context: string,
-  handlePage: (data: GcpInstancesPage) => boolean | void,
-  requestContext?: ProviderRequestContext
-): Promise<void> {
-  await fetchPaginatedGcpList(
-    scope,
-    baseUrl,
-    baseParams,
-    headers,
-    context,
-    async (payload) => {
-      const data = validateGcpInstancesList(payload, context);
-      const stop = handlePage(data);
-      return { nextPageToken: data.nextPageToken, stop: stop === true };
-    },
-    requestContext
-  );
+/**
+ * Warning code GCP puts on an aggregated-list scope it could not read. Any other scope warning
+ * (for example `NO_RESULTS_ON_PAGE` on an empty zone) is informational.
+ */
+export const GCP_UNREACHABLE_WARNING = 'UNREACHABLE';
+
+/**
+ * Build a Compute Engine list filter requiring every label. Each expression is parenthesised,
+ * which is the documented AND form for `aggregatedList`. Label keys and values are restricted to
+ * `[a-z0-9_-]` by GCP; anything else is refused rather than escaped, so a caller-supplied value
+ * can never widen the filter.
+ */
+export function gcpLabelFilter(labels: Record<string, string>): string {
+  return Object.entries(labels)
+    .map(([key, value]) => {
+      if (!GCP_LABEL_PATTERN.test(key) || !GCP_LABEL_VALUE_PATTERN.test(value)) {
+        throw new ProviderError('gcp', undefined, `Invalid GCP label filter ${key}=${value}`, {
+          category: 'invalid_config',
+        });
+      }
+      return `(labels.${key} = "${value}")`;
+    })
+    .join(' ');
 }
+
+const GCP_LABEL_PATTERN = /^[a-z][a-z0-9_-]{0,62}$/;
+const GCP_LABEL_VALUE_PATTERN = /^[a-z0-9_-]{0,63}$/;
 
 export async function fetchPaginatedGcpAggregatedInstances(
   scope: GcpApiScope,

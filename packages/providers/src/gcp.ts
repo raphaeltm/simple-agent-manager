@@ -1,6 +1,12 @@
 import type { CredentialProvider } from '@simple-agent-manager/shared';
 
-import { fetchPaginatedGcpInstances, type GcpApiScope, pollGcpOperation } from './gcp-api';
+import {
+  fetchPaginatedGcpAggregatedInstances,
+  GCP_UNREACHABLE_WARNING,
+  type GcpApiScope,
+  gcpLabelFilter,
+  pollGcpOperation,
+} from './gcp-api';
 import { ensureGcpFirewallRules } from './gcp-firewall';
 import { findGcpInstanceByIdOrName } from './gcp-instance-lookup';
 import {
@@ -291,43 +297,48 @@ export class GcpProvider implements Provider {
     context?: ProviderRequestContext
   ): Promise<VMInstance[]> {
     throwIfProviderRequestAborted(context);
+    const filter = gcpLabelFilter({ 'sam-managed': 'true', ...labels });
     const headers = await this.authHeaders(context);
     const results: VMInstance[] = [];
+    const unreachable: string[] = [];
 
-    // Build filter from labels
-    const filters: string[] = ['labels.sam-managed=true'];
-    if (labels) {
-      for (const [key, value] of Object.entries(labels)) {
-        filters.push(`labels.${key}=${value}`);
-      }
+    // One project-wide aggregated list covers every zone, so a VM created in any zone is
+    // visible to orphan reconciliation and deletion checks, not only VMs in the zones SAM
+    // happens to know by name.
+    try {
+      await fetchPaginatedGcpAggregatedInstances(
+        this.api,
+        `${this.projectUrl()}/aggregated/instances`,
+        new URLSearchParams({ filter }),
+        headers,
+        'listVMs.aggregated',
+        (data) => {
+          for (const [scope, scopeData] of Object.entries(data.items ?? {})) {
+            if (scopeData.warning?.code === GCP_UNREACHABLE_WARNING) unreachable.push(scope);
+            results.push(...(scopeData.instances ?? []).map((i) => gcpInstanceToVM(i)));
+          }
+        },
+        context
+      );
+    } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
+      throw new ProviderError(
+        'gcp',
+        err instanceof ProviderError ? err.statusCode : undefined,
+        `GCP instance list failed: ${err instanceof Error ? err.message : String(err)}`,
+        { cause: err instanceof Error ? err : undefined }
+      );
     }
-    const filterStr = filters.join(' ');
 
-    // Query all configured zones
-    for (const zone of this.locations) {
-      throwIfProviderRequestAborted(context);
-      try {
-        await fetchPaginatedGcpInstances(
-          this.api,
-          `${this.projectUrl()}/zones/${zone}/instances`,
-          new URLSearchParams({ filter: filterStr }),
-          headers,
-          `listVMs.${zone}`,
-          (data) => {
-            results.push(...(data.items || []).map((i) => gcpInstanceToVM(i)));
-          },
-          context
-        );
-      } catch (err) {
-        rethrowIfProviderRequestAborted(err, context);
-        if (this.isToleratedZoneListError(err)) continue;
-        throw new ProviderError(
-          'gcp',
-          err instanceof ProviderError ? err.statusCode : undefined,
-          `GCP zone ${zone} list failed: ${err instanceof Error ? err.message : String(err)}`,
-          { cause: err instanceof Error ? err : undefined }
-        );
-      }
+    // An unreachable zone makes the inventory partial. Callers use this list to prove a VM is
+    // gone (strict deletion) or that none is missing (orphan reconciliation), so a partial list
+    // must fail closed rather than read as "no VM there".
+    if (unreachable.length > 0) {
+      throw new ProviderError(
+        'gcp',
+        undefined,
+        `GCP instance list is incomplete: unreachable ${unreachable.join(', ')}`
+      );
     }
 
     return results;
@@ -464,10 +475,6 @@ export class GcpProvider implements Provider {
     context?: ProviderRequestContext
   ): Promise<GcpInstancePayload | null> {
     return findGcpInstanceByIdOrName(this.api, this.locations, idOrName, context);
-  }
-
-  private isToleratedZoneListError(err: unknown): boolean {
-    return err instanceof ProviderError && (err.statusCode === 404 || err.statusCode === 503);
   }
 
   private unsupportedVolumeOperation(operation: string): ProviderError {

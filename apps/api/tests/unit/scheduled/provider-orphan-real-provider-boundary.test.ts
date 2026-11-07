@@ -182,11 +182,11 @@ describe('provider orphan reconciliation — real provider delete boundaries', (
   });
 
   it('GCP decodes raw metadata and reaches only the owned instance DELETE', async () => {
-    const instance = (id: string, installation?: string) => ({
+    const instance = (id: string, installation?: string, zone = 'us-central1-a') => ({
       id,
       name: `vm-${id}`,
       status: 'RUNNING',
-      machineType: 'zones/us-central1-a/machineTypes/e2-medium',
+      machineType: `zones/${zone}/machineTypes/e2-medium`,
       creationTimestamp: CREATED,
       networkInterfaces: [{ accessConfigs: [{ natIP: '192.0.2.10' }] }],
       labels: installation
@@ -195,38 +195,52 @@ describe('provider orphan reconciliation — real provider delete boundaries', (
     });
     const ownedId = '9876543210123456789';
     const owned = { ...instance(ownedId, INSTALLATION), name: 'vm-owned' };
+    // An owned orphan in a zone outside the provider's labelled zone list. Before the
+    // aggregated listing, `listVMs` walked only the labelled zones and never saw it.
+    const newZone = 'northamerica-northeast2-b';
+    const ownedNewZoneId = '8876543210123456789';
+    const ownedNewZone = {
+      ...instance(ownedNewZoneId, INSTALLATION, newZone),
+      name: 'vm-owned-new-zone',
+    };
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       const method = (init?.method ?? 'GET').toUpperCase();
-      if (method === 'GET' && url.endsWith(`/instances/${ownedId}`)) {
+      if (method === 'GET' && /\/instances\/\d+$/.test(url)) {
         return json({ error: { message: 'Not found by name' } }, 404);
       }
-      if (url.includes('/aggregated/instances'))
-        return json({ items: { 'zones/us-central1-a': { instances: [owned] } } });
-      if (method === 'GET' && url.includes('/zones/us-central1-a/instances?')) {
+      if (url.includes('/aggregated/instances')) {
         return json({
-          items: url.includes('us-central1-a')
-            ? [
+          items: {
+            'zones/us-central1-a': {
+              instances: [
                 owned,
                 instance('1234567890123456789', FOREIGN_INSTALLATION),
                 instance('2234567890123456789'),
-              ]
-            : [],
+              ],
+            },
+            [`zones/${newZone}`]: { instances: [ownedNewZone] },
+          },
         });
       }
-      if (method === 'DELETE' && url.endsWith('/instances/vm-owned'))
+      if (method === 'DELETE' && url.endsWith('/zones/us-central1-a/instances/vm-owned'))
         return json({ name: 'delete-op', status: 'PENDING' });
+      if (method === 'DELETE' && url.endsWith(`/zones/${newZone}/instances/vm-owned-new-zone`))
+        return json({ name: 'delete-op-2', status: 'PENDING' });
       if (url.endsWith('/operations/delete-op')) return json({ name: 'delete-op', status: 'DONE' });
-      return json({ items: [] });
+      if (url.endsWith('/operations/delete-op-2'))
+        return json({ name: 'delete-op-2', status: 'DONE' });
+      return json({ error: { message: `unexpected ${method} ${url}` } }, 500);
     });
     globalThis.fetch = fetchMock;
     providerState.current = new GcpProvider('project', async () => 'token', 'us-central1-a');
 
     const result = await runProviderOrphanReconciliation(env());
 
-    expect(result.destroyed, JSON.stringify({ result, calls: methods(fetchMock) })).toBe(1);
+    expect(result.destroyed, JSON.stringify({ result, calls: methods(fetchMock) })).toBe(2);
     expect(methods(fetchMock).filter(([method]) => method === 'DELETE')).toEqual([
       ['DELETE', expect.stringContaining('/zones/us-central1-a/instances/vm-owned')],
+      ['DELETE', expect.stringContaining(`/zones/${newZone}/instances/vm-owned-new-zone`)],
     ]);
     expect(
       methods(fetchMock).some(
