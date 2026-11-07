@@ -1,10 +1,16 @@
-import { fetchPaginatedGcpAggregatedInstances, type GcpApiScope } from './gcp-api';
+import {
+  fetchPaginatedGcpAggregatedInstances,
+  GCP_UNREACHABLE_WARNING,
+  type GcpApiScope,
+  gcpLabelFilter,
+} from './gcp-api';
+import { gcpInstanceToVM } from './gcp-native-instance';
 import {
   providerFetch,
   rethrowIfProviderRequestAborted,
   throwIfProviderRequestAborted,
 } from './provider-fetch';
-import type { ProviderRequestContext } from './types';
+import type { ProviderRequestContext, VMInstance } from './types';
 import { ProviderError } from './types';
 import { type GcpInstancePayload, parseProviderJson, validateGcpInstance } from './validation';
 
@@ -108,4 +114,59 @@ async function findAggregatedInstance(
   }
 
   return null;
+}
+
+/**
+ * Every SAM-managed instance carrying `labels`, across every zone of the project. One aggregated
+ * list covers all zones, so a VM in any zone is visible to orphan reconciliation and allocation
+ * recovery, not only VMs in the zones SAM knows by name.
+ */
+export async function listGcpInstances(
+  scope: GcpApiScope,
+  labels: Record<string, string> | undefined,
+  context?: ProviderRequestContext
+): Promise<VMInstance[]> {
+  throwIfProviderRequestAborted(context);
+  const filter = gcpLabelFilter({ 'sam-managed': 'true', ...labels });
+  const headers = await scope.authHeaders(context);
+  const results: VMInstance[] = [];
+  const unreachable: string[] = [];
+
+  try {
+    await fetchPaginatedGcpAggregatedInstances(
+      scope,
+      `${scope.projectUrl}/aggregated/instances`,
+      new URLSearchParams({ filter }),
+      headers,
+      'listVMs.aggregated',
+      (data) => {
+        for (const [scopeKey, scopeData] of Object.entries(data.items ?? {})) {
+          if (scopeData.warning?.code === GCP_UNREACHABLE_WARNING) unreachable.push(scopeKey);
+          results.push(...(scopeData.instances ?? []).map((i) => gcpInstanceToVM(i)));
+        }
+      },
+      context
+    );
+  } catch (err) {
+    rethrowIfProviderRequestAborted(err, context);
+    throw new ProviderError(
+      'gcp',
+      err instanceof ProviderError ? err.statusCode : undefined,
+      `GCP instance list failed: ${err instanceof Error ? err.message : String(err)}`,
+      { cause: err instanceof Error ? err : undefined }
+    );
+  }
+
+  // An unreachable zone makes the inventory partial. Callers use this list to prove no SAM VM
+  // is missing (orphan reconciliation, allocation recovery), so a partial list must fail closed
+  // rather than read as "no VM there".
+  if (unreachable.length > 0) {
+    throw new ProviderError(
+      'gcp',
+      undefined,
+      `GCP instance list is incomplete: unreachable ${unreachable.join(', ')}`
+    );
+  }
+
+  return results;
 }
