@@ -327,6 +327,11 @@ export function validateGcpAggregatedInstances(
           ...(typeof warningObj.message === 'string' ? { message: warningObj.message } : {}),
         }
       : undefined;
+    // GCP marks an empty scope with a warning (NO_RESULTS_ON_PAGE). A scope with neither field
+    // is malformed; reading it as empty would let orphan reconciliation trust a partial inventory.
+    if (!instances && !warning) {
+      throw validationError('gcp', scopeContext, 'expected instances or warning');
+    }
     scopes[scope] = {
       ...(instances
         ? {

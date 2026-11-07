@@ -308,6 +308,73 @@ describe('GcpProvider', () => {
       expect(body.metadata.items[0].value).toBe('#cloud-config\nruncmd: []');
     });
 
+    it('reads the created VM from its creation zone, never a same-name VM elsewhere', async () => {
+      const requested: string[] = [];
+      globalThis.fetch = vi.fn(async (url: string, init: RequestInit = {}) => {
+        const target = String(url);
+        requested.push(`${init.method ?? 'GET'} ${target}`);
+        if (target.endsWith('/zones/northamerica-northeast2-b/instances/node-zonal')) {
+          return new Response(
+            JSON.stringify(
+              gcpInstance({
+                id: 'created',
+                name: 'node-zonal',
+                machineType: 'zones/northamerica-northeast2-b/machineTypes/e2-medium',
+              })
+            )
+          );
+        }
+        if (target.includes('/instances/node-zonal') || target.includes('/aggregated/')) {
+          // A same-name VM in another zone (possible under zonal DNS).
+          return new Response(JSON.stringify(gcpInstance({ id: 'other', name: 'node-zonal' })));
+        }
+        return successfulCreateResponse(target, init);
+      });
+
+      const vm = await provider.createVM({
+        name: 'node-zonal',
+        size: 'small',
+        location: 'northamerica-northeast2-b',
+        userData: '#cloud-config',
+      });
+
+      expect(vm.id).toBe('created');
+      const lookups = requested.filter((r) => r.startsWith('GET ') && r.includes('node-zonal'));
+      expect(lookups).toEqual([
+        'GET https://compute.googleapis.com/compute/v1/projects/test-project/zones/northamerica-northeast2-b/instances/node-zonal',
+      ]);
+    });
+
+    it('does not fall back to a project-wide lookup when the creation zone has no such VM', async () => {
+      const mockFetch = vi.fn(async (url: string, init: RequestInit = {}) => {
+        const target = String(url);
+        if (target.endsWith('/zones/us-central1-a/instances/node-missing')) {
+          return new Response(JSON.stringify({ error: { code: 404 } }), { status: 404 });
+        }
+        if (target.includes('/aggregated/')) {
+          return new Response(
+            JSON.stringify({
+              items: { 'zones/us-east1-b': { instances: [gcpInstance({ name: 'node-missing' })] } },
+            })
+          );
+        }
+        return successfulCreateResponse(target, init);
+      });
+      globalThis.fetch = mockFetch;
+
+      await expect(
+        provider.createVM({
+          name: 'node-missing',
+          size: 'small',
+          location: 'us-central1-a',
+          userData: '#cloud-config',
+        })
+      ).rejects.toThrow('VM node-missing created but not found after polling');
+      expect(mockFetch.mock.calls.some(([url]) => String(url).includes('/aggregated/'))).toBe(
+        false
+      );
+    });
+
     it('uses config.instanceType as the concrete machineType when provided', async () => {
       let capturedBody: string | undefined;
       globalThis.fetch = vi.fn(async (url: string, init: RequestInit = {}) => {
@@ -627,6 +694,44 @@ describe('GcpProvider', () => {
         category: 'invalid_config',
       });
       expect(mockFetch).not.toHaveBeenCalled();
+    });
+
+    it('accepts an international label value and still quotes it as one term', async () => {
+      const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+        expect(new URL(url).searchParams.get('filter')).toBe(
+          '(labels.sam-managed = "true") (labels.team = "café-équipe_2")'
+        );
+        return aggregated({});
+      });
+      globalThis.fetch = mockFetch;
+
+      await provider.listVMs({ team: 'café-équipe_2' });
+
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it.each(['Café', 'a b', 'a"b', 'a)b', 'x'.repeat(64)])(
+      'refuses label value %j before any request',
+      async (value) => {
+        const mockFetch = vi.fn();
+        globalThis.fetch = mockFetch;
+
+        await expect(provider.listVMs({ team: value })).rejects.toMatchObject({
+          category: 'invalid_config',
+        });
+        expect(mockFetch).not.toHaveBeenCalled();
+      }
+    );
+
+    it('fails closed on a scope with neither instances nor a warning', async () => {
+      globalThis.fetch = vi.fn().mockImplementation(async () =>
+        aggregated({
+          'zones/us-central1-a': { instances: [gcpInstance({ id: '1' })] },
+          'zones/us-east1-b': {},
+        })
+      );
+
+      await expect(provider.listVMs()).rejects.toThrow(/expected instances or warning/);
     });
 
     it('fails closed when any zone is unreachable: the inventory would be partial', async () => {

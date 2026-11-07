@@ -8,7 +8,7 @@ import {
   pollGcpOperation,
 } from './gcp-api';
 import { ensureGcpFirewallRules } from './gcp-firewall';
-import { findGcpInstanceByIdOrName } from './gcp-instance-lookup';
+import { findGcpInstanceByIdOrName, getGcpInstanceInZone } from './gcp-instance-lookup';
 import {
   COMPUTE_API_BASE,
   DEFAULT_GCP_AGENT_PORTS,
@@ -241,8 +241,9 @@ export class GcpProvider implements Provider {
     throwIfProviderRequestAborted(context);
     await this.pollOperation(zone, op.name, context);
 
-    // Fetch the created instance to get its details
-    const instance = await this.getVM(config.name, context);
+    // Read the created instance from the zone it was created in, never by name project-wide.
+    const created = await getGcpInstanceInZone(this.api, zone, config.name, context);
+    const instance = created ? gcpInstanceToVM(created) : null;
     if (!instance) {
       throw new ProviderError(
         'gcp',

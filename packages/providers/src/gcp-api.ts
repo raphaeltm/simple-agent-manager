@@ -103,7 +103,9 @@ export function gcpLabelFilter(labels: Record<string, string>): string {
 }
 
 const GCP_LABEL_PATTERN = /^[a-z][a-z0-9_-]{0,62}$/;
-const GCP_LABEL_VALUE_PATTERN = /^[a-z0-9_-]{0,63}$/;
+// GCP label values allow lowercase letters (international ones included), digits, `_` and `-`,
+// up to 63 characters. Quotes, spaces and parentheses stay out, so a value cannot widen the filter.
+const GCP_LABEL_VALUE_PATTERN = /^[\p{Ll}\p{Lo}\p{N}_-]{0,63}$/u;
 
 export async function fetchPaginatedGcpAggregatedInstances(
   scope: GcpApiScope,
