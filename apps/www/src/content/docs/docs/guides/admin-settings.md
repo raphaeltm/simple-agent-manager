@@ -138,7 +138,9 @@ before you try again.
 
 **Operations** also holds the [lifecycle latency budgets](#lifecycle-latency-monitoring), limits for [workflows](#workflows), [linked work](#linked-work), pull
 request tracking, the GitHub trigger queue, the Account Map, [workload identity](/docs/guides/workload-identity/)
-tokens, and the [SAM assistant](/docs/reference/configuration/#private-sam-assistant-runtime-controls).
+tokens, the [SAM assistant](/docs/reference/configuration/#private-sam-assistant-runtime-controls),
+the [Google Cloud machine catalog](#google-cloud-machine-catalog), and
+[provider fallback](#provider-fallback).
 Every card shows its own description, default, and range, so the tables below cover the limits
 you're most likely to change rather than every one.
 
