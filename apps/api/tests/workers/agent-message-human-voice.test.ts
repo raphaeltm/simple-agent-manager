@@ -115,7 +115,7 @@ describe('agent text reaches another agent only as a pointer', () => {
         expect(state.inbox).toEqual([
           expect.objectContaining({ message_class: messageClass, delivery_intent: 'queue' }),
         ]);
-        expect(state.inbox[0]!.content).toContain(`includes a ${messageClass} message`);
+        expect(state.inbox[0]!.content).toContain(`includes an urgent (${messageClass}) message`);
         expect(state.inbox[0]!.content).toContain(receipt.eventId);
         expectOnlyNotices(state);
       });

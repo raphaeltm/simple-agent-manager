@@ -91,7 +91,7 @@ export function agentMessageWakeContent(input: {
   urgentClass?: MessageClass | null;
 }): string {
   const urgent = input.urgentClass
-    ? `This batch includes a ${input.urgentClass} message, so SAM stopped your current turn to deliver ` +
+    ? `This batch includes an urgent (${input.urgentClass}) message, so SAM stopped your current turn to deliver ` +
       'it now. If that cut your work short, check the transcript for where you left off, then read the ' +
       'urgent message first. '
     : '';
