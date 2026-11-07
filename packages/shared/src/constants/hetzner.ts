@@ -84,5 +84,10 @@ export const DEFAULT_GCP_SA_TOKEN_LIFETIME_SECONDS = 3600;
 /** Default scope for GCP STS token exchange. Override via GCP_STS_SCOPE env var. */
 export const DEFAULT_GCP_STS_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 
-/** Default scopes for GCP SA impersonation (comma-separated). Override via GCP_SA_IMPERSONATION_SCOPES env var. */
-export const DEFAULT_GCP_SA_IMPERSONATION_SCOPES = 'https://www.googleapis.com/auth/compute';
+/**
+ * Default scopes for GCP SA impersonation (comma-separated). Override via GCP_SA_IMPERSONATION_SCOPES
+ * env var. `compute` runs VMs; `cloud-billing.readonly` reads the public Compute Engine price list
+ * for the live catalog (it grants no access to the project's billing account).
+ */
+export const DEFAULT_GCP_SA_IMPERSONATION_SCOPES =
+  'https://www.googleapis.com/auth/compute,https://www.googleapis.com/auth/cloud-billing.readonly';

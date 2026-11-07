@@ -6,6 +6,7 @@ import { log } from '../lib/logger';
 import { runAgentEmailRecovery } from '../services/agent-email/recovery';
 import { reconcileDiagnosisRuns } from '../services/diagnosis-runner';
 import { reconcileDiagnosticIncidents } from '../services/diagnostic-incident-reconciliation';
+import { refreshGcpPriceTableIfDue } from '../services/gcp-price-table';
 import { runGitHubTriggerRecovery } from '../services/github-trigger-recovery';
 import {
   runLifecycleLatencyDailyEvaluation,
@@ -182,6 +183,10 @@ export async function scheduled(
   const providerOrphans = await sweeps.isolate('provider_orphan_reconciliation', () =>
     runProviderOrphanReconciliation(env)
   );
+  // Before pool reconciliation, so a refreshed price table reaches the catalogs it rebuilds.
+  const gcpPriceTable = await sweeps.isolate('gcp_price_table', () =>
+    refreshGcpPriceTableIfDue(env)
+  );
   const capacityPools = await sweeps.isolate('capacity_pool_reconciliation', () =>
     runScheduledCapacityPoolReconciliation(env)
   );
@@ -314,6 +319,7 @@ export async function scheduled(
     capacityPoolReconciliationSkipped: capacityPools?.skipped,
     capacityPoolReconciliationSkipReason: capacityPools?.skipReason,
     capacityPoolReconciliationNextEligibleAt: capacityPools?.nextEligibleAt,
+    gcpPriceTableStatus: gcpPriceTable?.status,
     stuckTasksFailedQueued: stuckTasks?.failedQueued,
     stuckTasksFailedDelegated: stuckTasks?.failedDelegated,
     stuckTasksFailedInProgress: stuckTasks?.failedInProgress,
