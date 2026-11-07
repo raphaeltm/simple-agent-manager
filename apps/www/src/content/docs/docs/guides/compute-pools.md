@@ -199,6 +199,27 @@ order does not list come after every listed one.
 - **Changing the order does not disturb running machines.** It applies to the next new machine.
 - A project or agent profile that sets a default provider still limits the pool to that provider.
 
+**Falling back to the next provider.** When the first source cannot create a machine, SAM moves on
+to the next source in the order and tries there. That happens when the provider:
+
+- has no capacity for the machine (for example Google Cloud's `ZONE_RESOURCE_POOL_EXHAUSTED`, or
+  Hetzner's "error during placement"),
+- refuses because an account quota is used up (a Google Cloud `QUOTA_EXCEEDED`, a Hetzner core or
+  server limit), or
+- is already cooling down after one of those, or has no usable credential.
+
+With the `fallback-chain` exhaustion policy SAM tries every allowed offering of a source before
+moving on. With `fail` or `queue` it tries one offering per source. `queue` waits only after every
+source is exhausted, and the retry starts again from the first source.
+
+SAM does **not** move to another provider after an error that could mean a machine was created
+anyway, such as a timeout or an unclear `503`, or after a permission or configuration error. Those
+fail the run, so a broken credential is not hidden and no machine is ever created twice.
+
+Sources that share a rank do not fall back to each other; give them different ranks if you want
+one to back up the other. Without an order, nothing falls back across sources. Each attempt,
+including skipped sources and the reason, appears in the run's placement details.
+
 The order is set through the pool update API (`sourceOrder`, a list of source ids) for now.
 
 ### Allowed offerings
@@ -341,9 +362,10 @@ policy** is what SAM does when no permitted machine can be obtained. New pools d
 :::note
 Fallback chain only tries alternatives **from the same pool, on the same credential, in the same
 region if you pinned one, and only offerings that still satisfy the work's requirements**. It
-never downgrades to a machine smaller than the work asked for, never borrows another account's
-capacity, and never crosses into a different pool. If every permitted alternative is exhausted,
-the failure names what was tried.
+never downgrades to a machine smaller than the work asked for and never crosses into a different
+pool. The one way it leaves a credential is a [provider order](#provider-order): when the pool
+ranks its sources, SAM moves to the next-ranked source after the current one is exhausted. If
+every permitted alternative is exhausted, the failure names what was tried.
 :::
 
 :::caution
@@ -359,7 +381,9 @@ work and retry until the overall capacity wait expires, even under **Fail**:
   that needs at least as many cores of the same kind and carries on down the chain with the ones
   that need fewer; the work waits only when none of those fits. Under **Fail** or **Queue** there is
   no chain to descend, so it waits straight away. Shared and dedicated vCPUs have separate limits
-  on Hetzner, so reaching one does not rule out the other.
+  on Hetzner, so reaching one does not rule out the other. If the pool has a
+  [provider order](#provider-order) with a source ranked after this one, SAM moves to that source
+  instead of waiting.
 - **The pool's [Machine limit](#machine-limit) is reached** and no running node
   can take the work. The fix is the limit, the requirements, or freeing a node.
 
@@ -370,7 +394,8 @@ So **Fail** is not a guarantee of an immediate error in every capacity situation
 machine type and location. On Google Cloud, a zone that "does not have enough resources available"
 (`ZONE_RESOURCE_POOL_EXHAUSTED`). Some failures are not sold out and stop the work at once whatever
 the policy: a rejected credential or missing permission, an invalid request, and on Google Cloud a
-project quota (for example regional CPUs). A Google Cloud create request that fails with a plain
+project quota (for example regional CPUs), unless the pool's provider order has a source ranked
+after this one, in which case SAM moves to it. A Google Cloud create request that fails with a plain
 "service unavailable" also stops the work, because SAM cannot tell whether the machine was created
 anyway, and trying another one could leave you paying for two.
 

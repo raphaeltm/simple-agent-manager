@@ -55,17 +55,17 @@ from the first candidate, so the chain can never leave one credential domain.
 
 ## Implementation checklist
 
-- [ ] Exhaustion plan in tiers (`tierKey`, `sourceRank` on each attempt); tier membership and
+- [x] Exhaustion plan in tiers (`tierKey`, `sourceRank` on each attempt); tier membership and
       same-rank exclusion with diagnostics
-- [ ] Step loop: index-based; tier switch releases the old lease, re-targets, rebuilds identity,
+- [x] Step loop: index-based; tier switch releases the old lease, re-targets, rebuilds identity,
       re-runs compute quota, acquires the new lease; skip reasons recorded per attempt
-- [ ] Failure handler: returns the next index; account limit or `quota_exceeded` with a later tier
+- [x] Failure handler: returns the next index; account limit or `quota_exceeded` with a later tier
       moves to that tier (cooldown recorded on the failing domain); core-quota rejections scoped by
       capacity source; primary vs attempt identity
-- [ ] Re-entry: release a stale lease from another scope before acquiring
-- [ ] Terminal message names providers when the plan spans more than one
+- [x] Re-entry: release a stale lease from another scope before acquiring
+- [x] Terminal message names providers when the plan spans more than one
 - [ ] Compaction keeps each source's best candidates (after rebase onto PR 2b)
-- [ ] Docs: compute-pools.md "Provider order" (fallback behaviour)
+- [x] Docs: compute-pools.md "Provider order" (fallback behaviour)
 - [ ] Tests (below)
 
 ## Tests
@@ -85,3 +85,13 @@ from the first candidate, so the chain can never leave one credential domain.
 ## Staging
 
 Waived by Raphaël for this work (session `eecddba8`, 2026-11-07).
+
+## Progress notes
+
+- 14 tests in `tests/unit/durable-objects/task-runner-provider-tiers.test.ts`. Surgical reverts:
+  no new tiers → 10 red; same-rank allowed → same-rank test; `fail` tries all → fail test;
+  no refused-tier move → quota, account-limit and core-quota tests; unscoped core quota →
+  core-quota test; no stale release → restart test; queue on current tier → queue test; no
+  cooldown skip → cooldown test; no missing-credential skip → credential test; success recorded
+  on primary → first test.
+- Step split for rule 18: `node-provisioning-lease.ts` (primary lease), `node-provisioning-tier.ts`.
