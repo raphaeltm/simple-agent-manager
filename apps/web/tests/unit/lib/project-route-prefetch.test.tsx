@@ -53,6 +53,7 @@ describe('prefetchProjectRoute', () => {
     expect(mocks.getProject).toHaveBeenCalledWith('proj-1', expect.anything());
     expect(mocks.listChatSessions).toHaveBeenCalledWith('proj-1', {
       limit: CHAT_SESSION_LIST_LIMIT,
+      includeLive: true,
     });
     expect(mocks.getChatSession).toHaveBeenCalledWith(
       'proj-1',
@@ -227,6 +228,7 @@ describe('App project route', () => {
       expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'session-1', expect.anything());
       expect(mocks.listChatSessions).toHaveBeenCalledWith('proj-1', {
         limit: CHAT_SESSION_LIST_LIMIT,
+        includeLive: true,
       });
     });
     // The project read was started too, and is still outstanding.
@@ -263,6 +265,7 @@ describe('App project route', () => {
       expect(mocks.getChatSession).toHaveBeenCalledWith('proj-2', 'session-9', expect.anything());
       expect(mocks.listChatSessions).toHaveBeenCalledWith('proj-2', {
         limit: CHAT_SESSION_LIST_LIMIT,
+        includeLive: true,
       });
     });
   });
