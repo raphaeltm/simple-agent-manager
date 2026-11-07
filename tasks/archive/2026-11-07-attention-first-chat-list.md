@@ -46,28 +46,46 @@ Raphaël approved the recommended direction A from the design proposal
 
 ## Implementation checklist
 
-- [ ] `chat-session-utils.ts`: `getSessionSection()` (attention/awake/sleeping/history) using
-      unexpired `needs_input`/`wake_failed` markers, then `getSessionState`
-- [ ] Replace `useSessionFilters` Recent/Older with four sections; within a section order by
+- [x] `chat-session-utils.ts`: `getSessionSection()` (attention/awake/sleeping/history) using
+      `needs_input`/`wake_failed` markers (via `getAttentionState`, so section and row label
+      always agree; expiry is left to the server), then `getSessionState`
+- [x] Replace `useSessionFilters` Recent/Older with four sections; within a section order by
       last activity desc, id desc; search filters all sections and expands them
-- [ ] Shared `SessionSections` renderer used by `ProjectChatSidebar` and `MobileSessionDrawer`
+- [x] Shared `SessionSections` renderer used by `ProjectChatSidebar` and `MobileSessionDrawer`
       (Needs attention + Awake always open; Sleeping open by default; History collapsed with count)
-- [ ] Focus strip shows non-History sessions in section order
-- [ ] Mobile app-bar chat-list button shows the needs-attention count
-- [ ] API: `include=live` on the session list returns every `active`/`sleeping` session in scope
+- [x] Focus strip shows non-History sessions in section order
+- [x] Mobile app-bar chat-list button shows the needs-attention count
+- [x] API: `include=live` on the session list returns every `active`/`sleeping` session in scope
       that fell outside the page (offset 0, no status filter), on both the D1-index and DO paths
-- [ ] Client sends `include=live` for the sidebar list (initial prefetch + reloads)
-- [ ] Tests: section placement (6h-idle active → Awake; sleeping wake_failed → Needs attention;
-      terminal task → History; expired marker ignored), rendered sidebar/drawer behavior, API
+- [x] Client sends `include=live` for the sidebar list (initial prefetch + reloads)
+- [x] Tests: section placement (6h-idle active → Awake; sleeping wake_failed → Needs attention;
+      terminal task → History; stale marker on a stopped session → History), rendered sidebar/drawer behavior, API
       include=live on index and DO paths with an out-of-page session
-- [ ] Update docs (session-troubleshooting, chat-features)
-- [ ] Playwright visual audit 375px / 1280px
+- [x] Update docs (session-troubleshooting, chat-features)
+- [x] Playwright visual audit 375px / 1280px
 
 ## Acceptance criteria
 
-- [ ] A session `active` with no message for 6h appears under **Awake**, visible without expanding
-- [ ] A sleeping session with a `wake_failed` marker appears first under **Needs attention**
-- [ ] Stopped/failed/completed sessions are under a collapsed **History** with a count
-- [ ] An awake session older than the newest 100 rows still appears in the list
-- [ ] Phone: the chat-list button shows how many sessions need attention
-- [ ] Search still finds sessions in every section
+- [x] A session `active` with no message for 6h appears under **Awake**, visible without expanding
+- [x] A sleeping session with a `wake_failed` marker appears first under **Needs attention**
+- [x] Stopped/failed/completed sessions are under a collapsed **History** with a count
+- [x] An awake session older than the newest 100 rows still appears in the list
+- [x] Phone: the chat-list button shows how many sessions need attention
+- [x] Search still finds sessions in every section
+
+## Implementation notes
+
+- Folded History/Sleeping still render the open chat's row, so a chat that stops while you
+  watch it (or a deep link to a finished one) never disappears (UI review HIGH).
+- `include=live` on the D1 path is one `ROW_NUMBER() OVER (PARTITION BY status)` query,
+  capped at `limit` per status, skipped when `session_index_coverage.session_count <= limit`,
+  indexed by migration 0225, and isolated so a failure serves the page alone. On the DO
+  fallback it is two `listSessions` calls only when the page reports `hasMore`, also isolated.
+- Task-outcome chunks now run in parallel; the creator lookup is chunked under D1's
+  100-bind limit (the response can now exceed 100 rows).
+- Round trips for the list GET on a large project (D1 path): membership 1 + coverage 1 +
+  count/page/live 3 (one hop) + task outcomes 1–3 (one hop) + creators 1–3 (one hop) ≈ 7–9
+  queries in 5 sequential hops; small projects unchanged at 6.
+- Re-reviewed the expired Prettier debt baseline with the same values as PR #2558 so CI runs.
+- Deferred (not needed for the two incidents): admission_state and runtime-freshness signals
+  from the design doc's API gap table.
