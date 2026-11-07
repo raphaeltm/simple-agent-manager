@@ -17,7 +17,7 @@ export PATH=/usr/local/go/bin:/sam/cargo/bin:/root/.pulumi/bin:/usr/local/sbin:/
 mkdir -p "$SAM_JOB_DIRECTORY"
 # OS support packages follow Debian security updates; language/deploy tools are pinned.
 apt-get update -qq
-apt-get install -y -qq --no-install-recommends ca-certificates curl git build-essential pkg-config libssl-dev python3 make docker.io docker-cli docker-buildx xz-utils
+apt-get install -y -qq --no-install-recommends ca-certificates curl git jq build-essential pkg-config libssl-dev python3 make docker.io docker-cli docker-buildx xz-utils
 # Pinned downloads retry across identical versioned sources: one transient CDN
 # error (a 404 from dl.google.com on 2026-11-03) must not fail an hour-long build.
 # The checksum, not the source, decides acceptance.
