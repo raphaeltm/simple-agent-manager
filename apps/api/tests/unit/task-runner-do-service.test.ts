@@ -386,6 +386,18 @@ describe('task-runner-do service', () => {
     const serializedBytes = new TextEncoder().encode(JSON.stringify(forwarded.config)).length;
 
     expect(serializedBytes).toBeLessThan(131_072);
+    // Over budget, the ranked prefix that fits is kept, not just the first candidate: every
+    // later candidate is a fallback the exhaustion chain may need. Order is preserved.
+    const kept = forwarded.config.capacityPoolSelection?.candidates ?? [];
+    const selectionBytes = new TextEncoder().encode(
+      JSON.stringify(forwarded.config.capacityPoolSelection)
+    ).length;
+    expect(kept.length).toBeGreaterThan(1);
+    expect(kept.length).toBeLessThan(160);
+    expect(selectionBytes).toBeLessThanOrEqual(96 * 1024);
+    expect(kept.map((candidate: { candidateOrder: number }) => candidate.candidateOrder)).toEqual(
+      Array.from({ length: kept.length }, (_, index) => index)
+    );
     expect(forwarded.config.capacityPoolSelection?.candidates[0]).toMatchObject({
       provider: 'hetzner',
       location: 'fsn1',
