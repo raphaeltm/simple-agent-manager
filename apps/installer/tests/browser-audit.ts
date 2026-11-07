@@ -66,7 +66,8 @@ async function installFixtureRoutes(
         json: { error: 'Your installer session expired. Sign in again.' },
       });
     let conflicts: Array<{ name: string; type: string }> = [];
-    if (getState() === 'full-conflict') conflicts = [{ name: 'api.sam.example.com', type: 'CNAME' }];
+    if (getState() === 'full-conflict')
+      conflicts = [{ name: 'api.sam.example.com', type: 'CNAME' }];
     if (getState() === 'full-flow') {
       previewState.attempts++;
       // The first review attempt hits a conflict; "Check again" resolves it,
@@ -236,7 +237,8 @@ async function auditScenario(page: Page, scenario: string, baseUrl: string) {
     });
   });
   expect(stepBounds).toBe(true);
-  if (!scenario.startsWith('full-')) await expect(page.locator('#step-review')).toHaveClass(/skipped/);
+  if (!scenario.startsWith('full-'))
+    await expect(page.locator('#step-review')).toHaveClass(/skipped/);
   if (scenario === 'full-choose') await auditFullChoose(page);
   if (scenario === 'full-review') {
     await auditFullChoose(page);
