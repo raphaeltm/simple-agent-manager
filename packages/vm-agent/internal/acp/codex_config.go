@@ -103,6 +103,7 @@ func mergeManagedCodexMcpConfig(existing, managed string) string {
 	merged := assembleManagedCodexConfig(cleaned, managed, codexFeaturePlan{})
 	if err := codexConfigTOMLError(merged); err != nil && codexConfigTOMLError(cleaned) == nil {
 		// The user's file was valid and SAM's merge broke it, so Codex will fail to start.
+		// This only makes the failure visible; the result is still written.
 		slog.Error("Codex config: merged config.toml is invalid TOML although the existing file was valid",
 			"error", err)
 	}
@@ -125,6 +126,8 @@ func assembleManagedCodexConfig(cleaned, managed string, features codexFeaturePl
 		starts := codexTOMLStatementStarts(lines)
 		firstTable := codexTOMLFirstTableLine(lines, starts)
 		filtered := make([]string, 0, len(lines))
+		// Decided at each statement's first line and applied to its continuation lines,
+		// so a managed key with a multi-line value is removed whole.
 		dropping := false
 		for i, line := range lines {
 			if starts[i] {
