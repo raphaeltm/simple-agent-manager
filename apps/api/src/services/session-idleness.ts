@@ -12,9 +12,9 @@ export const DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS = 5 * 60 * 1000;
  * active snapshot every `ActivityRereportInterval`, and each report refreshes
  * `runtimeWorkUpdatedAt`. An adapter faithfully re-reporting a STALE task set —
  * the canonical case being an abandoned detached dev server that stays in a
- * runtime-work set — would therefore pin compute awake indefinitely. That
- * contradicts the canonical definition of idleness: only work still expected to
- * return to the agent pins compute.
+ * runtime-work set — would therefore pin compute awake indefinitely. Long-lived
+ * background work may deliberately keep a session awake, but only for this
+ * bounded interval after real work; heartbeat reports cannot renew it.
  *
  * NOTE: `runtimeWorkProgressAt` is ONE clock for the reporter's whole tracked
  * set, so this ceiling can only bound a set that stops progressing as a whole.
@@ -135,8 +135,8 @@ export function getFreshHarnessWorkLeaseExpiry(
 
 /**
  * When the session last did real work. `workAt` is the work clock; rows written before
- * it existed fall back to the turn start, then the last report. Harness progress counts
- * as work too.
+ * it existed fall back to the turn start or harness progress, then the last report
+ * only when no real-work anchor exists. Harness progress counts as work too.
  */
 export function sessionWorkAnchor(state: SessionIdlenessActivityState | null): number | null {
   if (!state) return null;
