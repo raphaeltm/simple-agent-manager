@@ -201,7 +201,7 @@ esac
 
     const rejected = run('https://example.test/wrong/v1.0.0/x');
     assert.notEqual(rejected.status, 0);
-    assert.equal(rejected.stderr.match(/failed: /g)?.length, 4);
+    assert.equal(rejected.stderr.match(/failed: /g)?.length, 6);
     assert.equal(existsSync(join(dir, 'out')), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });

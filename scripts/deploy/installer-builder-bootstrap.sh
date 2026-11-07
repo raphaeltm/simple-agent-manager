@@ -19,11 +19,14 @@ apt-get update -qq
 apt-get install -y -qq --no-install-recommends ca-certificates curl git jq build-essential pkg-config libssl-dev python3 make docker.io docker-cli docker-buildx xz-utils
 # Pinned downloads retry across identical versioned sources: one transient CDN
 # error (a 404 from dl.google.com on 2026-11-03) must not fail an hour-long build.
+# go.dev redirects to dl.google.com, so both URLs share one CDN; a 404 lasting
+# over 30 s failed an install on 2026-11-07. Six attempts with doubling delays
+# (5+10+20+40+60 s by default) ride out about two and a half minutes.
 # The checksum, not the source, decides acceptance.
 fetch_pinned() {
-  local output=$1 sha=$2 attempt url
+  local output=$1 sha=$2 attempt url delay=${SAM_FETCH_RETRY_DELAY_SECONDS:-5}
   shift 2
-  for attempt in 1 2 3 4; do
+  for attempt in $(seq 1 "${SAM_FETCH_ATTEMPTS:-6}"); do
     for url in "$@"; do
       if curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' --connect-timeout 20 "$url" -o "$output" &&
         printf '%s  %s\n' "$sha" "$output" | sha256sum --check --status; then
@@ -32,7 +35,8 @@ fetch_pinned() {
       echo "pinned download attempt $attempt failed: $url" >&2
       rm -f "$output"
     done
-    sleep $((attempt * ${SAM_FETCH_RETRY_DELAY_SECONDS:-5}))
+    sleep "$delay"
+    delay=$(( delay * 2 > 60 ? 60 : delay * 2 ))
   done
   return 1
 }
