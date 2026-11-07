@@ -1,4 +1,5 @@
 import {
+  AGENT_EFFORT_LEVELS,
   DEVCONTAINER_CONFIG_NAME_MAX_LENGTH,
   DEVCONTAINER_CONFIG_NAME_REGEX,
   TASK_EXECUTION_STEPS,
@@ -6,6 +7,7 @@ import {
 import * as v from 'valibot';
 
 import { MAX_RESOURCE_ID_LENGTH } from './_validator';
+import { AGENT_SETTINGS_VALIDATION_DEFAULTS } from './agent-settings';
 import { ResourceRequirementsSchema } from './resource-requirements';
 
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
@@ -64,6 +66,19 @@ const DevcontainerConfigNameSchema = v.pipe(
   )
 );
 
+/**
+ * One-chat model and effort overrides, shared by task submit and Instant chat start. Whether
+ * the effort is supported is checked against the resolved agent by `resolveTaskAgentOverrides`.
+ */
+export const TaskAgentOverrideFields = {
+  model: v.optional(
+    v.nullable(
+      v.pipe(v.string(), v.trim(), v.maxLength(AGENT_SETTINGS_VALIDATION_DEFAULTS.maxModelLength))
+    )
+  ),
+  effort: v.optional(v.nullable(v.picklist(AGENT_EFFORT_LEVELS))),
+};
+
 export const SubmitTaskSchema = v.object({
   message: v.string(),
   vmSize: v.optional(VMSizeSchema),
@@ -81,6 +96,7 @@ export const SubmitTaskSchema = v.object({
   skillId: v.optional(v.string()),
   attachments: v.optional(v.array(TaskAttachmentSchema)),
   resourceRequirements: v.optional(v.nullable(ResourceRequirementsSchema)),
+  ...TaskAgentOverrideFields,
   /** An open idea in this project this work starts from; linked before the agent starts. */
   sourceIdeaId: v.optional(v.pipe(v.string(), v.maxLength(MAX_RESOURCE_ID_LENGTH))),
 });
