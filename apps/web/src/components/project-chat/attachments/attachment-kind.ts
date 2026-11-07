@@ -26,14 +26,17 @@ function positiveIntEnv(raw: string | undefined, fallback: number): number {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-/** Bytes read from the head of a file to sniff text vs binary and draw the card snippet. */
-export const ATTACHMENT_SNIFF_BYTES = 4096;
-
+export const DEFAULT_ATTACHMENT_SNIFF_BYTES = 4096;
 export const DEFAULT_ATTACHMENT_PREVIEW_TEXT_MAX_BYTES = 256 * 1024;
 export const DEFAULT_ATTACHMENT_PREVIEW_TEXT_MAX_LINES = 2000;
 export const DEFAULT_ATTACHMENT_PREVIEW_LINE_MAX_CHARS = 20_000;
 export const DEFAULT_ATTACHMENT_LINE_COUNT_MAX_BYTES = 8 * 1024 * 1024;
 
+/** Bytes read from the head of a file to sniff text vs binary and draw the card snippet. */
+export const ATTACHMENT_SNIFF_BYTES = positiveIntEnv(
+  import.meta.env.VITE_ATTACHMENT_SNIFF_BYTES,
+  DEFAULT_ATTACHMENT_SNIFF_BYTES
+);
 /** Bytes of a text attachment read into the viewer; larger files show a truncation note. */
 export const ATTACHMENT_PREVIEW_TEXT_MAX_BYTES = positiveIntEnv(
   import.meta.env.VITE_ATTACHMENT_PREVIEW_TEXT_MAX_BYTES,
