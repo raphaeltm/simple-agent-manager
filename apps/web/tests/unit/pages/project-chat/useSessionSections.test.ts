@@ -112,6 +112,56 @@ describe('groupSessionsBySection', () => {
   });
 });
 
+describe('the Needs attention window', () => {
+  it('keeps only requests from the last 24 hours in Needs attention', () => {
+    const recentWake = session({
+      id: 'recent-wake',
+      status: 'sleeping',
+      lastMessageAt: NOW - 30 * HOUR,
+      attention: { ...marker('wake_failed'), createdAt: NOW - 2 * HOUR },
+    });
+    const oldWake = session({
+      id: 'old-wake',
+      status: 'sleeping',
+      lastMessageAt: NOW - 2 * DAY,
+      attention: { ...marker('wake_failed'), createdAt: NOW - 2 * DAY },
+    });
+    const oldAsk = session({
+      id: 'old-ask',
+      lastMessageAt: NOW - 55 * DAY,
+      attention: { ...marker('needs_input'), createdAt: NOW - 55 * DAY },
+    });
+
+    const sections = groupSessionsBySection([recentWake, oldWake, oldAsk], new Map());
+
+    expect(ids(sections.attention)).toEqual(['recent-wake']);
+    // Old requests fall back to their lifecycle section; the row still shows its label.
+    expect(ids(sections.sleeping)).toEqual(['old-wake']);
+    expect(ids(sections.awake)).toEqual(['old-ask']);
+  });
+
+  it('times the window from the request, not from newer messages in the chat', () => {
+    const busyOldAsk = session({
+      id: 'busy-old-ask',
+      lastMessageAt: NOW - 60_000,
+      attention: { ...marker('needs_input'), createdAt: NOW - 3 * DAY },
+    });
+    const sections = groupSessionsBySection([busyOldAsk], new Map());
+    expect(ids(sections.attention)).toEqual([]);
+    expect(ids(sections.awake)).toEqual(['busy-old-ask']);
+  });
+
+  it('counts only recent requests toward the attention badge', () => {
+    const stale = session({
+      id: 'stale-ask',
+      lastMessageAt: NOW - 3 * DAY,
+      attention: { ...marker('needs_input'), createdAt: NOW - 3 * DAY },
+    });
+    const { result } = renderHook(() => useSessionSections([...SESSIONS, stale], TASK_INFO, ''));
+    expect(result.current.attentionCount).toBe(2);
+  });
+});
+
 describe('useSessionSections', () => {
   it('searches the plain-text topic, the id and the creator across every section', () => {
     const search = (query: string) =>
