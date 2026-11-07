@@ -35,7 +35,7 @@ const GCP_STOCKOUT_MESSAGE =
   /zone.*resource.*pool.*exhausted|does not have enough resources available to fulfill the request/i;
 const GCP_QUOTA_CODES = new Set(['QUOTA_EXCEEDED', 'RESOURCE_EXHAUSTED']);
 /** "Quota 'CPUS' exceeded.  Limit: 8.0 in region us-central1." */
-const GCP_QUOTA_MESSAGE = /\bquota\b[^.]*\bexceeded\b|resource.*exhausted/i;
+const GCP_QUOTA_MESSAGE = /\bquota\b[^.]*\bexceeded\b|\bresources? exhausted\b/i;
 const GCP_RATE_LIMIT_CODES = new Set(['RATE_LIMIT_EXCEEDED']);
 const GCP_RATE_LIMIT_MESSAGE = /rate limit exceeded/i;
 const GCP_AUTH_CODES = new Set(['PERMISSION_DENIED', 'UNAUTHENTICATED']);

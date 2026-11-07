@@ -1199,6 +1199,33 @@ describe('TaskRunner capacity exhaustion: GCP errors from the real provider', ()
     expect(attemptedInstanceTypes()).toEqual([GCP_PRIMARY]);
   });
 
+  it('fallback-chain: a GCP invalid request (ALREADY_EXISTS) fails fast (control)', async () => {
+    const conflict = await gcpCreateError({
+      kind: 'http',
+      status: 409,
+      body: {
+        error: {
+          code: 409,
+          message:
+            "The resource 'projects/test-project/zones/us-central1-a/instances/node-x' already exists",
+          status: 'ALREADY_EXISTS',
+        },
+      },
+    });
+    expect(conflict.category).toBe('invalid_config');
+    expect(conflict.providerCode).toBe('ALREADY_EXISTS');
+    provisionNode.mockImplementation(async () => {
+      throw conflict;
+    });
+    const { rc, state } = gcpFallbackChainFixture();
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+      message: conflict.message,
+      permanent: true,
+    });
+    expect(attemptedInstanceTypes()).toEqual([GCP_PRIMARY]);
+  });
+
   it('fallback-chain: an ambiguous GCP 503 fails fast and never creates a second VM (control)', async () => {
     const unavailable = await gcpCreateError({
       kind: 'http',

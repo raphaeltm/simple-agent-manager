@@ -148,6 +148,7 @@ describe('GcpProvider.createVM error categories', () => {
       });
       expect(err.category).toBe('quota_exceeded');
       expect(err.providerCode).toBe('QUOTA_EXCEEDED');
+      expect(err.message).toBe(`GCP operation failed: QUOTA_EXCEEDED: ${QUOTA_MESSAGE}`);
     });
 
     it('synchronous 403 quotaExceeded with no status → quota_exceeded', async () => {
@@ -231,6 +232,10 @@ describe('GcpProvider.createVM error categories', () => {
         },
       });
       expect(err.category).toBe('auth_error');
+      expect(err.providerCode).toBe('UNAUTHENTICATED');
+      expect(err.message).toBe(
+        'gcp API error (401): Request had invalid authentication credentials.'
+      );
     });
 
     it('a bare 503 UNAVAILABLE stays unknown: the insert may have created the VM', async () => {
