@@ -16,10 +16,8 @@ describe('GCP scope constants', () => {
     expect(DEFAULT_GCP_STS_SCOPE).toBe('https://www.googleapis.com/auth/cloud-platform');
   });
 
-  it('DEFAULT_GCP_SA_IMPERSONATION_SCOPES is compute plus read-only Cloud Billing', () => {
-    expect(DEFAULT_GCP_SA_IMPERSONATION_SCOPES).toBe(
-      'https://www.googleapis.com/auth/compute,https://www.googleapis.com/auth/cloud-billing.readonly'
-    );
+  it('DEFAULT_GCP_SA_IMPERSONATION_SCOPES is compute', () => {
+    expect(DEFAULT_GCP_SA_IMPERSONATION_SCOPES).toBe('https://www.googleapis.com/auth/compute');
   });
 });
 
@@ -31,12 +29,9 @@ describe('GCP SA impersonation scopes parsing', () => {
     return (envValue || defaultValue).split(',').map((s) => s.trim()).filter(Boolean);
   }
 
-  it('returns the default scopes when env var is not set', () => {
+  it('returns default scope as single-element array when env var is not set', () => {
     const scopes = parseScopes(undefined, DEFAULT_GCP_SA_IMPERSONATION_SCOPES);
-    expect(scopes).toEqual([
-      'https://www.googleapis.com/auth/compute',
-      'https://www.googleapis.com/auth/cloud-billing.readonly',
-    ]);
+    expect(scopes).toEqual(['https://www.googleapis.com/auth/compute']);
   });
 
   it('supports a single custom scope', () => {
@@ -76,10 +71,7 @@ describe('GCP SA impersonation scopes parsing', () => {
 
   it('uses default when env var is empty string', () => {
     const scopes = parseScopes('', DEFAULT_GCP_SA_IMPERSONATION_SCOPES);
-    expect(scopes).toEqual([
-      'https://www.googleapis.com/auth/compute',
-      'https://www.googleapis.com/auth/cloud-billing.readonly',
-    ]);
+    expect(scopes).toEqual(['https://www.googleapis.com/auth/compute']);
   });
 });
 

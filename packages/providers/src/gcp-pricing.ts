@@ -125,6 +125,11 @@ export interface GcpPriceFetchOptions {
 /**
  * Read every Compute Engine SKU page and build the price table. Pages are parsed and dropped one
  * at a time, so memory scales with one page, not with the whole catalog.
+ *
+ * Bounds: `maxPages` × 5000 SKUs (the API maximum page size; default 20 pages = 100,000 SKUs).
+ * A catalog larger than that fails loudly rather than storing a partial table. Wall time is
+ * bounded by the caller's signal; the scheduled refresh passes `gcpCatalog.priceRefreshBudgetMs`
+ * (default 90 s) across every page and credential.
  */
 export async function fetchGcpComputePriceTable(
   accessToken: string,

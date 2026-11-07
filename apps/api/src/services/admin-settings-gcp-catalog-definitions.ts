@@ -8,7 +8,8 @@ export type GcpCatalogSettingName =
   | 'gcpCatalog.priceRetryMinutes'
   | 'gcpCatalog.priceMaxPages'
   | 'gcpCatalog.priceRequestTimeoutMs'
-  | 'gcpCatalog.priceRefreshCredentialAttempts';
+  | 'gcpCatalog.priceRefreshCredentialAttempts'
+  | 'gcpCatalog.priceRefreshBudgetMs';
 
 /**
  * General-purpose shapes SAM offers from Google Cloud by default: shared-core e2-medium, and the
@@ -84,5 +85,12 @@ export const GCP_CATALOG_SETTINGS: readonly AdminSettingDefinition[] = [
     'Operations',
     'Connected Google Cloud credentials tried per price refresh, platform credentials first, so one without the Cloud Billing API enabled does not block the rest.',
     { min: 1, max: 20 }
+  ),
+  integerDefinition(
+    'gcpCatalog.priceRefreshBudgetMs',
+    90_000,
+    'Operations',
+    'Maximum milliseconds one Google Cloud price refresh may take across all credentials it tries. It runs inside the 5-minute scheduled job, so it must stay well below that.',
+    { min: 10_000, max: 240_000 }
   ),
 ];

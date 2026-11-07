@@ -1,5 +1,6 @@
 import {
   createProvider,
+  type GcpPriceTable,
   GcpProvider,
   getProviderCatalogOfferings,
   type Provider as CloudProvider,
@@ -117,6 +118,8 @@ export function getStaticProviderCatalogOfferings(
 export async function buildProviderCatalogForCredential(input: {
   env: Env;
   seed: ProviderCatalogCredentialSeed;
+  /** Shared GCP price-table read for a multi-credential build; read on demand when absent. */
+  gcpPriceTable?: () => Promise<GcpPriceTable | null>;
 }): Promise<ProviderCatalog> {
   const providerName = input.seed.provider;
   const decryptedToken = await decrypt(
@@ -127,11 +130,16 @@ export async function buildProviderCatalogForCredential(input: {
   const providerToken = extractCloudProviderToken(providerName, decryptedToken);
   const provider =
     providerName === 'gcp'
-      ? await createGcpCatalogProvider(providerToken, input.env, {
-          credentialSource: input.seed.credentialSource,
-          userId: input.seed.createdBy ?? 'installation',
-          projectId: input.seed.ownerProjectId,
-        })
+      ? await createGcpCatalogProvider(
+          providerToken,
+          input.env,
+          {
+            credentialSource: input.seed.credentialSource,
+            userId: input.seed.createdBy ?? 'installation',
+            projectId: input.seed.ownerProjectId,
+          },
+          input.gcpPriceTable ?? (() => readGcpPriceTable(input.env))
+        )
       : createCatalogProvider(providerName, providerToken, input.env);
   const timeoutMs = Number(
     await resolveAdminSetting(input.env, 'performance.providerCatalogTimeoutMs')
@@ -196,7 +204,8 @@ export async function listInstallationProviderCatalogs(
 async function createGcpCatalogProvider(
   decryptedToken: string,
   env: Env,
-  owner: GcpTokenOwner
+  owner: GcpTokenOwner,
+  priceTable: () => Promise<GcpPriceTable | null>
 ): Promise<CloudProvider> {
   const gcpCred = parseGcpCredential(decryptedToken);
   const machineTypes = await resolveAdminSetting(env, 'gcpCatalog.machineTypes');
@@ -215,7 +224,7 @@ async function createGcpCatalogProvider(
     undefined,
     {
       machineTypes: Array.isArray(machineTypes) ? machineTypes : [],
-      priceTable: () => readGcpPriceTable(env),
+      priceTable,
     }
   );
 }
@@ -312,8 +321,11 @@ export async function buildCatalogsFromCredentialRows(
   seeds: ProviderCatalogCredentialSeed[],
   env: Env
 ): Promise<ProviderCatalogListResult> {
+  // Every GCP credential prices from the same installation table: read it once per build.
+  let gcpPriceTableRead: Promise<GcpPriceTable | null> | null = null;
+  const gcpPriceTable = () => (gcpPriceTableRead ??= readGcpPriceTable(env));
   const results = await Promise.allSettled(
-    seeds.map((seed) => buildProviderCatalogForCredential({ env, seed }))
+    seeds.map((seed) => buildProviderCatalogForCredential({ env, seed, gcpPriceTable }))
   );
 
   const catalogs: ProviderCatalog[] = [];

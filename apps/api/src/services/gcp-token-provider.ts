@@ -2,6 +2,7 @@ import type { GcpTokenProvider, ProviderRequestContext } from '@simple-agent-man
 import type { CredentialSource, GcpCredential } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
+import type { GcpAccessTokenOptions } from './gcp-sts';
 
 /** Who a GCP token is minted for: the credential's owner and the SAM project it serves. */
 export interface GcpTokenOwner {
@@ -20,7 +21,8 @@ export interface GcpTokenOwner {
 export function createGcpTokenProvider(
   credential: GcpCredential,
   owner: GcpTokenOwner,
-  env: Env
+  env: Env,
+  options: GcpAccessTokenOptions = {}
 ): GcpTokenProvider {
   const cacheUserId =
     owner.credentialSource === 'platform'
@@ -31,6 +33,8 @@ export function createGcpTokenProvider(
   const cacheProjectId = owner.projectId ?? credential.gcpProjectId;
   return async (context?: ProviderRequestContext) => {
     const { getGcpAccessToken } = await import('./gcp-sts');
-    return getGcpAccessToken(cacheUserId, cacheProjectId, credential, env, context);
+    return options.scopes
+      ? getGcpAccessToken(cacheUserId, cacheProjectId, credential, env, context, options)
+      : getGcpAccessToken(cacheUserId, cacheProjectId, credential, env, context);
   };
 }
