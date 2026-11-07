@@ -63,24 +63,31 @@ func isAllDigits(s string) bool {
 	return true
 }
 
-// removeManagedCodexBlock removes every block between startMarker and endMarker. An
-// unterminated block is removed through the end of the file.
+// removeManagedCodexBlock removes every block between a startMarker line and the next
+// endMarker line. Marker text inside a multi-line string is not a marker. An
+// unterminated block is removed through the end of the file: it holds SAM's own
+// tables, and keeping them would duplicate the tables SAM writes next, which Codex
+// rejects as invalid TOML.
 func removeManagedCodexBlock(existing, startMarker, endMarker string) string {
-	for {
-		start := strings.Index(existing, startMarker)
-		if start == -1 {
-			return existing
-		}
-		endRel := strings.Index(existing[start:], endMarker)
-		if endRel == -1 {
-			return existing[:start]
-		}
-		end := start + endRel + len(endMarker)
-		if end < len(existing) && existing[end] == '\n' {
-			end++
-		}
-		existing = existing[:start] + existing[end:]
+	if !strings.Contains(existing, startMarker) {
+		return existing
 	}
+	lines := strings.Split(existing, "\n")
+	starts := codexTOMLStatementStarts(lines)
+	kept := make([]string, 0, len(lines))
+	inBlock := false
+	for i, line := range lines {
+		isMarker := func(marker string) bool { return starts[i] && strings.TrimSpace(line) == marker }
+		switch {
+		case !inBlock && isMarker(startMarker):
+			inBlock = true
+		case inBlock && isMarker(endMarker):
+			inBlock = false
+		case !inBlock:
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, "\n")
 }
 
 // mergeManagedCodexMcpConfig replaces SAM's managed blocks in an existing config.toml:
@@ -110,11 +117,14 @@ func mergeManagedCodexMcpConfig(existing, managed string) string {
 	return merged
 }
 
+// codexConfigTOMLError returns the error go-toml reports for config, or nil if it parses.
 func codexConfigTOMLError(config string) error {
 	var parsed map[string]any
 	return toml.Unmarshal([]byte(config), &parsed)
 }
 
+// assembleManagedCodexConfig lays out the user's config (with SAM's blocks already
+// removed) around SAM's managed block and the planned feature defaults.
 func assembleManagedCodexConfig(cleaned, managed string, features codexFeaturePlan) string {
 	if features.placement == codexFeaturesUserTable {
 		cleaned = insertCodexFeaturesIntoUserTable(cleaned, features)
@@ -169,11 +179,13 @@ func assembleManagedCodexConfig(cleaned, managed string, features codexFeaturePl
 	return strings.Join(sections, "\n\n") + "\n"
 }
 
+// codexTopLevelAssignmentKeys returns the keys assigned before the first table header.
 func codexTopLevelAssignmentKeys(config string) map[string]bool {
 	keys := make(map[string]bool)
 	lines := strings.Split(config, "\n")
 	starts := codexTOMLStatementStarts(lines)
-	for i := 0; i < codexTOMLFirstTableLine(lines, starts); i++ {
+	firstTable := codexTOMLFirstTableLine(lines, starts)
+	for i := 0; i < firstTable; i++ {
 		if !starts[i] {
 			continue
 		}
@@ -184,6 +196,7 @@ func codexTopLevelAssignmentKeys(config string) map[string]bool {
 	return keys
 }
 
+// codexAssignmentKey returns the root key a single key/value statement assigns.
 func codexAssignmentKey(line string) (string, bool) {
 	if line == "" || strings.HasPrefix(line, "#") {
 		return "", false

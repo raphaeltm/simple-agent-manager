@@ -10,6 +10,7 @@ import (
 	"github.com/pelletier/go-toml/v2"
 )
 
+// parseCodexConfig parses config as TOML, failing the test if it is invalid.
 func parseCodexConfig(t *testing.T, config string) map[string]any {
 	t.Helper()
 	var root map[string]any
@@ -19,12 +20,14 @@ func parseCodexConfig(t *testing.T, config string) map[string]any {
 	return root
 }
 
+// codexFeatureTable returns the parsed [features] table, or nil.
 func codexFeatureTable(t *testing.T, root map[string]any) map[string]any {
 	t.Helper()
 	table, _ := root["features"].(map[string]any)
 	return table
 }
 
+// assertCodexFeatures checks feature values in config; a nil want means "not set".
 func assertCodexFeatures(t *testing.T, config string, want map[string]any) {
 	t.Helper()
 	root := parseCodexConfig(t, config)
@@ -138,6 +141,24 @@ func TestMergeManagedCodexConfigFeatureDefaults(t *testing.T) {
 			preserved: []string{"matrix = [\n  [1, 2], # \"[profiles.decoy]\"\n  [3, 4],\n]", "[mcp_servers.decoy]\nsandbox_mode = \"read-only\"", `model = "user-model"`},
 		},
 		{
+			name:      "multi-line string closed by extra quotes inside an array",
+			existing:  "notes = [\"\"\"a\"\"\"\"]\nmodel = \"user-model\"\n\n[profiles.user]\nmodel = \"other\"\n",
+			want:      allOff,
+			preserved: []string{"notes = [\"\"\"a\"\"\"\"]", `[profiles.user]`},
+		},
+		{
+			name: "SAM marker text inside a multi-line string is user content",
+			existing: strings.Join([]string{
+				`notes = """`,
+				codexManagedFeaturesStartMarker,
+				`kept`,
+				`"""`,
+				`model = "user-model"`,
+			}, "\n"),
+			want:      allOff,
+			preserved: []string{"notes = \"\"\"\n" + codexManagedFeaturesStartMarker + "\nkept\n\"\"\""},
+		},
+		{
 			name:     "managed top-level key with a multi-line value is replaced whole",
 			existing: "approval_policy = [\n  \"on-request\",\n]\nmodel = \"user-model\"\n",
 			want:     allOff,
@@ -173,6 +194,7 @@ func TestMergeManagedCodexConfigFeatureDefaults(t *testing.T) {
 	}
 }
 
+// codexFeaturesHeaderCount counts [features] table headers outside multi-line values.
 func codexFeaturesHeaderCount(config string) int {
 	count := 0
 	lines := strings.Split(config, "\n")

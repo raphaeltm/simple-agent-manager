@@ -21,15 +21,18 @@ func codexTOMLStatementStarts(lines []string) []bool {
 	return starts
 }
 
+// codexTOMLScanState is the lexical state carried from one line to the next.
 type codexTOMLScanState struct {
 	multiLineQuote string // `"""` or `'''` while inside a multi-line string
 	depth          int    // open [ and { in a value
 }
 
+// atStatementBoundary reports whether the next line starts a new statement.
 func (s *codexTOMLScanState) atStatementBoundary() bool {
 	return s.multiLineQuote == "" && s.depth == 0
 }
 
+// scanLine updates the open-string and bracket state with one line of a value.
 func (s *codexTOMLScanState) scanLine(line string) {
 	for i := 0; i < len(line); {
 		if s.multiLineQuote != "" {
@@ -38,8 +41,13 @@ func (s *codexTOMLScanState) scanLine(line string) {
 				continue
 			}
 			if strings.HasPrefix(line[i:], s.multiLineQuote) {
+				// A closing delimiter may be preceded by up to two quotes that belong
+				// to the content ("""a""""), so the whole run closes the string.
+				quote := s.multiLineQuote[0]
 				s.multiLineQuote = ""
-				i += 3
+				for i < len(line) && line[i] == quote {
+					i++
+				}
 				continue
 			}
 			i++
