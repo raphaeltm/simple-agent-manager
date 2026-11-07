@@ -32,26 +32,26 @@ the **local** file, so a file that is too large to upload can still be identifie
 
 ## Implementation checklist
 
-- [ ] `components/project-chat/attachments/attachment-kind.ts`: classify a File (image / video / text / other), icon, badge, paste label, configurable caps
-- [ ] `useLocalFilePreview.ts`: `useObjectUrl` (revoked on change/unmount) and `useAttachmentInfo` (head sniff, line count)
-- [ ] `ComposerAttachmentList.tsx`: image tiles + file cards, separate remove button, upload ring / error wash, count + size summary when there are more than 3
-- [ ] `AttachmentPreviewDialog.tsx` (+ text body file): image fit/100%, video player, text viewer (wrap, caps, single-line fix, Edit in message for pastes), icon card for others, failed banner, prev/next + arrow keys, remove (stays open on the next file), Esc restores focus
-- [ ] Wire into `ProjectChatComposer`; add optional `id` to `ProjectChatComposerAttachment` for stable keys
-- [ ] `useAttachments`: empty / over-limit files become previewable failed attachments (not uploaded)
-- [ ] Unit tests: card rendering per kind, tap opens preview from the local object URL with no fetch, remove doesn't open preview, Edit in message, video element, oversize file previewable, single-line truncation
-- [ ] Playwright audit spec over the real composer (mobile + desktop, stress data, `assertNoOverflow`)
-- [ ] Remove prototype (`pages/attachment-preview-prototype/`, `App.tsx` route + import)
-- [ ] Docs: chat-features attach section; configuration.md VITE vars
+- [x] `components/project-chat/attachments/attachment-kind.ts`: classify a File (image / video / text / other), icon, badge, paste label, configurable caps
+- [x] `useLocalFilePreview.ts`: `useObjectUrl` (revoked on change/unmount) and `useAttachmentInfo` (head sniff, line count)
+- [x] `ComposerAttachmentList.tsx`: image tiles + file cards, separate remove button, upload ring / error wash, count + size summary when there are more than 3
+- [x] `AttachmentPreviewDialog.tsx` (+ text body file): image fit/100%, video player, text viewer (wrap, caps, single-line fix, Edit in message for pastes), icon card for others, failed banner, prev/next + arrow keys, remove (stays open on the next file), Esc restores focus
+- [x] Wire into `ProjectChatComposer`; add optional `id` to `ProjectChatComposerAttachment` for stable keys
+- [x] `useAttachments`: empty / over-limit files become previewable failed attachments (not uploaded)
+- [x] Unit tests: card rendering per kind, tap opens preview from the local object URL with no fetch, remove doesn't open preview, Edit in message, video element, oversize file previewable, single-line truncation
+- [x] Playwright audit spec over the real composer (mobile + desktop, stress data, `assertNoOverflow`)
+- [x] Remove prototype (`pages/attachment-preview-prototype/`, `App.tsx` route + import)
+- [x] Docs: chat-features attach section; configuration.md VITE vars
 
 ## Acceptance criteria
 
-- [ ] Images show a thumbnail; tapping opens a viewer of the local file (fit / 100%, dimensions)
-- [ ] Videos play locally in the viewer; undecodable media falls back to an icon card
-- [ ] Pastes show "Pasted text"-style cards with first line + line count; the viewer shows numbered lines, capped, and can move the text back into the message
-- [ ] Other files show a typed icon + extension + size
-- [ ] An over-limit or empty file appears as Failed, can be previewed, and blocks send until removed
-- [ ] Removing never opens the preview; keyboard access works and focus returns to the trigger
-- [ ] No overflow at 375px / 1280px with 20 files, long names, upload states
+- [x] Images show a thumbnail; tapping opens a viewer of the local file (fit / 100%, dimensions)
+- [x] Videos play locally in the viewer; undecodable media falls back to an icon card
+- [x] Pastes show "Pasted text"-style cards with first line + line count; the viewer shows numbered lines, capped, and can move the text back into the message
+- [x] Other files show a typed icon + extension + size
+- [x] An over-limit or empty file appears as Failed, can be previewed, and blocks send until removed
+- [x] Removing never opens the preview; keyboard access works and focus returns to the trigger
+- [x] No overflow at 375px / 1280px with 20 files, long names, upload states
 
 ## Notes
 

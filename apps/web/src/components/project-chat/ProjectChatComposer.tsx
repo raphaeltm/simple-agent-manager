@@ -318,7 +318,11 @@ export function ProjectChatComposer({
                 aria-label={attachTitle}
                 title={attachTitle}
               >
-                <Paperclip size={20} strokeWidth={1.75} className={uploading ? 'animate-pulse' : ''} />
+                <Paperclip
+                  size={20}
+                  strokeWidth={1.75}
+                  className={uploading ? 'animate-pulse' : ''}
+                />
               </button>
             )}
           </>
@@ -386,7 +390,9 @@ export function ProjectChatComposer({
           className={`flex shrink-0 items-center justify-center gap-2 whitespace-nowrap rounded-[14px] border-0 text-base font-semibold text-[var(--sam-on-accent)] transition-[filter,opacity] ${
             submitLabel === 'Fork' ? 'min-h-[56px]' : 'min-h-12'
           } ${iconOnlySend ? 'w-12' : 'px-5'} bg-[linear-gradient(180deg,var(--sam-accent-top),var(--sam-accent-bottom))] shadow-[inset_0_1px_0_rgb(255_255_255/0.32),inset_0_-1px_0_rgb(0_0_0/0.2),var(--sam-shadow-accent)] ${
-            sendDisabled ? 'cursor-default opacity-45 shadow-none' : 'cursor-pointer hover:brightness-105'
+            sendDisabled
+              ? 'cursor-default opacity-45 shadow-none'
+              : 'cursor-pointer hover:brightness-105'
           } focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring`}
         >
           {iconOnlySend ? (

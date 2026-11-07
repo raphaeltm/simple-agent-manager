@@ -29,10 +29,19 @@ describe('files that cannot upload', () => {
     );
     const [first, second] = result.current.chatAttachments;
     // The staged items keep the very File objects the user picked: that is what the preview reads.
-    expect(first).toMatchObject({ file: huge, status: 'error', error: 'Larger than the 50 MB limit' });
+    expect(first).toMatchObject({
+      file: huge,
+      status: 'error',
+      error: 'Larger than the 50 MB limit',
+    });
     expect(second).toMatchObject({ file: empty, status: 'error', error: 'This file is empty' });
     expect(mocks.request).toHaveBeenCalledTimes(1);
-    expect(mocks.request).toHaveBeenCalledWith('project', 'fine.txt', 2, 'application/octet-stream');
+    expect(mocks.request).toHaveBeenCalledWith(
+      'project',
+      'fine.txt',
+      2,
+      'application/octet-stream'
+    );
     expect(setError).not.toHaveBeenCalledWith(expect.stringMatching(/limit|empty/));
   });
 });

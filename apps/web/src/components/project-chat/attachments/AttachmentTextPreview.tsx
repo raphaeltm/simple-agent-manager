@@ -109,7 +109,11 @@ export function AttachmentTextPreview({
   }
   if (file.size === 0) {
     return (
-      <AttachmentPreviewFallback info={info} title="This file is empty" body="It has no content to send." />
+      <AttachmentPreviewFallback
+        info={info}
+        title="This file is empty"
+        body="It has no content to send."
+      />
     );
   }
 
@@ -149,10 +153,10 @@ export function AttachmentTextPreview({
           </button>
         )}
       </div>
-      {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrollable region must be keyboard-scrollable */}
       <div
         className="relative min-h-0 flex-1 overflow-auto"
         role="region"
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- a scrollable region must be keyboard-scrollable
         tabIndex={0}
         aria-label="File contents"
         data-testid="attachment-text-preview"

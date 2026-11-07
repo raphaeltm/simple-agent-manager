@@ -43,8 +43,10 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-const png = () => new File([new Uint8Array([137, 80, 78, 71])], 'CleanShot.png', { type: 'image/png' });
-const paste = (text: string) => new File([text], 'pasted-1794057131479.txt', { type: 'text/plain' });
+const png = () =>
+  new File([new Uint8Array([137, 80, 78, 71])], 'CleanShot.png', { type: 'image/png' });
+const paste = (text: string) =>
+  new File([text], 'pasted-1794057131479.txt', { type: 'text/plain' });
 
 function complete(file: File, id: string): ProjectChatComposerAttachment {
   return { id, file, progress: 100, status: 'complete' };
@@ -98,7 +100,9 @@ describe('composer attachment cards', () => {
 
   it('labels a long paste by its first line and line count', async () => {
     render(<Harness initial={[complete(paste('\n  first real line\nsecond\nthird\n'), 'p')]} />);
-    const card = await screen.findByRole('button', { name: /^Preview Pasted text, Pasted text, 4 lines/ });
+    const card = await screen.findByRole('button', {
+      name: /^Preview Pasted text, Pasted text, 4 lines/,
+    });
     expect(within(card).getByText('first real line')).toBeInTheDocument();
     expect(within(card).getByText(/Pasted · 4 lines/)).toBeInTheDocument();
   });
@@ -179,7 +183,9 @@ describe('attachment preview dialog', () => {
     expect(screen.getByText('1 of 3')).toBeInTheDocument();
     fireEvent.keyDown(document, { key: 'ArrowRight' });
     expect(screen.getByRole('dialog', { name: 'notes.md' })).toBeInTheDocument();
-    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove notes.md' }));
+    fireEvent.click(
+      within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove notes.md' })
+    );
     expect(screen.getByRole('dialog', { name: 'data.zip' })).toBeInTheDocument();
     expect(screen.getByText('2 of 2')).toBeInTheDocument();
     // The row behind the modal is aria-hidden, so count its items directly.
@@ -190,7 +196,15 @@ describe('attachment preview dialog', () => {
     const big = png();
     render(
       <Harness
-        initial={[{ id: 'x', file: big, progress: 0, status: 'error', error: 'Larger than the 50 MB limit' }]}
+        initial={[
+          {
+            id: 'x',
+            file: big,
+            progress: 0,
+            status: 'error',
+            error: 'Larger than the 50 MB limit',
+          },
+        ]}
       />
     );
     fireEvent.click(screen.getByRole('button', { name: /failed: Larger than the 50 MB limit/ }));
@@ -259,8 +273,12 @@ describe('describeAttachment', () => {
   });
 
   it('sniffs an extensionless text file into a text card', async () => {
-    render(<Harness initial={[complete(new File(['FROM node:22\nRUN x\n'], 'Dockerfile'), 'd')]} />);
+    render(
+      <Harness initial={[complete(new File(['FROM node:22\nRUN x\n'], 'Dockerfile'), 'd')]} />
+    );
     await act(async () => {});
-    expect(await screen.findByRole('button', { name: /^Preview Dockerfile, Text, 2 lines/ })).toBeInTheDocument();
+    expect(
+      await screen.findByRole('button', { name: /^Preview Dockerfile, Text, 2 lines/ })
+    ).toBeInTheDocument();
   });
 });

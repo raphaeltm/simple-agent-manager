@@ -15,9 +15,21 @@ Use the paperclip, paste an image or file, or drag files onto the message input.
 characters of text or more turns it into a text-file attachment (`pasted-….txt`); shorter text stays
 in the input.
 
-Files upload while you compose, each as a chip showing its size or upload progress. Select **✕** on
-a chip to remove a file you don't want to send. A chip that says **Failed** blocks sending: remove
-it, then attach the file again. You can send files with no text; the agent is asked to read them.
+Files upload while you compose. Each one appears above the message input: an image as a thumbnail,
+anything else as a card with a file-type icon, its name and its size. A paste shows its first line and
+how many lines it has, so two pastes are easy to tell apart. A ring or bar shows upload progress.
+
+Tap an attachment to check it before you send. Images open full size (switch between **Fit** and
+**100%**), videos play, and text files show numbered lines with a wrap toggle. Very large text shows its
+first 2,000 lines or 256 KB, and the agent still gets the whole file. For a paste, **Edit in message**
+moves the text back into the input. Other file types show their type and size. Use the arrows to step
+through attachments, and **Remove** to drop one.
+
+Previews read the copy on your device, not the upload, so they work while a file is uploading and after
+an upload fails. A file that is empty or larger than the per-file limit is not uploaded. It still
+appears, marked **Failed** with the reason, so you can see which file it was. Select **✕** to remove an
+attachment. A failed attachment blocks sending until you remove it. You can send files with no text;
+the agent is asked to read them.
 
 The agent receives the files only when you send the message, together with each file's exact path in
 its workspace. You can attach files to a sleeping chat without waking it; sending the message wakes

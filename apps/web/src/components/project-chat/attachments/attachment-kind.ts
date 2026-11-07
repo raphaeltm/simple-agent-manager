@@ -58,33 +58,75 @@ export const ATTACHMENT_LINE_COUNT_MAX_BYTES = positiveIntEnv(
 export type AttachmentKind = 'image' | 'video' | 'text' | 'other';
 
 type Category =
-  | 'image'
-  | 'video'
-  | 'audio'
-  | 'text'
-  | 'code'
-  | 'data'
-  | 'sheet'
-  | 'pdf'
-  | 'archive'
-  | 'binary';
+  'image' | 'video' | 'audio' | 'text' | 'code' | 'data' | 'sheet' | 'pdf' | 'archive' | 'binary';
 
 /** Name the composer gives a long paste (`ProjectChatComposer` onPaste). */
 const PASTED_NAME = /^pasted-\d+\.txt$/;
 
 /** Extensions the shared MIME table doesn't cover, used only to pick an icon. */
 const EXTENSION_CATEGORY: Readonly<Record<string, Category>> = {
-  txt: 'text', md: 'text', markdown: 'text', log: 'text', rst: 'text',
-  ts: 'code', tsx: 'code', js: 'code', jsx: 'code', mjs: 'code', go: 'code', py: 'code',
-  rs: 'code', rb: 'code', java: 'code', kt: 'code', swift: 'code', c: 'code', h: 'code',
-  cpp: 'code', cs: 'code', php: 'code', sh: 'code', css: 'code', scss: 'code', html: 'code',
-  sql: 'code', toml: 'code', yaml: 'code', yml: 'code', ini: 'code', env: 'code',
-  json: 'data', xml: 'data', csv: 'sheet', tsv: 'sheet', xlsx: 'sheet', xls: 'sheet', ods: 'sheet',
-  pdf: 'pdf', zip: 'archive', gz: 'archive', tgz: 'archive', tar: 'archive', '7z': 'archive',
-  rar: 'archive', bz2: 'archive', xz: 'archive',
-  mp3: 'audio', m4a: 'audio', wav: 'audio', ogg: 'audio', flac: 'audio', aac: 'audio',
-  heic: 'image', heif: 'image', tif: 'image', tiff: 'image', bmp: 'image', ico: 'image',
-  mkv: 'video', avi: 'video',
+  txt: 'text',
+  md: 'text',
+  markdown: 'text',
+  log: 'text',
+  rst: 'text',
+  ts: 'code',
+  tsx: 'code',
+  js: 'code',
+  jsx: 'code',
+  mjs: 'code',
+  go: 'code',
+  py: 'code',
+  rs: 'code',
+  rb: 'code',
+  java: 'code',
+  kt: 'code',
+  swift: 'code',
+  c: 'code',
+  h: 'code',
+  cpp: 'code',
+  cs: 'code',
+  php: 'code',
+  sh: 'code',
+  css: 'code',
+  scss: 'code',
+  html: 'code',
+  sql: 'code',
+  toml: 'code',
+  yaml: 'code',
+  yml: 'code',
+  ini: 'code',
+  env: 'code',
+  json: 'data',
+  xml: 'data',
+  csv: 'sheet',
+  tsv: 'sheet',
+  xlsx: 'sheet',
+  xls: 'sheet',
+  ods: 'sheet',
+  pdf: 'pdf',
+  zip: 'archive',
+  gz: 'archive',
+  tgz: 'archive',
+  tar: 'archive',
+  '7z': 'archive',
+  rar: 'archive',
+  bz2: 'archive',
+  xz: 'archive',
+  mp3: 'audio',
+  m4a: 'audio',
+  wav: 'audio',
+  ogg: 'audio',
+  flac: 'audio',
+  aac: 'audio',
+  heic: 'image',
+  heif: 'image',
+  tif: 'image',
+  tiff: 'image',
+  bmp: 'image',
+  ico: 'image',
+  mkv: 'video',
+  avi: 'video',
 };
 
 /** Categories whose content the viewer shows as text. */
@@ -191,7 +233,8 @@ export function describeAttachment(file: File, sniffedText = false): AttachmentI
       ? 'image'
       : category === 'video' && isVideoMime(file.type, file.name)
         ? 'video'
-        : TEXT_CATEGORIES.has(category) || (category === 'sheet' && !BINARY_SHEET_EXTENSIONS.has(ext))
+        : TEXT_CATEGORIES.has(category) ||
+            (category === 'sheet' && !BINARY_SHEET_EXTENSIONS.has(ext))
           ? 'text'
           : 'other';
   const label = CATEGORY_LABEL[category];
