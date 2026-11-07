@@ -24,7 +24,8 @@ function isCollapsible(section: SessionSection): section is CollapsibleSessionSe
 /**
  * The project chat list, in sections: Needs attention, Awake, Sleeping, History. Shared by
  * the desktop sidebar (and Zen peek) and the mobile drawer. Empty sections are omitted.
- * Searching opens every section so a match is never hidden behind a folded one.
+ * Searching opens every section so a match is never hidden behind a folded one, and a
+ * folded section keeps showing the open chat.
  */
 export function SessionSectionList({
   sections,
@@ -82,6 +83,10 @@ export function SessionSectionList({
         );
         const collapsible = isCollapsible(section);
         const open = !collapsible || isSearching || openSections[section];
+        // A folded section still shows the chat that is open, so a chat that just stopped
+        // (or a deep link to a finished one) never vanishes from the list.
+        const selectedRow = open ? undefined : list.find((s) => s.id === selectedSessionId);
+        const rows = open ? list : selectedRow ? [selectedRow] : [];
 
         return (
           <section key={section} aria-labelledby={headingId}>
@@ -108,9 +113,9 @@ export function SessionSectionList({
                 {count}
               </h3>
             )}
-            {open && (
+            {rows.length > 0 && (
               <SessionList
-                sessions={list}
+                sessions={rows}
                 selectedSessionId={selectedSessionId}
                 onSelect={onSelect}
                 taskInfoMap={taskInfoMap}

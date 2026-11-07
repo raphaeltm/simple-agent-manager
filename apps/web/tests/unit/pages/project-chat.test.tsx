@@ -933,6 +933,21 @@ describe('ProjectChat new chat button', () => {
     expect(within(list).getByText('Finished chat')).toBeInTheDocument();
   });
 
+  it('keeps the open chat visible when its section is folded', async () => {
+    mocks.listChatSessions.mockResolvedValue({ sessions: [SESSION_1, SESSION_2], total: 2 });
+
+    // A deep link to a stopped chat: History is folded, but this row stays in view.
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${SESSION_2.id}`);
+
+    const list = await screen.findByRole('navigation', { name: 'Chat sessions' });
+    const history = await within(list).findByRole('button', { name: /^History/ });
+    expect(history).toHaveAttribute('aria-expanded', 'false');
+    const historySection = history.closest('section') as HTMLElement;
+    expect(within(historySection).getByText('Second chat')).toBeInTheDocument();
+    // Liveness: the awake chat renders in its own section.
+    expect(within(list).getByText('First chat')).toBeInTheDocument();
+  });
+
   it('asks the API for live sessions outside the newest page', async () => {
     mocks.listChatSessions.mockResolvedValue({ sessions: [SESSION_1], total: 1 });
     renderProjectChat();

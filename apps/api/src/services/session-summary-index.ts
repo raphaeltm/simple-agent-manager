@@ -254,11 +254,43 @@ async function readIndex(
                 started_at, last_message_at, ended_at, created_at, updated_at, agent_completed_at, attention_json`;
   const recency = 'ORDER BY COALESCE(last_message_at, created_at, started_at) DESC, id DESC';
 
+  // Live sessions the recency page may have left out. Skipped when the project has no
+  // more sessions than fit on the page: the page already holds every one of them.
+  const readLive = shouldIncludeLive(query) && coverage.session_count > query.limit;
+  const liveStatusBinds = LIVE_SESSION_STATUSES.map(() => '?').join(', ');
+
+  async function readLiveRows(): Promise<D1Result<Record<string, unknown>> | null> {
+    try {
+      return await db
+        .prepare(
+          `SELECT ${columns} FROM (
+             SELECT ${columns}, ROW_NUMBER() OVER (
+               PARTITION BY status
+               ORDER BY COALESCE(last_message_at, created_at, started_at) DESC, id DESC
+             ) AS status_rank
+             FROM session_summaries
+             WHERE ${whereClause} AND status IN (${liveStatusBinds})
+           )
+           WHERE status_rank <= ?
+           ${recency}`
+        )
+        .bind(...params, ...LIVE_SESSION_STATUSES, query.limit)
+        .all<Record<string, unknown>>();
+    } catch (err) {
+      log.warn('session_index.live_read_failed', {
+        projectId: query.projectId,
+        error: String(err),
+      });
+      return null;
+    }
+  }
+
   // Independent once coverage has been validated, so they go out together rather
-  // than paying sequential D1 hops. Live sessions are read per status, each capped at
-  // the page limit, so a long tail of sleeping chats cannot crowd out awake ones.
-  const liveStatuses = shouldIncludeLive(query) ? LIVE_SESSION_STATUSES : [];
-  const [countRow, page, ...live] = await Promise.all([
+  // than paying sequential D1 hops. The live read ranks each status by recency and
+  // caps each at the page limit, so a long tail of sleeping chats cannot crowd out
+  // awake ones. It is an extra on top of the page: if it fails, serve the page without
+  // it rather than turning a good index read into a Durable Object fallback.
+  const [countRow, page, live] = await Promise.all([
     db
       .prepare(`SELECT COUNT(*) as cnt FROM session_summaries WHERE ${whereClause}`)
       .bind(...params)
@@ -269,23 +301,13 @@ async function readIndex(
       )
       .bind(...params, query.limit, query.offset)
       .all<Record<string, unknown>>(),
-    ...liveStatuses.map((status) =>
-      db
-        .prepare(
-          `SELECT ${columns} FROM session_summaries
-           WHERE ${whereClause} AND status = ? ${recency} LIMIT ?`
-        )
-        .bind(...params, status, query.limit)
-        .all<Record<string, unknown>>()
-    ),
+    readLive ? readLiveRows() : null,
   ]);
 
   const total = countRow?.cnt ?? 0;
   const rows = page.results ?? [];
   const sessions = mapIndexRows(env, query.projectId, rows);
-  const liveSessions = live.flatMap((read) =>
-    mapIndexRows(env, query.projectId, read.results ?? [])
-  );
+  const liveSessions = live ? mapIndexRows(env, query.projectId, live.results ?? []) : [];
 
   // Mirrors the DO: `rows.length` is the raw SQL-fetched count, so post-fetch
   // skips cannot make `hasMore` claim the window reached the end when it did not.

@@ -77,31 +77,62 @@ async function enrichTaskOutcomes(
     { id: string; status: string; terminalReason: string | null }
   >();
   const chunkSize = D1_MAX_BOUND_PARAMETERS - 1; // project scope uses one bind.
+  const chunks: string[][] = [];
   for (let offset = 0; offset < ids.length; offset += chunkSize) {
-    const rows = await db
-      .select({
-        id: schema.tasks.id,
-        chatSessionId: schema.tasks.chatSessionId,
-        status: schema.tasks.status,
-        triggeredBy: schema.tasks.triggeredBy,
-        connectorClientName: schema.tasks.connectorClientName,
-        terminalReason: schema.tasks.terminalReason,
-      })
-      .from(schema.tasks)
-      .where(
-        and(
-          eq(schema.tasks.projectId, projectId),
-          inArray(schema.tasks.chatSessionId, ids.slice(offset, offset + chunkSize))
+    chunks.push(ids.slice(offset, offset + chunkSize));
+  }
+  // Independent reads over disjoint ids, so they go out together.
+  const results = await Promise.all(
+    chunks.map((chunk) =>
+      db
+        .select({
+          id: schema.tasks.id,
+          chatSessionId: schema.tasks.chatSessionId,
+          status: schema.tasks.status,
+          triggeredBy: schema.tasks.triggeredBy,
+          connectorClientName: schema.tasks.connectorClientName,
+          terminalReason: schema.tasks.terminalReason,
+        })
+        .from(schema.tasks)
+        .where(
+          and(eq(schema.tasks.projectId, projectId), inArray(schema.tasks.chatSessionId, chunk))
         )
-      );
-    for (const { chatSessionId, ...task } of rows) {
-      if (chatSessionId) bySession.set(chatSessionId, task);
-    }
+    )
+  );
+  for (const { chatSessionId, ...task } of results.flat()) {
+    if (chatSessionId) bySession.set(chatSessionId, task);
   }
   return sessions.map((session) => {
     const task = bySession.get(String(session.id));
     return task ? { ...session, task } : session;
   });
+}
+
+/**
+ * Live sessions from the Durable Object, one read per status, each capped at `limit`.
+ * An extra on top of a page the DO already returned, so a failure degrades to that page
+ * rather than failing the list.
+ */
+async function listLiveSessionsFromDO(
+  env: Env,
+  projectId: string,
+  limit: number,
+  createdByUserId: string | null
+): Promise<Record<string, unknown>[]> {
+  try {
+    const reads = await Promise.all(
+      LIVE_SESSION_STATUSES.map((status) =>
+        projectDataService.listSessions(env, projectId, status, limit, 0, null, createdByUserId)
+      )
+    );
+    return reads.flatMap((read) => read.sessions);
+  } catch (err) {
+    log.warn('session_list.live_read_failed', {
+      projectId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return [];
+  }
 }
 
 /** Register `GET /` (the session list) on the chat router. */
@@ -154,24 +185,11 @@ export function registerChatSessionListRoute(chatRoutes: Hono<{ Bindings: Env }>
         createdByUserId
       );
       if (result.hasMore && shouldIncludeLive({ includeLive, status, offset })) {
-        const live = await Promise.all(
-          LIVE_SESSION_STATUSES.map((liveStatus) =>
-            projectDataService.listSessions(
-              c.env,
-              projectId,
-              liveStatus,
-              limit,
-              0,
-              null,
-              createdByUserId
-            )
-          )
-        );
         result = {
           ...result,
           sessions: appendMissingSessions(
             result.sessions,
-            live.flatMap((read) => read.sessions)
+            await listLiveSessionsFromDO(c.env, projectId, limit, createdByUserId)
           ),
         };
       }

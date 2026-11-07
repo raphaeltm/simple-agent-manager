@@ -590,12 +590,13 @@ describe('listSessionsFromIndex', () => {
       // Page of three: new-stopped, new-active, old-awake.
       const result = await read({ limit: 3 });
 
+      // The page, then the live rows it left out, newest message first.
       expect(result.sessions.map((s) => s.id)).toEqual([
         'new-stopped',
         'new-active',
         'old-awake',
-        'member-awake',
         'old-wake-failed',
+        'member-awake',
       ]);
       // The attention marker comes through, so the client can promote the row.
       expect(result.sessions.find((s) => s.id === 'old-wake-failed')?.attention).toMatchObject({
@@ -636,7 +637,51 @@ describe('listSessionsFromIndex', () => {
 
       const result = await read({ limit: 1 });
 
-      expect(result.sessions.map((s) => s.id)).toEqual(['page-1', 'awake-oldest', 'sleep-0']);
+      expect(result.sessions.map((s) => s.id)).toEqual(['page-1', 'sleep-0', 'awake-oldest']);
+    });
+
+    it('skips the live read when the whole project fits on the page', async () => {
+      seedBeyondPage();
+      const prepare = vi.spyOn(env.DATABASE, 'prepare');
+
+      const result = await read({ limit: 6 });
+
+      expect(result.sessions.map((s) => s.id)).toEqual([
+        'new-stopped',
+        'new-active',
+        'old-awake',
+        'old-wake-failed',
+        'old-stopped',
+        'member-awake',
+      ]);
+      // Coverage, count and page only.
+      expect(prepare).toHaveBeenCalledTimes(3);
+    });
+
+    it('serves the page without live rows when the live read fails', async () => {
+      seedBeyondPage();
+      const realPrepare = env.DATABASE.prepare.bind(env.DATABASE);
+      vi.spyOn(env.DATABASE, 'prepare').mockImplementation((sql: string) => {
+        if (sql.includes('status_rank')) throw new Error('D1_ERROR: live read unavailable');
+        return realPrepare(sql);
+      });
+
+      const out = await listSessionsFromIndex(env, {
+        projectId: PROJECT,
+        status: null,
+        limit: 2,
+        offset: 0,
+        createdByUserId: null,
+        includeLive: true,
+      });
+
+      // Still answered from the index (not a miss that would fall back to the DO).
+      if (!('result' in out)) throw new Error(`expected a result, got ${out.missReason}`);
+      expect(out.result.sessions.map((s) => s.id)).toEqual(['new-stopped', 'new-active']);
+      expect(mocks.log.warn).toHaveBeenCalledWith(
+        'session_index.live_read_failed',
+        expect.objectContaining({ projectId: PROJECT })
+      );
     });
   });
 });

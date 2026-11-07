@@ -300,6 +300,26 @@ describe('GET /api/projects/:projectId/sessions — D1 fast path', () => {
       expect(mocks.listSessions).toHaveBeenCalledWith(env, PROJECT, 'sleeping', 2, 0, null, OWNER);
     });
 
+    it('serves the page when the live DO reads fail', async () => {
+      mocks.listSessions.mockImplementation(async (_env, _projectId, status: string | null) => {
+        if (status === null) {
+          return { sessions: [{ id: 'page-stopped' }], total: 3, hasMore: true };
+        }
+        throw new Error('ProjectData DO unavailable');
+      });
+
+      const { status, body } = await listSessions('?limit=1&include=live');
+
+      expect(status).toBe(200);
+      expect((body as { sessions: { id: string }[] }).sessions.map((s) => s.id)).toEqual([
+        'page-stopped',
+      ]);
+      expect(mocks.log.warn).toHaveBeenCalledWith(
+        'session_list.live_read_failed',
+        expect.objectContaining({ projectId: PROJECT })
+      );
+    });
+
     it('skips the live DO reads when the page already holds every session', async () => {
       const { body } = await listSessions('?include=live');
 
@@ -326,7 +346,11 @@ describe('GET /api/projects/:projectId/sessions — D1 fast path', () => {
            VALUES (?, ?, ?, ?, 'x', 1, 100, 5000, ?, ?, 90, ?)`
         )
         .run('old-awake', PROJECT, OWNER, 'active', 1000, OWNER, now);
-      setCoverage();
+      sqlite
+        .prepare(
+          'INSERT INTO session_index_coverage (project_id, synced_at, session_count, complete) VALUES (?, ?, 2, 1)'
+        )
+        .run(PROJECT, now);
 
       const { body } = await listSessions('?limit=1&include=live');
 
