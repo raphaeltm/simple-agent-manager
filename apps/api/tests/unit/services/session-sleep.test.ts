@@ -561,7 +561,7 @@ describe('sleepWorkspaceSession', () => {
   });
 
   // The ceiling must never EXTEND the sliding lease — it can only shorten it.
-  it('never extends the sliding lease past its own expiry', async () => {
+  it('expires the sliding lease but still waits out the interval after recent real progress', async () => {
     const now = new Date('2026-08-14T05:00:00.000Z');
     mocks.getSessionState.mockResolvedValue({
       activity: 'idle',
@@ -585,7 +585,11 @@ describe('sleepWorkspaceSession', () => {
         { workspaceId: 'workspace-1', userId: 'user-1' },
         now
       )
-    ).resolves.toEqual({ eligible: true });
+    ).resolves.toEqual({
+      eligible: false,
+      reason: 'Workspace idle interval has not elapsed',
+      retryAt: '2026-08-14T05:14:59.000Z',
+    });
   });
 
   it('allows sleep after a stale harness-work lease expires', async () => {
@@ -604,7 +608,7 @@ describe('sleepWorkspaceSession', () => {
 
     await expect(
       checkAutomaticSessionSleepEligibility(
-        buildEnv({ HARNESS_BACKGROUND_WORK_LEASE_MS: '120000' }),
+        buildEnv({ HARNESS_BACKGROUND_WORK_LEASE_MS: '120000', SESSION_SLEEP_AFTER_MS: '60000' }),
         { workspaceId: 'workspace-1', userId: 'user-1' },
         now
       )

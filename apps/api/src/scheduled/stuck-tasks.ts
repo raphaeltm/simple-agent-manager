@@ -1347,6 +1347,8 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
                 workspace_id: task.workspace_id,
                 chat_session_id: task.chat_session_id,
                 startedAtMs: startedAt,
+                taskMode: task.task_mode,
+                userId: task.user_id,
               },
               {
                 nowMs: now.getTime(),
@@ -1360,7 +1362,12 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
                 },
               }
             );
-            if (ceiling.kind === 'preserve') break;
+            if (ceiling.kind === 'preserve') {
+              // The sleep queue owns this generation now; do not run another
+              // stall/liveness verdict after handing it off.
+              if (ceiling.reason === 'session_sleep_requested') continue;
+              break;
+            }
             if (ceiling.kind === 'terminalize') {
               isStuck = true;
               if (ceiling.superseded) {
