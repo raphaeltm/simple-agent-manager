@@ -249,10 +249,10 @@ carried `knowledgeContext` and `policyContext` arrays holding byte-identical obs
 policy bodies. Nothing consumed them, and on a mature project they accounted for roughly half
 the payload (~166K → ~81K characters, about 21k tokens per session bootstrap), so they were
 removed. Callers that need machine-readable records should use the dedicated tools —
-`list_policies` / `get_policy`, and `search_knowledge` / `get_project_knowledge` — rather than
+`policies_read` method `list` / `policies_read` method `get`, and `knowledge_read` method `search` / `knowledge_read` method `list` — rather than
 parsing the bootstrap payload.
 
-Because `update_policy` and `remove_policy` resolve rows by exact id (`updatePolicy()` and
+Because `policies_write` method `update` and `policies_write` method `remove` resolve rows by exact id (`updatePolicy()` and
 `removePolicy()` in `apps/api/src/durable-objects/project-data/policies.ts` use `WHERE id = ?`),
 each rendered policy line carries its **full, untruncated** id:
 
@@ -261,7 +261,7 @@ each rendered policy line carries its **full, untruncated** id:
 - **Call get_instructions first** (id: 7d24e435-0153-44a6-a532-1244510d9e25): Agents must load SAM context before starting work.
 ```
 
-A policy may also carry a **shelf life**. `add_policy` and `update_policy` accept an optional
+A policy may also carry a **shelf life**. `policies_write` method `add` and `policies_write` method `update` accept an optional
 `expiresAt` (epoch milliseconds) and a `scope` of either `always` (a standing project policy,
 the default) or `task` (a one-shot policy captured for a specific piece of work). A
 `task`-scoped policy must set `expiresAt`, enforced at every write boundary by
@@ -277,14 +277,14 @@ expiry, `formatPolicyLifecycle()` renders it inline between the title and the id
 Expiry is evaluated at **read time** in `getActivePolicies()`
 (`apps/api/src/durable-objects/project-data/policies.ts`) — `active = 1 AND (expires_at IS NULL
 OR expires_at > ?)`. There is no sweep or cron: a lapsed policy simply stops being selected. The
-row is deliberately retained and stays `active`, so `get_policy`, `list_policies`, and the
+row is deliberately retained and stays `active`, so `policies_read` method `get`, `policies_read` method `list`, and the
 Policies tab can still show a human that the policy existed and when it stopped applying. A
 policy with no `expiresAt` never expires, which is the behaviour of every policy created before
 lifecycle controls existed.
 
 Knowledge observations do **not** currently carry their `observationId` in this payload, so
-`update_knowledge`, `remove_knowledge`, and `confirm_knowledge` need an id obtained from
-`search_knowledge` or `get_project_knowledge` first.
+`knowledge_write` method `update`, `knowledge_write` method `remove`, and `knowledge_write` method `confirm` need an id obtained from
+`knowledge_read` method `search` or `knowledge_read` method `list` first.
 
 ## Durable Objects Deep Dive
 
@@ -381,7 +381,7 @@ or time range without receiving raw R2 keys.
 
 This is the detail behind the user-facing guidance in
 [Finding Past Conversations](/docs/guides/chat-features/#finding-past-conversations): what an agent
-calling `search_messages` gets back, and what a self-hoster can tune.
+calling `sessions_read` method `search` gets back, and what a self-hoster can tune.
 
 Each `chat_messages` row is a single streaming token, so no row holds a whole word. SAM therefore
 concatenates consecutive same-role tokens into logical messages and indexes those with SQLite FTS5
@@ -423,7 +423,7 @@ and 40 terms); `SEARCH_QUERY_MAX_TERM_LENGTH` keeps each LIKE term inside SQLite
 `queryTruncated` flag, and `queryLimits`, so a caller can tell an exact search from one a guardrail
 trimmed (`apps/api/src/lib/search-query-limits.ts`).
 
-Project-wide `search_messages` also traverses the project's archived history. A call can return
+Project-wide `sessions_read` method `search` also traverses the project's archived history. A call can return
 provisional results plus `archiveSearch.continuation`; pass that continuation back with the same
 query, roles, and limit until `archiveSearch.complete` is true. `ownerCoverage`, `indexCoverage`,
 `rootError`, and `executionErrors` distinguish pending traversal, one-time index repair, and

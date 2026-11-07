@@ -36,7 +36,7 @@ export const SKILL_TOOLS = [
     description:
       'List all skills available in your project. ' +
       'Returns a concise summary of each skill (id, name, description, agentType, model, isBuiltin). ' +
-      'Use get_skill to get full details of a specific skill.',
+      'Use skills_read method get to get full details of a specific skill.',
     inputSchema: {
       type: 'object' as const,
       properties: {},

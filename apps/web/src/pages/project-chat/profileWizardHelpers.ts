@@ -32,8 +32,8 @@ export function resolveInitialVmSize(defaultVmSize: unknown): VMSize {
   return (defaultVmSize as VMSize | null) ?? DEFAULT_VM_SIZE;
 }
 
-const FORK_MESSAGE_TEMPLATE = `Use the SAM MCP tools (get_session_messages, search_messages) to review the previous session for full context about what was done and what needs to happen next.
-Use get_session_messages with the parent project ID and parent session ID below before relying on title or phrase search.
+const FORK_MESSAGE_TEMPLATE = `Use the SAM MCP tool sessions_read (methods messages and search) to review the previous session for full context about what was done and what needs to happen next.
+Use sessions_read method messages with the parent session ID below before relying on title or phrase search.
 
 `;
 

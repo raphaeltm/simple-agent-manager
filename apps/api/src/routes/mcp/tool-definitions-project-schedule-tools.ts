@@ -72,7 +72,7 @@ export const PROJECT_SCHEDULE_TOOLS = [
   {
     name: 'reschedule_project_schedule',
     description:
-      'Reschedule a pending action using the version returned by get_project_schedule. Concurrent changes conflict; already admitted actions cannot be moved.',
+      'Reschedule a pending action using the version returned by schedules_read method get. Concurrent changes conflict; already admitted actions cannot be moved.',
     inputSchema: {
       type: 'object',
       properties: {

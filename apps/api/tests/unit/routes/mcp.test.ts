@@ -1359,21 +1359,21 @@ describe('MCP Routes', () => {
       );
       expect(text).toContain('SAM App Deployment Guide');
       expect(text).toContain('Agent-First Deployment Model');
-      expect(text).toContain('build_and_publish');
-      expect(text).toContain('create_deployment_environment');
-      expect(text).toContain('list_deployment_environments');
-      expect(text).toContain('preview_deployment_routes');
-      expect(text).toContain('list_deployment_routes');
+      expect(text).toContain("deployments_write { method: 'publish'");
+      expect(text).toContain("deployments_write { method: 'create_environment'");
+      expect(text).toContain("deployments_read { method: 'environments'");
+      expect(text).toContain("deployments_read { method: 'preview_routes'");
+      expect(text).toContain("deployments_read { method: 'routes'");
       expect(text).toContain('mode: host');
       expect(text).toContain('ALLOWED_HOSTS');
       expect(text).toContain('custom domains');
       expect(text).toContain('Variables');
       expect(text).toContain('Secrets');
-      expect(text).toContain('read_deployment_logs');
-      expect(text).toContain('check_dns_status');
+      expect(text).toContain("deployments_read { method: 'logs'");
+      expect(text).toContain("workspace_read { method: 'dns' }");
       const quickReference = text.slice(text.indexOf('## Quick Reference'));
-      expect(quickReference.indexOf('preview_deployment_routes')).toBeLessThan(
-        quickReference.indexOf('build_and_publish')
+      expect(quickReference.indexOf("method: 'preview_routes'")).toBeLessThan(
+        quickReference.indexOf("method: 'publish'")
       );
     });
 
@@ -2716,7 +2716,7 @@ describe('MCP Routes', () => {
       // The session id is reserved in the task INSERT, so it is known before the
       // background launch creates the session.
       expect(data.sessionId).toEqual(expect.any(String));
-      expect(data.message).toContain('get_task_details');
+      expect(data.message).toContain('tasks_read method get');
       expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
       expect(mockDoStub.createSession).not.toHaveBeenCalled();
       expect(mockDoStub.persistMessage).not.toHaveBeenCalled();
@@ -3568,7 +3568,7 @@ describe('MCP Routes', () => {
       expect(data.taskMode).toBe('conversation');
       expect(data.warning).toContain('will not auto-complete');
       expect(data.warning).toContain('send_message_to_subtask');
-      expect(data.warning).toContain('get_session_messages');
+      expect(data.warning).toContain('sessions_read method messages');
       expect(data.warning).toContain('taskMode: "task"');
       const startInput = mockTaskRunnerStub.start.mock.calls[0][0];
       expect(startInput.config.taskMode).toBe('conversation');
@@ -3610,7 +3610,7 @@ describe('MCP Routes', () => {
       expect(data.taskMode).toBe('conversation');
       expect(data.warning).toContain('will not auto-complete');
       expect(data.warning).toContain('send_message_to_subtask');
-      expect(data.warning).toContain('get_session_messages');
+      expect(data.warning).toContain('sessions_read method messages');
       expect(data.warning).toContain('taskMode: "task"');
     });
 

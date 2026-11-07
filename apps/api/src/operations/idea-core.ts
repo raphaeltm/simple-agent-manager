@@ -243,11 +243,11 @@ export async function getIdea(
           kind: 'idea',
           text: page,
           maxLength: contentPageLength,
-          moreWith: 'get_idea',
+          moreWith: 'ideas_read method get',
         });
   let content = contentBlock?.text ?? null;
   if (content !== null && nextContentOffset !== null)
-    content += `\n[continued by SAM: call get_idea with contentOffset=${nextContentOffset} for the rest]`;
+    content += `\n[continued by SAM: call ideas_read method get with contentOffset=${nextContentOffset} for the rest]`;
   return {
     ideaId: idea.id,
     ...(ctx.actor.via !== 'workspace-agent'

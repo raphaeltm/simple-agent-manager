@@ -211,7 +211,7 @@ SELECT 'project: ' || pr.name, pr.id, u.email, pr.agent_defaults
 project. A project row lists every agent the project sets a mode for; read its JSON to see which.
 Set those modes to **Bypass Permissions**, or clear them: a user changes their own **Settings →
 Agents**, and any admin of a project can change its profiles and **Agent Overrides**. A skill's mode
-has no field in the app; change it with SAM's `update_skill` tool (ask an agent in the project) or
+has no field in the app; change it with SAM's `skills_write` method `update` tool (ask an agent in the project) or
 the API.
 
 ## GCP provisioning credentials

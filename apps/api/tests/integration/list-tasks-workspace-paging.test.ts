@@ -115,12 +115,11 @@ describe('list_tasks and search_tasks for workspace agents', () => {
       }
     ).tools;
 
-    for (const name of ['list_tasks', 'search_tasks']) {
-      const properties = tools.find((tool) => tool.name === name)?.inputSchema.properties;
-      expect(properties?.status?.enum).toEqual([...TASK_STATUSES]);
-      expect(properties?.status?.enum).toContain('sleeping');
-      expect(properties?.cursor).toBeDefined();
-    }
+    // list_tasks and search_tasks are listed as tasks_read methods list and search.
+    const properties = tools.find((tool) => tool.name === 'tasks_read')?.inputSchema.properties;
+    expect(properties?.status?.enum).toEqual([...TASK_STATUSES]);
+    expect(properties?.status?.enum).toContain('sleeping');
+    expect(properties?.cursor).toBeDefined()
   });
 
   it('returns sleeping tasks when asked for them', async () => {

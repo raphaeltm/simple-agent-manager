@@ -213,7 +213,7 @@ an agent's credentials.
 
 - **Channels** keep a limited history of recent posts. An agent can read what it missed and then
   follow new posts without missing any in between.
-- **Checking a one-time run from an agent:** `reconcile_project_schedule` with `expectedVersion`
+- **Checking a one-time run from an agent:** `schedules_write` method `reconcile` with `expectedVersion`
   checks the result again, and `retrySubmission: true` tries submitting again, with the same rules
   as the buttons.
 - **How much history a project keeps.** SAM keeps the history of one-time runs and watches. By

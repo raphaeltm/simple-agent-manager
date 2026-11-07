@@ -219,8 +219,8 @@ describe('MCP instruction context handlers', () => {
     expect(directives).toContain('BusinessStrategy (context, 2)');
     expect(directives).toContain('Architecture (context, 4)');
     // The agent must be told the block is partial and how to reach the rest.
-    expect(directives).toContain('search_knowledge');
-    expect(directives).toContain('get_relevant_knowledge');
+    expect(directives).toContain('`knowledge_read` method `search`');
+    expect(directives).toContain('`knowledge_read` method `relevant`');
     expect(directives).toContain('2 of the entities listed here have no observations shown above');
   });
 

@@ -168,7 +168,7 @@ export const OPS_READ_TOOLS = [
   ),
   tool(
     'ops_capture_debug_package',
-    'Capture a running node’s full debug package (cloud-init, journal, vm-agent log, docker state, events and metrics databases) into this Operations project’s library at /debug-packages/<nodeId>/<timestamp>.tar.gz. Returns the fileId; fetch it with download_library_file. Raw and unredacted: a daily purge deletes packages older than operations.debugPackageRetentionDays (default 7), in batches until done or operations.debugPackagePurgeDeadlineMs passes; your downloaded copy is not purged, so delete it when done. Size-capped by operations.debugPackageMaxBytes; every attempt counts toward operations.debugPackageCapturesPerHour.',
+    'Capture a running node’s full debug package (cloud-init, journal, vm-agent log, docker state, events and metrics databases) into this Operations project’s library at /debug-packages/<nodeId>/<timestamp>.tar.gz. Returns the fileId; fetch it with library_read method download. Raw and unredacted: a daily purge deletes packages older than operations.debugPackageRetentionDays (default 7), in batches until done or operations.debugPackagePurgeDeadlineMs passes; your downloaded copy is not purged, so delete it when done. Size-capped by operations.debugPackageMaxBytes; every attempt counts toward operations.debugPackageCapturesPerHour.',
     { nodeId: id('Node ID.') },
     ['nodeId']
   ),

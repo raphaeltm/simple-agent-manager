@@ -96,7 +96,7 @@ Oversized dispatches are not free. The Hetzner account has 10 servers shared by 
 
 ### Verify Dispatch Succeeded
 
-After calling `dispatch_task`, wait a few seconds and then check the task status (via `get_task_details` or `list_tasks`) to confirm it was properly dispatched and picked up. The dispatch system can occasionally fail silently — catching this early avoids wasted time waiting for work that never started.
+After calling `dispatch_task`, wait a few seconds and then check the task status (via `tasks_read` method `get` or `tasks_read` method `list`) to confirm it was properly dispatched and picked up. The dispatch system can occasionally fail silently — catching this early avoids wasted time waiting for work that never started.
 
 Verification must confirm all of:
 
@@ -122,9 +122,9 @@ Before resolving an incident, check whether the signature is already covered by 
 
 Before retrying or redispatching the same work after a SAM task fails, diagnose the failed start:
 
-- Call `get_task_details` for the failed task and read any output summary, output branch, branch, PR URL, profile/skill/mode evidence, and status evidence.
+- Call `tasks_read` method `get` for the failed task and read any output summary, output branch, branch, PR URL, profile/skill/mode evidence, and status evidence.
 - If there is a session, read enough messages to distinguish no-workspace/startup failure, transient provider error, human-cancel recovery, wrong profile, or real task failure.
-- Call `list_tasks`/`list_project_agents` to check for active duplicates with the same prompt, title, output branch, branch, PR, profile, or skill.
+- Call `tasks_read` method `list`/`tasks_read` method `agents` to check for active duplicates with the same prompt, title, output branch, branch, PR, profile, or skill.
 - If an active duplicate exists, inspect or coordinate with it instead of creating another copy.
 - If the failure was a transient provider or platform startup issue, adjust the retry only after confirming the current platform behavior has not already fixed it.
 - Include the failed task ID and any active duplicate task IDs in your report or retry context.
@@ -145,7 +145,7 @@ When Raphaël asks for status, open PRs, task history, deployment state, or a si
 When a task asks you to review a previous session or recover context from recent conversations, keep the search bounded and evidence-driven:
 
 - If the prompt names a parent/target session, task, PR, or branch, inspect that object directly first with the relevant SAM MCP or GitHub tool instead of starting with broad global searches.
-- Search tools keep normal long multi-word queries searchable by matching retained terms separately. Generous byte/term guardrails still disclose any trimming through `queryTruncated`, the effective `query`, and `queryLimits`. Callers that require exact coverage should refine an over-limit query or read known sessions directly via `get_session_messages`.
+- Search tools keep normal long multi-word queries searchable by matching retained terms separately. Generous byte/term guardrails still disclose any trimming through `queryTruncated`, the effective `query`, and `queryLimits`. Callers that require exact coverage should refine an over-limit query or read known sessions directly via `sessions_read` method `messages`.
 - Do not create a duplicate robustness idea for historical SQLite pattern-complexity failures unless the bounded search path still reproduces the error.
 - Update the current or resumed session topic when it is stale and the available SAM tool supports it. Do not rewrite unrelated historical session titles unless the task explicitly includes durable state cleanup.
 - A context-resume review remains read-only by default. Only create task files, branches, commits, PRs, or dispatched work when the user asks for implementation, durable artifacts, or delegation.

@@ -237,7 +237,7 @@ an agent.
 
 ## Asking an agent to read it
 
-Agents connected to SAM's MCP server read the same data with the `get_resource_history` tool.
+Agents connected to SAM's MCP server read the same data with the `sessions_read` method `resource_history` tool.
 **Called with no arguments it returns the agent's own session** — which is the useful case, because
 an agent can check whether it is heading for the same wall that killed the last attempt. The returned
 summary includes the server-resolved profile, skill, and agent type when available. Pass
@@ -247,7 +247,7 @@ stays cheap. There is no `projectId` parameter — the project comes from the ag
 
 This turns a vague complaint into a checkable one. For example:
 
-> "Task `01M2…` failed near the end. Use `get_resource_history` for that task, tell me whether it
+> "Task `01M2…` failed near the end. Use `sessions_read` method `resource_history` for that task, tell me whether it
 > hit an OOM, and if so what its RAM peak was."
 
 The same information is available over HTTP at
@@ -259,13 +259,13 @@ samples) — see the [API reference](/docs/reference/api/).
 
 ## Troubleshooting
 
-| What you see                                         | What it means                                                                                                                                                   |
-| ---------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| "Not recorded for Instant sessions"                  | Expected: Instant containers do not collect resource history yet.                                                                                               |
-| "No resource samples yet"                            | A VM session that has not finished its first 15-minute upload. Check back in a few minutes.                                                                     |
-| "Detailed history has expired"                       | The session is older than the sample retention. Its peaks and OOM count are still available to agents through `get_resource_history` until the summary expires. |
-| "Resource history could not be loaded."              | The request failed. Use **Try again**; if it persists, [report it](/docs/guides/reporting-issues/) from the same rail.                                          |
-| "… older 15-minute segments are not shown"           | The session is longer than the drawer's segment cap (see [Very long sessions](#very-long-sessions)).                                                            |
-| A break in the lines in the middle of a busy session | A [gap](#gaps): missing data, not idle time.                                                                                                                    |
-| A tool call with no CPU or memory movement above it  | The agent was waiting on something external. A tool call's length is elapsed time, not work done.                                                               |
-| A wake with no reserved line                         | SAM has no reservation recorded for that workspace, usually one created before reservations existed.                                                            |
+| What you see                                         | What it means                                                                                                                                                                      |
+| ---------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| "Not recorded for Instant sessions"                  | Expected: Instant containers do not collect resource history yet.                                                                                                                  |
+| "No resource samples yet"                            | A VM session that has not finished its first 15-minute upload. Check back in a few minutes.                                                                                        |
+| "Detailed history has expired"                       | The session is older than the sample retention. Its peaks and OOM count are still available to agents through `sessions_read` method `resource_history` until the summary expires. |
+| "Resource history could not be loaded."              | The request failed. Use **Try again**; if it persists, [report it](/docs/guides/reporting-issues/) from the same rail.                                                             |
+| "… older 15-minute segments are not shown"           | The session is longer than the drawer's segment cap (see [Very long sessions](#very-long-sessions)).                                                                               |
+| A break in the lines in the middle of a busy session | A [gap](#gaps): missing data, not idle time.                                                                                                                                       |
+| A tool call with no CPU or memory movement above it  | The agent was waiting on something external. A tool call's length is elapsed time, not work done.                                                                                  |
+| A wake with no reserved line                         | SAM has no reservation recorded for that workspace, usually one created before reservations existed.                                                                               |
