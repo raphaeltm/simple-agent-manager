@@ -48,33 +48,33 @@ allow you to override things like the model and effort as well."
 
 ## Implementation Checklist
 
-- [ ] Shared: add `model?: string | null` and `effort?: AgentEffort | null` to `SubmitTaskRequest`
-- [ ] API schemas: add bounded `model` and `effort` to `SubmitTaskSchema` and `StartChatSessionSchema`
-- [ ] API: one helper that normalizes request overrides and validates effort against the resolved
+- [x] Shared: add `model?: string | null` and `effort?: AgentEffort | null` to `SubmitTaskRequest`
+- [x] API schemas: add bounded `model` and `effort` to `SubmitTaskSchema` and `StartChatSessionSchema`
+- [x] API: one helper that normalizes request overrides and validates effort against the resolved
       agent type (reusing the profile effort validator), called in all three launch paths before any
       task effects
-- [ ] API VM path (`submit-task-implementation.ts`): explicit > skill/profile > project default
-- [ ] API Instant via submit (`submit-instant-task.ts`) and via chat-start (`chat-start.ts`)
-- [ ] Web: per-chat model/effort state in a hook outside `useProjectChatState.ts`, keyed to the
+- [x] API VM path (`submit-task-implementation.ts`): explicit > skill/profile > project default
+- [x] API Instant via submit (`submit-instant-task.ts`) and via chat-start (`chat-start.ts`)
+- [x] Web: per-chat model/effort state in a hook outside `useProjectChatState.ts`, keyed to the
       agent type it was chosen for; reset on new chat / project switch / successful submit
-- [ ] Web: Model (`ModelSelect`) and Effort (select with "Profile default") in `ComposerOptionsPanel`,
+- [x] Web: Model (`ModelSelect`) and Effort (select with "Profile default") in `ComposerOptionsPanel`,
       placeholders show the inherited value; badge counts them
-- [ ] Web: `buildBaseSubmitRequest` and `startInstantChatSession` send the overrides
-- [ ] Web: the To control subtitle shows the effective model/effort when overridden
-- [ ] Tests: API route-level tests for both endpoints (override wins, unset inherits, unsupported
+- [x] Web: `buildBaseSubmitRequest` and `startInstantChatSession` send the overrides
+- [x] Web: the To control subtitle shows the effective model/effort when overridden
+- [x] Tests: API route-level tests for both endpoints (override wins, unset inherits, unsupported
       effort → 400 with nothing written); web behavioral tests (panel → submit payload, agent switch
       drops overrides); submitRequest unit test
-- [ ] Docs: agents.md + concepts.mdx Chat options description
-- [ ] Playwright visual audit (mobile 375, desktop 1280)
+- [x] Docs: agents.md + concepts.mdx Chat options description
+- [x] Playwright visual audit (mobile 375, desktop 1280)
 
 ## Acceptance Criteria
 
-- [ ] Choosing a model and/or effort in Chat options starts the chat with those values on both VM and
+- [x] Choosing a model and/or effort in Chat options starts the chat with those values on both VM and
       Instant runtimes; leaving them blank uses the skill/profile values
-- [ ] An effort the resolved agent does not support is rejected with 400 before any task is created
-- [ ] Switching to a profile with a different agent type drops the overrides (no cross-agent leak)
-- [ ] The options badge counts model/effort overrides
-- [ ] Overrides reset after a successful send and on New chat
+- [x] An effort the resolved agent does not support is rejected with 400 before any task is created
+- [x] Switching to a profile with a different agent type drops the overrides (no cross-agent leak)
+- [x] The options badge counts model/effort overrides
+- [x] Overrides reset after a successful send and on New chat
 - [ ] Staging: a chat started with an override runs on the chosen model/effort (verified from the
       session's runtime contract / agent session record)
 
@@ -82,3 +82,22 @@ allow you to override things like the model and effort as well."
 
 - `.claude/rules/06-technical-patterns.md` (UI-to-backend data path), `61-guards-must-cover-every-runtime.md`,
   `62-tests-must-observe-the-real-trigger.md`, `18-file-size-limits.md`, `24-no-duplicate-ui-controls.md`
+
+## Implementation Notes
+
+- `resolveTaskAgentOverrides` (`apps/api/src/services/agent-profiles.ts`) reuses `validateProfileEffort`.
+  Called before any task effect in `submit-task-implementation.ts` (VM, against
+  `agentType || DEFAULT_TASK_AGENT_TYPE || 'opencode'`, matching `agent-session-step.ts`),
+  `submit-instant-task.ts` and `routes/chat-start.ts`.
+- `submit-task-implementation.ts` was 798 lines; context/attachment validation was extracted to
+  `submit-task-input-validation.ts` first (separate commit) so the feature did not cross 800.
+- `useProjectChatState.ts` (725 → 716 lines): per-chat override state moved into
+  `useComposerOverrides.ts`. Still over 500; a full split is out of scope.
+- Discrimination checks done: neutering the resolver reddens the API override/reject tests only;
+  reverting chat-start wiring reddens its two tests; removing web `agentFields` from each submit
+  path, the agent guard, and the New-chat reset each reddened exactly their test.
+- Visual audit found the taller panel pushed To/Send off a 375x667 phone (To bottom 708px).
+  Fixed with a `max-h-[50dvh]` scrollable panel and one-row Model/Effort; a measured assertion
+  was proven red before the fix.
+- Four Playwright audit tests fail identically on `main`; filed
+  `tasks/backlog/2026-11-07-fix-preexisting-chat-playwright-audit-failures.md`.
