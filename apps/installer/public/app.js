@@ -74,8 +74,27 @@ async function loadZones() {
   $('base-domain-shown').textContent = $('base-domain').value;
 }
 function message(text, tone = 'notice') {
-  $('message').dataset.tone = tone;
-  $('message').textContent = text;
+  const el = $('message');
+  el.dataset.tone = tone;
+  el.replaceChildren();
+  // Server errors append " Details: <technical>. No credentials were logged." —
+  // keep the plain-language summary visible and tuck the rest behind a disclosure.
+  const marker = ' Details: ';
+  const at = typeof text === 'string' ? text.indexOf(marker) : -1;
+  if (at === -1) {
+    el.textContent = text;
+    return;
+  }
+  const summary = document.createElement('p');
+  summary.textContent = text.slice(0, at);
+  const details = document.createElement('details');
+  const technical = document.createElement('summary');
+  technical.textContent = 'Technical details';
+  const body = document.createElement('p');
+  body.className = 'small';
+  body.textContent = text.slice(at + marker.length);
+  details.append(technical, body);
+  el.append(summary, details);
 }
 function screen(name) {
   for (const id of ['connect', 'choose', 'review', 'ready']) $(id).hidden = id !== name;

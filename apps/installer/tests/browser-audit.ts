@@ -15,7 +15,8 @@ const output = '../../.codex/tmp/playwright-screenshots';
 async function installFixtureRoutes(
   page: Page,
   getState: () => string,
-  setState: (value: string) => void
+  setState: (value: string) => void,
+  previewState: { attempts: number } = { attempts: 0 }
 ) {
   await page.route('**/api/config', (r) =>
     r.fulfill({
@@ -54,8 +55,22 @@ async function installFixtureRoutes(
   await page.route('**/api/session/zones', (r) =>
     r.fulfill({ json: { zones: [{ id: 'b'.repeat(32), name: 'example.com' }] } })
   );
-  await page.route('**/api/session/preview', (r) =>
-    r.fulfill({
+  await page.route('**/api/session/preview', (r) => {
+    if (getState() === 'full-expired')
+      return r.fulfill({
+        status: 401,
+        json: { error: 'Your installer session expired. Sign in again.' },
+      });
+    let conflicts: Array<{ name: string; type: string }> = [];
+    if (getState() === 'full-conflict') conflicts = [{ name: 'api.sam.example.com', type: 'CNAME' }];
+    if (getState() === 'full-flow') {
+      previewState.attempts++;
+      // The first review attempt hits a conflict; "Check again" resolves it,
+      // the way a real re-run would after the owner clears the blocking record.
+      conflicts =
+        previewState.attempts === 1 ? [{ name: 'api.sam.example.com', type: 'CNAME' }] : [];
+    }
+    return r.fulfill({
       json: {
         plan: {
           sourceCommit: 'c'.repeat(40),
@@ -67,17 +82,19 @@ async function installFixtureRoutes(
             'preview.sam.example.com',
             '*.sam.example.com',
           ],
-          conflicts:
-            getState() === 'full-conflict' ? [{ name: 'api.sam.example.com', type: 'CNAME' }] : [],
+          conflicts,
         },
       },
-    })
-  );
+    });
+  });
   await page.route('**/api/session/install', (r) => {
     if (getState() === 'error')
       return r.fulfill({
         status: 500,
-        json: { error: 'Cloudflare could not create the service. Please retry.' },
+        json: {
+          error:
+            'Cloudflare could not complete this step. Try again. Details: POST /workers/scripts returned HTTP 403 (codes 10000). No credentials were logged.',
+        },
       });
     setState('ready');
     return r.fulfill({ json: { ok: true } });
@@ -159,23 +176,13 @@ async function captureMaintenanceControls(page: Page, target: string) {
 
   return screenshots;
 }
-async function auditFullSettings(page: Page, scenario: string) {
+async function auditFullChoose(page: Page) {
   await expect(page.locator('#zone-id')).toHaveValue('b'.repeat(32));
+  await expect(page.locator('#base-domain-shown')).toHaveText('example.com');
   await page.locator('#owner-email').fill('owner+installation@example.com');
-  await expect(page.locator('#install')).toBeDisabled();
-  if (scenario !== 'full-account') {
-    await page.locator('#preview').click();
-    await expect(page.locator('#plan-summary')).toContainText(
-      scenario === 'full-conflict' ? 'block installation' : 'Build source'
-    );
-    if (scenario === 'full-conflict') await expect(page.locator('#install')).toBeDisabled();
-    else {
-      await expect(page.locator('#plan-summary')).toContainText(
-        'Initialize account address sam-account.workers.dev'
-      );
-      await expect(page.locator('#install')).toBeEnabled();
-    }
-  }
+  await expect(page.locator('#preview')).toBeEnabled();
+  // The "install" primary action is not visible until the plan has been reviewed.
+  await expect(page.locator('#review')).toBeHidden();
 }
 async function auditScenario(page: Page, scenario: string, baseUrl: string) {
   if (scenario === 'cleanup')
@@ -195,21 +202,47 @@ async function auditScenario(page: Page, scenario: string, baseUrl: string) {
     expect(
       await page.locator('#login').evaluate((el) => getComputedStyle(el).outlineStyle)
     ).not.toBe('none');
-    await page.getByText('What access am I granting?').click();
+    await page.getByText('What will SAM be allowed to do?').click();
     await expect(page.getByText(/These may allow changes to existing Workers/)).toBeVisible();
-    await page.getByText('What access am I granting?').click();
+    await page.getByText('What will SAM be allowed to do?').click();
   }
   const stepBounds = await page.locator('.steps').evaluate((el) => {
     const parent = el.getBoundingClientRect();
-    return [...el.querySelectorAll('li')].every((item) => {
+    return [...el.querySelectorAll('li:not([hidden])')].every((item) => {
       const r = item.getBoundingClientRect();
       return r.left >= parent.left && r.right <= parent.right;
     });
   });
   expect(stepBounds).toBe(true);
-  if (scenario.startsWith('full-')) await auditFullSettings(page, scenario);
+  if (scenario === 'full-choose') await auditFullChoose(page);
+  if (scenario === 'full-review') {
+    await auditFullChoose(page);
+    await page.locator('#preview').click();
+    await expect(page.locator('#review')).toBeVisible();
+    await expect(page.locator('#plan-summary')).toContainText('Build source');
+    await expect(page.locator('#plan-summary')).toContainText(
+      'Initialize account address sam-account.workers.dev'
+    );
+    await expect(page.locator('#review-blocked')).toBeHidden();
+    await expect(page.locator('#review-form')).toBeVisible();
+    await expect(page.locator('#install')).toBeEnabled();
+    await expect(page.locator('#step-review')).toHaveAttribute('aria-current', 'step');
+  }
+  if (scenario === 'full-conflict') {
+    await auditFullChoose(page);
+    await page.locator('#preview').click();
+    await expect(page.locator('#review')).toBeVisible();
+    await expect(page.locator('#plan-summary')).toContainText('block installation');
+    await expect(page.locator('#review-blocked')).toBeVisible();
+    await expect(page.locator('#review-form')).toBeHidden();
+    await expect(page.locator('#check-again')).toBeVisible();
+    // The install action is unavailable while a conflict exists.
+    await expect(page.locator('#install')).toBeHidden();
+    await expect(page.locator('#back-to-choose')).toBeVisible();
+  }
+  if (scenario === 'choose') await expect(page.locator('#install-simple')).toBeEnabled();
   if (scenario === 'empty' || scenario === 'unconfigured')
-    await expect(page.locator(scenario === 'empty' ? '#install' : '#login')).toBeDisabled();
+    await expect(page.locator(scenario === 'empty' ? '#install-simple' : '#login')).toBeDisabled();
   if (scenario === 'unconfigured') {
     await expect(page.locator('#message')).toContainText('not available');
     await expect(page.getByRole('link', { name: 'See setup options →' })).toHaveAttribute(
@@ -226,9 +259,13 @@ async function auditScenario(page: Page, scenario: string, baseUrl: string) {
     await expect(page.locator('#message')).toContainText('cancelled');
   if (scenario === 'error') {
     await page.locator('#confirm').check();
-    await page.locator('#install').click();
-    await expect(page.locator('#message')).toContainText('Please retry');
-    await expect(page.locator('#install')).toBeEnabled();
+    await page.locator('#install-simple').click();
+    // Plain language first; the raw provider detail stays behind a disclosure.
+    await expect(page.locator('#message > p')).toContainText('Try again');
+    await expect(page.locator('#message details p')).toBeHidden();
+    await page.getByText('Technical details').click();
+    await expect(page.locator('#message details p')).toContainText('HTTP 403');
+    await expect(page.locator('#install-simple')).toBeEnabled();
   }
 }
 async function auditViewport(
@@ -252,18 +289,20 @@ async function auditViewport(
       cspErrors.push(message.text());
   });
   let state = 'connect';
+  const previewState = { attempts: 0 };
   await installFixtureRoutes(
     page,
     () => state,
     (value) => {
       state = value;
-    }
+    },
+    previewState
   );
   for (const scenario of [
     'connect',
-    'account',
-    'full-account',
-    'full-preview',
+    'choose',
+    'full-choose',
+    'full-review',
     'full-conflict',
     'empty',
     'ready',
@@ -284,17 +323,51 @@ async function auditViewport(
     });
     screenshots++;
   }
-  // Exercise the real UI handlers across create -> ready -> disconnect.
-  state = 'account';
+  // Exercise the real non-full UI handlers across create -> ready -> disconnect.
+  state = 'choose';
   await page.goto(baseUrl);
   await page.locator('#confirm').check();
-  await page.locator('#install').click();
+  await page.locator('#install-simple').click();
   await expect(page.locator('#ready')).toBeVisible();
   await expect(page.locator('#step-handoff')).toHaveAttribute('aria-current', 'step');
   await page.locator('#disconnect').click();
   await expect(page.locator('#connect')).toBeVisible();
   await expect(page.locator('#step-connect')).toHaveAttribute('aria-current', 'step');
   await expect(page.locator('.steps .completed')).toHaveCount(0);
+
+  // Full flow: choose -> review hits a conflict -> "Check again" resolves it ->
+  // install -> handoff. This is the real trigger path, not a hand-fed state.
+  state = 'full-flow';
+  previewState.attempts = 0;
+  await page.goto(baseUrl);
+  await expect(page.locator('#choose')).toBeVisible();
+  await page.locator('#owner-email').fill('owner+flow@example.com');
+  await page.locator('#preview').click();
+  await expect(page.locator('#review-blocked')).toBeVisible();
+  await page.locator('#check-again').click();
+  await expect(page.locator('#review-form')).toBeVisible();
+  // The quiet "Back" link returns to Choose without losing the resolved plan.
+  await page.locator('#back-to-choose').click();
+  await expect(page.locator('#choose')).toBeVisible();
+  await expect(page.locator('#step-choose')).toHaveAttribute('aria-current', 'step');
+  await page.locator('#preview').click();
+  await expect(page.locator('#review-form')).toBeVisible();
+  await page.locator('#confirm-full').check();
+  await page.locator('#install').click();
+  await expect(page.locator('#ready')).toBeVisible();
+  await expect(page.locator('#step-handoff')).toHaveAttribute('aria-current', 'step');
+
+  // Session expiry mid-flow returns to Step 1 with a calm message, not a silent
+  // failure or stuck button.
+  state = 'full-expired';
+  await page.goto(baseUrl);
+  await page.locator('#owner-email').fill('owner+expired@example.com');
+  await page.locator('#preview').click();
+  await expect(page.locator('#connect')).toBeVisible();
+  await expect(page.locator('#step-connect')).toHaveAttribute('aria-current', 'step');
+  await expect(page.locator('#message')).toContainText('session expired');
+  await expect(page.locator('#disconnect')).toBeHidden();
+
   await page
     .getByRole('button', { name: theme === 'light' ? 'Dark theme' : 'Light theme' })
     .press('Enter');

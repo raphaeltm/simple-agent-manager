@@ -234,6 +234,14 @@ legend {
   margin-top: 20px;
   font-size: 0.875rem;
 }
+#message > p {
+  margin: 0;
+}
+#message details {
+  border-top: 1px solid var(--color-border-subtle);
+  margin-top: 10px;
+  padding-top: 10px;
+}
 [data-tone='error'],
 [data-tone='warning'] {
   color: var(--color-warning);
