@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 
 import type { ChatSessionListItem } from '../../lib/api';
 import {
@@ -11,6 +11,16 @@ import { stripMarkdown } from '../../lib/text-utils';
 import { enrichSessionWithTaskInfo, type TaskInfo } from './useTaskGroups';
 
 export type SessionSections = Record<SessionSection, ChatSessionListItem[]>;
+
+/** The sections a person can fold away; attention and awake work always stays in view. */
+export type CollapsibleSessionSection = Extract<SessionSection, 'sleeping' | 'history'>;
+export type OpenSessionSections = Record<CollapsibleSessionSection, boolean>;
+
+/** Sleeping chats are resumable work, so they start open; finished work starts folded. */
+export const DEFAULT_OPEN_SESSION_SECTIONS: OpenSessionSections = {
+  sleeping: true,
+  history: false,
+};
 
 function matchesSessionQuery(session: ChatSessionListItem, query: string): boolean {
   return (
@@ -43,7 +53,8 @@ export function groupSessionsBySection(
 /**
  * The session list's sections (Needs attention, Awake, Sleeping, History), filtered by the
  * search box. Shared by the desktop sidebar and the mobile drawer. `attentionCount` ignores
- * the search so a badge never hides a blocked session behind an unrelated query.
+ * the search so a badge never hides a blocked session behind an unrelated query. Also owns
+ * which foldable sections are open.
  */
 export function useSessionSections(
   sessions: ChatSessionListItem[],
@@ -68,9 +79,18 @@ export function useSessionSections(
     };
   }, [sections, query]);
 
+  const [openSections, setOpenSections] = useState<OpenSessionSections>(
+    DEFAULT_OPEN_SESSION_SECTIONS
+  );
+  const toggleSection = useCallback((section: CollapsibleSessionSection) => {
+    setOpenSections((open) => ({ ...open, [section]: !open[section] }));
+  }, []);
+
   return {
     sections: filteredSections,
     attentionCount: sections.attention.length,
     isSearching: query.length > 0,
+    openSections,
+    toggleSection,
   };
 }

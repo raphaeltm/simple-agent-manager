@@ -85,10 +85,10 @@ export function ProjectChatSidebar({
       {state.hasSessions ? (
         <nav aria-label="Chat sessions" className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
           <SessionSectionList
-            sections={state.sessionSections}
-            isSearching={state.isSearchingSessions}
-            openSections={state.openSessionSections}
-            onToggleSection={state.toggleSessionSection}
+            sections={state.sessionList.sections}
+            isSearching={state.sessionList.isSearching}
+            openSections={state.sessionList.openSections}
+            onToggleSection={state.sessionList.toggleSection}
             selectedSessionId={state.sessionId ?? null}
             onSelect={state.handleSelect}
             taskInfoMap={state.taskInfoMap}

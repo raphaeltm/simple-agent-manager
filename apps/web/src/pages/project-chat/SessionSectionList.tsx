@@ -3,18 +3,12 @@ import { ChevronDown, ChevronRight } from 'lucide-react';
 
 import { SESSION_SECTION_ORDER, type SessionSection } from '../../lib/chat-session-utils';
 import { SessionList } from './SessionList';
-import type { SessionSections as Sections } from './useSessionSections';
+import type {
+  CollapsibleSessionSection,
+  OpenSessionSections,
+  SessionSections as Sections,
+} from './useSessionSections';
 import type { TaskInfo } from './useTaskGroups';
-
-/** The sections a person can fold away; attention and awake work always stays in view. */
-export type CollapsibleSessionSection = Extract<SessionSection, 'sleeping' | 'history'>;
-export type OpenSessionSections = Record<CollapsibleSessionSection, boolean>;
-
-/** Sleeping chats are resumable work, so they start open; finished work starts folded. */
-export const DEFAULT_OPEN_SESSION_SECTIONS: OpenSessionSections = {
-  sleeping: true,
-  history: false,
-};
 
 const SECTION_LABELS: Record<SessionSection, string> = {
   attention: 'Needs attention',

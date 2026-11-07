@@ -43,11 +43,6 @@ import { stripMarkdown } from '../../lib/text-utils';
 import { useProjectContext } from '../ProjectContext';
 import { buildForkMessage } from './profileWizardHelpers';
 import {
-  type CollapsibleSessionSection,
-  DEFAULT_OPEN_SESSION_SECTIONS,
-  type OpenSessionSections,
-} from './SessionSectionList';
-import {
   buildBaseSubmitRequest,
   getCompletedAttachmentRefs,
   withAttachmentRefs,
@@ -114,12 +109,6 @@ export function useProjectChatState() {
 
   // Sidebar filtering
   const [searchQuery, setSearchQuery] = useState('');
-  const [openSessionSections, setOpenSessionSections] = useState<OpenSessionSections>(
-    DEFAULT_OPEN_SESSION_SECTIONS
-  );
-  const toggleSessionSection = useCallback((section: CollapsibleSessionSection) => {
-    setOpenSessionSections((open) => ({ ...open, [section]: !open[section] }));
-  }, []);
   const [sessionScope, setSessionScope] = useState<SessionScope>('all');
   const multiplayerActive = Boolean(project?.multiplayerActive);
 
@@ -245,11 +234,7 @@ export function useProjectChatState() {
 
   const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
 
-  const {
-    sections: sessionSections,
-    attentionCount,
-    isSearching: isSearchingSessions,
-  } = useSessionSections(sessions, taskInfoMap, searchQuery);
+  const sessionList = useSessionSections(sessions, taskInfoMap, searchQuery);
 
   // ---------------------------------------------------------------------------
   // Effects
@@ -679,13 +664,9 @@ export function useProjectChatState() {
     setSidebarOpen,
     searchQuery,
     setSearchQuery,
-    openSessionSections,
-    toggleSessionSection,
     sessionScope,
     setSessionScope,
-    sessionSections,
-    attentionCount,
-    isSearchingSessions,
+    sessionList,
     taskTitleMap,
     taskInfoMap,
     message,

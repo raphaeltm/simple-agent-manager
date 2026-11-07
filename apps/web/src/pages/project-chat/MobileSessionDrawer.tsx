@@ -6,12 +6,7 @@ import { GlassSheet, GlassSheetHeader } from '../../components/shell/GlassSheet'
 import { useScrollLock } from '../../hooks/useScrollLock';
 import type { ChatSessionListItem } from '../../lib/api';
 import { sessionScopeOptions } from './session-scope-options';
-import {
-  type CollapsibleSessionSection,
-  DEFAULT_OPEN_SESSION_SECTIONS,
-  type OpenSessionSections,
-  SessionSectionList,
-} from './SessionSectionList';
+import { SessionSectionList } from './SessionSectionList';
 import type { SessionScope } from './useProjectChatState';
 import { useSessionSections } from './useSessionSections';
 import type { TaskInfo } from './useTaskGroups';
@@ -49,12 +44,6 @@ export function MobileSessionDrawer({
   showOwnership: boolean;
 }) {
   const [mobileSearch, setMobileSearch] = useState('');
-  const [openSections, setOpenSections] = useState<OpenSessionSections>(
-    DEFAULT_OPEN_SESSION_SECTIONS
-  );
-  const toggleSection = useCallback((section: CollapsibleSessionSection) => {
-    setOpenSections((open) => ({ ...open, [section]: !open[section] }));
-  }, []);
   const [isClosing, setIsClosing] = useState(false);
 
   const handleClose = useCallback(() => {
@@ -64,7 +53,11 @@ export function MobileSessionDrawer({
   }, [isClosing, onClose]);
 
   // Same sections and search as the desktop list.
-  const { sections, isSearching } = useSessionSections(sessions, taskInfoMap, mobileSearch);
+  const { sections, isSearching, openSections, toggleSection } = useSessionSections(
+    sessions,
+    taskInfoMap,
+    mobileSearch
+  );
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {

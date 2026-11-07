@@ -50,7 +50,8 @@ export function ProjectChat() {
   // The chat list is this screen's main toggle: the mobile app bar shows it raised at its
   // right edge (SAM Glass), in place of the second bar this page used to draw.
   // Its count says how many chats need someone, so a closed drawer cannot hide a blocker.
-  const { hasSessions, sidebarOpen, setSidebarOpen, attentionCount } = state;
+  const { hasSessions, sidebarOpen, setSidebarOpen } = state;
+  const { attentionCount, sections: sessionSections } = state.sessionList;
   const chatListAction = useMemo(
     () =>
       isMobile && hasSessions
@@ -68,7 +69,6 @@ export function ProjectChat() {
     [isMobile, hasSessions, sidebarOpen, setSidebarOpen, attentionCount]
   );
   // The Focus strip shows what is still resumable, in list order; History stays in the full list.
-  const { sessionSections } = state;
   const focusStripSessions = useMemo(
     () => [...sessionSections.attention, ...sessionSections.awake, ...sessionSections.sleeping],
     [sessionSections]
