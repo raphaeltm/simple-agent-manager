@@ -82,7 +82,7 @@ export async function runInstallerEngine(
   mkdirSync(join(root, '.wrangler', 'installer-engine'), { recursive: true, mode: 0o700 });
   let operation = 'phase-validation';
   let goVersion = '';
-  const execute = (executable: string, args: string[], cwd = root) => {
+  const execute = (executable: string, args: string[], cwd = root, discardOutput = false) => {
     operation =
       executable === 'pulumi'
         ? `pulumi.${args[0]}`
@@ -95,10 +95,13 @@ export async function runInstallerEngine(
         cwd,
         env,
         timeoutMs: c.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS,
+        discardOutput,
       }
     );
   };
   const pnpm = (...args: string[]) => execute('pnpm', args);
+  /** For commands whose output is only progress (see EngineRunOptions.discardOutput). */
+  const pnpmProgress = (...args: string[]) => execute('pnpm', args, root, true);
   const script = (name: string, ...args: string[]) =>
     execute('bash', [`scripts/deploy/${name}`, ...args]);
   const pulumi = (...args: string[]) => execute('pulumi', args, join(root, 'infra'));
@@ -349,7 +352,7 @@ export async function runInstallerEngine(
       );
   });
   await phase('migrations', async () => {
-    await pnpm(
+    await pnpmProgress(
       'exec',
       'tsx',
       'scripts/deploy/d1-migration-safety.ts',
@@ -358,7 +361,7 @@ export async function runInstallerEngine(
       `--database=DATABASE:${output('d1DatabaseName')}`,
       `--database=OBSERVABILITY_DATABASE:${output('observabilityD1DatabaseName')}`
     );
-    await pnpm(
+    await pnpmProgress(
       'exec',
       'tsx',
       'scripts/deploy/project-data-archive-routing-guard.ts',

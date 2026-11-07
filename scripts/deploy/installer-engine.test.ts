@@ -159,6 +159,7 @@ function fixture(failOn?: string) {
     args: string[];
     cwd: string;
     env: NodeJS.ProcessEnv;
+    discardOutput?: boolean;
   }> = [];
   const outputs = {
     r2Name: 'install-test-prod-assets',
@@ -171,7 +172,12 @@ function fixture(failOn?: string) {
   };
   const runner: EngineRunner = {
     async run(command, options) {
-      commands.push({ ...command, cwd: options.cwd, env: structuredClone(options.env) });
+      commands.push({
+        ...command,
+        cwd: options.cwd,
+        env: structuredClone(options.env),
+        discardOutput: options.discardOutput,
+      });
       if (command.args.includes(failOn ?? '__never__'))
         throw new EngineCommandFailure(23, null, ['wrangler: D1 count failed for users']);
       if (command.args[0] === 'build-local-codex') stageRuntime(root);
@@ -292,6 +298,19 @@ describe('installation engine', () => {
     expect(JSON.stringify({ events, state })).not.toContain('secret-');
     expect(calls.join('\n')).not.toContain('secret-');
   });
+  it('runs the migration checks without capturing their progress output', async () => {
+    // A clean install's migration output exceeds the capture limit (2026-11-07); parsed
+    // outputs must still be captured.
+    const f = fixture();
+    await runInstallerEngine(config, { ...f, environment: privateEnv, emit() {}, save() {} });
+    const find = (part: string) =>
+      f.commands.find((entry) => [entry.executable, ...entry.args].join(' ').includes(part));
+    expect(find('scripts/deploy/d1-migration-safety.ts')?.discardOutput).toBe(true);
+    expect(find('scripts/deploy/project-data-archive-routing-guard.ts')?.discardOutput).toBe(true);
+    expect(find('stack output')?.discardOutput).toBe(false);
+    expect(find('rev-parse HEAD')?.discardOutput).toBe(false);
+  });
+
   it('stops on migration failures without publishing and exposes only phase identifiers', async () => {
     const f = fixture('scripts/deploy/d1-migration-safety.ts');
     const events: unknown[] = [];

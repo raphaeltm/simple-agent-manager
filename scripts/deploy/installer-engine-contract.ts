@@ -64,11 +64,20 @@ export interface EngineCheckpoint {
   activePhase?: string;
   status: 'running' | 'failed' | 'completed';
 }
+export interface EngineRunOptions {
+  cwd: string;
+  env: NodeJS.ProcessEnv;
+  timeoutMs: number;
+  includeStderr?: boolean;
+  /**
+   * The caller ignores stdout, so it is not captured and the capture limit does not apply.
+   * `wrangler d1 migrations apply` reprints its whole table after every migration; a clean
+   * install of ~230 migrations writes well over the capture limit (2026-11-07).
+   */
+  discardOutput?: boolean;
+}
 export interface EngineRunner {
-  run(
-    command: EngineCommand,
-    options: { cwd: string; env: NodeJS.ProcessEnv; timeoutMs: number; includeStderr?: boolean }
-  ): Promise<string>;
+  run(command: EngineCommand, options: EngineRunOptions): Promise<string>;
   request(url: string, init?: RequestInit): Promise<Response>;
   sleep(ms: number): Promise<void>;
 }
@@ -241,27 +250,38 @@ export const processRunner: EngineRunner = {
       }
       let output = '';
       let size = 0;
-      let failed = false;
+      let stopped: string | undefined;
       // Recent stdout+stderr, kept separately from the returned output and only
       // used to describe a failure.
       let recent = '';
       const remember = (chunk: Buffer) => {
         recent = (recent + chunk.toString()).slice(-64 * 1024);
       };
+      // Its own process group, so a stop reaches every descendant: killing only
+      // `pnpm` left `tsx`/`wrangler` running, and the failure surfaced minutes
+      // later after their output (2026-11-07).
       const child = spawn(command.executable, command.args, {
         cwd: options.cwd,
         env: options.env,
         shell: false,
+        detached: true,
         stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: options.timeoutMs,
-        killSignal: 'SIGKILL',
       });
-      const collect = (chunk: Buffer) => {
-        size += chunk.length;
-        if (size > maxCaptureBytes) {
-          failed = true;
+      const stop = (reason: string) => {
+        if (stopped) return;
+        stopped = reason;
+        try {
+          if (child.pid) process.kill(-child.pid, 'SIGKILL');
+        } catch {
           child.kill('SIGKILL');
-        } else output += chunk.toString();
+        }
+      };
+      const timer = setTimeout(() => stop('Stopped: the command timed out.'), options.timeoutMs);
+      const collect = (chunk: Buffer) => {
+        if (options.discardOutput) return;
+        size += chunk.length;
+        if (size > maxCaptureBytes) stop('Stopped: command output exceeded the capture limit.');
+        else if (!stopped) output += chunk.toString();
       };
       child.stdout.on('data', (chunk: Buffer) => {
         remember(chunk);
@@ -273,12 +293,19 @@ export const processRunner: EngineRunner = {
         remember(chunk);
         if (options.includeStderr) collect(chunk);
       });
-      child.once('error', () => reject(new Error('Deployment command could not start')));
-      child.once('close', (code, signal) =>
-        code === 0 && !failed
-          ? accept(output)
-          : reject(new EngineCommandFailure(code, signal, failureTail(recent, options.env)))
-      );
+      child.once('error', () => {
+        clearTimeout(timer);
+        reject(new Error('Deployment command could not start'));
+      });
+      child.once('close', (code, signal) => {
+        clearTimeout(timer);
+        if (code === 0 && !stopped) {
+          accept(output);
+          return;
+        }
+        const tail = failureTail(recent, options.env);
+        reject(new EngineCommandFailure(code, signal, stopped ? [...tail, stopped] : tail));
+      });
     });
   },
   request: (url, init) => fetch(url, init),
