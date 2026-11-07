@@ -93,7 +93,12 @@ export function ComposerOptionsPanel({
   compact,
 }: Readonly<{ id: string; options: ComposerOptionsValue; compact: boolean }>) {
   return (
-    <div id={id} className="mb-2 grid gap-3 rounded-lg border border-border-default bg-surface p-3">
+    // Capped and scrollable so opening it never pushes To, the message box or Send off a
+    // phone screen. `relative` keeps absolute descendants inside the scroller.
+    <div
+      id={id}
+      className="relative mb-2 grid max-h-[50dvh] gap-3 overflow-y-auto overscroll-contain rounded-lg border border-border-default bg-surface p-3"
+    >
       {options.skills.length > 0 && (
         <div>
           <div className="mb-1 text-xs font-medium text-fg-secondary">Skill for this chat</div>

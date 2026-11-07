@@ -42,7 +42,14 @@ export function ComposerAgentOverrideFields({
     onChange({ agentType, model: sameAgent ? overrides.model : '', effort, ...patch });
 
   return (
-    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_11rem]">
+    // One row even on a phone: the panel is height-capped and every row counts.
+    <div
+      className={
+        efforts.length > 1
+          ? 'grid grid-cols-[minmax(0,1fr)_8rem] gap-2 sm:grid-cols-[minmax(0,1fr)_11rem]'
+          : 'grid gap-2'
+      }
+    >
       <div className="grid min-w-0 gap-0.5">
         <label htmlFor={modelId} className="text-xs text-fg-muted">
           Model
