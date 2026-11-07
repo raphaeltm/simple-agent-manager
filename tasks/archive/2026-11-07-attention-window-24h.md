@@ -14,7 +14,8 @@ list; they crowd out what actually needs a person now. He asked to limit the sec
 - [x] `getSessionSection` places a needs_input / wake_failed chat in attention only when its
       marker `createdAt` is within the window (so a busy chat cannot keep an old request on top);
       otherwise it falls back to Awake or Sleeping, keeping its row label
-- [x] A malformed `VITE_ATTENTION_WINDOW_MS` falls back to the default (review finding)
+- [x] A malformed `VITE_ATTENTION_WINDOW_MS` falls back to the default (review finding), tested
+      with `vi.stubEnv` for not-a-number, empty, 0 and -5
 - [x] The mobile attention count follows (it counts the attention section)
 - [x] Tests: window placement, badge count (both proven discriminating); rendered page fixture uses
       a recent wake failure; Playwright audit includes a 55-day-old request that lands in Awake
@@ -31,3 +32,5 @@ list; they crowd out what actually needs a person now. He asked to limit the sec
   c913e623f.
 - Staging run 42369191416: two wake failures 42h/50h old left Needs attention for Sleeping
   (8 → 10); no badge; no errors at 375 and 1280.
+- task-completion-validator: PASS; its one MEDIUM gap (no test for the override fallback) fixed
+  with `ATTENTION_WINDOW_MS` tests in `chat-session-utils.test.ts`.
