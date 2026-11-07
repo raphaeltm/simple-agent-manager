@@ -18,7 +18,7 @@ import {
  * older than the client's default `staleTime`.
  */
 export function initialChatSessionListQueryOptions(queryScope: string, projectId: string) {
-  return projectChatSessionsQueryOptions(queryScope, projectId, CHAT_SESSION_LIST_LIMIT);
+  return projectChatSessionsQueryOptions(queryScope, projectId, CHAT_SESSION_LIST_LIMIT, true);
 }
 
 /**
@@ -35,7 +35,10 @@ export async function readInitialSessionList(
   projectId: string
 ): Promise<{ sessions: ChatSessionListItem[]; prefetched: boolean }> {
   if (!queryScope) {
-    const { sessions } = await listChatSessions(projectId, { limit: CHAT_SESSION_LIST_LIMIT });
+    const { sessions } = await listChatSessions(projectId, {
+      limit: CHAT_SESSION_LIST_LIMIT,
+      includeLive: true,
+    });
     return { sessions, prefetched: false };
   }
   const options = initialChatSessionListQueryOptions(queryScope, projectId);

@@ -1,4 +1,4 @@
-/** Bounded provider waiting policy. Code defaults only; no new Worker bindings. */
+/** Bounded provider waiting policy; optional deployment overrides keep code defaults. */
 import * as v from 'valibot';
 
 export const PROVIDER_LIMIT_POLICY = Object.freeze({
@@ -9,6 +9,7 @@ export const PROVIDER_LIMIT_POLICY = Object.freeze({
   recentRejectionMs: 2 * 60_000,
   maxResetDelayMs: 8 * 24 * 60 * 60_000,
   resetGraceMs: 10_000,
+  resetWindowToleranceMs: 60_000,
   resetJitterMs: 20_000,
   deadlineGraceMs: 30 * 60_000,
   snapshotMarginMs: 10 * 60_000,
@@ -66,36 +67,61 @@ export function newProviderLimitWait(input: {
   resetsAt: number | null;
   snapshotExpiresAt?: number | null;
   jitter?: number;
+  resetWindowToleranceMs?: number;
 }): ProviderLimitWait {
-  const attempts = Math.min(
-    (input.previous?.attempts ?? 0) + 1,
-    PROVIDER_LIMIT_POLICY.maxConsecutiveWaits + 1
-  );
   const reset =
     input.resetsAt &&
     input.resetsAt > input.now &&
     input.resetsAt <= input.now + PROVIDER_LIMIT_POLICY.maxResetDelayMs
       ? input.resetsAt
       : null;
-  const nextRetryAt = reset
-    ? reset +
-      PROVIDER_LIMIT_POLICY.resetGraceMs +
-      Math.floor(
-        Math.max(0, Math.min(1, input.jitter ?? providerLimitJitter())) *
-          PROVIDER_LIMIT_POLICY.resetJitterMs
-      )
-    : input.now +
-      Math.min(
-        PROVIDER_LIMIT_POLICY.unknownBackoffMs * 2 ** (attempts - 1),
-        PROVIDER_LIMIT_POLICY.maxUnknownBackoffMs
-      );
+  // Provider timestamps may be rounded differently by successive rejections.
+  // A pending unknown retry is also one wait, regardless of prompt count.
+  const sameCredential = input.previous?.credentialKey === input.credentialKey;
+  const sameWindow =
+    !!input.previous &&
+    sameCredential &&
+    ((reset !== null &&
+      input.previous.resetsAt !== null &&
+      Math.abs(reset - input.previous.resetsAt) <=
+        (input.resetWindowToleranceMs ?? PROVIDER_LIMIT_POLICY.resetWindowToleranceMs)) ||
+      (reset === null &&
+        input.previous.resetsAt === null &&
+        input.previous.phase === 'waiting' &&
+        input.now < input.previous.nextRetryAt));
+  const matchingWait = sameWindow ? input.previous : null;
+  const attempts =
+    matchingWait?.attempts ??
+    Math.min(
+      (reset === null && input.previous?.resetsAt !== null ? 0 : (input.previous?.attempts ?? 0)) +
+        1,
+      PROVIDER_LIMIT_POLICY.maxConsecutiveWaits + 1
+    );
+  // A rounded reset can still be in the future after the prior alarm became due.
+  const reusableWait = matchingWait && matchingWait.nextRetryAt > input.now ? matchingWait : null;
+  const nextRetryAt = reusableWait
+    ? reusableWait.nextRetryAt
+    : reset
+      ? reset +
+        PROVIDER_LIMIT_POLICY.resetGraceMs +
+        Math.floor(
+          Math.max(0, Math.min(1, input.jitter ?? providerLimitJitter())) *
+            PROVIDER_LIMIT_POLICY.resetJitterMs
+        )
+      : input.now +
+        Math.min(
+          PROVIDER_LIMIT_POLICY.unknownBackoffMs * 2 ** (attempts - 1),
+          PROVIDER_LIMIT_POLICY.maxUnknownBackoffMs
+        );
   const expires = input.snapshotExpiresAt;
   const outlivesSnapshot =
     expires != null && nextRetryAt >= expires - PROVIDER_LIMIT_POLICY.snapshotMarginMs;
   const changedCredential =
     input.previous?.credentialKey != null && input.previous.credentialKey !== input.credentialKey;
   const blocked =
-    attempts > PROVIDER_LIMIT_POLICY.maxConsecutiveWaits || outlivesSnapshot || changedCredential;
+    (reset === null && attempts > PROVIDER_LIMIT_POLICY.maxConsecutiveWaits) ||
+    outlivesSnapshot ||
+    changedCredential;
   const reason = changedCredential
     ? 'Blocked: selected provider credential changed; review before resuming.'
     : outlivesSnapshot
@@ -113,11 +139,14 @@ export function newProviderLimitWait(input: {
     credentialKey: input.credentialKey,
     incidentId: input.incidentId,
     observedAt: input.now,
-    resetsAt: reset,
+    resetsAt: reusableWait ? reusableWait.resetsAt : reset,
     nextRetryAt,
     deadlineAt: nextRetryAt + PROVIDER_LIMIT_POLICY.deadlineGraceMs,
-    scheduleKey: `provider-limit:${input.taskId}:${crypto.randomUUID()}`,
-    reason,
+    scheduleKey: reusableWait
+      ? reusableWait.scheduleKey
+      : `provider-limit:${input.taskId}:${crypto.randomUUID()}`,
+    ...(reusableWait?.scheduleId ? { scheduleId: reusableWait.scheduleId } : {}),
+    reason: reusableWait && !blocked ? reusableWait.reason : reason,
   };
 }
 

@@ -33,6 +33,10 @@ export interface ChatSession {
 }
 
 export interface ChatSessionTaskEmbed {
+  /** Current provider waiting or needs-attention reason. */
+  providerLimitReason?: string | null;
+  /** Opaque wait generation; changes when a new blocked wait replaces an accepted resume. */
+  providerLimitVersion?: string | null;
   id: string;
   /** Canonical, user-safe saved placement diagnostics, including queued runs. */
   placementExplanationJson?: string | null;

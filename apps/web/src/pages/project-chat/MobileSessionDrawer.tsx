@@ -1,14 +1,14 @@
 import { SearchField, SegmentedControl } from '@simple-agent-manager/ui';
-import { ChevronDown, ChevronRight, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 
 import { GlassSheet, GlassSheetHeader } from '../../components/shell/GlassSheet';
 import { useScrollLock } from '../../hooks/useScrollLock';
 import type { ChatSessionListItem } from '../../lib/api';
 import { sessionScopeOptions } from './session-scope-options';
-import { SessionList } from './SessionList';
+import { SessionSectionList } from './SessionSectionList';
 import type { SessionScope } from './useProjectChatState';
-import { useSessionFilters } from './useSessionFilters';
+import { useSessionSections } from './useSessionSections';
 import type { TaskInfo } from './useTaskGroups';
 
 /** A stable default, so the session filters don't recompute on every render. */
@@ -44,7 +44,6 @@ export function MobileSessionDrawer({
   showOwnership: boolean;
 }) {
   const [mobileSearch, setMobileSearch] = useState('');
-  const [mobileShowStale, setMobileShowStale] = useState(false);
   const [isClosing, setIsClosing] = useState(false);
 
   const handleClose = useCallback(() => {
@@ -53,13 +52,12 @@ export function MobileSessionDrawer({
     window.setTimeout(onClose, 250);
   }, [isClosing, onClose]);
 
-  // Same buckets and search as the desktop list, so stopped forks and retries collapse
-  // into Older here too.
-  const {
-    filteredRecent: filteredR,
-    filteredStale: filteredS,
-    effectiveShowStale: showOlder,
-  } = useSessionFilters(sessions, taskInfoMap, mobileSearch, mobileShowStale);
+  // Same sections and search as the desktop list.
+  const { sections, isSearching, openSections, toggleSection } = useSessionSections(
+    sessions,
+    taskInfoMap,
+    mobileSearch
+  );
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -140,36 +138,18 @@ export function MobileSessionDrawer({
 
       {/* Session list */}
       <nav aria-label="Chat sessions" className="min-h-0 flex-1 overflow-y-auto px-2 pb-4">
-        <SessionList
-          sessions={filteredR}
+        <SessionSectionList
+          sections={sections}
+          isSearching={isSearching}
+          openSections={openSections}
+          onToggleSection={toggleSection}
           selectedSessionId={selectedSessionId}
           onSelect={onSelect}
           taskInfoMap={taskInfoMap}
           onShowHierarchy={onShowHierarchy}
           showOwnership={showOwnership}
+          size="lg"
         />
-        {filteredS.length > 0 && (
-          <>
-            <button
-              type="button"
-              onClick={() => setMobileShowStale(!showOlder)}
-              className="mt-1 flex min-h-11 w-full cursor-pointer items-center gap-1.5 rounded-[11px] border-none bg-transparent px-3 text-sm text-fg-muted transition-colors hover:bg-[var(--sam-glass-v2-raised)]"
-            >
-              {showOlder ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-              <span>Older ({filteredS.length})</span>
-            </button>
-            {showOlder && (
-              <SessionList
-                sessions={filteredS}
-                selectedSessionId={selectedSessionId}
-                onSelect={onSelect}
-                taskInfoMap={taskInfoMap}
-                onShowHierarchy={onShowHierarchy}
-                showOwnership={showOwnership}
-              />
-            )}
-          </>
-        )}
       </nav>
     </GlassSheet>
   );

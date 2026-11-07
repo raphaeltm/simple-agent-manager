@@ -3,6 +3,7 @@ import { CloudOff, KeyRound, Link2Off, RotateCw } from 'lucide-react';
 
 import { NOTICE_ACTION_CLASS, NoticeSlab, NoticeTextButton } from '../chat-notices/NoticeSlab';
 import { StatusCapsule, StatusCapsuleSlot } from '../chat-notices/StatusCapsule';
+import { ProviderLimitResume } from '../ProviderLimitResume';
 import { ConnectionBanner } from './MessageBanners';
 import { ElapsedTime } from './session-view-utils';
 import type { UseSessionLifecycleResult } from './useSessionLifecycle.types';
@@ -42,7 +43,10 @@ export function hasActiveLoopbackGuidance(
  * the reader to act. Transient connection and wake states float over the conversation instead
  * (`SessionStatusCapsules`).
  */
-export function SessionStatusBanners({ lc }: Readonly<{ lc: UseSessionLifecycleResult }>) {
+export function SessionStatusBanners({
+  lc,
+  projectId,
+}: Readonly<{ lc: UseSessionLifecycleResult; projectId: string }>) {
   let missingAgentConnection = false;
   const unsupportedLoopbackAuth = hasActiveLoopbackGuidance(lc.messages);
   // The selection failure also sets the task error, so that error must not
@@ -56,8 +60,29 @@ export function SessionStatusBanners({ lc }: Readonly<{ lc: UseSessionLifecycleR
     }
   }
   const isMine = lc.session?.isMine === true;
+  const providerReason = lc.taskEmbed?.providerLimitReason;
+  const providerBlocked = providerReason?.startsWith('Blocked:');
   return (
     <>
+      {(providerBlocked || providerReason) && (
+        <NoticeSlab
+          role="status"
+          data-testid="provider-limit-notice"
+          tone={providerBlocked ? 'warning' : 'info'}
+          icon={<CloudOff size={15} />}
+          title={providerBlocked ? 'Needs you' : 'Waiting for provider limit reset'}
+          detail={providerReason ?? 'The provider wait needs your approval to resume.'}
+          actions={
+            providerBlocked && isMine && lc.taskEmbed && lc.session ? (
+              <ProviderLimitResume
+                key={`${lc.taskEmbed.id}:${lc.taskEmbed.providerLimitVersion ?? ''}`}
+                projectId={projectId}
+                taskId={lc.taskEmbed.id}
+              />
+            ) : undefined
+          }
+        />
+      )}
       {missingAgentConnection && (
         <NoticeSlab
           role="alert"
@@ -108,7 +133,7 @@ export function SessionStatusBanners({ lc }: Readonly<{ lc: UseSessionLifecycleR
       )}
 
       {/* Resume / delivery error with retry */}
-      {lc.resumeError && (
+      {lc.resumeError && !providerBlocked && (
         <NoticeSlab
           role="alert"
           data-testid="resume-error-notice"
@@ -156,7 +181,9 @@ export function SessionStatusCapsules({ lc }: Readonly<{ lc: UseSessionLifecycle
     e.g. an API that predates `wakePhase`, or a wake claimed before the
     replacement runner has written its first execution step.
   */
-  const showWake = lc.sessionState === 'sleeping' && (lc.isWaking || lc.agentActivity !== 'idle');
+  const providerHeld = Boolean(lc.taskEmbed?.providerLimitReason);
+  const showWake =
+    !providerHeld && lc.sessionState === 'sleeping' && (lc.isWaking || lc.agentActivity !== 'idle');
   if (!showConnection && !lc.isResuming && !showWake) return null;
 
   return (

@@ -11,6 +11,8 @@ import {
   parseProviderLimitWait,
   PROVIDER_LIMIT_POLICY,
 } from '../../services/provider-limit-policy';
+import { presentBlockedProviderLimitWait } from '../../services/provider-limit-recovery';
+import { resolveProviderLimitResetWindowTolerance } from '../../services/provider-limit-settings';
 import { rejectedProviderWindow } from '../../services/provider-limit-window';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
@@ -36,6 +38,9 @@ export async function holdTaskForProviderLimit(
     }>();
   const previous = parseProviderLimitWait(row?.provider_limit_wait_json);
   const now = Date.now();
+  const ownerResumed =
+    previous?.phase === 'released' &&
+    previous.scheduleKey.startsWith(`provider-limit:${state.taskId}:resume:`);
   if (row?.provider_limit_wait_json && !previous) {
     await rc.assertRecoveryAuthority(state);
     await rc.env.DATABASE.prepare(
@@ -100,13 +105,23 @@ export async function holdTaskForProviderLimit(
   const key = reference ? await credentialLimitReferenceKey(reference) : null;
   const window = await rejectedProviderWindow(rc.env, reference, now);
   let wait = previous;
-  if (previous?.credentialKey && previous.credentialKey !== key) {
+  if (!ownerResumed && previous?.credentialKey && previous.credentialKey !== key) {
     wait = {
       ...previous,
       phase: 'blocked',
       reason: 'Blocked: selected provider credential changed; review before resuming.',
     };
   } else if (previous?.phase === 'blocked') {
+    await presentBlockedProviderLimitWait(
+      rc.env,
+      {
+        id: state.taskId,
+        projectId: state.projectId,
+        chatSessionId: state.config.chatSessionId ?? null,
+        workspaceId: state.stepResults.workspaceId,
+      },
+      previous
+    );
     await rc.ctx.storage.deleteAlarm();
     return true; // no automatic retries once blocked
   } else if (previous?.phase === 'waiting' && previous.deadlineAt < now) {
@@ -120,14 +135,25 @@ export async function holdTaskForProviderLimit(
     await rc.ctx.storage.setAlarm(previous.nextRetryAt);
     return true;
   } else if (!window) {
-    if (previous && previous.phase !== 'released') {
+    if (previous && (previous.phase !== 'released' || ownerResumed)) {
       await rc.assertRecoveryAuthority(state);
       const released = await rc.env.DATABASE.prepare(
         `UPDATE tasks SET provider_limit_wait_json = ?, admission_state = NULL, admission_reason = NULL, admission_next_retry_at = NULL
          WHERE id = ? AND provider_limit_wait_json IS ?`
       )
         .bind(
-          JSON.stringify({ ...previous, phase: 'released' }),
+          ownerResumed && key === null
+            ? null
+            : JSON.stringify({
+                ...previous,
+                phase: 'released',
+                ...(ownerResumed
+                  ? {
+                      credentialKey: key,
+                      scheduleKey: `provider-limit:${state.taskId}:${crypto.randomUUID()}`,
+                    }
+                  : {}),
+              }),
           state.taskId,
           row?.provider_limit_wait_json ?? null
         )
@@ -142,9 +168,10 @@ export async function holdTaskForProviderLimit(
     wait = newProviderLimitWait({
       taskId: state.taskId,
       origin: 'admission',
+      resetWindowToleranceMs: await resolveProviderLimitResetWindowTolerance(rc.env),
       incidentId: `admission:${state.taskId}:${window.observedAt}`,
       credentialKey: key,
-      previous,
+      previous: ownerResumed ? null : previous,
       now,
       resetsAt: window.resetsAt,
     });
@@ -186,6 +213,18 @@ export async function holdTaskForProviderLimit(
       `${wait.scheduleKey}:notice`
     );
   if (wait.phase === 'waiting') await rc.ctx.storage.setAlarm(wait.nextRetryAt);
-  else await rc.ctx.storage.deleteAlarm();
+  else {
+    await presentBlockedProviderLimitWait(
+      rc.env,
+      {
+        id: state.taskId,
+        projectId: state.projectId,
+        chatSessionId: state.config.chatSessionId ?? null,
+        workspaceId: state.stepResults.workspaceId,
+      },
+      wait
+    );
+    await rc.ctx.storage.deleteAlarm();
+  }
   return true;
 }

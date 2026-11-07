@@ -103,6 +103,10 @@ import { runStandingWatchAlarm } from './project-standing-watches-runner';
 import * as standingWatches from './project-standing-watches-storage';
 import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from './prompt-delivery';
 import * as promptDelivery from './prompt-delivery';
+import {
+  type ProviderLimitAttentionResult,
+  syncProviderLimitAttention,
+} from './provider-limit-attention';
 import * as reconciliation from './reconciliation';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import { checkRuntimeHeartbeatTimeouts } from './runtime-heartbeat-policy';
@@ -2456,6 +2460,31 @@ export class ProjectData extends DurableObject<Env> {
 
   async getCleanupAt(sessionId: string): Promise<number | null> {
     return idleCleanup.getCleanupAt(this.sql, sessionId);
+  }
+
+  async syncProviderLimitAttention(input: {
+    projectId: string;
+    taskId: string;
+    sessionId: string;
+  }): Promise<ProviderLimitAttentionResult> {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.ensureProjectId(input.projectId);
+      const result = await syncProviderLimitAttention(this.sql, this.env.DATABASE, input);
+      if (result.changed) {
+        this.scheduleSummarySync();
+        this.broadcastEvent(
+          result.blocked ? 'attention.created' : 'attention.resolved',
+          {
+            sessionId: input.sessionId,
+            markerId: result.markerId,
+            kind: 'provider_limit_blocked',
+            reason: result.reason,
+          },
+          input.sessionId
+        );
+      }
+      return result;
+    });
   }
 
   async createAttentionMarker(

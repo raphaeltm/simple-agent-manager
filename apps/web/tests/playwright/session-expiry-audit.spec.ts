@@ -362,6 +362,11 @@ test('expired transcript, neutral label, and Fork remain usable', async ({ page 
     await openList.click();
   }
   await expect(page.getByPlaceholder('Search chats...')).toBeVisible();
+  // Expired chats are History, folded by default; the open one stays in view.
+  const history = page.getByRole('button', { name: /^History/ });
+  await expect(history).toHaveAttribute('aria-expanded', 'false');
+  await expect(page.getByText('Older conversation 1', { exact: true })).toHaveCount(0);
+  await history.click();
   await expect(page.getByText('Older conversation 1', { exact: true })).toBeVisible();
   await expect(page.getByText('Expired', { exact: true }).first()).toBeVisible();
   await page.screenshot({

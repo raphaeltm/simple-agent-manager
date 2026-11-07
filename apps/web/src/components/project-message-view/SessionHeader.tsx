@@ -275,7 +275,7 @@ export function SessionHeader({
       <SessionHeaderMobile
         title={sessionTitle}
         stateLabel={sessionStateLabel(sessionState, taskEmbed)}
-        stateTone={sessionStateTone(sessionState)}
+        stateTone={sessionStateTone(sessionState, taskEmbed)}
         firstPort={sortedPorts[0]}
         getWorkspacePortHref={getWorkspacePortHref}
         unresolvedCommentCount={unresolvedCommentCount}

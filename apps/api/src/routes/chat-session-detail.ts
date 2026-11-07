@@ -22,6 +22,7 @@ import { getPullRequestStates } from '../operations/pull-request-core';
 import type { OperationContext } from '../operations/types';
 import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
 import * as projectDataService from '../services/project-data';
+import { parseProviderLimitWait } from '../services/provider-limit-policy';
 import { publicPlacementExplanationJson } from '../services/public-placement-explanation';
 import { isTaskStatus } from '../services/task-status';
 import { attachWakeState } from './chat/wake-state';
@@ -115,6 +116,9 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
             id: schema.tasks.id,
             status: schema.tasks.status,
             executionStep: schema.tasks.executionStep,
+            admissionState: schema.tasks.admissionState,
+            admissionReason: schema.tasks.admissionReason,
+            providerLimitWaitJson: schema.tasks.providerLimitWaitJson,
             terminalReason: schema.tasks.terminalReason,
             errorMessage: schema.tasks.errorMessage,
             placementExplanationJson: schema.tasks.placementExplanationJson,
@@ -164,6 +168,12 @@ export function registerChatSessionDetailRoute(chatRoutes: Hono<{ Bindings: Env 
 
           task = {
             id: taskRow.id,
+            providerLimitReason: taskRow.admissionState?.startsWith('provider_limit_')
+              ? taskRow.admissionReason
+              : null,
+            providerLimitVersion: taskRow.admissionState?.startsWith('provider_limit_')
+              ? (parseProviderLimitWait(taskRow.providerLimitWaitJson)?.scheduleKey ?? null)
+              : null,
             status: isTaskStatus(taskRow.status) ? taskRow.status : 'draft',
             executionStep: isTaskExecutionStep(taskRow.executionStep)
               ? taskRow.executionStep

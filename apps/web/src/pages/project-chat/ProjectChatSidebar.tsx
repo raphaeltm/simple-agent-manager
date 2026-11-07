@@ -1,8 +1,8 @@
 import { SearchField, SegmentedControl } from '@simple-agent-manager/ui';
-import { ChevronDown, ChevronRight, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
 
 import { sessionScopeOptions } from './session-scope-options';
-import { SessionList } from './SessionList';
+import { SessionSectionList } from './SessionSectionList';
 import type { useProjectChatState } from './useProjectChatState';
 
 /**
@@ -84,43 +84,17 @@ export function ProjectChatSidebar({
       {/* Session list — scrollable */}
       {state.hasSessions ? (
         <nav aria-label="Chat sessions" className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
-          <SessionList
-            sessions={state.filteredRecent}
+          <SessionSectionList
+            sections={state.sessionList.sections}
+            isSearching={state.sessionList.isSearching}
+            openSections={state.sessionList.openSections}
+            onToggleSection={state.sessionList.toggleSection}
             selectedSessionId={state.sessionId ?? null}
             onSelect={state.handleSelect}
             taskInfoMap={state.taskInfoMap}
             onShowHierarchy={handleShowHierarchy}
             showOwnership={state.multiplayerActive}
           />
-          {state.filteredStale.length > 0 && (
-            <>
-              <button
-                type="button"
-                onClick={() => state.setShowStale(!state.effectiveShowStale)}
-                className="mt-1 flex min-h-10 w-full cursor-pointer items-center gap-1.5 rounded-[11px] border-none bg-transparent px-3 text-[13px] text-fg-muted transition-colors hover:bg-[var(--sam-glass-v2-raised)] hover:text-fg-primary"
-              >
-                {state.effectiveShowStale ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                <span>Older ({state.filteredStale.length})</span>
-              </button>
-              {state.effectiveShowStale && (
-                <SessionList
-                  sessions={state.filteredStale}
-                  selectedSessionId={state.sessionId ?? null}
-                  onSelect={state.handleSelect}
-                  taskInfoMap={state.taskInfoMap}
-                  onShowHierarchy={handleShowHierarchy}
-                  showOwnership={state.multiplayerActive}
-                />
-              )}
-            </>
-          )}
-          {state.filteredRecent.length === 0 && !state.effectiveShowStale && (
-            <div className="flex items-center justify-center p-4">
-              <span className="text-center text-[13px] text-fg-muted">
-                {state.searchQuery ? 'No matching chats' : 'No recent chats'}
-              </span>
-            </div>
-          )}
         </nav>
       ) : state.loading ? (
         // Not a status region: the conversation column's spinner already announces loading.

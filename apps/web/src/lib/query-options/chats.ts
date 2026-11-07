@@ -37,16 +37,33 @@ export const chatQueryKeys = {
     [...chatQueryKeys.all(queryScope), 'recent', { limit, staleThreshold }] as const,
   list: (queryScope: string, limit: number) =>
     [...chatQueryKeys.all(queryScope), 'list', { limit }] as const,
-  projectSessions: (queryScope: string, projectId: string, limit: number) =>
-    [...chatQueryKeys.all(queryScope), 'project-sessions', projectId, { limit }] as const,
+  projectSessions: (queryScope: string, projectId: string, limit: number, includeLive = false) =>
+    [
+      ...chatQueryKeys.all(queryScope),
+      'project-sessions',
+      projectId,
+      { limit, includeLive },
+    ] as const,
   /** Every chat transcript cached for this scope, across projects. */
   transcripts: (queryScope: string) => ['auth', queryScope, 'sessions', 'messages'] as const,
   sessionMessages: (queryScope: string, projectId: string, sessionId: string) =>
     [...chatQueryKeys.transcripts(queryScope), projectId, sessionId] as const,
   timelineMessages: (queryScope: string, projectId: string, sessionId: string, maxPages: number) =>
-    [...chatQueryKeys.all(queryScope), 'timeline-messages', projectId, sessionId, { maxPages }] as const,
+    [
+      ...chatQueryKeys.all(queryScope),
+      'timeline-messages',
+      projectId,
+      sessionId,
+      { maxPages },
+    ] as const,
   timelineActivity: (queryScope: string, projectId: string, sessionId: string, limit: number) =>
-    [...chatQueryKeys.all(queryScope), 'timeline-activity', projectId, sessionId, { limit }] as const,
+    [
+      ...chatQueryKeys.all(queryScope),
+      'timeline-activity',
+      projectId,
+      sessionId,
+      { limit },
+    ] as const,
 };
 
 /** Compat shape: consumers of `ChatSessionListItem` expect `createdAt`. */
@@ -58,11 +75,7 @@ function withCreatedAt(sessions: SessionSummaryItem[]): ChatSessionSummary[] {
   return sessions.map((session) => ({ ...session, createdAt: session.startedAt }));
 }
 
-export function recentChatsQueryOptions(
-  queryScope: string,
-  limit: number,
-  staleThreshold: number
-) {
+export function recentChatsQueryOptions(queryScope: string, limit: number, staleThreshold: number) {
   return queryOptions({
     queryKey: chatQueryKeys.recent(queryScope, limit, staleThreshold),
     queryFn: async () => {
@@ -91,12 +104,14 @@ export function allChatsQueryOptions(queryScope: string, limit: number) {
 export function projectChatSessionsQueryOptions(
   queryScope: string,
   projectId: string,
-  limit: number
+  limit: number,
+  /** Also load awake and sleeping sessions outside the newest page (the chat sidebar). */
+  includeLive = false
 ) {
   return queryOptions({
-    queryKey: chatQueryKeys.projectSessions(queryScope, projectId, limit),
+    queryKey: chatQueryKeys.projectSessions(queryScope, projectId, limit, includeLive),
     queryFn: async (): Promise<ChatSessionListItem[]> =>
-      (await listChatSessions(projectId, { limit })).sessions,
+      (await listChatSessions(projectId, { limit, includeLive })).sessions,
   });
 }
 
