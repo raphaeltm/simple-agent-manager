@@ -20,7 +20,7 @@ Known resets must resume automatically. Rejections in one window currently burn 
 - [x] Coherent blocked task/chat/snapshot state.
 - [x] Parent cancellation if small; otherwise update related idea.
 - [x] Real entry point regression tests and guard reversion red/green evidence.
-- [ ] UI mobile/desktop screenshot audit; lint/typecheck/test/build.
+- [x] UI mobile/desktop screenshot audit; lint/typecheck/test/build.
 - [ ] Specialist review, staging, PR/CI/CodeRabbit, merge/deploy.
 - [ ] Update idea 01M6SKEAYHG5P9T8ES3Z331A37 with PR/outcome.
 
@@ -48,4 +48,4 @@ Class: uncovered cross-boundary feedback loop and unrecoverable lifecycle state.
 Why missed: tests repeated identical callback receipts instead of distinct prompts in one window, and tested schedules rather than subscription delivery.
 Process fix: real callback/admission/event-alarm and owner HTTP-to-recovery regressions plus guard-reversion proofs required by rules35/62; no duplicate standing rules added.
 
-- Full repository tests: all non-API packages passed, including web4994. Initial API run15263 passed/3 failed/2 skipped exposed an immutable transcript write, missing recovery-failure anchor and stale read-count assertion; all corrected and focused reruns green. Final full API rerun in progress. Final lint/typecheck/build rerun in progress.
+- Full repository tests: all non-API packages passed, including web4994. Initial API run15263 passed/3 failed/2 skipped exposed an immutable transcript write, missing recovery-failure anchor and stale read-count assertion; all corrected and focused reruns green. Final full API rerun1055 files/15267 tests passed,1 file/2 tests skipped; final lint/typecheck/build35/35 passed. Staging/release gates remain tracked below and in the PR.
