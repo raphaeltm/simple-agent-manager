@@ -94,23 +94,17 @@ export function ActiveTaskCard({ task }: ActiveTaskCardProps) {
   const activity = getActivityIndicator(task);
 
   return (
-    <div
-      onClick={() => navigate(chatPath)}
-      className="cursor-pointer rounded-lg focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
-      role="button"
-      aria-label={`Open task: ${task.title}`}
-      tabIndex={0}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') {
-          e.preventDefault();
-          navigate(chatPath);
-        }
-      }}
-    >
+    <div className="relative">
       <Card
         variant="glass"
-        className={`py-3 px-[clamp(var(--sam-space-3),3vw,var(--sam-space-4))] hover:border-border-default transition-colors ${glowClass}`}
+        className={`relative py-3 px-[clamp(var(--sam-space-3),3vw,var(--sam-space-4))] hover:border-border-default transition-colors ${glowClass}`}
       >
+        <button
+          type="button"
+          aria-label={`Open task: ${task.title}`}
+          onClick={() => navigate(chatPath)}
+          className="absolute inset-0 z-10 cursor-pointer rounded-lg border-0 bg-transparent focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]"
+        />
         {/* Top row: status + activity indicator */}
         <div className="flex items-center justify-between gap-2 mb-2">
           {providerBlocked ? (
@@ -162,7 +156,7 @@ export function ActiveTaskCard({ task }: ActiveTaskCardProps) {
         ) : null}
 
         {providerBlocked && (
-          <div className="mb-3">
+          <div className="relative z-20 mb-3 w-fit max-w-full">
             <ProviderLimitResume
               key={`${task.id}:${task.providerLimitVersion ?? ''}`}
               projectId={task.projectId}

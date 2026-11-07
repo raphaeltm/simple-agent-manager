@@ -31,14 +31,14 @@ export async function presentBlockedProviderLimitWait(
     ).bind(now, task.id, task.projectId, wait.scheduleKey),
     env.DATABASE.prepare(
       `UPDATE session_snapshots SET recovery_status='failed',recovery_error=?,
-       recovery_attempt_id=NULL,recovery_claimed_at=NULL,updated_at=?
+       recovery_failed_at=COALESCE(recovery_failed_at,?),recovery_attempt_id=NULL,recovery_claimed_at=NULL,updated_at=?
        WHERE project_id=? AND chat_session_id=? AND sleeping_at IS NOT NULL
        AND EXISTS (SELECT 1 FROM tasks t WHERE t.id=? AND t.project_id=session_snapshots.project_id
          AND t.chat_session_id=session_snapshots.chat_session_id AND t.workspace_id IS NULL
          AND t.status='sleeping' AND json_valid(t.provider_limit_wait_json)
          AND json_extract(t.provider_limit_wait_json,'$.phase')='blocked'
          AND json_extract(t.provider_limit_wait_json,'$.scheduleKey')=?)`
-    ).bind(wait.reason, now, task.projectId, task.chatSessionId, task.id, wait.scheduleKey),
+    ).bind(wait.reason, now, now, task.projectId, task.chatSessionId, task.id, wait.scheduleKey),
   ]);
   await projectData.syncProviderLimitAttention(env, task.projectId, task.id, task.chatSessionId);
 }
@@ -133,7 +133,7 @@ export async function resumeProviderLimitTask(env: Env, task: schema.Task, owner
     ),
     env.DATABASE.prepare(
       `UPDATE session_snapshots SET recovery_status=NULL,recovery_attempt_id=NULL,recovery_claimed_at=NULL,
-       recovery_error=NULL,recovery_failed_at=NULL,updated_at=?
+       recovery_error=NULL,updated_at=?
        WHERE project_id=? AND chat_session_id=? AND user_id=? AND sleeping_at IS NOT NULL
        AND EXISTS (SELECT 1 FROM tasks t WHERE t.id=? AND t.provider_limit_wait_json IS ? AND t.workspace_id IS NULL AND t.status='sleeping')`
     ).bind(now, task.projectId, task.chatSessionId, ownerUserId, task.id, released),

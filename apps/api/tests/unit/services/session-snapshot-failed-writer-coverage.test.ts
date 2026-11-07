@@ -22,7 +22,7 @@ const SOURCE_ROOT = join(process.cwd(), 'src');
 /** Assignment forms only: a qualified WHERE predicate is a reader, not a writer. */
 const FAILED_STATUS_WRITE =
   /(?:SET|,)\s+recovery_status\s*=\s*'failed'|recoveryStatus:\s*'failed'/;
-const ANCHOR_WRITE = /recovery_failed_at\s*=\s*\?|recoveryFailedAt:/;
+const ANCHOR_WRITE = /recovery_failed_at\s*=\s*(?:\?|COALESCE\(recovery_failed_at,\s*\?\))|recoveryFailedAt:/;
 
 function sourceFiles(directory: string): string[] {
   return readdirSync(directory).flatMap((entry) => {

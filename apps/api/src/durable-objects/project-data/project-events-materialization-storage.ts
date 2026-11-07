@@ -52,7 +52,7 @@ export function insertPromptQueueBatch(
     `event-wake:${batchId}`,
     stableStringify([projectId, subscription.id, matchIds]),
     authorityExpiresAt ?? now + limits.wakePromptTtlMs,
-    Math.max(now, authorityExpiresAt ?? now) + limits.wakeReadGraceMs,
+    Math.max(now + limits.wakeReadGraceMs, authorityExpiresAt ?? now),
     subscription.deliveryPreference.requested,
     'queued_for_prompt_delivery',
     stableStringify({

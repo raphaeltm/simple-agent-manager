@@ -142,16 +142,18 @@ export async function holdTaskForProviderLimit(
          WHERE id = ? AND provider_limit_wait_json IS ?`
       )
         .bind(
-          JSON.stringify({
-            ...previous,
-            phase: 'released',
-            ...(ownerResumed
-              ? {
-                  credentialKey: key,
-                  scheduleKey: `provider-limit:${state.taskId}:${crypto.randomUUID()}`,
-                }
-              : {}),
-          }),
+          ownerResumed && key === null
+            ? null
+            : JSON.stringify({
+                ...previous,
+                phase: 'released',
+                ...(ownerResumed
+                  ? {
+                      credentialKey: key,
+                      scheduleKey: `provider-limit:${state.taskId}:${crypto.randomUUID()}`,
+                    }
+                  : {}),
+              }),
           state.taskId,
           row?.provider_limit_wait_json ?? null
         )

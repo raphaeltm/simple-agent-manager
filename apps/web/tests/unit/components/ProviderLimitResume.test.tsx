@@ -1,5 +1,6 @@
 import type { DashboardTask } from '@simple-agent-manager/shared';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -47,6 +48,30 @@ const lifecycle = (isMine = true) =>
 
 beforeEach(() => vi.clearAllMocks());
 describe('provider limit owner recovery', () => {
+  it('exposes sibling native controls and supports keyboard open and resume without navigating twice', async () => {
+    const user = userEvent.setup();
+    mocks.resume.mockResolvedValue({ status: 'waking', taskId: task.id });
+    render(
+      <MemoryRouter>
+        <ActiveTaskCard task={task} />
+      </MemoryRouter>
+    );
+    const open = screen.getByRole('button', { name: `Open task: ${task.title}` });
+    const resume = screen.getByRole('button', { name: 'Resume task' });
+    expect(open.tagName).toBe('BUTTON');
+    expect(open.contains(resume)).toBe(false);
+    expect(resume.closest('[role="button"]')).toBeNull();
+    await user.tab();
+    expect(open).toHaveFocus();
+    await user.keyboard('{Enter}');
+    expect(mocks.navigate).toHaveBeenCalledTimes(1);
+    await user.tab();
+    expect(resume).toHaveFocus();
+    await user.keyboard(' ');
+    expect(mocks.resume).toHaveBeenCalledWith('project-1', 'task-1');
+    expect(mocks.navigate).toHaveBeenCalledTimes(1);
+  });
+
   it('uses one coherent blocked or waiting state in both header layouts', () => {
     const embed = lifecycle().taskEmbed;
     expect(sessionStateLabel('sleeping', embed)).toBe('Needs you');

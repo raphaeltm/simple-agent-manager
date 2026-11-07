@@ -296,6 +296,44 @@ describe('provider admission through the TaskRunner alarm', () => {
     ).toEqual({ admission_state: 'provider_limit_blocked' });
   });
 
+  it('owner-approved platform selection clears the old BYO pin before initial credential injection', async () => {
+    const run = runner('agent_session');
+    const approved = {
+      ...newProviderLimitWait({
+        taskId: 'task-1',
+        origin: 'callback',
+        incidentId: 'old-rejection',
+        credentialKey: 'cc_credentials:old-account',
+        previous: null,
+        now: Date.now(),
+        resetsAt: null,
+      }),
+      phase: 'released',
+      scheduleKey: 'provider-limit:task-1:resume:owner-approved',
+    };
+    fixture.sqlite
+      .prepare("UPDATE tasks SET provider_limit_wait_json=? WHERE id='task-1'")
+      .run(JSON.stringify(approved));
+    // Platform selection intentionally has no BYO credential reference.
+    vi.mocked(getSelectedAgentCredentialReference).mockResolvedValueOnce(null);
+    await run.runner.alarm();
+    expect(startSamAwareAgentSession).toHaveBeenCalledOnce();
+    expect(
+      fixture.sqlite
+        .prepare(
+          "SELECT provider_limit_wait_json AS value,admission_state FROM tasks WHERE id='task-1'"
+        )
+        .get()
+    ).toEqual({ value: null, admission_state: null });
+    await expect(
+      assertProviderLimitCredentialPin(
+        fixture.rc.env,
+        'old-workspace',
+        'platform_credentials:platform-account'
+      )
+    ).resolves.toBeUndefined();
+  });
+
   it('owner approval is consumed before provisioning so a later credential change blocks the initial start', async () => {
     // The owner approved the currently selected account, so consumption must
     // happen even when no key change is needed on the first admission.

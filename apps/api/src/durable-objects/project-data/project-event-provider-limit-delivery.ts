@@ -16,13 +16,17 @@ export async function providerLimitEventDeliveryGuard(
 ): Promise<PromptDeliveryResult | null> {
   if (claim.mode !== 'submit' || claim.message.sourceKind !== 'project_event_wake' || !projectId)
     return null;
+  // Subscriptions retain their source task across legacy recovery. Provider state belongs
+  // to the live task currently owning the target chat, whose authority was checked above.
   const task = await env.DATABASE.prepare(
     `SELECT t.provider_limit_wait_json,
       (SELECT a.agent_credential_reference FROM agent_sessions a WHERE a.workspace_id=t.workspace_id
         AND a.status='running' ORDER BY a.created_at DESC LIMIT 1) AS credential_reference
-     FROM tasks t WHERE t.id=? AND t.project_id=? AND t.chat_session_id=?`
+     FROM tasks t WHERE t.project_id=? AND t.chat_session_id=?
+       AND t.status NOT IN ('completed','failed','cancelled')
+     LIMIT 1`
   )
-    .bind(claim.message.sourceTaskId, projectId, claim.message.targetSessionId)
+    .bind(projectId, claim.message.targetSessionId)
     .first<{ provider_limit_wait_json: string | null; credential_reference: string | null }>();
   const wait = parseProviderLimitWait(task?.provider_limit_wait_json);
   // Retain the parked identity as well: queued self-notices must not revive after credential changes.
@@ -102,8 +106,8 @@ export async function providerLimitEventDeliveryGuard(
         claim.message.id
       );
       sql.exec(
-        `UPDATE chat_messages SET content=?, tool_metadata=json_set(tool_metadata,'$.eventIds',json(?),'$.eventCount',?) WHERE id=?`,
-        input.displayContent,
+        // Transcript text is immutable audit history; only delivery metadata is refined.
+        `UPDATE chat_messages SET tool_metadata=json_set(tool_metadata,'$.eventIds',json(?),'$.eventCount',?) WHERE id=?`,
         JSON.stringify(ids),
         ids.length,
         claim.message.promptMessageId

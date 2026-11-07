@@ -368,6 +368,33 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
     );
   });
 
+  it('callback respects the configured reset-window tolerance instead of grouping a later window', async () => {
+    env.PROVIDER_LIMIT_RESET_WINDOW_TOLERANCE_MS = '1000';
+    const reset = Date.now() + 100 * MINUTE;
+    for (let prompt = 1; prompt <= 2; prompt++) {
+      expect(
+        (
+          await callback({
+            ...producedCallbacks[0].callback,
+            providerLimitPromptAttemptId: prompt,
+            providerLimitResetsAt: reset + (prompt - 1) * 30_000,
+          })
+        ).status
+      ).toBe(200);
+    }
+    const row = d1
+      .prepare('SELECT provider_limit_wait_json AS value FROM tasks WHERE id=?')
+      .get(TASK) as { value: string };
+    expect(JSON.parse(row.value)).toMatchObject({
+      phase: 'waiting',
+      attempts: 2,
+      resetsAt: reset + 30_000,
+    });
+    expect(sql.exec('SELECT count(*) AS count FROM project_schedules').toArray()[0]).toEqual({
+      count: 2,
+    });
+  });
+
   it('known reset windows keep an automatic wake after the unknown-reset wait budget', async () => {
     let nextRetryAt = Date.now();
     for (let window = 1; window <= 5; window++) {
