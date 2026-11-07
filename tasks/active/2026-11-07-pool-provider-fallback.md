@@ -66,7 +66,11 @@ from the first candidate, so the chain can never leave one credential domain.
 - [x] Terminal message names providers when the plan spans more than one
 - [ ] Compaction keeps each source's best candidates (after rebase onto PR 2b)
 - [x] Docs: compute-pools.md "Provider order" (fallback behaviour)
-- [ ] Tests (below)
+- [x] Tests (below)
+- [x] Review fixes (2026-11-07, second session): the first tier is skipped like later tiers when
+      a later tier exists (cooldown, spent quota, missing credential); compute quota is charged to
+      the tier being attempted, not `candidates[0]`; `fallback-chain` attempts per tier capped by
+      `operations.provisioningAttemptsPerProviderTier` (default 8)
 
 ## Tests
 
@@ -82,6 +86,17 @@ from the first candidate, so the chain can never leave one credential domain.
 - Compaction keeps a lower-rank source when the first source alone exceeds the budget
 - Each guard proven by surgical revert
 
+## Worst case per step (rule 81 / rule 47)
+
+Attempts in one `node_provisioning` step: at most `tiers × operations.provisioningAttemptsPerProviderTier`
+under `fallback-chain` (default 8), or one per tier under `fail`/`queue`. Tiers are bounded by
+the distinct ranks in the pool's provider order (one per supported provider in practice). Each
+attempt is about a dozen subrequests (node row, task fence, lease mark, provider create and
+operation polls, failure bookkeeping); each tier switch adds lease release, identity, quota and
+lease acquire (about five). A three-provider order is therefore at most 24 creates and roughly
+300 subrequests, under the Worker per-invocation limit. Before the cap, a live GCP catalog
+(hundreds of zone × type offerings) could exceed it on one tier.
+
 ## Staging
 
 Waived by Raphaël for this work (session `eecddba8`, 2026-11-07).
@@ -95,3 +110,11 @@ Waived by Raphaël for this work (session `eecddba8`, 2026-11-07).
   cooldown skip → cooldown test; no missing-credential skip → credential test; success recorded
   on primary → first test.
 - Step split for rule 18: `node-provisioning-lease.ts` (primary lease), `node-provisioning-tier.ts`.
+- Second session reviews: architecture HIGH, CF CRITICAL and test-engineer CRITICAL were the same
+  defect (tier 0 gates could not skip). Fixed via `enterPrimaryProvisioningTier`. Found while
+  fixing: `resolveCapacityAwareQuotaCredentialSource` read `candidates[0]`, so a user-credential
+  later tier below a platform tier was charged to the platform quota. Fixed with a
+  `targetCandidate` parameter. Test-engineer HIGH (GCP quota writes no cooldown) is intended: a
+  GCP quota is regional, and a domain cooldown would block other regions; documented in code and
+  docs. 9 new tests; surgical reverts: cooldown skip, quota skip, credential skip, target
+  candidate, later-tier quota and the per-tier cap each redden exactly their test.

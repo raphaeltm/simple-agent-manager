@@ -206,10 +206,18 @@ to the next source in the order and tries there. That happens when the provider:
   Hetzner's "error during placement"),
 - refuses because an account quota is used up (a Google Cloud `QUOTA_EXCEEDED`, a Hetzner core or
   server limit), or
-- is already cooling down after one of those, or has no usable credential.
+- is cooling down after an account limit (SAM records one for a Hetzner core or server limit and
+  holds new machines off that account for a while; a Google Cloud quota covers one region, so it
+  is not recorded), or has no usable credential, or
+- would go over SAM's monthly compute quota. Each source is checked against its own credential:
+  falling back from platform credentials to your own is allowed, but falling back onto platform
+  credentials still counts against the quota.
 
-With the `fallback-chain` exhaustion policy SAM tries every allowed offering of a source before
-moving on. With `fail` or `queue` it tries one offering per source. `queue` waits only after every
+These checks apply to the first source too, so a first source that is cooling down or over quota
+is skipped rather than waited on. A pool with a single source waits or fails as before.
+
+With the `fallback-chain` exhaustion policy SAM tries the best-ranked allowed offerings of a source
+(up to `operations.provisioningAttemptsPerProviderTier`, 8 by default) before moving on. With `fail` or `queue` it tries one offering per source. `queue` waits only after every
 source is exhausted, and the retry starts again from the first source.
 
 SAM does **not** move to another provider after an error that could mean a machine was created

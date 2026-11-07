@@ -617,6 +617,15 @@ These control the live Google Cloud catalog described in [Google Cloud](/docs/gu
 | `gcpCatalog.priceRefreshCredentialAttempts` | 3                                               | 1–20              | Credentials tried per refresh, platform first; a retry continues with the next ones.                    |
 | `gcpCatalog.priceRefreshBudgetMs`           | 90000                                           | 10000–240000      | Most time one price refresh may take across every page and credential it tries.                         |
 
+### Provider fallback
+
+| Setting                                          | Default | Allowed range | Applies to                                                                                                                     |
+| ------------------------------------------------ | ------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `operations.provisioningAttemptsPerProviderTier` | 8       | 1–50          | Most offerings one task tries from one provider source under `fallback-chain` before moving to the pool's next-ranked provider |
+
+See [Provider order](/docs/guides/compute-pools/#provider-order). Each attempt is a create request
+to the provider, so this bounds the work one task does before it reaches the next provider.
+
 ### Session and configuration read recovery
 
 `performance.configReadTimeoutMs` defaults to 5,000 ms (range 100–30,000) for shared platform

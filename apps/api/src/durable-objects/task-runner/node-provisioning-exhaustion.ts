@@ -45,6 +45,15 @@ import type { VMSize } from '@simple-agent-manager/shared';
 import type { TaskStartCapacityCandidate } from '../../services/placement-resolver';
 import type { TaskRunnerState } from './types';
 
+/**
+ * Default for `operations.provisioningAttemptsPerProviderTier`. Every attempt is a provider create
+ * plus about a dozen D1 and HTTP subrequests, and a live catalog can give one source hundreds of
+ * offerings (every zone of every machine type). Uncapped, one step could exceed the Worker
+ * subrequest limit before reaching the next provider. At 8 per tier, a three-provider order is at
+ * most 24 creates in one step.
+ */
+export const DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER = 8;
+
 /** One provisioning attempt: a concrete offering, or a legacy size-only run. */
 export interface ProvisioningAttempt {
   /** Null for an unpooled/legacy run that has no provider-native offering. */
@@ -80,8 +89,11 @@ export function exhaustionPolicyQueues(plan: ProvisioningExhaustionPlan): boolea
 
 export function buildProvisioningExhaustionPlan(
   state: TaskRunnerState,
-  rankedCandidates: readonly TaskStartCapacityCandidate[]
+  rankedCandidates: readonly TaskStartCapacityCandidate[],
+  options: { maxAttemptsPerTier?: number } = {}
 ): ProvisioningExhaustionPlan {
+  const maxAttemptsPerTier =
+    options.maxAttemptsPerTier ?? DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER;
   const selection = state.config.capacityPoolSelection ?? null;
   const requestedVmSize = state.config.vmSize;
   const diagnostics: string[] = [];
@@ -127,10 +139,16 @@ export function buildProvisioningExhaustionPlan(
         diagnostics.push(`${candidate.id}: ${exclusion}`);
         continue;
       }
-      // `fail` and `queue` try one offering per tier; `fallback-chain` tries them all.
-      if (policy === 'fallback-chain') {
-        tier.push(attemptFor(candidate, requestedVmSize, tierIndex));
+      // `fail` and `queue` try one offering per tier; `fallback-chain` tries the best-ranked
+      // `maxAttemptsPerTier` of them, so a large catalog cannot hold the chain on one source.
+      if (policy !== 'fallback-chain') continue;
+      if (tier.length >= maxAttemptsPerTier) {
+        diagnostics.push(
+          `${candidate.id}: beyond the ${maxAttemptsPerTier} offerings tried per provider source`
+        );
+        continue;
       }
+      tier.push(attemptFor(candidate, requestedVmSize, tierIndex));
       continue;
     }
     const exclusion = newTierExclusionReason(primary, tierHeads, candidate);

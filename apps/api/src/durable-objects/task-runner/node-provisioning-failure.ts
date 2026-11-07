@@ -11,7 +11,8 @@
  *      the domain.
  *   2. The source refused the create outright (a provider account limit, or a
  *      `quota_exceeded` from any provider) and the plan has a later provider
- *      tier → record the domain cooldown and move to that tier.
+ *      tier → record the domain cooldown where the error is an account limit,
+ *      and move to that tier.
  *   3. Any provider account quota with no later tier → record the domain
  *      cooldown and park the task on `provider_account_capacity`; without an
  *      admission queue, fail with a message that says which limit was hit and
@@ -163,7 +164,10 @@ export async function handleProvisioningAttemptFailure(
 
   // 2. This source refused the create, and a lower-ranked source remains. Record the
   //    domain's cooldown for every other task, then hand the chain to the next tier.
-  //    The step releases this tier's lease when it enters the next one.
+  //    The step releases this tier's lease when it enters the next one. Only an account
+  //    limit `classifyVmProviderCapacityError` recognises writes a cooldown (Hetzner today):
+  //    a GCP `quota_exceeded` names one region's quota, and a domain-wide cooldown would
+  //    also block this credential's other regions. Such a tier is retried by the next task.
   if (sourceRefused && laterTierIndex !== null) {
     if (admissionIdentity) {
       await recordVmProviderCapacityFailure(rc.env, { scope: admissionIdentity, error: err });

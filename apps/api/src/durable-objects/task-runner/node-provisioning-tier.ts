@@ -1,10 +1,11 @@
 /**
- * Entering the next provider tier of a TaskRunner provisioning attempt chain.
+ * Entering a provider tier of a TaskRunner provisioning attempt chain.
  *
  * Each tier of `ProvisioningExhaustionPlan` is one capacity source, and so one credential domain:
  * its own VM admission lease, provider cooldown and compute-quota attribution. The step resolves
- * all three once for the first tier. Before the first attempt in a later tier, this module moves
- * them to that tier's source:
+ * all three for the first tier before its attempt loop, with the same skip rules as here whenever
+ * a later tier exists (`node-provisioning-step.ts`). Before the first attempt in a later tier,
+ * this module moves them to that tier's source:
  *
  *   1. release the lease the previous tier held, so its domain's waiters can proceed;
  *   2. point the provisioning target at the tier's first offering;
@@ -19,17 +20,23 @@
  */
 import type { PlacementAttemptDiagnostic } from '@simple-agent-manager/shared';
 
+import { log } from '../../lib/logger';
 import {
   releaseVmProvisioningLease,
   tryAcquireVmProvisioningLease,
   type VmTaskAdmissionIdentity,
 } from '../../services/vm-admission-control';
 import { buildAdmissionIdentity, handleLeaseResult } from './node-provisioning-admission';
-import type {
-  ProvisioningAttempt,
-  ProvisioningExhaustionPlan,
+import {
+  firstAttemptIndexAfterTier,
+  type ProvisioningAttempt,
+  type ProvisioningExhaustionPlan,
 } from './node-provisioning-exhaustion';
 import { enforceComputeQuota } from './node-provisioning-gates';
+import {
+  acquirePrimaryProvisioningLease,
+  providerCooldownSkipReason,
+} from './node-provisioning-lease';
 import { applyCapacityCandidateProvisioningTarget } from './node-provisioning-target';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
@@ -60,32 +67,94 @@ export async function enterProvisioningTier(
 
   const admissionIdentity = await buildAdmissionIdentity(state, rc);
   if (!admissionIdentity) {
-    return {
-      kind: 'skipped',
-      reason: `Skipped: no ${candidate.provider} credential could be resolved for this source`,
-    };
+    return { kind: 'skipped', reason: missingCredentialSkipReason(candidate.provider) };
   }
 
-  try {
-    await enforceComputeQuota(state, rc);
-  } catch (error) {
-    if (!isPermanentError(error)) throw error;
-    return { kind: 'skipped', reason: `Skipped: ${error.message}` };
-  }
+  const quotaRefusal = await computeQuotaRefusal(state, rc);
+  if (quotaRefusal) return { kind: 'skipped', reason: `Skipped: ${quotaRefusal.message}` };
 
   const lease = await tryAcquireVmProvisioningLease(rc.env, admissionIdentity);
-  if (lease.kind === 'waiting' && lease.reason === 'provider_account_capacity') {
-    return {
-      kind: 'skipped',
-      reason: `Skipped: the ${candidate.provider} account is cooling down after a capacity error until ${lease.nextRetryAt}`,
-    };
-  }
+  const cooldown = providerCooldownSkipReason(candidate.provider, lease);
+  if (cooldown) return { kind: 'skipped', reason: cooldown };
   if ((await handleLeaseResult(state, rc, lease)) === 'waiting') return { kind: 'waiting' };
   return { kind: 'entered', admissionIdentity };
 }
 
-function isPermanentError(error: unknown): error is Error {
-  return error instanceof Error && (error as Error & { permanent?: unknown }).permanent === true;
+export type PrimaryTierEntry =
+  | { kind: 'entered' }
+  | { kind: 'step-finished' }
+  | { kind: 'skipped'; reason: string; nextIndex: number };
+
+/**
+ * The first tier's compute-quota gate and lease, before the attempt loop. With a later tier, the
+ * first is skipped for the same reasons a later one is: no credential, spent compute quota, or a
+ * provider cooldown. Without one, each fails or waits exactly as before tiers existed.
+ */
+export async function enterPrimaryProvisioningTier(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext,
+  plan: ProvisioningExhaustionPlan,
+  admissionIdentity: VmTaskAdmissionIdentity | null
+): Promise<PrimaryTierEntry> {
+  const nextIndex = firstAttemptIndexAfterTier(plan, 0);
+  const skip = (reason: string): PrimaryTierEntry =>
+    nextIndex === null ? { kind: 'entered' } : { kind: 'skipped', reason, nextIndex };
+  if (nextIndex !== null && !admissionIdentity) {
+    return skip(missingCredentialSkipReason(plan.attempts[0]?.provider ?? ''));
+  }
+  const quotaRefusal = await computeQuotaRefusal(state, rc);
+  if (quotaRefusal) {
+    if (nextIndex === null) throw quotaRefusal;
+    return skip(`Skipped: ${quotaRefusal.message}`);
+  }
+  if (!admissionIdentity) return { kind: 'entered' };
+  const lease = await acquirePrimaryProvisioningLease(state, rc, admissionIdentity, {
+    skipOnCooldown: nextIndex !== null,
+  });
+  if (lease.kind === 'skipped') return skip(lease.reason);
+  return lease.kind === 'step-finished' ? lease : { kind: 'entered' };
+}
+
+export function logTierSkipped(
+  state: TaskRunnerState,
+  attempt: ProvisioningAttempt | null,
+  tier: number,
+  reason: string
+): void {
+  log.info('task_runner_do.node_provisioning.provider_tier_skipped', {
+    taskId: state.taskId,
+    provider: attempt?.provider ?? null,
+    tier,
+    reason,
+  });
+}
+
+/** Why the current target has no usable credential domain. */
+export function missingCredentialSkipReason(provider: string): string {
+  return `Skipped: no ${provider} credential could be resolved for this source`;
+}
+
+/**
+ * The compute-quota gate for the current provisioning target. Returns the gate's permanent
+ * refusal (spent platform quota, no credential) instead of throwing it, so a tier can be skipped;
+ * anything else, such as a D1 failure, still throws.
+ *
+ * This checks the `permanent` flag directly rather than using `!isTransientError`: that helper
+ * calls any unrecognised error permanent, which would skip a tier on an unexpected bug.
+ */
+export async function computeQuotaRefusal(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext
+): Promise<Error | null> {
+  try {
+    await enforceComputeQuota(state, rc);
+    return null;
+  } catch (error) {
+    if (error instanceof Error && (error as Error & { permanent?: unknown }).permanent === true) {
+      return error;
+    }
+    throw error;
+  }
 }
 
 /** Give every attempt of a skipped tier the reason, leaving it `not-attempted`. */

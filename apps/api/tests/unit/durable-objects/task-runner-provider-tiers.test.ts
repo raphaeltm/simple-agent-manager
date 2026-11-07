@@ -30,6 +30,19 @@ vi.mock('../../../src/services/limits', () => ({
 
 vi.mock('drizzle-orm/d1', () => ({ drizzle: () => ({}) }));
 
+// The compute-quota gate's two lookups. Its own decision logic, and the capacity-aware source
+// choice between them, stay real.
+const resolveCredentialSource = vi.fn();
+const checkQuotaForUser = vi.fn();
+vi.mock('../../../src/services/provider-credentials', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/provider-credentials')>()),
+  resolveCredentialSource: (...a: unknown[]) => resolveCredentialSource(...a),
+}));
+vi.mock('../../../src/services/compute-quotas', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/compute-quotas')>()),
+  checkQuotaForUser: (...a: unknown[]) => checkQuotaForUser(...a),
+}));
+
 const resolveVmAdmissionScope = vi.fn();
 const tryAcquireVmProvisioningLease = vi.fn();
 const waitForVmAdmissionCapacity = vi.fn();
@@ -209,6 +222,8 @@ interface Offering {
   location: string;
   vcpu: number;
   rank: number | null;
+  /** Whose credential the source bills; defaults to the user's own. */
+  attribution?: 'user' | 'platform';
 }
 
 const GCP_A: Offering = {
@@ -263,8 +278,8 @@ function candidate(offering: Offering, index: number) {
     catalogAvailability: 'available',
     priority: 100 + index,
     candidateOrder: 100 + index,
-    credentialAttributionSource: 'user',
-    placementCredentialSource: 'user',
+    credentialAttributionSource: offering.attribution ?? 'user',
+    placementCredentialSource: offering.attribution ?? 'user',
     placementCredentialReference: `credentials:${offering.source}`,
     placementCredentialVersion: 42,
     capacityPoolProjectId: null,
@@ -371,7 +386,7 @@ function createState(
   } as unknown as TaskRunnerState;
 }
 
-function createContext() {
+function createContext(options: { quotaEnforced?: boolean } = {}) {
   const runs: Array<{ sql: string; args: unknown[] }> = [];
   const DATABASE = {
     prepare(sql: string) {
@@ -406,7 +421,11 @@ function createContext() {
     },
   };
   const rc = {
-    env: { DATABASE, MAX_NODES_PER_USER: '10', COMPUTE_QUOTA_ENFORCEMENT_ENABLED: 'false' },
+    env: {
+      DATABASE,
+      MAX_NODES_PER_USER: '10',
+      COMPUTE_QUOTA_ENFORCEMENT_ENABLED: options.quotaEnforced ? 'true' : 'false',
+    },
     ctx: { storage: { put: vi.fn().mockResolvedValue(undefined), setAlarm: vi.fn() } },
     assertRecoveryAuthority: vi.fn().mockResolvedValue(undefined),
     advanceToStep: vi.fn().mockResolvedValue(undefined),
@@ -467,6 +486,8 @@ beforeEach(() => {
     })
   );
   releaseVmProvisioningLease.mockResolvedValue(true);
+  resolveCredentialSource.mockResolvedValue({ credentialSource: 'user' });
+  checkQuotaForUser.mockResolvedValue({ allowed: true, used: 0, limit: 100 });
   waitForVmAdmissionCapacity.mockResolvedValue({
     kind: 'waiting',
     reason: 'provider_transient_capacity',
@@ -641,6 +662,185 @@ describe('provider tiers: exhaustion policies', () => {
     expect(waitForVmAdmissionCapacity.mock.calls[0]?.[1]).toMatchObject({ provider: 'gcp' });
     expect(waitForVmAdmissionCapacity.mock.calls[0]?.[2]).toBe('provider_transient_capacity');
     expect(rc.ctx.storage.setAlarm).toHaveBeenCalled();
+  });
+});
+
+describe('provider tiers: a large catalog cannot hold the chain on one provider', () => {
+  it('`fallback-chain` tries the default 8 best GCP offerings, then moves to Hetzner', async () => {
+    const stockout = await gcpStockout();
+    // Twelve GCP offerings, as a live catalog spanning many zones gives one machine type.
+    const gcpOfferings = Array.from({ length: 12 }, (_, n) => ({
+      ...GCP_A,
+      type: `e2-standard-4-z${n}`,
+    }));
+    provisionOutcomes(Object.fromEntries(gcpOfferings.map((o) => [o.type, stockout])));
+    const { rc } = createContext();
+    const state = createState([...gcpOfferings, HETZNER_A]);
+
+    // The cap comes from the real admin-setting resolver: nothing overrides it here.
+    await handleNodeProvisioning(state, rc);
+
+    expect(attempted()).toEqual([
+      ...gcpOfferings.slice(0, 8).map((o) => `gcp ${o.type}`),
+      'hetzner cx43',
+    ]);
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
+    // Placement diagnostics list what the plan will try: eight GCP offerings and Hetzner.
+    expect(diagnostics(state)).toHaveLength(9);
+  });
+});
+
+describe('provider tiers: `fail` with every tier exhausted', () => {
+  it('fails with every provider named and never queues', async () => {
+    const stockout = await gcpStockout();
+    const placement = await hetznerPlacement();
+    provisionOutcomes({ 'e2-standard-4': stockout, cx43: placement });
+    const { rc } = createContext();
+
+    await expect(
+      handleNodeProvisioning(createState([GCP_A, GCP_B, HETZNER_A, HETZNER_B], 'fail'), rc)
+    ).rejects.toMatchObject({
+      message: expect.stringContaining('(tried gcp e2-standard-4, hetzner cx43)'),
+      permanent: true,
+    });
+    expect(attempted()).toEqual(['gcp e2-standard-4', 'hetzner cx43']);
+    expect(waitForVmAdmissionCapacity).not.toHaveBeenCalled();
+    expect(rc.ctx.storage.setAlarm).not.toHaveBeenCalled();
+  });
+});
+
+const cooldownLease = (provider: string) => {
+  const retryAt = new Date(Date.now() + 600_000).toISOString();
+  tryAcquireVmProvisioningLease.mockImplementation(
+    async (_env: unknown, identity: { scopeKey: string; provider: string }) =>
+      identity.provider === provider
+        ? {
+            kind: 'waiting',
+            reason: 'provider_account_capacity',
+            nextRetryAt: retryAt,
+            waitDeadlineAt: retryAt,
+          }
+        : { kind: 'granted', scopeKey: identity.scopeKey, fencingToken: 7 }
+  );
+  return retryAt;
+};
+
+describe('provider tiers: the most preferred tier is skippable too', () => {
+  it('a cooling-down first provider is skipped, not waited on, when a later tier exists', async () => {
+    cooldownLease('hetzner');
+    const { rc } = createContext();
+    const state = createState([
+      { ...HETZNER_A, rank: 1 },
+      { ...GCP_A, rank: 2 },
+    ]);
+
+    await handleNodeProvisioning(state, rc);
+
+    expect(attempted()).toEqual(['gcp e2-standard-4']);
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
+    expect(rc.ctx.storage.setAlarm).not.toHaveBeenCalled();
+    expect(leaseScopes()).toEqual(['hetzner', 'gcp']);
+    expect(diagnostics(state)[0]).toMatchObject({
+      provider: 'hetzner',
+      outcome: 'not-attempted',
+      reason: expect.stringContaining('cooling down'),
+    });
+  });
+
+  it('control: with no later tier, a cooling-down provider still parks the task', async () => {
+    const retryAt = cooldownLease('hetzner');
+    const { rc } = createContext();
+
+    await handleNodeProvisioning(createState([{ ...HETZNER_A, rank: 1 }]), rc);
+
+    expect(attempted()).toEqual([]);
+    expect(rc.ctx.storage.setAlarm).toHaveBeenCalledWith(Date.parse(retryAt));
+  });
+
+  it('spent platform quota on the first tier falls back to the user’s own credential', async () => {
+    resolveCredentialSource.mockImplementation(
+      async (_db: unknown, _userId: string, provider: string) => ({
+        credentialSource: provider === 'gcp' ? 'platform' : 'user',
+      })
+    );
+    checkQuotaForUser.mockResolvedValue({ allowed: false, used: 100, limit: 100 });
+    const { rc } = createContext({ quotaEnforced: true });
+    const state = createState([{ ...GCP_A, attribution: 'platform' }, HETZNER_A]);
+
+    await handleNodeProvisioning(state, rc);
+
+    expect(attempted()).toEqual(['hetzner cx43']);
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
+    // Only the platform tier is charged to the platform quota.
+    expect(checkQuotaForUser).toHaveBeenCalledTimes(1);
+    expect(diagnostics(state)[0]?.reason).toContain('Monthly compute quota exceeded');
+  });
+
+  it('control: with no later tier, spent platform quota still fails the task', async () => {
+    resolveCredentialSource.mockResolvedValue({ credentialSource: 'platform' });
+    checkQuotaForUser.mockResolvedValue({ allowed: false, used: 100, limit: 100 });
+    const { rc } = createContext({ quotaEnforced: true });
+
+    await expect(
+      handleNodeProvisioning(createState([{ ...GCP_A, attribution: 'platform' }]), rc)
+    ).rejects.toMatchObject({
+      message: expect.stringContaining('Monthly compute quota exceeded'),
+      permanent: true,
+    });
+    expect(attempted()).toEqual([]);
+  });
+
+  it('a first-tier credential that cannot be resolved is skipped', async () => {
+    resolveVmAdmissionScope.mockImplementation(
+      async (_env: unknown, input: { targetProvider: string }) =>
+        input.targetProvider === 'gcp' ? null : scopeFor(input.targetProvider)
+    );
+    const { rc } = createContext();
+    const state = createState([GCP_A, HETZNER_A]);
+
+    await handleNodeProvisioning(state, rc);
+
+    expect(attempted()).toEqual(['hetzner cx43']);
+    expect(diagnostics(state)[0]?.reason).toContain('no gcp credential could be resolved');
+  });
+});
+
+describe('provider tiers: compute quota on a later tier', () => {
+  it('a later tier on platform credentials is skipped when the platform quota is spent', async () => {
+    const stockout = await gcpStockout();
+    provisionOutcomes({ 'e2-standard-4': stockout });
+    resolveCredentialSource.mockImplementation(
+      async (_db: unknown, _userId: string, provider: string) => ({
+        credentialSource: provider === 'hetzner' ? 'platform' : 'user',
+      })
+    );
+    checkQuotaForUser.mockResolvedValue({ allowed: false, used: 100, limit: 100 });
+    const { rc } = createContext({ quotaEnforced: true });
+    const state = createState([GCP_A, { ...HETZNER_A, attribution: 'platform' }]);
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({ permanent: true });
+
+    // Falling back cannot be used to provision past the platform quota.
+    expect(attempted()).toEqual(['gcp e2-standard-4']);
+    expect(checkQuotaForUser).toHaveBeenCalledTimes(1);
+    expect(diagnostics(state)[1]?.reason).toContain('Monthly compute quota exceeded');
+  });
+
+  it('control: the same later tier is used while the platform quota allows it', async () => {
+    const stockout = await gcpStockout();
+    provisionOutcomes({ 'e2-standard-4': stockout });
+    resolveCredentialSource.mockImplementation(
+      async (_db: unknown, _userId: string, provider: string) => ({
+        credentialSource: provider === 'hetzner' ? 'platform' : 'user',
+      })
+    );
+    const { rc } = createContext({ quotaEnforced: true });
+    const state = createState([GCP_A, { ...HETZNER_A, attribution: 'platform' }]);
+
+    await handleNodeProvisioning(state, rc);
+
+    expect(attempted()).toEqual(['gcp e2-standard-4', 'hetzner cx43']);
+    expect(checkQuotaForUser).toHaveBeenCalledTimes(1);
   });
 });
 

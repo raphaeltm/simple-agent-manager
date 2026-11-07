@@ -3,11 +3,14 @@
  * `node_provisioning` step. Split out of `node-provisioning-step.ts` (rule 18).
  *
  * Returns `step-finished` when the step must return now: the task is waiting for the lease or
- * the pool's node limit, or a reusable node was found after winning the lease.
+ * the pool's node limit, or a reusable node was found after winning the lease. Returns `skipped`
+ * instead of waiting when the provider account is cooling down and `skipOnCooldown` is set: the
+ * plan has a later provider tier, so the step moves on to it (`node-provisioning-tier.ts`).
  */
 import {
   releaseVmProvisioningLease,
   tryAcquireVmProvisioningLease,
+  type VmProvisioningLeaseResult,
   type VmTaskAdmissionIdentity,
 } from '../../services/vm-admission-control';
 import {
@@ -26,8 +29,9 @@ import type { TaskRunnerContext, TaskRunnerState } from './types';
 export async function acquirePrimaryProvisioningLease(
   state: TaskRunnerState,
   rc: TaskRunnerContext,
-  admissionIdentity: VmTaskAdmissionIdentity
-): Promise<'proceed' | 'step-finished'> {
+  admissionIdentity: VmTaskAdmissionIdentity,
+  options: { skipOnCooldown: boolean }
+): Promise<{ kind: 'proceed' } | { kind: 'step-finished' } | { kind: 'skipped'; reason: string }> {
   if (state.admissionScopeKey && state.admissionScopeKey !== admissionIdentity.scopeKey) {
     // A lease left by a later provider tier before a crash or wait: this run starts again
     // from the most preferred tier, so give the other domain's lease back first.
@@ -42,7 +46,13 @@ export async function acquirePrimaryProvisioningLease(
     state.admissionLeaseToken = null;
   }
   const leaseResult = await tryAcquireVmProvisioningLease(rc.env, admissionIdentity);
-  if ((await handleLeaseResult(state, rc, leaseResult)) === 'waiting') return 'step-finished';
+  const cooldown = options.skipOnCooldown
+    ? providerCooldownSkipReason(admissionIdentity.provider, leaseResult)
+    : null;
+  if (cooldown) return { kind: 'skipped', reason: cooldown };
+  if ((await handleLeaseResult(state, rc, leaseResult)) === 'waiting') {
+    return { kind: 'step-finished' };
+  }
 
   // Re-select after winning the claim. A compatible node may have become
   // reusable while this task was competing for the fenced provisioning lease.
@@ -65,7 +75,7 @@ export async function acquirePrimaryProvisioningLease(
       state.stepResults.capacityPlacementSnapshot = reusableNode.capacityPlacementSnapshot;
       await persistPlacementDiagnostics(state, rc, { queue: {} });
       await rc.advanceToStep(state, 'workspace_creation');
-      return 'step-finished';
+      return { kind: 'step-finished' };
     }
   }
 
@@ -88,7 +98,16 @@ export async function acquirePrimaryProvisioningLease(
     state.admissionScopeKey = null;
     state.admissionLeaseToken = null;
     await waitOrThrowForCapacityPoolNodeLimit(state, rc, admissionIdentity, poolMaxNodesAfterLease);
-    return 'step-finished';
+    return { kind: 'step-finished' };
   }
-  return 'proceed';
+  return { kind: 'proceed' };
+}
+
+/** A lease refused because the provider account is cooling down, as a skip reason. */
+export function providerCooldownSkipReason(
+  provider: string,
+  lease: VmProvisioningLeaseResult
+): string | null {
+  if (lease.kind !== 'waiting' || lease.reason !== 'provider_account_capacity') return null;
+  return `Skipped: the ${provider} account is cooling down after a capacity error until ${lease.nextRetryAt}`;
 }

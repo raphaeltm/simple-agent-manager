@@ -97,9 +97,17 @@ export async function enforceComputeQuota(
       });
     }
 
+    const selection = state.config.capacityPoolSelection ?? null;
+    // The offering this attempt provisions, which on a later provider tier is not the first.
+    const targetCandidateId = state.stepResults.capacityPlacementSnapshot?.capacityPoolCandidateId;
+    const targetCandidate =
+      selection?.candidates.find((candidate) => candidate.id === targetCandidateId) ??
+      selection?.candidates[0] ??
+      null;
     const quotaCredentialSource = resolveCapacityAwareQuotaCredentialSource(
       credResult,
-      state.config.capacityPoolSelection ?? null
+      selection,
+      targetCandidate
     );
     if (quotaCredentialSource === 'platform') {
       const { checkQuotaForUser } = await import('../../services/compute-quotas');

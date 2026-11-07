@@ -10,6 +10,7 @@ import {
   MAX_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
 } from '@simple-agent-manager/shared';
 
+import { DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER } from '../durable-objects/task-runner/node-provisioning-exhaustion';
 import { DEFAULT_IDEA_CONTENT_MAX_LENGTH } from '../lib/idea-content-limit';
 import {
   type AdminSettingDefinition,
@@ -218,6 +219,13 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     'Operations',
     'External workload identity token lifetime in seconds. Changes apply to newly issued tokens.',
     { min: 1, max: MAX_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS }
+  ),
+  integerDefinition(
+    'operations.provisioningAttemptsPerProviderTier',
+    DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER,
+    'Operations',
+    "Most offerings one task tries from a single provider source before moving to the pool's next-ranked provider (or giving up), under the fallback-chain exhaustion policy.",
+    { min: 1, max: 50 }
   ),
   ...Object.keys(CONNECTOR_DEFAULTS).map((key) => connectorDefinition(key as ConnectorSettingKey)),
   ...agentModelSettingDefinitions(),

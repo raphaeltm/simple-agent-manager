@@ -10,6 +10,7 @@
 import type { PlacementAttemptDiagnostic, VMSize } from '@simple-agent-manager/shared';
 
 import { log } from '../../lib/logger';
+import { resolveAdminSetting } from '../../services/admin-settings-resolution';
 import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_ASSIGNMENTS,
   capacityPlacementSnapshotSqlValues,
@@ -45,8 +46,7 @@ import {
   handleProvisioningAttemptFailure,
   terminalizeExhaustedPlan,
 } from './node-provisioning-failure';
-import { enforceComputeQuota, enforceUserNodeLimit } from './node-provisioning-gates';
-import { acquirePrimaryProvisioningLease } from './node-provisioning-lease';
+import { enforceUserNodeLimit } from './node-provisioning-gates';
 import { rankProvisioningCandidates } from './node-provisioning-ranking';
 import { adoptProvisionedNodeAfterCrash } from './node-provisioning-recovery';
 import {
@@ -55,7 +55,12 @@ import {
 } from './node-provisioning-rejected-node';
 import { trySelectReusableNodeForProvisioning } from './node-provisioning-reuse';
 import { applyCapacityCandidateProvisioningTarget } from './node-provisioning-target';
-import { enterProvisioningTier, markTierSkipped } from './node-provisioning-tier';
+import {
+  enterPrimaryProvisioningTier,
+  enterProvisioningTier,
+  logTierSkipped,
+  markTierSkipped,
+} from './node-provisioning-tier';
 import { persistPlacementDiagnostics } from './placement-diagnostics';
 import {
   assertTaskExecutionAuthority,
@@ -175,14 +180,31 @@ export async function handleNodeProvisioning(
 
   if ((await enforceUserNodeLimit(state, rc, admissionIdentity)) === 'waiting') return;
 
-  await enforceComputeQuota(state, rc);
-
-  if (
-    admissionIdentity &&
-    (await acquirePrimaryProvisioningLease(state, rc, admissionIdentity)) === 'step-finished'
-  ) {
-    return;
+  // Capacity exhaustion is decided by the effective pool's own exhaustionPolicy
+  // (queue / fail / fallback-chain), not by descending the legacy VM-size ladder.
+  // The old descent silently provisioned SMALLER hardware than the resolved
+  // requirements asked for whenever the size happened to be default-derived.
+  const exhaustionPlan = buildProvisioningExhaustionPlan(state, rankedCapacityCandidates, {
+    maxAttemptsPerTier: Number(
+      await resolveAdminSetting(rc.env, 'operations.provisioningAttemptsPerProviderTier')
+    ),
+  });
+  if (exhaustionPlan.diagnostics.length > 0) {
+    log.info('task_runner_do.node_provisioning.exhaustion_alternatives_excluded', {
+      taskId: state.taskId,
+      policy: exhaustionPlan.policy,
+      excludedCount: exhaustionPlan.diagnostics.length,
+      excluded: exhaustionPlan.diagnostics.slice(0, 5),
+    });
   }
+
+  const primaryEntry = await enterPrimaryProvisioningTier(
+    state,
+    rc,
+    exhaustionPlan,
+    admissionIdentity
+  );
+  if (primaryEntry.kind === 'step-finished') return;
 
   // Import and call node creation services
   // We import dynamically to avoid circular dependency issues and
@@ -190,19 +212,6 @@ export async function handleNodeProvisioning(
   const { createNodeRecord, provisionNode } = await import('../../services/nodes');
   const { getRuntimeLimits } = await import('../../services/limits');
   const limits = getRuntimeLimits(rc.env);
-
-  // Capacity exhaustion is decided by the effective pool's own exhaustionPolicy
-  // (queue / fail / fallback-chain), not by descending the legacy VM-size ladder.
-  // The old descent silently provisioned SMALLER hardware than the resolved
-  // requirements asked for whenever the size happened to be default-derived.
-  const exhaustionPlan = buildProvisioningExhaustionPlan(state, rankedCapacityCandidates);
-  if (exhaustionPlan.diagnostics.length > 0) {
-    log.info('task_runner_do.node_provisioning.exhaustion_alternatives_excluded', {
-      taskId: state.taskId,
-      policy: exhaustionPlan.policy,
-      excluded: exhaustionPlan.diagnostics.slice(0, 5),
-    });
-  }
 
   const diagnosticAttempts: PlacementAttemptDiagnostic[] = exhaustionPlan.attempts.map(
     (attempt, index) => ({
@@ -222,6 +231,13 @@ export async function handleNodeProvisioning(
   let currentTier = 0;
   let lastProviderError: string | null = null;
   let i = 0;
+  if (primaryEntry.kind === 'skipped') {
+    markTierSkipped(exhaustionPlan, diagnosticAttempts, 0, primaryEntry.reason);
+    await persistPlacementDiagnostics(state, rc, { attempts: diagnosticAttempts });
+    logTierSkipped(state, exhaustionPlan.attempts[0] ?? null, 0, primaryEntry.reason);
+    // `currentTier` stays 0, so the loop enters the next tier before its first attempt.
+    i = primaryEntry.nextIndex;
+  }
   while (i < exhaustionPlan.attempts.length) {
     const attempt = exhaustionPlan.attempts[i];
     const diagnosticAttempt = diagnosticAttempts[i];
@@ -237,12 +253,7 @@ export async function handleNodeProvisioning(
       if (entry.kind === 'skipped') {
         markTierSkipped(exhaustionPlan, diagnosticAttempts, currentTier, entry.reason);
         await persistPlacementDiagnostics(state, rc, { attempts: diagnosticAttempts });
-        log.info('task_runner_do.node_provisioning.provider_tier_skipped', {
-          taskId: state.taskId,
-          provider: attempt.provider,
-          tier: currentTier,
-          reason: entry.reason,
-        });
+        logTierSkipped(state, attempt, currentTier, entry.reason);
         i = firstAttemptIndexAfterTier(exhaustionPlan, i) ?? exhaustionPlan.attempts.length;
         continue;
       }
