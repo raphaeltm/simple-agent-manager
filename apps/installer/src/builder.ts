@@ -20,9 +20,17 @@ async function begin(){
  try {
   if(process.env.SAM_BUILD_FIT_ONLY==='1'){const {execFileSync}=require('node:child_process');execFileSync('git',['clone','https://github.com/raphaeltm/simple-agent-manager.git','/sam/source'],{stdio:'ignore'});execFileSync('git',['-C','/sam/source','checkout','--detach',process.env.SAM_SOURCE_COMMIT],{stdio:'ignore'});}
   else await (${canonicalSourceBootstrap})();
-  const child = spawn('sh', ['-c', boot], {stdio:'ignore',env:process.env});
-  child.once('error', () => {failure={step:'bootstrap'};state='failed';});
-  child.once('close', code => {if(code!==0)failure={step:'bootstrap',code};state=code===0?'completed':'failed';});
+  const child = spawn('sh', ['-c', boot], {stdio:['ignore','pipe','pipe'],env:process.env});
+  // Keep a short tail of the engine output for a failure report. The engine is
+  // built for public CI logs; exact secret values are scrubbed again here.
+  const secrets = Object.entries(process.env).filter(([name,value]) => typeof value === 'string' && value.length >= 12 && /TOKEN|SECRET|KEY|PASSPHRASE|NONCE|PASSWORD|CREDENTIAL/i.test(name)).map(([,value]) => value);
+  const tail = [];
+  const keep = line => { let text = String(line); for (const value of secrets) text = text.split(value).join('[redacted]'); tail.push(text.slice(0, 400)); if (tail.length > 40) tail.shift(); };
+  const readline = require('node:readline');
+  readline.createInterface({input:child.stdout}).on('line', keep);
+  readline.createInterface({input:child.stderr}).on('line', keep);
+  child.once('error', () => {failure={step:'bootstrap',tail};state='failed';});
+  child.once('close', code => {if(code!==0)failure={step:'bootstrap',code,tail};state=code===0?'completed':'failed';});
  }catch(error){failure={step:'source',reason:reason(error)};state='failed';}
 }
 // Initial OS tooling is required before signed source storage/bootstrap.
@@ -64,6 +72,7 @@ function builderSafeFailure(value){
  const failure={step:value.step};
  if(Number.isSafeInteger(value.code)&&value.code>=0&&value.code<=255)failure.code=value.code;
  if(typeof value.reason==='string'&&/^[A-Za-z0-9 ()]{1,120}$/.test(value.reason))failure.reason=value.reason;
+ if(Array.isArray(value.tail)){const tail=value.tail.filter(line=>typeof line==='string').slice(-40).map(line=>line.slice(0,400));if(tail.length&&tail.join('\n').length<=16384)failure.tail=tail;}
  return failure;
 }
 function builderSafeCheckpoint(value){

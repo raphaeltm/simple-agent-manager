@@ -182,10 +182,11 @@ $('preview').addEventListener('click', async () => {
     $('plan-summary').setAttribute('role', plan.conflicts.length ? 'alert' : 'status');
     const summary = $('plan-summary');
     if (plan.conflicts.length) {
-      const names = (certificate) => plan.conflicts.filter((record) => (record.type === 'certificate') === certificate).map((record) => record.name).join(', ');
+      const names = (kind) => plan.conflicts.filter((record) => (record.type === 'certificate' ? 'certificate' : record.type === 'route' ? 'route' : 'dns') === kind).map((record) => record.name).join(', ');
       const parts = [];
-      if (names(false)) parts.push(`Existing DNS records block installation: ${names(false)}. Remove them in Cloudflare or choose another domain.`);
-      if (names(true)) parts.push(`No active Cloudflare certificate covers ${names(true)}. Install directly at ${plan.zoneName}, which Cloudflare's free certificate covers, or add an Advanced Certificate for these names.`);
+      if (names('dns')) parts.push(`Existing DNS records block installation: ${names('dns')}. Remove them in Cloudflare or choose another domain.`);
+      if (names('route')) parts.push(`Existing Workers routes block installation: ${names('route')}. Remove them in Cloudflare (your domain, Workers Routes) or choose another domain.`);
+      if (names('certificate')) parts.push(`No active Cloudflare certificate covers ${names('certificate')}. Install directly at ${plan.zoneName}, which Cloudflare's free certificate covers, or add an Advanced Certificate for these names.`);
       summary.textContent = parts.join(' ');
     } else {
       const title = document.createElement('h3'); title.textContent = 'Your installation plan';

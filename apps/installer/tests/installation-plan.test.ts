@@ -24,16 +24,17 @@ describe('installation approval', () => {
     const fetch = vi.fn(async (url: string, _init?: RequestInit) =>
       Response.json({
         success: true,
-        result: url.includes('/dns_records?')
-          ? [{ name: 'api.sam.example.com', type: 'CNAME' }]
-          : url.includes('/workers/subdomain')
-            ? { subdomain: 'existing' }
-            : {
-                id: config.zoneId,
-                name: config.zoneName,
-                account: { id: config.accountId },
-                status: 'active',
-              },
+        result:
+          url.includes('/dns_records?') || url.includes('/workers/routes')
+            ? [{ name: 'api.sam.example.com', type: 'CNAME' }]
+            : url.includes('/workers/subdomain')
+              ? { subdomain: 'existing' }
+              : {
+                  id: config.zoneId,
+                  name: config.zoneName,
+                  account: { id: config.accountId },
+                  status: 'active',
+                },
       })
     );
     vi.stubGlobal('fetch', fetch);
@@ -73,14 +74,15 @@ describe('installation approval', () => {
         return Response.json({ success: true, result: { subdomain: current } });
       return Response.json({
         success: true,
-        result: url.includes('/dns_records?')
-          ? []
-          : {
-              id: config.zoneId,
-              name: config.zoneName,
-              account: { id: config.accountId },
-              status: 'active',
-            },
+        result:
+          url.includes('/dns_records?') || url.includes('/workers/routes')
+            ? []
+            : {
+                id: config.zoneId,
+                name: config.zoneName,
+                account: { id: config.accountId },
+                status: 'active',
+              },
       });
     });
     vi.stubGlobal('fetch', fetch);
@@ -105,14 +107,15 @@ describe('installation approval', () => {
           );
         return Response.json({
           success: true,
-          result: url.includes('/dns_records?')
-            ? []
-            : {
-                id: config.zoneId,
-                name: config.zoneName,
-                account: { id: config.accountId },
-                status: 'active',
-              },
+          result:
+            url.includes('/dns_records?') || url.includes('/workers/routes')
+              ? []
+              : {
+                  id: config.zoneId,
+                  name: config.zoneName,
+                  account: { id: config.accountId },
+                  status: 'active',
+                },
         });
       })
     );
@@ -164,11 +167,12 @@ describe('edge certificate coverage', () => {
           : Response.json({ success: true, result: packs });
       return Response.json({
         success: true,
-        result: url.includes('/dns_records?')
-          ? []
-          : url.includes('/workers/subdomain')
-            ? { subdomain: 'existing' }
-            : zone,
+        result:
+          url.includes('/dns_records?') || url.includes('/workers/routes')
+            ? []
+            : url.includes('/workers/subdomain')
+              ? { subdomain: 'existing' }
+              : zone,
       });
     });
     vi.stubGlobal('fetch', fetch);
@@ -203,5 +207,35 @@ describe('edge certificate coverage', () => {
       Response.json({ success: false, errors: [{ code: 9109 }] }, { status: 403 })
     );
     expect(certificateConflicts(await previewInstallation('private', config))).toHaveLength(3);
+  });
+});
+describe('workers route conflicts', () => {
+  it('blocks a leftover route with a pattern SAM creates and ignores unrelated routes', async () => {
+    const zone = {
+      id: config.zoneId,
+      name: config.zoneName,
+      account: { id: config.accountId },
+      status: 'active',
+    };
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) =>
+        Response.json({
+          success: true,
+          result: url.includes('/workers/routes')
+            ? [
+                { pattern: '*.vm.example.com/*', script: null },
+                { pattern: 'blog.example.com/*', script: 'blog' },
+              ]
+            : url.includes('/dns_records?')
+              ? []
+              : url.includes('/workers/subdomain')
+                ? { subdomain: 'existing' }
+                : zone,
+        })
+      )
+    );
+    const plan = await previewInstallation('private', { ...config, baseDomain: 'example.com' });
+    expect(plan.conflicts).toEqual([{ name: '*.vm.example.com/*', type: 'route' }]);
   });
 });

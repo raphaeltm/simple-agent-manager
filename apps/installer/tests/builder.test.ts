@@ -329,3 +329,45 @@ it('supervisor reports only fixed-string errors or an exit code', () => {
   expect(reason(curl)).toBe('exit 63');
   expect(reason({})).toBe('unexpected error');
 });
+it('scrubs secret environment values from the engine output tail', () => {
+  const supervisor = JSON.parse(
+    /const BUILDER_SUPERVISOR=(".*?");\n/s.exec(builderSource)![1]!
+  ) as string;
+  const pick = (name: string) => new RegExp(`(const ${name} = .*?;)\\n`).exec(supervisor)![1]!;
+  const make = new Function(
+    'process',
+    `${pick('secrets')}\n${pick('tail')}\n${pick('keep')}\nreturn { keep, tail };`
+  ) as (process: { env: Record<string, string> }) => {
+    keep: (line: string) => void;
+    tail: string[];
+  };
+  const { keep, tail } = make({
+    env: {
+      CF_API_TOKEN: 'cf-token-private-value',
+      R2_SECRET_ACCESS_KEY: 'r2-secret-private',
+      CF_ACCOUNT_ID: 'a'.repeat(32),
+    },
+  });
+  keep('pulumi error: authorization cf-token-private-value rejected for account ' + 'a'.repeat(32));
+  keep('upload with r2-secret-private failed');
+  for (let index = 0; index < 50; index++) keep(`line ${index}`);
+  expect(tail).toHaveLength(40);
+  const early = make({ env: { CF_API_TOKEN: 'cf-token-private-value' } });
+  early.keep('using cf-token-private-value now');
+  expect(early.tail).toEqual(['using [redacted] now']);
+});
+it('keeps a bounded engine output tail in the failure report', async () => {
+  const h = harness();
+  await h.call('/start', h.job);
+  h.setProgress({
+    state: 'failed',
+    failure: {
+      step: 'bootstrap',
+      code: 1,
+      tail: ['error: route already exists', 7, 'x'.repeat(900)],
+    },
+  });
+  const failure = (await (await h.call('/status')).json()).failure;
+  expect(failure.code).toBe(1);
+  expect(failure.tail).toEqual(['error: route already exists', 'x'.repeat(400)]);
+});

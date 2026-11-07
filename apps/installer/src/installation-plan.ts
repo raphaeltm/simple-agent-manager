@@ -92,6 +92,7 @@ export async function previewInstallation(
   );
   for (const records of recordSets)
     conflicts.push(...records.map(({ name, type }) => ({ name, type })));
+  conflicts.push(...(await conflictingRoutes(token, c)));
   conflicts.push(...(await uncoveredHostnames(token, c)));
 
   // Fingerprint the approved target, not its observed existence: an interrupted
@@ -103,6 +104,28 @@ export async function previewInstallation(
     conflicts,
     fingerprint: await digest(JSON.stringify({ ...c, workersDevSubdomain: workersDev.subdomain })),
   };
+}
+
+// Cloudflare rejects a Worker route whose pattern already exists, so a leftover
+// route from an earlier deployment fails infrastructure mid-way (staging,
+// 2026-11-06: '*.vm.sam2.party/*'). Patterns: the API Worker routes from
+// sync-wrangler-config and the VM exclusion route from infra/resources/dns.ts.
+async function conflictingRoutes(
+  token: string,
+  c: { zoneId: string; baseDomain: string }
+): Promise<InstallationPlan['conflicts']> {
+  const patterns = new Set(
+    ['preview.', 'api.', '*.', '*.vm.'].map((label) => `${label}${c.baseDomain}/*`)
+  );
+  const routes = await cloudflare<{ pattern?: unknown }[]>(
+    token,
+    `/zones/${c.zoneId}/workers/routes`
+  );
+  if (!Array.isArray(routes)) throw new Error('Invalid Workers routes response');
+  return routes
+    .map((route) => route.pattern)
+    .filter((pattern): pattern is string => typeof pattern === 'string' && patterns.has(pattern))
+    .map((name) => ({ name, type: 'route' }));
 }
 
 // SAM serves api., preview. and workspace (*.) hostnames through Worker routes,

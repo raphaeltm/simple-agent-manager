@@ -447,3 +447,19 @@ it('shows build progress as ordered stages that refresh themselves', async () =>
   expect(failed.headers.get('Refresh')).toBeNull();
   expect(await failed.text()).toContain('build-step--stopped');
 });
+
+it('shows the escaped engine output tail for a failed build under technical details', async () => {
+  const f = await fixture();
+  expect((await f.request('/deploy', { confirmed: 'yes' })).status).toBeLessThan(400);
+  const manifest = f.values.get('installation') as { requestedJob: { id: string } };
+  f.setJob({
+    status: 'failed',
+    sourceCommit: original,
+    jobId: manifest.requestedJob.id,
+    failure: { step: 'bootstrap', code: 1, tail: ['<script>route already exists</script>'] },
+  });
+  const html = await (await f.request('/')).text();
+  expect(html).toContain('<summary>Technical details</summary>');
+  expect(html).toContain('&lt;script&gt;route already exists&lt;/script&gt;');
+  expect(html).not.toContain('<script>route already exists');
+});
