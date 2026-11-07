@@ -138,7 +138,8 @@ describe('attachment preview dialog', () => {
     card.focus();
     fireEvent.click(card);
     const dialog = screen.getByRole('dialog', { name: 'CleanShot.png' });
-    const img = await within(dialog).findByTestId('attachment-image-preview');
+    // jsdom never decodes, so the viewer keeps the <img> visually hidden; find it by alt text.
+    const img = await within(dialog).findByAltText('CleanShot.png');
     expect(urlFiles.get(img.getAttribute('src')!)).toBe(file);
     expect(fetchSpy).not.toHaveBeenCalled();
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -150,7 +151,7 @@ describe('attachment preview dialog', () => {
     const clip = new File([new Uint8Array(16)], 'screen.mp4', { type: 'video/mp4' });
     render(<Harness initial={[complete(clip, 'v')]} />);
     fireEvent.click(screen.getByRole('button', { name: /^Preview screen\.mp4/ }));
-    const video = await screen.findByTestId('attachment-video-preview');
+    const video = await screen.findByTestId('video-preview');
     expect(urlFiles.get(video.getAttribute('src')!)).toBe(clip);
     expect(video).toHaveAttribute('controls');
   });
@@ -181,7 +182,9 @@ describe('attachment preview dialog', () => {
     );
     fireEvent.click(screen.getByRole('button', { name: /^Preview CleanShot\.png/ }));
     expect(screen.getByText('1 of 3')).toBeInTheDocument();
-    fireEvent.keyDown(document, { key: 'ArrowRight' });
+    // Focus lands on the dialog when it opens; that is where the key goes.
+    expect(document.activeElement).toBe(screen.getByRole('dialog'));
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowRight' });
     expect(screen.getByRole('dialog', { name: 'notes.md' })).toBeInTheDocument();
     fireEvent.click(
       within(screen.getByRole('dialog')).getByRole('button', { name: 'Remove notes.md' })
@@ -190,6 +193,32 @@ describe('attachment preview dialog', () => {
     expect(screen.getByText('2 of 2')).toBeInTheDocument();
     // The row behind the modal is aria-hidden, so count its items directly.
     expect(screen.getByTestId('composer-attachments').querySelectorAll('li')).toHaveLength(2);
+  });
+
+  it('keeps arrow keys for the focused text region instead of paging away', async () => {
+    render(
+      <Harness
+        initial={[
+          complete(paste('one\ntwo'), 'p'),
+          complete(new File([new Uint8Array(4)], 'data.zip', { type: 'application/zip' }), 'z'),
+        ]}
+      />
+    );
+    fireEvent.click(await screen.findByRole('button', { name: /^Preview Pasted text/ }));
+    const region = await screen.findByRole('region', { name: 'File contents' });
+    region.focus();
+    fireEvent.keyDown(region, { key: 'ArrowRight' });
+    expect(screen.getByText('1 of 2')).toBeInTheDocument();
+    // Control: on the dialog chrome the same key pages.
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'ArrowRight' });
+    expect(screen.getByText('2 of 2')).toBeInTheDocument();
+  });
+
+  it("names a paste's remove button by its first line", async () => {
+    render(<Harness initial={[complete(paste('alpha line\nbeta'), 'p')]} />);
+    expect(
+      await screen.findByRole('button', { name: 'Remove Pasted text “alpha line”' })
+    ).toBeInTheDocument();
   });
 
   it('previews a failed, over-limit file from the local copy and says why it failed', async () => {
@@ -212,7 +241,8 @@ describe('attachment preview dialog', () => {
     expect(within(dialog).getByRole('alert')).toHaveTextContent(
       'Larger than the 50 MB limit. Remove it to send your message.'
     );
-    const img = await within(dialog).findByTestId('attachment-image-preview');
+    // jsdom never decodes, so the viewer keeps the <img> visually hidden; find it by alt text.
+    const img = await within(dialog).findByAltText('CleanShot.png');
     expect(urlFiles.get(img.getAttribute('src')!)).toBe(big);
     fireEvent.keyDown(document, { key: 'Escape' });
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());

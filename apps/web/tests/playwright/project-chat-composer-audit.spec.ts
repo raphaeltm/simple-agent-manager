@@ -875,8 +875,8 @@ for (const mode of ['new', 'active'] as const) {
     await page.getByRole('button', { name: /^Preview CleanShot_2026-11-07\.png/ }).click();
     const dialog = page.getByTestId('attachment-preview');
     await expect(dialog).toBeVisible();
-    await expect(dialog).toContainText('800×500');
-    const viewerImg = page.getByTestId('attachment-image-preview');
+    await expect(dialog).toContainText('800 × 500');
+    const viewerImg = dialog.getByRole('img', { name: 'CleanShot_2026-11-07.png' });
     expect(await viewerImg.getAttribute('src')).toMatch(/^blob:/);
     const dialogBox = (await dialog.boundingBox())!;
     expect(dialogBox.x).toBeGreaterThanOrEqual(0);
@@ -912,7 +912,7 @@ for (const mode of ['new', 'active'] as const) {
     // A real recording plays from the local file.
     await pasteFiles(page, [{ kind: 'video', name: 'screen-recording.webm' }]);
     await page.getByRole('button', { name: /^Preview screen-recording\.webm/ }).click();
-    const video = page.getByTestId('attachment-video-preview');
+    const video = dialog.getByTestId('video-preview');
     await expect(video).toHaveAttribute('src', /^blob:/);
     await expect
       .poll(() => video.evaluate((el: HTMLVideoElement) => el.readyState >= 1 && el.videoWidth))

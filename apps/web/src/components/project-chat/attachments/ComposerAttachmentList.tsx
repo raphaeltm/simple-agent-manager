@@ -23,8 +23,10 @@ import {
 /** Above this many attachments the row gets a count + total size line. */
 const SUMMARY_MIN_ATTACHMENTS = 4;
 
+// The badge is 20px; `before:` widens the tap area to 36×44 without reaching the next card
+// (it stops inside the 10px gap) and without moving the badge.
 const REMOVE_BUTTON =
-  'absolute -right-1.5 -top-1.5 flex h-5 w-5 cursor-pointer items-center justify-center rounded-full border-0 bg-fg-primary/85 text-[var(--sam-form-bg)] shadow-sm backdrop-blur-sm hover:bg-fg-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring disabled:cursor-not-allowed disabled:opacity-50';
+  "absolute -right-1.5 -top-1.5 flex h-5 w-5 before:absolute before:-bottom-3 before:-left-3 before:-right-1 before:-top-3 before:content-[''] cursor-pointer items-center justify-center rounded-full border-0 bg-fg-primary/85 text-[var(--sam-form-bg)] shadow-sm backdrop-blur-sm hover:bg-fg-primary focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring disabled:cursor-not-allowed disabled:opacity-50";
 
 const TRIGGER =
   'relative cursor-pointer overflow-hidden rounded-[10px] border bg-[var(--sam-form-bg)] p-0 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
@@ -115,6 +117,9 @@ interface ItemProps {
 
 function AttachmentItem({ attachment: a, onOpen, onRemove, disabled }: ItemProps) {
   const { info, stats } = useAttachmentInfo(a.file);
+  const snippet = info.isPaste ? firstLine(stats) : null;
+  // Pastes are told apart by their first line, so two of them never share one remove label.
+  const removeName = snippet ? `${info.displayName} “${snippet.slice(0, 40)}”` : info.displayName;
   const borderTone =
     a.status === 'error' ? 'border-[var(--sam-status-danger-fg)]' : 'border-[var(--sam-hairline)]';
   const trigger = {
@@ -122,7 +127,7 @@ function AttachmentItem({ attachment: a, onOpen, onRemove, disabled }: ItemProps
     onClick: onOpen,
     'aria-haspopup': 'dialog' as const,
     'aria-label': previewLabel(a, info, stats),
-    title: a.file.name,
+    title: info.isPaste ? info.displayName : a.file.name,
   };
 
   let body;
@@ -134,7 +139,6 @@ function AttachmentItem({ attachment: a, onOpen, onRemove, disabled }: ItemProps
       </button>
     );
   } else {
-    const snippet = info.isPaste ? firstLine(stats) : null;
     const size = formatFileSize(a.file.size);
     const meta =
       a.status === 'uploading' || a.status === 'pending'
@@ -187,8 +191,8 @@ function AttachmentItem({ attachment: a, onOpen, onRemove, disabled }: ItemProps
           type="button"
           disabled={disabled}
           onClick={onRemove}
-          aria-label={`Remove ${a.file.name}`}
-          title={`Remove ${a.file.name}`}
+          aria-label={`Remove ${removeName}`}
+          title={`Remove ${removeName}`}
           className={REMOVE_BUTTON}
         >
           <X size={10} strokeWidth={2.5} aria-hidden="true" />

@@ -3,17 +3,14 @@
  * local file, so it works before, during and after upload, and for files that failed or were too
  * large to upload.
  */
-import {
-  IconButton,
-  paneClassName,
-  SegmentedControl,
-  useModalInteraction,
-} from '@simple-agent-manager/ui';
+import { IconButton, paneClassName, useModalInteraction } from '@simple-agent-manager/ui';
 import { AlertTriangle, ChevronLeft, ChevronRight, Trash2, X } from 'lucide-react';
-import { useEffect, useId, useRef, useState } from 'react';
+import { useEffect, useId, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 import { formatFileSize } from '../../../lib/file-utils';
+import { ImageViewer } from '../../shared-file-viewer/ImageViewer';
+import { VideoViewer } from '../../shared-file-viewer/VideoViewer';
 import type { ProjectChatComposerAttachment } from '../ProjectChatComposer';
 import type { AttachmentInfo } from './attachment-kind';
 import { AttachmentPreviewFallback } from './AttachmentPreviewFallback';
@@ -23,96 +20,44 @@ import { textMeta, useAttachmentInfo, useObjectUrl } from './useLocalFilePreview
 /** Stable stand-in while the composer closes a viewer whose attachment just went away. */
 const EMPTY_FILE = new File([], '');
 
-const CHECKERBOARD =
-  'bg-[length:16px_16px] bg-[linear-gradient(45deg,rgb(128_128_128/0.14)_25%,transparent_25%,transparent_75%,rgb(128_128_128/0.14)_75%),linear-gradient(45deg,rgb(128_128_128/0.14)_25%,transparent_25%,transparent_75%,rgb(128_128_128/0.14)_75%)] [background-position:0_0,8px_8px]';
-
-function ImagePreview({
-  file,
-  info,
-  onDimensions,
-}: {
-  file: File;
-  info: AttachmentInfo;
-  onDimensions: (dimensions: string | null) => void;
-}) {
+/**
+ * The shared image viewer (Fit / 1:1, pinch and pan) over a local `blob:` URL. No `fileSize`:
+ * its "large image, click to load" tiers guard network reads, and this file is already local.
+ */
+function LocalImage({ file, info }: { file: File; info: AttachmentInfo }) {
   const url = useObjectUrl(file);
-  const [failed, setFailed] = useState(false);
-  const [zoom, setZoom] = useState<'fit' | 'actual'>('fit');
-  if (failed) {
-    return (
-      <AttachmentPreviewFallback
-        info={info}
-        title="This image can't be shown in the browser"
-        body="It may be a format your browser doesn't decode, or the file is damaged. It is still sent to the agent as-is."
-      />
-    );
-  }
+  if (!url) return null;
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div className={`relative min-h-0 flex-1 overflow-auto ${CHECKERBOARD}`}>
-        {url && (
-          <img
-            src={url}
-            alt={file.name}
-            data-testid="attachment-image-preview"
-            onLoad={(e) =>
-              onDimensions(`${e.currentTarget.naturalWidth}×${e.currentTarget.naturalHeight}`)
-            }
-            onError={() => {
-              setFailed(true);
-              onDimensions(null);
-            }}
-            className={
-              zoom === 'fit'
-                ? 'absolute inset-0 m-auto max-h-full max-w-full object-contain'
-                : 'block max-w-none'
-            }
-          />
-        )}
-      </div>
-      <div className="flex shrink-0 justify-center border-t border-[var(--sam-hairline)] p-2">
-        <SegmentedControl
-          label="Image zoom"
-          className="w-40"
-          value={zoom}
-          onChange={setZoom}
-          options={[
-            { value: 'fit', label: 'Fit' },
-            { value: 'actual', label: '100%' },
-          ]}
+    <ImageViewer
+      src={url}
+      fileName={file.name}
+      errorFallback={
+        <AttachmentPreviewFallback
+          info={info}
+          title="This image can't be shown in the browser"
+          body="It may be a format your browser doesn't decode, or the file is damaged. It is still sent to the agent as-is."
         />
-      </div>
-    </div>
+      }
+    />
   );
 }
 
-function VideoPreview({ file, info }: { file: File; info: AttachmentInfo }) {
+function LocalVideo({ file, info }: { file: File; info: AttachmentInfo }) {
   const url = useObjectUrl(file);
-  const [failed, setFailed] = useState(false);
-  if (failed) {
-    return (
-      <AttachmentPreviewFallback
-        info={info}
-        title="This video can't play in your browser"
-        body="It is still sent to the agent as-is."
-      />
-    );
-  }
+  if (!url) return null;
   return (
-    <div className="flex min-h-0 flex-1 items-center justify-center bg-black">
-      {url && (
-        // eslint-disable-next-line jsx-a11y/media-has-caption -- a user's own unsent upload has no caption track
-        <video
-          src={url}
-          controls
-          playsInline
-          preload="metadata"
-          aria-label={`Video ${file.name}`}
-          data-testid="attachment-video-preview"
-          className="block h-full w-full object-contain"
-          onError={() => setFailed(true)}
-        />
-      )}
+    <div className="min-h-0 flex-1 bg-black">
+      <VideoViewer
+        src={url}
+        filename={file.name}
+        fallback={
+          <AttachmentPreviewFallback
+            info={info}
+            title="This video can't play in your browser"
+            body="It is still sent to the agent as-is."
+          />
+        }
+      />
     </div>
   );
 }
@@ -140,16 +85,21 @@ export function AttachmentPreviewDialog({
   const attachment = attachments[index];
   const count = attachments.length;
   const { info, stats } = useAttachmentInfo(attachment?.file ?? EMPTY_FILE);
-  const [dimensions, setDimensions] = useState<{ file: File; value: string | null } | null>(null);
 
   useModalInteraction({ enabled: true, modalRef, onEscape: onClose });
 
-  // Arrow keys page through attachments unless focus is in a field.
+  // Arrow keys page through attachments only while focus is on the dialog itself (where it lands
+  // on open) or on the previous/next buttons. An allow-list, so the scrollable text region, the
+  // zoom and wrap toggles, the player and any control added later keep their own arrow keys.
   useEffect(() => {
     if (count < 2) return;
     const onKey = (event: KeyboardEvent) => {
       const target = event.target;
-      if (target instanceof Element && target.closest('input, textarea, select, video')) return;
+      const onChrome =
+        target === modalRef.current ||
+        target === document.body ||
+        (target instanceof Element && target.closest('[data-gallery-nav]') !== null);
+      if (!onChrome) return;
       if (event.key === 'ArrowLeft') onNavigate((index - 1 + count) % count);
       if (event.key === 'ArrowRight') onNavigate((index + 1) % count);
     };
@@ -160,13 +110,7 @@ export function AttachmentPreviewDialog({
   if (!attachment) return null;
   const { file } = attachment;
   const size = formatFileSize(file.size);
-  const meta = [
-    info.typeLabel,
-    dimensions?.file === file ? dimensions.value : null,
-    info.kind === 'text' ? textMeta(stats, size) : size,
-  ]
-    .filter(Boolean)
-    .join(' · ');
+  const meta = `${info.typeLabel} · ${info.kind === 'text' ? textMeta(stats, size) : size}`;
 
   const remove = () => {
     if (!onRemove) return;
@@ -182,15 +126,12 @@ export function AttachmentPreviewDialog({
   let body;
   if (info.kind === 'image') {
     body = (
-      <ImagePreview
-        key={bodyKey}
-        file={file}
-        info={info}
-        onDimensions={(value) => setDimensions({ file, value })}
-      />
+      <div className="flex min-h-0 flex-1 flex-col">
+        <LocalImage key={bodyKey} file={file} info={info} />
+      </div>
     );
   } else if (info.kind === 'video') {
-    body = <VideoPreview key={bodyKey} file={file} info={info} />;
+    body = <LocalVideo key={bodyKey} file={file} info={info} />;
   } else if (info.kind === 'text') {
     body = (
       <AttachmentTextPreview
@@ -243,7 +184,7 @@ export function AttachmentPreviewDialog({
             <button
               type="button"
               onClick={remove}
-              aria-label={`Remove ${file.name}`}
+              aria-label={`Remove ${info.displayName}`}
               className="flex h-11 shrink-0 cursor-pointer items-center gap-1.5 rounded-[var(--sam-radius-control)] border-0 bg-transparent px-2.5 text-[13px] text-[var(--sam-status-danger-fg)] hover:bg-[var(--sam-status-danger-bg)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
             >
               <Trash2 size={15} aria-hidden="true" />
@@ -276,6 +217,7 @@ export function AttachmentPreviewDialog({
         {count > 1 && (
           <footer className="flex shrink-0 items-center justify-between border-t border-[var(--sam-hairline)] px-2 py-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))]">
             <IconButton
+              data-gallery-nav=""
               label="Previous attachment"
               icon={<ChevronLeft size={18} />}
               onClick={() => onNavigate((index - 1 + count) % count)}
@@ -284,6 +226,7 @@ export function AttachmentPreviewDialog({
               {index + 1} of {count}
             </span>
             <IconButton
+              data-gallery-nav=""
               label="Next attachment"
               icon={<ChevronRight size={18} />}
               onClick={() => onNavigate((index + 1) % count)}

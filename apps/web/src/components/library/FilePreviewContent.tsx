@@ -12,6 +12,7 @@ import {
 } from '../../lib/file-utils';
 import { RenderedMarkdown, SyntaxHighlightedCode } from '../MarkdownRenderer';
 import { ImageViewer } from '../shared-file-viewer/ImageViewer';
+import { VideoViewer } from '../shared-file-viewer/VideoViewer';
 import { InteractiveHtmlPreview } from './InteractiveHtmlPreview';
 import type { FileWithTags } from './types';
 
@@ -51,46 +52,6 @@ function PreviewFallback({ message, onDownload }: { message: string; onDownload:
         <Download size={14} aria-hidden="true" />
         Download
       </Button>
-    </div>
-  );
-}
-
-function VideoPreview({
-  src,
-  filename,
-  onDownload,
-}: {
-  src: string;
-  filename: string;
-  onDownload: () => void;
-}) {
-  const [failed, setFailed] = useState(false);
-  // A new file is a new chance to play.
-  useEffect(() => setFailed(false), [src]);
-  if (failed) {
-    return (
-      <PreviewFallback
-        message="This video can't play in your browser. Download it to watch."
-        onDownload={onDownload}
-      />
-    );
-  }
-  return (
-    <div className="flex h-full min-h-0 items-center justify-center">
-      {/* No `crossOrigin`: like the image viewer's <img>, the request carries the session cookie
-          to the API, which answers byte ranges so the player can seek. */}
-      {/* eslint-disable-next-line jsx-a11y/media-has-caption -- a library file is a lone video
-          upload with no caption file to attach; there is no track to point at. */}
-      <video
-        src={src}
-        controls
-        playsInline
-        preload="metadata"
-        aria-label={`Video ${filename}`}
-        data-testid="video-preview"
-        className="block h-full w-full object-contain"
-        onError={() => setFailed(true)}
-      />
     </div>
   );
 }
@@ -191,7 +152,18 @@ export function FilePreviewContent({
     case 'image':
       return <ImageViewer src={previewUrl} fileName={file.filename} fileSize={file.sizeBytes} />;
     case 'video':
-      return <VideoPreview src={previewUrl} filename={file.filename} onDownload={onDownload} />;
+      return (
+        <VideoViewer
+          src={previewUrl}
+          filename={file.filename}
+          fallback={
+            <PreviewFallback
+              message="This video can't play in your browser. Download it to watch."
+              onDownload={onDownload}
+            />
+          }
+        />
+      );
     case 'pdf':
       return <PdfPreview src={previewUrl} filename={file.filename} onDownload={onDownload} />;
     case 'markdown':
