@@ -183,10 +183,6 @@ export async function scheduled(
   const providerOrphans = await sweeps.isolate('provider_orphan_reconciliation', () =>
     runProviderOrphanReconciliation(env)
   );
-  // Before pool reconciliation, so a refreshed price table reaches the catalogs it rebuilds.
-  const gcpPriceTable = await sweeps.isolate('gcp_price_table', () =>
-    refreshGcpPriceTableIfDue(env)
-  );
   const capacityPools = await sweeps.isolate('capacity_pool_reconciliation', () =>
     runScheduledCapacityPoolReconciliation(env)
   );
@@ -234,6 +230,15 @@ export async function scheduled(
     runComputeUsageCleanup(env)
   );
   const trialExpire = await sweeps.isolate('trial_expire', () => runTrialExpireSweep(env));
+
+  // After the lifecycle sweeps on purpose. When due (about once a day, or once per retry
+  // interval while it keeps failing) it downloads Google's price list under
+  // gcpCatalog.priceRefreshBudgetMs (default 90 s); on other ticks it costs one KV read. Earlier
+  // in the chain that budget would delay session_sleep (`.claude/rules/47`). Catalogs pick up a
+  // refreshed table on their next build.
+  const gcpPriceTable = await sweeps.isolate('gcp_price_table', () =>
+    refreshGcpPriceTableIfDue(env)
+  );
 
   // Runs after every lifecycle sweep on purpose. When its persisted cadence is due it copies
   // whole terminal sessions between ProjectData objects under PROJECT_DATA_ARCHIVE_WALL_TIME_MS

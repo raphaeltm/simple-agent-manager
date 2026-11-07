@@ -45,7 +45,8 @@ SAM reads the Google Cloud machine catalog live; nothing about zones or prices i
   Billing Catalog API and prices each machine as its vCPUs times the core price plus its memory
   times the RAM price for that region. Prices are the same for every Google project, so SAM keeps
   one price list for the whole installation and refreshes it about once a day in the background,
-  using any connected Google Cloud credential. The price excludes the boot disk.
+  using any connected Google Cloud credential (platform credentials first) with a token limited to
+  read-only Cloud Billing access. The price excludes the boot disk.
 - **Price unavailable.** If no connected project has the Cloud Billing API enabled, or Google has no
   list price SAM recognises for a machine in a region, the machine is still offered but shows
   "Price unavailable". SAM never guesses a price. Enable `cloudbilling.googleapis.com` in the
@@ -54,8 +55,8 @@ SAM reads the Google Cloud machine catalog live; nothing about zones or prices i
 - **Credits and discounts are not reflected.** These are list prices. Committed-use discounts,
   free-tier usage and promotional credits apply on your Google invoice, not in SAM's ranking.
 
-If Google reports a zone as unreachable while SAM reads the catalog, SAM keeps the machines it last
-saw instead of treating that zone as sold out.
+If Google reports a zone as unreachable while SAM reads the catalog, SAM treats that read as
+incomplete: pools keep the machines they already had rather than marking that zone sold out.
 
 ## Troubleshoot connection errors
 

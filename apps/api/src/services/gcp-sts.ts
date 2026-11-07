@@ -114,6 +114,15 @@ export async function clearGcpAccessTokenCache(
   ]);
 }
 
+export interface GcpAccessTokenOptions {
+  /**
+   * Scopes for a workload-identity token, replacing the provisioning default. Used to mint a
+   * token for one narrow purpose (reading the public price list) without widening every token.
+   * Service-account-key credentials keep their own assertion scope.
+   */
+  scopes?: readonly string[];
+}
+
 /**
  * Get a short-lived GCP access token for either WIF or a service-account key.
  * Only the derivative access token is cached; the source credential remains in
@@ -124,10 +133,15 @@ export async function getGcpAccessToken(
   projectId: string,
   credential: GcpCredential,
   env: Env,
-  context?: ProviderRequestContext
+  context?: ProviderRequestContext,
+  options: GcpAccessTokenOptions = {}
 ): Promise<string> {
   throwIfProviderRequestAborted(context);
-  const cacheKey = getGcpAccessTokenCacheKey(userId, projectId, credential);
+  // A token minted for different scopes is a different token; the suffix keeps the shared
+  // prefix, so clearGcpAccessTokenCache still removes it.
+  const cacheKey = options.scopes
+    ? `${getGcpAccessTokenCacheKey(userId, projectId, credential)}:scopes:${cacheKeyComponent(options.scopes.join(','))}`
+    : getGcpAccessTokenCacheKey(userId, projectId, credential);
   const cached = await env.KV.get(cacheKey);
   throwIfProviderRequestAborted(context);
   if (cached) return cached;
@@ -135,7 +149,7 @@ export async function getGcpAccessToken(
   const result =
     credential.authType === 'service-account-key'
       ? await exchangeGcpServiceAccountAccessToken(credential, env, context)
-      : await exchangeGcpWifAccessToken(userId, projectId, credential, env, context);
+      : await exchangeGcpWifAccessToken(userId, projectId, credential, env, context, options);
   throwIfProviderRequestAborted(context);
 
   const configuredTtl = positiveInteger(
@@ -158,7 +172,8 @@ async function exchangeGcpWifAccessToken(
   projectId: string,
   credential: GcpOidcCredential,
   env: Env,
-  context?: ProviderRequestContext
+  context?: ProviderRequestContext,
+  options: GcpAccessTokenOptions = {}
 ): Promise<GcpAccessTokenResult> {
   throwIfProviderRequestAborted(context);
   const timeoutMs = positiveInteger(env.GCP_API_TIMEOUT_MS, DEFAULT_GCP_API_TIMEOUT_MS);
@@ -219,10 +234,12 @@ async function exchangeGcpWifAccessToken(
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        scope: (env.GCP_SA_IMPERSONATION_SCOPES || DEFAULT_GCP_SA_IMPERSONATION_SCOPES)
-          .split(',')
-          .map((scope) => scope.trim())
-          .filter(Boolean),
+        scope:
+          options.scopes ??
+          (env.GCP_SA_IMPERSONATION_SCOPES || DEFAULT_GCP_SA_IMPERSONATION_SCOPES)
+            .split(',')
+            .map((scope) => scope.trim())
+            .filter(Boolean),
         lifetime: `${saTokenLifetime}s`,
       }),
     },

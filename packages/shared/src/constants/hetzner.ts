@@ -84,10 +84,11 @@ export const DEFAULT_GCP_SA_TOKEN_LIFETIME_SECONDS = 3600;
 /** Default scope for GCP STS token exchange. Override via GCP_STS_SCOPE env var. */
 export const DEFAULT_GCP_STS_SCOPE = 'https://www.googleapis.com/auth/cloud-platform';
 
+/** Default scopes for GCP SA impersonation (comma-separated). Override via GCP_SA_IMPERSONATION_SCOPES env var. */
+export const DEFAULT_GCP_SA_IMPERSONATION_SCOPES = 'https://www.googleapis.com/auth/compute';
+
 /**
- * Default scopes for GCP SA impersonation (comma-separated). Override via GCP_SA_IMPERSONATION_SCOPES
- * env var. `compute` runs VMs; `cloud-billing.readonly` reads the public Compute Engine price list
- * for the live catalog (it grants no access to the project's billing account).
+ * The only scope requested for reading Google's public Compute Engine price list (Cloud Billing
+ * Catalog). Minted for that call alone, so provisioning tokens never carry a billing scope.
  */
-export const DEFAULT_GCP_SA_IMPERSONATION_SCOPES =
-  'https://www.googleapis.com/auth/compute,https://www.googleapis.com/auth/cloud-billing.readonly';
+export const GCP_PRICE_CATALOG_SCOPE = 'https://www.googleapis.com/auth/cloud-billing.readonly';

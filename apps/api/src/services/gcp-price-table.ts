@@ -12,7 +12,7 @@ import {
   type GcpPriceTable,
   parseStoredGcpPriceTable,
 } from '@simple-agent-manager/providers';
-import type { CredentialSource } from '@simple-agent-manager/shared';
+import { type CredentialSource, GCP_PRICE_CATALOG_SCOPE } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
@@ -51,9 +51,14 @@ export type GcpPriceRefreshResult =
   | { status: 'failed'; attempts: number };
 
 /**
- * Refresh the table when it is older than the TTL. A failed refresh records its time and is not
- * retried until the retry interval passes, so a project without the Cloud Billing API enabled
- * costs one attempt per interval, not one per cron tick.
+ * Refresh the table when it is older than the TTL. A failed refresh, or finding no Google Cloud
+ * credential at all, records its time and is not retried until the retry interval passes, so a
+ * project without the Cloud Billing API enabled (or an installation without Google Cloud) costs
+ * one attempt per interval, not one per cron tick.
+ *
+ * Worst case per due tick: `priceRefreshBudgetMs` (default 90 s), however many pages or
+ * credentials remain. With defaults that is one refresh a day, or one bounded attempt an hour
+ * while every credential fails.
  */
 export async function refreshGcpPriceTableIfDue(
   env: Env,
@@ -75,13 +80,42 @@ export async function refreshGcpPriceTableIfDue(
   }
 
   const candidates = await listPriceRefreshCredentials(env);
-  if (candidates.length === 0) return { status: 'no-credential' };
+  if (candidates.length === 0) {
+    // An installation without Google Cloud would otherwise probe D1 on every tick forever.
+    await env.KV.put(GCP_PRICE_TABLE_ATTEMPT_KV_KEY, now.toISOString());
+    return { status: 'no-credential' };
+  }
 
   const options = {
     maxPages: Number(await resolveAdminSetting(env, 'gcpCatalog.priceMaxPages')),
     requestTimeoutMs: Number(await resolveAdminSetting(env, 'gcpCatalog.priceRequestTimeoutMs')),
   };
+  // One budget across every credential tried: a degraded Billing API must not hold the
+  // scheduled job past this, however many pages or credentials remain.
+  const budgetMs = Number(await resolveAdminSetting(env, 'gcpCatalog.priceRefreshBudgetMs'));
+  const budget = new AbortController();
+  const budgetTimer = setTimeout(
+    () => budget.abort(new Error(`GCP price refresh budget of ${budgetMs}ms spent`)),
+    budgetMs
+  );
+  try {
+    return await refreshFromCandidates(env, candidates, options, budget.signal, now);
+  } finally {
+    clearTimeout(budgetTimer);
+  }
+}
+
+async function refreshFromCandidates(
+  env: Env,
+  candidates: PriceRefreshCredential[],
+  options: { maxPages: number; requestTimeoutMs: number },
+  signal: AbortSignal,
+  now: Date
+): Promise<GcpPriceRefreshResult> {
+  let attempts = 0;
   for (const candidate of candidates) {
+    if (signal.aborted) break;
+    attempts += 1;
     try {
       const decrypted = await decrypt(
         candidate.encryptedToken,
@@ -95,9 +129,10 @@ export async function refreshGcpPriceTableIfDue(
           userId: candidate.userId,
           projectId: candidate.projectId,
         },
-        env
-      )();
-      const table = await fetchGcpComputePriceTable(token, options);
+        env,
+        { scopes: [GCP_PRICE_CATALOG_SCOPE] }
+      )({ signal });
+      const table = await fetchGcpComputePriceTable(token, options, { signal });
       const fetchedAt = now.toISOString();
       await env.KV.put(GCP_PRICE_TABLE_KV_KEY, JSON.stringify({ fetchedAt, table }));
       await env.KV.delete(GCP_PRICE_TABLE_ATTEMPT_KV_KEY);
@@ -111,12 +146,13 @@ export async function refreshGcpPriceTableIfDue(
       log.warn('gcp_price_table.refresh_attempt_failed', {
         credentialId: candidate.id,
         credentialSource: candidate.credentialSource,
+        budgetExhausted: signal.aborted,
         ...serializeError(error),
       });
     }
   }
   await env.KV.put(GCP_PRICE_TABLE_ATTEMPT_KV_KEY, now.toISOString());
-  return { status: 'failed', attempts: candidates.length };
+  return { status: 'failed', attempts };
 }
 
 interface PriceRefreshCredential {
@@ -143,13 +179,18 @@ async function listPriceRefreshCredentials(env: Env): Promise<PriceRefreshCreden
   )
     .bind(limit)
     .all<{ id: string; userId: string; encryptedToken: string; iv: string }>();
+  const platformRows = platform.results ?? [];
+  const remaining = limit - platformRows.length;
+  if (remaining <= 0) {
+    return platformRows.map((row) => ({ ...row, credentialSource: 'platform', projectId: null }));
+  }
   const owned = await env.DATABASE.prepare(
     `SELECT id, user_id AS userId, project_id AS projectId, encrypted_token AS encryptedToken, iv
        FROM credentials
       WHERE provider = 'gcp' AND credential_type = 'cloud-provider' AND is_active = 1
       ORDER BY updated_at DESC LIMIT ?`
   )
-    .bind(limit)
+    .bind(remaining)
     .all<{
       id: string;
       userId: string;
@@ -158,7 +199,7 @@ async function listPriceRefreshCredentials(env: Env): Promise<PriceRefreshCreden
       iv: string;
     }>();
   return [
-    ...(platform.results ?? []).map((row) => ({
+    ...platformRows.map((row) => ({
       ...row,
       credentialSource: 'platform' as const,
       projectId: null,
@@ -167,5 +208,5 @@ async function listPriceRefreshCredentials(env: Env): Promise<PriceRefreshCreden
       ...row,
       credentialSource: (row.projectId ? 'project' : 'user') as CredentialSource,
     })),
-  ].slice(0, limit);
+  ];
 }

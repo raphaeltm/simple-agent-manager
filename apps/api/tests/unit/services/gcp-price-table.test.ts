@@ -22,13 +22,18 @@ import { serializeGcpCredential } from '../../../src/services/provider-credentia
 import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const tokenCalls: Array<{ userId: string; projectId: string; gcpProjectId: string }> = [];
+const tokenScopes: Array<readonly string[] | undefined> = [];
 vi.mock('../../../src/services/gcp-sts', () => ({
   getGcpAccessToken: async (
     userId: string,
     projectId: string,
-    credential: { gcpProjectId: string }
+    credential: { gcpProjectId: string },
+    _env: unknown,
+    _context: unknown,
+    options?: { scopes?: readonly string[] }
   ) => {
     tokenCalls.push({ userId, projectId, gcpProjectId: credential.gcpProjectId });
+    tokenScopes.push(options?.scopes);
     return `token-for-${credential.gcpProjectId}`;
   },
 }));
@@ -143,6 +148,7 @@ describe('GCP price table', () => {
 
   beforeEach(() => {
     tokenCalls.length = 0;
+    tokenScopes.length = 0;
     sqlite = new Database(':memory:');
     createAllSchemaTables(sqlite, schema);
     sqlite
@@ -184,6 +190,8 @@ describe('GCP price table', () => {
     expect(tokenCalls).toEqual([
       { userId: 'platform:admin-1', projectId: 'platform-gcp', gcpProjectId: 'platform-gcp' },
     ]);
+    // The price read asks for read-only Cloud Billing alone; provisioning tokens never carry it.
+    expect(tokenScopes).toEqual([['https://www.googleapis.com/auth/cloud-billing.readonly']]);
     const table = await readGcpPriceTable(env);
     expect(table?.regions['us-central1']?.e2).toEqual({
       coreHourly: 0.021811,
@@ -264,7 +272,7 @@ describe('GCP price table', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it('reports no credential without recording a failure', async () => {
+  it('backs off when no Google Cloud credential exists, instead of probing every tick', async () => {
     await seedOwned('cred-hetzner', 'unused', {
       updatedAt: '2026-11-06T00:00:00Z',
       provider: 'hetzner',
@@ -274,10 +282,64 @@ describe('GCP price table', () => {
       active: 0,
     });
     const fetchMock = stubBilling();
+    const prepare = vi.spyOn(env.DATABASE, 'prepare');
 
     expect(await refreshGcpPriceTableIfDue(env, NOW)).toEqual({ status: 'no-credential' });
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(await env.KV.get(GCP_PRICE_TABLE_ATTEMPT_KV_KEY)).toBeNull();
+    expect(await env.KV.get(GCP_PRICE_TABLE_ATTEMPT_KV_KEY)).toBe(NOW.toISOString());
+    const queriesAfterFirst = prepare.mock.calls.length;
+
+    const nextTick = new Date(NOW.getTime() + 5 * 60 * 1000);
+    expect(await refreshGcpPriceTableIfDue(env, nextTick)).toMatchObject({ status: 'backoff' });
+    // No credential query on the backed-off tick (admin-setting reads are cached).
+    expect(
+      prepare.mock.calls
+        .slice(queriesAfterFirst)
+        .some(([sql]) => /FROM (platform_credentials|credentials)\b/.test(String(sql)))
+    ).toBe(false);
+  });
+
+  it('does not query owned credentials when platform credentials fill the attempt limit', async () => {
+    for (const n of [1, 2, 3]) {
+      await seedPlatform(`cred-platform-${n}`, `platform-gcp-${n}`, `2026-11-0${n}T00:00:00Z`);
+    }
+    await seedOwned('cred-user', 'user-gcp', { updatedAt: '2026-11-06T00:00:00Z' });
+    stubBilling(['platform-gcp-1', 'platform-gcp-2', 'platform-gcp-3']);
+    const prepare = vi.spyOn(env.DATABASE, 'prepare');
+
+    expect(await refreshGcpPriceTableIfDue(env, NOW)).toEqual({ status: 'failed', attempts: 3 });
+    expect(tokenCalls.map((call) => call.gcpProjectId)).toEqual([
+      'platform-gcp-3',
+      'platform-gcp-2',
+      'platform-gcp-1',
+    ]);
+    expect(prepare.mock.calls.some(([sql]) => /FROM credentials\b/.test(String(sql)))).toBe(false);
+  });
+
+  it('stops trying further credentials once the refresh budget is spent', async () => {
+    sqlite
+      .prepare(
+        `INSERT INTO platform_settings (key, value, updated_at) VALUES ('gcpCatalog.priceRefreshBudgetMs', '10000', ?)`
+      )
+      .run(NOW.toISOString());
+    await seedOwned('cred-a', 'slow-gcp', { updatedAt: '2026-11-06T00:00:00Z' });
+    await seedOwned('cred-b', 'never-tried-gcp', { updatedAt: '2026-11-05T00:00:00Z' });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      // The first credential's request hangs until the budget aborts it.
+      globalThis.fetch = vi.fn(
+        (_input: string | URL, init?: RequestInit) =>
+          new Promise<Response>((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(init.signal?.reason));
+          })
+      ) as unknown as typeof fetch;
+      const pending = refreshGcpPriceTableIfDue(env, NOW);
+      await vi.advanceTimersByTimeAsync(10_001);
+      expect(await pending).toEqual({ status: 'failed', attempts: 1 });
+      expect(tokenCalls.map((call) => call.gcpProjectId)).toEqual(['slow-gcp']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('treats a malformed stored table as absent', async () => {
