@@ -128,6 +128,12 @@ describe('useSessionSections', () => {
     expect(search('  ').isSearching).toBe(false);
   });
 
+  it('matches session ids regardless of case', () => {
+    const sessions = [session({ id: '01M6SJC0WHWFSXDYA5SB59B0DD', topic: 'Uppercase id' })];
+    const { result } = renderHook(() => useSessionSections(sessions, new Map(), 'wh'));
+    expect(ids(result.current.sections.awake)).toEqual(['01M6SJC0WHWFSXDYA5SB59B0DD']);
+  });
+
   it('counts attention across the whole list, not just the search results', () => {
     const { result } = renderHook(() => useSessionSections(SESSIONS, TASK_INFO, 'ledger'));
     expect(result.current.sections.attention).toEqual([]);

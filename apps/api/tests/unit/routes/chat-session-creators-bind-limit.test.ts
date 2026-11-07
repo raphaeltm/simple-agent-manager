@@ -8,7 +8,6 @@ import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
-import { D1_MAX_BOUND_PARAMETERS } from '../../../src/lib/d1-limits';
 import { enrichSessionsWithCreators } from '../../../src/routes/chat-session-ownership';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
@@ -16,10 +15,14 @@ describe('enrichSessionsWithCreators', () => {
   let sqlite: Database.Database;
   let db: ReturnType<typeof drizzle<typeof schema>>;
 
+  // Cloudflare's documented D1 ceiling, written out rather than read from
+  // `D1_MAX_BOUND_PARAMETERS`, so a wrong constant cannot also move the test's limit.
+  const D1_BOUND_PARAMETER_CEILING = 100;
+
   beforeEach(() => {
     sqlite = new Database(':memory:');
     createAllSchemaTables(sqlite, schema);
-    db = drizzle(createSqliteD1WithBindLimit(sqlite, D1_MAX_BOUND_PARAMETERS), { schema });
+    db = drizzle(createSqliteD1WithBindLimit(sqlite, D1_BOUND_PARAMETER_CEILING), { schema });
   });
 
   afterEach(() => {
@@ -27,8 +30,9 @@ describe('enrichSessionsWithCreators', () => {
   });
 
   it('names every creator when there are more than one statement can bind', async () => {
-    // Full chunks plus a remainder, so an off-by-one cannot land on a clean boundary.
-    const creatorCount = D1_MAX_BOUND_PARAMETERS * 2 + 1;
+    // Well past the ceiling, and not a multiple of it, so an off-by-one cannot land on a
+    // clean boundary.
+    const creatorCount = 251;
     const insert = sqlite.prepare('INSERT INTO users (id, email, name) VALUES (?, ?, ?)');
     const sessions = Array.from({ length: creatorCount }, (_, n) => {
       insert.run(`user-${n}`, `user-${n}@example.com`, `User ${n}`);

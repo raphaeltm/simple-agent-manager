@@ -706,7 +706,8 @@ waking, stopping, or archiving never makes it newer, so an old chat you archive 
 top of History. A chat with no messages yet is placed by when it was created.
 
 The list loads the 100 chats with the most recent messages, plus up to 100 awake and up to 100
-sleeping chats that are older than those.
+sleeping chats that are older than those. Older chats that need attention are counted separately
+from that limit, so newer quiet chats cannot push them out of the list.
 
 A chat you opened in the last 24 hours opens at once from a cache in your browser, then refreshes in the background. A thin bar at the top of the page shows while the refresh runs, and messages that arrived while you were away appear when it finishes. A chat that is not cached shows a loading indicator until its newest messages arrive. The previous chat never stays on screen while the next one loads.
 

@@ -265,7 +265,7 @@ async function readIndex(
         .prepare(
           `SELECT ${columns} FROM (
              SELECT ${columns}, ROW_NUMBER() OVER (
-               PARTITION BY status
+               PARTITION BY status, attention_json IS NOT NULL
                ORDER BY COALESCE(last_message_at, created_at, started_at) DESC, id DESC
              ) AS status_rank
              FROM session_summaries
@@ -288,7 +288,8 @@ async function readIndex(
   // Independent once coverage has been validated, so they go out together rather
   // than paying sequential D1 hops. The live read ranks each status by recency and
   // caps each at the page limit, so a long tail of sleeping chats cannot crowd out
-  // awake ones. It is an extra on top of the page: if it fails, serve the page without
+  // awake ones. Sessions carrying an attention marker are ranked in their own group,
+  // so newer quiet chats cannot crowd out an older one that is waiting on a person. It is an extra on top of the page: if it fails, serve the page without
   // it rather than turning a good index read into a Durable Object fallback.
   const [countRow, page, live] = await Promise.all([
     db

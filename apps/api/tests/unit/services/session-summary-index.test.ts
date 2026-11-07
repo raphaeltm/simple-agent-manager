@@ -640,6 +640,35 @@ describe('listSessionsFromIndex', () => {
       expect(result.sessions.map((s) => s.id)).toEqual(['page-1', 'sleep-0', 'awake-oldest']);
     });
 
+    it('keeps an older chat waiting on a person when quiet sleeping chats fill the cap', async () => {
+      addSession('page-1', { status: 'stopped', lastMessageAt: 9000 });
+      for (let i = 0; i < 3; i++) {
+        addSession(`quiet-sleep-${i}`, { status: 'sleeping', lastMessageAt: 5000 - i });
+      }
+      addSession('old-wake-failed', {
+        status: 'sleeping',
+        lastMessageAt: 100,
+        attentionJson: JSON.stringify({
+          markerId: 'm-old',
+          kind: 'wake_failed',
+          createdAt: 150,
+          expiresAt: null,
+          reason: null,
+          options: [],
+        }),
+      });
+      setCoverage(PROJECT, { sessionCount: 5 });
+
+      const result = await read({ limit: 1 });
+
+      // One quiet sleeping chat (the cap) plus the waiting chat in its own group.
+      expect(result.sessions.map((s) => s.id)).toEqual([
+        'page-1',
+        'quiet-sleep-0',
+        'old-wake-failed',
+      ]);
+    });
+
     it('skips the live read when the whole project fits on the page', async () => {
       seedBeyondPage();
       const prepare = vi.spyOn(env.DATABASE, 'prepare');

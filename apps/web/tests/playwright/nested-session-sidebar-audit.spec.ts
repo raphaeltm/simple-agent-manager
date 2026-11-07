@@ -338,7 +338,9 @@ test.describe('Nested session sidebar — Mobile', () => {
     await openMobileSidebar(page);
     // The original bug: deep child's stopped ancestors were never surfaced.
     // Verifies the root stopped ancestor renders as a context anchor, which
-    // is what restores lineage navigation to the deep child.
+    // is what restores lineage navigation to the deep child. Stopped chats
+    // live in History, folded by default.
+    await expandHistorySection(page);
     await assertSessionVisible(page, 'Original investigation');
     await assertNoOverflow(page);
     await screenshot(page, 'nested-sidebar-stale-ancestor-mobile');

@@ -25,7 +25,7 @@ export const DEFAULT_OPEN_SESSION_SECTIONS: OpenSessionSections = {
 function matchesSessionQuery(session: ChatSessionListItem, query: string): boolean {
   return (
     Boolean(session.topic && stripMarkdown(session.topic).toLowerCase().includes(query)) ||
-    session.id.includes(query) ||
+    session.id.toLowerCase().includes(query) ||
     (session.createdBy?.name?.toLowerCase().includes(query) ?? false) ||
     (session.createdBy?.email?.toLowerCase().includes(query) ?? false)
   );
