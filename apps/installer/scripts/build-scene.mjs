@@ -70,8 +70,18 @@ shell = shell.replace(
   /url\(([^)]*Chillax-Variable\.woff2?[^)]*)\)/g,
   `url(data:font/woff2;base64,${font.toString('base64')})`
 );
-const scriptHashes = [...shell.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)]
-  .map((m) => "'sha256-" + createHash('sha256').update(m[1]).digest('base64') + "'")
+const clientScriptSource = await readFile(
+  new URL('../src/maintenance-client-script.ts', import.meta.url),
+  'utf8'
+);
+const clientScriptMatch = /maintenanceClientScript = `([^`]+)`/.exec(clientScriptSource);
+if (!clientScriptMatch) throw new Error('maintenance-client-script.ts: script template not found');
+const maintenanceClientScript = clientScriptMatch[1];
+const scriptHashes = [
+  ...[...shell.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]),
+  maintenanceClientScript,
+]
+  .map((code) => "'sha256-" + createHash('sha256').update(code).digest('base64') + "'")
   .join(' ');
 const [before, after] = shell.split('SAM_MAINTENANCE_CONTENT');
 if (!before || !after) throw new Error('Maintenance shell content marker missing');

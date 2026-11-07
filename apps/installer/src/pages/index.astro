@@ -29,7 +29,7 @@ import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
     
     
     
-    <script is:inline src="/app.js" defer></script>
+    <script is:inline type="module" src="/app.js"></script>
     <script is:inline type="module" src="/scene.js"></script>
   </head>
   <body class="installer-page sam-form">
@@ -42,7 +42,7 @@ import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
     <Header compact icon="/brand-icon.png" />
     <main>
       <div class="intro-layout">
-        <div class="hero-copy">
+        <div class="hero-copy" id="hero-copy">
           <Badge>Open Source &amp; Self-Hosted</Badge>
           <h1 class="hero-title">Your cloud.<br /><span class="gradient-text">Ready for SAM.</span></h1>
           <p class="intro">
@@ -54,6 +54,10 @@ import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
             ><span id="explore-label">Set up your cloud</span> <span aria-hidden="true">↗</span></a
           >
 
+        </div>
+        <div class="slim-header" id="slim-header" hidden>
+          <span class="slim-header-mark">SAM</span>
+          <span>Setting up your installation</span>
         </div>
         <div class="setup-column" id="setup" tabindex="-1">
           <div class="setup-card sam-glass sam-glass-rim">
@@ -67,6 +71,7 @@ import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
               <li id="step-handoff"><span class="step-number">4</span><span>Handoff</span></li>
             </ol>
             <div class="setup-content">
+              <div id="message" role="status" aria-live="polite"></div>
               <section id="connect" aria-labelledby="connect-title">
                 <h2 id="connect-title">Start with Cloudflare</h2>
                 <p>
@@ -84,7 +89,7 @@ import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
                       aria-hidden="true"
                     >
                       <path d="M7 18a5 5 0 1 1 1-9.9A6 6 0 0 1 20 10a4 4 0 0 1-1 8Z" /></svg
-                    ><span>Sign in with Cloudflare</span><span aria-hidden="true">↗</span>
+                    ><span>Sign in with Cloudflare</span>&nbsp;<span aria-hidden="true">↗</span>
                   </button>
                 </form>
                 <p class="reassurance">
@@ -154,7 +159,7 @@ import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
                       Use this verified email for your administrator account when you configure sign-in.
                     </p>
                     <button id="preview" type="button" class="sam-btn sam-btn--primary">
-                      Review installation <span aria-hidden="true">→</span>
+                      Review installation&nbsp;<span aria-hidden="true">→</span>
                     </button>
                   </fieldset>
                   <div id="choose-simple-actions">
@@ -166,19 +171,28 @@ import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
                         ></span
                       ></label
                     >
-                    <button class="sam-btn sam-btn--primary" id="install-simple" type="submit">
-                      Create my installation service <span aria-hidden="true">→</span>
+                    <button class="sam-btn sam-btn--primary" id="install-simple" type="submit" disabled>
+                      Create my installation service&nbsp;<span aria-hidden="true">→</span>
                     </button>
                   </div>
                 </form>
               </section>
               <section id="review" hidden aria-labelledby="review-title">
                 <h2 id="review-title">Review your installation</h2>
-                <div id="plan-summary" role="status"></div>
+                <p id="plan-summary-line"></p>
+                <details id="plan-details">
+                  <summary>What will be created</summary>
+                  <div id="plan-summary"></div>
+                </details>
                 <div id="review-blocked" hidden>
-                  <button type="button" id="check-again" class="sam-btn sam-btn--secondary">
-                    Check again
+                  <button type="button" id="use-different-domain" class="sam-btn sam-btn--primary">
+                    Use a different domain
                   </button>
+                  <p class="quiet-actions">
+                    <button type="button" id="check-again" class="sam-link-quiet">
+                      I've removed them — check again
+                    </button>
+                  </p>
                 </div>
                 <form id="review-form" hidden>
                   <label class="check"
@@ -187,8 +201,8 @@ import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
                       charges apply.</span
                     ></label
                   >
-                  <button class="sam-btn sam-btn--primary" id="install" type="submit">
-                    Install SAM in my account <span aria-hidden="true">→</span>
+                  <button class="sam-btn sam-btn--primary" id="install" type="submit" disabled>
+                    Install SAM in my account&nbsp;<span aria-hidden="true">→</span>
                   </button>
                 </form>
                 <p class="quiet-actions">
@@ -204,14 +218,13 @@ import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
                 </p>
                 <p id="worker-name" class="resource"></p>
                 <form method="post" action="/handoff">
-                  <button class="sam-btn sam-btn--primary">Continue to my service <span aria-hidden="true">→</span></button>
+                  <button class="sam-btn sam-btn--primary">Continue to my service&nbsp;<span aria-hidden="true">→</span></button>
                 </form>
                 <p class="small">
                   Save the recovery credential shown by your service. It keeps your access
                   independent of this temporary installer session.
                 </p>
               </section>
-              <div id="message" role="status" aria-live="polite"></div>
               <section id="cleanup-panel" hidden aria-labelledby="cleanup-title">
                 <h3 id="cleanup-title">Finish an interrupted setup</h3>
                 <p class="small" id="cleanup-description">
@@ -234,7 +247,7 @@ import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
                 </p></noscript
               >
             </div>
-            <aside class="mode-note">
+            <aside class="mode-note" id="mode-note">
               <strong>Your installation, in your account.</strong>
               <p id="installer-mode-note">
                 Creates a protected installation service. Full SAM installation, builds, and updates
@@ -247,7 +260,7 @@ import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
           </p>
         </div>
       </div>
-      <div class="trust">
+      <div class="trust" id="trust">
         <div>
           <h2>Nothing behind the curtain.</h2>
           <p>Public source. Temporary access. Host it here, or host it yourself.</p>
