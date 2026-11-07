@@ -118,6 +118,7 @@ export {
   isCapacityPoolStrategy,
   isCapacitySourceKind,
   isCapacityWorkloadRole,
+  MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH,
   SAFE_EFFECTIVE_CAPACITY_POOL_REASONS,
 } from './capacity-pool';
 

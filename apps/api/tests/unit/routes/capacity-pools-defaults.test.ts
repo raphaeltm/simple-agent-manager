@@ -55,7 +55,10 @@ vi.mock('../../../src/services/provider-catalogs', async (importOriginal) => {
 
 const { capacityPoolsRoutes } = await import('../../../src/routes/capacity-pools');
 const { adminCapacityPoolsRoutes } = await import('../../../src/routes/admin-capacity-pools');
-import { assertDefaultCapacityPoolUpdateResult } from '../../../src/routes/capacity-pool-update-request';
+import {
+  assertDefaultCapacityPoolUpdateResult,
+  parseDefaultCapacityPoolUpdateRequest,
+} from '../../../src/routes/capacity-pool-update-request';
 const providerCatalogs = await import('../../../src/services/provider-catalogs');
 
 function createApp() {
@@ -360,6 +363,48 @@ describe('default capacity pool routes', () => {
     expect(
       sqlite.prepare("SELECT deployment_strategy FROM capacity_pools WHERE scope = 'user'").get()
     ).toEqual({ deployment_strategy: 'smallest-fit' });
+  });
+
+  it('stores a provider order through PATCH without bumping the revision, and 400s an unknown source', async () => {
+    const { sqlite, env } = createEnv();
+    seedUser(sqlite, 'user-1');
+    seedCloudCredential(sqlite, { id: 'user-cloud-1', userId: 'user-1', provider: 'hetzner' });
+    const reconcile = await createApp().request(
+      '/api/capacity-pools/defaults/reconcile',
+      { method: 'POST' },
+      env
+    );
+    const initial = await reconcile.json();
+    const sourceId: string = initial.effective.candidates[0].capacitySourceId;
+    expect(sourceId).toBeTruthy();
+    const revisionBefore: number = initial.effective.pool.revision;
+
+    const res = await createApp().request(
+      '/api/capacity-pools/defaults',
+      { method: 'PATCH', body: JSON.stringify({ sourceOrder: [sourceId] }) },
+      env
+    );
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.effective.pool).toMatchObject({
+      sourceOrder: [sourceId],
+      revision: revisionBefore,
+    });
+
+    const rejected = await createApp().request(
+      '/api/capacity-pools/defaults',
+      { method: 'PATCH', body: JSON.stringify({ sourceOrder: ['no-such-source', sourceId] }) },
+      env
+    );
+
+    expect(rejected.status).toBe(400);
+    await expect(rejected.json()).resolves.toMatchObject({
+      details: { missingSourceIds: ['no-such-source'] },
+    });
+    expect(
+      sqlite.prepare("SELECT source_order_json FROM capacity_pools WHERE scope = 'user'").get()
+    ).toEqual({ source_order_json: JSON.stringify([sourceId]) });
   });
 
   it('keeps a zero-active user default visible and effective as configured-empty', async () => {
@@ -715,9 +760,45 @@ describe('default capacity pool routes', () => {
       )
     ).toMatchObject({ status: 'disabled' });
 
+    // The installation pool takes its own source, and refuses a user's source.
+    const platformSource: string = initial.effective.candidates[0].capacitySourceId;
+    const ordered = await createApp().request(
+      '/api/admin/capacity-pools/defaults',
+      { method: 'PATCH', body: JSON.stringify({ sourceOrder: [platformSource] }) },
+      env
+    );
+    expect(ordered.status).toBe(200);
+    expect((await ordered.json()).effective.pool.sourceOrder).toEqual([platformSource]);
+
+    seedUser(sqlite, 'user-1');
+    seedCloudCredential(sqlite, { id: 'user-cloud-1', userId: 'user-1', provider: 'hetzner' });
     authState.userId = 'user-1';
     authState.role = 'user';
-    seedUser(sqlite, 'user-1');
+    const userPool = await (
+      await createApp().request('/api/capacity-pools/defaults/reconcile', { method: 'POST' }, env)
+    ).json();
+    const userSource: string = userPool.defaults.find(
+      (item: { scope: string }) => item.scope === 'user'
+    ).summary.candidates[0].capacitySourceId;
+    authState.userId = 'superadmin-1';
+    authState.role = 'superadmin';
+    const crossScope = await createApp().request(
+      '/api/admin/capacity-pools/defaults',
+      { method: 'PATCH', body: JSON.stringify({ sourceOrder: [userSource] }) },
+      env
+    );
+    expect(crossScope.status).toBe(400);
+    await expect(crossScope.json()).resolves.toMatchObject({
+      details: { missingSourceIds: [userSource] },
+    });
+    expect(
+      sqlite
+        .prepare("SELECT source_order_json FROM capacity_pools WHERE scope = 'installation'")
+        .get()
+    ).toEqual({ source_order_json: JSON.stringify([platformSource]) });
+
+    authState.userId = 'user-1';
+    authState.role = 'user';
     const forbidden = await createApp().request(
       '/api/admin/capacity-pools/defaults',
       {
@@ -741,8 +822,22 @@ describe('default capacity pool update result contract', () => {
     unavailableCandidateIds: [],
     missingCatalogAdditions: [],
     unavailableCatalogAdditions: [],
+    missingSourceIds: [],
     conflict: false,
   };
+
+  it('rejects a provider order naming sources that do not serve the pool', () => {
+    try {
+      assertDefaultCapacityPoolUpdateResult(
+        { ...emptyResult, missingSourceIds: ['source-elsewhere'] },
+        'missing'
+      );
+      throw new Error('expected a 400');
+    } catch (error) {
+      expect(error).toBeInstanceOf(AppError);
+      expect((error as AppError).statusCode).toBe(400);
+    }
+  });
 
   it('surfaces a lost concurrent edit as 409 instead of reporting success', () => {
     try {
@@ -757,5 +852,31 @@ describe('default capacity pool update result contract', () => {
 
   it('accepts a published edit', () => {
     expect(() => assertDefaultCapacityPoolUpdateResult(emptyResult, 'missing')).not.toThrow();
+  });
+});
+
+describe('provider order request parsing', () => {
+  it('accepts an order alone, trimming ids', () => {
+    expect(parseDefaultCapacityPoolUpdateRequest({ sourceOrder: [' src-a ', 'src-b'] })).toEqual({
+      sourceOrder: ['src-a', 'src-b'],
+    });
+  });
+
+  it.each([[null], [[]]])('passes a clear (%j) through as present', (sourceOrder) => {
+    expect(parseDefaultCapacityPoolUpdateRequest({ sourceOrder })).toEqual({ sourceOrder });
+  });
+
+  it.each([
+    ['not an array', 'src-a'],
+    ['a non-string id', ['src-a', 7]],
+    ['an empty id', ['src-a', '  ']],
+    ['a duplicate', ['src-a', 'src-a']],
+    ['too many sources', Array.from({ length: 33 }, (_, i) => `src-${i}`)],
+  ])('rejects %s with a 400', (_label, sourceOrder) => {
+    expect(() => parseDefaultCapacityPoolUpdateRequest({ sourceOrder })).toThrow(AppError);
+  });
+
+  it('still requires some change', () => {
+    expect(() => parseDefaultCapacityPoolUpdateRequest({})).toThrow(/sourceOrder/);
   });
 });

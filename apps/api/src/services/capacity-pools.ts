@@ -27,6 +27,7 @@ import {
 } from '@simple-agent-manager/shared';
 
 import type * as schema from '../db/schema';
+import { log } from '../lib/logger';
 
 type StringGuard<T extends string> = (value: unknown) => value is T;
 
@@ -124,12 +125,37 @@ export function toCapacityPool(row: schema.CapacityPool): CapacityPoolDto {
       isCapacityExhaustionPolicy
     ),
     maxNodes: row.maxNodes,
+    sourceOrder: parseCapacityPoolSourceOrder(row.id, row.sourceOrderJson),
     lastReconciledAt: row.lastReconciledAt,
     migrationVersion: row.migrationVersion,
     migrationState: row.migrationState,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };
+}
+
+/**
+ * The stored provider order, or null when unset. A malformed value reads as unset (every source
+ * equal) rather than failing the pool read, and is logged so it can be fixed.
+ */
+export function parseCapacityPoolSourceOrder(
+  poolId: string,
+  raw: string | null | undefined
+): string[] | null {
+  if (raw === null || raw === undefined) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      Array.isArray(parsed) &&
+      parsed.every((id): id is string => typeof id === 'string' && id.length > 0)
+    ) {
+      return parsed.length > 0 ? parsed : null;
+    }
+  } catch {
+    // fall through to the warning below
+  }
+  log.warn('capacity_pool.source_order_invalid', { poolId });
+  return null;
 }
 
 export function toCapacityPoolCandidate(

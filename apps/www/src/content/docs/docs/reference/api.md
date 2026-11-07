@@ -652,8 +652,9 @@ credentials.
 
 ### `PATCH /api/capacity-pools/defaults`
 
-Update the authenticated user's owned default-pool policy, candidate statuses, or provider-native
-`catalogAdditions`. This endpoint does not mutate project or installation fallback pools.
+Update the authenticated user's owned default-pool policy, candidate statuses, provider-native
+`catalogAdditions`, or provider order (`sourceOrder`). This endpoint does not mutate project or
+installation fallback pools.
 
 `catalogAdditions` reactivates a currently available provider-native offering from the same
 credential-scoped catalog used by reconciliation. It identifies the active source plus concrete
@@ -669,6 +670,23 @@ provider/location/instance type; it does not accept secret material:
       "providerInstanceType": "cpx62",
       "providerInstanceSku": null
     }
+  ]
+}
+```
+
+`sourceOrder` sets the pool's provider order: capacity source ids, most preferred first, at most 32.
+New VMs are ranked by it; an existing node with room is still reused first. Sources not listed rank
+after listed ones. `null` or `[]` clears the order. Every id must be a capacity source that serves
+this pool, otherwise the request fails with `400` and `details.missingSourceIds` lists the unknown
+ids. Changing only the order does not bump the pool revision, so existing nodes stay reusable.
+If another edit changed the order after this request read it, the request fails with `409` and
+changes nothing.
+
+```json
+{
+  "sourceOrder": [
+    "cap-source-default:user:gcp-credential-id",
+    "cap-source-default:user:hetzner-credential-id"
   ]
 }
 ```
@@ -690,8 +708,9 @@ context. Project-scoped metadata comes from active project compute credentials. 
 
 ### `PATCH /api/projects/:id/capacity-pools/defaults`
 
-Update only the project-owned default-pool policy, candidate statuses, or provider-native
-`catalogAdditions`. Requires project `secret:write`.
+Update only the project-owned default-pool policy, candidate statuses, provider-native
+`catalogAdditions`, or `sourceOrder` (same shape and `missingSourceIds` error as the user route).
+Requires project `secret:write`.
 
 ### `GET /api/admin/capacity-pools/defaults`
 
@@ -705,8 +724,9 @@ Superadmin only.
 
 ### `PATCH /api/admin/capacity-pools/defaults`
 
-Update only the installation-owned default-pool policy, candidate statuses, or provider-native
-`catalogAdditions`. Superadmin only.
+Update only the installation-owned default-pool policy, candidate statuses, provider-native
+`catalogAdditions`, or `sourceOrder` (same shape and `missingSourceIds` error as the user route).
+Superadmin only.
 
 ## GitHub
 

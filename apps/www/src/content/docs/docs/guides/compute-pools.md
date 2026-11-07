@@ -185,6 +185,22 @@ its own section, named after the provider and where you manage it (for example *
 Infrastructure settings**, **Hetzner · Project accounts**, or **Hetzner · Project credentials**), so
 you can tell them apart without seeing credential ids.
 
+#### Provider order
+
+A pool can rank its sources: for example Google Cloud first, Hetzner second. When SAM needs a
+**new** machine, it plans from the first source in the order before any later one, whatever the
+strategy or price would otherwise prefer. Within one source, the strategy still decides. Sources the
+order does not list come after every listed one.
+
+- **A running machine with room is always used first.** The order only decides where a new machine
+  comes from, so a warm Hetzner node is reused even when Google Cloud is ranked first.
+- **No order (the default) means every source is equal**, which is how pools behaved before ordering
+  existed.
+- **Changing the order does not disturb running machines.** It applies to the next new machine.
+- A project or agent profile that sets a default provider still limits the pool to that provider.
+
+The order is set through the pool update API (`sourceOrder`, a list of source ids) for now.
+
 ### Allowed offerings
 
 An **offering** is one concrete, provider-native machine: a specific instance type in a specific

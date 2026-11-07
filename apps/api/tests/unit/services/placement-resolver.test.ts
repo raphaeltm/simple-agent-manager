@@ -19,6 +19,7 @@ import {
   resolveReusableNodeCapacitySnapshot,
   resolveTaskStartPlacement,
 } from '../../../src/services/placement-resolver';
+import { buildCapacityPlacementExplanation } from '../../../src/services/placement-resolver-capacity-snapshot';
 
 function reservation(
   overrides: Partial<ReturnType<typeof resolveTaskStartPlacement>['resolvedReservation']> = {}
@@ -705,6 +706,103 @@ describe('preferCapacityCandidatesInLocation', () => {
     ]);
     // Nothing is dropped, including when the pool has no offering in that region.
     expect(preferCapacityCandidatesInLocation(offerings, 'ash')).toEqual(offerings);
+  });
+  it('prefers the previous region only within the most preferred provider', () => {
+    const offerings = [
+      { id: 'gcp-a', location: 'us-central1-a', sourceRank: 1 },
+      { id: 'hetzner-hel1', location: 'hel1', sourceRank: 2 },
+      { id: 'gcp-b', location: 'us-east1-b', sourceRank: 1 },
+    ] as TaskStartCapacityCandidate[];
+
+    expect(preferCapacityCandidatesInLocation(offerings, 'hel1').map((c) => c.id)).toEqual([
+      'gcp-a',
+      'gcp-b',
+      'hetzner-hel1',
+    ]);
+    expect(preferCapacityCandidatesInLocation(offerings, 'us-east1-b').map((c) => c.id)).toEqual([
+      'gcp-b',
+      'gcp-a',
+      'hetzner-hel1',
+    ]);
+  });
+});
+
+describe('provider rank in runtime re-ranking', () => {
+  const candidate = (id: string, sourceRank: number | null, location: string) =>
+    ({
+      id,
+      sourceRank,
+      provider: 'hetzner',
+      location,
+      providerInstanceVcpuCount: 2,
+      providerInstanceMemoryMb: 4096,
+      providerInstanceDiskGb: 40,
+      providerInstancePriceMonthlyCents: 500,
+      providerInstancePriceHourlyMicros: 7000,
+      providerInstancePriceCurrency: 'EUR',
+      priceComparability: 'known',
+      priority: 0,
+      candidateOrder: 0,
+    }) as TaskStartCapacityCandidate;
+
+  it('puts ranked sources first, unranked last, ahead of spread location balancing', () => {
+    const ranked = rankCapacityCandidatesForRuntime(
+      [
+        candidate('unranked', null, 'fsn1'),
+        candidate('second', 2, 'nbg1'),
+        candidate('first', 1, 'fsn1'),
+      ],
+      {
+        strategy: 'spread',
+        reservation: reservation(),
+        // fsn1 is crowded, so spread alone would put nbg1 first.
+        locationInventory: [{ provider: 'hetzner', location: 'fsn1', nodeCount: 5 }],
+      } as never
+    );
+    expect(ranked.map((c) => c.id)).toEqual(['first', 'second', 'unranked']);
+  });
+});
+
+describe('provider rank in persisted state', () => {
+  it('ranks a candidate persisted before sourceRank existed as unranked', () => {
+    const legacy = {
+      id: 'legacy',
+      provider: 'hetzner',
+      location: 'fsn1',
+      providerInstanceVcpuCount: 2,
+      providerInstanceMemoryMb: 4096,
+      providerInstanceDiskGb: 40,
+      providerInstancePriceMonthlyCents: 100,
+      providerInstancePriceHourlyMicros: 1000,
+      providerInstancePriceCurrency: 'EUR',
+      priceComparability: 'known',
+      priority: 0,
+      candidateOrder: 0,
+    } as TaskStartCapacityCandidate;
+    expect('sourceRank' in legacy).toBe(false);
+
+    const ranked = rankCapacityCandidatesForRuntime(
+      [legacy, { ...legacy, id: 'ranked', sourceRank: 1, providerInstancePriceMonthlyCents: 900 }],
+      { strategy: 'balanced', reservation: reservation(), locationInventory: [] } as never
+    );
+
+    // Even though it is cheaper, the legacy candidate ranks after the ranked one.
+    expect(ranked.map((c) => c.id)).toEqual(['ranked', 'legacy']);
+  });
+
+  it('records the source rank in the placement explanation', () => {
+    const selection = capacitySelection({});
+    const explain = (sourceRank: number | null | undefined) =>
+      JSON.parse(
+        buildCapacityPlacementExplanation(selection, {
+          ...selection.candidates[0]!,
+          sourceRank,
+        })
+      ).sourceRank;
+
+    expect(explain(2)).toBe(2);
+    expect(explain(null)).toBeNull();
+    expect(explain(undefined)).toBeNull();
   });
 });
 
