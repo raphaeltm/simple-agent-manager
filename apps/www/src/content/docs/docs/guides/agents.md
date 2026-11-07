@@ -33,6 +33,16 @@ sign-in page and shows a copyable one-time code; no terminal interaction or
 manual `~/.codex/auth.json` paste is required. Pasting `auth.json` manually is
 still available as a fallback.
 
+SAM turns off Codex's built-in apps (ChatGPT connectors) and plugins, so a Codex
+session only has the tools and skills that SAM, your project, and your profile
+give it. SAM sets the `apps`, `plugins`, and `remote_plugin` features to `false`
+in the workspace's `~/.codex/config.toml`, inside a block marked
+`# BEGIN SAM MANAGED FEATURES` and `# END SAM MANAGED FEATURES`. SAM rewrites its
+marked blocks every time the agent starts, so edits inside them are lost. To turn
+a feature back on, replace that whole block with your own `[features]` table, for
+example `[features]` followed by `apps = true`. SAM keeps any value you set there
+and adds its defaults for the features you leave out.
+
 ### Gemini CLI
 
 | Property      | Value                                                  |
