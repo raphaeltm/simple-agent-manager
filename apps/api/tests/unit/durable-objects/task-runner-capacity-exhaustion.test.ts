@@ -13,7 +13,7 @@
  * What replaces the descent is the effective pool's own `exhaustionPolicy`,
  * exercised below through `handleNodeProvisioning` itself.
  */
-import { ProviderError } from '@simple-agent-manager/providers';
+import { GcpProvider, ProviderError } from '@simple-agent-manager/providers';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { handleNodeProvisioning } from '../../../src/durable-objects/task-runner/node-steps';
@@ -1032,5 +1032,192 @@ describe('TaskRunner capacity exhaustion policy', () => {
       permanent: true,
     });
     expect(provisionNode).toHaveBeenCalledTimes(1);
+  });
+});
+
+// -----------------------------------------------------------------------------------------
+// GCP zone stockouts (idea 01M6NXTF2RQ5QXHM7YZ4ZF0XBK slice 2; idea 01M236QPGGC6B150FG4QHT17MW
+// item 5). `classifyGcpError` had no call sites, so every GCP error reached this step as
+// `unknown` and a `ZONE_RESOURCE_POOL_EXHAUSTED` failed the task on its first offering.
+//
+// The errors here are produced by the real `GcpProvider.createVM` against a stubbed Compute
+// API (rule 62), never hand-built with a category: the category must come from the provider.
+// -----------------------------------------------------------------------------------------
+
+const GCP_PRIMARY = 'e2-standard-4';
+const GCP_ALTERNATE = 'n2d-standard-4';
+const GCP_STOCKOUT_MESSAGE =
+  "The zone 'projects/test-project/zones/us-central1-a' does not have enough resources available to fulfill the request.  Try a different zone, or try again later.";
+
+type GcpInsertOutcome =
+  | { kind: 'http'; status: number; body: unknown }
+  | { kind: 'operation'; errors: Array<{ code: string; message: string }> };
+
+/** Run the real `GcpProvider.createVM` against a stubbed Compute API and return its error. */
+async function gcpCreateError(outcome: GcpInsertOutcome): Promise<ProviderError> {
+  const zone = 'us-central1-a';
+  const originalFetch = globalThis.fetch;
+  const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status });
+  globalThis.fetch = (async (input: string | URL, init?: RequestInit) => {
+    const url = String(input);
+    const method = init?.method ?? 'GET';
+    if (url.endsWith('/global/firewalls') && method === 'POST') {
+      return json(
+        { error: { code: 409, message: 'already exists', status: 'ALREADY_EXISTS' } },
+        409
+      );
+    }
+    if (url.endsWith(`/zones/${zone}/instances`) && method === 'POST') {
+      if (outcome.kind === 'http') return json(outcome.body, outcome.status);
+      return json({ name: 'operation-insert-1', status: 'PENDING' });
+    }
+    if (
+      url.includes(`/zones/${zone}/operations/operation-insert-1`) &&
+      outcome.kind === 'operation'
+    ) {
+      return json({
+        name: 'operation-insert-1',
+        status: 'DONE',
+        error: { errors: outcome.errors },
+      });
+    }
+    throw new Error(`unexpected request ${method} ${url}`);
+  }) as typeof fetch;
+  try {
+    const provider = new GcpProvider('test-project', async () => 'token', zone);
+    const err = await provider
+      .createVM({ name: 'node-x', size: 'large', location: zone, userData: '#cloud-config' })
+      .then(
+        () => null,
+        (e: unknown) => e
+      );
+    if (!(err instanceof ProviderError)) throw new Error('expected a ProviderError from createVM');
+    return err;
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+}
+
+function gcpFallbackChainFixture() {
+  const { DATABASE } = createDbMock({});
+  const rc = createContext(DATABASE);
+  const state = createState({
+    capacityPoolSelection: poolWith('fallback-chain', [
+      siblingCandidate({
+        id: 'candidate-gcp-primary',
+        provider: 'gcp',
+        location: 'us-central1-a',
+        providerInstanceType: GCP_PRIMARY,
+        candidateOrder: 0,
+      }),
+      siblingCandidate({
+        id: 'candidate-gcp-alternate',
+        provider: 'gcp',
+        location: 'us-central1-b',
+        providerInstanceType: GCP_ALTERNATE,
+        candidateOrder: 1,
+      }),
+    ]),
+  });
+  return { rc, state };
+}
+
+describe('TaskRunner capacity exhaustion: GCP errors from the real provider', () => {
+  beforeEach(() => {
+    resolveCredentialSource.mockReset();
+    provisionNode.mockReset();
+    createNodeRecord.mockClear();
+  });
+
+  it('fallback-chain: descends past a GCP ZONE_RESOURCE_POOL_EXHAUSTED and advances', async () => {
+    const stockout = await gcpCreateError({
+      kind: 'operation',
+      errors: [{ code: 'ZONE_RESOURCE_POOL_EXHAUSTED', message: GCP_STOCKOUT_MESSAGE }],
+    });
+    // Fixture fidelity: the provider, not this test, assigned the category.
+    expect(stockout.category).toBe('transient_capacity');
+    expect(stockout.providerCode).toBe('ZONE_RESOURCE_POOL_EXHAUSTED');
+    provisionNode.mockImplementationOnce(async () => {
+      throw stockout;
+    });
+    provisionNode.mockImplementationOnce(async () => undefined);
+    const { rc, state } = gcpFallbackChainFixture();
+
+    await handleNodeProvisioning(state, rc);
+
+    expect(attemptedInstanceTypes()).toEqual([GCP_PRIMARY, GCP_ALTERNATE]);
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_agent_ready');
+    expect(state.stepResults.capacityPlacementSnapshot?.capacityPoolCandidateId).toBe(
+      'candidate-gcp-alternate'
+    );
+    const attempts = state.stepResults.placementDiagnostics?.attempts ?? [];
+    expect(attempts.map((a) => a.outcome)).toEqual(['capacity-exhausted', 'succeeded']);
+    expect(attempts[0]?.reason).toBe(
+      `Provider offering has no available capacity: GCP operation failed: ZONE_RESOURCE_POOL_EXHAUSTED: ${GCP_STOCKOUT_MESSAGE}`
+    );
+  });
+
+  it('fallback-chain: a GCP stockout on every offering ends with the exhaustion message', async () => {
+    const stockout = await gcpCreateError({
+      kind: 'operation',
+      errors: [{ code: 'ZONE_RESOURCE_POOL_EXHAUSTED', message: GCP_STOCKOUT_MESSAGE }],
+    });
+    provisionNode.mockImplementation(async () => {
+      throw stockout;
+    });
+    const { rc, state } = gcpFallbackChainFixture();
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+      message: `No capacity for any permitted offering in this compute pool (tried ${GCP_PRIMARY}, ${GCP_ALTERNATE}). Last provider error: GCP operation failed: ZONE_RESOURCE_POOL_EXHAUSTED: ${GCP_STOCKOUT_MESSAGE}`,
+      permanent: true,
+    });
+    expect(attemptedInstanceTypes()).toEqual([GCP_PRIMARY, GCP_ALTERNATE]);
+  });
+
+  it('fallback-chain: a GCP permission denial fails fast (control)', async () => {
+    const denied = await gcpCreateError({
+      kind: 'http',
+      status: 403,
+      body: {
+        error: {
+          code: 403,
+          message: "Required 'compute.instances.create' permission for 'projects/test-project'",
+          status: 'PERMISSION_DENIED',
+        },
+      },
+    });
+    expect(denied.category).toBe('auth_error');
+    provisionNode.mockImplementation(async () => {
+      throw denied;
+    });
+    const { rc, state } = gcpFallbackChainFixture();
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+      message: denied.message,
+      permanent: true,
+    });
+    expect(attemptedInstanceTypes()).toEqual([GCP_PRIMARY]);
+  });
+
+  it('fallback-chain: an ambiguous GCP 503 fails fast and never creates a second VM (control)', async () => {
+    const unavailable = await gcpCreateError({
+      kind: 'http',
+      status: 503,
+      body: {
+        error: {
+          code: 503,
+          message: 'The service is currently unavailable.',
+          status: 'UNAVAILABLE',
+        },
+      },
+    });
+    expect(unavailable.category).toBe('unknown');
+    provisionNode.mockImplementation(async () => {
+      throw unavailable;
+    });
+    const { rc, state } = gcpFallbackChainFixture();
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({ permanent: true });
+    expect(attemptedInstanceTypes()).toEqual([GCP_PRIMARY]);
   });
 });

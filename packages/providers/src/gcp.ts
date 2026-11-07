@@ -16,6 +16,7 @@ import {
   SAM_DEPLOYMENT_APP_ROUTE_NETWORK_TAG,
   SAM_NETWORK_TAG,
   SIZE_MAP,
+  withGcpErrorCategory,
 } from './gcp-metadata';
 import { gcpInstanceToVM, resolveGcpSourceImage } from './gcp-native-instance';
 import { getProviderCatalogOfferings } from './instance-offerings';
@@ -123,6 +124,20 @@ export class GcpProvider implements Provider {
   }
 
   async createVM(config: VMConfig, context?: ProviderRequestContext): Promise<VMInstance> {
+    try {
+      return await this.createVMUnclassified(config, context);
+    } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
+      // Assign the category at construction (rule 72) so a zone stockout reaches the TaskRunner
+      // as `transient_capacity` and descends the pool's fallback chain instead of failing.
+      throw withGcpErrorCategory(err);
+    }
+  }
+
+  private async createVMUnclassified(
+    config: VMConfig,
+    context?: ProviderRequestContext
+  ): Promise<VMInstance> {
     throwIfProviderRequestAborted(context);
     const nativeConfig = resolveVMConfigWithLegacySizeAdapter(config, {
       providerName: this.name,

@@ -347,6 +347,14 @@ work and retry until the overall capacity wait expires, even under **Fail**:
 So **Fail** is not a guarantee of an immediate error in every capacity situation.
 :::
 
+**What counts as "sold out".** On Hetzner, a placement or resource-unavailable error for that
+machine type and location. On Google Cloud, a zone that "does not have enough resources available"
+(`ZONE_RESOURCE_POOL_EXHAUSTED`). Some failures are not sold out and stop the work at once whatever
+the policy: a rejected credential or missing permission, an invalid request, and on Google Cloud a
+project quota (for example regional CPUs). A Google Cloud create request that fails with a plain
+"service unavailable" also stops the work, because SAM cannot tell whether the machine was created
+anyway, and trying another one could leave you paying for two.
+
 While work is waiting for capacity, the chat's infrastructure section shows "Waiting for capacity"
 and the next retry time, so a queued task is visible rather than silently stuck.
 

@@ -193,8 +193,23 @@ describe('classifyScalewayError', () => {
 });
 
 describe('classifyGcpError', () => {
-  it('UNAVAILABLE → transient_capacity', () => {
-    expect(classifyGcpError(503, 'UNAVAILABLE', 'zone unavailable')).toBe('transient_capacity');
+  // A bare UNAVAILABLE / 503 says GCP's front end failed, not that the zone is out of stock, and
+  // on the create POST it does not prove that nothing was created. `transient_capacity` would let
+  // the TaskRunner drop the node row and create a second VM (TLA+ path P2), so it stays `unknown`.
+  it('UNAVAILABLE without stockout evidence → unknown (ambiguous outcome never descends)', () => {
+    expect(classifyGcpError(503, 'UNAVAILABLE', 'The service is currently unavailable.')).toBe(
+      'unknown',
+    );
+  });
+
+  it('UNAVAILABLE carrying the stockout message → transient_capacity', () => {
+    expect(
+      classifyGcpError(
+        503,
+        'UNAVAILABLE',
+        "The zone 'projects/p/zones/us-central1-a' does not have enough resources available to fulfill the request.  Try a different zone, or try again later.",
+      ),
+    ).toBe('transient_capacity');
   });
 
   it('ZONE_RESOURCE_POOL_EXHAUSTED → transient_capacity', () => {
@@ -241,8 +256,30 @@ describe('classifyGcpError', () => {
     expect(classifyGcpError(429, 'RATE_LIMIT_EXCEEDED', 'rate limit exceeded')).toBe('rate_limited');
   });
 
-  it('503 without code → transient_capacity', () => {
-    expect(classifyGcpError(503, undefined, 'service unavailable')).toBe('transient_capacity');
+  it('503 without code → unknown', () => {
+    expect(classifyGcpError(503, undefined, 'service unavailable')).toBe('unknown');
+  });
+
+  // GCP reports quota and rate limits as HTTP 403. Read as `auth_error` they would be
+  // indistinguishable from a revoked credential.
+  it('403 quota without a structured status → quota_exceeded, not auth_error', () => {
+    expect(
+      classifyGcpError(403, undefined, "Quota 'CPUS' exceeded.  Limit: 8.0 in region us-central1."),
+    ).toBe('quota_exceeded');
+  });
+
+  it('403 rate limit without a structured status → rate_limited, not auth_error', () => {
+    expect(classifyGcpError(403, undefined, 'Rate Limit Exceeded')).toBe('rate_limited');
+  });
+
+  it('403 permission denial without a structured status → auth_error (control)', () => {
+    expect(
+      classifyGcpError(
+        403,
+        undefined,
+        "Required 'compute.instances.create' permission for 'projects/p/zones/us-central1-a/instances/node-x'",
+      ),
+    ).toBe('auth_error');
   });
 
   it('401 without code → auth_error', () => {

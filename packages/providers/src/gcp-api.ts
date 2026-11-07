@@ -1,4 +1,4 @@
-import { DEFAULT_GCP_MAX_LIST_PAGES } from './gcp-metadata';
+import { DEFAULT_GCP_MAX_LIST_PAGES, gcpOperationError } from './gcp-metadata';
 import { providerDelay, providerFetch, throwIfProviderRequestAborted } from './provider-fetch';
 import type { ProviderRequestContext } from './types';
 import { ProviderError } from './types';
@@ -58,10 +58,7 @@ export async function pollGcpOperation(
     throwIfProviderRequestAborted(context);
 
     if (op.status === 'DONE') {
-      if (op.error?.errors?.length) {
-        const errMsg = op.error.errors.map((e) => `${e.code}: ${e.message}`).join('; ');
-        throw new ProviderError('gcp', undefined, `GCP operation failed: ${errMsg}`);
-      }
+      if (op.error?.errors?.length) throw gcpOperationError(op.error.errors);
       return;
     }
 
