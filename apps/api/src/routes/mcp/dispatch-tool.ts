@@ -114,6 +114,7 @@ export async function handleDispatchTask(
   const [currentTask] = await db
     .select({
       id: schema.tasks.id,
+      chatSessionId: schema.tasks.chatSessionId,
       dispatchDepth: schema.tasks.dispatchDepth,
       status: schema.tasks.status,
       missionId: schema.tasks.missionId,
@@ -279,6 +280,7 @@ export async function handleDispatchTask(
     missionId: explicitMissionId ?? currentTask.missionId ?? null,
     coordinationChannel,
     maxLength: limits.dispatchDescriptionMaxLength,
+    parent: { taskId: currentTask.id, chatSessionId: currentTask.chatSessionId },
   });
 
   // ── Create the task ─────────────────────────────────────────────────────

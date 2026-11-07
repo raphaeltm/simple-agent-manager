@@ -18,6 +18,7 @@ import {
   type MessageCommentThread,
   type MessageCommentThreadEventReason,
   type MessageCursor,
+  type SchedulePromptAuthor,
   type SendAgentChannelMessageInput,
   type SendAgentChannelMessageResult,
   type SessionActivityTerminalReason,
@@ -1718,6 +1719,8 @@ export class ProjectData extends DurableObject<Env> {
     creatorChatSessionId: string | null;
     /** Only a person may schedule into a chat shared with them; see `ScheduleCreator`. */
     creator: ScheduleCreator;
+    /** Who wrote the prompt; an agent-written one is delivered as a pointer (constitution XV). */
+    promptAuthor: SchedulePromptAuthor;
     request: unknown;
   }) {
     this.ensureProjectId(input.projectId);
@@ -1759,6 +1762,7 @@ export class ProjectData extends DurableObject<Env> {
         {
           userId: input.userId,
           chatSessionId: input.creatorChatSessionId,
+          promptAuthor: input.promptAuthor,
           sharedAccessGrantId: authority?.writer.grantId ?? null,
         },
         input.request,

@@ -1,7 +1,8 @@
 /**
  * Child-task description assembly for MCP dispatch: the caller's description,
  * optional references, and (inside a mission) the inherited active policies,
- * capped at the dispatch description limit after concatenation.
+ * capped at the dispatch description limit after concatenation, then the parent
+ * attribution, which the cap never removes.
  */
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
@@ -15,6 +16,28 @@ export interface BuildDispatchDescriptionInput {
   missionId: string | null;
   coordinationChannel: string | null;
   maxLength: number;
+  /** The dispatching agent, named in the child's first message (constitution XV). */
+  parent: { taskId: string; chatSessionId: string | null };
+}
+
+const PARENT_ATTRIBUTION_MARKER = '\n\n---\nSent by parent agent task ';
+
+/**
+ * The description becomes the child's first chat message, which reads as human input. It is
+ * agent-written, so it always ends by naming the agent that wrote it.
+ */
+export function parentAgentAttribution(parent: BuildDispatchDescriptionInput['parent']): string {
+  const session = parent.chatSessionId ? `, chat session ${parent.chatSessionId}` : '';
+  return (
+    `${PARENT_ATTRIBUTION_MARKER}${parent.taskId}${session}. ` +
+    'An agent wrote this task description; it was not typed by a human.'
+  );
+}
+
+/** A description without its trailing parent attribution (a retry reuses its predecessor's). */
+export function withoutParentAgentAttribution(description: string): string {
+  const marker = description.lastIndexOf(PARENT_ATTRIBUTION_MARKER);
+  return marker === -1 ? description : description.slice(0, marker);
 }
 
 export async function buildDispatchDescription(
@@ -61,5 +84,5 @@ export async function buildDispatchDescription(
   if (fullDescription.length > input.maxLength) {
     fullDescription = fullDescription.slice(0, input.maxLength);
   }
-  return fullDescription;
+  return fullDescription + parentAgentAttribution(input.parent);
 }

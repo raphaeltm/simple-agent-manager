@@ -70,14 +70,19 @@ export async function handleStopSubtask(
 
   const { task, workspace, agentSession } = resolution;
 
-  // If reason provided, inject a final warning message (best-effort)
+  // If reason provided, send a final SAM-authored warning (best-effort). The parent's
+  // reason is agent-written, so it is recorded on the task, never put in the prompt
+  // (constitution XV).
   if (reason && task.status !== 'sleeping') {
+    // Grace period to let the agent process the warning (capped at 30s to prevent misconfiguration)
+    const gracePeriodMs = Math.min(limits.orchestratorStopGraceMs, 30_000);
+    const graceSeconds = Math.ceil(gracePeriodMs / 1000);
     try {
       await sendPromptToAgentOnNode(
         workspace.nodeId,
         workspace.id,
         agentSession.id,
-        `[STOP REQUESTED BY PARENT] ${reason}`,
+        stopRequestedNotice(tokenData.taskId, graceSeconds),
         env,
         tokenData.userId
       );
@@ -90,8 +95,6 @@ export async function handleStopSubtask(
       });
     }
 
-    // Grace period to let the agent process the warning (capped at 30s to prevent misconfiguration)
-    const gracePeriodMs = Math.min(limits.orchestratorStopGraceMs, 30_000);
     await new Promise((resolve) => setTimeout(resolve, gracePeriodMs));
   }
 
@@ -264,4 +267,14 @@ export async function handleStopSubtask(
       },
     ],
   });
+}
+
+/** SAM-authored notice for a parent's stop; it names the parent but never quotes its reason. */
+export function stopRequestedNotice(parentTaskId: string | null, graceSeconds: number): string {
+  const parent = parentTaskId ? `parent agent task ${parentTaskId}` : 'its parent agent';
+  return (
+    `SAM notice (system-generated, not a human message): ${parent} is stopping this task. ` +
+    `This session ends in about ${graceSeconds} seconds. Save or push any work you need to keep now. ` +
+    "The parent's reason is agent-written; SAM records it on this task when it stops."
+  );
 }

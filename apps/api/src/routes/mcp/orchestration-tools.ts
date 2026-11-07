@@ -43,6 +43,8 @@ import {
   type McpTokenData,
   sanitizeUserInput,
 } from './_helpers';
+import { parentAgentAttribution, withoutParentAgentAttribution } from './dispatch-description';
+import { resolveCallerChatSession } from './mailbox-target';
 import { denyWhenMcpActorLacksCurrentProjectCapability } from './orchestration-authority';
 import { stopActiveChildAgentForRetry } from './orchestration-retry-stop';
 
@@ -191,11 +193,18 @@ export async function handleRetrySubtask(
   const truncatedError = childTask.errorMessage
     ? sanitizeUserInput(childTask.errorMessage.slice(0, 500))
     : '';
-  const replacementDescription =
+  const replacementBody =
     newDescription ??
-    `${originalDescription}\n\nNote: Previous attempt (${childTaskId}) ended with status '${stoppedStatus}'.${
+    `${withoutParentAgentAttribution(originalDescription)}\n\nNote: Previous attempt (${childTaskId}) ended with status '${stoppedStatus}'.${
       truncatedError ? ` Error: ${truncatedError}` : ''
     }${childTask.outputBranch ? ` Branch with partial work: ${childTask.outputBranch}` : ''}`;
+  // The retry's description is agent-written too, so it names this parent (constitution XV).
+  const replacementDescription =
+    replacementBody +
+    parentAgentAttribution({
+      taskId: tokenData.taskId,
+      chatSessionId: tokenData.chatSessionId ?? (await resolveCallerChatSession(tokenData, env)),
+    });
 
   // Dispatch replacement task — reuse logic from dispatch-tool
   const taskId = ulid();
@@ -423,11 +432,7 @@ export async function handleRetrySubtask(
     );
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    await markTaskFailedIfNonTerminal(
-      env.DATABASE,
-      taskId,
-      `Session creation failed: ${errorMsg}`
-    );
+    await markTaskFailedIfNonTerminal(env.DATABASE, taskId, `Session creation failed: ${errorMsg}`);
     return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to create chat session: ${errorMsg}`);
   }
 
@@ -524,7 +529,4 @@ export async function handleRetrySubtask(
 // `add_dependency` and `remove_pending_subtask` live in
 // `orchestration-dependency-tools.ts` (rule 18 file-size ceiling); re-exported
 // here so importers keep one entry point for the orchestration tool family.
-export {
-  handleAddDependency,
-  handleRemovePendingSubtask,
-} from './orchestration-dependency-tools';
+export { handleAddDependency, handleRemovePendingSubtask } from './orchestration-dependency-tools';
