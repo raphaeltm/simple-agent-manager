@@ -1,4 +1,5 @@
 import type {
+  AgentEffort,
   AgentProfile,
   CreateAgentProfileRequest,
   GitHubCliPolicy,
@@ -107,6 +108,29 @@ function validateProfileEffort(agentType: string, effort: unknown): void {
   if (!isAgentEffortSupported(agentType, effort)) {
     throw errors.badRequest(`Effort '${effort}' is not supported for agent type '${agentType}'`);
   }
+}
+
+/** The model and effort a task's agent launches with. */
+export interface TaskAgentRunSettings {
+  model: string | null;
+  effort: AgentEffort | null;
+}
+
+/**
+ * Apply one-chat model/effort overrides over the inherited (skill → profile → project) values.
+ * A blank or null override inherits. The effort is checked against the agent that will run, so
+ * callers must resolve `agentType` first and call this before any task effect.
+ */
+export function resolveTaskAgentOverrides(
+  agentType: string,
+  requested: Readonly<{ model?: string | null; effort?: AgentEffort | null }>,
+  inherited: Readonly<{ model?: string | null; effort?: AgentEffort | null }>
+): TaskAgentRunSettings {
+  validateProfileEffort(agentType, requested.effort);
+  return {
+    model: requested.model?.trim() || inherited.model || null,
+    effort: requested.effort ?? inherited.effort ?? null,
+  };
 }
 
 /** Convert a DB row to an API response */

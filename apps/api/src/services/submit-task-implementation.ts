@@ -38,6 +38,7 @@ import {
   resolveTaskStartPlacement,
   resolveTaskStartPlacementCredentialAttributionFromPlacement,
 } from '../services/placement-resolver';
+import { resolveTaskAgentOverrides } from '../services/agent-profiles';
 import { resolveProjectAgentDefault } from '../services/project-agent-defaults';
 import * as projectDataService from '../services/project-data';
 import {
@@ -316,6 +317,7 @@ export async function submitTaskImplementation(
       contextSummary: body.contextSummary,
       taskMode: body.taskMode,
       agentType: body.agentType,
+      agentOverrides: { model: body.model, effort: body.effort },
       attachments: validatedAttachments,
       triggeredBy: via === 'connector' || via === 'pat' ? 'connector' : 'user',
       connectorClientName: clientName,
@@ -469,6 +471,14 @@ export async function submitTaskImplementation(
     requestedVmSizeSource: vmSizeSource,
   });
   const projectAgentDefaults = resolveProjectAgentDefault(project.agentDefaults, agentType);
+  // Chat-level model/effort > skill/profile > project.agentDefaults[agentType]; checked before
+  // any task effect against the agent the runner will launch (agent-session-step.ts). An unset
+  // model falls through in the VM agent to user agent_settings.
+  const launchAgentType = agentType || env.DEFAULT_TASK_AGENT_TYPE || 'opencode';
+  const agentRun = resolveTaskAgentOverrides(launchAgentType, body, {
+    model: resolvedProfile?.model ?? projectAgentDefaults.model,
+    effort: resolvedProfile?.effort,
+  });
 
   // Start new task work on its generated output branch so VM-agent completion
   // pushes cannot land on the repository default branch. A fork does not check out
@@ -700,10 +710,8 @@ export async function submitTaskImplementation(
       credentialAttributionProjectId,
       credentialAttributionSource,
       taskMode,
-      // Resolution chain: agent profile > project.agentDefaults[agentType] > null (VM agent
-      // then falls through to user agent_settings via callback, then platform default).
-      model: resolvedProfile?.model ?? projectAgentDefaults.model,
-      effort: resolvedProfile?.effort ?? null,
+      model: agentRun.model,
+      effort: agentRun.effort,
       permissionMode: resolvedProfile?.permissionMode ?? projectAgentDefaults.permissionMode,
       // OpenCode provider/baseUrl: null = no profile-level override.
       // The VM agent fetches user-level agent settings via the POST /:id/agent-settings callback.
