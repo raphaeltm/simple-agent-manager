@@ -247,7 +247,10 @@ async function auditViewport(
     reducedMotion: 'reduce',
   });
   const cspErrors: string[] = [];
-  page.on('console', message => { if(message.type() === 'error' && message.text().includes('Content Security Policy')) cspErrors.push(message.text()); });
+  page.on('console', (message) => {
+    if (message.type() === 'error' && message.text().includes('Content Security Policy'))
+      cspErrors.push(message.text());
+  });
   let state = 'connect';
   await installFixtureRoutes(
     page,
@@ -497,7 +500,15 @@ async function auditMaintenance(browser: Browser) {
         ' origins ' +
         JSON.stringify(received)
     );
-  await expect(page.getByRole('button', { name: 'Cancel deployment', exact: true })).toBeVisible();
+  // Running builds show ordered stages and keep stopping behind a confirmed disclosure.
+  await expect(page.getByText(/^Step \d+ of \d+:/)).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Refresh progress' })).toHaveCount(0);
+  const stop = page.locator('summary', { hasText: 'Stop this build' });
+  await expect(stop).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Stop build', exact: true })).toBeHidden();
+  await stop.click();
+  await expect(page.getByRole('button', { name: 'Stop build', exact: true })).toBeVisible();
+  screenshots += await captureState(page, 'maintenance-stop-disclosure');
   for (const state of ['running', 'failed', 'completed']) {
     builderJob = {
       ...builderJob,
