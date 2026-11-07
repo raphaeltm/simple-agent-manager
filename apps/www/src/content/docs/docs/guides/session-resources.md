@@ -237,7 +237,7 @@ an agent.
 
 ## Asking an agent to read it
 
-Agents connected to SAM's MCP server read the same data with the `sessions_read` method `resource_history` tool.
+Agents connected to SAM's MCP server read the same data with the `sessions_read` tool and `{"method": "resource_history"}`; with no other arguments it reads the caller's own session.
 **Called with no arguments it returns the agent's own session** — which is the useful case, because
 an agent can check whether it is heading for the same wall that killed the last attempt. The returned
 summary includes the server-resolved profile, skill, and agent type when available. Pass

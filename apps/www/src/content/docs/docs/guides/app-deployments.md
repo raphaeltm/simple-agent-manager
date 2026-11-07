@@ -68,7 +68,7 @@ When agent deploys are off for the environment, each **Ask an agent…** button 
 
 ## For agents: publishing a release
 
-Agents can discover this whole flow at runtime by calling the `deployments_read` method `guide` MCP tool, which returns a briefing on the agent-first model and the order in which to call the deployment tools. It takes no arguments and is the recommended starting point whenever a user asks to deploy, launch, publish, ship, or release an app.
+Agents can discover this whole flow at runtime by calling the `deployments_read` MCP tool with `{"method": "guide"}`, which returns a briefing on the agent-first model and the order in which to call the deployment tools. It needs no other arguments.
 
 Publishing is a two-step, asynchronous flow:
 

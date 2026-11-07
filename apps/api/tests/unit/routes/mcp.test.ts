@@ -795,7 +795,6 @@ describe('MCP Routes', () => {
           'ideas_write',
           'knowledge_read',
           'knowledge_write',
-          'library_read',
           'policies_read',
           'policies_write',
           'profiles_read',
@@ -860,7 +859,9 @@ describe('MCP Routes', () => {
           'delete_trigger',
           'list_triggers',
           'update_trigger',
-          // Library writes the chat renders as document cards
+          // Library tools (download writes into the workspace; writes render as cards)
+          'download_library_file',
+          'list_library_files',
           'display_from_library',
           'replace_library_file',
           'upload_to_library',

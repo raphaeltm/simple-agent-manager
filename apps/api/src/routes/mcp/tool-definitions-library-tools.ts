@@ -51,13 +51,13 @@ export const LIBRARY_TOOLS = [
     name: 'download_library_file',
     description:
       'Download a file from the project library into the workspace. The file is decrypted and placed in the configured library directory ' +
-      '(default: .library/, configurable via LIBRARY_MCP_DOWNLOAD_DIR). Use library_read method list first to find the file ID.',
+      '(default: .library/, configurable via LIBRARY_MCP_DOWNLOAD_DIR). Use list_library_files first to find the file ID.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         fileId: {
           type: 'string',
-          description: 'The file ID to download (from library_read method list)',
+          description: 'The file ID to download (from list_library_files)',
         },
         targetPath: {
           type: 'string',
@@ -104,13 +104,13 @@ export const LIBRARY_TOOLS = [
       'Surface an existing library file to the user as a rich document card in the chat. Use this to show the user a document ' +
       'that already exists in the library — for example, re-answering a question that a previously written explanation already covers. ' +
       'The card renders an inline preview (image thumbnail or clamped markdown) and opens full-screen on click. ' +
-      'Does not require a workspace. Use library_read method list first to find the file ID.',
+      'Does not require a workspace. Use list_library_files first to find the file ID.',
     inputSchema: {
       type: 'object' as const,
       properties: {
         fileId: {
           type: 'string',
-          description: 'The file ID to display (from library_read method list)',
+          description: 'The file ID to display (from list_library_files)',
         },
         caption: {
           type: 'string',
@@ -131,7 +131,7 @@ export const LIBRARY_TOOLS = [
       properties: {
         fileId: {
           type: 'string',
-          description: 'The file ID to replace (from library_read method list or upload_to_library FILE_EXISTS error)',
+          description: 'The file ID to replace (from list_library_files or upload_to_library FILE_EXISTS error)',
         },
         filePath: {
           type: 'string',

@@ -347,7 +347,7 @@ The Resources drawer reads a whole chat session through two endpoints, both scop
 
 The index returns `{ sessionId, runs, chunks, totalChunkCount, omittedChunkCount, maxChunks, collection, runtime }`. `chunks` is ascending by start time and covers every workspace the session ran on (each wake is a new workspace); each carries its `summary` and a columnar per-minute `rollup` (`null` for chunks uploaded before rollups existed). `runs` groups chunks by workspace with that workspace's `reservation` (`cpuMillis`, `memoryMb`, or `null`). Past `WORKSPACE_RESOURCE_TIMELINE_MAX_CHUNKS` (1000) the oldest chunks are left out and counted in `omittedChunkCount`. When there are no chunks, `collection` explains why: `unsupported` (an Instant session), `expired` (samples passed retention; the summary remains), or `pending` (nothing uploaded yet). The chunk endpoint returns the same shape as `detail` above and `404`s for a chunk that belongs to another project or session.
 
-Agents read the same data with the `sessions_read` method `resource_history` MCP tool, which takes no `projectId` — the project comes from the verified token. With no arguments it returns the caller's own session; supplying any one of `sessionId`, `taskId`, or `workspaceId` replaces the caller's defaults entirely rather than narrowing within them.
+Agents read the same data with the `sessions_read` MCP tool and `{"method": "resource_history"}`, which takes no `projectId` — the project comes from the verified token. With no arguments it returns the caller's own session; supplying any one of `sessionId`, `taskId`, or `workspaceId` replaces the caller's defaults entirely rather than narrowing within them.
 
 ### Live steering
 

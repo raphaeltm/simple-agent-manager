@@ -306,7 +306,7 @@ export const handleOpsCaptureDebugPackage: Handler = (requestId, params, tokenDa
         result: {
           nodeId: node.id,
           ...outcome,
-          next: 'Fetch it with library_read method download using fileId, then grep narrowly or run a local scrub script before reading. The download is a workspace copy the retention purge does not reach: delete it and anything extracted from it when you are done. Never paste raw contents into ideas, PRs or knowledge.',
+          next: 'Fetch it with download_library_file using fileId, then grep narrowly or run a local scrub script before reading. The download is a workspace copy the retention purge does not reach: delete it and anything extracted from it when you are done. Never paste raw contents into ideas, PRs or knowledge.',
         },
         detail: { status: 'ok', fileId: outcome.fileId, sizeBytes: outcome.sizeBytes },
       };

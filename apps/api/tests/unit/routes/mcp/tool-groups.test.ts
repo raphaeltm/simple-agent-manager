@@ -158,6 +158,13 @@ describe('tools/list catalogue', () => {
       destructiveHint: true,
     });
     expect(byName.get('list_triggers')?.annotations?.readOnlyHint).toBe(true);
+    // Downloading writes into the workspace, so it is not read-only (unlike listing).
+    expect(byName.get('list_library_files')?.annotations?.readOnlyHint).toBe(true);
+    expect(byName.get('download_library_file')?.annotations).toMatchObject({
+      readOnlyHint: false,
+      destructiveHint: true,
+    });
+    expect(byName.get('pause_mission')?.annotations?.destructiveHint).toBe(true);
   });
 
   it('cuts the ordinary catalogue to at most 85 tools', async () => {

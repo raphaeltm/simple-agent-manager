@@ -18,6 +18,8 @@ const route = (path: string) => `${api}/api/projects/${projectId}${path}`;
 test.setTimeout(480_000);
 
 test('a real agent calls domain tool groups by method', async ({ page }) => {
+  // Opt-in: runs only when a staging project is named, so default runs skip it.
+  test.skip(!process.env.MCP_GROUPS_PROJECT_ID, 'staging-only: set MCP_GROUPS_PROJECT_ID');
   expect(projectId, 'MCP_GROUPS_PROJECT_ID is required').not.toBe('');
   expect(profileId, 'MCP_GROUPS_PROFILE_ID is required').not.toBe('');
   const token = process.env.SAM_PLAYWRIGHT_PRIMARY_USER;

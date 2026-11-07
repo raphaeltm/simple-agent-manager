@@ -459,7 +459,7 @@ knowledge.
 log, Docker state, the agent's event and metrics databases) as
 `/debug-packages/<node ID>/<time>.tar.gz` in the Operations project's
 [library](/docs/guides/project-files/). The agent downloads it into its own workspace with
-`library_read` method `download`. Packages are **raw and unredacted**: they can contain anything the node
+`download_library_file`. Packages are **raw and unredacted**: they can contain anything the node
 logged. In the app only superadmins see them, and over MCP only tokens that pass the debugger-tool
 check can list, download or display them; every MCP download is audited. A daily 03:00 UTC cleanup
 deletes packages older than the retention period, oldest first, in batches of

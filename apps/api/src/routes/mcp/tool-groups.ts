@@ -9,8 +9,9 @@
  * validation and authorization run unchanged (`tool-group-dispatch.ts`). The member tools
  * stay callable by name for sessions that cached an older `tools/list`.
  *
- * Kept out of groups on purpose: tools the web UI or vm-agent recognise by name
- * (`upload_to_library`, `replace_library_file`, `display_from_library`,
+ * Kept out of groups on purpose: library tools (the web UI and vm-agent recognise the
+ * write tools by name, and `download_library_file` writes into the workspace, so it
+ * cannot share a read-only tool with `list_library_files`),
  * `request_human_input`, `ops_request_action`), task lifecycle and dispatch, agent
  * messaging/eventing/orchestration (pending a backend unification), triggers (create and
  * update schemas disagree on nullability), hard deletes, and Operations-only tools.
@@ -179,7 +180,7 @@ export const MCP_TOOL_GROUPS: readonly McpToolGroup[] = [
       },
       dependencies: {
         tool: 'get_task_dependencies',
-        summary: "the current task's parent, children and siblings",
+        summary: "the current task's parent, children and siblings (needs a task-scoped token)",
       },
     },
   },
@@ -235,21 +236,6 @@ export const MCP_TOOL_GROUPS: readonly McpToolGroup[] = [
       setup_guide: {
         tool: 'get_repo_setup_guide',
         summary: 'guide for preparing a repository for SAM agent workflows',
-      },
-    },
-  },
-  {
-    name: 'library_read',
-    kind: 'read',
-    summary: 'Browse and download files from the project library.',
-    methods: {
-      list: {
-        tool: 'list_library_files',
-        summary: 'file metadata, filterable by directory, tags, type and source',
-      },
-      download: {
-        tool: 'download_library_file',
-        summary: 'copy a library file into the workspace',
       },
     },
   },
