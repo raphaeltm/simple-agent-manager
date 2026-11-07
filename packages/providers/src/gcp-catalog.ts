@@ -105,8 +105,13 @@ export async function fetchGcpMachineTypes(
         ) {
           unreachable.push(scopeKey);
         }
-        const entries = optionalArray(scopeObj, 'machineTypes', 'gcp', scopeContext) ?? [];
-        entries.forEach((entry, index) => {
+        const entries = optionalArray(scopeObj, 'machineTypes', 'gcp', scopeContext);
+        // GCP marks an empty scope with a warning; a scope with neither is malformed, and
+        // reading it as empty would silently drop that zone from the catalog.
+        if (!entries && !warning) {
+          throw validationError('gcp', scopeContext, 'expected machineTypes or warning');
+        }
+        (entries ?? []).forEach((entry, index) => {
           const type = parseMachineType(entry, scopeKey, `${scopeContext}.machineTypes[${index}]`);
           // The server-side filter is the narrowing; this re-check keeps an unexpected
           // filter interpretation from widening the catalog.

@@ -382,6 +382,18 @@ describe('GcpProvider live offerings', () => {
     ).rejects.toThrow(/machine type list is incomplete: unreachable zones\/europe-west3-a/);
   });
 
+  it('a zone scope with neither machine types nor a warning fails the live catalog', async () => {
+    stubMachineTypes({
+      'zones/us-central1-a': {
+        machineTypes: [machineType('e2-standard-2', 'us-central1-a', 2, 8192)],
+      },
+      'zones/us-east1-b': {},
+    });
+    await expect(
+      provider().listInstanceOfferings({ preferApi: true, allowStaticFallback: false })
+    ).rejects.toThrow(/expected machineTypes or warning/);
+  });
+
   it('falls back to the static table when allowed and the live call fails', async () => {
     globalThis.fetch = vi.fn(
       async () => new Response(JSON.stringify({ error: { message: 'boom' } }), { status: 500 })
