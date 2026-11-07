@@ -25,7 +25,7 @@ Replace the example SHA with the current PR's full 40-character head SHA. Bare
 2. Subscribe only while relevant checks are pending. Check GitHub again immediately
    after subscribing to catch completion between the first read and registration.
 3. Before yielding, persist PR URL, full SHA, subscription ID/expiry and a concrete
-   fallback deadline chosen for the pending runs. Use `create_project_schedule`
+   fallback deadline chosen for the pending runs. Use `schedules_write` method `create`
    with `action.kind = "message_session"` and your current session ID for one
    bounded reconciliation, independent of the subscription expiry. Confirm creation
    and retain the schedule ID. Scheduling is not proof the recipient executed.

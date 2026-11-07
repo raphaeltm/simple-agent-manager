@@ -54,7 +54,7 @@ describe('agent-facing CI wait contract', () => {
       expect(text).toContain('full 40-character PR head SHA');
       expect(text).toContain('immediately after subscribing');
       expect(text).toContain('after every resume');
-      expect(text).toContain('create_project_schedule');
+      expect(text).toContain('`schedules_write` method `create`');
       expect(text).toContain('bounded fallback check');
     }
     expect(fields.subjectId.anyOf[0].description).toContain('never an abbreviated SHA');

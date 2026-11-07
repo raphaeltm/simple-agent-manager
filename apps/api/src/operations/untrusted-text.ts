@@ -29,7 +29,8 @@ const TRUNCATION_NOTICE = '[truncated by SAM]';
  * plain tool identifier is interpolated; anything else degrades to the bare notice rather than
  * being sanitised into something that looks deliberate.
  */
-const TOOL_NAME = /^[a-z0-9][a-z0-9_.-]{0,48}$/i;
+// A tool name, optionally followed by a domain-group method (`ideas_read method get`).
+const TOOL_NAME = /^[a-z0-9][a-z0-9_.-]{0,48}(?: method [a-z][a-z0-9_]{0,31})?$/i;
 
 /**
  * Says the text was cut, and how to get the rest when the caller knows a tool that returns it

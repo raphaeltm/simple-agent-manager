@@ -311,7 +311,7 @@ describe('what the user and the woken agent are told', () => {
 
   it('guides a fallback wake to check Git state and not replay outside effects', () => {
     const prompt = sessionRecoveryInitialPrompt(record());
-    expect(prompt).toContain('Use get_session_messages for this chat session');
+    expect(prompt).toContain('Use sessions_read method messages for this chat session');
     expect(prompt).toContain(`SAM restored commit ${'f'.repeat(40)} on branch sam/feature`);
     expect(prompt).toContain('Files outside the repository and any changes made after');
     expect(prompt).toContain('You are starting a new agent session');

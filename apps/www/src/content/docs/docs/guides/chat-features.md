@@ -551,7 +551,7 @@ An archived or expired chat also has a **Fork** box of its own; see
 1. Open the chat you want to branch from.
 2. Select **Fork** in the [session tool rail](#the-session-tool-rail).
 3. The new-chat screen opens with the message box filled in: an instruction for the agent to read
-   the previous chat with SAM's tools (`get_session_messages`, `search_messages`), then the previous
+   the previous chat with SAM's tools (`sessions_read` method `messages`, `sessions_read` method `search`), then the previous
    chat's title and its project, session, and task IDs.
 4. Add what to do next at the end of the message, keeping the IDs, and send it. To build on what
    the original agent pushed, say so, for example "continue from the original chat's branch". If

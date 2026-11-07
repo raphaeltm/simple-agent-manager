@@ -13,7 +13,7 @@ export const PROFILE_TOOLS = [
     description:
       'List all agent profiles available in your project, including built-in profiles. ' +
       'Returns a concise summary of each profile (id, name, description, agentType, model, isBuiltin). ' +
-      'Use get_agent_profile to get full details of a specific profile.',
+      'Use profiles_read method get to get full details of a specific profile.',
     inputSchema: {
       type: 'object' as const,
       properties: {},

@@ -324,7 +324,7 @@ These **Operations** settings control automatic links between chats, ideas, libr
 | `operations.agentLinkedUpdatesCap`            | 5       | 1–50           | Recent idea notes in agent context                                                                           |
 | `operations.agentLinkedTextMaxLength`         | 300     | 50–2,000       | Characters in each related text field sent to an agent                                                       |
 | `operations.agentLinkedMaxBytes`              | 24,000  | 2,000–36,000   | Serialized bytes in the related context sent to an agent                                                     |
-| `operations.agentIdeaContentPageLength`       | 65,536  | 1,000–65,536   | Idea content read in one `get_idea` call; a continuation notice names the next offset when a page is shorter |
+| `operations.agentIdeaContentPageLength`       | 65,536  | 1,000–65,536   | Idea content read in one `ideas_read` method `get` call; a continuation notice names the next offset when a page is shorter |
 
 If you lower the cap on read and view links below what a target already has, nothing is removed straight away: each new read or view link to that target then removes at most one batch of them, until the target is back under the cap. Reading the same thing again doesn't count as a new link.
 

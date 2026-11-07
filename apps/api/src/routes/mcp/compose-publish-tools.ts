@@ -73,7 +73,7 @@ export async function handleBuildAndPublish(
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      'A deployment environment name is required before build_and_publish can record a release.'
+      'A deployment environment name is required before deployments_write method publish can record a release.'
     );
   }
 
@@ -185,10 +185,11 @@ export async function handleBuildAndPublish(
               environment,
               environmentId: policyResult.environmentId,
               reference,
-              pollTool: 'get_publish_status',
+              pollTool: 'deployments_read',
+              pollMethod: 'publish_status',
               pollAfterSeconds: 10,
               instructions:
-                'Call get_publish_status with publishJobId until status is succeeded, failed, canceled, or unknown. Do not retry blindly while this job is still active.',
+                'Call deployments_read method publish_status with publishJobId until status is succeeded, failed, canceled, or unknown. Do not retry blindly while this job is still active.',
             },
             null,
             2
@@ -224,9 +225,10 @@ export async function handleBuildAndPublish(
               status: 'failed',
               errorCode: 'failed_to_start',
               errorMessage: message,
-              pollTool: 'get_publish_status',
+              pollTool: 'deployments_read',
+              pollMethod: 'publish_status',
               instructions:
-                'The publish job failed before VM acceptance. Inspect get_publish_status before retrying.',
+                'The publish job failed before VM acceptance. Inspect deployments_read method publish_status before retrying.',
             },
             null,
             2

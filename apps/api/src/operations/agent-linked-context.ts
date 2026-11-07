@@ -175,8 +175,13 @@ export async function getAgentLinkedContext(
             recentUpdates: {
               items: updates.updates.slice(0, limits.updates).map((note) => ({
                 ...note,
-                body: framed(note.body, 'idea update', limits.text, 'list_idea_updates'),
-                quote: framed(note.quote, 'idea update quote', limits.text, 'list_idea_updates'),
+                body: framed(note.body, 'idea update', limits.text, 'ideas_read method updates'),
+                quote: framed(
+                  note.quote,
+                  'idea update quote',
+                  limits.text,
+                  'ideas_read method updates'
+                ),
                 authorName: framed(note.authorName, 'author name', limits.text),
                 sessionTopic: framed(note.sessionTopic, 'chat topic', limits.text),
               })),

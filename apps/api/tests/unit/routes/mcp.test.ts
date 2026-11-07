@@ -12,6 +12,7 @@ import {
 import type { Env as ProjectDataEnv } from '../../../src/durable-objects/project-data/types';
 import type { ProjectDataArchiveExactReadInput } from '../../../src/project-data-archive/contract';
 import { groupTokensIntoMessages } from '../../../src/routes/mcp';
+import { MCP_TOOLS } from '../../../src/routes/mcp/tool-definitions';
 import * as projectHelpers from '../../../src/routes/projects/_helpers';
 import * as agentProfileService from '../../../src/services/agent-profiles';
 import {
@@ -779,151 +780,114 @@ describe('MCP Routes', () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      const toolNames = body.result.tools.map((t: { name: string }) => t.name);
-      // Task lifecycle tools
-      expect(toolNames).toContain('get_instructions');
-      expect(toolNames).toContain('update_task_status');
-      expect(toolNames).toContain('complete_task');
-      // Project awareness tools
-      expect(toolNames).toContain('list_tasks');
-      expect(toolNames).toContain('get_task_details');
-      expect(toolNames).toContain('search_tasks');
-      expect(toolNames).toContain('list_sessions');
-      expect(toolNames).toContain('get_session_messages');
-      expect(toolNames).toContain('get_archived_tool_payloads');
-      expect(toolNames).toContain('search_messages');
-      const searchMessages = body.result.tools.find(
-        (tool: { name: string }) => tool.name === 'search_messages'
+      const toolNames: string[] = body.result.tools.map((t: { name: string }) => t.name);
+      // The exact catalogue an ordinary task agent sees: domain groups replace their
+      // member tools (tool-groups.ts); incident and Operations tools are listed only to
+      // the Operations project (tests/unit/routes/mcp/tool-listing.test.ts).
+      expect([...toolNames].sort()).toEqual(
+        [
+          // Domain groups
+          'comments_read',
+          'comments_write',
+          'deployments_read',
+          'deployments_write',
+          'ideas_read',
+          'ideas_write',
+          'knowledge_read',
+          'knowledge_write',
+          'policies_read',
+          'policies_write',
+          'profiles_read',
+          'profiles_write',
+          'schedules_read',
+          'schedules_write',
+          'sessions_read',
+          'skills_read',
+          'skills_write',
+          'tasks_read',
+          'workspace_read',
+          // Task lifecycle, dispatch and orchestration
+          'add_dependency',
+          'associate_pull_request',
+          'cancel_mission',
+          'complete_task',
+          'create_mission',
+          'dispatch_task',
+          'get_handoff',
+          'get_instructions',
+          'get_mission',
+          'get_mission_state',
+          'get_orchestrator_status',
+          'get_scheduling_queue',
+          'list_pull_request_associations',
+          'override_task_state',
+          'pause_mission',
+          'publish_handoff',
+          'publish_mission_state',
+          'remove_pending_subtask',
+          'request_human_input',
+          'resume_mission',
+          'retry_subtask',
+          'send_message_to_subtask',
+          'stop_subtask',
+          'update_session_topic',
+          'update_task_status',
+          'wait_for_subtasks',
+          'get_workflow_run',
+          'start_workflow_run',
+          // Messaging and events
+          'ack_event_delivery',
+          'ack_message',
+          'cancel_project_event_subscription',
+          'catch_up_event_channel',
+          'create_project_event_subscription',
+          'follow_event_channel',
+          'get_channel_history',
+          'get_event',
+          'get_pending_messages',
+          'get_project_event_subscription',
+          'list_channel_subscribers',
+          'list_event_channels',
+          'list_project_event_subscriptions',
+          'list_subscription_events',
+          'publish_channel_event',
+          'send_durable_message',
+          // Triggers, profiles and skills deletes
+          'create_trigger',
+          'delete_agent_profile',
+          'delete_skill',
+          'delete_trigger',
+          'list_triggers',
+          'update_trigger',
+          // Library tools (download writes into the workspace; writes render as cards)
+          'download_library_file',
+          'list_library_files',
+          'display_from_library',
+          'replace_library_file',
+          'upload_to_library',
+          // Workspace actions, secrets, models, email
+          'exec_with_secrets',
+          'exec_with_secrets_cancel',
+          'exec_with_secrets_status',
+          'expose_port',
+          'list_ai_models',
+          'reply_to_email',
+          'report_environment_issue',
+          'run_ai_model',
+        ].sort()
       );
-      expect(searchMessages.inputSchema.properties.continuation).toMatchObject({
-        type: 'string',
-      });
-      const searchTasks = body.result.tools.find(
-        (tool: { name: string }) => tool.name === 'search_tasks'
+      const sessionsRead = body.result.tools.find(
+        (tool: { name: string }) => tool.name === 'sessions_read'
       );
-      expect(searchTasks.inputSchema.properties.continuation).toBeUndefined();
-      expect(toolNames).toContain('update_session_topic');
-      expect(toolNames).toContain('dispatch_task');
-      // Message-comment tools
-      expect(toolNames).toContain('list_message_comment_threads');
-      expect(toolNames).toContain('get_message_comment_thread');
-      expect(toolNames).toContain('create_message_comment_thread');
-      expect(toolNames).toContain('reply_to_message_comment_thread');
-      expect(toolNames).toContain('resolve_message_comment_thread');
-      expect(toolNames).toContain('reopen_message_comment_thread');
-      // Orchestration communication tools
-      expect(toolNames).toContain('send_message_to_subtask');
-      expect(toolNames).toContain('stop_subtask');
-      // Agent-initiated notifications
-      expect(toolNames).toContain('request_human_input');
-      // Session–Idea linking tools
-      expect(toolNames).toContain('link_idea');
-      expect(toolNames).toContain('unlink_idea');
-      expect(toolNames).toContain('list_linked_ideas');
-      expect(toolNames).toContain('find_related_ideas');
-      // Idea management tools
-      expect(toolNames).toContain('create_idea');
-      expect(toolNames).toContain('update_idea');
-      expect(toolNames).toContain('get_idea');
-      expect(toolNames).toContain('list_ideas');
-      expect(toolNames).toContain('search_ideas');
-      // Workspace tools (unified from workspace-mcp)
-      expect(toolNames).toContain('get_workspace_info');
-      expect(toolNames).toContain('get_credential_status');
-      expect(toolNames).toContain('get_network_info');
-      expect(toolNames).toContain('expose_port');
-      expect(toolNames).toContain('check_dns_status');
-      expect(toolNames).toContain('list_project_agents');
-      expect(toolNames).toContain('get_peer_agent_output');
-      expect(toolNames).toContain('get_task_dependencies');
-      expect(toolNames).toContain('get_workspace_diff_summary');
-      expect(toolNames).toContain('report_environment_issue');
-      // Project file library tools
-      expect(toolNames).toContain('list_library_files');
-      expect(toolNames).toContain('download_library_file');
-      expect(toolNames).toContain('upload_to_library');
-      expect(toolNames).toContain('replace_library_file');
-      expect(toolNames).toContain('display_from_library');
-      // Onboarding tools
-      expect(toolNames).toContain('get_repo_setup_guide');
-      // Deployment discovery tool — verify it advertises a zero-argument schema
-      expect(toolNames).toContain('get_deployment_guide');
-      const deploymentGuideTool = body.result.tools.find(
-        (t: { name: string }) => t.name === 'get_deployment_guide'
+      expect(sessionsRead.inputSchema.properties.continuation).toMatchObject({ type: 'string' });
+      const tasksRead = body.result.tools.find(
+        (tool: { name: string }) => tool.name === 'tasks_read'
       );
-      expect(deploymentGuideTool.inputSchema.properties).toEqual({});
-      expect(deploymentGuideTool.inputSchema.required).toBeUndefined();
-      // Trigger tools
-      expect(toolNames).toContain('list_triggers');
-      expect(toolNames).toContain('create_trigger');
-      expect(toolNames).toContain('update_trigger');
-      expect(toolNames).toContain('delete_trigger');
-      // Agent profile tools
-      expect(toolNames).toContain('list_agent_profiles');
-      expect(toolNames).toContain('get_agent_profile');
-      expect(toolNames).toContain('create_agent_profile');
-      expect(toolNames).toContain('update_agent_profile');
-      expect(toolNames).toContain('delete_agent_profile');
-      expect(toolNames).toContain('add_profile_env_var');
-      expect(toolNames).toContain('remove_profile_env_var');
-      expect(toolNames).toContain('list_profile_env_vars');
-      // Skill tools
-      expect(toolNames).toContain('list_skills');
-      expect(toolNames).toContain('get_skill');
-      expect(toolNames).toContain('create_skill');
-      expect(toolNames).toContain('update_skill');
-      expect(toolNames).toContain('delete_skill');
-      // Orchestrator lifecycle tools
-      expect(toolNames).toContain('get_orchestrator_status');
-      expect(toolNames).toContain('get_scheduling_queue');
-      expect(toolNames).toContain('pause_mission');
-      expect(toolNames).toContain('resume_mission');
-      expect(toolNames).toContain('cancel_mission');
-      expect(toolNames).toContain('override_task_state');
-      // Compose build + publish (agent-first deployment) tool
-      expect(toolNames).toContain('build_and_publish');
-      expect(toolNames).toContain('get_publish_status');
-      expect(toolNames).toContain('create_deployment_environment');
-      expect(toolNames).toContain('list_deployment_environments');
-      expect(toolNames).toContain('read_deployment_logs');
-      expect(toolNames).toContain('preview_deployment_routes');
-      expect(toolNames).toContain('list_deployment_routes');
-      expect(toolNames).toContain('list_deployment_environment_config');
-      expect(toolNames).toContain('set_deployment_environment_config');
-      expect(toolNames).toContain('wait_for_subtasks');
-      // Incident and Operations tools are listed only to the Operations project
-      // (tests/unit/routes/mcp/tool-listing.test.ts); this token is an ordinary project.
-      for (const name of ['list_incident_queue', 'claim_incident', 'ops_get_access_status']) {
-        expect(toolNames).not.toContain(name);
-      }
-      // Library file comment tools
-      expect(toolNames).toContain('list_library_file_comment_threads');
-      expect(toolNames).toContain('create_library_file_comment_thread');
-      // ProjectData event subscription tools
-      expect(toolNames).toContain('create_project_event_subscription');
-      expect(toolNames).toContain('list_project_event_subscriptions');
-      expect(toolNames).toContain('get_project_event_subscription');
-      expect(toolNames).toContain('cancel_project_event_subscription');
-      expect(toolNames).toContain('list_subscription_events');
-      expect(toolNames).toContain('get_event');
-      expect(toolNames).toContain('ack_event_delivery');
-      // Agent model calls (Cloudflare-hosted models)
-      expect(toolNames).toContain('list_ai_models');
-      expect(toolNames).toContain('run_ai_model');
-      for (const name of [
-        'publish_channel_event',
-        'list_event_channels',
-        'get_channel_history',
-        'follow_event_channel',
-        'catch_up_event_channel',
-        'create_project_schedule',
-        'list_project_schedules',
-        'get_project_schedule',
-        'reschedule_project_schedule',
-        'cancel_project_schedule',
-      ]) {
-        expect(toolNames).toContain(name);
-      }
+      expect(tasksRead.inputSchema.properties.continuation).toBeUndefined();
+      const deploymentsRead = body.result.tools.find(
+        (t: { name: string }) => t.name === 'deployments_read'
+      );
+      expect(deploymentsRead.inputSchema.properties.method.enum).toContain('guide');
       expect(new Set(toolNames).size).toBe(toolNames.length);
     });
 
@@ -951,8 +915,9 @@ describe('MCP Routes', () => {
       const res = await mcpRequest(app, jsonRpcRequest('tools/list'));
 
       const body = await res.json();
+      // profiles_write carries create_agent_profile.runtime, the schema that failed on Gemini.
       expect(body.result.tools.map((tool: { name: string }) => tool.name)).toContain(
-        'create_agent_profile'
+        'profiles_write'
       );
       for (const tool of body.result.tools) {
         expect(findGeminiSchemaViolations(tool.inputSchema, tool.name)).toEqual([]);
@@ -963,18 +928,23 @@ describe('MCP Routes', () => {
     });
 
     it('advertises bounded message-comment schemas without caller identity fields', async () => {
-      const res = await mcpRequest(app, jsonRpcRequest('tools/list'));
+      // Member schemas (still callable by name) feed the listed comments_* groups.
+      const memberTool = (name: string) =>
+        (
+          MCP_TOOLS as unknown as Array<{ name: string; description: string; inputSchema: any }>
+        ).find((tool) => tool.name === name)!;
+      const listComments = memberTool('list_message_comment_threads');
+      const createComment = memberTool('create_message_comment_thread');
+      const replyComment = memberTool('reply_to_message_comment_thread');
 
+      const res = await mcpRequest(app, jsonRpcRequest('tools/list'));
       const body = await res.json();
-      const listComments = body.result.tools.find(
-        (tool: { name: string }) => tool.name === 'list_message_comment_threads'
-      );
-      const createComment = body.result.tools.find(
-        (tool: { name: string }) => tool.name === 'create_message_comment_thread'
-      );
-      const replyComment = body.result.tools.find(
-        (tool: { name: string }) => tool.name === 'reply_to_message_comment_thread'
-      );
+      for (const group of ['comments_read', 'comments_write']) {
+        const listed = body.result.tools.find((tool: { name: string }) => tool.name === group);
+        expect(listed.inputSchema.properties.projectId).toBeUndefined();
+        expect(listed.inputSchema.properties.author).toBeUndefined();
+        expect(listed.inputSchema.properties.authorRole).toBeUndefined();
+      }
 
       expect(listComments.description).toContain('current SAM chat session');
       expect(listComments.description).toContain('quoted source-message context');
@@ -1390,21 +1360,21 @@ describe('MCP Routes', () => {
       );
       expect(text).toContain('SAM App Deployment Guide');
       expect(text).toContain('Agent-First Deployment Model');
-      expect(text).toContain('build_and_publish');
-      expect(text).toContain('create_deployment_environment');
-      expect(text).toContain('list_deployment_environments');
-      expect(text).toContain('preview_deployment_routes');
-      expect(text).toContain('list_deployment_routes');
+      expect(text).toContain("deployments_write { method: 'publish'");
+      expect(text).toContain("deployments_write { method: 'create_environment'");
+      expect(text).toContain("deployments_read { method: 'environments'");
+      expect(text).toContain("deployments_read { method: 'preview_routes'");
+      expect(text).toContain("deployments_read { method: 'routes'");
       expect(text).toContain('mode: host');
       expect(text).toContain('ALLOWED_HOSTS');
       expect(text).toContain('custom domains');
       expect(text).toContain('Variables');
       expect(text).toContain('Secrets');
-      expect(text).toContain('read_deployment_logs');
-      expect(text).toContain('check_dns_status');
+      expect(text).toContain("deployments_read { method: 'logs'");
+      expect(text).toContain("workspace_read { method: 'dns' }");
       const quickReference = text.slice(text.indexOf('## Quick Reference'));
-      expect(quickReference.indexOf('preview_deployment_routes')).toBeLessThan(
-        quickReference.indexOf('build_and_publish')
+      expect(quickReference.indexOf("method: 'preview_routes'")).toBeLessThan(
+        quickReference.indexOf("method: 'publish'")
       );
     });
 
@@ -2747,7 +2717,7 @@ describe('MCP Routes', () => {
       // The session id is reserved in the task INSERT, so it is known before the
       // background launch creates the session.
       expect(data.sessionId).toEqual(expect.any(String));
-      expect(data.message).toContain('get_task_details');
+      expect(data.message).toContain('tasks_read method get');
       expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
       expect(mockDoStub.createSession).not.toHaveBeenCalled();
       expect(mockDoStub.persistMessage).not.toHaveBeenCalled();
@@ -3599,7 +3569,7 @@ describe('MCP Routes', () => {
       expect(data.taskMode).toBe('conversation');
       expect(data.warning).toContain('will not auto-complete');
       expect(data.warning).toContain('send_message_to_subtask');
-      expect(data.warning).toContain('get_session_messages');
+      expect(data.warning).toContain('sessions_read method messages');
       expect(data.warning).toContain('taskMode: "task"');
       const startInput = mockTaskRunnerStub.start.mock.calls[0][0];
       expect(startInput.config.taskMode).toBe('conversation');
@@ -3641,7 +3611,7 @@ describe('MCP Routes', () => {
       expect(data.taskMode).toBe('conversation');
       expect(data.warning).toContain('will not auto-complete');
       expect(data.warning).toContain('send_message_to_subtask');
-      expect(data.warning).toContain('get_session_messages');
+      expect(data.warning).toContain('sessions_read method messages');
       expect(data.warning).toContain('taskMode: "task"');
     });
 

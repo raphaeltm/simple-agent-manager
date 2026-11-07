@@ -230,6 +230,28 @@ describe('automatic links from real workspace MCP triggers', () => {
         }),
         expect.anything()
       );
+      // A domain group call links exactly like its member tool (tool-group-dispatch.ts).
+      const createdViaGroup = await invoke('ideas_write', {
+        method: 'create',
+        title: 'Grouped idea',
+      });
+      expect(writes).toHaveBeenCalledWith(
+        env,
+        'project1',
+        expect.objectContaining({
+          sourceId: 'session1',
+          targetId: createdViaGroup['ideaId'],
+          relation: 'created',
+        }),
+        expect.anything()
+      );
+      await invoke('ideas_write', { method: 'update', ideaId: 'idea2', title: 'Edited via group' });
+      expect(writes).toHaveBeenCalledWith(
+        env,
+        'project1',
+        expect.objectContaining({ sourceId: 'session1', targetId: 'idea2', relation: 'edited' }),
+        expect.anything()
+      );
       const beforeForeignRead = writes.mock.calls.length;
       await recordAutoLink(env, 'project1', {
         sourceKind: 'session',

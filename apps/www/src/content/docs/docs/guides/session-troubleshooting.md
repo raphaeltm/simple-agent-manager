@@ -730,7 +730,7 @@ Code, look at the skill. A skill that sets an agent replaces the profile's agent
 profile's model. Skills created from the **Skills** page before 21 October 2026 (v2026.10.22 on a
 self-hosted instance) all set the platform default agent, usually OpenCode, and the **Skills** page
 doesn't show it. Ask an agent in the project to list the project's skills and clear the agent on
-any that set one (`update_skill` with `agentType: ""`), or start the chat without that skill. See
+any that set one (`skills_write` method `update` with `agentType: ""`), or start the chat without that skill. See
 [the order SAM picks the agent in](/docs/guides/agents/#agent-profiles).
 
 ## SAM moved the session to another machine
