@@ -35,10 +35,10 @@ still available as a fallback.
 
 SAM turns off Codex's built-in apps (ChatGPT connectors) and plugins, so a Codex
 session only has the tools and skills that SAM, your project, and your profile
-give it. SAM writes `apps = false`, `plugins = false`, and `remote_plugin = false`
-under `[features]` in the workspace's `~/.codex/config.toml`. To turn one back
-on, set it yourself in that file, for example `apps = true` under `[features]`.
-SAM keeps any value you set.
+give it. SAM sets the `apps`, `plugins`, and `remote_plugin` features to `false`
+in the workspace's `~/.codex/config.toml`. To turn one back on, set it yourself
+in that file, for example `apps = true` under `[features]`. SAM keeps any value
+you set.
 
 ### Gemini CLI
 

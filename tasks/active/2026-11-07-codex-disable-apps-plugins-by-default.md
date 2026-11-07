@@ -12,7 +12,7 @@ while still letting a user's own `~/.codex/config.toml` opt back in.
 - Pinned Codex CLI is `0.160.0` (`packages/vm-agent/internal/acp/codex_runtime_installer.sh`).
   `codex features list` on 0.160.0 shows `apps`, `plugins` and `remote_plugin` as stable and on by
   default (`recommended_plugins` is already off). Writing `[features] apps = false, plugins = false,
-  remote_plugin = false` to `$CODEX_HOME/config.toml` turns all three off. `--disable` and
+remote_plugin = false` to `$CODEX_HOME/config.toml` turns all three off. `--disable` and
   `-c features.x=false` also work for the bare CLI.
 - SAM starts Codex through `@agentclientprotocol/codex-acp` 2.1.1. The adapter spawns
   `codex app-server` with no `-c` arguments, and `CODEX_CONFIG` is only applied per thread
@@ -73,3 +73,11 @@ while still letting a user's own `~/.codex/config.toml` opt back in.
 - Real binary: configs produced by `mergeManagedCodexMcpConfig` for fresh, user-table and dotted
   forms were read by Codex 0.160.0 `codex features list`: `apps`/`plugins`/`remote_plugin` false,
   and the user's `apps = true` and `code_mode = true` preserved.
+- Review fix (go-specialist HIGH ×2): the merge scanned config.toml line by line, so a line
+  inside a multi-line string or array could be taken for a table header. That misplaced the
+  feature keys (new) and split a user's multi-line array with SAM's block, writing invalid TOML
+  (pre-existing on `main`). `codexTOMLStatementStarts` (`codex_toml_statements.go`) now tracks
+  multi-line strings and open arrays, and every scan (first table, top-level keys, `[features]`
+  header, managed-key removal) uses it. A managed key with a multi-line value is removed whole.
+  The merge also logs an error if its result is invalid while the user's file was valid.
+  Forcing every line to count as a statement reddens exactly the three multi-line cases.

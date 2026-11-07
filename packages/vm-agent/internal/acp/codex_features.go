@@ -87,9 +87,11 @@ func planCodexManagedFeatures(cleaned string) codexFeaturePlan {
 
 // codexFeaturesHeaderLine returns the line index of a [features] table header, or -1.
 func codexFeaturesHeaderLine(config string) int {
-	for i, line := range strings.Split(config, "\n") {
+	lines := strings.Split(config, "\n")
+	starts := codexTOMLStatementStarts(lines)
+	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if !strings.HasPrefix(trimmed, "[") || strings.HasPrefix(trimmed, "[[") {
+		if !starts[i] || !strings.HasPrefix(trimmed, "[") || strings.HasPrefix(trimmed, "[[") {
 			continue
 		}
 		var header map[string]any

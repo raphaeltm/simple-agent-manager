@@ -105,6 +105,44 @@ func TestMergeManagedCodexConfigFeatureDefaults(t *testing.T) {
 			preserved: []string{`[features.example]`},
 		},
 		{
+			name: "multi-line string containing a [features] line before the real table",
+			existing: strings.Join([]string{
+				`notes = """`,
+				`[features]`,
+				`apps = true`,
+				`"""`,
+				``,
+				`[features]`,
+				`code_mode = true`,
+			}, "\n"),
+			want:      map[string]any{"apps": false, "plugins": false, "remote_plugin": false, "code_mode": true},
+			preserved: []string{"notes = \"\"\"\n[features]\napps = true\n\"\"\""},
+		},
+		{
+			name: "multi-line top-level array and literal string",
+			existing: strings.Join([]string{
+				`matrix = [`,
+				`  [1, 2], # "[profiles.decoy]"`,
+				`  [3, 4],`,
+				`]`,
+				`prompt = '''`,
+				`[mcp_servers.decoy]`,
+				`sandbox_mode = "read-only"`,
+				`'''`,
+				`model = "user-model"`,
+				``,
+				`[profiles.user]`,
+				`model = "other"`,
+			}, "\n"),
+			want:      allOff,
+			preserved: []string{"matrix = [\n  [1, 2], # \"[profiles.decoy]\"\n  [3, 4],\n]", "[mcp_servers.decoy]\nsandbox_mode = \"read-only\"", `model = "user-model"`},
+		},
+		{
+			name:     "managed top-level key with a multi-line value is replaced whole",
+			existing: "approval_policy = [\n  \"on-request\",\n]\nmodel = \"user-model\"\n",
+			want:     allOff,
+		},
+		{
 			name:     "user inline features table cannot be extended",
 			existing: "features = { code_mode = true }\n",
 			// SAM leaves Codex's defaults rather than write an invalid file.
@@ -137,8 +175,10 @@ func TestMergeManagedCodexConfigFeatureDefaults(t *testing.T) {
 
 func codexFeaturesHeaderCount(config string) int {
 	count := 0
-	for _, line := range strings.Split(config, "\n") {
-		if strings.TrimSpace(line) == "[features]" {
+	lines := strings.Split(config, "\n")
+	starts := codexTOMLStatementStarts(lines)
+	for i, line := range lines {
+		if starts[i] && strings.TrimSpace(line) == "[features]" {
 			count++
 		}
 	}
@@ -183,6 +223,12 @@ func TestCodexStartupDisablesAppsAndPluginsOnEveryRuntime(t *testing.T) {
 			container: true,
 			existing:  "[features]\ncode_mode = true\nplugins = true\n",
 			want:      map[string]any{"apps": false, "plugins": true, "remote_plugin": false, "code_mode": true},
+		},
+		{
+			name:      "container with user inline features table",
+			container: true,
+			existing:  "features = { code_mode = true }\n",
+			want:      map[string]any{"apps": nil, "plugins": nil, "remote_plugin": nil, "code_mode": true},
 		},
 	}
 	for _, tc := range cases {
