@@ -297,32 +297,16 @@ export function validateGcpInstance(payload: unknown, context: string): GcpInsta
   };
 }
 
-export function validateGcpInstancesList(
-  payload: unknown,
-  context: string
-): { items?: GcpInstancePayload[]; nextPageToken?: string } {
-  const root = expectObject(payload, 'gcp', context);
-  const items = optionalArray(root, 'items', 'gcp', context);
-  const nextPageToken = optionalString(root, 'nextPageToken', 'gcp', context);
-  if (nextPageToken !== undefined && nextPageToken.length === 0) {
-    throw validationError('gcp', `${context}.nextPageToken`, 'expected non-empty string');
-  }
-  return {
-    ...(items
-      ? {
-          items: items.map((instance, index) =>
-            validateGcpInstance(instance, `${context}.items[${index}]`)
-          ),
-        }
-      : {}),
-    ...(nextPageToken ? { nextPageToken } : {}),
-  };
+/** One `items` entry of a GCP aggregated list: a zone's instances, or a warning about it. */
+export interface GcpAggregatedScope {
+  instances?: GcpInstancePayload[];
+  warning?: { code: string; message?: string };
 }
 
 export function validateGcpAggregatedInstances(
   payload: unknown,
   context: string
-): { items?: Record<string, { instances?: GcpInstancePayload[] }>; nextPageToken?: string } {
+): { items?: Record<string, GcpAggregatedScope>; nextPageToken?: string } {
   const root = expectObject(payload, 'gcp', context);
   const items = optionalObject(root, 'items', 'gcp', context);
   const nextPageToken = optionalString(root, 'nextPageToken', 'gcp', context);
@@ -331,17 +315,28 @@ export function validateGcpAggregatedInstances(
   }
   if (!items) return { ...(nextPageToken ? { nextPageToken } : {}) };
 
-  const scopes: Record<string, { instances?: GcpInstancePayload[] }> = {};
+  const scopes: Record<string, GcpAggregatedScope> = {};
   for (const [scope, scopePayload] of Object.entries(items)) {
-    const scopeObj = expectObject(scopePayload, 'gcp', `${context}.items.${scope}`);
-    const instances = optionalArray(scopeObj, 'instances', 'gcp', `${context}.items.${scope}`);
-    scopes[scope] = instances
+    const scopeContext = `${context}.items.${scope}`;
+    const scopeObj = expectObject(scopePayload, 'gcp', scopeContext);
+    const instances = optionalArray(scopeObj, 'instances', 'gcp', scopeContext);
+    const warningObj = optionalObject(scopeObj, 'warning', 'gcp', scopeContext);
+    const warning = warningObj
       ? {
-          instances: instances.map((instance, index) =>
-            validateGcpInstance(instance, `${context}.items.${scope}.instances[${index}]`)
-          ),
+          code: requireString(warningObj, 'code', 'gcp', `${scopeContext}.warning`),
+          ...(typeof warningObj.message === 'string' ? { message: warningObj.message } : {}),
         }
-      : {};
+      : undefined;
+    scopes[scope] = {
+      ...(instances
+        ? {
+            instances: instances.map((instance, index) =>
+              validateGcpInstance(instance, `${scopeContext}.instances[${index}]`)
+            ),
+          }
+        : {}),
+      ...(warning ? { warning } : {}),
+    };
   }
 
   return {

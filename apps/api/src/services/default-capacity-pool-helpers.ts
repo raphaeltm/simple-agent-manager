@@ -1,9 +1,5 @@
 import type { CapacityPoolScope, CredentialProvider } from '@simple-agent-manager/shared';
 import type { VMSize } from '@simple-agent-manager/shared';
-import {
-  getDefaultLocationForProvider,
-  getLocationsForProvider,
-} from '@simple-agent-manager/shared';
 
 export interface DefaultPoolScopeIdentity {
   scope: CapacityPoolScope;
@@ -19,15 +15,6 @@ export interface DefaultCapacitySourceReference {
 }
 
 export const CAPACITY_SOURCE_EXTERNAL_CREDENTIAL_TYPE = 'capacity-source-external-ref';
-
-export function orderedLocationsForProvider(provider: CredentialProvider) {
-  const locations = getLocationsForProvider(provider);
-  const defaultLocation = getDefaultLocationForProvider(provider);
-  return [
-    ...locations.filter((location) => location.id === defaultLocation),
-    ...locations.filter((location) => location.id !== defaultLocation),
-  ];
-}
 
 export function defaultPoolId(scope: DefaultPoolScopeIdentity): string {
   switch (scope.scope) {
