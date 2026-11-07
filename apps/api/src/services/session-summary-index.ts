@@ -30,10 +30,7 @@ const log = createModuleLogger('session_summary_index');
 
 /** Why a read could not be served from D1 — surfaced for observability. */
 export type SessionIndexMissReason =
-  | 'no_coverage'
-  | 'incomplete_coverage'
-  | 'stale_coverage'
-  | 'index_error';
+  'no_coverage' | 'incomplete_coverage' | 'stale_coverage' | 'index_error';
 
 export interface SessionIndexResult {
   sessions: Record<string, unknown>[];
@@ -48,6 +45,46 @@ export interface SessionIndexQuery {
   offset: number;
   /** Restricts to sessions this user created (the sidebar's `scope=my`). */
   createdByUserId: string | null;
+  /** Also return in-scope live sessions the page left out (see `LIVE_SESSION_STATUSES`). */
+  includeLive?: boolean;
+}
+
+/**
+ * Statuses a session can still be resumed or acted on from: awake (working or idle) and
+ * sleeping. The chat sidebar groups by state, so it needs every one of these in scope, not
+ * just those whose last message happens to fall in the newest page.
+ */
+export const LIVE_SESSION_STATUSES = ['active', 'sleeping'] as const;
+
+/**
+ * Whether a list read should add the live sessions its page left out. Only a first page of
+ * an unfiltered list: a status filter already selects what it wants, and later pages would
+ * repeat rows the first one returned.
+ */
+export function shouldIncludeLive(query: {
+  includeLive?: boolean;
+  status: string | null;
+  offset: number;
+}): boolean {
+  return Boolean(query.includeLive) && query.status === null && query.offset === 0;
+}
+
+/**
+ * Append `extra` rows whose id is not already in `page`, in their own order. The page keeps
+ * its position and `total`/`hasMore` keep describing it.
+ */
+export function appendMissingSessions(
+  page: Record<string, unknown>[],
+  extra: Record<string, unknown>[]
+): Record<string, unknown>[] {
+  const seen = new Set(page.map((session) => session.id));
+  const merged = [...page];
+  for (const session of extra) {
+    if (seen.has(session.id)) continue;
+    seen.add(session.id);
+    merged.push(session);
+  }
+  return merged;
 }
 
 export function resolveMaxStalenessMs(env: Env): number {
@@ -213,33 +250,60 @@ async function readIndex(
   }
 
   const whereClause = conditions.join(' AND ');
+  const columns = `id, workspace_id, task_id, created_by_user_id, topic, status, message_count,
+                started_at, last_message_at, ended_at, created_at, updated_at, agent_completed_at, attention_json`;
+  const recency = 'ORDER BY COALESCE(last_message_at, created_at, started_at) DESC, id DESC';
 
   // Independent once coverage has been validated, so they go out together rather
-  // than paying two sequential D1 hops.
-  const [countRow, page] = await Promise.all([
+  // than paying sequential D1 hops. Live sessions are read per status, each capped at
+  // the page limit, so a long tail of sleeping chats cannot crowd out awake ones.
+  const liveStatuses = shouldIncludeLive(query) ? LIVE_SESSION_STATUSES : [];
+  const [countRow, page, ...live] = await Promise.all([
     db
       .prepare(`SELECT COUNT(*) as cnt FROM session_summaries WHERE ${whereClause}`)
       .bind(...params)
       .first<{ cnt: number }>(),
     db
       .prepare(
-        `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count,
-                started_at, last_message_at, ended_at, created_at, updated_at, agent_completed_at, attention_json
-         FROM session_summaries
-         WHERE ${whereClause}
-         ORDER BY COALESCE(last_message_at, created_at, started_at) DESC, id DESC
-         LIMIT ? OFFSET ?`
+        `SELECT ${columns} FROM session_summaries WHERE ${whereClause} ${recency} LIMIT ? OFFSET ?`
       )
       .bind(...params, query.limit, query.offset)
       .all<Record<string, unknown>>(),
+    ...liveStatuses.map((status) =>
+      db
+        .prepare(
+          `SELECT ${columns} FROM session_summaries
+           WHERE ${whereClause} AND status = ? ${recency} LIMIT ?`
+        )
+        .bind(...params, status, query.limit)
+        .all<Record<string, unknown>>()
+    ),
   ]);
 
   const total = countRow?.cnt ?? 0;
   const rows = page.results ?? [];
+  const sessions = mapIndexRows(env, query.projectId, rows);
+  const liveSessions = live.flatMap((read) =>
+    mapIndexRows(env, query.projectId, read.results ?? [])
+  );
 
-  // Per-row isolation (.claude/rules/50): one row that fails the schema — a
-  // legacy shape, a NULL where the schema wants a number — must degrade to "that
-  // row is missing" and never throw the whole list into a 500.
+  // Mirrors the DO: `rows.length` is the raw SQL-fetched count, so post-fetch
+  // skips cannot make `hasMore` claim the window reached the end when it did not.
+  const hasMore = query.offset + rows.length < total;
+
+  return { result: { sessions: appendMissingSessions(sessions, liveSessions), total, hasMore } };
+}
+
+/**
+ * Map index rows with per-row isolation (.claude/rules/50): one row that fails the schema
+ * — a legacy shape, a NULL where the schema wants a number — must degrade to "that row is
+ * missing" and never throw the whole list into a 500.
+ */
+function mapIndexRows(
+  env: Env,
+  projectId: string,
+  rows: Record<string, unknown>[]
+): Record<string, unknown>[] {
   const sessions: Record<string, unknown>[] = [];
   let skipped = 0;
   for (const raw of rows) {
@@ -248,7 +312,7 @@ async function readIndex(
     } catch (err) {
       skipped++;
       log.warn('session_index.row_skipped', {
-        projectId: query.projectId,
+        projectId,
         rowId: typeof raw.id === 'string' ? raw.id : null,
         error: String(err),
       });
@@ -257,16 +321,11 @@ async function readIndex(
 
   if (skipped > 0) {
     log.warn('session_index.list_degraded', {
-      projectId: query.projectId,
+      projectId,
       fetched: rows.length,
       returned: sessions.length,
       skipped,
     });
   }
-
-  // Mirrors the DO: `rows.length` is the raw SQL-fetched count, so post-fetch
-  // skips cannot make `hasMore` claim the window reached the end when it did not.
-  const hasMore = query.offset + rows.length < total;
-
-  return { result: { sessions, total, hasMore } };
+  return sessions;
 }

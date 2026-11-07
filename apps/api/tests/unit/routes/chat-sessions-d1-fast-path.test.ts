@@ -261,4 +261,80 @@ describe('GET /api/projects/:projectId/sessions — D1 fast path', () => {
       OWNER
     );
   });
+
+  describe('include=live', () => {
+    it('reads live sessions the page left out from the DO when the index cannot answer', async () => {
+      // No coverage: the DO serves the page, then each live status.
+      mocks.listSessions.mockImplementation(async (_env, _projectId, status: string | null) => {
+        if (status === null) {
+          return {
+            sessions: [{ id: 'page-stopped' }, { id: 'page-active' }],
+            total: 4,
+            hasMore: true,
+          };
+        }
+        if (status === 'active') {
+          return {
+            sessions: [{ id: 'page-active' }, { id: 'old-awake' }],
+            total: 2,
+            hasMore: false,
+          };
+        }
+        return { sessions: [{ id: 'old-sleeping' }], total: 1, hasMore: false };
+      });
+
+      const { status, body } = await listSessions('?limit=2&include=live&scope=my');
+
+      expect(status).toBe(200);
+      const typed = body as { sessions: { id: string }[]; total: number; hasMore: boolean };
+      expect(typed.sessions.map((s) => s.id)).toEqual([
+        'page-stopped',
+        'page-active',
+        'old-awake',
+        'old-sleeping',
+      ]);
+      expect(typed.total).toBe(4);
+      expect(typed.hasMore).toBe(true);
+      // Each live read keeps the caller's creator scope and the page limit.
+      expect(mocks.listSessions).toHaveBeenCalledWith(env, PROJECT, 'active', 2, 0, null, OWNER);
+      expect(mocks.listSessions).toHaveBeenCalledWith(env, PROJECT, 'sleeping', 2, 0, null, OWNER);
+    });
+
+    it('skips the live DO reads when the page already holds every session', async () => {
+      const { body } = await listSessions('?include=live');
+
+      expect((body as { sessions: { id: string }[] }).sessions.map((s) => s.id)).toEqual([
+        'from-do',
+      ]);
+      expect(mocks.listSessions).toHaveBeenCalledTimes(1);
+    });
+
+    it('serves live sessions from D1 without touching the DO when the index is fresh', async () => {
+      sqlite
+        .prepare(
+          `INSERT INTO session_summaries
+             (id, project_id, user_id, status, topic, message_count, started_at, updated_at,
+              last_message_at, created_by_user_id, created_at, synced_at)
+           VALUES (?, ?, ?, ?, 'x', 1, 100, 5000, ?, ?, 90, ?)`
+        )
+        .run('page-stopped', PROJECT, OWNER, 'stopped', 9000, OWNER, now);
+      sqlite
+        .prepare(
+          `INSERT INTO session_summaries
+             (id, project_id, user_id, status, topic, message_count, started_at, updated_at,
+              last_message_at, created_by_user_id, created_at, synced_at)
+           VALUES (?, ?, ?, ?, 'x', 1, 100, 5000, ?, ?, 90, ?)`
+        )
+        .run('old-awake', PROJECT, OWNER, 'active', 1000, OWNER, now);
+      setCoverage();
+
+      const { body } = await listSessions('?limit=1&include=live');
+
+      expect((body as { sessions: { id: string }[] }).sessions.map((s) => s.id)).toEqual([
+        'page-stopped',
+        'old-awake',
+      ]);
+      expect(mocks.listSessions).not.toHaveBeenCalled();
+    });
+  });
 });

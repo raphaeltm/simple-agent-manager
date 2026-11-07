@@ -105,10 +105,10 @@ older saved sessions.
 
 ## The agent is waiting for you
 
-**Needs input** beside a chat in the session list means it is waiting for an answer. On a phone,
-open the session list with the list icon at the right of the project-name bar. A chat with no new
-messages for three hours moves into the collapsed **Older** group at the bottom of the list, so look
-there too. Open the chat and look for one of these:
+**Needs input** beside a chat in the session list means it is waiting for an answer. Such chats sit
+at the top of the list under **Needs attention**, however long ago their last message was. On a
+phone, open the session list with the list icon at the right of the project-name bar; an amber count
+on that icon says how many chats need attention. Open the chat and look for one of these:
 
 - **A card in the chat** — a permission request, under the step it's about, or a question or a link
   to open, at the end of the chat. Answer it there; the agent carries on once it has your answer. If

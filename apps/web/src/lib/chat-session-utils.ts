@@ -162,6 +162,38 @@ export function getAttentionState(session: ChatSessionResponse): AttentionState 
   return 'stopped';
 }
 
+// =============================================================================
+// Session List Sections
+// =============================================================================
+
+/**
+ * Where a session sits in the project chat list, in display order: something a person must
+ * act on, then sessions whose runtime is awake (working or idle), then sleeping sessions a
+ * message can wake, then everything that can no longer be resumed.
+ *
+ * Placement is by state only — never by message age — so a long-quiet awake session stays
+ * visible. Within a section the list keeps conversation recency.
+ */
+export type SessionSection = 'attention' | 'awake' | 'sleeping' | 'history';
+
+export const SESSION_SECTION_ORDER: readonly SessionSection[] = [
+  'attention',
+  'awake',
+  'sleeping',
+  'history',
+];
+
+/** Section for a session. Pass the task-enriched session so terminal tasks land in History. */
+export function getSessionSection(session: ChatSessionResponse): SessionSection {
+  const state = getSessionState(session);
+  if (state === 'terminated') return 'history';
+  // An unanswered question or a failed wake needs a person even when the session is
+  // asleep; it outranks the lifecycle state, matching the row's own status label.
+  const attention = getAttentionState(session);
+  if (attention === 'needs_input' || attention === 'wake_failed') return 'attention';
+  return state === 'sleeping' ? 'sleeping' : 'awake';
+}
+
 /** Whether a session's attention state should be treated as high-priority. */
 export function isHighPriorityAttention(state: AttentionState): boolean {
   return state === 'needs_input' || state === 'wake_failed' || state === 'error';

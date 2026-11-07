@@ -2,10 +2,10 @@ import { Plus } from 'lucide-react';
 import { useCallback, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
-import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
+import type { ChatSessionListItem } from '../../lib/api';
 import { ATTENTION_ICON, getAttentionState } from '../../lib/chat-session-utils';
 import { SessionTreeItem } from './SessionTreeItem';
-import type { TaskInfo } from './useTaskGroups';
+import { enrichSessionWithTaskInfo, type TaskInfo } from './useTaskGroups';
 
 /**
  * Focus Mode session strip — the 64px collapsed form of the project-chat
@@ -27,26 +27,6 @@ import type { TaskInfo } from './useTaskGroups';
  */
 
 const CLOSE_DELAY_MS = 140;
-
-function enrichSession(
-  session: ChatSessionListItem,
-  taskInfoMap: Map<string, TaskInfo>
-): ChatSessionResponse {
-  const taskInfo = session.taskId ? taskInfoMap.get(session.taskId) : undefined;
-  if (!taskInfo) return session;
-  return {
-    ...session,
-    task: {
-      id: taskInfo.id,
-      status: taskInfo.status,
-      terminalReason: taskInfo.terminalReason,
-      errorMessage: taskInfo.errorMessage,
-      executionStep: taskInfo.executionStep,
-      taskMode: taskInfo.taskMode,
-      ...session.task,
-    },
-  };
-}
 
 interface TooltipState {
   session: ChatSessionListItem;
@@ -111,7 +91,10 @@ export function FocusStrip({
           className="flex-1 min-h-0 w-full overflow-y-auto overflow-x-hidden flex flex-col items-center gap-0.5 pt-1"
         >
           {sessions.map((session) => {
-            const enriched = enrichSession(session, taskInfoMap);
+            const enriched = enrichSessionWithTaskInfo(
+              session,
+              session.taskId ? taskInfoMap.get(session.taskId) : undefined
+            );
             const attention = getAttentionState(enriched);
             const config = ATTENTION_ICON[attention];
             const StatusIcon = config.icon;

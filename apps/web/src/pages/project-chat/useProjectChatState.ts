@@ -43,6 +43,11 @@ import { stripMarkdown } from '../../lib/text-utils';
 import { useProjectContext } from '../ProjectContext';
 import { buildForkMessage } from './profileWizardHelpers';
 import {
+  type CollapsibleSessionSection,
+  DEFAULT_OPEN_SESSION_SECTIONS,
+  type OpenSessionSections,
+} from './SessionSectionList';
+import {
   buildBaseSubmitRequest,
   getCompletedAttachmentRefs,
   withAttachmentRefs,
@@ -59,9 +64,9 @@ import { useConversationActions } from './useConversationActions';
 import { useProfileChoice } from './useProfileChoice';
 import { useProjectSkills } from './useProjectSkills';
 import { useProvisioningTracker } from './useProvisioningTracker';
-import { useSessionFilters } from './useSessionFilters';
 import { useSessionReducer } from './useSessionReducer';
 import { rawToSessionEvent } from './useSessionReducer';
+import { useSessionSections } from './useSessionSections';
 import { useStableTaskInfoMap } from './useStableTaskInfoMap';
 
 /** Pre-filled fork/retry context shown on the new chat screen. */
@@ -109,7 +114,12 @@ export function useProjectChatState() {
 
   // Sidebar filtering
   const [searchQuery, setSearchQuery] = useState('');
-  const [showStale, setShowStale] = useState(false);
+  const [openSessionSections, setOpenSessionSections] = useState<OpenSessionSections>(
+    DEFAULT_OPEN_SESSION_SECTIONS
+  );
+  const toggleSessionSection = useCallback((section: CollapsibleSessionSection) => {
+    setOpenSessionSections((open) => ({ ...open, [section]: !open[section] }));
+  }, []);
   const [sessionScope, setSessionScope] = useState<SessionScope>('all');
   const multiplayerActive = Boolean(project?.multiplayerActive);
 
@@ -235,12 +245,11 @@ export function useProjectChatState() {
 
   const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
 
-  const { filteredRecent, filteredStale, effectiveShowStale } = useSessionFilters(
-    sessions,
-    taskInfoMap,
-    searchQuery,
-    showStale
-  );
+  const {
+    sections: sessionSections,
+    attentionCount,
+    isSearching: isSearchingSessions,
+  } = useSessionSections(sessions, taskInfoMap, searchQuery);
 
   // ---------------------------------------------------------------------------
   // Effects
@@ -273,8 +282,13 @@ export function useProjectChatState() {
         sessions = initial.sessions;
         listFromPrefetchRef.current = initial.prefetched;
       } else {
-        sessions = (await listChatSessions(projectId, { limit: CHAT_SESSION_LIST_LIMIT, scope }))
-          .sessions;
+        sessions = (
+          await listChatSessions(projectId, {
+            limit: CHAT_SESSION_LIST_LIMIT,
+            scope,
+            includeLive: true,
+          })
+        ).sessions;
       }
       resetSessions(sessions);
       hasLoadedRef.current = true;
@@ -665,13 +679,13 @@ export function useProjectChatState() {
     setSidebarOpen,
     searchQuery,
     setSearchQuery,
-    showStale,
-    setShowStale,
+    openSessionSections,
+    toggleSessionSection,
     sessionScope,
     setSessionScope,
-    filteredRecent,
-    filteredStale,
-    effectiveShowStale,
+    sessionSections,
+    attentionCount,
+    isSearchingSessions,
     taskTitleMap,
     taskInfoMap,
     message,

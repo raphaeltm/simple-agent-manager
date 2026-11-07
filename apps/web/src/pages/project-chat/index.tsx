@@ -49,19 +49,31 @@ export function ProjectChat() {
 
   // The chat list is this screen's main toggle: the mobile app bar shows it raised at its
   // right edge (SAM Glass), in place of the second bar this page used to draw.
-  const { hasSessions, sidebarOpen, setSidebarOpen } = state;
+  // Its count says how many chats need someone, so a closed drawer cannot hide a blocker.
+  const { hasSessions, sidebarOpen, setSidebarOpen, attentionCount } = state;
   const chatListAction = useMemo(
     () =>
       isMobile && hasSessions
         ? {
-            label: 'Open chat list',
+            label:
+              attentionCount > 0
+                ? `Open chat list, ${attentionCount} need${attentionCount === 1 ? 's' : ''} attention`
+                : 'Open chat list',
             icon: <PanelRight size={20} strokeWidth={1.75} />,
             onClick: () => setSidebarOpen(true),
             expanded: sidebarOpen,
+            count: attentionCount > 0 ? attentionCount : undefined,
           }
         : null,
-    [isMobile, hasSessions, sidebarOpen, setSidebarOpen]
+    [isMobile, hasSessions, sidebarOpen, setSidebarOpen, attentionCount]
   );
+  // The Focus strip shows what is still resumable, in list order; History stays in the full list.
+  const { sessionSections } = state;
+  const focusStripSessions = useMemo(
+    () => [...sessionSections.attention, ...sessionSections.awake, ...sessionSections.sleeping],
+    [sessionSections]
+  );
+
   useEffect(() => {
     setScreenAction(chatListAction);
     return () => setScreenAction(null);
@@ -248,7 +260,7 @@ export function ProjectChat() {
         >
           {focusMode === 'focus' ? (
             <FocusStrip
-              sessions={state.filteredRecent}
+              sessions={focusStripSessions}
               selectedSessionId={state.sessionId ?? null}
               onSelect={state.handleSelect}
               taskInfoMap={state.taskInfoMap}

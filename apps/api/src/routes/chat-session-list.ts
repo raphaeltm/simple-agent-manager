@@ -23,7 +23,12 @@ import { parsePositiveInt, requireRouteParam } from '../lib/route-helpers';
 import { getUserId } from '../middleware/auth';
 import { requireProjectAccess } from '../middleware/project-auth';
 import * as projectDataService from '../services/project-data';
-import { listSessionsFromIndex } from '../services/session-summary-index';
+import {
+  appendMissingSessions,
+  listSessionsFromIndex,
+  LIVE_SESSION_STATUSES,
+  shouldIncludeLive,
+} from '../services/session-summary-index';
 import { enrichSessionsWithCreators, getSessionListScope } from './chat-session-ownership';
 
 /**
@@ -113,6 +118,9 @@ export function registerChatSessionListRoute(chatRoutes: Hono<{ Bindings: Env }>
     const offset = parsePositiveInt(c.req.query('offset'), 0);
     const scope = getSessionListScope(c.req.query('scope'));
     const createdByUserId = scope === 'my' ? userId : null;
+    // `include=live`: the sidebar groups by state, so it also needs every awake and
+    // sleeping session in scope that falls outside this recency page.
+    const includeLive = c.req.query('include') === 'live';
 
     // Fast path: serve from the D1 session index when it can prove it holds the
     // same answer the DO would give. Each DO call wakes a single-threaded object
@@ -129,6 +137,7 @@ export function registerChatSessionListRoute(chatRoutes: Hono<{ Bindings: Env }>
       limit,
       offset,
       createdByUserId,
+      includeLive,
     });
 
     let result;
@@ -144,6 +153,28 @@ export function registerChatSessionListRoute(chatRoutes: Hono<{ Bindings: Env }>
         null,
         createdByUserId
       );
+      if (result.hasMore && shouldIncludeLive({ includeLive, status, offset })) {
+        const live = await Promise.all(
+          LIVE_SESSION_STATUSES.map((liveStatus) =>
+            projectDataService.listSessions(
+              c.env,
+              projectId,
+              liveStatus,
+              limit,
+              0,
+              null,
+              createdByUserId
+            )
+          )
+        );
+        result = {
+          ...result,
+          sessions: appendMissingSessions(
+            result.sessions,
+            live.flatMap((read) => read.sessions)
+          ),
+        };
+      }
       // Re-prime off the response path, and ONLY here — this is the one caller
       // that actually observed the index fail. A permanently over-cap project is
       // excluded because its sync short-circuits, so this cannot become a

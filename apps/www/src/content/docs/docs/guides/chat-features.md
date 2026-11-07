@@ -622,7 +622,7 @@ Two different tools answer two different questions:
 
 - **"Which chat was that?"** Type in the **Search chats** box above the session list. It matches
   chat titles, session IDs, and who started the chat, among the chats loaded in the list (the 100
-  most recently active). It does not read messages, so for anything older, ask an agent.
+  most recently active, plus older awake and sleeping chats). It does not read messages, so for anything older, ask an agent.
 - **"Where did we talk about…?"** Ask an agent in the project, for example: _"Search this
   project's chats for where we chose the retry limit, and tell me what we decided."_ Agents can
   search the text of every chat in the project — sleeping, stopped, and archived ones included.
@@ -686,10 +686,27 @@ To send on a desktop keyboard, press **Cmd+Enter** on Mac or **Ctrl+Enter** on W
 
 ## Switching Between Chats
 
-The session list puts the chat with the most recent message first. Only a new message moves a chat
-up — from you, the agent, or SAM itself, such as a wake-failure notice. Sleeping, waking, stopping,
-or archiving a chat leaves it where it is, so an old chat you archive doesn't jump to the top. A
-chat with no messages yet is placed by when it was created.
+The session list groups chats by state, in this order:
+
+1. **Needs attention** — a chat waiting for your answer (**Needs input**) or one SAM could not wake
+   (**Wake failed**), including sleeping ones.
+2. **Awake** — chats whose agent is working or idle. An awake chat stays here however long it has
+   been quiet; the list never hides one because of its age.
+3. **Sleeping** — chats a message can wake. You can fold this section.
+4. **History** — stopped, archived, completed, failed and expired chats. Folded until you open it.
+
+Empty sections are not shown. Each heading shows how many chats it holds. On a phone, the list icon
+at the right of the project-name bar carries an amber count of chats that need attention, so you can
+see them without opening the list. Searching opens every section.
+
+Within a section, the chat with the most recent message comes first. Only a new message moves a chat
+up — from you, the agent, or SAM itself, such as a wake-failure notice. A chat moves between
+sections when its state changes (for example, when it falls asleep or is archived), but sleeping,
+waking, stopping, or archiving never makes it newer, so an old chat you archive doesn't jump to the
+top of History. A chat with no messages yet is placed by when it was created.
+
+The list loads the 100 chats with the most recent messages, plus up to 100 awake and up to 100
+sleeping chats that are older than those.
 
 A chat you opened in the last 24 hours opens at once from a cache in your browser, then refreshes in the background. A thin bar at the top of the page shows while the refresh runs, and messages that arrived while you were away appear when it finishes. A chat that is not cached shows a loading indicator until its newest messages arrive. The previous chat never stays on screen while the next one loads.
 
