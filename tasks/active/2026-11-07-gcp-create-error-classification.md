@@ -58,39 +58,39 @@ pool's `fallback-chain` policy has other permitted offerings (another zone or ma
 
 ## Implementation checklist
 
-- [ ] Split `gcp.ts`: move operation polling (deduplicating zonal and global) and paginated list
+- [x] Split `gcp.ts`: move operation polling (deduplicating zonal and global) and paginated list
       helpers into `gcp-api.ts`, and firewall setup into `gcp-firewall.ts`. Separate commit, no
       behaviour change.
-- [ ] Rework `classifyGcpError` so each arm names its recovery action:
+- [x] Rework `classifyGcpError` so each arm names its recovery action:
   - stockout code or stockout message → `transient_capacity`;
   - quota code or message → `quota_exceeded`, checked before the 403 → `auth_error` arm;
   - rate-limit code or message → `rate_limited`, checked before 403;
   - auth → `auth_error`;
   - a bare `UNAVAILABLE` / 503 with no stockout evidence → `unknown` (ambiguous outcome; never
     descend), with a comment explaining why.
-- [ ] Operation errors carry `providerCode` (the decisive code) and `category` at construction.
-- [ ] `createVM` maps synchronous `ProviderError`s through the classifier at construction,
+- [x] Operation errors carry `providerCode` (the decisive code) and `category` at construction.
+- [x] `createVM` maps synchronous `ProviderError`s through the classifier at construction,
       preserving status, code, message and cause. Abort reasons pass through unchanged.
-- [ ] Update the `hetzner-metadata.ts` comment that says `classifyGcpError` has no call sites.
-- [ ] Provider tests, built through the real `GcpProvider.createVM` with fresh responses per call:
+- [x] Update the `hetzner-metadata.ts` comment that says `classifyGcpError` has no call sites.
+- [x] Provider tests, built through the real `GcpProvider.createVM` with fresh responses per call:
       stockout operation error, `_WITH_DETAILS`, quota 403 without a status, quota operation
       error, rate-limit 403, permission 403 (control), bare 503 (control: stays `unknown`), and
       an operation timeout (control: stays `unknown`). Each asserts the parsed message and code.
-- [ ] Action-layer tests (`task-runner-capacity-exhaustion.test.ts`): a GCP stockout error produced
+- [x] Action-layer tests (`task-runner-capacity-exhaustion.test.ts`): a GCP stockout error produced
       by the real `GcpProvider` descends the fallback chain; a GCP auth error from the real
       producer fails fast; a GCP 503 fails fast.
-- [ ] Surgical revert: remove the wiring (keep exports) and confirm the stockout tests go red.
-- [ ] Hetzner non-regression: the existing Hetzner placement and capacity suites stay green
+- [x] Surgical revert: remove the wiring (keep exports) and confirm the stockout tests go red.
+- [x] Hetzner non-regression: the existing Hetzner placement and capacity suites stay green
       unchanged.
-- [ ] Docs: check self-hosting GCP and provider docs for statements about GCP error handling.
+- [x] Docs: check self-hosting GCP and provider docs for statements about GCP error handling.
 
 ## Acceptance criteria
 
-- [ ] A GCP `ZONE_RESOURCE_POOL_EXHAUSTED` failure during task provisioning descends to the
+- [x] A GCP `ZONE_RESOURCE_POOL_EXHAUSTED` failure during task provisioning descends to the
       pool's next permitted offering under `fallback-chain` (action-layer test).
-- [ ] A GCP permission or auth error still fails the task on the first attempt (control test).
-- [ ] An ambiguous GCP create outcome (bare 503, operation timeout) never descends.
-- [ ] All Hetzner capacity and placement tests pass unchanged.
+- [x] A GCP permission or auth error still fails the task on the first attempt (control test).
+- [x] An ambiguous GCP create outcome (bare 503, operation timeout) never descends.
+- [x] All Hetzner capacity and placement tests pass unchanged.
 
 ## Staging
 
@@ -103,3 +103,16 @@ testing outside of a real staging env. I'll test in prod."). GCP is not connecte
 - `packages/providers/.claude/rules/72-error-categories-must-match-the-recovery-action.md`
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md`
 - `apps/api/.claude/rules/67-shared-predicates-that-trigger-actions.md`
+
+## Implementation notes
+
+- Classification is assigned at construction for every GCP operation error (`pollGcpOperation` →
+  `gcpOperationError`), not only on create. The only other category consumer that can see a GCP
+  operation error is `node-manual-deletion.ts` `isCredentialRejection` (`auth_error`), where a
+  PERMISSION_DENIED operation error really is a credential rejection.
+- `gcp.ts` split: 794 → 487 lines (`gcp-api.ts`, `gcp-firewall.ts`, `gcp-instance-lookup.ts`).
+- Surgical revert (wiring removed, exports kept): 11/14 provider cases and 3/4 action-layer cases
+  went red. The ones that stayed green are the controls that must hold either way: bare 503, poll
+  timeout, caller abort, and the ambiguous-503 action-layer case.
+- Docs: `apps/www/src/content/docs/docs/guides/compute-pools.md` now says which provider errors
+  count as "sold out" and which stop the work.
