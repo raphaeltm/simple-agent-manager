@@ -43,7 +43,10 @@ export function filesUnder(path) {
     .filter((file) => statSync(file).isFile());
 }
 
-/** Run `action` with a fake `curl` first on PATH; restores the environment after. */
+/**
+ * Run `action` with a fake `curl`: its absolute path is passed to `action`, and it is
+ * also first on PATH for code that still resolves curl by name. Restores the environment.
+ */
 export async function withFakeR2(action) {
   const root = mkdtempSync(join(tmpdir(), 'sam-fake-r2-'));
   const saved = process.env.PATH;
@@ -54,7 +57,7 @@ export async function withFakeR2(action) {
     process.env.PATH = `${join(root, 'bin')}:${saved}`;
     process.env.FAKE_R2_ROOT = join(root, 'bucket');
     process.env.FAKE_R2_LOG = join(root, 'credentials.log');
-    return await action({ root, log: process.env.FAKE_R2_LOG });
+    return await action({ root, log: process.env.FAKE_R2_LOG, curl: join(root, 'bin', 'curl') });
   } finally {
     process.env.PATH = saved;
     delete process.env.FAKE_R2_ROOT;

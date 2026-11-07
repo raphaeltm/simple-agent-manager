@@ -30,7 +30,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, isAbsolute } from 'node:path';
 
 export const CACHE_PREFIX = 'installer-cache';
 const MAX_OBJECT_BYTES = 1024 ** 3;
@@ -83,7 +83,19 @@ export function cacheKey(kind, inputs) {
 }
 
 /** S3 transport over curl. Credentials stay in a private config file, never argv. */
-export function r2CacheStore({ accountId, bucket, accessKeyId, secretAccessKey, work }) {
+// Fixed, root-owned location of Debian's curl in the managed builder; never resolved
+// through PATH. Tests pass their stand-in's absolute path explicitly.
+const CURL = '/usr/bin/curl';
+
+export function r2CacheStore({
+  accountId,
+  bucket,
+  accessKeyId,
+  secretAccessKey,
+  work,
+  curlPath = CURL,
+}) {
+  if (!isAbsolute(curlPath)) throw new Error('curl must be an absolute path');
   if (
     !/^[a-f0-9]{32}$/.test(accountId) ||
     !/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(bucket) ||
@@ -102,7 +114,7 @@ export function r2CacheStore({ accountId, bucket, accessKeyId, secretAccessKey, 
       writeFileSync(config, `user = "${accessKeyId}:${secretAccessKey}"\n`, { mode: 0o600 });
       return await new Promise((accept, reject) =>
         execFile(
-          'curl',
+          curlPath,
           [
             '--config',
             config,

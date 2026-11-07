@@ -9,9 +9,10 @@ import { filesUnder, withFakeR2 } from './installer-fake-r2.mjs';
 const SECRET = 'c'.repeat(64);
 
 test('real R2 transport stores and restores outputs and leaves no credential on disk', async () => {
-  await withFakeR2(async ({ root, log }) => {
+  await withFakeR2(async ({ root, log, curl }) => {
     const work = join(root, 'work');
     const store = r2CacheStore({
+      curlPath: curl,
       accountId: 'a'.repeat(32),
       bucket: 's123abc-pulumi-state-production',
       accessKeyId: 'b'.repeat(32),
@@ -82,4 +83,19 @@ test('the cache only builds without this installation key', async () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('R2 transport refuses a curl resolved through PATH', () => {
+  assert.throws(
+    () =>
+      r2CacheStore({
+        accountId: 'a'.repeat(32),
+        bucket: 's123abc-pulumi-state-production',
+        accessKeyId: 'b'.repeat(32),
+        secretAccessKey: SECRET,
+        work: tmpdir(),
+        curlPath: 'curl',
+      }),
+    /absolute path/
+  );
 });
