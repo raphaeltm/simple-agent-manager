@@ -36,14 +36,14 @@ Kept standalone on purpose: library `upload_to_library`/`replace_library_file`/`
 
 ## Implementation checklist
 
-- [ ] Group registry + schema generator (`tool-groups.ts`, `tool-group-schema.ts`)
-- [ ] Dispatcher: extract tool-call dispatch, route group calls to legacy tools
-- [ ] Listing: groups replace members; annotations on every listed tool; task-less filter
-- [ ] `initialize` instructions category map
-- [ ] Update text references the model reads: `get_instructions` strings, eventing guidance, playbooks, seed README, server prompts, skills, commands, rules, public docs
-- [ ] Tests: listing through real route, group dispatch reaching real handlers (vertical slice), legacy alias still callable, schema conflicts, Gemini compat for listed tools, annotations present, task-less filter discriminating
-- [ ] Docs: public MCP tool docs updated
-- [ ] File follow-up ideas for messaging consolidation and policy budget
+- [x] Group registry + schema generator (`tool-groups.ts`, `tool-group-schema.ts`)
+- [x] Dispatcher: extract tool-call dispatch, route group calls to legacy tools
+- [x] Listing: groups replace members; annotations on every listed tool; task-less filter
+- [x] `initialize` instructions category map
+- [x] Update text references the model reads: `get_instructions` strings, eventing guidance, playbooks, seed README, server prompts, skills, commands, rules, public docs
+- [x] Tests: listing through real route, group dispatch reaching real handlers (vertical slice), legacy alias still callable, schema conflicts, Gemini compat for listed tools, annotations present, task-less filter discriminating
+- [x] Docs: public MCP tool docs updated
+- [x] File follow-up ideas for messaging consolidation and policy budget
 
 ## Acceptance criteria
 
@@ -54,3 +54,15 @@ Kept standalone on purpose: library `upload_to_library`/`replace_library_file`/`
 - [ ] `initialize` returns instructions under 2 KB
 - [ ] All listed schemas pass the Gemini compatibility checks
 - [ ] CI green; PR open and not merged
+
+## Implementation notes
+
+- Listed catalogue: 81 tools for ordinary projects (was 145), 103 for Operations (was 167). Listed definitions shrank from ~159K to ~142K characters; most of the remaining size is in the standalone tools.
+- Member property conflict: `add_policy.expiresAt` (number) vs `update_policy.expiresAt` (number or null). The generator merges a create/update nullability pair to the nullable form; the dispatcher rejects `null` for methods whose member does not accept it.
+- Triggers stay ungrouped because `create_trigger`/`update_trigger` disagree on several fields beyond nullability.
+- `list_pull_request_associations` stays ungrouped (its `cursor` is an object while `list_tasks.cursor` is a string).
+- Discrimination verified: disabling the null check, the task-less filter, or group resolution in `index.ts` each turns the intended tests red.
+- The untrusted-text truncation hint now accepts `<tool> method <name>` (`operations/untrusted-text.ts` TOOL_NAME).
+- The Prettier debt baseline review expired 2026-11-07T00:00Z, failing format checks for every PR. Re-measured at main a42bb516b (2,180 files) and set the next review for 2027-02-05.
+- The local machine is shared and was at load average 30-67. Some suites hit their 10s hook timeouts, and a stashed `main` failed the same way.
+- Follow-ups: idea 01M6SPM7G7TPCNAMC31EVZ1QDP (coordination tools phase 2), idea 01M6SPMDHY2F2BPVD933B9FYJZ (policy injection budget).

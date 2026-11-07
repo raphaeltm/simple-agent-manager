@@ -36,7 +36,11 @@ export function resolveGroupedToolCall(
 
   const methods = Object.keys(group.methods);
   const { method, ...rest } = toolArgs;
-  const entry = typeof method === 'string' ? group.methods[method] : undefined;
+  // Own keys only: an inherited name such as `constructor` is not a method.
+  const entry =
+    typeof method === 'string' && Object.hasOwn(group.methods, method)
+      ? group.methods[method]
+      : undefined;
   if (!entry) {
     return jsonRpcError(
       requestId,

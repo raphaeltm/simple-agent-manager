@@ -312,6 +312,14 @@ describe('group argument translation', () => {
     expect(add).toMatchObject({ error: { code: -32602, data: { nullRejected: ['expiresAt'] } } });
   });
 
+  it('rejects inherited object keys as methods', () => {
+    for (const method of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+      expect(resolveGroupedToolCall(1, 'ideas_read', { method })).toMatchObject({
+        error: { code: -32602 },
+      });
+    }
+  });
+
   it('leaves ungrouped tool calls untouched', () => {
     expect(resolveGroupedToolCall(1, 'dispatch_task', { description: 'x' })).toEqual({
       toolName: 'dispatch_task',
