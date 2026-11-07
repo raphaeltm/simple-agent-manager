@@ -615,6 +615,7 @@ These control the live Google Cloud catalog described in [Google Cloud](/docs/gu
 | `gcpCatalog.priceMaxPages`                  | 20                                              | 1–200             | Most pages of price data read in one refresh; needing more fails rather than storing a partial list.  |
 | `gcpCatalog.priceRequestTimeoutMs`          | 30000                                           | 1000–120000       | Each request for a page of Google Cloud price data.                                                   |
 | `gcpCatalog.priceRefreshCredentialAttempts` | 3                                               | 1–20              | Connected Google Cloud credentials tried per refresh, platform credentials first.                     |
+| `gcpCatalog.priceRefreshBudgetMs`          | 90000                                           | 10000–240000      | Most time one price refresh may take across every page and credential it tries.                      |
 
 ### Session and configuration read recovery
 
