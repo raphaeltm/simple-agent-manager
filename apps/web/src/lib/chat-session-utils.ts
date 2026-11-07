@@ -22,13 +22,16 @@ export const STALE_SESSION_THRESHOLD_MS = parseInt(
 
 /**
  * How long a chat stays in the list's Needs attention section after its attention marker
- * or last message (ms). Older blocked chats fall back to their lifecycle section, where
- * their row still shows the status label.
+ * was raised (ms). Older blocked chats fall back to their lifecycle section, where their
+ * row still shows the status label. A malformed override falls back to the default, so it
+ * cannot silently empty the section.
  */
 const DEFAULT_ATTENTION_WINDOW_MS = 24 * 60 * 60 * 1000; // 24 hours
-export const ATTENTION_WINDOW_MS = parseInt(
-  import.meta.env.VITE_ATTENTION_WINDOW_MS || String(DEFAULT_ATTENTION_WINDOW_MS)
-);
+const parsedAttentionWindowMs = Number.parseInt(import.meta.env.VITE_ATTENTION_WINDOW_MS ?? '', 10);
+export const ATTENTION_WINDOW_MS =
+  Number.isFinite(parsedAttentionWindowMs) && parsedAttentionWindowMs > 0
+    ? parsedAttentionWindowMs
+    : DEFAULT_ATTENTION_WINDOW_MS;
 
 export type SessionState = 'active' | 'idle' | 'sleeping' | 'terminated';
 
@@ -206,12 +209,13 @@ export function getSessionSection(
   if (state === 'terminated') return 'history';
   // An unanswered question or a failed wake needs a person even when the session is
   // asleep; it outranks the lifecycle state, matching the row's own status label. Only
-  // recent ones, though: a request nobody answered for days is old news, not a to-do.
+  // recent ones, though: a request nobody answered for days is old news, not a to-do. The
+  // window runs from when the request was raised, not from the chat's last message, so a
+  // busy chat cannot keep an old request at the top.
   const attention = getAttentionState(session);
   if (
     (attention === 'needs_input' || attention === 'wake_failed') &&
-    now - Math.max(session.attention?.createdAt ?? 0, getLastActivity(session)) <=
-      ATTENTION_WINDOW_MS
+    now - (session.attention?.createdAt ?? 0) <= ATTENTION_WINDOW_MS
   ) {
     return 'attention';
   }

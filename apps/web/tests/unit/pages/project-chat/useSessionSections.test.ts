@@ -140,6 +140,17 @@ describe('the Needs attention window', () => {
     expect(ids(sections.awake)).toEqual(['old-ask']);
   });
 
+  it('times the window from the request, not from newer messages in the chat', () => {
+    const busyOldAsk = session({
+      id: 'busy-old-ask',
+      lastMessageAt: NOW - 60_000,
+      attention: { ...marker('needs_input'), createdAt: NOW - 3 * DAY },
+    });
+    const sections = groupSessionsBySection([busyOldAsk], new Map());
+    expect(ids(sections.attention)).toEqual([]);
+    expect(ids(sections.awake)).toEqual(['busy-old-ask']);
+  });
+
   it('counts only recent requests toward the attention badge', () => {
     const stale = session({
       id: 'stale-ask',
