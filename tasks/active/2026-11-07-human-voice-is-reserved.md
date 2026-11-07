@@ -40,38 +40,51 @@ child's first message must say which parent agent sent it. Trigger templates are
 
 ## Implementation checklist
 
-- [ ] Constitution principle XV "Human Voice Is Reserved", plus a version bump
-- [ ] Shared: widen `AgentChannelMessageClass` to every `MessageClass`
-- [ ] DO channel send accepts urgent classes
-- [ ] Wake materialization delivers a batch holding an urgent agent message as stop-and-deliver with that
+- [x] Constitution principle XV "Human Voice Is Reserved", plus a version bump
+- [x] Shared: widen `AgentChannelMessageClass` to every `MessageClass`
+- [x] DO channel send accepts urgent classes
+- [x] Wake materialization delivers a batch holding an urgent agent message as stop-and-deliver with that
       class; the notice stays IDs-only
-- [ ] `send_durable_message`: every class and every delivery intent goes over the channel; fail closed
+- [x] `send_durable_message`: every class and every delivery intent goes over the channel; fail closed
       with a named reason when channels are unavailable; remove the raw-injection code
-- [ ] `send_message_to_subtask`: same fail-closed behavior; remove the raw-injection fallback
-- [ ] Remove dead helpers (`composePeerSteerContent`, `composeUrgentDeliveryContent`,
+- [x] `send_message_to_subtask`: same fail-closed behavior; remove the raw-injection fallback
+- [x] Remove dead helpers (`composePeerSteerContent`, `composeUrgentDeliveryContent`,
       `attemptImmediateDelivery` if unused) and their tests
-- [ ] DO migration `075`: `project_schedules.prompt_author` (nullable; NULL means a legacy row)
-- [ ] Record prompt_author at every schedule create path (web: human, MCP agent: agent, operations:
+- [x] DO migration `075`: `project_schedules.prompt_author` (nullable; NULL means a legacy row)
+- [x] Record prompt_author at every schedule create path (web: human, MCP agent: agent, operations:
       workspace-agent/sam → agent, connector/person → human, provider-limit: sam)
-- [ ] Agent-authored `message_session` schedules deliver a SAM pointer notice (read with
+- [x] Agent-authored `message_session` schedules deliver a SAM pointer notice (read with
       `schedules_read` get), not the prompt text
-- [ ] Dispatch: append parent attribution (task + chat session) after truncation
-- [ ] Update tool descriptions and agent guidance (`instruction-eventing-guidance.ts`, tool definitions)
-- [ ] Update public docs that describe steering and agent messaging
-- [ ] Tests (see acceptance criteria)
+- [x] Dispatch: append parent attribution (task + chat session) after truncation
+- [x] Update tool descriptions and agent guidance (`instruction-eventing-guidance.ts`, tool definitions)
+- [x] Update public docs that describe steering and agent messaging
+- [x] Tests (see acceptance criteria)
+
+## Implementation notes
+
+- `stop_subtask` also injected the parent's raw reason (`[STOP REQUESTED BY PARENT] <reason>`); it now
+  sends `stopRequestedNotice` and records the reason on the task only.
+- `retry_subtask` builds its own replacement description; it strips the predecessor's attribution and
+  appends the retrying parent's.
+- Agent-created `start_session` schedules launch a task whose first message the agent wrote; they get
+  the same footer as dispatch (`scheduledTaskPrompt`).
+- Channel messages are capped at `PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES` (4096 by default), which
+  already applied to ordinary agent messages in production. Steers and urgent messages now share it.
+- Out of scope, tracked in `tasks/backlog/2026-11-07-sam-assistant-messages-as-pointers.md`: the /sam
+  assistant's own `send_message_to_subtask` tool, and GitHub text interpolated into trigger templates.
 
 ## Acceptance criteria
 
-- [ ] A steer `send_durable_message` produces a channel event; the recipient's transcript holds only the
+- [x] A steer `send_durable_message` produces a channel event; the recipient's transcript holds only the
       SAM notice, never the raw text (worker test through the real DO)
-- [ ] An `interrupt` message produces a stop-and-deliver wake whose content is the IDs-only notice
-- [ ] With channels off, `send_durable_message` and `send_message_to_subtask` return an error naming the
+- [x] An `interrupt` message produces a stop-and-deliver wake whose content is the IDs-only notice
+- [x] With channels off, `send_durable_message` and `send_message_to_subtask` return an error naming the
       reason, and nothing is written to the transcript
-- [ ] An agent-created `message_session` schedule delivers a pointer; a human-created one and a
+- [x] An agent-created `message_session` schedule delivers a pointer; a human-created one and a
       provider-limit one still deliver their prompt text
-- [ ] A dispatched child's description ends with the parent task and session attribution, including
+- [x] A dispatched child's description ends with the parent task and session attribution, including
       when the caller's description is at the length limit
-- [ ] The constitution contains principle XV
+- [x] The constitution contains principle XV
 
 ## References
 
