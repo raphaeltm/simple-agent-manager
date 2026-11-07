@@ -63,17 +63,19 @@ func isAllDigits(s string) bool {
 	return true
 }
 
-func removeManagedCodexMcpBlock(existing string) string {
+// removeManagedCodexBlock removes every block between startMarker and endMarker. An
+// unterminated block is removed through the end of the file.
+func removeManagedCodexBlock(existing, startMarker, endMarker string) string {
 	for {
-		start := strings.Index(existing, codexManagedMcpStartMarker)
+		start := strings.Index(existing, startMarker)
 		if start == -1 {
 			return existing
 		}
-		endRel := strings.Index(existing[start:], codexManagedMcpEndMarker)
+		endRel := strings.Index(existing[start:], endMarker)
 		if endRel == -1 {
 			return existing[:start]
 		}
-		end := start + endRel + len(codexManagedMcpEndMarker)
+		end := start + endRel + len(endMarker)
 		if end < len(existing) && existing[end] == '\n' {
 			end++
 		}
@@ -81,8 +83,32 @@ func removeManagedCodexMcpBlock(existing string) string {
 	}
 }
 
+// mergeManagedCodexMcpConfig replaces SAM's managed blocks in an existing config.toml:
+// the MCP/sandbox block from generateCodexMcpConfig and the feature defaults planned
+// by planCodexManagedFeatures. If adding the feature defaults would make the file
+// invalid TOML, they are left out so Codex can still start.
 func mergeManagedCodexMcpConfig(existing, managed string) string {
-	cleaned := removeManagedCodexMcpBlock(existing)
+	cleaned := removeManagedCodexBlock(existing, codexManagedMcpStartMarker, codexManagedMcpEndMarker)
+	cleaned = removeManagedCodexBlock(cleaned, codexManagedFeaturesStartMarker, codexManagedFeaturesEndMarker)
+	withoutFeatures := assembleManagedCodexConfig(cleaned, managed, codexFeaturePlan{})
+	plan := planCodexManagedFeatures(cleaned)
+	if plan.placement == codexFeaturesNone {
+		return withoutFeatures
+	}
+	merged := assembleManagedCodexConfig(cleaned, managed, plan)
+	var parsed map[string]any
+	if err := toml.Unmarshal([]byte(merged), &parsed); err != nil {
+		slog.Warn("Codex config: SAM's feature defaults would make config.toml invalid; leaving Codex feature flags at their defaults",
+			"error", err)
+		return withoutFeatures
+	}
+	return merged
+}
+
+func assembleManagedCodexConfig(cleaned, managed string, features codexFeaturePlan) string {
+	if features.placement == codexFeaturesUserTable {
+		cleaned = insertCodexFeaturesIntoUserTable(cleaned, features)
+	}
 	managed = strings.TrimSpace(managed)
 	managedTopLevelKeys := codexTopLevelAssignmentKeys(managed)
 	if len(managedTopLevelKeys) > 0 {
@@ -103,36 +129,36 @@ func mergeManagedCodexMcpConfig(existing, managed string) string {
 		}
 		cleaned = strings.Join(filtered, "\n")
 	}
-	cleaned = strings.TrimRight(cleaned, "\n")
 
-	switch {
-	case cleaned == "" && managed == "":
-		return ""
-	case cleaned == "":
-		return managed + "\n"
-	case managed == "":
-		return cleaned + "\n"
-	default:
-		lines := strings.Split(cleaned, "\n")
-		firstTable := len(lines)
-		for i, line := range lines {
-			if strings.HasPrefix(strings.TrimSpace(line), "[") {
-				firstTable = i
-				break
-			}
+	// Top-level user keys first, then SAM's block (which starts with top-level keys of
+	// its own), then tables, so no top-level assignment lands inside a table.
+	lines := strings.Split(strings.TrimRight(cleaned, "\n"), "\n")
+	firstTable := len(lines)
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "[") {
+			firstTable = i
+			break
 		}
-		topLevel := strings.TrimSpace(strings.Join(lines[:firstTable], "\n"))
-		tables := strings.TrimSpace(strings.Join(lines[firstTable:], "\n"))
-		sections := make([]string, 0, 3)
-		if topLevel != "" {
-			sections = append(sections, topLevel)
-		}
-		sections = append(sections, managed)
-		if tables != "" {
-			sections = append(sections, tables)
-		}
-		return strings.Join(sections, "\n\n") + "\n"
 	}
+	sections := make([]string, 0, 5)
+	for _, section := range []struct {
+		text    string
+		include bool
+	}{
+		{strings.Join(lines[:firstTable], "\n"), true},
+		{renderCodexFeaturesBlock(features), features.placement == codexFeaturesTopLevelDotted},
+		{managed, true},
+		{renderCodexFeaturesBlock(features), features.placement == codexFeaturesOwnTable},
+		{strings.Join(lines[firstTable:], "\n"), true},
+	} {
+		if text := strings.TrimSpace(section.text); section.include && text != "" {
+			sections = append(sections, text)
+		}
+	}
+	if len(sections) == 0 {
+		return ""
+	}
+	return strings.Join(sections, "\n\n") + "\n"
 }
 
 func codexTopLevelAssignmentKeys(config string) map[string]bool {
