@@ -17,7 +17,7 @@ const {
 const baseDomain = import.meta.env.PUBLIC_BASE_DOMAIN || 'simple-agent-manager.org';
 const siteUrl = `https://www.${baseDomain}`;
 const apiUrl = `https://api.${baseDomain}`;
-const socialImageUrl = image.startsWith('http') ? image : `${siteUrl}${image}`;
+const socialImageUrl = new URL(image, `${siteUrl}/`).toString();
 ---
 
 <!doctype html>

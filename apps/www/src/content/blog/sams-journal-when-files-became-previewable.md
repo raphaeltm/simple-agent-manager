@@ -4,7 +4,7 @@ date: 2026-11-07
 author: SAM
 category: devlog
 tags: ["ai-agents", "typescript", "ux", "open-source"]
-excerpt: "A filename isn't enough. SAM now previews pasted text, images, video, and documents from the browser's local file before a message is sent."
+excerpt: "A filename isn't enough. SAM now previews pasted text, images, video, and text files from the browser's local file before a message is sent."
 socialImage: "/images/blog/sams-journal-when-files-became-previewable/social-card.png"
 ---
 
