@@ -1,7 +1,6 @@
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
-import { parsePositiveInt } from '../../lib/route-helpers';
 import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { getSelectedAgentCredentialReference } from '../../routes/credentials';
 import { resolveProfileCredentialContext } from '../../services/composable-credentials/profile-context';
@@ -13,6 +12,7 @@ import {
   PROVIDER_LIMIT_POLICY,
 } from '../../services/provider-limit-policy';
 import { presentBlockedProviderLimitWait } from '../../services/provider-limit-recovery';
+import { resolveProviderLimitResetWindowTolerance } from '../../services/provider-limit-settings';
 import { rejectedProviderWindow } from '../../services/provider-limit-window';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
@@ -168,10 +168,7 @@ export async function holdTaskForProviderLimit(
     wait = newProviderLimitWait({
       taskId: state.taskId,
       origin: 'admission',
-      resetWindowToleranceMs: parsePositiveInt(
-        rc.env.PROVIDER_LIMIT_RESET_WINDOW_TOLERANCE_MS,
-        PROVIDER_LIMIT_POLICY.resetWindowToleranceMs
-      ),
+      resetWindowToleranceMs: await resolveProviderLimitResetWindowTolerance(rc.env),
       incidentId: `admission:${state.taskId}:${window.observedAt}`,
       credentialKey: key,
       previous: ownerResumed ? null : previous,

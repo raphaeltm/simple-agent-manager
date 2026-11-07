@@ -46,13 +46,17 @@ import { AppError } from '../../src/middleware/error';
 import { taskCallbackRoute } from '../../src/routes/tasks/callback';
 import { providerLimitResumeRoutes } from '../../src/routes/tasks/provider-limit-resume';
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
+import {
+  __resetAdminSettingsCacheForTest,
+  updateAdminSettings,
+} from '../../src/services/admin-settings';
 import { preserveProviderLimitWait } from '../../src/services/provider-limit-reconciliation';
 import {
   queueWorkspaceSessionSleep,
   sleepWorkspaceSession,
 } from '../../src/services/session-sleep';
 import { createSleepProjectDataFixture } from '../helpers/session-sleep-project-data-fixture';
-import { createSchemaTables } from '../helpers/sqlite-d1';
+import { createMemoryKv, createSchemaTables } from '../helpers/sqlite-d1';
 
 vi.mock('../../src/services/jwt', () => ({
   verifyCallbackToken: vi.fn(async () => ({ workspace: 'workspace-1', scope: 'workspace' })),
@@ -112,16 +116,25 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
     }));
     ({ sqlite: d1, env } = fixture);
     Object.assign(env, {
+      KV: createMemoryKv(),
       DURABLE_PROMPT_DELIVERY_ENABLED: 'true',
       PROJECT_EVENT_WAKE_ENABLED: 'true',
     });
     createSchemaTables(d1, [
       schema.users,
       schema.platformSettings,
+      schema.platformCredentials,
       schema.taskDependencies,
       schema.credentialLimitWindows,
       schema.projectEventSourceOutbox,
     ]);
+    d1.exec(
+      readFileSync(
+        new URL('../../src/db/migrations/0196_admin_settings.sql', import.meta.url),
+        'utf8'
+      )
+    );
+    __resetAdminSettingsCacheForTest();
     d1.exec(
       'CREATE UNIQUE INDEX quota_key ON credential_limit_windows(project_id,credential_reference,window_type)'
     );
@@ -369,7 +382,10 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
   });
 
   it('callback respects the configured reset-window tolerance instead of grouping a later window', async () => {
-    env.PROVIDER_LIMIT_RESET_WINDOW_TOLERANCE_MS = '1000';
+    await updateAdminSettings(env, {
+      actorUserId: USER,
+      changes: [{ name: 'operations.providerLimitResetWindowToleranceMs', value: 1000 }],
+    });
     const reset = Date.now() + 100 * MINUTE;
     for (let prompt = 1; prompt <= 2; prompt++) {
       expect(

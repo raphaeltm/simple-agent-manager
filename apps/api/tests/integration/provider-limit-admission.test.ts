@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -8,11 +10,16 @@ import type { TaskRunnerState } from '../../src/durable-objects/task-runner/type
 import type { Env } from '../../src/env';
 import { getSelectedAgentCredentialReference } from '../../src/routes/credentials';
 import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
+import {
+  __resetAdminSettingsCacheForTest,
+  updateAdminSettings,
+} from '../../src/services/admin-settings';
 import { startSamAwareAgentSession } from '../../src/services/agent-session-bootstrap';
 import { assertProviderLimitCredentialPin } from '../../src/services/provider-limit-credential-pin';
 import { newProviderLimitWait } from '../../src/services/provider-limit-policy';
 import { resumeProviderLimitTask } from '../../src/services/provider-limit-recovery';
 import { createIncompatibleCapacityFixture } from '../helpers/incompatible-agent-capacity-fixture';
+import { createMemoryKv } from '../helpers/sqlite-d1';
 
 vi.mock('cloudflare:workers', () => ({
   DurableObject: class {
@@ -50,6 +57,14 @@ describe('provider admission through the TaskRunner alarm', () => {
     vi.setSystemTime(new Date('2026-10-12T09:00:00Z'));
     vi.clearAllMocks();
     fixture = createIncompatibleCapacityFixture();
+    fixture.rc.env.KV = createMemoryKv();
+    fixture.sqlite.exec(
+      readFileSync(
+        new URL('../../src/db/migrations/0196_admin_settings.sql', import.meta.url),
+        'utf8'
+      )
+    );
+    __resetAdminSettingsCacheForTest();
   });
   afterEach(() => {
     fixture.sqlite.close();
@@ -373,6 +388,43 @@ describe('provider admission through the TaskRunner alarm', () => {
       fixture.sqlite.prepare("SELECT admission_state FROM tasks WHERE id='task-1'").get()
     ).toEqual({ admission_state: 'provider_limit_blocked' });
   });
+
+  it.each([
+    { tolerance: null, attempts: 1 },
+    { tolerance: 1000, attempts: 2 },
+  ])(
+    'admission uses the admin reset tolerance $tolerance with default and override',
+    async ({ tolerance, attempts }) => {
+      if (tolerance !== null)
+        await updateAdminSettings(fixture.rc.env, {
+          actorUserId: 'user-1',
+          changes: [{ name: 'operations.providerLimitResetWindowToleranceMs', value: tolerance }],
+        });
+      const reset = Date.now() + 60_000;
+      rejected(reset + 30_000);
+      const wait = {
+        ...newProviderLimitWait({
+          taskId: 'task-1',
+          origin: 'callback',
+          incidentId: 'original-window',
+          credentialKey: 'cc_credentials:quota-key',
+          previous: null,
+          now: Date.now() - 120_000,
+          resetsAt: reset,
+        }),
+        phase: 'released',
+      };
+      fixture.sqlite
+        .prepare("UPDATE tasks SET provider_limit_wait_json=? WHERE id='task-1'")
+        .run(JSON.stringify(wait));
+      const run = runner();
+      await run.runner.alarm();
+      const row = fixture.sqlite
+        .prepare("SELECT provider_limit_wait_json AS value FROM tasks WHERE id='task-1'")
+        .get() as { value: string };
+      expect(JSON.parse(row.value)).toMatchObject({ phase: 'waiting', attempts });
+    }
+  );
 
   it('blocks credential changes while an unknown reset is held', async () => {
     rejected(null);
