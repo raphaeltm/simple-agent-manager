@@ -3,6 +3,7 @@
 const form = document.getElementById('maintenance-claim-form');
 const recovery = document.getElementById('maintenance-recovery');
 const display = document.getElementById('maintenance-recovery-display');
+const copy = document.getElementById('maintenance-recovery-copy');
 const saved = document.getElementById('maintenance-recovery-saved');
 const submit = document.getElementById('maintenance-claim-submit');
 const status = document.getElementById('maintenance-handoff-status');
@@ -18,6 +19,20 @@ if (form && recovery && display && saved && submit) {
     display.readOnly = true;
     display.autocomplete = 'off';
     display.spellcheck = false;
+    if (copy)
+      copy.addEventListener('click', async () => {
+        const original = copy.textContent;
+        try {
+          await navigator.clipboard.writeText(value);
+          copy.textContent = 'Copied';
+        } catch {
+          display.select();
+          copy.textContent = 'Select the credential above and copy it manually';
+        }
+        setTimeout(() => {
+          copy.textContent = original;
+        }, 2000);
+      });
     saved.addEventListener('change', () => {
       submit.disabled = !saved.checked;
     });

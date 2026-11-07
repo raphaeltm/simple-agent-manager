@@ -192,8 +192,39 @@ legend {
 .plan-list ul {
   padding-left: 18px;
 }
-#disconnect {
-  margin-top: 24px;
+.quiet-actions {
+  margin-top: 20px;
+  text-align: center;
+}
+.sam-link-quiet {
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.8125rem;
+  color: var(--color-fg-muted);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.sam-link-quiet:hover {
+  color: var(--color-fg-primary);
+}
+.sam-link-quiet:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 3px;
+}
+#review #plan-summary {
+  margin-top: 16px;
+}
+#base-domain-preview strong {
+  color: var(--color-fg-primary);
+}
+#subdomain-details {
+  font-size: 0.875rem;
+}
+#review-blocked {
+  margin-top: 16px;
 }
 #message:not(:empty) {
   padding: 16px;
@@ -238,6 +269,18 @@ legend {
   color: var(--color-success);
   font-size: 2rem;
   margin-bottom: 12px;
+}
+.recovery-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.recovery-row input {
+  flex: 1;
+  min-width: 0;
+}
+.recovery-row .sam-btn {
+  flex-shrink: 0;
 }
 .resource,
 code {
@@ -339,12 +382,28 @@ pre {
     margin-bottom: 28px;
   }
   .steps {
-    padding: 18px 20px;
-    gap: 16px;
+    padding: 14px 16px;
+    display: grid;
+    grid-auto-flow: column;
+    grid-auto-columns: minmax(0, 1fr);
+    gap: 6px;
   }
   .steps li {
-    font-size: 0.8125rem;
-    gap: 6px;
+    display: grid;
+    justify-items: center;
+    gap: 4px;
+    text-align: center;
+    font-size: 0.6875rem;
+  }
+  .steps li span:not(.step-number) {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+  .step-number {
+    width: 20px;
+    height: 20px;
   }
   .setup-content,
   .privacy-content {
@@ -367,19 +426,6 @@ fieldset,
 .setup-content,
 form {
   min-width: 0;
-}
-@media (max-width: 400px) {
-  .steps {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px;
-  }
-  .steps li {
-    display: grid;
-    justify-items: center;
-    gap: 6px;
-    text-align: center;
-  }
 }
 .maintenance-page form {
   margin-top: 14px;
