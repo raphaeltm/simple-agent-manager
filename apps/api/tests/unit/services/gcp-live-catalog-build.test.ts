@@ -13,9 +13,9 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { encrypt } from '../../../src/services/encryption';
 import { GCP_PRICE_TABLE_KV_KEY } from '../../../src/services/gcp-price-table';
-import { serializeGcpCredential } from '../../../src/services/provider-credential-codecs';
 import { buildProviderCatalogForCredential } from '../../../src/services/provider-catalogs-build';
 import type { ProviderCatalogCredentialSeed } from '../../../src/services/provider-catalogs-common';
+import { serializeGcpCredential } from '../../../src/services/provider-credential-codecs';
 import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const tokenCalls: Array<{ userId: string; projectId: string }> = [];
