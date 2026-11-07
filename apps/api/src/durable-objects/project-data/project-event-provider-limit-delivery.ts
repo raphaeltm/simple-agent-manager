@@ -42,10 +42,11 @@ export async function providerLimitEventDeliveryGuard(
       .exec(
         `SELECT m.id, m.event_id FROM project_event_matches m JOIN project_events e ON e.id=m.event_id
        WHERE m.project_id=? AND m.batch_id=? AND e.subject_type='credential'
-         AND e.subject_id IN (${keys.map(() => '?').join(',')}) AND e.event_type LIKE 'credential.limit.%'`,
+         AND e.subject_id IN (?, ?) AND e.event_type LIKE 'credential.limit.%'`,
         projectId,
         claim.message.id,
-        ...keys
+        keys[0] ?? null,
+        keys[1] ?? null
       )
       .toArray();
     if (own.length) {
