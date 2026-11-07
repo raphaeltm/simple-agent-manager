@@ -13,9 +13,10 @@ interface Props {
   author: string;
   category: string;
   tags: string[];
+  socialImage?: string;
 }
 
-const { title, description, date, author, category, tags } = Astro.props;
+const { title, description, date, author, category, tags, socialImage } = Astro.props;
 
 const categoryColor = categoryColors[category] ?? 'var(--color-fg-dim)';
 
@@ -26,7 +27,7 @@ const formattedDate = date.toLocaleDateString('en-US', {
 });
 ---
 
-<Base title={`${title} | SAM Blog`} description={description}>
+<Base title={`${title} | SAM Blog`} description={description} image={socialImage}>
   <Header />
   <main class="blog-post" data-blog-title={title}>
     <div class="container">
