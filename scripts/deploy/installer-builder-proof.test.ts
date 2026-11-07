@@ -47,7 +47,7 @@ describe('bounded cold build proof', () => {
     expect((await proof.fetch(request())).status).toBe(409);
     expect(container.start).toHaveBeenCalledTimes(1);
     const options = container.start.mock.calls[0][0];
-    expect(options.instance).toBe('standard-3');
+    expect(options.instance).toBe('standard-4');
     expect(options.env).not.toHaveProperty('CF_API_TOKEN');
     expect(options.env.SAM_BUILD_FIT_ONLY).toBe('1');
     const record = state.get('job');
@@ -56,7 +56,7 @@ describe('bounded cold build proof', () => {
     await proof.alarm();
     expect(container.destroy).toHaveBeenCalledWith('SAM proof timed_out');
     expect(state.get('job').status).toBe('timed_out');
-    expect(PROOF_COMPUTE_UPPER_USD).toBeCloseTo(0.220032);
+    expect(PROOF_COMPUTE_UPPER_USD).toBeCloseTo(0.40104);
   });
 });
 

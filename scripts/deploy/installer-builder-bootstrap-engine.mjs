@@ -26,9 +26,10 @@ export function builderEngineConfig(supplied, approvedCommit) {
     baseDomain,
     environment,
     prefix,
+    // Same checksum- and size-pinned publisher archive as SAM's own CI deploys.
     codexBuild: {
       executable: 'bash',
-      args: ['scripts/deploy/installer-builder-bootstrap-codex.sh'],
+      args: ['scripts/deploy/prepare-codex-runtime-artifact.sh', 'apps/api/container-artifacts'],
     },
     codexPublish: {
       executable: 'bash',

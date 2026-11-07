@@ -2,7 +2,10 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
+// @ts-expect-error Shared JavaScript cache helpers have no declaration file.
+import { r2CacheStore } from './installer-build-cache.mjs';
 import {
+  type BuildCacheStore,
   type EngineCheckpoint,
   parseEngineCheckpoint,
   runInstallerEngine,
@@ -34,6 +37,15 @@ async function main(): Promise<void> {
       writeFileSync(`${path}.result`, JSON.stringify(result), { mode: 0o600 });
     },
     emit: (event) => process.stdout.write(`${JSON.stringify(event)}\n`),
+    // The engine opens this only for installations, with its own state bucket name.
+    buildCache: ({ accountId, bucket, work }) =>
+      r2CacheStore({
+        accountId,
+        bucket,
+        work,
+        accessKeyId: process.env.R2_ACCESS_KEY_ID,
+        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
+      }) as BuildCacheStore,
   });
 }
 main().catch(() => {

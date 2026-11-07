@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { builderEngineConfig } from './installer-builder-bootstrap-engine.mjs';
-test('approved source chooses only fixed source-build commands and owner config', () => {
+test('approved source chooses only fixed runtime commands and owner config', () => {
   const approved = 'a'.repeat(40);
   const config = builderEngineConfig(
     {
@@ -21,7 +21,10 @@ test('approved source chooses only fixed source-build commands and owner config'
     approved
   );
   assert.equal(config.codexBuild.executable, 'bash');
-  assert.deepEqual(config.codexBuild.args, ['scripts/deploy/installer-builder-bootstrap-codex.sh']);
+  assert.deepEqual(config.codexBuild.args, [
+    'scripts/deploy/prepare-codex-runtime-artifact.sh',
+    'apps/api/container-artifacts',
+  ]);
   assert.equal(config.ownerEmail, 'owner@example.com');
   assert.deepEqual(config.workersDev, { action: 'preserve', subdomain: 'approved-account' });
   assert.equal(config.cloudflareApiUrl, undefined);
@@ -146,11 +149,10 @@ test('every checksum-pinned builder download names an immutable version', () => 
       /^fetch_pinned (\S+) ([a-f0-9]{64})((?: \\\n)?(?: +https:\/\/\S+(?: \\\n)?)+)/gm
     ),
   ];
-  assert.equal(calls.length, 3);
+  assert.equal(calls.length, 2);
   const urls = calls.flatMap((call) => call[3].match(/https:\/\/\S+/g));
-  assert.equal(urls.length, 5);
+  assert.equal(urls.length, 4);
   for (const url of urls) assert.match(url, /[/-]v?\d+\.\d+\.\d+[/-]|go\d+\.\d+\.\d+\./, url);
-  assert.ok(!urls.some((url) => url.includes('/rustup/dist/')));
 });
 
 test('pinned downloads fail over between sources and reject wrong bytes', () => {

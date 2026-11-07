@@ -7,9 +7,10 @@ import { createHash, randomBytes } from 'node:crypto';
 import { pathToFileURL } from 'node:url';
 
 export const PROOF_SECONDS = 3600;
-export const PROOF_INSTANCE = 'standard-3';
+// Matches the installation builder default (4 vCPU / 12 GiB / 20 GB).
+export const PROOF_INSTANCE = 'standard-4';
 export const PROOF_COMPUTE_UPPER_USD =
-  PROOF_SECONDS * (2 * 0.00002 + 8 * 0.0000025 + 16 * 0.00000007);
+  PROOF_SECONDS * (4 * 0.00002 + 12 * 0.0000025 + 20 * 0.00000007);
 
 const supervisor = String.raw`
 const http=require('node:http'),fs=require('node:fs'),{spawn}=require('node:child_process');
@@ -33,7 +34,7 @@ export class BuildProof{
   if(path==='/start'&&request.method==='POST'){
    if(await this.ctx.storage.get('job'))return new Response('',{status:409});
    const job={status:'running',deadline:Date.now()+3600000};await this.ctx.storage.put('job',job);await this.ctx.storage.setAlarm(Date.now()+5000);
-   this.ctx.container.start({image:'cloudflare/debian-trixie',instance:'standard-3',enableInternet:true,entrypoint:['node','-e',SUPERVISOR],env:{SAM_SOURCE_COMMIT:this.env.SOURCE_COMMIT,SAM_PROOF_KEY:this.env.PROOF_KEY,SAM_JOB_DIRECTORY:'/sam/job',SAM_BUILD_FIT_ONLY:'1'},labels:{proof:'cold-build'}});
+   this.ctx.container.start({image:'cloudflare/debian-trixie',instance:'${PROOF_INSTANCE}',enableInternet:true,entrypoint:['node','-e',SUPERVISOR],env:{SAM_SOURCE_COMMIT:this.env.SOURCE_COMMIT,SAM_PROOF_KEY:this.env.PROOF_KEY,SAM_JOB_DIRECTORY:'/sam/job',SAM_BUILD_FIT_ONLY:'1'},labels:{proof:'cold-build'}});
    return Response.json(job,{status:202});
   }
   if(path==='/cancel'&&request.method==='POST'){await this.stop('cancelled');return Response.json(await this.ctx.storage.get('job'));}

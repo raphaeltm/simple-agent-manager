@@ -97,6 +97,9 @@ it('requires internal authority, validates immutable jobs, and starts only one m
     env: Record<string, string>;
   };
   expect(options.image).toBe('cloudflare/debian-trixie');
+  expect((options as unknown as { instance: string }).instance).toBe('standard-4');
+  // The restore reads shared source from the same state bucket the engine derives.
+  expect(options.env.SAM_BUILD_CACHE_BUCKET).toBe('s123abc-pulumi-state-staging');
   expect(options.entrypoint.slice(0, 2)).toEqual(['node', '-e']);
   expect(options.env.CF_RUNTIME_API_TOKEN).toBe('runtime-secret');
   expect(options.env).not.toHaveProperty('BUILDER_CONTROL_SECRET');
@@ -139,6 +142,38 @@ it('keeps setup result private and stops a completed container', async () => {
   for (const args of h.env.BUILDER_ARTIFACTS.put.mock.calls)
     expect(JSON.stringify(args)).not.toContain('private-setup');
   expect(h.container.destroy).toHaveBeenLastCalledWith('SAM builder completed');
+});
+it('publishes only a well-formed pinned-runtime receipt', async () => {
+  const h = harness();
+  await h.call('/start', h.job);
+  const receipt = {
+    version: 2,
+    source: 'publisher',
+    archiveSHA256: 'a'.repeat(64),
+    archiveBytes: 136245837,
+    installerSHA256: 'b'.repeat(64),
+  };
+  h.setProgress({ state: 'running', runtimeTrust: { ...receipt, extra: 'private-detail' } });
+  await h.call('/status');
+  const trust = h.env.BUILDER_ARTIFACTS.put.mock.calls.find((args) =>
+    String((args as unknown as [string])[0]).endsWith('/codex-trust.json')
+  ) as unknown as [string, string];
+  expect(JSON.parse(trust[1])).toEqual(receipt);
+  h.env.BUILDER_ARTIFACTS.put.mock.calls.length = 0;
+  // The retired in-account build receipt and malformed digests are not published.
+  for (const runtimeTrust of [
+    { ...receipt, version: 1 },
+    { ...receipt, source: 'installation' },
+    { ...receipt, archiveSHA256: 'not-a-digest' },
+  ]) {
+    h.setProgress({ state: 'running', runtimeTrust });
+    await h.call('/status');
+  }
+  expect(
+    h.env.BUILDER_ARTIFACTS.put.mock.calls.some((args) =>
+      String((args as unknown as [string])[0]).endsWith('/codex-trust.json')
+    )
+  ).toBe(false);
 });
 it('cancels and explicitly resumes a job after destroying uncertain old processes', async () => {
   const h = harness();

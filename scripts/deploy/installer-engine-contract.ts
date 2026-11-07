@@ -83,6 +83,11 @@ export interface EngineArtifact {
   buildDate: string;
   sha256: string;
 }
+/** Object store for verified build outputs (installer-build-cache.mjs). */
+export interface BuildCacheStore {
+  get(key: string, file: string): Promise<boolean>;
+  put(key: string, file: string): Promise<void>;
+}
 export interface EngineOptions {
   root: string;
   environment: NodeJS.ProcessEnv;
@@ -91,6 +96,8 @@ export interface EngineOptions {
   emit(event: EngineEvent): void;
   reportArtifact?(artifact: EngineArtifact): void | Promise<void>;
   saveResult?(result: EngineResult): void | Promise<void>;
+  /** Installation profile only: opens the cache in the deterministic state bucket. */
+  buildCache?(location: { accountId: string; bucket: string; work: string }): BuildCacheStore;
   runner?: EngineRunner;
 }
 export const DEFAULT_COMMAND_TIMEOUT_MS = 60 * 60 * 1000;
@@ -141,7 +148,7 @@ function validateExecutionSettings(c: InstallerEngineConfig): void {
       !Array.isArray(command.args) ||
       command.args.some((arg) => typeof arg !== 'string' || arg.includes('\0'))
     ) {
-      throw new Error(`${key} source-build adapter is required`);
+      throw new Error(`${key} runtime adapter is required`);
     }
   }
   for (const key of ['commandTimeoutMs', 'healthAttempts', 'healthIntervalMs'] as const) {

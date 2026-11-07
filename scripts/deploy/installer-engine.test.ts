@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
 import {
+  type BuildCacheStore,
   type EngineCheckpoint,
   EngineCommandFailure,
   engineFingerprint,
@@ -19,10 +20,7 @@ import {
   legacyCiInvocation,
   legacyCiWorkflow,
 } from './installer-engine-ci.js';
-import { verifyInstallationAgentIdentity } from './installer-engine-runtime.js';
-
-// @ts-expect-error Shared runtime identity helper is JavaScript without declarations.
-import { runtimeAgentAssociation } from './installer-runtime-identity.mjs';
+import { sourceRuntimePins } from './installer-engine-runtime.js';
 
 const config: InstallerEngineConfig = {
   ownerEmail: 'owner@example.org',
@@ -44,61 +42,109 @@ const privateEnv = {
   CF_RUNTIME_API_TOKEN: 'secret-runtime',
   R2_ACCESS_KEY_ID: 'secret-access',
   R2_SECRET_ACCESS_KEY: 'secret-r2',
-  PULUMI_CONFIG_PASSPHRASE: 'secret-state',
+  PULUMI_CONFIG_PASSPHRASE: 'secret-state-installation-one',
 };
 const directories: string[] = [];
 afterEach(() =>
   directories.splice(0).forEach((path) => rmSync(path, { recursive: true, force: true }))
 );
-function stageRuntimeIdentity(
-  root: string,
-  sourceCommit = config.sourceCommit,
-  inputs = 'e'.repeat(64)
-) {
-  const artifact = Buffer.from('local build');
-  const archiveSHA256 = createHash('sha256').update(artifact).digest('hex');
-  const catalogSHA256 = 'f'.repeat(64),
-    installerSHA256 = archiveSHA256;
-  const baseRelease = 'd'.repeat(40),
-    buildDate = '2026-10-28T00:00:00Z';
-  const { release } = runtimeAgentAssociation(
-    baseRelease,
-    buildDate,
-    {
-      archiveSHA256,
-      archiveBytes: artifact.length,
-      catalogSHA256,
-      installerSHA256,
-    },
-    inputs
-  );
+const RUNTIME_PIN_FILES = (sha: string, bytes: number): Array<[string, string]> => [
+  [
+    'packages/vm-agent/internal/acp/codex_runtime_distribution.go',
+    `const codexRuntimeArchiveSHA = "${sha}"\nconst codexRuntimeArchiveBytes = ${bytes}\n`,
+  ],
+  [
+    'apps/api/src/routes/codex-runtime.ts',
+    `export const CODEX_RUNTIME_RELEASE =\n  '${sha}';\nexport const CODEX_RUNTIME_ARCHIVE_BYTES = ${bytes};\n`,
+  ],
+  ['scripts/deploy/prepare-codex-runtime-artifact.sh', `release='${sha}'\nsize=${bytes}\n`],
+  ['scripts/deploy/publish-codex-runtime-artifact.sh', `release='${sha}'\nsize=${bytes}\n`],
+];
+/** Approved source pinning `pinned` and an embedded installer with the same pins. */
+function stageSourcePins(root: string, pinned = Buffer.from('reviewed publisher archive')) {
+  const sha = createHash('sha256').update(pinned).digest('hex');
+  const installer = `#!/usr/bin/env bash\narchive_hash='${sha}'\narchive_size=${pinned.length}\n`;
   for (const [file, content] of [
-    ['packages/vm-agent/internal/acp/codex_runtime_installer.sh', 'local build'],
-    ['packages/vm-agent/internal/acp/codex_runtime_distribution.go', archiveSHA256],
-    ['packages/vm-agent/internal/acp/codex_staging_candidate.go', catalogSHA256],
-    ['apps/api/src/routes/codex-runtime.ts', archiveSHA256],
-  ]) {
-    const path = join(root, String(file));
-    mkdirSync(path.slice(0, path.lastIndexOf('/')), { recursive: true });
-    writeFileSync(path, String(content));
+    ...RUNTIME_PIN_FILES(sha, pinned.length),
+    ['packages/vm-agent/internal/acp/codex_runtime_installer.sh', installer],
+  ] as Array<[string, string]>) {
+    mkdirSync(join(root, file, '..'), { recursive: true });
+    writeFileSync(join(root, file), content);
   }
-  writeFileSync(
-    join(root, '.wrangler/installer-runtime-agent-identity.json'),
-    JSON.stringify({
-      schemaVersion: 1,
-      baseRelease,
-      release,
-      buildDate,
-      runtimeInputsSHA256: inputs,
-      archiveSHA256,
-      archiveBytes: artifact.length,
-      catalogSHA256,
-      installerSHA256,
-      sourceCommit,
-    })
-  );
-  return release;
+  return { sha, installer };
 }
+/** What prepare-codex-runtime-artifact.sh stages: the archive and the reviewed installer. */
+function stageRuntime(root: string, archive = Buffer.from('reviewed publisher archive')) {
+  writeFileSync(
+    join(root, 'apps/api/container-artifacts/codex-runtime-linux-amd64.tar.gz'),
+    archive
+  );
+  writeFileSync(
+    join(root, 'apps/api/container-artifacts/install-codex-runtime.sh'),
+    readFileSync(join(root, 'packages/vm-agent/internal/acp/codex_runtime_installer.sh'))
+  );
+}
+/** In-memory stand-in for the state bucket's `installer-cache/` prefix. */
+function memoryStore() {
+  const objects = new Map<string, Buffer>();
+  const store: BuildCacheStore = {
+    async get(key, file) {
+      const value = objects.get(key);
+      if (!value) return false;
+      writeFileSync(file, value);
+      return true;
+    },
+    async put(key, file) {
+      objects.set(key, readFileSync(file));
+    },
+  };
+  return { objects, store, buildCache: () => store };
+}
+const outputBuilds = { count: 0 };
+const BUILT_FILES: Record<string, string[]> = {
+  'prepare-container': [
+    'packages/vm-agent/bin/vm-agent-linux-amd64',
+    'apps/api/container-artifacts/vm-agent-linux-amd64',
+    'apps/api/container-artifacts/install-opencode.sh',
+  ],
+  'vm-agent build-all': [
+    'packages/vm-agent/bin/vm-agent-linux-amd64',
+    'packages/vm-agent/bin/vm-agent-linux-arm64',
+    'packages/vm-agent/bin/vm-agent-darwin-amd64',
+    'packages/vm-agent/bin/vm-agent-darwin-arm64',
+  ],
+  'cli build-all': [
+    'packages/cli/bin/sam-linux-amd64',
+    'packages/cli/bin/sam-linux-arm64',
+    'packages/cli/bin/sam-darwin-amd64',
+    'packages/cli/bin/sam-darwin-arm64',
+    'packages/cli/bin/version.json',
+  ],
+};
+/** Simulates the make targets: every build writes distinguishable bytes. */
+function simulateMake(root: string, args: string[]) {
+  const target = args.includes('prepare-container')
+    ? 'prepare-container'
+    : `${args.includes('packages/cli') ? 'cli' : 'vm-agent'} build-all`;
+  const build = ++outputBuilds.count;
+  for (const file of BUILT_FILES[target] ?? []) {
+    mkdirSync(join(root, file, '..'), { recursive: true });
+    writeFileSync(join(root, file), `${file} build ${build}`, { mode: 0o755 });
+  }
+  if (target === 'prepare-container') {
+    const binary = readFileSync(join(root, 'apps/api/container-artifacts/vm-agent-linux-amd64'));
+    writeFileSync(
+      join(root, 'apps/api/container-artifacts/vm-agent-version.json'),
+      JSON.stringify({
+        version: args.find((arg) => arg.startsWith('VERSION='))?.slice(8),
+        buildDate: args.find((arg) => arg.startsWith('BUILD_DATE='))?.slice(11),
+        sha256: `sha256:${createHash('sha256').update(binary).digest('hex')}`,
+      })
+    );
+  }
+}
+const makeCalls = (commands: Array<{ executable: string }>) =>
+  commands.filter((entry) => entry.executable === 'make').length;
 function fixture(failOn?: string) {
   const root = mkdtempSync(join(tmpdir(), 'installer-engine-'));
   directories.push(root);
@@ -106,6 +152,8 @@ function fixture(failOn?: string) {
   mkdirSync(join(root, '.wrangler'), { recursive: true });
   writeFileSync(join(root, '.wrangler/api-worker-first-deploy'), 'true');
   writeFileSync(join(root, '.wrangler/tail-worker-first-deploy'), 'true');
+  stageSourcePins(root);
+  let dirty = '';
   const commands: Array<{
     executable: string;
     args: string[];
@@ -125,14 +173,10 @@ function fixture(failOn?: string) {
     async run(command, options) {
       commands.push({ ...command, cwd: options.cwd, env: structuredClone(options.env) });
       if (command.args.includes(failOn ?? '__never__')) throw new EngineCommandFailure(23, null);
-      if (command.args[0] === 'build-local-codex') {
-        stageRuntimeIdentity(root);
-        for (const file of ['codex-runtime-linux-amd64.tar.gz', 'install-codex-runtime.sh'])
-          writeFileSync(join(root, 'apps/api/container-artifacts', file), 'local build');
-      }
-      if (command.args.includes('scripts/deploy/installer-runtime-identity.mjs'))
-        return 'e'.repeat(64);
+      if (command.args[0] === 'build-local-codex') stageRuntime(root);
+      if (command.executable === 'make') simulateMake(root, command.args);
       if (command.executable === 'go') return 'go version go1.26.10 linux/amd64';
+      if (command.executable === 'git' && command.args[0] === 'status') return dirty;
       if (command.executable === 'git')
         return command.args.includes('HEAD') ? `${config.sourceCommit}\n` : 'false\n';
       if (command.args.includes('scripts/deploy/resolve-vm-agent-release.sh'))
@@ -179,7 +223,14 @@ function fixture(failOn?: string) {
     },
     async sleep() {},
   };
-  return { root, commands, runner };
+  return {
+    root,
+    commands,
+    runner,
+    setDirty: (value: string) => {
+      dirty = value;
+    },
+  };
 }
 
 describe('installation engine', () => {
@@ -190,7 +241,7 @@ describe('installation engine', () => {
       'belong'
     );
     expect(() => validateEngineConfig({ ...config, codexBuild: undefined })).toThrow(
-      'source-build'
+      'runtime adapter'
     );
     expect(() => validateEngineConfig({ ...config, healthAttempts: 0 })).toThrow('healthAttempts');
   });
@@ -227,11 +278,11 @@ describe('installation engine', () => {
     const secretCommand = f.commands.find((entry) =>
       entry.args.includes('scripts/deploy/configure-secrets.sh')
     );
-    const expectedAgentRelease = stageRuntimeIdentity(f.root);
+    // The pinned publisher runtime leaves the content-derived VM-agent release as is.
     expect(
       f.commands
         .filter((entry) => entry.args.includes('scripts/deploy/sync-wrangler-config.ts'))
-        .every((entry) => entry.env.VM_AGENT_REQUIRED_VERSION === expectedAgentRelease)
+        .every((entry) => entry.env.VM_AGENT_REQUIRED_VERSION === 'd'.repeat(40))
     ).toBe(true);
     expect(secretCommand?.env.CF_API_TOKEN).toBe('secret-runtime');
     expect(secretCommand?.env.CLOUDFLARE_API_TOKEN).toBe('secret-deploy');
@@ -283,38 +334,6 @@ describe('installation engine', () => {
     await runInstallerEngine(config, { ...opts, checkpoint: base });
     expect(f.commands.some((entry) => entry.args[0] === 'build-local-codex')).toBe(true);
   });
-  it('keeps frontend-only updates on the same agent identity and rotates for real runtime inputs', async () => {
-    const f = fixture();
-    await runInstallerEngine(config, { ...f, environment: privateEnv, emit() {}, save() {} });
-    const base = 'd'.repeat(40),
-      date = '2026-10-28T00:00:00Z',
-      inputs = 'e'.repeat(64);
-    const first = verifyInstallationAgentIdentity(f.root, config.sourceCommit, base, date, inputs);
-    const frontendCommit = '9'.repeat(40);
-    stageRuntimeIdentity(f.root, frontendCommit);
-    const frontend = verifyInstallationAgentIdentity(f.root, frontendCommit, base, date, inputs);
-    expect(frontend.release).toBe(first.release);
-    stageRuntimeIdentity(f.root, frontendCommit, '8'.repeat(64));
-    const changed = verifyInstallationAgentIdentity(
-      f.root,
-      frontendCommit,
-      base,
-      date,
-      '8'.repeat(64)
-    );
-    expect(changed.release).not.toBe(first.release);
-    expect(() =>
-      verifyInstallationAgentIdentity(f.root, frontendCommit, base, date, inputs)
-    ).toThrow('approved source');
-    writeFileSync(
-      join(f.root, 'apps/api/container-artifacts/codex-runtime-linux-amd64.tar.gz'),
-      'corrupted'
-    );
-    expect(() =>
-      verifyInstallationAgentIdentity(f.root, frontendCommit, base, date, '8'.repeat(64))
-    ).toThrow('bytes changed');
-  });
-
   it('keeps strict installation profile separate from legacy CI credentials', () => {
     expect(() => validateEngineConfig({ ...config, ownerEmail: undefined })).toThrow('ownerEmail');
     expect(() =>
@@ -570,5 +589,238 @@ describe('installation engine', () => {
       ).rejects.toThrow('state-backend');
       expect(calls.some((init) => init.method === 'PUT')).toBe(false);
     }
+  });
+  it('stages the pinned publisher runtime and records a receipt derived from its bytes', async () => {
+    const f = fixture();
+    await runInstallerEngine(config, { ...f, environment: privateEnv, emit() {}, save() {} });
+    const archive = Buffer.from('reviewed publisher archive');
+    expect(
+      JSON.parse(readFileSync(join(f.root, '.wrangler/installer-runtime-trust.json'), 'utf8'))
+    ).toEqual({
+      version: 2,
+      source: 'publisher',
+      archiveSHA256: createHash('sha256').update(archive).digest('hex'),
+      archiveBytes: archive.length,
+      installerSHA256: createHash('sha256')
+        .update(
+          readFileSync(join(f.root, 'packages/vm-agent/internal/acp/codex_runtime_installer.sh'))
+        )
+        .digest('hex'),
+    });
+    expect(f.commands.some((entry) => entry.executable === 'rustc')).toBe(false);
+  });
+  it('fails closed when staged runtime bytes or any source pin disagree', async () => {
+    const tampered = fixture();
+    const original = tampered.runner.run;
+    tampered.runner.run = async (command, opts) => {
+      const result = await original(command, opts);
+      if (command.args[0] === 'build-local-codex')
+        writeFileSync(
+          join(tampered.root, 'apps/api/container-artifacts/codex-runtime-linux-amd64.tar.gz'),
+          'different archive bytes'
+        );
+      return result;
+    };
+    await expect(
+      runInstallerEngine(config, { ...tampered, environment: privateEnv, emit() {}, save() {} })
+    ).rejects.toThrow('codex-source-build');
+    expect(makeCalls(tampered.commands)).toBe(0);
+    // One consumer pinning another archive must stop the install too.
+    const split = fixture();
+    writeFileSync(
+      join(split.root, 'apps/api/src/routes/codex-runtime.ts'),
+      `export const CODEX_RUNTIME_RELEASE = '${'f'.repeat(64)}';\nexport const CODEX_RUNTIME_ARCHIVE_BYTES = 26;\n`
+    );
+    await expect(
+      runInstallerEngine(config, { ...split, environment: privateEnv, emit() {}, save() {} })
+    ).rejects.toThrow('codex-source-build');
+    expect(() => sourceRuntimePins(split.root)).toThrow('disagree');
+  });
+  it('reads one consistent runtime pin from every consumer in this repository', () => {
+    const pins = sourceRuntimePins(process.cwd());
+    expect(pins.archiveSHA256).toMatch(/^[a-f0-9]{64}$/);
+    expect(pins.archiveBytes).toBeGreaterThan(0);
+  });
+  it('builds once, then restores verified outputs in a fresh container for the same source', async () => {
+    const cache = memoryStore();
+    const first = fixture();
+    await runInstallerEngine(config, {
+      ...first,
+      environment: privateEnv,
+      emit() {},
+      save() {},
+      buildCache: cache.buildCache,
+    });
+    expect(makeCalls(first.commands)).toBe(3);
+    const manifests = [...cache.objects.keys()].filter((key) => key.startsWith('outputs/'));
+    expect(manifests).toHaveLength(2);
+    // A brand-new container: nothing on disk, same account/domain cache.
+    const second = fixture();
+    const artifacts: unknown[] = [];
+    await runInstallerEngine(config, {
+      ...second,
+      environment: privateEnv,
+      emit() {},
+      save() {},
+      buildCache: cache.buildCache,
+      reportArtifact: (artifact) => {
+        artifacts.push(artifact);
+      },
+    });
+    expect(makeCalls(second.commands)).toBe(0);
+    for (const file of [...BUILT_FILES['vm-agent build-all']!, ...BUILT_FILES['cli build-all']!])
+      expect(readFileSync(join(second.root, file))).toEqual(readFileSync(join(first.root, file)));
+    expect(artifacts).toEqual([
+      expect.objectContaining({ kind: 'vm-agent-container', version: 'd'.repeat(40) }),
+    ]);
+    // The restored CLI is what gets published.
+    expect(
+      second.commands.some(
+        (entry) =>
+          entry.args.includes('put') &&
+          entry.args.includes(join(second.root, 'packages/cli/bin/sam-linux-amd64'))
+      )
+    ).toBe(true);
+  });
+  it('rebuilds instead of trusting a corrupted cache entry, then repairs it', async () => {
+    const cache = memoryStore();
+    const first = fixture();
+    const options = { environment: privateEnv, emit() {}, save() {}, buildCache: cache.buildCache };
+    await runInstallerEngine(config, { ...first, ...options });
+    const corrupted = [...cache.objects.keys()].find((key) => key.startsWith('objects/'))!;
+    // Same size, different bytes: only the digest check can notice.
+    cache.objects.set(corrupted, Buffer.alloc(cache.objects.get(corrupted)!.length, 0x78));
+    const second = fixture();
+    await runInstallerEngine(config, { ...second, ...options });
+    expect(makeCalls(second.commands)).toBeGreaterThan(0);
+    const third = fixture();
+    await runInstallerEngine(config, { ...third, ...options });
+    expect(makeCalls(third.commands)).toBe(0);
+  });
+  it('never trusts binaries cached by another installation sharing the state bucket', async () => {
+    const cache = memoryStore();
+    const own = { environment: privateEnv, emit() {}, save() {}, buildCache: cache.buildCache };
+    const foreign = {
+      ...own,
+      environment: { ...privateEnv, PULUMI_CONFIG_PASSPHRASE: 'secret-state-installation-two' },
+    };
+    const first = fixture();
+    await runInstallerEngine(config, { ...first, ...own });
+    const other = fixture();
+    await runInstallerEngine(config, { ...other, ...foreign });
+    expect(makeCalls(other.commands)).toBe(3);
+    // Neither installation's entry displaced the other's.
+    const retry = fixture();
+    await runInstallerEngine(config, { ...retry, ...own });
+    expect(makeCalls(retry.commands)).toBe(0);
+    const otherRetry = fixture();
+    await runInstallerEngine(config, { ...otherRetry, ...foreign });
+    expect(makeCalls(otherRetry.commands)).toBe(0);
+  });
+  it('rebuilds when a manifest names valid planted objects without a valid MAC', async () => {
+    const cache = memoryStore();
+    const options = { environment: privateEnv, emit() {}, save() {}, buildCache: cache.buildCache };
+    await runInstallerEngine(config, { ...fixture(), ...options });
+    const planted = Buffer.from('attacker binary');
+    const digest = createHash('sha256').update(planted).digest('hex');
+    cache.objects.set(`objects/${digest}`, planted);
+    const manifests = [...cache.objects.keys()].filter((key) => key.startsWith('outputs/'));
+    expect(manifests).toHaveLength(2);
+    const genuine = new Map(manifests.map((key) => [key, cache.objects.get(key)!]));
+    for (const mac of [undefined, 'f'.repeat(64)]) {
+      for (const [key, value] of genuine) {
+        const manifest = JSON.parse(String(value)) as {
+          files: Array<{ sha256: string; bytes: number }>;
+          mac?: string;
+        };
+        for (const entry of manifest.files) Object.assign(entry, { sha256: digest, bytes: 15 });
+        if (mac) manifest.mac = mac;
+        else delete manifest.mac;
+        cache.objects.set(key, Buffer.from(JSON.stringify(manifest)));
+      }
+      const victim = fixture();
+      await runInstallerEngine(config, { ...victim, ...options });
+      expect(makeCalls(victim.commands)).toBe(3);
+      expect(
+        readFileSync(join(victim.root, 'packages/vm-agent/bin/vm-agent-linux-amd64'), 'utf8')
+      ).not.toBe('attacker binary');
+    }
+  });
+  it('builds through cache faults and never caches a modified input tree', async () => {
+    const failing: BuildCacheStore = {
+      get: async () => {
+        throw new Error('R2 unavailable');
+      },
+      put: async () => {
+        throw new Error('R2 unavailable');
+      },
+    };
+    const f = fixture();
+    await runInstallerEngine(config, {
+      ...f,
+      environment: privateEnv,
+      emit() {},
+      save() {},
+      buildCache: () => failing,
+    });
+    expect(makeCalls(f.commands)).toBe(3);
+    const cache = memoryStore();
+    const dirty = fixture();
+    dirty.setDirty(' M packages/vm-agent/main.go\n');
+    await runInstallerEngine(config, {
+      ...dirty,
+      environment: privateEnv,
+      emit() {},
+      save() {},
+      buildCache: cache.buildCache,
+    });
+    expect(makeCalls(dirty.commands)).toBe(3);
+    expect([...cache.objects.keys()].some((key) => key.startsWith('outputs/'))).toBe(false);
+  });
+  it('offers the restored source bundle to later installations; legacy CI never opens the cache', async () => {
+    const cache = memoryStore();
+    const f = fixture();
+    const bundle = Buffer.from('verified source bundle');
+    const manifest = {
+      version: 1,
+      commit: config.sourceCommit,
+      tree: 'e'.repeat(40),
+      bundleSHA256: createHash('sha256').update(bundle).digest('hex'),
+      bundleBytes: bundle.length,
+    };
+    writeFileSync(
+      join(f.root, '.wrangler/installer-source-identity.json'),
+      JSON.stringify(manifest)
+    );
+    writeFileSync(join(f.root, '.wrangler/installer-source-upstream.bundle'), bundle);
+    await runInstallerEngine(config, {
+      ...f,
+      environment: privateEnv,
+      emit() {},
+      save() {},
+      buildCache: cache.buildCache,
+    });
+    expect(cache.objects.get(`source/objects/${manifest.bundleSHA256}.bundle`)).toEqual(bundle);
+    expect(JSON.parse(String(cache.objects.get(`source/${config.sourceCommit}.json`)))).toEqual(
+      manifest
+    );
+    expect(existsSync(join(f.root, '.wrangler/installer-source-upstream.bundle'))).toBe(false);
+    let opened = false;
+    const legacy = fixture();
+    await runInstallerEngine(
+      { ...config, ownerEmail: undefined, profile: 'legacy-ci' },
+      {
+        ...legacy,
+        environment: privateEnv,
+        emit() {},
+        save() {},
+        buildCache: () => {
+          opened = true;
+          return cache.store;
+        },
+      }
+    );
+    expect(opened).toBe(false);
+    expect(makeCalls(legacy.commands)).toBe(3);
   });
 });

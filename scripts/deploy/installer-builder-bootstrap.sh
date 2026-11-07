@@ -12,8 +12,7 @@ umask 077
 # https://github.com/cloudflare/workers-sdk/blob/main/packages/containers-shared/src/build.ts
 export WRANGLER_CI_OVERRIDE_NETWORK_MODE_HOST=1
 export DEBIAN_FRONTEND=noninteractive
-export CARGO_HOME=/sam/cargo RUSTUP_HOME=/sam/rustup
-export PATH=/usr/local/go/bin:/sam/cargo/bin:/root/.pulumi/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+export PATH=/usr/local/go/bin:/root/.pulumi/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 mkdir -p "$SAM_JOB_DIRECTORY"
 # OS support packages follow Debian security updates; language/deploy tools are pinned.
 apt-get update -qq
@@ -41,11 +40,6 @@ fetch_pinned /sam/go.tar.gz ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb
   https://dl.google.com/go/go1.26.10.linux-amd64.tar.gz https://go.dev/dl/go1.26.10.linux-amd64.tar.gz
 tar -xzf /sam/go.tar.gz -C /usr/local
 rm /sam/go.tar.gz
-fetch_pinned /sam/rustup-init 5be191e8c70a5007074254cb74d78dbfdd25cd5a61c27de7b8e5410122ec24f4 \
-  https://static.rust-lang.org/rustup/archive/1.29.2/x86_64-unknown-linux-gnu/rustup-init
-chmod 700 /sam/rustup-init
-/sam/rustup-init -y --profile minimal --default-toolchain 1.95.0
-rm /sam/rustup-init
 npm install --global --ignore-scripts pnpm@9.15.9
 # Pulumi toolchain download is checksum-pinned below.
 fetch_pinned /sam/pulumi.tar.gz 58d545f2b98761051922008ebd381ecef95484d7f7a5ff7faa15d7a780ea84f6 \

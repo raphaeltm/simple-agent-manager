@@ -1,6 +1,9 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+
 import * as TOML from '@iarna/toml';
+
+import { CLI_OUTPUTS, openEngineBuildCache, VM_AGENT_OUTPUTS } from './installer-engine-cache.js';
 import {
   DEFAULT_CLOUDFLARE_API_URL,
   DEFAULT_COMMAND_TIMEOUT_MS,
@@ -16,7 +19,7 @@ import {
 } from './installer-engine-contract.js';
 import { deployEngineApi } from './installer-engine-deploy.js';
 import { verifyEngineReadiness } from './installer-engine-readiness.js';
-import { verifyInstallationAgentIdentity } from './installer-engine-runtime.js';
+import { readContainerArtifact, verifyPublisherRuntime } from './installer-engine-runtime.js';
 export * from './installer-engine-contract.js';
 export async function runInstallerEngine(
   input: unknown,
@@ -78,6 +81,7 @@ export async function runInstallerEngine(
     throw new Error('Required private environment variable CF_RUNTIME_API_TOKEN is missing');
   mkdirSync(join(root, '.wrangler', 'installer-engine'), { recursive: true, mode: 0o700 });
   let operation = 'phase-validation';
+  let goVersion = '';
   const execute = (executable: string, args: string[], cwd = root) => {
     operation =
       executable === 'pulumi'
@@ -142,9 +146,9 @@ export async function runInstallerEngine(
     if ((await execute('git', ['rev-parse', '--is-shallow-repository'])).trim() !== 'false')
       throw new Error('Shallow source');
     if (!c.dryRun) {
-      const version = await execute('go', ['version']);
-      if (!version.startsWith('go version go1.26.10 ')) throw new Error('Unsupported Go toolchain');
-      if (c.profile !== 'legacy-ci') await execute('rustc', ['+1.95.0', '--version']);
+      goVersion = (await execute('go', ['version'])).trim();
+      if (!goVersion.startsWith('go version go1.26.10 '))
+        throw new Error('Unsupported Go toolchain');
       await execute('docker', ['info']);
     }
     await execute('pulumi', ['version']);
@@ -160,6 +164,8 @@ export async function runInstallerEngine(
     });
     await pnpm('install', '--frozen-lockfile');
   });
+  // Phase keys are durable checkpoint and progress vocabulary. The installation key
+  // predates staging the pinned publisher archive instead of compiling Codex.
   if (!c.dryRun)
     await phase(
       c.profile === 'legacy-ci' ? 'codex-publisher-artifact' : 'codex-source-build',
@@ -167,30 +173,9 @@ export async function runInstallerEngine(
         await execute(c.codexBuild.executable, c.codexBuild.args);
         for (const file of ['codex-runtime-linux-amd64.tar.gz', 'install-codex-runtime.sh']) {
           if (!existsSync(join(root, 'apps/api/container-artifacts', file)))
-            throw new Error('Source-built runtime missing');
+            throw new Error('Codex runtime missing');
         }
-        if (c.profile !== 'legacy-ci') {
-          const inputs = (
-            await execute('node', [
-              'scripts/deploy/installer-runtime-identity.mjs',
-              'inputs',
-              root,
-              c.sourceCommit,
-            ])
-          ).trim();
-          const identity = verifyInstallationAgentIdentity(
-            root,
-            c.sourceCommit,
-            String(env.VM_AGENT_RELEASE),
-            String(env.VM_AGENT_BUILD_DATE),
-            inputs
-          );
-          Object.assign(env, {
-            VM_AGENT_RELEASE: identity.release,
-            VM_AGENT_REQUIRED_VERSION: identity.release,
-            VM_AGENT_BUILD_DATE: identity.buildDate,
-          });
-        }
+        if (c.profile !== 'legacy-ci') verifyPublisherRuntime(root);
       }
     );
   const configureWorkersDev = async () => {
@@ -271,6 +256,18 @@ export async function runInstallerEngine(
     await options.save(state);
     return state;
   }
+  // Installation outputs outlive the container through the state bucket, which exists
+  // from here on and persists across installations of this account and domain.
+  const cached = await openEngineBuildCache({
+    options,
+    enabled: c.profile !== 'legacy-ci',
+    accountId: c.accountId,
+    bucket: stateBucket,
+    root,
+    sourceCommit: c.sourceCommit,
+    passphrase: options.environment.PULUMI_CONFIG_PASSPHRASE,
+    git: (args) => execute('git', args),
+  });
   await phase('infrastructure', async () => {
     await execute(
       'bash',
@@ -310,43 +307,41 @@ export async function runInstallerEngine(
   });
   await phase('build', async () => {
     await pnpm('build');
-    await execute('make', [
-      '-C',
+    // Keyed by the content-derived VM-agent release, so later commits that leave
+    // packages/vm-agent untouched reuse the same verified binaries.
+    await cached(
+      'vm-agent',
+      {
+        release: String(env.VM_AGENT_RELEASE),
+        buildDate: String(env.VM_AGENT_BUILD_DATE),
+        go: goVersion,
+      },
+      VM_AGENT_OUTPUTS,
       'packages/vm-agent',
-      '-o',
-      'prepare-codex-runtime',
-      'prepare-container',
-      `VERSION=${env.VM_AGENT_RELEASE}`,
-      `BUILD_DATE=${env.VM_AGENT_BUILD_DATE}`,
-    ]);
-    if (options.reportArtifact) {
-      const parsed: unknown = JSON.parse(
-        readFileSync(join(root, 'apps/api/container-artifacts/vm-agent-version.json'), 'utf8')
+      async () => {
+        await execute('make', [
+          '-C',
+          'packages/vm-agent',
+          '-o',
+          'prepare-codex-runtime',
+          'prepare-container',
+          `VERSION=${env.VM_AGENT_RELEASE}`,
+          `BUILD_DATE=${env.VM_AGENT_BUILD_DATE}`,
+        ]);
+        if (!c.skipAgent)
+          await execute('make', [
+            '-C',
+            'packages/vm-agent',
+            'build-all',
+            `VERSION=${env.VM_AGENT_RELEASE}`,
+            `BUILD_DATE=${env.VM_AGENT_BUILD_DATE}`,
+          ]);
+      }
+    );
+    if (options.reportArtifact)
+      await options.reportArtifact(
+        readContainerArtifact(root, String(env.VM_AGENT_RELEASE), String(env.VM_AGENT_BUILD_DATE))
       );
-      const artifact = parsed as { version?: unknown; buildDate?: unknown; sha256?: unknown };
-      if (
-        !artifact ||
-        artifact.version !== env.VM_AGENT_RELEASE ||
-        artifact.buildDate !== env.VM_AGENT_BUILD_DATE ||
-        typeof artifact.sha256 !== 'string' ||
-        !/^sha256:[a-f0-9]{64}$/.test(artifact.sha256)
-      )
-        throw new Error('Invalid container artifact identity');
-      await options.reportArtifact({
-        kind: 'vm-agent-container',
-        version: String(artifact.version),
-        buildDate: String(artifact.buildDate),
-        sha256: artifact.sha256,
-      });
-    }
-    if (!c.skipAgent)
-      await execute('make', [
-        '-C',
-        'packages/vm-agent',
-        'build-all',
-        `VERSION=${env.VM_AGENT_RELEASE}`,
-        `BUILD_DATE=${env.VM_AGENT_BUILD_DATE}`,
-      ]);
   });
   await phase('migrations', async () => {
     await pnpm(
@@ -433,7 +428,13 @@ export async function runInstallerEngine(
     await deployApi();
   });
   await phase('publish-cli', async () => {
-    await execute('make', ['-C', 'packages/cli', 'build-all', 'version']);
+    await cached(
+      'cli',
+      { commit: c.sourceCommit, go: goVersion },
+      CLI_OUTPUTS,
+      'packages/cli',
+      () => execute('make', ['-C', 'packages/cli', 'build-all', 'version'])
+    );
     for (const file of [
       'sam-linux-amd64',
       'sam-linux-arm64',
@@ -461,7 +462,7 @@ export async function runInstallerEngine(
           request,
           apiBase: c.cloudflareApiUrl ?? DEFAULT_CLOUDFLARE_API_URL,
           accountId: c.accountId,
-          token: env.CF_API_TOKEN!,
+          token: String(env.CF_API_TOKEN),
           worker: `${prefix}-api-${stack}`,
           pages: output('pagesName'),
           domain: c.baseDomain,

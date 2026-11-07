@@ -85,7 +85,8 @@ function auditBuildGraph(
 
 test('in-account bootstrap and every reachable local script are pure builds', () => {
   const seen = auditBuildGraph(root);
-  assert.ok(seen.has(resolve(root, 'scripts/diagnostics/build-pinned-codex-review.sh')));
+  assert.ok(seen.has(resolve(root, 'scripts/deploy/prepare-codex-runtime-artifact.sh')));
+  assert.ok(seen.has(resolve(root, 'scripts/deploy/installer-build-cache.mjs')));
   assert.ok(seen.has(resolve(root, 'scripts/deploy/installer-engine.ts')));
   assert.ok(seen.has(resolve(root, 'apps/api/Dockerfile.sandbox')));
   assert.ok(seen.has(resolve(root, 'apps/api/Dockerfile.vm-agent-container')));

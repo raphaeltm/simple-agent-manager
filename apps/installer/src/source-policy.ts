@@ -4,7 +4,7 @@ export const sourcePolicyFactory = String.raw`(()=>{
  const repository='https://api.github.com/repos/raphaeltm/simple-agent-manager';
  const raw='https://raw.githubusercontent.com/raphaeltm/simple-agent-manager/';
  const headers={'User-Agent':'SAM-owner-maintenance','Accept':'application/vnd.github+json'};
- const paths={bootstrap:'scripts/deploy/installer-builder-bootstrap.sh',engine:'scripts/deploy/installer-engine-cli.ts',sourceBuild:'scripts/deploy/installer-builder-bootstrap-source-build.sh'};
+ const paths={bootstrap:'scripts/deploy/installer-builder-bootstrap.sh',engine:'scripts/deploy/installer-engine-cli.ts'};
  const capabilities=['source-build','durable-maintenance','owner-binding','resumable-deploy'];
  async function json(url,limit=65536){
   const response=await fetch(url,{headers,signal:AbortSignal.timeout(10000)});

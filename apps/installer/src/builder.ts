@@ -44,7 +44,7 @@ http.createServer((req,res) => {
  let sourceIdentity;
  try { const s=fs.statSync('/sam/source/.wrangler/installer-source-identity.json');if(s.size<=4096)sourceIdentity=JSON.parse(fs.readFileSync('/sam/source/.wrangler/installer-source-identity.json','utf8')); }catch{}
  let runtimeTrust;
- try { const s=fs.statSync('/sam/job/codex/installation-codex-trust.json');if(s.size<=32768)runtimeTrust=JSON.parse(fs.readFileSync('/sam/job/codex/installation-codex-trust.json','utf8')); }catch{}
+ try { const s=fs.statSync('/sam/source/.wrangler/installer-runtime-trust.json');if(s.size<=4096)runtimeTrust=JSON.parse(fs.readFileSync('/sam/source/.wrangler/installer-runtime-trust.json','utf8')); }catch{}
  let result;
  try { const s=fs.statSync('/sam/job/checkpoint.json.result');if(s.size<=8192)result=JSON.parse(fs.readFileSync('/sam/job/checkpoint.json.result','utf8')); }catch{}
  res.writeHead(200,{'Content-Type':'application/json'});res.end(JSON.stringify({state,failure,checkpoint,sourceIdentity,runtimeTrust,result}));
@@ -53,19 +53,20 @@ http.createServer((req,res) => {
 
 export const builderSource = String.raw`
 const BUILDER_SUPERVISOR=${JSON.stringify(supervisor)};
+// standard-4 (4 vCPU / 12 GiB / 20 GB) costs ~1.8x standard-3 per second, but the
+// build is CPU-bound Go/TS compilation; BUILDER_INSTANCE overrides within the list below.
+const DEFAULT_BUILDER_INSTANCE='standard-4';
 const builderSourcePolicy=${sourcePolicyFactory};
 function builderJson(value,status=200){return Response.json(value,{status,headers:{'Cache-Control':'no-store'}});}
 function builderSafeSourceIdentity(value,commit){
  if(!value||value.version!==1||value.commit!==commit||!/^[a-f0-9]{40}$/.test(value.tree)||!/^[a-f0-9]{64}$/.test(value.bundleSHA256)||!Number.isSafeInteger(value.bundleBytes)||value.bundleBytes<=0||value.bundleBytes>1073741824)return undefined;
  return {version:1,commit:value.commit,tree:value.tree,bundleSHA256:value.bundleSHA256,bundleBytes:value.bundleBytes};
 }
-function builderSafeTrust(value,older=true){
- if(!value||value.version!==1||typeof value.identity!=='string'||!/^sam-codex-acp-[a-zA-Z0-9.+-]+-installation-[a-f0-9]{16}$/.test(value.identity)||!Number.isSafeInteger(value.archiveBytes)||value.archiveBytes<=0||value.archiveBytes>314572800)return undefined;
- const selected={version:1,identity:value.identity,archiveBytes:value.archiveBytes};
- for(const key of ['archiveSHA256','catalogSHA256','noticesSHA256','sourceSHA256','reviewSHA256','installerSHA256']){if(value[key]!==undefined){if(!/^[a-f0-9]{64}$/.test(value[key]))return undefined;selected[key]=value[key];}}
- if(!selected.archiveSHA256||!selected.catalogSHA256||!selected.noticesSHA256)return undefined;
- if(older&&value.previous){const previous=builderSafeTrust(value.previous,false);if(previous)selected.previous=previous;}
- return selected;
+// Receipt written by the engine after it re-derived the staged Codex runtime's
+// digest and size and matched them against every pin in the approved source.
+function builderSafeTrust(value){
+ if(!value||value.version!==2||value.source!=='publisher'||!/^[a-f0-9]{64}$/.test(value.archiveSHA256)||!/^[a-f0-9]{64}$/.test(value.installerSHA256)||!Number.isSafeInteger(value.archiveBytes)||value.archiveBytes<=0||value.archiveBytes>314572800)return undefined;
+ return {version:2,source:'publisher',archiveSHA256:value.archiveSHA256,archiveBytes:value.archiveBytes,installerSHA256:value.installerSHA256};
 }
 function builderSafeFailure(value){
  if(!value||!['tools','source','bootstrap'].includes(value.step))return undefined;
@@ -118,14 +119,14 @@ export class InstallationBuilder{
  publicJob(job){return job?{jobId:job.id,status:job.status,sourceCommit:job.config.sourceCommit,deadline:job.deadline,...(job.startedAt?{startedAt:job.startedAt}:{}),checkpoint:job.checkpoint,...(job.failure?{failure:job.failure}:{})}: {status:'idle'};}
  async persist(job){await this.ctx.storage.put('job',job);if(this.env.BUILDER_ARTIFACTS){try{await this.env.BUILDER_ARTIFACTS.put('installer/jobs/'+job.id+'/state.json',JSON.stringify(this.publicJob(job)));}catch{/* Durable Object remains the authoritative checkpoint. */}}}
  async launch(config,id,checkpoint,sourceValidation,sourceIdentity){
-  const seconds=Number(this.env.BUILDER_MAX_SECONDS||3600),poll=Number(this.env.BUILDER_POLL_SECONDS||15),instance=this.env.BUILDER_INSTANCE||'standard-3';
+  const seconds=Number(this.env.BUILDER_MAX_SECONDS||3600),poll=Number(this.env.BUILDER_POLL_SECONDS||15),instance=this.env.BUILDER_INSTANCE||DEFAULT_BUILDER_INSTANCE;
   if(!Number.isInteger(seconds)||seconds<60||seconds>14400||!Number.isInteger(poll)||poll<5||poll>60||!['standard-1','standard-2','standard-3','standard-4'].includes(instance))throw new Error('Invalid builder limits');
   const required=['CF_API_TOKEN','CF_RUNTIME_API_TOKEN','R2_ACCESS_KEY_ID','R2_SECRET_ACCESS_KEY','PULUMI_CONFIG_PASSPHRASE','SAM_ARTIFACTS_BUCKET'];
   if(required.some(key=>typeof this.env[key]!=='string'||!this.env[key]))throw new Error('Missing builder authority');
   const nonce=[...crypto.getRandomValues(new Uint8Array(32))].map(x=>x.toString(16).padStart(2,'0')).join('');
   const job={id,config,checkpoint,sourceValidation,sourceIdentity,status:'starting',startedAt:Date.now(),deadline:Date.now()+seconds*1000,nonce,pollSeconds:poll};
   await this.persist(job);await this.ctx.storage.setAlarm(Math.min(job.deadline,Date.now()+poll*1000));
-  const env={SAM_JOB_NONCE:nonce,SAM_SOURCE_COMMIT:config.sourceCommit,SAM_PREVIOUS_SOURCE_COMMIT:config.previousSourceCommit||'',SAM_ENGINE_CONFIG:JSON.stringify(config),SAM_JOB_DIRECTORY:'/sam/job',CF_ACCOUNT_ID:config.accountId,SAM_ENGINE_CHECKPOINT:checkpoint?JSON.stringify(checkpoint):''};
+  const env={SAM_JOB_NONCE:nonce,SAM_SOURCE_COMMIT:config.sourceCommit,SAM_BUILD_CACHE_BUCKET:config.prefix+'-pulumi-state-'+config.environment,SAM_ENGINE_CONFIG:JSON.stringify(config),SAM_JOB_DIRECTORY:'/sam/job',CF_ACCOUNT_ID:config.accountId,SAM_ENGINE_CHECKPOINT:checkpoint?JSON.stringify(checkpoint):''};
   if(sourceIdentity)env.SAM_SOURCE_IDENTITY=JSON.stringify(sourceIdentity);
   for(const key of required)env[key]=this.env[key];
   this.ctx.container.start({image:'cloudflare/debian-trixie',instance,enableInternet:true,entrypoint:['node','-e',BUILDER_SUPERVISOR],env,labels:{job:id}});
