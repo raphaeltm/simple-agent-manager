@@ -129,6 +129,35 @@ it('reconciles an existing process after DO restart and destroys all compute on 
   expect((h.values.get('job') as { status: string }).status).toBe('timed_out');
   expect(h.getAlarm()).toBeUndefined();
 });
+it('passes engine timings through and drops malformed ones without losing the checkpoint', async () => {
+  const h = harness();
+  await h.call('/start', h.job);
+  const base = {
+    schemaVersion: 1,
+    fingerprint: 'e'.repeat(64),
+    completed: ['preflight'],
+    status: 'running',
+  };
+  const timings = {
+    phases: { preflight: 41000 },
+    commands: [{ phase: 'preflight', label: 'bash resolve-vm-agent-release.sh', ms: 1200 }],
+  };
+  h.setProgress({ state: 'running', checkpoint: { ...base, timings } });
+  await h.call('/status');
+  expect((h.values.get('job') as { checkpoint: unknown }).checkpoint).toEqual({ ...base, timings });
+  h.setProgress({
+    state: 'running',
+    checkpoint: {
+      ...base,
+      timings: {
+        phases: {},
+        commands: [{ phase: 'preflight', label: 'pulumi Secret=ABC', ms: 1 }],
+      },
+    },
+  });
+  await h.call('/status');
+  expect((h.values.get('job') as { checkpoint: unknown }).checkpoint).toEqual(base);
+});
 it('keeps setup result private and stops a completed container', async () => {
   const h = harness();
   await h.call('/start', h.job);

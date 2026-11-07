@@ -79,7 +79,19 @@ function builderSafeFailure(value){
 function builderSafeCheckpoint(value){
  if(!value||value.schemaVersion!==1||!/^[a-f0-9]{64}$/.test(value.fingerprint)||!Array.isArray(value.completed)||value.completed.length>64||value.completed.some(x=>typeof x!=='string'||!/^[a-z][a-z0-9-]{0,63}$/.test(x))||!['running','failed','completed'].includes(value.status))return undefined;
  if(value.activePhase!==undefined&&(typeof value.activePhase!=='string'||!/^[a-z][a-z0-9-]{0,63}$/.test(value.activePhase)))return undefined;
- return {schemaVersion:1,fingerprint:value.fingerprint,completed:value.completed,status:value.status,...(value.activePhase?{activePhase:value.activePhase}:{})};
+ const timings=builderSafeTimings(value.timings);
+ return {schemaVersion:1,fingerprint:value.fingerprint,completed:value.completed,status:value.status,...(value.activePhase?{activePhase:value.activePhase}:{}),...(timings?{timings}:{})};
+}
+// Engine phase/command durations (fixed-word labels). Malformed timings are dropped; the checkpoint is kept.
+function builderSafeTimings(value){
+ if(!value||typeof value!=='object')return undefined;
+ const ms=x=>Number.isSafeInteger(x)&&x>=0&&x<=86400000;
+ const phases={},entries=value.phases&&typeof value.phases==='object'?Object.entries(value.phases):[];
+ if(entries.length>64)return undefined;
+ for(const [name,duration] of entries){if(!/^[a-z][a-z0-9-]{0,63}$/.test(name)||!ms(duration))return undefined;phases[name]=duration;}
+ const commands=Array.isArray(value.commands)?value.commands:[];
+ if(commands.length>80||commands.some(c=>!c||typeof c.phase!=='string'||!/^(?:[a-z][a-z0-9-]{0,63})?$/.test(c.phase)||typeof c.label!=='string'||!/^[a-z0-9][a-z0-9 .-]{0,159}$/.test(c.label)||!ms(c.ms)))return undefined;
+ return {phases,commands:commands.map(c=>({phase:c.phase,label:c.label,ms:c.ms}))};
 }
 export class InstallationBuilder{
  constructor(ctx,env){this.ctx=ctx;this.env=env;this.queue=Promise.resolve();}
