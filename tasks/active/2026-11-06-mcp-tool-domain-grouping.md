@@ -66,3 +66,4 @@ Kept standalone on purpose: library `upload_to_library`/`replace_library_file`/`
 - The Prettier debt baseline review expired 2026-11-07T00:00Z, failing format checks for every PR. Re-measured at main a42bb516b (2,180 files) and set the next review for 2027-02-05.
 - The local machine is shared and was at load average 30-67. Some suites hit their 10s hook timeouts, and a stashed `main` failed the same way.
 - Follow-ups: idea 01M6SPM7G7TPCNAMC31EVZ1QDP (coordination tools phase 2), idea 01M6SPMDHY2F2BPVD933B9FYJZ (policy injection budget).
+- Merge with main 349c78101 -> head 1fead2384; baseline kept 2180@a42bb51 with main dates; CI 21/21 incl Sonar.
