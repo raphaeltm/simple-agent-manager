@@ -11,7 +11,7 @@ Repeated idle reports advance activity_at, postponing unattended sleep forever d
 - [x] Drive real reports through ProjectData and real sleep sweep; prove idle deadline, recent progress, expiry, missing anchor and override/default controls.
 - [x] Revert each changed guard/default once and record discriminating failures.
 - [x] Prefer bounded conversation sleep at task absolute ceiling, preserving terminal fallback for failed sleep.
-- [ ] Run quality checks and specialist reviews.
+- [x] Run quality checks and specialist reviews.
 - [ ] Estimate bounded VM staging cost; coordinate staging, verify real background process sleep, clean up.
 - [ ] PR, CI, CodeRabbit wait, merge and production health/deploy evidence; update idea.
 
@@ -44,3 +44,8 @@ Every mutation below produced a failing behavioral test; fixed sources restored 
 | caller-wiring-deleted | requests sleep at the ceiling through the recovery entry point, including a null task chat link |
 
 Final restored guard suite: 3 files / 82 tests PASS after all nine mutations. Root lint 13 tasks PASS; root typecheck19tasks PASS; root build9tasks PASS; context-budget command PASS. Final API typecheck/full root tests still in progress.
+
+## Broad-suite reconciliation
+Initial full run completed: API 15,259 passed, 2 skipped, with only two old expired-lease expectations failing; all other packages passed, including web 4,988 tests. Those controls are corrected in `57ac8c3a1`, their complete file passes 44 tests, and the test specialist re-reviewed them. Final full suite rerun is in progress. Current staging holder is MCP-grouping task 01M6SH3VNV1BMYX8BRTCX3QRVT, run 42318920176; explicit release is required before this task's VM check.
+
+Final full local suite PASS: `pnpm run test --concurrency=2`, 21 successful tasks (19 cached), API 1,055 files/15,261 tests passed, 1 file/2 tests skipped. Web 399 files/4,988 tests passed. Root lint13/typecheck19/build9 tasks pass; final API typecheck passed. No remaining local code/test/review blockers. Staging release remains pending; no resources or overrides created by this task.
