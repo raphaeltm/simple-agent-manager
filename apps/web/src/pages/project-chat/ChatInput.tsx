@@ -9,10 +9,12 @@ import type {
 import { paneClassName } from '@simple-agent-manager/ui';
 import { Paperclip } from 'lucide-react';
 import type { MutableRefObject } from 'react';
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 
 import { ProfileFormDialog } from '../../components/agent-profiles/ProfileFormDialog';
 import {
+  chatAgentDefaults,
+  type ChatAgentOverrides,
   ComposerOptionsButton,
   composerOptionsCount,
   ComposerOptionsPanel,
@@ -20,6 +22,10 @@ import {
   ProfilePickerSheet,
   ProfileToControl,
 } from '../../components/project-chat/profile-picker';
+import {
+  effectiveChatAgent,
+  EMPTY_CHAT_AGENT_OVERRIDES,
+} from '../../components/project-chat/profile-picker/agent-overrides';
 import { ProjectChatComposer } from '../../components/project-chat/ProjectChatComposer';
 import {
   hasValidationErrors,
@@ -64,6 +70,8 @@ type ChatInputProps = Readonly<{
   onTaskResourceReqsChange: (next: ResourceRequirementsFormState) => void;
   taskResourceErrors: ResourceValidationErrors;
   onTaskResourceErrorsClear: () => void;
+  agentOverrides: ChatAgentOverrides;
+  onAgentOverridesChange: (next: ChatAgentOverrides) => void;
   profileWizard: ProfileWizardState;
   onOpenProfileWizard: () => void;
   onCloseProfileWizard: () => void;
@@ -124,6 +132,8 @@ export function ChatInput({
   onTaskResourceReqsChange,
   taskResourceErrors,
   onTaskResourceErrorsClear,
+  agentOverrides,
+  onAgentOverridesChange,
   profileWizard,
   onOpenProfileWizard,
   onCloseProfileWizard,
@@ -155,6 +165,23 @@ export function ChatInput({
     wizardOpen: profileWizard.open,
     placeholder,
   });
+  const selectedSkill = selectedSkillId
+    ? (skills.find((skill) => skill.id === selectedSkillId) ?? null)
+    : null;
+  const agentDefaults = chatAgentDefaults(selectedProfile, selectedSkill);
+  const effectiveAgent = effectiveChatAgent(agentDefaults, agentOverrides);
+  // Overrides belong to the agent they were picked for: a profile or skill that switches the
+  // agent clears them, so switching back starts from that agent's defaults again.
+  const effectiveAgentType = agentDefaults.agentType;
+  useEffect(() => {
+    if (
+      agentOverrides.agentType &&
+      effectiveAgentType &&
+      agentOverrides.agentType !== effectiveAgentType
+    ) {
+      onAgentOverridesChange(EMPTY_CHAT_AGENT_OVERRIDES);
+    }
+  }, [agentOverrides.agentType, effectiveAgentType, onAgentOverridesChange]);
   const options: ComposerOptionsValue = {
     skills,
     selectedSkillId,
@@ -163,6 +190,9 @@ export function ChatInput({
     onTaskResourceReqsChange,
     taskResourceErrors,
     onTaskResourceErrorsClear,
+    agentDefaults,
+    agentOverrides,
+    onAgentOverridesChange,
     disabled: submitting,
   };
   const showOptions = optionsOpen || hasResourceErrors;
@@ -203,6 +233,7 @@ export function ChatInput({
           <div className="@container min-w-0 flex-1">
             <ProfileToControl
               profile={selectedProfile}
+              effective={effectiveAgent}
               loading={profilePicker.picker.status === 'loading'}
               disabled={submitting}
               onOpen={onOpenProfileSheet}

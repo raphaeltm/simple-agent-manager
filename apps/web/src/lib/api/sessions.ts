@@ -1,4 +1,5 @@
 import type {
+  AgentEffort,
   AgentProfileRuntime,
   SessionAccessSummary,
   SessionViewerAccess,
@@ -360,6 +361,10 @@ export interface StartInstantChatSessionRequest {
   agentProfileId?: string;
   skillId?: string;
   parentTaskId?: string;
+  /** Model for this chat only; omitted inherits the skill/profile model. */
+  model?: string;
+  /** Effort for this chat only; must be supported by the resolved agent. */
+  effort?: AgentEffort;
   /** An open idea in this project this conversation starts from. The server links it
    * (`discusses`) before the agent receives its first prompt. */
   sourceIdeaId?: string;
