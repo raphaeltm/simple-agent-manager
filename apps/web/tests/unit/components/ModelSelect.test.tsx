@@ -120,3 +120,28 @@ describe('ModelSelect dynamic catalog', () => {
     expect(getAgentModelCatalog).not.toHaveBeenCalled();
   });
 });
+
+describe('ModelSelect list position', () => {
+  it('follows the input when a scrolling ancestor moves it', async () => {
+    const user = userEvent.setup();
+    render(
+      <div data-testid="scroller" style={{ overflowY: 'auto' }}>
+        <ModelSelect id="m" agentType="claude-code" value="" onChange={() => undefined} />
+      </div>
+    );
+    const input = screen.getByRole('combobox');
+    const container = input.parentElement!.parentElement!;
+    let top = 300;
+    container.getBoundingClientRect = () =>
+      ({ top, bottom: top + 44, left: 10, right: 210, width: 200, height: 44 }) as DOMRect;
+
+    await user.click(input);
+    const list = await screen.findByRole('listbox');
+    expect(list.style.top).toBe('348px');
+
+    // The panel scrolls by 120px; the open list must move with the input, not stay put.
+    top = 180;
+    screen.getByTestId('scroller').dispatchEvent(new Event('scroll'));
+    await waitFor(() => expect(screen.getByRole('listbox').style.top).toBe('228px'));
+  });
+});

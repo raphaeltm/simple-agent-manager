@@ -1,20 +1,21 @@
-import type { AgentEffort, AgentProfile } from '@simple-agent-manager/shared';
+import type { AgentProfile } from '@simple-agent-manager/shared';
 import { ChevronDown } from 'lucide-react';
 
+import type { ChatAgentDefaults } from './agent-overrides';
 import { profileSubtitle } from './model';
 import { ProfileAvatar } from './ProfileAvatar';
 
 /** The composer's single profile control: "To [avatar] Opus 5.5 Chat ⌄". Opens the picker. */
 export function ProfileToControl({
   profile,
-  overrides,
+  effective,
   loading,
   disabled,
   onOpen,
 }: Readonly<{
   profile: AgentProfile | null;
-  /** This chat's model/effort from Chat options, shown in place of the profile's. */
-  overrides?: Readonly<{ model: string | null; effort: AgentEffort | null }>;
+  /** What this chat will launch with (skill and Chat options applied), in place of the profile's. */
+  effective?: Readonly<ChatAgentDefaults>;
   loading: boolean;
   disabled: boolean;
   onOpen: (anchor: DOMRect) => void;
@@ -43,11 +44,9 @@ export function ProfileToControl({
           <span className="truncate text-sm font-medium text-fg-primary">{profile.name}</span>
           {/* Needs an `@container` ancestor; shown only when the toolbar has room for it. */}
           <span className="hidden truncate text-xs text-fg-muted @md:inline">
-            {profileSubtitle({
-              ...profile,
-              model: overrides?.model ?? profile.model,
-              effort: overrides?.effort ?? profile.effort,
-            })}
+            {profileSubtitle(
+              effective?.agentType ? { ...effective, agentType: effective.agentType } : profile
+            )}
           </span>
         </>
       ) : (

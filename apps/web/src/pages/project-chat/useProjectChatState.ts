@@ -570,9 +570,11 @@ export function useProjectChatState() {
       newChatIntentRef.current = true;
       setSubmitError(null);
       setProvisioning(null);
+      // A derived chat starts from its profile, not from an earlier draft's options.
+      resetComposerOverrides();
       navigate(`/projects/${projectId}/chat`, { replace: true });
     },
-    [navigate, projectId]
+    [navigate, projectId, resetComposerOverrides]
   );
 
   /** Open the new-chat composer with the original task prompt re-added. */
@@ -597,6 +599,7 @@ export function useProjectChatState() {
       newChatIntentRef.current = true;
       setSubmitError(null);
       setProvisioning(null);
+      resetComposerOverrides();
       navigate(`/projects/${projectId}/chat`, { replace: true });
 
       const isCurrent = () => pendingDerivedRef.current === derived;
@@ -615,7 +618,7 @@ export function useProjectChatState() {
           );
         });
     },
-    [navigate, projectId]
+    [navigate, projectId, resetComposerOverrides]
   );
 
   const conversationActions = useConversationActions({

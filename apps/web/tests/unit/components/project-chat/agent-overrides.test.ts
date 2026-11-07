@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   activeChatAgentOverrides,
   chatAgentDefaults,
+  effectiveChatAgent,
 } from '../../../../src/components/project-chat/profile-picker/agent-overrides';
 
 const claudeProfile = {
@@ -37,6 +38,13 @@ describe('chatAgentDefaults', () => {
     expect(
       chatAgentDefaults(claudeProfile, { agentType: 'openai-codex', model: null, effort: null })
     ).toMatchObject({ agentType: 'openai-codex', model: 'claude-sonnet-4-5' });
+  });
+
+  it('drops a profile effort the skill-switched agent cannot run', () => {
+    const maxProfile = { agentType: 'claude-code', model: null, effort: 'max' as const };
+    expect(
+      chatAgentDefaults(maxProfile, { agentType: 'openai-codex', model: null, effort: null })
+    ).toMatchObject({ agentType: 'openai-codex', effort: null });
   });
 
   it('has no agent before a profile is chosen', () => {
@@ -77,5 +85,23 @@ describe('activeChatAgentOverrides', () => {
       model: null,
       effort: null,
     });
+  });
+});
+
+describe('effectiveChatAgent', () => {
+  it('shows overrides over the skill and profile values', () => {
+    const defaults = chatAgentDefaults(claudeProfile, {
+      agentType: null,
+      model: 'claude-opus-5-5',
+      effort: null,
+    });
+    expect(effectiveChatAgent(defaults, { agentType: null, model: '', effort: null })).toEqual({
+      agentType: 'claude-code',
+      model: 'claude-opus-5-5',
+      effort: 'high',
+    });
+    expect(
+      effectiveChatAgent(defaults, { agentType: 'claude-code', model: '', effort: 'max' })
+    ).toEqual({ agentType: 'claude-code', model: 'claude-opus-5-5', effort: 'max' });
   });
 });

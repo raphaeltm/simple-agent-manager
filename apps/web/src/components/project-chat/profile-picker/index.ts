@@ -1,7 +1,8 @@
 export {
-  activeChatAgentOverrides,
   chatAgentDefaults,
   type ChatAgentOverrides,
+  effectiveChatAgent,
+  EMPTY_CHAT_AGENT_OVERRIDES,
 } from './agent-overrides';
 export {
   ComposerOptionsButton,

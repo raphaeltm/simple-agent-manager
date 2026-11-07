@@ -17,12 +17,17 @@ Four local Playwright audit tests fail on `origin/main` (349c78101), reproduced 
 
 Found 2026-11-07 while running the visual audit for per-chat model/effort overrides
 (task `2026-11-07-per-chat-model-effort-overrides.md`). Identical results with and without
-that branch's changes, so they predate it. These audits do not run in CI, which is why
-they went unnoticed.
+that branch's changes, so they predate it. CI's `playwright-visual` job runs non-quarantined
+audits only on `iPhone 14 (390x844)` (`.github/workflows/ci.yml`), so it runs
+`new-chat-profile-picker-audit.spec.ts` but never at iPhone SE 375x667, and
+`project-chat-composer-audit.spec.ts` is listed in `apps/web/tests/playwright/visual-audit-quarantine.txt`
+and does not run in CI at all. That is why these went unnoticed.
 
 ## Acceptance Criteria
 
 - [ ] Each failure is diagnosed: a real UI regression is fixed, or a stale test is updated
       to the current intended UI with a reason
 - [ ] All four pass at the listed viewports against a fresh `vite build`
-- [ ] Consider whether these audits should run in CI so drift is caught
+- [ ] `project-chat-composer-audit.spec.ts` is removed from the quarantine list once it passes
+- [ ] Decide whether CI should also run the iPhone SE (375x667) and Desktop (1280x800) projects for
+      these chat audits, since both failures above only appear at viewports CI does not run

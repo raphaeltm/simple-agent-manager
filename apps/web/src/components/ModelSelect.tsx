@@ -1,7 +1,7 @@
 import type { ModelDefinition, ModelGroup } from '@simple-agent-manager/shared';
 import { getModelGroupsForAgent } from '@simple-agent-manager/shared';
 import { ChevronDown, ChevronUp } from 'lucide-react';
-import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { type FC, useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { getAgentModelCatalog } from '../lib/api/agents';
@@ -212,6 +212,19 @@ export const ModelSelect: FC<ModelSelectProps> = ({
     setFilterText('');
     setActiveIndex(-1);
   }, []);
+
+  // The open list is fixed-positioned from the input's box. Re-measure when anything scrolls or
+  // resizes (a scrolling panel or the phone keyboard) so it stays attached to the input.
+  const [, remeasure] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    if (!isOpen) return;
+    window.addEventListener('scroll', remeasure, true);
+    window.addEventListener('resize', remeasure);
+    return () => {
+      window.removeEventListener('scroll', remeasure, true);
+      window.removeEventListener('resize', remeasure);
+    };
+  }, [isOpen]);
 
   // Keyboard navigation
   const handleKeyDown = useCallback(

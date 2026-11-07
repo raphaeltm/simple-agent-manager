@@ -4,7 +4,7 @@ import { isAgentEffortSupported } from '@simple-agent-manager/shared';
 /**
  * Model and effort chosen for one new chat. They are recorded with the agent they were picked
  * for: a Codex model means nothing to Claude, so switching to a profile or skill that runs a
- * different agent drops them instead of sending a value that agent cannot use.
+ * different agent clears them (`ChatInput`) instead of sending a value that agent cannot use.
  */
 export interface ChatAgentOverrides {
   agentType: string | null;
@@ -36,14 +36,14 @@ export function chatAgentDefaults(
   skill: Pick<AgentSkill, 'agentType' | 'model' | 'effort'> | null
 ): ChatAgentDefaults {
   const agentType = skill?.agentType || profile?.agentType || null;
-  const skillEffort =
-    agentType && skill?.effort && isAgentEffortSupported(agentType, skill.effort)
-      ? skill.effort
-      : null;
+  // An inherited effort the chat's agent can't run is dropped, as the API does
+  // (`resolveTaskAgentOverrides`): a skill can switch a Claude/max profile to Codex.
+  const runnable = (effort: AgentEffort | null | undefined) =>
+    agentType && effort && isAgentEffortSupported(agentType, effort) ? effort : null;
   return {
     agentType,
     model: skill?.model || profile?.model || null,
-    effort: skillEffort ?? profile?.effort ?? null,
+    effort: runnable(skill?.effort) ?? runnable(profile?.effort),
   };
 }
 
@@ -59,5 +59,18 @@ export function activeChatAgentOverrides(
       overrides.effort && isAgentEffortSupported(agentType, overrides.effort)
         ? overrides.effort
         : null,
+  };
+}
+
+/** The agent, model and effort a chat will launch with: overrides over its defaults. */
+export function effectiveChatAgent(
+  defaults: ChatAgentDefaults,
+  overrides: ChatAgentOverrides
+): ChatAgentDefaults {
+  const active = activeChatAgentOverrides(overrides, defaults.agentType);
+  return {
+    agentType: defaults.agentType,
+    model: active.model ?? defaults.model,
+    effort: active.effort ?? defaults.effort,
   };
 }

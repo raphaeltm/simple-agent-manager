@@ -1048,6 +1048,38 @@ describe('ProjectChat new chat button', () => {
     });
   });
 
+  it('starts a fork from the profile, not from model and effort set in an earlier draft', async () => {
+    mocks.listChatSessions.mockResolvedValue({ sessions: [SESSION_WITH_TASK], total: 1 });
+    mocks.listCredentials.mockResolvedValue([
+      { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
+    ]);
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${SESSION_WITH_TASK.id}`);
+    await waitFor(() =>
+      expect(screen.getByTestId('message-view')).toHaveTextContent(SESSION_WITH_TASK.id)
+    );
+
+    // A draft in the new-chat composer sets a model and effort, then is left for the session.
+    fireEvent.click(screen.getByRole('button', { name: 'New Chat', exact: true }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Chat options' }));
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Model' }), {
+      target: { value: 'claude-opus-5-5' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Effort' }), {
+      target: { value: 'max' },
+    });
+    expect(screen.getByRole('button', { name: 'Chat options (2 set)' })).toBeInTheDocument();
+    // The session is stopped, so it sits in the folded History section.
+    fireEvent.click(screen.getByRole('button', { name: /^History/ }));
+    fireEvent.click(screen.getByText('Fix the login bug'));
+    await waitFor(() =>
+      expect(screen.getByTestId('message-view')).toHaveTextContent(SESSION_WITH_TASK.id)
+    );
+
+    fireEvent.click(screen.getByLabelText('Fork session'));
+    expect(screen.getByText('Forking from: Fix the login bug')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Chat options' })).toBeInTheDocument();
+  });
+
   it('forks to the new chat screen with the IDs already filled in and nothing to wait for', async () => {
     mocks.listChatSessions.mockResolvedValue({
       sessions: [SESSION_WITH_TASK],
@@ -2383,6 +2415,30 @@ describe('ProjectChat agent profile selection', () => {
     expect(payload).not.toHaveProperty('model');
   });
 
+  it('does not bring back overrides after switching to another agent and back', async () => {
+    mocks.listAgentProfiles.mockResolvedValue([
+      ...TEST_PROFILES,
+      makeAgentProfile({ id: 'prof-3', name: 'Careful Builder', agentType: 'claude-code' }),
+    ]);
+    renderProjectChat();
+
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Fast Implementer'));
+    fireEvent.click(screen.getByRole('button', { name: 'Chat options' }));
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Effort' }), {
+      target: { value: 'max' },
+    });
+    expect(screen.getByRole('button', { name: 'Chat options (1 set)' })).toBeInTheDocument();
+
+    for (const name of [/Reviewer/, /Careful Builder/]) {
+      const sheet = await openProfilePicker();
+      fireEvent.click(within(sheet).getByRole('button', { name }));
+    }
+    // Back on a Claude profile: the Claude-only Max picked earlier does not return.
+    expect(getProfileControl()).toHaveTextContent('Careful Builder');
+    expect(screen.getByRole('button', { name: 'Chat options' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Effort' })).toHaveValue('');
+  });
+
   it('offers the efforts of the agent a skill switches to', async () => {
     mocks.listSkills.mockResolvedValue([
       {
@@ -2409,6 +2465,8 @@ describe('ProjectChat agent profile selection', () => {
     expect(within(codexEffort).getByRole('option', { name: 'Extra high' })).toBeInTheDocument();
     // Only the skill is counted now: the Claude-only effort no longer applies.
     expect(screen.getByRole('button', { name: 'Chat options (1 set)' })).toBeInTheDocument();
+    // To names what will run: the skill's agent, not the profile's.
+    expect(getProfileControl()).toHaveTextContent('Codex');
   });
 
   it('hides every profile not picked lately with the edit list’s suggestion', async () => {
