@@ -10,7 +10,7 @@ import {
   cancelDeploymentPublishJob,
   failExpiredDeploymentPublishJobs,
 } from '../../../src/services/deployment-publish-jobs';
-import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
+import { createDeclaredIndexes, createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 let sqlite: Database.Database;
 let database: D1Database;
@@ -162,6 +162,31 @@ describe('publish job atomic guards on SQLite', () => {
       })
     ).toBe(false);
     expect(row().status).toBe('building');
+  });
+
+  it('uses status index ranges instead of scanning terminal history', async () => {
+    createDeclaredIndexes(sqlite, [schema.deploymentPublishJobs]);
+    seed('future', 'collecting', old, old);
+    const plans: string[] = [];
+    const prepare = database.prepare.bind(database);
+    database.prepare = (query: string) => {
+      const statement = prepare(query);
+      if (query.startsWith('select "id" from "deployment_publish_jobs"')) {
+        const bind = statement.bind.bind(statement);
+        statement.bind = (...values: unknown[]) => {
+          plans.push(
+            ...(
+              sqlite.prepare(`EXPLAIN QUERY PLAN ${query}`).all(...values) as { detail: string }[]
+            ).map((row) => row.detail)
+          );
+          return bind(...values);
+        };
+      }
+      return statement;
+    };
+    expect(await failExpiredDeploymentPublishJobs(db(), settings, now)).toHaveLength(1);
+    expect(plans.join(' ')).toContain('idx_deployment_publish_jobs_status_updated_at');
+    expect(plans.join(' ')).not.toContain('SCAN deployment_publish_jobs');
   });
 
   it('links exactly one owner release and rejects a duplicate without creating it', async () => {

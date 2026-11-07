@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, notInArray, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, lt, notInArray, or, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -330,15 +330,25 @@ export async function failExpiredDeploymentPublishJobs(
   const deadlineCutoff = new Date(nowMs - settings.deadlineMs).toISOString();
   const expired = sql`(${schema.deploymentPublishJobs.createdAt} <= ${deadlineCutoff}
     OR coalesce(${schema.deploymentPublishJobs.lastEventAt}, ${schema.deploymentPublishJobs.createdAt}) <= ${stallCutoff})`;
+  // Disjoint status ranges use the existing (status, updated_at) index and
+  // exclude terminal history. Unlike a fixed active-status list, this also
+  // covers new non-terminal states introduced by later executors.
+  const terminalStatuses = [...PUBLISH_JOB_TERMINAL_STATUSES].sort();
+  const activeRanges = or(
+    ...terminalStatuses.map((status, index) =>
+      index === 0
+        ? lt(schema.deploymentPublishJobs.status, status)
+        : and(
+            gt(schema.deploymentPublishJobs.status, terminalStatuses[index - 1] as string),
+            lt(schema.deploymentPublishJobs.status, status)
+          )
+    ),
+    gt(schema.deploymentPublishJobs.status, terminalStatuses[terminalStatuses.length - 1] as string)
+  );
   const candidates = await db
     .select({ id: schema.deploymentPublishJobs.id })
     .from(schema.deploymentPublishJobs)
-    .where(
-      and(
-        notInArray(schema.deploymentPublishJobs.status, [...PUBLISH_JOB_TERMINAL_STATUSES]),
-        expired
-      )
-    )
+    .where(and(activeRanges, expired))
     .orderBy(asc(schema.deploymentPublishJobs.updatedAt), asc(schema.deploymentPublishJobs.id))
     .limit(settings.sweepLimit);
   const failed: schema.DeploymentPublishJobRow[] = [];

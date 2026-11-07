@@ -16,3 +16,12 @@ Phase 1 of idea 01KZ6V37D1QGDR3WN12PSDB0QD. Node-owned builds currently have no 
 
 ## Scope
 No context bundles, executor columns, queueing, or job tokens. Current SAM output branch is already isolated; use it. Preserve local .codex/config.toml change.
+
+## Saved verification / review evidence — 2026-11-07
+- Implementation saved in e8dfdf8c0; current main merged in 42c24dbf5 without rewriting published history.
+- Full repository lint passed: 13/13 packages, existing accessibility/hook warnings only.
+- Real SQL suites: 27 tests passed after indexed sweep fix; service suite including generated-query EXPLAIN passed 17 tests.
+- Cloudflare/constitution reviewer approved after fixing terminal-history scans. Sweep uses indexed disjoint non-terminal status ranges; reads/sort scale with active jobs, not retained terminal history. Default 25 selected jobs per tick: one candidate query, at most 25 conditional updates and 25 asynchronous lifecycle deliveries; no VM network calls on sweep path.
+- Go/security reviewer approved: focused real-handler cancel and publish happy-path tests passed. Optional early eligibility read before volume allocation noted; authoritative transactional release fence retained.
+- Test/docs/completion reviewer: no implementation blocker; final validation, mutation proof and staging evidence required before archive.
+- Unrelated .codex/config.toml stays uncommitted.
