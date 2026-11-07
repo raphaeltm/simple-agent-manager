@@ -15,8 +15,7 @@ import { assertNoOverflow, screenshot } from './audit-helpers';
 
 const PROJECT_ID = 'proj-switch-audit';
 const USER = { id: 'user-switch-audit', name: 'Audit User', email: 'audit@example.com' };
-// Relative to the real clock: the session list files chats idle for hours under a
-// collapsed "Older" group, and these must read as recent.
+// Relative to the real clock, so relative times in the session list read as recent.
 const NOW = Date.now();
 const REFRESH_DELAY_MS = 4_000;
 const LONG_URL =
@@ -137,8 +136,10 @@ const TRANSCRIPTS: Record<string, Row[]> = {
       transcript(session.id, 12, (n) => `${session.topic} — message ${n}`),
     ])
   ),
-  [ARCHIVED.id]: transcript(ARCHIVED.id, ARCHIVED.messageCount, (n) =>
-    `Archived conversation message ${n}`
+  [ARCHIVED.id]: transcript(
+    ARCHIVED.id,
+    ARCHIVED.messageCount,
+    (n) => `Archived conversation message ${n}`
   ),
 };
 
@@ -265,19 +266,25 @@ function isMobile(page: Page): boolean {
   return (page.viewportSize()?.width ?? 1280) < 768;
 }
 
+/** Unfolds History, where stopped chats such as the fillers and the wordy chat live. */
+async function openHistory(list: ReturnType<Page['getByRole']>) {
+  const history = list.getByRole('button', { name: /^History/ });
+  if ((await history.getAttribute('aria-expanded')) === 'false') await history.click();
+  await expect(history).toHaveAttribute('aria-expanded', 'true');
+}
+
 /** Picks a chat the way a user does on this viewport: the sidebar, or the chat-list drawer. */
 async function selectChat(page: Page, topic: string) {
   if (isMobile(page)) {
-    await page.getByRole('button', { name: 'Open chat list' }).click();
+    await page.getByRole('button', { name: /^Open chat list/ }).click();
     const drawer = page.getByRole('dialog', { name: 'Chat sessions' });
+    await openHistory(drawer);
     await drawer.getByText(topic, { exact: false }).first().click();
     await expect(drawer).toHaveCount(0);
   } else {
-    await page
-      .getByRole('navigation', { name: 'Chat sessions' })
-      .getByText(topic, { exact: false })
-      .first()
-      .click();
+    const list = page.getByRole('navigation', { name: 'Chat sessions' });
+    await openHistory(list);
+    await list.getByText(topic, { exact: false }).first().click();
   }
 }
 
@@ -431,14 +438,16 @@ test.describe('project chat — instant switching audit', () => {
 
     // Many sessions in the list, long titles included.
     if (isMobile(page)) {
-      await page.getByRole('button', { name: 'Open chat list' }).click();
+      await page.getByRole('button', { name: /^Open chat list/ }).click();
       const drawer = page.getByRole('dialog', { name: 'Chat sessions' });
+      await openHistory(drawer);
       await expect(drawer.getByText('Filler chat 32:', { exact: false })).toBeAttached();
       await assertNoOverflow(page);
       await screenshot(page, `project-chat-switching-session-list-${viewport}`);
       await page.keyboard.press('Escape');
       await expect(drawer).toHaveCount(0);
     } else {
+      await openHistory(page.getByRole('navigation', { name: 'Chat sessions' }));
       await screenshot(page, `project-chat-switching-session-list-${viewport}`);
     }
 
@@ -473,7 +482,7 @@ test.describe('project chat — instant switching audit', () => {
     await screenshot(page, `project-chat-switching-cached-return-${viewport}`);
   });
 
-  test('a recent archive-maintenance timestamp does not put an old chat in Recent', async ({
+  test('a recent archive-maintenance timestamp does not move an old chat up History', async ({
     page,
   }, testInfo) => {
     await setupApi(page, []);
@@ -488,9 +497,9 @@ test.describe('project chat — instant switching audit', () => {
       sessionList = page.getByRole('dialog', { name: 'Chat sessions' });
     }
 
-    const olderToggle = sessionList.getByRole('button', { name: 'Older (1)' });
-    await expect(olderToggle).toBeVisible();
-    await olderToggle.click();
+    const historyToggle = sessionList.getByRole('button', { name: /^History/ });
+    await expect(historyToggle).toBeVisible();
+    await historyToggle.click();
     const listViewport = isMobile(page)
       ? sessionList.getByRole('navigation', { name: 'Chat sessions' })
       : sessionList;
