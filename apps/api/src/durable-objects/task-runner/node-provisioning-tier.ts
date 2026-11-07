@@ -140,7 +140,8 @@ export function missingCredentialSkipReason(provider: string): string {
  * anything else, such as a D1 failure, still throws.
  *
  * This checks the `permanent` flag directly rather than using `!isTransientError`: that helper
- * calls any unrecognised error permanent, which would skip a tier on an unexpected bug.
+ * also treats messages containing words such as "invalid", "forbidden" or "not found" as
+ * permanent, which would skip a tier for an error that is not a quota refusal.
  */
 export async function computeQuotaRefusal(
   state: TaskRunnerState,

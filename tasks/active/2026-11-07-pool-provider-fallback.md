@@ -64,7 +64,8 @@ from the first candidate, so the chain can never leave one credential domain.
       capacity source; primary vs attempt identity
 - [x] Re-entry: release a stale lease from another scope before acquiring
 - [x] Terminal message names providers when the plan spans more than one
-- [ ] Compaction keeps each source's best candidates (after rebase onto PR 2b)
+- [x] Compaction keeps each source's best candidates (after rebase onto PR 2b): with a provider
+      order, `compactCapacityPoolSelectionForTaskRunner` keeps every source's best `k` candidates
 - [x] Docs: compute-pools.md "Provider order" (fallback behaviour)
 - [x] Tests (below)
 - [x] Review fixes (2026-11-07, second session): the first tier is skipped like later tiers when
@@ -118,3 +119,8 @@ Waived by Raphaël for this work (session `eecddba8`, 2026-11-07).
   GCP quota is regional, and a domain cooldown would block other regions; documented in code and
   docs. 9 new tests; surgical reverts: cooldown skip, quota skip, credential skip, target
   candidate, later-tier quota and the per-tier cap each redden exactly their test.
+- Re-reviews of db58b5add: test-engineer, cloudflare-specialist, security-auditor PASS;
+  architecture-reviewer MEDIUM (settings module importing a DO constant) fixed by moving it to
+  `services/provisioning-attempt-limits.ts`. LOWs done: quota target lookup fails closed;
+  stale-lease restart test with a skipped first tier. Compaction: per-source test traced into
+  `buildProvisioningExhaustionPlan` (two tiers survive); both proven by revert.

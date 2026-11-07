@@ -10,7 +10,6 @@ import {
   MAX_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
 } from '@simple-agent-manager/shared';
 
-import { DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER } from '../durable-objects/task-runner/node-provisioning-exhaustion';
 import { DEFAULT_IDEA_CONTENT_MAX_LENGTH } from '../lib/idea-content-limit';
 import {
   type AdminSettingDefinition,
@@ -21,6 +20,7 @@ import {
 import { agentModelSettingDefinitions } from './agent-models/settings-definition';
 import { CONNECTOR_DEFAULTS, type ConnectorSettingKey } from './connector-settings-definition';
 import { ENV_KEYS, SECRET_KINDS, SETTING_KEYS } from './platform-config-store';
+import { DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER } from './provisioning-attempt-limits';
 import { DEFAULT_SESSION_STALE_TURN_NO_WORK_MINUTES } from './session-idleness';
 export const CORE_SETTINGS: AdminSettingDefinition[] = [
   integerDefinition(

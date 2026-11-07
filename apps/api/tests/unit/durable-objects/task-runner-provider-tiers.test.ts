@@ -11,6 +11,7 @@
 import { GcpProvider, HetznerProvider, ProviderError } from '@simple-agent-manager/providers';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { enforceComputeQuota } from '../../../src/durable-objects/task-runner/node-provisioning-gates';
 import { handleNodeProvisioning } from '../../../src/durable-objects/task-runner/node-steps';
 import type {
   TaskRunnerContext,
@@ -806,6 +807,19 @@ describe('provider tiers: the most preferred tier is skippable too', () => {
 });
 
 describe('provider tiers: compute quota on a later tier', () => {
+  it('refuses to charge quota when the provisioning target is not in the selection', async () => {
+    const { rc } = createContext({ quotaEnforced: true });
+    const state = createState([GCP_A, HETZNER_A]);
+    state.stepResults.capacityPlacementSnapshot = {
+      capacityPoolCandidateId: 'candidate-from-elsewhere',
+    } as TaskRunnerState['stepResults']['capacityPlacementSnapshot'];
+
+    await expect(enforceComputeQuota(state, rc)).rejects.toThrow(
+      "Provisioning target candidate-from-elsewhere is not in the task's capacity pool selection"
+    );
+    expect(checkQuotaForUser).not.toHaveBeenCalled();
+  });
+
   it('a later tier on platform credentials is skipped when the platform quota is spent', async () => {
     const stockout = await gcpStockout();
     provisionOutcomes({ 'e2-standard-4': stockout });
@@ -912,6 +926,30 @@ describe('provider tiers: entering a tier', () => {
 
     expect(attempted()).toEqual(['gcp e2-standard-4']);
     expect(rc.ctx.storage.setAlarm).toHaveBeenCalledWith(Date.parse(retryAt));
+  });
+
+  it('on restart with a skipped first tier, gives back the later tier’s stale lease before re-entering it', async () => {
+    resolveVmAdmissionScope.mockImplementation(
+      async (_env: unknown, input: { targetProvider: string }) =>
+        input.targetProvider === 'gcp' ? null : scopeFor(input.targetProvider)
+    );
+    const { rc } = createContext();
+    const state = createState([GCP_A, HETZNER_A]);
+    state.admissionScopeKey = scopeFor('hetzner').scopeKey;
+    state.admissionLeaseToken = 9;
+
+    await handleNodeProvisioning(state, rc);
+
+    // The stale lease is released with its own token before the Hetzner tier takes a fresh one.
+    expect(releaseVmProvisioningLease.mock.calls[0]?.slice(1)).toEqual([
+      scopeFor('hetzner').scopeKey,
+      'task-1',
+      9,
+      'provider_tier_fallback',
+    ]);
+    expect(leaseScopes()).toEqual(['hetzner']);
+    expect(state.admissionLeaseToken).toBe(7);
+    expect(attempted()).toEqual(['hetzner cx43']);
   });
 
   it('on restart, gives back a lease a later tier held before acquiring the first tier’s', async () => {

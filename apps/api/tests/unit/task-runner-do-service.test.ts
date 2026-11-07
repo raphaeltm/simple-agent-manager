@@ -9,6 +9,8 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { buildProvisioningExhaustionPlan } from '../../src/durable-objects/task-runner/node-provisioning-exhaustion';
+import type { TaskRunnerState } from '../../src/durable-objects/task-runner/types';
 import type { Env } from '../../src/env';
 import { resolveReusableNodeCapacitySnapshot } from '../../src/services/placement-resolver';
 import { startTaskRunnerDO } from '../../src/services/task-runner-do';
@@ -418,6 +420,64 @@ describe('task-runner-do service', () => {
       providerInstancePriceCurrency: 'EUR',
     });
   });
+  it('with a provider order, keeps the next provider’s candidates when the first fills the budget', async () => {
+    const { env, start } = createTaskRunnerEnv();
+    const gcp = capacityPoolSelection({
+      provider: 'hetzner',
+      location: 'fsn1',
+      candidateCount: 160,
+    });
+    // The first source ranks first and alone exceeds the budget, as a live GCP catalog does.
+    const first = gcp.candidates.map((candidate) => ({
+      ...candidate,
+      capacitySourceId: 'source-first',
+      sourceRank: 1,
+    }));
+    const second = capacityPoolSelection({
+      provider: 'hetzner',
+      location: 'fsn1',
+      candidateCount: 3,
+    }).candidates.map((candidate, index) => ({
+      ...candidate,
+      id: `candidate-second-${index}`,
+      capacitySourceId: 'source-second',
+      providerInstanceType: `cpx${21 + index}`,
+      sourceRank: 2,
+    }));
+    const selection = {
+      ...gcp,
+      exhaustionPolicy: 'fallback-chain' as const,
+      candidates: [...first, ...second],
+    };
+
+    await startTaskRunnerDO(env, {
+      ...minimalStartInput,
+      cloudProvider: 'hetzner',
+      explicitVmLocation: false,
+      capacityPoolSelection: selection,
+    });
+
+    const forwarded = start.mock.calls[0]?.[0];
+    const kept: Array<{ id: string; capacitySourceId: string }> =
+      forwarded.config.capacityPoolSelection.candidates;
+    expect(
+      new TextEncoder().encode(JSON.stringify(forwarded.config.capacityPoolSelection)).length
+    ).toBeLessThanOrEqual(96 * 1024);
+    const firstKept = kept.filter((c) => c.capacitySourceId === 'source-first');
+    const secondKept = kept.filter((c) => c.capacitySourceId === 'source-second');
+    expect(firstKept.length).toBeGreaterThan(1);
+    expect(secondKept.map((c) => c.id)).toEqual(second.map((c) => c.id));
+    // Each source keeps its own best candidates, in rank order.
+    expect(firstKept.map((c) => c.id)).toEqual(first.slice(0, firstKept.length).map((c) => c.id));
+
+    // Through to the TaskRunner's plan: the second provider is still a fallback tier.
+    const plan = buildProvisioningExhaustionPlan(
+      { config: forwarded.config } as unknown as TaskRunnerState,
+      forwarded.config.capacityPoolSelection.candidates
+    );
+    expect(new Set(plan.attempts.map((attempt) => attempt.tierIndex))).toEqual(new Set([0, 1]));
+  });
+
   it('refuses a selection whose first candidate alone exceeds the budget', async () => {
     const { env, start } = createTaskRunnerEnv();
     const selection = capacityPoolSelection({
