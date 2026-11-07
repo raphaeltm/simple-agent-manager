@@ -574,7 +574,7 @@ describe('ProjectChat new chat button', () => {
     // Joined, not duplicated, while the route read is in flight.
     expect(mocks.listChatSessions).toHaveBeenCalledTimes(1);
 
-    const created = { ...SESSION_2, id: 'session-created-before-socket', topic: 'Late arrival' };
+    const created = { ...SESSION_1, id: 'session-created-before-socket', topic: 'Late arrival' };
     mocks.listChatSessions.mockResolvedValue({
       sessions: [created, SESSION_1, SESSION_2],
       total: 3,
@@ -587,6 +587,7 @@ describe('ProjectChat new chat button', () => {
     expect(mocks.listChatSessions).toHaveBeenLastCalledWith(PROJECT_ID, {
       limit: expect.any(Number),
       scope: 'all',
+      includeLive: true,
     });
   });
 
@@ -595,7 +596,7 @@ describe('ProjectChat new chat button', () => {
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
 
     renderWithClient(client, `/projects/${PROJECT_ID}/chat/session-1`);
-    expect(await screen.findAllByText('Second chat')).not.toHaveLength(0);
+    expect(await screen.findAllByText('First chat')).not.toHaveLength(0);
     await act(async () => {
       await new Promise((resolve) => setTimeout(resolve, 50));
     });
@@ -791,7 +792,8 @@ describe('ProjectChat new chat button', () => {
       expect(screen.getByText('First chat')).toBeInTheDocument();
     });
 
-    // Click on the second session
+    // Click on the second session, a stopped one in the folded History section
+    fireEvent.click(screen.getByRole('button', { name: /^History/ }));
     fireEvent.click(screen.getByText('Second chat'));
 
     // Should show that session's messages
@@ -823,19 +825,19 @@ describe('ProjectChat new chat button', () => {
     expect(mocks.resolveAttentionAnswer).toHaveBeenCalledTimes(2);
   });
 
-  it('shows and opens hierarchy controls for stale sessions in the Older bucket', async () => {
+  it('shows and opens hierarchy controls for stopped sessions in the History section', async () => {
     setupStaleHierarchyMocks();
 
     renderProjectChat();
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Older (2)' })).toBeInTheDocument();
-    });
-    // Before expanding Older, no hierarchy buttons visible
+    const history = await screen.findByRole('button', { name: /^History/ });
+    expect(history).toHaveTextContent('History2');
+    expect(history).toHaveAttribute('aria-expanded', 'false');
+    // Before expanding History, no hierarchy buttons visible
     expect(screen.queryByLabelText('Has subtasks')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Subtask')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Older (2)' }));
+    fireEvent.click(history);
 
     await waitFor(() => {
       expect(screen.getByText('Child dispatched task')).toBeInTheDocument();
@@ -850,6 +852,110 @@ describe('ProjectChat new chat button', () => {
 
     const dialog = await screen.findByRole('dialog', { name: 'Task hierarchy' });
     expect(dialog).toHaveAttribute('data-focus-task-id', 'child-task');
+  });
+
+  it('groups the sidebar by state: attention, awake, sleeping, then folded history', async () => {
+    const hoursAgo = (hours: number) => Date.now() - hours * 60 * 60 * 1000;
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [
+        { ...SESSION_1, id: 'recent-active', topic: 'Recent active chat' },
+        // Awake for six hours without a message: it used to fall into a folded "Older".
+        {
+          ...SESSION_1,
+          id: 'quiet-awake',
+          topic: 'Quiet awake chat',
+          startedAt: hoursAgo(7),
+          createdAt: hoursAgo(7),
+          lastMessageAt: hoursAgo(6),
+        },
+        {
+          ...SESSION_1,
+          id: 'resting',
+          topic: 'Resting chat',
+          status: 'sleeping',
+          lastMessageAt: hoursAgo(1),
+        },
+        // Asleep and days old, but its wake failed: a person must act.
+        {
+          ...SESSION_1,
+          id: 'wake-failed',
+          topic: 'Wake failed chat',
+          status: 'sleeping',
+          lastMessageAt: hoursAgo(48),
+          attention: {
+            markerId: 'marker-1',
+            kind: 'wake_failed',
+            createdAt: hoursAgo(47),
+            expiresAt: null,
+            reason: 'provider_limit_blocked',
+            options: [],
+          },
+        },
+        { ...SESSION_2, id: 'finished', topic: 'Finished chat' },
+      ],
+      total: 5,
+    });
+
+    renderProjectChat();
+
+    const list = await screen.findByRole('navigation', { name: 'Chat sessions' });
+    await within(list).findByText('Quiet awake chat');
+    const sectionOf = (section: string) =>
+      within(list)
+        .getAllByRole('region')
+        .find((region) => region.getAttribute('aria-labelledby') === `session-section-${section}`)!;
+
+    const attention = sectionOf('attention');
+    expect(within(attention).getByRole('heading', { name: /Needs attention/ })).toBeInTheDocument();
+    expect(within(attention).getByText('Wake failed chat')).toBeInTheDocument();
+    const awake = sectionOf('awake');
+    expect(within(awake).getByText('Recent active chat')).toBeInTheDocument();
+    expect(within(awake).getByText('Quiet awake chat')).toBeInTheDocument();
+    const sleeping = sectionOf('sleeping');
+    expect(within(sleeping).getByText('Resting chat')).toBeInTheDocument();
+
+    // Sections render in priority order, not message order.
+    const headings = within(list)
+      .getAllByRole('region')
+      .map((region) => region.getAttribute('aria-labelledby'));
+    expect(headings).toEqual([
+      'session-section-attention',
+      'session-section-awake',
+      'session-section-sleeping',
+      'session-section-history',
+    ]);
+
+    // Finished work is folded until asked for.
+    const history = within(list).getByRole('button', { name: /^History/ });
+    expect(history).toHaveAttribute('aria-expanded', 'false');
+    expect(within(list).queryByText('Finished chat')).not.toBeInTheDocument();
+    fireEvent.click(history);
+    expect(within(list).getByText('Finished chat')).toBeInTheDocument();
+  });
+
+  it('keeps the open chat visible when its section is folded', async () => {
+    mocks.listChatSessions.mockResolvedValue({ sessions: [SESSION_1, SESSION_2], total: 2 });
+
+    // A deep link to a stopped chat: History is folded, but this row stays in view.
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${SESSION_2.id}`);
+
+    const list = await screen.findByRole('navigation', { name: 'Chat sessions' });
+    const history = await within(list).findByRole('button', { name: /^History/ });
+    expect(history).toHaveAttribute('aria-expanded', 'false');
+    const historySection = history.closest('section') as HTMLElement;
+    expect(within(historySection).getByText('Second chat')).toBeInTheDocument();
+    // Liveness: the awake chat renders in its own section.
+    expect(within(list).getByText('First chat')).toBeInTheDocument();
+  });
+
+  it('asks the API for live sessions outside the newest page', async () => {
+    mocks.listChatSessions.mockResolvedValue({ sessions: [SESSION_1], total: 1 });
+    renderProjectChat();
+    await screen.findAllByText('First chat');
+    expect(mocks.listChatSessions).toHaveBeenCalledWith(
+      PROJECT_ID,
+      expect.objectContaining({ includeLive: true })
+    );
   });
 
   it('derives hierarchy modal visibility from URL hash (#hierarchy-<taskId>)', async () => {
@@ -1187,6 +1293,7 @@ describe('ProjectChat new chat button', () => {
 
     // Back to the same session and retry it again while the first load is still out.
     const readsBeforeReopen = mocks.getProjectTask.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: /^History/ }));
     fireEvent.click(screen.getByText('Fix the login bug'));
     // Reopening reads the session's task again (provisioning tracker); let that settle first.
     await waitFor(() => {

@@ -19,18 +19,25 @@ const SESSION_STATE_LABELS: Partial<Record<SessionState, string>> = {
   terminated: 'Stopped',
 };
 
-export type SessionStateTone = 'success' | 'info' | 'muted';
+export type SessionStateTone = 'success' | 'info' | 'muted' | 'warning';
 
 /** The status label the header shows: "Expired" wins over the live session state. */
 export function sessionStateLabel(
   sessionState: SessionState,
   taskEmbed: ChatSessionResponse['task'] | null
 ): string {
+  if (taskEmbed?.providerLimitReason)
+    return taskEmbed.providerLimitReason.startsWith('Blocked:') ? 'Needs you' : 'Waiting';
   return isExpiredTask(taskEmbed) ? 'Expired' : (SESSION_STATE_LABELS[sessionState] ?? 'Stopped');
 }
 
 /** Green is working; amber is reserved for "waiting on you", so a resting agent is neutral. */
-export function sessionStateTone(sessionState: SessionState): SessionStateTone {
+export function sessionStateTone(
+  sessionState: SessionState,
+  taskEmbed?: ChatSessionResponse['task'] | null
+): SessionStateTone {
+  if (taskEmbed?.providerLimitReason)
+    return taskEmbed.providerLimitReason.startsWith('Blocked:') ? 'warning' : 'info';
   return sessionState === 'active' ? 'success' : sessionState === 'sleeping' ? 'info' : 'muted';
 }
 
@@ -76,7 +83,7 @@ export function SessionHeaderChips({
 
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-2">
-      <Chip tone={sessionStateTone(sessionState)} dot>
+      <Chip tone={sessionStateTone(sessionState, taskEmbed)} dot>
         {sessionStateLabel(sessionState, taskEmbed)}
       </Chip>
 

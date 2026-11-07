@@ -1,9 +1,9 @@
 import { memo, useMemo } from 'react';
 
-import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
+import type { ChatSessionListItem } from '../../lib/api';
 import { HierarchyIndicator } from './HierarchyIndicator';
 import { SessionItem } from './SessionItem';
-import type { TaskInfo } from './useTaskGroups';
+import { enrichSessionWithTaskInfo, type TaskInfo } from './useTaskGroups';
 
 /**
  * Flat session list item renderer.
@@ -38,23 +38,10 @@ export const SessionTreeItem = memo(function SessionTreeItem({
 
   // Enrich session with task status from D1 task data so that
   // getAttentionState() can distinguish completed/failed/cancelled tasks.
-  const enrichedSession = useMemo((): ChatSessionResponse => {
-    if (!taskInfo) return session;
-    return {
-      ...session,
-      task: {
-        id: taskInfo.id,
-        triggeredBy: taskInfo.triggeredBy,
-        connectorClientName: taskInfo.connectorClientName,
-        status: taskInfo.status,
-        terminalReason: taskInfo.terminalReason,
-        errorMessage: taskInfo.errorMessage,
-        executionStep: taskInfo.executionStep,
-        taskMode: taskInfo.taskMode,
-        ...session.task,
-      },
-    };
-  }, [session, taskInfo]);
+  const enrichedSession = useMemo(
+    () => enrichSessionWithTaskInfo(session, taskInfo),
+    [session, taskInfo]
+  );
 
   const blockedByTitle = taskInfo?.blocked ? getBlockedByTitle(session, taskInfoMap) : undefined;
 

@@ -10,7 +10,7 @@ your work is safe and what to do next. Everything here applies to both
 
 - **Needs input** in the session list. The agent, or SAM, is waiting for an answer from the person
   who started the chat. → [Find what it's waiting for](#the-agent-is-waiting-for-you)
-- **"Waiting for provider limit reset at…"**, **Waiting** or **Blocked** on the task's Dashboard
+- **"Waiting for provider limit reset at…"**, **Waiting** or **Needs you** on the task's Dashboard
   card, or a red **BLOCKED** badge on the chat in the session list. The agent hit a usage limit;
   SAM carries on after the reset, unless it says **Blocked**. (A subtask with that badge also reads
   "Waiting on:" and its parent task's title, whether a usage limit or another task is holding it,
@@ -105,10 +105,10 @@ older saved sessions.
 
 ## The agent is waiting for you
 
-**Needs input** beside a chat in the session list means it is waiting for an answer. On a phone,
-open the session list with the list icon at the right of the project-name bar. A chat with no new
-messages for three hours moves into the collapsed **Older** group at the bottom of the list, so look
-there too. Open the chat and look for one of these:
+**Needs input** beside a chat in the session list means it is waiting for an answer. Such chats sit
+at the top of the list under **Needs attention**, however long ago their last message was. On a
+phone, open the session list with the list icon at the right of the project-name bar; an amber count
+on that icon says how many chats need attention. Open the chat and look for one of these:
 
 - **A card in the chat** — a permission request, under the step it's about, or a question or a link
   to open, at the end of the chat. Answer it there; the agent carries on once it has your answer. If
@@ -154,16 +154,16 @@ never switches to another model, profile, or credential to get around a limit.
 
 - **If Claude Code or Codex didn't say when its limit resets**, the message reads **Waiting for provider
   limit reset (time unknown); bounded retry 1/3 at 14:05 UTC.** SAM tries again after 5 minutes,
-  then 10, then 20. If the limit still hasn't lifted, the task is **Blocked**.
+  then 10, then 20. Repeated rejections before one retry do not use extra waits. If three separate unknown-reset waits don't get the work going, the task shows **Needs you**.
 - **A new VM task that uses the same credential waits too**, before its agent starts (a new Instant
   chat isn't held). Its card says **Waiting**; once its workspace is ready, the reason reads
   **Blocked before provider prompt:** followed by the reset time, and its machine stays up
   meanwhile. Despite the word "Blocked", it starts by itself after the reset.
 
-**Blocked** on its own means SAM stopped waiting. The task won't carry on by itself, and a reply in
+**Needs you**, with a reason starting **Blocked:**, means SAM stopped waiting. The task won't carry on by itself, and a reply in
 the chat doesn't restart it:
 
-- **Blocked: provider limit wait budget exhausted.** Three waits in a row didn't get the work going.
+- **Blocked: provider limit wait budget exhausted.** Three unknown-reset waits in a row didn't get the work going. A known reset does not spend this budget.
 - **Blocked: provider limit reset outlives the saved snapshot…** The reset comes after SAM stops
   keeping the saved workspace, so the chat can't be woken where it left off.
 - **Blocked: selected provider credential changed…** The account the task would run on changed
@@ -172,25 +172,16 @@ the chat doesn't restart it:
   didn't start the task on.
 - Any other reason that starts with **Blocked:** means the same thing.
 
-**Don't reply in the blocked chat.** On a VM, a reply puts the task back in the queue, still
-**Blocked**, and SAM then refuses **Complete**, so the task can't be ended from the app. Instead:
+**Select Resume task** in the chat notice or on its Dashboard card. Only the task owner can
+resume it. This accepts the currently selected provider credential and wakes the saved workspace,
+including work the agent hasn't pushed. SAM still respects an active provider limit: approving a
+resume does not bypass a limit on that account. If the workspace is still being saved, wait until
+sleep finishes and try again. If the saved snapshot has expired, use **Fork** or **Retry** to start
+from a pushed branch instead.
 
-1. Look at what the agent got done: the chat, and anything it pushed. Work it didn't push stays in
-   the chat's saved workspace, which can't be woken while the task is **Blocked**, so don't count on
-   getting it back.
-2. End the blocked task:
-   - Select **Complete** in the session tool rail. For a **Chat** that's asleep you can instead
-     **Archive** it, which, unlike **Complete**, deletes its saved workspace.
-   - If SAM refuses **Complete** (the agent never started, or someone replied), SAM's own pages can't
-     end the task. If you use [SAM from Claude or ChatGPT](/docs/guides/sam-connector/), ask it to
-     stop that chat: that cancels the task and frees its machine. Otherwise leave it: it won't run by
-     itself, but a machine already prepared for it keeps running until SAM's 24-hour limit stops it.
-3. Continue in a new chat once the limit has reset, or straight away with a profile for a different
-   agent (Codex instead of Claude Code, say): **Fork** or **Retry** in the tool rail starts one from
-   this chat (see [Conversation forking](/docs/guides/chat-features/#conversation-forking)). The new
-   chat starts from your default branch, so tell its agent which pushed branch to build on.
-
-The chat keeps its red **BLOCKED** badge in the session list even after the task has ended.
+While a task is waiting, SAM holds project event prompts until the wait is released. Credential
+limit events about the task's own credential stay recorded without prompting that agent, so a
+rejection cannot start a notification/rejection loop.
 
 ## SAM paused automatic check-ins
 

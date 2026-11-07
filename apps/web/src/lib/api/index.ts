@@ -584,6 +584,7 @@ export {
   listTaskEvents,
   removeTaskDependency,
   requestAttachmentUpload,
+  resumeProviderLimitTask,
   runProjectTask,
   submitTask,
   updateProjectTask,

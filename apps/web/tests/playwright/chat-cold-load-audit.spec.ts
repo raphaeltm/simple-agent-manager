@@ -209,6 +209,8 @@ for (const viewport of [
 
       gates.list.release();
       if (!viewport.isMobile) {
+        // The fixture's chats are stopped, so they sit in History, folded by default.
+        await page.getByRole('button', { name: /^History/ }).click();
         await expect(page.getByText('Chat number 32 about something ordinary')).toBeAttached();
       }
       await expect(page.getByText('The transcript waited behind')).toBeVisible();

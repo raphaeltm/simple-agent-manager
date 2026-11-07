@@ -30,6 +30,10 @@ const sleepBoundaryMocks = vi.hoisted(() => ({
   r2Head: vi.fn(),
   scheduleWorkspaceDeletion: vi.fn(),
   sleepSession: vi.fn(),
+  syncProviderLimitAttention: vi.fn(),
+  listActiveAttentionMarkers: vi.fn(),
+  createAttentionMarker: vi.fn(),
+  resolveSessionAttentionMarkers: vi.fn(),
   stopComputeTracking: vi.fn(),
   stopWorkspaceOnNode: vi.fn(),
   transitionAcpSession: vi.fn(),
@@ -47,6 +51,13 @@ vi.mock('../../src/services/node-agent', async (importOriginal) => ({
 }));
 
 vi.mock('../../src/services/project-data', () => ({
+  syncProviderLimitAttention: (...args: unknown[]) =>
+    sleepBoundaryMocks.syncProviderLimitAttention(...args),
+  listActiveAttentionMarkers: (...args: unknown[]) =>
+    sleepBoundaryMocks.listActiveAttentionMarkers(...args),
+  createAttentionMarker: (...args: unknown[]) => sleepBoundaryMocks.createAttentionMarker(...args),
+  resolveSessionAttentionMarkers: (...args: unknown[]) =>
+    sleepBoundaryMocks.resolveSessionAttentionMarkers(...args),
   recordActivityEvent: (...args: unknown[]) => sleepBoundaryMocks.recordActivityEvent(...args),
   getProjectSchedule: (...args: unknown[]) => sleepBoundaryMocks.getProjectSchedule(...args),
   mutateProjectSchedule: (...args: unknown[]) => sleepBoundaryMocks.mutateProjectSchedule(...args),
@@ -99,6 +110,7 @@ export function createSessionSleepFixture(taskStatus: string, getActivity: () =>
   vi.useFakeTimers();
   vi.setSystemTime(SLEEP_START);
   vi.resetAllMocks();
+  sleepBoundaryMocks.listActiveAttentionMarkers.mockResolvedValue([]);
   const mocks = sleepBoundaryMocks;
   const START = SLEEP_START;
   const sqlite = new Database(':memory:');

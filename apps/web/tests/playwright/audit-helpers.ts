@@ -557,13 +557,15 @@ export interface SleepingChatMockOptions {
   state: Record<string, unknown>;
   /** The session's OWN task row, the one `useProvisioningTracker` reads. */
   ownTask: Record<string, unknown>;
+  /** The session list; defaults to just `session`. */
+  sessions?: unknown[];
 }
 
 /**
  * Registers every API route the project chat page touches when it opens a
- * sleeping or waking session. Shared by `wake-progress-audit.spec.ts` and
- * `sleeping-session-audit.spec.ts`, which differ only in the session `state`
- * and the own-task shape they feed in.
+ * sleeping or waking session. Shared by `wake-progress-audit.spec.ts`,
+ * `sleeping-session-audit.spec.ts` and `project-chat-session-sections-audit.spec.ts`,
+ * which differ in the session `state`, the own-task shape and the session list.
  *
  * Envelope shapes matter: the client reads `.sessions`, `.items`, `.commands`
  * and `.messages`. Returning a bare array crashes the app into its
@@ -571,6 +573,7 @@ export interface SleepingChatMockOptions {
  */
 export async function setupSleepingChatMocks(page: Page, options: SleepingChatMockOptions) {
   const { user, project, session, messages, state, ownTask } = options;
+  const sessions = options.sessions ?? [session];
   await page.route('**/api/**', async (route: Route) => {
     const path = new URL(route.request().url()).pathname;
     const respond = (status: number, body: unknown) =>
@@ -591,7 +594,9 @@ export async function setupSleepingChatMocks(page: Page, options: SleepingChatMo
     const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
     if (projectMatch) {
       const subPath = projectMatch[2] || '';
-      if (subPath === '/sessions') return respond(200, { sessions: [session], total: 1 });
+      if (subPath === '/sessions') {
+        return respond(200, { sessions, total: sessions.length, hasMore: false });
+      }
       if (subPath === '/agent-profiles') return respond(200, { items: [] });
       if (subPath === '/cached-commands') return respond(200, { commands: [] });
       if (subPath === '/credential-attribution-health') return respond(200, {});

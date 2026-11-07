@@ -12,6 +12,7 @@ import type {
   SessionAccessGrantRecord,
   SessionAccessResolution,
 } from '../durable-objects/project-data/session-access';
+import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import { errors } from '../middleware/error';
 import { toSessionViewerAccess } from '../services/session-access';
 
@@ -39,18 +40,27 @@ async function buildCreatorMap(
 
   if (creatorIds.length === 0) return new Map();
 
-  const rows = await db
-    .select({
-      id: schema.users.id,
-      name: schema.users.name,
-      email: schema.users.email,
-      image: schema.users.image,
-      avatarUrl: schema.users.avatarUrl,
-    })
-    .from(schema.users)
-    .where(inArray(schema.users.id, creatorIds));
+  // Chunked to stay under D1's bound-parameter ceiling; independent reads go out together.
+  const chunks: string[][] = [];
+  for (let offset = 0; offset < creatorIds.length; offset += D1_MAX_BOUND_PARAMETERS) {
+    chunks.push(creatorIds.slice(offset, offset + D1_MAX_BOUND_PARAMETERS));
+  }
+  const rows = await Promise.all(
+    chunks.map((chunk) =>
+      db
+        .select({
+          id: schema.users.id,
+          name: schema.users.name,
+          email: schema.users.email,
+          image: schema.users.image,
+          avatarUrl: schema.users.avatarUrl,
+        })
+        .from(schema.users)
+        .where(inArray(schema.users.id, chunk))
+    )
+  );
 
-  return new Map(rows.map((row) => [row.id, row]));
+  return new Map(rows.flat().map((row) => [row.id, row]));
 }
 
 function attachCreator(

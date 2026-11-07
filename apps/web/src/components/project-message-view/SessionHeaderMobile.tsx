@@ -9,6 +9,7 @@ import { SessionInfoSheet } from './SessionInfoSheet';
 
 const DOT_COLOR: Record<SessionStateTone, string> = {
   success: 'text-[var(--sam-status-success-fg)]',
+  warning: 'text-[var(--sam-status-warning-fg)]',
   info: 'text-[var(--sam-status-info-fg)]',
   muted: 'text-[var(--sam-status-muted-fg)]',
 };

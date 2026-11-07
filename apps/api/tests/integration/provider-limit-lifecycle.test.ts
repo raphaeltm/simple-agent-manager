@@ -12,10 +12,17 @@ import { resolve } from 'node:path';
 
 import type { ProjectScheduledAction } from '@simple-agent-manager/shared';
 import type Database from 'better-sqlite3';
+import { getTableName, is } from 'drizzle-orm';
+import { SQLiteTable } from 'drizzle-orm/sqlite-core';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
+import {
+  createAttentionMarker,
+  listActiveAttentionMarkers,
+  resolveAttentionMarkers,
+} from '../../src/durable-objects/project-data/attention';
 import {
   type DurabilityFoundationHooks,
   processPromptDeliveryAlarm,
@@ -33,23 +40,38 @@ import {
   getSchedule,
 } from '../../src/durable-objects/project-data/project-event-schedules-storage';
 import { admitProjectEvent } from '../../src/durable-objects/project-data/project-events';
+import { syncProviderLimitAttention } from '../../src/durable-objects/project-data/provider-limit-attention';
 import type { Env } from '../../src/env';
 import { AppError } from '../../src/middleware/error';
 import { taskCallbackRoute } from '../../src/routes/tasks/callback';
+import { providerLimitResumeRoutes } from '../../src/routes/tasks/provider-limit-resume';
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
+import {
+  __resetAdminSettingsCacheForTest,
+  updateAdminSettings,
+} from '../../src/services/admin-settings';
 import { preserveProviderLimitWait } from '../../src/services/provider-limit-reconciliation';
 import {
   queueWorkspaceSessionSleep,
   sleepWorkspaceSession,
 } from '../../src/services/session-sleep';
 import { createSleepProjectDataFixture } from '../helpers/session-sleep-project-data-fixture';
-import { createSchemaTables } from '../helpers/sqlite-d1';
+import { createMemoryKv, createSchemaTables } from '../helpers/sqlite-d1';
 
 vi.mock('../../src/services/jwt', () => ({
   verifyCallbackToken: vi.fn(async () => ({ workspace: 'workspace-1', scope: 'workspace' })),
 }));
 
-const recovery = vi.hoisted(() => ({ ensure: vi.fn(), report: vi.fn() }));
+const recovery = vi.hoisted(() => ({ ensure: vi.fn(), report: vi.fn(), start: vi.fn() }));
+vi.mock('../../src/middleware/auth', () => ({
+  getUserId: () => 'user-1',
+  requireAuth: () => async (_c: unknown, next: () => Promise<void>) => next(),
+  requireApproved: () => async (_c: unknown, next: () => Promise<void>) => next(),
+}));
+vi.mock('../../src/services/task-runner-do', () => ({
+  startTaskRunnerDO: (...args: unknown[]) => recovery.start(...args),
+  ensureTaskRunnerStarted: vi.fn(async () => false),
+}));
 vi.mock('../../src/services/session-recovery', () => ({
   ensureSessionRecovery: recovery.ensure,
   reportSessionRecoveryRefusal: recovery.report,
@@ -94,15 +116,25 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
     }));
     ({ sqlite: d1, env } = fixture);
     Object.assign(env, {
+      KV: createMemoryKv(),
       DURABLE_PROMPT_DELIVERY_ENABLED: 'true',
       PROJECT_EVENT_WAKE_ENABLED: 'true',
     });
     createSchemaTables(d1, [
       schema.users,
+      schema.platformSettings,
+      schema.platformCredentials,
       schema.taskDependencies,
       schema.credentialLimitWindows,
       schema.projectEventSourceOutbox,
     ]);
+    d1.exec(
+      readFileSync(
+        new URL('../../src/db/migrations/0196_admin_settings.sql', import.meta.url),
+        'utf8'
+      )
+    );
+    __resetAdminSettingsCacheForTest();
     d1.exec(
       'CREATE UNIQUE INDEX quota_key ON credential_limit_windows(project_id,credential_reference,window_type)'
     );
@@ -113,6 +145,20 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
       taskId: TASK,
       startedAt: START,
     }));
+    mocks.syncProviderLimitAttention.mockImplementation(
+      async (_env, projectId, taskId, sessionId) =>
+        syncProviderLimitAttention(sql, env.DATABASE, { projectId, taskId, sessionId })
+    );
+    mocks.listActiveAttentionMarkers.mockImplementation(async (_env, _project, session) =>
+      listActiveAttentionMarkers(sql, session)
+    );
+    mocks.createAttentionMarker.mockImplementation(async (_env, _project, options) =>
+      createAttentionMarker(sql, options)
+    );
+    mocks.resolveSessionAttentionMarkers.mockImplementation(
+      async (_env, _project, session, message, actor, reason) =>
+        resolveAttentionMarkers(sql, session, message, actor, reason)
+    );
     recovery.ensure.mockResolvedValue({ status: 'waking', taskId: TASK });
 
     d1.prepare(
@@ -280,6 +326,142 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
       expect(provider).toBeTruthy();
     }
   );
+
+  it('six distinct prompt rejections in one rounded reset window retain one automatic wake', async () => {
+    const reset = Date.now() + 100 * MINUTE;
+    let first: {
+      attempts: number;
+      nextRetryAt: number;
+      scheduleKey: string;
+      scheduleId: string;
+    } | null = null;
+    for (let prompt = 1; prompt <= 6; prompt++) {
+      if (prompt > 1) vi.setSystemTime(Date.now() + 2 * MINUTE);
+      expect(
+        (
+          await callback({
+            ...producedCallbacks[0].callback,
+            providerLimitPromptAttemptId: prompt,
+            // Successive provider reports round the same reset up/down.
+            providerLimitResetsAt: reset + (prompt % 2 ? 0 : 30_000),
+          })
+        ).status
+      ).toBe(200);
+      const row = d1
+        .prepare('SELECT provider_limit_wait_json AS value,admission_state FROM tasks WHERE id=?')
+        .get(TASK) as { value: string; admission_state: string };
+      const wait = JSON.parse(row.value);
+      if (!first) first = wait;
+      expect(wait).toMatchObject({
+        phase: 'waiting',
+        attempts: 1,
+        resetsAt: reset,
+        scheduleKey: first!.scheduleKey,
+        scheduleId: first!.scheduleId,
+        nextRetryAt: first!.nextRetryAt,
+      });
+      expect(row.admission_state).toBe('provider_limit_waiting');
+    }
+    expect(sql.exec('SELECT count(*) AS count FROM project_schedules').toArray()[0]).toEqual({
+      count: 1,
+    });
+    await sleepTheTask();
+    vi.setSystemTime(first!.nextRetryAt);
+    await runScheduleAlarm(sql, env as never, hooks);
+    expect(inbox('scheduled_action')).toEqual([
+      { target: CHAT, sourceTask: TASK, state: 'queued' },
+    ]);
+    await runDeliveryAlarm();
+    expect(recovery.ensure).toHaveBeenCalledOnce();
+    expect(recovery.ensure).toHaveBeenCalledWith(
+      env,
+      PROJECT,
+      CHAT,
+      expect.objectContaining({ taskId: TASK })
+    );
+  });
+
+  it('callback respects the configured reset-window tolerance instead of grouping a later window', async () => {
+    await updateAdminSettings(env, {
+      actorUserId: USER,
+      changes: [{ name: 'operations.providerLimitResetWindowToleranceMs', value: 1000 }],
+    });
+    const reset = Date.now() + 100 * MINUTE;
+    for (let prompt = 1; prompt <= 2; prompt++) {
+      expect(
+        (
+          await callback({
+            ...producedCallbacks[0].callback,
+            providerLimitPromptAttemptId: prompt,
+            providerLimitResetsAt: reset + (prompt - 1) * 30_000,
+          })
+        ).status
+      ).toBe(200);
+    }
+    const row = d1
+      .prepare('SELECT provider_limit_wait_json AS value FROM tasks WHERE id=?')
+      .get(TASK) as { value: string };
+    expect(JSON.parse(row.value)).toMatchObject({
+      phase: 'waiting',
+      attempts: 2,
+      resetsAt: reset + 30_000,
+    });
+    expect(sql.exec('SELECT count(*) AS count FROM project_schedules').toArray()[0]).toEqual({
+      count: 2,
+    });
+  });
+
+  it('known reset windows keep an automatic wake after the unknown-reset wait budget', async () => {
+    let nextRetryAt = Date.now();
+    for (let window = 1; window <= 5; window++) {
+      vi.setSystemTime(nextRetryAt + 1);
+      expect(
+        (
+          await callback({
+            ...producedCallbacks[0].callback,
+            providerLimitPromptAttemptId: window,
+            providerLimitResetsAt: Date.now() + 100 * MINUTE,
+          })
+        ).status
+      ).toBe(200);
+      const row = d1
+        .prepare('SELECT provider_limit_wait_json AS value,admission_state FROM tasks WHERE id=?')
+        .get(TASK) as { value: string; admission_state: string };
+      const wait = JSON.parse(row.value);
+      expect(wait.phase).toBe('waiting');
+      expect(wait.scheduleId).toBeTruthy();
+      expect(row.admission_state).toBe('provider_limit_waiting');
+      nextRetryAt = wait.nextRetryAt;
+    }
+    await sleepTheTask();
+    vi.setSystemTime(nextRetryAt);
+    await runScheduleAlarm(sql, env as never, hooks);
+    await runDeliveryAlarm();
+    expect(recovery.ensure).toHaveBeenCalledOnce();
+  });
+
+  it('repeated unknown-reset rejections before the retry do not spend the wait budget', async () => {
+    for (let prompt = 1; prompt <= 6; prompt++) {
+      expect(
+        (
+          await callback({
+            toStatus: 'failed',
+            errorMessage: 'provider_limit_reached',
+            providerLimitAgentSessionId: 'agent-1',
+            providerLimitCredentialGeneration: 1,
+            providerLimitPromptAttemptId: prompt,
+          })
+        ).status
+      ).toBe(200);
+    }
+    const row = d1
+      .prepare('SELECT provider_limit_wait_json AS value FROM tasks WHERE id=?')
+      .get(TASK) as { value: string };
+    expect(JSON.parse(row.value)).toMatchObject({ phase: 'waiting', attempts: 1, resetsAt: null });
+    expect(sql.exec('SELECT count(*) AS count FROM project_schedules').toArray()[0]).toEqual({
+      count: 1,
+    });
+  });
 
   it.each([
     { interval: 180_000, delay: 120_000, immediate: false },
@@ -680,6 +862,10 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
   it('unknown reset retries are bounded across restored runtime generations', async () => {
     for (let i = 0; i < 4; i++) {
       if (i) {
+        const row = d1
+          .prepare('SELECT provider_limit_wait_json AS value FROM tasks WHERE id=?')
+          .get(TASK) as { value: string };
+        vi.setSystemTime(JSON.parse(row.value).nextRetryAt + 1);
         d1.prepare('UPDATE agent_sessions SET id = ?').run(`agent-${i + 1}`);
       }
       const response = await callback({
@@ -701,10 +887,88 @@ describe('provider-limit callback reaches the durable scheduled VM wake', () => 
     });
   });
 
+  it('real rejected callbacks block, sleep and resume through the owner HTTP action into snapshot recovery', async () => {
+    // The real wake reads placement/profile settings beyond the sleep boundary.
+    const absentTables = Object.values(schema).filter(
+      (value): value is SQLiteTable =>
+        is(value, SQLiteTable) &&
+        !d1
+          .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?")
+          .get(getTableName(value))
+    );
+    createSchemaTables(d1, absentTables);
+    d1.exec(`INSERT INTO credentials(id,user_id,provider,credential_type,credential_kind,is_active,encrypted_token,iv)
+      VALUES ('cloud-credential','user-1','hetzner','cloud-provider','api-key',1,'encrypted','iv');
+      UPDATE projects SET default_location='nbg1',default_branch='main',repository='owner/repo',installation_id='install-1' WHERE id='project-1';
+      UPDATE nodes SET cloud_provider='hetzner',vm_size='small',vm_location='nbg1' WHERE id='node-1'`);
+    for (let prompt = 1; prompt <= 4; prompt++) {
+      if (prompt > 1) {
+        const row = d1
+          .prepare('SELECT provider_limit_wait_json AS value FROM tasks WHERE id=?')
+          .get(TASK) as { value: string };
+        vi.setSystemTime(JSON.parse(row.value).nextRetryAt + 1);
+      }
+      expect(
+        (
+          await callback({
+            toStatus: 'failed',
+            errorMessage: 'provider_limit_reached',
+            providerLimitAgentSessionId: 'agent-1',
+            providerLimitCredentialGeneration: 1,
+            providerLimitPromptAttemptId: prompt,
+          })
+        ).status
+      ).toBe(200);
+    }
+    await sleepTheTask();
+    expect(await preserveProviderLimitWait(env, TASK, Date.now())).toBe(true);
+    expect(listActiveAttentionMarkers(sql, CHAT)).toEqual([
+      expect.objectContaining({ kind: 'provider_limit_blocked' }),
+    ]);
+    const actual = await vi.importActual<typeof import('../../src/services/session-recovery')>(
+      '../../src/services/session-recovery'
+    );
+    recovery.ensure.mockImplementation(actual.ensureSessionRecovery);
+    recovery.start.mockResolvedValue(undefined);
+    const app = new Hono<{ Bindings: Env }>();
+    app.onError((error, c) =>
+      error instanceof AppError
+        ? c.json(error.toJSON(), error.statusCode)
+        : c.json({ error: String(error) }, 500)
+    );
+    app.route('/projects/:projectId/tasks', providerLimitResumeRoutes);
+    const response = await app.request(
+      `/projects/${PROJECT}/tasks/${TASK}/provider-limit/resume`,
+      { method: 'POST' },
+      env
+    );
+    expect(response.status, await response.clone().text()).toBe(202);
+    expect(await response.json()).toEqual({ status: 'waking', taskId: TASK });
+    expect(recovery.start).toHaveBeenCalledOnce();
+    expect(recovery.start.mock.calls[0]?.[1]).toMatchObject({
+      taskId: TASK,
+      resumeSnapshotChatSessionId: CHAT,
+    });
+    expect(d1.prepare('SELECT status,admission_state FROM tasks WHERE id=?').get(TASK)).toEqual({
+      status: 'queued',
+      admission_state: null,
+    });
+    expect(
+      d1.prepare('SELECT recovery_status FROM session_snapshots WHERE chat_session_id=?').get(CHAT)
+    ).toEqual({ recovery_status: 'waking' });
+    expect(listActiveAttentionMarkers(sql, CHAT)).toHaveLength(0);
+  });
+
   it('preserves an exhausted unknown-reset block after its runtime was deleted', async () => {
     // Distinct real callback incidents exhaust the existing consecutive budget.
     for (let incident = 0; incident < 4; incident++) {
-      if (incident) d1.prepare('UPDATE agent_sessions SET id=?').run(`blocked-agent-${incident}`);
+      if (incident) {
+        const row = d1
+          .prepare('SELECT provider_limit_wait_json AS value FROM tasks WHERE id=?')
+          .get(TASK) as { value: string };
+        vi.setSystemTime(JSON.parse(row.value).nextRetryAt + 1);
+        d1.prepare('UPDATE agent_sessions SET id=?').run(`blocked-agent-${incident}`);
+      }
       expect(
         (await callback({ toStatus: 'failed', errorMessage: 'provider_limit_reached' })).status
       ).toBe(200);

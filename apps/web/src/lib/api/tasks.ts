@@ -311,3 +311,11 @@ export async function getTaskSessions(
 ): Promise<TaskSessionsResponse> {
   return request<TaskSessionsResponse>(`/api/projects/${projectId}/tasks/${taskId}/sessions`);
 }
+
+/** Resume an owner-held provider-limit wait from its saved snapshot. */
+export function resumeProviderLimitTask(projectId: string, taskId: string) {
+  return request<{ status: 'waking'; taskId: string }>(
+    `/api/projects/${projectId}/tasks/${taskId}/provider-limit/resume`,
+    { method: 'POST' }
+  );
+}
