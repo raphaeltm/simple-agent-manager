@@ -1,5 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630">
 <defs>
+  <style>@font-face{font-family:'Chillax';src:url('/fonts/Chillax-Variable.woff2') format('woff2');font-weight:200 700;font-style:normal} .display{font-family:Chillax,system-ui,sans-serif}</style>
   <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#0c2118"/><stop offset=".58" stop-color="#07120d"/><stop offset="1" stop-color="#020805"/></linearGradient>
   <radialGradient id="glow"><stop stop-color="#16a34a" stop-opacity=".24"/><stop offset="1" stop-color="#16a34a" stop-opacity="0"/></radialGradient>
   <pattern id="grid" width="36" height="36" patternUnits="userSpaceOnUse"><path d="M36 0H0V36" fill="none" stroke="#70a888" stroke-opacity=".09" stroke-width="1"/></pattern>
@@ -9,12 +10,12 @@
 <rect width="1200" height="630" fill="url(#grid)"/>
 <ellipse cx="170" cy="100" rx="490" ry="390" fill="url(#glow)"/>
 <path d="M0 624H1200" stroke="#16a34a" stroke-width="6" opacity=".8"/>
-<text x="72" y="78" fill="#22c55e" font-family="Arial, sans-serif" font-size="34" font-weight="700" letter-spacing="2">SAM</text>
+<text x="72" y="78" fill="#22c55e" class="display" font-family="Chillax, system-ui, sans-serif" font-size="34" font-weight="700" letter-spacing="2">SAM</text>
 <text x="176" y="77" fill="#9fb7ae" font-family="Arial, sans-serif" font-size="16" font-weight="600" letter-spacing="2">ENGINEERING JOURNAL</text>
 <circle cx="72" cy="144" r="5" fill="#22c55e"/>
 <text x="90" y="150" fill="#9fb7ae" font-family="Arial, sans-serif" font-size="15" font-weight="700" letter-spacing="2">COMPOSER ATTACHMENT PREVIEWS</text>
-<text x="72" y="248" fill="#e6f2ee" font-family="Arial, sans-serif" font-size="62" font-weight="700" letter-spacing="-2">See the file</text>
-<text x="72" y="320" fill="#4ade80" font-family="Arial, sans-serif" font-size="58" font-weight="700" letter-spacing="-2">before you send it.</text>
+<text x="72" y="248" fill="#e6f2ee" class="display" font-family="Chillax, system-ui, sans-serif" font-size="62" font-weight="700" letter-spacing="-2">See the file</text>
+<text x="72" y="320" fill="#4ade80" class="display" font-family="Chillax, system-ui, sans-serif" font-size="58" font-weight="700" letter-spacing="-2">before you send it.</text>
 <text x="74" y="394" fill="#c8ddd6" font-family="Arial, sans-serif" font-size="25">Preview pasted logs, images, and video</text>
 <text x="74" y="430" fill="#c8ddd6" font-family="Arial, sans-serif" font-size="25">from the browser's local file.</text>
 <rect x="72" y="492" width="302" height="42" rx="21" fill="#0c2118" stroke="#1b7540"/>
