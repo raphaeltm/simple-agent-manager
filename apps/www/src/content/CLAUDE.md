@@ -34,6 +34,7 @@ excerpt: "One or two sentences that appear on the blog index card and in meta de
 | `category` | Exactly one of: `announcement`, `engineering`, `tutorial`, `devlog` |
 | `tags` | YAML array of tags. Use existing tags when possible (see below). |
 | `excerpt` | 1-2 sentences for the blog index card and `<meta description>`. Under 160 characters. |
+| `socialImage` | Optional site-relative or absolute URL for a post-specific Open Graph and X card image. Prefer a branded 1200×630 image over the shared default. |
 
 ### Optional fields
 

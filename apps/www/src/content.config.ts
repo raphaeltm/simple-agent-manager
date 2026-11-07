@@ -12,6 +12,7 @@ const blog = defineCollection({
     category: z.enum(['announcement', 'engineering', 'tutorial', 'devlog']),
     tags: z.array(z.string()),
     excerpt: z.string(),
+    socialImage: z.string().optional(),
     draft: z.boolean().optional().default(false),
     interactive: z.enum(['scheduler', 'placement']).optional(),
   }),
