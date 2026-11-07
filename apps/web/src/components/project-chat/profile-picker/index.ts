@@ -1,4 +1,9 @@
 export {
+  activeChatAgentOverrides,
+  chatAgentDefaults,
+  type ChatAgentOverrides,
+} from './agent-overrides';
+export {
   ComposerOptionsButton,
   composerOptionsCount,
   ComposerOptionsPanel,

@@ -2272,6 +2272,87 @@ describe('ProjectChat agent profile selection', () => {
     });
   });
 
+  it('sends a per-chat model and effort set in chat options, and New chat starts clean', async () => {
+    mocks.listChatSessions.mockResolvedValueOnce({ sessions: [], total: 0 }).mockResolvedValue({
+      sessions: [{ ...SESSION_1, id: 'session-prof', topic: 'Try the bigger model' }],
+      total: 1,
+    });
+    renderProjectChat();
+
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Fast Implementer'));
+    expect(screen.queryByRole('combobox', { name: 'Model' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Chat options' }));
+    const model = await screen.findByRole('combobox', { name: 'Model' });
+    // The profile's model is what a blank field means.
+    expect(model).toHaveAttribute('placeholder', expect.stringMatching(/^Default: /));
+    fireEvent.change(model, { target: { value: 'claude-opus-5-5' } });
+    const effort = screen.getByRole('combobox', { name: 'Effort' });
+    // Claude can run every effort level, including max.
+    expect(within(effort).getByRole('option', { name: 'Max' })).toBeInTheDocument();
+    fireEvent.change(effort, { target: { value: 'max' } });
+    expect(screen.getByRole('button', { name: 'Chat options (2 set)' })).toBeInTheDocument();
+    expect(getProfileControl()).toHaveTextContent('max effort');
+
+    fireEvent.change(screen.getByPlaceholderText('Describe what you want the agent to do...'), {
+      target: { value: 'Try the bigger model' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => {
+      expect(mocks.submitTask).toHaveBeenCalledWith(
+        PROJECT_ID,
+        expect.objectContaining({
+          agentProfileId: 'prof-1',
+          model: 'claude-opus-5-5',
+          effort: 'max',
+        })
+      );
+    });
+
+    // Overrides are for one chat: the next new chat starts from the profile again.
+    await waitFor(() =>
+      expect(screen.getByTestId('message-view')).toHaveTextContent('session-prof')
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'New Chat', exact: true }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Chat options' }));
+    expect(await screen.findByRole('combobox', { name: 'Model' })).toHaveValue('');
+    expect(screen.getByRole('combobox', { name: 'Effort' })).toHaveValue('');
+  });
+
+  it('drops a model and effort chosen for another agent when the profile changes', async () => {
+    renderProjectChat();
+
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Fast Implementer'));
+    fireEvent.click(screen.getByRole('button', { name: 'Chat options' }));
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Model' }), {
+      target: { value: 'claude-opus-5-5' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Effort' }), {
+      target: { value: 'max' },
+    });
+    expect(screen.getByRole('button', { name: 'Chat options (2 set)' })).toBeInTheDocument();
+
+    // Reviewer runs Codex: a Claude model and a Claude-only effort mean nothing there.
+    const sheet = await openProfilePicker();
+    fireEvent.click(within(sheet).getByRole('button', { name: /Reviewer/ }));
+    expect(getProfileControl()).toHaveTextContent('Reviewer');
+    expect(screen.getByRole('button', { name: 'Chat options' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue('');
+    const effort = screen.getByRole('combobox', { name: 'Effort' });
+    expect(effort).toHaveValue('');
+    expect(within(effort).queryByRole('option', { name: 'Max' })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('Describe what you want the agent to do...'), {
+      target: { value: 'Review the diff' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(mocks.submitTask).toHaveBeenCalledTimes(1));
+    const [, payload] = mocks.submitTask.mock.calls[0] as [string, Record<string, unknown>];
+    expect(payload).toMatchObject({ agentProfileId: 'prof-2', message: 'Review the diff' });
+    expect(payload).not.toHaveProperty('model');
+    expect(payload).not.toHaveProperty('effort');
+  });
+
   it('hides every profile not picked lately with the edit list’s suggestion', async () => {
     mocks.listAgentProfiles.mockResolvedValue([
       ...TEST_PROFILES,
@@ -2388,6 +2469,57 @@ describe('ProjectChat agent profile selection', () => {
     await waitFor(() => {
       expect(screen.getByTestId('message-view')).toHaveTextContent('session-instant');
     });
+  });
+
+  it('sends a per-chat model and effort with an instant session', async () => {
+    mocks.listCredentials.mockResolvedValue([]);
+    mocks.listAgentProfiles.mockResolvedValue([
+      makeAgentProfile({
+        id: 'prof-instant',
+        name: 'Instant Chat',
+        agentType: 'openai-codex',
+        model: 'gpt-6.1-sol',
+        effort: 'high',
+        runtime: 'cf-container',
+        workspaceProfile: 'lightweight',
+        taskMode: 'conversation',
+      }),
+    ]);
+    mocks.startInstantChatSession.mockResolvedValue({
+      status: 'starting',
+      runtime: { runtime: 'cf-container', reason: 'explicit-cf-container' },
+      taskId: 'task-instant',
+      sessionId: 'session-instant',
+      workspaceId: 'ws-instant',
+      nodeId: 'node-instant',
+      workspaceUrl: 'https://ws-instant.example.test',
+    });
+
+    renderProjectChat();
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Instant Chat'));
+    fireEvent.click(screen.getByRole('button', { name: 'Chat options' }));
+    const effort = await screen.findByRole('combobox', { name: 'Effort' });
+    expect(within(effort).getByRole('option', { name: 'Default: High' })).toBeInTheDocument();
+    fireEvent.change(effort, { target: { value: 'low' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Model' }), {
+      target: { value: 'gpt-6.1-astra' },
+    });
+
+    fireEvent.change(screen.getByPlaceholderText('Describe what you want the agent to do...'), {
+      target: { value: 'Quick question' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(mocks.startInstantChatSession).toHaveBeenCalledWith(PROJECT_ID, {
+        message: 'Quick question',
+        agentProfileId: 'prof-instant',
+        skillId: undefined,
+        model: 'gpt-6.1-astra',
+        effort: 'low',
+      });
+    });
+    expect(mocks.submitTask).not.toHaveBeenCalled();
   });
 
   it('opens the new-profile wizard from the picker sheet', async () => {

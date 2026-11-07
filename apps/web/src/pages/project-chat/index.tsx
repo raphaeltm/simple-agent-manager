@@ -360,6 +360,8 @@ export function ProjectChat() {
               onTaskResourceReqsChange={state.setTaskResourceReqs}
               taskResourceErrors={state.taskResourceErrors}
               onTaskResourceErrorsClear={() => state.setTaskResourceErrors({})}
+              agentOverrides={state.agentOverrides}
+              onAgentOverridesChange={state.setAgentOverrides}
               profileWizard={state.profileWizard}
               onOpenProfileWizard={state.openProfileWizard}
               onCloseProfileWizard={state.closeProfileWizard}

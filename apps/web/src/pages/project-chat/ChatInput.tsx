@@ -13,6 +13,9 @@ import { useId, useState } from 'react';
 
 import { ProfileFormDialog } from '../../components/agent-profiles/ProfileFormDialog';
 import {
+  activeChatAgentOverrides,
+  chatAgentDefaults,
+  type ChatAgentOverrides,
   ComposerOptionsButton,
   composerOptionsCount,
   ComposerOptionsPanel,
@@ -64,6 +67,8 @@ type ChatInputProps = Readonly<{
   onTaskResourceReqsChange: (next: ResourceRequirementsFormState) => void;
   taskResourceErrors: ResourceValidationErrors;
   onTaskResourceErrorsClear: () => void;
+  agentOverrides: ChatAgentOverrides;
+  onAgentOverridesChange: (next: ChatAgentOverrides) => void;
   profileWizard: ProfileWizardState;
   onOpenProfileWizard: () => void;
   onCloseProfileWizard: () => void;
@@ -124,6 +129,8 @@ export function ChatInput({
   onTaskResourceReqsChange,
   taskResourceErrors,
   onTaskResourceErrorsClear,
+  agentOverrides,
+  onAgentOverridesChange,
   profileWizard,
   onOpenProfileWizard,
   onCloseProfileWizard,
@@ -155,6 +162,11 @@ export function ChatInput({
     wizardOpen: profileWizard.open,
     placeholder,
   });
+  const selectedSkill = selectedSkillId
+    ? (skills.find((skill) => skill.id === selectedSkillId) ?? null)
+    : null;
+  const agentDefaults = chatAgentDefaults(selectedProfile, selectedSkill);
+  const activeAgentOverrides = activeChatAgentOverrides(agentOverrides, agentDefaults.agentType);
   const options: ComposerOptionsValue = {
     skills,
     selectedSkillId,
@@ -163,6 +175,9 @@ export function ChatInput({
     onTaskResourceReqsChange,
     taskResourceErrors,
     onTaskResourceErrorsClear,
+    agentDefaults,
+    agentOverrides,
+    onAgentOverridesChange,
     disabled: submitting,
   };
   const showOptions = optionsOpen || hasResourceErrors;
@@ -203,6 +218,12 @@ export function ChatInput({
           <div className="@container min-w-0 flex-1">
             <ProfileToControl
               profile={selectedProfile}
+              // A skill that switches agent makes the profile's subtitle the wrong base.
+              overrides={
+                agentDefaults.agentType === selectedProfile?.agentType
+                  ? activeAgentOverrides
+                  : undefined
+              }
               loading={profilePicker.picker.status === 'loading'}
               disabled={submitting}
               onOpen={onOpenProfileSheet}
