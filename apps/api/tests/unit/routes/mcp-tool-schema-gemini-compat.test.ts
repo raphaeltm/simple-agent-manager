@@ -10,9 +10,10 @@ import {
 
 type Tool = { name: string; inputSchema: Record<string, unknown> };
 // Every callable tool plus the generated domain groups agents actually see in tools/list.
-const tools = [...(MCP_TOOLS as unknown as Tool[]), ...(LISTED_MCP_TOOLS as unknown as Tool[])].filter(
-  (tool, index, all) => all.findIndex((other) => other.name === tool.name) === index
-);
+const tools = [
+  ...(MCP_TOOLS as unknown as Tool[]),
+  ...(LISTED_MCP_TOOLS as unknown as Tool[]),
+].filter((tool, index, all) => all.findIndex((other) => other.name === tool.name) === index);
 
 function tool(name: string): Tool {
   const found = tools.find((candidate) => candidate.name === name);

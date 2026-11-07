@@ -929,9 +929,9 @@ describe('MCP Routes', () => {
     it('advertises bounded message-comment schemas without caller identity fields', async () => {
       // Member schemas (still callable by name) feed the listed comments_* groups.
       const memberTool = (name: string) =>
-        (MCP_TOOLS as unknown as Array<{ name: string; description: string; inputSchema: any }>).find(
-          (tool) => tool.name === name
-        )!;
+        (
+          MCP_TOOLS as unknown as Array<{ name: string; description: string; inputSchema: any }>
+        ).find((tool) => tool.name === name)!;
       const listComments = memberTool('list_message_comment_threads');
       const createComment = memberTool('create_message_comment_thread');
       const replyComment = memberTool('reply_to_message_comment_thread');
