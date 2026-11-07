@@ -29,6 +29,7 @@ import {
 } from '../operations/start-work-core';
 import { requireRepositoryAccess } from '../routes/projects/_helpers';
 import { type SubmitTaskSchema } from '../schemas';
+import { resolveTaskAgentOverrides } from '../services/agent-profiles';
 import { generateBranchName } from '../services/branch-name';
 import { capacityPlacementSnapshotDbValues } from '../services/capacity-placement-snapshot';
 import { enrichMessageWithMentions } from '../services/mention-enrichment';
@@ -38,7 +39,6 @@ import {
   resolveTaskStartPlacement,
   resolveTaskStartPlacementCredentialAttributionFromPlacement,
 } from '../services/placement-resolver';
-import { resolveTaskAgentOverrides } from '../services/agent-profiles';
 import { resolveProjectAgentDefault } from '../services/project-agent-defaults';
 import * as projectDataService from '../services/project-data';
 import {
