@@ -95,3 +95,13 @@ child's first message must say which parent agent sent it. Trigger templates are
 
 - Idea `01M6VEW6VYZ39YNHSW28836QWP`
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md`, `apps/api/.claude/rules/31-migration-safety.md`
+
+## Staging verification (2026-11-07)
+
+Deploy Staging run 42404575121 succeeded. A real Claude agent on staging (project Potato, parent task
+`01M6VQM21A3V2S564TDGWAKBH8`, chat `a49ef31c-970a-4f1c-b18c-6e2b1556e4f4`) dispatched a child
+(`01M6VQW40CJNHAJJCSDB5GKYJT`), sent it a steer and an interrupt, and scheduled a message to itself:
+the child's first message ended with the parent attribution; both peer messages arrived as SAM notices
+(the interrupt notice stopped the turn); the schedule arrived as a SAM notice naming the schedule; zero
+user-role rows contained the peer text. Both agents read the real text through `get_event` and
+`schedules_read`.
