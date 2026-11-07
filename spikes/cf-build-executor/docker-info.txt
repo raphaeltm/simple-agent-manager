@@ -1,0 +1,62 @@
+Client:
+ Version:    29.9.3
+ Context:    default
+ Debug Mode: false
+ Plugins:
+  buildx: Docker Buildx (Docker Inc.)
+    Version:  v0.38.2
+    Path:     /usr/local/libexec/docker/cli-plugins/docker-buildx
+  compose: Docker Compose (Docker Inc.)
+    Version:  v5.7.0
+    Path:     /usr/local/libexec/docker/cli-plugins/docker-compose
+
+Server:
+ Containers: 0
+  Running: 0
+  Paused: 0
+  Stopped: 0
+ Images: 0
+ Server Version: 29.9.3
+ Storage Driver: overlayfs
+  driver-type: io.containerd.snapshotter.v1
+ Logging Driver: json-file
+ Cgroup Driver: cgroupfs
+ Cgroup Version: 2
+ Plugins:
+  Volume: local
+  Network: bridge host ipvlan macvlan null overlay
+  Log: awslogs fluentd gcplogs gelf journald json-file local splunk syslog
+ CDI spec directories:
+  /etc/cdi
+  /var/run/cdi
+ Swarm: inactive
+ Runtimes: runc io.containerd.runc.v2
+ Default Runtime: runc
+ Init Binary: docker-init
+ containerd version: 
+ runc version: v1.5.2-0-g29dd3dc
+ init version: de40ad0
+ Security Options:
+  seccomp
+   Profile: builtin
+  cgroupns
+ Kernel Version: 6.18.56-cloudflare-microvm-2026.10.9
+ Operating System: Alpine Linux v3.24
+ OSType: linux
+ Architecture: x86_64
+ CPUs: 4
+ Total Memory: 11.93GiB
+ Name: cloudchamber
+ ID: fe1b0149-8f6c-414b-af97-36c5d592eeba
+ Docker Root Dir: /var/lib/docker
+ Debug Mode: false
+ Experimental: false
+ Insecure Registries:
+  127.0.0.0/8
+  ::1/128
+ Live Restore Enabled: false
+ Product License: Community Engine
+ Firewall Backend: iptables
+  EnableUserlandProxy: true
+  UserlandProxyPath: /usr/local/bin/docker-proxy
+

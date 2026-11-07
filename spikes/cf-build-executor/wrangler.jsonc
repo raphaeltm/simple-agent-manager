@@ -1,20 +1,20 @@
 {
-  "name": "sam-build-spike",
+  "name": "sam-build-spike2-a",
   "main": "index.ts",
   "compatibility_date": "2026-11-06",
   "containers": [
     {
-      "class_name": "BuildSpike",
+      "class_name": "Sandbox",
       "image": "./Dockerfile",
       "instance_type": "standard-4",
-      "max_instances": 1
+      "max_instances": 3
     }
   ],
   "durable_objects": {
     "bindings": [
       {
-        "name": "BUILD",
-        "class_name": "BuildSpike"
+        "name": "Sandbox",
+        "class_name": "Sandbox"
       }
     ]
   },
@@ -22,11 +22,14 @@
     {
       "tag": "v1",
       "new_sqlite_classes": [
-        "BuildSpike"
+        "Sandbox"
       ]
     }
   ],
   "observability": {
     "enabled": true
-  }
+  },
+  "compatibility_flags": [
+    "nodejs_compat"
+  ]
 }

@@ -1,0 +1,167 @@
+[
+  {
+    "run": "a-cold1",
+    "clientSeconds": 6.075119980000636,
+    "success": true,
+    "execDurationMs": 5946,
+    "timeOutput": [
+      "Command being timed: \"docker pull node:22-alpine\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:03.21",
+      "Command being timed: \"docker compose build --progress plain\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:01.98",
+      "Command being timed: \"docker save -o /measurements/a-1794010925.tar spike-a\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:00.50"
+    ],
+    "saveBytes": [
+      61367296
+    ],
+    "maxFilesystemUsedBytes": 960327680,
+    "maxNonAvailableMemoryBytes": null,
+    "maxNonFreeMemoryBytes": null
+  },
+  {
+    "run": "a-cold2-warm",
+    "clientSeconds": 8.554889854999601,
+    "success": true,
+    "execDurationMs": 7153,
+    "timeOutput": [
+      "Command being timed: \"docker pull node:22-alpine\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:02.44",
+      "Command being timed: \"docker compose --progress plain build\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:01.90",
+      "Command being timed: \"docker save -o /measurements/a-1794011021.tar spike-a\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:00.53",
+      "Command being timed: \"docker pull node:22-alpine\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:00.69",
+      "Command being timed: \"docker compose --progress plain build\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:00.22",
+      "Command being timed: \"docker save -o /measurements/a-1794011026.tar spike-a\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:00.53"
+    ],
+    "saveBytes": [
+      61367296,
+      61367296
+    ],
+    "maxFilesystemUsedBytes": 1021812736,
+    "maxNonAvailableMemoryBytes": 448843776,
+    "maxNonFreeMemoryBytes": 1079967744
+  },
+  {
+    "run": "b-default-network",
+    "clientSeconds": 16.734975497999585,
+    "success": false,
+    "execDurationMs": 16607,
+    "timeOutput": [
+      "Command being timed: \"docker pull node:22-bookworm-slim\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:03.65",
+      "Command being timed: \"docker pull python:3.12-slim\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:03.01",
+      "Command being timed: \"docker compose build --progress plain\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:09.81"
+    ],
+    "saveBytes": [],
+    "maxFilesystemUsedBytes": null,
+    "maxNonAvailableMemoryBytes": null,
+    "maxNonFreeMemoryBytes": null
+  },
+  {
+    "run": "b-cold1",
+    "clientSeconds": 90.3542917349996,
+    "success": true,
+    "execDurationMs": 90217,
+    "timeOutput": [
+      "Command being timed: \"docker pull node:22-bookworm-slim\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:00.70",
+      "Command being timed: \"docker pull python:3.12-slim\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:00.71",
+      "Command being timed: \"docker compose --progress plain build\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 1:26.10",
+      "Command being timed: \"docker save -o /measurements/b-1794010986.tar spike-b-node spike-b-python\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:02.43"
+    ],
+    "saveBytes": [
+      246160384
+    ],
+    "maxFilesystemUsedBytes": 3026059264,
+    "maxNonAvailableMemoryBytes": 1012191232,
+    "maxNonFreeMemoryBytes": 3288252416
+  },
+  {
+    "run": "b-cold2-warm",
+    "clientSeconds": 102.23708425299992,
+    "success": true,
+    "execDurationMs": 102092,
+    "timeOutput": [
+      "Command being timed: \"docker pull node:22-bookworm-slim\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:03.24",
+      "Command being timed: \"docker pull python:3.12-slim\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:02.52",
+      "Command being timed: \"docker compose --progress plain build\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 1:29.23",
+      "Command being timed: \"docker save -o /measurements/b-1794011050.tar spike-b-node spike-b-python\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:02.40",
+      "Command being timed: \"docker pull node:22-bookworm-slim\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:00.72",
+      "Command being timed: \"docker pull python:3.12-slim\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:00.70",
+      "Command being timed: \"docker compose --progress plain build\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:00.31",
+      "Command being timed: \"docker save -o /measurements/b-1794011147.tar spike-b-python spike-b-node\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:02.45"
+    ],
+    "saveBytes": [
+      246160384,
+      246160384
+    ],
+    "maxFilesystemUsedBytes": 3333332992,
+    "maxNonAvailableMemoryBytes": 997138432,
+    "maxNonFreeMemoryBytes": 3665010688
+  },
+  {
+    "run": "c-cold1-warm",
+    "clientSeconds": 87.53591018299994,
+    "success": true,
+    "execDurationMs": 87404,
+    "timeOutput": [
+      "Command being timed: \"docker pull alpine:3.22\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:01.47",
+      "Command being timed: \"docker compose --progress plain build\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:55.29",
+      "Command being timed: \"docker save -o /measurements/c-1794011092.tar spike-c\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:15.03",
+      "Command being timed: \"docker pull alpine:3.22\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:00.72",
+      "Command being timed: \"docker compose --progress plain build\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:00.25",
+      "Command being timed: \"docker save -o /measurements/c-1794011164.tar spike-c\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:14.17"
+    ],
+    "saveBytes": [
+      1577154048,
+      1577154048
+    ],
+    "maxFilesystemUsedBytes": 10922151936,
+    "maxNonAvailableMemoryBytes": 653250560,
+    "maxNonFreeMemoryBytes": 11544834048
+  },
+  {
+    "run": "c-cold2",
+    "clientSeconds": 70.79457526200076,
+    "success": true,
+    "execDurationMs": 70648,
+    "timeOutput": [
+      "Command being timed: \"docker pull alpine:3.22\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:01.48",
+      "Command being timed: \"docker compose --progress plain build\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:53.17",
+      "Command being timed: \"docker save -o /measurements/c-1794011159.tar spike-c\"",
+      "Elapsed (wall clock) time (h:mm:ss or m:ss): 0:15.72"
+    ],
+    "saveBytes": [
+      1577154048
+    ],
+    "maxFilesystemUsedBytes": 9652092928,
+    "maxNonAvailableMemoryBytes": 586596352,
+    "maxNonFreeMemoryBytes": 10168115200
+  }
+]

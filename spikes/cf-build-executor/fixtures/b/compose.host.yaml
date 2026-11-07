@@ -1,0 +1,8 @@
+# SPIKE ONLY: required for package-download build steps.
+services:
+  node:
+    build:
+      network: host
+  python:
+    build:
+      network: host

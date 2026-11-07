@@ -1,0 +1,113 @@
+[
+  {
+    "utc": "2026-11-07T00:27:54.005416+00:00",
+    "resource": "DELETE /containers/applications/a031aea6-dbed-4031-b847-b6e9892f5ecc",
+    "status": 200,
+    "body": {
+      "success": true,
+      "result": {
+        "message": "Application a031aea6-dbed-4031-b847-b6e9892f5ecc has been deleted. It might take a while for all the app instances to completely shutdown."
+      },
+      "messages": [],
+      "errors": []
+    }
+  },
+  {
+    "utc": "2026-11-07T00:27:55.066683+00:00",
+    "resource": "GET /containers/applications/a031aea6-dbed-4031-b847-b6e9892f5ecc",
+    "status": 404,
+    "body": {
+      "success": false,
+      "result": null,
+      "errors": [
+        {
+          "code": 1609,
+          "message": "Container application not found: a031aea6-dbed-4031-b847-b6e9892f5ecc"
+        }
+      ],
+      "messages": []
+    }
+  },
+  {
+    "utc": "2026-11-07T00:27:56.123595+00:00",
+    "resource": "DELETE /workers/scripts/sam-build-spike2-a",
+    "status": 200,
+    "body": {
+      "result": {
+        "id": "5757cfae58f7412eaedc70696236c957"
+      },
+      "success": true,
+      "errors": [],
+      "messages": []
+    }
+  },
+  {
+    "utc": "2026-11-07T00:27:56.992234+00:00",
+    "resource": "GET /workers/scripts/sam-build-spike2-a/settings",
+    "status": 404,
+    "body": {
+      "result": null,
+      "success": false,
+      "errors": [
+        {
+          "code": 10007,
+          "message": "This Worker does not exist on your account."
+        }
+      ],
+      "messages": []
+    }
+  },
+  {
+    "utc": "2026-11-07T00:28:01.380391+00:00",
+    "resource": "registry image delete",
+    "exitCode": 0,
+    "stdout": "? Are you sure you want to delete sam-build-spike2-a-sandbox:462290ef? This action cannot be undone.\n\ud83e\udd16 Using fallback value in non-interactive context: yes\nDeleted sam-build-spike2-a-sandbox:462290ef (sha256:fca672b53e538dcfd61d536fed485ab5dd31ec55e007e1e9f8121caaa44ad5e7)\n",
+    "stderr": ""
+  },
+  {
+    "utc": "2026-11-07T00:28:32.674969+00:00",
+    "resource": "registry list",
+    "exitCode": 0,
+    "prefix": "sam-build-spike2",
+    "matchingRepositories": []
+  },
+  {
+    "utc": "2026-11-07T00:28:33.332676+00:00",
+    "resource": "final list /containers/applications",
+    "status": 200,
+    "body": {
+      "success": true,
+      "result": [],
+      "errors": [],
+      "messages": [],
+      "result_info": {}
+    }
+  },
+  {
+    "utc": "2026-11-07T00:28:34.107738+00:00",
+    "resource": "final list /workers/scripts",
+    "status": 200,
+    "body": {
+      "result": [],
+      "success": true,
+      "errors": [],
+      "messages": []
+    }
+  },
+  {
+    "utc": "2026-11-07T00:28:34.644757+00:00",
+    "resource": "R2 scratch bucket GET",
+    "status": 404,
+    "body": {
+      "success": false,
+      "errors": [
+        {
+          "code": 10006,
+          "message": "The specified bucket does not exist."
+        }
+      ],
+      "messages": [],
+      "result": null
+    }
+  }
+]
