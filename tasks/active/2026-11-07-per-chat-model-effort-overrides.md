@@ -63,7 +63,8 @@ allow you to override things like the model and effort as well."
 - [x] Web: the To control subtitle shows the effective model/effort when overridden
 - [x] Tests: API route-level tests for both endpoints (override wins, unset inherits, unsupported
       effort → 400 with nothing written); web behavioral tests (panel → submit payload, agent switch
-      drops overrides); submitRequest unit test
+      drops overrides). `buildBaseSubmitRequest` is unchanged (fields are spread on after it),
+      so no new submitRequest test; pure helpers have `agent-overrides.test.ts`
 - [x] Docs: agents.md + concepts.mdx Chat options description
 - [x] Playwright visual audit (mobile 375, desktop 1280)
 
@@ -74,7 +75,8 @@ allow you to override things like the model and effort as well."
 - [x] An effort the resolved agent does not support is rejected with 400 before any task is created
 - [x] Switching to a profile with a different agent type drops the overrides (no cross-agent leak)
 - [x] The options badge counts model/effort overrides
-- [x] Overrides reset after a successful send and on New chat
+- [x] Overrides reset on New chat (tested, discriminating) and after a successful send (in code;
+      not independently observable because reaching the new-chat composer again goes through New chat)
 - [ ] Staging: a chat started with an override runs on the chosen model/effort (verified from the
       session's runtime contract / agent session record)
 
