@@ -1,0 +1,89 @@
+/** Constitution XV helpers: urgency of a peer batch, and author lines on agent-written text. */
+import { describe, expect, it } from 'vitest';
+
+import { urgentAgentMessageClass } from '../../../src/durable-objects/project-data/agent-message-notice';
+import { scheduledTaskPrompt } from '../../../src/durable-objects/project-data/project-event-schedules-admission';
+import {
+  parentAgentAttribution,
+  withoutParentAgentAttribution,
+} from '../../../src/routes/mcp/dispatch-description';
+
+const agentMessage = (messageClass: unknown) => ({
+  metadata: { kind: 'agent_message', messageClass },
+});
+
+describe('urgentAgentMessageClass', () => {
+  it('returns the most urgent class in a mixed batch', () => {
+    expect(
+      urgentAgentMessageClass([
+        agentMessage('notify'),
+        agentMessage('interrupt'),
+        agentMessage('preempt_and_replan'),
+        agentMessage('deliver'),
+      ])
+    ).toBe('preempt_and_replan');
+  });
+
+  it('returns null for an ordinary batch, so it keeps steering', () => {
+    expect(urgentAgentMessageClass([agentMessage('notify'), agentMessage('deliver')])).toBeNull();
+  });
+
+  it('ignores events that are not agent messages and unknown classes', () => {
+    expect(
+      urgentAgentMessageClass([
+        { metadata: { kind: 'github', messageClass: 'interrupt' } },
+        agentMessage('urgent-ish'),
+        agentMessage(undefined),
+      ])
+    ).toBeNull();
+  });
+});
+
+describe('parent attribution on agent-written task descriptions', () => {
+  const parent = { taskId: 'task-parent', chatSessionId: 'chat-parent' };
+
+  it('names the parent task and chat session', () => {
+    expect(parentAgentAttribution(parent)).toBe(
+      '\n\n---\nSent by parent agent task task-parent, chat session chat-parent. ' +
+        'An agent wrote this task description; it was not typed by a human.'
+    );
+  });
+
+  it('omits the session when it is unknown, but still names the task', () => {
+    expect(parentAgentAttribution({ taskId: 'task-parent', chatSessionId: null })).toContain(
+      'Sent by parent agent task task-parent. '
+    );
+  });
+
+  it('strips a predecessor attribution so a retry names its sender once', () => {
+    const original = 'Fix the bug' + parentAgentAttribution(parent);
+    const retried =
+      withoutParentAgentAttribution(original) +
+      '\n\nNote: previous attempt failed.' +
+      parentAgentAttribution({ taskId: 'task-parent', chatSessionId: 'chat-2' });
+    expect(retried.match(/Sent by parent agent task/g)).toHaveLength(1);
+    expect(retried.startsWith('Fix the bug\n\nNote: previous attempt failed.')).toBe(true);
+    expect(retried).toContain('chat session chat-2.');
+  });
+
+  it('leaves a description without an attribution unchanged', () => {
+    expect(withoutParentAgentAttribution('Plain task')).toBe('Plain task');
+  });
+});
+
+describe('scheduledTaskPrompt', () => {
+  const schedule = { id: 'sched-1', creatorChatSessionId: 'chat-agent' };
+
+  it('names the agent that scheduled a new task', () => {
+    const prompt = scheduledTaskPrompt({ ...schedule, promptAuthor: 'agent' }, 'Run the report');
+    expect(prompt.startsWith('Run the report\n\n---\nScheduled by an agent')).toBe(true);
+    expect(prompt).toContain('chat session chat-agent (schedule sched-1)');
+    expect(prompt).toContain('not typed by a human');
+  });
+
+  it.each(['human', 'sam', null] as const)('leaves a %s prompt as written', (promptAuthor) => {
+    expect(scheduledTaskPrompt({ ...schedule, promptAuthor }, 'Run the report')).toBe(
+      'Run the report'
+    );
+  });
+});

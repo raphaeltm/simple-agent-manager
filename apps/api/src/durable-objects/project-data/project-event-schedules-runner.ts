@@ -9,7 +9,7 @@ import {
   type DurabilityFoundationHooks,
   finalizeAcceptedPromptDelivery,
 } from './durability-foundation';
-import { admitScheduleClaim } from './project-event-schedules-admission';
+import { admitScheduleClaim, scheduledTaskPrompt } from './project-event-schedules-admission';
 import { requireScheduleAction, scheduleSharedAccess } from './project-event-schedules-authority';
 import { boundedScheduleTaskLabel, scheduleLimits } from './project-event-schedules-config';
 import { getSchedule, scheduleSharedAccessGrantId } from './project-event-schedules-storage';
@@ -181,7 +181,7 @@ async function submitAdmittedSchedule(sql: SqlStorage, env: Env, projectId: stri
     },
     projectId,
     userId: schedule.creatorUserId,
-    prompt: schedule.action.prompt,
+    prompt: scheduledTaskPrompt(schedule, schedule.action.prompt),
     agentProfileId: schedule.action.agentProfileId,
     skillId: schedule.action.skillId,
     branchNameSeed: boundedScheduleTaskLabel(env, schedule.reason ?? 'Scheduled task'),

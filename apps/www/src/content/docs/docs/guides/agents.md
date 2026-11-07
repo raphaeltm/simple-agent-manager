@@ -647,24 +647,29 @@ SAM now backs chat sessions with task records across more runtime paths. In prac
 ### Messages between agents
 
 Any agent working in a project can message another active agent in the same project: a
-coordinator redirecting a subtask it started, for example, or a subtask reporting back. If the
-recipient is in the middle of a turn, the message is added to that turn without stopping it. That
-needs agent message channels, which managed deployments turn on (`AGENT_MESSAGE_CHANNELS_ENABLED`),
-and an agent that supports live steering; otherwise the message arrives when the turn ends. An idle recipient gets
+coordinator redirecting a subtask it started, for example, or a subtask reporting back. Messages
+between agents need agent message channels, which managed deployments turn on
+(`AGENT_MESSAGE_CHANNELS_ENABLED`); with them off, an agent's send is refused rather than posted
+into the other chat. If the recipient is in the middle of a turn, the message is added to that
+turn without stopping it when the agent supports live steering; otherwise it arrives when the turn ends. An idle recipient gets
 it straight away, and a sleeping one is woken. An urgent message
 can instead stop the recipient's current turn, the same way the stop button does, so it reads the
 message straight away.
 
-For ordinary messages, the other agent's words don't go straight into the recipient's prompt, so
-they can't pass for yours. Instead SAM puts a notice in the recipient's chat. It appears on your side
+The other agent's words never go straight into the recipient's chat, urgent or not, so they can't
+pass for yours. Only text a person wrote appears there as a plain message. Instead SAM puts a notice in the recipient's chat. It appears on your side
 of the chat, as if you had sent it, but SAM wrote it for the agent: it starts with **SAM notice
 (system-generated, not a human message)**, lists the new messages' IDs, and tells the agent how to
 read and answer them. You don't need to reply to it. You'll then see the agent fetching the
 messages with SAM's tools. To read a whole conversation between two agents, open the project's
 **Automation** page, then **Behind the scenes** → **Channels**, and turn on **Show private threads
 between agents**: each pair of agents that has talked has an `agent-dm.…` channel there, with its
-messages from the last 30 days in order. Urgent messages aren't there; they
-appear only in the recipient's chat.
+messages from the last 30 days in order, urgent ones included.
+
+The same rule covers other text an agent writes for another agent. A task an agent dispatches
+starts with the description that agent wrote, followed by a line naming the parent agent's task and
+chat session. A scheduled message an agent sets up arrives as a SAM notice naming the schedule, not
+as the agent's text; a schedule you create still posts your words.
 
 A sending agent learns that its message was accepted, not that it was read; it hears back only if
 the recipient replies.
@@ -724,8 +729,8 @@ change.
 | `deployments_read` / `deployments_write`                                                                           | App deployments. Methods: `guide`, `environments`, `preview_routes`, `routes`, `config`, `logs`, `publish_status`; `create_environment`, `set_config`, `publish`.                                                                                                                                                                                                              |
 | `associate_pull_request`, `list_pull_request_associations`                                                         | Record that this task is responsible for a pull request it didn't open, and look up who is ([Pull requests an agent takes over](#pull-requests-an-agent-takes-over))                                                                                                                                                                                                           |
 | `exec_with_secrets`                                                                                                | Run a command in this workspace with selected **Secret** variables filled in; `exec_with_secrets_status` returns the result and `exec_with_secrets_cancel` stops it ([Run commands with secrets](/docs/guides/secret-execution/))                                                                                                                                              |
-| `send_message_to_subtask`                                                                                          | Send a message to another active agent in the project by task ID, usually a subtask; it arrives at the end of the recipient's turn, or wakes it                                                                                                                                                                                                                                |
-| `send_durable_message`                                                                                             | Send a message to any active agent in the project, by task ID; `deliveryIntent: "steer"` adds it to the agent's running turn when it can ([Live steering](/docs/reference/api/#live-steering))                                                                                                                                                                                 |
+| `send_message_to_subtask`                                                                                          | Send a message to another active agent in the project by task ID, usually a subtask; the recipient gets a SAM notice and reads it with `get_event`                                                                                                                                                                                                                                |
+| `send_durable_message`                                                                                             | Send a message to any active agent in the project, by task ID; the notice joins the agent's running turn when it can ([Live steering](/docs/reference/api/#live-steering))                                                                                                                                                                                 |
 | `wait_for_subtasks`                                                                                                | End the turn and be woken when the tasks it names (usually ones this agent dispatched) finish, instead of polling                                                                                                                                                                                                                                                              |
 | `stop_subtask`                                                                                                     | Stop a task this agent dispatched                                                                                                                                                                                                                                                                                                                                              |
 | `create_trigger`                                                                                                   | Create a schedule, GitHub, or webhook [trigger](/docs/guides/triggers/#ask-an-agent-to-set-one-up) in the project; `update_trigger` and `delete_trigger` change or remove one                                                                                                                                                                                                  |

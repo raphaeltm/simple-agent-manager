@@ -253,6 +253,32 @@ describe('connector schedule operations', () => {
   });
 
   describe('creating a one-off schedule', () => {
+    // Constitution XV: who wrote the prompt decides plain vs pointer delivery. A workspace
+    // agent and the SAM assistant are models; a person through a Connector or the web is human.
+    it.each([
+      ['connector', 'human'],
+      ['web', 'human'],
+      ['sam', 'agent'],
+    ] as const)('records a %s caller as prompt author %s', async (via, promptAuthor) => {
+      await samScheduleCreate.run(
+        ctx('owner', {
+          idempotencyKey: `author-${via}`,
+          actor: { userId: 'owner', via, scopes: new Set(['sam.read', 'sam.write']) },
+        }),
+        {
+          projectId: 'p',
+          requestKey: `author-${via}`,
+          runAt: '2026-11-01T09:00:00Z',
+          action: { kind: 'start_session', prompt: 'Check the deploy' },
+        }
+      );
+      expect(mocks.create).toHaveBeenCalledWith(
+        env,
+        'p',
+        expect.objectContaining({ promptAuthor })
+      );
+    });
+
     it('sends the DO the exact UTC instant of a local time and keeps the zone for display', async () => {
       const result = await samScheduleCreate.run(keyed('k1'), {
         projectId: 'p',
@@ -268,6 +294,7 @@ describe('connector schedule operations', () => {
         userId: 'owner',
         creatorChatSessionId: null,
         creator: 'person',
+        promptAuthor: 'human',
         request: {
           action: {
             kind: 'start_session',

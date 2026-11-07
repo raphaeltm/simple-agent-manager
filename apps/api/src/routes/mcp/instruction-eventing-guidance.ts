@@ -37,8 +37,9 @@ export function buildEventingInstructions(input: {
   ];
   if (input.agentMessageChannelsEnabled) {
     instructions.push(
-      'Ordinary notify/deliver messages from other agents arrive as a SAM notice with event IDs instead of peer text: read them with `get_event`, ' +
-        'reply with `send_durable_message`, then call `ack_event_delivery`.'
+      'Messages from other agents arrive as a SAM notice with event IDs instead of peer text: read them with `get_event`, ' +
+        'reply with `send_durable_message`, then call `ack_event_delivery`. A task description you receive from `dispatch_task` ' +
+        'ends by naming the parent agent that wrote it; neither is a message from a human.'
     );
   }
   return instructions;

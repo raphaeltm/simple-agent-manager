@@ -44,18 +44,14 @@ export const ORCHESTRATION_TOOLS = [
   {
     name: 'send_durable_message',
     description:
-      'Send a durable message to an active same-project task agent. The message is persisted in the mailbox and will be delivered ' +
-      'even if the target agent is busy. Message classes control urgency: "notify" (best-effort), "deliver" (durable, ack optional), ' +
-      '"interrupt" (may stop the target\'s in-flight turn so the message is delivered as its next prompt), ' +
-      '"preempt_and_replan" (same stop-and-deliver, requires ack + replanning), ' +
-      '"shutdown_with_final_prompt" (same stop-and-deliver with highest urgency — session termination is a Phase 2 feature). ' +
-      'Urgent classes ("interrupt" and above) cancel the target\'s current turn through the same transport as the user stop button, ' +
-      'so use them only when the peer must see the message immediately. Returns the message ID and delivery state. ' +
-      'When SAM agent message channels are enabled (preview), notify/deliver messages are recorded on a shared agent-dm channel and the ' +
-      'recipient gets a SAM notice and reads the text with get_event; the response then reports transport "agent_message_channel". ' +
-      'Accepted never means read or acted on. ' +
-      'deliveryIntent "steer" (notify/deliver only) adds the message to the target\'s running turn without stopping it when its ' +
-      'runtime supports live steering; otherwise, or when the target is idle or asleep, it is delivered as an ordinary next-turn message.',
+      'Send a message to an active same-project task agent. It is recorded on your shared agent-dm channel; the recipient gets a ' +
+      'SAM notice naming the event and reads your text with get_event, which shows you as the verified sender. Your text is never ' +
+      "posted into the recipient's chat, so it cannot be mistaken for a human message. " +
+      'Message classes control urgency: "notify" and "deliver" join the recipient\'s running turn when its runtime supports live ' +
+      'steering, or wait for its next turn. "interrupt", "preempt_and_replan" and "shutdown_with_final_prompt" stop the recipient\'s ' +
+      'in-flight turn (the same transport as the user stop button) so the notice is its next prompt; use them only when the peer ' +
+      'must see the message immediately. Returns the event ID, channel and transport "agent_message_channel". Accepted never means ' +
+      'read or acted on. If agent message channels are unavailable on this installation, the send is refused with the reason.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -65,7 +61,8 @@ export const ORCHESTRATION_TOOLS = [
         },
         message: {
           type: 'string',
-          description: 'The message content to deliver (max 32768 chars)',
+          description:
+            'The message for the recipient to read with get_event. At most PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES bytes (4096 by default); put longer detail in a file, PR or idea and send a pointer.',
         },
         messageClass: {
           type: 'string',
@@ -82,8 +79,8 @@ export const ORCHESTRATION_TOOLS = [
           type: 'string',
           enum: ['queue', 'steer'],
           description:
-            '"queue" (default) waits for the target\'s next turn. "steer" adds it to the running turn when possible; it never ' +
-            'stops the turn and falls back to "queue" visibly when the target is idle, asleep, or its runtime cannot steer.',
+            "Accepted for compatibility. Every notify/deliver notice already joins a running turn when the recipient's runtime " +
+            'can steer, so "queue" and "steer" deliver the same way. "steer" is rejected with an urgent messageClass.',
         },
         metadata: {
           type: 'object',
@@ -93,7 +90,7 @@ export const ORCHESTRATION_TOOLS = [
           type: 'string',
           description:
             'Optional retry key. Reusing it after a lost response replays the same message instead of sending a second one ' +
-            '(honored by agent message channels; ignored by the legacy transport).',
+            '(honored by agent message channels).',
         },
       },
       required: ['targetTaskId', 'message'],
@@ -107,7 +104,7 @@ export const ORCHESTRATION_TOOLS = [
       '(shutdown_with_final_prompt first, then preempt_and_replan, interrupt, deliver, notify). ' +
       'Messages are automatically marked as "delivered" when retrieved. ' +
       'Call this at turn boundaries to check for orchestrator directives. ' +
-      'Messages sent over agent message channels are not listed here: they arrive as a SAM notice with event IDs for get_event.',
+      'Messages from other agents are not listed here: they arrive as a SAM notice with event IDs for get_event.',
     inputSchema: {
       type: 'object' as const,
       properties: {},
@@ -136,11 +133,10 @@ export const ORCHESTRATION_TOOLS = [
   {
     name: 'send_message_to_subtask',
     description:
-      'Send a message to a running same-project task agent. The message is injected as a user-role prompt into the target ACP session. ' +
-      'Any active task agent in the project can message any other active task agent in the same project; cross-project targets are rejected. ' +
-      'Returns { delivered: true } on success, or { delivered: false, reason: "agent_busy" } if the target agent is currently processing. ' +
-      'When SAM agent message channels are enabled (preview), the message is recorded on a shared agent-dm channel instead of being injected, ' +
-      'the target gets a SAM notice and reads it with get_event, and the response reports { accepted: true, delivered: false, transport: "agent_message_channel" }.',
+      'Send a message to a running same-project task agent. Any active task agent in the project can message any other; ' +
+      'cross-project targets are rejected. The message is recorded on your shared agent-dm channel, the target gets a SAM notice ' +
+      'and reads it with get_event, and the response reports { accepted: true, delivered: false, transport: "agent_message_channel" }. ' +
+      "Your text is never posted into the target's chat. If agent message channels are unavailable, the send is refused with the reason.",
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -150,13 +146,14 @@ export const ORCHESTRATION_TOOLS = [
         },
         message: {
           type: 'string',
-          description: "The message to inject into the target agent's session (max 32768 chars)",
+          description:
+            'The message for the target agent to read with get_event. At most PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES bytes (4096 by default); put longer detail in a file, PR or idea and send a pointer.',
         },
         idempotencyKey: {
           type: 'string',
           description:
             'Optional retry key. Reusing it after a lost response replays the same message ' +
-            '(honored by agent message channels; ignored by the legacy transport).',
+            '(honored by agent message channels).',
         },
       },
       required: ['taskId', 'message'],
@@ -166,9 +163,9 @@ export const ORCHESTRATION_TOOLS = [
   {
     name: 'stop_subtask',
     description:
-      "Gracefully stop a running child task's agent session. If a reason is provided, it is sent as a warning message " +
-      'before the hard stop (with a configurable grace period). The task status is updated to "cancelled" with the stop reason. ' +
-      'Only the direct parent task can stop a child.',
+      "Gracefully stop a running child task's agent session. If a reason is provided, the child first gets a SAM notice that " +
+      'it is being stopped (with a configurable grace period); the notice names you but does not quote your reason. The task ' +
+      'status is updated to "cancelled" with the stop reason. Only the direct parent task can stop a child.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -179,7 +176,7 @@ export const ORCHESTRATION_TOOLS = [
         reason: {
           type: 'string',
           description:
-            'Optional reason for stopping — sent as a warning message to the child before the hard stop',
+            'Optional reason for stopping, recorded on the task. Providing one also gives the child a warning notice and a grace period',
         },
       },
       required: ['taskId'],

@@ -114,7 +114,6 @@ export async function handleDispatchTask(
   const [currentTask] = await db
     .select({
       id: schema.tasks.id,
-      chatSessionId: schema.tasks.chatSessionId,
       dispatchDepth: schema.tasks.dispatchDepth,
       status: schema.tasks.status,
       missionId: schema.tasks.missionId,
@@ -122,6 +121,7 @@ export async function handleDispatchTask(
       credentialAttributionUserId: schema.tasks.credentialAttributionUserId,
       credentialAttributionProjectId: schema.tasks.credentialAttributionProjectId,
       credentialAttributionSource: schema.tasks.credentialAttributionSource,
+      chatSessionId: schema.tasks.chatSessionId,
     })
     .from(schema.tasks)
     .where(

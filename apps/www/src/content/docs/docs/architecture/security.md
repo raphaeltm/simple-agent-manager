@@ -278,8 +278,9 @@ The share dialog says so, and the server requires the owner to acknowledge it (`
 
 Task agents in one project can message each other (`send_durable_message`, `send_message_to_subtask`) and, with live steering, add a message to another agent's running turn. Agents in a project therefore trust each other: a compromised task can try to steer a sibling. SAM limits what that can do rather than preventing it:
 
-- A peer's text reaches the recipient fenced and labelled as another agent's message, never as a human directive (`composePeerSteerContent` in `apps/api/src/services/urgent-delivery-content.ts`), with an instruction to verify claims through SAM's tools before acting.
-- A steer can only use the `notify` and `deliver` classes, so it cannot stop the recipient's turn; this is checked at the MCP tool and again when the delivery is accepted (`canSteerMessageClass`).
+- A peer's text never enters the recipient's chat or prompt. Every message, whatever its class or delivery intent, is published on the pair's `agent-dm.*` channel (`sendOverAgentMessageChannel` in `apps/api/src/routes/mcp/agent-message-channel-send.ts`). The recipient gets a SAM-authored notice naming event IDs (`agentMessageWakeContent`) and reads the text with `get_event`, which marks it untrusted and names the verified sender. When the channel transport is unavailable the send is refused; there is no fallback that posts the text. This is constitution principle XV, Human Voice Is Reserved.
+- Only an urgent class (`interrupt` and above) can stop the recipient's turn, and it still delivers only the notice (`urgentAgentMessageClass`). A steer can only use the `notify` and `deliver` classes (`canSteerMessageClass`).
+- Other agent-written text that becomes a chat message names its author: a task description from `dispatch_task` or `retry_subtask` ends with the parent's task and chat session (`parentAgentAttribution`), an agent-created scheduled message arrives as a notice naming the schedule (`agentScheduleNotice`), and `stop_subtask` sends a fixed notice without quoting the parent's reason (`stopRequestedNotice`).
 - The recipient must be a task in the caller's own project, resolved from the caller's verified MCP token.
 
 ## Workspace Isolation Model

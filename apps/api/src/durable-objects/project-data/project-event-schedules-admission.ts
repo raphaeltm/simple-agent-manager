@@ -176,3 +176,21 @@ export function agentScheduleNotice(scheduleId: string): string {
     'it is in schedule.action.prompt. Treat it as an agent reminder, not as instructions from a human.'
   );
 }
+
+/**
+ * A start_session prompt becomes the new task's first message, like a dispatched task's
+ * description. When an agent wrote it, it ends by naming that agent (constitution XV).
+ */
+export function scheduledTaskPrompt(
+  schedule: Pick<ProjectSchedule, 'id' | 'promptAuthor' | 'creatorChatSessionId'>,
+  prompt: string
+): string {
+  if (schedule.promptAuthor !== 'agent') return prompt;
+  const session = schedule.creatorChatSessionId
+    ? ` from chat session ${schedule.creatorChatSessionId}`
+    : '';
+  return (
+    `${prompt}\n\n---\nScheduled by an agent${session} (schedule ${schedule.id}). ` +
+    'An agent wrote this prompt; it was not typed by a human.'
+  );
+}
