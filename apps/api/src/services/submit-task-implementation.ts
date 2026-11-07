@@ -9,14 +9,8 @@
  *
  * See: specs/022-simplified-chat-ux/contracts/task-submit.md
  */
-import type { SubmitTaskResponse, TaskAttachment, VMSize } from '@simple-agent-manager/shared';
-import {
-  ACP_SESSION_DEFAULTS,
-  ATTACHMENT_DEFAULTS,
-  isValidProvider,
-  MAX_CONTEXT_SUMMARY_BYTES,
-  SAFE_FILENAME_REGEX,
-} from '@simple-agent-manager/shared';
+import type { SubmitTaskResponse, VMSize } from '@simple-agent-manager/shared';
+import { ACP_SESSION_DEFAULTS, isValidProvider } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type * as v from 'valibot';
@@ -35,7 +29,6 @@ import {
 } from '../operations/start-work-core';
 import { requireRepositoryAccess } from '../routes/projects/_helpers';
 import { type SubmitTaskSchema } from '../schemas';
-import { validateAttachments } from '../services/attachment-upload';
 import { generateBranchName } from '../services/branch-name';
 import { capacityPlacementSnapshotDbValues } from '../services/capacity-placement-snapshot';
 import { enrichMessageWithMentions } from '../services/mention-enrichment';
@@ -58,6 +51,7 @@ import {
 } from '../services/resource-requirements-input';
 import { resolveSkillProfile } from '../services/skills';
 import { submitInstantTask } from '../services/submit-instant-task';
+import { validateSubmitContextAndAttachments } from '../services/submit-task-input-validation';
 import { markTaskFailedIfNonTerminal } from '../services/task-failure';
 import { startTaskRunnerDO } from '../services/task-runner-do';
 import { getTaskTitleConfig } from '../services/task-title';
@@ -146,45 +140,12 @@ export async function submitTaskImplementation(
   // vmSize, workspaceProfile validated by schema (picklist)
   // vmLocation validated as string by schema
 
-  // Validate contextSummary size if provided
-  if (body.contextSummary) {
-    const summaryBytes = new TextEncoder().encode(body.contextSummary).length;
-    if (summaryBytes > MAX_CONTEXT_SUMMARY_BYTES) {
-      throw errors.badRequest(
-        `contextSummary exceeds maximum size of ${MAX_CONTEXT_SUMMARY_BYTES} bytes`
-      );
-    }
-  }
-
-  // Validate attachments if provided
-  let validatedAttachments: TaskAttachment[] = [];
-  if (body.attachments && body.attachments.length > 0) {
-    // Validate attachment structure
-    const maxFiles = env.ATTACHMENT_MAX_FILES
-      ? parseInt(env.ATTACHMENT_MAX_FILES, 10)
-      : ATTACHMENT_DEFAULTS.MAX_FILES;
-    if (body.attachments.length > maxFiles) {
-      throw errors.badRequest(
-        `Too many attachments: ${body.attachments.length} exceeds maximum ${maxFiles}`
-      );
-    }
-
-    // Structure validated by schema; check filename safety
-    for (const att of body.attachments) {
-      if (!SAFE_FILENAME_REGEX.test(att.filename)) {
-        throw errors.badRequest(`Unsafe filename in attachment: ${att.filename}`);
-      }
-    }
-
-    // Validate attachments exist in R2 and match declared sizes
-    setOperation('attachment_validation');
-    const validation = await validateAttachments(env, userId, body.attachments);
-    if (!validation.valid) {
-      throw errors.badRequest(`Attachment validation failed: ${validation.errors.join('; ')}`);
-    }
-
-    validatedAttachments = body.attachments;
-  }
+  const validatedAttachments = await validateSubmitContextAndAttachments(
+    env,
+    userId,
+    body,
+    setOperation
+  );
 
   let inheritedAttributionUserId: string | null = null;
   let inheritedAttributionProjectId: string | null = null;
