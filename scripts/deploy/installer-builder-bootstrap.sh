@@ -55,6 +55,12 @@ fetch_pinned /sam/pulumi.tar.gz 58d545f2b98761051922008ebd381ecef95484d7f7a5ff7f
 mkdir -p /root/.pulumi/bin
 tar -xzf /sam/pulumi.tar.gz --strip-components=1 -C /root/.pulumi/bin
 rm /sam/pulumi.tar.gz
+# crane copies verified prebuilt container images into the account registry
+# without Docker (installer-engine-prebuilt.ts); digests survive the copy.
+fetch_pinned /sam/crane.tar.gz c14340087103ba9dadf61d45acd20675490fd0ccbd56ac7901fc1b502137f44b \
+  https://github.com/google/go-containerregistry/releases/download/v0.20.2/go-containerregistry_Linux_x86_64.tar.gz
+tar -xzf /sam/crane.tar.gz -C /usr/local/bin crane
+rm /sam/crane.tar.gz
 dockerd --iptables=false --ip6tables=false --ip-forward=false >/dev/null 2>&1 &
 for attempt in $(seq 1 120); do docker info >/dev/null 2>&1 && break; sleep 1; done
 docker info >/dev/null 2>&1

@@ -8,6 +8,8 @@ import { digest } from './security';
 export interface ProvisionInstallation {
   config: InstallationConfig;
   credentials: InstallationCredentials;
+  /** Optional https base of prebuilt artifacts, handed to the builder unchanged. */
+  artifactBaseUrl?: string;
 }
 export async function provision(
   token: string,
@@ -150,6 +152,7 @@ async function configureInstallationBindings(
     CF_ACCOUNT_ID: accountId,
     SAM_ARTIFACTS_BUCKET: bucket,
     INSTALLATION_CONFIG: JSON.stringify(config),
+    ...(installation.artifactBaseUrl ? { ARTIFACT_BASE_URL: installation.artifactBaseUrl } : {}),
   });
   Object.assign(secrets, {
     CF_API_TOKEN: credentials.deploymentToken,

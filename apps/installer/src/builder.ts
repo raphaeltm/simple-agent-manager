@@ -140,6 +140,8 @@ export class InstallationBuilder{
   await this.persist(job);await this.ctx.storage.setAlarm(Math.min(job.deadline,Date.now()+poll*1000));
   const env={SAM_JOB_NONCE:nonce,SAM_SOURCE_COMMIT:config.sourceCommit,SAM_BUILD_CACHE_BUCKET:config.prefix+'-pulumi-state-'+config.environment,SAM_ENGINE_CONFIG:JSON.stringify(config),SAM_JOB_DIRECTORY:'/sam/job',CF_ACCOUNT_ID:config.accountId,SAM_ENGINE_CHECKPOINT:checkpoint?JSON.stringify(checkpoint):''};
   if(sourceIdentity)env.SAM_SOURCE_IDENTITY=JSON.stringify(sourceIdentity);
+  // Optional prebuilt-artifact publisher; the engine verifies every byte and builds without it.
+  if(typeof this.env.ARTIFACT_BASE_URL==='string'&&/^https:\/\/[^\s?#@]{1,500}$/.test(this.env.ARTIFACT_BASE_URL))env.SAM_ARTIFACT_BASE_URL=this.env.ARTIFACT_BASE_URL;
   for(const key of required)env[key]=this.env[key];
   this.ctx.container.start({image:'cloudflare/debian-trixie',instance,enableInternet:true,entrypoint:['node','-e',BUILDER_SUPERVISOR],env,labels:{job:id}});
   job.status='running';await this.persist(job);

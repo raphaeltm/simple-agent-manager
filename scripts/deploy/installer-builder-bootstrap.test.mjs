@@ -149,9 +149,9 @@ test('every checksum-pinned builder download names an immutable version', () => 
       /^fetch_pinned (\S+) ([a-f0-9]{64})((?: \\\n)?(?: +https:\/\/\S+(?: \\\n)?)+)/gm
     ),
   ];
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3);
   const urls = calls.flatMap((call) => call[3].match(/https:\/\/\S+/g));
-  assert.equal(urls.length, 5);
+  assert.equal(urls.length, 6);
   for (const url of urls) assert.match(url, /[/-]v?\d+\.\d+\.\d+[/-]|go\d+\.\d+\.\d+\./, url);
 });
 

@@ -106,6 +106,19 @@ it('requires internal authority, validates immutable jobs, and starts only one m
   expect(JSON.stringify(await (await h.call('/status')).json())).not.toContain('secret');
   expect(h.getAlarm()).toBeTypeOf('number');
 });
+it('hands only an https prebuilt-artifact base to the builder process', async () => {
+  for (const [value, expected] of [
+    ['https://github.com/raphaeltm/simple-agent-manager/releases/download/v1', true],
+    ['http://artifacts.example.com/v1', false],
+    ['https://user:pw@artifacts.example.com/v1', false],
+  ] as const) {
+    const h = harness();
+    (h.env as Record<string, unknown>).ARTIFACT_BASE_URL = value;
+    await h.call('/start', h.job);
+    const [options] = h.container.start.mock.calls.at(-1) as [{ env: Record<string, string> }];
+    expect(options.env.SAM_ARTIFACT_BASE_URL).toBe(expected ? value : undefined);
+  }
+});
 it('reconciles an existing process after DO restart and destroys all compute on deadline', async () => {
   const h = harness();
   await h.call('/start', h.job);

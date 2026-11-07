@@ -10,6 +10,8 @@ export interface Env {
   DOCS_URL: string;
   BUILD_SHA: string;
   INSTALL_SOURCE_COMMIT?: string;
+  /** Optional https base serving prebuilt installation artifacts (installer-engine-prebuilt.ts). */
+  ARTIFACT_BASE_URL?: string;
   OAUTH_CLEANUP_RESERVE_SECONDS?: string;
   MIN_PROVISION_SECONDS?: string;
   PROVISION_TIMEOUT_SECONDS?: string;

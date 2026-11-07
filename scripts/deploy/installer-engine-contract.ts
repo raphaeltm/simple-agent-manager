@@ -141,6 +141,8 @@ export interface EngineOptions {
   runner?: EngineRunner;
 }
 export const DEFAULT_COMMAND_TIMEOUT_MS = 60 * 60 * 1000;
+/** Largest prebuilt artifact (~1.2 GB image) at a conservative 2 MB/s, with headroom. */
+export const DEFAULT_PREBUILT_DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1000;
 export const DEFAULT_HEALTH_ATTEMPTS = 30;
 export const DEFAULT_HEALTH_INTERVAL_MS = 10_000;
 export const DEFAULT_CLOUDFLARE_API_URL = 'https://api.cloudflare.com/client/v4';

@@ -10,6 +10,7 @@ import {
   DEFAULT_COMMAND_TIMEOUT_MS,
   DEFAULT_HEALTH_ATTEMPTS,
   DEFAULT_HEALTH_INTERVAL_MS,
+  DEFAULT_PREBUILT_DOWNLOAD_TIMEOUT_MS,
   type EngineCheckpoint,
   EngineCommandFailure,
   engineFingerprint,
@@ -21,6 +22,12 @@ import {
   validateEngineConfig,
 } from './installer-engine-contract.js';
 import { deployEngineApi } from './installer-engine-deploy.js';
+import {
+  fetchPrebuiltManifest,
+  importPrebuiltImages,
+  placePrebuiltFiles,
+  prebuiltBaseUrl,
+} from './installer-engine-prebuilt.js';
 import { verifyEngineReadiness } from './installer-engine-readiness.js';
 import { readContainerArtifact, verifyPublisherRuntime } from './installer-engine-runtime.js';
 export * from './installer-engine-contract.js';
@@ -308,6 +315,35 @@ export async function runInstallerEngine(
     running.catch(() => undefined);
     return running;
   };
+  // Prebuilt artifacts are an optional fast path for installations; legacy CI builds.
+  const prebuiltBase =
+    c.profile === 'legacy-ci'
+      ? undefined
+      : prebuiltBaseUrl(options.environment.SAM_ARTIFACT_BASE_URL);
+  const prebuiltTimeoutMs = Number(
+    options.environment.INSTALLER_PREBUILT_DOWNLOAD_TIMEOUT_MS ??
+      DEFAULT_PREBUILT_DOWNLOAD_TIMEOUT_MS
+  );
+  const prebuiltManifest = prebuiltBase
+    ? fetchPrebuiltManifest(runner.request, prebuiltBase)
+    : Promise.resolve(undefined);
+  const prebuiltFiles = async (kind: string, key: string, paths: readonly string[]) => {
+    const manifest = await prebuiltManifest;
+    return (
+      !!manifest &&
+      !!prebuiltBase &&
+      placePrebuiltFiles({
+        request: runner.request,
+        base: prebuiltBase,
+        manifest,
+        kind,
+        key,
+        root,
+        paths,
+        timeoutMs: prebuiltTimeoutMs,
+      })
+    );
+  };
   const vmAgentBuild = background(() =>
     // Keyed by the content-derived VM-agent release, so later commits that leave
     // packages/vm-agent untouched reuse the same verified binaries.
@@ -321,6 +357,9 @@ export async function runInstallerEngine(
       VM_AGENT_OUTPUTS,
       'packages/vm-agent',
       async () => {
+        const prebuiltKey = `release=${env.VM_AGENT_RELEASE};build=${env.VM_AGENT_BUILD_DATE};${goVersion}`;
+        if (!c.skipAgent && (await prebuiltFiles('vm-agent', prebuiltKey, VM_AGENT_OUTPUTS)))
+          return;
         const version = [
           `VERSION=${env.VM_AGENT_RELEASE}`,
           `BUILD_DATE=${env.VM_AGENT_BUILD_DATE}`,
@@ -341,6 +380,60 @@ export async function runInstallerEngine(
       }
     )
   );
+  // Container images are keyed by their build inputs, which include the VM-agent
+  // outputs, so the import waits for them. Any failure leaves Wrangler building.
+  const imageImport: Promise<Record<string, string>> = (async () => {
+    const manifest = await prebuiltManifest;
+    if (!manifest?.images.length || !prebuiltBase) return {};
+    await vmAgentBuild;
+    const topLevel = TOML.parse(readFileSync(join(root, 'apps/api/wrangler.toml'), 'utf8')) as {
+      containers?: { class_name: string; image: string }[];
+    };
+    return importPrebuiltImages({
+      request: runner.request,
+      base: prebuiltBase,
+      manifest,
+      accountId: c.accountId,
+      contextDir: join(root, 'apps/api'),
+      containers: (topLevel.containers ?? []).map((container) => ({
+        className: container.class_name,
+        dockerfile: container.image.replace(/^\.\//, ''),
+      })),
+      repository: (className) => `${prefix}-api-${stack}-${className.toLowerCase()}-prebuilt`,
+      work: join(root, '.wrangler', 'installer-engine', 'images'),
+      timeoutMs: prebuiltTimeoutMs,
+      run: (executable, args, extra) =>
+        runner.run(
+          { executable, args },
+          {
+            cwd: root,
+            env: { ...env, ...extra },
+            timeoutMs: c.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS,
+            discardOutput: executable === 'tar',
+          }
+        ),
+      registryPassword: async () => {
+        const output = await wrangler(
+          'api',
+          'containers',
+          'registries',
+          'credentials',
+          'registry.cloudflare.com',
+          '--push',
+          '--pull',
+          '--json'
+        );
+        const parsed: unknown = JSON.parse(output.slice(output.indexOf('{')));
+        const password =
+          parsed && typeof parsed === 'object' && 'password' in parsed
+            ? parsed.password
+            : undefined;
+        if (typeof password !== 'string' || !password)
+          throw new Error('Registry credentials missing');
+        return password;
+      },
+    });
+  })().catch(() => ({}));
   const cliBuild = background(() =>
     cached('cli', { commit: c.sourceCommit, go: goVersion }, CLI_OUTPUTS, 'packages/cli', () =>
       execute('make', ['-C', 'packages/cli', 'build-all', 'version'])
@@ -424,6 +517,11 @@ export async function runInstallerEngine(
       await execute('sudo', ['systemctl', 'restart', 'docker']);
     });
   await phase('bootstrap-api-tail', async () => {
+    const images = await imageImport;
+    if (Object.keys(images).length) {
+      env.SAM_CONTAINER_IMAGE_OVERRIDES = JSON.stringify(images);
+      await sync();
+    }
     const firstDeploy = existsSync(join(root, '.wrangler/api-worker-first-deploy'));
     if (firstDeploy) await deployApi();
     await wrangler('tail-worker', 'deploy', '--env', c.environment);

@@ -16,11 +16,13 @@ import {
   runInstallerEngine,
   validateEngineConfig,
 } from './installer-engine.js';
+import { VM_AGENT_OUTPUTS } from './installer-engine-cache.js';
 import {
   legacyCiEnvironmentManifest,
   legacyCiInvocation,
   legacyCiWorkflow,
 } from './installer-engine-ci.js';
+import { imageContextKey } from './installer-engine-prebuilt.js';
 import { sourceRuntimePins } from './installer-engine-runtime.js';
 
 const config: InstallerEngineConfig = {
@@ -411,6 +413,116 @@ describe('installation engine', () => {
     expect(events.filter((event) => event.status === 'failed').map((event) => event.phase)).toEqual(
       ['build']
     );
+  });
+
+  it('uses verified prebuilt VM-agent files and images instead of building them', async () => {
+    const f = fixture();
+    const root = f.root;
+    // A container whose image inputs the publisher also built.
+    writeFileSync(
+      join(root, 'apps/api/wrangler.toml'),
+      '[[containers]]\nclass_name = "SandboxDO"\nimage = "./Dockerfile.sandbox"\n'
+    );
+    writeFileSync(join(root, 'apps/api/Dockerfile.sandbox'), 'FROM x\nCOPY entry.sh /entry.sh\n');
+    writeFileSync(join(root, 'apps/api/entry.sh'), 'entry');
+    const imageKey = imageContextKey(join(root, 'apps/api'), 'Dockerfile.sandbox');
+    const vmAgentKey = `release=${'d'.repeat(40)};build=2026-10-28T00:00:00Z;go version go1.26.10 linux/amd64`;
+    const bodies: Record<string, string> = Object.fromEntries(
+      VM_AGENT_OUTPUTS.map((path, index) => [`file-${index}`, `prebuilt ${path}`])
+    );
+    bodies['sandbox.tar'] = 'oci-layout';
+    const digest = `sha256:${'b'.repeat(64)}`;
+    const hash = (value: string) => createHash('sha256').update(value).digest('hex');
+    bodies['sam-installer-artifacts.json'] = JSON.stringify({
+      schemaVersion: 1,
+      files: VM_AGENT_OUTPUTS.map((path, index) => ({
+        kind: 'vm-agent',
+        key: vmAgentKey,
+        path,
+        name: `file-${index}`,
+        sha256: hash(bodies[`file-${index}`]),
+        size: bodies[`file-${index}`].length,
+      })),
+      images: [
+        {
+          className: 'SandboxDO',
+          key: imageKey,
+          name: 'sandbox.tar',
+          sha256: hash('oci-layout'),
+          size: 'oci-layout'.length,
+          digest,
+        },
+      ],
+    });
+    const base = 'https://artifacts.example.com/sam';
+    const inner = f.runner;
+    const runner: EngineRunner = {
+      ...inner,
+      async request(url, init) {
+        if (url.startsWith(`${base}/`)) {
+          const body = bodies[url.slice(base.length + 1)];
+          return body === undefined ? new Response('missing', { status: 404 }) : new Response(body);
+        }
+        return inner.request(url, init);
+      },
+      async run(command, options) {
+        if (command.executable === 'crane' && command.args[0] === 'digest') {
+          await inner.run(command, options);
+          return `${digest}\n`;
+        }
+        if (command.args.includes('credentials')) {
+          await inner.run(command, options);
+          return 'warning text\n{"username":"v1","password":"registry-secret"}';
+        }
+        return inner.run(command, options);
+      },
+    };
+    await runInstallerEngine(config, {
+      ...f,
+      runner,
+      environment: { ...privateEnv, SAM_ARTIFACT_BASE_URL: base },
+      emit() {},
+      save() {},
+    });
+    const lines = f.commands.map((entry) => [entry.executable, ...entry.args].join(' '));
+    expect(lines.some((line) => line.includes('packages/vm-agent build-all'))).toBe(false);
+    expect(lines.some((line) => line.includes('prepare-container'))).toBe(false);
+    for (const path of VM_AGENT_OUTPUTS)
+      expect(readFileSync(join(root, path), 'utf8')).toBe(`prebuilt ${path}`);
+    const reference = `registry.cloudflare.com/${config.accountId}/${config.prefix}-api-prod-sandboxdo-prebuilt@${digest}`;
+    const resync = f.commands.findIndex(
+      (entry) =>
+        entry.args.includes('scripts/deploy/sync-wrangler-config.ts') &&
+        entry.env.SAM_CONTAINER_IMAGE_OVERRIDES === JSON.stringify({ SandboxDO: reference })
+    );
+    const firstApiDeploy = lines.findIndex((line) =>
+      line.includes('@simple-agent-manager/api exec wrangler deploy')
+    );
+    expect(resync).toBeGreaterThan(-1);
+    expect(resync).toBeLessThan(firstApiDeploy);
+  });
+
+  it('builds as before when the prebuilt publisher has nothing usable', async () => {
+    const f = fixture();
+    const inner = f.runner;
+    const runner: EngineRunner = {
+      ...inner,
+      async request(url, init) {
+        if (url.startsWith('https://artifacts.example.com/'))
+          return new Response('missing', { status: 404 });
+        return inner.request(url, init);
+      },
+    };
+    await runInstallerEngine(config, {
+      ...f,
+      runner,
+      environment: { ...privateEnv, SAM_ARTIFACT_BASE_URL: 'https://artifacts.example.com/sam' },
+      emit() {},
+      save() {},
+    });
+    const lines = f.commands.map((entry) => [entry.executable, ...entry.args].join(' '));
+    expect(lines.some((line) => line.includes('packages/vm-agent build-all'))).toBe(true);
+    expect(f.commands.some((entry) => entry.env.SAM_CONTAINER_IMAGE_OVERRIDES)).toBe(false);
   });
 
   it('runs the migration checks without capturing their progress output', async () => {

@@ -125,7 +125,11 @@ export class SessionInstallation {
       this.env.APP_ORIGIN,
       session.expires,
       session.plan && session.credentials
-        ? { config: session.plan, credentials: session.credentials }
+        ? {
+            config: session.plan,
+            credentials: session.credentials,
+            ...(this.env.ARTIFACT_BASE_URL ? { artifactBaseUrl: this.env.ARTIFACT_BASE_URL } : {}),
+          }
         : undefined,
       workSignal
     );
