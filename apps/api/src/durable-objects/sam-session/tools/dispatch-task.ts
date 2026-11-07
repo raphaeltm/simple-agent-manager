@@ -23,6 +23,7 @@ import { ulid } from '../../../lib/ulid';
 import { AppError } from '../../../middleware/error';
 import { requireProjectCapability } from '../../../middleware/project-auth';
 import { requireRepositoryOwnerAccess } from '../../../routes/projects/_helpers';
+import { samAssistantAttribution } from '../../../services/agent-authorship';
 import { generateBranchName } from '../../../services/branch-name';
 import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS,
@@ -172,6 +173,8 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
   const maxDescLen =
     Number(env.SAM_DISPATCH_MAX_DESCRIPTION_LENGTH) || DEFAULT_MAX_DESCRIPTION_LENGTH;
   const description = input.description.trim().slice(0, maxDescLen);
+  // The child's first message is model-written, so it names the SAM assistant (constitution XV).
+  const childDescription = description + samAssistantAttribution();
 
   // ── Validate optional params (before any DB access) ───────────────────
   let vmSize: VMSize | undefined;
@@ -409,7 +412,7 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
       parentTaskId,
       chatSessionId,
       taskTitle,
-      description,
+      childDescription,
       priority,
       dispatchDepth,
       branchName,
@@ -462,7 +465,7 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
       input.projectId,
       sessionId,
       'user',
-      description,
+      childDescription,
       null
     );
   } catch (err) {
@@ -502,7 +505,7 @@ export async function dispatchTask(input: DispatchTaskInput, ctx: ToolContext): 
       userEmail: userRow?.email ?? null,
       githubId: userRow?.githubId ?? null,
       taskTitle,
-      taskDescription: description,
+      taskDescription: childDescription,
       repository: project.repository,
       installationId: project.installationId,
       outputBranch: branchName,

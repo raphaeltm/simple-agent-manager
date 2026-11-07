@@ -12,6 +12,10 @@ import * as schema from '../../../db/schema';
 import type { Env } from '../../../env';
 import { log } from '../../../lib/logger';
 import { ulid } from '../../../lib/ulid';
+import {
+  samAssistantAttribution,
+  withoutAuthorAttribution,
+} from '../../../services/agent-authorship';
 import { generateBranchName } from '../../../services/branch-name';
 import {
   CAPACITY_PLACEMENT_SNAPSHOT_SQL_COLUMNS,
@@ -136,11 +140,14 @@ export async function retrySubtask(
   const deletionError = await replacementDeletionError(env, taskId, original.projectId, ctx.userId);
   if (deletionError) return deletionError;
 
-  // Use new description or fall back to original
-  const description = input.newDescription?.trim() || original.description;
+  // Use new description or fall back to original, without the author line it already carries
+  const description =
+    input.newDescription?.trim() || withoutAuthorAttribution(original.description ?? '');
   if (!description) {
     return { error: 'Task has no description and no newDescription was provided.' };
   }
+  // The replacement's first message is model-written, so it names the SAM assistant (constitution XV).
+  const childDescription = description + samAssistantAttribution();
 
   // Resolve matching profiles before interpreting a persisted legacy agent-type
   // hint. Skill defaults/overrides retain their original layering semantics.
@@ -265,7 +272,7 @@ export async function retrySubtask(
       ctx.userId,
       chatSessionId,
       taskTitle,
-      description,
+      childDescription,
       branchName,
       ctx.userId,
       resolvedTaskMode,
@@ -310,7 +317,7 @@ export async function retrySubtask(
       original.projectId,
       sessionId,
       'user',
-      description,
+      childDescription,
       null
     );
   } catch (err) {
@@ -354,7 +361,7 @@ export async function retrySubtask(
       userEmail: userRow?.email ?? null,
       githubId: userRow?.githubId ?? null,
       taskTitle,
-      taskDescription: description,
+      taskDescription: childDescription,
       repository: original.projectRepository,
       installationId: original.projectInstallationId,
       outputBranch: branchName,

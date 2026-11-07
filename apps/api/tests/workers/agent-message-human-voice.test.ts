@@ -12,12 +12,14 @@ import {
   twoAgentProject,
   withAgentMessageChannels,
 } from './helpers/agent-message-channels';
+import { DefaultVmPromptDeliveryAdapter } from '../../src/services/vm-prompt-delivery-adapter';
 import {
   materialize,
   wakeBatches,
   type WakeFixture,
   withQuietAlarms,
 } from './helpers/event-wake-harness';
+import { accepted, deliveryPass } from './helpers/steer-wake-harness';
 
 const PEER_TEXT = 'peer-text-that-must-never-reach-the-chat';
 
@@ -119,6 +121,39 @@ describe('agent text reaches another agent only as a pointer', () => {
       });
     }
   );
+
+  it('hands an urgent notice to the VM adapter as stop-and-deliver, through the real delivery pass', async () => {
+    await withAgentMessageChannels(async () => {
+      const f = await twoAgentProject();
+      okBody<ChannelReceipt>(
+        await f.a.tool('send_durable_message', {
+          targetTaskId: f.b.taskId,
+          message: PEER_TEXT,
+          messageClass: 'interrupt',
+        })
+      );
+      await withQuietAlarms(f, async () => {
+        await materialize(f, Date.now());
+        const submitted: Array<Parameters<DefaultVmPromptDeliveryAdapter['submit']>[0]> = [];
+        const steer = vi.spyOn(DefaultVmPromptDeliveryAdapter.prototype, 'steer');
+        vi.spyOn(DefaultVmPromptDeliveryAdapter.prototype, 'submit').mockImplementation(
+          async (input) => {
+            submitted.push(input);
+            return accepted(input);
+          }
+        );
+        await deliveryPass(f);
+        // The adapter stops a busy turn only for an urgent class with an onBusyTurn hook
+        // (vm-prompt-delivery-adapter.ts); both reach it, and the prompt is still the notice.
+        expect(submitted).toHaveLength(1);
+        expect(submitted[0]!.claim.message.messageClass).toBe('interrupt');
+        expect(submitted[0]!.onBusyTurn).toEqual(expect.any(Function));
+        expect(submitted[0]!.claim.message.content).toMatch(/^SAM notice/);
+        expect(submitted[0]!.claim.message.content).not.toContain(PEER_TEXT);
+        expect(steer).not.toHaveBeenCalled();
+      });
+    });
+  });
 
   it('keeps an ordinary message from stopping the turn (control)', async () => {
     await withAgentMessageChannels(async () => {

@@ -70,6 +70,11 @@ child's first message must say which parent agent sent it. Trigger templates are
   the same footer as dispatch (`scheduledTaskPrompt`).
 - Channel messages are capped at `PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES` (4096 by default), which
   already applied to ordinary agent messages in production. Steers and urgent messages now share it.
+- Security review found the /sam assistant's `dispatch_task` and `retry_subtask` tools post model-written
+  descriptions as plain first messages. They now end with `samAssistantAttribution`; the author-line
+  helpers live in `apps/api/src/services/agent-authorship.ts`.
+- `stop_subtask` keeps its direct VM send because the text is now a fixed SAM notice (no agent text);
+  it is best-effort and never blocks the stop, so it does not need the channel's fail-closed behavior.
 - Out of scope, tracked in `tasks/backlog/2026-11-07-sam-assistant-messages-as-pointers.md`: the /sam
   assistant's own `send_message_to_subtask` tool, and GitHub text interpolated into trigger templates.
 

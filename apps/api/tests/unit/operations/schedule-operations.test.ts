@@ -259,11 +259,19 @@ describe('connector schedule operations', () => {
       ['connector', 'human'],
       ['web', 'human'],
       ['sam', 'agent'],
+      ['workspace-agent', 'agent'],
     ] as const)('records a %s caller as prompt author %s', async (via, promptAuthor) => {
       await samScheduleCreate.run(
         ctx('owner', {
           idempotencyKey: `author-${via}`,
-          actor: { userId: 'owner', via, scopes: new Set(['sam.read', 'sam.write']) },
+          actor: {
+            userId: 'owner',
+            via,
+            scopes: new Set(['sam.read', 'sam.write']),
+            ...(via === 'workspace-agent'
+              ? { workspace: { workspaceId: 'ws', projectId: 'p' } }
+              : {}),
+          },
         }),
         {
           projectId: 'p',

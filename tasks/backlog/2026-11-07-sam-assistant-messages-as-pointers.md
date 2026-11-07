@@ -9,7 +9,9 @@ persists model-written text through `persistOrchestrationPrompt` and sends it wi
 `sendPromptToAgentOnNode` as a user prompt. When the target is busy, the 409 fallback enqueues it with
 `senderType: 'human'`.
 
-The MCP messaging tools moved to pair channels in the Human Voice PR. The /sam assistant cannot use
+The /sam `dispatch_task` and `retry_subtask` tools were fixed in the Human Voice PR: the child's first
+message ends with a SAM-assistant author line (`samAssistantAttribution`). The MCP messaging tools moved
+to pair channels in the same PR. The /sam assistant cannot use
 them directly: a /sam conversation has no task-backed chat session to own a pair subscription.
 
 A related edge, recorded but not decided: GitHub-trigger templates are human-authored, but

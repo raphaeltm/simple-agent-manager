@@ -10,6 +10,7 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
+import { parentAgentAttribution, withoutAuthorAttribution } from '../../services/agent-authorship';
 import { generateBranchName } from '../../services/branch-name';
 import { capacityPlacementSnapshotDbValues } from '../../services/capacity-placement-snapshot';
 import {
@@ -43,7 +44,6 @@ import {
   type McpTokenData,
   sanitizeUserInput,
 } from './_helpers';
-import { parentAgentAttribution, withoutParentAgentAttribution } from './dispatch-description';
 import { resolveCallerChatSession } from './mailbox-target';
 import { denyWhenMcpActorLacksCurrentProjectCapability } from './orchestration-authority';
 import { stopActiveChildAgentForRetry } from './orchestration-retry-stop';
@@ -195,7 +195,7 @@ export async function handleRetrySubtask(
     : '';
   const replacementBody =
     newDescription ??
-    `${withoutParentAgentAttribution(originalDescription)}\n\nNote: Previous attempt (${childTaskId}) ended with status '${stoppedStatus}'.${
+    `${withoutAuthorAttribution(originalDescription)}\n\nNote: Previous attempt (${childTaskId}) ended with status '${stoppedStatus}'.${
       truncatedError ? ` Error: ${truncatedError}` : ''
     }${childTask.outputBranch ? ` Branch with partial work: ${childTask.outputBranch}` : ''}`;
   // The retry's description is agent-written too, so it names this parent (constitution XV).
@@ -351,11 +351,11 @@ export async function handleRetrySubtask(
   });
 
   const titleConfig = getTaskTitleConfig(env);
-  const taskTitle = await generateTaskTitle(env, replacementDescription, titleConfig);
+  const taskTitle = await generateTaskTitle(env, replacementBody, titleConfig);
 
   const branchPrefix = env.BRANCH_NAME_PREFIX || 'sam/';
   const branchMaxLength = parseInt(env.BRANCH_NAME_MAX_LENGTH || '60', 10);
-  const branchName = generateBranchName(replacementDescription, taskId, {
+  const branchName = generateBranchName(replacementBody, taskId, {
     prefix: branchPrefix,
     maxLength: branchMaxLength,
   });
