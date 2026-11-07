@@ -51,7 +51,8 @@ table regardless: 3 machine types (`SIZE_MAP`) × 8 zones, at three hardcoded `~
 - [x] `gcp-price-table.ts` + isolated cron step `gcp_price_table` (TTL, failure backoff,
       platform-first credentials, attempt cap)
 - [x] Admin settings `gcpCatalog.*`
-- [x] WIF scope `cloud-billing.readonly`; setup enables `cloudbilling.googleapis.com`
+- [x] Price read requests `cloud-billing.readonly` alone (provisioning tokens stay compute-only);
+      setup enables `cloudbilling.googleapis.com`
 - [x] Docs: google-cloud.md, self-hosting.mdx, admin-settings.md, compute-pools.md,
       configuration.md, `.env.example`
 - [x] Tests: SKU parsing and exclusions, conflicts, pagination, disabled API, machine-type filter
@@ -72,3 +73,16 @@ table regardless: 3 machine types (`SIZE_MAP`) × 8 zones, at three hardcoded `~
 ## Staging
 
 Waived by Raphaël for this work (session `eecddba8`, 2026-11-07). GCP is not connected on staging.
+
+## Review fixes
+
+- security-auditor MEDIUM: billing scope no longer added to every token; `getGcpAccessToken`
+  takes a `scopes` option used only by the price read (separate cache key).
+- cloudflare-specialist MEDIUM ×2: overall refresh budget (`gcpCatalog.priceRefreshBudgetMs`,
+  default 90 s), step moved after the lifecycle sweeps, no-credential backoff. LOW ×2: one
+  price-table read per catalog build, no D1 over-fetch.
+- test-engineer MEDIUM: real WIF exchange test for scopes and cache separation; budget test.
+  LOW deferred: a single test from live catalog to pool candidate activation (both halves
+  are covered separately: the live offering carries `machineSize`, and pool activation by
+  `machineSize` is tested generically).
+- doc-sync LOW ×2: incomplete-read wording; providers AGENTS.md GCP entry.
