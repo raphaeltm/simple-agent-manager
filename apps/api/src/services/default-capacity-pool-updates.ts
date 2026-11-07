@@ -4,6 +4,7 @@ import type {
   CapacityPoolStrategy,
   DefaultCapacityPoolCandidateCatalogAddition,
 } from '@simple-agent-manager/shared';
+import { MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH } from '@simple-agent-manager/shared';
 import { and, eq, inArray, ne, or, sql } from 'drizzle-orm';
 import type { BatchItem } from 'drizzle-orm/batch';
 import { type drizzle } from 'drizzle-orm/d1';
@@ -55,7 +56,9 @@ export interface DefaultCapacityPoolUpdateResult {
   /**
    * True when a concurrent editor advanced the pool between this edit's read and its write.
    * Nothing was published: membership, policy and revision are all fenced on the same
-   * pre-read revision inside one D1 batch, so a losing editor changes nothing at all.
+   * pre-read revision inside one D1 batch, so a losing editor changes nothing at all. An edit
+   * that rewrites the provider order is also fenced on the order it read, because a reorder
+   * does not advance the revision.
    */
   conflict: boolean;
 }
@@ -169,6 +172,9 @@ export async function updateDefaultCapacityPool(
   const published = await publishPoolEditAtomically(db, {
     poolId: pool.id,
     guardRevision: pool.revision,
+    // A reorder does not bump the revision, so an edit that rewrites the order must also
+    // prove the order it read is still the stored one.
+    ...(sourceOrderResult.changed ? { guardSourceOrderJson: pool.sourceOrderJson ?? null } : {}),
     candidateUpdates: candidateResult.changedUpdates,
     policyValues: {
       ...policyResult.values,
@@ -205,15 +211,23 @@ async function publishPoolEditAtomically(
   input: {
     poolId: string;
     guardRevision: number;
+    /** When set, the edit also requires the stored provider order to still equal this value. */
+    guardSourceOrderJson?: string | null;
     candidateUpdates: CandidateStatusUpdate[];
     policyValues: Partial<PolicyUpdate> & { sourceOrderJson?: string | null };
   }
 ): Promise<boolean> {
   const now = nextCapacityPoolTimestamp();
   const nextRevision = input.guardRevision + 1;
+  // Every statement shares this fence, so a refused order guard cannot leave candidate rows
+  // updated under a pool row that was not.
+  const sourceOrderGuard =
+    input.guardSourceOrderJson === undefined
+      ? sql``
+      : sql` AND source_order_json IS ${input.guardSourceOrderJson}`;
   const poolRevisionFence = sql`EXISTS (
     SELECT 1 FROM capacity_pools
-    WHERE id = ${input.poolId} AND revision = ${input.guardRevision}
+    WHERE id = ${input.poolId} AND revision = ${input.guardRevision}${sourceOrderGuard}
   )`;
 
   // One statement per (target status, bind-safe id chunk) rather than one per row: a
@@ -271,12 +285,7 @@ async function publishPoolEditAtomically(
         revision: nextRevision,
         updatedAt: now,
       })
-      .where(
-        and(
-          eq(schema.capacityPools.id, input.poolId),
-          eq(schema.capacityPools.revision, input.guardRevision)
-        )
-      )
+      .where(and(eq(schema.capacityPools.id, input.poolId), poolRevisionFence))
   );
 
   const results = await db.batch(statements as SqliteBatch);
@@ -329,6 +338,12 @@ async function resolveSourceOrderUpdate(
   if (input.sourceOrder === undefined) {
     return { changed: false, json: pool.sourceOrderJson ?? null, missingSourceIds: [] };
   }
+  if (input.sourceOrder && input.sourceOrder.length > MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH) {
+    // The route rejects this first; the membership read below binds one parameter per id.
+    throw new Error(
+      `sourceOrder may list at most ${MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH} capacity sources`
+    );
+  }
   const requested = input.sourceOrder && input.sourceOrder.length > 0 ? input.sourceOrder : null;
   const json = requested ? JSON.stringify(requested) : null;
   const current = parseCapacityPoolSourceOrder(pool.id, pool.sourceOrderJson);
@@ -358,7 +373,12 @@ async function resolveSourceOrderUpdate(
   };
 }
 
-/** Store a provider order alone, fenced on the pool revision but without bumping it. */
+/**
+ * Store a provider order alone, without bumping the revision. The revision alone cannot fence
+ * this write, because a reorder never advances it: two concurrent reorders would both match it
+ * and the later one would silently replace the earlier. So it also compares the stored order
+ * with the one this edit read, and a changed order is a conflict.
+ */
 async function publishSourceOrderOnly(
   db: Db,
   pool: schema.CapacityPool,
@@ -368,7 +388,11 @@ async function publishSourceOrderOnly(
     .update(schema.capacityPools)
     .set({ sourceOrderJson: json })
     .where(
-      and(eq(schema.capacityPools.id, pool.id), eq(schema.capacityPools.revision, pool.revision))
+      and(
+        eq(schema.capacityPools.id, pool.id),
+        eq(schema.capacityPools.revision, pool.revision),
+        sql`${schema.capacityPools.sourceOrderJson} IS ${pool.sourceOrderJson ?? null}`
+      )
     )
     .run();
   return (result as unknown as D1Result<unknown>).meta.changes === 1;

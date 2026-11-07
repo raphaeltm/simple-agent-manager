@@ -58,3 +58,22 @@ a mixed GCP + Hetzner pool interleaved them by strategy and price; there was no 
 ## Staging
 
 Waived by Raphaël for the provider-priority work (session `eecddba8`, 2026-11-07).
+
+## Review fixes (2026-11-07)
+
+- [x] HIGH (test-engineer, cloudflare-specialist): two concurrent reorder-only edits both passed the
+      revision fence, so the later one silently replaced the earlier. The reorder now also fences on
+      the stored order value it read (`source_order_json IS ?`); an edit that rewrites the order
+      together with policy/candidates carries the same guard in the shared batch fence, so a refused
+      guard cannot leave candidate rows updated. Race tests for both paths; each goes red with its
+      guard removed.
+- [x] Route-level PATCH tests for `sourceOrder` (user, plus installation with a cross-scope source).
+- [x] Reuse-after-reorder test through the real writer and `filterReusableNodesByCurrentAuthority`,
+      with a revision-bump control.
+- [x] Deleted-only source counts as not serving the pool; legacy candidate without `sourceRank`
+      ranks as unranked.
+- [x] `sourceRank` recorded in `placement_explanation_json` (not part of the authority predicate).
+- [x] Service-level cap of 32 ids (bind budget), type-only circular import removed.
+- Rule 60: worst-case combined PATCH (candidates + catalogAdditions + policy + sourceOrder) is ~13
+  D1 round trips, one over the mutation guide; the order membership read only runs when the order
+  actually changes. Accepted for a low-traffic admin route; stated in the PR.

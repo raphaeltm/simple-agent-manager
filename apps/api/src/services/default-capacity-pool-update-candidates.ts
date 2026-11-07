@@ -15,7 +15,6 @@ import {
 } from './capacity-pool-workload-roles';
 import type { DefaultPoolScopeIdentity } from './default-capacity-pool-helpers';
 import { defaultCandidateId } from './default-capacity-pool-helpers';
-import type { DefaultCapacityPoolUpdateInput } from './default-capacity-pool-updates';
 
 type Db = ReturnType<typeof drizzle>;
 
@@ -50,7 +49,9 @@ export interface CatalogAdditionUpdateResult {
 export async function resolveCatalogAdditionUpdates(
   db: Db,
   pool: schema.CapacityPool,
-  input: DefaultCapacityPoolUpdateInput
+  input: DefaultPoolScopeIdentity & {
+    catalogAdditions?: DefaultCapacityPoolCandidateCatalogAddition[];
+  }
 ): Promise<CatalogAdditionUpdateResult> {
   const additions = dedupeCatalogAdditions(input.catalogAdditions ?? []);
   if (additions.length === 0) {

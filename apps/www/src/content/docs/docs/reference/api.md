@@ -679,6 +679,8 @@ New VMs are ranked by it; an existing node with room is still reused first. Sour
 after listed ones. `null` or `[]` clears the order. Every id must be a capacity source that serves
 this pool, otherwise the request fails with `400` and `details.missingSourceIds` lists the unknown
 ids. Changing only the order does not bump the pool revision, so existing nodes stay reusable.
+If another edit changed the order after this request read it, the request fails with `409` and
+changes nothing.
 
 ```json
 {

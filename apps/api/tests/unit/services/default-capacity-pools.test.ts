@@ -6907,6 +6907,82 @@ describe('pool provider order (idea 01M6NXTF2RQ5QXHM7YZ4ZF0XBK)', () => {
     });
   });
 
+  it('lets exactly one of two concurrent reorders win; the other reports a conflict', async () => {
+    const { db, hetznerSource, vultrSource } = await seedTwoProviderPool();
+    const reorder = (sourceOrder: string[]) =>
+      updateDefaultCapacityPool(db as never, {
+        scope: 'user',
+        ownerUserId: 'user-1',
+        ownerProjectId: null,
+        sourceOrder,
+      });
+    const first = [hetznerSource, vultrSource];
+    const second = [vultrSource, hetznerSource];
+
+    const [a, b] = await Promise.all([reorder(first), reorder(second)]);
+
+    // Both editors read the same unordered pool. A reorder does not bump the revision, so only
+    // the order-value fence can stop the later write from silently replacing the earlier one.
+    expect([a.conflict, b.conflict].sort()).toEqual([false, true]);
+    const winner = a.conflict ? second : first;
+    expect(poolRow().source_order_json).toBe(JSON.stringify(winner));
+    expect((a.conflict ? b : a).summary?.pool.sourceOrder).toEqual(winner);
+  });
+
+  it('fences a policy edit that rewrites the order against a concurrent reorder', async () => {
+    const { db, hetznerSource, vultrSource } = await seedTwoProviderPool();
+    const before = poolRow();
+    const reorderOnly = updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      sourceOrder: [hetznerSource, vultrSource],
+    });
+    const policyAndOrder = updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      policy: { exhaustionPolicy: 'fallback-chain' },
+      sourceOrder: [vultrSource, hetznerSource],
+    });
+
+    const [a, b] = await Promise.all([reorderOnly, policyAndOrder]);
+
+    expect([a.conflict, b.conflict].sort()).toEqual([false, true]);
+    const row = getRows<{ exhaustion_policy: string; revision: number }>(
+      "SELECT exhaustion_policy, revision FROM capacity_pools WHERE scope = 'user'"
+    )[0]!;
+    if (a.conflict) {
+      // The combined edit won: its order and its policy landed together, in one revision bump.
+      expect(poolRow().source_order_json).toBe(JSON.stringify([vultrSource, hetznerSource]));
+      expect(row).toEqual({ exhaustion_policy: 'fallback-chain', revision: before.revision + 1 });
+    } else {
+      // The reorder won: the combined edit published nothing, policy included.
+      expect(poolRow().source_order_json).toBe(JSON.stringify([hetznerSource, vultrSource]));
+      expect(row.revision).toBe(before.revision);
+      expect(row.exhaustion_policy).not.toBe('fallback-chain');
+    }
+  });
+
+  it('treats a source whose candidates are all deleted as not serving the pool', async () => {
+    const { db, hetznerSource, vultrSource } = await seedTwoProviderPool();
+    sqlite
+      ?.prepare(
+        `UPDATE capacity_pool_candidates SET status = 'deleted' WHERE capacity_source_id = ?`
+      )
+      .run(vultrSource);
+
+    const update = await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      sourceOrder: [vultrSource, hetznerSource],
+    });
+
+    expect(update.missingSourceIds).toEqual([vultrSource]);
+    expect(poolRow().source_order_json).toBeNull();
+  });
+
   it('reads a malformed stored order as no order instead of failing the pool', async () => {
     const { db } = await seedTwoProviderPool();
     sqlite?.prepare(`UPDATE capacity_pools SET source_order_json = '{"not":"a list"}'`).run();

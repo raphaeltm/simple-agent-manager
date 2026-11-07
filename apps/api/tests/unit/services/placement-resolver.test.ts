@@ -19,6 +19,7 @@ import {
   resolveReusableNodeCapacitySnapshot,
   resolveTaskStartPlacement,
 } from '../../../src/services/placement-resolver';
+import { buildCapacityPlacementExplanation } from '../../../src/services/placement-resolver-capacity-snapshot';
 
 function reservation(
   overrides: Partial<ReturnType<typeof resolveTaskStartPlacement>['resolvedReservation']> = {}
@@ -759,6 +760,49 @@ describe('provider rank in runtime re-ranking', () => {
       } as never
     );
     expect(ranked.map((c) => c.id)).toEqual(['first', 'second', 'unranked']);
+  });
+});
+
+describe('provider rank in persisted state', () => {
+  it('ranks a candidate persisted before sourceRank existed as unranked', () => {
+    const legacy = {
+      id: 'legacy',
+      provider: 'hetzner',
+      location: 'fsn1',
+      providerInstanceVcpuCount: 2,
+      providerInstanceMemoryMb: 4096,
+      providerInstanceDiskGb: 40,
+      providerInstancePriceMonthlyCents: 100,
+      providerInstancePriceHourlyMicros: 1000,
+      providerInstancePriceCurrency: 'EUR',
+      priceComparability: 'known',
+      priority: 0,
+      candidateOrder: 0,
+    } as TaskStartCapacityCandidate;
+    expect('sourceRank' in legacy).toBe(false);
+
+    const ranked = rankCapacityCandidatesForRuntime(
+      [legacy, { ...legacy, id: 'ranked', sourceRank: 1, providerInstancePriceMonthlyCents: 900 }],
+      { strategy: 'balanced', reservation: reservation(), locationInventory: [] } as never
+    );
+
+    // Even though it is cheaper, the legacy candidate ranks after the ranked one.
+    expect(ranked.map((c) => c.id)).toEqual(['ranked', 'legacy']);
+  });
+
+  it('records the source rank in the placement explanation', () => {
+    const selection = capacitySelection({});
+    const explain = (sourceRank: number | null | undefined) =>
+      JSON.parse(
+        buildCapacityPlacementExplanation(selection, {
+          ...selection.candidates[0]!,
+          sourceRank,
+        })
+      ).sourceRank;
+
+    expect(explain(2)).toBe(2);
+    expect(explain(null)).toBeNull();
+    expect(explain(undefined)).toBeNull();
   });
 });
 

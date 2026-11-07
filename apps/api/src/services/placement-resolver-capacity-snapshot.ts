@@ -196,6 +196,7 @@ export function buildCapacityPlacementExplanation(
     | 'sourceAuthorityGeneration'
     | 'candidateAuthorityGeneration'
     | 'capacityAuthorityGeneration'
+    | 'sourceRank'
   >
 ): string {
   const authorityGeneration =
@@ -213,6 +214,9 @@ export function buildCapacityPlacementExplanation(
     capacityPoolProjectId: selection.capacityPoolProjectId,
     workloadRole: selection.workloadRole,
     capacitySourceId: candidate?.capacitySourceId ?? null,
+    // The source's place in the pool's provider order (1 = most preferred, null = unranked).
+    // It outranks price and strategy, so it is recorded with them.
+    sourceRank: candidate?.sourceRank ?? null,
     capacityPoolCandidateId: candidate?.id ?? null,
     provider: candidate?.provider ?? null,
     location: candidate?.location ?? null,
