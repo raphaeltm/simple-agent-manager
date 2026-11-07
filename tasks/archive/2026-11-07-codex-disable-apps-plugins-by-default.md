@@ -40,15 +40,15 @@ remote_plugin = false` to `$CODEX_HOME/config.toml` turns all three off. `--disa
 - [x] Tests: each form, idempotence, user override wins, invalid-user-config fallback, through `writeCodexConfigLocally`
 - [x] Verify locally against the real Codex 0.160.0 binary with `codex features list`
 - [x] Docs: mention the default in the public Codex/agent docs
-- [ ] Staging: real Codex session's config.toml has the managed features block and Codex reports the features off
+- [x] Staging: real Codex session's config.toml has the managed features block and Codex reports the features off
 
 ## Acceptance Criteria
 
-- [ ] A fresh SAM Codex session (VM and Instant) writes `apps = false`, `plugins = false`, `remote_plugin = false`
-- [ ] A user's own explicit value for any of those keys is preserved
-- [ ] User configs with an existing `[features]` table stay valid TOML and keep their other keys
-- [ ] Rewriting the config on restart does not duplicate the managed lines
-- [ ] Codex 0.160.0 reports the three features as disabled when reading the written config
+- [x] A fresh SAM Codex session (VM and Instant) writes `apps = false`, `plugins = false`, `remote_plugin = false`
+- [x] A user's own explicit value for any of those keys is preserved
+- [x] User configs with an existing `[features]` table stay valid TOML and keep their other keys
+- [x] Rewriting the config on restart does not duplicate the managed lines
+- [x] Codex 0.160.0 reports the three features as disabled when reading the written config
 
 ## References
 
@@ -81,3 +81,23 @@ remote_plugin = false` to `$CODEX_HOME/config.toml` turns all three off. `--disa
   header, managed-key removal) uses it. A managed key with a multi-line value is removed whole.
   The merge also logs an error if its result is invalid while the user's file was valid.
   Forcing every line to count as a statement reddens exactly the three multi-line cases.
+
+## Staging Evidence
+
+- Deploy run 42401427249 (branch head a78548721) succeeded. Fresh node `01M6VNFTXA2MNF3NH9FEFRCPYN`
+  reported `agent_version = a78548721a42…` (this branch's VM-agent release).
+- VM runtime, profile "OpenAI Codex Chat" (Codex subscription credential), session
+  `1724ccd7-ce30-4d8b-81ca-4bc9621ffe44`, driven through the project chat UI with Playwright:
+  - `~/.codex/config.toml` contained the `# BEGIN SAM MANAGED FEATURES` block with `[features]`
+    `apps = false`, `plugins = false`, `remote_plugin = false`.
+  - `/opt/sam-codex-c2/current/bin/codex features list` on the VM: `apps false`, `plugins false`,
+    `remote_plugin false`.
+  - `~/.codex/plugins` does not exist. Agent reports no `codex_apps` tools and no plugin skills.
+  - SAM MCP is still available (`mcp__sam_mcp__`, `SAM_MCP_TOKEN` set). The agent's first reply
+    wrongly said it was missing; asked again, it found it through tool discovery. Local check with
+    Codex 0.160.0 and a mock model: the tool list sent to the model (including `mcp__sam_mcp`) is
+    identical with and without the three flags.
+- Observation (not a regression): Codex appends `[projects."<workspace>"] trust_level = "trusted"`
+  at the end of config.toml. SAM's last managed block is at the end of the file, so the table lands
+  inside SAM's markers and is removed on the next rewrite, then re-added by Codex. Before this
+  change the same happened inside the MCP block.
