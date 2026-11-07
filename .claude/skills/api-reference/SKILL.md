@@ -80,7 +80,7 @@ The control plane uses the VM-agent capability path `DELETE /workspaces/:id/phys
 
 ## Chat Sessions (Project Scoped)
 
-- `GET /api/projects/:projectId/sessions` — List chat sessions for a project
+- `GET /api/projects/:projectId/sessions` — List chat sessions for a project, newest message first (`limit` ≤ 100, `offset`, `status`, `scope=my|all`). `include=live` on an unfiltered first page also appends every in-scope `active` and `sleeping` session the page left out (up to `limit` per status, with sessions that carry an attention marker ranked separately); `total`/`hasMore` still describe the page
 - `GET /api/projects/:projectId/sessions/:sessionId` — Get chat session detail with recent messages (`before`/`after` take the same cursors as the message list below; an `after`-only request reads forward so a client can drain newer messages page by page)
 - `GET /api/projects/:projectId/sessions/:sessionId/state` — Get lightweight ACP activity state for a chat session
 - `GET /api/projects/:projectId/sessions/:sessionId/messages` — List persisted session messages (supports `roles`, `before`, `after`, `limit`, `compact`, `order=asc|desc`). `before`/`after` accept an exact `[createdAt,sequence,id]` cursor taken from a page's edge row — required to resume inside a group of rows sharing one timestamp — or a legacy millisecond timestamp that excludes every row at that time. Without `order`, an `after`-only request reads ascending; anything else reads newest-first. Pages are always returned oldest-first.

@@ -167,13 +167,24 @@ export interface ChatMessagesListResponse {
 
 export async function listChatSessions(
   projectId: string,
-  params: { status?: string; limit?: number; offset?: number; scope?: 'my' | 'all' } = {}
+  params: {
+    status?: string;
+    limit?: number;
+    offset?: number;
+    scope?: 'my' | 'all';
+    /**
+     * Also return every awake and sleeping session in scope that the newest page left out
+     * (first page, no status filter). The chat sidebar groups by state, not by age.
+     */
+    includeLive?: boolean;
+  } = {}
 ): Promise<ChatSessionListResponse> {
   const searchParams = new URLSearchParams();
   if (params.status) searchParams.set('status', params.status);
   if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
   if (params.offset !== undefined) searchParams.set('offset', String(params.offset));
   if (params.scope) searchParams.set('scope', params.scope);
+  if (params.includeLive) searchParams.set('include', 'live');
 
   const qs = searchParams.toString();
   const endpoint = qs

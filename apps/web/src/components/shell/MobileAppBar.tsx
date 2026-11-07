@@ -14,6 +14,8 @@ export interface ShellScreenAction {
   onClick: () => void;
   /** Whether the surface it opens is open, for `aria-expanded`. */
   expanded?: boolean;
+  /** Items waiting on the user behind this toggle, shown as an amber count. Put it in `label` too. */
+  count?: number;
 }
 
 /**
@@ -65,6 +67,8 @@ export function MobileAppBar({
           icon={screenAction.icon}
           onClick={screenAction.onClick}
           aria-expanded={screenAction.expanded}
+          count={screenAction.count}
+          countTone="attention"
           showTooltip={false}
           className="ml-1"
         />
