@@ -177,12 +177,23 @@ async function captureMaintenanceControls(page: Page, target: string) {
   return screenshots;
 }
 async function auditFullChoose(page: Page) {
+  // Pick a normal account name (index 0 is a deliberately hostile/long name
+  // fixture, exercised separately by the default "choose" scenario) so the
+  // review summary assertions below are deterministic.
+  await page.locator('#account-id').selectOption({ label: 'Account 1' });
   await expect(page.locator('#zone-id')).toHaveValue('b'.repeat(32));
   await expect(page.locator('#base-domain-shown')).toHaveText('example.com');
+  // Advanced subdomain override starts collapsed.
+  await expect(page.locator('#subdomain-details')).not.toHaveAttribute('open', '');
   await page.locator('#owner-email').fill('owner+installation@example.com');
   await expect(page.locator('#preview')).toBeEnabled();
   // The "install" primary action is not visible until the plan has been reviewed.
   await expect(page.locator('#review')).toBeHidden();
+  // Choose/Review/Handoff drop the marketing hero and extra panels for a slim header.
+  await expect(page.locator('#hero-copy')).toBeHidden();
+  await expect(page.locator('#slim-header')).toBeVisible();
+  await expect(page.locator('#mode-note')).toBeHidden();
+  await expect(page.locator('#trust')).toBeHidden();
 }
 async function auditScenario(page: Page, scenario: string, baseUrl: string) {
   if (scenario === 'cleanup')
@@ -206,41 +217,66 @@ async function auditScenario(page: Page, scenario: string, baseUrl: string) {
     await expect(page.getByText(/These may allow changes to existing Workers/)).toBeVisible();
     await page.getByText('What will SAM be allowed to do?').click();
   }
+  // The step indicator always has 4 entries in both modes; it never changes
+  // length between screens. Bootstrap mode greys Review out instead of
+  // removing it, so Connect/Choose/Handoff numbering stays identical.
+  await expect(page.locator('.steps li')).toHaveCount(4);
   const stepBounds = await page.locator('.steps').evaluate((el) => {
     const parent = el.getBoundingClientRect();
-    return [...el.querySelectorAll('li:not([hidden])')].every((item) => {
+    return [...el.querySelectorAll('li')].every((item) => {
       const r = item.getBoundingClientRect();
       return r.left >= parent.left && r.right <= parent.right;
     });
   });
   expect(stepBounds).toBe(true);
+  if (!scenario.startsWith('full-')) await expect(page.locator('#step-review')).toHaveClass(/skipped/);
   if (scenario === 'full-choose') await auditFullChoose(page);
   if (scenario === 'full-review') {
     await auditFullChoose(page);
     await page.locator('#preview').click();
     await expect(page.locator('#review')).toBeVisible();
-    await expect(page.locator('#plan-summary')).toContainText('Build source');
-    await expect(page.locator('#plan-summary')).toContainText(
-      'Initialize account address sam-account.workers.dev'
+    await expect(page.locator('#plan-summary-line')).toContainText(
+      'SAM will live at app.example.com in Account 1. Cloudflare usage charges apply.'
     );
+    await expect(page.locator('#plan-details')).toBeVisible();
+    await expect(page.locator('#plan-summary')).toBeHidden();
+    await page.locator('#plan-details summary').click();
+    await expect(page.locator('#plan-summary')).toContainText('sam-account.workers.dev (new)');
+    await expect(page.locator('#plan-summary')).not.toContainText('Initialize account address');
     await expect(page.locator('#review-blocked')).toBeHidden();
     await expect(page.locator('#review-form')).toBeVisible();
+    await expect(page.locator('#confirm-full')).not.toBeChecked();
+    await expect(page.locator('#install')).toBeDisabled();
+    await page.locator('#confirm-full').check();
     await expect(page.locator('#install')).toBeEnabled();
     await expect(page.locator('#step-review')).toHaveAttribute('aria-current', 'step');
+    await expect(page.locator('#step-review')).not.toHaveClass(/skipped/);
   }
   if (scenario === 'full-conflict') {
     await auditFullChoose(page);
     await page.locator('#preview').click();
     await expect(page.locator('#review')).toBeVisible();
-    await expect(page.locator('#plan-summary')).toContainText('block installation');
+    await expect(page.locator('#message > p')).toContainText('block installation');
+    await expect(page.locator('#plan-details')).toBeHidden();
     await expect(page.locator('#review-blocked')).toBeVisible();
     await expect(page.locator('#review-form')).toBeHidden();
-    await expect(page.locator('#check-again')).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Use a different domain', exact: true })
+    ).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: "I've removed them — check again", exact: true })
+    ).toBeVisible();
     // The install action is unavailable while a conflict exists.
     await expect(page.locator('#install')).toBeHidden();
     await expect(page.locator('#back-to-choose')).toBeVisible();
   }
-  if (scenario === 'choose') await expect(page.locator('#install-simple')).toBeEnabled();
+  if (scenario === 'choose') {
+    await expect(page.locator('#install-simple')).toBeDisabled();
+    await page.locator('#confirm').check();
+    await expect(page.locator('#install-simple')).toBeEnabled();
+    await page.locator('#confirm').uncheck();
+    await expect(page.locator('#install-simple')).toBeDisabled();
+  }
   if (scenario === 'empty' || scenario === 'unconfigured')
     await expect(page.locator(scenario === 'empty' ? '#install-simple' : '#login')).toBeDisabled();
   if (scenario === 'unconfigured') {
@@ -561,6 +597,13 @@ async function auditMaintenance(browser: Browser) {
   screenshots += await captureMaintenanceControls(page, target);
   await page.setViewportSize({ width: 375, height: 667 });
   await page.goto(target);
+  // The first-install consent checkbox is pre-checked (the installer's Review
+  // screen already captured consent); the shared script keeps the primary
+  // button in sync with it rather than requiring a second identical click.
+  await expect(page.locator('input[name="confirmed"]')).toBeChecked();
+  await expect(page.getByRole('button', { name: 'Install SAM', exact: true })).toBeEnabled();
+  await page.locator('input[name="confirmed"]').uncheck();
+  await expect(page.getByRole('button', { name: 'Install SAM', exact: true })).toBeDisabled();
   await page.locator('input[name="confirmed"]').check();
   const [deploymentResponse] = await Promise.all([
     page.waitForResponse((response) => response.url() === target + '/deploy'),
@@ -573,26 +616,65 @@ async function auditMaintenance(browser: Browser) {
         ' origins ' +
         JSON.stringify(received)
     );
-  // Running builds show ordered stages and keep stopping behind a confirmed disclosure.
+  // Running builds show the current stage, a live "last checked" signal and a
+  // progress bar; the full 13-stage list stays collapsed until asked for.
   await expect(page.getByText(/^Step \d+ of \d+:/)).toBeVisible();
+  await expect(page.getByText(/Last checked \d{2}:\d{2}:\d{2} UTC/)).toBeVisible();
+  await expect(page.getByText(/updates every \d+s/)).toBeVisible();
+  await expect(page.locator('progress.build-progress')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Refresh progress' })).toHaveCount(0);
+  const showStages = page.locator('summary', { hasText: 'Show all stages' });
+  await expect(showStages).toBeVisible();
+  await expect(page.locator('.build-steps li').first()).toBeHidden();
+  await showStages.click();
+  await expect(page.locator('.build-steps li').first()).toBeVisible();
   const stop = page.locator('summary', { hasText: 'Stop this build' });
   await expect(stop).toBeVisible();
   await expect(page.getByRole('button', { name: 'Stop build', exact: true })).toBeHidden();
   await stop.click();
-  await expect(page.getByRole('button', { name: 'Stop build', exact: true })).toBeVisible();
+  // The stop confirmation also starts unchecked/disabled, same as handoff.
+  await expect(page.getByRole('button', { name: 'Stop build', exact: true })).toBeDisabled();
+  await page.locator('form[action="/cancel"] input[type="checkbox"]').check();
+  await expect(page.getByRole('button', { name: 'Stop build', exact: true })).toBeEnabled();
   screenshots += await captureState(page, 'maintenance-stop-disclosure');
-  for (const state of ['running', 'failed', 'completed']) {
+  // A failed build gets a plain-language headline with warning styling; the
+  // raw engine tail stays collapsed behind "Technical details".
+  builderJob = {
+    ...builderJob,
+    status: 'failed',
+    checkpoint: { activePhase: 'publish-application' },
+    failure: { step: 'bootstrap', tail: ['<script>route already exists</script>', 'exit 1'] },
+  };
+  await page.goto(target);
+  await page.evaluate(() => document.fonts.ready);
+  await expect(page.locator('.deployment-status--attention')).toBeVisible();
+  await expect(page.locator('.deployment-status')).toContainText('Installation needs attention');
+  await expect(page.locator('.deployment-status')).toContainText(
+    'Your installation and what has been built so far are kept.'
+  );
+  await expect(page.getByText('route already exists')).toBeHidden();
+  await page.locator('summary', { hasText: 'Technical details' }).click();
+  await expect(page.getByText('route already exists')).toBeVisible();
+  screenshots += await captureState(page, 'maintenance-failed');
+  for (const state of ['running', 'completed']) {
     builderJob = {
       ...builderJob,
       status: state,
       checkpoint: { activePhase: 'publish-application' },
+      failure: undefined,
     };
     await page.goto(target);
     await page.evaluate(() => document.fonts.ready);
     screenshots += await captureState(page, 'maintenance-' + state);
   }
-  await page.getByRole('button', { name: 'Open initial setup instructions' }).click();
+  // Completed: one primary action; "Check for an update" is a quiet text
+  // link, not a second competing button; its body text lives in the status box.
+  await expect(page.locator('.deployment-status')).toContainText(
+    'Your instance passed its deployment health check.'
+  );
+  const updateLink = page.getByRole('button', { name: 'Check for an update', exact: true });
+  await expect(updateLink).not.toHaveClass(/sam-btn--secondary/);
+  await page.getByRole('button', { name: 'Finish setting up SAM', exact: true }).click();
   await expect(page.getByText('synthetic-private-setup-token-for-audit')).toBeVisible();
   screenshots += await captureState(page, 'maintenance-setup');
   await context.close();

@@ -101,7 +101,10 @@ export function renderPlanSummary(plan, context) {
   state.approvedPlan = plan;
   blocked.hidden = true;
   form.hidden = false;
-  $('install').disabled = false;
+  // A freshly reviewed plan always starts unconfirmed, even if a previous
+  // plan on this screen had already been ticked.
+  $('confirm-full').checked = false;
+  $('install').disabled = true;
 }
 
 export async function runPreview() {
