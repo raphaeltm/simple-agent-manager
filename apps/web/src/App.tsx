@@ -32,6 +32,10 @@ import { Landing } from './pages/Landing';
 import { ChatLoadingLayout } from './pages/project-chat/ChatLoadingLayout';
 import { LegacyCloudProviderRedirect, SettingsRedirect } from './pages/settings-redirects';
 
+const AttachmentPreviewPrototype = lazyNamed(
+  () => import('./pages/attachment-preview-prototype'),
+  'AttachmentPreviewPrototype'
+);
 const AccountMap = lazyNamed(() => import('./pages/AccountMap'), 'AccountMap');
 const Admin = lazyNamed(() => import('./pages/Admin'), 'Admin');
 const AdminAIProxy = lazyNamed(() => import('./pages/AdminAIProxy'), 'AdminAIProxy');
@@ -313,6 +317,11 @@ export default function App() {
                         <Route
                           path="/__test/trial-chat-gate"
                           element={page(<TrialChatGateHarness />)}
+                        />
+                        {/* PROTOTYPE — composer attachment previews. Remove before merge. */}
+                        <Route
+                          path="/prototype/attachment-previews"
+                          element={page(<AttachmentPreviewPrototype />)}
                         />
                         <Route
                           path="/__test/error-boundary"
