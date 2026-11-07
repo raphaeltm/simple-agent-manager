@@ -39,24 +39,39 @@ function render(data) {
   }
 }
 
-async function createInstallation(fingerprint) {
-  message('Creating your installation service. Keep this page open; retrying will resume the same service if interrupted.');
-  await api('install', {
-    accountId: $('account-id').value,
-    confirmed: true,
-    fingerprint,
-  });
-  render(await api('status'));
-  message('Your installation service is ready.', 'success');
+const CREATING_LABEL = 'Creating your installation service…';
+async function createInstallation(buttonId, fingerprint) {
+  const button = $(buttonId);
+  const previousLabel = button.textContent;
+  button.disabled = true;
+  button.setAttribute('aria-busy', 'true');
+  button.textContent = CREATING_LABEL;
+  message(
+    'Creating your installation service. Keep this page open; retrying will resume the same service if interrupted.'
+  );
+  try {
+    await api('install', {
+      accountId: $('account-id').value,
+      confirmed: true,
+      fingerprint,
+    });
+    render(await api('status'));
+    message('Your installation service is ready.', 'success');
+  } finally {
+    button.removeAttribute('aria-busy');
+    // render() may have already set a more specific label (e.g. "Resume my
+    // installation service" for a pending job); only restore the pre-busy
+    // label if nothing else claimed the button in the meantime.
+    if (button.textContent === CREATING_LABEL) button.textContent = previousLabel;
+  }
 }
 
 $('install-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   if (state.busy || state.fullInstaller || !$('confirm').checked) return;
   state.busy = true;
-  $('install-simple').disabled = true;
   try {
-    await createInstallation();
+    await createInstallation('install-simple');
   } catch (error) {
     if (error.message !== 'session-expired') message(error.message, 'error');
   } finally {
@@ -72,9 +87,8 @@ $('review-form').addEventListener('submit', async (event) => {
   event.preventDefault();
   if (state.busy || !state.approvedPlan || !$('confirm-full').checked) return;
   state.busy = true;
-  $('install').disabled = true;
   try {
-    await createInstallation(state.approvedPlan.fingerprint);
+    await createInstallation('install', state.approvedPlan.fingerprint);
   } catch (error) {
     if (error.message !== 'session-expired') message(error.message, 'error');
   } finally {

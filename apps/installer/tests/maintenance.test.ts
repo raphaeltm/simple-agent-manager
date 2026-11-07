@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { maintenanceSource } from '../src/maintenance';
@@ -244,7 +246,7 @@ it('tells a bootstrap owner plainly that installing SAM is not available, withou
   const claimHtml = await claimed.text();
   expect(claimed.status).toBe(200);
   expect(claimHtml).toContain('Save your recovery credential');
-  expect(claimHtml).toContain('Installing SAM itself from this service is not available yet');
+  expect(claimHtml).toContain('Installing SAM from this service is not available yet');
   expect(claimHtml).toContain(`href="${origin}/self-host.html"`);
   expect(claimHtml).not.toContain('Continue to installation controls');
   const home = await f.coordinator.fetch(
@@ -253,7 +255,23 @@ it('tells a bootstrap owner plainly that installing SAM is not available, withou
   const homeHtml = await home.text();
   expect(home.status).toBe(200);
   expect(homeHtml).toContain('Ownership handoff verified');
-  expect(homeHtml).toContain('Installing SAM itself from this service is not available yet');
+  expect(homeHtml).toContain('Installing SAM from this service is not available yet');
   expect(homeHtml).not.toContain('Continue to installation controls');
   expect(homeHtml).not.toContain('<code>');
+});
+
+it('never ships an inline script whose hash is missing from its own CSP header (hash-drift guard)', async () => {
+  const f = await fixture();
+  const claimed = await f.claim();
+  const csp = claimed.headers.get('Content-Security-Policy') ?? '';
+  const scriptSrc = /script-src ([^;]+)/.exec(csp)?.[1] ?? '';
+  const allowedHashes = new Set(scriptSrc.match(/'sha256-[^']+'/g) ?? []);
+  expect(allowedHashes.size).toBeGreaterThan(0);
+  const html = await claimed.text();
+  const bodies = [...html.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)].map((m) => m[1]!);
+  expect(bodies.length).toBeGreaterThan(0);
+  for (const body of bodies) {
+    const hash = `'sha256-${createHash('sha256').update(body).digest('base64')}'`;
+    expect(allowedHashes.has(hash)).toBe(true);
+  }
 });

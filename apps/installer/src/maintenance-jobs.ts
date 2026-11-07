@@ -59,6 +59,10 @@ async function maintenanceDeploymentPanel(service){
   else if(!manifest.lastSuccessfulCommit)bodyText='Build SAM in your account, then open your own instance. This creates databases, storage, application images and the DNS records you reviewed. Workers Paid and usage charges apply.';
   else bodyText='Your instance passed its deployment health check. Continue to configure sign-in and finish setup.';
  }
+ // The first-install checkbox is pre-checked: the installer's own Review
+ // screen already presented and recorded the same "Workers Paid and usage
+ // charges apply" consent before this service could even be created. The
+ // owner can still untick it; /deploy keeps requiring confirmed==='yes'.
  let actionsHtml='';
  if(active)actionsHtml='<details class="secondary-actions"><summary>Stop this build</summary><p>Stopping keeps your installation and what has been built so far. You can start the build again.</p><form method="post" action="/cancel"><label><input name="confirmed" type="checkbox" value="yes" required> Stop the running build</label><button class="secondary">Stop build</button></form></details>';
  else if(retry)actionsHtml='<form method="post" action="/resume"><button>Retry deployment</button></form>';

@@ -16,7 +16,11 @@ async function installFixtureRoutes(
   page: Page,
   getState: () => string,
   setState: (value: string) => void,
-  previewState: { attempts: number } = { attempts: 0 }
+  previewState: { attempts: number } = { attempts: 0 },
+  installGate: { release: () => void; hold: Promise<void> } = {
+    release: () => {},
+    hold: Promise.resolve(),
+  }
 ) {
   await page.route('**/api/config', (r) =>
     r.fulfill({
@@ -87,7 +91,7 @@ async function installFixtureRoutes(
       },
     });
   });
-  await page.route('**/api/session/install', (r) => {
+  await page.route('**/api/session/install', async (r) => {
     if (getState() === 'error')
       return r.fulfill({
         status: 500,
@@ -96,6 +100,9 @@ async function installFixtureRoutes(
             'Cloudflare could not complete this step. Try again. Details: POST /workers/scripts returned HTTP 403 (codes 10000). No credentials were logged.',
         },
       });
+    // Held open by 'installing' until the test releases it, so the busy
+    // button state is genuinely observed rather than hand-fed.
+    if (getState() === 'installing') await installGate.hold;
     setState('ready');
     return r.fulfill({ json: { ok: true } });
   });
@@ -235,8 +242,11 @@ async function auditScenario(page: Page, scenario: string, baseUrl: string) {
     await auditFullChoose(page);
     await page.locator('#preview').click();
     await expect(page.locator('#review')).toBeVisible();
+    // The app hostname comes from the server's own plan.hostnames, not a
+    // client-side reconstruction of the (possibly different) base-domain
+    // input — this fixture's plan intentionally returns a distinct domain.
     await expect(page.locator('#plan-summary-line')).toContainText(
-      'SAM will live at app.example.com in Account 1. Cloudflare usage charges apply.'
+      'SAM will live at app.sam.example.com in Account 1. Cloudflare usage charges apply.'
     );
     await expect(page.locator('#plan-details')).toBeVisible();
     await expect(page.locator('#plan-summary')).toBeHidden();
@@ -326,13 +336,21 @@ async function auditViewport(
   });
   let state = 'connect';
   const previewState = { attempts: 0 };
+  let releaseInstall: () => void = () => {};
+  const installGate = {
+    release: () => releaseInstall(),
+    hold: new Promise<void>((resolve) => {
+      releaseInstall = resolve;
+    }),
+  };
   await installFixtureRoutes(
     page,
     () => state,
     (value) => {
       state = value;
     },
-    previewState
+    previewState,
+    installGate
   );
   for (const scenario of [
     'connect',
@@ -360,10 +378,24 @@ async function auditViewport(
     screenshots++;
   }
   // Exercise the real non-full UI handlers across create -> ready -> disconnect.
-  state = 'choose';
+  // 'installing' holds /api/session/install open with a real deferred promise
+  // so the busy button state below is genuinely observed, not hand-fed.
+  state = 'installing';
   await page.goto(baseUrl);
   await page.locator('#confirm').check();
-  await page.locator('#install-simple').click();
+  const installClick = page.locator('#install-simple').click();
+  await expect(page.locator('#install-simple')).toHaveAttribute('aria-busy', 'true');
+  await expect(page.locator('#install-simple')).toHaveText(/Creating your installation service/);
+  await expect(page.locator('#install-simple')).toBeDisabled();
+  if (await page.evaluate(() => document.documentElement.scrollWidth > innerWidth))
+    throw new Error(`Overflow ${label} installing`);
+  await page.screenshot({
+    path: `${output}/installer-installing-${label}.png`,
+    fullPage: true,
+  });
+  screenshots++;
+  installGate.release();
+  await installClick;
   await expect(page.locator('#ready')).toBeVisible();
   await expect(page.locator('#step-handoff')).toHaveAttribute('aria-current', 'step');
   await page.locator('#disconnect').click();

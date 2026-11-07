@@ -71,11 +71,6 @@ function renderCreatedDetails(plan) {
   if (/^[a-f0-9]{40}$/.test(plan.sourceCommit))
     source.href = `https://github.com/raphaeltm/simple-agent-manager/commit/${plan.sourceCommit}`;
   appendDetailRow(list, 'Source commit', source);
-  appendDetailRow(
-    list,
-    'What gets created',
-    'DNS records for the hostnames above and a new Cloudflare Worker in your account.'
-  );
   return list;
 }
 
@@ -96,7 +91,11 @@ export function renderPlanSummary(plan, context) {
   }
   $('plan-details').hidden = false;
   line.dataset.tone = '';
-  line.textContent = `SAM will live at app.${context.baseDomain}${context.accountName ? ` in ${context.accountName}` : ''}. Cloudflare usage charges apply.`;
+  // The app hostname is the server's own plan output, not a client-side
+  // reconstruction from the raw domain input (which may differ after the
+  // server's own normalization).
+  const appHost = plan.hostnames.find((host) => host.startsWith('app.')) ?? `app.${context.baseDomain}`;
+  line.textContent = `SAM will live at ${appHost}${context.accountName ? ` in ${context.accountName}` : ''}. Cloudflare usage charges apply.`;
   details.replaceChildren(renderCreatedDetails(plan));
   state.approvedPlan = plan;
   blocked.hidden = true;

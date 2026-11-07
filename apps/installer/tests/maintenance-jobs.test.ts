@@ -429,7 +429,12 @@ it('shows build progress as ordered stages that refresh themselves', async () =>
   });
   const response = await f.request('/');
   const html = await response.text();
-  expect(response.headers.get('Refresh')).toBe('15');
+  // Reload timing lives client-side (in the CSP-hashed script) so an open
+  // disclosure or an in-progress edit can suppress it; the server only ever
+  // advertises the interval via the data attribute, never an HTTP header that
+  // would force a full navigation regardless of in-page state.
+  expect(response.headers.get('Refresh')).toBeNull();
+  expect(html).toContain('data-auto-refresh="15"');
   expect(html).toContain('Step 3 of 13: <strong>Building the agent runtime</strong>');
   expect(html).toContain('Started 23:39 UTC.');
   expect(html).toContain('build-step--done');
@@ -444,8 +449,10 @@ it('shows build progress as ordered stages that refresh themselves', async () =>
     failure: { step: 'bootstrap', code: 2 },
   });
   const failed = await f.request('/');
+  const failedHtml = await failed.text();
   expect(failed.headers.get('Refresh')).toBeNull();
-  expect(await failed.text()).toContain('build-step--stopped');
+  expect(failedHtml).not.toContain('data-auto-refresh="');
+  expect(failedHtml).toContain('build-step--stopped');
 });
 
 it('shows the escaped engine output tail for a failed build under technical details', async () => {

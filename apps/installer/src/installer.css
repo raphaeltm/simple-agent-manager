@@ -269,10 +269,12 @@ legend {
   margin-top: 10px;
   padding-top: 10px;
 }
-[data-tone='error'],
-[data-tone='warning'] {
+/* Must out-specificity #message:not(:empty)'s own border/background, or the
+   tone colour never shows up (reviewer finding: banners rendered neutral). */
+#message[data-tone='error'],
+#message[data-tone='warning'] {
   border-color: var(--color-warning);
-  background: color-mix(in srgb, var(--color-warning) 12%, var(--color-bg-inset));
+  background: color-mix(in srgb, var(--color-warning) 16%, var(--color-bg-inset));
 }
 .status-icon {
   color: var(--color-warning);
