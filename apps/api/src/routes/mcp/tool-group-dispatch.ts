@@ -31,8 +31,11 @@ export function resolveGroupedToolCall(
   toolName: string | undefined,
   toolArgs: Record<string, unknown>
 ): ResolvedToolCall | JsonRpcResponse {
-  const group = toolName ? MCP_TOOL_GROUPS_BY_NAME.get(toolName) : undefined;
-  if (!group || !toolName) return { toolName: toolName ?? '', toolArgs };
+  if (typeof toolName !== 'string' || !toolName) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'tools/call requires a tool name');
+  }
+  const group = MCP_TOOL_GROUPS_BY_NAME.get(toolName);
+  if (!group) return { toolName, toolArgs };
 
   const methods = Object.keys(group.methods);
   const { method, ...rest } = toolArgs;

@@ -12,7 +12,10 @@ import { MCP_SERVER_INSTRUCTIONS } from '../../../../src/routes/mcp/server-instr
 import { LISTED_MCP_TOOLS, TASK_REQUIRED_TOOLS } from '../../../../src/routes/mcp/tool-catalog';
 import { MCP_TOOLS } from '../../../../src/routes/mcp/tool-definitions';
 import { resolveGroupedToolCall } from '../../../../src/routes/mcp/tool-group-dispatch';
-import { buildGroupDefinition } from '../../../../src/routes/mcp/tool-group-schema';
+import {
+  buildGroupDefinition,
+  indexGroupMembers,
+} from '../../../../src/routes/mcp/tool-group-schema';
 import { MCP_TOOL_GROUPS } from '../../../../src/routes/mcp/tool-groups';
 import { __resetAdminSettingsCacheForTest } from '../../../../src/services/admin-settings';
 import { __resetPlatformConfigCacheForTest } from '../../../../src/services/platform-config';
@@ -320,6 +323,12 @@ describe('group argument translation', () => {
     }
   });
 
+  it('rejects a call without a tool name', () => {
+    expect(resolveGroupedToolCall(1, undefined, {})).toMatchObject({
+      error: { code: -32602, message: 'tools/call requires a tool name' },
+    });
+  });
+
   it('leaves ungrouped tool calls untouched', () => {
     expect(resolveGroupedToolCall(1, 'dispatch_task', { description: 'x' })).toEqual({
       toolName: 'dispatch_task',
@@ -356,6 +365,18 @@ describe('group schema generation', () => {
         fake
       )
     ).toThrow(/property 'limit' differs/);
+  });
+
+  it('refuses a member tool claimed by two groups', () => {
+    const group = (name: string) => ({
+      name,
+      kind: 'read' as const,
+      summary: 'x',
+      methods: { get: { tool: 'get_idea', summary: 'x' } },
+    });
+    expect(() => indexGroupMembers([group('one_read'), group('two_read')])).toThrow(
+      /get_idea is in both one_read and two_read/
+    );
   });
 
   it('marks which methods use and require each property', () => {

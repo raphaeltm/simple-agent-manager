@@ -211,7 +211,7 @@ export function formatKnowledgeEntityIndex(
     `\n${heading}\n` +
       'The block above shows only the highest-ranked observations, capped per entity — it is NOT everything ' +
       `this project knows.${notInjected > 0 ? ` ${notInjected} of the entities listed here have no observations shown above at all.` : ''} ` +
-      `${truncated ? `A further ${totalEntities - entityIndex.length} entities are not listed; \`search_knowledge\` still reaches them. ` : ''}` +
+      `${truncated ? `A further ${totalEntities - entityIndex.length} entities are not listed; \`knowledge_read\` method \`search\` still reaches them. ` : ''}` +
       'Each entry below is `EntityName (type, N observations)`. To read anything not shown in full, call ' +
       '`knowledge_read` method `search` with the entity name, or `knowledge_read` method `relevant` with a description of what you are about to do. ' +
       'Do this before decisions that touch one of these topics.\n',

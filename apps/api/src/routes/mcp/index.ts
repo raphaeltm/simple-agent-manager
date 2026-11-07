@@ -187,7 +187,7 @@ mcpRoutes.post('/', async (c) => {
         (rpc.params as { arguments?: Record<string, unknown> })?.arguments ?? {}
       );
       if (!isResolvedToolCall(resolved)) return c.json(resolved);
-      const toolName = resolved.toolName || undefined;
+      const toolName = resolved.toolName;
       const toolArgs = resolved.toolArgs;
 
       try {
@@ -401,7 +401,7 @@ mcpRoutes.post('/', async (c) => {
         }
         const message = err instanceof Error ? err.message : 'Tool execution failed';
         const name = toolName ?? '<unknown>';
-        log.error('mcp.tool_call_failed', { tool: name, error: String(err) });
+        log.error('mcp.tool_call_failed', { tool: name, via: resolved.via, error: String(err) });
         return c.json(jsonRpcError(requestId, INTERNAL_ERROR, `Tool '${name}' failed: ${message}`));
       }
     }

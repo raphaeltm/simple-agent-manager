@@ -189,7 +189,8 @@ describe('async build_and_publish MCP tools', () => {
     expect(payload).toMatchObject({
       publishJobId: 'job-1',
       status: 'starting',
-      pollTool: 'get_publish_status',
+      pollTool: 'deployments_read',
+      pollMethod: 'publish_status',
     });
   });
 

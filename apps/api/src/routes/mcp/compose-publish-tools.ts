@@ -185,7 +185,8 @@ export async function handleBuildAndPublish(
               environment,
               environmentId: policyResult.environmentId,
               reference,
-              pollTool: 'get_publish_status',
+              pollTool: 'deployments_read',
+              pollMethod: 'publish_status',
               pollAfterSeconds: 10,
               instructions:
                 'Call deployments_read method publish_status with publishJobId until status is succeeded, failed, canceled, or unknown. Do not retry blindly while this job is still active.',
@@ -224,7 +225,8 @@ export async function handleBuildAndPublish(
               status: 'failed',
               errorCode: 'failed_to_start',
               errorMessage: message,
-              pollTool: 'get_publish_status',
+              pollTool: 'deployments_read',
+              pollMethod: 'publish_status',
               instructions:
                 'The publish job failed before VM acceptance. Inspect deployments_read method publish_status before retrying.',
             },

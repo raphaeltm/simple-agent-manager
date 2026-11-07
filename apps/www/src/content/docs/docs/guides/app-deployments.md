@@ -75,11 +75,11 @@ Publishing is a two-step, asynchronous flow:
 1. `deployments_write` with `method: "publish"` (`environment`, optional `reference` and `workingDir`) starts a build/publish job on the SAM VM and immediately returns a durable `publishJobId`. The job builds the workspace's Docker Compose stack, pushes built service images with SAM-owned registry credentials, and records the release server-side. Agents never run docker or registry commands and never receive registry credentials.
 2. `deployments_read` with `method: "publish_status"` and the `publishJobId` reports progress. Poll it until the status is terminal — `succeeded`, `failed`, `canceled`, or `unknown` — rather than retrying `deployments_write` method `publish` blindly.
 
-After a successful publish, agents can verify runtime health with `read_deployment_logs(environment, ...)`.
+After a successful publish, agents can verify runtime health with `deployments_read` (`method: "logs"`).
 
 `deployments_write` method `publish` requires the named deployment environment to be active — or in `error`, awaiting a recovery release — agent deployment to be enabled by a user, and the agent profile to satisfy that environment's policy. An environment that a previous release left in `error` stays available to agents precisely so the next release can recover it; environments that are starting, stopping, stopped, or being deleted are not agent-deployable.
 
-Agents can preview route behavior before publishing with `preview_deployment_routes(environment, composeYaml)` and inspect the latest release's generated routes and custom domains with `list_deployment_routes(environment)`.
+Agents can preview route behavior before publishing with `deployments_read` (`method: "preview_routes"`, `environment`, `composeYaml`) and inspect the latest release's generated routes and custom domains with `deployments_read` (`method: "routes"`).
 
 The release submission format is Docker Compose YAML with SAM extensions. SAM supports multi-service Compose stacks, preserves service topology including Docker Model Runner `provider:` services, and derives route hints from either `x-sam-routes` or compose service `ports:`. Compose long-syntax `ports:` entries with `mode: host` are treated as internal/private route hints; other `ports:` entries are public by default unless an explicit private `x-sam-routes` entry suppresses them.
 
