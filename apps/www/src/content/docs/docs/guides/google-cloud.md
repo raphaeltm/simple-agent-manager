@@ -32,6 +32,8 @@ SAM's VM setup requests these APIs in the **selected VM project**: Cloud Resourc
 
 The default zone is a connection setting, not a restriction on all node-pool offerings. Review the allowed machine types and regions in your [compute pool](/docs/guides/compute-pools/) to control where SAM may place work.
 
+SAM accepts any Compute Engine zone name, including zones Google adds later. The zone picker suggests common zones, but it is not the full list. When SAM looks for its own VMs (orphan cleanup, allocation recovery), it lists every zone in the project in one call. If Google reports any zone as unreachable, SAM treats the list as incomplete: cleanup skips that run and tries again on the next one, and a recovery check fails rather than assuming a VM is gone.
+
 ## Troubleshoot connection errors
 
 ### Project listing fails with “Permission denied”

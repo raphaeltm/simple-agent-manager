@@ -39,7 +39,7 @@ pnpm --filter @simple-agent-manager/providers lint        # ESLint
   caller cancellation reason and begin no follow-up request or resource mutation after cancellation.
 - Provider methods accept explicit credentials supplied by the caller. They do not read
   environment variables or decide whether a credential is user, project, or platform scoped.
-- Location validation uses `PROVIDER_LOCATIONS` registry from `@simple-agent-manager/shared`
+- Location validation uses `PROVIDER_LOCATIONS` registry from `@simple-agent-manager/shared` (except GCP, which validates by zone-name shape with `GCP_ZONE_PATTERN`; its list is suggestions only)
 - New providers: create `src/<provider-name>.ts`, implement `Provider` interface, export from `src/index.ts`
 - VM create paths use `VMConfig.native.instanceType` as the provider-native authority. Legacy
   `size` remains optional and is translated only through `resolveVMConfigWithLegacySizeAdapter()`.
