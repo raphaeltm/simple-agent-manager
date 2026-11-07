@@ -1,3 +1,4 @@
+import { ATTACHMENT_DEFAULTS } from '@simple-agent-manager/shared';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -8,6 +9,33 @@ vi.mock('../../../src/lib/api', () => ({
   requestAttachmentUpload: mocks.request,
   uploadAttachmentToR2: mocks.upload,
 }));
+
+describe('files that cannot upload', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+  it('stages empty and over-limit files as failed, previewable attachments without uploading them', async () => {
+    mocks.request.mockResolvedValue({ uploadId: 'u', uploadUrl: 'u' });
+    mocks.upload.mockResolvedValue(undefined);
+    const setError = vi.fn();
+    const { result } = renderHook(() => useAttachments('project', setError));
+    const huge = new File(['x'], 'huge.png', { type: 'image/png' });
+    Object.defineProperty(huge, 'size', { value: ATTACHMENT_DEFAULTS.UPLOAD_MAX_BYTES + 1 });
+    const empty = new File([], 'empty.txt');
+    const fine = new File(['ok'], 'fine.txt');
+    act(() => result.current.handleChatFilesSelected([huge, empty, fine]));
+    await waitFor(() =>
+      expect(result.current.chatAttachments.find((a) => a.file === fine)?.status).toBe('complete')
+    );
+    const [first, second] = result.current.chatAttachments;
+    // The staged items keep the very File objects the user picked: that is what the preview reads.
+    expect(first).toMatchObject({ file: huge, status: 'error', error: 'Larger than the 50 MB limit' });
+    expect(second).toMatchObject({ file: empty, status: 'error', error: 'This file is empty' });
+    expect(mocks.request).toHaveBeenCalledTimes(1);
+    expect(mocks.request).toHaveBeenCalledWith('project', 'fine.txt', 2, 'application/octet-stream');
+    expect(setError).not.toHaveBeenCalledWith(expect.stringMatching(/limit|empty/));
+  });
+});
 
 describe('staged attachment identity', () => {
   beforeEach(() => {

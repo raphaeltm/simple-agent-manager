@@ -148,7 +148,8 @@ export function AttachmentPreviewDialog({
   useEffect(() => {
     if (count < 2) return;
     const onKey = (event: KeyboardEvent) => {
-      if ((event.target as HTMLElement | null)?.closest('input, textarea, select, video')) return;
+      const target = event.target;
+      if (target instanceof Element && target.closest('input, textarea, select, video')) return;
       if (event.key === 'ArrowLeft') onNavigate((index - 1 + count) % count);
       if (event.key === 'ArrowRight') onNavigate((index + 1) % count);
     };
