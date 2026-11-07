@@ -100,7 +100,8 @@ test('a real agent calls domain tool groups by method', async ({ page }) => {
       [200, 202]
     );
     const { rows, assistant } = await waitForAssistant(`DONE ${marker}`, 300_000);
-    const transcript = JSON.stringify(rows);
+    // Only tool-call rows count: the prompt itself names the tools.
+    const transcript = JSON.stringify(rows.filter((row) => row.role === 'tool'));
     for (const tool of ['ideas_read', 'knowledge_read', 'workspace_read']) {
       expect(transcript, `${tool} was called`).toContain(tool);
     }
