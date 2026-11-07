@@ -31,6 +31,9 @@ export function alternativeValue(name: string, value: string): string {
   if (value === '') return '7';
   if (/^\d+$/.test(value)) return String(Number(value) > 1 ? Number(value) - 1 : Number(value) + 1);
   if (/^\d*\.\d+$/.test(value)) return String(Math.round((Number(value) - 0.01) * 100) / 100);
+  // Go durations relayed to the VM agent must stay valid durations.
+  const duration = /^(\d+)(ms|s|m|h)$/.exec(value);
+  if (duration) return `${Number(duration[1]) + 1}${duration[2]}`;
   return `${value}-alt`;
 }
 

@@ -66,6 +66,12 @@ const CLOUDFLARE_WORKER_TEXT_BINDING_MAX = 350;
 const CLOUDFLARE_WORKER_TEXT_BINDING_HEADROOM = 10;
 export const CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT =
   CLOUDFLARE_WORKER_TEXT_BINDING_MAX - CLOUDFLARE_WORKER_TEXT_BINDING_HEADROOM;
+/**
+ * Text-binding limit on an ordinary Workers Paid account. SAM's own accounts run with a raised
+ * limit (the guard above); a self-hosted install fails `wrangler secret bulk` with code 10055
+ * above this one, so the checked-in configuration must fit it (sync-wrangler-config.test.ts).
+ */
+export const CLOUDFLARE_STANDARD_WORKER_TEXT_BINDING_MAX = 128;
 
 const EVENTING_OPTIONAL_PROCESS_ENV_VARS = [
   'PROJECT_EVENT_MAX_ACTIVE_SUBSCRIPTIONS_PER_PROJECT',

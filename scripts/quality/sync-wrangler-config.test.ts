@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   assertWorkerTextBindingLimit,
   checkTailWorkerExists,
+  CLOUDFLARE_STANDARD_WORKER_TEXT_BINDING_MAX,
   CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT,
   countWorkerTextBindings,
   detectArtifactsAvailable,
@@ -140,6 +141,19 @@ describe('sync wrangler config', () => {
     const generated = generateApiWorkerEnv(checkedIn, outputs, 'staging', false, false, null);
     expect(countWorkerTextBindings(generated)).toBeLessThanOrEqual(
       CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT
+    );
+  });
+
+  it('keeps a self-hosted install under the standard account text-binding limit', () => {
+    // Installer deploys run without SAM's GitHub Environment overrides on accounts with the
+    // standard limit; every secret configure-secrets.sh can set is counted.
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    const checkedIn = TOML.parse(
+      readFileSync(join(import.meta.dirname, '../../apps/api/wrangler.toml'), 'utf-8')
+    ) as WranglerToml;
+    const generated = generateApiWorkerEnv(checkedIn, outputs, 'prod', false, false, null);
+    expect(countWorkerTextBindings(generated)).toBeLessThanOrEqual(
+      CLOUDFLARE_STANDARD_WORKER_TEXT_BINDING_MAX
     );
   });
 
