@@ -129,7 +129,7 @@ export async function fetchPaginatedGcpAggregatedInstances(
   );
 }
 
-async function fetchPaginatedGcpList(
+export async function fetchPaginatedGcpList(
   scope: GcpApiScope,
   baseUrl: string,
   baseParams: URLSearchParams,

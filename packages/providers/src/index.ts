@@ -98,7 +98,7 @@ export {
   DIGITALOCEAN_VOLUME_MAX_SIZE_GB,
   DIGITALOCEAN_VOLUME_MIN_SIZE_GB,
 } from './digitalocean-volumes';
-export type { GcpTokenProvider } from './gcp';
+export type { GcpCatalogOptions, GcpTokenProvider } from './gcp';
 export {
   classifyGcpError,
   DEFAULT_GCP_AGENT_PORTS,
@@ -109,7 +109,13 @@ export {
   GCP_LOCATIONS,
   GcpProvider,
 } from './gcp';
+export { GCP_MACHINE_TYPE_NAME_PATTERN } from './gcp-catalog';
 export { SIZE_MAP as GCP_SIZE_CONFIGS } from './gcp-metadata';
+export {
+  fetchGcpComputePriceTable,
+  type GcpPriceTable,
+  parseStoredGcpPriceTable,
+} from './gcp-pricing';
 export type { HetznerProviderRuntimeOptions } from './hetzner';
 export {
   classifyHetznerError,

@@ -1,14 +1,9 @@
 import type { CredentialProvider } from '@simple-agent-manager/shared';
 
-import {
-  fetchPaginatedGcpAggregatedInstances,
-  GCP_UNREACHABLE_WARNING,
-  type GcpApiScope,
-  gcpLabelFilter,
-  pollGcpOperation,
-} from './gcp-api';
+import { type GcpApiScope, pollGcpOperation } from './gcp-api';
+import { fetchGcpMachineTypes, gcpOfferingsFromMachineTypes } from './gcp-catalog';
 import { ensureGcpFirewallRules } from './gcp-firewall';
-import { findGcpInstanceByIdOrName } from './gcp-instance-lookup';
+import { findGcpInstanceByIdOrName, listGcpInstances } from './gcp-instance-lookup';
 import {
   COMPUTE_API_BASE,
   DEFAULT_GCP_AGENT_PORTS,
@@ -25,6 +20,7 @@ import {
   withGcpErrorCategory,
 } from './gcp-metadata';
 import { gcpInstanceToVM, resolveGcpSourceImage } from './gcp-native-instance';
+import type { GcpPriceTable } from './gcp-pricing';
 import { getProviderCatalogOfferings } from './instance-offerings';
 import { resolveVMConfigWithLegacySizeAdapter } from './native-vm-config';
 import {
@@ -60,6 +56,14 @@ export {
   GCP_LOCATIONS,
 } from './gcp-metadata';
 
+/** Live catalog inputs. Without them `listInstanceOfferings` returns the static table. */
+export interface GcpCatalogOptions {
+  /** Exact machine type names to offer (admin-editable). */
+  machineTypes: readonly string[];
+  /** Current list prices; null or a rejection leaves offerings unpriced. */
+  priceTable?: () => Promise<GcpPriceTable | null>;
+}
+
 /**
  * GCP Compute Engine provider.
  *
@@ -87,10 +91,15 @@ export class GcpProvider implements Provider {
     private readonly firewallSourceRanges: readonly string[] = DEFAULT_GCP_FIREWALL_SOURCE_RANGES,
     private readonly agentPorts: readonly string[] = DEFAULT_GCP_AGENT_PORTS,
     private readonly appRouteSourceRanges: readonly string[] = DEFAULT_GCP_APP_ROUTE_SOURCE_RANGES,
-    private readonly appRoutePorts: readonly string[] = DEFAULT_GCP_APP_ROUTE_PORTS
+    private readonly appRoutePorts: readonly string[] = DEFAULT_GCP_APP_ROUTE_PORTS,
+    private readonly catalog?: GcpCatalogOptions
   ) {
     this.defaultLocation = defaultZone || 'us-central1-a';
+    this.instanceOfferingApiBacked = catalog !== undefined;
   }
+
+  /** True when this instance was built with a live catalog (`GcpCatalogOptions`). */
+  readonly instanceOfferingApiBacked: boolean;
 
   private async authHeaders(context?: ProviderRequestContext): Promise<Record<string, string>> {
     throwIfProviderRequestAborted(context);
@@ -296,52 +305,7 @@ export class GcpProvider implements Provider {
     labels?: Record<string, string>,
     context?: ProviderRequestContext
   ): Promise<VMInstance[]> {
-    throwIfProviderRequestAborted(context);
-    const filter = gcpLabelFilter({ 'sam-managed': 'true', ...labels });
-    const headers = await this.authHeaders(context);
-    const results: VMInstance[] = [];
-    const unreachable: string[] = [];
-
-    // One project-wide aggregated list covers every zone, so a VM created in any zone is
-    // visible to orphan reconciliation and deletion checks, not only VMs in the zones SAM
-    // happens to know by name.
-    try {
-      await fetchPaginatedGcpAggregatedInstances(
-        this.api,
-        `${this.projectUrl()}/aggregated/instances`,
-        new URLSearchParams({ filter }),
-        headers,
-        'listVMs.aggregated',
-        (data) => {
-          for (const [scope, scopeData] of Object.entries(data.items ?? {})) {
-            if (scopeData.warning?.code === GCP_UNREACHABLE_WARNING) unreachable.push(scope);
-            results.push(...(scopeData.instances ?? []).map((i) => gcpInstanceToVM(i)));
-          }
-        },
-        context
-      );
-    } catch (err) {
-      rethrowIfProviderRequestAborted(err, context);
-      throw new ProviderError(
-        'gcp',
-        err instanceof ProviderError ? err.statusCode : undefined,
-        `GCP instance list failed: ${err instanceof Error ? err.message : String(err)}`,
-        { cause: err instanceof Error ? err : undefined }
-      );
-    }
-
-    // An unreachable zone makes the inventory partial. Callers use this list to prove a VM is
-    // gone (strict deletion) or that none is missing (orphan reconciliation), so a partial list
-    // must fail closed rather than read as "no VM there".
-    if (unreachable.length > 0) {
-      throw new ProviderError(
-        'gcp',
-        undefined,
-        `GCP instance list is incomplete: unreachable ${unreachable.join(', ')}`
-      );
-    }
-
-    return results;
+    return listGcpInstances(this.api, labels, context);
   }
 
   async powerOff(id: string, context?: ProviderRequestContext): Promise<void> {
@@ -403,15 +367,44 @@ export class GcpProvider implements Provider {
   }
 
   async listInstanceOfferings(
-    _options?: ProviderOfferingListOptions,
+    options?: ProviderOfferingListOptions,
     context?: ProviderRequestContext
   ) {
     throwIfProviderRequestAborted(context);
+    if (options?.preferApi === false || !this.catalog) return this.staticOfferings();
+    try {
+      const [types, priceTable] = await Promise.all([
+        fetchGcpMachineTypes(this.api, this.catalog.machineTypes, context),
+        this.loadPriceTable(),
+      ]);
+      throwIfProviderRequestAborted(context);
+      return gcpOfferingsFromMachineTypes(types, priceTable, {
+        bootDiskGb: this.diskSizeGb,
+        lastSeenAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
+      if (options?.allowStaticFallback === false) throw err;
+      return this.staticOfferings();
+    }
+  }
+
+  private staticOfferings() {
     return getProviderCatalogOfferings(
       this.name as CredentialProvider,
       this.locations,
       this.locationMetadata
     );
+  }
+
+  /** Prices are optional: an unavailable table leaves offerings unpriced, never fails them. */
+  private async loadPriceTable(): Promise<GcpPriceTable | null> {
+    if (!this.catalog?.priceTable) return null;
+    try {
+      return await this.catalog.priceTable();
+    } catch {
+      return null;
+    }
   }
 
   async createVolume(
