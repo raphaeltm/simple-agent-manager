@@ -496,6 +496,40 @@ describe('runaway-cost ceiling — a sleeping conversation is not runaway comput
    * the ceiling deleted outright. A live VM runtime whose generation is 25h old
    * and which holds no sleep record is still terminalized as runaway compute.
    */
+  it('requests sleep at the ceiling through the recovery entry point, including a null task chat link', async () => {
+    seedTask({ executionStep: 'running', chatSessionId: null, startedAt: iso(-24.5 * HOUR) });
+    seedWorkspace({ status: 'running', createdAt: iso(-24.5 * HOUR) });
+    seedNode({ heartbeatAt: iso(-30_000) });
+    sqlite.exec('CREATE UNIQUE INDEX idx_snapshot_chat ON session_snapshots(chat_session_id)');
+    sqlite
+      .prepare(
+        "INSERT INTO agent_sessions (id, workspace_id, status, agent_type) VALUES ('agent-ceiling', ?, 'running', 'claude-code')"
+      )
+      .run(WORKSPACE_ID);
+
+    const result = await recoverStuckTasks(env());
+
+    expect(taskRow()).toEqual({ status: 'in_progress', error_message: null });
+    expect(result.failedInProgress).toBe(0);
+    expect(
+      sqlite
+        .prepare('SELECT sleep_status FROM session_snapshots WHERE chat_session_id = ?')
+        .get(CHAT_SESSION_ID)
+    ).toEqual({ sleep_status: 'scheduled' });
+    expect(getTaskAcpLivenessSignalsMock).not.toHaveBeenCalled();
+  });
+
+  it('retains terminal fallback when a conversation cannot queue a resumable sleep', async () => {
+    seedTask({ executionStep: 'running', startedAt: iso(-24.5 * HOUR) });
+    seedWorkspace({ status: 'running', createdAt: iso(-24.5 * HOUR) });
+    seedNode({ heartbeatAt: iso(-30_000) });
+    // No agent session: queueWorkspaceSessionSleep cannot establish a resumable owner.
+    const result = await recoverStuckTasks(env());
+    expect(taskRow().status).toBe('failed');
+    expect(result.failedInProgress).toBe(1);
+    expect(taskRow().error_message).toContain('runaway-cost ceiling');
+  });
+
   it('still terminalizes a live 25h runtime with no sleep record', async () => {
     seedTask({ executionStep: 'running' });
     seedWorkspace({ status: 'running', createdAt: iso(PAST_CEILING) });
