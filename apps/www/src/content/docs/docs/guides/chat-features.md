@@ -689,7 +689,8 @@ To send on a desktop keyboard, press **Cmd+Enter** on Mac or **Ctrl+Enter** on W
 The session list groups chats by state, in this order:
 
 1. **Needs attention** — a chat waiting for your answer (**Needs input**) or one SAM could not wake
-   (**Wake failed**), including sleeping ones.
+   (**Wake failed**), including sleeping ones, from the last 24 hours. An older one moves to its
+   usual section (Awake or Sleeping) and keeps its **Needs input** or **Wake failed** label.
 2. **Awake** — chats whose agent is working or idle. An awake chat stays here however long it has
    been quiet; the list never hides one because of its age.
 3. **Sleeping** — chats a message can wake. You can fold this section.

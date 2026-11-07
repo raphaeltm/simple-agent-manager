@@ -106,7 +106,8 @@ older saved sessions.
 ## The agent is waiting for you
 
 **Needs input** beside a chat in the session list means it is waiting for an answer. Such chats sit
-at the top of the list under **Needs attention**, however long ago their last message was. On a
+at the top of the list under **Needs attention** for 24 hours; after that they move to **Awake** or
+**Sleeping** and keep the label. On a
 phone, open the session list with the list icon at the right of the project-name bar; an amber count
 on that icon says how many chats need attention. Open the chat and look for one of these:
 

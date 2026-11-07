@@ -885,7 +885,8 @@ describe('ProjectChat new chat button', () => {
           attention: {
             markerId: 'marker-1',
             kind: 'wake_failed',
-            createdAt: hoursAgo(47),
+            // The wake failed recently, on a chat whose last message is days old.
+            createdAt: hoursAgo(2),
             expiresAt: null,
             reason: 'provider_limit_blocked',
             options: [],
