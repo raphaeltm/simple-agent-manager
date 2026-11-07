@@ -41,6 +41,8 @@ export interface AgentActivityTask {
   status: string;
   executionStep: string | null;
   providerLimitReason?: string | null;
+  /** Opaque wait generation; changes when a new blocked wait replaces an accepted resume. */
+  providerLimitVersion?: string | null;
   projectId: string;
   projectName: string;
   userId: string;
@@ -65,6 +67,8 @@ interface AgentActivitySqlRow {
   status: string;
   executionStep: string | null;
   providerLimitReason?: string | null;
+  /** Opaque wait generation; changes when a new blocked wait replaces an accepted resume. */
+  providerLimitVersion?: string | null;
   projectId: string;
   projectName: string;
   userId: string;
@@ -294,6 +298,7 @@ export async function listAgentActivityTasks(
       t.status AS status,
       t.execution_step AS executionStep,
       CASE WHEN t.admission_state IN ('provider_limit_waiting','provider_limit_blocked') THEN t.admission_reason ELSE NULL END AS providerLimitReason,
+      CASE WHEN t.admission_state IN ('provider_limit_waiting','provider_limit_blocked') AND json_valid(t.provider_limit_wait_json) THEN json_extract(t.provider_limit_wait_json, '$.scheduleKey') ELSE NULL END AS providerLimitVersion,
       t.project_id AS projectId,
       p.name AS projectName,
       t.user_id AS userId,
@@ -344,6 +349,7 @@ export async function listAgentActivityTasks(
     status: row.status,
     executionStep: row.executionStep,
     ...(row.providerLimitReason ? { providerLimitReason: row.providerLimitReason } : {}),
+    ...(row.providerLimitVersion ? { providerLimitVersion: row.providerLimitVersion } : {}),
     projectId: row.projectId,
     projectName: row.projectName,
     userId: row.userId,

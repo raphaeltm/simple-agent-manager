@@ -3374,6 +3374,21 @@ export function hasPendingSessionHumanInput(
   );
 }
 
+export async function syncProviderLimitAttention(
+  env: Env,
+  projectId: string,
+  taskId: string,
+  sessionId: string
+) {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'syncProviderLimitAttention',
+    (stub) => stub.syncProviderLimitAttention({ projectId, taskId, sessionId }),
+    'mutation'
+  );
+}
+
 export async function createAttentionMarker(
   env: Env,
   projectId: string,

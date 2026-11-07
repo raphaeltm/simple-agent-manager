@@ -10,6 +10,7 @@ import {
 } from './project-events-due-state';
 import { resolveProjectEventLimits } from './project-events-limits';
 import {
+  eventWakeAuthorityExpiresAt,
   insertPromptQueueBatch,
   readEvents,
   readSubscription,
@@ -358,6 +359,11 @@ function materializeCandidate(
     throw new Error('Project event wake match claim lost contention');
   }
   refreshWakeDueAtForSubscription(sql, projectId, subscription.id, now);
+  promptInput.expiresAt = eventWakeAuthorityExpiresAt(sql, subscription.id);
+  promptInput.ttlMs =
+    promptInput.expiresAt === null
+      ? limits.wakePromptTtlMs
+      : Math.max(1, promptInput.expiresAt - now);
   const accepted = acceptPromptDeliveryInTransaction(sql, env, promptInput, now);
   recordQueueCheckpoint(sql, projectId, batchId, now, limits.wakeSubscriptionCooldownMs);
   markSchedulerSuccess(sql, projectId, now, 'materialization');

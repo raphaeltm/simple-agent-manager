@@ -15,6 +15,9 @@ import { request } from './client';
 
 /** Task embed shape — populated in the detail response, added via enrichment for list items. */
 export interface ChatSessionTaskEmbed {
+  providerLimitReason?: string | null;
+  /** Opaque wait generation; changes when a new blocked wait replaces an accepted resume. */
+  providerLimitVersion?: string | null;
   triggeredBy?: string;
   connectorClientName?: string | null;
   id: string;

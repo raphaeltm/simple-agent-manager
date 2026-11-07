@@ -129,6 +129,10 @@ export async function parkTaskForProviderLimit(
     wait = newProviderLimitWait({
       taskId: task.id,
       origin: 'callback',
+      resetWindowToleranceMs: parsePositiveInt(
+        env.PROVIDER_LIMIT_RESET_WINDOW_TOLERANCE_MS,
+        PROVIDER_LIMIT_POLICY.resetWindowToleranceMs
+      ),
       incidentId,
       credentialKey: key,
       previous,

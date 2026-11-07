@@ -1,12 +1,17 @@
+import { eq } from 'drizzle-orm';
+import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../src/db/schema';
 import { TaskRunner } from '../../src/durable-objects/task-runner';
 import type { TaskRunnerState } from '../../src/durable-objects/task-runner/types';
 import type { Env } from '../../src/env';
 import { getSelectedAgentCredentialReference } from '../../src/routes/credentials';
 import { recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
 import { startSamAwareAgentSession } from '../../src/services/agent-session-bootstrap';
+import { assertProviderLimitCredentialPin } from '../../src/services/provider-limit-credential-pin';
 import { newProviderLimitWait } from '../../src/services/provider-limit-policy';
+import { resumeProviderLimitTask } from '../../src/services/provider-limit-recovery';
 import { createIncompatibleCapacityFixture } from '../helpers/incompatible-agent-capacity-fixture';
 
 vi.mock('cloudflare:workers', () => ({
@@ -29,7 +34,14 @@ vi.mock('../../src/services/agent-session-bootstrap', () => ({
     initialPromptSent: true,
   })),
 }));
-vi.mock('../../src/services/project-data', () => ({ persistMessage: vi.fn(async () => 'notice') }));
+vi.mock('../../src/services/project-data', () => ({
+  persistMessage: vi.fn(async () => 'notice'),
+  syncProviderLimitAttention: vi.fn(),
+  listActiveAttentionMarkers: vi.fn(async () => []),
+  createAttentionMarker: vi.fn(),
+  resolveSessionAttentionMarkers: vi.fn(),
+  sleepSession: vi.fn(),
+}));
 
 describe('provider admission through the TaskRunner alarm', () => {
   let fixture: ReturnType<typeof createIncompatibleCapacityFixture>;
@@ -76,7 +88,10 @@ describe('provider admission through the TaskRunner alarm', () => {
     const instance = new TaskRunner(ctx, fixture.rc.env);
     fixture.rc.env.TASK_RUNNER = {
       idFromName: vi.fn((id: string) => id),
-      get: vi.fn(() => ({ getStatus: () => instance.getStatus() })),
+      get: vi.fn(() => ({
+        getStatus: () => instance.getStatus(),
+        nudge: (reason?: string) => instance.nudge(reason),
+      })),
     } as unknown as Env['TASK_RUNNER'];
     return {
       runner: instance,
@@ -205,6 +220,122 @@ describe('provider admission through the TaskRunner alarm', () => {
     ).toEqual({ admission_state: 'provider_limit_blocked' });
     expect(run.state().stepResults.nodeId).toBeNull();
   });
+  it('owner resumes a fresh admission block without inventing a snapshot or sleeping state', async () => {
+    fixture.state.config.chatSessionId = 'chat-1';
+    fixture.sqlite.exec("UPDATE tasks SET chat_session_id='chat-1' WHERE id='task-1'");
+    rejected(null);
+    const run = runner();
+    for (let attempt = 0; attempt < 4; attempt++) {
+      await run.runner.alarm();
+      if (attempt < 3) {
+        vi.setSystemTime(run.alarm()!);
+        fixture.sqlite
+          .prepare('UPDATE credential_limit_windows SET observed_at=?,updated_at=?')
+          .run(Date.now(), Date.now());
+      }
+    }
+    const db = drizzle(fixture.rc.env.DATABASE, { schema });
+    const blocked = await db.select().from(schema.tasks).where(eq(schema.tasks.id, 'task-1')).get();
+    if (!blocked) throw new Error('Missing blocked task');
+    expect(blocked).toMatchObject({ status: 'queued', admissionState: 'provider_limit_blocked' });
+    expect(fixture.sqlite.prepare('SELECT count(*) AS count FROM session_snapshots').get()).toEqual(
+      { count: 0 }
+    );
+    expect(await resumeProviderLimitTask(fixture.rc.env, blocked, 'user-1')).toEqual({
+      status: 'waking',
+      taskId: 'task-1',
+    });
+    expect(run.alarm()).not.toBeNull();
+    fixture.sqlite.exec('DELETE FROM credential_limit_windows');
+    vi.setSystemTime(run.alarm()!);
+    await run.runner.alarm();
+    expect(run.state().currentStep).not.toBe('node_selection');
+    expect(
+      fixture.sqlite.prepare("SELECT admission_state FROM tasks WHERE id='task-1'").get()
+    ).toEqual({ admission_state: null });
+  });
+
+  it('owner-approved released wait repins the selected credential before initial credential injection', async () => {
+    const run = runner('agent_session');
+    const wait = {
+      ...newProviderLimitWait({
+        taskId: 'task-1',
+        origin: 'callback',
+        incidentId: 'old-rejection',
+        credentialKey: 'cc_credentials:old-account',
+        previous: null,
+        now: Date.now(),
+        resetsAt: null,
+      }),
+      phase: 'released',
+      scheduleKey: 'provider-limit:task-1:resume:owner-approved',
+    };
+    fixture.sqlite
+      .prepare("UPDATE tasks SET provider_limit_wait_json=? WHERE id='task-1'")
+      .run(JSON.stringify(wait));
+    await run.runner.alarm();
+    expect(startSamAwareAgentSession).toHaveBeenCalledOnce();
+    const row = fixture.sqlite
+      .prepare("SELECT provider_limit_wait_json AS value FROM tasks WHERE id='task-1'")
+      .get() as { value: string };
+    expect(JSON.parse(row.value)).toEqual({
+      ...wait,
+      credentialKey: 'cc_credentials:quota-key',
+      scheduleKey: expect.any(String),
+    });
+    expect(JSON.parse(row.value).scheduleKey).not.toBe(wait.scheduleKey);
+    expect(JSON.parse(row.value).scheduleKey).not.toContain(':resume:');
+    await expect(
+      assertProviderLimitCredentialPin(fixture.rc.env, 'old-workspace', 'cc_credentials:quota-key')
+    ).resolves.toBeUndefined();
+    await expect(
+      assertProviderLimitCredentialPin(fixture.rc.env, 'old-workspace', 'cc_credentials:unapproved')
+    ).rejects.toThrow('Provider limit recovery requires review');
+    expect(
+      fixture.sqlite.prepare("SELECT admission_state FROM tasks WHERE id='task-1'").get()
+    ).toEqual({ admission_state: 'provider_limit_blocked' });
+  });
+
+  it('owner approval is consumed before provisioning so a later credential change blocks the initial start', async () => {
+    // The owner approved the currently selected account, so consumption must
+    // happen even when no key change is needed on the first admission.
+    const approved = {
+      ...newProviderLimitWait({
+        taskId: 'task-1',
+        origin: 'callback',
+        incidentId: 'old-rejection',
+        credentialKey: 'cc_credentials:quota-key',
+        previous: null,
+        now: Date.now(),
+        resetsAt: null,
+      }),
+      phase: 'released',
+      scheduleKey: 'provider-limit:task-1:resume:owner-approved',
+    };
+    fixture.sqlite
+      .prepare("UPDATE tasks SET provider_limit_wait_json=? WHERE id='task-1'")
+      .run(JSON.stringify(approved));
+    const run = runner();
+    await run.runner.alarm();
+    expect(run.state().currentStep).not.toBe('node_selection');
+    // Complete the provisioning boundary with the fixture's allocated workspace.
+    run.state().currentStep = 'agent_session';
+    run.state().stepResults.nodeId = 'existing-node';
+    run.state().stepResults.workspaceId = 'old-workspace';
+    fixture.sqlite.exec(
+      "UPDATE tasks SET status='delegated',workspace_id='old-workspace' WHERE id='task-1'"
+    );
+    vi.mocked(getSelectedAgentCredentialReference).mockResolvedValueOnce(
+      'cc_credentials:unapproved'
+    );
+    await run.runner.alarm();
+    expect(startSamAwareAgentSession).not.toHaveBeenCalled();
+    expect(run.alarm()).toBeNull();
+    expect(
+      fixture.sqlite.prepare("SELECT admission_state FROM tasks WHERE id='task-1'").get()
+    ).toEqual({ admission_state: 'provider_limit_blocked' });
+  });
+
   it('blocks credential changes while an unknown reset is held', async () => {
     rejected(null);
     const run = runner();

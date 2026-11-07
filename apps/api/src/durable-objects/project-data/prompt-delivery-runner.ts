@@ -13,6 +13,7 @@ import type {
 import * as activity from './activity';
 import { invalidCheckpointContinuationTarget } from './checkpoint-continuation-delivery';
 import type { DurableExecutionConfig } from './durable-execution-config';
+import { providerLimitEventDeliveryGuard } from './project-event-provider-limit-delivery';
 import {
   invalidScheduledDeliveryTarget,
   releaseAcceptedProviderLimitSchedule,
@@ -170,6 +171,13 @@ export async function runPromptDeliveryClaim(
           claim
         );
         if (sourceInvalid) return sourceInvalid;
+        const providerHold = await providerLimitEventDeliveryGuard(
+          sql,
+          env,
+          hooks.projectId,
+          claim
+        );
+        if (providerHold) return providerHold;
         return invalidProjectEventWakeDeliveryTargetResult(sql, env, hooks.projectId, claim);
       } catch (error) {
         return sourceValidationReadFailure(

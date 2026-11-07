@@ -395,7 +395,7 @@ export const SessionMessageView: FC<ProjectMessageViewProps> = ({
           beside the whole column; on phones it stays inside the message pane so the header
           and message box keep the full width. */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2.5 md:gap-[var(--sam-space-gutter)]">
-        <SessionStatusBanners lc={lc} />
+        <SessionStatusBanners lc={lc} projectId={projectId} />
 
         {floatingHeader}
 

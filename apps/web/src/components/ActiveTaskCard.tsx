@@ -4,6 +4,7 @@ import { Card, StatusBadge } from '@simple-agent-manager/ui';
 import { useNavigate } from 'react-router';
 
 import { ConnectorChip } from './ConnectorChip';
+import { ProviderLimitResume } from './ProviderLimitResume';
 
 interface ActiveTaskCardProps {
   task: DashboardTask;
@@ -47,7 +48,7 @@ function getActivityIndicator(task: DashboardTask): {
 } {
   if (task.providerLimitReason)
     return {
-      label: task.providerLimitReason.startsWith('Blocked:') ? 'Blocked' : 'Waiting',
+      label: task.providerLimitReason.startsWith('Blocked:') ? 'Needs you' : 'Waiting',
       dotClassName: 'bg-info-fg',
       textClassName: 'text-info-fg',
     };
@@ -82,6 +83,7 @@ function getActivityIndicator(task: DashboardTask): {
 
 export function ActiveTaskCard({ task }: ActiveTaskCardProps) {
   const navigate = useNavigate();
+  const providerBlocked = task.providerLimitReason?.startsWith('Blocked:');
 
   const chatPath = task.sessionId
     ? `/projects/${task.projectId}/chat/${task.sessionId}`
@@ -111,14 +113,20 @@ export function ActiveTaskCard({ task }: ActiveTaskCardProps) {
       >
         {/* Top row: status + activity indicator */}
         <div className="flex items-center justify-between gap-2 mb-2">
-          <StatusBadge status={task.status} />
-          <div className="flex items-center gap-1.5">
-            <span
-              aria-hidden="true"
-              className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${activity.dotClassName}`}
-            />
-            <span className={`sam-type-caption ${activity.textClassName}`}>{activity.label}</span>
-          </div>
+          {providerBlocked ? (
+            <span className="sam-type-caption text-warning-fg">Needs you</span>
+          ) : (
+            <StatusBadge status={task.status} />
+          )}
+          {!providerBlocked && (
+            <div className="flex items-center gap-1.5">
+              <span
+                aria-hidden="true"
+                className={`inline-block w-2 h-2 rounded-full flex-shrink-0 ${activity.dotClassName}`}
+              />
+              <span className={`sam-type-caption ${activity.textClassName}`}>{activity.label}</span>
+            </div>
+          )}
         </div>
 
         {/* Task title */}
@@ -137,7 +145,10 @@ export function ActiveTaskCard({ task }: ActiveTaskCardProps) {
 
         {/* Execution step (if provisioning) or failed indicator */}
         {task.providerLimitReason ? (
-          <p className="sam-type-caption text-info-fg mb-2 break-words" role="status">
+          <p
+            className={`sam-type-caption ${providerBlocked ? 'text-warning-fg' : 'text-info-fg'} mb-2 break-words`}
+            role="status"
+          >
             {task.providerLimitReason}
           </p>
         ) : task.status === 'failed' ? (
@@ -149,6 +160,16 @@ export function ActiveTaskCard({ task }: ActiveTaskCardProps) {
             {stepLabel}
           </div>
         ) : null}
+
+        {providerBlocked && (
+          <div className="mb-3">
+            <ProviderLimitResume
+              key={`${task.id}:${task.providerLimitVersion ?? ''}`}
+              projectId={task.projectId}
+              taskId={task.id}
+            />
+          </div>
+        )}
 
         {/* Time info */}
         <div className="flex items-center justify-between sam-type-caption text-fg-muted gap-2">
