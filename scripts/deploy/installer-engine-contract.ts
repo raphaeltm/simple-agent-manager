@@ -63,6 +63,37 @@ export interface EngineCheckpoint {
   completed: string[];
   activePhase?: string;
   status: 'running' | 'failed' | 'completed';
+  /** Wall-clock durations, so a slow installation is visible from stored data. */
+  timings?: EngineTimings;
+}
+export interface EngineTimings {
+  /** Milliseconds per phase, from its latest run. */
+  phases: Record<string, number>;
+  /** Most recent commands, oldest first; labels hold only fixed words, never values. */
+  commands: { phase: string; label: string; ms: number }[];
+}
+/** Bounded so the checkpoint stays within the builder's 16 KiB status read. */
+export const MAX_TIMED_COMMANDS = 80;
+
+/**
+ * A command label built only from the executable, package names, lowercase
+ * subcommand words and script file names. Anything that can carry a value
+ * (hex identifiers, long tokens, dots, paths, flags) is dropped, and words stop after a verb that
+ * takes values (`pulumi config set <key> <value>`).
+ */
+export function commandLabel(command: EngineCommand): string {
+  const words: string[] = [];
+  for (const raw of command.args) {
+    const arg = raw.replace(/^@simple-agent-manager\//, '');
+    const script = /^(?:[\w.-]+\/)*([a-z][a-z0-9-]*\.(?:sh|ts|mjs))$/.exec(arg)?.[1];
+    const word =
+      script ??
+      (/^[a-z][a-z0-9-]{0,23}$/.test(arg) && !/^[0-9a-f]{8,}$/.test(arg) ? arg : undefined);
+    if (!word) continue;
+    words.push(word);
+    if (words.length === 5 || ['set', 'put', 'get'].includes(word)) break;
+  }
+  return [command.executable.replace(/^.*\//, ''), ...words].join(' ');
 }
 export interface EngineRunOptions {
   cwd: string;

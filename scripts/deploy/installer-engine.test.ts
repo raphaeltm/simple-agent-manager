@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import {
   type BuildCacheStore,
+  commandLabel,
   type EngineCheckpoint,
   EngineCommandFailure,
   engineFingerprint,
@@ -298,6 +299,58 @@ describe('installation engine', () => {
     expect(JSON.stringify({ events, state })).not.toContain('secret-');
     expect(calls.join('\n')).not.toContain('secret-');
   });
+  it('records phase and command durations without argument values', async () => {
+    // Slow installs were invisible: only the phase name survived in stored state (2026-11-07).
+    const f = fixture();
+    let state: EngineCheckpoint | undefined;
+    await runInstallerEngine(config, {
+      ...f,
+      environment: privateEnv,
+      emit() {},
+      save: (value) => {
+        state = structuredClone(value);
+      },
+    });
+    const timings = state?.timings;
+    expect(Object.keys(timings?.phases ?? {}).sort()).toEqual([...(state?.completed ?? [])].sort());
+    expect(timings?.commands.length).toBeGreaterThan(10);
+    expect(timings?.commands.length).toBeLessThanOrEqual(80);
+    expect(
+      timings?.commands.some((entry) => entry.label.startsWith('pnpm api exec wrangler deploy'))
+    ).toBe(true);
+    const serialized = JSON.stringify(timings);
+    for (const value of Object.values(privateEnv)) expect(serialized).not.toContain(value);
+    expect(serialized).not.toContain(config.sourceCommit);
+    // The builder supervisor reads at most 16 KiB of checkpoint.
+    expect(JSON.stringify(state).length).toBeLessThan(16 * 1024);
+  });
+
+  it('labels commands with fixed words only', () => {
+    expect(
+      commandLabel({
+        executable: '/usr/bin/pulumi',
+        args: ['config', 'set', 'cloudflareApiToken', 'Sk3tchy-Value_123', '--secret'],
+      })
+    ).toBe('pulumi config set');
+    expect(
+      commandLabel({
+        executable: 'pnpm',
+        args: [
+          '--filter',
+          '@simple-agent-manager/api',
+          'exec',
+          'wrangler',
+          'r2',
+          'object',
+          'put',
+          'bucket/cli/sam-linux-amd64',
+          '--file',
+          '/tmp/x.tar.gz',
+        ],
+      })
+    ).toBe('pnpm api exec wrangler r2 object');
+  });
+
   it('runs the migration checks without capturing their progress output', async () => {
     // A clean install's migration output exceeds the capture limit (2026-11-07); parsed
     // outputs must still be captured.

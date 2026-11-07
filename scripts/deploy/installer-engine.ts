@@ -5,6 +5,7 @@ import * as TOML from '@iarna/toml';
 
 import { CLI_OUTPUTS, openEngineBuildCache, VM_AGENT_OUTPUTS } from './installer-engine-cache.js';
 import {
+  commandLabel,
   DEFAULT_CLOUDFLARE_API_URL,
   DEFAULT_COMMAND_TIMEOUT_MS,
   DEFAULT_HEALTH_ATTEMPTS,
@@ -13,6 +14,8 @@ import {
   EngineCommandFailure,
   engineFingerprint,
   type EngineOptions,
+  type EngineRunner,
+  MAX_TIMED_COMMANDS,
   processRunner,
   stackNameForEnvironment,
   validateEngineConfig,
@@ -40,7 +43,25 @@ export async function runInstallerEngine(
   ) {
     throw new Error('Checkpoint does not match approved installation inputs');
   }
-  const runner = options.runner ?? processRunner;
+  const baseRunner = options.runner ?? processRunner;
+  const timings = (state.timings ??= { phases: {}, commands: [] });
+  const runner: EngineRunner = {
+    ...baseRunner,
+    async run(command, runOptions) {
+      const started = Date.now();
+      try {
+        return await baseRunner.run(command, runOptions);
+      } finally {
+        timings.commands.push({
+          phase: state.activePhase ?? '',
+          label: commandLabel(command),
+          ms: Date.now() - started,
+        });
+        if (timings.commands.length > MAX_TIMED_COMMANDS)
+          timings.commands.splice(0, timings.commands.length - MAX_TIMED_COMMANDS);
+      }
+    },
+  };
   const root = resolve(options.root);
   const stack = stackNameForEnvironment(c.environment);
   const prefix = c.prefix;
@@ -123,13 +144,16 @@ export async function runInstallerEngine(
     await options.save(state);
     operation = 'phase-validation';
     options.emit({ phase: name, status: 'started' });
+    const started = Date.now();
     try {
       await action();
+      timings.phases[name] = Date.now() - started;
       if (!state.completed.includes(name)) state.completed.push(name);
       delete state.activePhase;
       await options.save(state);
       options.emit({ phase: name, status: 'completed' });
     } catch (error) {
+      timings.phases[name] = Date.now() - started;
       state.status = 'failed';
       await options.save(state);
       options.emit({
