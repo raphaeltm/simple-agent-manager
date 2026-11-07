@@ -95,8 +95,9 @@ test('a real agent calls domain tool groups by method', async ({ page }) => {
             `Use only SAM MCP tools. 1) Call ideas_read with method "search" and query "${marker}". ` +
             '2) Call knowledge_read with method "search" and query "test". ' +
             '3) Call workspace_read with method "info". ' +
-            `Then reply with one line "DONE ${marker}" followed by, for each call, the tool name, the method and either OK or the exact error. ` +
-            'For call 1, also state the idea ID it found. Do not change anything.',
+            `Then reply with "REPORT ${marker}" on its own line, then one line per call in the form ` +
+            '"<tool> <method> OK" on success or "<tool> <method> ERROR: <message>" on failure, ' +
+            `then the idea ID from call 1 on its own line, and end with "DONE ${marker}". Do not change anything.`,
         },
       },
       [200, 202]
@@ -109,6 +110,18 @@ test('a real agent calls domain tool groups by method', async ({ page }) => {
     }
     // The search found the idea this test created, through the ideas_read group.
     expect(assistant).toContain(created.ideaId);
+    // Each call succeeded, per the agent's structured report.
+    const reportLines = assistant
+      .slice(assistant.lastIndexOf(`REPORT ${marker}`))
+      .split(/\r?\n/)
+      .map((line) => line.trim());
+    for (const result of [
+      'ideas_read search OK',
+      'knowledge_read search OK',
+      'workspace_read info OK',
+    ]) {
+      expect(reportLines).toContain(result);
+    }
     console.log(`Agent report:\n${assistant.slice(assistant.indexOf(`DONE ${marker}`))}`);
   } finally {
     if (created.sessionId) {

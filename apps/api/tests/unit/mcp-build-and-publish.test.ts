@@ -192,6 +192,14 @@ describe('async build_and_publish MCP tools', () => {
       pollTool: 'deployments_read',
       pollMethod: 'publish_status',
     });
+    // The returned instructions are a callable tools/call request for the poll tool.
+    const { resolveGroupedToolCall } = await import('../../src/routes/mcp/tool-group-dispatch');
+    expect(
+      resolveGroupedToolCall(2, payload.pollTool, {
+        method: payload.pollMethod,
+        publishJobId: payload.publishJobId,
+      })
+    ).toMatchObject({ toolName: 'get_publish_status', toolArgs: { publishJobId: 'job-1' } });
   });
 
   it('persists a failed terminal job when VM start fails and redacts signed URL details', async () => {

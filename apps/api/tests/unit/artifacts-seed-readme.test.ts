@@ -54,8 +54,8 @@ describe('buildReadmeContent', () => {
       'get_instructions',
       'dispatch_task',
       'update_task_status',
-      'knowledge_read',
-      'ideas_write',
+      '`knowledge_read` method `search`',
+      '`ideas_write` method `create`',
     ]) {
       expect(readme).toContain(tool);
     }

@@ -980,6 +980,9 @@ describe('ProjectChat new chat button', () => {
       'Describe what you want the agent to do...'
     ) as HTMLTextAreaElement;
     expect(textarea.value).toContain('SAM MCP tool sessions_read');
+    expect(textarea.value).toContain(
+      'Use sessions_read method messages with the parent session ID below before relying on title or phrase search.'
+    );
     expect(textarea.value).toContain('Previous session: "Fix the login bug"');
     expect(textarea.value).toContain(`Parent project ID: ${PROJECT_ID}`);
     expect(textarea.value).toContain(`Parent session ID: ${SESSION_WITH_TASK.id}`);
