@@ -1,6 +1,13 @@
-import { expect, type Page, type Route, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 
-import { assertNoOverflow, screenshot } from './audit-helpers';
+import {
+  assertNoOverflow,
+  makeIdleSessionState,
+  makeMockProject,
+  makeMockUser,
+  screenshot,
+  setupSleepingChatMocks,
+} from './audit-helpers';
 
 /**
  * Visual + behavioural audit for the attention-first project chat list: Needs attention,
@@ -10,7 +17,13 @@ import { assertNoOverflow, screenshot } from './audit-helpers';
  */
 
 const PROJECT_ID = 'proj-sections-audit';
-const USER = { id: 'user-sections-audit', name: 'Audit User', email: 'audit@example.com' };
+const USER_ID = 'user-sections-audit';
+const USER = makeMockUser({
+  email: 'audit@example.com',
+  name: 'Audit User',
+  sessionId: 'auth-session-sections-audit',
+  userId: USER_ID,
+});
 const NOW = Date.now();
 const HOUR = 3_600_000;
 
@@ -92,65 +105,26 @@ const ALL_SESSIONS = [
   WAKE_FAILED,
 ];
 
+/** Mocks the chat page around `sessions`; returns the `include` param of every list read. */
 async function setupApi(page: Page, sessions: Record<string, unknown>[]): Promise<string[]> {
-  const listIncludes: string[] = [];
   await page.addInitScript((userId) => {
     window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
-  }, USER.id);
-
-  await page.routeWebSocket(/\/api\/projects\/[^/]+\/sessions\/ws/, (ws) => {
-    ws.onMessage((raw) => {
-      try {
-        if (JSON.parse(String(raw))?.type === 'ping') ws.send(JSON.stringify({ type: 'pong' }));
-      } catch {
-        /* keepalive frames that are not JSON are ignored */
-      }
-    });
-  });
-
-  await page.route('**/api/**', async (route: Route) => {
-    const url = new URL(route.request().url());
-    const path = url.pathname;
-    const respond = (body: unknown) =>
-      route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
-
-    if (path.startsWith('/api/auth/')) return respond({ user: USER });
-    if (path.startsWith('/api/notifications')) {
-      return respond({ notifications: [], unreadCount: 0, nextCursor: null });
-    }
-    if (path === '/api/credentials') return respond([{ provider: 'hetzner', status: 'valid' }]);
-    if (path === '/api/trial/status') return respond({ available: false });
-    if (path === '/api/agents') return respond({ agents: [] });
-    if (path === '/api/github/installations') return respond([]);
-
-    const projectPath = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
-    if (!projectPath) return respond({});
-    const sub = projectPath[2] ?? '';
-
-    if (sub === '/sessions') {
+  }, USER_ID);
+  const listIncludes: string[] = [];
+  page.on('request', (request) => {
+    const url = new URL(request.url());
+    if (/^\/api\/projects\/[^/]+\/sessions$/.test(url.pathname)) {
       listIncludes.push(url.searchParams.get('include') ?? '');
-      return respond({ sessions, total: sessions.length, hasMore: false });
     }
-    const detail = sub.match(/^\/sessions\/([^/]+)$/);
-    if (detail) {
-      const session = sessions.find((s) => s.id === detail[1]);
-      return respond({ session, messages: [], hasMore: false, state: null });
-    }
-    if (sub.match(/^\/sessions\/[^/]+\/comments/)) return respond({ comments: [] });
-    if (sub === '/tasks') return respond({ tasks: [], nextCursor: null });
-    if (sub === '/agent-profiles') return respond({ items: [] });
-    if (sub.startsWith('/commands')) return respond({ commands: [] });
-    if (sub === '') {
-      return respond({
-        id: PROJECT_ID,
-        name: 'Sections Audit',
-        repository: 'user/sections-audit',
-        repoProvider: 'github',
-        createdAt: '2026-09-01T00:00:00Z',
-        updatedAt: '2026-09-01T00:00:00Z',
-      });
-    }
-    return respond({});
+  });
+  await setupSleepingChatMocks(page, {
+    user: USER,
+    project: makeMockProject({ id: PROJECT_ID, name: 'Sections Audit' }),
+    session: sessions[0] as { id: string },
+    sessions,
+    messages: [],
+    state: makeIdleSessionState(),
+    ownTask: {},
   });
   return listIncludes;
 }
