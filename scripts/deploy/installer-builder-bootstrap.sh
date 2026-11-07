@@ -19,9 +19,11 @@ apt-get update -qq
 apt-get install -y -qq --no-install-recommends ca-certificates curl git jq build-essential pkg-config libssl-dev python3 make docker.io docker-cli docker-buildx xz-utils
 # Pinned downloads retry across identical versioned sources: one transient CDN
 # error (a 404 from dl.google.com on 2026-11-03) must not fail an hour-long build.
-# go.dev redirects to dl.google.com, so both URLs share one CDN; a 404 lasting
-# over 30 s failed an install on 2026-11-07. Six attempts with doubling delays
-# (5+10+20+40+60 s by default) ride out about two and a half minutes.
+# go.dev redirects to dl.google.com, so both URLs share one CDN; it answered the
+# Cloudflare builder with 404 for over 20 minutes on 2026-11-07 while serving
+# other clients. Go therefore also has a byte-identical SAM prerelease mirror.
+# Six attempts with doubling delays (5+10+20+40+60 s by default) ride out about
+# two and a half minutes.
 # The checksum, not the source, decides acceptance.
 fetch_pinned() {
   local output=$1 sha=$2 attempt url delay=${SAM_FETCH_RETRY_DELAY_SECONDS:-5}
@@ -41,7 +43,8 @@ fetch_pinned() {
   return 1
 }
 fetch_pinned /sam/go.tar.gz ccfe7ae822d2c2f41f4fe7c956199967a4dac22d0ee0d2b2bfdb440aab3b20c5 \
-  https://dl.google.com/go/go1.26.10.linux-amd64.tar.gz https://go.dev/dl/go1.26.10.linux-amd64.tar.gz
+  https://dl.google.com/go/go1.26.10.linux-amd64.tar.gz https://go.dev/dl/go1.26.10.linux-amd64.tar.gz \
+  https://github.com/raphaeltm/simple-agent-manager/releases/download/installer-toolchain-go1.26.10/go1.26.10.linux-amd64.tar.gz
 tar -xzf /sam/go.tar.gz -C /usr/local
 rm /sam/go.tar.gz
 npm install --global --ignore-scripts pnpm@9.15.9
