@@ -19,7 +19,7 @@ Known resets must resume automatically. Rejections in one window currently burn 
 - [x] Owner resume API and dashboard/chat controls wake retained snapshot.
 - [x] Coherent blocked task/chat/snapshot state.
 - [x] Parent cancellation if small; otherwise update related idea.
-- [ ] Real entry point regression tests and guard reversion red/green evidence.
+- [x] Real entry point regression tests and guard reversion red/green evidence.
 - [ ] UI mobile/desktop screenshot audit; lint/typecheck/test/build.
 - [ ] Specialist review, staging, PR/CI/CodeRabbit, merge/deploy.
 - [ ] Update idea 01M6SKEAYHG5P9T8ES3Z331A37 with PR/outcome.
@@ -32,7 +32,7 @@ Ideas 01M6SKEAYHG5P9T8ES3Z331A37, 01M6GW3B0YQJVBE6Q8Q1SCX1W3; rules 35/62; /do.
 
 - Same reset (60-second default rounding tolerance, optional deployment override) refreshes one wait and schedule; elapsed unknown retries still consume the budget. Known reset waits do not exhaust that budget.
 - Actual subscription path: event admission/matching -> project-events-materialization -> project_event_wake inbox -> prompt-delivery-runner -> provider guard -> VM submit/steer. The old schedules guard only runs for scheduled_action. Both submit-time and before-side-effect checks hold waiting/blocked tasks. Own credential notices become recorded_not_injected; mixed batches retain other events.
-- Callback/admission/policy serial run 67/67 passed before final pin test; owner recovery route suite 5/5; event Workers 6/6 and existing runtime-steer 4/4; UI initial5/5 before generation controls.
+- Final callback/admission/policy72/72, owner recovery5/5, event/occupancy Workers15/15, existing runtime-steer4/4 and UI7/7 passed. One-use owner approval, current chat successor ownership, immutable transcript and receipt reconciliation have positive regressions and discriminating guard reversions.
 - Removed each policy guard once: known window equivalence, pending unknown equivalence, known reset budget exemption. Each intended real-callback test failed, then source restored.
 - Removed delivery hold, own-credential filter, and transport lifetime preservation once. Real alarm tests failed (unexpected prompt, own ID leak, no delivery after release); restored.
 - Full-path callback->sleep->resume test caught retained sleeping workspace ID, fixed by snapshot-verified detach. Review caught fresh-dispatch no-snapshot and credential injection pin cases; owner approval now nudges first admission or repins exact selected account before recovery injection. Rejected recovery preserves retry.
@@ -47,3 +47,5 @@ Root cause: per-prompt incident counting spent an unknown-reset budget on one kn
 Class: uncovered cross-boundary feedback loop and unrecoverable lifecycle state.
 Why missed: tests repeated identical callback receipts instead of distinct prompts in one window, and tested schedules rather than subscription delivery.
 Process fix: real callback/admission/event-alarm and owner HTTP-to-recovery regressions plus guard-reversion proofs required by rules35/62; no duplicate standing rules added.
+
+- Full repository tests: all non-API packages passed, including web4994. Initial API run15263 passed/3 failed/2 skipped exposed an immutable transcript write, missing recovery-failure anchor and stale read-count assertion; all corrected and focused reruns green. Final full API rerun in progress. Final lint/typecheck/build rerun in progress.
