@@ -22,6 +22,7 @@ import (
 
 // McpBuildAndPublishRequest is the body for the build-and-publish endpoint.
 type McpBuildAndPublishRequest struct {
+	Attempt int `json:"attempt,omitempty"`
 	// PublishJobID is the durable control-plane job id for async publish jobs.
 	PublishJobID string `json:"publishJobId,omitempty"`
 	// Environment is the deployment environment name already authorized by the
@@ -142,6 +143,10 @@ func (s *Server) handleMcpBuildAndPublishJobStart(w http.ResponseWriter, r *http
 		return
 	}
 
+	prepared.Request.PublishJobID = jobID
+	if prepared.Request.Attempt <= 0 {
+		prepared.Request.Attempt = 1
+	}
 	s.publishJobsMu.Lock()
 	if s.publishJobs == nil {
 		s.publishJobs = make(map[string]publishJobState)
@@ -338,6 +343,8 @@ func (s *Server) runPreparedBuildAndPublish(ctx context.Context, prepared *prepa
 	}
 
 	orch := publish.New(publish.Options{
+		PublishJobID: prepared.Request.PublishJobID,
+		Attempt:      prepared.Request.Attempt,
 		ControlPlane: publish.NewHTTPControlPlane(publish.HTTPControlPlaneOptions{
 			BaseURL:     s.config.ControlPlaneURL,
 			Token:       prepared.Token,
@@ -474,4 +481,25 @@ func (s *Server) deployBuildPublishTimeout() time.Duration {
 		return s.config.DeployBuildPublishTimeout
 	}
 	return config.DefaultDeployBuildPublishTimeout
+}
+
+// handleMcpBuildAndPublishJobCancel uses the same node-management auth as start.
+func (s *Server) handleMcpBuildAndPublishJobCancel(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	if !s.requireNodeManagementAuth(w, r, workspaceID) {
+		return
+	}
+	jobID := strings.TrimSpace(r.PathValue("jobId"))
+	s.publishJobsMu.Lock()
+	state, exists := s.publishJobs[jobID]
+	if !exists || state.WorkspaceID != workspaceID {
+		s.publishJobsMu.Unlock()
+		writeError(w, http.StatusNotFound, "publish job not found")
+		return
+	}
+	if state.CompletedAt.IsZero() && state.Cancel != nil {
+		state.Cancel()
+	}
+	s.publishJobsMu.Unlock()
+	writeJSON(w, http.StatusOK, map[string]string{"publishJobId": jobID, "status": "cancel_requested"})
 }

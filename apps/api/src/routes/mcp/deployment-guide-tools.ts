@@ -54,6 +54,7 @@ SAM exposes these MCP tools for deployment. They are the only interface you need
 | \`list_deployment_environment_config(environment)\` | List the Variables (values visible) and Secret keys (values never returned) configured for an environment. |
 | \`set_deployment_environment_config(environment, key, value, isSecret?)\` | Create or update a Variable or Secret for an environment. |
 | \`build_and_publish(environment, reference?, workingDir?)\` | Start an async server-side Compose build/publish job and return a durable \`publishJobId\`. |
+| \`cancel_publish(publishJobId)\` | Cancel a running publish job in this project and requesting workspace. Already terminal jobs stay unchanged; recorded releases are not rolled back. |
 | \`get_publish_status(publishJobId, sinceSeq?, limit?)\` | Poll the build/publish job for status, events, release details, and sanitized failure diagnostics. |
 | \`preview_deployment_routes(environment, composeYaml)\` | Preview which Compose ports will get public SAM URLs before deploying. \`mode: host\` ports are internal/private; other ports are public unless explicitly marked private. |
 | \`list_deployment_routes(environment)\` | List the public URLs, custom domains, and internal routes derived from the latest release version in an accessible environment. |
@@ -133,6 +134,8 @@ Call \`build_and_publish(environment, reference?, workingDir?)\`:
 - \`workingDir\` — optional absolute path under \`/workspaces\` if the Compose file is not at the workspace root.
 
 SAM returns a \`publishJobId\` quickly after the VM accepts the job. The actual Docker Compose build, image export, artifact upload, and release recording continue in the background. You do not run any docker or registry commands.
+
+Publishing requires a VM session; Instant sessions cannot publish yet. Jobs fail with retryable \`stalled\` after prolonged silence or \`deadline_exceeded\` after the overall deadline.
 
 After \`build_and_publish\` returns, call \`get_publish_status({ publishJobId })\` every 10-20 seconds until the status is terminal:
 

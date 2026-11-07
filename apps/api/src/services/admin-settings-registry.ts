@@ -1,5 +1,6 @@
 import type { AdminSettingDefinition } from './admin-setting-definitions';
 import { CORE_SETTINGS } from './admin-settings-core-definitions';
+import { DEPLOYMENT_PUBLISH_SETTINGS } from './admin-settings-deployment-publish-definitions';
 import { FEATURE_SETTINGS } from './admin-settings-features-definitions';
 import { LIFECYCLE_LATENCY_SETTINGS } from './admin-settings-lifecycle-latency-definitions';
 import { OPERATIONS_TELEMETRY_SETTINGS } from './admin-settings-operations-telemetry-definitions';
@@ -20,6 +21,7 @@ export {
   OPERATOR_DEFAULTS,
 } from './admin-setting-definitions';
 const definitions = [
+  ...DEPLOYMENT_PUBLISH_SETTINGS,
   ...CORE_SETTINGS,
   ...FEATURE_SETTINGS,
   ...OPERATOR_SETTINGS,

@@ -323,6 +323,22 @@ export const SESSION_IDEA_TOOLS = [
     },
   },
   {
+    name: 'cancel_publish',
+    description:
+      'Cancel a non-terminal publish job owned by this project and requesting workspace. Cancellation is durable even if the build agent cannot be reached. Already terminal jobs are unchanged. A release already recorded before cancellation is not rolled back.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        publishJobId: {
+          type: 'string',
+          description: 'The publishJobId returned by build_and_publish.',
+        },
+      },
+      required: ['publishJobId'],
+      additionalProperties: false,
+    },
+  },
+  {
     name: 'get_publish_status',
     description:
       'Poll a durable build_and_publish job. Returns current status, current step, recent events, terminal release details on success, and sanitized failure diagnostics on failure. Use sinceSeq to fetch only new events after an earlier poll.',

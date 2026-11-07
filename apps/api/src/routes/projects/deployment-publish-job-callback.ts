@@ -97,7 +97,7 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
   const status = optionalString(event.status) ?? undefined;
   const currentStep = optionalString(event.currentStep) ?? optionalString(event.step);
   await assertCurrent();
-  await appendDeploymentPublishJobEvent(db, {
+  const accepted = await appendDeploymentPublishJobEvent(db, {
     publishJobId,
     projectId,
     environmentId: job.environmentId,
@@ -110,14 +110,15 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
     message,
     detail: requestBody.detail,
     terminal: event.terminal === true,
-    releaseId: optionalString(event.releaseId),
-    releaseVersion: optionalNumber(event.releaseVersion),
-    releaseStatus: optionalString(event.releaseStatus),
+    releaseId: optionalString(event.releaseId) ?? undefined,
+    releaseVersion: optionalNumber(event.releaseVersion) ?? undefined,
+    releaseStatus: optionalString(event.releaseStatus) ?? undefined,
     errorMessage: optionalString(event.errorMessage),
     errorCode: optionalString(event.errorCode),
     retryable: event.retryable === true,
   });
 
+  if (accepted === false) throw errors.conflict('Publish job is terminal');
   await assertCurrent();
   if (status && status !== job.status) {
     c.executionCtx.waitUntil(
@@ -130,8 +131,8 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
         currentStep,
         nodeId: job.nodeId,
         workspaceId,
-        releaseId: optionalString(event.releaseId),
-        releaseVersion: optionalNumber(event.releaseVersion),
+        releaseId: optionalString(event.releaseId) ?? undefined,
+        releaseVersion: optionalNumber(event.releaseVersion) ?? undefined,
         terminal: event.terminal === true,
         source: 'deployment_publish_job_callback.status',
         occurredAt: Date.now(),

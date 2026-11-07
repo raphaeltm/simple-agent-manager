@@ -121,6 +121,8 @@ const composePublishSubmittedBySchema = v.object({
  * .claude/rules/51-runtime-boundary-validation.md.
  */
 const composePublishReleaseSubmissionSchema = v.object({
+  publishJobId: v.optional(v.pipe(v.string(), v.minLength(1))),
+  attempt: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
   environment: v.optional(v.string()),
   environmentId: v.optional(v.string()),
   reference: v.optional(v.string()),
@@ -231,6 +233,9 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     throw errors.badRequest('Invalid release submission body');
   }
 
+  if (submission.publishJobId !== undefined && submission.attempt === undefined) {
+    throw errors.badRequest('Release submission with publishJobId requires attempt');
+  }
   const environment = cleanOptionalString(submission.environment);
   const environmentId = cleanOptionalString(submission.environmentId);
   if (!environment || !environmentId) {
@@ -417,6 +422,16 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     const insertedRelease = await insertDeploymentReleaseWhilePlacementUnlocked({
       db,
       env: c.env,
+      // Rollout: old agents omit publishJobId and retain the legacy unfenced path.
+      publishJob: submission.publishJobId
+        ? {
+            id: submission.publishJobId,
+            attempt: submission.attempt ?? 1,
+            projectId,
+            workspaceId,
+            requestedBy: userId,
+          }
+        : undefined,
       values: {
         id: releaseId,
         environmentId,
@@ -433,7 +448,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     });
     if (!insertedRelease) {
       throw errors.conflict(
-        'Another deployment placement operation is in progress. Please retry this release.'
+        'Publish job is terminal, stale, already linked, or deployment placement is in progress.'
       );
     }
     await assertCurrent();

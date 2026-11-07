@@ -72,8 +72,14 @@ Agents can discover this whole flow at runtime by calling the `get_deployment_gu
 
 Publishing is a two-step, asynchronous flow:
 
-1. `build_and_publish(environment, reference?, workingDir?)` starts a build/publish job on the SAM VM and immediately returns a durable `publishJobId`. The job builds the workspace's Docker Compose stack, pushes built service images with SAM-owned registry credentials, and records the release server-side. Agents never run docker or registry commands and never receive registry credentials.
+1. `build_and_publish(environment, reference?, workingDir?)` starts a build/publish job on the SAM VM and immediately returns a durable `publishJobId`. The job builds the workspace's Docker Compose stack, uploads built service images as scoped artifacts, and records the release server-side. Agents never run docker or registry commands and never receive registry credentials.
 2. `get_publish_status(publishJobId)` reports progress. Poll it until the status is terminal — `succeeded`, `failed`, `canceled`, or `unknown` — rather than retrying `build_and_publish` blindly.
+
+To stop a running build, call `cancel_publish(publishJobId)`. It uses the same project and requesting-workspace scope as `get_publish_status`. Cancellation is durable even if the build machine is unreachable. Terminal jobs stay unchanged. A release already recorded before cancellation continues deploying; cancellation does not roll it back.
+
+A job that stops reporting progress fails with `errorCode: stalled`; a job that exceeds its overall time budget fails with `errorCode: deadline_exceeded`. Both are retryable. Inspect the recent events before starting a new job. The default silence threshold is five minutes and the overall deadline is twenty minutes; the scheduled sweep detects expiry on its next tick. Installation admins can change these in **Admin → Settings** (`deployments.publishJobStallMs` and `deployments.publishJobDeadlineMs`).
+
+Publishing currently requires a **VM session**. Instant sessions receive “Deploying from Instant sessions isn't available yet; use a VM session” before any build job is created.
 
 After a successful publish, agents can verify runtime health with `read_deployment_logs(environment, ...)`.
 
@@ -262,3 +268,7 @@ the route.
 SAM does not create or manage your DNS record. Root/apex domains, wildcard
 domains, TXT-record ownership challenges, and on-demand TLS authorization are out
 of scope for this version.
+
+### Publish-agent rollout compatibility
+
+Updated VM agents include `publishJobId` and `attempt` in release callbacks. SAM accepts a release only while its job is non-terminal, the attempt matches, and no release is linked. Duplicate, canceled, expired, or stale submissions return HTTP 409 and create no release. Terminal jobs reject later event updates. During rollout, older agents that omit `publishJobId` retain the legacy release behavior without this fence; older agents without the cancel endpoint may continue building locally after the control plane marks their job canceled. Refresh VM agents to obtain the full guarantee.

@@ -236,6 +236,32 @@ export async function startBuildPublishJobOnVm(
   );
 }
 
+/** Durable cancellation is already committed before this best-effort request. */
+export async function cancelBuildPublishJobOnVm(
+  env: Env,
+  workspaceId: string,
+  userId: string,
+  nodeId: string,
+  publishJobId: string,
+  timeoutMs: number
+): Promise<unknown> {
+  const { token } = await signNodeManagementToken(userId, nodeId, workspaceId, env);
+  const path = `/workspaces/${encodeURIComponent(workspaceId)}/mcp/build-and-publish-jobs/${encodeURIComponent(publishJobId)}/cancel`;
+  return fetchVmAgentJson(
+    env,
+    nodeId,
+    vmAgentUrlForPath(env, nodeId, path),
+    'POST',
+    {
+      Authorization: `Bearer ${token}`,
+      'X-SAM-Node-Id': nodeId,
+      'X-SAM-Workspace-Id': workspaceId,
+    },
+    {},
+    timeoutMs
+  );
+}
+
 /**
  * Validate that the MCP token has a workspaceId. Returns an error response if not.
  */
