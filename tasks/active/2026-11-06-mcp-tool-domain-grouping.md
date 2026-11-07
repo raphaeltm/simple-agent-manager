@@ -47,7 +47,7 @@ Kept standalone on purpose: library `upload_to_library`/`replace_library_file`/`
 
 ## Acceptance criteria
 
-- [ ] `tools/list` for a normal project lists about 79 tools, no legacy member names, every tool annotated
+- [x] `tools/list` for a normal project lists 82 tools, no legacy member names, every tool annotated
 - [ ] Calling `ideas_read {method:'search', query}` returns the same result as legacy `search_ideas`
 - [ ] Legacy names still work through `tools/call`
 - [ ] Unknown `method` returns a JSON-RPC invalid-params error listing valid methods
@@ -57,7 +57,7 @@ Kept standalone on purpose: library `upload_to_library`/`replace_library_file`/`
 
 ## Implementation notes
 
-- Listed catalogue: 81 tools for ordinary projects (was 145), 103 for Operations (was 167). Listed definitions shrank from ~159K to ~142K characters; most of the remaining size is in the standalone tools.
+- Listed catalogue: 82 tools for ordinary projects (was 145), 104 for Operations (was 167). Library tools stay ungrouped because `download_library_file` writes into the workspace, so it cannot be read-only (CodeRabbit). Listed definitions shrank from ~159K to ~142K characters; most of the remaining size is in the standalone tools.
 - Member property conflict: `add_policy.expiresAt` (number) vs `update_policy.expiresAt` (number or null). The generator merges a create/update nullability pair to the nullable form; the dispatcher rejects `null` for methods whose member does not accept it.
 - Triggers stay ungrouped because `create_trigger`/`update_trigger` disagree on several fields beyond nullability.
 - `list_pull_request_associations` stays ungrouped (its `cursor` is an object while `list_tasks.cursor` is a string).
