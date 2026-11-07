@@ -5,6 +5,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+import { DefaultVmPromptDeliveryAdapter } from '../../src/services/vm-prompt-delivery-adapter';
 import {
   type ChannelReceipt,
   okBody,
@@ -12,7 +13,6 @@ import {
   twoAgentProject,
   withAgentMessageChannels,
 } from './helpers/agent-message-channels';
-import { DefaultVmPromptDeliveryAdapter } from '../../src/services/vm-prompt-delivery-adapter';
 import {
   materialize,
   wakeBatches,
