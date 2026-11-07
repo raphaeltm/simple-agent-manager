@@ -107,7 +107,8 @@ export function withGcpErrorCategory(err: unknown): unknown {
  * keeps every code and message for operators.
  */
 export function gcpOperationError(errors: ReadonlyArray<{ code: string; message: string }>) {
-  const message = `GCP operation failed: ${errors.map((e) => `${e.code}: ${e.message}`).join('; ')}`;
+  const details = errors.map((e) => `${e.code}: ${e.message}`).join('; ');
+  const message = `GCP operation failed: ${details}`;
   let decisive = errors[0];
   let category: ProviderErrorCategory = 'unknown';
   for (const entry of errors) {
