@@ -2,6 +2,15 @@ name: Provision Marketing Site Infrastructure
 
 on:
   workflow_dispatch:
+    inputs:
+      operation:
+        description: 'Plan the apex redirect, apply it only, or provision the complete marketing site'
+        type: choice
+        default: plan-redirect
+        options:
+          - plan-redirect
+          - apply-redirect
+          - provision
 
 concurrency:
   group: www-infra
@@ -35,6 +44,7 @@ jobs:
           cache: 'pnpm'
 
       - name: Install dependencies
+        if: inputs.operation == 'provision'
         run: pnpm install --frozen-lockfile
 
       - name: Resolve Domain
@@ -48,6 +58,7 @@ jobs:
       # Phase 1: Cloudflare Pages Project
       # ========================================
       - name: Create Pages Project
+        if: inputs.operation == 'provision'
         run: |
           set -euo pipefail
           echo "Creating Cloudflare Pages project: $PAGES_PROJECT"
@@ -72,6 +83,7 @@ jobs:
       # Phase 2: DNS Records
       # ========================================
       - name: Create DNS Records
+        if: inputs.operation == 'provision'
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
@@ -158,6 +170,7 @@ jobs:
       # Phase 3: Custom Domain on Pages Project
       # ========================================
       - name: Add Custom Domain to Pages Project
+        if: inputs.operation == 'provision'
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
@@ -187,78 +200,26 @@ jobs:
           fi
 
       # ========================================
-      # Phase 4: Apex → www Redirect (Page Rule)
+      # Phase 4: Apex → www Single Redirect (account-token compatible)
       # ========================================
       - name: Create Apex Redirect Rule
         env:
           CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
           BASE_DOMAIN: ${{ steps.domain.outputs.base }}
-          WWW_DOMAIN: ${{ steps.domain.outputs.www }}
+          OPERATION: ${{ inputs.operation }}
         run: |
-          API="https://api.cloudflare.com/client/v4"
-          AUTH="Authorization: Bearer $CF_API_TOKEN"
-
-          echo "Creating Page Rule: $BASE_DOMAIN/* -> https://$WWW_DOMAIN/\$1 (301)"
-
-          # Check for existing page rule matching this pattern
-          EXISTING_RULES=$(curl -sf "$API/zones/$CF_ZONE_ID/pagerules?status=active" \
-            -H "$AUTH")
-          EXISTING_ID=$(echo "$EXISTING_RULES" | jq -r --arg pattern "${BASE_DOMAIN}/*" \
-            '.result[] | select(.targets[0].constraint.value == $pattern) | .id' 2>/dev/null)
-
-          if [ -n "$EXISTING_ID" ] && [ "$EXISTING_ID" != "null" ]; then
-            echo "Page Rule already exists (ID: $EXISTING_ID), updating..."
-            curl -sf "$API/zones/$CF_ZONE_ID/pagerules/$EXISTING_ID" \
-              -X PUT \
-              -H "$AUTH" \
-              -H "Content-Type: application/json" \
-              -d "{
-                \"targets\": [{
-                  \"target\": \"url\",
-                  \"constraint\": {
-                    \"operator\": \"matches\",
-                    \"value\": \"${BASE_DOMAIN}/*\"
-                  }
-                }],
-                \"actions\": [{
-                  \"id\": \"forwarding_url\",
-                  \"value\": {
-                    \"url\": \"https://${WWW_DOMAIN}/\$1\",
-                    \"status_code\": 301
-                  }
-                }],
-                \"status\": \"active\"
-              }" | jq '.success'
+          if [ "$OPERATION" = "apply-redirect" ] || [ "$OPERATION" = "provision" ]; then
+            node scripts/deploy/apex-redirect.mjs --apply
           else
-            echo "Creating new Page Rule..."
-            curl -sf "$API/zones/$CF_ZONE_ID/pagerules" \
-              -H "$AUTH" \
-              -H "Content-Type: application/json" \
-              -d "{
-                \"targets\": [{
-                  \"target\": \"url\",
-                  \"constraint\": {
-                    \"operator\": \"matches\",
-                    \"value\": \"${BASE_DOMAIN}/*\"
-                  }
-                }],
-                \"actions\": [{
-                  \"id\": \"forwarding_url\",
-                  \"value\": {
-                    \"url\": \"https://${WWW_DOMAIN}/\$1\",
-                    \"status_code\": 301
-                  }
-                }],
-                \"status\": \"active\"
-              }" | jq '.success'
+            node scripts/deploy/apex-redirect.mjs
           fi
 
       # ========================================
       # Summary
       # ========================================
       - name: Write Job Summary
-        if: always()
+        if: always() && inputs.operation == 'provision'
         run: |
           if [ "$PROVISION_JOB_STATUS" = "success" ]; then
             cat >> "$GITHUB_STEP_SUMMARY" <<EOF
@@ -276,7 +237,7 @@ jobs:
           - **Pages URL:** \`${PAGES_PROJECT}.pages.dev\`
 
           ### Redirect
-          - \`${BASE_DOMAIN}/*\` → \`https://${WWW_DOMAIN}/\$1\` (301)
+          - \`${BASE_DOMAIN}\` → \`https://${WWW_DOMAIN}\` (301, path and query retained)
 
           ### Next Steps
           1. Run the **Deploy Marketing Site** workflow to publish the site
