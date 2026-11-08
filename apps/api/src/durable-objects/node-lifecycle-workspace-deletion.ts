@@ -45,7 +45,10 @@ import {
   workspaceDeletionRetryDelayMs,
   workspaceStoppedTtlMs,
 } from './node-lifecycle-workspace-deletion-support';
-import { keepWakeTarget } from './node-lifecycle-workspace-deletion-wake-target';
+import {
+  keepWakeTarget,
+  releaseExactAutomaticEntry,
+} from './node-lifecycle-workspace-deletion-wake-target';
 
 /** Persisted to `platform_errors` on every dead-letter; Operations anomaly sweeps match on it. */
 export const WORKSPACE_DELETION_QUARANTINE_MESSAGE =
@@ -99,7 +102,7 @@ export class NodeLifecycleWorkspaceDeletionQueue {
     const existing = await this.storage.get<PendingWorkspaceDeletion>(key);
     if (
       await keepWakeTarget(this.env, existing, workspaceId, () =>
-        this.deleteExact(key, existing?.claimId ?? null)
+        this.releaseExactAutomatic(key, existing)
       )
     )
       return false;
@@ -388,7 +391,7 @@ export class NodeLifecycleWorkspaceDeletionQueue {
   ): Promise<void> {
     if (
       await keepWakeTarget(this.env, entry, entry.workspaceId, () =>
-        this.deleteExact(key, entry.claimId ?? null)
+        this.releaseExactAutomatic(key, entry)
       )
     )
       return;
@@ -690,6 +693,15 @@ export class NodeLifecycleWorkspaceDeletionQueue {
       }
     });
     await this.recalculateAlarm(await this.getWarmAlarmTime());
+  }
+
+  private async releaseExactAutomatic(
+    key: string,
+    expected: PendingWorkspaceDeletion | undefined
+  ): Promise<boolean> {
+    const released = await releaseExactAutomaticEntry(this.storage, key, expected);
+    if (released && expected) await this.recalculateAlarm(await this.getWarmAlarmTime());
+    return released;
   }
 
   private async deleteExact(key: string, claimId: string | null): Promise<void> {

@@ -6,7 +6,9 @@
  * `vm-prompt-delivery-target.ts`, then `ensureAwake`). A slept container bills nothing, so the
  * sleep writer never queues it for deletion (`scheduleSleepingWorkspaceDeletion` returns early
  * for cf-container), and its teardown belongs to the snapshot purge once retention ends
- * (`scheduled/session-snapshot-purge.ts`). Only an explicit deletion may destroy it earlier.
+ * (`scheduled/session-snapshot-purge.ts`). Only a deliberate deletion may destroy it earlier: an
+ * explicit delete or archive (queue entries in `explicit` mode), or the end of an anonymous trial
+ * (`scheduled/trial-expire.ts`, which claims directly and never goes through the guarded paths).
  *
  * A sleeping VM is different: its VM must be released, and the snapshot carries the wake to a
  * replacement. That is why the guard is runtime-specific rather than a change to the
@@ -46,55 +48,68 @@ export function wakeableSleepingInstantSql(workspaceAlias: string): string {
 }
 
 /**
- * A `stopping` row that only an automatic deletion claim put there: the claim and every
- * failed attempt write the deletion diagnostic, and none of them touched the node (still
- * `sleeping`, which `wakeableSleepingInstantSql` requires).
+ * A `stopping` row that a deletion claim put there: the claim and every failed attempt write
+ * the deletion diagnostic, and none of them touched the node (still `sleeping`, which
+ * `wakeableSleepingInstantSql` requires).
  */
 const STOPPED_BY_DELETION_CLAIM_SQL = `substr(COALESCE(error_message, ''), 1, length(?)) = ?`;
 
-export type WakeableSleepingInstantStatus = 'sleeping' | 'stopping';
+/** The wake target as observed, so a repair can compare-and-set on exactly this row state. */
+export interface WakeableSleepingInstant {
+  status: 'sleeping' | 'stopping';
+  errorMessage: string | null;
+  updatedAt: string | null;
+}
 
-/** The wake target's status, or null when the workspace is not a wakeable sleeping Instant. */
+/** The wake target, or null when the workspace is not a wakeable sleeping Instant. */
 export async function findWakeableSleepingInstant(
   database: D1Database,
   workspaceId: string
-): Promise<WakeableSleepingInstantStatus | null> {
+): Promise<WakeableSleepingInstant | null> {
   const row = await database
     .prepare(
-      `SELECT status FROM workspaces
+      `SELECT status, error_message AS errorMessage, updated_at AS updatedAt FROM workspaces
         WHERE id = ?
           AND (status = 'sleeping' OR (status = 'stopping' AND ${STOPPED_BY_DELETION_CLAIM_SQL}))
           AND ${wakeableSleepingInstantSql('workspaces')}
         LIMIT 1`
     )
     .bind(workspaceId, WORKSPACE_DELETION_DIAGNOSTIC_PREFIX, WORKSPACE_DELETION_DIAGNOSTIC_PREFIX)
-    .first<{ status: WakeableSleepingInstantStatus }>();
-  return row?.status ?? null;
+    .first<WakeableSleepingInstant>();
+  return row ?? null;
 }
 
 /**
- * Return a wake target that an automatic deletion claim moved to `stopping` to `sleeping`, so
- * the next follow-up wakes it in place. The same predicates run inside the UPDATE, so a
- * workspace that changed in between (a destroy claim, an explicit deletion that confirmed, a
- * wake) is left alone.
+ * Return a wake target that a failed automatic deletion left `stopping` to `sleeping`, so the
+ * next follow-up wakes it in place. It compares-and-sets on the row exactly as `observed`:
+ * any claim that started since (explicit or automatic) rewrites `error_message` and
+ * `updated_at` before its first external call, so it is never reverted. The wake predicate
+ * runs inside the UPDATE too, so a destroy claim, a confirmed deletion or a wake in between
+ * also leaves the row alone.
  */
 export async function restoreWakeableSleepingInstant(
   database: D1Database,
   workspaceId: string,
+  observed: WakeableSleepingInstant,
   nowIso: string
 ): Promise<boolean> {
+  if (observed.status !== 'stopping') return false;
   const result = await database
     .prepare(
       `UPDATE workspaces
           SET status = 'sleeping', error_message = NULL, updated_at = ?
         WHERE id = ?
           AND status = 'stopping'
+          AND error_message IS ?
+          AND updated_at IS ?
           AND ${STOPPED_BY_DELETION_CLAIM_SQL}
           AND ${wakeableSleepingInstantSql('workspaces')}`
     )
     .bind(
       nowIso,
       workspaceId,
+      observed.errorMessage,
+      observed.updatedAt,
       WORKSPACE_DELETION_DIAGNOSTIC_PREFIX,
       WORKSPACE_DELETION_DIAGNOSTIC_PREFIX
     )

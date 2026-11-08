@@ -9,18 +9,24 @@
  * container teardown. Substituted: the container runtime (`VmAgentContainerTestDouble`, whose
  * `destroyForUser` records `stopped`).
  *
- * Every Instant case has a sleeping VM control. A sleeping VM must still release its VM.
+ * The guarded paths each have a sleeping VM control: a sleeping VM must still release its VM.
  */
 import { env, runInDurableObject } from 'cloudflare:test';
 import { drizzle } from 'drizzle-orm/d1';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import { workspaceDeletionDueIndexKey } from '../../src/durable-objects/node-lifecycle-workspace-deletion';
-import type { PendingWorkspaceDeletion } from '../../src/durable-objects/node-lifecycle-workspace-deletion-support';
+import {
+  claimWorkspaceDeletionInD1,
+  type NodeLifecycleDeletionEnv,
+  type PendingWorkspaceDeletion,
+} from '../../src/durable-objects/node-lifecycle-workspace-deletion-support';
+import { keepWakeTarget } from '../../src/durable-objects/node-lifecycle-workspace-deletion-wake-target';
 import type { Env } from '../../src/env';
 import { emptyResult, resolveCleanupConfig } from '../../src/scheduled/node-cleanup/shared';
 import { sweepStaleStoppedWorkspaces } from '../../src/scheduled/node-cleanup/workspace-phases';
+import { findWakeableSleepingInstant } from '../../src/services/instant-sleeping-deletion-guard';
 import { buildSessionSnapshotR2Key } from '../../src/services/session-snapshot-artifacts';
 import {
   attemptWorkspaceDeletion,
@@ -199,13 +205,78 @@ async function containerLifecycle(nodeId: string): Promise<unknown> {
   );
 }
 
+async function enableContainers(nodeId: string): Promise<void> {
+  await runInDurableObject(lifecycle(nodeId), async (instance) => {
+    (instance.env as unknown as Record<string, string>).CF_CONTAINER_ENABLED = 'true';
+  });
+}
+
+/** The alarm dispatches attempts through `waitUntil`; give them time to land before asserting. */
+async function settleDispatchedAttempts(): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, 250));
+}
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
+describe('which workspaces count as a wakeable sleeping Instant', () => {
+  it('is the slept Instant workspace with its sleeping snapshot (control)', async () => {
+    const instant = await seedSleptWorkspace('cf-container', 'pred-instant');
+    expect(await findWakeableSleepingInstant(env.DATABASE, instant.workspaceId)).toMatchObject({
+      status: 'sleeping',
+    });
+  });
+
+  it.each([
+    ['a sleeping VM workspace', 'vm', null],
+    [
+      'an Instant workspace with no snapshot',
+      'cf-container',
+      `DELETE FROM session_snapshots WHERE workspace_id = ?1`,
+    ],
+    [
+      'an Instant workspace whose snapshot belongs to another chat',
+      'cf-container',
+      `UPDATE session_snapshots SET chat_session_id = 'other-chat' WHERE workspace_id = ?1`,
+    ],
+    [
+      'an Instant workspace whose snapshot is awake',
+      'cf-container',
+      `UPDATE session_snapshots SET sleep_status = NULL WHERE workspace_id = ?1`,
+    ],
+    [
+      'an Instant workspace whose node is not sleeping',
+      'cf-container',
+      `UPDATE nodes SET status = 'running' WHERE id = (SELECT node_id FROM workspaces WHERE id = ?1)`,
+    ],
+    [
+      'an Instant workspace whose container termination is confirmed',
+      'cf-container',
+      `UPDATE nodes SET runtime_termination_confirmed_at = '2026-01-02T00:00:00.000Z'
+        WHERE id = (SELECT node_id FROM workspaces WHERE id = ?1)`,
+    ],
+    [
+      'an Instant workspace stopping for a reason other than deletion',
+      'cf-container',
+      `UPDATE workspaces SET status = 'stopping', error_message = 'Managed node stop' WHERE id = ?1`,
+    ],
+  ] as const)('is not %s', async (_case, runtime, mutation) => {
+    const suffix = `pred-${_case.length}-${runtime}`;
+    const seeded = await seedSleptWorkspace(runtime, suffix);
+    if (mutation) await env.DATABASE.prepare(mutation).bind(seeded.workspaceId).run();
+
+    expect(await findWakeableSleepingInstant(env.DATABASE, seeded.workspaceId)).toBeNull();
+  });
+});
+
 describe('the stale-workspace safety net and a sleeping Instant workspace', () => {
   it('leaves a sleeping Instant workspace asleep and wakeable', async () => {
     const instant = await seedSleptWorkspace('cf-container', 'net-instant');
 
-    const result = await runSafetyNet();
+    await runSafetyNet();
 
-    expect(result.stoppedWorkspacesQueued).toBe(0);
+    // D1 is shared across this file, so assert on this workspace rather than sweep totals.
     expect(await queuedEntry(instant.nodeId, instant.workspaceId)).toBeUndefined();
     // Liveness: the row is still exactly what the in-place wake reads.
     expect(await workspaceRow(instant.workspaceId)).toMatchObject({
@@ -218,9 +289,8 @@ describe('the stale-workspace safety net and a sleeping Instant workspace', () =
   it('still queues a sleeping VM workspace, whose VM must be released (control)', async () => {
     const vm = await seedSleptWorkspace('vm', 'net-vm');
 
-    const result = await runSafetyNet();
+    await runSafetyNet();
 
-    expect(result.stoppedWorkspacesQueued).toBe(1);
     expect(await queuedEntry(vm.nodeId, vm.workspaceId)).toMatchObject({
       workspaceId: vm.workspaceId,
     });
@@ -260,8 +330,12 @@ describe('the deletion queue and a sleeping Instant workspace', () => {
   it('repairs a row an automatic claim left stopping when its entry comes due', async () => {
     const instant = await seedSleptWorkspace('cf-container', 'due-instant');
     await seedStuckAutomaticDeletion(instant.nodeId, instant.workspaceId, Date.now() - 1_000);
+    // Containers enabled, so a deletion that got past the guard would reach the container DO
+    // and the `not.toBe('stopped')` assertion below can fail.
+    await enableContainers(instant.nodeId);
 
     await runInDurableObject(lifecycle(instant.nodeId), async (instance) => instance.alarm());
+    await settleDispatchedAttempts();
 
     expect(await queuedEntry(instant.nodeId, instant.workspaceId)).toBeUndefined();
     expect(await workspaceRow(instant.workspaceId)).toMatchObject({
@@ -320,6 +394,75 @@ describe('the deletion queue and a sleeping Instant workspace', () => {
     expect((await workspaceRow(instant.workspaceId))?.status).toBe('deleted');
     expect(await nodeStatus(instant.nodeId)).toBe('deleted');
     expect(await containerLifecycle(instant.nodeId)).toBe('stopped');
+  });
+
+  it('still attempts a due automatic deletion of a stuck VM workspace (control)', async () => {
+    const vm = await seedSleptWorkspace('vm', 'due-vm');
+    await seedStuckAutomaticDeletion(vm.nodeId, vm.workspaceId, Date.now() - 1_000);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new TypeError('Network connection lost.');
+      })
+    );
+
+    await runInDurableObject(lifecycle(vm.nodeId), async (instance) => instance.alarm());
+    await settleDispatchedAttempts();
+
+    // The guard left it alone: the queue claimed attempt 9 rather than handing the row back.
+    expect(await queuedEntry(vm.nodeId, vm.workspaceId)).toMatchObject({ attemptCount: 9 });
+    expect((await workspaceRow(vm.workspaceId))?.status).toBe('stopping');
+  });
+
+  it('never reverts a claim that lands while it reads the row', async () => {
+    const instant = await seedSleptWorkspace('cf-container', 'race-claim');
+    await seedStuckAutomaticDeletion(instant.nodeId, instant.workspaceId, Date.now() - 1_000);
+    const expected = await loadWorkspaceDeletionIdentity(env.DATABASE, instant.workspaceId);
+    if (!expected) throw new Error('expected a deletion identity');
+    const claimDiagnostic = 'Workspace deletion unconfirmed: durable attempt 9 claimed';
+
+    const kept = await keepWakeTarget(
+      env as unknown as NodeLifecycleDeletionEnv,
+      undefined,
+      instant.workspaceId,
+      async () => {
+        // A newer claim lands in the await gap, through the real claim writer.
+        expect(
+          await claimWorkspaceDeletionInD1(
+            env as unknown as NodeLifecycleDeletionEnv,
+            expected,
+            9,
+            claimDiagnostic,
+            'automatic'
+          )
+        ).toBe(true);
+        return true;
+      }
+    );
+
+    expect(kept).toBe(true);
+    expect(await workspaceRow(instant.workspaceId)).toMatchObject({
+      status: 'stopping',
+      error_message: claimDiagnostic,
+    });
+  });
+
+  it('leaves the row alone when its queue entry was replaced', async () => {
+    const instant = await seedSleptWorkspace('cf-container', 'race-entry');
+    await seedStuckAutomaticDeletion(instant.nodeId, instant.workspaceId, Date.now() - 1_000);
+
+    const kept = await keepWakeTarget(
+      env as unknown as NodeLifecycleDeletionEnv,
+      undefined,
+      instant.workspaceId,
+      async () => false
+    );
+
+    expect(kept).toBe(true);
+    expect(await workspaceRow(instant.workspaceId)).toMatchObject({
+      status: 'stopping',
+      error_message: STUCK_DIAGNOSTIC,
+    });
   });
 
   it('does not repair a stopping row whose entry is explicit', async () => {
