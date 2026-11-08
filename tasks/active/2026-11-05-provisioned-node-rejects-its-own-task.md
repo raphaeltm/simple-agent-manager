@@ -118,21 +118,35 @@ until the 15-minute provisioning timeout (~150 cycles).
 
 ## Implementation checklist
 
-- [ ] Split `workspace-steps.ts` (659 lines, rule 18): move the dispatch step into its own module (separate commit)
-- [ ] `evaluateWorkspaceReservationCapacity`: measured check charges `max(reserve, unattributed measured)`; comment names condition, signal and divergence; reason string names the condition
-- [ ] `workspaceAdmissionEligibilitySql`: same formula in the atomic SQL
-- [ ] `DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB` 512 → 1024 with a comment citing the measured overhead
-- [ ] Admin setting `operations.workspacePlacementMaxRejections` + `DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS`
-- [ ] TaskRunner state counter (consecutive, reset on success), fail fast at cap, diagnose reasons via shared evaluator, persist diagnostics note, keep node for warm handoff
-- [ ] Tests: divergence through real producer (catalog selection → real TaskRunner admission on D1), red pre-fix
-- [ ] Tests: convergence control (unattributed use above reserve still refuses; co-tenant overrun still refuses)
-- [ ] Tests: defaults through the real resolver (no overrides)
-- [ ] Tests: cap test driving the real alarm loop past the cap; node handed off warm; counter reset on success
-- [ ] Update existing tests that assumed 512 / the double-count formula
-- [ ] Docs: configuration.md, compute-pools.md, admin-settings.md, architecture overview if it states the formula, www placement explorer constant
-- [ ] `.claude/rules/09` ceiling 3.5 → 3 GB (and policy `d8f2a083` text after merge)
-- [ ] Backlog task for heartbeat `workspaceMemory` absence + nominal vs MemTotal
+- [x] Split `workspace-steps.ts` (659 lines, rule 18): move the dispatch step into its own module (separate commit)
+- [x] `evaluateWorkspaceReservationCapacity`: measured check charges `max(reserve, unattributed measured)`; comment names condition, signal and divergence; reason string names the condition
+- [x] `workspaceAdmissionEligibilitySql`: same formula in the atomic SQL
+- [x] `DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB` 512 → 1024 with a comment citing the measured overhead
+- [x] Admin setting `operations.workspacePlacementMaxRejections` + `DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS`
+- [x] TaskRunner state counter (consecutive, reset on success), fail fast at cap, diagnose reasons via shared evaluator, persist diagnostics note, keep node for warm handoff
+- [x] Tests: divergence through real producer (catalog selection → real TaskRunner admission on D1), red pre-fix
+- [x] Tests: convergence control (unattributed use above reserve still refuses; co-tenant overrun still refuses)
+- [x] Tests: defaults through the real resolver (no overrides)
+- [x] Tests: cap test driving the real alarm loop past the cap; node handed off warm; counter reset on success
+- [x] Update existing tests that assumed 512 / the double-count formula
+- [x] Docs: configuration.md, compute-pools.md, admin-settings.md, architecture overview if it states the formula, www placement explorer constant
+- [x] `.claude/rules/09` ceiling 3.5 → 3 GB (and policy `d8f2a083` text after merge)
+- [x] Backlog task for heartbeat `workspaceMemory` absence + nominal vs MemTotal
 - [ ] Staging: dispatch a task at exactly the documented cap (3 GB / 2 vCPU), show it lands on the node it provisioned, clean up
+
+## Implementation notes
+
+- Splits: `workspace-steps.ts` → `workspace-dispatch-step.ts` (089ca8019); `workspace-resource-capacity.ts` →
+  `workspace-admission-policy.ts` + `workspace-reservation-usage.ts` (83e4d6610). Pure code motion.
+- Fix: 80724e302. Tests and docs: 51ad96e54, afadf320e.
+- Discrimination (verified by surgical revert, then restored):
+  - matrix test red with the reserve reverted alone (7680 MB on cx33) and with the formula reverted alone (3072 MB on cx23);
+  - SQL-twin test red with only the SQL reverted (3 of 5);
+  - workers at-cap test red with the formula reverted; workers cap test red with the cap disabled.
+- Legacy `small` (1152 MiB) now fits two per cx23 by declared accounting instead of three. In practice three never
+  fit, because the old double count with no `workspaceMemory` credits refused them.
+- Also: the cloud-init fallback reserve is 1024 (pinned by `host-memory-reserve-default-sync.test.ts`); the specified-node
+  first-refusal path is tested; the dispatch module is allowlisted in the branch-guard scan because the creation step runs the guard.
 
 ## Acceptance Criteria
 
