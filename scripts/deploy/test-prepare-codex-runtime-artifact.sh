@@ -22,6 +22,8 @@ PATH="$private/bin:$PATH" CURL_ARGUMENTS="$private/args" REVIEWED_ARCHIVE="$arch
 cmp "$archive" "$private/prepared/codex-runtime-linux-amd64.tar.gz"
 cmp "$script_dir/../../packages/vm-agent/internal/acp/codex_runtime_installer.sh" "$private/prepared/install-codex-runtime.sh"
 grep -q -- '--proto-redir' "$private/args"
+grep -q -- '--retry-all-errors' "$private/args"
+grep -q -- '--retry-max-time' "$private/args"
 printf tampered > "$private/tampered"
 if CODEX_RUNTIME_ARCHIVE="$private/tampered" bash "$script_dir/prepare-codex-runtime-artifact.sh" "$private/rejected"; then
  echo 'Unapproved archive accepted' >&2; exit 1

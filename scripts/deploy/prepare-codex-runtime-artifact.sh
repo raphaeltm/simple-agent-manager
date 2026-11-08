@@ -13,7 +13,11 @@ trap 'rm -rf -- "$private"' EXIT
 if [[ -n ${CODEX_RUNTIME_ARCHIVE:-} ]]; then
   timeout 120 head -c "$((size + 1))" -- "$CODEX_RUNTIME_ARCHIVE" > "$private/runtime.tar.gz"
 else
+  # github.com release downloads intermittently return 504 (2026-11-08, for ~25 minutes, while the
+  # API path stayed healthy). Retry transient failures, bounded at 10 minutes in total; the size and
+  # checksum checks below still decide whether the bytes are acceptable.
   curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
+    --retry 5 --retry-all-errors --retry-delay 10 --retry-max-time 600 \
     --max-time 180 --max-filesize "$size" --output "$private/runtime.tar.gz" "$url"
 fi
 [[ $(stat -c %s "$private/runtime.tar.gz") == "$size" ]]
