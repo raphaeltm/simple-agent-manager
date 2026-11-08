@@ -329,7 +329,7 @@ MCP tools `list_ai_models` / `run_ai_model` (`routes/mcp/agent-model-tools.ts`, 
 
 ## Credentials
 
-- `GET /api/credentials` — Get the user's cloud provider connections. GCP returns safe `authType`, project, service-account email, zone, and optional key ID metadata; encrypted source credentials are never returned, and malformed rows are isolated.
+- `GET /api/credentials` — Get the user's cloud provider connections. GCP returns safe `authType`, project, service-account email, zone, optional key ID metadata, and `apiIssues` (required Google APIs that are off, refused, or never enabled by setup); encrypted source credentials are never returned, and malformed rows are isolated.
 - `POST /api/credentials` — Save a cloud provider credential. New GCP WIF writes use the versioned `workload-identity` variant.
 - `DELETE /api/credentials/:provider` — Delete the stored cloud provider credential. GCP deletion atomically removes legacy and generated composable copies and cached derivatives; it does not revoke Google-managed keys.
 - `POST /api/cc/attachments` — Pin one of the caller's accounts as their default (no `projectId`) or to a project (replaces their previous pin for that agent; requires `task:write`, since it changes only the caller's own runs).
@@ -343,7 +343,7 @@ MCP tools `list_ai_models` / `run_ai_model` (`routes/mcp/agent-model-tools.ts`, 
 - `PUT /api/gcp/service-account` — Validate and atomically save or rotate an OAuth-free service-account JSON credential. Body: `{ serviceAccountJson, defaultZone }`. Verification and the mutation rate limit run before replacement; the response contains safe metadata only.
 - `POST /api/gcp/setup` — Complete the recommended keyless WIF setup using an OAuth handle and store the versioned WIF credential.
 - `POST /api/gcp/projects` — List Google Cloud projects for a short-lived infrastructure OAuth handle.
-- `POST /api/gcp/verify` — Verify the currently stored GCP credential, dispatching to WIF or service-account authentication.
+- `POST /api/gcp/verify` — Verify the currently stored GCP credential, dispatching to WIF or service-account authentication, then probe Cloud Billing and return `billingCheck` plus the credential's `apiIssues` (the Settings "Check again" action).
 
 The service-account flow ignores uploaded endpoint fields and exchanges RS256 assertions only at SAM's fixed Google token endpoint.
 

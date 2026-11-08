@@ -115,7 +115,9 @@ export {
   fetchGcpComputePriceTable,
   type GcpPriceTable,
   parseStoredGcpPriceTable,
+  probeGcpBillingAccess,
 } from './gcp-pricing';
+export { type GoogleErrorInfo, googleErrorInfoOf } from './google-error-info';
 export type { HetznerProviderRuntimeOptions } from './hetzner';
 export {
   classifyHetznerError,

@@ -39,6 +39,8 @@ export type {
   CredentialResponse,
   CredentialSource,
   CredentialValidationStatus,
+  GcpApiIssue,
+  GcpApiIssueReason,
   GcpCredential,
   GcpCredentialAuthType,
   GcpCredentialMetadata,

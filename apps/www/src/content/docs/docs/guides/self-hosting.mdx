@@ -254,7 +254,7 @@ gcloud iam service-accounts keys create sam-service-account.json \
   --project="${PROJECT_ID}"
 ```
 
-Cloud Billing (`cloudbilling.googleapis.com`) lets SAM read Google's public list prices for the machine catalog; it grants no access to your billing account. Without it, machines are still offered but show "Price unavailable". Vertex AI access is optional and is not required for VM provisioning. If your organization policy disables service-account key creation, use WIF or ask a Google Cloud administrator to approve an appropriate key-management policy; do not weaken the policy just for SAM.
+Cloud Billing (`cloudbilling.googleapis.com`) lets SAM read Google's public list prices for the machine catalog; it grants no access to your billing account. Without it, machines are still offered but show "Price unavailable", and Settings → Infrastructure shows a warning with the exact command and an enable link. Use **Check again** on the Google Cloud connection after enabling it. Vertex AI access is optional and is not required for VM provisioning. If your organization policy disables service-account key creation, use WIF or ask a Google Cloud administrator to approve an appropriate key-management policy; do not weaken the policy just for SAM.
 
 SAM encrypts the complete JSON in both credential stores with the configured credential-encryption key. Only safe metadata is returned to the browser. Derived Google access tokens are short-lived and cached only up to their returned expiry. Rotation verifies the new key before atomically replacing all SAM copies. Disconnect removes SAM's encrypted copies and cached tokens, but it cannot revoke the key in Google Cloud—disable or delete the old key there after a successful rotation or disconnect.
 

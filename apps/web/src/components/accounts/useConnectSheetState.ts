@@ -3,7 +3,7 @@ import { useCallback } from 'react';
 import { useSearchParams } from 'react-router';
 
 /** Query params the connect sheet owns; closing the sheet clears all of them. */
-const SHEET_PARAMS = ['connect', 'method', 'gcp_setup', 'gcp_error'] as const;
+const SHEET_PARAMS = ['connect', 'method', 'review', 'gcp_setup', 'gcp_error'] as const;
 const ANY_PROVIDER = 'any';
 
 /**
@@ -21,8 +21,23 @@ export function useConnectSheetState() {
       setParams((prev) => {
         const next = new URLSearchParams(prev);
         next.set('connect', providerId ?? ANY_PROVIDER);
+        next.delete('review');
         if (authMethod) next.set('method', authMethod);
         else next.delete('method');
+        return next;
+      });
+    },
+    [setParams]
+  );
+
+  /** Open an already-connected provider's card to look at it, not to replace it. */
+  const review = useCallback(
+    (providerId: string) => {
+      setParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.set('connect', providerId);
+        next.set('review', '1');
+        next.delete('method');
         return next;
       });
     },
@@ -45,7 +60,10 @@ export function useConnectSheetState() {
     providerId: connect && connect !== ANY_PROVIDER ? connect : undefined,
     authMethod:
       method === 'api-key' || method === 'oauth-token' ? (method as CredentialKind) : undefined,
+    /** The sheet was opened to review an existing connection (`?review=1`). */
+    reviewing: connect !== null && connect !== ANY_PROVIDER && params.get('review') === '1',
     open,
+    review,
     close,
   };
 }
