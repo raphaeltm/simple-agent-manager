@@ -2,7 +2,7 @@
 
 ## The Problem
 
-The `users` table (and others) contains internal **sentinel rows** that are not real humans — most notably `system_anonymous_trials` (`status='system'`, seeded by migration 0043). Any business-logic check that counts rows to make a decision MUST exclude these sentinel rows. Counting them produces off-by-one logic that silently breaks the feature.
+The `users` table (and others) contains internal **sentinel rows** that are not real humans — most notably the system user `system_anonymous_trials` (`SYSTEM_USER_ID`, `status='system'`, seeded by migration 0043). Any business-logic check that counts rows to make a decision MUST exclude these sentinel rows. Counting them produces off-by-one logic that silently breaks the feature.
 
 ## Incident That Created This Rule
 
@@ -15,7 +15,7 @@ When writing any query or in-memory check whose result depends on **how many** r
 1. **Exclude sentinel rows in the WHERE clause**, e.g. `WHERE status != 'system'`. Do NOT count first and subtract — exclude at the source so the count is correct by construction.
 2. **`status` (and similar discriminators) are `input:false` additionalFields** — only migrations ever write `'system'`, so the filter is reliable without a CHECK constraint.
 3. **Never treat "a row exists" as "a human exists."** "First user", "single operator", "no users yet", and "only one account" checks all require the sentinel exclusion.
-4. **Make the sentinel id env-overridable** where it is referenced directly (`env.TRIAL_ANONYMOUS_USER_ID ?? TRIAL_ANONYMOUS_USER_ID`) — do not hardcode it (Constitution Principle XI).
+4. **Reference the sentinel id through the shared constant** (`SYSTEM_USER_ID` from `@simple-agent-manager/shared`), never a string literal. The id is fixed by migration 0043, so it is not env-overridable: an override could only name a row that does not exist.
 
 ## Quick Compliance Check
 

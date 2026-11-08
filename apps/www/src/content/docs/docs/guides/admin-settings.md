@@ -1,6 +1,6 @@
 ---
 title: Admin Settings
-description: Change SAM's sign-in providers, SAM Connector limits, anonymous trials, background jobs, and the limits for collaboration, workflows, AI models and agent email from the app, without redeploying.
+description: Change SAM's sign-in providers, SAM Connector limits, background jobs, and the limits for collaboration, workflows, AI models and agent email from the app, without redeploying.
 ---
 
 A superadmin can change a set of platform settings from **Admin → Settings**, on a phone or a
@@ -10,8 +10,9 @@ and the Workflows settings (under Operations) in v2026.10.22, AI models in v2026
 and workload identity in v2026.10.24, the Connector read limits in v2026.10.26, and the GitHub
 trigger queue limits in the first release after v2026.10.26.
 Before v2026.10.17, sign-in providers and the SAM Connector were set in `/setup` and
-**Admin → Integrations**, trials on **Admin → Trials**, and the background-job switches only through
-GitHub Environment variables and KV.
+**Admin → Integrations**, and the background-job switches only through GitHub Environment variables
+and KV. The anonymous-trial switch (`trials.enabled`, once on **Admin → Trials**) was removed with
+the trial product in November 2026; a value saved for it earlier is ignored.
 
 ## Open the settings
 
@@ -19,7 +20,7 @@ Select **Admin** in the sidebar (only superadmins see it), then the **Settings**
 titled **Runtime settings**. An account must be an approved, active superadmin to use it; admins
 can't.
 
-Settings are grouped into **OAuth**, **Connector**, **Operations**, **Trials**, **Collaboration**,
+Settings are grouped into **OAuth**, **Connector**, **Operations**, **Collaboration**,
 **Chat**, **AI models**, and **Email**. Type in **Search settings** to filter by name, group, or
 description. Each card is named after the setting, split into words (`operations.cronSweepsEnabled`
 shows as **operations · cron Sweeps Enabled**), and shows:
@@ -50,7 +51,7 @@ shows as **operations · cron Sweeps Enabled**), and shows:
    budgets and unpriced-call charge. Other number limits, including the Connector read limits, save
    straight away. **Reset override** always asks.
 3. The page says **Settings saved.** The server that saved it uses the new value at once, and the
-   rest of SAM within a minute (within 30 seconds for trials, cron sweeps, and Durable Object alarms).
+   rest of SAM within a minute (within 30 seconds for cron sweeps and Durable Object alarms).
 
 OAuth client secrets are write-only: their card says **Current secret is never returned**. To
 replace one, type the new value in **Enter replacement secret**; an empty field keeps the current
@@ -92,10 +93,10 @@ nobody can sign in:
 
 For each setting SAM uses the first of these that exists:
 
-1. A value saved in the app, here or on the older **Admin → Integrations** and **Admin → Trials**
-   pages, which change the same settings (**Source: database**).
+1. A value saved in the app, here or on the older **Admin → Integrations** page, which changes the
+   same settings (**Source: database**).
 2. The matching Worker variable, set through your GitHub Environment (**Source: environment**).
-3. An older KV value: `trials:enabled`, or the cron and alarm switches (**Source: kv**).
+3. An older KV value: the cron and alarm switches (**Source: kv**).
 4. The code default (**Source: default**).
 
 So once a value is saved in the app, changing its GitHub Environment variable does nothing until you
@@ -129,7 +130,6 @@ before you try again.
 | Operations    | `operations.stalledTaskClassifierEnabled`                                                                                                                        | on                                             | The check that [ends stalled turns](/docs/guides/session-troubleshooting/#sam-ended-a-stalled-turn)                                                                                                                                                                                                                                                                                                                                                                                                                                                                           | `STALLED_TASK_CLASSIFIER_ENABLED`                                                 |
 | Operations    | `operations.samOperatorDisabled`                                                                                                                                 | off                                            | Set to **Enabled**, turns the [SAM assistant](/docs/guides/sam-assistant/) off for everyone, keeping each person's own choice                                                                                                                                                                                                                                                                                                                                                                                                                                                 | —                                                                                 |
 | Operations    | `operations.githubTriggerQueueMaxPendingLimit`, `…TtlSecondsLimit`                                                                                               | 1,000 events; 2,592,000 seconds (30 days)      | The most a [GitHub trigger](/docs/guides/triggers/#when-a-github-trigger-is-busy) can set for waiting events and how long they wait. Applies when someone creates a trigger or changes its queue settings                                                                                                                                                                                                                                                                                                                                                                     | —                                                                                 |
-| Trials        | `trials.enabled`                                                                                                                                                 | off                                            | Anonymous trials (keep off; see [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access))                                                                                                                                                                                                                                                                                                                                                                                                                                                           | KV `trials:enabled`                                                               |
 | Collaboration | `collaboration.*` (below)                                                                                                                                        | see below                                      | Shared chats, comments, and idea updates                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | —                                                                                 |
 | Operations    | `nodes.usageWindowMinutes`, `nodes.usageChunkLookbackMinutes`, `nodes.usageMaxHistoryWorkspaces`, `nodes.usageMaxWorkspaces`, `nodes.usageMaxChunksPerWorkspace` | 60, 60, 150, 500, 48                           | On the [Nodes page](/docs/guides/compute-pools/#what-each-machine-is-using): minutes of CPU and memory history drawn (15–360); how early a history chunk may start and still be read, which must cover the longest chunk a VM agent uploads (15–1,440); most workspaces per person whose history is read (1–500, running first, each machine's newest before any machine's second); most workspaces per person listed (50–2,000, running and most recently changed first); most history chunks read per workspace, newest first (4–500). The page says what each cap left out | —                                                                                 |
 | Chat          | `chat.profileUsageWindowDays`, `chat.profilePinCandidateLimit` (below)                                                                                           | 30                                             | How far back the new-chat profile picker looks                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | —                                                                                 |
@@ -588,8 +588,8 @@ again once one has expired.
 
 ## If the database can't be read
 
-The page shows an error instead of guessing. Meanwhile SAM fails safe: the Connector and trials
-switch off, and cron sweeps, alarms, and the stalled-turn check stay switched off if they already
+The page shows an error instead of guessing. Meanwhile SAM fails safe: the Connector switches
+off, and cron sweeps, alarms, and the stalled-turn check stay switched off if they already
 were. Sign-in and security checks refuse rather than fall back, and so does anything that needs the
 linked-work, Account Map, GitHub trigger queue or workload identity limits. The SAM assistant
 switches off. The collaboration, chat, workflow, email and Connector read limits, and the AI-model
@@ -600,9 +600,9 @@ lowered. A single saved value that SAM can't read stops the whole page from load
 
 Updating to v2026.10.17 or later changes nothing by itself: no values are copied into the app, and
 each setting keeps the value it had (from its variable, KV, or default) until someone saves one here.
-New installations keep their defaults, with anonymous trials off.
+New installations keep their defaults.
 
-Releases before v2026.10.17 ignore values saved here: they read trials, cron sweeps, and alarms only
+Releases before v2026.10.17 ignore values saved here: they read cron sweeps and alarms only
 from KV, and the stalled-turn check only from its variable. Those releases can no longer be deployed
 anyway ([Update forward, not back](/docs/guides/self-hosting/#option-a-update-self-hosted-instance-workflow-recommended)),
 but if you run one, set the KV switches to the values you want and check them. Rolling back the

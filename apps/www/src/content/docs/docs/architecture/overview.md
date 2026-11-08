@@ -179,9 +179,8 @@ Before a deploy applies D1 migrations, SAM records per-table counts and a time-t
 | `GITHUB_USER_ACCESS_TOKEN_LOCK` | Per user    | Serializes GitHub OAuth user-token refresh                                                                 |
 | `GITLAB_USER_ACCESS_TOKEN_LOCK` | Per user    | Serializes GitLab OAuth user-token refresh                                                                 |
 | `AI_TOKEN_BUDGET_COUNTER`       | Per user    | Atomic AI token budget accounting                                                                          |
-| `TRIAL_COUNTER`                 | Singleton   | Monthly trial-onboarding cap counter (keyed by `YYYY-MM`)                                                  |
-| `TRIAL_EVENT_BUS`               | Per trial   | SSE event buffering for trial provisioning                                                                 |
-| `TRIAL_ORCHESTRATOR`            | Per trial   | Alarm-driven trial provisioning                                                                            |
+
+The retired anonymous-trial classes (`TrialCounter`, `TrialEventBus`, `TrialOrchestrator`) are still exported as unbound tombstones (`apps/api/src/durable-objects/retired-trial.ts`), because Cloudflare refuses a deploy that drops a class an existing namespace depends on unless a storage-deleting `deleted_classes` migration is added.
 
 ### Why Hybrid?
 

@@ -21,8 +21,8 @@ export function RetiredTrial() {
           Hosted trials have ended
         </Typography>
         <p className="text-fg-muted text-sm mb-6">
-          SAM runs on your own Cloudflare account and cloud provider. Taking you to the
-          self-hosting guide…
+          SAM runs on your own Cloudflare account and cloud provider. Taking you to the self-hosting
+          guide…
         </p>
         <a
           href={SELF_HOST_URL}

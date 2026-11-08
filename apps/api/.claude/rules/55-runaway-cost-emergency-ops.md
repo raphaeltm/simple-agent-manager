@@ -42,8 +42,7 @@ not match the intended incident target.
 ## First resort: KV master brakes
 
 Disable both operational control-loop switches. These switches deliberately
-fail open on a KV read error because they are availability brakes, unlike the
-fail-closed trials entitlement switch. Durable Object alarms re-arm at the
+fail open on a KV read error because they are availability brakes. Durable Object alarms re-arm at the
 configured disabled interval, so re-enabling resumes their chains cleanly.
 
 ```bash
