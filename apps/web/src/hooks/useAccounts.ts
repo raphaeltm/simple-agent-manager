@@ -52,11 +52,13 @@ interface UseAccountsResult {
 export function useAccountsData(options?: {
   /** Always resolve coverage for this project, even past the list cap. */
   project?: AccountProject;
+  /** False skips every request, for surfaces that only sometimes show accounts. */
+  enabled?: boolean;
 }): UseAccountsResult {
   const extraProjectId = options?.project?.id;
   const extraProjectName = options?.project?.name;
   const queryScope = useQueryScope();
-  const enabled = Boolean(queryScope);
+  const enabled = Boolean(queryScope) && (options?.enabled ?? true);
   const resolution = useQuery({ ...resolutionStatusQueryOptions(queryScope), enabled });
   const listsEnabled = enabled && resolution.isFetched;
   const credentials = useQuery({ ...ccCredentialsQueryOptions(queryScope), enabled: listsEnabled });

@@ -56,6 +56,13 @@ const mocks = vi.hoisted(() => ({
   getTranscribeApiUrl: vi.fn(() => 'https://api.test.com/api/transcribe'),
   closeConversationTask: vi.fn(),
   resolveAttentionAnswer: vi.fn(),
+  // Account reads behind the picker's usage (useAccountsData).
+  getMyCredentialLimits: vi.fn(),
+  getResolutionStatus: vi.fn(),
+  listCCCredentials: vi.fn(),
+  listCCConfigurations: vi.fn(),
+  listCCAttachments: vi.fn(),
+  listProfilePins: vi.fn(),
   availableCommands: [] as Array<{
     name: string;
     description: string;
@@ -96,6 +103,12 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   getTranscribeApiUrl: mocks.getTranscribeApiUrl,
   closeConversationTask: mocks.closeConversationTask,
   resolveAttentionAnswer: mocks.resolveAttentionAnswer,
+  getMyCredentialLimits: mocks.getMyCredentialLimits,
+  getResolutionStatus: mocks.getResolutionStatus,
+  listCCCredentials: mocks.listCCCredentials,
+  listCCConfigurations: mocks.listCCConfigurations,
+  listCCAttachments: mocks.listCCAttachments,
+  listProfilePins: mocks.listProfilePins,
 }));
 
 vi.mock('../../../src/components/task-hierarchy', async (importOriginal) => {
@@ -509,6 +522,35 @@ describe('ProjectChat new chat button', () => {
       alreadyResolved: false,
       answer: 'Approve',
     });
+    mocks.getMyCredentialLimits.mockResolvedValue({ credentials: [], generatedAt: 0 });
+    mocks.getResolutionStatus.mockResolvedValue({ consumers: [] });
+    mocks.listCCCredentials.mockResolvedValue([]);
+    mocks.listCCConfigurations.mockResolvedValue([]);
+    mocks.listCCAttachments.mockResolvedValue([]);
+    mocks.listProfilePins.mockResolvedValue([]);
+  });
+
+  it('reads account usage for the new-chat profile picker', async () => {
+    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
+
+    renderProjectChat();
+
+    expect(await screen.findByText('What do you want to build?')).toBeInTheDocument();
+    await waitFor(() => expect(mocks.getMyCredentialLimits).toHaveBeenCalled());
+    await waitFor(() => expect(mocks.getResolutionStatus).toHaveBeenCalled());
+  });
+
+  it('makes no account requests while a conversation is open', async () => {
+    mocks.listChatSessions.mockResolvedValue({ sessions: [SESSION_1, SESSION_2], total: 2 });
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/session-1`);
+
+    // Liveness: the conversation rendered, so the page's queries had their chance to run.
+    expect(await screen.findByTestId('message-view')).toHaveTextContent('session-1');
+    expect(await screen.findAllByText('First chat')).not.toHaveLength(0);
+    expect(mocks.getMyCredentialLimits).not.toHaveBeenCalled();
+    expect(mocks.getResolutionStatus).not.toHaveBeenCalled();
+    expect(mocks.listCCCredentials).not.toHaveBeenCalled();
   });
 
   it('shows a deep-linked conversation while the session list is still loading', async () => {
