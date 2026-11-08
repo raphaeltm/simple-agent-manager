@@ -203,13 +203,6 @@ class ContainerVmAgent {
     if (!this.running) throw new TypeError('Network connection lost.');
     const { pathname } = new URL(request.url);
     this.requests.push({ method: request.method, path: pathname });
-    if (
-      pathname === `/workspaces/${WORKSPACE_ID}/physical-deletion` &&
-      request.method === 'DELETE'
-    ) {
-      const identity = await request.json();
-      return Response.json({ ...identity, success: true, physicalDeleted: true });
-    }
     if (pathname === '/workspaces' && request.method === 'POST') {
       if (
         request.headers.get('Authorization') !== 'Bearer node-management-token' ||
@@ -1233,10 +1226,14 @@ describe('Instant session wake after idle sleep', () => {
 
       expect(response.status, await response.clone().text()).toBe(200);
       expect(vmAgent.signals).toEqual([`${AGENT_PATH}/cancel`, `${AGENT_PATH}/stop`]);
-      expect(runtimeRows(), JSON.stringify(runtimeRows())).toEqual({
-        ...ARCHIVED_ROWS,
-        agentSession: { status: 'completed' },
-      });
+      // The container DO destroys it. The in-container physical-deletion route cannot prove
+      // ownership (the standalone agent has no node identity env) and answered 409 on staging,
+      // so the deletion must not depend on it.
+      expect(vmAgent.requests.map((request) => request.path)).not.toContain(
+        `/workspaces/${WORKSPACE_ID}/physical-deletion`
+      );
+      expect(vmAgent.running).toBe(false);
+      expect(runtimeRows(), JSON.stringify(runtimeRows())).toEqual(ARCHIVED_ROWS);
     });
 
     it('still forwards a cancel to a live agent', async () => {

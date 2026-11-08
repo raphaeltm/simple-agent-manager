@@ -623,9 +623,14 @@ async function requestWorkspaceDeletion(
     const node = await env.DATABASE.prepare('SELECT status FROM nodes WHERE id = ?')
       .bind(expected.nodeId)
       .first<{ status: string }>();
-    if (node && node.status !== 'running') {
-      // Proxying to a sleeping container wakes it, but recovery cannot admit the
-      // stopping workspace we just claimed. Destroy through the container DO.
+    if (node) {
+      // An Instant workspace is its container, so destroying the container through its DO
+      // is the physical deletion, awake or asleep. Proxying to a sleeping container wakes it,
+      // and recovery cannot admit the stopping workspace we just claimed. Proxying to an awake
+      // one cannot succeed either: the standalone agent is launched without NODE_USER_ID or
+      // NODE_RUNTIME_INCARNATION_ID (`VmAgentContainer` launch env), so its physical-deletion
+      // route always answers 409 "node deletion ownership or incarnation mismatch" (staging
+      // 2026-11-08: archiving an awake Instant chat returned 409 on every attempt).
       await requireDeletionTargetAtBoundary(env, expected);
       await requireAutomaticPreservation(options);
       // An Instant workspace is never evicted, so its generation is NULL. NULL is the exact
