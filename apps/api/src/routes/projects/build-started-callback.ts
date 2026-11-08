@@ -12,6 +12,7 @@ import { jsonValidator } from '../../schemas';
 import { verifyCallbackToken } from '../../services/jwt';
 import { callbackTokenMatchesWorkspace } from '../../services/node-callback-auth';
 import { notifyTaskRunnerWorkspaceBuildStarted } from '../../services/task-runner-do';
+import { assertWorkspaceCallbackResourceById } from '../workspaces/_helpers';
 
 const BuildStartedCallbackSchema = v.object({
   workspaceId: v.string(),
@@ -71,6 +72,10 @@ buildStartedCallbackRoute.post(
       });
       throw errors.forbidden('Workspace is not bound to this task');
     }
+
+    // A stopped, deleted or errored workspace (or one whose node is ending) must not
+    // advance its task, even with a still-unexpired token from that workspace.
+    await assertWorkspaceCallbackResourceById(c.env, body.workspaceId, 'build_started');
 
     await notifyTaskRunnerWorkspaceBuildStarted(c.env, taskId, body.workspaceId);
     return c.body(null, 204);

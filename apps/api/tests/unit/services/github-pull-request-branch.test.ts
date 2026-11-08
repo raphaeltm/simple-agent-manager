@@ -5,7 +5,13 @@ import type { Project } from '../../../src/db/schema';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { resolveProjectPullRequestHeadBranch } from '../../../src/services/github-pull-request-branch';
-import { callMcpTool, createJsonKv, createMcpApp, storeMcpToken } from '../../helpers/mcp-route';
+import {
+  callMcpTool,
+  createJsonKv,
+  createMcpApp,
+  seedActiveMcpWorkspace,
+  storeMcpToken,
+} from '../../helpers/mcp-route';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const mocks = vi.hoisted(() => ({ access: vi.fn(), token: vi.fn(), fetch: vi.fn() }));
@@ -61,6 +67,7 @@ describe('authorized current GitHub PR branch read', () => {
       userId: 'u',
       workspaceId: 'ws',
     });
+    seedActiveMcpWorkspace(sqlite, { workspaceId: 'ws', userId: 'u', projectId: 'p' });
     const app = await createMcpApp();
     const claim = (prHeadBranch: string) =>
       callMcpTool(app, routeEnv, 'live-branch-token', 'associate_pull_request', {

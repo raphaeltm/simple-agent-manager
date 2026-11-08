@@ -9,11 +9,14 @@ import * as projectDataService from './project-data';
 
 export type WorkspaceDeletionCallbackKind =
   | 'acp_activity'
+  | 'acp_interaction'
   | 'agent_credential_sync'
   | 'agent_key'
   | 'agent_settings'
+  | 'ai_proxy'
   | 'boot_log'
   | 'bootstrap_token'
+  | 'build_started'
   | 'callback_token_renewal'
   | 'codex_refresh'
   | 'compose_image_artifact_complete'

@@ -605,7 +605,7 @@ describe('JWT Token Contract', () => {
       expect(payload.scope).toBe('node');
     });
 
-    it('returns scope: undefined for legacy tokens (no scope claim)', async () => {
+    it('rejects legacy tokens with no scope claim, with or without an expected scope', async () => {
       const { SignJWT, importPKCS8 } = await import('jose');
       const { verifyCallbackToken } = await import('../../src/services/jwt');
 
@@ -628,9 +628,33 @@ describe('JWT Token Contract', () => {
         BASE_DOMAIN: 'example.com',
       } as any;
 
-      const payload = await verifyCallbackToken(legacyToken, env);
-      expect(payload.workspace).toBe('ws-legacy');
-      expect(payload.scope).toBeUndefined();
+      await expect(verifyCallbackToken(legacyToken, env)).rejects.toMatchObject({
+        statusCode: 401,
+        message: 'Missing token scope claim',
+      });
+      await expect(
+        verifyCallbackToken(legacyToken, env, { expectedScope: 'workspace' })
+      ).rejects.toMatchObject({ statusCode: 401 });
+    });
+
+    it('rejects a correctly scoped token that carries no issue time', async () => {
+      const { SignJWT, importPKCS8 } = await import('jose');
+      const { verifyCallbackToken } = await import('../../src/services/jwt');
+
+      const privateKey = await importPKCS8(testPrivateKey, JWT_ALGORITHM);
+      const noIatToken = await new SignJWT({ workspace: 'ws-1', type: 'callback', scope: 'workspace' })
+        .setProtectedHeader({ alg: JWT_ALGORITHM, kid: 'key-2024-01' })
+        .setIssuer('https://api.example.com')
+        .setSubject('ws-1')
+        .setAudience(JWT_AUDIENCES.callback)
+        .setExpirationTime(new Date(Date.now() + 86400000))
+        .sign(privateKey);
+      const env = { JWT_PUBLIC_KEY: testPublicKey, BASE_DOMAIN: 'example.com' } as any;
+
+      await expect(verifyCallbackToken(noIatToken, env)).rejects.toMatchObject({
+        statusCode: 401,
+        message: 'Missing token issue time',
+      });
     });
   });
 

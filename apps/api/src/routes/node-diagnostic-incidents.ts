@@ -91,7 +91,7 @@ async function assertNodeCallbackResourceAcceptsWrite(
 
 nodeDiagnosticIncidentRoutes.post('/:id/errors', async (c) => {
   const nodeId = c.req.param('id');
-  await verifyNodeCallbackAuth(c, nodeId, { requireExplicitScope: true });
+  await verifyNodeCallbackAuth(c, nodeId);
   await assertNodeCallbackResourceAcceptsWrite(c, nodeId, 'errors');
   const maxBodyBytes = positiveInteger(
     c.env.MAX_VM_AGENT_ERROR_BODY_BYTES,
@@ -296,7 +296,7 @@ nodeDiagnosticIncidentRoutes.post('/:id/errors', async (c) => {
 nodeDiagnosticIncidentRoutes.post('/:id/diagnostic-incidents/:incidentId/artifacts', async (c) => {
   const nodeId = c.req.param('id');
   const incidentId = c.req.param('incidentId');
-  await verifyNodeCallbackAuth(c, nodeId, { requireExplicitScope: true });
+  await verifyNodeCallbackAuth(c, nodeId);
   await assertNodeCallbackResourceAcceptsWrite(c, nodeId, 'diagnostic_artifact_registration');
   const config = resolveDiagnosticIncidentConfig(c.env);
   const contentLength = Number.parseInt(c.req.header('content-length') ?? '', 10);
@@ -342,7 +342,7 @@ nodeDiagnosticIncidentRoutes.put(
   '/:id/diagnostic-incidents/:incidentId/artifacts/:artifactId/content',
   async (c) => {
     const nodeId = c.req.param('id');
-    await verifyNodeCallbackAuth(c, nodeId, { requireExplicitScope: true });
+    await verifyNodeCallbackAuth(c, nodeId);
     await assertNodeCallbackResourceAcceptsWrite(c, nodeId, 'diagnostic_artifact_upload');
     await uploadDiagnosticArtifact(
       c.env,

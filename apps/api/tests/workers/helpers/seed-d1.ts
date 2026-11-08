@@ -473,3 +473,38 @@ export async function seedTriggerExecution(
     )
     .run();
 }
+
+/**
+ * Seed the user, project, running node and running workspace a workspace MCP token names,
+ * so the token passes `validateActiveWorkspaceMcpToken`. Returns the identity to store in
+ * the token. Fresh ids each call, so tests sharing the persistent D1 never collide.
+ */
+export async function seedActiveMcpTokenWorkspace(): Promise<{
+  userId: string;
+  projectId: string;
+  workspaceId: string;
+}> {
+  const suffix = crypto.randomUUID();
+  const userId = `mcp-user-${suffix}`;
+  const installationId = `mcp-inst-${suffix}`;
+  const projectId = `mcp-project-${suffix}`;
+  const workspaceId = `mcp-ws-${suffix}`;
+  await seedUser(userId);
+  await seedInstallation(installationId, userId);
+  await seedProject(projectId, userId, installationId);
+  await seedMcpTokenWorkspace(workspaceId, userId, projectId);
+  return { userId, projectId, workspaceId };
+}
+
+/**
+ * Seed a running node and a running workspace for an existing user and project, so an MCP
+ * token naming `workspaceId` passes `validateActiveWorkspaceMcpToken`. Idempotent.
+ */
+export async function seedMcpTokenWorkspace(
+  workspaceId: string,
+  userId: string,
+  projectId: string
+): Promise<void> {
+  await seedNode(`${workspaceId}-node`, userId);
+  await seedWorkspace(workspaceId, `${workspaceId}-node`, userId, { projectId });
+}

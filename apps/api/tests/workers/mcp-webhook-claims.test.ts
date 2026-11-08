@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 
 import { storeMcpToken } from '../../src/services/mcp-token';
 import { hashWebhookToken } from '../../src/services/webhook-trigger-crypto';
-import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
+import { seedInstallation, seedMcpTokenWorkspace, seedProject, seedUser } from './helpers/seed-d1';
 
 interface Created {
   id: string;
@@ -33,6 +33,7 @@ async function setup(suffix: string) {
     chatSessionId: `${suffix}-chat`,
     createdAt: now,
   };
+  await seedMcpTokenWorkspace(identity.workspaceId, userId, projectId);
   await storeMcpToken(env.KV, token, identity);
   const input = {
     name: `Webhook ${suffix}`,

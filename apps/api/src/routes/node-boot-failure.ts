@@ -19,7 +19,7 @@ const BootFailureSchema = v.object({
 export const nodeBootFailureRoutes = new Hono<{ Bindings: Env }>();
 nodeBootFailureRoutes.post('/:id/boot-failure', jsonValidator(BootFailureSchema), async (c) => {
   const nodeId = c.req.param('id');
-  await verifyNodeCallbackAuth(c, nodeId, { requireExplicitScope: true });
+  await verifyNodeCallbackAuth(c, nodeId);
   const node = await c.env.DATABASE.prepare(
     'SELECT status, node_class, runtime FROM nodes WHERE id = ?'
   )

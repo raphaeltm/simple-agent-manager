@@ -59,14 +59,6 @@ function gone(resource: TerminalCallbackResource): AcpHeartbeatVerdict {
   return { outcome: 'gone', resource };
 }
 
-function rejectInvalidScope(scope: CallbackTokenPayload['scope']): never {
-  log.warn('acp_heartbeat.invalid_token_scope', {
-    scope,
-    action: 'rejected',
-  });
-  throw errors.forbidden('Invalid token scope for ACP heartbeat');
-}
-
 async function loadNodeStatus(db: AppDb, nodeId: string): Promise<string | null> {
   const nodeRow = await db
     .select({ status: schema.nodes.status })
@@ -195,11 +187,7 @@ async function authorizeAcpHeartbeat(
     return authorizeNodeScopedHeartbeat(db, payload, projectId, requestedNodeId);
   }
 
-  if (payload.scope === 'workspace' || payload.scope === undefined) {
-    return authorizeWorkspaceScopedHeartbeat(db, payload, projectId, requestedNodeId);
-  }
-
-  rejectInvalidScope(payload.scope);
+  return authorizeWorkspaceScopedHeartbeat(db, payload, projectId, requestedNodeId);
 }
 
 function logTerminalResource(

@@ -60,44 +60,35 @@ export function nodeStatusTerminatesCallbacks(status: string | null | undefined)
   return status != null && NODE_STATUSES_TERMINATING_CALLBACKS.has(status);
 }
 
+/** Workspace-scoped tokens CANNOT be used for node-level endpoints. */
+function rejectNonNodeScope(nodeId: string, tokenIdentity: string | null): never {
+  log.warn('node_auth.rejected_workspace_scoped_token', {
+    nodeId,
+    tokenIdentity,
+    action: 'rejected',
+  });
+  throw errors.forbidden('Insufficient token scope');
+}
+
 export async function verifyNodeCallbackAuth(
   c: Context<{ Bindings: Env }>,
-  nodeId: string,
-  options: { requireExplicitScope?: boolean } = {}
+  nodeId: string
 ): Promise<void> {
   const token = extractBearerToken(c.req.header('Authorization'));
   let payload: CallbackTokenPayload;
   try {
-    payload = options.requireExplicitScope
-      ? await verifyCallbackToken(token, c.env, { expectedScope: 'node' })
-      : await verifyCallbackToken(token, c.env);
+    payload = await verifyCallbackToken(token, c.env, { expectedScope: 'node' });
   } catch (cause) {
-    if (!options.requireExplicitScope) throw cause;
     if (!(cause instanceof AppError)) throw cause;
-    const message = cause.message || 'Invalid callback token';
-    if (cause.statusCode === 403 || message.includes('scope')) {
-      throw errors.forbidden('Insufficient token scope');
-    }
+    if (cause.statusCode === 403) rejectNonNodeScope(nodeId, null);
     if (cause.statusCode === 401) {
       throw errors.unauthorized('Invalid callback token');
     }
     throw cause;
   }
 
-  if (options.requireExplicitScope && payload.scope !== 'node') {
-    throw errors.forbidden('Insufficient token scope');
-  }
-
-  // Workspace-scoped tokens CANNOT be used for node-level endpoints.
-  if (payload.scope === 'workspace') {
-    log.warn('node_auth.rejected_workspace_scoped_token', {
-      tokenWorkspace: payload.workspace,
-      nodeId,
-      scope: payload.scope,
-      action: 'rejected',
-    });
-    throw errors.forbidden('Insufficient token scope');
-  }
+  // Defence in depth: the verifier already enforced expectedScope.
+  if (payload.scope !== 'node') rejectNonNodeScope(nodeId, payload.workspace);
 
   if (payload.workspace !== nodeId) {
     throw errors.unauthorized('Callback token does not match node');

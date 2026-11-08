@@ -190,14 +190,12 @@ describe('POST /api/auth/codex-refresh', () => {
     expect(json.error).toBe('insufficient_scope');
   });
 
-  it('accepts legacy tokens without scope claim (backward compatibility)', async () => {
-    vi.mocked(verifyCallbackToken).mockResolvedValue({
-      workspace: 'ws-123',
-      type: 'callback',
-      // scope is undefined — legacy token
-    });
+  it('returns 401 when the verifier rejects an unscoped legacy token', async () => {
+    // verifyCallbackToken refuses tokens without a scope claim (Missing token scope claim).
+    vi.mocked(verifyCallbackToken).mockRejectedValue(new Error('Missing token scope claim'));
     const res = await postRefresh(validBody);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(401);
+    expect(mockDoFetch).not.toHaveBeenCalled();
   });
 
   // -----------------------------------------------------------------------
@@ -318,6 +316,25 @@ describe('POST /api/auth/codex-refresh', () => {
     expect(doRequestBody.projectId).toBeUndefined();
     // encryptionKey is NOT in the DO request — DO derives it from its own env
     expect(doRequestBody.encryptionKey).toBeUndefined();
+  });
+
+  it('withholds the rotated tokens when the workspace stopped while the refresh ran', async () => {
+    const live = mockDrizzleWithWorkspace('user-abc');
+    const stopped = mockDrizzleWithWorkspace('user-abc', null, 'stopped');
+    // First identity read (admission) sees the running workspace; the read at the response
+    // boundary sees it stopped, as if a stop landed during the DO rotation.
+    vi.mocked(drizzle)
+      .mockReturnValueOnce(live)
+      .mockReturnValueOnce(live)
+      .mockReturnValue(stopped);
+
+    const res = await postRefresh(validBody);
+
+    expect(mockDoFetch).toHaveBeenCalledTimes(1);
+    expect(res.status).toBe(410);
+    const body = await res.text();
+    expect(body).not.toContain('new-refresh');
+    expect(body).not.toContain('new-access');
   });
 
   it('returns 401 without calling the DO when the run has no refreshable credential', async () => {

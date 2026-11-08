@@ -2,10 +2,14 @@
  * Drive the real workspace MCP route (`POST /mcp`, JSON-RPC `tools/call`) in a test.
  * Pair with `createSqliteD1` so tool handlers run their real SQL.
  */
+import type Database from 'better-sqlite3';
+import { getTableConfig } from 'drizzle-orm/sqlite-core';
 import { Hono } from 'hono';
 import { expect } from 'vitest';
 
+import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
+import { createSchemaTables } from './sqlite-d1';
 
 export interface McpToolResponse {
   result?: { content: Array<{ text: string }> };
@@ -84,4 +88,42 @@ export async function callMcpTool(
 export function toolResult<T>(response: McpToolResponse): T {
   expect(response.error).toBeUndefined();
   return JSON.parse(response.result?.content[0]?.text ?? '{}') as T;
+}
+
+/**
+ * Make the workspace an MCP token names authorize it, the way a live agent session's
+ * workspace does: present, owned by the token's user and project, and on a running node
+ * (`validateActiveWorkspaceMcpToken`). Creates the `nodes`/`workspaces` tables when a
+ * narrow fixture omitted them. A workspace row the test already seeded keeps its status,
+ * so a test of an inactive workspace still sees that status; only a missing node is filled.
+ * Pass `nodeId` to reuse a node the fixture already has (installation-wide listings).
+ */
+export function seedActiveMcpWorkspace(
+  sqlite: Database.Database,
+  data: { workspaceId: string; userId: string; projectId: string; nodeId?: string }
+): void {
+  const existing = new Set(
+    (
+      sqlite.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`).all() as Array<{
+        name: string;
+      }>
+    ).map((row) => row.name)
+  );
+  createSchemaTables(
+    sqlite,
+    [schema.nodes, schema.workspaces].filter((table) => !existing.has(getTableConfig(table).name))
+  );
+  sqlite
+    .prepare(
+      `INSERT INTO workspaces (id, user_id, project_id, node_id, status)
+       VALUES (?, ?, ?, ?, 'running')
+       ON CONFLICT(id) DO UPDATE SET node_id = COALESCE(workspaces.node_id, excluded.node_id)`
+    )
+    .run(data.workspaceId, data.userId, data.projectId, data.nodeId ?? `${data.workspaceId}-node`);
+  const { nodeId } = sqlite
+    .prepare(`SELECT node_id AS nodeId FROM workspaces WHERE id = ?`)
+    .get(data.workspaceId) as { nodeId: string };
+  sqlite
+    .prepare(`INSERT OR IGNORE INTO nodes (id, user_id, status) VALUES (?, ?, 'running')`)
+    .run(nodeId, data.userId);
 }

@@ -11,6 +11,9 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { verifyCallbackToken } from './jwt';
+import { nodeStatusTerminatesCallbacks } from './node-callback-auth';
+import { WORKSPACE_CALLBACK_ACTIVE_STATUSES } from './workspace-callback-identity';
+import { signalWorkspaceDeletionUnconfirmedCallback } from './workspace-deletion-callback-signal';
 import type { PreloadedRuntimeRows } from './workspace-runtime-assets';
 
 // =============================================================================
@@ -65,7 +68,9 @@ export function extractCallbackToken(
 
 /**
  * Verify a callback token and resolve the workspace → userId/projectId.
- * Rejects node-scoped tokens (only workspace-scoped tokens allowed).
+ * Rejects node-scoped tokens (only workspace-scoped tokens allowed), and tokens whose
+ * workspace is not active on a live node: a stopped, sleeping, deleted or errored
+ * workspace's token must not keep spending model credentials until it expires.
  */
 export async function verifyAIProxyAuth(
   token: string,
@@ -83,14 +88,35 @@ export async function verifyAIProxyAuth(
       projectId: schema.workspaces.projectId,
       chatSessionId: schema.workspaces.chatSessionId,
       agentProfileHint: schema.workspaces.agentProfileHint,
+      status: schema.workspaces.status,
+      nodeId: schema.workspaces.nodeId,
+      nodeStatus: schema.nodes.status,
     })
     .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
     .where(eq(schema.workspaces.id, workspaceId))
     .get();
 
   if (!workspace?.userId) {
     log.error('ai_proxy.workspace_not_found', { workspaceId });
     throw new AIProxyAuthError('Workspace not found', 404);
+  }
+
+  if (
+    !WORKSPACE_CALLBACK_ACTIVE_STATUSES.has(workspace.status) ||
+    !workspace.nodeId ||
+    !workspace.nodeStatus ||
+    nodeStatusTerminatesCallbacks(workspace.nodeStatus)
+  ) {
+    await signalWorkspaceDeletionUnconfirmedCallback(env, workspaceId, 'ai_proxy');
+    log.info('ai_proxy.workspace_inactive', {
+      workspaceId,
+      workspaceStatus: workspace.status,
+      nodeId: workspace.nodeId,
+      nodeStatus: workspace.nodeStatus ?? 'missing',
+      action: 'rejected',
+    });
+    throw new AIProxyAuthError('Workspace is not active', 403);
   }
 
   let agentType: string | null = null;

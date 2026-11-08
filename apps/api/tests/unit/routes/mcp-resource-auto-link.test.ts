@@ -56,7 +56,12 @@ import { MIGRATIONS } from '../../../src/durable-objects/migrations';
 import { recordLink as recordDoLink } from '../../../src/durable-objects/project-data/links';
 import type { Env } from '../../../src/env';
 import { recordAutoLink } from '../../../src/operations/link-core';
-import { createJsonKv, createMcpApp, storeMcpToken } from '../../helpers/mcp-route';
+import {
+  createJsonKv,
+  createMcpApp,
+  seedActiveMcpWorkspace,
+  storeMcpToken,
+} from '../../helpers/mcp-route';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 import { createSqlStorage } from '../durable-objects/sql-storage-test-utils';
 
@@ -87,8 +92,8 @@ describe('automatic links from real workspace MCP triggers', () => {
         ('foreign-idea','project2','Foreign','draft',1,1),
         -- Also a draft, and not an idea: the row only the is_idea flag can tell apart.
         ('ordinary-draft','project1','Undispatched task','draft',1,0);
-        INSERT INTO workspaces(id,project_id,chat_session_id) VALUES
-        ('workspace1','project1','session1');
+        INSERT INTO workspaces(id,project_id,chat_session_id,user_id,status) VALUES
+        ('workspace1','project1','session1','user1','running');
         INSERT INTO project_files(id,project_id,filename,directory,mime_type,size_bytes,
           uploaded_by,upload_source,status,r2_key) VALUES
         ('file1','project1','notes.md','/','text/markdown',10,'user1','user','ready','key1'),
@@ -100,6 +105,11 @@ describe('automatic links from real workspace MCP triggers', () => {
         projectId: 'project1',
         userId: 'user1',
         workspaceId: 'workspace1',
+      });
+      seedActiveMcpWorkspace(db, {
+        workspaceId: 'workspace1',
+        userId: 'user1',
+        projectId: 'project1',
       });
       const env = {
         DATABASE: createSqliteD1(db),

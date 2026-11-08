@@ -23,6 +23,17 @@ import {
 import { createUnpublishedStorageSession } from '../../helpers/reliability-storage';
 import { createSqlStorage } from '../durable-objects/sql-storage-test-utils';
 
+// These tool tests run on a mock D1 that has no workspace/node rows. MCP authentication's
+// workspace-lifecycle gate is exercised against real SQL in
+// tests/unit/services/mcp-token-lifecycle.test.ts; here it reduces to KV token validation.
+vi.mock('../../../src/services/mcp-token-lifecycle', async () => {
+  const { validateMcpToken } = await import('../../../src/services/mcp-token');
+  return {
+    validateActiveWorkspaceMcpToken: (env: { KV: KVNamespace }, token: string) =>
+      validateMcpToken(env.KV, token, env),
+  };
+});
+
 const providerCredentialMocks = vi.hoisted(() => ({
   resolveCredentialSource: vi.fn(),
 }));
