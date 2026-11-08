@@ -683,6 +683,7 @@ describe('task callback writes are fenced by the active workspace incarnation', 
     status: 'running',
     nodeId: 'node-callback',
     nodeStatus: 'running',
+    callbackGeneration: null,
   } as const;
 
   async function seedCallbackTask(): Promise<schema.Task> {

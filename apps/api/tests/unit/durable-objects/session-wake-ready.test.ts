@@ -241,8 +241,8 @@ describe('readiness against actual SQL authority', () => {
     async (runtime) => {
       const db = new Database(':memory:');
       try {
-        db.exec(`CREATE TABLE nodes (id TEXT, runtime TEXT, status TEXT, runtime_incarnation_id TEXT, callback_generation TEXT);
-        CREATE TABLE workspaces (id TEXT, node_id TEXT, project_id TEXT, chat_session_id TEXT, status TEXT, runtime_deletion_confirmed_at TEXT, callback_generation TEXT);
+        db.exec(`CREATE TABLE nodes (id TEXT, runtime TEXT, status TEXT, runtime_incarnation_id TEXT);
+        CREATE TABLE workspaces (id TEXT, node_id TEXT, project_id TEXT, chat_session_id TEXT, status TEXT, runtime_deletion_confirmed_at TEXT);
         CREATE TABLE agent_sessions (id TEXT, workspace_id TEXT, status TEXT);
         CREATE TABLE session_snapshots (chat_session_id TEXT, project_id TEXT, recovery_status TEXT, recovery_workspace_id TEXT, recovery_task_id TEXT, recovery_attempt_id TEXT);
         CREATE TABLE tasks (id TEXT, project_id TEXT, chat_session_id TEXT, status TEXT);

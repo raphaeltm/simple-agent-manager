@@ -77,33 +77,49 @@ the Instant stale-callback heuristic (now redundant for claimed tokens; kept as 
 ## Implementation Checklist
 
 ### API
-- [ ] Migration `0227_callback_generation.sql` + `schema.ts` columns
-- [ ] `callback-token-claims.ts`: `cgen` claim + reader; `signCallbackToken` / `signNodeCallbackToken` accept `callbackGeneration`
-- [ ] `verifyCallbackToken`: generation check against D1 by scope; payload returns `callbackGeneration`
-- [ ] Rotation: `persistRuntimeRecovering` (node + workspace = new incarnation); `reserveWorkspaceRestart`; rebuild active-path update
-- [ ] Mint sites carry the current generation: Instant wake (node + workspace JWT), restart/rebuild token, hibernate delivery, renewal (preserve), heartbeat node refresh, creation/dispatch sites
-- [ ] Restart/rebuild send `callbackToken`; old-agent 400 maps to a clear fail-closed error
-- [ ] MCP: `callbackGeneration` stored at every `storeMcpToken` site; verified in `validateActiveWorkspaceMcpToken`
-- [ ] MCP rotate endpoint (dual proof, rule 49 fence, revoke old)
-- [ ] `WorkspaceCallbackIdentitySnapshot.callbackGeneration` in loaders, comparator, CAS
+- [x] Migration `0227_callback_generation.sql` + `schema.ts` columns
+- [x] `callback-token-claims.ts`: `cgen` claim + reader; `signCallbackToken` / `signNodeCallbackToken` accept `callbackGeneration`
+- [x] `verifyCallbackToken`: generation check against D1 by scope; payload returns `callbackGeneration`
+- [x] Rotation: `persistRuntimeRecovering` (node + workspace = new incarnation); `reserveWorkspaceRestart`; rebuild active-path update
+- [x] Mint sites carry the current generation: Instant wake (node + workspace JWT), restart/rebuild token, hibernate delivery, renewal (preserve), heartbeat node refresh, creation/dispatch sites
+- [x] Restart/rebuild send `callbackToken`; old-agent 400 maps to a clear fail-closed error
+- [x] MCP: `callbackGeneration` stored at every `storeMcpToken` site; verified in `validateActiveWorkspaceMcpToken`
+- [x] MCP rotate endpoint (dual proof, rule 49 fence, revoke old)
+- [x] `WorkspaceCallbackIdentitySnapshot.callbackGeneration` in loaders, comparator, CAS
 
 ### VM agent
-- [ ] Restart/rebuild accept `callbackToken`; validate workspace + scope; install (replace, persist, propagate) before provisioning
-- [ ] Rotate persisted `sam-mcp` session tokens after install, before agent sessions start
-- [ ] Git-credential endpoint: JWT path requires matching `cgen`
+- [x] Restart/rebuild accept `callbackToken`; validate workspace + scope; install (replace, persist, propagate) before provisioning
+- [x] Rotate persisted `sam-mcp` session tokens after install, before agent sessions start
+- [x] Git-credential endpoint: JWT path requires matching `cgen`
 
 ### Tests
-- [ ] Real-SQL + real-JWT A→B tests per path: VM restart, VM rebuild, Instant recovery: A refused / B accepted at secret (agent-key, git-token), AI proxy, state (messages, task callback, activity), node sinks (heartbeat, snapshot relay)
-- [ ] MCP: A's token refused + revoked at `/mcp`, webhook claims, deployment identity after B; B's works; rotate endpoint (attack: A-token-only, other workspace, B control)
-- [ ] Legacy claimless tokens: accepted while column NULL, refused after rotation
-- [ ] Renewal keeps generation; heartbeat refresh keeps node generation; ABA fence (identity snapshot)
-- [ ] Go: restart token install + persistence + propagation; MCP rotation; old-API compatibility (no field); git credential cgen
-- [ ] Discrimination: delete each guard once, record reddened tests
+- [x] Real-SQL + real-JWT A→B tests per path: VM restart and rebuild through the real lifecycle route (verifier, `/ready` and `/provisioning-failed` state sinks, `/runtime-assets` secret-delivery route, AI proxy, MCP), Instant recovery through the real `persistRuntimeRecovering` and the real container wake (workspace + node tokens, MCP); heartbeat node refresh through the real route; an enumeration test proves no module verifies a callback JWT outside `verifyCallbackToken`, so every other sink inherits the same check
+- [x] MCP: A's token refused + revoked at `/mcp`, webhook claims, deployment identity after B; B's works; rotate endpoint (attack: A-token-only, other workspace, B control)
+- [x] Legacy claimless tokens: accepted while column NULL, refused after rotation
+- [x] Renewal keeps generation; heartbeat refresh keeps node generation; ABA fence (identity snapshot)
+- [x] Go: restart token install + persistence + propagation; MCP rotation; old-API compatibility (no field); git credential cgen
+- [x] Discrimination: delete each guard once, record reddened tests
 
 ### Docs
-- [ ] `architecture/security.md` Callback Tokens: replace the residual paragraph
-- [ ] `apps/api/.claude/rules/34` + vm-agent copy: generation rule
-- [ ] Archive `tasks/backlog/2026-07-21-extend-stale-instant-callback-guard-coverage.md` (superseded) with evidence
+- [x] `architecture/security.md` Callback Tokens: replace the residual paragraph
+- [x] `apps/api/.claude/rules/34` + vm-agent copy: generation rule
+- [x] Archive `tasks/backlog/2026-07-21-extend-stale-instant-callback-guard-coverage.md` (superseded) with evidence
+
+## Implementation Notes
+
+- Rotation values: VM restart/rebuild reuse the new `eviction_generation` ULID; Instant recovery
+  reuses the new `runtime_incarnation_id` for both rows.
+- Mint sites (compiler-enumerated by making `callbackGeneration` a required sign option):
+  creation/dispatch use `signCurrent*CallbackToken` (row read); Instant wake uses the context
+  loaded after rotation; hibernate delivery uses the binding's generation and re-reads it;
+  renewal and heartbeat refresh carry the verified token's generation.
+- Raw-SQL identity loaders typed by generic (`provider-limit-credential-pin.ts`) are not
+  compiler-checked; found by test, fixed, and the task-callback CAS predicate gained the column.
+- Discrimination (guard removed → red): verifier check 13 tests; VM restart rotation 7; rebuild
+  rotation 1; Instant rotation 2; MCP verdict 3; identity fence 1; old-agent mapping 1; rotate
+  endpoint identity check 1; heartbeat refresh generation 1. Go: see agent report in PR.
+- Production read-only check: 10 stopped VM workspaces on running nodes, no restarts in 30 days,
+  so failing closed on pre-release agents has negligible impact.
 
 ## Acceptance Criteria
 

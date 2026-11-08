@@ -56,6 +56,17 @@ were fenced correctly.
    bypass `expectedScope`.
 3. Test the sink with a real SQL engine: the same token is accepted while the workspace is active
    and refused after it stops, with one case per refused workspace and node state.
+4. A lifecycle check alone does not retire a credential when the same workspace ID runs again.
+   On 2026-11-08 a VM restart kept its callback token and an Instant wake left the previous
+   container's tokens valid, because both were checked only against the workspace's status. Every
+   credential minted for a runtime carries the row's `callback_generation` (`cgen` claim, MCP
+   `callbackGeneration`); the reactivating write rotates it; `verifyCallbackToken` and
+   `validateActiveWorkspaceMcpToken` refuse a retired generation. When you add a path that starts a
+   new runtime for an existing workspace or node, rotate the generation in that write and mint the
+   runtime's credentials from it. When you add a path that renews or delivers to an existing
+   runtime, carry the generation it verified or bound, never a fresh read. Never verify a callback
+   JWT outside `verifyCallbackToken` (`tests/unit/services/callback-credential-generation.test.ts`
+   enforces this).
 
 ### How to Identify VM Agent Callback Routes
 

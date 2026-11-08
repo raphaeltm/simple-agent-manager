@@ -1,5 +1,18 @@
 # Extend Stale Instant-Callback Guard to Non-Destructive Regressions
 
+> **Resolved 2026-11-08 (task `01M6YNJDB3328SQ43281EEH7T1`, branch
+> `sam/finish-workspace-credential-revocation-eeh7t1`):** implemented the generation/epoch
+> option. `persistRuntimeRecovering` rotates `workspaces.callback_generation` and
+> `nodes.callback_generation` to the new runtime incarnation, every token minted for the woken
+> container carries it (`cgen`), and `verifyCallbackToken` refuses any other generation with 401.
+> A superseded container can therefore send no callback at all (`error`, `failed`, `completed`,
+> `cancelled`, `idle` alike), regardless of the freshness margin. Evidence:
+> `tests/unit/services/callback-credential-generation.test.ts` (Instant cases through the real
+> `persistRuntimeRecovering`), `tests/integration/instant-idle-sleep-wake.test.ts` ("retires the
+> slept container credentials ..."), and the enumeration test proving every callback JWT is
+> verified in `verifyCallbackToken`. The freshness heuristic (`_stale-callback-guard.ts`) is kept
+> as defence in depth; it no longer decides anything a current-generation token could reach.
+
 > **Note 2026-11-08 (task `01M6Y0DAXRD0S56125X2TQA7RF`):** callback tokens now require `scope`
 > and `iat`. The AI proxy and MCP tokens are now bound to the workspace lifecycle (an inactive
 > workspace is refused). One residual remains: a superseded Instant generation's

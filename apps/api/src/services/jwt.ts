@@ -355,7 +355,8 @@ export async function verifyCallbackToken(
   if (rawGeneration !== undefined && (typeof rawGeneration !== 'string' || rawGeneration === '')) {
     throw callbackTokenUnauthorized('Invalid token generation claim');
   }
-  const callbackGeneration: string | null = typeof rawGeneration === 'string' ? rawGeneration : null;
+  const callbackGeneration: string | null =
+    typeof rawGeneration === 'string' ? rawGeneration : null;
 
   // Enforce expected scope when specified (unified scope check — F-010)
   if (options?.expectedScope && scope !== options.expectedScope) {

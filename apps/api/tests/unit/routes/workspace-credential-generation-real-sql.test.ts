@@ -22,7 +22,9 @@ import type { Env } from '../../../src/env';
 import { AppError } from '../../../src/middleware/error';
 import { lifecycleRoutes } from '../../../src/routes/workspaces/lifecycle';
 import { mcpTokenRotationRoutes } from '../../../src/routes/workspaces/mcp-token-rotation';
+import { runtimeRoutes } from '../../../src/routes/workspaces/runtime';
 import { verifyAIProxyAuth } from '../../../src/services/ai-proxy-auth';
+import { encrypt } from '../../../src/services/encryption';
 import { signCallbackToken, verifyCallbackToken } from '../../../src/services/jwt';
 import { storeMcpToken } from '../../../src/services/mcp-token';
 import { validateActiveWorkspaceMcpToken } from '../../../src/services/mcp-token-lifecycle';
@@ -53,6 +55,7 @@ const NODE_ID = 'node-gen';
 const WORKSPACE_ID = 'workspace-gen';
 const CHAT_SESSION_ID = 'chat-gen';
 const MCP_TOKEN_A = 'mcp-token-of-incarnation-a';
+const ENCRYPTION_KEY = btoa(String.fromCharCode(...new Uint8Array(32).fill(7)));
 
 let keys: { privateKey: string; publicKey: string };
 
@@ -244,6 +247,7 @@ describe('workspace credential generation across VM restart and rebuild — real
       BASE_DOMAIN: 'example.test',
       JWT_PRIVATE_KEY: keys.privateKey,
       JWT_PUBLIC_KEY: keys.publicKey,
+      ENCRYPTION_KEY: ENCRYPTION_KEY,
       KV: kv,
       NODE_LIFECYCLE: {
         idFromName: (name: string) => name,
@@ -258,6 +262,7 @@ describe('workspace credential generation across VM restart and rebuild — real
     );
     app.route('/api/workspaces', lifecycleRoutes);
     app.route('/api/workspaces', mcpTokenRotationRoutes);
+    app.route('/api/workspaces', runtimeRoutes);
   });
 
   afterEach(() => {
@@ -295,6 +300,23 @@ describe('workspace credential generation across VM restart and rebuild — real
     ).toBe(401);
     expect((await agentReportsReady(tokenB)).status).toBe(200);
     expect(workspaceRow().status).toBe('running');
+
+    // Secret delivery route: the project's runtime assets reach B, and A gets nothing.
+    const sealed = await encrypt('runtime-secret-value', ENCRYPTION_KEY);
+    sqlite
+      .prepare(
+        `INSERT INTO project_runtime_env_vars (id, project_id, user_id, env_key, stored_value, value_iv, is_secret)
+         VALUES ('env-1', ?, ?, 'PROJECT_SECRET', ?, ?, 1)`
+      )
+      .run(PROJECT_ID, USER_ID, sealed.ciphertext, sealed.iv);
+    const assetsForA = await request('/runtime-assets', { method: 'GET', token: tokenA });
+    expect(assetsForA.status).toBe(401);
+    expect(await assetsForA.text()).not.toContain('PROJECT_SECRET');
+    const assetsForB = await request('/runtime-assets', { method: 'GET', token: tokenB });
+    expect(assetsForB.status).toBe(200);
+    expect(await assetsForB.json()).toMatchObject({
+      envVars: [expect.objectContaining({ key: 'PROJECT_SECRET', isSecret: true })],
+    });
 
     // Verifier and AI proxy: B accepted, A refused although the workspace is active again.
     expect(await verifyStatus(tokenA)).toBe(401);

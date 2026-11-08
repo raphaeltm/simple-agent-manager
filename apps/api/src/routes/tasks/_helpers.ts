@@ -34,7 +34,7 @@ function taskWorkspaceCallbackCondition(expected: WorkspaceCallbackIdentitySnaps
        AND callback_workspace.chat_session_id IS ${expected.chatSessionId}
        AND callback_workspace.node_id IS ${expected.nodeId}
        AND callback_workspace.status IS ${expected.status}
-       AND callback_workspace.callback_generation IS ${expected.callbackGeneration}
+       AND callback_workspace.callback_generation IS ${expected.callbackGeneration ?? null}
        AND callback_node.status IS ${expected.nodeStatus}
   )`;
 }
