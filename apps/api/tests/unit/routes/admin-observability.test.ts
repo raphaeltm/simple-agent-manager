@@ -520,7 +520,7 @@ describe('Admin Observability Routes', () => {
           id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL,
           health_status TEXT, last_heartbeat_at TEXT, cloud_provider TEXT,
           node_class TEXT, agent_version TEXT, error_message TEXT,
-          created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL, callback_generation TEXT
         );
       `);
       const insert = sqlite.prepare(`INSERT INTO nodes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);

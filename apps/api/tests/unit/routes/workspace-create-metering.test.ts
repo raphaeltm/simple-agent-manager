@@ -624,7 +624,7 @@ describe('fresh workspace metering through registered HTTP and real SQL', () => 
     await f.durable.tick();
     await Promise.all(f.durable.pending);
     expect(f.inventoryRequests).toHaveLength(0);
-    const token = await signNodeCallbackToken(node.id, f.f.env);
+    const token = await signNodeCallbackToken(node.id, f.f.env, { callbackGeneration: null });
     const heartbeat = await f.app.request(
       `/node-callback/${node.id}/heartbeat`,
       {
@@ -920,7 +920,7 @@ describe('fresh workspace metering through registered HTTP and real SQL', () => 
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${await signCallbackToken(control.workspaceId, control.f.env)}`,
+            Authorization: `Bearer ${await signCallbackToken(control.workspaceId, control.f.env, { callbackGeneration: null })}`,
           },
           body: JSON.stringify({ errorMessage: 'Cloud-init failed' }),
         },
@@ -953,7 +953,7 @@ describe('fresh workspace metering through registered HTTP and real SQL', () => 
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${await signCallbackToken(control.workspaceId, control.f.env)}`,
+            Authorization: `Bearer ${await signCallbackToken(control.workspaceId, control.f.env, { callbackGeneration: null })}`,
           },
           body: JSON.stringify({ status: 'running' }),
         },

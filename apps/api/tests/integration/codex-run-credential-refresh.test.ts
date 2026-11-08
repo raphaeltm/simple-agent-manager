@@ -29,6 +29,7 @@ vi.mock('cloudflare:workers', () => ({
 vi.mock('../../src/services/jwt', () => ({
   verifyCallbackToken: vi.fn(async () => ({ workspace: 'w1', scope: 'workspace' })),
   signCallbackToken: vi.fn(),
+  signCurrentWorkspaceCallbackToken: vi.fn(),
 }));
 vi.mock('../../src/services/project-data', () => ({ persistMessage: vi.fn(async () => 'notice') }));
 

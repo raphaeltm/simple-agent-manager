@@ -23,6 +23,7 @@ import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 vi.mock('../../src/services/jwt', () => ({
   verifyCallbackToken: vi.fn(async () => ({ workspace: 'workspace-1', scope: 'workspace' })),
   signCallbackToken: vi.fn(),
+  signCurrentWorkspaceCallbackToken: vi.fn(),
 }));
 vi.mock('../../src/services/project-data', () => ({
   persistMessage: vi.fn(async () => 'notice'),

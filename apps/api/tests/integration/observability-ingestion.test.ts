@@ -90,8 +90,7 @@ function createTestD1(sqlite: Database.Database): D1Database {
     },
     async first(col?: string) {
       const row = sqlite.prepare(sql).get(...normalize(params)) as
-        | Record<string, unknown>
-        | undefined;
+        Record<string, unknown> | undefined;
       if (col != null) return row ? (row[col] ?? null) : null;
       return row ?? null;
     },
@@ -784,13 +783,13 @@ describe('observability error ingestion pipeline (behavioral)', () => {
       mainSqlite.exec(`
         CREATE TABLE nodes (
           id TEXT PRIMARY KEY,
-          status TEXT NOT NULL
+          status TEXT NOT NULL, callback_generation TEXT
         );
         CREATE TABLE workspaces (
           id TEXT PRIMARY KEY,
           node_id TEXT,
           project_id TEXT,
-          chat_session_id TEXT
+          chat_session_id TEXT, callback_generation TEXT
         );
         CREATE TABLE tasks (
           id TEXT PRIMARY KEY,
@@ -872,7 +871,7 @@ describe('observability error ingestion pipeline (behavioral)', () => {
     }
 
     it('persists vm-agent errors with source "vm-agent", nodeId, and workspaceId for a valid node token', async () => {
-      const token = await signNodeCallbackToken(NODE_ID, authEnv);
+      const token = await signNodeCallbackToken(NODE_ID, authEnv, { callbackGeneration: null });
       const res = await postNodeErrors(token);
 
       expect(res.status).toBe(204);
@@ -967,7 +966,7 @@ describe('observability error ingestion pipeline (behavioral)', () => {
         '2026-08-09T06:01:00.000Z'
       );
 
-      const token = await signNodeCallbackToken(NODE_ID, authEnv);
+      const token = await signNodeCallbackToken(NODE_ID, authEnv, { callbackGeneration: null });
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const res = await buildNodeApp().request(
         `/api/nodes/${NODE_ID}/errors`,
@@ -1042,7 +1041,7 @@ describe('observability error ingestion pipeline (behavioral)', () => {
               '2026-08-09T06:00:00.000Z', '2026-08-09T06:01:00.000Z')`
         )
         .run();
-      const token = await signNodeCallbackToken(NODE_ID, authEnv);
+      const token = await signNodeCallbackToken(NODE_ID, authEnv, { callbackGeneration: null });
       const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       const beforeReceipt = Date.now();
 
@@ -1118,7 +1117,7 @@ describe('observability error ingestion pipeline (behavioral)', () => {
     it('enriches a retried stable incident and rejects a later conflicting rebind', async () => {
       const incidentId = '01KZJMDJT3ET7Z3BZ40TTX81Z5';
       const incidentTimestamp = '2026-08-09T06:47:29.000Z';
-      const token = await signNodeCallbackToken(NODE_ID, authEnv);
+      const token = await signNodeCallbackToken(NODE_ID, authEnv, { callbackGeneration: null });
       const postStableIncident = () =>
         buildNodeApp().request(
           `/api/nodes/${NODE_ID}/errors`,
@@ -1196,7 +1195,7 @@ describe('observability error ingestion pipeline (behavioral)', () => {
     });
 
     it('rejects vm-agent error writes when the main D1 node lookup fails', async () => {
-      const token = await signNodeCallbackToken(NODE_ID, authEnv);
+      const token = await signNodeCallbackToken(NODE_ID, authEnv, { callbackGeneration: null });
       authEnv.DATABASE = createBrokenD1();
 
       const res = await postNodeErrors(token);
@@ -1218,7 +1217,7 @@ describe('observability error ingestion pipeline (behavioral)', () => {
     });
 
     it('coerces an unrecognized vm-agent level to "error" on the persisted row', async () => {
-      const token = await signNodeCallbackToken(NODE_ID, authEnv);
+      const token = await signNodeCallbackToken(NODE_ID, authEnv, { callbackGeneration: null });
       const pending: Promise<unknown>[] = [];
       const app = buildNodeApp();
 
@@ -1254,7 +1253,7 @@ describe('observability error ingestion pipeline (behavioral)', () => {
     });
 
     it('rejects a batch larger than the VM-agent maximum with 400 and persists nothing', async () => {
-      const token = await signNodeCallbackToken(NODE_ID, authEnv);
+      const token = await signNodeCallbackToken(NODE_ID, authEnv, { callbackGeneration: null });
       const pending: Promise<unknown>[] = [];
       const app = buildNodeApp();
       // DEFAULT_MAX_VM_ERROR_BATCH_SIZE is 10; send 15 to trip the guard.
@@ -1285,7 +1284,7 @@ describe('observability error ingestion pipeline (behavioral)', () => {
     });
 
     it('rejects a workspace-scoped token with 403 and persists nothing', async () => {
-      const wsToken = await signCallbackToken('ws-77', authEnv);
+      const wsToken = await signCallbackToken('ws-77', authEnv, { callbackGeneration: null });
       const res = await postNodeErrors(wsToken);
 
       expect(res.status).toBe(403);
@@ -1293,7 +1292,9 @@ describe('observability error ingestion pipeline (behavioral)', () => {
     });
 
     it('rejects a node token minted for a different node with 401 and persists nothing', async () => {
-      const otherToken = await signNodeCallbackToken('some-other-node', authEnv);
+      const otherToken = await signNodeCallbackToken('some-other-node', authEnv, {
+        callbackGeneration: null,
+      });
       const res = await postNodeErrors(otherToken);
 
       expect(res.status).toBe(401);

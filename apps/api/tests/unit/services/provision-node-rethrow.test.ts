@@ -119,6 +119,7 @@ vi.mock('../../../src/lib/secrets', () => ({
 
 vi.mock('../../../src/services/jwt', () => ({
   signNodeCallbackToken: vi.fn().mockResolvedValue('callback-token'),
+  signCurrentNodeCallbackToken: vi.fn().mockResolvedValue('callback-token'),
 }));
 
 let useRealCloudInit = false;

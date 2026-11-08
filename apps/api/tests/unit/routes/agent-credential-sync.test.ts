@@ -22,6 +22,7 @@ vi.mock('../../../src/services/jwt', () => ({
     .fn()
     .mockResolvedValue({ workspace: 'ws-123', type: 'callback', scope: 'workspace' }),
   signCallbackToken: vi.fn(),
+  signCurrentWorkspaceCallbackToken: vi.fn(),
 }));
 
 const ENCRYPTION_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';

@@ -210,7 +210,7 @@ describe('bounded stranded retirement through the real cleanup cron entry', () =
     const sqlite = new Database(':memory:');
     observabilityDatabases.push(sqlite);
     sqlite.exec(
-      "CREATE TABLE nodes (id TEXT PRIMARY KEY, status TEXT); INSERT INTO nodes VALUES ('existing-node', 'stopped')"
+      "CREATE TABLE nodes (id TEXT PRIMARY KEY, status TEXT, callback_generation TEXT); INSERT INTO nodes VALUES ('existing-node', 'stopped')"
     );
     const migration = readFileSync(
       new URL('../../../src/db/migrations/0214_node_cleanup_blocked.sql', import.meta.url),

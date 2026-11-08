@@ -111,7 +111,7 @@ export async function agentOnVm(taskMode: TaskMode, agentType = 'claude-code') {
   )
     .bind(`agent-cred-${id}`, userId, agentType, agentKey.ciphertext, agentKey.iv, now, now)
     .run();
-  const token = await signCallbackToken(workspaceId, testEnv);
+  const token = await signCallbackToken(workspaceId, testEnv, { callbackGeneration: null });
   const injected = await SELF.fetch(
     `https://api.test.example.com/api/workspaces/${workspaceId}/agent-key`,
     {

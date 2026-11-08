@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   jwt: {
     signCallbackToken: vi.fn(),
+    signCurrentWorkspaceCallbackToken: vi.fn(),
     signNodeCallbackToken: vi.fn(),
+    signCurrentNodeCallbackToken: vi.fn(),
     signTerminalToken: vi.fn(),
   },
   mcp: {

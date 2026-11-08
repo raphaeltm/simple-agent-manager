@@ -23,7 +23,7 @@ function setup() {
       triggered_by TEXT,
       task_mode TEXT NOT NULL, dispatch_depth INTEGER NOT NULL, created_by TEXT NOT NULL,
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL, output_pr_url TEXT);
-    CREATE TABLE nodes (id TEXT PRIMARY KEY, agent_version TEXT);
+    CREATE TABLE nodes (id TEXT PRIMARY KEY, agent_version TEXT, callback_generation TEXT);
     CREATE TABLE debug_diagnoses (id TEXT PRIMARY KEY, diagnosis TEXT NOT NULL);
     CREATE TABLE platform_feedback_triages (
       signature TEXT PRIMARY KEY, canonical_signature TEXT, source TEXT NOT NULL, summary TEXT NOT NULL,

@@ -506,7 +506,7 @@ describe('JWT Token Contract', () => {
         BASE_DOMAIN: 'example.com',
       } as any;
 
-      const token = await signCallbackToken('ws-test-123', env);
+      const token = await signCallbackToken('ws-test-123', env, { callbackGeneration: null });
       expect(typeof token).toBe('string');
 
       // Verify and extract claims
@@ -552,7 +552,7 @@ describe('JWT Token Contract', () => {
         BASE_DOMAIN: 'example.com',
       } as any;
 
-      const token = await signNodeCallbackToken('node-abc-123', env);
+      const token = await signNodeCallbackToken('node-abc-123', env, { callbackGeneration: null });
       expect(typeof token).toBe('string');
 
       const publicKey = await importSPKI(testPublicKey, JWT_ALGORITHM);
@@ -582,7 +582,7 @@ describe('JWT Token Contract', () => {
         BASE_DOMAIN: 'example.com',
       } as any;
 
-      const token = await signCallbackToken('ws-scope-test', env);
+      const token = await signCallbackToken('ws-scope-test', env, { callbackGeneration: null });
       const payload = await verifyCallbackToken(token, env);
 
       expect(payload.workspace).toBe('ws-scope-test');
@@ -598,7 +598,9 @@ describe('JWT Token Contract', () => {
         BASE_DOMAIN: 'example.com',
       } as any;
 
-      const token = await signNodeCallbackToken('node-scope-test', env);
+      const token = await signNodeCallbackToken('node-scope-test', env, {
+        callbackGeneration: null,
+      });
       const payload = await verifyCallbackToken(token, env);
 
       expect(payload.workspace).toBe('node-scope-test');
@@ -642,7 +644,11 @@ describe('JWT Token Contract', () => {
       const { verifyCallbackToken } = await import('../../src/services/jwt');
 
       const privateKey = await importPKCS8(testPrivateKey, JWT_ALGORITHM);
-      const noIatToken = await new SignJWT({ workspace: 'ws-1', type: 'callback', scope: 'workspace' })
+      const noIatToken = await new SignJWT({
+        workspace: 'ws-1',
+        type: 'callback',
+        scope: 'workspace',
+      })
         .setProtectedHeader({ alg: JWT_ALGORITHM, kid: 'key-2024-01' })
         .setIssuer('https://api.example.com')
         .setSubject('ws-1')
@@ -684,7 +690,7 @@ describe('JWT Token Contract', () => {
         BASE_DOMAIN: 'example.com',
       } as any;
 
-      const token = await signCallbackToken('ws-terminal', env);
+      const token = await signCallbackToken('ws-terminal', env, { callbackGeneration: null });
 
       await expect(verifyTerminalToken(token, env)).rejects.toThrow();
     });
@@ -762,7 +768,7 @@ describe('JWT Token Contract', () => {
         BASE_DOMAIN: 'example.com',
       } as any;
 
-      const token = await signCallbackToken('ws-verify-test', env);
+      const token = await signCallbackToken('ws-verify-test', env, { callbackGeneration: null });
       const payload = await verifyCallbackToken(token, env);
 
       expect(payload.workspace).toBe('ws-verify-test');

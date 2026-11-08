@@ -26,6 +26,7 @@ vi.mock('../../../src/services/jwt', () => ({
     .fn()
     .mockResolvedValue({ workspace: 'ws-123', type: 'callback', scope: 'workspace' }),
   signCallbackToken: vi.fn(),
+  signCurrentWorkspaceCallbackToken: vi.fn(),
 }));
 vi.mock('../../../src/services/encryption', () => ({
   encrypt: vi.fn(),

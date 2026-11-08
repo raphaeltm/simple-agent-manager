@@ -38,7 +38,7 @@ function createDb() {
   sqlite.exec(
     `CREATE TABLE nodes (${nodes.columns
       .map((column) => `"${column.name}" ${column.getSQLType()}`)
-      .join(', ')})`
+      .join(', ')}, callback_generation TEXT)`
   );
   const db = drizzle(sqlite, { schema }) as unknown as Parameters<typeof startComputeTracking>[0];
   return { sqlite, db };

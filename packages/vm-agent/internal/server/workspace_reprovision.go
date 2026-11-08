@@ -13,6 +13,14 @@ import (
 type workspaceReprovisionRequest struct {
 	EvictionGeneration         string  `json:"evictionGeneration"`
 	ExpectedEvictionGeneration *string `json:"expectedEvictionGeneration"`
+	// CallbackToken is the workspace callback token the control plane minted
+	// when it rotated the workspace's callback generation for this restart or
+	// rebuild. The previous generation's tokens are already revoked, so a
+	// delivered token replaces the current one unconditionally. Empty means
+	// none was delivered (an older control plane): the current token is kept.
+	// Agents predating the field reject it as unknown with 400, which the
+	// control plane treats as "this agent cannot rotate".
+	CallbackToken string `json:"callbackToken,omitempty"`
 }
 
 func decodeWorkspaceReprovisionRequest(w http.ResponseWriter, r *http.Request) (workspaceReprovisionRequest, bool) {
@@ -57,6 +65,23 @@ func validateWorkspaceReprovisionGeneration(runtime *WorkspaceRuntime, body work
 	return 0, nil
 }
 
+// validateReprovisionCallbackToken rejects a delivered token that is not this
+// workspace's callback token, before the restart changes any state. The request
+// itself is authenticated with a node-management JWT and the control plane
+// verifies every token it later receives, so only the claims are checked.
+func validateReprovisionCallbackToken(workspaceID, token string) error {
+	if token == "" {
+		return nil
+	}
+	if _, ok := decodeCallbackTokenClaims(strings.TrimSpace(token)); !ok {
+		return errors.New("workspace restart callbackToken is not a callback token")
+	}
+	if callbackTokenNamesOtherWorkspace(strings.TrimSpace(token), workspaceID) {
+		return errors.New("workspace restart callbackToken is not this workspace's token")
+	}
+	return nil
+}
+
 // claimWorkspaceReprovision serializes a restart with eviction and recovery for
 // this workspace. SQLite I/O runs without the global workspace mutex; the active
 // claim prevents ordinary metadata updates from changing the lifecycle state.
@@ -79,19 +104,52 @@ func (s *Server) claimWorkspaceReprovision(ctx context.Context, workspaceID stri
 		return nil, WorkspaceRuntime{}, statusCode, err
 	}
 	statusCode, persistErr := s.persistWorkspaceReprovision(&previous, body.EvictionGeneration)
+	snapshot, statusCode, err := s.commitWorkspaceReprovision(runtime, previous, body, statusCode, persistErr)
+	if err != nil {
+		return nil, WorkspaceRuntime{}, statusCode, err
+	}
+	if body.CallbackToken != "" {
+		// The new token is installed and persisted; hand it to the consumers that
+		// copied the old one. propagateWorkspaceCallbackToken must run without
+		// workspaceMu, and before the caller starts provisioning from snapshot.
+		s.setWorkspaceTokenRenewalState(workspaceID, workspaceTokenRenewalState{})
+		s.propagateWorkspaceCallbackToken(workspaceID, snapshot.CallbackToken)
+	}
+	return runtime, snapshot, 0, nil
+}
+
+// commitWorkspaceReprovision applies a claimed restart in memory, in the final
+// workspaceMu critical section, and returns the snapshot provisioning starts from.
+func (s *Server) commitWorkspaceReprovision(runtime *WorkspaceRuntime, previous WorkspaceRuntime, body workspaceReprovisionRequest, statusCode int, persistErr error) (WorkspaceRuntime, int, error) {
 	s.workspaceMu.Lock()
 	defer s.workspaceMu.Unlock()
 	if persistErr != nil {
 		runtime.ProvisioningActive = previous.ProvisioningActive
-		return nil, WorkspaceRuntime{}, statusCode, persistErr
+		return WorkspaceRuntime{}, statusCode, persistErr
 	}
 	if body.EvictionGeneration != "" {
 		runtime.EvictionGeneration = body.EvictionGeneration
 	}
-	s.resetResourceHistoryAfterReprovision(workspaceID)
+	if body.CallbackToken != "" {
+		// Authoritative replace, NOT adoptWorkspaceCallbackTokenLocked's
+		// "later expiry wins" rule: the control plane revoked the old token's
+		// generation before sending this one, so keeping the old token because it
+		// expires later would keep a credential that no longer works.
+		runtime.CallbackToken = strings.TrimSpace(body.CallbackToken)
+	}
+	s.resetResourceHistoryAfterReprovision(runtime.ID)
 	runtime.Status = "creating"
 	runtime.UpdatedAt = nowUTC()
-	return runtime, *runtime, 0, nil
+	if body.CallbackToken != "" && s.store != nil {
+		// persistWorkspaceReprovision wrote the pre-restart snapshot, which holds
+		// the revoked token. Persist the new one before any consumer sees it so
+		// an agent restart resumes with the working credential. The upsert leaves
+		// eviction_generation and evicted alone (only the restart CAS moves them).
+		if err := s.writeWorkspaceMetadata(runtime); err != nil {
+			slog.Error("Failed to persist delivered workspace callback token", "workspace", runtime.ID, "error", err)
+		}
+	}
+	return *runtime, 0, nil
 }
 
 func (s *Server) prepareWorkspaceReprovision(workspaceID string, body workspaceReprovisionRequest, allowedStatuses []string) (*WorkspaceRuntime, WorkspaceRuntime, int, error) {
@@ -113,6 +171,9 @@ func (s *Server) prepareWorkspaceReprovision(workspaceID string, body workspaceR
 	}
 	if status, err := validateWorkspaceReprovisionGeneration(runtime, body); err != nil {
 		return nil, WorkspaceRuntime{}, status, err
+	}
+	if err := validateReprovisionCallbackToken(workspaceID, body.CallbackToken); err != nil {
+		return nil, WorkspaceRuntime{}, http.StatusBadRequest, err
 	}
 	previous := *runtime
 	runtime.ProvisioningActive = true

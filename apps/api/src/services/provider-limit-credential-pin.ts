@@ -19,7 +19,8 @@ export async function assertProviderLimitCredentialPin(
   const tasks = await env.DATABASE.prepare(
     `SELECT t.id, t.admission_state, t.provider_limit_wait_json,
       w.id AS workspaceId, w.user_id AS userId, w.project_id AS projectId,
-      w.chat_session_id AS chatSessionId, w.status, w.node_id AS nodeId, n.status AS nodeStatus
+      w.chat_session_id AS chatSessionId, w.status, w.node_id AS nodeId, n.status AS nodeStatus,
+      w.callback_generation AS callbackGeneration
       FROM workspaces w LEFT JOIN nodes n ON n.id = w.node_id
       LEFT JOIN tasks t ON t.workspace_id = w.id AND t.status IN ('queued','delegated','in_progress','sleeping')
         AND (t.provider_limit_wait_json IS NOT NULL OR t.admission_state LIKE 'provider_limit_%')

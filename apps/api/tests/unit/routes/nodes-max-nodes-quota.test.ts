@@ -75,7 +75,7 @@ beforeEach(() => {
     CREATE TABLE nodes (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, status TEXT NOT NULL,
       node_role TEXT NOT NULL DEFAULT 'workspace', node_class TEXT NOT NULL DEFAULT 'managed',
-      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL, callback_generation TEXT
     );
   `);
 });

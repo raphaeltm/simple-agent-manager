@@ -176,6 +176,9 @@ type callbackTokenClaims struct {
 	Subject   string  `json:"sub"`
 	IssuedAt  float64 `json:"iat"`
 	ExpiresAt float64 `json:"exp"`
+	// CallbackGeneration is the control plane's callback credential generation
+	// ("cgen", see auth.Claims.CallbackGeneration). Not the eviction generation.
+	CallbackGeneration string `json:"cgen,omitempty"`
 }
 
 // decodeCallbackTokenClaims decodes a callback token's payload and verifies

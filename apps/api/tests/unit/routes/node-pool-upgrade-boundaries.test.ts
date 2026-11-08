@@ -1,5 +1,5 @@
 /** Shipped migrations and external HTTP/JWT boundaries joined to the shared upgrade slice. */
-import { readdirSync,readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import Database from 'better-sqlite3';
@@ -125,7 +125,7 @@ async function heartbeat(
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${await signNodeCallbackToken(tokenNodeId, f.env)}`,
+        Authorization: `Bearer ${await signNodeCallbackToken(tokenNodeId, f.env, { callbackGeneration: null })}`,
       },
       body: JSON.stringify(body),
     },

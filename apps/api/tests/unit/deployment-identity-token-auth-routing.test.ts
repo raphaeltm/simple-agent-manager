@@ -79,6 +79,7 @@ vi.mock('../../src/services/jwt', () => ({
   signIdentityToken: vi.fn().mockResolvedValue('mock-identity-token-jwt'),
   verifyCallbackToken: vi.fn().mockResolvedValue(null),
   signCallbackToken: vi.fn().mockResolvedValue('mock-token'),
+  signCurrentWorkspaceCallbackToken: vi.fn().mockResolvedValue('mock-token'),
 }));
 
 // Mock rate limiter to always allow
@@ -86,13 +87,11 @@ vi.mock('../../src/middleware/rate-limit', async () => {
   const actual = await vi.importActual('../../src/middleware/rate-limit');
   return {
     ...actual,
-    checkRateLimit: vi
-      .fn()
-      .mockResolvedValue({
-        allowed: true,
-        remaining: 9,
-        resetAt: Math.floor(Date.now() / 1000) + 60,
-      }),
+    checkRateLimit: vi.fn().mockResolvedValue({
+      allowed: true,
+      remaining: 9,
+      resetAt: Math.floor(Date.now() / 1000) + 60,
+    }),
   };
 });
 

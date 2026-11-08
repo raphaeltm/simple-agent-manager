@@ -72,7 +72,7 @@ const D1_SCHEMA = `
     status TEXT NOT NULL,
     health_status TEXT,
     last_heartbeat_at TEXT,
-    runtime TEXT
+    runtime TEXT, callback_generation TEXT
   );
   CREATE TABLE workspaces (
     id TEXT PRIMARY KEY,
@@ -82,7 +82,7 @@ const D1_SCHEMA = `
     node_id TEXT,
     status TEXT NOT NULL,
     created_at TEXT,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL, callback_generation TEXT
   );
   -- Read by the terminal-verdict sleep guard in services/task-sleep-preservation.ts.
   -- Left empty by seed(): these fixtures are NOT sleeping, so the guard must find
@@ -175,10 +175,16 @@ describe('ProjectData idle cleanup runtime liveness contract', () => {
     d1Db = new Database(':memory:');
     sql = createSqlStorage(projectDb);
     runMigrations(sql);
-    hostListingMock.mockReset().mockImplementation(async (_nodeId: string, workspaceId: string) => ({
-      sessions: projectDb.prepare('SELECT id, workspace_id AS workspaceId, status FROM acp_sessions WHERE workspace_id = ?')
-        .all(workspaceId).map((session) => ({ ...(session as object), hostStatus: 'ready' })),
-    }));
+    hostListingMock
+      .mockReset()
+      .mockImplementation(async (_nodeId: string, workspaceId: string) => ({
+        sessions: projectDb
+          .prepare(
+            'SELECT id, workspace_id AS workspaceId, status FROM acp_sessions WHERE workspace_id = ?'
+          )
+          .all(workspaceId)
+          .map((session) => ({ ...(session as object), hostStatus: 'ready' })),
+      }));
     d1Db.exec(D1_SCHEMA);
     d1Db
       .prepare('INSERT INTO projects (id, workspace_idle_timeout_ms) VALUES (?, NULL)')

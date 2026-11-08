@@ -365,8 +365,14 @@ func (s *Server) startWorkspaceProvision(
 	successType string,
 	successMessage string,
 	detail map[string]interface{},
+	rotateSamMcpTokens bool, // restart/rebuild delivered a new callback generation's token
 ) {
 	go func() {
+		if rotateSamMcpTokens {
+			// Before anything else, so no provisioning step or restarted agent
+			// runs with a revoked sam-mcp token; bounded by its own budget.
+			s.rotateWorkspaceSamMcpTokens(provisionRuntime.ID, provisionRuntime.CallbackToken)
+		}
 		s.acquireBuildSlot(provisionRuntime.ID)
 		defer s.releaseBuildSlot(provisionRuntime.ID)
 		go s.notifyWorkspaceBuildStarted(provisionRuntime)
@@ -825,6 +831,7 @@ func (s *Server) handleAsyncWorkspaceCreate(
 		"workspace.created",
 		"Workspace runtime created",
 		detail,
+		false,
 	)
 
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{
@@ -940,6 +947,7 @@ func (s *Server) handleRestartWorkspace(w http.ResponseWriter, r *http.Request) 
 		"workspace.restarted",
 		"Workspace restarted",
 		map[string]interface{}{},
+		body.CallbackToken != "",
 	)
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{"status": "creating"})
 }
@@ -974,6 +982,7 @@ func (s *Server) handleRebuildWorkspace(w http.ResponseWriter, r *http.Request) 
 		"workspace.rebuilt",
 		"Workspace rebuilt with devcontainer",
 		map[string]interface{}{},
+		body.CallbackToken != "",
 	)
 
 	writeJSON(w, http.StatusAccepted, map[string]interface{}{"status": "rebuilding"})
@@ -1907,6 +1916,8 @@ func (s *Server) agentCapabilities() map[string]interface{} {
 			"staleStatus":       "stale_generation",
 		},
 		"steering": steeringCapability(),
+		// Restart/rebuild accept a delivered callbackToken and rotate sam-mcp tokens.
+		"callbackTokenRotation": true,
 		"checkpointRollover": map[string]interface{}{
 			"supported": true,
 			"automatic": false,

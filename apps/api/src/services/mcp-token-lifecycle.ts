@@ -12,9 +12,14 @@
  * - active (`creating` / `running` / `recovery`) on a node that is not ending, exactly
  *   like workspace callback tokens (`assertWorkspaceAcceptsCallback`).
  *
- * A deleted or missing workspace revokes the token. Other inactive states (stopping,
- * stopped, sleeping, error) only reject: a sleeping or restarting workspace may become
- * active again with the same agent session, and that session's token must then work.
+ * - issued to the workspace's current runtime: its credential generation equals
+ *   `workspaces.callback_generation` (both absent on a never-rotated workspace).
+ *
+ * A deleted or missing workspace, or a retired generation, revokes the token. Other inactive
+ * states (stopping, stopped, sleeping, error) only reject: the same runtime may resume. A new
+ * runtime for the same workspace ID (Instant wake, VM restart or rebuild) rotates the
+ * generation, and its agent sessions receive fresh tokens (`session-restore-mcp.ts`,
+ * `mcp-token-rotation.ts`).
  */
 import type { Env } from '../env';
 import { log } from '../lib/logger';
@@ -28,6 +33,7 @@ interface McpTokenWorkspaceRow {
   status: string;
   nodeId: string | null;
   nodeStatus: string | null;
+  callbackGeneration: string | null;
 }
 
 /** Why a token's workspace no longer authorizes it, or null when it does. */
@@ -42,6 +48,10 @@ function workspaceVerdict(
     return { reason: 'identity_mismatch', revoke: true };
   }
   if (row.status === 'deleted') return { reason: 'workspace_deleted', revoke: true };
+  // Issued to a runtime the workspace has since replaced: no later state can make it valid.
+  if ((data.callbackGeneration ?? null) !== row.callbackGeneration) {
+    return { reason: 'generation_retired', revoke: true };
+  }
   if (!WORKSPACE_CALLBACK_ACTIVE_STATUSES.has(row.status)) {
     return { reason: 'workspace_inactive', revoke: false };
   }
@@ -69,7 +79,8 @@ export async function validateActiveWorkspaceMcpToken(
                 w.project_id AS projectId,
                 w.status AS status,
                 w.node_id AS nodeId,
-                n.status AS nodeStatus
+                n.status AS nodeStatus,
+                w.callback_generation AS callbackGeneration
            FROM workspaces w
            LEFT JOIN nodes n ON n.id = w.node_id
           WHERE w.id = ?

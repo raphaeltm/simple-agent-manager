@@ -135,7 +135,9 @@ vi.mock('../../src/services/jwt', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/services/jwt')>()),
   signNodeManagementToken: async () => ({ token: 'node-management-token' }),
   signNodeCallbackToken: async () => 'node-callback-token',
+  signCurrentNodeCallbackToken: async () => 'node-callback-token',
   signCallbackToken: async () => 'workspace-callback-token',
+  signCurrentWorkspaceCallbackToken: async () => 'workspace-callback-token',
 }));
 
 const PROJECT_ID = 'project-1';

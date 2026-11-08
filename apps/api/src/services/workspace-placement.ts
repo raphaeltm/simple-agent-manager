@@ -233,7 +233,8 @@ export async function reserveWorkspaceRestart(
        WHERE ${workspaceAdmissionEligibilitySql()}
      )
      UPDATE workspaces SET status = 'creating', error_message = NULL, updated_at = ?,
-       eviction_generation = ?, eviction_finalized_at = NULL, stop_runtime_confirmed_at = NULL
+       eviction_generation = ?, callback_generation = ?, eviction_finalized_at = NULL,
+       stop_runtime_confirmed_at = NULL
      WHERE id = ? AND node_id = ? AND user_id = ? AND project_id = ?
        AND chat_session_id IS ? AND status = ?
        AND eviction_generation IS ?
@@ -244,6 +245,9 @@ export async function reserveWorkspaceRestart(
     .bind(
       ...admission.binds,
       admission.admissionNow,
+      input.evictionGeneration,
+      // The restarted runtime gets a new credential generation in the same write that
+      // reactivates the workspace, so the previous runtime's tokens stop authenticating.
       input.evictionGeneration,
       input.id,
       input.nodeId,

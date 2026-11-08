@@ -15,7 +15,7 @@ import { recordWorkStartIdeaLink } from '../operations/start-work-core';
 import { startSamAwareAgentSession } from './agent-session-bootstrap';
 import { explicitRuntimeAdapterSnapshot } from './canonical-vm-allocation';
 import { capacityPlacementSnapshotDbValues } from './capacity-placement-snapshot';
-import { signCallbackToken, signNodeCallbackToken } from './jwt';
+import { signCurrentNodeCallbackToken, signCurrentWorkspaceCallbackToken } from './jwt';
 import {
   type AgentSessionOverrides,
   createWorkspaceOnNode,
@@ -396,7 +396,7 @@ export async function acceptInstantSession(
   }
 
   const containerId = node.id.toLowerCase();
-  const nodeCallbackToken = await signNodeCallbackToken(node.id, env);
+  const nodeCallbackToken = await signCurrentNodeCallbackToken(node.id, env);
   const workspaceDir = containerWorkspaceDir(env, input.project.repository);
 
   return {
@@ -479,7 +479,7 @@ export async function continueInstantSessionLaunch(
     const agentReadyDurationMs = Date.now() - agentReadyStart;
 
     const workspaceCreateStart = Date.now();
-    const workspaceCallbackToken = await signCallbackToken(workspaceId, env);
+    const workspaceCallbackToken = await signCurrentWorkspaceCallbackToken(workspaceId, env);
     await runContainerPhase('create_workspace', phaseDetail, () =>
       createWorkspaceOnNode(
         nodeId,

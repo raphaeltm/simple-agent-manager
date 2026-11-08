@@ -189,7 +189,8 @@ describe('renewWorkspaceCallbackToken', () => {
       workspaceId: WS,
       workspaceToken,
       nodeId: NODE,
-      nodeToken: nodeToken ?? (await signNodeCallbackToken(NODE, env)),
+      nodeToken:
+        nodeToken ?? (await signNodeCallbackToken(NODE, env, { callbackGeneration: null })),
     });
   }
 
@@ -204,7 +205,7 @@ describe('renewWorkspaceCallbackToken', () => {
 
   it('suppresses the renewed credential when the workspace is deleted while minting', async () => {
     const env = makeEnv();
-    const nodeToken = await signNodeCallbackToken(NODE, env);
+    const nodeToken = await signNodeCallbackToken(NODE, env, { callbackGeneration: null });
     onPrepare = (sql) => {
       // The identity re-read at the secret-delivery boundary is drizzle's select.
       if (sql.includes('from "workspaces"') && sql.includes('left join "nodes"')) {
@@ -220,7 +221,7 @@ describe('renewWorkspaceCallbackToken', () => {
 
   it('suppresses the renewed credential when the workspace moves to another node while minting', async () => {
     const env = makeEnv();
-    const nodeToken = await signNodeCallbackToken(NODE, env);
+    const nodeToken = await signNodeCallbackToken(NODE, env, { callbackGeneration: null });
     onPrepare = (sql) => {
       if (sql.includes('from "workspaces"') && sql.includes('left join "nodes"')) {
         sqlite.prepare('UPDATE workspaces SET node_id = ? WHERE id = ?').run(OTHER_NODE, WS);
@@ -238,7 +239,7 @@ describe('renewWorkspaceCallbackToken', () => {
 
   it('ends renewal when the workspace is deleted before its attempt is counted', async () => {
     const env = makeEnv();
-    const nodeToken = await signNodeCallbackToken(NODE, env);
+    const nodeToken = await signNodeCallbackToken(NODE, env, { callbackGeneration: null });
     onPrepare = (sql) => {
       if (sql.includes('INSERT INTO workspace_callback_token_renewal_rate_limits')) {
         sqlite.prepare('DELETE FROM workspaces WHERE id = ?').run(WS);

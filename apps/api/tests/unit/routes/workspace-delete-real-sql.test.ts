@@ -34,7 +34,9 @@ vi.mock('../../../src/lib/logger', async (importActual) => {
 });
 vi.mock('../../../src/services/jwt', () => ({
   signCallbackToken: vi.fn(),
+  signCurrentWorkspaceCallbackToken: vi.fn(),
   signNodeCallbackToken: vi.fn(),
+  signCurrentNodeCallbackToken: vi.fn(),
   signNodeManagementToken: (...args: unknown[]) => mocks.signNodeManagementToken(...args),
   signPortAccessToken: vi.fn(),
   signTerminalToken: vi.fn(),

@@ -15,7 +15,9 @@ const mocks = vi.hoisted(() => ({
   recordLink: vi.fn(),
   jwt: {
     signCallbackToken: vi.fn(),
+    signCurrentWorkspaceCallbackToken: vi.fn(),
     signNodeCallbackToken: vi.fn(),
+    signCurrentNodeCallbackToken: vi.fn(),
     signTerminalToken: vi.fn(),
   },
   nodeAgent: {
