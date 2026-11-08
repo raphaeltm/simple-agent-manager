@@ -14,10 +14,11 @@ api_url='https://api.github.com/repos/raphaeltm/simple-agent-manager/releases/as
 private=$(mktemp -d)
 trap 'rm -rf -- "$private"' EXIT
 download() {
-  # Retry transient failures, bounded at 10 minutes per source. The size and checksum checks below
-  # still decide whether the bytes are acceptable, whichever source served them.
+  # Retry transient failures, bounded at 5 minutes per source (10 minutes for both), so the step
+  # stays well inside the deploy job's timeout. The size and checksum checks below still decide
+  # whether the bytes are acceptable, whichever source served them.
   curl --fail --silent --show-error --location --proto '=https' --proto-redir '=https' \
-    --retry 5 --retry-all-errors --retry-delay 10 --retry-max-time 600 \
+    --retry 5 --retry-all-errors --retry-delay 10 --retry-max-time 300 \
     --max-time 180 --max-filesize "$size" --output "$private/runtime.tar.gz" "$@"
 }
 if [[ -n ${CODEX_RUNTIME_ARCHIVE:-} ]]; then
@@ -27,9 +28,11 @@ elif ! download "$url"; then
   # Deploy workflows pass no token (their permission contract forbids token consumers), so CI uses
   # the unauthenticated API. A caller that sets GITHUB_TOKEN gets the authenticated rate limit; curl
   # does not forward the header when the API redirects to the asset storage host.
-  auth=()
-  [[ -n ${GITHUB_TOKEN:-} ]] && auth=(-H "Authorization: Bearer $GITHUB_TOKEN")
-  download -H 'Accept: application/octet-stream' "${auth[@]}" "$api_url"
+  if [[ -n ${GITHUB_TOKEN:-} ]]; then
+    download -H 'Accept: application/octet-stream' -H "Authorization: Bearer $GITHUB_TOKEN" "$api_url"
+  else
+    download -H 'Accept: application/octet-stream' "$api_url"
+  fi
 fi
 [[ $(stat -c %s "$private/runtime.tar.gz") == "$size" ]]
 printf '%s  %s\n' "$release" "$private/runtime.tar.gz" | sha256sum --check --status

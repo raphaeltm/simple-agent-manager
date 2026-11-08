@@ -157,8 +157,9 @@ work.
 
 Offering selection accounts for the memory held back for the host itself. With the default 1 GiB
 reserve, a 4 GiB offering can host at most a 3072 MiB workspace reservation, so a request for more
-than 3 GiB needs a larger offering. Admission uses the same reserve, so a machine started for a
-request can always take it unless the host is measured using more than the reserve. If no allowed offering fits, submission fails with a
+than 3 GiB needs a larger offering, and at most two legacy `small` slices (1152 MiB each) share one.
+Admission uses the same reserve, so a machine started for a request can always take it unless the
+host is measured using more than the reserve. If no allowed offering fits, submission fails with a
 resource-capacity error **before** anything is provisioned, rather than starting a machine that
 cannot hold the work.
 

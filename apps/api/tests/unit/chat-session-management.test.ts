@@ -45,13 +45,16 @@ const taskRunnerDoServiceSource = readFileSync(
 );
 
 function getWorkspaceCreationSection(): string {
-  const wsCreationStart = taskRunnerDoSource.indexOf(
-    'export async function handleWorkspaceCreation('
+  // workspace-steps.ts holds only the workspace_creation step and its helpers since dispatch moved
+  // to workspace-dispatch-step.ts, so the module itself is the bounded section.
+  const source = readFileSync(
+    resolve(process.cwd(), 'src/durable-objects/task-runner/workspace-steps.ts'),
+    'utf8'
   );
-  const wsCreationEnd = taskRunnerDoSource.indexOf(
-    'export async function handleWorkspaceDispatch('
-  );
-  return taskRunnerDoSource.slice(wsCreationStart, wsCreationEnd);
+  if (!source.includes('export async function handleWorkspaceCreation(')) {
+    throw new Error('workspace creation step not found in workspace-steps.ts');
+  }
+  return source;
 }
 
 // =========================================================================

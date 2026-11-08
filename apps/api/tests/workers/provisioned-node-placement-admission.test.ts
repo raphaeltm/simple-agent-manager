@@ -12,7 +12,7 @@
  * env sets no admission override.
  */
 import { env, runInDurableObject } from 'cloudflare:test';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 
 import type {
   StartTaskInput,
@@ -20,6 +20,8 @@ import type {
   TaskRunnerState,
 } from '../../src/durable-objects/task-runner';
 import { WORKSPACE_PLACEMENT_REFUSED_NOTE_PREFIX } from '../../src/durable-objects/task-runner/workspace-placement-rejection';
+import type { Env } from '../../src/env';
+import { invalidateAdminSettings } from '../../src/services/admin-settings-resolution';
 import { DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS } from '../../src/services/provisioning-attempt-limits';
 import {
   DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB,
@@ -195,6 +197,37 @@ async function warmSince(nodeId: string): Promise<string | null> {
   return node?.warmSince ?? null;
 }
 
+const MAX_REJECTIONS_SETTING = 'operations.workspacePlacementMaxRejections';
+
+/** Persist an admin override the way the settings UI does, then drop the per-isolate cache. */
+async function setMaxRejections(value: number | null): Promise<void> {
+  await env.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?')
+    .bind(MAX_REJECTIONS_SETTING)
+    .run();
+  if (value !== null) {
+    await env.DATABASE.prepare(
+      'INSERT INTO platform_settings(key, value, updated_at, updated_by) VALUES (?, ?, ?, NULL)'
+    )
+      .bind(MAX_REJECTIONS_SETTING, String(value), new Date().toISOString())
+      .run();
+  }
+  invalidateAdminSettings(env as unknown as Env);
+}
+
+/** Fire alarms until the run completes; returns the steps it ran. */
+async function runToCompletion(taskId: string): Promise<{ ran: string[]; state: TaskRunnerState }> {
+  const ran: string[] = [];
+  let state: TaskRunnerState | null = null;
+  for (let i = 0; i < 60; i++) {
+    const fired = await fireAlarm(taskId);
+    ran.push(fired.ran);
+    state = fired.state;
+    if (state.completed) break;
+  }
+  if (!state) throw new Error('TaskRunner never ran');
+  return { ran, state };
+}
+
 async function taskRow(taskId: string) {
   return env.DATABASE.prepare(
     `SELECT status, workspace_id AS workspaceId, error_message AS errorMessage,
@@ -225,6 +258,10 @@ function placementNotes(placement: string | null): string[] {
 }
 
 describe('a node provisioned for a task admits that task', () => {
+  afterEach(async () => {
+    await setMaxRejections(null);
+  });
+
   it('resolves the shared defaults through the real resolver', () => {
     expect(DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB).toBe(1024);
     expect(resolveWorkspaceAdmissionPolicy(env as never).hostMemoryReserveMb).toBe(1024);
@@ -354,5 +391,22 @@ describe('a node provisioned for a task admits that task', () => {
     expect(placementNotes(task?.placement ?? null)).toEqual(
       expect.arrayContaining([expect.stringContaining(WORKSPACE_BUSY_BUILD_QUEUE_REASON)])
     );
+  });
+
+  it.each([1, 5])('fails after exactly the configured %i consecutive refusals', async (limit) => {
+    const nodeId = `node-provisioned-limit-${limit}`;
+    const taskId = `task-provisioned-limit-${limit}`;
+    await seedProvisionedCx23(nodeId, taskId, { memoryPercent: 60 });
+    await setMaxRejections(limit);
+    await startAtWorkspaceCreation(taskId, nodeId, DOCUMENTED_CAP_MEMORY_MB);
+
+    const { ran, state } = await runToCompletion(taskId);
+
+    // A handler hard-coded to the default would stop after 3 here, not 1 or 5.
+    expect(ran.filter((step) => step === 'workspace_creation')).toHaveLength(limit);
+    expect(state.completed).toBe(true);
+    const task = await taskRow(taskId);
+    expect(task?.status).toBe('failed');
+    expect(task?.errorMessage).toContain(`refused ${limit} times in a row`);
   });
 });

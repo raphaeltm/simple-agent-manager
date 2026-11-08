@@ -496,8 +496,10 @@ A node accepts additional work only if **all** of these hold:
   and measured headroom: the host is charged its reserve, or its measured use when that is larger,
   and outstanding reserved memory plus the new request must fit in the rest. The reserve already
   covers the host's own processes, so measured use only counts against you when something on the
-  node uses more than it declared. Fresh observations of running work avoid counting its usage twice;
-  starting work and missing observations keep the full reservation outstanding. A brand-new machine that has
+  node uses more than it declared. A fresh observation of a running workspace's memory is
+  subtracted from measured use, capped at that workspace's reservation, so its usage is not counted
+  twice. A workspace that is still starting, or has no fresh observation, gets no credit: its
+  measured use counts alongside its full reservation. A brand-new machine that has
   not reported yet is not held back by this. Restarting a stopped, errored, or evicted workspace
   also requires admission; rebuilding an already active workspace retains its reservation.
 - Live CPU is treated differently from memory and disk. CPU is shared out by the kernel, so a busy
