@@ -178,7 +178,10 @@ func (s *Server) handleMcpBuildAndPublishJobStart(w http.ResponseWriter, r *http
 
 	controlPlaneReporter := newPublishJobReporter(s.config.ControlPlaneURL, prepared.ProjectID, jobID, s.publishCallbackToken(prepared), s.controlPlaneHTTPClient(publishTimeout), prepared.Log)
 	reporter := publish.EventFunc(func(ctx context.Context, event publish.Event) {
-		s.persistPublishEvent(jobID, event)
+		// Heartbeats are control-plane liveness, not local job history.
+		if event.EventType != "publish.job.heartbeat" {
+			s.persistPublishEvent(jobID, event)
+		}
 		controlPlaneReporter.Event(ctx, event)
 	})
 	go s.runAcceptedPublishJob(jobCtx, jobID, prepared, reporter)

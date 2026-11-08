@@ -1,0 +1,25 @@
+{
+  "guards": [
+    {
+      "guard": "heartbeat-local-history-exclusion",
+      "test": "real-handler reporter fan-out + real SQLite GetJob/ListJobEvents + stepped owner control",
+      "failureEvidence": [
+        "--- FAIL: TestMcpBuildAndPublishHeartbeatsDuringSilentRunner (0.26s)",
+        "--- FAIL: TestMcpBuildAndPublishHeartbeatsDuringSilentRunner/periodic (0.12s)",
+        "publish_job_heartbeat_test.go:53: heartbeat entered local job history",
+        "publish_job_heartbeat_test.go:53: heartbeat entered local job history"
+      ]
+    },
+    {
+      "guard": "empty-step-preserves-prior-state",
+      "test": "real-handler reporter fan-out + real SQLite GetJob/ListJobEvents + stepped owner control",
+      "failureEvidence": [
+        "--- FAIL: TestMcpBuildAndPublishHeartbeatsDuringSilentRunner (0.22s)",
+        "--- FAIL: TestMcpBuildAndPublishHeartbeatsDuringSilentRunner/periodic (0.14s)",
+        "publish_job_heartbeat_test.go:53: local job step = &{ID:job-heartbeat Kind:deployment-publish ScopeID:ws-001 Status:starting CurrentStep: StartedAt:2026-11-08T18:51:25.341714935Z UpdatedAt:2026-11-08T18:51:25.344294231Z CompletedAt: ErrorMessage: ResultJSON:}, want build",
+        "publish_job_heartbeat_test.go:53: local job step = &{ID:job-heartbeat Kind:deployment-publish ScopeID:ws-001 Status:starting CurrentStep: StartedAt:2026-11-08T18:51:25.341714935Z UpdatedAt:2026-11-08T18:51:25.344294231Z CompletedAt: ErrorMessage: ResultJSON:}, want build"
+      ]
+    }
+  ],
+  "guardsRestored": true
+}
