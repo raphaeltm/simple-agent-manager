@@ -25,7 +25,7 @@ import {
   updateUserDefaultCapacityPools,
 } from '../../lib/api/capacity-pools';
 import { ApiClientError } from '../../lib/api/client';
-import { POOL_SCOPE_COPY } from '../../lib/compute-pool-copy';
+import { POOL_EDIT_CONFLICT_MESSAGE, POOL_SCOPE_COPY } from '../../lib/compute-pool-copy';
 import { buildMachineGroups } from '../../lib/compute-pool-machines';
 import { initialSourceOrder, orderableSources } from '../../lib/compute-pool-source-order';
 import { capacityPoolQueryKeys } from '../../lib/query-options/capacity-pools';
@@ -168,6 +168,14 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
       toast.success('Compute pool saved');
     },
     onError: (error) => {
+      if (error instanceof ApiClientError && error.status === 409) {
+        // Someone else saved this pool after it loaded. Saving again would resend the same stale
+        // edit, so show the current pool instead.
+        setIsEditing(false);
+        void queryClient.invalidateQueries({ queryKey });
+        toast.error(POOL_EDIT_CONFLICT_MESSAGE);
+        return;
+      }
       toast.error(error instanceof Error ? error.message : 'Failed to save the compute pool');
     },
   });

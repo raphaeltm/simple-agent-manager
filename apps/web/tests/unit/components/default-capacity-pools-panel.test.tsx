@@ -1175,6 +1175,35 @@ describe('DefaultCapacityPoolsPanel provider order', () => {
     );
   });
 
+  it('closes the editor and reloads the pool when a save conflicts with another edit', async () => {
+    const stale = multiSourceSummary(['source-gcp', 'source-hetzner']);
+    const fresh = multiSourceSummary(['source-scw', 'source-gcp', 'source-hetzner']);
+    mocks.fetchProjectDefaultCapacityPools
+      .mockResolvedValueOnce(response('project', stale))
+      .mockResolvedValue(response('project', fresh));
+    mocks.updateProjectDefaultCapacityPools.mockRejectedValue(
+      new ApiClientError('CONFLICT', 'Default capacity pool changed; reload and retry', 409)
+    );
+
+    renderPanel();
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Move Hetzner · Project credentials up' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+    await waitFor(() =>
+      expect(mocks.toast.error).toHaveBeenCalledWith(
+        expect.stringContaining('changed while you were editing')
+      )
+    );
+    expect(screen.queryByRole('button', { name: 'Save changes' })).not.toBeInTheDocument();
+    expect(
+      await screen.findByText(
+        'Scaleway (no machines allowed yet) first, then Google Cloud and Hetzner.'
+      )
+    ).toBeInTheDocument();
+  });
+
   it('names two accounts of one provider apart in the order', async () => {
     mocks.providerCatalogs = [
       providerCatalog('credential-alpha'),

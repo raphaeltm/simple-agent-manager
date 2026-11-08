@@ -129,3 +129,6 @@ export const PROVIDER_ORDER_COPY = {
     description: 'SAM starts new machines on the first account and falls back down the list.',
   },
 } as const;
+
+export const POOL_EDIT_CONFLICT_MESSAGE =
+  'This pool changed while you were editing it, so your changes were not saved. Review the current pool and edit again.';
