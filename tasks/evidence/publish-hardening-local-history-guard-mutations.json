@@ -21,5 +21,10 @@
       ]
     }
   ],
-  "guardsRestored": true
+  "guardsRestored": true,
+  "periodicProducerRemainsDiscriminating": [
+    "--- FAIL: TestMcpBuildAndPublishHeartbeatsDuringSilentRunner (1.20s)",
+    "--- FAIL: TestMcpBuildAndPublishHeartbeatsDuringSilentRunner/periodic (1.05s)",
+    "publish_job_heartbeat_test.go:84: silent build did not heartbeat"
+  ]
 }

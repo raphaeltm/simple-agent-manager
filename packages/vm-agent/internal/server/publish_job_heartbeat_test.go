@@ -74,7 +74,7 @@ func TestMcpBuildAndPublishHeartbeatsDuringSilentRunner(t *testing.T) {
 					if event.Terminal {
 						t.Fatal("silent runner ended before release")
 					}
-					if event.EventType == "publish.job.heartbeat" {
+					if event.EventType == "publish.job.heartbeat" && event.Message == "publish executor is alive" {
 						count++
 						if event.Status != "" || event.CurrentStep != "" {
 							t.Fatalf("heartbeat changes progress: %+v", event)
