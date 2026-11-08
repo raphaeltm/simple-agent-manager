@@ -11,7 +11,6 @@ import {
   workspaceDeletionIdentityLogContext,
   type WorkspaceDeletionMode,
 } from '../services/workspace-deletion';
-import { chatBindingAllowsDeletion } from '../services/workspace-deletion-identity';
 import { automaticDeletionPreservationAvailable } from '../services/workspace-deletion-preservation';
 import {
   claimedDeletionEntry,
@@ -20,6 +19,8 @@ import {
   deletionEntryMatchesScheduledIdentity,
   deletionIdentityForAttempt,
   deletionIdentityFromEntry,
+  isWorkspaceDeletionEligibleStatus,
+  sameDeletionIdentity,
   scheduledDeletionEntry,
   scheduledDeletionIdentity,
 } from './node-lifecycle-workspace-deletion-entry';
@@ -44,48 +45,21 @@ import {
   workspaceDeletionRetryDelayMs,
   workspaceStoppedTtlMs,
 } from './node-lifecycle-workspace-deletion-support';
+import {
+  keepWakeTarget,
+  releaseExactAutomaticEntry,
+} from './node-lifecycle-workspace-deletion-wake-target';
 
 /** Persisted to `platform_errors` on every dead-letter; Operations anomaly sweeps match on it. */
 export const WORKSPACE_DELETION_QUARANTINE_MESSAGE =
   'Workspace deletion entered durable operator quarantine';
 
 export type { WorkspaceDeletionMode } from '../services/workspace-deletion';
+export { workspaceDeletionDueIndexKey } from './node-lifecycle-workspace-deletion-index';
 export type {
   NodeLifecycleDeletionEnv,
   WorkspaceDeletionClaimResult,
 } from './node-lifecycle-workspace-deletion-support';
-
-const WORKSPACE_DELETION_ELIGIBLE_STATUSES = new Set([
-  'stopped',
-  'evicted',
-  'sleeping',
-  'stopping',
-  'deleted',
-]);
-export { workspaceDeletionDueIndexKey } from './node-lifecycle-workspace-deletion-index';
-
-function isWorkspaceDeletionEligibleStatus(status: string): boolean {
-  return WORKSPACE_DELETION_ELIGIBLE_STATUSES.has(status);
-}
-
-/** `left` is the workspace's current identity, `right` the queued or expected one. */
-function sameDeletionIdentity(
-  left: WorkspaceDeletionIdentity,
-  right: WorkspaceDeletionIdentity
-): boolean {
-  return (
-    left.workspaceId === right.workspaceId &&
-    (left.workspaceGeneration ?? null) === (right.workspaceGeneration ?? null) &&
-    left.nodeId === right.nodeId &&
-    left.nodeUserId === right.nodeUserId &&
-    left.nodeRuntime === right.nodeRuntime &&
-    left.nodeProviderInstanceId === right.nodeProviderInstanceId &&
-    left.nodeRuntimeIncarnationId === right.nodeRuntimeIncarnationId &&
-    left.userId === right.userId &&
-    left.projectId === right.projectId &&
-    chatBindingAllowsDeletion(left.chatSessionId, right.chatSessionId)
-  );
-}
 
 /** Durable queue for proof-bearing VM workspace deletion attempts. */
 export class NodeLifecycleWorkspaceDeletionQueue {
@@ -126,6 +100,12 @@ export class NodeLifecycleWorkspaceDeletionQueue {
       return false;
     }
     const existing = await this.storage.get<PendingWorkspaceDeletion>(key);
+    if (
+      await keepWakeTarget(this.env, existing, workspaceId, () =>
+        this.releaseExactAutomatic(key, existing)
+      )
+    )
+      return false;
     const scheduledIdentity = scheduledDeletionIdentity({
       supplied: options?.expected,
       current: identity,
@@ -409,6 +389,12 @@ export class NodeLifecycleWorkspaceDeletionQueue {
     storedNodeId: string | undefined,
     dispatch: WorkspaceDeletionAttemptDispatcher
   ): Promise<void> {
+    if (
+      await keepWakeTarget(this.env, entry, entry.workspaceId, () =>
+        this.releaseExactAutomatic(key, entry)
+      )
+    )
+      return;
     entry.firstScheduledAt ??= now;
     const currentIdentity = await loadWorkspaceDeletionSnapshot(
       this.env.DATABASE,
@@ -707,6 +693,15 @@ export class NodeLifecycleWorkspaceDeletionQueue {
       }
     });
     await this.recalculateAlarm(await this.getWarmAlarmTime());
+  }
+
+  private async releaseExactAutomatic(
+    key: string,
+    expected: PendingWorkspaceDeletion | undefined
+  ): Promise<boolean> {
+    const released = await releaseExactAutomaticEntry(this.storage, key, expected);
+    if (released && expected) await this.recalculateAlarm(await this.getWarmAlarmTime());
+    return released;
   }
 
   private async deleteExact(key: string, claimId: string | null): Promise<void> {

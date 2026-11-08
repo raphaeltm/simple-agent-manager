@@ -24,3 +24,5 @@ The user's message was not delivered and the chat stayed asleep.
 - [ ] A follow-up to an idle Instant chat whose container is gone starts a fresh runtime instead of
       failing, or tells the user what to do next.
 - [ ] Regression test through the real wake entry point.
+
+> **Resolved by** `tasks/archive/2026-11-08-instant-sleeping-workspace-deletion-and-wake.md` (branch `sam/stability-fix-instant-cf-ztxbsx`).

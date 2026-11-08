@@ -18,6 +18,7 @@ import { eq } from 'drizzle-orm';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { wakeableSleepingInstantSql } from '../../services/instant-sleeping-deletion-guard';
 import { stopWorkspaceOnNode } from '../../services/node-agent';
 import { persistError } from '../../services/observability';
 import { sessionSleepInFlightMaxAgeMs } from '../../services/session-snapshot-sleep-predicate';
@@ -174,7 +175,8 @@ const RECEIPT_RESTORED_SQL = `(CASE WHEN json_valid(w.preservation_receipt_json)
     = COALESCE(w.eviction_generation, ''))`;
 
 /**
- * Phase 6 — safety net for stopped workspaces the DO alarm never deleted.
+ * Phase 6 — safety net for stopped workspaces the DO alarm never deleted. A sleeping VM is
+ * eligible (its VM must be released); a sleeping Instant container is not.
  */
 export async function sweepStaleStoppedWorkspaces(
   _db: CleanupDb,
@@ -209,6 +211,10 @@ export async function sweepStaleStoppedWorkspaces(
            WHERE r.workspace_id = w.id AND r.recovery_status = 'restored'
              AND ${evictionWakeCommittedSql('r')}
          ))
+       -- A sleeping Instant container is its chat's wake target, not leftover compute: the
+       -- sleep writer never queues it, and its teardown belongs to the snapshot purge
+       -- (instant-sleeping-deletion-guard.ts). The queue refuses it too.
+       AND NOT (w.status = 'sleeping' AND ${wakeableSleepingInstantSql('w')})
        AND (n.id IS NULL OR n.node_class != 'user-owned')
        AND w.updated_at < ?
      ORDER BY w.updated_at ASC
