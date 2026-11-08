@@ -135,21 +135,21 @@ the chat or start a new one. The fresh-runtime restore is filed as an idea.
       broken behaviour as its contract)
 - [x] Discrimination checks: revert each guard and confirm the intended tests go red
 - [x] Docs sync (grep for the refusal text and safety-net descriptions)
-- [ ] Archive the four backlog files, and update the idea (fresh-runtime restore filed as idea `01M6WVP5YWVX5VGMVGANJKP3N7`)
+- [x] Archive the four backlog files, and update the idea (fresh-runtime restore filed as idea `01M6WVP5YWVX5VGMVGANJKP3N7`)
 
 ## Acceptance criteria
 
-- [ ] Every writer named, and wakeable Instant workspaces excluded
-- [ ] Rows wrongly moved to `stopping` behind a `sleeping` snapshot become wakeable again
-- [ ] A follow-up to a chat whose container is genuinely gone tells the person what to do; the
+- [x] Every writer named, and wakeable Instant workspaces excluded
+- [x] Rows wrongly moved to `stopping` behind a `sleeping` snapshot become wakeable again
+- [x] A follow-up to a chat whose container is genuinely gone tells the person what to do; the
       message is never silently lost
-- [ ] Deleting a slept Instant workspace converges
-- [ ] Regression tests through the real sweep and wake entry points, with a VM control and a
+- [x] Deleting a slept Instant workspace converges
+- [x] Regression tests through the real sweep and wake entry points, with a VM control and a
       discrimination check
-- [ ] Staging: an Instant chat sleeps past the sweep window and a follow-up wakes it; deleting
+- [x] Staging: an Instant chat sleeps past the sweep window and a follow-up wakes it; deleting
       a slept Instant workspace completes; the five stuck staging rows repair; test sessions
       are cleaned up
-- [ ] Production checked (`ops_find_anomalies`, `ops_search_errors`) before and after
+- [x] Production checked (`ops_find_anomalies`, `ops_search_errors`) before and after
 
 ## Implementation notes
 
@@ -185,3 +185,10 @@ the chat or start a new one. The fresh-runtime restore is filed as an idea.
 - Chat B: `DELETE /api/workspaces/:id` on the slept workspace returned
   `200 {"deletionStatus":"confirmed"}`. Before the fix it was 202 pending.
 - Archiving the awake chat A returned 409 (root cause 3). Fixed in c3547cf55, redeployed.
+- After redeploy 42460523659 (c3547cf55): the pending archive of chat A converged
+  (`workspace_auto_deleted`, attempt 5, `node_runtime_terminated`). Chat C (conversation mode)
+  was woken from the UI and archived while its container was awake: 200
+  `{"status":"stopped","workspaceDeleted":true}`. Staging then had zero cf-container rows in
+  `stopping`. All test chats were archived.
+- Regression navigation (dashboard, projects, settings, project chat) at 1280 and 375: all 200,
+  no console errors, no horizontal overflow.

@@ -35,3 +35,5 @@ not touch the deletion path; the earliest occurrences predate its first staging 
 - [ ] A sleeping Instant workspace is never queued for runtime deletion while its chat is wakeable
 - [ ] A workspace already moved to `stopping` this way can still wake (or is repaired)
 - [ ] Regression test through the real enqueue path, with a sleeping-Instant fixture
+
+> **Resolved by** `tasks/archive/2026-11-08-instant-sleeping-workspace-deletion-and-wake.md` (branch `sam/stability-fix-instant-cf-ztxbsx`).

@@ -38,3 +38,5 @@ categorizes as `request_failed` on every attempt.
 - [ ] The diagnostic names the real failure, not a generic `request_failed`
 - [ ] Regression test through `attemptWorkspaceDeletion` with a sleeping cf-container node
 - [ ] Decide what happens to the node-less `stopping` row from 2026-09-13
+
+> **Resolved by** `tasks/archive/2026-11-08-instant-sleeping-workspace-deletion-and-wake.md` (branch `sam/stability-fix-instant-cf-ztxbsx`).
