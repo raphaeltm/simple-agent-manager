@@ -1,6 +1,7 @@
 import {
   GCP_CLOUD_BILLING_SERVICE,
   GCP_PROJECT_ID_PATTERN,
+  GCP_SERVICE_NAME_PATTERN,
   type GcpApiIssue,
   type GcpCredentialMetadata,
   gcpEnableApiUrl,
@@ -48,10 +49,14 @@ export function GcpApiIssuesNotice({
   const issues = metadata.apiIssues ?? [];
   if (issues.length === 0) return null;
   const project = metadata.gcpProjectId;
-  // Shown for the owner to paste into a shell, so only offered for a well-formed project id.
-  const enableCommand = GCP_PROJECT_ID_PATTERN.test(project)
-    ? `gcloud services enable ${issues.map((issue) => issue.service).join(' ')} --project="${project}"`
-    : null;
+  // Shown for the owner to paste into a shell, so built only from well-formed Google identifiers.
+  const commandServices = issues
+    .map((issue) => issue.service)
+    .filter((service) => GCP_SERVICE_NAME_PATTERN.test(service));
+  const enableCommand =
+    GCP_PROJECT_ID_PATTERN.test(project) && commandServices.length > 0
+      ? `gcloud services enable ${commandServices.join(' ')} --project="${project}"`
+      : null;
 
   return (
     <Alert variant="warning" data-testid="gcp-api-issues">

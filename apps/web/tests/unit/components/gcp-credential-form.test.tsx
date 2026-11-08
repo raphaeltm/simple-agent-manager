@@ -506,6 +506,28 @@ describe('GcpCredentialForm', () => {
       );
     });
 
+    it('leaves a malformed service name out of the gcloud command', () => {
+      render(
+        <GcpCredentialForm
+          credential={{
+            ...serviceAccountCredential,
+            gcp: {
+              ...serviceAccountCredential.gcp,
+              gcpProjectId: 'acme-prod-01',
+              apiIssues: [billingIssue, { ...billingIssue, service: 'x; rm -rf ~' }],
+            },
+          }}
+          onUpdate={onUpdate}
+        />
+      );
+      const notice = screen.getByTestId('gcp-api-issues');
+      expect(
+        within(notice).getByText(
+          'gcloud services enable cloudbilling.googleapis.com --project="acme-prod-01"'
+        )
+      ).toBeInTheDocument();
+    });
+
     it('Check again re-verifies, refreshes the credential in place, and reports the result', async () => {
       const onRefresh = vi.fn();
       mocks.verifyGcpSetup.mockResolvedValue({
