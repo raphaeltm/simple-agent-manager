@@ -3,6 +3,7 @@
  * reusable-node selection (`node-selection.ts`). Split out per rule 18.
  */
 import {
+  type CapacityPlacementSnapshot,
   type ResolvedResourceReservation,
   resolveResourceReservation,
 } from '@simple-agent-manager/shared';
@@ -21,9 +22,33 @@ import {
   resolveWorkspaceAdmissionPolicy,
   type TrustedWorkspaceNodeCapacityRow,
 } from '../../services/workspace-resource-capacity';
-import { type ReusableNodeSelection } from './node-placement-deferral';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
-import { isUserConversationStart } from './user-start-admission';
+
+export interface ReusableNodeSelection {
+  nodeId: string;
+  capacityPlacementSnapshot: CapacityPlacementSnapshot | null;
+  /**
+   * The node's startup backlog when it was ranked above at least one other admitted host. The
+   * final reservation refuses if the backlog has grown since, so the run reselects and can take
+   * the other host (`maxStartupBacklog`). Null or absent when there was no alternative, and for
+   * pinned nodes and warm claims.
+   */
+  observedStartupBacklog?: number | null;
+}
+
+/** Record a reusable node as this run's placement target. */
+export function adoptReusableNodeSelection(
+  state: TaskRunnerState,
+  selection: ReusableNodeSelection
+): void {
+  state.stepResults.nodeId = selection.nodeId;
+  state.stepResults.capacityPlacementSnapshot = selection.capacityPlacementSnapshot;
+  // Keyed by node so a value observed for one node can never guard a reservation on another.
+  state.stepResults.rankedStartupBacklog =
+    selection.observedStartupBacklog === null || selection.observedStartupBacklog === undefined
+      ? null
+      : { nodeId: selection.nodeId, backlog: selection.observedStartupBacklog };
+}
 
 export type NodePlacementFields = {
   id: string;
@@ -180,7 +205,6 @@ export async function hasReusableNodeReservationCapacity(
   node: NodePlacementFields
 ): Promise<boolean> {
   const policy = resolveWorkspaceAdmissionPolicy(rc.env, state.config.projectScaling);
-  policy.allowBusyBuildQueue = await isUserConversationStart(state, rc);
   const usage = await loadActiveWorkspaceReservationUsage(rc.env.DATABASE, [node.id]);
   return hasWorkspaceReservationCapacity(
     node,

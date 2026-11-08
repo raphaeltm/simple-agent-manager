@@ -160,8 +160,7 @@ export async function waitForVmAdmissionCapacity(
   input: VmTaskAdmissionIdentity,
   reason: VmAdmissionReason,
   suggestedRetryAt?: string | null,
-  providerInfo?: VmProviderCapacityInfo | null,
-  options?: { waitTimeoutMs?: number | null }
+  providerInfo?: VmProviderCapacityInfo | null
 ): Promise<VmAdmissionWait | VmAdmissionExpired> {
   await ensureVmTaskAdmission(env, input);
   const config = getVmAdmissionConfig(env);
@@ -169,17 +168,12 @@ export async function waitForVmAdmissionCapacity(
   const nowMs = Date.now();
   const now = toIso(nowMs);
   const existingReasonMatches = existing?.reason === reason;
-  const defaultDeadlineMs = existingReasonMatches
+  const deadlineMs = existingReasonMatches
     ? (parseIsoMs(existing?.wait_deadline_at) ?? nowMs + config.waitTimeoutMs)
     : nowMs + config.waitTimeoutMs;
-  const customWaitTimeoutMs =
-    options?.waitTimeoutMs && options.waitTimeoutMs > 0 ? Math.floor(options.waitTimeoutMs) : null;
+  const deadlineAt = toIso(deadlineMs);
+  // A new wait reason starts a new episode: its deadline and enqueue time restart with it.
   const enqueuedMs = existingReasonMatches ? (parseIsoMs(existing?.enqueued_at) ?? nowMs) : nowMs;
-  const deadlineAt =
-    customWaitTimeoutMs === null
-      ? toIso(defaultDeadlineMs)
-      : toIso(Math.min(defaultDeadlineMs, enqueuedMs + customWaitTimeoutMs));
-  const deadlineMs = parseIsoMs(deadlineAt) ?? nowMs;
 
   if (deadlineMs <= nowMs) {
     await env.DATABASE.prepare(

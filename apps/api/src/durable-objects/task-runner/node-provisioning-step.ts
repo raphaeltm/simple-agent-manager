@@ -54,6 +54,7 @@ import {
   recordProviderRejectedNode,
 } from './node-provisioning-rejected-node';
 import { trySelectReusableNodeForProvisioning } from './node-provisioning-reuse';
+import { adoptReusableNodeSelection } from './node-selection-shared';
 import { applyCapacityCandidateProvisioningTarget } from './node-provisioning-target';
 import {
   enterPrimaryProvisioningTier,
@@ -163,8 +164,7 @@ export async function handleNodeProvisioning(
   if (admissionIdentity && !spreadNeedsNode) {
     const reusableNode = await trySelectReusableNodeForProvisioning(state, rc);
     if (reusableNode) {
-      state.stepResults.nodeId = reusableNode.nodeId;
-      state.stepResults.capacityPlacementSnapshot = reusableNode.capacityPlacementSnapshot;
+      adoptReusableNodeSelection(state, reusableNode);
       await persistPlacementDiagnostics(state, rc, { queue: {} });
       await rc.advanceToStep(state, 'workspace_creation');
       return;

@@ -20,9 +20,11 @@ import { isResolvedResourceReservation } from '../../services/workspace-resource
 import { persistPlacementDiagnostics, updatePlacementDiagnostics } from './placement-diagnostics';
 import { ensureSessionLinked } from './state-machine';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
-import { isUserConversationStart } from './user-start-admission';
 import { ensureBranchExistsOnRemote } from './workspace-branch';
-import { handleWorkspacePlacementRefused } from './workspace-placement-rejection';
+import {
+  handleWorkspacePlacementRefused,
+  resolveStartupBacklogGuard,
+} from './workspace-placement-rejection';
 import {
   claimWorkspaceAllocationForTask,
   recoverWorkspaceFromD1,
@@ -184,7 +186,7 @@ async function createAndProvisionWorkspace(
     rc.env,
     state.config.projectScaling
   );
-  admissionPolicy.allowBusyBuildQueue = await isUserConversationStart(state, rc);
+  const maxStartupBacklog = await resolveStartupBacklogGuard(state, rc, nodeId);
   updatePlacementDiagnostics(state, { queue: {} });
   const placementReserved = await reserveWorkspacePlacement(
     rc.env.DATABASE,
@@ -221,18 +223,20 @@ async function createAndProvisionWorkspace(
             : null,
       },
       resolvedReservation,
+      maxStartupBacklog,
       createdAt: now,
     },
     admissionPolicy
   );
 
   if (!placementReserved) {
-    await handleWorkspacePlacementRefused(state, rc, nodeId, admissionPolicy);
+    await handleWorkspacePlacementRefused(state, rc, nodeId, admissionPolicy, maxStartupBacklog);
     return false;
   }
 
   // A reservation that succeeds ends the refusal episode (rule 61).
   state.workspacePlacementRejections = 0;
+  state.startupBacklogConflicts = 0;
   await persistPlacementDiagnostics(state, rc, {
     revalidatedAgainstCurrentAuthority: true,
     queue: {},

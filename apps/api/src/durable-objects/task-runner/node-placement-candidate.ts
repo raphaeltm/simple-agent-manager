@@ -15,11 +15,7 @@ import {
   usableMemoryMb,
   type WorkspaceAdmissionPolicy,
 } from '../../services/workspace-resource-capacity';
-import type {
-  DeferrableReusableNodeCandidate,
-  ReusableNodeSelection,
-} from './node-placement-deferral';
-import type { NodePlacementFields } from './node-selection';
+import type { NodePlacementFields, ReusableNodeSelection } from './node-selection-shared';
 
 export type RankedReusableNode = {
   id: string;
@@ -32,7 +28,6 @@ export type RankedReusableNode = {
 type ReusableNodeCandidateEvaluation = {
   diagnosticHost: PlacementHostDiagnosticInput;
   candidate?: RankedReusableNode;
-  deferrableCandidate?: DeferrableReusableNodeCandidate;
   rejection?: { nodeId: string; reasons: string[] };
 };
 
@@ -46,8 +41,8 @@ type ReusableNodeCandidateInput = {
   satisfiesTaskResources: boolean;
   authoritative: boolean;
   /**
-   * The node is in the last part of its lifetime (`node-lifetime-admission.ts`). Checked first and
-   * never deferrable: waiting for, or draining, a node about to be reaped gains nothing.
+   * The node is in the last part of its lifetime (`node-lifetime-admission.ts`). Checked first:
+   * placing onto, or queueing behind, a node about to be reaped gains nothing.
    */
   pastLifetimeAdmissionCutoff?: boolean;
 };
@@ -133,7 +128,7 @@ function capacityCandidateEvaluation(
   );
   const diagnosticHost: PlacementHostDiagnosticInput = {
     signals,
-    outcome: capacity.deferrable ? 'deferred' : 'rejected',
+    outcome: 'rejected',
     reasons: capacity.admitted ? ['Another eligible host ranked higher'] : capacity.reasons,
     provider: input.node.cloudProvider,
     location: input.node.vmLocation,
@@ -141,12 +136,6 @@ function capacityCandidateEvaluation(
   };
   if (capacity.admitted)
     return { diagnosticHost, candidate: rankedNode(input, signals, selection) };
-  if (capacity.deferrable) {
-    return {
-      diagnosticHost,
-      deferrableCandidate: rankedNode(input, signals, selection),
-    };
-  }
   return {
     diagnosticHost,
     rejection: { nodeId: input.node.id, reasons: capacity.reasons },

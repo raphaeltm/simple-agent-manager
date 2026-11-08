@@ -9,6 +9,11 @@
  * every ~6 s until the 15-minute provisioning timeout (2026-11-05 staging). The cap
  * fails the task fast instead, with the refusal reasons, and keeps the node on the
  * run so failure cleanup hands a node this task provisioned to the warm pool.
+ *
+ * One refusal is not a capacity verdict at all: a startup-backlog conflict, where the node's
+ * startup queue grew after this run ranked it above another admitted node
+ * (`resolveStartupBacklogGuard`). Those replan freshly without spending the rejection budget,
+ * and after a bounded number the next reservation drops only the backlog guard.
  */
 import { log } from '../../lib/logger';
 import { resolveAdminSetting } from '../../services/admin-settings-resolution';
@@ -30,13 +35,42 @@ import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 /** Prefix of the placement-diagnostics note this module owns; replaced on each refusal. */
 export const WORKSPACE_PLACEMENT_REFUSED_NOTE_PREFIX = 'Workspace placement refused';
+export const STARTUP_BACKLOG_CONFLICT_REASON =
+  'node startup queue grew after it was ranked above another admitted node';
 const UNEXPLAINED_REFUSAL_REASON =
   'final reservation refused although advisory capacity admitted the node (a concurrent placement or a placement-authority change won)';
 
 interface PlacementRefusal {
   reasons: string[];
-  /** Only a busy build queue refused: a survivable wait, not evidence the node cannot fit. */
-  deferrable: boolean;
+  /**
+   * Capacity still admits the run; only the startup-backlog guard refused it. Fairness, not
+   * evidence that the node cannot fit.
+   */
+  backlogConflict: boolean;
+}
+
+/**
+ * The startup-backlog guard for a reservation on `nodeId`: the backlog observed when the node was
+ * ranked above an alternative, or null for no guard. After
+ * `operations.workspacePlacementBacklogConflictRetries` consecutive conflicts the guard is dropped,
+ * so a run that keeps losing the race to the shortest queue still places. Every capacity,
+ * telemetry and authority guard stays in the reservation SQL either way.
+ */
+export async function resolveStartupBacklogGuard(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext,
+  nodeId: string
+): Promise<number | null> {
+  const ranked = state.stepResults.rankedStartupBacklog;
+  if (!ranked || ranked.nodeId !== nodeId) return null;
+  const conflicts = state.startupBacklogConflicts ?? 0;
+  if (conflicts > 0) {
+    const maxConflicts = Number(
+      await resolveAdminSetting(rc.env, 'operations.workspacePlacementBacklogConflictRetries')
+    );
+    if (conflicts >= maxConflicts) return null;
+  }
+  return ranked.backlog;
 }
 
 /**
@@ -47,15 +81,26 @@ export async function handleWorkspacePlacementRefused(
   state: TaskRunnerState,
   rc: TaskRunnerContext,
   nodeId: string,
-  admissionPolicy: PlacementAdmissionPolicy
+  admissionPolicy: PlacementAdmissionPolicy,
+  maxStartupBacklog: number | null
 ): Promise<void> {
   await rc.assertRecoveryAuthority(state);
-  const refusal = await diagnoseWorkspacePlacementRefusal(state, rc, nodeId, admissionPolicy);
-  // Busy-build refusals wait in node selection; they say nothing about whether the node fits.
-  const rejections = refusal.deferrable
+  const refusal = await diagnoseWorkspacePlacementRefusal(
+    state,
+    rc,
+    nodeId,
+    admissionPolicy,
+    maxStartupBacklog
+  );
+  // A backlog conflict says nothing about whether the node fits: it only means a shorter
+  // queue may now be elsewhere. It must not spend the budget that fails the task.
+  const rejections = refusal.backlogConflict
     ? (state.workspacePlacementRejections ?? 0)
     : (state.workspacePlacementRejections ?? 0) + 1;
   state.workspacePlacementRejections = rejections;
+  state.startupBacklogConflicts = refusal.backlogConflict
+    ? (state.startupBacklogConflicts ?? 0) + 1
+    : (state.startupBacklogConflicts ?? 0);
   const maxRejections = Number(
     await resolveAdminSetting(rc.env, 'operations.workspacePlacementMaxRejections')
   );
@@ -76,6 +121,8 @@ export async function handleWorkspacePlacementRefused(
     reasons: refusal.reasons,
     rejections,
     maxRejections,
+    backlogConflict: refusal.backlogConflict,
+    startupBacklogConflicts: state.startupBacklogConflicts,
     autoProvisioned: state.stepResults.autoProvisioned,
     cpuShareBudgetPercent: admissionPolicy.cpuShareBudgetPercent,
     hostMemoryReserveMb: admissionPolicy.hostMemoryReserveMb,
@@ -110,6 +157,7 @@ export async function handleWorkspacePlacementRefused(
   state.stepResults.autoProvisioned = false;
   state.stepResults.provisionedVmSize = null;
   state.stepResults.capacityPlacementSnapshot = null;
+  state.stepResults.rankedStartupBacklog = null;
   await releaseVmProvisioningLease(
     rc.env,
     state.admissionScopeKey,
@@ -131,7 +179,8 @@ async function diagnoseWorkspacePlacementRefusal(
   state: TaskRunnerState,
   rc: TaskRunnerContext,
   nodeId: string,
-  policy: PlacementAdmissionPolicy
+  policy: PlacementAdmissionPolicy,
+  maxStartupBacklog: number | null
 ): Promise<PlacementRefusal> {
   const node = await rc.env.DATABASE.prepare(
     `SELECT id, status, ${trustedWorkspaceNodeCapacityColumnsSql()},
@@ -140,14 +189,15 @@ async function diagnoseWorkspacePlacementRefusal(
   )
     .bind(nodeId, state.userId)
     .first<WorkspaceResourceNode & { status: string }>();
-  if (!node) return { reasons: ['node no longer exists'], deferrable: false };
+  if (!node) return { reasons: ['node no longer exists'], backlogConflict: false };
   if (node.status !== 'running') {
-    return { reasons: [`node is ${node.status}, not running`], deferrable: false };
+    return { reasons: [`node is ${node.status}, not running`], backlogConflict: false };
   }
   const usage = await loadActiveWorkspaceReservationUsage(rc.env.DATABASE, [nodeId]);
+  const nodeUsage = usage.get(nodeId);
   const evaluation = evaluateWorkspaceReservationCapacity(
     node,
-    usage.get(nodeId),
+    nodeUsage,
     getTaskReservation(state),
     policy
   );
@@ -161,6 +211,15 @@ async function diagnoseWorkspacePlacementRefusal(
   ) {
     reasons.push(LIFETIME_ADMISSION_CUTOFF_REASON);
   }
+  const startupBacklog = nodeUsage?.startupBacklog ?? 0;
+  if (reasons.length === 0 && maxStartupBacklog !== null && startupBacklog > maxStartupBacklog) {
+    return {
+      reasons: [
+        `${STARTUP_BACKLOG_CONFLICT_REASON} (${maxStartupBacklog} when ranked, ${startupBacklog} now)`,
+      ],
+      backlogConflict: true,
+    };
+  }
   if (reasons.length === 0) reasons.push(UNEXPLAINED_REFUSAL_REASON);
-  return { reasons, deferrable: evaluation.deferrable && reasons.length === 1 };
+  return { reasons, backlogConflict: false };
 }

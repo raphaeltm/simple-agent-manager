@@ -22,6 +22,7 @@ import { CONNECTOR_DEFAULTS, type ConnectorSettingKey } from './connector-settin
 import { ENV_KEYS, SECRET_KINDS, SETTING_KEYS } from './platform-config-store';
 import {
   DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER,
+  DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES,
   DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS,
 } from './provisioning-attempt-limits';
 import { DEFAULT_SESSION_STALE_TURN_NO_WORK_MINUTES } from './session-idleness';
@@ -242,6 +243,13 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS,
     'Operations',
     'Consecutive times the node a task selected may refuse its final workspace reservation before the task fails with the refusal reasons. The count resets when a reservation succeeds.',
+    { min: 1, max: 20 }
+  ),
+  integerDefinition(
+    'operations.workspacePlacementBacklogConflictRetries',
+    DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES,
+    'Operations',
+    "Consecutive times a task may reselect because the node it ranked first gained queued workspace builds before its reservation. After this many, the task places on its next choice without that fairness check; capacity checks still apply. Conflicts never fail a task or provision a node. The count resets when a reservation succeeds.",
     { min: 1, max: 20 }
   ),
   ...Object.keys(CONNECTOR_DEFAULTS).map((key) => connectorDefinition(key as ConnectorSettingKey)),

@@ -16,3 +16,13 @@ export const DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER = 8;
  * 15-minute provisioning timeout. The count resets when a reservation succeeds.
  */
 export const DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS = 3;
+
+/**
+ * Default for `operations.workspacePlacementBacklogConflictRetries`: consecutive times a task's
+ * reservation may be refused only because the ranked node's startup queue grew after ranking,
+ * before the next reservation drops that fairness guard (capacity guards stay). Each conflict
+ * replans through node selection, a few D1 reads and no provider call, so 3 adds well under a
+ * second. A burst of K starts ranking the same nodes converges in at most K rounds, because
+ * every round's first reservation succeeds; the cap only bounds an unlucky loser.
+ */
+export const DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES = 3;

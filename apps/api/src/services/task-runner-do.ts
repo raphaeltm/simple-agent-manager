@@ -292,6 +292,7 @@ export async function startTaskRunnerDO(
     config: {
       vmSize: input.vmSize,
       vmLocation: initialCapacityCandidate?.location ?? input.vmLocation,
+      explicitVmLocation: input.explicitVmLocation === true,
       branch: input.branch,
       defaultBranch: input.defaultBranch ?? input.branch,
       preferredNodeId: input.preferredNodeId ?? null,

@@ -45,6 +45,14 @@ export interface WorkspacePlacementInput {
   taskLifecycleGuard?: WorkspacePlacementTaskLifecycleGuard | null;
   authorityNodeClass?: PlacementAuthorityNodeClass;
   resolvedReservation?: ResolvedResourceReservation | null;
+  /**
+   * Fairness guard for ranked placement: the node's startup backlog (`creating` workspaces) the
+   * caller observed when it chose this node over a less-queued alternative. The reservation is
+   * refused when the backlog has since grown, so a burst that ranked the same node first spreads
+   * out instead of queueing behind itself. Null or absent means no fairness guard (pins, warm
+   * claims, a single candidate, or the bounded fallback); every capacity guard applies either way.
+   */
+  maxStartupBacklog?: number | null;
   createdAt: string;
 }
 
@@ -97,6 +105,7 @@ export async function reserveWorkspacePlacement(
           ?, ?
        FROM node_scope n, requested_reservation requested, active_reservations active, admission_policy policy
          WHERE ${workspaceAdmissionEligibilitySql()}
+         AND (? IS NULL OR active.startup_backlog <= ?)
          ${taskLifecyclePredicate.sql}`
     )
     .bind(
@@ -121,6 +130,8 @@ export async function reserveWorkspacePlacement(
       ...capacityPlacementSnapshotSqlValues(input.capacityPlacementSnapshot),
       input.createdAt,
       input.createdAt,
+      input.maxStartupBacklog ?? null,
+      input.maxStartupBacklog ?? null,
       ...taskLifecyclePredicate.binds
     )
     .run();

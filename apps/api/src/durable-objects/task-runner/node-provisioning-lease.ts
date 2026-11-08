@@ -23,6 +23,7 @@ import {
   waitOrThrowForCapacityPoolNodeLimit,
 } from './node-provisioning-admission';
 import { trySelectReusableNodeForProvisioning } from './node-provisioning-reuse';
+import { adoptReusableNodeSelection } from './node-selection-shared';
 import { persistPlacementDiagnostics } from './placement-diagnostics';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
@@ -71,8 +72,7 @@ export async function acquirePrimaryProvisioningLease(
       );
       state.admissionScopeKey = null;
       state.admissionLeaseToken = null;
-      state.stepResults.nodeId = reusableNode.nodeId;
-      state.stepResults.capacityPlacementSnapshot = reusableNode.capacityPlacementSnapshot;
+      adoptReusableNodeSelection(state, reusableNode);
       await persistPlacementDiagnostics(state, rc, { queue: {} });
       await rc.advanceToStep(state, 'workspace_creation');
       return { kind: 'step-finished' };

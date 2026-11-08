@@ -10,10 +10,7 @@ import {
   pastLifetimeAdmissionCutoffColumnSql,
   resolvePlacementAdmissionPolicy,
 } from '../../services/node-lifetime-admission';
-import {
-  comparePlacementHostsByStrategy,
-  normalizePlacementHostSignals,
-} from '../../services/placement-strategy';
+import { normalizePlacementHostSignals } from '../../services/placement-strategy';
 import { filterReusableNodesByCurrentAuthority } from '../../services/reusable-node-authority';
 import {
   SessionRecoveryAuthorityRevokedError,
@@ -24,7 +21,6 @@ import {
   trustedWorkspaceNodeCapacityColumnsSql,
 } from '../../services/workspace-resource-capacity';
 import type { NodeLifecycle } from '../node-lifecycle';
-import { type ReusableNodeSelection } from './node-placement-deferral';
 import {
   currentReusableNodeIds,
   getTaskReservation,
@@ -32,12 +28,12 @@ import {
   type NodePlacementFields,
   nodeSatisfiesTaskResources,
   resolveReusableNodeSelection,
+  type ReusableNodeSelection,
 } from './node-selection-shared';
 import { updatePlacementDiagnostics } from './placement-diagnostics';
 import { revokeRecoveryAuthority } from './recovery-revocation';
-import { taskPlacementStrategy } from './task-placement-strategy';
+import { compareReusableHosts } from './task-placement-strategy';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
-import { isUserConversationStart } from './user-start-admission';
 
 function recoverySourceTaskGuard(
   state: TaskRunnerState
@@ -256,17 +252,14 @@ export async function tryClaimWarmNode(
 
   if (!warmNodes.results.length) return null;
 
-  // Warm hosts are ranked by the SAME strategy comparator as occupied reuse, so
-  // an operator's pool strategy is observable on the warm path too. It used to
-  // rank on `vmSize` equality, which made every strategy pick the same host.
-  warmPolicy.allowBusyBuildQueue = await isUserConversationStart(state, rc);
+  // Warm hosts are ranked by the SAME comparator as occupied reuse, so an operator's
+  // pool strategy is observable on the warm path too. It used to rank on `vmSize`
+  // equality, which made every strategy pick the same host.
   const warmReservation = getTaskReservation(state);
   const warmUsage = await loadActiveWorkspaceReservationUsage(
     rc.env.DATABASE,
     warmNodes.results.map((node) => node.id)
   );
-  const warmStrategy = taskPlacementStrategy(state);
-  const warmSelectionSettings = state.config.capacityPoolSelection?.selectionSettings;
   const authoritativeWarmNodes = await currentReusableNodeIds(state, rc, warmNodes.results);
   const sorted = warmNodes.results
     .filter((node) => authoritativeWarmNodes.has(node.id))
@@ -283,19 +276,14 @@ export async function tryClaimWarmNode(
         request: warmReservation,
         policy: warmPolicy,
       });
+      // The warm shortcut runs before occupied ranking on the premise that a warm node is
+      // empty. `warm_since` is cleared by NodeLifecycle after a placement lands, so an
+      // ordinary placement can already have a workspace starting here. Leave such a node
+      // to the occupied ranking, which weighs its queue against the alternatives.
+      if (signals.startupBacklog > 0) return [];
       return [{ ...node, selection, signals }];
     })
-    .sort((a, b) => {
-      const aLocMatch = a.vmLocation === state.config.vmLocation ? 1 : 0;
-      const bLocMatch = b.vmLocation === state.config.vmLocation ? 1 : 0;
-      if (aLocMatch !== bLocMatch) return bLocMatch - aLocMatch;
-      return comparePlacementHostsByStrategy(
-        a.signals,
-        b.signals,
-        warmStrategy,
-        warmSelectionSettings
-      );
-    });
+    .sort((a, b) => compareReusableHosts(state, a, b));
 
   for (const warmNode of sorted) {
     try {
