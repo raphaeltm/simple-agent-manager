@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, gt, lt, notInArray, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, isNull, lt, notInArray, or, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -149,9 +149,16 @@ export async function appendDeploymentPublishJobEvent(
 ): Promise<boolean> {
   const now = new Date().toISOString();
   const status = normalizeStatus(input.status);
+  if (input.terminal && (!status || !PUBLISH_JOB_TERMINAL_STATUSES.has(status))) return false;
   const terminal = input.terminal || (status ? PUBLISH_JOB_TERMINAL_STATUSES.has(status) : false);
   const predicate = and(
     eq(schema.deploymentPublishJobs.id, input.publishJobId),
+    input.releaseId != null
+      ? or(
+          isNull(schema.deploymentPublishJobs.releaseId),
+          eq(schema.deploymentPublishJobs.releaseId, input.releaseId)
+        )
+      : undefined,
     input.expectedStatus
       ? eq(schema.deploymentPublishJobs.status, input.expectedStatus)
       : undefined,
@@ -170,6 +177,9 @@ export async function appendDeploymentPublishJobEvent(
   const update: Partial<schema.NewDeploymentPublishJobRow> = {
     updatedAt: now,
     lastEventAt: now,
+    // Progress is also proof of life, but cannot opt legacy agents into stall detection.
+    lastHeartbeatAt:
+      sql`CASE WHEN ${schema.deploymentPublishJobs.lastHeartbeatAt} IS NULL THEN NULL ELSE ${now} END` as unknown as string,
   };
   if (status) update.status = status;
   if (input.currentStep !== undefined) update.currentStep = input.currentStep;

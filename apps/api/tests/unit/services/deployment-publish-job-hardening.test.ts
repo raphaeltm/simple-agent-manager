@@ -92,6 +92,80 @@ beforeEach(() => {
 afterEach(() => sqlite.close());
 
 describe('publish job atomic guards on SQLite', () => {
+  it.each([undefined, 'building'])(
+    'rejects terminal flag with non-terminal status %s without writes',
+    async (status) => {
+      seed();
+      const before = row();
+      expect(
+        await appendDeploymentPublishJobEvent(db(), { ...event, status, terminal: true })
+      ).toBe(false);
+      expect(row()).toEqual(before);
+      expect(
+        sqlite.prepare('SELECT count(*) AS n FROM deployment_publish_job_events').get()
+      ).toEqual({ n: 0 });
+      expect(
+        await appendDeploymentPublishJobEvent(db(), {
+          ...event,
+          status: 'succeeded',
+          terminal: true,
+        })
+      ).toBe(true);
+      expect(row().completed_at).toBeTruthy();
+    }
+  );
+  it('rejects conflicting release metadata and accepts metadata for the linked release', async () => {
+    seed();
+    sqlite
+      .prepare(
+        "UPDATE deployment_publish_jobs SET release_id = 'owner', release_version = 1, release_status = 'created'"
+      )
+      .run();
+    const before = row();
+    expect(
+      await appendDeploymentPublishJobEvent(db(), {
+        ...event,
+        releaseId: 'other',
+        releaseVersion: 99,
+        releaseStatus: 'failed',
+      })
+    ).toBe(false);
+    expect(row()).toEqual(before);
+    expect(sqlite.prepare('SELECT count(*) AS n FROM deployment_publish_job_events').get()).toEqual(
+      { n: 0 }
+    );
+    expect(
+      await appendDeploymentPublishJobEvent(db(), {
+        ...event,
+        releaseId: 'owner',
+        releaseVersion: 2,
+        releaseStatus: 'ready',
+      })
+    ).toBe(true);
+    expect(row()).toMatchObject({
+      release_id: 'owner',
+      release_version: 2,
+      release_status: 'ready',
+    });
+  });
+  it('accepted progress refreshes capable executor liveness while preserving legacy NULL', async () => {
+    seed('job', 'building', old, old, old);
+    seed('legacy', 'building', old, old, null);
+    expect(await appendDeploymentPublishJobEvent(db(), event)).toBe(true);
+    expect(await appendDeploymentPublishJobEvent(db(), { ...event, publishJobId: 'legacy' })).toBe(
+      true
+    );
+    expect(row().last_heartbeat_at).not.toBe(old);
+    expect(row('legacy').last_heartbeat_at).toBeNull();
+    expect(
+      await failExpiredDeploymentPublishJobs(
+        db(),
+        { ...settings, deadlineMs: 86_400_000_000 },
+        Date.now()
+      )
+    ).toEqual([]);
+  });
+
   it('preserves silent healthy builds and legacy jobs while expiring dead heartbeat-capable jobs', async () => {
     seed('alive', 'building', old, old, recent);
     seed('legacy', 'uploading', old, old, null);

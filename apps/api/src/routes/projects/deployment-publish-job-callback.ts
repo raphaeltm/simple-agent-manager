@@ -7,7 +7,10 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { parseWithSchema, readRequestJsonRecord } from '../../lib/runtime-validation';
 import { errors } from '../../middleware/error';
-import { appendDeploymentPublishJobEvent } from '../../services/deployment-publish-jobs';
+import {
+  appendDeploymentPublishJobEvent,
+  PUBLISH_JOB_TERMINAL_STATUSES,
+} from '../../services/deployment-publish-jobs';
 import { recordDeploymentPublishJobLifecycleEventBestEffort } from '../../services/project-lifecycle-events';
 import { verifyWorkspacePublishCallback } from './_callback-auth';
 
@@ -95,6 +98,9 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
   }
 
   const status = optionalString(event.status) ?? undefined;
+  if (event.terminal && (!status || !PUBLISH_JOB_TERMINAL_STATUSES.has(status))) {
+    throw errors.badRequest('Terminal publish job event requires a terminal status');
+  }
   const currentStep = optionalString(event.currentStep) ?? optionalString(event.step);
   await assertCurrent();
   const accepted = await appendDeploymentPublishJobEvent(db, {
@@ -118,7 +124,8 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
     retryable: event.retryable === true,
   });
 
-  if (accepted === false) throw errors.conflict('Publish job is terminal');
+  if (accepted === false)
+    throw errors.conflict('Publish job is terminal or release does not match');
   await assertCurrent();
   if (eventType !== 'publish.job.heartbeat' && status && status !== job.status) {
     c.executionCtx.waitUntil(

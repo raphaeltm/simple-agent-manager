@@ -106,6 +106,58 @@ beforeEach(() => {
 });
 afterEach(() => sqlite.close());
 describe('publish callback routes with real SQL', () => {
+  it.each([undefined, 'building'])(
+    'rejects malformed terminal status %s before writes',
+    async (status) => {
+      const before = sqlite.prepare('SELECT * FROM deployment_publish_jobs').get();
+      expect(
+        (
+          await request('deployment-publish-jobs/job/events', {
+            eventType: 'publish.done',
+            message: 'done',
+            terminal: true,
+            status,
+          })
+        ).status
+      ).toBe(400);
+      expect(sqlite.prepare('SELECT * FROM deployment_publish_jobs').get()).toEqual(before);
+      expect(
+        sqlite.prepare('SELECT count(*) AS n FROM deployment_publish_job_events').get()
+      ).toEqual({ n: 0 });
+      expect(
+        (
+          await request('deployment-publish-jobs/job/events', {
+            eventType: 'publish.done',
+            message: 'done',
+            terminal: true,
+            status: 'succeeded',
+          })
+        ).status
+      ).toBe(200);
+    }
+  );
+  it('returns 409 on conflicting release metadata and accepts the linked release', async () => {
+    sqlite.exec("UPDATE deployment_publish_jobs SET release_id = 'owner', release_version = 1");
+    const before = sqlite.prepare('SELECT * FROM deployment_publish_jobs').get();
+    const event = {
+      eventType: 'publish.release',
+      message: 'release',
+      status: 'building',
+      releaseVersion: 9,
+      releaseStatus: 'ready',
+    };
+    expect(
+      (await request('deployment-publish-jobs/job/events', { ...event, releaseId: 'other' })).status
+    ).toBe(409);
+    expect(sqlite.prepare('SELECT * FROM deployment_publish_jobs').get()).toEqual(before);
+    expect(sqlite.prepare('SELECT count(*) AS n FROM deployment_publish_job_events').get()).toEqual(
+      { n: 0 }
+    );
+    expect(
+      (await request('deployment-publish-jobs/job/events', { ...event, releaseId: 'owner' })).status
+    ).toBe(200);
+  });
+
   it('MCP cancel commits despite an old-agent 404 and fences the real release callback', async () => {
     const result = await handleCancelPublish(
       'cancel',
