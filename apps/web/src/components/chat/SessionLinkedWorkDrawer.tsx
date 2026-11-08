@@ -13,7 +13,7 @@
 import type { LinkedFile } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
 import { FileText, GitPullRequest, Lightbulb, Link2 } from 'lucide-react';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { projectIdeaPath } from '../../lib/project-routes';
 import { LibraryFilePreview } from '../library/LibraryFilePreview';
@@ -183,6 +183,14 @@ export function SessionLinkedWorkDrawer({
   const panelRef = useRef<HTMLDivElement>(null);
   const [previewFile, setPreviewFile] = useState<LinkedFile | null>(null);
   useDialogFocusTrap(panelRef, onClose, previewFile === null);
+
+  // The preview hands focus back to the row that opened it. If a refetch removed that row in
+  // the meantime, focus would fall to the page, outside this dialog; keep it in the panel.
+  useEffect(() => {
+    if (previewFile === null && !panelRef.current?.contains(document.activeElement)) {
+      panelRef.current?.focus();
+    }
+  }, [previewFile]);
 
   const hasItems =
     linkedWork.ideas.items.length > 0 ||

@@ -355,6 +355,28 @@ describe('chat linked work — the Related panel', () => {
     );
   });
 
+  it('keeps focus in the panel when the row that opened the preview has since gone', async () => {
+    const queryClient = await renderChat();
+    const drawer = await openRelated();
+    within(drawer).getByTestId('linked-work-file').focus();
+    fireEvent.click(within(drawer).getByTestId('linked-work-file'));
+    await screen.findByRole('region', { name: 'Preview of report.png' });
+
+    // A refetch drops the file while its preview is open, so the opener row unmounts.
+    act(() => {
+      queryClient.setQueryData(SESSION_LINKS_KEY, richContext({ files: cappedList([]) }));
+    });
+    await waitFor(() =>
+      expect(within(drawer).queryByTestId('linked-work-file')).not.toBeInTheDocument()
+    );
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() =>
+      expect(screen.queryByRole('dialog', { name: 'report.png' })).not.toBeInTheDocument()
+    );
+    expect(drawer).toHaveFocus();
+  });
+
   it("shows the file's name while it loads, and says so when it cannot be opened", async () => {
     let reject: (error: Error) => void = () => {};
     mockGetLibraryFile.mockReturnValue(
