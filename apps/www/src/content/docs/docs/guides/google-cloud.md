@@ -75,13 +75,14 @@ SAM reads the Google Cloud machine catalog live; nothing about zones or prices i
   "Price unavailable". SAM never guesses a price. Enable `cloudbilling.googleapis.com` in the
   connected project to fix it; the next refresh picks it up within the retry interval
   (`gcpCatalog.priceRetryMinutes`). Each retry tries the next connected credentials in turn, so
-  credentials without the API cannot keep a working one from being tried. A credential whose
-  project has Cloud Billing turned off, or refuses it on IAM grounds, is flagged on that connection
-  for its owner (see [Keeping the required APIs on](#keeping-the-required-apis-on)) and does not
-  notify operators. A refresh where every credential failed and at least one failure was anything
-  else (a token without the right scope, a server error, a timeout, a response with no usable price)
-  notifies operators as a failed scheduled sweep (`refreshGcpPriceTableIfDue()` in
-  `apps/api/src/services/gcp-price-table.ts`). Either way the previous price list is kept.
+  credentials without the API cannot keep a working one from being tried. A user's or project's
+  credential whose project has Cloud Billing turned off, or refuses it on IAM grounds, is flagged on
+  that connection for its owner (see [Keeping the required APIs on](#keeping-the-required-apis-on))
+  and does not notify operators. A refresh where every credential failed and at least one failure
+  was anything else notifies operators as a failed scheduled sweep (`refreshGcpPriceTableIfDue()`
+  in `apps/api/src/services/gcp-price-table.ts`). That covers a token without the right scope, a
+  server error, a timeout, a response with no usable price, and any failure of a platform
+  credential, which operators own. Either way the previous price list is kept.
 - **Credits and discounts are not reflected.** These are list prices. Committed-use discounts,
   free-tier usage and promotional credits apply on your Google invoice, not in SAM's ranking.
 

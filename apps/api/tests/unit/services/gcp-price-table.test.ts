@@ -337,10 +337,11 @@ describe('GCP price table', () => {
     stubBilling(['platform-gcp-1', 'platform-gcp-2', 'platform-gcp-3']);
 
     // The failing platform credentials fill the per-refresh limit of three.
+    // Platform credentials belong to operators, so even an owner-fixable reason is a fault.
     expect(await refreshGcpPriceTableIfDue(env, NOW)).toEqual({
       status: 'failed',
       attempts: 3,
-      faults: 0,
+      faults: 3,
     });
     expect(tokenCalls.map((call) => call.gcpProjectId)).toEqual([
       'platform-gcp-3',
@@ -516,6 +517,21 @@ describe('GCP price table', () => {
         ]);
       }
     );
+
+    it('keeps a platform credential with Cloud Billing off a fault, since operators own it', async () => {
+      await seedPlatform('cred-platform', 'platform-off-gcp', '2026-11-01T00:00:00Z');
+      stubBilling(['platform-off-gcp'], 'service_disabled');
+
+      expect(await refreshGcpPriceTableIfDue(env, NOW)).toEqual({
+        status: 'failed',
+        attempts: 1,
+        faults: 1,
+      });
+      // Still recorded, so the record is ready when operators get a place to see it.
+      expect(await issuesFor('cred-platform', 'platform-off-gcp')).toMatchObject([
+        { reason: 'api_disabled' },
+      ]);
+    });
 
     it('counts faults separately when owner-fixable and genuine failures mix', async () => {
       await seedOwned('cred-off', 'off-gcp', { updatedAt: '2026-11-06T00:00:00Z' });

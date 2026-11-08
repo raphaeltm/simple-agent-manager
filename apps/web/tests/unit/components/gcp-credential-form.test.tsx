@@ -543,6 +543,42 @@ describe('GcpCredentialForm', () => {
       );
     });
 
+    it('Check again reports a failed Cloud Billing check instead of success', async () => {
+      mocks.verifyGcpSetup.mockResolvedValue({
+        success: true,
+        verified: true,
+        billingCheck: 'fault',
+        apiIssues: [],
+      });
+      render(<GcpCredentialForm credential={withIssues} onUpdate={onUpdate} onRefresh={vi.fn()} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
+
+      await waitFor(() =>
+        expect(mocks.toastError).toHaveBeenCalledWith('Google Cloud check could not finish')
+      );
+      expect(mocks.toastSuccess).not.toHaveBeenCalled();
+    });
+
+    it('re-running setup keeps a saved zone that is not one of the suggestions', async () => {
+      window.history.replaceState({}, '', '?gcp_setup=1');
+      render(
+        <GcpCredentialForm
+          credential={{
+            ...credential,
+            gcp: { ...credential.gcp, gcpProjectId: 'proj-2', defaultZone: 'me-west1-c' },
+          }}
+          onUpdate={onUpdate}
+        />
+      );
+
+      await waitFor(() =>
+        expect(screen.getByText('Select a GCP project to connect:')).toBeInTheDocument()
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+      expect(screen.getByLabelText('Default Zone')).toHaveValue('me-west1-c');
+    });
+
     it('re-running setup starts from the connected project and zone', async () => {
       window.history.replaceState({}, '', '?gcp_setup=1');
       render(

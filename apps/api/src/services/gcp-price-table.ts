@@ -177,7 +177,11 @@ async function refreshFromCandidates(
         await updateGcpApiHealthSafely(candidate.id, () =>
           recordGcpApiIssue(env, candidate.id, ownerFixable, now)
         );
-      } else {
+      }
+      // A user's or project's own Google project is theirs to fix, and their connection card
+      // shows it. A platform credential belongs to the operators, who have no such card, so its
+      // failures stay faults and keep reaching the failed-sweep notification.
+      if (!ownerFixable || candidate.credentialSource === 'platform') {
         faults += 1;
       }
       log.warn('gcp_price_table.refresh_attempt_failed', {

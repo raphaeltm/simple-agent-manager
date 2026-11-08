@@ -22,7 +22,7 @@ function reasonText(issue: GcpApiIssue): string {
 /** What stops working until the API is usable, where SAM knows. */
 function consequenceText(service: string): string | null {
   return service === GCP_CLOUD_BILLING_SERVICE
-    ? 'Until then, Google Cloud machines show "Price unavailable".'
+    ? 'Until then SAM cannot read Google\'s list prices through this connection, and if no other connection can, Google Cloud machines show "Price unavailable".'
     : null;
 }
 

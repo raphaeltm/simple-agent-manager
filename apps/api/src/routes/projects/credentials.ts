@@ -52,6 +52,7 @@ import {
 } from '../../services/composable-credentials/compute-sync';
 import { decrypt, encrypt } from '../../services/encryption';
 import { getTimeoutMs } from '../../services/fetch-timeout';
+import { deleteGcpApiHealthSafely } from '../../services/gcp-api-health';
 import { serializeCredentialToken } from '../../services/provider-credentials';
 import {
   CredentialValidator,
@@ -402,7 +403,7 @@ projectCredentialsRoutes.delete('/:id/cloud-credentials/:provider', async (c) =>
   }
 
   const providerName = provider as CredentialProvider;
-  await db
+  const deleted = await db
     .delete(schema.credentials)
     .where(
       and(
@@ -420,6 +421,9 @@ projectCredentialsRoutes.delete('/:id/cloud-credentials/:provider', async (c) =>
     provider: providerName,
   });
   await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'project', userId, projectId });
+  if (providerName === 'gcp') {
+    for (const row of deleted) await deleteGcpApiHealthSafely(c.env, row.id);
+  }
 
   return c.json({ success: true });
 });

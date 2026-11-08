@@ -254,7 +254,7 @@ describe('runGcpSetup', () => {
   });
 
   /** Google's setup APIs; `existing` answers every create with 409 as on a re-run. */
-  function stubGoogleSetup(existing: boolean) {
+  function stubGoogleSetup(existing: boolean, enableError = false) {
     const enabledServices: string[][] = [];
     const json = (body: unknown, status = 200) =>
       new Response(JSON.stringify(body), {
@@ -267,7 +267,9 @@ describe('runGcpSetup', () => {
         enabledServices.push(
           (JSON.parse(String(init?.body)) as { serviceIds: string[] }).serviceIds
         );
-        return json({ done: true });
+        return enableError
+          ? json({ done: true, error: { code: 7, message: 'Billing account required' } })
+          : json({ done: true });
       }
       if (url.endsWith('cloudresourcemanager.googleapis.com/v1/projects/owner-project')) {
         return json({ projectNumber: '123456' });
@@ -309,4 +311,12 @@ describe('runGcpSetup', () => {
       expect(await listGcpApiIssues(env, 'fresh', credential, NOW)).toEqual([]);
     }
   );
+
+  it('refuses to record APIs as enabled when Google finished the enable with an error', async () => {
+    stubGoogleSetup(false, true);
+
+    await expect(
+      runGcpSetup('oauth-token', 'owner-project', 'us-central1-a', setupEnv)
+    ).rejects.toMatchObject({ step: 'enable_apis' });
+  });
 });

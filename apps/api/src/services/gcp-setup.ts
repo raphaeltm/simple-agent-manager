@@ -49,6 +49,7 @@ const gcpProjectListResponseSchema = v.object({
 const gcpOperationSchema = v.object({
   name: v.optional(v.string()),
   done: v.optional(v.boolean()),
+  error: v.optional(v.object({ message: v.optional(v.string()) })),
 });
 
 const iamBindingSchema = v.object({
@@ -214,6 +215,14 @@ export async function enableApis(
 
   // Poll the long-running operation
   const op = await readResponseJson(res, gcpOperationSchema, 'gcp.service_usage.batch_enable');
+  // A completed operation can still have failed; recording the APIs as enabled would hide them.
+  if (op.error) {
+    throw new GcpApiError({
+      step: 'enable_apis',
+      message: 'Failed to enable APIs',
+      rawBody: op.error.message,
+    });
+  }
   if (!op.done) {
     await pollOperation(oauthToken, requireOperationName(op, 'enable_apis'), timeoutMs);
   }

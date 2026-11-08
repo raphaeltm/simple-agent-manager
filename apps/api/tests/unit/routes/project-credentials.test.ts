@@ -474,6 +474,36 @@ describe('Project Credentials Routes', () => {
     });
   });
 
+  describe('DELETE /:id/cloud-credentials/gcp', () => {
+    it("forgets the deleted Google Cloud credential's API health record", async () => {
+      mockDB.returning.mockResolvedValueOnce([{ id: 'project-gcp-cred' }]);
+      kv.delete.mockClear();
+
+      const res = await app.request(
+        '/api/projects/proj-1/cloud-credentials/gcp',
+        { method: 'DELETE' },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(kv.delete).toHaveBeenCalledWith('gcp-api-health:v1:project-gcp-cred');
+    });
+
+    it('does not touch API health records for other providers', async () => {
+      mockDB.returning.mockResolvedValueOnce([{ id: 'project-hetzner-cred' }]);
+      kv.delete.mockClear();
+
+      const res = await app.request(
+        '/api/projects/proj-1/cloud-credentials/hetzner',
+        { method: 'DELETE' },
+        env
+      );
+
+      expect(res.status).toBe(200);
+      expect(kv.delete).not.toHaveBeenCalledWith(expect.stringContaining('gcp-api-health'));
+    });
+  });
+
   describe('DELETE /:id/credentials/:agentType/:credentialKind', () => {
     it('returns 404 when project is not owned', async () => {
       projectAuthMocks.requireProjectCapability.mockRejectedValueOnce(

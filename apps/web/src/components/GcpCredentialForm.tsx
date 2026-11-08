@@ -16,6 +16,7 @@ import {
 import { ConfirmDialog } from './ConfirmDialog';
 import { GCP_ZONES, SERVICE_ACCOUNT_COMMANDS, SETUP_STEPS } from './gcp-credential-form-constants';
 import { GcpApiIssuesNotice } from './GcpApiIssuesNotice';
+import { GcpConnectionDetails } from './GcpConnectionDetails';
 
 interface GcpCredentialFormProps {
   credential?: CredentialResponse | null;
@@ -41,6 +42,10 @@ export function GcpCredentialForm({ credential, onUpdate, onRefresh }: GcpCreden
   const [showDisconnectConfirm, setShowDisconnectConfirm] = useState(false);
   const [showRotateConfirm, setShowRotateConfirm] = useState(false);
   const [disconnecting, setDisconnecting] = useState(false);
+  // Any zone is valid; keep a saved one selectable even when it is not a suggestion.
+  const zoneOptions = GCP_ZONES.some((zone) => zone.id === selectedZone)
+    ? GCP_ZONES
+    : [...GCP_ZONES, { id: selectedZone, label: selectedZone }];
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -79,9 +84,7 @@ export function GcpCredentialForm({ credential, onUpdate, onRefresh }: GcpCreden
       const current = credential?.gcp;
       if (current && result.projects.some((p) => p.projectId === current.gcpProjectId)) {
         setSelectedProject(current.gcpProjectId);
-        if (GCP_ZONES.some((zone) => zone.id === current.defaultZone)) {
-          setSelectedZone(current.defaultZone);
-        }
+        setSelectedZone(current.defaultZone);
       } else if (result.projects.length === 1 && result.projects[0]) {
         setSelectedProject(result.projects[0].projectId);
       }
@@ -141,6 +144,7 @@ export function GcpCredentialForm({ credential, onUpdate, onRefresh }: GcpCreden
       const result = await verifyGcpSetup();
       onRefresh?.();
       if (!result.verified) toast.error(result.error ?? 'Google Cloud verification failed');
+      else if (result.billingCheck === 'fault') toast.error('Google Cloud check could not finish');
       else if (result.apiIssues?.length) toast.warning('Some Google APIs still need attention');
       else toast.success('Google Cloud connection checked');
     } catch (err) {
@@ -237,59 +241,14 @@ export function GcpCredentialForm({ credential, onUpdate, onRefresh }: GcpCreden
             checking={checking}
           />
         )}
-        <div className="rounded-md border border-success/30 bg-success-tint p-4">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div className="min-w-0">
-              <p className="font-medium text-success-fg">Connected</p>
-              <p className="mt-1 text-sm text-fg-muted">
-                {metadata?.authType === 'service-account-key'
-                  ? 'Service account JSON (long-lived key)'
-                  : 'Workload Identity Federation (recommended)'}
-              </p>
-              {metadata && (
-                <dl className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
-                  <div className="min-w-0">
-                    <dt className="text-xs text-fg-muted">GCP project</dt>
-                    <dd className="break-all text-fg-primary">{metadata.gcpProjectId}</dd>
-                  </div>
-                  <div className="min-w-0">
-                    <dt className="text-xs text-fg-muted">Default zone</dt>
-                    <dd className="break-all text-fg-primary">{metadata.defaultZone}</dd>
-                  </div>
-                  <div className="min-w-0 sm:col-span-2">
-                    <dt className="text-xs text-fg-muted">Service account</dt>
-                    <dd className="break-all text-fg-primary">{metadata.serviceAccountEmail}</dd>
-                  </div>
-                  {metadata.privateKeyId && (
-                    <div className="min-w-0 sm:col-span-2">
-                      <dt className="text-xs text-fg-muted">Private key ID</dt>
-                      <dd className="break-all font-mono text-xs text-fg-primary">
-                        {metadata.privateKeyId}
-                      </dd>
-                    </div>
-                  )}
-                </dl>
-              )}
-            </div>
-            <div className="flex flex-col gap-2 sm:shrink-0">
-              {metadata?.authType === 'service-account-key' && (
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => {
-                    setSelectedZone(metadata.defaultZone);
-                    setPhase('service-account');
-                  }}
-                >
-                  Rotate JSON key
-                </Button>
-              )}
-              <Button variant="danger" size="sm" onClick={() => setShowDisconnectConfirm(true)}>
-                Disconnect
-              </Button>
-            </div>
-          </div>
-        </div>
+        <GcpConnectionDetails
+          metadata={metadata}
+          onRotateKey={() => {
+            if (metadata) setSelectedZone(metadata.defaultZone);
+            setPhase('service-account');
+          }}
+          onDisconnect={() => setShowDisconnectConfirm(true)}
+        />
         {error && <Alert variant="error">{error}</Alert>}
         <ConfirmDialog
           isOpen={showDisconnectConfirm}
@@ -349,7 +308,7 @@ export function GcpCredentialForm({ credential, onUpdate, onRefresh }: GcpCreden
             value={selectedZone}
             onChange={(event) => setSelectedZone(event.target.value)}
           >
-            {GCP_ZONES.map((zone) => (
+            {zoneOptions.map((zone) => (
               <option key={zone.id} value={zone.id}>
                 {zone.label}
               </option>
@@ -465,7 +424,7 @@ export function GcpCredentialForm({ credential, onUpdate, onRefresh }: GcpCreden
             value={selectedZone}
             onChange={(event) => setSelectedZone(event.target.value)}
           >
-            {GCP_ZONES.map((zone) => (
+            {zoneOptions.map((zone) => (
               <option key={zone.id} value={zone.id}>
                 {zone.label}
               </option>
