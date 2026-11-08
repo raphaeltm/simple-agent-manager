@@ -71,6 +71,33 @@ describe('auth route logging', () => {
     expect(logged).not.toContain('body');
   });
 
+  it('returns the OAuth callback response unchanged for a visitor holding a stale trial cookie', async () => {
+    // The retired anonymous-trial hook used to rewrite this response into a redirect to /try
+    // with a sam_trial_claim cookie. The callback must now be BetterAuth's answer, byte for byte.
+    const app = buildApp();
+    const upstream = new Response(null, {
+      status: 302,
+      headers: {
+        Location: 'https://app.example.test/dashboard',
+        'Set-Cookie': 'better-auth.session_token=abc; Path=/; HttpOnly',
+      },
+    });
+    mocks.authHandler.mockResolvedValue(upstream);
+
+    const res = await app.request(
+      '/api/auth/callback/github?code=c&state=s',
+      { headers: { Cookie: 'sam_trial_fingerprint=stale.signature' } },
+      {} as Env
+    );
+
+    expect(mocks.authHandler).toHaveBeenCalledOnce();
+    expect(res.status).toBe(302);
+    expect(res.headers.get('location')).toBe('https://app.example.test/dashboard');
+    const setCookie = res.headers.get('set-cookie') ?? '';
+    expect(setCookie).toContain('better-auth.session_token=abc');
+    expect(setCookie).not.toContain('sam_trial');
+  });
+
   it('/me rejects suspended users using a database-backed session read', async () => {
     const app = buildApp();
     mocks.getSession.mockResolvedValue({

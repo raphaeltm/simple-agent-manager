@@ -36,7 +36,9 @@ sweep orphans nothing. The historical rows stay in place (no D1 DROP; migration-
 - `system_anonymous_trials_installation` row: the placeholder `installation_id` for artifacts and
   GitLab projects (`routes/projects/project-create.ts`, migration 0047). Deleting it would cascade
   into real projects. Both rows stay; the shared constant is renamed to a system-row name with the
-  same value, and the existing env overrides keep working.
+  same value. The `TRIAL_ANONYMOUS_USER_ID` / `TRIAL_ANONYMOUS_INSTALLATION_ID` overrides are
+  dropped: the ids are fixed by migrations, so an override could only name a row that does not
+  exist (tests prove the override is ignored and `status='system'` rows stay excluded).
 - `GET /api/trial-status` + `services/platform-trial.ts`: authenticated installation platform
   credential + AI proxy availability (project → user → platform fallback UX). Kept; user-facing
   copy saying "platform trial" becomes "platform compute".
@@ -83,24 +85,24 @@ sweep orphans nothing. The historical rows stay in place (no D1 DROP; migration-
 
 ## Implementation checklist
 
-- [ ] Shared: delete `trial.ts`, `constants/trial-orchestrator.ts`; add system-row id constants
-- [ ] API: delete trial routes/services/DO implementations/scheduled jobs/admin route and their tests
-- [ ] API: tombstone DO classes; remove bindings from wrangler.toml, env.ts, vitest configs
-- [ ] API: `/api/trial/*` → 410 Gone with self-host pointer; test proves no D1/DO access
-- [ ] API: remove OAuth claim hook, bridge call sites, ai-proxy trialId, provisioning-authority trial
+- [x] Shared: delete `trial.ts`, `constants/trial-orchestrator.ts`; add system-row id constants
+- [x] API: delete trial routes/services/DO implementations/scheduled jobs/admin route and their tests
+- [x] API: tombstone DO classes; remove bindings from wrangler.toml, env.ts, vitest configs
+- [x] API: `/api/trial/*` → 410 Gone with self-host pointer; test proves no D1/DO access
+- [x] API: remove OAuth claim hook, bridge call sites, ai-proxy trialId, provisioning-authority trial
       assertion, placement source, MCP/session `'trial'` context, rate-limit buckets
-- [ ] API: remove `trials.enabled` admin setting + category + legacy KV plumbing
-- [ ] API: scheduled handler + wrangler crons without trial jobs
-- [ ] API: rename sentinel constant usages (auth, operator notifications, platform-config store,
-      project-create) to system-row constants; keep env overrides
-- [ ] Web: remove trial pages/components/hooks/libs, AdminTrials, nav + palette entries, admin API
+- [x] API: remove `trials.enabled` admin setting + category + legacy KV plumbing
+- [x] API: scheduled handler + wrangler crons without trial jobs
+- [x] API: rename sentinel constant usages (auth, operator notifications, platform-config store,
+      project-create) to system-row constants; drop the env overrides
+- [x] Web: remove trial pages/components/hooks/libs, AdminTrials, nav + palette entries, admin API
       fns, AI usage/costs trial split; `/try*` → retired-trial redirect to self-host page
-- [ ] Web: reword "platform trial" copy to platform compute
-- [ ] Deploy/infra: secrets lists, configure-secrets, staging KV step, worker-var defaults,
+- [x] Web: reword "platform trial" copy to platform compute
+- [x] Deploy/infra: secrets lists, configure-secrets, staging KV step, worker-var defaults,
       runtime tunables baseline, churning tables, node-pool inventory, DO migration scan,
       Pulumi output removal (resource retained)
-- [ ] Docs + agent rules/skills sync
-- [ ] Playwright screenshots of retired `/try` page (375 + 1280) and admin nav
+- [x] Docs + agent rules/skills sync
+- [x] Playwright screenshots of retired `/try` page (375 + 1280) and admin nav
 - [ ] Full quality suite
 
 ## Acceptance criteria
@@ -122,3 +124,15 @@ sweep orphans nothing. The historical rows stay in place (no D1 DROP; migration-
 
 - Audit: Library `01M6XBX8SZDQGD5ZK87NDE3Y5P`
 - Rules: 31 migration safety, 07 env/urls (DO migrations), 25 review gate, 30 never ship broken
+
+## Implementation notes
+
+- Commits: d416e5a11 (API/shared/deploy/infra), d3a804768 (web), af85875a6 (docs), sonar exclusion fix.
+- The trial-related AI-proxy D1 lookup ran on every AI proxy call, and the trial bridge did a KV
+  lookup on every message batch, ACP transition, idea and knowledge write; both are gone.
+- A new quality test (`scripts/quality/do-migration-compatibility.test.ts`) asserts that every
+  migration-created DO class stays exported. Verified discriminating by deleting the tombstone
+  export (test went red).
+- `/api/trial/*` 410 handler test asserts no env binding is read (`trial-status.test.ts`).
+- Visual audit: `apps/web/tests/playwright/trial-retirement-audit.spec.ts` (12/12 at 375 and 1280).
+- The task file was committed on the feature branch rather than main, to avoid an extra production deploy.
