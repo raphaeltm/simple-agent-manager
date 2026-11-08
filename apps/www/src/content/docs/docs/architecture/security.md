@@ -15,7 +15,7 @@ Handoff removes hosted OAuth and deployment-credential copies while retaining th
 
 Experimental full installation is disabled by default and has not completed authenticated end-to-end validation. Its design separates temporary bootstrap OAuth, user-owned maintenance deployment authority, storage access, and narrower normal SAM runtime authority. Credential values pass through hosted bootstrap before transfer. Continued operation after OAuth revocation must be verified before claiming independence. Updates select an explicit immutable source version; they are not a promise of automatic conflict merging, transactional deployment, or database rollback.
 
-For installer-bound instances, `BOOTSTRAP_OWNER_EMAIL` restricts initial administration to the matching provider-verified email. Other initial identities are denied; an atomic election handles concurrent callbacks and durably records completion. Later changes to the elected owner's email, role or status do not reopen that election or lock out other authorized users; normal suspension checks still apply. The separate `SETUP_TOKEN` authorizes provider configuration, not user login. Ordinary installations without this optional binding retain their existing first-user policy.
+For installer-bound instances, `BOOTSTRAP_OWNER_EMAIL` restricts initial administration to the matching verified email (verified by an OAuth provider or by an emailed sign-in code). Other initial identities are denied; an atomic election handles concurrent callbacks and durably records completion. Later changes to the elected owner's email, role or status do not reopen that election or lock out other authorized users; normal suspension checks still apply. The separate `SETUP_TOKEN` authorizes first-run setup, not user login. The installer's setup link carries it in the URL fragment, which browsers never send to a server; the setup page removes it from the address bar on load. Ordinary installations without this optional binding retain their existing first-user policy.
 
 ## Cloud Credential Model (BYOC + Platform Fallback)
 
@@ -90,7 +90,7 @@ Cloud provider credentials are stored with a `credentialType` of `cloud-provider
 
 ## Authentication Flow
 
-SAM uses **BetterAuth** with configured OAuth login providers for user authentication:
+SAM uses **BetterAuth** with configured OAuth login providers, and email codes where email is available, for user authentication:
 
 1. User clicks a configured sign-in provider such as GitHub, Google, or GitLab
 2. API redirects to that provider's OAuth flow
@@ -99,6 +99,14 @@ SAM uses **BetterAuth** with configured OAuth login providers for user authentic
 5. API fetches user profile and email
 6. BetterAuth creates/updates user record and session
 7. Session cookie set in browser
+
+Where the deploy prepared Email Sending, BetterAuth's email OTP plugin also signs people in with a six-digit code (`services/email-sign-in.ts`):
+
+1. User enters an email address; the API emails a code from `sign-in@agents.<BASE_DOMAIN>` only if the address belongs to an account, or it is the first user's (the installer owner email before that owner exists, or anyone on an installation with no users and no owner email). The response is identical either way.
+2. User enters the code. It is stored hashed, expires after 5 minutes and allows 3 attempts.
+3. BetterAuth marks the email verified and creates the session, running the same user and session hooks as OAuth sign-in.
+
+Code requests are limited per IP address and per recipient (`agentEmail.signInCodesPerIpPerHour`, `agentEmail.signInCodesPerEmailPerHour`).
 
 ### Token Types
 

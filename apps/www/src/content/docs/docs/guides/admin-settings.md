@@ -627,6 +627,8 @@ Superadmins can search for these controls in **Admin → Settings**. Values are 
 | ------------------------------------------- | ------: | ------------: | ------------------------------------------------------------------------------------------------------------ |
 | `agentEmail.setupPlanTimeoutMs`             |   15000 |    100–120000 | Complete read-only agent-email setup inspection; a deadline returns a partial verification plan.             |
 | `agentEmail.readTimeoutMs`                  |    5000 |     100–30000 | Each Cloudflare/DNS verification read and the admin status request.                                          |
+| `agentEmail.signInCodesPerEmailPerHour`     |       5 |         1–100 | Sign-in codes SAM emails to one address per hour. Further requests send nothing                              |
+| `agentEmail.signInCodesPerIpPerHour`        |      20 |       1–1,000 | Sign-in code requests one IP address can make per hour                                                       |
 | `performance.githubRequestTimeoutMs`        |    5000 |    100–120000 | Each GitHub discovery HTTP request, including its response body.                                             |
 | `performance.githubInstallationsDeadlineMs` |   15000 |    100–120000 | Overall GitHub installation discovery route.                                                                 |
 | `performance.providerCatalogTimeoutMs`      |   10000 |    100–120000 | Each provider machine catalog read; an unavailable catalog can use the existing incomplete fallback.         |
