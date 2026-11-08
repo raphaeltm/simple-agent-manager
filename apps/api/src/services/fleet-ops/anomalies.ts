@@ -21,100 +21,38 @@ import { neutralizeUntrustedText } from '../../operations/untrusted-text';
 import { resolveCleanupConfig } from '../../scheduled/node-cleanup/config';
 import { deriveNodeHealth } from '../node-health';
 import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from '../workspace-resource-capacity';
+import { snapshotFailures, stalledWakes } from './anomalies-sessions';
+import {
+  ANOMALY_CLASSES,
+  type AnomalyClass,
+  type AnomalyClassResult,
+  type AnomalyReport,
+  int,
+  isoMinus,
+  minutesSince,
+  result,
+  type Row,
+  type SweepContext,
+  text,
+} from './anomaly-shared';
 import type { FleetOpsSettings } from './settings';
 
-export const ANOMALY_CLASSES = [
-  'empty_node_past_warm_grace',
-  'stale_node_heartbeat',
-  'node_destroying_too_long',
-  'running_workspace_for_terminal_task',
-  'idle_in_progress_task',
-  'session_snapshot_failure',
-  'workspace_deletion_quarantine',
-  'pending_incident',
-] as const;
-export type AnomalyClass = (typeof ANOMALY_CLASSES)[number];
-
-export interface AnomalyFinding {
-  readonly ids: Readonly<Record<string, string | null>>;
-  readonly reason: string;
-  readonly observedAt: string | null;
-}
-
-export interface AnomalyClassResult {
-  readonly class: AnomalyClass;
-  readonly total: number;
-  readonly returned: number;
-  readonly truncated: boolean;
-  readonly findings: readonly AnomalyFinding[];
-  readonly error?: string;
-  /** Set when `total` may count reported items that a full scan would have dropped. */
-  readonly totalIsUpperBound?: boolean;
-}
-
-export interface AnomalyReport {
-  readonly generatedAt: string;
-  readonly thresholds: Readonly<Record<string, number>>;
-  readonly classes: readonly AnomalyClassResult[];
-}
-
-type Row = Record<string, unknown>;
+export {
+  ANOMALY_CLASSES,
+  type AnomalyClass,
+  type AnomalyClassResult,
+  type AnomalyFinding,
+  type AnomalyReport,
+} from './anomaly-shared';
 
 const TERMINAL_TASK_STATUS_SQL = "'completed', 'failed', 'cancelled'";
 const ACTIVE_TASK_STATUS_SQL = "'queued', 'delegated', 'in_progress'";
-
-function text(value: unknown): string | null {
-  return typeof value === 'string' && value.length > 0 ? value : null;
-}
-
-function int(value: unknown): number {
-  const n = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(n) ? n : 0;
-}
-
-function minutesSince(iso: string | null, now: number): number | null {
-  const at = iso ? Date.parse(iso.includes('T') ? iso : `${iso.replace(' ', 'T')}Z`) : NaN;
-  return Number.isFinite(at) ? Math.max(0, Math.round((now - at) / 60_000)) : null;
-}
-
-function isoMinus(now: number, ms: number): string {
-  return new Date(now - ms).toISOString();
-}
-
-/** Every class query selects `COUNT(*) OVER () AS total` so the cap is disclosed in one read. */
-function result(
-  cls: AnomalyClass,
-  rows: Row[],
-  toFinding: (row: Row) => AnomalyFinding
-): AnomalyClassResult {
-  const findings: AnomalyFinding[] = [];
-  for (const row of rows) {
-    try {
-      findings.push(toFinding(row));
-    } catch (error) {
-      log.warn('fleet_ops.anomaly_row_skipped', {
-        anomalyClass: cls,
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-  }
-  const total = rows.length > 0 ? int(rows[0]?.total) : 0;
-  return { class: cls, total, returned: findings.length, truncated: total > rows.length, findings };
-}
 
 /**
  * Quarantine reports are read up to this many times the per-class cap, so reports for
  * workspaces deleted since can be dropped without hiding open ones behind them.
  */
 const QUARANTINE_SCAN_MULTIPLIER = 4;
-
-interface SweepContext {
-  readonly env: Env;
-  readonly now: number;
-  readonly cap: number;
-  readonly emptyNodeIdleMs: number;
-  readonly settings: FleetOpsSettings;
-}
 
 async function emptyNodes(ctx: SweepContext): Promise<AnomalyClassResult> {
   const rows = await ctx.env.DATABASE.prepare(
@@ -303,57 +241,6 @@ async function idleInProgressTasks(ctx: SweepContext): Promise<AnomalyClassResul
   });
 }
 
-async function snapshotFailures(ctx: SweepContext): Promise<AnomalyClassResult> {
-  const rows = await ctx.env.DATABASE.prepare(
-    `SELECT s.id, s.project_id, s.chat_session_id, s.workspace_id, s.node_id, s.user_id,
-            s.status, s.sleep_status, s.recovery_status, s.restore_status,
-            s.sleep_attempts, s.recovery_attempts,
-            (s.capture_error IS NOT NULL) AS has_capture_error,
-            (s.sleep_error IS NOT NULL) AS has_sleep_error,
-            (s.recovery_error IS NOT NULL) AS has_recovery_error,
-            s.updated_at, COUNT(*) OVER () AS total
-     FROM session_snapshots s
-     WHERE julianday(s.updated_at) >= julianday(?)
-       AND (s.sleep_status IN ('failed', 'terminal_failed')
-            OR s.recovery_status = 'failed'
-            OR s.restore_status = 'failed'
-            OR s.status = 'failed'
-            OR s.capture_error IS NOT NULL)
-     ORDER BY julianday(s.updated_at) DESC, s.id ASC
-     LIMIT ?`
-  )
-    .bind(isoMinus(ctx.now, ctx.settings.lookbackHours * 3_600_000), ctx.cap)
-    .all<Row>();
-  return result('session_snapshot_failure', rows.results ?? [], (row) => {
-    const parts = [
-      `status ${text(row.status)}`,
-      `sleep ${text(row.sleep_status) ?? 'none'} (${int(row.sleep_attempts)} attempts)`,
-      `recovery ${text(row.recovery_status) ?? 'none'} (${int(row.recovery_attempts)} attempts)`,
-      `restore ${text(row.restore_status) ?? 'none'}`,
-    ];
-    const errors = [
-      int(row.has_capture_error) ? 'capture_error' : null,
-      int(row.has_sleep_error) ? 'sleep_error' : null,
-      int(row.has_recovery_error) ? 'recovery_error' : null,
-    ].filter(Boolean);
-    return {
-      ids: {
-        snapshotId: text(row.id),
-        chatSessionId: text(row.chat_session_id),
-        projectId: text(row.project_id),
-        workspaceId: text(row.workspace_id),
-        nodeId: text(row.node_id),
-        userId: text(row.user_id),
-      },
-      reason:
-        `Session snapshot failed: ${parts.join(', ')}` +
-        (errors.length ? `; recorded ${errors.join(', ')} (read with ops_get_session_story)` : '') +
-        '.',
-      observedAt: text(row.updated_at),
-    };
-  });
-}
-
 /**
  * Dead-lettered deletions live in NodeLifecycle DO storage; each one also writes a
  * `platform_errors` row (`node-lifecycle-workspace-deletion.ts deadLetterExact`), which is the
@@ -452,6 +339,7 @@ const SWEEPS: Record<AnomalyClass, (ctx: SweepContext) => Promise<AnomalyClassRe
   running_workspace_for_terminal_task: runningWorkspacesForTerminalTasks,
   idle_in_progress_task: idleInProgressTasks,
   session_snapshot_failure: snapshotFailures,
+  session_wake_stalled: stalledWakes,
   workspace_deletion_quarantine: deletionQuarantine,
   pending_incident: pendingIncidents,
 };
@@ -487,6 +375,7 @@ export async function findAnomalies(
       idleTaskMinutes: settings.idleTaskMinutes,
       destroyingNodeHours: settings.destroyingNodeHours,
       lookbackHours: settings.lookbackHours,
+      wakingMinutes: settings.wakingMinutes,
       maxPerClass: ctx.cap,
     },
     classes,
