@@ -1175,6 +1175,9 @@ describe('startup backlog fairness guard in the atomic reservation', () => {
     seedNode();
     seedStartingWorkspace('finished-build', 'node-1', 'running');
     seedStartingWorkspace('recovering', 'node-1', 'recovery');
+    // A start that was cancelled or failed leaves the queue.
+    seedStartingWorkspace('cancelled-start', 'node-1', 'stopped');
+    seedStartingWorkspace('failed-start', 'node-1', 'error');
     const input = reserveInput(capacitySnapshot());
 
     await expect(

@@ -1644,6 +1644,26 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
       expect(state.stepResults.rankedStartupBacklog).toBeNull();
     });
 
+    it('keeps an explicit pin on its node however long that node\'s queue is, with no guard', async () => {
+      const selection = capacityPoolSelection('user');
+      const state = busyBuildState({ selection });
+      state.config.preferredNodeId = 'node-pinned';
+      const rc = createContext({
+        preferredNode: { ...busyBuildNode('node-pinned', selection), status: 'running' },
+        existingNodes: [
+          busyBuildNode('node-idle', selection, { last_metrics: idleBuildMetrics() }),
+        ],
+        workspaceReservations: reservationsOn('node-pinned', 4, state),
+        healthByNode: healthyAgents('node-pinned', 'node-idle'),
+      });
+
+      await handleNodeSelection(state, rc);
+
+      expect(state.stepResults.nodeId).toBe('node-pinned');
+      expect(state.stepResults.rankedStartupBacklog).toBeNull();
+      expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+    });
+
     it('lets a task parked under the old busy-build wait place on its next selection', async () => {
       const state = busyBuildState();
       const selection = state.config.capacityPoolSelection!;

@@ -545,6 +545,20 @@ provisioned to the warm pool (`handleWorkspacePlacementRefused()` in
 node, and an active exclusive workspace prevents any additional placement. Legacy workspace-count
 and co-tenant settings remain compatible audit data but do not block placement.
 
+A node that is building another workspace is not refused. The VM agent builds one workspace at a
+time (`acquireBuildSlot()` in `packages/vm-agent/internal/server/workspaces.go`), so a placement
+there waits for every workspace still `creating` on that node. Node selection ranks admitted nodes
+by that startup backlog before the pool strategy (`compareReusableHosts()` in
+`durable-objects/task-runner/task-placement-strategy.ts`), reading the D1 `creating` count from the
+rows `loadActiveWorkspaceReservationUsage()` already loads. An explicit location ranks before
+backlog; a default location ranks after it. When another admitted node was available, the TaskRunner
+carries the chosen node's observed backlog into the final reservation, which refuses the claim if
+that node's backlog has grown since (`maxStartupBacklog` in `reserveWorkspacePlacement()`). Such a
+refusal replans without counting toward `operations.workspacePlacementMaxRejections`; after
+`operations.workspacePlacementBacklogConflictRetries` consecutive conflicts (3 by default) the next
+reservation omits only that guard. Backlog never triggers provisioning: a node that fits is used
+even when its queue is long.
+
 ## ACP Session Lifecycle
 
 Agent sessions are managed by the ProjectData DO with this state machine:

@@ -74,20 +74,20 @@ normal capacity-exhaustion behavior.
 
 ## Implementation checklist
 
-- [ ] Usage: count `creating` rows (`creatingCount`) in `loadActiveWorkspaceReservationUsage`
-- [ ] Signals and diagnostics: `startupBacklog` in `PlacementHostSignals` and host diagnostics (shared type optional)
-- [ ] Remove the busy-build veto from the evaluator, policy and SQL; keep malformed `creatingWorkspaces` validation
-- [ ] Delete `node-placement-deferral.ts`, `user-start-admission.ts` and the busy-build wait branch in `node-steps.ts`
-- [ ] Remove the per-call `waitTimeoutMs` option and `busyBuildWaitTimeoutMs` config, the shared constant, the env var, `.env.example`, the omitted-var record and its probe, the env-reference skill and the runtime-tunables baseline
-- [ ] Shared comparator in `task-placement-strategy.ts`; use it in node selection and the warm claim
-- [ ] `explicitVmLocation` in TaskRunner config (`task-runner-do.ts`, types)
-- [ ] Warm shortcut skips nodes with startup backlog > 0
-- [ ] Fairness predicate `maxStartupBacklog` in `reserveWorkspacePlacement`
-- [ ] TaskRunner carries `observedStartupBacklog` (2+ candidates only); pin, warm and provisioned paths carry null
-- [ ] Refusal handler: classify the fairness conflict, don't count it, bounded fallback, reset on success
-- [ ] Admin setting `operations.workspacePlacementBacklogConflictRetries` (default 3)
-- [ ] Tests (see acceptance criteria)
-- [ ] Docs: public docs on placement and build queue (grep), the env reference
+- [x] Usage: count `creating` rows (`creatingCount`) in `loadActiveWorkspaceReservationUsage`
+- [x] Signals and diagnostics: `startupBacklog` in `PlacementHostSignals` and host diagnostics (shared type optional)
+- [x] Remove the busy-build veto from the evaluator, policy and SQL; keep malformed `creatingWorkspaces` validation
+- [x] Delete `node-placement-deferral.ts`, `user-start-admission.ts` and the busy-build wait branch in `node-steps.ts`
+- [x] Remove the per-call `waitTimeoutMs` option and `busyBuildWaitTimeoutMs` config, the shared constant, the env var, `.env.example`, the omitted-var record and its probe, the env-reference skill and the runtime-tunables baseline
+- [x] Shared comparator in `task-placement-strategy.ts`; use it in node selection and the warm claim
+- [x] `explicitVmLocation` in TaskRunner config (`task-runner-do.ts`, types)
+- [x] Warm shortcut skips nodes with startup backlog > 0
+- [x] Fairness predicate `maxStartupBacklog` in `reserveWorkspacePlacement`
+- [x] TaskRunner carries `observedStartupBacklog` (2+ candidates only); pin, warm and provisioned paths carry null
+- [x] Refusal handler: classify the fairness conflict, don't count it, bounded fallback, reset on success
+- [x] Admin setting `operations.workspacePlacementBacklogConflictRetries` (default 3)
+- [x] Tests (see acceptance criteria)
+- [x] Docs: public docs on placement and build queue (grep), the env reference
 
 ## Acceptance criteria
 
@@ -106,3 +106,19 @@ normal capacity-exhaustion behavior.
 
 - `.claude/rules/62`, `.claude/rules/74`, `.claude/rules/73`, `.claude/rules/81`
 - `apps/api/.claude/rules/69-aggregate-capacity-at-final-reservation.md`, `61-per-cycle-budget-counters.md`, `47-control-loop-io-budget.md`
+
+## Implementation notes
+
+- `startupBacklog` is counted in `loadActiveWorkspaceReservationUsage` (`status = 'creating'`) and in the
+  `active_reservations` CTE of the atomic SQL (`startup_backlog`). No extra round-trips.
+- The guard is stored as `stepResults.rankedStartupBacklog = { nodeId, backlog }` through
+  `adoptReusableNodeSelection()`, so a stale value never guards a different node.
+- The fairness fallback reads `operations.workspacePlacementBacklogConflictRetries` only when the
+  run already has a conflict.
+- Discrimination verified (each reverted once, the named tests went red):
+  - comparator backlog key: 7 node-selection unit tests plus the real-D1 selector test
+  - warm `startupBacklog > 0` skip: the warm interleaving test
+  - SQL fairness predicate: the refuse/control test and the two-node burst
+  - restoring the old busy veto in SQL: building-node admission, burst, single-node burst, restart
+  - conflicts counted as rejections: the replan-without-budget test
+  - fallback bound removed: the drop-guard-after-N test
