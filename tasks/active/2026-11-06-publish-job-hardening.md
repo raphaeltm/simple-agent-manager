@@ -11,7 +11,7 @@ Phase 1 of idea 01KZ6V37D1QGDR3WN12PSDB0QD. Node-owned builds currently have no 
 - [x] Lifecycle events for API starting and failed_to_start; early Instant gate references phase-3 idea.
 - [x] Go handler/callback payload tests; delete-guard red/restore checks.
 - [x] Docs and channel contracts.
-- [ ] Full checks, specialist reviews, staging VM binary refresh and success/cancel/sweep/Instant verification with cleanup.
+- [x] Full checks, specialist reviews, staging VM binary refresh and success/cancel/sweep/Instant verification with cleanup.
 - [ ] PR, CI, CodeRabbit, merge, production smoke; idea update with PR.
 
 ## Scope
@@ -47,3 +47,11 @@ No context bundles, executor columns, queueing, or job tokens. Current SAM outpu
 - Fresh guard-removal proof saved in `tasks/evidence/publish-hardening-guard-mutations.json`: ten removed guards each failed the intended test; restored real-SQL/MCP suite passed35tests. PRcomment6724035073 retains the same proof.
 - Staging browser smoke passed dashboard, project and settings with zero page errors. Fresh VM heartbeat identifies agent30c80869dcd1dc5974660afdb06a405698f3722b, same Go content as final runtimehead.
 - Actual VM publish01M6Y0QT8ZN6ZMZMT6M13FGGRD succeeded and linked release01M6Y0R61D76Q1QN31QFYD8WP1, version1. Delayed job01M6Y0TCKQ1FAK2W5MQ4WN1QSC canceled while building with no release. At16:47 release list still contained only version1. Final API rollout, kill/sweep, active Instant gate and cleanup remain pending.
+
+### Completed live staging and cleanup — 2026-11-08
+- Deployment42499959944 succeeded on runtimehead d1e03526f. Browser smoke3pages passed withzero pageerrors. Publish v1 was applied withweb running (appliedSeq1).
+- Active Instant session returned the exact VM-session gate and created0jobs. Running delayed build canceled, retained no release beyond its build delay; onlyv1 existed.
+- Killed source VM termination was confirmed17:01:57.592Z while job01M6Y1NGTTK3T27K2VT8TZVC70 remainedbuilding. Scheduled sweep wrotefailed/stalled/retryable1/no release17:05:51.170Z, within temporary30second silence threshold plus5minute tick. Last event17:00:36.166Z. Earlier queryprecededtickwrite; no sweepfailure was recorded.
+- Temporary setting reset; no platform_settings override remains (default300000ms). D1 cleanup proof17:13:05Z confirmsall3fixture nodesdeleted withterminationproof, environment/profile/tasks absent. Existing project/profile and unrelatednodes retained.
+- Full evidence in `tasks/evidence/publish-hardening-staging.json`; mutation proofnowincludes failingtestnames/excerpts. Public defaultstagingapphostnameTLS negotiationfailedfromrunner; appliedservice verified, publicHTTPSresponse remainsunverified. No TLS/routingchanges inthisPR.
+- Finalcompletion review approvesimplementation/fourbehaviors, requiresreleaseworkflowbeforearchive. CodeRabbit/merge/productionhealth/finalideanote remain.
