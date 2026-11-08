@@ -378,7 +378,9 @@ jobs:
     name: Test
     needs: [changes]
     if: (github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager') && needs.changes.outputs.repo-quality == 'true'
-    timeout-minutes: 20
+    # Normal runs take 12-20 min; on slower runners 3 runs on 2026-11-08 were
+    # cancelled at the old 20-min limit with no failing suite.
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
