@@ -182,8 +182,8 @@ The point of the panel is to make a machine-size decision with evidence instead 
 **If you saw an OOM**, raise the memory floor. Set it at whichever level in the
 [requirements chain](/docs/guides/compute-pools/#where-you-can-set-them) the problem belongs to —
 the project default for "everything here needs more", the agent profile for "this agent is heavy",
-the task itself for a one-off. Remember the host reserve: a 4 GiB machine can only back a ~3.5 GiB
-reservation, so asking for exactly 4 GB pushes you onto an 8 GiB machine.
+the task itself for a one-off. Remember the host reserve: a 4 GiB machine can only back a 3 GiB
+reservation, so asking for more than 3 GB pushes you onto an 8 GiB machine.
 
 Do **not** use "memory including cache looks close to the reserved line" as your trigger. Cache is
 reclaimable (see [What this does not tell you](#what-this-does-not-tell-you)), so a workspace that

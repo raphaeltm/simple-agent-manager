@@ -529,11 +529,20 @@ the last capacity.
 `apps/api/src/services/workspace-resource-capacity.ts` makes legacy capacity intentionally
 conservative: both empty and occupied nodes require verified observed CPU, memory, and disk
 capacity. An occupied node also requires valid active reservations and fresh resource telemetry.
-Admission keeps the full declared memory budget and separately checks fresh measured host usage
-plus outstanding reservations and the new request against physical memory minus the host reserve.
-Only unique, fresh observations for the same running workspace lifecycle credit usage already
-represented in the host sample; unobserved or starting work keeps its full reservation outstanding.
-The final atomic claim repeats both checks. CPU saturation and disk pressure remain live overload vetoes. Exclusive requests require an empty
+Admission keeps the full declared memory budget and separately charges a host overhead of
+`max(host reserve, measured host use not explained by workspace observations)` plus outstanding
+reservations and the new request against physical memory (`measuredHostOverheadMb()` in
+`workspace-resource-capacity.ts`, mirrored by `measuredHostOverheadMbSql()` in
+`workspace-admission-sql.ts`). Measured use counts only where it exceeds the reserve, because the
+reserve already pays for the host's own processes; offering selection assumes the same reserve, so a
+node provisioned for a request can admit it. Only unique, fresh observations for the same running
+workspace lifecycle credit usage already represented in the host sample; unobserved or starting work
+keeps its full reservation outstanding.
+The final atomic claim repeats both checks. When that claim refuses the node a task selected, the
+TaskRunner replans through node selection; after `operations.workspacePlacementMaxRejections`
+consecutive refusals (3 by default) it fails the task with the refusal reasons and hands a node it
+provisioned to the warm pool (`handleWorkspacePlacementRefused()` in
+`durable-objects/task-runner/workspace-placement-rejection.ts`). CPU saturation and disk pressure remain live overload vetoes. Exclusive requests require an empty
 node, and an active exclusive workspace prevents any additional placement. Legacy workspace-count
 and co-tenant settings remain compatible audit data but do not block placement.
 

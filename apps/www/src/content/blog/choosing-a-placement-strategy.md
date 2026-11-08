@@ -53,7 +53,11 @@ Which produces a result that reads like a bug the first time you hit it:
 | Fits? | **No** |
 
 A 4 GB workload does not fit a 4 GB machine. Every default-sized SAM workspace therefore needs a
-`cx33` or larger. In the explorer, submit a **Standard** workload and watch which hosts refuse it.
+`cx33` or larger.
+
+_Update, 2026-11-08: the default reserve is now 1 GB. Idle hosts were measured using 500–770 MB on
+4 GB machines, so 512 MB let SAM start machines that admission then refused. A `cx23` now holds
+workloads of up to 3 GB, and the explorer uses the new value._ In the explorer, submit a **Standard** workload and watch which hosts refuse it.
 
 ## The four strategies
 
