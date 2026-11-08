@@ -1,47 +1,40 @@
+import type { ResolvedResourceReservation } from '@simple-agent-manager/shared';
+
+import type { WorkspaceAdmissionPolicy } from './workspace-admission-policy';
 import {
-  DEFAULT_NODE_CPU_THRESHOLD_PERCENT,
-  DEFAULT_NODE_MEMORY_THRESHOLD_PERCENT,
-  type ResolvedResourceReservation,
-} from '@simple-agent-manager/shared';
+  type ActiveWorkspaceReservationUsage,
+  emptyUsage,
+  isResolvedResourceReservation,
+  nonNegativeInteger,
+  parseTimestampMs,
+  positiveInteger,
+} from './workspace-reservation-usage';
 
-import type { Env } from '../env';
-import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
+export {
+  DEFAULT_WORKSPACE_ADMISSION_CPU_SCORE_WEIGHT_PERCENT,
+  DEFAULT_WORKSPACE_ADMISSION_CPU_SHARE_BUDGET_PERCENT,
+  DEFAULT_WORKSPACE_ADMISSION_DISK_PRESSURE_THRESHOLD_PERCENT,
+  DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB,
+  DEFAULT_WORKSPACE_ADMISSION_MEMORY_SCORE_WEIGHT_PERCENT,
+  DEFAULT_WORKSPACE_ADMISSION_METRICS_TTL_MS,
+  type PlacementAdmissionPolicy,
+  resolveEffectiveNodeHostMemoryReserveMb,
+  resolveWorkspaceAdmissionPolicy,
+  type WorkspaceAdmissionPolicy,
+} from './workspace-admission-policy';
+export {
+  ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL,
+  ACTIVE_WORKSPACE_RESERVATION_STATUSES,
+  type ActiveWorkspaceReservationUsage,
+  aggregateWorkspaceReservationRows,
+  emptyUsage,
+  isResolvedResourceReservation,
+  loadActiveWorkspaceReservationUsage,
+  parseResolvedResourceReservation,
+  RESOURCE_REQUIREMENTS_SOURCE_SQL,
+} from './workspace-reservation-usage';
 
-export const ACTIVE_WORKSPACE_RESERVATION_STATUSES = ['running', 'creating', 'recovery'] as const;
-export const ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL = ACTIVE_WORKSPACE_RESERVATION_STATUSES.map(
-  (status) => `'${status}'`
-).join(', ');
-export const DEFAULT_WORKSPACE_ADMISSION_CPU_SHARE_BUDGET_PERCENT = 100;
-export const DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB = 512;
-export const DEFAULT_WORKSPACE_ADMISSION_DISK_PRESSURE_THRESHOLD_PERCENT = 80;
-export const DEFAULT_WORKSPACE_ADMISSION_METRICS_TTL_MS = 180_000;
-export const DEFAULT_WORKSPACE_ADMISSION_CPU_SCORE_WEIGHT_PERCENT = 40;
-export const DEFAULT_WORKSPACE_ADMISSION_MEMORY_SCORE_WEIGHT_PERCENT = 60;
 export const WORKSPACE_BUSY_BUILD_QUEUE_REASON = 'node build queue is busy';
-export const RESOURCE_REQUIREMENTS_SOURCE_SQL =
-  "'task', 'trigger', 'skill', 'agent-profile', 'project', 'user', 'platform'";
-const D1_BIND_LIMIT = D1_MAX_BOUND_PARAMETERS;
-
-export interface WorkspaceAdmissionPolicy {
-  /** Internal admission hint: human conversation starts need not wait for unrelated builds. */
-  allowBusyBuildQueue?: boolean;
-  cpuShareBudgetPercent: number;
-  hostMemoryReserveMb: number;
-  diskPressureThresholdPercent: number;
-  metricsTtlMs: number;
-  cpuThresholdPercent: number;
-  memoryThresholdPercent: number;
-  cpuScoreWeightPercent: number;
-  memoryScoreWeightPercent: number;
-}
-
-/**
- * The policy of a NEW placement. The lifetime cutoff must have been resolved
- * (`resolvePlacementAdmissionPolicy`), so a placement path cannot forget it; null disables it.
- */
-export type PlacementAdmissionPolicy = WorkspaceAdmissionPolicy & {
-  lifetimeAdmissionCutoffAgeMs: number | null;
-};
 
 export interface WorkspaceAdmissionMetrics {
   cpuLoadAvg1: number | null;
@@ -52,17 +45,6 @@ export interface WorkspaceAdmissionMetrics {
   fresh: boolean;
   malformed: boolean;
   unsupportedVersion: boolean;
-}
-
-export interface ActiveWorkspaceReservationUsage {
-  activeCount: number;
-  invalidCount: number;
-  exclusiveCount: number;
-  cpuMillis: number;
-  memoryMb: number;
-  /** Fresh running-container usage already included in the node memory reading. */
-  observedMemoryCredits?: Array<{ memoryMb: number; collectedAt: number; heartbeatAt: number }>;
-  diskMb: number;
 }
 
 export interface WorkspaceReservationCapacityResult {
@@ -93,127 +75,6 @@ export interface TrustedWorkspaceNodeCapacity {
   diskGb: number | null;
   source: 'observed' | 'planned' | null;
   reasons: string[];
-}
-
-export function resolveWorkspaceAdmissionPolicy(
-  env: Pick<
-    Env,
-    | 'TASK_RUN_NODE_CPU_THRESHOLD_PERCENT'
-    | 'TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT'
-    | 'TASK_RUN_NODE_CPU_SHARE_BUDGET_PERCENT'
-    | 'TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB'
-    | 'VM_AGENT_MEMORY_RESERVE_MB'
-    | 'TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT'
-    | 'TASK_RUN_NODE_METRICS_TTL_MS'
-    | 'TASK_RUN_NODE_CPU_SCORE_WEIGHT_PERCENT'
-    | 'TASK_RUN_NODE_MEMORY_SCORE_WEIGHT_PERCENT'
-  >,
-  scaling?: {
-    nodeCpuThresholdPercent?: number | null;
-    nodeMemoryThresholdPercent?: number | null;
-    nodeCpuShareBudgetPercent?: number | null;
-    nodeHostMemoryReserveMb?: number | null;
-    nodeDiskPressureThresholdPercent?: number | null;
-    nodeMetricsTtlMs?: number | null;
-    nodeCpuScoreWeightPercent?: number | null;
-    nodeMemoryScoreWeightPercent?: number | null;
-  } | null
-): WorkspaceAdmissionPolicy {
-  const cpuScoreWeightPercent = positiveInt(
-    scaling?.nodeCpuScoreWeightPercent,
-    parseEnvInt(
-      env.TASK_RUN_NODE_CPU_SCORE_WEIGHT_PERCENT,
-      DEFAULT_WORKSPACE_ADMISSION_CPU_SCORE_WEIGHT_PERCENT
-    )
-  );
-  const memoryScoreWeightPercent = positiveInt(
-    scaling?.nodeMemoryScoreWeightPercent,
-    parseEnvInt(
-      env.TASK_RUN_NODE_MEMORY_SCORE_WEIGHT_PERCENT,
-      DEFAULT_WORKSPACE_ADMISSION_MEMORY_SCORE_WEIGHT_PERCENT
-    )
-  );
-  const totalWeight = cpuScoreWeightPercent + memoryScoreWeightPercent;
-
-  return {
-    cpuShareBudgetPercent: boundedInt(
-      scaling?.nodeCpuShareBudgetPercent,
-      parseEnvInt(
-        env.TASK_RUN_NODE_CPU_SHARE_BUDGET_PERCENT,
-        DEFAULT_WORKSPACE_ADMISSION_CPU_SHARE_BUDGET_PERCENT
-      ),
-      1,
-      1_000
-    ),
-    hostMemoryReserveMb: resolveEffectiveNodeHostMemoryReserveMb(env, scaling),
-    diskPressureThresholdPercent: boundedInt(
-      scaling?.nodeDiskPressureThresholdPercent,
-      parseEnvInt(
-        env.TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT,
-        DEFAULT_WORKSPACE_ADMISSION_DISK_PRESSURE_THRESHOLD_PERCENT
-      ),
-      1,
-      100
-    ),
-    metricsTtlMs: positiveInt(
-      scaling?.nodeMetricsTtlMs,
-      parseEnvInt(env.TASK_RUN_NODE_METRICS_TTL_MS, DEFAULT_WORKSPACE_ADMISSION_METRICS_TTL_MS)
-    ),
-    cpuThresholdPercent: boundedInt(
-      scaling?.nodeCpuThresholdPercent,
-      parseEnvInt(env.TASK_RUN_NODE_CPU_THRESHOLD_PERCENT, DEFAULT_NODE_CPU_THRESHOLD_PERCENT),
-      1,
-      1_000
-    ),
-    memoryThresholdPercent: boundedInt(
-      scaling?.nodeMemoryThresholdPercent,
-      parseEnvInt(
-        env.TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
-        DEFAULT_NODE_MEMORY_THRESHOLD_PERCENT
-      ),
-      1,
-      100
-    ),
-    cpuScoreWeightPercent:
-      totalWeight > 0
-        ? cpuScoreWeightPercent
-        : DEFAULT_WORKSPACE_ADMISSION_CPU_SCORE_WEIGHT_PERCENT,
-    memoryScoreWeightPercent:
-      totalWeight > 0
-        ? memoryScoreWeightPercent
-        : DEFAULT_WORKSPACE_ADMISSION_MEMORY_SCORE_WEIGHT_PERCENT,
-  };
-}
-
-export function resolveEffectiveNodeHostMemoryReserveMb(
-  env: Pick<Env, 'TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB' | 'VM_AGENT_MEMORY_RESERVE_MB'>,
-  scaling?: { nodeHostMemoryReserveMb?: number | null } | null
-): number {
-  return nonNegativeInt(
-    scaling?.nodeHostMemoryReserveMb,
-    parseEnvInt(
-      env.TASK_RUN_NODE_HOST_MEMORY_RESERVE_MB ?? env.VM_AGENT_MEMORY_RESERVE_MB,
-      DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB
-    )
-  );
-}
-
-export function isResolvedResourceReservation(
-  value: unknown
-): value is ResolvedResourceReservation {
-  if (!value || typeof value !== 'object') return false;
-  const record = value as Record<string, unknown>;
-  return (
-    (record.version === 1 || record.version === 2 || record.version === 3) &&
-    positiveInteger(record.cpuMillis) !== null &&
-    positiveInteger(record.memoryMb) !== null &&
-    nonNegativeInteger(record.diskMb) !== null &&
-    typeof record.exclusiveNode === 'boolean' &&
-    typeof record.source === 'string' &&
-    ['task', 'trigger', 'skill', 'agent-profile', 'project', 'user', 'platform'].includes(
-      record.source
-    )
-  );
 }
 
 export function parseWorkspaceAdmissionMetrics(
@@ -379,122 +240,6 @@ export function scoreWorkspaceAdmissionMetrics(
   return (cpu * policy.cpuScoreWeightPercent + memory * policy.memoryScoreWeightPercent) / weight;
 }
 
-export async function loadActiveWorkspaceReservationUsage(
-  database: D1Database,
-  nodeIds: readonly string[]
-): Promise<Map<string, ActiveWorkspaceReservationUsage>> {
-  const usage = new Map<string, ActiveWorkspaceReservationUsage>();
-  const uniqueNodeIds = Array.from(new Set(nodeIds)).filter((id) => id.length > 0);
-
-  for (let i = 0; i < uniqueNodeIds.length; i += D1_BIND_LIMIT) {
-    const chunk = uniqueNodeIds.slice(i, i + D1_BIND_LIMIT);
-    if (!chunk.length) continue;
-    const placeholders = chunk.map(() => '?').join(',');
-    const rows = await database
-      .prepare(
-        `SELECT w.node_id AS nodeId, w.resolved_reservation_json AS reservationJson,
-           w.id AS workspaceId, w.status, w.updated_at AS updatedAt,
-           n.last_metrics AS lastMetrics, n.last_heartbeat_at AS lastHeartbeatAt
-         FROM workspaces w JOIN nodes n ON n.id = w.node_id
-         WHERE w.node_id IN (${placeholders})
-           AND w.status IN (${ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL})`
-      )
-      .bind(...chunk)
-      .all<{
-        nodeId: string;
-        reservationJson: string | null;
-        workspaceId: string;
-        status: string;
-        updatedAt: string;
-        lastMetrics: string | null;
-        lastHeartbeatAt: string | null;
-      }>();
-
-    for (const row of rows.results ?? []) {
-      const existing = usage.get(row.nodeId) ?? emptyUsage();
-      existing.activeCount += 1;
-      addReservationUsage(existing, row.reservationJson);
-      const credit = observedWorkspaceMemoryCredit(row);
-      if (credit) {
-        existing.observedMemoryCredits ??= [];
-        existing.observedMemoryCredits.push(credit);
-      }
-      usage.set(row.nodeId, existing);
-    }
-  }
-
-  return usage;
-}
-
-/** Credit only a unique running-container observation from this lifecycle and heartbeat.
- * Missing/invalid observations leave the complete reservation outstanding. */
-function observedWorkspaceMemoryCredit(row: {
-  workspaceId: string;
-  status: string;
-  updatedAt: string;
-  reservationJson: string | null;
-  lastMetrics: string | null;
-  lastHeartbeatAt: string | null;
-}): { memoryMb: number; collectedAt: number; heartbeatAt: number } | null {
-  const reservation = parseResolvedResourceReservation(row.reservationJson);
-  if (!reservation || row.status !== 'running' || !row.lastMetrics) return null;
-  const heartbeat = parseTimestampMs(row.lastHeartbeatAt);
-  const updated = parseTimestampMs(row.updatedAt);
-  if (heartbeat === null || updated === null) return null;
-  try {
-    const metrics = JSON.parse(row.lastMetrics);
-    if (!Array.isArray(metrics?.workspaceMemory)) return null;
-    const matches = metrics.workspaceMemory.filter(
-      (entry: unknown) =>
-        entry !== null &&
-        typeof entry === 'object' &&
-        (entry as Record<string, unknown>).workspaceId === row.workspaceId
-    );
-    if (matches.length !== 1) return null;
-    const metric = matches[0];
-    const collected =
-      typeof metric.collectedAt === 'string' ? parseTimestampMs(metric.collectedAt) : null;
-    // Reject samples from a predecessor lifecycle or a future heartbeat.
-    if (collected === null || collected < updated || collected > heartbeat) return null;
-    if (
-      typeof metric.memoryUsageBytes !== 'number' ||
-      !Number.isFinite(metric.memoryUsageBytes) ||
-      metric.memoryUsageBytes < 0
-    )
-      return null;
-    return {
-      memoryMb: Math.min(reservation.memoryMb, metric.memoryUsageBytes / (1024 * 1024)),
-      collectedAt: collected,
-      heartbeatAt: heartbeat,
-    };
-  } catch {
-    return null;
-  }
-}
-
-export function aggregateWorkspaceReservationRows(
-  rows: ReadonlyArray<{ resolvedReservationJson: string | null }>
-): ActiveWorkspaceReservationUsage {
-  const usage = emptyUsage();
-  for (const row of rows) {
-    usage.activeCount += 1;
-    addReservationUsage(usage, row.resolvedReservationJson);
-  }
-  return usage;
-}
-
-function addReservationUsage(usage: ActiveWorkspaceReservationUsage, value: string | null): void {
-  const reservation = parseResolvedResourceReservation(value);
-  if (!reservation) {
-    usage.invalidCount += 1;
-    return;
-  }
-  usage.cpuMillis += reservation.cpuMillis;
-  usage.memoryMb += reservation.memoryMb;
-  usage.diskMb += reservation.diskMb;
-  if (reservation.exclusiveNode) usage.exclusiveCount += 1;
-}
-
 export function evaluateWorkspaceReservationCapacity(
   node: WorkspaceResourceNode,
   usage: ActiveWorkspaceReservationUsage | undefined,
@@ -598,17 +343,6 @@ export function hasWorkspaceReservationCapacity(
   return evaluateWorkspaceReservationCapacity(node, usage, request, policy, metrics).admitted;
 }
 
-export function emptyUsage(): ActiveWorkspaceReservationUsage {
-  return {
-    activeCount: 0,
-    invalidCount: 0,
-    exclusiveCount: 0,
-    cpuMillis: 0,
-    memoryMb: 0,
-    diskMb: 0,
-  };
-}
-
 export function cpuBudgetMillis(vcpuCount: number, policy: WorkspaceAdmissionPolicy): number {
   return Math.floor((vcpuCount * 1000 * policy.cpuShareBudgetPercent) / 100);
 }
@@ -665,58 +399,7 @@ function measuredAdmissionDiagnostic(
   return null;
 }
 
-export function parseResolvedResourceReservation(
-  value: string | null | undefined
-): ResolvedResourceReservation | null {
-  if (!value) return null;
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return isResolvedResourceReservation(parsed) ? parsed : null;
-  } catch {
-    return null;
-  }
-}
 
-function parseTimestampMs(value: string | null | undefined): number | null {
-  if (!value) return null;
-  const parsed = new Date(value).getTime();
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function parseEnvInt(value: string | undefined, fallback: number): number {
-  if (value === undefined || value.trim() === '') return fallback;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isInteger(parsed) ? parsed : fallback;
-}
-
-function positiveInt(value: number | null | undefined, fallback: number): number {
-  return Number.isInteger(value) && value !== null && value !== undefined && value > 0
-    ? value
-    : Math.max(1, Math.floor(fallback));
-}
-
-function nonNegativeInt(value: number | null | undefined, fallback: number): number {
-  return Number.isInteger(value) && value !== null && value !== undefined && value >= 0
-    ? value
-    : Math.max(0, Math.floor(fallback));
-}
-
-function boundedInt(
-  value: number | null | undefined,
-  fallback: number,
-  min: number,
-  max: number
-): number {
-  return Math.min(max, Math.max(min, positiveInt(value, fallback)));
-}
-
-function positiveInteger(value: unknown): number | null {
-  return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : null;
-}
-
-function nonNegativeInteger(value: unknown): number | null {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : null;
-}
 
 function nonNegativeNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
