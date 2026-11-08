@@ -12,11 +12,12 @@ export interface RefreshRequestPayload {
   /** The userId to look up credentials for. */
   userId: string;
   /**
-   * Optional projectId — when set, the DO prefers the project-scoped credential
-   * row. Preserves scope when rotating OAuth tokens so a project-scoped credential
-   * doesn't collapse to user-scoped.
+   * References (`cc_credentials:<id>` / `credentials:<id>`) of the credentials the
+   * calling workspace's runs were seeded with, from
+   * `resolveRunAgentCredentialReferences`. The DO refreshes only one of these, so
+   * a run pinned to an account can never be answered with another account's tokens.
    */
-  projectId?: string | null;
+  credentialReferences: string[];
 }
 
 export interface CodexRefreshEnv {
@@ -94,6 +95,13 @@ export interface RotatedTokenEntry {
   tokenHash: string;
   /** Unix timestamp (ms) when the token was rotated out. */
   rotatedAt: number;
+  /**
+   * The credential the token was rotated out of. A grace hit returns that
+   * credential's current tokens, so it must match the credential being served.
+   * Entries written before this field existed never match (they expire within
+   * the grace window).
+   */
+  credentialReference?: string;
 }
 
 export interface RateLimitState {

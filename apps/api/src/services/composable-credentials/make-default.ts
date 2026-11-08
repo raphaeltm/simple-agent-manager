@@ -9,12 +9,13 @@
  *    at the chosen configuration. Creating a second user-scoped attachment instead
  *    would leave two active defaults, and the resolver would take whichever it
  *    found first.
- * 2. Legacy `credentials`: Codex token refresh (`CodexRefreshLock`) and the
- *    workspace credential-sync callback still read the active user-scoped legacy
- *    row and mirror rotations into the active default's cc credential. If that row
- *    kept the old account, a workspace on the new default would be answered with
- *    the old account's tokens. So the chosen account's secret becomes the active
- *    legacy row, exactly as connecting it through the legacy save path would.
+ * 2. Legacy `credentials`: the legacy resolver (`resolveAgentKeyLegacy`, used for
+ *    users without cc data) answers from the active user-scoped legacy row. If that
+ *    row kept the old account, a legacy-path workspace would get the old account's
+ *    secret. So the chosen account's secret becomes the active legacy row, exactly
+ *    as connecting it through the legacy save path would. (Token refresh and the
+ *    credential-sync callback no longer read this row: they write into the
+ *    credential each run was seeded with, `services/run-agent-credential.ts`.)
  *    When its secret is not a valid legacy credential (an OpenAI-compatible
  *    endpoint, a hand-made Advanced row), the agent's legacy rows are only
  *    deactivated: no legacy path may answer for the wrong account.

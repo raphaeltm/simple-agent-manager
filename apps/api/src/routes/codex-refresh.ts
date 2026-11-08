@@ -16,7 +16,9 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { getCredentialEncryptionKey } from '../lib/secrets';
 import { verifyCallbackToken } from '../services/jwt';
+import { resolveRunAgentCredentialReferences } from '../services/run-agent-credential';
 
 const codexRefreshRoutes = new Hono<{ Bindings: Env }>();
 
@@ -102,15 +104,31 @@ codexRefreshRoutes.post('/codex-refresh', async (c) => {
   const userId = workspace.userId;
   const projectId = workspace.projectId;
 
+  // The credentials this workspace's runs were seeded with: the agent-key
+  // callback's recorded choice (project pin, profile pin, default or legacy row),
+  // else the same resolver. Never "the user's default" by assumption — a pinned
+  // run must refresh, and bill, its own account.
+  const credentialReferences = await resolveRunAgentCredentialReferences(
+    db,
+    c.env.DATABASE,
+    getCredentialEncryptionKey(c.env),
+    { workspaceId, userId, projectId, agentType: 'openai-codex' }
+  );
+
   log.info('codex_refresh.request_received', {
     workspaceId,
     userId,
     projectId,
+    candidateCount: credentialReferences.length,
   });
+
+  if (credentialReferences.length === 0) {
+    log.warn('codex_refresh.no_run_credential', { workspaceId, userId, projectId });
+    return c.json({ error: 'refresh_token_invalidated' }, 401);
+  }
 
   // Forward to CodexRefreshLock DO keyed by userId for serialized refresh.
   // The DO derives the encryption key from its own env — no need to forward it.
-  // projectId is forwarded so the DO updates the correct scoped credential row.
   const doId = c.env.CODEX_REFRESH_LOCK.idFromName(userId);
   const stub = c.env.CODEX_REFRESH_LOCK.get(doId);
 
@@ -120,7 +138,7 @@ codexRefreshRoutes.post('/codex-refresh', async (c) => {
     body: JSON.stringify({
       refreshToken: body.refresh_token,
       userId,
-      projectId,
+      credentialReferences,
     }),
   });
 

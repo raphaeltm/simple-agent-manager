@@ -3,7 +3,7 @@
  *
  * Keyed by userId. Prevents concurrent refresh requests from racing against OpenAI's
  * rotating refresh token — only one refresh against OpenAI happens at a time per user.
- * Second concurrent request detects stale token and returns latest from DB instead.
+ * A queued concurrent request presenting the just-rotated token takes the grace path.
  *
  * Accessed via `env.CODEX_REFRESH_LOCK.idFromName(userId)`.
  *
@@ -19,11 +19,14 @@
  *    the grace window, we return only short-lived tokens (access_token, id_token) without the
  *    refresh_token, forcing re-auth. This balances security (don't hand out rotating credentials
  *    to truly old/stolen tokens) with operational correctness (don't break concurrent sessions).
- *  - Project vs user fallback (HIGH #2): if `projectId` is supplied AND any project-scoped row
- *    exists for (userId, projectId) — active OR inactive — we do NOT fall back to the
- *    user-scoped row. An inactive project row means the user explicitly deactivated
- *    project-scope in favor of something else; rotating the user-scoped row would affect
- *    every other project inheriting it.
+ *  - Which credential (HIGH #2, and pinned accounts): the route resolves the credentials the
+ *    calling workspace's runs were seeded with (`resolveRunAgentCredentialReferences`: the
+ *    recorded agent-key choice, else the same cc resolver), so a project or profile pin is
+ *    refreshed against its own row and never against the user's default. An inactive candidate
+ *    is skipped, never replaced by another credential. The rotation is written with a
+ *    compare-and-set on the ciphertext that was read (`writeRotatedAgentCredential`).
+ *  - Grace entries record the credential the token was rotated out of, and only that
+ *    credential's tokens are returned for a grace hit.
  *  - Rate limiting (MEDIUM #5): token-bucket state is held in DO storage (strongly consistent,
  *    atomic increments). KV read-modify-write is not safe for enforcement under concurrency.
  *  - Scope validation (MEDIUM #6): unexpected upstream scopes are checked against a conservative
@@ -36,8 +39,14 @@ import * as v from 'valibot';
 import { log } from '../lib/logger';
 import { maybeJsonRecord, readResponseJson } from '../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../lib/secrets';
-import { syncActiveAgentCredentialSecret } from '../services/composable-credentials/agent-sync';
 import { decrypt, encrypt } from '../services/encryption';
+import {
+  type CodexAuthIdentity,
+  loadRunAgentCredential,
+  parseCodexAuth,
+  type RunAgentCredential,
+  writeRotatedAgentCredential,
+} from '../services/run-agent-credential';
 import {
   type CodexRefreshEnv,
   DEFAULT_CLIENT_ID,
@@ -132,9 +141,15 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
 
   private async handleRefresh(request: Request, signal: AbortSignal): Promise<Response> {
     const payload: RefreshRequestPayload = await request.json();
-    const { refreshToken, userId, projectId } = payload;
+    const { refreshToken, userId, credentialReferences } = payload;
 
-    if (!refreshToken || !userId) {
+    if (
+      !refreshToken ||
+      !userId ||
+      !Array.isArray(credentialReferences) ||
+      credentialReferences.length === 0 ||
+      !credentialReferences.every((ref) => typeof ref === 'string' && ref !== '')
+    ) {
       return new Response(
         JSON.stringify({ error: 'invalid_request', message: 'Missing required fields' }),
         { status: 400, headers: { 'Content-Type': 'application/json' } }
@@ -144,71 +159,63 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     // Serialize the read→refresh→write critical section so concurrent refreshes
     // for the same user cannot both consume the same one-time-use refresh token.
     return this.withRefreshLock(() =>
-      this.runRefresh(refreshToken, userId, projectId ?? null, signal)
+      this.runRefresh(refreshToken, userId, credentialReferences, signal)
     );
   }
 
   /**
-   * The serialized critical section. Reads the stored credential, decides
-   * grace/stale/match, optionally refreshes against OpenAI, and persists the
-   * rotated tokens. MUST run under `withRefreshLock` — reading the credential
+   * The serialized critical section. Reads the candidate credentials, decides
+   * match/grace/stale, optionally refreshes against OpenAI, and persists the
+   * rotated tokens. MUST run under `withRefreshLock` — reading the credentials
    * here (rather than before acquiring the lock) is what lets a queued
    * concurrent request observe the rotated token and take the grace-window path
    * instead of replaying the consumed token against OpenAI.
+   *
+   * Candidates are only the credentials the calling workspace's runs were seeded
+   * with (`resolveRunAgentCredentialReferences`). The one to serve is chosen by
+   * possession: the credential whose stored refresh_token the caller presented,
+   * else the credential that token was recently rotated out of. With no proof of
+   * possession, a single candidate gets short-lived tokens and several get none,
+   * because nothing says which account the caller is on.
    */
   private async runRefresh(
     refreshToken: string,
     userId: string,
-    projectId: string | null,
+    credentialReferences: string[],
     signal: AbortSignal
   ): Promise<Response> {
     // Derive encryption key from DO env (not from caller).
     const encryptionKey = getCredentialEncryptionKey(this.env);
 
-    // Look up the stored credential — prefer project-scoped when projectId is set.
-    const credential = await this.getStoredCredential(userId, projectId ?? null);
-    if (!credential) {
+    const { candidates, readFailure } = await this.loadCandidates(
+      userId,
+      credentialReferences,
+      encryptionKey
+    );
+    if (candidates.length === 0) {
+      if (readFailure) {
+        return new Response(JSON.stringify({ error: 'internal_error', message: readFailure }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
       return new Response(JSON.stringify({ error: 'refresh_token_invalidated' }), {
         status: 401,
         headers: { 'Content-Type': 'application/json' },
       });
     }
 
-    // Decrypt the stored credential to get the current auth.json.
-    let storedAuthJson: string;
-    try {
-      storedAuthJson = await decrypt(credential.encryptedToken, credential.iv, encryptionKey);
-    } catch {
-      return new Response(
-        JSON.stringify({ error: 'internal_error', message: 'Failed to decrypt stored credential' }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-
-    // Parse the stored auth.json to extract the current refresh token.
-    let storedAuth: Record<string, unknown>;
-    try {
-      storedAuth = JSON.parse(storedAuthJson);
-    } catch {
-      return new Response(
-        JSON.stringify({ error: 'internal_error', message: 'Stored credential is not valid JSON' }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
-      );
-    }
-
-    const tokens = storedAuth.tokens as Record<string, string> | undefined;
-    const storedRefreshToken = tokens?.refresh_token;
-
-    if (refreshToken !== storedRefreshToken) {
+    const match = candidates.find((c) => c.identity.refreshToken === refreshToken);
+    if (!match) {
       // Stale token path — the caller's refresh token doesn't match what's in DB.
       // Check if it was recently rotated (grace window) before rejecting.
       const graceWindowMs = this.getGraceWindowMs();
-      const withinGrace = await this.isWithinGraceWindow(refreshToken, graceWindowMs);
+      const graceCandidate = await this.findGraceCandidate(refreshToken, candidates, graceWindowMs);
 
-      if (withinGrace) {
-        // The caller's token was valid recently — this is a legitimate concurrent
-        // session that started before the rotation. Return the full token set
-        // so the session can continue operating without re-auth.
+      if (graceCandidate) {
+        // The caller's token was rotated out of THIS credential recently — this is
+        // a legitimate concurrent session that started before the rotation. Return
+        // the full token set so the session can continue operating without re-auth.
         //
         // Deliberately NOT rate-limited: reaching here requires presenting a
         // refresh_token that was valid within the grace window, so the successor
@@ -220,29 +227,50 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
         // guards only the real upstream-refresh path.
         log.info('codex_refresh.grace_window_hit', {
           userId,
+          credentialReference: graceCandidate.credential.reference,
           graceWindowMs,
         });
         return this.createTokenResponse({
-          accessToken: tokens?.access_token ?? null,
-          refreshToken: tokens?.refresh_token ?? null,
-          idToken: tokens?.id_token ?? null,
+          accessToken: graceCandidate.identity.accessToken ?? null,
+          refreshToken: graceCandidate.identity.refreshToken ?? null,
+          idToken: graceCandidate.identity.idToken ?? null,
+        });
+      }
+
+      const [only] = candidates;
+      if (candidates.length !== 1 || !only) {
+        // No proof of which account the caller is on, and more than one account
+        // this workspace could be using: hand out nothing.
+        log.warn('codex_refresh.stale_token_ambiguous', {
+          userId,
+          candidateCount: candidates.length,
+        });
+        return new Response(JSON.stringify({ error: 'refresh_token_invalidated' }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
         });
       }
 
       // Outside grace window — CRITICAL #1 still applies.
       // The caller did NOT prove possession of the current refresh token AND
       // the token is too old to be from a legitimate concurrent session. Do NOT
-      // return the refresh_token. Return short-lived tokens only.
+      // return the refresh_token. Return short-lived tokens only, of the one
+      // credential this workspace's run was seeded with.
       log.warn('codex_refresh.stale_token_rejected', {
         userId,
+        credentialReference: only.credential.reference,
         graceWindowMs,
       });
       return this.createTokenResponse({
-        accessToken: tokens?.access_token ?? null,
-        idToken: tokens?.id_token ?? null,
+        accessToken: only.identity.accessToken ?? null,
+        idToken: only.identity.idToken ?? null,
         stale: true,
       });
     }
+
+    const credential = match.credential;
+    const storedAuth = match.auth;
+    const storedRefreshToken = match.identity.refreshToken;
 
     // Atomic per-credential rate limit (MEDIUM #5) — DO state is strongly
     // consistent, so increments cannot race the way KV read-modify-write can.
@@ -250,7 +278,7 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     // stale-credential responses above do NOT consume budget — those never hit
     // OpenAI and must not contribute to the rate limit that guards real upstream
     // refreshes.
-    const rateLimitResult = await this.enforceRateLimit(credential.id);
+    const rateLimitResult = await this.enforceRateLimit(credential.reference);
     if (!rateLimitResult.allowed) {
       const retryAfter = Math.max(1, rateLimitResult.resetAt - Math.floor(Date.now() / 1000));
       log.warn('codex_refresh.rate_limited', { userId });
@@ -359,7 +387,7 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       // logged — never the raw body — so a refresh token can never leak.
       log.warn('codex_refresh.upstream_rejected', {
         userId,
-        credentialId: credential.id,
+        credentialReference: credential.reference,
         status: upstreamResponse.status,
         upstreamContentType,
         upstreamErrorCode,
@@ -400,7 +428,7 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       typeof newTokens.refresh_token === 'string' &&
       newTokens.refresh_token !== storedRefreshToken
     ) {
-      await this.recordRotatedToken(storedRefreshToken);
+      await this.recordRotatedToken(storedRefreshToken, credential.reference);
     }
 
     // Update the stored auth.json with new tokens.
@@ -415,55 +443,30 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     if (typeof newTokens.id_token === 'string') authTokens.id_token = newTokens.id_token;
     authTokens.last_refresh = new Date().toISOString();
 
-    // Re-encrypt with fresh IV and update the database.
+    // Re-encrypt with fresh IV and write back into exactly the credential that
+    // was read: compare-and-set on its ciphertext, then rotate every other stored
+    // copy of that same credential generation (legacy row or cc row). If the row
+    // changed while OpenAI was answering (replaced, switched, deactivated), the
+    // write is skipped everywhere rather than landing on another account.
     const updatedAuthJson = JSON.stringify(storedAuth);
     const { ciphertext, iv } = await encrypt(updatedAuthJson, encryptionKey);
-
-    const db = this.env.DATABASE;
-    await db
-      .prepare(
-        "UPDATE credentials SET encrypted_token = ?, iv = ?, updated_at = datetime('now') WHERE id = ?"
-      )
-      .bind(ciphertext, iv, credential.id)
-      .run();
-
-    // CORE FIX (dual-write): mirror the rotated token into the composable-
-    // credentials store. The legacy UPDATE above only touches the `credentials`
-    // table; workspaces seed ~/.codex/auth.json from the `cc_credentials`
-    // snapshot. Without this sync, cc_credentials stays frozen at backfill time,
-    // fresh workspaces present a stale refresh_token, and Codex enters a
-    // 401 → re-refresh loop that exceeds the rate limit → 429.
-    //
-    // Reuse the same ciphertext/iv just persisted to the legacy row, and pass
-    // the credential row's OWN scope (scopeProjectId) — NOT the workspace's —
-    // so the matching active cc_credentials row is updated (mirrors runtime.ts).
-    try {
-      const ccRowsUpdated = await syncActiveAgentCredentialSecret(db, {
+    const write = await writeRotatedAgentCredential(this.env.DATABASE, {
+      userId,
+      agentType: CODEX_AGENT_TYPE,
+      credentialKind: CODEX_CREDENTIAL_KIND,
+      target: credential,
+      next: { encryptedToken: ciphertext, iv },
+    });
+    if (write.applied) {
+      log.info('codex_refresh.rotation_stored', {
         userId,
-        projectId: credential.scopeProjectId ?? undefined,
-        agentType: 'openai-codex',
-        credentialKind: 'oauth-token',
-        encryptedToken: ciphertext,
-        iv,
+        credentialReference: credential.reference,
+        mirroredRows: write.mirroredRows,
       });
-      if (ccRowsUpdated === 0) {
-        // The legacy row rotated but no matching active cc_credentials row was
-        // found to mirror into. This is the exact silent desync this fix exists
-        // to prevent, so surface it (no token material) for diagnosis.
-        log.warn('codex_refresh.cc_sync_no_row', {
-          userId,
-          credentialId: credential.id,
-          scopeProjectId: credential.scopeProjectId ?? null,
-        });
-      }
-    } catch (err) {
-      // Never let a cc_credentials sync failure break the refresh — the legacy
-      // row is already updated and the caller has working tokens. Log without
-      // any token material so the desync is diagnosable.
-      log.error('codex_refresh.cc_sync_failed', {
+    } else {
+      log.warn('codex_refresh.rotation_cas_lost', {
         userId,
-        credentialId: credential.id,
-        message: err instanceof Error ? err.message : 'unknown',
+        credentialReference: credential.reference,
       });
     }
 
@@ -592,7 +595,10 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
    * successful upstream refresh replaces the stored token with a new one.
    * Keeps at most MAX_ROTATED_TOKEN_ENTRIES entries; prunes expired ones.
    */
-  private async recordRotatedToken(oldRefreshToken: string): Promise<void> {
+  private async recordRotatedToken(
+    oldRefreshToken: string,
+    credentialReference: string
+  ): Promise<void> {
     const hash = await this.hashToken(oldRefreshToken);
     const now = Date.now();
     const graceWindowMs = this.getGraceWindowMs();
@@ -602,23 +608,9 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     const fresh = entries
       .filter((e) => now - e.rotatedAt < graceWindowMs)
       .slice(-(MAX_ROTATED_TOKEN_ENTRIES - 1));
-    fresh.push({ tokenHash: hash, rotatedAt: now });
+    fresh.push({ tokenHash: hash, rotatedAt: now, credentialReference });
 
     await this.ctx.storage.put('rotated-tokens', fresh);
-  }
-
-  /**
-   * Check whether the given refresh token was rotated out within the grace window.
-   * Returns true if the token hash matches a recently-rotated entry.
-   */
-  private async isWithinGraceWindow(refreshToken: string, graceWindowMs: number): Promise<boolean> {
-    const entries = await this.getRotatedTokenEntries();
-    if (entries.length === 0) return false;
-
-    const hash = await this.hashToken(refreshToken);
-    const now = Date.now();
-
-    return entries.some((e) => e.tokenHash === hash && now - e.rotatedAt < graceWindowMs);
   }
 
   private getGraceWindowMs(): number {
@@ -652,80 +644,78 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
   }
 
   /**
-   * Look up the active openai-codex oauth-token credential for the given user.
-   *
-   * HIGH #2 fix: when `projectId` is supplied, we look for a project-scoped row first.
-   *  - Active project row found → use it.
-   *  - Inactive project row found (or any row exists for the project) → return null.
-   *    We do NOT fall back to user-scoped, because an inactive row indicates the user
-   *    explicitly deactivated this credential (e.g., via `autoActivate: true` on
-   *    another project row). Rotating the user-scoped row would change the credential
-   *    for every other project inheriting it.
-   *  - No project row at all → fall back to the user-scoped row (preserves the
-   *    inheritance model — a project without its own override inherits the user default).
+   * Read every candidate credential, skipping rows that are gone, inactive, or
+   * unreadable. An inactive candidate is never replaced by another credential
+   * (rule 28): a deactivated pin forces re-auth instead of falling back to the
+   * user's default account.
    */
-  private async getStoredCredential(
+  private async loadCandidates(
     userId: string,
-    projectId: string | null
-  ): Promise<{
-    id: string;
-    encryptedToken: string;
-    iv: string;
-    scopeProjectId: string | null;
-  } | null> {
-    const db = this.env.DATABASE;
-
-    if (projectId) {
-      // Fetch ANY project-scoped row (active or inactive) to decide fallback behavior.
-      const projectAny = await db
-        .prepare(
-          `SELECT id, encrypted_token, iv, is_active FROM credentials
-           WHERE user_id = ? AND project_id = ? AND credential_type = 'agent-api-key'
-             AND agent_type = 'openai-codex' AND credential_kind = 'oauth-token'
-           LIMIT 1`
-        )
-        .bind(userId, projectId)
-        .first<{ id: string; encrypted_token: string; iv: string; is_active: number }>();
-
-      if (projectAny) {
-        if (projectAny.is_active === 1) {
-          return {
-            id: projectAny.id,
-            encryptedToken: projectAny.encrypted_token,
-            iv: projectAny.iv,
-            // Scope of the matched row — used to mirror the rotation into the
-            // correct cc_credentials row (project-scoped, not workspace-scoped).
-            scopeProjectId: projectId,
-          };
-        }
-        // Project-scoped row exists but is inactive — do NOT fall back.
-        // User explicitly deactivated; refusing forces re-auth at project scope.
-        log.warn('codex_refresh.inactive_project_credential_no_fallback', {
-          userId,
-          projectId,
-        });
-        return null;
+    credentialReferences: string[],
+    encryptionKey: string
+  ): Promise<{ candidates: RefreshCandidate[]; readFailure: string | null }> {
+    const candidates: RefreshCandidate[] = [];
+    let readFailure: string | null = null;
+    for (const reference of credentialReferences) {
+      const credential = await loadRunAgentCredential(this.env.DATABASE, {
+        userId,
+        reference,
+        agentType: CODEX_AGENT_TYPE,
+        credentialKind: CODEX_CREDENTIAL_KIND,
+      });
+      if (!credential) {
+        log.warn('codex_refresh.credential_not_found', { userId, credentialReference: reference });
+        continue;
       }
+      if (!credential.isActive) {
+        log.warn('codex_refresh.inactive_credential_no_fallback', {
+          userId,
+          credentialReference: reference,
+        });
+        continue;
+      }
+      let decrypted: string;
+      try {
+        decrypted = await decrypt(credential.encryptedToken, credential.iv, encryptionKey);
+      } catch {
+        readFailure ??= 'Failed to decrypt stored credential';
+        log.error('codex_refresh.credential_decrypt_failed', {
+          userId,
+          credentialReference: reference,
+        });
+        continue;
+      }
+      const parsed = parseCodexAuth(decrypted);
+      if (!parsed) {
+        readFailure ??= 'Stored credential is not valid JSON';
+        log.error('codex_refresh.credential_not_json', { userId, credentialReference: reference });
+        continue;
+      }
+      candidates.push({ credential, auth: parsed.auth, identity: parsed.identity });
     }
-
-    const result = await db
-      .prepare(
-        `SELECT id, encrypted_token, iv FROM credentials
-         WHERE user_id = ? AND project_id IS NULL AND credential_type = 'agent-api-key'
-           AND agent_type = 'openai-codex' AND credential_kind = 'oauth-token'
-           AND is_active = 1
-         LIMIT 1`
-      )
-      .bind(userId)
-      .first<{ id: string; encrypted_token: string; iv: string }>();
-
-    if (!result) return null;
-    // User-scoped fallback row — its scope is null (no project override).
-    return {
-      id: result.id,
-      encryptedToken: result.encrypted_token,
-      iv: result.iv,
-      scopeProjectId: null,
-    };
+    return { candidates, readFailure };
   }
+
+  private async findGraceCandidate(
+    refreshToken: string,
+    candidates: RefreshCandidate[],
+    graceWindowMs: number
+  ): Promise<RefreshCandidate | null> {
+    const entries = await this.getRotatedTokenEntries();
+    if (entries.length === 0) return null;
+    const hash = await this.hashToken(refreshToken);
+    const now = Date.now();
+    const hit = entries.find((e) => e.tokenHash === hash && now - e.rotatedAt < graceWindowMs);
+    if (!hit?.credentialReference) return null;
+    return candidates.find((c) => c.credential.reference === hit.credentialReference) ?? null;
+  }
+}
+
+const CODEX_AGENT_TYPE = 'openai-codex';
+const CODEX_CREDENTIAL_KIND = 'oauth-token';
+
+interface RefreshCandidate {
+  credential: RunAgentCredential;
+  auth: Record<string, unknown>;
+  identity: CodexAuthIdentity;
 }
