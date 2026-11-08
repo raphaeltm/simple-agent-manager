@@ -493,10 +493,12 @@ fi
 STALE_SECRETS=(
   "AI_PROXY_DEFAULT_MODEL"   # Migrated to wrangler.toml [vars] — code defaults in shared/constants/ai-services.ts
   "AI_PROXY_ENABLED"         # Migrated to wrangler.toml [vars]
+  "TRIAL_CLAIM_TOKEN_SECRET" # Retired anonymous-trial product (2026-11-08)
+  "ANTHROPIC_API_KEY_TRIAL"  # Retired anonymous-trial product (2026-11-08)
 )
 
 echo ""
-echo "Cleaning up stale secrets (migrated to wrangler.toml vars)..."
+echo "Cleaning up stale secrets (migrated to wrangler.toml vars or retired)..."
 for secret_name in "${STALE_SECRETS[@]}"; do
   queue_stale_worker_secret_delete "$secret_name"
 done

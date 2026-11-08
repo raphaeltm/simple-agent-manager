@@ -700,6 +700,9 @@ describe('deployment workflow hardening', () => {
       expect(payload.GITHUB_APP_PRIVATE_KEY).toBe('github-app-private-key');
       expect(payload.AI_PROXY_DEFAULT_MODEL).toBeNull();
       expect(payload.AI_PROXY_ENABLED).toBeNull();
+      // Retired anonymous-trial secrets are deleted from upgraded deployments, never set.
+      expect(payload.TRIAL_CLAIM_TOKEN_SECRET).toBeNull();
+      expect(payload.ANTHROPIC_API_KEY_TRIAL).toBeNull();
       expect(Object.keys(payload).length).toBeGreaterThan(10);
       expect(Object.keys(payload).length).toBeLessThanOrEqual(100);
     } finally {
