@@ -20,15 +20,21 @@ function focusableElements(panel: HTMLElement): HTMLElement[] {
  *
  * The drawers already identify themselves as modal dialogs; this supplies the
  * behavioral half by keeping Tab focus inside the active panel and closing on
- * Escape.
+ * Escape. Pass `enabled: false` while a modal opened from the panel is on top, so Tab and
+ * Escape belong to that modal rather than to the panel underneath it.
  */
-export function useDialogFocusTrap(panelRef: RefObject<HTMLElement | null>, onClose: () => void) {
+export function useDialogFocusTrap(
+  panelRef: RefObject<HTMLElement | null>,
+  onClose: () => void,
+  enabled = true
+) {
   useEffect(() => {
     const panel = panelRef.current;
     panel?.focus();
   }, [panelRef]);
 
   useEffect(() => {
+    if (!enabled) return;
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         onClose();
@@ -75,5 +81,5 @@ export function useDialogFocusTrap(panelRef: RefObject<HTMLElement | null>, onCl
 
     window.addEventListener('keydown', handleKey);
     return () => window.removeEventListener('keydown', handleKey);
-  }, [onClose, panelRef]);
+  }, [enabled, onClose, panelRef]);
 }

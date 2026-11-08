@@ -6,12 +6,17 @@
  * screen on a phone — so the rail's tools behave alike and desktop/mobile stay at parity
  * (`.claude/rules/15-nav-parity.md`). It reads the query `useSessionLinkedWork` already owns,
  * so opening it issues no request of its own.
+ *
+ * A file row opens the library's preview over the chat rather than navigating to the library,
+ * the same viewer the chat's document cards open.
  */
+import type { LinkedFile } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
 import { FileText, GitPullRequest, Lightbulb, Link2 } from 'lucide-react';
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-import { projectIdeaPath, projectLibraryFilePath } from '../../lib/project-routes';
+import { projectIdeaPath } from '../../lib/project-routes';
+import { LibraryFilePreview } from '../library/LibraryFilePreview';
 import {
   describeRelations,
   formatCappedTotal,
@@ -60,7 +65,12 @@ function metaLine(...parts: Array<string | null | undefined>): string {
 function LinkedWorkSections({
   projectId,
   linkedWork,
-}: Readonly<{ projectId: string; linkedWork: SessionLinkedWork }>) {
+  onOpenFile,
+}: Readonly<{
+  projectId: string;
+  linkedWork: SessionLinkedWork;
+  onOpenFile: (file: LinkedFile) => void;
+}>) {
   const { ideas, files, pullRequests } = linkedWork;
   return (
     <>
@@ -99,7 +109,7 @@ function LinkedWorkSections({
               accent={FILE_ACCENT}
               title={file.filename}
               meta={metaLine(describeRelations(file.relations), file.directory)}
-              to={projectLibraryFilePath(projectId, file.fileId)}
+              onClick={() => onOpenFile(file)}
               testId="linked-work-file"
             />
           ))}
@@ -171,7 +181,16 @@ export function SessionLinkedWorkDrawer({
   onClose,
 }: Readonly<{ projectId: string; linkedWork: SessionLinkedWork; onClose: () => void }>) {
   const panelRef = useRef<HTMLDivElement>(null);
-  useDialogFocusTrap(panelRef, onClose);
+  const [previewFile, setPreviewFile] = useState<LinkedFile | null>(null);
+  useDialogFocusTrap(panelRef, onClose, previewFile === null);
+
+  // The preview hands focus back to the row that opened it. If a refetch removed that row in
+  // the meantime, focus would fall to the page, outside this dialog; keep it in the panel.
+  useEffect(() => {
+    if (previewFile === null && !panelRef.current?.contains(document.activeElement)) {
+      panelRef.current?.focus();
+    }
+  }, [previewFile]);
 
   const hasItems =
     linkedWork.ideas.items.length > 0 ||
@@ -191,33 +210,43 @@ export function SessionLinkedWorkDrawer({
       animated={false}
       testId="session-linked-work-drawer"
     >
-        <GlassSheetHeader
-          icon={<Link2 size={20} strokeWidth={1.75} />}
-          title="Related work"
-          onClose={onClose}
-          closeLabel="Close related work"
-        />
+      <GlassSheetHeader
+        icon={<Link2 size={20} strokeWidth={1.75} />}
+        title="Related work"
+        onClose={onClose}
+        closeLabel="Close related work"
+      />
 
-        <div className="min-h-0 flex-1 overflow-y-auto pb-[env(safe-area-inset-bottom)]">
-          {/* Spinner only before the first result. A refetch keeps the list on screen
+      <div className="min-h-0 flex-1 overflow-y-auto pb-[env(safe-area-inset-bottom)]">
+        {/* Spinner only before the first result. A refetch keeps the list on screen
               (`apps/web/.claude/rules/48-stale-while-revalidate-ui.md`). */}
-          {linkedWork.isLoading ? (
-            // `Spinner` is its own `role="status"` region, so this wrapper must not be a
-            // second one — two status regions for one load announce twice.
-            <div
-              className="flex items-center justify-center py-10"
-              data-testid="linked-work-loading"
-            >
-              <Spinner size="sm" />
-            </div>
-          ) : linkedWork.isError ? (
-            <ErrorState onRetry={linkedWork.refetch} />
-          ) : hasItems ? (
-            <LinkedWorkSections projectId={projectId} linkedWork={linkedWork} />
-          ) : (
-            <EmptyState />
-          )}
-        </div>
+        {linkedWork.isLoading ? (
+          // `Spinner` is its own `role="status"` region, so this wrapper must not be a
+          // second one — two status regions for one load announce twice.
+          <div className="flex items-center justify-center py-10" data-testid="linked-work-loading">
+            <Spinner size="sm" />
+          </div>
+        ) : linkedWork.isError ? (
+          <ErrorState onRetry={linkedWork.refetch} />
+        ) : hasItems ? (
+          <LinkedWorkSections
+            projectId={projectId}
+            linkedWork={linkedWork}
+            onOpenFile={setPreviewFile}
+          />
+        ) : (
+          <EmptyState />
+        )}
+      </div>
+
+      {previewFile && (
+        <LibraryFilePreview
+          projectId={projectId}
+          fileId={previewFile.fileId}
+          filename={previewFile.filename}
+          onClose={() => setPreviewFile(null)}
+        />
+      )}
     </GlassSheet>
   );
 }

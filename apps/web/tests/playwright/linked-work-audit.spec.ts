@@ -247,6 +247,8 @@ interface MockOptions {
   withoutOutputPr?: boolean;
   /** Seeds the persisted tool-strip mode. Defaults to `labels` so counts are readable. */
   stripMode?: 'icons' | 'labels' | 'hidden';
+  /** Never answers the library list, so the page stays on its first-load spinner. */
+  holdLibraryList?: boolean;
 }
 
 function makeChatSession(options: MockOptions) {
@@ -425,6 +427,7 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
 
     // Library
     if (pathname === `/api/projects/${PROJECT_ID}/library`) {
+      if (options.holdLibraryList) return;
       await route.fulfill({ json: { files: [LIBRARY_FILE], nextCursor: null } });
       return;
     }
@@ -433,7 +436,8 @@ async function setupMocks(page: Page, options: MockOptions = {}) {
       return;
     }
     if (pathname === `/api/projects/${PROJECT_ID}/library/${FILE_ID}`) {
-      await route.fulfill({ json: LIBRARY_FILE });
+      // The real `GET /library/:fileId` shape (`routes/library.ts`).
+      await route.fulfill({ json: { file: LIBRARY_FILE, tags: [] } });
       return;
     }
     if (pathname === `/api/projects/${PROJECT_ID}/library/${FILE_ID}/preview`) {
@@ -566,14 +570,35 @@ test.describe('Linked work — chat Related panel', () => {
       'href',
       `/projects/${PROJECT_ID}/ideas/idea-1`
     );
-    await expect(drawer.getByTestId('linked-work-file').first()).toHaveAttribute(
-      'href',
-      `/projects/${PROJECT_ID}/library?preview=${FILE_ID}`
-    );
+    // A file opens in place; see "a file opens in the chat's preview" below.
+    await expect(drawer.getByTestId('linked-work-file').first()).not.toHaveAttribute('href');
     const pr = drawer.getByTestId('linked-work-pr').first();
     await expect(pr).toHaveAttribute('href', prUrl(2425));
     await expect(pr).toHaveAttribute('target', '_blank');
     await expect(pr).toHaveAttribute('rel', /noopener/);
+  });
+
+  test("a file opens in the chat's preview, and closing it returns to the panel", async ({
+    page,
+  }) => {
+    await openChat(page);
+    await page.getByTestId('session-tool-related').click();
+    const drawer = page.getByTestId('session-linked-work-drawer');
+    await drawer.getByTestId('linked-work-file').first().click();
+
+    const preview = page.getByRole('region', { name: `Preview of ${LONG_FILENAME}` });
+    await expect(preview).toBeVisible();
+    await expect(
+      preview.getByRole('heading', { name: 'Agent observability and egress' })
+    ).toBeVisible();
+    // Still the chat: no navigation to the library.
+    expect(new URL(page.url()).pathname).toBe(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
+    await page.waitForTimeout(600);
+    await capture(page, 'linked-work-file-preview');
+
+    await page.getByRole('button', { name: 'Close preview' }).click();
+    await expect(preview).toHaveCount(0);
+    await expect(drawer).toBeVisible();
   });
 
   test('a pull request shows its state, and one without state shows no pill', async ({ page }) => {
@@ -784,6 +809,17 @@ test.describe('Linked work — library file preview', () => {
     // An untitled chat still gets a label rather than an empty row.
     await expect(page.getByText('Untitled chat')).toBeVisible();
     await capture(page, 'file-linked-work-expanded');
+  });
+
+  test('a direct link opens the file before the library list has loaded', async ({ page }) => {
+    await openLibraryPreview(page, { holdLibraryList: true });
+    await expect(page.getByRole('region', { name: `Preview of ${LONG_FILENAME}` })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Agent observability and egress' })
+    ).toBeVisible();
+    // Liveness: the list really is still loading underneath.
+    await expect(page.getByPlaceholder('Search files and folders...')).toHaveCount(0);
+    await capture(page, 'library-direct-preview-before-index');
   });
 
   test('a file with nothing linked grows no strip', async ({ page }) => {
