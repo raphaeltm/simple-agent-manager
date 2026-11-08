@@ -62,6 +62,12 @@ if PATH="$private/bin:$PATH" CURL_ARGUMENTS="$private/fallback-args" REVIEWED_AR
  echo 'Unavailable sources accepted' >&2; exit 1
 fi
 [[ ! -e "$private/both-down" ]]
+# Without a token (the deploy workflows set none) the fallback still runs, unauthenticated.
+: > "$private/anon-args"
+PATH="$private/bin:$PATH" CURL_ARGUMENTS="$private/anon-args" REVIEWED_ARCHIVE="$archive" \
+ CODEX_RUNTIME_ARCHIVE='' GITHUB_TOKEN='' bash "$script_dir/prepare-codex-runtime-artifact.sh" "$private/anon"
+cmp "$archive" "$private/anon/codex-runtime-linux-amd64.tar.gz"
+if grep -q -- 'Authorization:' "$private/anon-args"; then echo 'Empty token sent an auth header' >&2; exit 1; fi
 # An unavailable canonical source must not reuse stale output as success.
 printf '#!/bin/sh\nexit 22\n' > "$private/bin/curl"
 if PATH="$private/bin:$PATH" CODEX_RUNTIME_ARCHIVE='' bash "$script_dir/prepare-codex-runtime-artifact.sh" "$private/prepared"; then

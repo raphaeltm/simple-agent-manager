@@ -24,8 +24,10 @@ if [[ -n ${CODEX_RUNTIME_ARCHIVE:-} ]]; then
   timeout 120 head -c "$((size + 1))" -- "$CODEX_RUNTIME_ARCHIVE" > "$private/runtime.tar.gz"
 elif ! download "$url"; then
   echo 'github.com release download failed; trying the GitHub API asset endpoint' >&2
+  # Deploy workflows pass no token (their permission contract forbids token consumers), so CI uses
+  # the unauthenticated API. A caller that sets GITHUB_TOKEN gets the authenticated rate limit; curl
+  # does not forward the header when the API redirects to the asset storage host.
   auth=()
-  # curl does not forward this header when the API redirects to the asset storage host.
   [[ -n ${GITHUB_TOKEN:-} ]] && auth=(-H "Authorization: Bearer $GITHUB_TOKEN")
   download -H 'Accept: application/octet-stream' "${auth[@]}" "$api_url"
 fi
