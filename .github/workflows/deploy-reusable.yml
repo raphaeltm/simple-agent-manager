@@ -1094,6 +1094,8 @@ jobs:
         env:
           VM_AGENT_RELEASE: ${{ steps.deploy-sha.outputs.release }}
           VM_AGENT_BUILD_DATE: ${{ steps.deploy-sha.outputs.build_date }}
+          # Read-only release-asset access for the API fallback in prepare-codex-runtime-artifact.sh.
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Run Database Migrations With Safety Gates
         if: ${{ inputs.dry_run != true }}
