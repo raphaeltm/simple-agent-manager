@@ -196,7 +196,7 @@ export function SessionHeader({
         people={people}
         size={isMobile ? 26 : 20}
         label={`People with access: ${people.map((person) => person.name).join(', ')}`}
-        className="shrink-0"
+        className="mt-0.5 shrink-0"
       />
     ) : null;
 

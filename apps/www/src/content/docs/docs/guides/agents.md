@@ -363,8 +363,8 @@ coming before an agent stops on it.
 </picture>
 
 - **In a chat**, a small chip under the chat's title shows the credential that chat's agent uses —
-  for example `Claude 78% · 31%`: the two shortest limits, shortest first, without their labels
-  (hover or use a screen reader for `Claude · 5h 78% · Week 31%`). It adds `rejected` while the
+  for example `Claude 78% · 31%`: the two shortest limits, shortest first, without their labels,
+  and `+N` for any more (hover or use a screen reader for `Claude · 5h 78% · Week 31%`). It adds `rejected` while the
   provider is turning prompts away. Select it to see every limit, how
   much of it is used, and when it resets. The dialog is titled with the account's name from
   Settings, so you can tell which subscription it is; an account you didn't add (a project's or the
