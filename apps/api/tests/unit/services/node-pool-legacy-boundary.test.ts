@@ -1183,7 +1183,8 @@ describe('node-pool inventories', () => {
       expect(entry.owner.length).toBeGreaterThan(0);
       expect(entry.role.length).toBeGreaterThan(0);
     }
-    expect(ALLOCATION_WRITER_INVENTORY.length).toBeGreaterThanOrEqual(23);
+    // 22 since the anonymous-trial task adapter was retired (2026-11-08).
+    expect(ALLOCATION_WRITER_INVENTORY.length).toBeGreaterThanOrEqual(22);
   });
 
   it('records every allocation entrypoint with a scope, role and admission contract', () => {
@@ -1191,7 +1192,8 @@ describe('node-pool inventories', () => {
       expect(entry.owner.length).toBeGreaterThan(0);
       expect(entry.admission.length).toBeGreaterThan(20);
     }
-    expect(ALLOCATION_ENTRYPOINT_INVENTORY.length).toBeGreaterThanOrEqual(21);
+    // 19 since the four anonymous-trial orchestrator entrypoints were retired (2026-11-08).
+    expect(ALLOCATION_ENTRYPOINT_INVENTORY.length).toBeGreaterThanOrEqual(19);
   });
 
   it('has no duplicate writer or entrypoint ownership keys', () => {

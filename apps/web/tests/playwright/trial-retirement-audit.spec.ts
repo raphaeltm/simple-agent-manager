@@ -1,44 +1,54 @@
-import { expect, type Page, type Route, test } from '@playwright/test';
+import { expect, type Route, test } from '@playwright/test';
 
-import { assertNoOverflow, makeMockUser, screenshot } from './audit-helpers';
+import {
+  assertNoOverflow,
+  expectTheme,
+  makeMockUser,
+  screenshot,
+  seedTheme,
+} from './audit-helpers';
 
 /**
  * Visual audit for the anonymous-trial retirement:
- *  - stale `/try` links land on the retired-trial page, which redirects to the self-hosting guide
+ *  - stale `/try` links land on the retired-trial page, which links to the self-hosting guide
  *  - the admin AI usage cards no longer split out trial requests/cost
  */
 
 const respond = (route: Route, status: number, body: unknown) =>
   route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
-async function holdExternalRedirect(page: Page): Promise<string[]> {
-  // The page redirects to the public website straight away. Answer that navigation with 204 No
-  // Content, which browsers do not navigate to, so the fallback card stays on screen for the
-  // screenshot, and record the target.
-  const attempted: string[] = [];
-  await page.route(/^https:\/\/(?!localhost)[^/]+\/self-host\/.*/, (route) => {
-    attempted.push(route.request().url());
-    return route.fulfill({ status: 204 });
-  });
-  await page.route('**/api/**', (route) => respond(route, 401, { error: 'UNAUTHORIZED' }));
-  return attempted;
-}
+for (const theme of ['dark', 'light'] as const) {
+  for (const path of ['/try', '/try/trial_01HZYQ8K3W9M2V7R5T0X4B6N8C', '/try/waitlist/thanks']) {
+    test(`retired trial link ${path} (${theme})`, async ({ page }) => {
+      await seedTheme(page, theme);
+      await page.route('**/api/**', (route) => respond(route, 401, { error: 'UNAUTHORIZED' }));
+      // Capture where "Self-host SAM" goes without leaving the test environment.
+      const followed: string[] = [];
+      await page.route(/^https:\/\/(?!localhost)[^/]+\/self-host\/.*/, (route) => {
+        followed.push(route.request().url());
+        return route.fulfill({ status: 200, contentType: 'text/html', body: '<h1>Self-host</h1>' });
+      });
 
-for (const path of ['/try', '/try/trial_01HZYQ8K3W9M2V7R5T0X4B6N8C', '/try/waitlist/thanks']) {
-  test(`retired trial link ${path}`, async ({ page }) => {
-    const attempted = await holdExternalRedirect(page);
-    await page.goto(path);
-    await expect(page.getByRole('heading', { name: 'Hosted trials have ended' })).toBeVisible();
-    await expect(page.getByRole('link', { name: 'Self-host SAM' })).toHaveAttribute(
-      'href',
-      /\/self-host\/$/
-    );
-    await expect.poll(() => attempted.length).toBeGreaterThan(0);
-    expect(attempted[0]).toMatch(/\/self-host\/$/);
-    await assertNoOverflow(page);
-    const slug = path === '/try' ? 'root' : path.includes('waitlist') ? 'waitlist' : 'trial-id';
-    await screenshot(page, `retired-trial-${slug}`);
-  });
+      await page.goto(path);
+      await expect(page.getByRole('heading', { name: 'Hosted trials have ended' })).toBeVisible();
+      await expectTheme(page, theme);
+      // Nothing navigates on its own: the page is still here after it settles.
+      await page.waitForTimeout(800);
+      expect(followed).toEqual([]);
+      expect(new URL(page.url()).pathname).toBe(path);
+      const signIn = page.getByRole('link', { name: 'Already have access? Sign in' });
+      await expect(signIn).toHaveAttribute('href', '/');
+      expect((await signIn.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+      await assertNoOverflow(page);
+      const slug = path === '/try' ? 'root' : path.includes('waitlist') ? 'waitlist' : 'trial-id';
+      await screenshot(page, `retired-trial-${slug}-${theme}`);
+
+      // The primary action reaches the self-hosting guide.
+      await page.getByRole('link', { name: 'Self-host SAM' }).click();
+      await expect.poll(() => followed.length).toBe(1);
+      expect(followed[0]).toMatch(/\/self-host\/$/);
+    });
+  }
 }
 
 const ADMIN = makeMockUser({

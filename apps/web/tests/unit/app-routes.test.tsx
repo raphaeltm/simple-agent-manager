@@ -67,7 +67,6 @@ vi.mock('../../src/pages/AdminAIProxy', () => ({
   AdminAIProxy: () => <div data-testid="admin-ai-proxy-page" />,
 }));
 
-
 vi.mock('../../src/pages/AdminCosts', () => ({
   AdminCosts: () => <div data-testid="admin-costs-page" />,
 }));
