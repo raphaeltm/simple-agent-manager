@@ -50,10 +50,6 @@ const AdminInfrastructure = lazyNamed(
   () => import('./pages/AdminInfrastructure'),
   'AdminInfrastructure'
 );
-const SessionHeaderPrototype = lazyNamed(
-  () => import('./pages/session-header-prototype'),
-  'SessionHeaderPrototype'
-);
 const AdminLogs = lazyNamed(() => import('./pages/AdminLogs'), 'AdminLogs');
 const AdminOverview = lazyNamed(() => import('./pages/AdminOverview'), 'AdminOverview');
 const AdminSettings = lazyNamed(() => import('./pages/AdminSettings'), 'AdminSettings');
@@ -305,11 +301,6 @@ export default function App() {
                         <Route
                           path="/__test/error-boundary"
                           element={<ErrorBoundaryAuditHarness />}
-                        />
-                        {/* PROTOTYPE: slimmer session header. Remove before merging to main. */}
-                        <Route
-                          path="/prototype/session-header"
-                          element={page(<SessionHeaderPrototype />)}
                         />
                       </>
                     )}

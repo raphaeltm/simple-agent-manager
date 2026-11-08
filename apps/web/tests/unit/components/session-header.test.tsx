@@ -258,7 +258,8 @@ describe('SessionHeader', () => {
   it("mounts the usage chip for the session's project and agent session", () => {
     renderHeader({ session: makeSession({ agentSessionId: 'agent-123' }) });
     expect(chipMock.SessionCredentialLimitChip).toHaveBeenCalledWith(
-      expect.objectContaining({ projectId: 'proj-1', agentSessionId: 'agent-123' }),
+      // The desktop header uses the small chip size, so the usage chip does too.
+      expect.objectContaining({ projectId: 'proj-1', agentSessionId: 'agent-123', size: 'sm' }),
       undefined
     );
   });
@@ -281,6 +282,54 @@ describe('SessionHeader', () => {
   it('shows Stopped state indicator for stopped sessions', () => {
     renderHeader({ sessionState: 'stopped' });
     expect(screen.getByText('Stopped')).toBeInTheDocument();
+  });
+
+  it('puts the status and the workspace profile in one chip', () => {
+    renderHeader({
+      sessionState: 'active',
+      workspace: makeWorkspace({ workspaceProfile: 'lightweight' }),
+    });
+    const status = screen.getByText('Active').closest('span');
+    expect(status).toHaveTextContent('Active· Lightweight');
+    expect(status).toHaveAttribute('title', 'Workspace profile: Lightweight');
+    // One chip, not two: no standalone profile badge.
+    expect(screen.queryByLabelText('Workspace profile: Lightweight')).not.toBeInTheDocument();
+  });
+
+  it('keeps a recovery container as its own chip instead of merging it', () => {
+    renderHeader({ workspace: makeWorkspace({ status: 'recovery' }) });
+    expect(
+      screen.getByRole('button', { name: /Recovery container: devcontainer build failed/ })
+    ).toBeInTheDocument();
+    expect(screen.getByText('Active').closest('span')).toHaveTextContent(/^Active$/);
+  });
+
+  it('names the creator only when someone else started the session', () => {
+    const { unmount } = renderHeader({ session: makeSession({ isMine: true }) });
+    expect(screen.queryByText('Your session')).not.toBeInTheDocument();
+    expect(screen.queryByTitle(/^Created by/)).not.toBeInTheDocument();
+    expect(screen.getByText('Test Session')).toBeInTheDocument();
+    unmount();
+
+    renderHeader({
+      session: makeSession({
+        isMine: false,
+        createdByUserId: 'user-2',
+        createdBy: { id: 'user-2', name: 'Alex Rivera', email: 'alex@example.com' },
+      } as Partial<ChatSessionResponse>),
+    });
+    expect(screen.getByTitle('Created by Alex Rivera')).toHaveTextContent('Alex Rivera');
+  });
+
+  it('leaves comments to the tool rail on desktop', () => {
+    const onOpenComments = vi.fn();
+    renderHeader({ onOpenComments, unresolvedCommentCount: 2, needsAttentionCommentCount: 1 });
+    const header = within(screen.getByTestId('session-header'));
+    expect(header.queryByRole('button', { name: /comment/i })).not.toBeInTheDocument();
+    expect(header.getByText('Test Session')).toBeInTheDocument();
+    // The rail's Comments action is where they open from (its count wiring is covered in
+    // use-session-tools.test.tsx).
+    expect(screen.getByTestId('session-tool-comments')).toBeInTheDocument();
   });
 
   it('exposes the details control in the tool rail', () => {
