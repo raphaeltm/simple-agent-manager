@@ -41,6 +41,17 @@ Callback JWT routes are not allowed to convert designed terminal callback states
 3. Designed callback `4xx`/`410` responses MUST use non-error or bounded low-severity logging. They MUST NOT emit an error-level log or persisted platform error row for every retry attempt.
 4. Tests for callback-route changes MUST include the discriminating control: a live node/workspace callback still succeeds through the combined app/router wiring.
 
+## Every Credential Sink Checks the Workspace Lifecycle
+
+The API refuses a workspace's callback token (AI proxy and workspace callbacks) and its MCP token
+once the workspace stops being `creating`/`running`/`recovery` or its node starts ending. There is
+no revocation list; each use re-reads D1. On the agent side:
+
+- An agent process running during a stop or sleep will see 403 from the AI proxy, 401 from MCP and
+  410 from workspace callbacks. Treat these as terminal for that workspace and do not retry in a loop.
+- Callback tokens must carry `scope` and `iat`. The API mints every token; never construct one here.
+- Full rule and tests: `apps/api/.claude/rules/34-vm-agent-callback-auth.md`.
+
 ### How to Identify VM Agent Callback Routes
 
 A route is a VM agent callback if ANY of these are true:
