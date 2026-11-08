@@ -23,6 +23,8 @@ func TestPublishDeadlineDefaultContract(t *testing.T) {
 		t.Fatal("positive API admission/callback margin required")
 	}
 	t.Setenv("DEPLOY_BUILD_PUBLISH_TIMEOUT", "")
+	t.Setenv("DEPLOY_PUBLISH_HEARTBEAT_INTERVAL", "")
+	t.Setenv("HTTP_CALLBACK_TIMEOUT", "")
 	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
 	t.Setenv("NODE_ID", "node-contract")
 	cfg, err := Load()
@@ -31,6 +33,10 @@ func TestPublishDeadlineDefaultContract(t *testing.T) {
 	}
 	if time.Duration(deadline)*time.Millisecond <= cfg.DeployBuildPublishTimeout+time.Duration(margin)*time.Millisecond {
 		t.Fatalf("API deadline %dms must exceed resolved VM timeout %v plus %dms admission/callback margin", deadline, cfg.DeployBuildPublishTimeout, margin)
+	}
+	stall, err := strconv.ParseInt(os.Getenv("SAM_TEST_API_PUBLISH_STALL_MS"), 10, 64)
+	if err != nil || time.Duration(stall)*time.Millisecond <= cfg.DeployPublishHeartbeatInterval+cfg.HTTPCallbackTimeout {
+		t.Fatalf("API stall %dms must exceed resolved heartbeat interval %v plus callback timeout %v", stall, cfg.DeployPublishHeartbeatInterval, cfg.HTTPCallbackTimeout)
 	}
 }
 

@@ -33,6 +33,7 @@ it.skipIf(process.env.SAM_PUBLISH_TIMEOUT_CONTRACT !== '1')(
               ...process.env,
               SAM_TEST_API_PUBLISH_DEADLINE_MS: String(settings.deadlineMs),
               SAM_TEST_API_PUBLISH_MARGIN_MS: String(DEFAULT_DEPLOY_PUBLISH_JOB_DEADLINE_MARGIN_MS),
+              SAM_TEST_API_PUBLISH_STALL_MS: String(settings.stallMs),
             },
             timeout: 120_000,
             maxBuffer: 64 * 1024,

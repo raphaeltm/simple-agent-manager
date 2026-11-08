@@ -127,6 +127,12 @@ describe('publish job atomic guards on SQLite', () => {
     ).toBe(false);
     expect(row()).toMatchObject({ status: 'canceled', last_heartbeat_at: heartbeat });
   });
+  it('still expires a heartbeat-free legacy job at the overall deadline', async () => {
+    seed('legacy', 'building', new Date(now - settings.deadlineMs - 1).toISOString(), recent, null);
+    expect(await failExpiredDeploymentPublishJobs(db(), settings, now)).toMatchObject([
+      { id: 'legacy', status: 'failed', errorCode: 'deadline_exceeded', retryable: true },
+    ]);
+  });
   it('allows owner cancellation and fences late events and releases', async () => {
     seed();
     expect(await cancelDeploymentPublishJob(db(), 'project', 'workspace', 'job')).toMatchObject({
