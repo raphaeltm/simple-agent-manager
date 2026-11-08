@@ -19,6 +19,7 @@ export function layoutTar(
     options.extra?.(dir);
     return execFileSync('tar', ['-cf', '-', ...(options.tarArgs ?? []), '-C', dir, '.'], {
       maxBuffer: 1024 * 1024,
+      env: { PATH: '/usr/bin:/bin' },
     }).toString('latin1');
   } finally {
     rmSync(dir, { recursive: true, force: true });

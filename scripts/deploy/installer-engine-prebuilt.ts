@@ -240,7 +240,8 @@ export function dockerfileSources(dockerfile: string): string[] {
     const paths = words.filter((word) => !word.startsWith('--'));
     sources.push(...paths.slice(0, -1));
   }
-  return [...new Set(sources)].sort();
+  // Code-unit order, independent of the host locale: the key must match across machines.
+  return [...new Set(sources)].sort((a, b) => Number(a > b) - Number(a < b));
 }
 
 /**
@@ -262,7 +263,7 @@ export function imageContextKey(contextDir: string, dockerfilePath: string): str
 }
 
 const LAYOUT_ENTRY =
-  /^(?:|oci-layout|index\.json|blobs\/|blobs\/sha256\/|blobs\/sha256\/[a-f0-9]{64})$/;
+  /^(?:oci-layout|index\.json|blobs\/|blobs\/sha256\/|blobs\/sha256\/[a-f0-9]{64})$/;
 
 /**
  * True only when a tarred OCI image layout holds nothing but the layout's own
@@ -292,7 +293,8 @@ export function layoutArchiveIsSafe(path: string): boolean {
       const relative = name.replace(/^\.\//, '').replace(/^\.$/, '');
       if (!Number.isSafeInteger(size) || size < 0) return false;
       if (type === '5') {
-        if (!LAYOUT_ENTRY.test(relative.endsWith('/') || !relative ? relative : `${relative}/`))
+        // The layout root itself, or one of its two directories.
+        if (relative && !LAYOUT_ENTRY.test(relative.endsWith('/') ? relative : `${relative}/`))
           return false;
       } else if (type === '0' || type === '\0') {
         if (!relative || relative.endsWith('/') || !LAYOUT_ENTRY.test(relative)) return false;

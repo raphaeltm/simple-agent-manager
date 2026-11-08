@@ -6,15 +6,16 @@ on:
     - cron: '0 6 * * *'
   workflow_dispatch:
 
-permissions:
-  contents: write
-  deployments: read
+permissions: {}
 
 jobs:
   release:
     name: Tag and release the latest production deploy
     if: github.repository == 'raphaeltm/simple-agent-manager'
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      deployments: read
     outputs:
       tag_name: ${{ steps.tag.outputs.tag_name }}
       created: ${{ steps.create.outputs.created }}

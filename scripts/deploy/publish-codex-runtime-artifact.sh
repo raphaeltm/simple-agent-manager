@@ -12,7 +12,7 @@ release='384d0071527848b68df318c04f2e6e040f2eea67131bbd5b6f66cc58f5bd65bd'
 size=136243963
 # R2's S3 API moves this archive in seconds; Wrangler's REST object transport
 # took over 180 s to read it back on an installer builder (2026-11-07).
-# 136 MB within 300 s needs only ~0.45 MB/s.
+# 136 MB within 300 s needs only ~0.45 MB/s per transfer.
 transfer_timeout=${CODEX_PUBLISH_TRANSFER_TIMEOUT_SECONDS:-300}
 [[ "$transfer_timeout" =~ ^[1-9][0-9]{0,4}$ ]] || exit 1
 private=$(mktemp -d)
@@ -20,9 +20,6 @@ trap 'rm -rf -- "$private"' EXIT
 timeout 120 head -c "$((size + 1))" -- "$1" > "$private/runtime.tar"
 [[ $(stat -c %s "$private/runtime.tar") == "$size" ]]
 printf '%s  %s\n' "$release" "$private/runtime.tar" | sha256sum --check --status
-# A single-part R2 upload's ETag is the MD5 of the bytes, so a HEAD verifies a
-# stored object against the SHA-256-checked local copy without reading it back.
-md5=$(md5sum "$private/runtime.tar" | cut -c1-32)
 url="https://$CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com/$R2_BUCKET/acp/codex/releases/$release/codex-runtime-linux-amd64.tar.gz"
 s3() {
   local seconds=$1; shift
@@ -30,15 +27,19 @@ s3() {
     --aws-sigv4 'aws:amz:auto:s3' --user "$AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY" \
     -H 'x-amz-content-sha256: UNSIGNED-PAYLOAD' "$@" "$url"
 }
-# Prints the HTTP status; matching size and ETag are reported as "match".
+# Prints the HTTP status; a stored object whose bytes have the pinned SHA-256 is
+# reported as "match". R2's S3 API reads the archive back in seconds.
 stored() {
   local status
   status=$(s3 30 --head --output /dev/null --dump-header "$private/headers" --write-out '%{http_code}') || return 1
-  if [[ "$status" == 200 ]]; then
-    if grep -qix "content-length: $size"$'\r' "$private/headers" &&
-      grep -qix "etag: \"$md5\""$'\r' "$private/headers"; then echo match; else echo mismatch; fi
+  if [[ "$status" != 200 ]]; then echo "$status"; return 0; fi
+  if ! grep -qix "content-length: $size"$'\r' "$private/headers"; then echo mismatch; return 0; fi
+  rm -f "$private/stored.tar"
+  s3 "$transfer_timeout" --fail --output "$private/stored.tar" || return 1
+  if printf '%s  %s\n' "$release" "$private/stored.tar" | sha256sum --check --status; then
+    echo match
   else
-    echo "$status"
+    echo mismatch
   fi
 }
 case $(stored || echo error) in

@@ -27,8 +27,7 @@ on:
       - scripts/deploy/installer-engine-publish.ts
       - scripts/deploy/installer-engine-prebuilt.ts
 
-permissions:
-  contents: write
+permissions: {}
 
 concurrency:
   group: installer-artifacts-${{ inputs.tag || github.ref }}
@@ -46,6 +45,9 @@ jobs:
     if: github.repository == 'raphaeltm/simple-agent-manager'
     runs-on: ubuntu-latest
     timeout-minutes: 60
+    permissions:
+      # Uploads release assets; fork pull requests still get a read-only token.
+      contents: write
     services:
       registry:
         image: registry:2.8.3
