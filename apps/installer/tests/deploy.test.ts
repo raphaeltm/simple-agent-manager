@@ -22,7 +22,8 @@ vi.mock('node:fs/promises', async (importOriginal) => ({
   }),
   unlink: vi.fn(async () => {}),
 }));
-// Fixture IDs verified against live GET /oauth/scopes on 2026-10-28. In
+// Fixture IDs verified against live GET /oauth/scopes on 2026-10-28 (the three email
+// scopes on 2026-11-08). In
 // particular Workers AI uses ai.*, Pages uses page.*, and token creation uses
 // account-api-tokens.write; permission-group display names are not scope IDs.
 const fullScopes = [

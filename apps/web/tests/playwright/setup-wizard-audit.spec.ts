@@ -135,6 +135,8 @@ test.describe('First-run setup wizard', () => {
     await page.goto('/setup#token=installer-setup-token');
     await expect(page.getByRole('heading', { name: 'Welcome to your SAM' })).toBeVisible();
     await expect(page.getByText('Setup token filled in from your installer')).toBeVisible();
+    // The step indicator appears once the token is checked and the step count is known.
+    await expect(page.getByRole('list', { name: 'Setup steps' })).toHaveCount(0);
     // The token never stays in the address bar or history.
     expect(new URL(page.url()).hash).toBe('');
     await assertNoOverflow(page);
@@ -165,16 +167,24 @@ test.describe('First-run setup wizard', () => {
     await screenshot(page, 'setup-sign-in-email', { scopeToProject: true });
 
     await page.getByRole('button', { name: /Also allow GitHub, Google or GitLab/ }).click();
-    await expect(page.getByRole('radio', { name: 'GitHub' })).toHaveAttribute(
-      'aria-checked',
+    await expect(page.getByRole('button', { name: 'GitHub', exact: true })).toHaveAttribute(
+      'aria-pressed',
       'true'
     );
     await expect(page.getByText(/\/api\/auth\/callback\/github/)).toBeVisible();
+    // Google infrastructure OAuth (GCP) is admin-only; setup offers sign-in providers alone.
+    await expect(page.getByText(/infrastructure/i)).toHaveCount(0);
     await assertNoOverflow(page);
     await screenshot(page, 'setup-sign-in-providers', { scopeToProject: true });
 
+    // A half-entered provider would fail setup, so Continue waits for the rest of it.
+    await page.getByLabel('Client ID').fill('half-entered-client-id');
+    await expect(page.getByRole('button', { name: 'Continue' })).toBeDisabled();
+    await page.getByLabel('Client ID').fill('');
     await page.getByRole('button', { name: 'Continue' }).click();
     await expect(page.getByRole('heading', { name: 'Email your agents' })).toBeVisible();
+    // Focus follows the step, so keyboard and screen reader users start at the new heading.
+    await expect(page.getByRole('heading', { name: 'Email your agents' })).toBeFocused();
     await expect(page.getByRole('switch', { name: 'Let agents receive email' })).toHaveAttribute(
       'aria-checked',
       'true'
@@ -228,7 +238,7 @@ test.describe('First-run setup wizard', () => {
     ).toBeVisible();
     const continueButton = page.getByRole('button', { name: 'Continue' });
     await expect(continueButton).toBeDisabled();
-    await page.getByRole('radio', { name: 'Google' }).click();
+    await page.getByRole('button', { name: 'Google', exact: true }).click();
     await page.getByLabel('Client ID').fill('google-client-id.apps.googleusercontent.com');
     await page.getByLabel('Client secret').fill('google-client-secret');
     await assertNoOverflow(page);
@@ -271,24 +281,32 @@ test.describe('First-run setup wizard', () => {
 });
 
 test.describe('First-run setup scrolling', () => {
-  test.use({ viewport: { width: 1280, height: 560 }, isMobile: false, hasTouch: false });
-
-  test('the wizard scrolls with the mouse wheel when it is taller than the window', async ({
+  test('the tallest step scrolls to its button with the wheel, at every viewport', async ({
     page,
   }) => {
     await setupMocks(page);
+    // Shorter than the step at every project viewport, mobile included.
+    const viewport = page.viewportSize();
+    await page.setViewportSize({ width: viewport?.width ?? 375, height: 560 });
     await page.goto('/setup#token=t');
     await page.getByRole('button', { name: "Let's go" }).click();
     await page.getByRole('button', { name: /Also allow GitHub, Google or GitLab/ }).click();
+    await page.getByRole('button', { name: 'GitLab', exact: true }).click();
+    const scroller = page.getByTestId('setup-scroll');
+    const overflow = await scroller.evaluate((node) => node.scrollHeight - node.clientHeight);
+    expect(overflow).toBeGreaterThan(0);
+
     const continueButton = page.getByRole('button', { name: 'Continue' });
-    await page.mouse.move(640, 300);
-    await page.mouse.wheel(0, 2000);
-    await page.waitForTimeout(300);
-    const box = await continueButton.boundingBox();
-    const viewport = page.viewportSize();
-    expect(box).not.toBeNull();
-    expect(box!.y + box!.height).toBeLessThanOrEqual(viewport!.height);
-    expect(box!.y).toBeGreaterThanOrEqual(0);
+    await page.mouse.move((viewport?.width ?? 375) / 2, 280);
+    await page.mouse.wheel(0, 3000);
+    await expect
+      .poll(async () => {
+        const box = await continueButton.boundingBox();
+        return box ? box.y + box.height <= 560 && box.y >= 0 : false;
+      })
+      .toBe(true);
+    await assertNoOverflow(page);
+    await screenshot(page, 'setup-sign-in-providers-scrolled', { scopeToProject: true });
   });
 });
 
@@ -302,7 +320,7 @@ test.describe('Email sign-in', () => {
     await assertNoOverflow(page);
     await screenshot(page, 'sign-in-email-only', { scopeToProject: true });
 
-    await page.getByPlaceholder('you@example.com').fill(LONG_OWNER);
+    await page.getByLabel('Email').fill(LONG_OWNER);
     await sendButton.click();
     await expect(page.getByLabel('Sign-in code')).toBeVisible();
     expect(captured.sendCode).toEqual([{ email: LONG_OWNER, type: 'sign-in' }]);

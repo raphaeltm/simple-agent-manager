@@ -8,13 +8,13 @@
  *
  * Who gets a code:
  * - an address that already belongs to an account;
- * - the first user: the installer's owner email until that owner exists, or anyone while an
- *   installation without an owner email has no users yet.
- * Everyone else gets nothing, and the response is the same either way, so the form does not
- * reveal which addresses have accounts. `databaseHooks.user.create.before` in `../auth.ts` still
+ * - the installer's owner email (`BOOTSTRAP_OWNER_EMAIL`) until that owner exists.
+ * Everyone else gets nothing. The response is the same either way, and the code is sent after
+ * the response (`CreateAuthOptions.waitUntil`), so neither the body nor the timing reveals which
+ * addresses have accounts. Installations without an owner email do not offer email sign-up: the
+ * first person to request a code would become the administrator. `databaseHooks.user.create.before` in `../auth.ts` still
  * decides the new account's role and refuses non-owners on its own.
  */
-import { SYSTEM_USER_ID } from '@simple-agent-manager/shared';
 import type { BetterAuthPlugin } from 'better-auth';
 import { emailOTP } from 'better-auth/plugins/email-otp';
 import type { Context, MiddlewareHandler } from 'hono';
@@ -41,24 +41,35 @@ export const EMAIL_SIGN_IN_LOCAL_PART = 'sign-in';
 /** BetterAuth's emailOTP default code lifetime; stated in the email. */
 const CODE_LIFETIME_SECONDS = 300;
 export const SEND_CODE_PATH = '/email-otp/send-verification-otp';
+export const EMAIL_CODE_SIGN_IN_PATH = '/sign-in/email-otp';
+
+/**
+ * The emailOTP plugin also mounts password-reset, email-verification and email-change routes.
+ * SAM has no passwords and sends only sign-in codes, so those routes are closed outright rather
+ * than left to the `type === 'sign-in'` guard in `emailSignInPlugins`.
+ */
+export function isClosedEmailOtpPath(pathname: string): boolean {
+  const path = pathname.replace(/^\/api\/auth/, '');
+  if (path === SEND_CODE_PATH || path === EMAIL_CODE_SIGN_IN_PATH) return false;
+  return path.startsWith('/email-otp/') || path === '/forget-password/email-otp';
+}
 
 export function emailSignInAvailable(env: Pick<Env, 'AGENT_EMAIL' | 'BASE_DOMAIN'>): boolean {
   return hasAgentEmailBinding(env);
 }
 
+/** Can the first account be created by email? Only where the installer named its owner. */
+export function emailSignUpOffered(
+  env: Pick<Env, 'AGENT_EMAIL' | 'BASE_DOMAIN' | 'BOOTSTRAP_OWNER_EMAIL'>
+): boolean {
+  return emailSignInAvailable(env) && Boolean(env.BOOTSTRAP_OWNER_EMAIL?.trim());
+}
+
 /** May a code create a new account for this address? Existing accounts are handled by BetterAuth. */
 export async function emailSignUpAllowed(env: Env, email: string): Promise<boolean> {
   const owner = bootstrapOwnerEmail(env);
-  if (owner !== undefined) {
-    return !(await bootstrapOwnerEstablished(env)) && owner !== '' && email === owner;
-  }
-  // The migration-seeded sentinel user is not a person (rule 40).
-  const anyUser = await env.DATABASE.prepare(
-    "SELECT 1 FROM users WHERE id != ? AND status != 'system' LIMIT 1"
-  )
-    .bind(SYSTEM_USER_ID)
-    .first();
-  return anyUser === null;
+  if (!owner) return false;
+  return email === owner && !(await bootstrapOwnerEstablished(env));
 }
 
 async function accountExists(env: Env, email: string): Promise<boolean> {
@@ -161,14 +172,14 @@ function clientIp(c: Context): string {
   );
 }
 
-/** Per-IP limit on code requests, ahead of BetterAuth. */
-export function rateLimitSignInCodes(): MiddlewareHandler<{ Bindings: Env }> {
+/** Per-IP limit on email-code requests or redemptions, ahead of BetterAuth. */
+export function rateLimitSignInCodes(keyPrefix: string): MiddlewareHandler<{ Bindings: Env }> {
   return async (c, next) => {
     const { signInCodesPerIpPerHour } = await getAgentEmailLimits(c.env);
     const windowStart = getCurrentWindowStart(DEFAULT_WINDOW_SECONDS);
     const result = await checkRateLimit(
       c.env.KV,
-      createRateLimitKey('email-sign-in-ip', clientIp(c), windowStart),
+      createRateLimitKey(keyPrefix, clientIp(c), windowStart),
       signInCodesPerIpPerHour,
       DEFAULT_WINDOW_SECONDS
     );

@@ -30,6 +30,13 @@ const PROVIDERS: Array<{ key: SetupProvider; label: string; console: string }> =
   { key: 'gitlab', label: 'GitLab', console: 'GitLab → Preferences → Applications' },
 ];
 
+/** Something was typed for the chosen provider, but not everything it needs. */
+export function providerValuesPartial(values: SetupProviderValues): boolean {
+  return (
+    Boolean(values.clientId.trim() || values.clientSecret.trim()) && !providerValuesComplete(values)
+  );
+}
+
 /** Every field the chosen provider needs is filled in. */
 export function providerValuesComplete(values: SetupProviderValues): boolean {
   return Boolean(
@@ -68,7 +75,7 @@ export function SetupProviderFields({ values, onChange, apiOrigin }: SetupProvid
   return (
     <div className="space-y-4">
       <div
-        role="radiogroup"
+        role="group"
         aria-label="Sign-in provider"
         className="sam-well flex rounded-[var(--sam-radius-control)] p-1"
       >
@@ -78,8 +85,7 @@ export function SetupProviderFields({ values, onChange, apiOrigin }: SetupProvid
             <button
               key={provider.key}
               type="button"
-              role="radio"
-              aria-checked={selected}
+              aria-pressed={selected}
               onClick={() => update({ provider: provider.key, clientId: '', clientSecret: '' })}
               className={`min-h-11 flex-1 rounded-[calc(var(--sam-radius-control)-4px)] text-sm font-semibold transition-colors ${
                 selected ? 'sam-raised text-fg-primary' : 'text-fg-muted hover:text-fg-primary'

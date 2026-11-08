@@ -102,11 +102,11 @@ SAM uses **BetterAuth** with configured OAuth login providers, and email codes w
 
 Where the deploy prepared Email Sending, BetterAuth's email OTP plugin also signs people in with a six-digit code (`services/email-sign-in.ts`):
 
-1. User enters an email address; the API emails a code from `sign-in@agents.<BASE_DOMAIN>` only if the address belongs to an account, or it is the first user's (the installer owner email before that owner exists, or anyone on an installation with no users and no owner email). The response is identical either way.
+1. User enters an email address; the API emails a code from `sign-in@agents.<BASE_DOMAIN>` only if the address belongs to an account, or it is the installer owner email before that owner exists. The response is identical either way, and the code is sent after the response (`waitUntil`), so timing reveals nothing. Deployments without an owner email never create accounts by email.
 2. User enters the code. It is stored hashed, expires after 5 minutes and allows 3 attempts.
 3. BetterAuth marks the email verified and creates the session, running the same user and session hooks as OAuth sign-in.
 
-Code requests are limited per IP address and per recipient (`agentEmail.signInCodesPerIpPerHour`, `agentEmail.signInCodesPerEmailPerHour`).
+Code requests and code redemptions are limited per IP address, and requests per recipient (`agentEmail.signInCodesPerIpPerHour`, `agentEmail.signInCodesPerEmailPerHour`). The plugin's password-reset, verification and email-change routes return 404.
 
 ### Token Types
 

@@ -1,4 +1,5 @@
 import { GlassNodeField } from '@simple-agent-manager/ui';
+import { Check } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 export interface SetupStepMarker {
@@ -59,10 +60,14 @@ export function SetupShell({ steps, currentStep, footer, children }: SetupShellP
                           : 'text-fg-muted'
                     }`}
                   >
-                    <span
-                      aria-hidden="true"
-                      className={`h-1.5 w-1.5 rounded-full ${state === 'next' ? 'bg-fg-muted' : 'bg-accent'}`}
-                    />
+                    {state === 'done' ? (
+                      <Check className="h-3.5 w-3.5" aria-hidden="true" />
+                    ) : (
+                      <span
+                        aria-hidden="true"
+                        className={`h-1.5 w-1.5 rounded-full ${state === 'next' ? 'bg-fg-muted' : 'bg-accent'}`}
+                      />
+                    )}
                     {step.label}
                     {state === 'done' && <span className="sr-only"> (done)</span>}
                   </span>

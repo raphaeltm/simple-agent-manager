@@ -25,10 +25,19 @@ export function SetupNotice({
   );
 }
 
+/** Each step's heading; Setup moves focus here when the step changes. */
+export const SETUP_STEP_HEADING_ID = 'setup-step-heading';
+
 function StepHeading({ title, subtitle }: { title: string; subtitle: ReactNode }) {
   return (
     <header className="mb-6 text-center">
-      <h1 className="text-[1.6rem] font-bold leading-tight sm:text-[1.9rem]">{title}</h1>
+      <h1
+        id={SETUP_STEP_HEADING_ID}
+        tabIndex={-1}
+        className="text-[1.6rem] font-bold leading-tight outline-none sm:text-[1.9rem]"
+      >
+        {title}
+      </h1>
       <p className="mx-auto mt-2 max-w-sm text-[0.95rem] text-fg-muted">{subtitle}</p>
     </header>
   );
@@ -124,6 +133,8 @@ interface SignInStepProps {
   emailSignIn: boolean;
   ownerEmail: string | null;
   providerReady: boolean;
+  /** Provider fields were started but not finished: finishing setup would fail validation. */
+  providerPartial: boolean;
   providerFields: ReactNode;
   showProviders: boolean;
   busy: boolean;
@@ -135,6 +146,7 @@ export function SignInStep({
   emailSignIn,
   ownerEmail,
   providerReady,
+  providerPartial,
   providerFields,
   showProviders,
   busy,
@@ -188,7 +200,7 @@ export function SignInStep({
         variant="accent"
         size="lg"
         className="w-full"
-        disabled={!emailSignIn && !providerReady}
+        disabled={(!emailSignIn && !providerReady) || providerPartial}
         loading={busy}
         onClick={onContinue}
       >

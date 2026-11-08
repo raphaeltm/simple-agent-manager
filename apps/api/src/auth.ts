@@ -139,7 +139,16 @@ export function selectPrimaryGitHubEmail(
 /**
  * Create BetterAuth instance with Cloudflare D1 + KV configuration.
  */
-export async function createAuth(env: Env) {
+export interface CreateAuthOptions {
+  /**
+   * Keeps work BetterAuth runs in the background alive after the response (the request's
+   * `executionCtx.waitUntil`). Email sign-in codes are sent this way, so the response time does
+   * not reveal whether an address gets a code. Without it, BetterAuth awaits that work inline.
+   */
+  waitUntil?: (promise: Promise<unknown>) => void;
+}
+
+export async function createAuth(env: Env, options: CreateAuthOptions = {}) {
   const db = drizzle(env.DATABASE, { schema });
   // The migration-seeded system user is never a "first real human".
   const sentinelId = SYSTEM_USER_ID;
@@ -307,6 +316,7 @@ export async function createAuth(env: Env) {
     },
     socialProviders,
     plugins: emailSignInPlugins(env),
+    ...(options.waitUntil ? { advanced: { backgroundTasks: { handler: options.waitUntil } } } : {}),
     user: {
       additionalFields: {
         githubId: {
@@ -336,9 +346,9 @@ export async function createAuth(env: Env) {
         create: {
           before: async (incoming) => {
             // Email sign-in creates accounts without a name; show the mailbox name instead.
-            const user = incoming.name?.trim()
-              ? incoming
-              : { ...incoming, name: incoming.email.split('@')[0] ?? incoming.email };
+            const mailbox = (incoming.email ?? '').split('@')[0];
+            const user =
+              incoming.name?.trim() || !mailbox ? incoming : { ...incoming, name: mailbox };
             const bootstrap = await bootstrapUserDecision(env, user);
             if (bootstrap === 'deny') return false;
             if (bootstrap === 'owner') {

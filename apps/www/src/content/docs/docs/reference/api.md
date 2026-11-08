@@ -235,12 +235,13 @@ Returns the current authenticated session and user info.
 
 Email a six-digit sign-in code. Body: `{ "email": "...", "type": "sign-in" }`. Exists only when the
 deployment can send email. Always answers `200 { "success": true }`; a code is sent only to an
-existing account or the first user (see [Security](/docs/architecture/security/)). Returns `429`
-past the per-IP limit.
+existing account or the installer owner (see [Security](/docs/architecture/security/)). Returns
+`429` past the per-IP limit.
 
 ### `POST /api/auth/sign-in/email-otp`
 
 Sign in with an emailed code. Body: `{ "email": "...", "otp": "123456" }`. Sets the session cookie.
+Limited per IP address. Other `/api/auth/email-otp/*` routes return `404`.
 
 ### `GET /api/config/login-providers`
 
@@ -255,7 +256,8 @@ Token-gated by `SETUP_TOKEN`; every route returns `410 SETUP_CLOSED` once setup 
 - `POST /api/setup/verify` — body `{ token }`. Returns the integration `status`, `signIn: { email,
 ownerEmail }` and `agentEmail`, the agent email setup plan (or `null` when it can't be read).
 - `POST /api/setup/complete` — body `{ token, config?, agentEmail?: { consentToken } }`. Needs a
-  sign-in method: email sign-in, or an OAuth provider in `config`. With `agentEmail`, turns agent
+  sign-in method: email sign-up (installer owner set and email prepared), or an OAuth provider in
+  `config`. With `agentEmail`, turns agent
   email on after setup completes and returns `agentEmail: { plan, error }`; a failure there does not
   undo setup.
 

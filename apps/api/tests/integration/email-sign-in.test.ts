@@ -191,19 +191,98 @@ describe('email sign-in through better-auth (vertical slice)', () => {
     expect(realUsers()).toHaveLength(2);
   });
 
-  it('lets the first person sign up on an install without an owner email', async () => {
-    // With approval on, the user-create hook itself makes the first person superadmin. (With it
-    // off, the login self-heal does that through numbered SQL params, which the better-sqlite3
-    // D1 shim cannot bind.)
-    env = makeEnv({ REQUIRE_APPROVAL: 'true' });
-    await requestCode('first@example.com');
-    expect(mail.sent).toHaveLength(1);
-    expect((await signIn('first@example.com', codeFrom(mail.sent[0]))).status).toBe(200);
-    expect((await me()).body).toMatchObject({ email: 'first@example.com', role: 'superadmin' });
+  it('offers no email sign-up on an install without an owner email', async () => {
+    // Otherwise the first person to ask for a code would become the administrator.
+    env = makeEnv();
+    expect((await requestCode('first@example.com')).status).toBe(200);
+    expect(mail.sent).toHaveLength(0);
+    expect(realUsers()).toHaveLength(0);
 
-    // The second person does not get a code: email sign-up is for the first user only.
-    await requestCode('second@example.com');
+    // Control: an existing account on the same install still gets one.
+    sqlite
+      .prepare(
+        `INSERT INTO users (id, email, email_verified, name, role, status, created_at, updated_at)
+         VALUES ('existing', 'existing@example.com', 1, 'Existing', 'superadmin', 'active', 1, 1)`
+      )
+      .run();
+    await requestCode('existing@example.com');
+    expect(mail.sent.map((sent) => sent.to)).toEqual(['existing@example.com']);
+  });
+
+  it('answers before the code is sent, so timing does not reveal who has an account', async () => {
+    let releaseSend: () => void = () => undefined;
+    const sendStarted: string[] = [];
+    env = makeEnv({
+      BOOTSTRAP_OWNER_EMAIL: OWNER,
+      AGENT_EMAIL: {
+        send: async (message: SentEmail) => {
+          sendStarted.push(message.to);
+          await new Promise<void>((resolve) => {
+            releaseSend = resolve;
+          });
+          return { messageId: 'held' };
+        },
+      } as unknown as SendEmail,
+    });
+    const background: Promise<unknown>[] = [];
+    const executionCtx = {
+      waitUntil: (promise: Promise<unknown>) => background.push(promise),
+      passThroughOnException: () => undefined,
+      props: {},
+    } as unknown as ExecutionContext;
+
+    const response = await app.request(
+      `${API_ORIGIN}/api/auth/email-otp/send-verification-otp`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', origin: APP_ORIGIN },
+        body: JSON.stringify({ email: OWNER, type: 'sign-in' }),
+      },
+      env,
+      executionCtx
+    );
+    // The response is back while the send is still held open.
+    expect(response.status).toBe(200);
+    expect(background).toHaveLength(1);
+    await expect.poll(() => sendStarted).toEqual([OWNER]);
+    releaseSend();
+    await Promise.all(background);
+  });
+
+  it('keeps the password-reset, verification and email-change code routes closed', async () => {
+    for (const path of [
+      '/email-otp/request-password-reset',
+      '/forget-password/email-otp',
+      '/email-otp/reset-password',
+      '/email-otp/verify-email',
+      '/email-otp/check-verification-otp',
+      '/email-otp/request-email-change',
+      '/email-otp/change-email',
+    ]) {
+      const response = await app.request(
+        `${API_ORIGIN}/api/auth${path}`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json', origin: APP_ORIGIN },
+          body: JSON.stringify({ email: OWNER, type: 'forget-password', otp: '000000' }),
+        },
+        env
+      );
+      expect(response.status, path).toBe(404);
+    }
+    expect(mail.sent).toHaveLength(0);
+    // Liveness: the sign-in route on the same app still sends.
+    await requestCode(OWNER);
     expect(mail.sent).toHaveLength(1);
+  });
+
+  it('limits code redemptions per IP address', async () => {
+    const statuses: number[] = [];
+    for (let attempt = 0; attempt < 21; attempt += 1) {
+      statuses.push((await signIn(`guess${attempt}@example.com`, '000000')).status);
+    }
+    expect(statuses.slice(0, 20).every((status) => status === 400)).toBe(true);
+    expect(statuses[20]).toBe(429);
   });
 
   it('rejects a wrong code', async () => {

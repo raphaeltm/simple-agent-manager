@@ -1,3 +1,4 @@
+import type { Context } from 'hono';
 import { Hono } from 'hono';
 
 import { createAuth } from '../auth';
@@ -5,7 +6,12 @@ import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
-import { rateLimitSignInCodes, SEND_CODE_PATH } from '../services/email-sign-in';
+import {
+  EMAIL_CODE_SIGN_IN_PATH,
+  isClosedEmailOtpPath,
+  rateLimitSignInCodes,
+  SEND_CODE_PATH,
+} from '../services/email-sign-in';
 import { readAuthSession } from '../services/read-auth-session';
 import { assertUserNotSuspended } from '../services/signup-approval';
 
@@ -48,12 +54,16 @@ authRoutes.get('/me', async (c) => {
  */
 authRoutes.get('/get-session', (c) => readAuthSession(c.env, c.req.raw));
 
-// Email sign-in codes cost an email each: limit requests per IP before BetterAuth sees them.
-authRoutes.post(SEND_CODE_PATH, rateLimitSignInCodes());
+// Email sign-in codes cost an email each, and each redemption is a guess: limit both per IP
+// before BetterAuth sees them.
+authRoutes.post(SEND_CODE_PATH, rateLimitSignInCodes('email-sign-in-ip'));
+authRoutes.post(EMAIL_CODE_SIGN_IN_PATH, rateLimitSignInCodes('email-sign-in-redeem-ip'));
 
 authRoutes.on(['GET', 'POST'], '/*', async (c) => {
+  // SAM has no passwords: the plugin's reset, verification and email-change routes stay closed.
+  if (isClosedEmailOtpPath(new URL(c.req.url).pathname)) throw errors.notFound('Route');
   try {
-    const auth = await createAuth(c.env);
+    const auth = await createAuth(c.env, { waitUntil: executionWaitUntil(c) });
     const response = await auth.handler(c.req.raw);
 
     // Log auth error metadata only. BetterAuth response bodies may include
@@ -71,5 +81,15 @@ authRoutes.on(['GET', 'POST'], '/*', async (c) => {
     return c.json({ error: 'AUTH_ERROR', message: 'Internal auth error' }, 500);
   }
 });
+
+/** The request's waitUntil, when the runtime provides one (Workers do; unit-test apps do not). */
+function executionWaitUntil(c: Context): ((promise: Promise<unknown>) => void) | undefined {
+  try {
+    const ctx = c.executionCtx;
+    return (promise) => ctx.waitUntil(promise);
+  } catch {
+    return undefined;
+  }
+}
 
 export { authRoutes };

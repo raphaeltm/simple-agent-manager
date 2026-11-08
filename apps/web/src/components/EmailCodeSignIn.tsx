@@ -123,7 +123,7 @@ export function EmailCodeSignIn({ initialEmail = '', primary, onSignedIn }: Emai
   return (
     <form onSubmit={requestCode} className="space-y-3 text-left" data-testid="email-sign-in-form">
       <label className="block space-y-1.5">
-        <span className="sr-only">Email</span>
+        <span className="text-sm font-medium">Email</span>
         <input
           type="email"
           value={email}

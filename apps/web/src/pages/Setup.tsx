@@ -1,6 +1,6 @@
 import type { AgentEmailSetupPlan } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import type { SetupStatusResponse, SetupVerifyResponse } from '../lib/api';
@@ -9,11 +9,19 @@ import {
   EMPTY_PROVIDER_VALUES,
   providerConfig,
   providerValuesComplete,
+  providerValuesPartial,
   SetupProviderFields,
   type SetupProviderValues,
 } from './setup/SetupProviderFields';
 import { SetupShell, type SetupStepMarker } from './setup/SetupShell';
-import { AgentEmailStep, DoneStep, SetupNotice, SignInStep, WelcomeStep } from './setup/SetupSteps';
+import {
+  AgentEmailStep,
+  DoneStep,
+  SETUP_STEP_HEADING_ID,
+  SetupNotice,
+  SignInStep,
+  WelcomeStep,
+} from './setup/SetupSteps';
 
 const API_ORIGIN = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 /** The installer's "Open SAM setup" link carries the token here; fragments never reach a server. */
@@ -82,16 +90,25 @@ export function Setup() {
     };
   }, []);
 
+  // Move focus to the new step's heading, so keyboard and screen reader users land on it.
+  const previousStep = useRef(step);
+  useEffect(() => {
+    if (previousStep.current === step) return;
+    previousStep.current = step;
+    document.getElementById(SETUP_STEP_HEADING_ID)?.focus();
+  }, [step]);
+
   const agentEmailPlan: AgentEmailSetupPlan | null =
     verified?.agentEmail && RUNNABLE_AGENT_EMAIL_STATES.has(verified.agentEmail.state)
       ? verified.agentEmail
       : null;
   const emailSignIn = verified?.signIn.email ?? false;
 
+  // The indicator appears once the token is verified, when the number of steps is known.
   const steps: SetupStepMarker[] = [
     { key: 'welcome', label: 'Welcome' },
     { key: 'sign-in', label: 'Sign-in' },
-    ...(agentEmailPlan || !verified ? [{ key: 'agent-email', label: 'Email' }] : []),
+    ...(agentEmailPlan ? [{ key: 'agent-email', label: 'Email' }] : []),
   ];
 
   const handleVerify = async () => {
@@ -165,7 +182,7 @@ export function Setup() {
 
   return (
     <SetupShell
-      steps={step === 'done' ? undefined : steps}
+      steps={step === 'welcome' || step === 'done' ? undefined : steps}
       currentStep={step}
       footer={<span className="break-all">{instanceDomain()}</span>}
     >
@@ -190,6 +207,7 @@ export function Setup() {
           emailSignIn={emailSignIn}
           ownerEmail={verified?.signIn.ownerEmail ?? null}
           providerReady={providerValuesComplete(provider)}
+          providerPartial={showProviders && providerValuesPartial(provider)}
           showProviders={showProviders}
           onShowProviders={() => setShowProviders(true)}
           busy={busy && !agentEmailPlan}

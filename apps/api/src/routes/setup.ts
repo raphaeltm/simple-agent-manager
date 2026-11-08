@@ -10,7 +10,7 @@ import { AppError, errors } from '../middleware/error';
 import { parseOptionalBody } from '../schemas/_validator';
 import { planAgentEmailSetup, runAgentEmailSetup } from '../services/agent-email/setup';
 import { bootstrapOwnerEmail } from '../services/bootstrap-owner';
-import { emailSignInAvailable } from '../services/email-sign-in';
+import { emailSignUpOffered } from '../services/email-sign-in';
 import {
   completeSetupWithConfig,
   getPlatformConfigStatus,
@@ -109,7 +109,7 @@ async function parseSetupBody(c: SetupContext): Promise<{
 /** What the first-run screens need beyond the integration status. Token-gated by the callers. */
 async function signInSummary(env: Env) {
   return {
-    email: emailSignInAvailable(env),
+    email: emailSignUpOffered(env),
     ownerEmail: bootstrapOwnerEmail(env) || null,
   };
 }
@@ -180,7 +180,7 @@ setupRoutes.post('/complete', async (c) => {
 
   const preview = await previewPlatformIntegrationConfig(c.env, config);
   const completion = validateSetupCanComplete(preview, {
-    emailSignIn: emailSignInAvailable(c.env),
+    emailSignIn: emailSignUpOffered(c.env),
   });
   if (!completion.ok) {
     throw errors.badRequest('Setup cannot be completed', { errors: completion.errors });
