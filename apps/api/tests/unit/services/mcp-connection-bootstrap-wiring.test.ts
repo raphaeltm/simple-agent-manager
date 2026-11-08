@@ -104,7 +104,7 @@ function capturedStartServers() {
 beforeEach(() => {
   vi.clearAllMocks();
   sqlite = new Database(':memory:');
-  createSchemaTables(sqlite, [schema.mcpConnections, schema.agentSessions, schema.projects, schema.agentSettings, schema.sessionSnapshots]);
+  createSchemaTables(sqlite, [schema.mcpConnections, schema.agentSessions, schema.projects, schema.agentSettings, schema.sessionSnapshots, schema.workspaces]);
   db = drizzle(createSqliteD1(sqlite), { schema });
 });
 

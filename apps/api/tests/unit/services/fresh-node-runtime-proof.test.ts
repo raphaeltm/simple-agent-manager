@@ -22,7 +22,10 @@ vi.mock('../../../src/services/provider-credentials', () => ({
   createProviderForUser: mocks.createProvider,
   exactProviderCredentialBindingFromPlacementSnapshot: () => null,
 }));
-vi.mock('../../../src/services/jwt', () => ({ signNodeCallbackToken: async () => 'test-token' }));
+vi.mock('../../../src/services/jwt', () => ({
+  signNodeCallbackToken: async () => 'test-token',
+  signCurrentNodeCallbackToken: async () => 'test-token',
+}));
 vi.mock('../../../src/lib/secrets', () => ({ getCredentialEncryptionKey: () => 'test-key' }));
 vi.mock('../../../src/services/observability', () => ({ persistError: vi.fn() }));
 vi.mock('@simple-agent-manager/cloud-init', () => ({

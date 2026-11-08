@@ -46,7 +46,8 @@ import { agentSessionSuspendResumeRoutes } from '../../src/routes/workspaces/age
 import { agentSessionRoutes } from '../../src/routes/workspaces/agent-sessions';
 import { emptyResult, resolveCleanupConfig } from '../../src/scheduled/node-cleanup/shared';
 import { sweepStaleStoppedWorkspaces } from '../../src/scheduled/node-cleanup/workspace-phases';
-import { validateMcpToken } from '../../src/services/mcp-token';
+import { storeMcpToken, validateMcpToken } from '../../src/services/mcp-token';
+import { validateActiveWorkspaceMcpToken } from '../../src/services/mcp-token-lifecycle';
 import { resolveSessionRuntimeContract } from '../../src/services/session-runtime-contract';
 import { sleepWorkspaceSession } from '../../src/services/session-sleep-execution';
 import { endSessionSleepEpisodeBlocked } from '../../src/services/session-sleep-fallback';
@@ -131,12 +132,32 @@ vi.mock('../../src/middleware/auth', () => ({
   getUserId: () => 'user-1',
 }));
 
+/** The credential generation each callback token was minted for, in mint order. */
+const mintedGenerations = vi.hoisted(() => ({
+  node: [] as Array<string | null>,
+  workspace: [] as Array<string | null>,
+}));
+
 vi.mock('../../src/services/jwt', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../src/services/jwt')>()),
   signNodeManagementToken: async () => ({ token: 'node-management-token' }),
-  signNodeCallbackToken: async () => 'node-callback-token',
+  signNodeCallbackToken: async (
+    _nodeId: string,
+    _env: unknown,
+    options: { callbackGeneration: string | null }
+  ) => {
+    mintedGenerations.node.push(options.callbackGeneration);
+    return 'node-callback-token';
+  },
   signCurrentNodeCallbackToken: async () => 'node-callback-token',
-  signCallbackToken: async () => 'workspace-callback-token',
+  signCallbackToken: async (
+    _workspaceId: string,
+    _env: unknown,
+    options: { callbackGeneration: string | null }
+  ) => {
+    mintedGenerations.workspace.push(options.callbackGeneration);
+    return 'workspace-callback-token';
+  },
   signCurrentWorkspaceCallbackToken: async () => 'workspace-callback-token',
 }));
 
@@ -861,6 +882,62 @@ describe('Instant session wake after idle sleep', () => {
     expect(restoreIndex).toBeGreaterThan(sessionIndex);
     expect(runtimeRows()).toEqual(AWAKE_ROWS);
   });
+  it('retires the slept container credentials and mints the woken runtime its own', async () => {
+    const generationsBeforeWake = () =>
+      d1
+        .prepare(
+          `SELECT w.callback_generation AS workspaceGeneration,
+                  n.callback_generation AS nodeGeneration,
+                  n.runtime_incarnation_id AS incarnation
+             FROM workspaces w JOIN nodes n ON n.id = w.node_id WHERE w.id = ?`
+        )
+        .get(WORKSPACE_ID) as {
+        workspaceGeneration: string | null;
+        nodeGeneration: string | null;
+        incarnation: string | null;
+      };
+    await sleepOnContainerIdleTimeout();
+    const slept = generationsBeforeWake();
+    // The slept runtime's agent session holds an MCP token for the slept generation.
+    await storeMcpToken(env.KV, 'mcp-token-of-slept-runtime', {
+      taskId: TASK_ID,
+      contextType: 'task',
+      taskMode: 'task',
+      projectId: PROJECT_ID,
+      userId: USER_ID,
+      workspaceId: WORKSPACE_ID,
+      chatSessionId: CHAT_SESSION_ID,
+      agentSessionId: AGENT_SESSION_ID,
+      callbackGeneration: slept.workspaceGeneration,
+      createdAt: new Date().toISOString(),
+    });
+    mintedGenerations.node.length = 0;
+    mintedGenerations.workspace.length = 0;
+
+    expect((await postWorkspaceAgentResume()).status).toBe(200);
+    expect(runtimeRows()).toEqual(AWAKE_ROWS);
+
+    // The wake rotated both rows to the new runtime incarnation, in the write that woke it.
+    const woken = generationsBeforeWake();
+    expect(woken.incarnation).not.toBe(slept.incarnation);
+    expect(woken.workspaceGeneration).toBe(woken.incarnation);
+    expect(woken.nodeGeneration).toBe(woken.incarnation);
+    expect(woken.workspaceGeneration).not.toBe(slept.workspaceGeneration);
+    // Every callback token handed to the new container carries the new generation.
+    expect(mintedGenerations.node).toEqual([woken.incarnation]);
+    expect(mintedGenerations.workspace).toEqual([woken.incarnation]);
+    // The restored agent session got a fresh MCP token for the new generation ...
+    const samToken = vmAgent.creations.at(-1)?.mcpServers[0]?.token;
+    expect(samToken).toEqual(expect.any(String));
+    expect(await validateActiveWorkspaceMcpToken(env, samToken!)).toMatchObject({
+      agentSessionId: AGENT_SESSION_ID,
+      callbackGeneration: woken.incarnation,
+    });
+    // ... and the slept runtime's token is refused and revoked although the workspace runs.
+    expect(await validateActiveWorkspaceMcpToken(env, 'mcp-token-of-slept-runtime')).toBeNull();
+    expect(await validateMcpToken(env.KV, 'mcp-token-of-slept-runtime')).toBeNull();
+  });
+
   it('preserves snapshot and creates no session or MCP token if workspace hydration is refused', async () => {
     await sleepOnContainerIdleTimeout();
     const generation = restorableGeneration();

@@ -15,7 +15,10 @@ import { handoffFixture } from './node-cleanup-handoff-fixture';
 
 const NOW = new Date('2026-09-08T12:00:00.000Z');
 const OLD = '2026-09-08T10:00:00.000Z';
-vi.mock('../../../src/services/jwt', () => ({ signNodeCallbackToken: async () => 'test-token' }));
+vi.mock('../../../src/services/jwt', () => ({
+  signNodeCallbackToken: async () => 'test-token',
+  signCurrentNodeCallbackToken: async () => 'test-token',
+}));
 
 const updateNodeField = (column: string, value: string) => `UPDATE nodes SET ${column} = ${value}`;
 const protectedHandoffMutations = [
