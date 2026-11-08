@@ -18,6 +18,7 @@ export type NodeLifecycleDecisionSource =
   | 'cleanup_sweep'
   | 'warm_handoff'
   | 'operations_action'
+  | 'session_sleep'
   | 'deployment_teardown';
 
 export type NodeLifecycleDecision =
@@ -43,7 +44,8 @@ export type NodeLifecycleDecision =
   | 'handoff_skipped'
   | 'handoff_failed'
   // Operations action (an approved or auto-safe `rerun_node_cleanup`)
-  | 'cleanup_rerun_requested';
+  | 'cleanup_rerun_requested'
+  | 'sleep_eligible';
 
 export type NodeLifecycleDecisionDetail = Record<
   string,

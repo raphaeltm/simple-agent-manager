@@ -5,6 +5,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { resolveAdminSetting } from './admin-settings';
+import { recordNodeLifecycleDecision } from './node-lifecycle-decisions';
 import * as projectDataService from './project-data';
 import { parseProviderLimitWait, providerLimitNeedsImmediateSleep } from './provider-limit-policy';
 import {
@@ -46,7 +47,9 @@ export function sessionSleepDeferralReason(
  * `resolveAdminSetting` answers the code default during a settings outage, so the bound holds.
  */
 export async function resolveSessionStaleTurnMs(env: Env): Promise<number | null> {
-  const minutes = Number(await resolveAdminSetting(env, 'operations.sessionStaleTurnNoWorkMinutes'));
+  const minutes = Number(
+    await resolveAdminSetting(env, 'operations.sessionStaleTurnNoWorkMinutes')
+  );
   const effective = Number.isFinite(minutes) ? minutes : DEFAULT_SESSION_STALE_TURN_NO_WORK_MINUTES;
   return effective > 0 ? effective * 60_000 : null;
 }
@@ -165,6 +168,7 @@ export async function checkAutomaticSessionSleepEligibility(
     .select({
       projectId: schema.workspaces.projectId,
       chatSessionId: schema.workspaces.chatSessionId,
+      nodeId: schema.workspaces.nodeId,
       taskStatus: schema.tasks.status,
       admissionState: schema.tasks.admissionState,
       providerLimitWaitJson: schema.tasks.providerLimitWaitJson,
@@ -205,7 +209,25 @@ export async function checkAutomaticSessionSleepEligibility(
   const requirement = await resolveSleepRequirement(env, workspace, now, {
     requestedByPerson: input.requiredByPerson === true,
   });
-  if (requirement === 'required') return { eligible: true };
+  if (requirement === 'required') {
+    // Required sleep deliberately bypasses the idle classifier and state read.
+    // Record that distinction without adding a fallible runtime dependency.
+    if (workspace.nodeId) {
+      await recordNodeLifecycleDecision(env.DATABASE, {
+        nodeId: workspace.nodeId,
+        source: 'session_sleep',
+        decision: 'sleep_eligible',
+        reason: 'required_sleep',
+        detail: {
+          workspaceId: input.workspaceId,
+          chatSessionId: workspace.chatSessionId,
+          requiredByPerson: input.requiredByPerson === true,
+        },
+        now,
+      });
+    }
+    return { eligible: true };
+  }
   const [agentSession] = await db
     .select({ id: schema.agentSessions.id })
     .from(schema.agentSessions)
@@ -231,8 +253,7 @@ export async function checkAutomaticSessionSleepEligibility(
     idleAfterMs,
     harnessWorkConfig: parseHarnessWorkConfig(env),
     // Read only for an open turn: an idle session never consults the bound.
-    staleTurnMs:
-      state && state.activity !== 'idle' ? await resolveSessionStaleTurnMs(env) : null,
+    staleTurnMs: state && state.activity !== 'idle' ? await resolveSessionStaleTurnMs(env) : null,
     // The unattended scheduler is the only caller that also waits out the idle
     // interval before reclaiming a session on its own initiative.
     // Only long known resets (or blocked/unknown waits) request immediate sleep.
@@ -252,6 +273,33 @@ export async function checkAutomaticSessionSleepEligibility(
         : 'idle-interval-elapsed',
   });
   if (idleness.idle) {
+    // Snapshot traces preserve capture/teardown timings, but not the verdict
+    // or clocks that authorized automatic sleep. Keep that evidence before
+    // teardown removes session_state; existing diagnostic retention applies.
+    if (workspace.nodeId) {
+      await recordNodeLifecycleDecision(env.DATABASE, {
+        nodeId: workspace.nodeId,
+        source: 'session_sleep',
+        decision: 'sleep_eligible',
+        reason: idleness.reason,
+        now,
+        detail: {
+          workspaceId: input.workspaceId,
+          chatSessionId: workspace.chatSessionId,
+          agentSessionId: agentSession?.id,
+          activity: state?.activity,
+          activityAt: state?.activityAt,
+          workAt: state?.workAt,
+          promptStartedAt: state?.promptStartedAt,
+          runtimeWorkState: state?.runtimeWorkState,
+          runtimeWorkCount: state?.runtimeWorkCount,
+          runtimeWorkSource: state?.runtimeWorkSource,
+          runtimeWorkUpdatedAt: state?.runtimeWorkUpdatedAt,
+          runtimeWorkProgressAt: state?.runtimeWorkProgressAt,
+          requirement,
+        },
+      });
+    }
     return { eligible: true };
   }
 
