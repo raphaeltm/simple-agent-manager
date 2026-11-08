@@ -65,8 +65,10 @@ exploit. This task checks each claim against current `main` and fixes only what 
 ## Permitted vs Forbidden After Stop / Delete / Replacement
 
 - **Permitted terminal cleanup** (unchanged): node heartbeat and node error reports while the node
-  is non-terminal, snapshot upload/complete/failure for sleep, deletion-unconfirmed signalling,
-  stale-generation destructive callbacks rejected with designed 4xx/410.
+  is non-terminal; a provisioning-failure report for a workspace in `error`; idempotent eviction
+  replays; resource-telemetry flushes; deletion-unconfirmed signalling. Stale-generation destructive
+  callbacks are rejected with designed 4xx/410. Snapshot routes need an active workspace, because
+  the snapshot is taken before the sleep transition.
 - **Forbidden**: secret delivery (agent key, git token, runtime assets, registry creds, webhook
   claims, GCP identity tokens), AI proxy spend, MCP tool calls, token renewal, and state-mutating
   callbacks for a non-active workspace or terminal node.
