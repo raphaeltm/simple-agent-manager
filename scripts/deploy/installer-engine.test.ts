@@ -756,7 +756,7 @@ describe('installation engine', () => {
       )
     ).toHaveLength(1);
   });
-  it('enables staging trial KV only for the legacy staging adapter', async () => {
+  it('never writes the retired anonymous-trial KV switch, even for legacy staging', async () => {
     const f = fixture();
     const original = f.runner.run;
     f.runner.run = async (command, opts) =>
@@ -775,11 +775,11 @@ describe('installation engine', () => {
       { ...config, ownerEmail: undefined, profile: 'legacy-ci', environment: 'staging' },
       { ...f, environment: privateEnv, emit() {}, save() {} }
     );
+    // Liveness: the run reached secret configuration, so the absence below is meaningful.
     expect(
-      f.commands.some(
-        (entry) => entry.args.includes('trials:enabled') && entry.args.includes('--remote')
-      )
+      f.commands.some((entry) => entry.args.includes('scripts/deploy/configure-secrets.sh'))
     ).toBe(true);
+    expect(f.commands.some((entry) => entry.args.includes('trials:enabled'))).toBe(false);
   });
   it('fails on unexpected Wrangler binding warnings before secret publication', async () => {
     const f = fixture();

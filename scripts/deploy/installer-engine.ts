@@ -462,20 +462,6 @@ export async function runInstallerEngine(
       '--commit-hash',
       c.sourceCommit
     );
-    if (c.profile === 'legacy-ci' && c.environment === 'staging')
-      await wrangler(
-        'api',
-        'kv',
-        'key',
-        'put',
-        'trials:enabled',
-        'true',
-        '--binding',
-        'KV',
-        '--env',
-        'staging',
-        '--remote'
-      );
     operation = 'script.configure-secrets.sh';
     await runner.run(
       { executable: 'bash', args: ['scripts/deploy/configure-secrets.sh', c.environment] },

@@ -760,7 +760,6 @@ describe('deployment workflow hardening', () => {
     'vapid-private-secret',
     'cf-api-token-secret',
     'deploy-signing-private-secret',
-    'trial-claim-secret',
     'github-client-secret-line-1',
     'github-client-secret-line-2',
     'github-app-private-key',

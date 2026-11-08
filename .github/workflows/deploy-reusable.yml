@@ -228,7 +228,6 @@ jobs:
         env:
           SAM_CI_SECRETS_JSON: |
             {
-              "ANTHROPIC_API_KEY_TRIAL": ${{ toJSON(secrets.ANTHROPIC_API_KEY_TRIAL || '') }},
               "BETTER_AUTH_SECRET": ${{ toJSON(secrets.BETTER_AUTH_SECRET || '') }},
               "CF_ACCOUNT_ID": ${{ toJSON(secrets.CF_ACCOUNT_ID || '') }},
               "CF_AIG_TOKEN": ${{ toJSON(secrets.CF_AIG_TOKEN || '') }},
