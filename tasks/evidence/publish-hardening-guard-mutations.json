@@ -1,0 +1,46 @@
+{
+  "head": "d1e03526f0edf01f286861d53507f9f80a64f393",
+  "guards": [
+    {
+      "guard": "terminal-events",
+      "removed_guard_test_red": true
+    },
+    {
+      "guard": "cancel-terminal",
+      "removed_guard_test_red": true
+    },
+    {
+      "guard": "cancel-workspace",
+      "removed_guard_test_red": true
+    },
+    {
+      "guard": "release-attempt",
+      "removed_guard_test_red": true
+    },
+    {
+      "guard": "release-terminal",
+      "removed_guard_test_red": true
+    },
+    {
+      "guard": "release-duplicate",
+      "removed_guard_test_red": true
+    },
+    {
+      "guard": "instant",
+      "removed_guard_test_red": true
+    },
+    {
+      "guard": "sweep-terminal",
+      "removed_guard_test_red": true
+    },
+    {
+      "guard": "sweep-heartbeat",
+      "removed_guard_test_red": true
+    },
+    {
+      "guard": "sweep-empty",
+      "removed_guard_test_red": true
+    }
+  ],
+  "restored_suite_green": true
+}

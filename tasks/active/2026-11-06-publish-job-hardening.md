@@ -4,13 +4,13 @@
 Phase 1 of idea 01KZ6V37D1QGDR3WN12PSDB0QD. Node-owned builds currently have no cancel/watchdog, permit terminal status resurrection and duplicate release submission. Existing attempt column defaults to 1; no executor/schema expansion needed. Release FK means release insertion and conditional job linking must share an atomic D1 batch. Existing cron sweep isolator and typed admin settings provide the required extension points.
 
 ## Implementation and acceptance
-- [ ] Real SQLite tests for scoped atomic cancel, bounded stall/deadline sweep, terminal event rejection, and owner/duplicate/late/attempt release fencing.
-- [ ] Add runtime settings with DEFAULT constants; isolated bounded scheduled sweep emits lifecycle events.
-- [ ] cancel_publish tool with durable cancellation before best-effort authenticated VM cancellation; old-agent 404 tolerated.
-- [ ] Fence release callback using publishJobId/attempt; legacy omissions retain behavior; propagate Go payload.
-- [ ] Lifecycle events for API starting and failed_to_start; early Instant gate references phase-3 idea.
-- [ ] Go handler/callback payload tests; delete-guard red/restore checks.
-- [ ] Docs and channel contracts.
+- [x] Real SQLite tests for scoped atomic cancel, bounded stall/deadline sweep, terminal event rejection, and owner/duplicate/late/attempt release fencing.
+- [x] Add runtime settings with DEFAULT constants; isolated bounded scheduled sweep emits lifecycle events.
+- [x] cancel_publish tool with durable cancellation before best-effort authenticated VM cancellation; old-agent 404 tolerated.
+- [x] Fence release callback using publishJobId/attempt; legacy omissions retain behavior; propagate Go payload.
+- [x] Lifecycle events for API starting and failed_to_start; early Instant gate references phase-3 idea.
+- [x] Go handler/callback payload tests; delete-guard red/restore checks.
+- [x] Docs and channel contracts.
 - [ ] Full checks, specialist reviews, staging VM binary refresh and success/cancel/sweep/Instant verification with cleanup.
 - [ ] PR, CI, CodeRabbit, merge, production smoke; idea update with PR.
 
@@ -41,3 +41,9 @@ No context bundles, executor columns, queueing, or job tokens. Current SAM outpu
 - Post-fix scoped typecheck and lint passed; SQL/MCP affected suite passed 35 tests; empty-page and rejected-history assertions added, service suite passed 18 tests.
 - Staging deployment run42499039846 in progress. No test VM/resource created yet. Enabled platform Hetzner compute credential verified; no personal cloud credential required.
 - Original guard deletion proofs observed and restored: terminal-event guard, cancel terminality/workspace scope, release attempt/terminal/duplicate fences, Instant gate, sweep heartbeat/cancel race rechecks, acceptance-order guard. Earlier temporary logs did not survive sleep; outcomes were observed in-session. Final restored targeted suite passed73 before Sonar-only refactoring.
+
+### Final implementation validation — 2026-11-08
+- Final runtime head d1e03526f0edf01f286861d53507f9f80a64f393 passed all CI: lint, typecheck, build, full Test, all Durable Object shards, Go unit/integration/E2E, smoke, SonarCloud and marketing.
+- Fresh guard-removal proof saved in `tasks/evidence/publish-hardening-guard-mutations.json`: ten removed guards each failed the intended test; restored real-SQL/MCP suite passed35tests. PRcomment6724035073 retains the same proof.
+- Staging browser smoke passed dashboard, project and settings with zero page errors. Fresh VM heartbeat identifies agent30c80869dcd1dc5974660afdb06a405698f3722b, same Go content as final runtimehead.
+- Actual VM publish01M6Y0QT8ZN6ZMZMT6M13FGGRD succeeded and linked release01M6Y0R61D76Q1QN31QFYD8WP1, version1. Delayed job01M6Y0TCKQ1FAK2W5MQ4WN1QSC canceled while building with no release. At16:47 release list still contained only version1. Final API rollout, kill/sweep, active Instant gate and cleanup remain pending.
