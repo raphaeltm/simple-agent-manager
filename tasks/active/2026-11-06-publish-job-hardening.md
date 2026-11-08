@@ -25,3 +25,7 @@ No context bundles, executor columns, queueing, or job tokens. Current SAM outpu
 - Go/security reviewer approved: focused real-handler cancel and publish happy-path tests passed. Optional early eligibility read before volume allocation noted; authoritative transactional release fence retained.
 - Test/docs/completion reviewer: no implementation blocker; final validation, mutation proof and staging evidence required before archive.
 - Unrelated .codex/config.toml stays uncommitted.
+
+### Foreground recovery verification — 2026-11-08
+- Affected API suites passed **73 tests / 7 files** (11.90 seconds). Includes real SQLite service, callback route, scheduled sweep, MCP start/cancel and existing publish regressions.
+- Previous long full commands were interrupted by session sleep and their temporary logs disappeared. Their outcome is unverified; rerun gates remain required.
