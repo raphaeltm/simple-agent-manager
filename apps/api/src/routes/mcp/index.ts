@@ -104,7 +104,7 @@ mcpRoutes.route('/', webhookClaimRoutes);
 mcpRoutes.post('/', async (c) => {
   // NOSONAR - legacy MCP dispatcher switch is intentionally centralized.
   // Authenticate — returns parsed token data
-  const [tokenData] = await authenticateMcpRequest(c.req.header('Authorization'), c.env.KV, c.env);
+  const [tokenData] = await authenticateMcpRequest(c.req.header('Authorization'), c.env);
   if (!tokenData) {
     return c.json(jsonRpcError(null, -32000, 'Unauthorized: invalid or expired MCP token'), 401);
   }

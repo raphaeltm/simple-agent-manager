@@ -354,25 +354,11 @@ export async function verifyWorkspaceCallbackAuth(
     throw errors.forbidden('Insufficient token scope');
   }
 
-  // Workspace-scoped tokens: direct workspace match required.
-  if (payload.scope === 'workspace') {
-    if (payload.workspace === workspaceId) {
-      return;
-    }
-    throw errors.forbidden('Insufficient token scope');
-  }
-
-  // Legacy tokens (no scope claim): backward compatible behavior.
-  // Direct workspace match.
+  // Workspace-scoped tokens: direct workspace match required. verifyCallbackToken has
+  // already rejected tokens without a scope claim.
   if (payload.workspace === workspaceId) {
-    log.warn('workspace_auth.legacy_token_no_scope', {
-      tokenWorkspace: payload.workspace,
-      workspaceId,
-      action: 'allowed_legacy',
-    });
     return;
   }
-
   throw errors.forbidden('Insufficient token scope');
 }
 

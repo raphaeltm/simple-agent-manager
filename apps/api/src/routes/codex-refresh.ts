@@ -16,9 +16,12 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
-import { verifyCallbackToken } from '../services/jwt';
+import { type CallbackTokenPayload, verifyCallbackToken } from '../services/jwt';
 import { resolveRunAgentCredentialReferences } from '../services/run-agent-credential';
-import { assertWorkspaceCallbackResourceById } from './workspaces/_helpers';
+import {
+  assertWorkspaceCallbackIdentityCurrent,
+  assertWorkspaceCallbackResourceById,
+} from './workspaces/_helpers';
 
 const codexRefreshRoutes = new Hono<{ Bindings: Env }>();
 
@@ -55,7 +58,7 @@ codexRefreshRoutes.post('/codex-refresh', async (c) => {
   }
 
   // Verify the callback token.
-  let tokenPayload: { workspace: string; scope?: string };
+  let tokenPayload: CallbackTokenPayload;
   try {
     tokenPayload = await verifyCallbackToken(token, c.env);
   } catch {
@@ -145,6 +148,10 @@ codexRefreshRoutes.post('/codex-refresh', async (c) => {
   const responseBody = await doResponse.text();
 
   if (doResponse.ok) {
+    // Rule 49: the DO has already stored the rotated tokens, so withholding them is safe.
+    // A workspace that stopped, slept, was deleted or changed incarnation while the refresh
+    // ran must not receive the new OpenAI credentials.
+    await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'codex_refresh');
     log.info('codex_refresh.success', { workspaceId, userId });
   } else {
     log.warn('codex_refresh.upstream_error', {
