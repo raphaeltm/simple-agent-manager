@@ -159,8 +159,6 @@ const ADMIN_ANALYTICS_MOCK = {
   totalInputTokens: 0,
   totalOutputTokens: 0,
   totalCostUsd: 0,
-  trialRequests: 0,
-  trialCostUsd: 0,
   cachedRequests: 0,
   uniqueUsers: 0,
   unique_users: 0,

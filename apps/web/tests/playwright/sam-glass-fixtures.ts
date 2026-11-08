@@ -467,7 +467,6 @@ export async function setupGlassChatMocks(
       if (path === '/api/agents') return respond({ agents: [] });
       if (path === '/api/nodes') return respond([]);
       if (path === '/api/report-issue/config') return respond({ enabled: true });
-      if (path === '/api/trial/status') return respond({ available: false });
       if (path === '/api/workspaces') return respond([WORKSPACE]);
       if (path.startsWith('/api/workspaces/')) return respond(WORKSPACE);
       if (path === '/api/projects') return respond({ projects: [GLASS_PROJECT], nextCursor: null });

@@ -67,7 +67,6 @@ const AdminProjectEvents = lazyNamed(
 );
 const AdminStorage = lazyNamed(() => import('./pages/AdminStorage'), 'AdminStorage');
 const AdminStream = lazyNamed(() => import('./pages/AdminStream'), 'AdminStream');
-const AdminTrials = lazyNamed(() => import('./pages/AdminTrials'), 'AdminTrials');
 const AdminUsers = lazyNamed(() => import('./pages/AdminUsers'), 'AdminUsers');
 const AgentContextPage = lazyNamed(() => import('./pages/AgentContextPage'), 'AgentContextPage');
 const Chats = lazyNamed(() => import('./pages/Chats'), 'Chats');
@@ -225,14 +224,7 @@ const Setup = lazyNamed(() => import('./pages/Setup'), 'Setup');
 const TaskRedirect = lazyNamed(() => import('./pages/TaskRedirect'), 'TaskRedirect');
 const Tools = lazyNamed(() => import('./pages/Tools'), 'Tools');
 const ToolsCli = lazyNamed(() => import('./pages/ToolsCli'), 'ToolsCli');
-const TrialChatGateHarness = lazyNamed(
-  () => import('./pages/TrialChatGateHarness'),
-  'TrialChatGateHarness'
-);
-const Try = lazyNamed(() => import('./pages/Try'), 'Try');
-const TryCapExceeded = lazyNamed(() => import('./pages/TryCapExceeded'), 'TryCapExceeded');
-const TryDiscovery = lazyNamed(() => import('./pages/TryDiscovery'), 'TryDiscovery');
-const TryWaitlistThanks = lazyNamed(() => import('./pages/TryWaitlistThanks'), 'TryWaitlistThanks');
+const RetiredTrial = lazyNamed(() => import('./pages/RetiredTrial'), 'RetiredTrial');
 const UiStandards = lazyNamed(() => import('./pages/UiStandards'), 'UiStandards');
 const Workspace = lazyNamed(() => import('./pages/workspace'), 'Workspace');
 
@@ -270,7 +262,6 @@ function SuperadminRoute({ children }: { children: ReactNode }) {
 }
 
 export const DEV_ONLY_ROUTE_PATHS = [
-  '/__test/trial-chat-gate',
   '/__test/error-boundary',
   '/ui-standards',
 ] as const;
@@ -300,20 +291,13 @@ export default function App() {
                   <Routes>
                     {/* Public routes */}
                     <Route path="/" element={<Landing />} />
-                    <Route path="/try" element={page(<Try />)} />
-                    <Route path="/try/cap-exceeded" element={page(<TryCapExceeded />)} />
-                    <Route path="/try/waitlist/thanks" element={page(<TryWaitlistThanks />)} />
-                    <Route path="/try/:trialId" element={page(<TryDiscovery />)} />
+                    {/* Retired anonymous trials: stale links go to the self-hosting guide */}
+                    <Route path="/try/*" element={page(<RetiredTrial />)} />
                     <Route path="/oauth/consent" element={page(<ConnectorConsent />)} />
                     <Route path="/device" element={page(<DeviceAuth />)} />
                     <Route path="/setup" element={page(<Setup />)} />
                     {showDevOnlyRoutes && (
                       <>
-                        {/* Harness for Playwright audits — mounts trial components with mock data */}
-                        <Route
-                          path="/__test/trial-chat-gate"
-                          element={page(<TrialChatGateHarness />)}
-                        />
                         <Route
                           path="/__test/error-boundary"
                           element={<ErrorBoundaryAuditHarness />}
@@ -468,7 +452,6 @@ export default function App() {
                         <Route path="infrastructure" element={page(<AdminInfrastructure />)} />
                         <Route path="storage" element={page(<AdminStorage />)} />
                         <Route path="ai-proxy" element={page(<AdminAIProxy />)} />
-                        <Route path="trials" element={page(<AdminTrials />)} />
                         <Route path="costs" element={page(<AdminCosts />)} />
                         <Route path="usage" element={page(<AdminComputeUsage />)} />
                         <Route path="quotas" element={page(<AdminComputeQuotas />)} />

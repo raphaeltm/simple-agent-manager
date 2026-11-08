@@ -38,9 +38,9 @@ export const PROVIDER_CATALOG_STALE_TIME_MS = resolveDurationMs(
 );
 
 /**
- * Trial status (`GET /api/trial-status`) — whether a platform-funded trial is still
- * available to this user. Moves only when a trial is claimed or expires, both of
- * which invalidate the query explicitly.
+ * Platform compute availability (`GET /api/trial-status`) — whether installation
+ * platform compute is available to this user. Moves only when an admin changes the
+ * platform cloud credential or AI proxy configuration.
  */
 const DEFAULT_TRIAL_STATUS_STALE_TIME_MS = 60_000;
 export const TRIAL_STATUS_STALE_TIME_MS = resolveDurationMs(

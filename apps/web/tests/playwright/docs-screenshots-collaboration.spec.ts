@@ -237,7 +237,6 @@ async function setupMocks(page: Page, viewer: Viewer) {
       return respond([{ id: 'inst-1', accountName: 'acme', accountType: 'Organization' }]);
     }
     if (path === '/api/agents') return respond({ agents: [] });
-    if (path === '/api/trial/status') return respond({ available: false });
     if (path === '/api/workspaces') return respond([]);
     if (path === '/api/projects') return respond({ projects: [PROJECT], nextCursor: null });
 

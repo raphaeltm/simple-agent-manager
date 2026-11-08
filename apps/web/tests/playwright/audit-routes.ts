@@ -172,10 +172,6 @@ export async function setupProjectChatMocks(page: Page, options: ProjectChatMock
     route.fulfill({ status: 200, json: [{ provider: 'hetzner', status: 'valid' }] })
   );
 
-  await page.route('**/api/trial/status', (route: Route) =>
-    route.fulfill({ status: 200, json: { available: false } })
-  );
-
   await page.route('**/api/agents', (route: Route) =>
     route.fulfill({ status: 200, json: { agents: [] } })
   );

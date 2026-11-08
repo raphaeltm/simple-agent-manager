@@ -17,6 +17,7 @@ import { Link, useNavigate } from 'react-router';
 import { LoadError, Loading, PageHeader } from '../../components/page-kit/page';
 import { Panel, SectionTitle } from '../../components/page-kit/ui';
 import type { DeploymentEnvironment } from '../../lib/api';
+import { PUBLIC_WEBSITE_URL } from '../../lib/public-website';
 import { useProjectContext } from '../ProjectContext';
 import { Column } from './column';
 import { useEnvironments, useProfiles } from './data';
@@ -149,9 +150,6 @@ function EnvRow({
     </div>
   );
 }
-
-const PUBLIC_WEBSITE_URL =
-  import.meta.env.VITE_PUBLIC_WEBSITE_URL || 'https://simple-agent-manager.org';
 
 function EmptyList({ onCreate }: { onCreate: () => void }) {
   return (

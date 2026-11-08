@@ -55,8 +55,8 @@ export const AIUsageChart: FC<Props> = ({ data }) => {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <KpiCard label="Requests" value={data.totalRequests.toLocaleString()} />
         <KpiCard label="Total Tokens" value={formatTokens(data.totalInputTokens + data.totalOutputTokens)} subtitle={`${formatTokens(data.totalInputTokens)} in / ${formatTokens(data.totalOutputTokens)} out`} />
-        <KpiCard label="Est. Cost" value={formatCost(data.totalCostUsd)} subtitle={data.trialRequests > 0 ? `${formatCost(data.trialCostUsd)} from trials` : undefined} />
-        <KpiCard label="Trials" value={data.trialRequests.toLocaleString()} subtitle={data.cachedRequests > 0 ? `${data.cachedRequests} cached` : undefined} />
+        <KpiCard label="Est. Cost" value={formatCost(data.totalCostUsd)} />
+        <KpiCard label="Cached" value={data.cachedRequests.toLocaleString()} subtitle={data.errorRequests > 0 ? `${data.errorRequests.toLocaleString()} errors` : undefined} />
       </div>
 
       {/* Tokens by model — horizontal bar chart */}

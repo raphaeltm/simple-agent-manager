@@ -67,9 +67,6 @@ vi.mock('../../src/pages/AdminAIProxy', () => ({
   AdminAIProxy: () => <div data-testid="admin-ai-proxy-page" />,
 }));
 
-vi.mock('../../src/pages/AdminTrials', () => ({
-  AdminTrials: () => <div data-testid="admin-trials-page" />,
-}));
 
 vi.mock('../../src/pages/AdminCosts', () => ({
   AdminCosts: () => <div data-testid="admin-costs-page" />,
@@ -147,8 +144,8 @@ vi.mock('../../src/pages/Sam', () => ({
   Sam: () => <div data-testid="sam-page" />,
 }));
 
-vi.mock('../../src/pages/TrialChatGateHarness', () => ({
-  TrialChatGateHarness: () => <div data-testid="trial-chat-gate-harness-page" />,
+vi.mock('../../src/pages/RetiredTrial', () => ({
+  RetiredTrial: () => <div data-testid="retired-trial-page" />,
 }));
 
 vi.mock('../../src/pages/Projects', () => ({
@@ -342,11 +339,16 @@ describe('App routes', () => {
     expect(await screen.findByTestId('sam-page')).toBeInTheDocument();
   });
 
-  it('keeps test harness routes available in local/test mode', async () => {
-    renderAt('/__test/trial-chat-gate');
-    expect(await screen.findByTestId('trial-chat-gate-harness-page')).toBeInTheDocument();
+  it.each(['/try', '/try/trial_01ABC', '/try/cap-exceeded', '/try/waitlist/thanks'])(
+    'sends the retired anonymous-trial link %s to the retired-trial page',
+    async (path) => {
+      renderAt(path);
+      expect(await screen.findByTestId('retired-trial-page')).toBeInTheDocument();
+      expect(screen.queryByTestId('landing-page')).not.toBeInTheDocument();
+    }
+  );
 
-    cleanup();
+  it('keeps test harness routes available in local/test mode', async () => {
     renderAt('/ui-standards');
     expect(await screen.findByTestId('ui-standards-page')).toBeInTheDocument();
   });
@@ -402,7 +404,6 @@ describe('App routes', () => {
     vi.stubEnv('MODE', 'production');
 
     expect(DEV_ONLY_ROUTE_PATHS).toEqual([
-      '/__test/trial-chat-gate',
       '/__test/error-boundary',
       '/ui-standards',
     ]);
@@ -414,7 +415,6 @@ describe('App routes', () => {
 
       expect(screen.getByTestId('landing-page')).toBeInTheDocument();
       expect(screen.queryByTestId('sam-page')).not.toBeInTheDocument();
-      expect(screen.queryByTestId('trial-chat-gate-harness-page')).not.toBeInTheDocument();
       expect(screen.queryByTestId('ui-standards-page')).not.toBeInTheDocument();
     }
   });

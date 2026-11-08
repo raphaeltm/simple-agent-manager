@@ -534,7 +534,6 @@ async function openWorkspaceChat(page: Page, theme: 'dark' | 'light') {
     if (path === `/api/nodes/${NODE.id}`) return json(NODE);
     if (path === `/api/nodes/${NODE.id}/system-info`) return json(NODE_SYSTEM_INFO);
     if (path === '/api/projects') return json({ projects: [], nextCursor: null });
-    if (path === '/api/trial/status') return json({ available: false });
     if (path === '/api/agents') return json({ agents: [] });
     if (path === '/api/github/installations') return json([]);
     return json({});

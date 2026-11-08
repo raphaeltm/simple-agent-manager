@@ -198,7 +198,7 @@ describe('AppShell (global context)', () => {
     ];
 
     expect(navPaths).not.toContain('/sam');
-    expect(navPaths).not.toContain('/__test/trial-chat-gate');
+    expect(navPaths).not.toContain('/__test/error-boundary');
     expect(navPaths).not.toContain('/ui-standards');
     expect(navPaths.every((path) => !path.includes('prototype'))).toBe(true);
     expect(navPaths.every((path) => !path.includes('__test'))).toBe(true);

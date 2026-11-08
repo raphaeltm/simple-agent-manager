@@ -94,7 +94,6 @@ async function setupMocks(page: Page, scenario: RecoveryScenario) {
     }
     if (path === '/api/github/installations') return respond(route, 200, []);
     if (path === '/api/credentials') return respond(route, 200, []);
-    if (path === '/api/trial/status') return respond(route, 200, { available: false });
     if (path === '/api/agents') return respond(route, 200, { agents: [] });
     if (path === '/api/projects') {
       return respond(route, 200, { projects: [PROJECT], nextCursor: null });

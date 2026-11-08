@@ -35,7 +35,6 @@ interface SettingFixture {
     | 'OAuth'
     | 'Connector'
     | 'Operations'
-    | 'Trials'
     | 'Collaboration'
     | 'Chat'
     | 'AI models'
@@ -230,15 +229,6 @@ const SETTINGS = [
     value: true,
   }),
   setting({
-    name: 'trials.enabled',
-    type: 'boolean',
-    category: 'Trials',
-    description: 'Allow anonymous trials. Fresh installs remain disabled.',
-    defaultValue: false,
-    value: false,
-    source: 'kv',
-  }),
-  setting({
     name: 'collaboration.sessionAccessMaxGrants',
     type: 'integer',
     category: 'Collaboration',
@@ -397,7 +387,7 @@ async function openSettingsPage(page: Page) {
   });
   // Every registry entry rendered as a card, under the groups the guide names.
   await expect(page.locator('article')).toHaveCount(SETTINGS.length);
-  for (const group of ['OAuth', 'Connector', 'Operations', 'Trials', 'Collaboration']) {
+  for (const group of ['OAuth', 'Connector', 'Operations', 'Collaboration']) {
     await expect(page.getByRole('heading', { name: group, exact: true })).toBeVisible();
   }
   await expect(page.getByText(`${SETTINGS.length} settings · Revision 3`)).toBeVisible();

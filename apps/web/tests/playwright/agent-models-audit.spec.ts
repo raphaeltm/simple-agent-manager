@@ -156,7 +156,6 @@ async function setupProjectSettingsMocks(page: Page, options: MockOptions = {}) 
     if (path === '/api/credentials') return respond(200, []);
     if (path.startsWith('/api/github')) return respond(200, []);
     if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
-    if (path === '/api/trial/status') return respond(200, { available: false });
 
     const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
     if (projectMatch) {

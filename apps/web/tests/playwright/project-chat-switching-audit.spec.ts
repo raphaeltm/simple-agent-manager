@@ -217,7 +217,6 @@ async function setupApi(page: Page, detailRequests: DetailRequest[]) {
       return respond({ notifications: [], unreadCount: 0, nextCursor: null });
     }
     if (path === '/api/credentials') return respond([{ provider: 'hetzner', status: 'valid' }]);
-    if (path === '/api/trial/status') return respond({ available: false });
     if (path === '/api/agents') return respond({ agents: [] });
     if (path === '/api/github/installations') return respond([]);
     if (path === '/api/report-issue/config') return respond({ enabled: true });

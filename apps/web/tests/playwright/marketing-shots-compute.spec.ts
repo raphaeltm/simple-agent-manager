@@ -1281,7 +1281,6 @@ const COST_SUMMARY = {
     totalRequests: 82_000,
     totalInputTokens: 140_600_000,
     totalOutputTokens: 22_950_000,
-    trialCostUsd: 0,
     cachedRequests: 9400,
     errorRequests: 62,
     byModel: [

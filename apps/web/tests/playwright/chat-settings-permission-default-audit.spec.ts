@@ -142,7 +142,6 @@ async function setupMocks(page: Page, savedPermissionMode: string | null) {
         updatedAt: savedPermissionMode ? NOW : null,
       });
     }
-    if (path === '/api/trial/status') return fulfill(route, { available: false });
     if (path === '/api/github/installations') return fulfill(route, []);
 
     return fulfill(route, {});
