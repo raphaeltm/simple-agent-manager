@@ -150,6 +150,23 @@ export async function appendDeploymentPublishJobEvent(
   const now = new Date().toISOString();
   const status = normalizeStatus(input.status);
   const terminal = input.terminal || (status ? PUBLISH_JOB_TERMINAL_STATUSES.has(status) : false);
+  const predicate = and(
+    eq(schema.deploymentPublishJobs.id, input.publishJobId),
+    input.expectedStatus
+      ? eq(schema.deploymentPublishJobs.status, input.expectedStatus)
+      : undefined,
+    notInArray(schema.deploymentPublishJobs.status, [...PUBLISH_JOB_TERMINAL_STATUSES])
+  );
+  if (input.eventType === 'publish.job.heartbeat') {
+    // Heartbeats prove executor liveness independently of slow build/upload progress.
+    // The same terminal fence prevents late heartbeats from reviving a canceled job.
+    const changed = await db
+      .update(schema.deploymentPublishJobs)
+      .set({ lastHeartbeatAt: now, updatedAt: now })
+      .where(predicate)
+      .returning({ id: schema.deploymentPublishJobs.id });
+    return changed.length > 0;
+  }
   const update: Partial<schema.NewDeploymentPublishJobRow> = {
     updatedAt: now,
     lastEventAt: now,
@@ -174,13 +191,6 @@ export async function appendDeploymentPublishJobEvent(
     update.completedAt =
       sql`coalesce(${schema.deploymentPublishJobs.completedAt}, ${now})` as unknown as string;
 
-  const predicate = and(
-    eq(schema.deploymentPublishJobs.id, input.publishJobId),
-    input.expectedStatus
-      ? eq(schema.deploymentPublishJobs.status, input.expectedStatus)
-      : undefined,
-    notInArray(schema.deploymentPublishJobs.status, [...PUBLISH_JOB_TERMINAL_STATUSES])
-  );
   // Insert history and transition together. Sequencing inside the batch avoids
   // the acceptance/event callback race on the unique (publish_job_id, seq) key.
   const insert = db.insert(schema.deploymentPublishJobEvents).select(
@@ -263,6 +273,7 @@ export async function getDeploymentPublishJobForMcp(
     currentStep: job.currentStep,
     createdAt: job.createdAt,
     updatedAt: job.updatedAt,
+    lastHeartbeatAt: job.lastHeartbeatAt,
     startedAt: job.startedAt,
     completedAt: job.completedAt,
     environment: job.environmentName,
@@ -332,8 +343,9 @@ export async function failExpiredDeploymentPublishJobs(
   const now = new Date(nowMs).toISOString();
   const stallCutoff = new Date(nowMs - settings.stallMs).toISOString();
   const deadlineCutoff = new Date(nowMs - settings.deadlineMs).toISOString();
+  // SQL NULL never satisfies the heartbeat comparison: legacy agents are deadline-only.
   const expired = sql`(${schema.deploymentPublishJobs.createdAt} <= ${deadlineCutoff}
-    OR coalesce(${schema.deploymentPublishJobs.lastEventAt}, ${schema.deploymentPublishJobs.createdAt}) <= ${stallCutoff})`;
+    OR ${schema.deploymentPublishJobs.lastHeartbeatAt} <= ${stallCutoff})`;
   // Disjoint status ranges use the existing (status, updated_at) index and
   // exclude terminal history. Unlike a fixed active-status list, this also
   // covers new non-terminal states introduced by later executors.

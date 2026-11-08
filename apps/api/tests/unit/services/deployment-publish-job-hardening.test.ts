@@ -21,14 +21,20 @@ const settings = { stallMs: 60_000, deadlineMs: 1_200_000, sweepLimit: 2 };
 function db() {
   return drizzle(database, { schema });
 }
-function seed(id = 'job', status = 'building', createdAt = recent, lastEventAt = recent) {
+function seed(
+  id = 'job',
+  status = 'building',
+  createdAt = recent,
+  lastEventAt = recent,
+  lastHeartbeatAt: string | null = lastEventAt
+) {
   sqlite
     .prepare(
       `INSERT INTO deployment_publish_jobs
-    (id, project_id, workspace_id, environment_id, node_id, requested_by, status, attempt, created_at, updated_at, last_event_at)
-    VALUES (?, 'project', 'workspace', 'environment', 'node', 'user', ?, 1, ?, ?, ?)`
+    (id, project_id, workspace_id, environment_id, node_id, requested_by, status, attempt, created_at, updated_at, last_event_at, last_heartbeat_at)
+    VALUES (?, 'project', 'workspace', 'environment', 'node', 'user', ?, 1, ?, ?, ?, ?)`
     )
-    .run(id, status, createdAt, createdAt, lastEventAt);
+    .run(id, status, createdAt, createdAt, lastEventAt, lastHeartbeatAt);
 }
 function row(id = 'job') {
   return sqlite.prepare('SELECT * FROM deployment_publish_jobs WHERE id = ?').get(id) as Record<
@@ -86,6 +92,41 @@ beforeEach(() => {
 afterEach(() => sqlite.close());
 
 describe('publish job atomic guards on SQLite', () => {
+  it('preserves silent healthy builds and legacy jobs while expiring dead heartbeat-capable jobs', async () => {
+    seed('alive', 'building', old, old, recent);
+    seed('legacy', 'uploading', old, old, null);
+    seed('dead', 'building', old, recent, old);
+    const failed = await failExpiredDeploymentPublishJobs(db(), settings, now);
+    expect(failed.map((job) => job.id)).toEqual(['dead']);
+    expect(row('alive').status).toBe('building');
+    expect(row('legacy').status).toBe('uploading');
+    expect(row('dead')).toMatchObject({ status: 'failed', error_code: 'stalled', retryable: 1 });
+  });
+  it('records heartbeat capability without changing progress or allowing terminal resurrection', async () => {
+    seed('job', 'building', old, old, null);
+    expect(
+      await appendDeploymentPublishJobEvent(db(), {
+        ...event,
+        eventType: 'publish.job.heartbeat',
+        status: undefined,
+      })
+    ).toBe(true);
+    expect(row()).toMatchObject({ status: 'building', last_event_at: old });
+    expect(row().last_heartbeat_at).toBeTruthy();
+    expect(sqlite.prepare('SELECT COUNT(*) AS n FROM deployment_publish_job_events').get()).toEqual(
+      { n: 0 }
+    );
+    await cancelDeploymentPublishJob(db(), 'project', 'workspace', 'job');
+    const heartbeat = row().last_heartbeat_at;
+    expect(
+      await appendDeploymentPublishJobEvent(db(), {
+        ...event,
+        eventType: 'publish.job.heartbeat',
+        status: undefined,
+      })
+    ).toBe(false);
+    expect(row()).toMatchObject({ status: 'canceled', last_heartbeat_at: heartbeat });
+  });
   it('allows owner cancellation and fences late events and releases', async () => {
     seed();
     expect(await cancelDeploymentPublishJob(db(), 'project', 'workspace', 'job')).toMatchObject({
@@ -145,7 +186,7 @@ describe('publish job atomic guards on SQLite', () => {
         if (!injected && query.toLowerCase().startsWith('update "deployment_publish_jobs"')) {
           injected = true;
           if (race === 'heartbeat')
-            sqlite.prepare('UPDATE deployment_publish_jobs SET last_event_at = ?').run(recent);
+            sqlite.prepare('UPDATE deployment_publish_jobs SET last_heartbeat_at = ?').run(recent);
           else sqlite.exec("UPDATE deployment_publish_jobs SET status = 'canceled'");
         }
         return originalPrepare(query);

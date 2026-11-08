@@ -258,7 +258,8 @@ export async function cancelBuildPublishJobOnVm(
       'X-SAM-Workspace-Id': workspaceId,
     },
     {},
-    timeoutMs
+    timeoutMs,
+    { noWakeContainer: true, recoverContainerOnTimeout: false }
   );
 }
 

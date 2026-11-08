@@ -5,6 +5,10 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
+const cancel = vi.hoisted(() => vi.fn(async () => undefined));
+vi.mock('../../../src/services/deployment-publish-job-cancel', () => ({
+  cancelDeploymentPublishJobOnVmBestEffort: cancel,
+}));
 const record = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock('../../../src/services/project-lifecycle-events', () => ({
   recordDeploymentPublishJobLifecycleEventBestEffort: record,
@@ -14,6 +18,7 @@ vi.mock('../../../src/services/deployment-publish-job-settings', () => ({
     stallMs: 60_000,
     deadlineMs: 1_200_000,
     sweepLimit: 2,
+    cancelTimeoutMs: 1000,
   }),
 }));
 const { runDeploymentPublishJobSweep } =
@@ -23,21 +28,27 @@ beforeEach(() => {
   sqlite = new Database(':memory:');
   createSchemaTables(sqlite, [schema.deploymentPublishJobs]);
   record.mockClear();
+  cancel.mockClear();
 });
 afterEach(() => sqlite.close());
 it('sweeps real persisted jobs and hands lifecycle delivery to waitUntil', async () => {
   const old = new Date(Date.now() - 120_000).toISOString();
   sqlite
     .prepare(
-      "INSERT INTO deployment_publish_jobs(id,project_id,environment_id,workspace_id,node_id,status,created_at,updated_at,last_event_at) VALUES('job','project','environment','workspace','node','building',?,?,?)"
+      "INSERT INTO deployment_publish_jobs(id,project_id,environment_id,workspace_id,node_id,status,created_at,updated_at,last_event_at,last_heartbeat_at) VALUES('job','project','environment','workspace','node','building',?,?,?,?)"
     )
-    .run(old, old, old);
+    .run(old, old, old, old);
   const pending: Promise<unknown>[] = [];
   const result = await runDeploymentPublishJobSweep(
     { DATABASE: createSqliteD1(sqlite) } as Env,
     (promise) => pending.push(promise)
   );
   expect(result.failed).toBe(1);
+  expect(cancel).toHaveBeenCalledWith(
+    expect.anything(),
+    expect.objectContaining({ id: 'job', status: 'failed' }),
+    1000
+  );
   expect(pending).toHaveLength(1);
   await Promise.all(pending);
   expect(

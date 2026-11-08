@@ -135,7 +135,7 @@ Call \`deployments_write { method: 'publish', environment, reference?, workingDi
 
 SAM returns a \`publishJobId\` quickly after the VM accepts the job. The actual Docker Compose build, image export, artifact upload, and release recording continue in the background. You do not run any docker or registry commands.
 
-Publishing requires a VM session; Instant sessions cannot publish yet. Jobs fail with retryable \`stalled\` after prolonged silence or \`deadline_exceeded\` after the overall deadline. To cancel, use \`deployments_write { method: 'cancel_publish', publishJobId }\` (also callable as \`cancel_publish\`).
+Publishing requires a VM session; Instant sessions cannot publish yet. Jobs fail with retryable \`stalled\` when a heartbeat-capable executor stops heartbeating (older agents are deadline-only) or \`deadline_exceeded\` after the overall deadline. To cancel, use \`deployments_write { method: 'cancel_publish', publishJobId }\` (also callable as \`cancel_publish\`).
 
 After \`deployments_write\` method \`publish\` returns, call \`deployments_read { method: 'publish_status', publishJobId }\` every 10-20 seconds until the status is terminal:
 

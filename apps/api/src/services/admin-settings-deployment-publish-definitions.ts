@@ -11,7 +11,7 @@ export const DEPLOYMENT_PUBLISH_SETTINGS = [
     'deployments.publishJobStallMs',
     DEFAULT_DEPLOY_PUBLISH_JOB_STALL_MS,
     'Operations',
-    'Maximum silence between publish-job events before failing the job as stalled.',
+    'Maximum silence between executor heartbeats before failing a heartbeat-capable job as stalled. Legacy jobs are deadline-only.',
     { min: 10_000, max: 86_400_000 }
   ),
   integerDefinition(

@@ -16,7 +16,7 @@ import type { Env } from '../../env';
 import { parsePositiveInt } from '../../lib/route-helpers';
 import { assertAgentDeploymentAllowed } from '../../services/deployment-control';
 import { loadDeploymentBuildInterpolationEnv } from '../../services/deployment-environment-config';
-import { getDeploymentPublishJobSettings } from '../../services/deployment-publish-job-settings';
+import { cancelDeploymentPublishJobOnVmBestEffort } from '../../services/deployment-publish-job-cancel';
 import {
   appendDeploymentPublishJobEvent,
   cancelDeploymentPublishJob,
@@ -34,7 +34,6 @@ import {
   sanitizeUserInput,
 } from './_helpers';
 import {
-  cancelBuildPublishJobOnVm,
   lookupWorkspaceForVmAgent,
   requireWorkspace,
   startBuildPublishJobOnVm,
@@ -353,19 +352,7 @@ export async function handleCancelPublish(
       source: 'mcp.cancel_publish',
       occurredAt: job.completedAt ?? job.updatedAt,
     });
-    try {
-      const settings = await getDeploymentPublishJobSettings(env);
-      await cancelBuildPublishJobOnVm(
-        env,
-        job.workspaceId,
-        tokenData.userId,
-        job.nodeId,
-        job.id,
-        settings.cancelTimeoutMs
-      );
-    } catch {
-      // Old agents return 404. Durable cancellation and release fencing remain authoritative.
-    }
+    await cancelDeploymentPublishJobOnVmBestEffort(env, job);
   }
   return handleGetPublishStatus(requestId, { publishJobId }, tokenData, env);
 }

@@ -11,7 +11,7 @@ Phase 1 of idea 01KZ6V37D1QGDR3WN12PSDB0QD. Node-owned builds currently have no 
 - [x] Lifecycle events for API starting and failed_to_start; early Instant gate references phase-3 idea.
 - [x] Go handler/callback payload tests; delete-guard red/restore checks.
 - [x] Docs and channel contracts.
-- [x] Full checks, specialist reviews, staging VM binary refresh and success/cancel/sweep/Instant verification with cleanup.
+- [ ] Full checks, specialist reviews, staging VM binary refresh and success/cancel/sweep/Instant verification with cleanup.
 - [ ] PR, CI, CodeRabbit, merge, production smoke; idea update with PR.
 
 ## Scope
@@ -55,3 +55,12 @@ No context bundles, executor columns, queueing, or job tokens. Current SAM outpu
 - Temporary setting reset; no platform_settings override remains (default300000ms). D1 cleanup proof17:13:05Z confirmsall3fixture nodesdeleted withterminationproof, environment/profile/tasks absent. Existing project/profile and unrelatednodes retained.
 - Full evidence in `tasks/evidence/publish-hardening-staging.json`; mutation proofnowincludes failingtestnames/excerpts. Public defaultstagingapphostnameTLS negotiationfailedfromrunner; appliedservice verified, publicHTTPSresponse remainsunverified. No TLS/routingchanges inthisPR.
 - Finalcompletion review approvesimplementation/fourbehaviors, requiresreleaseworkflowbeforearchive. CodeRabbit/merge/productionhealth/finalideanote remain.
+
+### Coordinator correctness review — heartbeat revision
+- Coordinator requested changes on1d863927a: progress silence is not executor death; API20min deadline races the later-started VM20min timeout. PR remains draft/needs-human-review, exact new-head approval required.
+- Added nullable last_heartbeat_at via additive0227 migration. Heartbeat callback only updates liveness under terminal CAS, not progress/history/status. Legacy null-heartbeat jobs are deadline-only. API deadline30min includes start/callback grace.
+- VM emits immediate and configurable periodic heartbeats(default1m), each bounded by existing HTTP_CALLBACK_TIMEOUT. Heartbeat context is canceled/joined before terminal callback. Real-handler silent-runner and blocked-callback tests passed.
+- Sweep now sends bounded best-effort VM cancellation after durable failure, in waitUntil alongside lifecycle delivery; cancellation never wakes a sleeping container. MCP and sweep share structured cancellation-failure logging; old-agent404 informational, response bodies omitted.
+- Real-resolver cross-language default contract runs in existing combined CLI/Worker CI job; APIregistry defaults passed to exact Go config.Load test, requiring deadline>VMtimeout+5min margin. Local contract passed.
+- New SQL regression went red against old predicate(alive+legacy wrongly swept), then21SQL/sweep tests green. Affected SQL/MCP/cancel suites30tests passed; focusedGo config/server publish tests, APItypecheck, scopedlint and agent-context budget passed.
+- Still required: mutation proofs for new guards/default margin/heartbeat producer; affected regression suite, specialist rereview, CI, fresh staging silent-but-heartbeating + killed-job tests and cleanup, CodeRabbitincrementalwait, coordinator new-head approval. Earlier staging evidence is historical for pre-heartbeat head and not claimed sufficient for this revision.

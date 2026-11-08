@@ -280,12 +280,15 @@ func (s *Server) prepareMcpBuildAndPublish(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) runAcceptedPublishJob(ctx context.Context, jobID string, prepared *preparedBuildPublish, reporter publish.EventSink) {
+	stopHeartbeats := s.startPublishJobHeartbeats(ctx, reporter)
 	reporter.Event(ctx, publish.Event{Status: "starting", CurrentStep: "started", EventType: "publish.job.started", Message: "publish job started"})
 	runner := s.runPreparedBuildAndPublish
 	if s.buildPublishRunner != nil {
 		runner = s.buildPublishRunner
 	}
 	result, err := runner(ctx, prepared, reporter)
+	// Abort and join any in-flight heartbeat before emitting a terminal callback.
+	stopHeartbeats()
 	s.publishJobsMu.Lock()
 	state := s.publishJobs[jobID]
 	if state.Cancel != nil {
