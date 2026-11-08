@@ -58,8 +58,9 @@ export async function fixture() {
       idempotencyKey: key,
       message,
     });
-  const tool = async (name: string, args: Record<string, unknown>) => {
-    const response = await SELF.fetch('https://api.test.example.com/mcp', {
+  /** The raw `/mcp` response, for cases MCP authentication itself refuses. */
+  const toolRequest = (name: string, args: Record<string, unknown>) =>
+    SELF.fetch('https://api.test.example.com/mcp', {
       method: 'POST',
       headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -69,6 +70,8 @@ export async function fixture() {
         params: { name, arguments: args },
       }),
     });
+  const tool = async (name: string, args: Record<string, unknown>) => {
+    const response = await toolRequest(name, args);
     expect(response.status).toBe(200);
     return response.json<{
       error?: { message: string };
@@ -85,6 +88,7 @@ export async function fixture() {
     stub,
     publish,
     tool,
+    toolRequest,
     actor,
     token,
   };

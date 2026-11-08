@@ -284,6 +284,14 @@ describe('read-only channel subscriber roster through MCP', () => {
           .bind(condition, f.projectId, f.userId)
           .run();
       }
+      if (condition === 'foreign-workspace') {
+        // The token's workspace no longer belongs to its project, so MCP authentication
+        // refuses (and revokes) the token before any tool runs.
+        const refused = await f.toolRequest('list_channel_subscribers', { channel: 'builds' });
+        expect(refused.status).toBe(401);
+        expect(await refused.text()).not.toContain('other-agent');
+        continue;
+      }
       const reply = await f.tool('list_channel_subscribers', { channel: 'builds' });
       expect(reply.error).toBeDefined();
       expect(reply.result).toBeUndefined();
