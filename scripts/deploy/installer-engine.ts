@@ -27,6 +27,7 @@ import {
   importPrebuiltImages,
   placePrebuiltFiles,
   prebuiltBaseUrl,
+  vmAgentPrebuiltKey,
 } from './installer-engine-prebuilt.js';
 import { verifyEngineReadiness } from './installer-engine-readiness.js';
 import { readContainerArtifact, verifyPublisherRuntime } from './installer-engine-runtime.js';
@@ -357,7 +358,11 @@ export async function runInstallerEngine(
       VM_AGENT_OUTPUTS,
       'packages/vm-agent',
       async () => {
-        const prebuiltKey = `release=${env.VM_AGENT_RELEASE};build=${env.VM_AGENT_BUILD_DATE};${goVersion}`;
+        const prebuiltKey = vmAgentPrebuiltKey(
+          String(env.VM_AGENT_RELEASE),
+          String(env.VM_AGENT_BUILD_DATE),
+          goVersion
+        );
         if (!c.skipAgent && (await prebuiltFiles('vm-agent', prebuiltKey, VM_AGENT_OUTPUTS)))
           return;
         const version = [

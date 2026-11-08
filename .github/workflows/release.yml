@@ -15,6 +15,9 @@ jobs:
     name: Tag and release the latest production deploy
     if: github.repository == 'raphaeltm/simple-agent-manager'
     runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.tag.outputs.tag_name }}
+      created: ${{ steps.create.outputs.created }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -92,6 +95,7 @@ jobs:
           echo "Will create tag: $TAG_NAME"
 
       - name: Create tag and release
+        id: create
         if: steps.deploy.outputs.skip != 'true' && steps.tag.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -168,3 +172,15 @@ jobs:
             --title "$TAG_NAME"
 
           echo "Created release $TAG_NAME at $DEPLOY_SHA"
+          echo "created=true" >> "$GITHUB_OUTPUT"
+
+  # Prebuilt VM-agent binaries and container images for user-owned installations.
+  # Re-run for an existing tag with the Installer Artifacts workflow's dispatch.
+  installer-artifacts:
+    needs: release
+    if: needs.release.outputs.created == 'true'
+    uses: ./.github/workflows/installer-artifacts.yml
+    with:
+      tag: ${{ needs.release.outputs.tag_name }}
+    permissions:
+      contents: write

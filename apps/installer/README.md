@@ -74,6 +74,12 @@ Builds reuse verified outputs (`scripts/deploy/installer-build-cache.mjs`). The 
 
 Every hit is also checked against its recorded size and SHA-256 before use. A miss, a storage error, an invalid MAC, a mismatch or a modified input tree builds normally instead, so the cache can only save time, never fail an install. Storage credentials exist on disk only for the duration of one request.
 
+### Prebuilt artifacts
+
+When the installer Worker has `ARTIFACT_BASE_URL` (an https URL; the deploy workflow sets it from the GitHub Environment variable `INSTALLER_ARTIFACT_BASE_URL`), the builder reads `<base>/sam-installer-artifacts.json`. It places the published VM-agent outputs whose content key (agent release, build date, `go version`) matches its own, and copies each published container image whose build inputs hash to the same key into the account registry with `crane`, deploying it by digest (`scripts/deploy/installer-engine-prebuilt.ts`). Every file is accepted only with the manifest's size and SHA-256, and every image only when the registry reports the published digest. Anything missing, malformed or mismatched is built as usual.
+
+SAM's daily release attaches these artifacts (`.github/workflows/installer-artifacts.yml`, staged by `scripts/deploy/installer-engine-publish.ts`), so the canonical installer uses `https://github.com/raphaeltm/simple-agent-manager/releases/latest/download`. Keys follow content, not commits, so a newer installer still matches the latest release until the VM agent, a Dockerfile or a copied file changes. To backfill an existing tag, run **Installer Artifacts** with that tag.
+
 The builder runs on a `standard-4` container (4 vCPU, 12 GiB). `BUILDER_INSTANCE` on the maintenance Worker overrides it with `standard-1` to `standard-4`.
 
 Created resources are retained. No automatic uninstall or database rollback is promised. Application observability is disabled to avoid persisting callback URLs. A hosted operator can change code; separate deployment is not trustlessness.

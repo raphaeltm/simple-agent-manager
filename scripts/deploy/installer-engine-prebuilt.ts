@@ -61,6 +61,14 @@ export interface PrebuiltManifest {
 
 type Request = (url: string, init?: RequestInit) => Promise<Response>;
 
+/**
+ * Content key of the VM-agent build outputs. The release and build date come from
+ * the content-derived agent release, so the key changes only with the agent's
+ * sources or the Go toolchain (`go version` output).
+ */
+export const vmAgentPrebuiltKey = (release: string, buildDate: string, goVersion: string) =>
+  `release=${release};build=${buildDate};${goVersion}`;
+
 /** An https base URL without credentials, query or fragment, or undefined. */
 export function prebuiltBaseUrl(value: string | undefined): string | undefined {
   if (!value) return undefined;

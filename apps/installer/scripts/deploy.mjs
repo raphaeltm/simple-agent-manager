@@ -156,6 +156,15 @@ config.vars.SOURCE_URL =
       : '/tree/main/'
   );
 config.vars.DOCS_URL = process.env.DOCS_URL || template.vars.DOCS_URL;
+// Prebuilt installation artifacts (for example a release download URL). Unset keeps
+// whatever the deployed installer already has; installations build without one.
+if (process.env.ARTIFACT_BASE_URL) {
+  if (!/^https:\/\/[^\s?#@]{1,500}$/.test(process.env.ARTIFACT_BASE_URL))
+    throw new Error(
+      'ARTIFACT_BASE_URL must be an https URL without credentials, query or fragment'
+    );
+  config.vars.ARTIFACT_BASE_URL = process.env.ARTIFACT_BASE_URL;
+}
 const explicitCredentials = !!(process.env.OAUTH_CLIENT_ID || process.env.OAUTH_CLIENT_SECRET);
 const reuseReadyConfiguration = !!existing && ready && !scopesChanged && !explicitCredentials;
 async function findOAuthClient(clientId) {

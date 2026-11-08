@@ -85,6 +85,8 @@ jobs:
           # (staging opts in to full mode for live proofs), otherwise preserve.
           INSTALLER_MODE: ${{ github.event_name == 'workflow_dispatch' && inputs.mode || vars.INSTALLER_MODE || 'preserve' }}
           OAUTH_REGISTRATION_TOKEN: ${{ secrets.OAUTH_REGISTRATION_TOKEN }}
+          # Release download URL for prebuilt artifacts (installer-artifacts.yml).
+          ARTIFACT_BASE_URL: ${{ vars.INSTALLER_ARTIFACT_BASE_URL }}
       - name: Verify deployed version
         env:
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
