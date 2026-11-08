@@ -53,9 +53,8 @@ func TestPinnedQuietCommandSleepProbe(t *testing.T) {
 		callback = local.URL
 	}
 	started := release + ".started"
-	quotedStart, _ := json.Marshal(started)
-	quoted, _ := json.Marshal(release)
-	command := "touch " + string(quotedStart) + "; while [ ! -f " + string(quoted) + " ]; do sleep 0.05; done"
+	quote := func(path string) string { return "'" + strings.ReplaceAll(path, "'", "'\"'\"'") + "'" }
+	command := "touch " + quote(started) + "; while [ ! -f " + quote(release) + " ]; do sleep 0.05; done"
 	var calls atomic.Int32
 	model := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.Copy(io.Discard, r.Body)
