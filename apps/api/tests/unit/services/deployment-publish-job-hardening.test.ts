@@ -94,6 +94,9 @@ describe('publish job atomic guards on SQLite', () => {
     expect(await appendDeploymentPublishJobEvent(db(), event)).toBe(false);
     expect(await release('late')).toBe(false);
     expect(row().status).toBe('canceled');
+    expect(sqlite.prepare('SELECT count(*) AS n FROM deployment_publish_job_events').get()).toEqual(
+      { n: 0 }
+    );
     expect(sqlite.prepare('SELECT count(*) AS n FROM deployment_releases').get()).toEqual({ n: 0 });
   });
   it.each(['succeeded', 'failed', 'canceled', 'unknown'])(
@@ -187,6 +190,14 @@ describe('publish job atomic guards on SQLite', () => {
     expect(await failExpiredDeploymentPublishJobs(db(), settings, now)).toHaveLength(1);
     expect(plans.join(' ')).toContain('idx_deployment_publish_jobs_status_updated_at');
     expect(plans.join(' ')).not.toContain('SCAN deployment_publish_jobs');
+  });
+
+  it('returns an empty sweep when all jobs are healthy or terminal', async () => {
+    seed('healthy');
+    seed('terminal', 'succeeded', old, old);
+    expect(await failExpiredDeploymentPublishJobs(db(), settings, now)).toEqual([]);
+    expect(row('healthy').status).toBe('building');
+    expect(row('terminal').status).toBe('succeeded');
   });
 
   it('links exactly one owner release and rejects a duplicate without creating it', async () => {

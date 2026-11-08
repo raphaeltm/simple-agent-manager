@@ -34,3 +34,10 @@ No context bundles, executor columns, queueing, or job tokens. Current SAM outpu
 - Broader Go server run fails in existing `TestHibernateReportsQuiescedOnlyWhenCheckPasses` (capture `degraded`, expected `available`). Reproduced all three failures on clean `origin/main` d300ba42b in detached baseline worktree; unrelated to publish changes. Do not claim broad Go pass.
 - Latest main consolidated deployment MCP discovery. Added `deployments_write` method `cancel_publish` while retaining direct callable `cancel_publish`, and marked cancellation destructive. Docs retain current grouped publish/status names.
 - Default full test worker fanout caused memory pressure. Stopped that run explicitly; replacement uses `turbo run test --concurrency=1 -- --maxWorkers=2` to bound local resources.
+
+### PR / CI checkpoint — 2026-11-08
+- PR #2582 opened with durable specialist review evidence and staging explicitly pending, per coordinator request after repeated automatic session sleeps.
+- CI on cf85c5108 passed lint, typecheck, build, VM-agent unit/E2E/integration/smoke, preflight and specialist evidence. Sonar flagged implicit string sorting and handler complexity; corrected with explicit comparator, extracted argument helpers, and bounded D1 sweep batch. Follow-up Cloudflare review approved unchanged expiry/terminal guards.
+- Post-fix scoped typecheck and lint passed; SQL/MCP affected suite passed 35 tests; empty-page and rejected-history assertions added, service suite passed 18 tests.
+- Staging deployment run42499039846 in progress. No test VM/resource created yet. Enabled platform Hetzner compute credential verified; no personal cloud credential required.
+- Original guard deletion proofs observed and restored: terminal-event guard, cancel terminality/workspace scope, release attempt/terminal/duplicate fences, Instant gate, sweep heartbeat/cancel race rechecks, acceptance-order guard. Earlier temporary logs did not survive sleep; outcomes were observed in-session. Final restored targeted suite passed73 before Sonar-only refactoring.

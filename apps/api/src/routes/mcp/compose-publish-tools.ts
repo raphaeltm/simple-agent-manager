@@ -52,6 +52,22 @@ function getBuildPublishStartTimeout(env: Env): number {
   );
 }
 
+type PublishRequestId = string | number | null;
+
+function optionalPublishArgument(value: unknown): string | undefined {
+  return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
+}
+
+function publishArguments(toolArgs: Record<string, unknown>) {
+  const environment = optionalPublishArgument(toolArgs.environment);
+  const reference = optionalPublishArgument(toolArgs.reference);
+  return {
+    environment: environment ? sanitizeUserInput(environment).slice(0, 200) : undefined,
+    reference: reference ? sanitizeUserInput(reference).slice(0, 200) : 'latest',
+    workingDir: optionalPublishArgument(toolArgs.workingDir),
+  };
+}
+
 /**
  * Handle the build_and_publish MCP tool call.
  *
@@ -59,7 +75,7 @@ function getBuildPublishStartTimeout(env: Env): number {
  * vm-agent triggers are themselves rate-limited at their own endpoints.
  */
 export async function handleBuildAndPublish(
-  requestId: string | number | null,
+  requestId: PublishRequestId,
   toolArgs: Record<string, unknown>,
   tokenData: McpTokenData,
   env: Env
@@ -70,9 +86,7 @@ export async function handleBuildAndPublish(
   const { projectId } = tokenData;
   const db = drizzle(env.DATABASE, { schema });
 
-  const rawEnvironment =
-    typeof toolArgs.environment === 'string' ? toolArgs.environment.trim() : undefined;
-  const environment = rawEnvironment ? sanitizeUserInput(rawEnvironment).slice(0, 200) : undefined;
+  const { environment, reference, workingDir } = publishArguments(toolArgs);
   if (!environment) {
     return jsonRpcError(
       requestId,
@@ -87,20 +101,8 @@ export async function handleBuildAndPublish(
   }
   const buildEnv = await loadDeploymentBuildInterpolationEnv(db, policyResult.environmentId);
 
-  const reference =
-    typeof toolArgs.reference === 'string' && toolArgs.reference.trim() !== ''
-      ? sanitizeUserInput(toolArgs.reference.trim()).slice(0, 200)
-      : 'latest';
-
-  // Optional: the agent's current working directory (e.g. a git worktree under
-  // /workspaces). When set, the vm-agent builds the source at this directory
-  // instead of the workspace's primary repo. The vm-agent validates it is a path
-  // under /workspaces and ignores anything that isn't.
-  const workingDir =
-    typeof toolArgs.workingDir === 'string' && toolArgs.workingDir.trim() !== ''
-      ? toolArgs.workingDir.trim()
-      : undefined;
-
+  // workingDir selects the agent's worktree under /workspaces; the VM agent
+  // validates the actual source path before building.
   const workspace = await lookupWorkspaceForVmAgent(env, tokenData.workspaceId, projectId);
   const [node] = await db
     .select({ runtime: schema.nodes.runtime })
@@ -288,7 +290,7 @@ export async function handleBuildAndPublish(
 }
 
 export async function handleGetPublishStatus(
-  requestId: string | number | null,
+  requestId: PublishRequestId,
   toolArgs: Record<string, unknown>,
   tokenData: McpTokenData,
   env: Env
@@ -322,7 +324,7 @@ export async function handleGetPublishStatus(
 }
 
 export async function handleCancelPublish(
-  requestId: string | number | null,
+  requestId: PublishRequestId,
   toolArgs: Record<string, unknown>,
   tokenData: McpTokenData,
   env: Env

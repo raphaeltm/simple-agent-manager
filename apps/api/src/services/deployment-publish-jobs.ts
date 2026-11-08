@@ -337,7 +337,9 @@ export async function failExpiredDeploymentPublishJobs(
   // Disjoint status ranges use the existing (status, updated_at) index and
   // exclude terminal history. Unlike a fixed active-status list, this also
   // covers new non-terminal states introduced by later executors.
-  const terminalStatuses = [...PUBLISH_JOB_TERMINAL_STATUSES].sort();
+  const terminalStatuses = [...PUBLISH_JOB_TERMINAL_STATUSES].sort((left, right) =>
+    left.localeCompare(right)
+  );
   const activeRanges = or(
     ...terminalStatuses.map((status, index) =>
       index === 0
@@ -347,7 +349,7 @@ export async function failExpiredDeploymentPublishJobs(
             lt(schema.deploymentPublishJobs.status, status)
           )
     ),
-    gt(schema.deploymentPublishJobs.status, terminalStatuses[terminalStatuses.length - 1] as string)
+    gt(schema.deploymentPublishJobs.status, terminalStatuses.at(-1) as string)
   );
   const candidates = await db
     .select({ id: schema.deploymentPublishJobs.id })
@@ -355,9 +357,8 @@ export async function failExpiredDeploymentPublishJobs(
     .where(and(activeRanges, expired))
     .orderBy(asc(schema.deploymentPublishJobs.updatedAt), asc(schema.deploymentPublishJobs.id))
     .limit(settings.sweepLimit);
-  const failed: schema.DeploymentPublishJobRow[] = [];
-  for (const candidate of candidates) {
-    const rows = await db
+  const updates = candidates.map((candidate) =>
+    db
       .update(schema.deploymentPublishJobs)
       .set({
         status: 'failed',
@@ -375,8 +376,12 @@ export async function failExpiredDeploymentPublishJobs(
           expired
         )
       )
-      .returning();
-    if (rows[0]) failed.push(rows[0]);
-  }
-  return failed;
+      .returning()
+  );
+  const [first, ...remaining] = updates;
+  if (!first) return [];
+  // One bounded D1 batch preserves each conditional expiry check while reducing
+  // round trips. Lifecycle delivery remains outside this transaction.
+  const results = await db.batch([first, ...remaining]);
+  return results.flat();
 }
