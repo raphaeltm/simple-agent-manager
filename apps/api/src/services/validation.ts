@@ -31,7 +31,7 @@ export interface OpenAIAuthJsonValidation {
  * Decode a JWT payload without signature verification.
  * Returns the parsed claims object or null on failure.
  */
-function decodeJwtPayload(jwt: string): Record<string, unknown> | null {
+export function decodeJwtPayload(jwt: string): Record<string, unknown> | null {
   try {
     const parts = jwt.split('.');
     if (parts.length !== 3) return null;

@@ -91,6 +91,13 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     { min: 1, max: 86400000 }
   ),
   integerDefinition(
+    'operations.deadWakeReconcileBatchSize',
+    10,
+    'Operations',
+    'Dead VM wake claims the scheduled sweep ends per run. A wake is dead when its claim is older than the wake lease and its task is no longer waking; the chat then shows the wake as failed and can be woken again.',
+    { min: 1, max: 50 }
+  ),
+  integerDefinition(
     'operations.githubTriggerQueueMaxPendingLimit',
     DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING_LIMIT,
     'Operations',

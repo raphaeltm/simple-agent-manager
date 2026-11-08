@@ -232,6 +232,8 @@ pinned to the old account, and profiles that use it, keep using it: move them wi
 projects…** and **Use in profiles…** on the new card, or replace the pinned account from the project's
 **Accounts** tab. A chat that's already running picks up the new account only when its agent starts
 again (see [The agent or a tool can't sign in](/docs/guides/session-troubleshooting/#the-agent-or-a-tool-cant-sign-in)).
+Until then it keeps renewing the sign-in it started with: a Codex chat on a pinned account renews, and
+is billed to, that pinned account, never your default.
 
 **Refresh a pinned account, such as a client's key.** Don't use **Connect account** in **Settings →
 Agents** for this: that would make the new key your default. Instead, open one of the projects it is

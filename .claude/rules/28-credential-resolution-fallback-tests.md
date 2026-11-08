@@ -72,6 +72,30 @@ Credential rotation endpoints (OAuth refresh, key rotation) MUST have:
 - The limit state MUST be atomic — DO storage, database row-level locks, or an equivalent. KV read-modify-write is NOT acceptable for rate limits guarding credential rotation.
 - A behavioral test that exercises "at-limit rejection" AND "window rollover resets counter"
 
+### 5. Write-Back Targets the Credential the Run Was Seeded With
+
+A path that writes a refreshed or synced secret back into storage (token refresh,
+post-session credential sync) MUST write into the exact row the run was seeded with,
+not re-derive "the credential" from a narrower lookup. Codex refresh and
+`agent-credential-sync` re-derived it from the legacy `credentials` table, which knows
+nothing about project or profile pins (`cc_attachments`, `cc_profile_attachments`), so a
+pinned run was answered with, and could overwrite, the user's default account.
+
+- Read the seeded identity the boot path recorded (`agent_sessions.agent_credential_reference`),
+  else call the same resolver the boot path calls (`resolveRunAgentCredentialReferences`).
+- Write with a compare-and-set on the exact value read, and mirror only copies of that same
+  generation (same owner, identical `(encrypted_token, iv)`): `writeRotatedAgentCredential`.
+- A compare-and-set proves nobody wrote since you read; it does not prove the value you write
+  is newer. The VM agent is meant to sync auth.json on every session stop, so a run that never
+  refreshed writes back a refresh token another run already rotated away. Refuse a different rotating
+  secret unless it is provably newer, and fail closed when that cannot be shown
+  (`isStaleCodexSync`).
+- A reference recorded by an ended run does not answer alone for a live one: agent-key cannot
+  attribute a run with no running D1 session, so add the current selection as a candidate
+  when no running session recorded a reference.
+- Test each pin tier through the real boot callback, then the write-back path, on a real SQL
+  engine (`tests/integration/codex-run-credential-refresh.test.ts`).
+
 ## Prohibited Patterns
 
 1. **Warn-only rotation validation.** `log.warn('unexpected scope') ; storeNewTokens(...)` silently accepts escalations. Either block or don't validate.
@@ -112,6 +136,7 @@ Before merging any PR that touches credential resolution, rotation, or compariso
 - [ ] No source-contract tests on auth middleware
 - [ ] Guards that are SQL predicates are tested against a real SQL engine, not a `.where()`-ignoring mock
 - [ ] Every attack case has an owner-path control, and the pair was verified discriminating by deleting the guard
+- [ ] Write-back paths target the seeded credential (recorded reference or the boot resolver) with a compare-and-set
 
 ## References
 

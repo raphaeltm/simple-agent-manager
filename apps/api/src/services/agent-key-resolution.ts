@@ -82,7 +82,7 @@ export async function getSelectedAgentCredentialReference(
   userId: string,
   agentType: string,
   encryptionKey: string,
-  projectId: string,
+  projectId: string | null,
   profile?: ProfileCredentialContext | null
 ): Promise<string | null> {
   const trace = await explainForConsumer(
