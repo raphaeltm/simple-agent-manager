@@ -5,6 +5,7 @@ import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
+import { rateLimitSignInCodes, SEND_CODE_PATH } from '../services/email-sign-in';
 import { readAuthSession } from '../services/read-auth-session';
 import { assertUserNotSuspended } from '../services/signup-approval';
 
@@ -46,6 +47,9 @@ authRoutes.get('/me', async (c) => {
  * - GET /api/auth/session - Get current session
  */
 authRoutes.get('/get-session', (c) => readAuthSession(c.env, c.req.raw));
+
+// Email sign-in codes cost an email each: limit requests per IP before BetterAuth sees them.
+authRoutes.post(SEND_CODE_PATH, rateLimitSignInCodes());
 
 authRoutes.on(['GET', 'POST'], '/*', async (c) => {
   try {

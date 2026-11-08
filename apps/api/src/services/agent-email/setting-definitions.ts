@@ -26,6 +26,10 @@ export const DEFAULT_AGENT_EMAIL_RETRY_BASE_SECONDS = 60;
 export const DEFAULT_AGENT_EMAIL_RETRY_MAX_SECONDS = 900;
 /** Accepted emails one recovery sweep retries. */
 export const DEFAULT_AGENT_EMAIL_RECOVERY_BATCH_SIZE = 10;
+/** Sign-in codes SAM emails to one address per hour. */
+export const DEFAULT_AGENT_EMAIL_SIGN_IN_CODES_PER_EMAIL_PER_HOUR = 5;
+/** Sign-in code requests one IP address may make per hour. */
+export const DEFAULT_AGENT_EMAIL_SIGN_IN_CODES_PER_IP_PER_HOUR = 20;
 
 export const DEFAULT_AGENT_EMAIL_SETUP_PLAN_TIMEOUT_MS = 15_000;
 export const DEFAULT_AGENT_EMAIL_READ_TIMEOUT_MS = 5_000;
@@ -126,6 +130,18 @@ export const AGENT_EMAIL_SETTINGS = [
     defaultValue: DEFAULT_AGENT_EMAIL_RECOVERY_BATCH_SIZE,
     description: 'Accepted emails one 5-minute recovery sweep retries.',
     range: { min: 1, max: 100 },
+  },
+  {
+    name: 'agentEmail.signInCodesPerEmailPerHour',
+    defaultValue: DEFAULT_AGENT_EMAIL_SIGN_IN_CODES_PER_EMAIL_PER_HOUR,
+    description: 'Sign-in codes SAM emails to one address per hour. Further requests send nothing.',
+    range: { min: 1, max: 100 },
+  },
+  {
+    name: 'agentEmail.signInCodesPerIpPerHour',
+    defaultValue: DEFAULT_AGENT_EMAIL_SIGN_IN_CODES_PER_IP_PER_HOUR,
+    description: 'Sign-in code requests one IP address may make per hour.',
+    range: { min: 1, max: 1_000 },
   },
 ] as const;
 

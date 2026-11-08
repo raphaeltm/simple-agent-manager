@@ -764,7 +764,8 @@ app.get('/api/config/vapid-public-key', (c) => {
 
 // Public config — which login providers are configured, so the login surfaces
 // only render a provider button when that provider is actually usable. Google
-// here means the LOGIN client (getGoogleLoginOAuthConfig), never the infra/GCP one.
+// here means the LOGIN client (getGoogleLoginOAuthConfig), never the infra/GCP one. Email
+// means this deployment can send sign-in codes (services/email-sign-in.ts).
 app.get('/api/config/login-providers', async (c) => {
   const { getGitHubOAuthConfig, getGitLabOAuthConfig, getGoogleLoginOAuthConfig } =
     await import('./services/platform-config');
@@ -773,8 +774,14 @@ app.get('/api/config/login-providers', async (c) => {
     getGoogleLoginOAuthConfig(c.env),
     getGitLabOAuthConfig(c.env),
   ]);
+  const { emailSignInAvailable } = await import('./services/email-sign-in');
   applyCacheHeaders(c, 'public-config');
-  return c.json({ github: github !== null, google: google !== null, gitlab: gitlab !== null });
+  return c.json({
+    github: github !== null,
+    google: google !== null,
+    gitlab: gitlab !== null,
+    email: emailSignInAvailable(c.env),
+  });
 });
 
 // JWKS endpoint (must be at root level)
