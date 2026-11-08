@@ -15,6 +15,7 @@ import {
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
 import { evaluateRunawayCostCeiling } from '../../src/scheduled/stuck-task-ceiling';
 import { parseHarnessWorkConfig } from '../../src/services/session-idleness';
+import { checkAutomaticSessionSleepEligibility } from '../../src/services/session-sleep-eligibility';
 import { createSchemaTables } from '../helpers/sqlite-d1';
 import { createSqlStorage } from '../unit/durable-objects/sql-storage-test-utils';
 
@@ -92,6 +93,29 @@ describe('automatic sleep with repeated idle reports', () => {
       status: 'sleeping',
     });
   }
+
+  it('records required sleep without reading runtime state or applying idle guards', async () => {
+    mocks.getSessionState.mockRejectedValue(new Error('runtime state unavailable'));
+    expect(
+      await checkAutomaticSessionSleepEligibility(
+        fixture.env,
+        { workspaceId: 'workspace-1', userId: 'user-1', requiredByPerson: true },
+        START
+      )
+    ).toEqual({ eligible: true });
+    expect(mocks.getSessionState).not.toHaveBeenCalled();
+    const decision = fixture.sqlite
+      .prepare(
+        "SELECT reason, detail_json FROM node_lifecycle_decisions WHERE source = 'session_sleep'"
+      )
+      .get() as { reason: string; detail_json: string };
+    expect(decision.reason).toBe('required_sleep');
+    expect(JSON.parse(decision.detail_json)).toEqual({
+      workspaceId: 'workspace-1',
+      chatSessionId: 'chat-1',
+      requiredByPerson: true,
+    });
+  });
 
   it('sleeps after the work idle interval despite a report every 60 seconds', async () => {
     for (let minute = 1; minute <= 15; minute++) {
