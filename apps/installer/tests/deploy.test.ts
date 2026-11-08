@@ -69,6 +69,7 @@ interface Options {
   missingScope?: boolean;
   laggingSecretReads?: number;
   secretsNeverVisible?: boolean;
+  orphanClient?: boolean;
 }
 const existingScopes = (existing: Options['existing']) =>
   existing === 'full'
@@ -84,26 +85,27 @@ async function deploy(options: Options = {}) {
   vi.stubEnv('BASE_DOMAIN', 'sammy.party');
   vi.stubEnv('INSTALLER_ENVIRONMENT', 'staging');
   vi.stubEnv('INSTALLER_MODE', options.mode || 'preserve');
-  vi.stubEnv('OAUTH_CLIENT_ID', '');
-  vi.stubEnv('OAUTH_CLIENT_SECRET', '');
+  vi.stubEnv('OAUTH_CLIENT_ID', options.orphanClient ? 'existing' : '');
+  vi.stubEnv('OAUTH_CLIENT_SECRET', options.orphanClient ? 'OPERATOR_SECRET' : '');
   vi.stubEnv('OAUTH_REGISTRATION_TOKEN', options.registrationToken || '');
   vi.stubEnv('GITHUB_SHA', options.sha ?? 'b'.repeat(40));
   vi.stubEnv('OAUTH_SECRETS_POLL_MS', '1');
   vi.stubEnv('OAUTH_SECRETS_VISIBLE_TIMEOUT_MS', options.secretsNeverVisible ? '0' : '30000');
   let laggingSecretReads = options.laggingSecretReads ?? 0;
   const ready = options.ready ?? !!options.existing;
-  let client: Record<string, unknown> | undefined = options.existing
-    ? {
-        client_id: 'existing',
-        client_name: 'sam-installer-staging',
-        client_uri: 'https://install.sammy.party',
-        scopes: [...existingScopes(options.existing)],
-        grant_types: ['authorization_code'],
-        response_types: ['code'],
-        redirect_uris: ['https://install.sammy.party/oauth/callback'],
-        token_endpoint_auth_method: 'client_secret_post',
-      }
-    : undefined;
+  let client: Record<string, unknown> | undefined =
+    options.existing || options.orphanClient
+      ? {
+          client_id: 'existing',
+          client_name: 'sam-installer-staging',
+          client_uri: 'https://install.sammy.party',
+          scopes: [...existingScopes(options.existing ?? 'bootstrap')],
+          grant_types: ['authorization_code'],
+          response_types: ['code'],
+          redirect_uris: ['https://install.sammy.party/oauth/callback'],
+          token_endpoint_auth_method: 'client_secret_post',
+        }
+      : undefined;
   const secretNames = ready ? ['OAUTH_CLIENT_ID', 'OAUTH_CLIENT_SECRET'] : [];
   const oauthResult = (path: string, method: string, body: Record<string, unknown>) => {
     let result: unknown;
@@ -302,6 +304,14 @@ describe('publisher-controlled installer deployment', () => {
     expect(listed).toBeLessThan(capture.events.indexOf('write-config'));
     expect(created).toBeGreaterThan(capture.events.indexOf('write-config'));
     expect(capture.calls.find((call) => call.method === 'POST')?.body.scopes).toEqual(fullScopes);
+    expect(capture.calls.filter((call) => call.method === 'PUT')).toHaveLength(2);
+  });
+  it('updates an operator-supplied leftover client only after a fresh installer is published', async () => {
+    await deploy({ mode: 'full', orphanClient: true });
+    const patched = capture.events.findIndex((entry) => entry.startsWith('PATCH '));
+    expect(patched).toBeGreaterThan(capture.events.indexOf('write-config'));
+    expect(capture.calls.find((call) => call.method === 'PATCH')?.body.scopes).toEqual(fullScopes);
+    expect(capture.calls.some((call) => call.method === 'POST')).toBe(false);
     expect(capture.calls.filter((call) => call.method === 'PUT')).toHaveLength(2);
   });
   it('blocks a fresh full deployment before publishing when management access is denied', async () => {
