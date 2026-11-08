@@ -106,25 +106,25 @@ issuing a verdict.
 
 ## Implementation Checklist
 
-- [ ] VM: `SessionHost` parks crash/exit handling while `evictionPending`
+- [x] VM: `SessionHost` parks crash/exit handling while `evictionPending`
       (`finishPromptAttemptWithError` crash branch, `monitorProcessExit`)
-- [ ] VM: parked exits replay on `PrepareEviction` rollback
-- [ ] VM: `StopForEviction()` completes the in-flight prompt with an `evicted` stop
+- [x] VM: parked exits replay on `PrepareEviction` rollback
+- [x] VM: `StopForEviction()` completes the in-flight prompt with an `evicted` stop
       reason; `finishLocalWorkspaceEviction` uses it
-- [ ] VM: `makeTaskCompletionCallback` posts no task status for `evicted`
-- [ ] VM tests: race through the real trigger (process dies after `PrepareEviction`;
+- [x] VM: `makeTaskCompletionCallback` posts no task status for `evicted`
+- [x] VM tests: race through the real trigger (process dies after `PrepareEviction`;
       both orders: prompt RPC error first, process exit first). Assert no
       `failed`/restart/agent error, then that `StopForEviction` posts nothing. Rollback
       replay test. Control: a crash without a fence still fails/restarts as before.
       Discrimination check: delete the guard, the tests go red.
-- [ ] VM: test that the completion callback sends no request for `evicted`
-- [ ] API: orphan sweep grace also measured from the task's terminal time; test with a
+- [x] VM: test that the completion callback sends no request for `evicted`
+- [x] API: orphan sweep grace also measured from the task's terminal time; test with a
       real SQL engine (old workspace + just-failed task is not stopped; old task is
       stopped)
-- [ ] Docs: update eviction / workspace lifecycle docs that describe crash recovery or
+- [x] Docs: update eviction / workspace lifecycle docs that describe crash recovery or
       the orphan grace
-- [ ] Track the residual case (the kernel OOM-kills a whole container before any
-      eviction claims it) as an idea, with evidence
+- [x] Track the residual case (the kernel OOM-kills a whole container before any
+      eviction claims it) as an idea, with evidence (idea `01M6YR5TX0C7X1S5FS7HSG22DX`)
 
 ## Acceptance Criteria
 
@@ -151,3 +151,24 @@ issuing a verdict.
 - `.claude/rules/62-tests-must-observe-the-real-trigger.md`
 - `.claude/rules/74-proxy-signals-must-match-the-condition.md`
 - `packages/vm-agent/.claude/rules/54-vm-agent-rollout-compatibility.md`
+
+## Implementation Notes
+
+- The VM fix is in `acp/session_host_eviction.go` (`parkPromptCrashForEviction`,
+  `parkProcessExitForEviction`, `StopForEviction`, rollback replay), with call sites in
+  `session_host_prompt.go` and `session_host_process.go` (`handleProcessExit` split
+  out), plus `server/eviction.go`, `server/workspaces.go` and `server/server.go`.
+- `acp/session_host_eviction_crash_test.go` covers both arrival orders, the idle exit,
+  rollback replay, nested rollback and a no-fence control. Disabling the guard turns
+  4 tests red; the control stays green.
+- `server/eviction_agent_exit_test.go` runs a real ACP subprocess under the
+  production SessionHost; a fake `docker stop` inside `stopEvictedWorkspaceContainer`
+  SIGKILLs it. Without the guard it reproduces production's exact callback
+  (`toStatus: failed`, `Agent prompt failed`, `agent_prompt_failed`). The control
+  (container lost with no eviction) still posts `failed`.
+- `tests/workers/scheduled-node-cleanup.test.ts`: a just-failed task keeps its
+  hour-old workspace running, while the long-failed control is stopped. Reverting the
+  sweep makes the test red. Four existing fixtures now set `completedAt: oldDate`
+  (their scenario is a task that ended long ago).
+- `main` is protected (a direct task-file push was rejected), so the task file lives
+  on the branch.
