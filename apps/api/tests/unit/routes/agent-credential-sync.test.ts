@@ -25,9 +25,14 @@ vi.mock('../../../src/services/jwt', () => ({
 }));
 
 const ENCRYPTION_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
+/** An unsigned JWT issued at `generation` (seconds), as OpenAI access tokens carry an `iat`. */
+const accessToken = (generation: number) =>
+  `${['{"alg":"none"}', JSON.stringify({ iat: generation })]
+    .map((part) => Buffer.from(part).toString('base64url'))
+    .join('.')}.sig`;
 const codexAuth = (generation: number) =>
   JSON.stringify({
-    tokens: { access_token: `jwt-${generation}`, refresh_token: `rt-${generation}` },
+    tokens: { access_token: accessToken(generation), refresh_token: `rt-${generation}` },
   });
 
 describe('POST /workspaces/:id/agent-credential-sync', () => {
@@ -210,6 +215,15 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
     expect(await secretOf('cred-user')).toBe(codexAuth(2));
   });
 
+  it('refuses an older generation than the stored one and keeps the stored rotation', async () => {
+    seedWorkspace();
+    await seedLegacy('cred-user', codexAuth(3));
+
+    const res = await postSync(validBody);
+    expect(await res.json()).toEqual({ success: false, reason: 'credential_stale' });
+    expect(await secretOf('cred-user')).toBe(codexAuth(3));
+  });
+
   it('does not fall back to user-scoped credential when a project-scoped row exists but is inactive', async () => {
     seedWorkspace({ projectId: 'proj-1' });
     await seedLegacy('cred-project', codexAuth(1), { projectId: 'proj-1', active: false });
@@ -230,9 +244,8 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
     expect(await secretOf('cred-user')).toBe(codexAuth(2));
   });
 
-  it('rejects an oversized body that declares no Content-Length, before writing', async () => {
-    seedWorkspace();
-    await seedLegacy('cred-user', codexAuth(1));
+  /** A well-formed request whose credential is 70 KiB, streamed with no Content-Length. */
+  function postChunked(): Promise<Response> {
     const huge = JSON.stringify({ ...validBody, credential: 'x'.repeat(70 * 1024) });
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
@@ -240,7 +253,7 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
         controller.close();
       },
     });
-    const res = await app.request(
+    return app.request(
       new Request('http://localhost/api/workspaces/ws-123/agent-credential-sync', {
         method: 'POST',
         headers: {
@@ -254,9 +267,28 @@ describe('POST /workspaces/:id/agent-credential-sync', () => {
       undefined,
       env
     );
+  }
+
+  it('rejects an oversized body that declares no Content-Length, before writing', async () => {
+    seedWorkspace();
+    await seedLegacy('cred-user', codexAuth(1));
+
+    const res = await postChunked();
 
     expect(res.status).toBe(400);
     expect((await res.json()).message).toContain('Payload exceeds');
+    expect(await secretOf('cred-user')).toBe(codexAuth(1));
+  });
+
+  it('control: the same body under a higher limit passes the cap and reaches validation', async () => {
+    seedWorkspace();
+    await seedLegacy('cred-user', codexAuth(1));
+    env = { ...env, MAX_AGENT_CREDENTIAL_SYNC_BYTES: String(200 * 1024) } as Env;
+
+    const res = await postChunked();
+
+    expect(res.status).toBe(200);
+    expect(await res.json()).toEqual({ success: false, reason: 'credential_invalid' });
     expect(await secretOf('cred-user')).toBe(codexAuth(1));
   });
 

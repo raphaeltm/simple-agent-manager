@@ -55,10 +55,16 @@ let doRequestBodies: Array<Record<string, unknown>>;
 /** Runs once just before the next D1 batch (the credential write), to stage a race. */
 let beforeNextBatch: (() => void) | null;
 
+/** An unsigned JWT access token issued at `generation` (seconds), as OpenAI's carry an `iat`. */
+const accessToken = (who: string, generation: number) =>
+  `${['{"alg":"none"}', JSON.stringify({ sub: who, iat: generation })]
+    .map((part) => Buffer.from(part).toString('base64url'))
+    .join('.')}.sig`;
+
 const codexAuth = (who: string, generation = 1) =>
   JSON.stringify({
     tokens: {
-      access_token: `${who}-access-${generation}`,
+      access_token: accessToken(who, generation),
       refresh_token: `${who}-refresh-${generation}`,
       id_token: `${who}-id-${generation}`,
       account_id: `acct-${who}`,
@@ -262,7 +268,7 @@ beforeEach(() => {
       const who = presented.replace(/-refresh-\d+$/, '');
       return new Response(
         JSON.stringify({
-          access_token: `${who}-access-2`,
+          access_token: accessToken(who, 2),
           refresh_token: `${who}-refresh-2`,
           id_token: `${who}-id-2`,
         }),
@@ -313,7 +319,7 @@ describe('a Codex run refreshes the account it was seeded with', () => {
 
     expect(res.status).toBe(200);
     expect(res.body).toMatchObject({
-      access_token: 'profile-access-2',
+      access_token: accessToken('profile', 2),
       refresh_token: 'profile-refresh-2',
     });
     expect(upstreamRefreshTokens).toEqual(['profile-refresh-1']);
@@ -340,7 +346,7 @@ describe('a Codex run refreshes the account it was seeded with', () => {
     const res = await refresh('unknown-refresh');
 
     expect(res.body).toEqual({
-      access_token: 'project-access-1',
+      access_token: accessToken('project', 1),
       id_token: 'project-id-1',
       stale: true,
     });
@@ -435,9 +441,11 @@ describe('which recorded references are candidates', () => {
 
     const res = await refresh('project-refresh-1');
 
+    // Only ended sessions recorded a reference, so the current selection is added last.
     expect(doRequestBodies[0]?.credentialReferences).toEqual([
       'cc_credentials:cred-profile',
       'cc_credentials:cred-project',
+      'cc_credentials:cred-default',
     ]);
     expect(res.status).toBe(200);
     expect(await refreshTokenOf('cc_credentials', 'cred-project')).toBe('project-refresh-2');
@@ -464,8 +472,10 @@ describe('which recorded references are candidates', () => {
     await refresh('profile-refresh-1');
 
     const refs = doRequestBodies[0]?.credentialReferences as string[];
-    expect(refs).toHaveLength(RUN_CREDENTIAL_CANDIDATE_LIMIT);
+    // The recorded references are capped; the current selection is still added after them.
+    expect(refs).toHaveLength(RUN_CREDENTIAL_CANDIDATE_LIMIT + 1);
     expect(refs[0]).toBe(`cc_credentials:cred-gone-${RUN_CREDENTIAL_CANDIDATE_LIMIT}`);
+    expect(refs.at(-1)).toBe('cc_credentials:cred-default');
     expect(refs).not.toContain('cc_credentials:cred-gone-0');
   });
 
@@ -539,7 +549,36 @@ describe('which recorded references are candidates', () => {
     const res = await refresh('project-refresh-1');
 
     expect(res.status).toBe(200);
-    expect(doRequestBodies[0]?.credentialReferences).toEqual(['cc_credentials:cred-project']);
+    expect(doRequestBodies[0]?.credentialReferences).toEqual([
+      'cc_credentials:cred-project',
+      'cc_credentials:cred-default',
+    ]);
+  });
+
+  // A run agent-key could not attribute (no running D1 session) leaves only ended
+  // sessions' references behind. Those must not answer alone for it.
+  it('an unattributed run: an ended run’s account is not handed to a token it does not hold', async () => {
+    record('s-ended', 'cc_credentials:cred-project', '2026-11-08T00:00:00.000Z');
+
+    const res = await refresh('unknown-refresh');
+
+    expect(doRequestBodies[0]?.credentialReferences).toEqual([
+      'cc_credentials:cred-project',
+      'cc_credentials:cred-default',
+    ]);
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({ error: 'refresh_token_invalidated' });
+    expect(upstreamRefreshTokens).toEqual([]);
+  });
+
+  it('an unattributed run seeded with the current selection refreshes that account', async () => {
+    record('s-ended', 'cc_credentials:cred-project', '2026-11-08T00:00:00.000Z');
+
+    const res = await refresh('default-refresh-1');
+
+    expect(res.status).toBe(200);
+    expect(await refreshTokenOf('cc_credentials', 'cred-default')).toBe('default-refresh-2');
+    expect(await secret('cc_credentials', 'cred-project')).toBe(codexAuth('project'));
   });
 });
 
@@ -662,6 +701,19 @@ describe('agent-credential-sync writes into the seeded account', () => {
 
   it('an unchanged auth.json is a no-op', async () => {
     expect((await sync(codexAuth('project'))).body).toEqual({ success: true, updated: false });
+  });
+
+  // The VM agent syncs auth.json on every session stop, changed or not. A run that
+  // never refreshed still holds the generation another run has since rotated away.
+  it('a stopping run’s older auth.json does not overwrite a newer rotation', async () => {
+    expect((await refresh('project-refresh-1')).status).toBe(200);
+    const rotated = await secret('cc_credentials', 'cred-project');
+
+    const res = await sync(codexAuth('project', 1));
+
+    expect(res.body).toEqual({ success: false, reason: 'credential_stale' });
+    expect(await secret('cc_credentials', 'cred-project')).toBe(rotated);
+    expect(await refreshTokenOf('cc_credentials', 'cred-project')).toBe('project-refresh-2');
   });
 
   it('the workspace moving between read and write: nothing is written (410)', async () => {

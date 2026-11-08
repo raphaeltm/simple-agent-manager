@@ -5,7 +5,10 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { selectSyncTarget } from '../../../src/routes/workspaces/agent-credential-sync';
+import {
+  isStaleCodexSync,
+  selectSyncTarget,
+} from '../../../src/routes/workspaces/agent-credential-sync';
 import type { RunAgentCredential } from '../../../src/services/run-agent-credential';
 
 const auth = (accountId?: string) =>
@@ -95,5 +98,81 @@ describe('selectSyncTarget', () => {
     expect(pick('key', [candidate('a'), candidate('b')], 'claude-code')).toBe(
       'credential_ambiguous'
     );
+  });
+
+  it('the chosen target is refused when the synced file is an older generation', () => {
+    const stored = JSON.stringify({
+      tokens: { refresh_token: 'rt-2', access_token: jwt({ iat: 2 }), account_id: 'acct-a' },
+    });
+    const older = JSON.stringify({
+      tokens: { refresh_token: 'rt-1', access_token: jwt({ iat: 1 }), account_id: 'acct-a' },
+    });
+    const result = selectSyncTarget('openai-codex', older, [
+      {
+        credential: { reference: 'cc_credentials:a', id: 'a' } as RunAgentCredential,
+        plaintext: stored,
+      },
+    ]);
+    expect(result).toEqual({ ok: false, reason: 'credential_stale' });
+  });
+});
+
+const jwt = (claims: Record<string, unknown>) =>
+  `${['{"alg":"none"}', JSON.stringify(claims)]
+    .map((part) => Buffer.from(part).toString('base64url'))
+    .join('.')}.sig`;
+
+describe('isStaleCodexSync', () => {
+  const identity = (refreshToken: string, access?: string, id?: string) => ({
+    refreshToken,
+    accessToken: access,
+    idToken: id,
+  });
+
+  it.each([
+    {
+      name: 'same refresh token, older access token',
+      synced: identity('rt', jwt({ iat: 1 })),
+      stored: identity('rt', jwt({ iat: 2 })),
+      stale: false,
+    },
+    {
+      name: 'different refresh token, newer access token (a direct refresh)',
+      synced: identity('rt-3', jwt({ iat: 3 })),
+      stored: identity('rt-2', jwt({ iat: 2 })),
+      stale: false,
+    },
+    {
+      name: 'different refresh token, older access token',
+      synced: identity('rt-1', jwt({ iat: 1 })),
+      stored: identity('rt-2', jwt({ iat: 2 })),
+      stale: true,
+    },
+    {
+      name: 'different refresh token, the stored access token (the proxy stale path)',
+      synced: identity('rt-1', jwt({ iat: 2 })),
+      stored: identity('rt-2', jwt({ iat: 2 })),
+      stale: true,
+    },
+    {
+      name: 'different refresh token, no issue time on either side (fails closed)',
+      synced: identity('rt-1', 'opaque'),
+      stored: identity('rt-2', 'opaque'),
+      stale: true,
+    },
+    {
+      name: 'different refresh token, newer id token when the access token is opaque',
+      synced: identity('rt-3', 'opaque', jwt({ iat: 3 })),
+      stored: identity('rt-2', 'opaque', jwt({ iat: 2 })),
+      stale: false,
+    },
+    {
+      name: 'stored file has no refresh token',
+      synced: identity('rt-1', jwt({ iat: 1 })),
+      stored: { accessToken: jwt({ iat: 2 }) },
+      stale: false,
+    },
+  ])('$name → stale: $stale', ({ synced, stored, stale }) => {
+    expect(isStaleCodexSync(synced, stored)).toBe(stale);
   });
 });

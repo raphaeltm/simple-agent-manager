@@ -29,12 +29,14 @@ import { errors } from '../../middleware/error';
 import { AgentCredentialSyncSchema } from '../../schemas';
 import { decrypt, encrypt } from '../../services/encryption';
 import {
+  type CodexAuthIdentity,
   loadRunAgentCredential,
   parseCodexAuth,
   resolveRunAgentCredentialReferences,
   type RunAgentCredential,
   writeRotatedAgentCredential,
 } from '../../services/run-agent-credential';
+import { decodeJwtPayload } from '../../services/validation';
 import {
   assertWorkspaceCallbackIdentityCurrent,
   assertWorkspaceCallbackResourceById,
@@ -59,8 +61,36 @@ type SyncSelection =
         | 'credential_account_mismatch'
         | 'credential_account_unverified'
         | 'credential_ambiguous'
-        | 'credential_invalid';
+        | 'credential_invalid'
+        | 'credential_stale';
     };
+
+/** Issue time (JWT `iat`, seconds) of a Codex auth file's access token, else its id token. */
+function codexIssuedAt(identity: CodexAuthIdentity): number | null {
+  for (const token of [identity.accessToken, identity.idToken]) {
+    const iat = token ? decodeJwtPayload(token)?.iat : undefined;
+    if (typeof iat === 'number' && Number.isFinite(iat)) return iat;
+  }
+  return null;
+}
+
+/**
+ * Whether a synced Codex file is an older generation than the stored one.
+ *
+ * The VM agent syncs auth.json on every session stop, changed or not. When
+ * another run has since rotated the shared credential through the refresh
+ * proxy, this run's file still holds the refresh token OpenAI already consumed,
+ * and writing it back would break the next refresh for every run of the
+ * account. A different refresh token is accepted only when the synced tokens
+ * were issued later than the stored ones (a direct refresh while the proxy is
+ * switched off). Without that proof the stored rotation is kept.
+ */
+export function isStaleCodexSync(synced: CodexAuthIdentity, stored: CodexAuthIdentity): boolean {
+  if (!stored.refreshToken || synced.refreshToken === stored.refreshToken) return false;
+  const syncedAt = codexIssuedAt(synced);
+  const storedAt = codexIssuedAt(stored);
+  return syncedAt === null || storedAt === null || syncedAt <= storedAt;
+}
 
 /**
  * Pick which seeded credential the synced file belongs to.
@@ -70,7 +100,8 @@ type SyncSelection =
  * account is never a target, and when a stored credential names its account
  * the synced file must name the same one. With several candidates the target
  * must be unique: two stored copies of the same account are ambiguous, because
- * the callback does not say which session wrote the file.
+ * the callback does not say which session wrote the file. The chosen target is
+ * refused when the synced file is an older generation (`isStaleCodexSync`).
  */
 export function selectSyncTarget(
   agentType: string,
@@ -89,24 +120,29 @@ export function selectSyncTarget(
   if (!synced?.refreshToken) return { ok: false, reason: 'credential_invalid' };
   const accounts = candidates.map((candidate) => ({
     candidate,
-    accountId: parseCodexAuth(candidate.plaintext)?.identity.accountId,
+    stored: parseCodexAuth(candidate.plaintext)?.identity,
   }));
+  const accept = ({ candidate, stored }: (typeof accounts)[number]): SyncSelection =>
+    stored && isStaleCodexSync(synced, stored)
+      ? { ok: false, reason: 'credential_stale' }
+      : { ok: true, candidate };
 
   if (accounts.length === 1) {
-    const [{ candidate, accountId }] = accounts as [(typeof accounts)[number]];
-    if (!accountId) return { ok: true, candidate };
+    const [only] = accounts as [(typeof accounts)[number]];
+    const accountId = only.stored?.accountId;
+    if (!accountId) return accept(only);
     if (!synced.accountId) return { ok: false, reason: 'credential_account_unverified' };
     return accountId === synced.accountId
-      ? { ok: true, candidate }
+      ? accept(only)
       : { ok: false, reason: 'credential_account_mismatch' };
   }
 
   if (!synced.accountId) return { ok: false, reason: 'credential_ambiguous' };
-  const sameAccount = accounts.filter(({ accountId }) => accountId === synced.accountId);
+  const sameAccount = accounts.filter(({ stored }) => stored?.accountId === synced.accountId);
   const [match] = sameAccount;
-  if (sameAccount.length === 1 && match) return { ok: true, candidate: match.candidate };
+  if (sameAccount.length === 1 && match) return accept(match);
   if (sameAccount.length > 1) return { ok: false, reason: 'credential_ambiguous' };
-  return accounts.every(({ accountId }) => accountId)
+  return accounts.every(({ stored }) => stored?.accountId)
     ? { ok: false, reason: 'credential_account_mismatch' }
     : { ok: false, reason: 'credential_ambiguous' };
 }

@@ -85,6 +85,14 @@ pinned run was answered with, and could overwrite, the user's default account.
   else call the same resolver the boot path calls (`resolveRunAgentCredentialReferences`).
 - Write with a compare-and-set on the exact value read, and mirror only copies of that same
   generation (same owner, identical `(encrypted_token, iv)`): `writeRotatedAgentCredential`.
+- A compare-and-set proves nobody wrote since you read; it does not prove the value you write
+  is newer. The VM agent syncs auth.json on every session stop, so a run that never refreshed
+  writes back a refresh token another run already rotated away. Refuse a different rotating
+  secret unless it is provably newer, and fail closed when that cannot be shown
+  (`isStaleCodexSync`).
+- A reference recorded by an ended run does not answer alone for a live one: agent-key cannot
+  attribute a run with no running D1 session, so add the current selection as a candidate
+  when no running session recorded a reference.
 - Test each pin tier through the real boot callback, then the write-back path, on a real SQL
   engine (`tests/integration/codex-run-credential-refresh.test.ts`).
 

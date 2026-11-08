@@ -112,7 +112,7 @@ export async function resolveRunAgentCredentialReferences(
         LIMIT ?`
     )
     .bind(input.workspaceId, input.userId, input.agentType, RUN_CREDENTIAL_CANDIDATE_LIMIT + 1)
-    .all<{ reference: unknown; platform: number }>();
+    .all<{ reference: unknown; platform: number; live: number }>();
   const rows = recorded.results ?? [];
   if (rows.length > RUN_CREDENTIAL_CANDIDATE_LIMIT) {
     log.warn('run_credential.candidates_truncated', {
@@ -134,11 +134,30 @@ export async function resolveRunAgentCredentialReferences(
       });
     }
   }
-  if (references.length > 0) return references;
+  if (references.length > 0) {
+    if (rows.some((row) => row.live === 1)) return references;
+    // Only ended sessions recorded a reference, yet a run is calling. It may be one
+    // agent-key could not attribute (no running D1 session to record it on), seeded
+    // with whatever was selected then. Add the current selection so an ended run's
+    // reference never answers alone for it: possession or account matching decides,
+    // and a second candidate closes the refresh proxy's stale path.
+    const selected = await selectedRunCredentialReference(db, encryptionKey, input);
+    return selected && !references.includes(selected) ? [...references, selected] : references;
+  }
   // Something was recorded but none of it is writable (platform proxy, malformed):
   // the run has no credential of its own to refresh.
   if (rows.length > 0) return [];
 
+  const selected = await selectedRunCredentialReference(db, encryptionKey, input);
+  return selected ? [selected] : [];
+}
+
+/** The writable reference agent-key would seed a new run of this workspace with now. */
+async function selectedRunCredentialReference(
+  db: Db,
+  encryptionKey: string,
+  input: { workspaceId: string; userId: string; projectId: string | null; agentType: string }
+): Promise<string | null> {
   const profile = await resolveSessionProfileCredentialContext(db, {
     workspaceId: input.workspaceId,
   });
@@ -150,7 +169,7 @@ export async function resolveRunAgentCredentialReferences(
     input.projectId,
     profile
   );
-  return parseRunCredentialReference(selected) && selected ? [selected] : [];
+  return parseRunCredentialReference(selected) && selected ? selected : null;
 }
 
 /**
