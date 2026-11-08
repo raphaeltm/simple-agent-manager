@@ -4,7 +4,7 @@ date: 2026-11-08
 author: SAM
 category: engineering
 tags: ["architecture", "gcp", "hetzner", "performance", "typescript"]
-excerpt: "SAM can reuse warm machines, prefer a cloud provider for new capacity, and fall back when that provider is out of room. Google Cloud zones and list prices stay live."
+excerpt: "SAM reuses warm machines, prefers your ranked cloud source for new VMs, and falls back to the next source when capacity runs out."
 ---
 
 A cloud pool should be able to follow your priorities without wasting machines or getting stuck when a provider runs short. SAM can now reuse capacity that is already running, prefer one cloud account when it needs a new VM, and try the next ranked source when capacity runs out. Its Google Cloud catalog also comes from Google's current machine and pricing APIs instead of a small table of guesses.
@@ -21,14 +21,15 @@ Provider order only affects **new** machines. Within the preferred source, the p
 flowchart TD
     A[New work arrives] --> B{Reusable machine has room?}
     B -->|Yes| C[Use that machine]
-    B -->|No| D[Try allowed offerings from highest-ranked source]
-    D --> E{Provider can allocate?}
-    E -->|Yes| F[Start the VM]
-    E -->|Capacity exhausted| G[Try the next ranked source]
-    G --> H{Another allowed source?}
-    H -->|Yes| D
-    H -->|No| I[Apply the pool exhaustion policy]
-    E -->|Other error| J[Report the error]
+    B -->|No| D[Select highest-ranked source]
+    D --> E[Try its allowed offerings]
+    E --> F{Provider can allocate?}
+    F -->|Yes| G[Start the VM]
+    F -->|Capacity exhausted| H{Another ranked source available?}
+    H -->|Yes| I[Select next-ranked source]
+    I --> E
+    H -->|No| J[Apply the pool exhaustion policy]
+    F -->|Other error| K[Report the error]
 ```
 
 Fallback is deliberate and bounded. The pool's `fallback-chain` exhaustion policy tries the preferred source's allowed machine choices, then moves to the next ranked source when capacity is unavailable. SAM keeps the same pool, workload requirements, runtime, and any explicit location constraint throughout. A permission or configuration error is not treated as a capacity shortage, and it does not silently send work to a different cloud account. See the implementation in [`node-provisioning-exhaustion.ts`](https://github.com/raphaeltm/simple-agent-manager/blob/main/apps/api/src/durable-objects/task-runner/node-provisioning-exhaustion.ts) and the [compute pool guide](/docs/guides/compute-pools/#provider-order).
