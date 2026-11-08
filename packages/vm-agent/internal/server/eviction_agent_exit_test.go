@@ -106,7 +106,7 @@ type evictionAgentFixture struct {
 
 // startEvictionAgentFixture runs a production SessionHost with a prompt in flight on a
 // workspace the eviction test server can evict, wired to a recording control plane.
-func startEvictionAgentFixture(t *testing.T) *evictionAgentFixture {
+func startEvictionAgentFixture(t *testing.T, withPrompt bool, parkTimeout ...time.Duration) *evictionAgentFixture {
 	t.Helper()
 	bin := t.TempDir()
 	installACPAdapterFixtureShims(t, bin)
@@ -147,6 +147,9 @@ func startEvictionAgentFixture(t *testing.T) *evictionAgentFixture {
 	s.acpConfig = acp.GatewayConfig{ControlPlaneURL: control.URL, CallbackToken: "test-token", NodeID: "node-1",
 		ProcessLauncher: f.launcher, ContainerWorkDir: bin, SettingsResolved: true,
 		TerminalActivityReportAttempts: 1, ActivityReportTimeout: time.Second}
+	if len(parkTimeout) == 1 {
+		s.acpConfig.EvictionParkTimeout = parkTimeout[0]
+	}
 	session, _, err := s.agentSessions.Create("workspace-1", "agent-1", "Agent", "")
 	if err != nil {
 		t.Fatal(err)
@@ -169,6 +172,10 @@ func startEvictionAgentFixture(t *testing.T) *evictionAgentFixture {
 	if host.Status() != acp.HostReady {
 		t.Fatalf("fixture agent did not initialize: %s", host.Status())
 	}
+	f.server, f.host = s, host
+	if !withPrompt {
+		return f
+	}
 	params := json.RawMessage(`{"sessionId":"fixture-evicted-session","prompt":[{"type":"text","text":"long-running work"}]}`)
 	// The prompt outlives this setup function, so it must not take the setup context.
 	accepted, ok := host.AcceptPrompt(context.Background(), json.RawMessage(`1`), params, "fixture-viewer", true, "", nil)
@@ -177,7 +184,6 @@ func startEvictionAgentFixture(t *testing.T) *evictionAgentFixture {
 	}
 	go accepted.Run()
 	waitForFile(t, f.launcher.pidFile+".prompting")
-	f.server, f.host = s, host
 	return f
 }
 
@@ -224,8 +230,11 @@ func expectNoTaskCallback(t *testing.T, callbacks chan map[string]any, wait time
 	}
 }
 
-func TestEvictionStopKillingTheAgentDoesNotFailTheTask(t *testing.T) {
-	f := startEvictionAgentFixture(t)
+// evictKillingTheAgent runs the real eviction stop with a fake `docker stop` that kills
+// the agent and its container, then records and notifies the eviction. It returns the
+// eviction callback body, asserting no task status and no restart along the way.
+func (f *evictionAgentFixture) evictKillingTheAgent(t *testing.T) map[string]any {
+	t.Helper()
 	setupEvictionDocker(t, evictionTestContainerID)
 	dir := t.TempDir()
 	started, release := filepath.Join(dir, "stop-started"), filepath.Join(dir, "stop-release")
@@ -264,18 +273,35 @@ func TestEvictionStopKillingTheAgentDoesNotFailTheTask(t *testing.T) {
 	}
 	select {
 	case body := <-f.evictCallbacks:
-		if body["interruptedWork"] != true || body["containerStopped"] != true {
-			t.Fatalf("eviction callback = %v, want the in-flight prompt reported as interrupted work", body)
-		}
+		return body
 	case <-time.After(5 * time.Second):
 		t.Fatal("eviction callback was not delivered")
+		return nil
+	}
+}
+
+func TestEvictionStopKillingTheAgentDoesNotFailTheTask(t *testing.T) {
+	f := startEvictionAgentFixture(t, true)
+	body := f.evictKillingTheAgent(t)
+	if body["interruptedWork"] != true || body["containerStopped"] != true {
+		t.Fatalf("eviction callback = %v, want the in-flight prompt reported as interrupted work", body)
+	}
+}
+
+// An idle agent killed by the eviction must not be restarted either, and the eviction
+// reports that no work was interrupted.
+func TestEvictionStopKillingAnIdleAgentDoesNotRestartIt(t *testing.T) {
+	f := startEvictionAgentFixture(t, false)
+	body := f.evictKillingTheAgent(t)
+	if body["interruptedWork"] != false || body["containerStopped"] != true {
+		t.Fatalf("eviction callback = %v, want an idle runtime reported as not interrupted", body)
 	}
 }
 
 // Control on the same production host: a container lost without an eviction still
 // produces the terminal verdict, so the test above can see a callback when one is sent.
 func TestContainerLossWithoutEvictionStillFailsTheTask(t *testing.T) {
-	f := startEvictionAgentFixture(t)
+	f := startEvictionAgentFixture(t, true)
 	f.killAgentWithContainer(t)
 	select {
 	case body := <-f.taskCallbacks:
@@ -284,5 +310,37 @@ func TestContainerLossWithoutEvictionStillFailsTheTask(t *testing.T) {
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("an unowned container loss posted no task verdict")
+	}
+}
+
+// A `docker stop` that kills the agent but then fails leaves the eviction committed and
+// unrecorded, so nothing calls StopForEviction until the reconciler succeeds. The park
+// deadline bounds that: the task gets the ordinary crash verdict instead of staying in
+// progress forever (and the control plane can still resume it if the eviction lands).
+func TestStuckEvictionStopFallsBackToCrashVerdictAtTheDeadline(t *testing.T) {
+	f := startEvictionAgentFixture(t, true, 2*time.Second)
+	setupEvictionDocker(t, evictionTestContainerID)
+	dir := t.TempDir()
+	started, release := filepath.Join(dir, "stop-started"), filepath.Join(dir, "stop-release")
+	t.Setenv("SAM_EVICTION_TEST_STOP_STARTED", started)
+	t.Setenv("SAM_EVICTION_TEST_STOP_RELEASE", release)
+	t.Setenv("SAM_EVICTION_TEST_STOP_EXIT", "1")
+	go func() {
+		waitForFile(t, started)
+		f.killAgentWithContainer(t)
+		time.Sleep(100 * time.Millisecond)
+		_ = os.WriteFile(release, nil, 0600)
+	}()
+	if err := f.server.stopEvictedWorkspaceContainer(context.Background(), evictionTargetFixture(f.server)); err == nil {
+		t.Fatal("stop unexpectedly succeeded")
+	}
+	expectNoTaskCallback(t, f.taskCallbacks, time.Second, "before the park deadline")
+	select {
+	case body := <-f.taskCallbacks:
+		if body["toStatus"] != "failed" {
+			t.Fatalf("callback = %v, want the crash verdict after the deadline", body)
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("a stuck eviction left the prompt parked past its deadline")
 	}
 }

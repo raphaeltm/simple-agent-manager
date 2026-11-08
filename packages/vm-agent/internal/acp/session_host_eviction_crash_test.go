@@ -8,6 +8,8 @@ package acp
 // host defers to the eviction instead of issuing a verdict.
 
 import (
+	"context"
+	"encoding/json"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -62,7 +64,7 @@ func TestEvictionOwnedDisconnectIsNotACrash(t *testing.T) {
 				exitFakeProcess(oldProc)
 			} else {
 				exitFakeProcess(oldProc)
-				time.Sleep(200 * time.Millisecond)
+				waitForParked(t, host, func(p evictionParked) bool { return len(p.processExit) == 1 })
 				finishWithPeerDisconnect(host)
 			}
 			assertNoVerdict(t, completed, starts, "before commit")
@@ -87,9 +89,76 @@ func TestEvictionOwnedIdleExitDoesNotRestart(t *testing.T) {
 		t.Fatal("idle host should be captured as not interrupted")
 	}
 	exitFakeProcess(oldProc)
+	waitForParked(t, host, func(p evictionParked) bool { return len(p.processExit) == 1 })
 	assertNoVerdict(t, completed, &starts, "idle exit")
 	host.StopForEviction()
 	assertNoSecondCompletion(t, completed)
+	if host.Status() != HostStopped {
+		t.Fatalf("status = %s, want stopped", host.Status())
+	}
+}
+
+// The prompt can see the disconnect while the process has not exited yet (a broken
+// stdio pipe). The prompt path alone must not start crash recovery: that would stop the
+// process and arm the recovery watchdog, whose expiry is itself a fatal verdict.
+func TestEvictionOwnedPromptDisconnectAloneStartsNoRecovery(t *testing.T) {
+	host, oldProc, completed, starts := armEvictedPrompt(t)
+	host.PrepareEviction()
+	finishWithPeerDisconnect(host)
+	assertNoVerdict(t, completed, starts, "prompt disconnect")
+	if n := oldProc.stopCount.Load(); n != 0 {
+		t.Fatalf("crash recovery stopped the agent %d time(s) during an eviction", n)
+	}
+	host.mu.RLock()
+	recovering := host.crashRecoverySnapshotLocked().inProgress
+	host.mu.RUnlock()
+	if recovering {
+		t.Fatal("crash recovery (and its watchdog) started for an eviction-owned disconnect")
+	}
+	waitForParked(t, host, func(p evictionParked) bool { return len(p.promptCrash) == 1 })
+	host.StopForEviction()
+	expectCompletion(t, completed, EvictedStopReason, time.Second, "committed eviction did not end the prompt")
+}
+
+// An eviction that never resolves its parked exit (its record keeps failing, or the
+// intent was superseded without stopping this host) must not leave the task in progress
+// forever: after the deadline the host applies ordinary crash handling.
+func TestUnresolvedEvictionParkFallsBackToCrashHandling(t *testing.T) {
+	host := newRecoveryTestHost(t, 30*time.Second)
+	defer host.Stop()
+	host.config.EvictionParkTimeout = 300 * time.Millisecond
+	oldProc, _, _ := armRecoverablePrompt(t, host, "claude-code", 10*time.Second, false)
+	if _, ok := host.beginPrompt(func() {}, nil); !ok {
+		t.Fatal("prompt not accepted")
+	}
+	completed := startRecoveryMonitor(t, host, oldProc, "claude-code", func(*agentStartup) (agentProcess, error) {
+		return nil, errNoRunningDevcontainerForTest
+	})
+	host.PrepareEviction()
+	finishWithPeerDisconnect(host)
+	exitFakeProcess(oldProc)
+	select {
+	case reason := <-completed:
+		t.Fatalf("verdict %q before the park deadline", reason)
+	case <-time.After(200 * time.Millisecond):
+	}
+	expectCompletion(t, completed, fatalErrorStopReason, 5*time.Second, "parked exit was never resolved after its deadline")
+	assertNoSecondCompletion(t, completed)
+}
+
+func waitForParked(t *testing.T, host *SessionHost, done func(evictionParked) bool) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		host.promptMu.Lock()
+		ok := done(host.evictionParked)
+		host.promptMu.Unlock()
+		if ok {
+			return
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	t.Fatal("exit was not parked by the eviction fence")
 }
 
 // A rolled-back eviction (its intent was never committed, so no docker stop ran) must
@@ -147,3 +216,22 @@ var errNoRunningDevcontainerForTest = &testError{"failed to discover devcontaine
 type testError struct{ msg string }
 
 func (e *testError) Error() string { return e.msg }
+
+// Unmanaged sessions arm a prompt deadline (ACP_PROMPT_TIMEOUT) whose expiry force-stops
+// the prompt with fatal_error. Landing during an eviction, it must defer like a crash.
+func TestPromptDeadlineDuringEvictionIsNotAVerdict(t *testing.T) {
+	host, _, completed, starts := armEvictedPrompt(t)
+	host.promptMu.Lock()
+	attempt := host.promptAttempt
+	host.promptMu.Unlock()
+	host.PrepareEviction()
+	promptCtx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	done := make(chan struct{})
+	defer close(done)
+	go host.watchPromptTimeout(attempt, promptCtx, done, "viewer-1", json.RawMessage(`"req-1"`), 50*time.Millisecond)
+	assertNoVerdict(t, completed, starts, "prompt deadline")
+	waitForParked(t, host, func(p evictionParked) bool { return len(p.promptCrash) == 1 })
+	host.StopForEviction()
+	expectCompletion(t, completed, EvictedStopReason, time.Second, "committed eviction did not end the prompt")
+}

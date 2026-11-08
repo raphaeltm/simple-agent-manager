@@ -472,6 +472,7 @@ func New(cfg *config.Config) (*Server, error) {
 		CredentialSyncTimeout:            cfg.ACPCredentialSyncTimeout,
 		RestartAttemptTimeout:            cfg.ACPRestartAttemptTimeout,
 		RecoveryWatchdogTimeout:          cfg.ACPRecoveryWatchdog,
+		EvictionParkTimeout:              cfg.ACPEvictionParkTimeout,
 		RestartDecayWindow:               cfg.ACPRestartDecayWindow,
 		HTTPClient:                       config.NewControlPlaneClient(cfg.HTTPCallbackTimeout),
 	}

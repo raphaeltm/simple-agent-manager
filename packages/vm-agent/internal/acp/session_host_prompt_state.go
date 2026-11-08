@@ -191,6 +191,11 @@ func (h *SessionHost) triggerPromptForceStopIfStuck(attempt *promptAttempt, reas
 		h.settleStuckPromptCancel(attempt, reason, fields)
 		return
 	}
+	// A prompt deadline that lands while an eviction owns the runtime is not this
+	// prompt's verdict: the eviction ends it (StopForEviction) or, if rolled back, replays this.
+	if h.parkPromptCrashForEviction("prompt_timeout", func() { h.triggerPromptForceStopIfStuck(attempt, reason) }) {
+		return
+	}
 	attempt.completeWith(h, fatalErrorStopReason, errors.New(reason), func() {
 		h.mu.Lock()
 		agentType := h.agentType

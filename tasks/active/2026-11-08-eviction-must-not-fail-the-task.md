@@ -128,16 +128,16 @@ issuing a verdict.
 
 ## Acceptance Criteria
 
-- [ ] An agent killed by an eviction's `docker stop` never produces a `failed` task
+- [x] An agent killed by an eviction's `docker stop` never produces a `failed` task
       callback, an `agent_restart_failed` error, or a restart attempt (VM unit tests
       through `SessionHost` with a real process exit)
-- [ ] A committed eviction completes the in-flight prompt as `evicted` and the
+- [x] A committed eviction completes the in-flight prompt as `evicted` and the
       control-plane task stays non-terminal until the eviction callback (unit test on the
       callback)
-- [ ] An uncommitted eviction (rollback) leaves genuine crash handling intact (test)
-- [ ] A crash without an eviction behaves exactly as before (existing suite plus a
+- [x] An uncommitted eviction (rollback) leaves genuine crash handling intact (test)
+- [x] A crash without an eviction behaves exactly as before (existing suite plus a
       control test)
-- [ ] The orphan sweep does not stop a workspace whose task became terminal less than
+- [x] The orphan sweep does not stop a workspace whose task became terminal less than
       the grace period ago (SQLite integration test)
 - [ ] Staging: a real VM eviction under memory pressure leaves the task non-terminal and
       the conversation resumes on a new workspace (or the reason it cannot be exercised
@@ -172,3 +172,21 @@ issuing a verdict.
   (their scenario is a task that ended long ago).
 - `main` is protected (a direct task-file push was rejected), so the task file lives
   on the branch.
+- Review round 1 (go-specialist, test-engineer) added:
+  - `EVICTION_PARK_TIMEOUT` (default 15m): a parked exit replays as an ordinary crash
+    if the eviction never stops the host (a stuck `docker stop`, or an intent superseded
+    without stopping the host). Tests: `TestUnresolvedEvictionParkFallsBackToCrashHandling`
+    (acp) and `TestStuckEvictionStopFallsBackToCrashVerdictAtTheDeadline` (server, real
+    stop path with a failing fake `docker stop`).
+  - The prompt-timeout force-stop (`triggerPromptForceStopIfStuck`, unmanaged
+    `ACP_PROMPT_TIMEOUT`) parks too: `TestPromptDeadlineDuringEvictionIsNotAVerdict`
+    drives the real `watchPromptTimeout`.
+  - Prompt-crash guard proven alone, with the process still alive:
+    `TestEvictionOwnedPromptDisconnectAloneStartsNoRecovery`.
+  - Server-level idle eviction: `TestEvictionStopKillingAnIdleAgentDoesNotRestartIt`.
+  - Any `Stop()` disarms the parked work and the deadline; replay skips a stopped host;
+    `StopForEviction` logs when a checkpoint rollover owns the attempt.
+  - Not changed: prompt receipt `errorCode` is an unexported, never-serialized field
+    (`persistence.PromptDeliveryReceipt`), so no consumer can misread it.
+  - Discrimination was verified per guard: process-exit park, prompt-crash park,
+    timeout park, deadline, orphan grace.

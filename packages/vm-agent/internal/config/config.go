@@ -39,6 +39,13 @@ const (
 	// disconnect. Override via DEFAULT_RECOVERY_WATCHDOG_TIMEOUT.
 	DefaultACPRecoveryWatchdogTimeout = 2 * time.Minute
 
+	// DefaultACPEvictionParkTimeout bounds how long an eviction may own an agent exit
+	// before the session host falls back to ordinary crash handling. It must exceed the
+	// post-stop window an eviction legitimately holds (docker stop, the final capture
+	// bounded by EVICTION_FINAL_SNAPSHOT_TIMEOUT_SECONDS, recording). Override via
+	// EVICTION_PARK_TIMEOUT.
+	DefaultACPEvictionParkTimeout = 15 * time.Minute
+
 	// DefaultACPRestartDecayWindow is the quiet period after which restartCount
 	// resets. Override via DEFAULT_RESTART_DECAY_WINDOW.
 	DefaultACPRestartDecayWindow = 5 * time.Minute
@@ -293,6 +300,7 @@ type Config struct {
 	ACPPromptRetryInitial             time.Duration // Initial backoff for transient provider prompt retries (default: 15s)
 	ACPPromptRetryMax                 time.Duration // Max backoff for transient provider prompt retries (default: 2m)
 	ACPRecoveryWatchdog               time.Duration // Max crash recovery duration before terminal error (default: 2m)
+	ACPEvictionParkTimeout            time.Duration // Max time an eviction owns an agent exit before crash handling resumes (default: 15m)
 	ACPRestartDecayWindow             time.Duration // Quiet period before restartCount decays (default: 5m)
 	ACPIdleSuspendTimeout             time.Duration // Auto-suspend after this idle duration with no viewers (default: 30m, 0=disabled)
 	ACPNotifSerializeTimeout          time.Duration // Max wait for previous notification processing before delivering next (default: 5s)

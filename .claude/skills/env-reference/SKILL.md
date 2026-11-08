@@ -913,6 +913,7 @@ Generated deployments validate and pass these values through cloud-init to newly
 - `DEFAULT_EVICTION_CALLBACK_RETRY_MAX_SECONDS` — Durable callback backoff cap, in seconds (default: 300). Retry eligibility also respects the complete operation lease (default: 60 seconds), which can exceed the cap; delivery is heartbeat-paced
 - `DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS` — Deadline for resolving a pressured Docker container to a workspace before eviction, in seconds (default: 5)
 - `EVICTION_FINAL_SNAPSHOT_TIMEOUT_SECONDS` — VM-agent deadline for the post-stop final eviction capture (default `300`); on timeout the pre-stop capture is kept
+- `EVICTION_PARK_TIMEOUT` — VM-agent bound (Go duration, default `15m`) on how long a pending eviction owns an agent exit before the session host applies ordinary crash handling (`armEvictionParkDeadlineLocked` in `packages/vm-agent/internal/acp/session_host_eviction.go`)
 - `SNAPSHOT_HELPER_MEMORY_LIMIT` — `docker --memory` for a stopped-workspace snapshot helper (default `1g`)
 - `SNAPSHOT_HELPER_PIDS_LIMIT` — `docker --pids-limit` for a stopped-workspace snapshot helper (default `256`)
 - `SNAPSHOT_HELPER_MIN_FREE_BYTES` — free space kept on the Docker root after committing a source's writable layer (default `1073741824`)

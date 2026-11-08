@@ -49,6 +49,8 @@ const (
 	// DefaultRecoveryWatchdogTimeout bounds crash recovery after an ACP stdio
 	// disconnect so a leaked process monitor cannot strand the prompt forever.
 	DefaultRecoveryWatchdogTimeout = 2 * time.Minute
+	// DefaultEvictionParkTimeout bounds how long a pending eviction owns an agent exit.
+	DefaultEvictionParkTimeout = config.DefaultACPEvictionParkTimeout
 
 	// DefaultRestartDecayWindow is the quiet period after which restartCount is
 	// reset before counting a new unexpected agent exit.
@@ -304,6 +306,8 @@ type SessionHost struct {
 	guardedCancelPending bool           // promptMu: a matched process stop still owns admission
 	evictionPending      bool           // promptMu: durable eviction owns this runtime; reject new work
 	evictionParked       evictionParked // promptMu: crash handling deferred while evictionPending
+	evictionParkTimer    *time.Timer    // promptMu: replays parked handling if the eviction never resolves it
+	evictionParkExpired  bool           // promptMu: the deadline fired; this fence no longer parks exits
 	promptSeq            uint64
 	// promptAttempt remains attached until the next accepted prompt so late
 	// terminal signals from the same runtime are absorbed by its exact-once
@@ -605,6 +609,7 @@ func (h *SessionHost) Stop() {
 	h.promptMu.Lock()
 	attempt := h.promptAttempt
 	activePrompt := h.promptInFlight
+	_ = h.takeEvictionParkedLocked() // A stopped host has no parked exit left to resolve.
 	h.promptMu.Unlock()
 	if activePrompt && attempt != nil {
 		attempt.complete(h, "cancelled", context.Canceled)

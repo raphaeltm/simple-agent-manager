@@ -659,7 +659,7 @@ func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promp
 	if isCrashPromptError(err) && !errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
 		// An eviction's docker stop disconnects the agent before the stop returns.
 		// That disconnect is the eviction, not a crash: no recovery, no verdict.
-		if h.parkPromptCrashForEviction(func() {
+		if h.parkPromptCrashForEviction("prompt_disconnected", func() {
 			h.finishPromptAttemptWithError(attempt, promptCtx, reqID, info, err)
 		}) {
 			return

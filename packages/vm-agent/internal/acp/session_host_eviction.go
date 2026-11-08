@@ -3,6 +3,7 @@ package acp
 import (
 	"errors"
 	"log/slog"
+	"time"
 )
 
 // EvictedStopReason completes a prompt whose runtime was taken by a committed eviction.
@@ -38,9 +39,13 @@ func (h *SessionHost) PrepareEviction() (interrupted *bool, rollback func()) {
 		h.evictionPending = wasPending
 		var parked evictionParked
 		if !h.evictionPending {
-			parked, h.evictionParked = h.evictionParked, evictionParked{}
+			parked = h.takeEvictionParkedLocked()
+			h.evictionParkExpired = false
 		}
 		h.promptMu.Unlock()
+		if h.Status() == HostStopped {
+			return // A stopped host has no crash to handle; replay would only emit stale status.
+		}
 		parked.replay()
 	}
 	work := h.harnessWorkSnapshot()
@@ -73,17 +78,19 @@ func (p evictionParked) replay() {
 	}()
 }
 
-// parkPromptCrashForEviction defers a prompt's crash handling while a durable eviction
-// owns the runtime. It reports whether the crash was parked.
-func (h *SessionHost) parkPromptCrashForEviction(replay func()) bool {
+// parkPromptCrashForEviction defers a prompt's terminal handling (a crash disconnect, or
+// a prompt-timeout force-stop) while a durable eviction owns the runtime. It reports
+// whether the handling was parked.
+func (h *SessionHost) parkPromptCrashForEviction(signal string, replay func()) bool {
 	h.promptMu.Lock()
-	parked := h.evictionPending
+	parked := h.evictionPending && !h.evictionParkExpired
 	if parked {
 		h.evictionParked.promptCrash = append(h.evictionParked.promptCrash, replay)
+		h.armEvictionParkDeadlineLocked()
 	}
 	h.promptMu.Unlock()
 	if parked {
-		h.reportEvictionOwnedExit("prompt_disconnected")
+		h.reportEvictionOwnedExit(signal)
 	}
 	return parked
 }
@@ -95,15 +102,65 @@ func (h *SessionHost) parkProcessExitForEviction(process agentProcess, replay fu
 	h.mu.RLock()
 	current := h.process == process && h.status != HostStopped
 	h.promptMu.Lock()
-	parked := current && h.evictionPending
+	parked := current && h.evictionPending && !h.evictionParkExpired
 	if parked {
 		h.evictionParked.processExit = append(h.evictionParked.processExit, replay)
+		h.armEvictionParkDeadlineLocked()
 	}
 	h.promptMu.Unlock()
 	h.mu.RUnlock()
 	if parked {
 		h.reportEvictionOwnedExit("process_exited")
 	}
+	return parked
+}
+
+// armEvictionParkDeadlineLocked bounds the parking. A committed eviction resolves a
+// parked exit by stopping the host (StopForEviction) once the eviction is recorded. If
+// that never happens (the intent was superseded without stopping this host, or the
+// record keeps failing), the deadline replays the parked handling as an ordinary crash
+// instead of leaving the task in progress forever. The control plane can still resume
+// the conversation if the eviction is reported later. Caller holds promptMu.
+func (h *SessionHost) armEvictionParkDeadlineLocked() {
+	if h.evictionParkTimer != nil {
+		return
+	}
+	timeout := h.config.EvictionParkTimeout
+	if timeout <= 0 {
+		timeout = DefaultEvictionParkTimeout
+	}
+	h.evictionParkTimer = time.AfterFunc(timeout, h.expireEvictionPark)
+}
+
+func (h *SessionHost) expireEvictionPark() {
+	h.promptMu.Lock()
+	h.evictionParkTimer = nil
+	if !h.evictionPending {
+		h.promptMu.Unlock()
+		return
+	}
+	h.evictionParkExpired = true
+	parked := h.evictionParked
+	h.evictionParked = evictionParked{}
+	h.promptMu.Unlock()
+	if h.Status() == HostStopped {
+		return
+	}
+	slog.Error("Eviction did not resolve a parked agent exit before its deadline; applying crash handling",
+		"sessionId", h.config.SessionID, "workspaceId", h.config.WorkspaceID,
+		"parkedPromptCrashes", len(parked.promptCrash), "parkedProcessExits", len(parked.processExit))
+	parked.replay()
+}
+
+// takeEvictionParkedLocked removes the parked handling and disarms its deadline.
+// Caller holds promptMu.
+func (h *SessionHost) takeEvictionParkedLocked() evictionParked {
+	if h.evictionParkTimer != nil {
+		h.evictionParkTimer.Stop()
+		h.evictionParkTimer = nil
+	}
+	parked := h.evictionParked
+	h.evictionParked = evictionParked{}
 	return parked
 }
 
@@ -122,10 +179,12 @@ func (h *SessionHost) StopForEviction() {
 	h.promptMu.Lock()
 	attempt := h.promptAttempt
 	active := h.promptInFlight
-	h.evictionParked = evictionParked{}
+	_ = h.takeEvictionParkedLocked()
 	h.promptMu.Unlock()
-	if active && attempt != nil {
-		attempt.complete(h, EvictedStopReason, errWorkspaceEvicted)
+	if active && attempt != nil && !attempt.complete(h, EvictedStopReason, errWorkspaceEvicted) {
+		// A checkpoint rollover owns this attempt's terminal outcome, as it does for Stop().
+		slog.Warn("Evicted prompt is owned by a checkpoint rollover; leaving its outcome to the rollover",
+			"sessionId", h.config.SessionID, "workspaceId", h.config.WorkspaceID, "promptId", attempt.id)
 	}
 	h.Stop()
 }
