@@ -14,7 +14,6 @@ import * as v from 'valibot';
 import { parse as parseYaml } from 'yaml';
 
 import * as schema from '../../db/schema';
-import { PUBLISH_JOB_TERMINAL_STATUSES } from '../../services/deployment-publish-jobs';
 import type { Env } from '../../env';
 import { log, serializeError } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
@@ -32,6 +31,7 @@ import {
   DEPLOYMENT_MODEL_RUNNER_VM_SIZE,
   resolveDeploymentPlacement,
 } from '../../services/deployment-provisioning';
+import { PUBLISH_JOB_TERMINAL_STATUSES } from '../../services/deployment-publish-jobs';
 import {
   createMissingDeclaredVolumes,
   markDeploymentReleaseVolumeAttachFailed,
@@ -371,7 +371,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
         .where(
           and(
             eq(schema.deploymentPublishJobs.id, submission.publishJobId),
-            eq(schema.deploymentPublishJobs.attempt, submission.attempt!),
+            eq(schema.deploymentPublishJobs.attempt, submission.attempt ?? 0),
             eq(schema.deploymentPublishJobs.projectId, projectId),
             eq(schema.deploymentPublishJobs.workspaceId, workspaceId),
             eq(schema.deploymentPublishJobs.requestedBy, userId),
