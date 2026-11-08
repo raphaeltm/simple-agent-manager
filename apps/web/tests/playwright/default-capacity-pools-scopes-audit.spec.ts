@@ -525,6 +525,21 @@ async function editStressedPool(page: Page, screenshotName: string) {
   await page.getByRole('button', { name: 'cx43 in Helsinki', exact: true }).click();
   await screenshotNearHeading(page, 'Allowed machines', screenshotName);
 
+  // Provider order: rank the six accounts and move the second one to the top.
+  await page.getByRole('radio', { name: /Try accounts in this order/ }).check();
+  const order = page.getByRole('list', { name: 'Accounts in order' });
+  await expect(order.getByRole('listitem')).toHaveCount(providerNames.length);
+  const secondTitle = (await order
+    .getByRole('listitem')
+    .nth(1)
+    .locator('div > div')
+    .first()
+    .textContent())!.replace(/^\d+\.\s*/, '');
+  await order.getByRole('button', { name: `Move ${secondTitle} up` }).click();
+  await expect(order.getByRole('listitem').first()).toContainText(secondTitle);
+  await assertNoOverflow(page);
+  await screenshotNearHeading(page, 'Provider order', `${screenshotName}-provider-order`);
+
   // Each click removes its button, so always expand the first one left.
   const showMoreButtons = page.getByRole('button', { name: /^Show \d+ more machine types?$/ });
   for (let left = await showMoreButtons.count(); left > 0; left -= 1) {
@@ -550,6 +565,8 @@ async function editStressedPool(page: Page, screenshotName: string) {
   // cx33's only region was turned off; the catalog-only cpx62 joins.
   await expect(page.getByText('cpx62-catalog-only-live-api-extra', { exact: true })).toBeVisible();
   await expect(page.getByText('cx33', { exact: true })).toHaveCount(0);
+  // The saved order reaches the overview sentence.
+  await expect(page.getByText(/ first, then /)).toBeVisible();
   await assertNoOverflow(page);
 }
 

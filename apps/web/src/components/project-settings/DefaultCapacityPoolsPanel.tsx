@@ -27,6 +27,7 @@ import {
 import { ApiClientError } from '../../lib/api/client';
 import { POOL_SCOPE_COPY } from '../../lib/compute-pool-copy';
 import { buildMachineGroups } from '../../lib/compute-pool-machines';
+import { initialSourceOrder, orderableSources } from '../../lib/compute-pool-source-order';
 import { capacityPoolQueryKeys } from '../../lib/query-options/capacity-pools';
 import { ComputePoolEditor } from '../compute-pool/ComputePoolEditor';
 import { ComputePoolEmptyState } from '../compute-pool/ComputePoolEmptyState';
@@ -137,6 +138,7 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
     () => (shown ? buildMachineGroups(shown.candidates, catalogs, shown.sources) : []),
     [shown, catalogs]
   );
+  const sources = useMemo(() => (shown ? orderableSources(shown, groups) : []), [shown, groups]);
 
   const reconcileMutation = useMutation({
     mutationFn: () =>
@@ -229,6 +231,8 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
               <ComputePoolEditor
                 pool={ownedDefault.pool}
                 groups={groups}
+                sources={sources}
+                initialOrder={initialSourceOrder(sources, ownedDefault.pool.sourceOrder)}
                 saving={updateMutation.isPending}
                 onCancel={() => setIsEditing(false)}
                 onSave={(request) => {
@@ -240,6 +244,7 @@ export function DefaultCapacityPoolsPanel(props: DefaultCapacityPoolsPanelProps)
               <ComputePoolOverview
                 summary={shown}
                 groups={groups}
+                sources={sources}
                 projectId={projectId}
                 notice={
                   fallbackScope && fallbackScope !== scope ? (

@@ -20,6 +20,7 @@ import {
   summarizeAllowedMachines,
 } from '../../lib/compute-pool-machines';
 import { formatOfferingNumber } from '../../lib/compute-pool-offerings';
+import { type OrderableSource, rankSources } from '../../lib/compute-pool-source-order';
 import {
   groupTitles,
   joinNatural,
@@ -131,9 +132,32 @@ function ConnectionsLine({
   );
 }
 
+function sourceName(source: OrderableSource): string {
+  return source.allowedMachineCount === 0
+    ? `${source.label} (no machines allowed yet)`
+    : source.label;
+}
+
+/** The provider order in one sentence; unranked sources are tried after every ranked one. */
+export function providerOrderSentence(
+  sources: OrderableSource[],
+  sourceOrder: string[] | null | undefined
+): string {
+  const { ranked, unranked } = rankSources(sources, sourceOrder);
+  if (ranked.length === 0)
+    return 'Every account is equal. The placement strategy and price decide.';
+  const [first, ...rest] = ranked.map(sourceName);
+  const chain =
+    rest.length > 0 ? `${first} first, then ${joinNatural(rest, 'and')}` : `${first} first`;
+  const after =
+    unranked.length > 0 ? ` ${joinNatural(unranked.map(sourceName), 'and')} after those.` : '';
+  return `${chain}.${after}`;
+}
+
 interface ComputePoolOverviewProps {
   summary: DefaultCapacityPoolSummary;
   groups: MachineGroup[];
+  sources: OrderableSource[];
   projectId: string | null;
   notice?: ReactNode;
 }
@@ -142,6 +166,7 @@ interface ComputePoolOverviewProps {
 export function ComputePoolOverview({
   summary,
   groups,
+  sources,
   projectId,
   notice,
 }: ComputePoolOverviewProps) {
@@ -191,6 +216,14 @@ export function ComputePoolOverview({
         </dd>
         <dt className="text-fg-muted">App deployments</dt>
         <dd className="m-0 text-fg-primary">{deployment.label}</dd>
+        {sources.length > 1 && (
+          <>
+            <dt className="text-fg-muted">Provider order</dt>
+            <dd className="m-0 text-fg-primary [overflow-wrap:anywhere]">
+              {providerOrderSentence(sources, pool.sourceOrder)}
+            </dd>
+          </>
+        )}
       </dl>
 
       <section className="grid min-w-0 gap-2" aria-label="Allowed machines">
