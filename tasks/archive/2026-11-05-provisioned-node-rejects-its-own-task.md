@@ -132,7 +132,7 @@ until the 15-minute provisioning timeout (~150 cycles).
 - [x] Docs: configuration.md, compute-pools.md, admin-settings.md, architecture overview if it states the formula, www placement explorer constant
 - [x] `.claude/rules/09` ceiling 3.5 → 3 GB (and policy `d8f2a083` text after merge)
 - [x] Backlog task for heartbeat `workspaceMemory` absence + nominal vs MemTotal
-- [ ] Staging: dispatch a task at exactly the documented cap (3 GB / 2 vCPU), show it lands on the node it provisioned, clean up
+- [x] Staging: dispatch a task at exactly the documented cap (3 GB / 2 vCPU), show it lands on the node it provisioned, clean up
 
 ## Implementation notes
 
@@ -150,9 +150,23 @@ until the 15-minute provisioning timeout (~150 cycles).
 
 ## Acceptance Criteria
 
-- [ ] A node auto-provisioned for a task with `minMemoryGb: X` can admit that task (one shared accounting policy)
-- [ ] The placement-lost loop is bounded with a configurable cap and `DEFAULT_*`; fails fast with a specific reason recorded in placement diagnostics; the provisioned node is warm-handed-off
-- [ ] Throughput/worst-case of the bound stated (above)
-- [ ] Divergence test red pre-fix, convergence control, real-resolver defaults, cap test past the cap
-- [ ] Rule 09 guidance updated in the same PR
-- [ ] Staging: task at the documented cap lands and runs on the node it provisioned; node cleaned up
+- [x] A node auto-provisioned for a task with `minMemoryGb: X` can admit that task (one shared accounting policy)
+- [x] The placement-lost loop is bounded with a configurable cap and `DEFAULT_*`; fails fast with a specific reason recorded in placement diagnostics; the provisioned node is warm-handed-off
+- [x] Throughput/worst-case of the bound stated (above)
+- [x] Divergence test red pre-fix, convergence control, real-resolver defaults, cap test past the cap
+- [x] Rule 09 guidance updated in the same PR
+- [x] Staging: task at the documented cap lands and runs on the node it provisioned; node cleaned up
+
+## Staging verification (2026-11-08, deploy run 42477465235, commit 1d4e51b05)
+
+- The live Worker version was annotated `commit:1d4e51b05…` at 100%. Before the test, staging had no VM nodes and the platform Hetzner credential was enabled.
+- Task `01M6XGQJVCV4PEDN3NS5M7FAHQ` (project hono): 2 vCPU / 3 GB, exclusive node.
+  - Provisioning chose a **cx23** (node `01M6XGQXB4S3KRFBWCTBG2D2GZ`, 4096 MB). Its first heartbeat read `memoryPercent` 20 (≈ 819 MB) while booting, then settled at 14–15%.
+  - Admission placed workspace `01M6XGX9MKRCHSQS80RX29KVYW` on that same node on the first attempt (queued → delegated at 12:07:48), with no refusal notes. The old formula would have refused it every time (819 + 512 + 3072 > 4096).
+  - The agent (opencode) started, but the model provider refused the prompt with `provider.budget-limit` ("Workspace usage limit reached"). This is the smoke user's OpenCode Go quota and unrelated to placement.
+- Task `01M6XH7R0VWH3BGJ0696DZREDX`, same cap, "Claude Code VM Chat" profile.
+  - Placed on the same cx23 at exact fit (memory 14.6%), workspace `01M6XH814HQ09TKE061P2ANJWS`.
+  - The agent ran and replied "OK", and the task **completed**. The project chat screenshot shows the reply and summary with no console errors.
+- Regression: dashboard, projects and settings load with no console errors. Deploy smoke tests passed.
+- Cleanup: `DELETE /api/nodes/01M6XGQXB4S3KRFBWCTBG2D2GZ` → 200. The node row is gone, and staging has 0 VM nodes.
+- Deploys from 08:47 to 11:47Z failed on a GitHub incident (github.com release downloads 503/504, "timeouts for some unauthenticated users"). Added curl retries plus an authenticated API-asset fallback for the Codex runtime archive (d79da0282, 1d4e51b05), tested with fake curl and with a real run during the outage. The opencode installer inside the container image still downloads unauthenticated.
