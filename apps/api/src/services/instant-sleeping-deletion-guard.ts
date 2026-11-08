@@ -23,7 +23,7 @@ import { WORKSPACE_DELETION_DIAGNOSTIC_PREFIX } from './workspace-deletion';
 /**
  * True when the workspace row aliased `workspaceAlias` still has a wakeable sleeping Instant
  * runtime: a `cf-container` node that is `sleeping` with no termination proof, no confirmed
- * runtime deletion, and this chat's snapshot marked `sleeping`. It mirrors the resumer's
+ * runtime deletion, and this chat's snapshot marked `sleeping` and unexpired. It mirrors the resumer's
  * precondition rather than a status label (`.claude/rules/58`). Self-contained, so it is never
  * NULL under a LEFT JOIN.
  */
@@ -44,6 +44,10 @@ export function wakeableSleepingInstantSql(workspaceAlias: string): string {
       AND wake_snapshot.chat_session_id = ${w}.chat_session_id
       AND wake_snapshot.runtime = 'cf-container'
       AND wake_snapshot.sleep_status = 'sleeping'
+      -- Bounded escape (rule 58): an expired snapshot no longer wakes
+      -- (snapshot_expired), and julianday() is NULL for an unparseable value, which
+      -- the purge's string comparison could otherwise skip forever.
+      AND julianday(wake_snapshot.expires_at) > julianday('now')
   )`;
 }
 

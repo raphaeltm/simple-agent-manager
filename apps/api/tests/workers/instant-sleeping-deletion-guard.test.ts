@@ -22,7 +22,10 @@ import {
   type NodeLifecycleDeletionEnv,
   type PendingWorkspaceDeletion,
 } from '../../src/durable-objects/node-lifecycle-workspace-deletion-support';
-import { keepWakeTarget } from '../../src/durable-objects/node-lifecycle-workspace-deletion-wake-target';
+import {
+  keepWakeTarget,
+  releaseExactAutomaticEntry,
+} from '../../src/durable-objects/node-lifecycle-workspace-deletion-wake-target';
 import type { Env } from '../../src/env';
 import { emptyResult, resolveCleanupConfig } from '../../src/scheduled/node-cleanup/shared';
 import { sweepStaleStoppedWorkspaces } from '../../src/scheduled/node-cleanup/workspace-phases';
@@ -257,6 +260,16 @@ describe('which workspaces count as a wakeable sleeping Instant', () => {
         WHERE id = (SELECT node_id FROM workspaces WHERE id = ?1)`,
     ],
     [
+      'an Instant workspace whose snapshot expired',
+      'cf-container',
+      `UPDATE session_snapshots SET expires_at = '2020-01-01T00:00:00.000Z' WHERE workspace_id = ?1`,
+    ],
+    [
+      'an Instant workspace whose snapshot expiry is unparseable',
+      'cf-container',
+      `UPDATE session_snapshots SET expires_at = 'not-a-timestamp' WHERE workspace_id = ?1`,
+    ],
+    [
       'an Instant workspace stopping for a reason other than deletion',
       'cf-container',
       `UPDATE workspaces SET status = 'stopping', error_message = 'Managed node stop' WHERE id = ?1`,
@@ -463,6 +476,68 @@ describe('the deletion queue and a sleeping Instant workspace', () => {
       status: 'stopping',
       error_message: STUCK_DIAGNOSTIC,
     });
+  });
+
+  it('repairs a stuck row with no queue entry left on the next safety-net tick', async () => {
+    // A restore that failed after its entry was released leaves exactly this: the row still
+    // stopping, nothing queued. The safety net re-selects it, and the queue repairs it then.
+    const instant = await seedSleptWorkspace('cf-container', 'tick-orphan');
+    await env.DATABASE.prepare(
+      `UPDATE workspaces SET status = 'stopping', error_message = ? WHERE id = ?`
+    )
+      .bind(STUCK_DIAGNOSTIC, instant.workspaceId)
+      .run();
+
+    await runSafetyNet();
+
+    expect(await queuedEntry(instant.nodeId, instant.workspaceId)).toBeUndefined();
+    expect(await workspaceRow(instant.workspaceId)).toMatchObject({
+      status: 'sleeping',
+      error_message: null,
+    });
+  });
+
+  it('releases only the exact entry it judged, never a newer claim that replaced it', async () => {
+    const instant = await seedSleptWorkspace('cf-container', 'release-exact');
+    await seedStuckAutomaticDeletion(instant.nodeId, instant.workspaceId, Date.now() - 1_000);
+    const key = `ws-delete:${instant.workspaceId}`;
+
+    const outcome = await runInDurableObject(lifecycle(instant.nodeId), async (instance) => {
+      const storage = instance.ctx.storage;
+      const judged = await storage.get<PendingWorkspaceDeletion>(key);
+      if (!judged) throw new Error('expected the stuck entry');
+      // A newer attempt claims the same key between the read and the release.
+      const newer = { ...judged, attemptCount: 9, claimId: 'newer-claim' };
+      await storage.put(key, newer);
+      const kept = await keepWakeTarget(
+        env as unknown as NodeLifecycleDeletionEnv,
+        judged,
+        instant.workspaceId,
+        () => releaseExactAutomaticEntry(storage, key, judged)
+      );
+      return { kept, stored: await storage.get<PendingWorkspaceDeletion>(key) };
+    });
+
+    expect(outcome.kept).toBe(true);
+    expect(outcome.stored).toMatchObject({ claimId: 'newer-claim', attemptCount: 9 });
+    expect(await workspaceRow(instant.workspaceId)).toMatchObject({
+      status: 'stopping',
+      error_message: STUCK_DIAGNOSTIC,
+    });
+  });
+
+  it('releases the exact entry it judged when nothing replaced it (control)', async () => {
+    const instant = await seedSleptWorkspace('cf-container', 'release-same');
+    await seedStuckAutomaticDeletion(instant.nodeId, instant.workspaceId, Date.now() - 1_000);
+    const key = `ws-delete:${instant.workspaceId}`;
+
+    const released = await runInDurableObject(lifecycle(instant.nodeId), async (instance) => {
+      const judged = await instance.ctx.storage.get<PendingWorkspaceDeletion>(key);
+      return releaseExactAutomaticEntry(instance.ctx.storage, key, judged);
+    });
+
+    expect(released).toBe(true);
+    expect(await queuedEntry(instant.nodeId, instant.workspaceId)).toBeUndefined();
   });
 
   it('does not repair a stopping row whose entry is explicit', async () => {
