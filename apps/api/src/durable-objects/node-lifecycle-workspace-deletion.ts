@@ -52,12 +52,11 @@ export const WORKSPACE_DELETION_QUARANTINE_MESSAGE =
   'Workspace deletion entered durable operator quarantine';
 
 export type { WorkspaceDeletionMode } from '../services/workspace-deletion';
+export { workspaceDeletionDueIndexKey } from './node-lifecycle-workspace-deletion-index';
 export type {
   NodeLifecycleDeletionEnv,
   WorkspaceDeletionClaimResult,
 } from './node-lifecycle-workspace-deletion-support';
-
-export { workspaceDeletionDueIndexKey } from './node-lifecycle-workspace-deletion-index';
 
 /** Durable queue for proof-bearing VM workspace deletion attempts. */
 export class NodeLifecycleWorkspaceDeletionQueue {
