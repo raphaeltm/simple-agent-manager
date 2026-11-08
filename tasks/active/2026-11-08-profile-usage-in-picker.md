@@ -43,19 +43,19 @@ and approved "A's wording inside C's layout" on 2026-11-08, with staging explici
 
 ## Checklist
 
-- [ ] `useAccountsData` / `useProfileBudgets` accept `enabled`
-- [ ] Usage model `profile-picker/usage.ts` (state, left, reset, words, alternative)
-- [ ] `ProfileUsageAvatar` ring component
-- [ ] Cards: ring, low/out/paused/none line, dim when out, a11y label
-- [ ] Sheet rows: ring, trailing low/out/paused/none text, a11y label
-- [ ] Sheet: "Out for now" folded section (`pickerSections` out ids)
-- [ ] To chip: ring + a11y label
-- [ ] Composer nudge with switch suggestion; hidden when the effective agent differs
-- [ ] Wire budgets from the project chat page (enabled only in new-chat view)
-- [ ] Unit tests: usage model, sections, cards/sheet/nudge rendering
-- [ ] Playwright audit through the real page with mocked accounts + limits (mobile + desktop)
-- [ ] Docs: agents.md
-- [ ] Remove the prototype route and files
+- [x] `useAccountsData` / `useProfileBudgets` accept `enabled`
+- [x] Usage model `profile-picker/usage.ts` (state, left, reset, words, alternative)
+- [x] `ProfileUsageAvatar` ring component
+- [x] Cards: ring, low/out/paused/none line, dim when out, a11y label
+- [x] Sheet rows: ring, trailing low/out/paused/none text, a11y label
+- [x] Sheet: "Out for now" folded section (`pickerSections` out ids)
+- [x] To chip: ring + a11y label
+- [x] Composer nudge with switch suggestion; hidden when the effective agent differs
+- [x] Wire budgets from the project chat page (enabled only in new-chat view)
+- [x] Unit tests: usage model, sections, cards/sheet/nudge rendering
+- [x] Playwright audit through the real page with mocked accounts + limits (mobile + desktop)
+- [x] Docs: agents.md
+- [x] Remove the prototype route and files
 
 ## Acceptance criteria
 
@@ -65,3 +65,14 @@ and approved "A's wording inside C's layout" on 2026-11-08, with staging explici
 - Selecting a low/out profile shows the nudge; tapping the suggestion selects that profile.
 - No ring, no nudge, no extra requests in active-session view.
 - No horizontal overflow at 375px and 1280px.
+
+## Implementation notes
+
+- Usage map is computed once on the project chat page (`useProfileUsages`) and passed to the cards,
+  the composer (To chip, nudge) and the sheet; `StartWorkSheet` passes nothing and is unchanged.
+- No dimming of exhausted cards: the red words carry it without lowering text contrast.
+- Countdown refreshes when a limits poll lands (60s); TanStack keeps the same data object when a
+  poll returns identical rows, so a countdown can lag by up to a minute between changes. Accepted.
+- Gate discrimination: forcing `useProfileUsages(..., true)` fails
+  `makes no account requests while a conversation is open` (verified, then restored).
+- Staging waived by Raphaël for this task (2026-11-08).

@@ -374,6 +374,14 @@ coming before an agent stops on it.
   (its own pin, the project's account, or your default), for example `● 5h 72%  Wk 31%  Opus 88%`.
   Select it for the same details dialog. **Most room** sorts the profiles by how much is left on the
   limit that will stop each one first, which helps pick the agent to use next.
+- **When you start a new chat**, each profile's icon in the cards, the profile list and **To** has a
+  ring that shows how much is left on the limit that will stop it first. Words appear only when it
+  matters: `6% left · resets 52m` when a limit is close, `Out · back in 2h 10m` when one is used up.
+  Used-up profiles move to a folded **Out for now** section at the end of the profile list. If the
+  profile you picked is close or out, a line above the message box says so and, when another profile
+  runs the same model on a different account with room, offers to switch to it (for example
+  **Use Claudiii · 83% left**). A skill or chat option that changes the agent hides this, because the
+  chat would then run on another account.
 - **Agents** can read the same numbers with the `workspace_read` tool (`method: "credential_limits"`), so an agent
   coordinating others can pause before a limit and schedule itself to wake after the reset.
 
@@ -488,7 +496,7 @@ Type `@` in a chat message to choose a profile from the mention list. Mentions a
 
 - **The profile you used last is pre-selected.** A new chat starts with the profile you last picked yourself for a new chat in this project in the last 30 days, unless you've hidden it. Chats the SAM assistant started for you count; chats that automations, the Connector or other agents started don't. Otherwise it's the first profile you haven't hidden, in alphabetical order. Change it any time before you send. **Start work** on an [idea](/docs/guides/ideas/#start-work-on-an-idea) pre-selects the same way.
 - **Your recent profiles appear as cards.** With two or more profiles you haven't hidden, the empty chat asks **Who should take this?** and shows your most recent profiles as cards under **Recent** (with no recent picks, your first profiles, under **Your profiles**). When the chat area is wide enough, it also shows profiles that build and open pull requests. Each card shows the profile's description (change it with **Edit** in the profile list or on the **Profiles** page) and what runs it, such as **Claude · Opus 5.5 · max effort**. Tap a card to pick it, or select **All _N_ profiles** under the cards for the full list. Otherwise the starter prompts show instead.
-- **To** above the message box names the chosen profile. Select it to see every profile: **Recent** first, then **Chat & explore** and **Build & open PRs**, with a search box once you have more than eight. **New**, **Edit** and **Manage** are at the bottom.
+- **To** above the message box names the chosen profile. Select it to see every profile: **Recent** first, then **Chat & explore** and **Build & open PRs**, with a search box once you have more than eight. Profiles whose account has no [usage](#usage-limits) left wait in a folded **Out for now** section near the end. **New**, **Edit** and **Manage** are at the bottom.
 
 ![The profile list opened from To, titled 'Start with…', with Edit list and a close button. Recent lists Brainstormer (checked), Careful Builder and Code Reviewer. Chat & explore lists Quick Questions and Release Notes. Build & open PRs lists Frontend Builder. Each row shows what runs it, such as 'Codex · GPT-6 Luna · medium effort'. New, Edit and Manage are at the bottom.](/images/docs/new-chat-profile-list.png)
 
