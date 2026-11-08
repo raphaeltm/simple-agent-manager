@@ -97,7 +97,7 @@ user row in step with the default, so it does not cause or fix this.
       stale response omits refresh_token, grace bound to credential, concurrency exactly-once,
       sync account mismatch; each guard proven discriminating
 - [x] Vertical slice: agent-key callback records the pin → refresh rotates the pinned row only
-- [ ] Staging: pinned non-default Codex account refresh lands on the pinned credential
+- [x] Staging: pinned non-default Codex account refresh lands on the pinned credential
 
 ## Implementation Notes
 
@@ -132,4 +132,18 @@ user row in step with the default, so it does not cause or fix this.
 - D1 after the runs: default cc row and legacy row unchanged (same updated_at / iv); pinned row
   unchanged (no successful rotation to store). Pre-fix, these runs would have taken the stale
   branch against the legacy default row and been handed the default account's access token.
-- Remaining: a successful refresh on a live pinned non-default account (swap test).
+- Swap test (live pinned non-default account), build a8765f4 (version etag verified unchanged):
+  - The smoke user's default was temporarily switched to the dead Jul 16 account (UI "Make default";
+    legacy default row now held that account), and the live Aug 21 account `cc-cred-01M0JB…` was pinned
+    to the VM profile "OpenAI Codex Chat" (UI "Use in profiles…"). Instant sessions were blocked by
+    staging's container `max_instances`, unrelated (backlog task filed).
+  - The VM session recorded `cc_credentials:cc-cred-01M0JB…`, `scope = profile`.
+  - Codex declined to run a credential-handling script, so the operator ran the same refresh check in
+    the workspace terminal: it POSTed the workspace's own seeded refresh token to the proxy URL Codex was
+    configured with. Result: HTTP 200, refresh token rotated (sha12 `e40d8ded74d2` → `a53222d8143b`),
+    returned id_token account `dc7f512f…` == the seeded (pinned) account. No token was printed.
+  - D1 after: pinned row `cc-cred-01M0JB…` updated 09:54:35Z with a new IV; the legacy default row
+    (dead account) and both July rows unchanged. Pre-fix, this refresh would have been compared with the
+    legacy default row (dead account) and answered with that account's expired access token.
+  - Restored: Aug 21 default again (legacy row now carries its rotated ciphertext), both profile pins
+    removed, test workspace and VM node deleted.
