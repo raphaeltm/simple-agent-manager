@@ -604,10 +604,13 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     const graceWindowMs = this.getGraceWindowMs();
     const entries = await this.getRotatedTokenEntries();
 
-    // Prune expired entries and add the new one.
-    const fresh = entries
-      .filter((e) => now - e.rotatedAt < graceWindowMs)
-      .slice(-(MAX_ROTATED_TOKEN_ENTRIES - 1));
+    // Prune expired entries and add the new one. The cap applies per credential, so
+    // rotations of one pinned account never evict another account's grace entry;
+    // across credentials the list stays bounded by the grace window.
+    const live = entries.filter((e) => now - e.rotatedAt < graceWindowMs);
+    const sameCredential = live.filter((e) => e.credentialReference === credentialReference);
+    const kept = new Set(sameCredential.slice(-(MAX_ROTATED_TOKEN_ENTRIES - 1)));
+    const fresh = live.filter((e) => e.credentialReference !== credentialReference || kept.has(e));
     fresh.push({ tokenHash: hash, rotatedAt: now, credentialReference });
 
     await this.ctx.storage.put('rotated-tokens', fresh);
@@ -654,45 +657,53 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     credentialReferences: string[],
     encryptionKey: string
   ): Promise<{ candidates: RefreshCandidate[]; readFailure: string | null }> {
-    const candidates: RefreshCandidate[] = [];
     let readFailure: string | null = null;
-    for (const reference of credentialReferences) {
-      const credential = await loadRunAgentCredential(this.env.DATABASE, {
-        userId,
-        reference,
-        agentType: CODEX_AGENT_TYPE,
-        credentialKind: CODEX_CREDENTIAL_KIND,
-      });
-      if (!credential) {
-        log.warn('codex_refresh.credential_not_found', { userId, credentialReference: reference });
-        continue;
-      }
-      if (!credential.isActive) {
-        log.warn('codex_refresh.inactive_credential_no_fallback', {
+    const loaded = await Promise.all(
+      credentialReferences.map(async (reference): Promise<RefreshCandidate | null> => {
+        const credential = await loadRunAgentCredential(this.env.DATABASE, {
           userId,
-          credentialReference: reference,
+          reference,
+          agentType: CODEX_AGENT_TYPE,
+          credentialKind: CODEX_CREDENTIAL_KIND,
         });
-        continue;
-      }
-      let decrypted: string;
-      try {
-        decrypted = await decrypt(credential.encryptedToken, credential.iv, encryptionKey);
-      } catch {
-        readFailure ??= 'Failed to decrypt stored credential';
-        log.error('codex_refresh.credential_decrypt_failed', {
-          userId,
-          credentialReference: reference,
-        });
-        continue;
-      }
-      const parsed = parseCodexAuth(decrypted);
-      if (!parsed) {
-        readFailure ??= 'Stored credential is not valid JSON';
-        log.error('codex_refresh.credential_not_json', { userId, credentialReference: reference });
-        continue;
-      }
-      candidates.push({ credential, auth: parsed.auth, identity: parsed.identity });
-    }
+        if (!credential) {
+          log.warn('codex_refresh.credential_not_found', {
+            userId,
+            credentialReference: reference,
+          });
+          return null;
+        }
+        if (!credential.isActive) {
+          log.warn('codex_refresh.inactive_credential_no_fallback', {
+            userId,
+            credentialReference: reference,
+          });
+          return null;
+        }
+        let decrypted: string;
+        try {
+          decrypted = await decrypt(credential.encryptedToken, credential.iv, encryptionKey);
+        } catch {
+          readFailure ??= 'Failed to decrypt stored credential';
+          log.error('codex_refresh.credential_decrypt_failed', {
+            userId,
+            credentialReference: reference,
+          });
+          return null;
+        }
+        const parsed = parseCodexAuth(decrypted);
+        if (!parsed) {
+          readFailure ??= 'Stored credential is not valid JSON';
+          log.error('codex_refresh.credential_not_json', {
+            userId,
+            credentialReference: reference,
+          });
+          return null;
+        }
+        return { credential, auth: parsed.auth, identity: parsed.identity };
+      })
+    );
+    const candidates = loaded.filter((c): c is RefreshCandidate => c !== null);
     return { candidates, readFailure };
   }
 

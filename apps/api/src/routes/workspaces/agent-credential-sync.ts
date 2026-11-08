@@ -51,7 +51,10 @@ type SyncSelection =
 /**
  * Pick which seeded credential the synced file belongs to. For Codex, the
  * auth.json `tokens.account_id` identifies the account: a stored credential of a
- * different account is never a target. Several stored copies of the same
+ * different account is never a target. With one candidate, a missing account id
+ * on either side is accepted (nothing else it could belong to). With several, the
+ * synced file must name its account and a candidate must match it exactly: a
+ * missing id is ambiguous, never a wildcard. Several stored copies of the same
  * account resolve to the most recently used one (candidates arrive in that order).
  */
 export function selectSyncTarget(
@@ -60,27 +63,28 @@ export function selectSyncTarget(
   candidates: SyncCandidate[]
 ): SyncSelection {
   const [first] = candidates;
-  if (agentType !== 'openai-codex') {
-    return candidates.length === 1 && first
-      ? { ok: true, candidate: first }
-      : { ok: false, reason: 'credential_ambiguous' };
+  if (!first) return { ok: false, reason: 'credential_ambiguous' };
+  const isCodex = agentType === 'openai-codex';
+  const accountOf = (credential: string) =>
+    isCodex ? parseCodexAuth(credential)?.identity.accountId : undefined;
+  const syncedAccount = accountOf(syncedCredential);
+
+  if (candidates.length === 1) {
+    const storedAccount = accountOf(first.plaintext);
+    return syncedAccount && storedAccount && storedAccount !== syncedAccount
+      ? { ok: false, reason: 'credential_account_mismatch' }
+      : { ok: true, candidate: first };
   }
-  const syncedAccount = parseCodexAuth(syncedCredential)?.identity.accountId;
+
+  if (!syncedAccount) return { ok: false, reason: 'credential_ambiguous' };
   const accounts = candidates.map((candidate) => ({
     candidate,
-    accountId: parseCodexAuth(candidate.plaintext)?.identity.accountId,
+    accountId: accountOf(candidate.plaintext),
   }));
-  const compatible = accounts.filter(
-    ({ accountId }) => !syncedAccount || !accountId || accountId === syncedAccount
-  );
-  if (compatible.length === 0) return { ok: false, reason: 'credential_account_mismatch' };
-  const sameAccount = syncedAccount
-    ? compatible.find(({ accountId }) => accountId === syncedAccount)
-    : undefined;
+  const sameAccount = accounts.find(({ accountId }) => accountId === syncedAccount);
   if (sameAccount) return { ok: true, candidate: sameAccount.candidate };
-  const [only] = compatible;
-  return compatible.length === 1 && only
-    ? { ok: true, candidate: only.candidate }
+  return accounts.every(({ accountId }) => accountId)
+    ? { ok: false, reason: 'credential_account_mismatch' }
     : { ok: false, reason: 'credential_ambiguous' };
 }
 
@@ -215,9 +219,8 @@ agentCredentialSyncRoutes.post(
       },
     });
     if (!write.applied) {
-      // Throws 410 when the workspace callback identity moved; otherwise the
-      // credential itself changed under us and is left alone.
-      await assertWorkspaceCallbackIdentityCurrent(c.env, workspace, 'agent_credential_sync');
+      // `respond` throws 410 when the workspace callback identity moved; otherwise
+      // the credential itself changed under us and is left alone.
       log.warn('agent_credential_sync.cas_lost', {
         workspaceId,
         agentType,

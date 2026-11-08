@@ -80,8 +80,9 @@ export const DEFAULT_RATE_WINDOW_SECONDS = 3600;
  */
 export const DEFAULT_GRACE_WINDOW_MS = 300_000;
 /**
- * Maximum number of recently-rotated token hashes to track in DO storage.
- * Keeps storage bounded even under pathological refresh patterns.
+ * Maximum number of recently-rotated token hashes to track per credential in DO
+ * storage. Entries also expire with the grace window, so storage stays bounded
+ * even under pathological refresh patterns.
  */
 export const MAX_ROTATED_TOKEN_ENTRIES = 5;
 

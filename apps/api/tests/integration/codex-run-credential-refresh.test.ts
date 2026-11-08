@@ -41,6 +41,7 @@ import { agentCredentialSyncRoutes } from '../../src/routes/workspaces/agent-cre
 import { runtimeRoutes } from '../../src/routes/workspaces/runtime';
 import { decrypt, encrypt } from '../../src/services/encryption';
 import { verifyCallbackToken } from '../../src/services/jwt';
+import { RUN_CREDENTIAL_CANDIDATE_LIMIT } from '../../src/services/run-agent-credential';
 import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 const ENCRYPTION_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
@@ -50,6 +51,9 @@ const CODEX = 'openai-codex';
 let sqlite: Database.Database;
 let env: Env;
 let upstreamRefreshTokens: string[];
+let doRequestBodies: Array<Record<string, unknown>>;
+/** Runs once just before the next D1 batch (the credential write), to stage a race. */
+let beforeNextBatch: (() => void) | null;
 
 const codexAuth = (who: string, generation = 1) =>
   JSON.stringify({
@@ -201,6 +205,8 @@ beforeEach(() => {
   sqlite = new Database(':memory:');
   createAllSchemaTables(sqlite, schema);
   upstreamRefreshTokens = [];
+  doRequestBodies = [];
+  beforeNextBatch = null;
   const store = new Map<string, unknown>();
   const ctx = {
     storage: {
@@ -208,8 +214,22 @@ beforeEach(() => {
       put: async (key: string, value: unknown) => void store.set(key, value),
     },
   };
+  const d1 = createSqliteD1(sqlite);
+  const database = new Proxy(d1, {
+    get(target, prop, receiver) {
+      if (prop === 'batch') {
+        return async (statements: D1PreparedStatement[]) => {
+          const hook = beforeNextBatch;
+          beforeNextBatch = null;
+          hook?.();
+          return target.batch(statements);
+        };
+      }
+      return Reflect.get(target, prop, receiver);
+    },
+  });
   const base = {
-    DATABASE: createSqliteD1(sqlite),
+    DATABASE: database,
     ENCRYPTION_KEY,
     BASE_DOMAIN: 'sammy.party',
     CODEX_EXPECTED_SCOPES: '',
@@ -223,7 +243,12 @@ beforeEach(() => {
       idFromName: (name: string) => name,
       get: (name: string) => {
         if (!locks.has(name)) locks.set(name, new CodexRefreshLock(ctx as never, base as never));
-        return { fetch: (request: Request) => locks.get(name)!.fetch(request) };
+        return {
+          fetch: async (request: Request) => {
+            doRequestBodies.push((await request.clone().json()) as Record<string, unknown>);
+            return locks.get(name)!.fetch(request);
+          },
+        };
       },
     },
   } as unknown as Env;
@@ -385,6 +410,89 @@ describe('a Codex run refreshes the account it was seeded with', () => {
   });
 });
 
+describe('which recorded references are candidates', () => {
+  beforeEach(async () => {
+    await seedCcAccount('default');
+    await seedCcAccount('project');
+    await seedCcAccount('profile');
+    attachDefault('default');
+  });
+
+  function record(sessionId: string, reference: string, updatedAt: string, source = 'user') {
+    sqlite
+      .prepare(
+        `INSERT INTO agent_sessions (id, user_id, workspace_id, status, agent_type, agent_credential_source,
+           agent_credential_reference, agent_credential_generation, updated_at)
+         VALUES (?, 'u1', 'w1', 'stopped', ?, ?, ?, 1, ?)`
+      )
+      .run(sessionId, CODEX, source, reference, updatedAt);
+  }
+
+  it('several sessions: deduplicated, most recently used first, chosen by possession', async () => {
+    record('s-old', 'cc_credentials:cred-project', '2026-11-07T00:00:00.000Z');
+    record('s-new', 'cc_credentials:cred-profile', '2026-11-08T00:00:00.000Z');
+    record('s-new2', 'cc_credentials:cred-profile', '2026-11-08T01:00:00.000Z');
+
+    const res = await refresh('project-refresh-1');
+
+    expect(doRequestBodies[0]?.credentialReferences).toEqual([
+      'cc_credentials:cred-profile',
+      'cc_credentials:cred-project',
+    ]);
+    expect(res.status).toBe(200);
+    expect(await refreshTokenOf('cc_credentials', 'cred-project')).toBe('project-refresh-2');
+    expect(await secret('cc_credentials', 'cred-profile')).toBe(codexAuth('profile'));
+    expect(await secret('cc_credentials', 'cred-default')).toBe(codexAuth('default'));
+  });
+
+  it('several sessions and no proof of possession: nothing is handed out', async () => {
+    record('s-old', 'cc_credentials:cred-project', '2026-11-07T00:00:00.000Z');
+    record('s-new', 'cc_credentials:cred-profile', '2026-11-08T00:00:00.000Z');
+
+    const res = await refresh('unknown-refresh');
+
+    expect(res.status).toBe(401);
+    expect(res.body).toEqual({ error: 'refresh_token_invalidated' });
+  });
+
+  it('caps the candidates at the most recently used, dropping only the oldest', async () => {
+    for (let n = 0; n <= RUN_CREDENTIAL_CANDIDATE_LIMIT; n++) {
+      const minute = String(n).padStart(2, '0');
+      record(`s-${n}`, `cc_credentials:cred-gone-${n}`, `2026-11-08T00:${minute}:00.000Z`);
+    }
+
+    await refresh('profile-refresh-1');
+
+    const refs = doRequestBodies[0]?.credentialReferences as string[];
+    expect(refs).toHaveLength(RUN_CREDENTIAL_CANDIDATE_LIMIT);
+    expect(refs[0]).toBe(`cc_credentials:cred-gone-${RUN_CREDENTIAL_CANDIDATE_LIMIT}`);
+    expect(refs).not.toContain('cc_credentials:cred-gone-0');
+  });
+
+  it('a recorded legacy reference is honoured', async () => {
+    await seedLegacyAccount('leg-pinned', 'legacy');
+    record('s-legacy', 'credentials:leg-pinned', '2026-11-08T00:00:00.000Z');
+
+    const res = await refresh('legacy-refresh-1');
+
+    expect(res.status).toBe(200);
+    expect(await refreshTokenOf('credentials', 'leg-pinned')).toBe('legacy-refresh-2');
+    expect(await secret('cc_credentials', 'cred-default')).toBe(codexAuth('default'));
+  });
+
+  it('a reference recorded for a platform-sourced run is not a candidate', async () => {
+    record('s-platform', 'cc_credentials:cred-profile', '2026-11-08T00:00:00.000Z', 'platform');
+
+    const res = await refresh('profile-refresh-1');
+
+    // Falls through to the resolver (the user default), which the caller does not hold.
+    expect(doRequestBodies[0]?.credentialReferences).toEqual(['cc_credentials:cred-default']);
+    expect(res.body.refresh_token).toBeUndefined();
+    expect(upstreamRefreshTokens).toEqual([]);
+    expect(await secret('cc_credentials', 'cred-profile')).toBe(codexAuth('profile'));
+  });
+});
+
 describe('legacy-only users', () => {
   it('a legacy project row is refreshed in place (no cc data, nothing recorded)', async () => {
     await seedLegacyAccount('leg-user', 'default');
@@ -464,6 +572,45 @@ describe('agent-credential-sync writes into the seeded account', () => {
 
   it('an unchanged auth.json is a no-op', async () => {
     expect((await sync(codexAuth('project'))).body).toEqual({ success: true, updated: false });
+  });
+
+  it('the workspace moving between read and write: nothing is written (410)', async () => {
+    beforeNextBatch = () => sqlite.exec(`UPDATE workspaces SET status = 'stopped' WHERE id = 'w1'`);
+
+    const res = await sync(codexAuth('project', 3));
+
+    expect(res.status).toBe(410);
+    expect(await secret('cc_credentials', 'cred-project')).toBe(codexAuth('project'));
+  });
+
+  it('the credential rotating between read and write: credential_changed, nothing overwritten', async () => {
+    const rotated = await encrypt(codexAuth('project', 2), ENCRYPTION_KEY);
+    beforeNextBatch = () =>
+      sqlite
+        .prepare(`UPDATE cc_credentials SET encrypted_token = ?, iv = ? WHERE id = 'cred-project'`)
+        .run(rotated.ciphertext, rotated.iv);
+
+    const res = await sync(codexAuth('project', 3));
+
+    expect(res.body).toEqual({ success: false, reason: 'credential_changed' });
+    expect(await secret('cc_credentials', 'cred-project')).toBe(codexAuth('project', 2));
+    expect(await secret('cc_credentials', 'cred-default')).toBe(codexAuth('default'));
+  });
+
+  it('attack: a forged reference to another user’s credential is not written; owner control is', async () => {
+    await seedCcAccount('victim', 'u2');
+    sqlite.exec(`INSERT INTO workspaces (id, user_id, node_id, project_id, status)
+      VALUES ('w3', 'u1', 'n1', NULL, 'running')`);
+    sqlite.exec(`INSERT INTO agent_sessions (id, user_id, workspace_id, status, agent_type,
+      agent_credential_source, agent_credential_reference, agent_credential_generation)
+      VALUES ('s3', 'u1', 'w3', 'running', '${CODEX}', 'user', 'cc_credentials:cred-victim', 1)`);
+
+    const attack = await sync(codexAuth('victim', 3), 'w3');
+    expect(attack.body.success).toBe(false);
+    expect(await secret('cc_credentials', 'cred-victim')).toBe(codexAuth('victim'));
+
+    const owner = await sync(codexAuth('project', 3), 'w1');
+    expect(owner.body).toEqual({ success: true, updated: true });
   });
 
   it('an inactive pinned credential is not replaced by the default', async () => {

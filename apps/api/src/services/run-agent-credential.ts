@@ -27,12 +27,21 @@ import type { CredentialKind } from '@simple-agent-manager/shared';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import type * as schema from '../db/schema';
+import { log } from '../lib/logger';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 import { getSelectedAgentCredentialReference } from './agent-key-resolution';
 import { ccKindForAgentCredential } from './composable-credentials/agent-sync';
 import { resolveSessionProfileCredentialContext } from './composable-credentials/profile-context';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
+
+/**
+ * Safety cap on distinct recorded credentials considered for one workspace run.
+ * Each reference names one of the user's own credential rows, so real workspaces
+ * hold one or two; the cap only bounds the per-candidate reads in a pathological
+ * case, keeping the most recently used.
+ */
+export const RUN_CREDENTIAL_CANDIDATE_LIMIT = 20;
 
 export type RunCredentialTable = 'cc_credentials' | 'credentials';
 
@@ -93,11 +102,22 @@ export async function resolveRunAgentCredentialReferences(
           AND agent_credential_reference IS NOT NULL
           AND (agent_credential_source IS NULL OR agent_credential_source != 'platform')
         GROUP BY agent_credential_reference
-        ORDER BY last_used DESC, agent_credential_reference`
+        ORDER BY last_used DESC, agent_credential_reference
+        LIMIT ?`
     )
-    .bind(input.workspaceId, input.userId, input.agentType)
+    .bind(input.workspaceId, input.userId, input.agentType, RUN_CREDENTIAL_CANDIDATE_LIMIT + 1)
     .all<{ reference: string }>();
-  const references = (recorded.results ?? [])
+  const rows = recorded.results ?? [];
+  if (rows.length > RUN_CREDENTIAL_CANDIDATE_LIMIT) {
+    // Most recently used first, so only the oldest recorded choices are dropped.
+    log.warn('run_credential.candidates_truncated', {
+      workspaceId: input.workspaceId,
+      agentType: input.agentType,
+      limit: RUN_CREDENTIAL_CANDIDATE_LIMIT,
+    });
+  }
+  const references = rows
+    .slice(0, RUN_CREDENTIAL_CANDIDATE_LIMIT)
     .map((row) => row.reference)
     .filter((reference) => parseRunCredentialReference(reference) !== null);
   if (references.length > 0) return references;
@@ -170,7 +190,8 @@ export async function loadRunAgentCredential(
  * write did, so a lost compare-and-set writes nothing anywhere.
  *
  * `guard` adds a condition to the primary write (the sync route binds it to the
- * workspace callback identity).
+ * workspace callback identity; that guard joins `nodes`, so it assumes the
+ * workspace has a node, which every callback-active workspace does).
  */
 export async function writeRotatedAgentCredential(
   database: D1Database,

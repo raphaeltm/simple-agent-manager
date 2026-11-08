@@ -784,7 +784,58 @@ describe('CodexRefreshLock', () => {
         })
       );
 
+      // Liveness: the race window was reached and the CAS rejected the write.
+      expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
+      expect(mockLogWarn).toHaveBeenCalledWith(
+        'codex_refresh.rotation_cas_lost',
+        expect.objectContaining({ credentialReference: 'cc_credentials:cred-pinned' })
+      );
       expect(await secretOf('cc_credentials', 'cred-pinned')).toBe(codexAuth('pinned'));
+    });
+
+    it('overlapping refreshes of two accounts of one user each rotate their own account once', async () => {
+      const { do: doInstance } = createDO();
+      await seedCc('cred-a', codexAuth('a'));
+      await seedCc('cred-b', codexAuth('b'));
+      vi.mocked(fetch).mockImplementation(async (_url, init) => {
+        const presented = JSON.parse(String(init?.body)).refresh_token as string;
+        const who = presented.replace(/-refresh$/, '');
+        return new Response(
+          JSON.stringify({ access_token: `${who}2-access`, refresh_token: `${who}2-refresh` }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        );
+      });
+
+      const [resA, resB] = await Promise.all([
+        doInstance.fetch(
+          makeRequest({
+            refreshToken: 'a-refresh',
+            userId: USER,
+            credentialReferences: ['cc_credentials:cred-a'],
+          })
+        ),
+        doInstance.fetch(
+          makeRequest({
+            refreshToken: 'b-refresh',
+            userId: USER,
+            credentialReferences: ['cc_credentials:cred-b'],
+          })
+        ),
+      ]);
+
+      expect((await resA.json()).refresh_token).toBe('a2-refresh');
+      expect((await resB.json()).refresh_token).toBe('b2-refresh');
+      const presented = vi
+        .mocked(fetch)
+        .mock.calls.map(([, init]) => JSON.parse(String(init?.body)).refresh_token)
+        .sort();
+      expect(presented).toEqual(['a-refresh', 'b-refresh']);
+      expect(JSON.parse(await secretOf('cc_credentials', 'cred-a')).tokens.refresh_token).toBe(
+        'a2-refresh'
+      );
+      expect(JSON.parse(await secretOf('cc_credentials', 'cred-b')).tokens.refresh_token).toBe(
+        'b2-refresh'
+      );
     });
   });
 
@@ -815,6 +866,55 @@ describe('CodexRefreshLock', () => {
       expect(json.access_token).toBe('pinned-access');
       expect(json.refresh_token).toBe(expectFull ? 'pinned-refresh' : undefined);
       expect(json.stale).toBe(expectFull ? undefined : true);
+    });
+
+    it("one account's rotations never evict another account's grace entries", async () => {
+      const otherEntries = await Promise.all(
+        [1, 2, 3, 4, 5].map(async (n) => ({
+          tokenHash: await sha256Hex(`other-${n}`),
+          rotatedAt: Date.now() - 1_000,
+          credentialReference: DEFAULT_REF,
+        }))
+      );
+      const { do: doInstance, ctx } = createDO({}, { 'rotated-tokens': otherEntries });
+      await seedCc('cred-pinned', codexAuth('pinned'));
+      mockSuccessfulRefreshResponse();
+
+      await doInstance.fetch(
+        makeRequest({
+          refreshToken: 'pinned-refresh',
+          userId: USER,
+          credentialReferences: ['cc_credentials:cred-pinned'],
+        })
+      );
+
+      const stored = ctx.storage._store.get('rotated-tokens') as Array<{
+        credentialReference: string;
+      }>;
+      expect(stored.filter((e) => e.credentialReference === DEFAULT_REF)).toHaveLength(5);
+      expect(
+        stored.filter((e) => e.credentialReference === 'cc_credentials:cred-pinned')
+      ).toHaveLength(1);
+    });
+
+    it('caps the grace entries of one credential', async () => {
+      const own = await Promise.all(
+        [1, 2, 3, 4, 5].map(async (n) => ({
+          tokenHash: await sha256Hex(`old-${n}`),
+          rotatedAt: Date.now() - 1_000,
+          credentialReference: DEFAULT_REF,
+        }))
+      );
+      const { do: doInstance, ctx } = createDO({}, { 'rotated-tokens': own });
+      await setupCredentialFound();
+      mockSuccessfulRefreshResponse();
+
+      await doInstance.fetch(makeRequest({ refreshToken: 'stored-refresh', userId: USER }));
+
+      const stored = ctx.storage._store.get('rotated-tokens') as Array<{ tokenHash: string }>;
+      expect(stored).toHaveLength(5);
+      expect(stored.at(-1)?.tokenHash).toBe(await sha256Hex('stored-refresh'));
+      expect(stored.map((e) => e.tokenHash)).not.toContain(await sha256Hex('old-1'));
     });
 
     it('records the credential a token was rotated out of', async () => {
