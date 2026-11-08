@@ -327,10 +327,12 @@ function finalMeasuredPressurePredicateSql(): string {
       AND ${validCreatingWorkspacesSql()}
       AND (policy.allow_busy_build_queue = 1
         OR COALESCE(CAST(json_extract(n.metrics_json, '$.creatingWorkspaces') AS INTEGER), 0) = 0)
-      AND (
+      -- CPU is compressible: bootstrap load must not veto the first reservation.
+      -- Read occupancy in this claim so a concurrent co-tenant cannot bypass it.
+      AND (active.active_count = 0 OR (
         ((CAST(json_extract(n.metrics_json, '$.cpuLoadAvg1') AS REAL) / n.trusted_provider_instance_vcpu_count) * 100)
           < policy.cpu_threshold_percent
-      )
+      ))
       AND CAST(json_extract(n.metrics_json, '$.diskPercent') AS REAL)
         < policy.disk_pressure_threshold_percent
     )
