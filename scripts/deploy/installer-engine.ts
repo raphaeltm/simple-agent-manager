@@ -418,15 +418,31 @@ export async function runInstallerEngine(
           }
         ),
       registryPassword: async () => {
-        const output = await wrangler(
-          'api',
-          'containers',
-          'registries',
-          'credentials',
-          'registry.cloudflare.com',
-          '--push',
-          '--pull',
-          '--json'
+        // Not via wrangler(): the output is the password itself, so a failure must
+        // not report it (EngineRunOptions.privateOutput).
+        const output = await runner.run(
+          {
+            executable: 'pnpm',
+            args: [
+              '--filter',
+              '@simple-agent-manager/api',
+              'exec',
+              'wrangler',
+              'containers',
+              'registries',
+              'credentials',
+              'registry.cloudflare.com',
+              '--push',
+              '--pull',
+              '--json',
+            ],
+          },
+          {
+            cwd: root,
+            env,
+            timeoutMs: c.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS,
+            privateOutput: true,
+          }
         );
         const parsed: unknown = JSON.parse(output.slice(output.indexOf('{')));
         const password =

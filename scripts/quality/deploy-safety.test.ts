@@ -553,7 +553,9 @@ describe('deployment workflow safety wiring', () => {
     expect(release).toContain('git tag -a');
     expect(release).toContain('gh release create');
     expect(release).toContain('--verify-tag');
-    expect(release).toContain('--latest');
+    // Latest only after the installer artifacts job, which installers read from.
+    expect(release).toContain('--latest=false');
+    expect(release).toContain('gh release edit "$TAG_NAME" --repo "$GH_REPOSITORY" --latest');
     // Notes are generated through the API and length-checked before the
     // release call, rather than via `--generate-notes`, which summarises the
     // entire history when no previous release exists.

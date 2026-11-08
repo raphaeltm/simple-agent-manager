@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
 import { parse } from 'yaml';
+
 import { LEGACY_CI_DIRECT_SECRETS } from './installer-engine-ci';
 
 interface Step {
@@ -89,7 +90,8 @@ describe('shared deployment workflow routing', () => {
     const gate = steps.find(
       (step) => step.name === 'Verify installation engine orchestration contract'
     );
-    expect(gate?.if).toBeUndefined();
+    // Only the opt-in shared-engine path depends on the engine; CI covers it otherwise.
+    expect(active(gate ?? {}, shared, dry)).toBe(shared);
     expect(gate?.run).toContain('installer-engine.vitest.config.ts');
   });
   it('retains output contracts and sends existing secrets only through private environment', () => {

@@ -1,8 +1,11 @@
 import { createHash } from 'node:crypto';
 import {
+  closeSync,
   createWriteStream,
   mkdirSync,
+  openSync,
   readFileSync,
+  readSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -258,6 +261,51 @@ export function imageContextKey(contextDir: string, dockerfilePath: string): str
   return hash.digest('hex');
 }
 
+const LAYOUT_ENTRY =
+  /^(?:|oci-layout|index\.json|blobs\/|blobs\/sha256\/|blobs\/sha256\/[a-f0-9]{64})$/;
+
+/**
+ * True only when a tarred OCI image layout holds nothing but the layout's own
+ * entries (`oci-layout`, `index.json`, `blobs/sha256/<digest>`) as regular files
+ * and directories. The archive's checksum proves only who published it, so this
+ * runs before extraction: no links, devices, absolute or parent paths, or
+ * extended headers that could rename an entry.
+ */
+export function layoutArchiveIsSafe(path: string): boolean {
+  const fd = openSync(path, 'r');
+  try {
+    const header = Buffer.alloc(512);
+    let offset = 0;
+    for (;;) {
+      if (readSync(fd, header, 0, 512, offset) !== 512) return false;
+      if (header.every((byte) => byte === 0)) return true;
+      const field = (start: number, length: number) =>
+        header
+          .subarray(start, start + length)
+          .toString('latin1')
+          .replace(/\0.*$/s, '');
+      const posix = header.subarray(257, 263).toString('latin1') === 'ustar\0';
+      const prefix = posix ? field(345, 155) : '';
+      const name = (prefix ? `${prefix}/` : '') + field(0, 100);
+      const type = String.fromCharCode(header[156]);
+      const size = Number.parseInt(field(124, 12).trim() || '0', 8);
+      const relative = name.replace(/^\.\//, '').replace(/^\.$/, '');
+      if (!Number.isSafeInteger(size) || size < 0) return false;
+      if (type === '5') {
+        if (!LAYOUT_ENTRY.test(relative.endsWith('/') || !relative ? relative : `${relative}/`))
+          return false;
+      } else if (type === '0' || type === '\0') {
+        if (!relative || relative.endsWith('/') || !LAYOUT_ENTRY.test(relative)) return false;
+      } else return false;
+      offset += 512 + Math.ceil(size / 512) * 512;
+    }
+  } catch {
+    return false;
+  } finally {
+    closeSync(fd);
+  }
+}
+
 /** A digest-pinned reference in the account's Cloudflare managed registry. */
 export const ACCOUNT_IMAGE_REFERENCE =
   /^registry\.cloudflare\.com\/[a-f0-9]{32}\/[a-z0-9][a-z0-9._-]{0,127}@sha256:[a-f0-9]{64}$/;
@@ -329,6 +377,7 @@ export async function importPrebuiltImages(input: {
           ))
         )
           return;
+        if (!layoutArchiveIsSafe(archive)) return;
         mkdirSync(layout, { mode: 0o700 });
         await input.run('tar', ['-xf', archive, '-C', layout]);
         rmSync(archive, { force: true });

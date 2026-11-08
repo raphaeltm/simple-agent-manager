@@ -106,6 +106,11 @@ export interface EngineRunOptions {
    * install of ~230 migrations writes well over the capture limit (2026-11-07).
    */
   discardOutput?: boolean;
+  /**
+   * The output carries a credential no environment variable holds, so a failure
+   * reports no output tail (failureTail() can only scrub environment values).
+   */
+  privateOutput?: boolean;
 }
 export interface EngineRunner {
   run(command: EngineCommand, options: EngineRunOptions): Promise<string>;
@@ -336,7 +341,9 @@ export const processRunner: EngineRunner = {
           accept(output);
           return;
         }
-        const tail = failureTail(recent, options.env);
+        const tail = options.privateOutput
+          ? ['Output withheld: it may contain credentials.']
+          : failureTail(recent, options.env);
         reject(new EngineCommandFailure(code, signal, stopped ? [...tail, stopped] : tail));
       });
     });

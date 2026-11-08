@@ -1,5 +1,12 @@
 import { createHash } from 'node:crypto';
-import { copyFileSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import {
+  copyFileSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 
@@ -27,6 +34,15 @@ export interface PublishedImage {
   archive: string;
   /** Manifest digest of the image as pushed (`crane digest`). */
   digest: string;
+}
+
+/** GitHub rejects release assets of 2 GiB or more. */
+const MAX_RELEASE_ASSET_BYTES = 2 * 1024 ** 3 - 1;
+
+function assetSize(path: string): number {
+  const size = statSync(path).size;
+  if (size > MAX_RELEASE_ASSET_BYTES) throw new Error(`${path} exceeds the release asset limit`);
+  return size;
 }
 
 const sha256File = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
@@ -65,7 +81,7 @@ export async function stagePrebuiltArtifacts(input: {
       path,
       name,
       sha256: sha256File(source),
-      size: statSync(source).size,
+      size: assetSize(source),
     };
   });
   const dockerfiles = containerDockerfiles(input.root);
@@ -73,13 +89,16 @@ export async function stagePrebuiltArtifacts(input: {
     const dockerfile = dockerfiles.get(image.className);
     if (!dockerfile) throw new Error(`No container class ${image.className} in wrangler.toml`);
     const name = `image-${image.className.toLowerCase()}.tar`;
-    copyFileSync(image.archive, join(input.out, name));
+    const size = assetSize(image.archive);
+    const sha256 = sha256File(image.archive);
+    // Images are ~1.3 GB each, so move rather than copy them.
+    renameSync(image.archive, join(input.out, name));
     return {
       className: image.className,
       key: imageContextKey(join(input.root, 'apps/api'), dockerfile),
       name,
-      sha256: sha256File(image.archive),
-      size: statSync(image.archive).size,
+      sha256,
+      size,
       digest: image.digest,
     };
   });

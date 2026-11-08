@@ -22,6 +22,7 @@ import {
   legacyCiInvocation,
   legacyCiWorkflow,
 } from './installer-engine-ci.js';
+import { layoutTar } from './installer-engine-layout-fixture.js';
 import { imageContextKey } from './installer-engine-prebuilt.js';
 import { sourceRuntimePins } from './installer-engine-runtime.js';
 
@@ -430,7 +431,7 @@ describe('installation engine', () => {
     const bodies: Record<string, string> = Object.fromEntries(
       VM_AGENT_OUTPUTS.map((path, index) => [`file-${index}`, `prebuilt ${path}`])
     );
-    bodies['sandbox.tar'] = 'oci-layout';
+    bodies['sandbox.tar'] = layoutTar();
     const digest = `sha256:${'b'.repeat(64)}`;
     const hash = (value: string) => createHash('sha256').update(value).digest('hex');
     bodies['sam-installer-artifacts.json'] = JSON.stringify({
@@ -448,8 +449,8 @@ describe('installation engine', () => {
           className: 'SandboxDO',
           key: imageKey,
           name: 'sandbox.tar',
-          sha256: hash('oci-layout'),
-          size: 'oci-layout'.length,
+          sha256: hash(bodies['sandbox.tar']),
+          size: bodies['sandbox.tar'].length,
           digest,
         },
       ],

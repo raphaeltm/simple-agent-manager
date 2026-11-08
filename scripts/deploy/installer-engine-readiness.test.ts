@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { verifyEngineReadiness } from './installer-engine-readiness.js';
 
 const commit = 'a'.repeat(40);

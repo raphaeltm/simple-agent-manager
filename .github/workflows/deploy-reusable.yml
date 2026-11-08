@@ -195,10 +195,11 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # Exercise the installation engine with fake process/Cloudflare boundaries
-      # before existing deployment commands run. Production mutation orchestration
-      # remains below until the CI adapter preserves dry-run, skip-agent, legacy
-      # secrets and all environment overrides with staging equivalence evidence.
+      # before it mutates anything. Only the opt-in shared-engine path runs the
+      # engine; the default deploy path does not depend on it, and CI already runs
+      # this suite on every change to scripts/deploy.
       - name: Verify installation engine orchestration contract
+        if: ${{ inputs.use_shared_engine }}
         run: pnpm exec vitest run --config scripts/deploy/installer-engine.vitest.config.ts
 
       - name: Install Pulumi CLI

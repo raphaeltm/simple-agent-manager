@@ -49,6 +49,23 @@ describe('failure tail', () => {
     expect(failure.tail).toEqual(['stdout line', 'stderr uses [redacted]']);
   });
 
+  it('withholds the whole tail of a private-output command, whose credential no env var holds', async () => {
+    const error = await processRunner
+      .run(
+        {
+          executable: process.execPath,
+          args: ['-e', `console.log('{"password":"registry-secret-value"'); process.exit(1)`],
+        },
+        { cwd: process.cwd(), env: process.env, timeoutMs: 10000, privateOutput: true }
+      )
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(EngineCommandFailure);
+    expect((error as EngineCommandFailure).tail).toEqual([
+      'Output withheld: it may contain credentials.',
+    ]);
+    expect(JSON.stringify(error)).not.toContain('registry-secret-value');
+  });
+
   it('control: a successful command still returns only stdout', async () => {
     const output = await processRunner.run(
       { executable: process.execPath, args: ['-e', "console.log('ok'); console.error('hidden')"] },

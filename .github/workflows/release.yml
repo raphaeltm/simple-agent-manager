@@ -168,7 +168,7 @@ jobs:
             --target "$DEPLOY_SHA" \
             --verify-tag \
             --notes-file "$NOTES_FILE" \
-            --latest \
+            --latest=false \
             --title "$TAG_NAME"
 
           echo "Created release $TAG_NAME at $DEPLOY_SHA"
@@ -184,3 +184,21 @@ jobs:
       tag: ${{ needs.release.outputs.tag_name }}
     permissions:
       contents: write
+
+  # Installers read artifacts from the latest release, so the new release becomes
+  # latest only after its artifacts are attached. It still becomes latest when the
+  # artifact build fails (installations then build for themselves), so self-hosted
+  # updates never wait on artifacts.
+  mark-latest:
+    needs: [release, installer-artifacts]
+    if: always() && needs.release.outputs.created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Mark release as latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+          TAG_NAME: ${{ needs.release.outputs.tag_name }}
+        run: gh release edit "$TAG_NAME" --repo "$GH_REPOSITORY" --latest

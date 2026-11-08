@@ -5,12 +5,14 @@ import { join } from 'node:path';
 
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { layoutTar, withSymlink } from './installer-engine-layout-fixture.js';
 import {
   dockerfileSources,
   downloadVerified,
   fetchPrebuiltManifest,
   imageContextKey,
   importPrebuiltImages,
+  layoutArchiveIsSafe,
   placePrebuiltFiles,
   PREBUILT_MANIFEST,
   prebuiltBaseUrl,
@@ -181,12 +183,11 @@ describe('image content key', () => {
 });
 
 describe('prebuilt image import', () => {
-  const setup = (registryDigest: string) => {
+  const setup = (registryDigest: string, archive = layoutTar()) => {
     const dir = temp();
     writeFileSync(join(dir, 'Dockerfile.sandbox'), 'FROM x\nCOPY a /a\n');
     writeFileSync(join(dir, 'a'), 'a');
     const key = imageContextKey(dir, 'Dockerfile.sandbox');
-    const archive = 'oci-layout-tar';
     const published = 'sha256:' + 'b'.repeat(64);
     const { request, requested } = publisher({ 'sandbox.tar': archive });
     const commands: { executable: string; args: string[]; env?: NodeJS.ProcessEnv }[] = [];
@@ -260,8 +261,45 @@ describe('prebuilt image import', () => {
     expect(existsSync(t.input.work)).toBe(false);
   });
 
+  it('never extracts a published archive that holds a link, and leaves the class to build', async () => {
+    const t = setup('sha256:' + 'b'.repeat(64), layoutTar({ extra: withSymlink }));
+    expect(await importPrebuiltImages(t.input)).toEqual({});
+    expect(t.commands).toEqual([]);
+  });
+
   it('rejects an image whose registry digest differs from the published one', async () => {
     const t = setup('sha256:' + 'e'.repeat(64));
     expect(await importPrebuiltImages(t.input)).toEqual({});
+  });
+});
+
+describe('layout archive containment', () => {
+  const archiveFile = (body: string) => {
+    const dir = temp();
+    writeFileSync(join(dir, 'layout.tar'), Buffer.from(body, 'latin1'));
+    return join(dir, 'layout.tar');
+  };
+
+  it('accepts a layout tarred the way the publisher tars it', () => {
+    expect(layoutArchiveIsSafe(archiveFile(layoutTar()))).toBe(true);
+  });
+
+  it('rejects a symlink entry', () => {
+    expect(layoutArchiveIsSafe(archiveFile(layoutTar({ extra: withSymlink })))).toBe(false);
+  });
+
+  it('rejects a parent-directory path', () => {
+    expect(
+      layoutArchiveIsSafe(archiveFile(layoutTar({ tarArgs: ['--transform', 's,^\\./,../,'] })))
+    ).toBe(false);
+  });
+
+  it('rejects a file outside the layout entries', () => {
+    const extra = (dir: string) => writeFileSync(join(dir, 'authorized_keys'), 'key');
+    expect(layoutArchiveIsSafe(archiveFile(layoutTar({ extra })))).toBe(false);
+  });
+
+  it('rejects a truncated or non-tar archive', () => {
+    expect(layoutArchiveIsSafe(archiveFile('oci-layout-tar'))).toBe(false);
   });
 });

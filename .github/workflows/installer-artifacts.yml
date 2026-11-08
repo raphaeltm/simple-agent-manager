@@ -36,7 +36,9 @@ concurrency:
 
 env:
   # Must match the Go toolchain installations pin (installer-engine.ts preflight).
-  GO_VERSION: '1.26.10'
+  # Not named GO_VERSION: packages/vm-agent/Makefile embeds GO_VERSION in the
+  # binary, and an installation builds with the Makefile's own default.
+  GO_TOOLCHAIN_VERSION: '1.26.10'
 
 jobs:
   publish:
@@ -59,14 +61,14 @@ jobs:
 
       - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ env.GO_VERSION }}
+          go-version: ${{ env.GO_TOOLCHAIN_VERSION }}
           cache: false
 
       - name: Record Go toolchain
         id: go
         run: |
           version=$(go version)
-          [[ "$version" == "go version go${GO_VERSION} linux/amd64" ]]
+          [[ "$version" == "go version go${GO_TOOLCHAIN_VERSION} linux/amd64" ]]
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -108,25 +110,33 @@ jobs:
         run: |
           work="$RUNNER_TEMP/images"
           mkdir -p "$work"
-          args=()
           # class_name and image pairs from the top-level wrangler.toml.
+          node --input-type=module -e "
+            import * as TOML from '@iarna/toml';
+            import { readFileSync } from 'node:fs';
+            for (const c of TOML.parse(readFileSync('apps/api/wrangler.toml','utf8')).containers ?? [])
+              console.log(c.class_name + '\t' + c.image);
+          " > "$work/classes"
+          : > "$work/args"
           while IFS=$'\t' read -r class dockerfile; do
             repo="localhost:5000/$(tr '[:upper:]' '[:lower:]' <<< "$class"):release"
-            docker build --platform linux/amd64 -f "apps/api/${dockerfile#./}" -t "$repo" apps/api
+            # Built the way Wrangler builds it: one linux/amd64 image manifest,
+            # no attestation index.
+            docker build --platform linux/amd64 --provenance=false --sbom=false \
+              -f "apps/api/${dockerfile#./}" -t "$repo" apps/api
             docker push "$repo"
+            crane manifest "$repo" |
+              jq -e '.mediaType | test("vnd.docker.distribution.manifest.v2|vnd.oci.image.manifest")' > /dev/null
             # The registry keeps the manifest as pushed, so this digest is what
             # an installation's crane push of the same layout must report.
             digest=$(crane digest "$repo")
             crane pull --format=oci "$repo" "$work/$class"
             tar -cf "$work/$class.tar" -C "$work/$class" .
-            args+=(--image "$class=$work/$class.tar=$digest")
-          done < <(node --input-type=module -e "
-            import * as TOML from '@iarna/toml';
-            import { readFileSync } from 'node:fs';
-            for (const c of TOML.parse(readFileSync('apps/api/wrangler.toml','utf8')).containers ?? [])
-              console.log(c.class_name + '\t' + c.image);
-          ")
-          printf '%s\n' "${args[@]}" > "$work/args"
+            # Each image is ~1.3 GB; keep one copy on the runner.
+            rm -rf "${work:?}/$class"
+            docker image rm "$repo" > /dev/null
+            printf '%s\n' --image "$class=$work/$class.tar=$digest" >> "$work/args"
+          done < "$work/classes"
 
       - name: Stage artifacts and manifest
         env:

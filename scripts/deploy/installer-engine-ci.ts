@@ -11,7 +11,6 @@ import {
   stackNameForEnvironment,
   validateEngineConfig,
 } from './installer-engine-contract.js';
-
 // @ts-expect-error Shared workflow naming resolver is JavaScript without declarations.
 import { resolveResourceNames } from './workflow-resource-names.mjs';
 
