@@ -1,0 +1,116 @@
+{
+  "head": "d1e03526f0edf01f286861d53507f9f80a64f393",
+  "guards": [
+    {
+      "guard": "terminal-events",
+      "removed_guard_test_red": true,
+      "failingTests": [
+        "FAIL  tests/unit/services/deployment-publish-job-hardening.test.ts > publish job atomic guards on SQLite > preserves terminal succeeded against cancel and events",
+        "FAIL  tests/unit/services/deployment-publish-job-hardening.test.ts > publish job atomic guards on SQLite > preserves terminal failed against cancel and events",
+        "FAIL  tests/unit/services/deployment-publish-job-hardening.test.ts > publish job atomic guards on SQLite > preserves terminal canceled against cancel and events",
+        "FAIL  tests/unit/services/deployment-publish-job-hardening.test.ts > publish job atomic guards on SQLite > preserves terminal unknown against cancel and events"
+      ],
+      "failureExcerpt": [
+        "AssertionError: expected true to be false // Object.is equality"
+      ]
+    },
+    {
+      "guard": "cancel-terminal",
+      "removed_guard_test_red": true,
+      "failingTests": [
+        "FAIL  tests/unit/services/deployment-publish-job-hardening.test.ts > publish job atomic guards on SQLite > preserves terminal succeeded against cancel and events",
+        "FAIL  tests/unit/services/deployment-publish-job-hardening.test.ts > publish job atomic guards on SQLite > preserves terminal failed against cancel and events",
+        "FAIL  tests/unit/services/deployment-publish-job-hardening.test.ts > publish job atomic guards on SQLite > preserves terminal canceled against cancel and events",
+        "FAIL  tests/unit/services/deployment-publish-job-hardening.test.ts > publish job atomic guards on SQLite > preserves terminal unknown against cancel and events"
+      ],
+      "failureExcerpt": [
+        "AssertionError: expected { id: 'job', \u2026(25) } to be null",
+        "AssertionError: expected { id: 'job', \u2026(25) } to be null"
+      ]
+    },
+    {
+      "guard": "cancel-workspace",
+      "removed_guard_test_red": true,
+      "failingTests": [
+        "FAIL  tests/unit/services/deployment-publish-job-hardening.test.ts > publish job atomic guards on SQLite > enforces project and requesting workspace while retaining the owner path"
+      ],
+      "failureExcerpt": [
+        "AssertionError: expected { id: 'job', \u2026(25) } to be null"
+      ]
+    },
+    {
+      "guard": "release-attempt",
+      "removed_guard_test_red": true,
+      "failingTests": [
+        "FAIL  tests/unit/routes/publish-hardening-real-sqlite.test.ts > publish callback routes with real SQL > rejects wrong attempt and foreign workspace, while owner succeeds"
+      ],
+      "failureExcerpt": [
+        "AssertionError: expected [ Array(1) ] to have a length of +0 but got 1"
+      ]
+    },
+    {
+      "guard": "release-terminal",
+      "removed_guard_test_red": true,
+      "failingTests": [
+        "FAIL  tests/unit/routes/publish-hardening-real-sqlite.test.ts > publish callback routes with real SQL > rejects canceled late release, with independent live owner control",
+        "FAIL  tests/unit/routes/publish-hardening-real-sqlite.test.ts > publish callback routes with real SQL > rejects failed late release, with independent live owner control",
+        "FAIL  tests/unit/routes/publish-hardening-real-sqlite.test.ts > publish callback routes with real SQL > rejects succeeded late release, with independent live owner control",
+        "FAIL  tests/unit/routes/publish-hardening-real-sqlite.test.ts > publish callback routes with real SQL > rejects unknown late release, with independent live owner control"
+      ],
+      "failureExcerpt": [
+        "AssertionError: expected [ Array(1) ] to have a length of +0 but got 1"
+      ]
+    },
+    {
+      "guard": "release-duplicate",
+      "removed_guard_test_red": true,
+      "failingTests": [
+        "FAIL  tests/unit/routes/publish-hardening-real-sqlite.test.ts > publish callback routes with real SQL > records and links an owner release, then rejects duplicate callback with 409"
+      ],
+      "failureExcerpt": [
+        "AssertionError: expected [ \u2026(2) ] to have a length of 1 but got 2"
+      ]
+    },
+    {
+      "guard": "instant",
+      "removed_guard_test_red": true,
+      "failingTests": [
+        "FAIL  tests/unit/mcp-build-and-publish.test.ts > async build_and_publish MCP tools > rejects Instant sessions before creating or starting a job"
+      ],
+      "failureExcerpt": [
+        "AssertionError: the given combination of arguments (undefined and string) is invalid for this assertion. You can use an array, a map, an object, a set, a string, or a weakset instead of a string"
+      ]
+    },
+    {
+      "guard": "sweep-terminal",
+      "removed_guard_test_red": true,
+      "failingTests": [
+        "FAIL  tests/unit/services/deployment-publish-job-hardening.test.ts > publish job atomic guards on SQLite > rechecks cancel between sweep selection and update"
+      ],
+      "failureExcerpt": [
+        "AssertionError: expected [ { id: 'job', \u2026(25) } ] to deeply equal []"
+      ]
+    },
+    {
+      "guard": "sweep-heartbeat",
+      "removed_guard_test_red": true,
+      "failingTests": [
+        "FAIL  tests/unit/services/deployment-publish-job-hardening.test.ts > publish job atomic guards on SQLite > rechecks heartbeat between sweep selection and update"
+      ],
+      "failureExcerpt": [
+        "AssertionError: expected [ { id: 'job', \u2026(25) } ] to deeply equal []"
+      ]
+    },
+    {
+      "guard": "sweep-empty",
+      "removed_guard_test_red": true,
+      "failingTests": [
+        "FAIL  tests/unit/services/deployment-publish-job-hardening.test.ts > publish job atomic guards on SQLite > returns an empty sweep when all jobs are healthy or terminal"
+      ],
+      "failureExcerpt": [
+        "TypeError: Cannot read properties of undefined (reading '_prepare')"
+      ]
+    }
+  ],
+  "restored_suite_green": true
+}

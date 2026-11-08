@@ -423,6 +423,10 @@ export const MCP_TOOL_GROUPS: readonly McpToolGroup[] = [
         tool: 'set_deployment_environment_config',
         summary: 'create or update a Variable or Secret',
       },
+      cancel_publish: {
+        tool: 'cancel_publish',
+        summary: 'cancel a non-terminal publish job in the requesting workspace',
+      },
       publish: {
         tool: 'build_and_publish',
         summary:
