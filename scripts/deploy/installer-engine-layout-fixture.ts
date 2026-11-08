@@ -17,9 +17,8 @@ export function layoutTar(
     writeFileSync(join(dir, 'index.json'), '{"schemaVersion":2,"manifests":[]}');
     writeFileSync(join(dir, 'blobs/sha256', 'a'.repeat(64)), 'layer');
     options.extra?.(dir);
-    return execFileSync('tar', ['-cf', '-', ...(options.tarArgs ?? []), '-C', dir, '.'], {
+    return execFileSync('/usr/bin/tar', ['-cf', '-', ...(options.tarArgs ?? []), '-C', dir, '.'], {
       maxBuffer: 1024 * 1024,
-      env: { PATH: '/usr/bin:/bin' },
     }).toString('latin1');
   } finally {
     rmSync(dir, { recursive: true, force: true });
