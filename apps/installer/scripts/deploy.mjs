@@ -192,7 +192,15 @@ function matchesOAuthClient(client, desired) {
     )
   );
 }
-async function prepareOAuth() {
+// Cloudflare rejected client creation (observed 2026-11-08 in production: POST
+// /oauth_clients returned 500) while the client's logo and policy URLs on the
+// installer origin were not served yet. When no installer Worker exists, the
+// preflight therefore only validates the catalog and management access, and any
+// client mutation (create, or update of a leftover client) waits until the
+// Worker and its assets are live. A write failure after publishing then leaves a
+// fresh Worker without OAuth secrets; the run fails, health never reports
+// oauthConfigured, and the next run reconciles the client.
+async function prepareOAuth({ deferMutation = false } = {}) {
   const catalog = await api('/oauth/scopes');
   if (
     !Array.isArray(catalog) ||
@@ -215,6 +223,7 @@ async function prepareOAuth() {
     scopes,
     token_endpoint_auth_method: 'client_secret_post',
   };
+  if (deferMutation && (!client || !matchesOAuthClient(client, desired))) return undefined;
   if (!client) {
     client = await api(`${base}/oauth_clients`, 'POST', desired);
     clientId = client.client_id;
@@ -245,7 +254,7 @@ async function prepareOAuth() {
 // A fresh bootstrap still ships approved static assets before OAuth readiness.
 const preflight = !reuseReadyConfiguration && (full || (!!existing && scopesChanged));
 let credentials;
-if (preflight) credentials = await prepareOAuth();
+if (preflight) credentials = await prepareOAuth({ deferMutation: !existing });
 const generated = '.wrangler-deploy.json';
 await writeFile(generated, JSON.stringify(config, null, 2), { mode: 0o600 });
 try {

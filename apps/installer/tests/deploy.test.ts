@@ -69,6 +69,7 @@ interface Options {
   missingScope?: boolean;
   laggingSecretReads?: number;
   secretsNeverVisible?: boolean;
+  orphanClient?: boolean;
 }
 const existingScopes = (existing: Options['existing']) =>
   existing === 'full'
@@ -84,26 +85,27 @@ async function deploy(options: Options = {}) {
   vi.stubEnv('BASE_DOMAIN', 'sammy.party');
   vi.stubEnv('INSTALLER_ENVIRONMENT', 'staging');
   vi.stubEnv('INSTALLER_MODE', options.mode || 'preserve');
-  vi.stubEnv('OAUTH_CLIENT_ID', '');
-  vi.stubEnv('OAUTH_CLIENT_SECRET', '');
+  vi.stubEnv('OAUTH_CLIENT_ID', options.orphanClient ? 'existing' : '');
+  vi.stubEnv('OAUTH_CLIENT_SECRET', options.orphanClient ? 'OPERATOR_SECRET' : '');
   vi.stubEnv('OAUTH_REGISTRATION_TOKEN', options.registrationToken || '');
   vi.stubEnv('GITHUB_SHA', options.sha ?? 'b'.repeat(40));
   vi.stubEnv('OAUTH_SECRETS_POLL_MS', '1');
   vi.stubEnv('OAUTH_SECRETS_VISIBLE_TIMEOUT_MS', options.secretsNeverVisible ? '0' : '30000');
   let laggingSecretReads = options.laggingSecretReads ?? 0;
   const ready = options.ready ?? !!options.existing;
-  let client: Record<string, unknown> | undefined = options.existing
-    ? {
-        client_id: 'existing',
-        client_name: 'sam-installer-staging',
-        client_uri: 'https://install.sammy.party',
-        scopes: [...existingScopes(options.existing)],
-        grant_types: ['authorization_code'],
-        response_types: ['code'],
-        redirect_uris: ['https://install.sammy.party/oauth/callback'],
-        token_endpoint_auth_method: 'client_secret_post',
-      }
-    : undefined;
+  let client: Record<string, unknown> | undefined =
+    options.existing || options.orphanClient
+      ? {
+          client_id: 'existing',
+          client_name: 'sam-installer-staging',
+          client_uri: 'https://install.sammy.party',
+          scopes: [...existingScopes(options.existing ?? 'bootstrap')],
+          grant_types: ['authorization_code'],
+          response_types: ['code'],
+          redirect_uris: ['https://install.sammy.party/oauth/callback'],
+          token_endpoint_auth_method: 'client_secret_post',
+        }
+      : undefined;
   const secretNames = ready ? ['OAUTH_CLIENT_ID', 'OAUTH_CLIENT_SECRET'] : [];
   const oauthResult = (path: string, method: string, body: Record<string, unknown>) => {
     let result: unknown;
@@ -113,6 +115,10 @@ async function deploy(options: Options = {}) {
         .map((id) => ({ id }));
     else if (path.endsWith('/oauth_clients')) {
       if (method === 'GET') result = client ? [client] : [];
+      // Cloudflare refused creation while the logo/policy URLs on a not yet
+      // published installer origin were unreachable (production, 2026-11-08).
+      else if (capture.run.mock.calls.length === 0)
+        return Response.json({ success: false }, { status: 500 });
       else {
         client = { ...body, client_id: 'new', client_secret: 'SECRET' };
         result = client;
@@ -163,6 +169,7 @@ async function deploy(options: Options = {}) {
         result = settings;
       } else if (path.includes('/oauth_clients') || path === '/client/v4/oauth/scopes') {
         result = oauthResult(path, method, body);
+        if (result instanceof Response) return result;
       } else if (path.endsWith('/secrets')) {
         if (method === 'PUT') {
           if (!secretNames.includes(String(body.name))) secretNames.push(String(body.name));
@@ -284,6 +291,32 @@ describe('publisher-controlled installer deployment', () => {
     ).rejects.toThrow('permissions');
     expect(capture.run).not.toHaveBeenCalled();
     expect(capture.writes).toHaveLength(0);
+  });
+  it('creates a fresh full-mode client only after the installer and its assets are published', async () => {
+    await deploy({ mode: 'full' });
+    expect(config().vars.INSTALL_SOURCE_COMMIT).toBe('b'.repeat(40));
+    expect(config().vars.OAUTH_SCOPES.split(' ')).toEqual(fullScopes);
+    const listed = capture.events.findIndex((entry) => entry.endsWith('/oauth_clients'));
+    const created = capture.events.indexOf(
+      `POST /client/v4/accounts/${'a'.repeat(32)}/oauth_clients`
+    );
+    expect(listed).toBeGreaterThanOrEqual(0);
+    expect(listed).toBeLessThan(capture.events.indexOf('write-config'));
+    expect(created).toBeGreaterThan(capture.events.indexOf('write-config'));
+    expect(capture.calls.find((call) => call.method === 'POST')?.body.scopes).toEqual(fullScopes);
+    expect(capture.calls.filter((call) => call.method === 'PUT')).toHaveLength(2);
+  });
+  it('updates an operator-supplied leftover client only after a fresh installer is published', async () => {
+    await deploy({ mode: 'full', orphanClient: true });
+    const patched = capture.events.findIndex((entry) => entry.startsWith('PATCH '));
+    expect(patched).toBeGreaterThan(capture.events.indexOf('write-config'));
+    expect(capture.calls.find((call) => call.method === 'PATCH')?.body.scopes).toEqual(fullScopes);
+    expect(capture.calls.some((call) => call.method === 'POST')).toBe(false);
+    expect(capture.calls.filter((call) => call.method === 'PUT')).toHaveLength(2);
+  });
+  it('blocks a fresh full deployment before publishing when management access is denied', async () => {
+    await expect(deploy({ mode: 'full', managementDenied: true })).rejects.toThrow('permissions');
+    expect(capture.run).not.toHaveBeenCalled();
   });
   it('rejects unsupported consent identifiers before enabling full mode', async () => {
     await expect(deploy({ mode: 'full', missingScope: true })).rejects.toThrow('catalog');
