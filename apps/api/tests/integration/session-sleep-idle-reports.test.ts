@@ -6,6 +6,7 @@ import {
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../src/db/schema';
 import { runMigrations } from '../../src/durable-objects/migrations';
 import {
   getSessionState,
@@ -14,6 +15,7 @@ import {
 import { runSessionSleepSweep } from '../../src/scheduled/session-sleep';
 import { evaluateRunawayCostCeiling } from '../../src/scheduled/stuck-task-ceiling';
 import { parseHarnessWorkConfig } from '../../src/services/session-idleness';
+import { createSchemaTables } from '../helpers/sqlite-d1';
 import { createSqlStorage } from '../unit/durable-objects/sql-storage-test-utils';
 
 const {
@@ -33,6 +35,7 @@ describe('automatic sleep with repeated idle reports', () => {
       activity: 'idle',
       activityAt: START.getTime(),
     }));
+    createSchemaTables(fixture.sqlite, [schema.nodeLifecycleDecisions]);
     stateDb = new Database(':memory:');
     sql = createSqlStorage(stateDb);
     runMigrations(sql);
@@ -103,6 +106,18 @@ describe('automatic sleep with repeated idle reports', () => {
       activityAt: START.getTime() + 15 * MINUTE,
     });
     assertSlept();
+    const decision = fixture.sqlite
+      .prepare(
+        "SELECT reason, detail_json FROM node_lifecycle_decisions WHERE source = 'session_sleep'"
+      )
+      .get() as { reason: string; detail_json: string };
+    expect(decision.reason).toBe('idle');
+    expect(JSON.parse(decision.detail_json)).toMatchObject({
+      chatSessionId: 'chat-1',
+      agentSessionId: 'agent-1',
+      activity: 'idle',
+      workAt: START.getTime(),
+    });
   });
 
   it.each([undefined, '1800000'])(

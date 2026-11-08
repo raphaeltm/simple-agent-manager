@@ -34,3 +34,11 @@ Existing managed workspace is on the assigned output branch; preserve startup .c
 - [ ] Restore settings, delete resources; record evidence.
 - [ ] CI, CodeRabbit request/wait, resolve findings, merge, production deploy/basic smoke.
 - [ ] Update and complete idea only after merge; report task completion.
+
+## Concrete validation hazard found (17:31 UTC)
+
+`TestCodexC2CandidateProcessCleanupSignalsActualArgv` globally ran `pkill -TERM/-KILL -f` against the exact installed Codex adapter/CLI release paths. A read-only `/proc` match confirms those patterns match this live task's adapter and CLI. This hazard was introduced November6 #2556, before all three episodes. The affected branch records Go validation, but the exact historical invocation is still unavailable; do not claim all three disconnects are conclusively attributed to this test.
+
+Fix: constrain the test's pkill to direct children of its own test process. Add an identical-argv runtime under a different parent and prove it survives; keep TERM/KILL and regex-escaping positive controls. Run the unsafe mutation ONLY in a disposable Docker PID namespace. Native pinned-command probe now executes this validation test in a subprocess while its actual quiet command is held; the command must retain ownership/results and its lease through the resolved30m stale bound (accelerated policy clock), then sleep15m after completion.
+
+Recovery ghost-reporter regression: original code FAILED `TestSessionHost_CodexCrashRecoveryStopsInterruptedPromptReports` because recovered idle was overwritten by prompting. Fixed test PASS; local Go reviewer race test PASS3repetitions. Native uninterrupted+validation-cleanup callback→DO→sweep test PASS locally using installed C2.3adapter/Codex0.160.0; default stale resolver30m exercised. Existing hung-turn+idle integration controls PASS15tests. API typecheck PASS. Reviews acknowledge original historical command-ownership gap; final completion review remains outstanding.

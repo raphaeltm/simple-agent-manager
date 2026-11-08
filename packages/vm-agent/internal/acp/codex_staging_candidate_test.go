@@ -1,6 +1,7 @@
 package acp
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"syscall"
 	"testing"
@@ -258,6 +260,10 @@ func TestCodexC2CandidateProcessCleanupSignalsActualArgv(t *testing.T) {
 	base := codexC2ReleaseRoot + "/releases/" + codexC2ReleaseIdentity + "/payload/"
 	for _, signal := range []string{"TERM", "KILL"} {
 		t.Run(signal, func(t *testing.T) {
+			// A SAM agent running this suite has the same argv as the fixtures.
+			// Keep an identical process under another parent to prove cleanup
+			// cannot kill that agent or another concurrently running session.
+			externalPID := startExternalArgvProcess(t, base+"adapter.js")
 			adapter := startDisposableArgvProcess(t, base+"adapter.js")
 			cli := startDisposableArgvProcess(t, base+"codex")
 			// Without escaping '+', this is a regex false positive.
@@ -265,7 +271,7 @@ func TestCodexC2CandidateProcessCleanupSignalsActualArgv(t *testing.T) {
 			defer stopDisposableArgvProcess(unrelated)
 			patterns := containerProcessKillPatterns(codexC2ReleaseRoot + "/current/bin/codex-acp")
 			for _, pattern := range patterns {
-				if output, err := exec.Command("pkill", "-"+signal, "-f", pattern).CombinedOutput(); err != nil {
+				if output, err := exec.Command("pkill", "-"+signal, "-P", strconv.Itoa(os.Getpid()), "-f", pattern).CombinedOutput(); err != nil {
 					t.Fatalf("pkill %s %q: %v: %s", signal, pattern, err, output)
 				}
 			}
@@ -274,8 +280,55 @@ func TestCodexC2CandidateProcessCleanupSignalsActualArgv(t *testing.T) {
 			if err := syscall.Kill(unrelated.Process.Pid, 0); err != nil {
 				t.Fatalf("unrelated process was signalled: %v", err)
 			}
+			if err := syscall.Kill(externalPID, 0); err != nil {
+				t.Fatalf("matching runtime under another parent was signalled: %v", err)
+			}
+			if executable, err := os.Readlink(fmt.Sprintf("/proc/%d/exe", externalPID)); err != nil || !strings.HasSuffix(executable, "/sleep") {
+				t.Fatalf("matching external runtime is not live (including zombie): %q, %v", executable, err)
+			}
 		})
 	}
+}
+
+func startExternalArgvProcess(t *testing.T, name string) int {
+	t.Helper()
+	// The supervisor's argv must not itself contain the matching runtime path.
+	// Its child impersonates the live agent, outside this test's cleanup scope.
+	cmd := exec.Command("bash", "-c", `bash -c 'exec -a "$FAKE_RUNTIME_ARGV" sleep 60' & child=$!; echo "$child"; wait "$child"`)
+	cmd.Env = append(os.Environ(), "FAKE_RUNTIME_ARGV="+name)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewScanner(stdout)
+	if !reader.Scan() {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		t.Fatal("runtime supervisor did not report its child")
+	}
+	pid, err := strconv.Atoi(reader.Text())
+	if err != nil {
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = syscall.Kill(pid, syscall.SIGKILL)
+		_ = cmd.Wait()
+	})
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		argv, _ := os.ReadFile(fmt.Sprintf("/proc/%d/cmdline", pid))
+		if bytes.HasPrefix(argv, []byte(name+"\x00")) {
+			return pid
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("external runtime did not enter expected argv")
+	return 0
 }
 
 func startDisposableArgvProcess(t *testing.T, name string) *exec.Cmd {
