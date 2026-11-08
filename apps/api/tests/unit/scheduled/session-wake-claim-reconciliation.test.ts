@@ -248,18 +248,37 @@ describe('dead wake claim sweep', () => {
   });
 
   describe('compare-and-set against a wake that moves after selection', () => {
-    function moveBeforeWrite(mutation: string) {
+    function moveBeforeWrite(mutation: string | (() => Promise<void>)) {
       const database = env.DATABASE;
+      let armed = true;
       env = {
         DATABASE: {
           prepare: database.prepare.bind(database),
           batch: async (statements: D1PreparedStatement[]) => {
-            sqlite.exec(mutation);
+            if (armed) {
+              armed = false;
+              if (typeof mutation === 'string') sqlite.exec(mutation);
+              else await mutation();
+            }
             return database.batch(statements);
           },
         } as unknown as D1Database,
       } as Env;
     }
+
+    it('loses to a real user wake that re-claims the snapshot after selection', async () => {
+      seed('race');
+      moveBeforeWrite(async () => {
+        expect(await userWake('race')).toEqual({ status: 'claimed', taskId: 'task-race' });
+      });
+      expect(await sweep()).toEqual({ selected: 1, released: 0 });
+      expect(snapshot('race')).toMatchObject({
+        recovery_status: 'waking',
+        recovery_attempt_id: 'next-race',
+        recovery_claimed_at: NOW.toISOString(),
+      });
+      expect(notifyWakeSettled).not.toHaveBeenCalled();
+    });
 
     it.each([
       [
@@ -288,6 +307,52 @@ describe('dead wake claim sweep', () => {
       seed('race');
       moveBeforeWrite('SELECT 1');
       expect(await sweep()).toEqual({ selected: 1, released: 1 });
+    });
+  });
+
+  it('a user wake that loses its re-claim to the sweep claims afresh instead of reporting a dead wake', async () => {
+    seed('race');
+    // Run the real sweep inside the resumer's window: after it read the stale claim and
+    // before its re-claim UPDATE (the statement that rewrites recovery_task_id).
+    const database = env.DATABASE;
+    let armed = true;
+    const runSweepFirst = async () => {
+      if (!armed) return;
+      armed = false;
+      env = { DATABASE: database } as Env;
+      expect(await sweep()).toEqual({ selected: 1, released: 1 });
+    };
+    const wrapped = {
+      prepare(query: string) {
+        const statement = database.prepare(query);
+        if (!/^update "session_snapshots" set "recovery_task_id"/i.test(query)) return statement;
+        return {
+          bind: (...values: unknown[]) => {
+            const bound = statement.bind(...values);
+            return {
+              run: async () => (await runSweepFirst(), bound.run()),
+              all: async () => (await runSweepFirst(), bound.all()),
+              raw: async () => (await runSweepFirst(), bound.raw()),
+              first: async () => (await runSweepFirst(), bound.first()),
+            };
+          },
+        };
+      },
+      batch: database.batch.bind(database),
+    } as unknown as D1Database;
+    const result = await claimSessionSnapshotRecovery(drizzle(wrapped, { schema }), env, {
+      chatSessionId: 'chat-race',
+      userId: 'user',
+      taskId: 'task-race',
+      recoveryAttemptId: 'next-race',
+      now: NOW,
+    });
+
+    expect(armed).toBe(false);
+    expect(result).toEqual({ status: 'claimed', taskId: 'task-race' });
+    expect(snapshot('race')).toMatchObject({
+      recovery_status: 'waking',
+      recovery_attempt_id: 'next-race',
     });
   });
 

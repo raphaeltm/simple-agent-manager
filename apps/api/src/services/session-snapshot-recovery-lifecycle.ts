@@ -59,19 +59,30 @@ function budgetAvailable(
   });
 }
 
-export async function claimSessionSnapshotRecovery(
+type SessionSnapshotRecoveryClaimInput = {
+  chatSessionId: string;
+  userId: string;
+  taskId: string;
+  recoveryAttemptId?: string;
+  now?: Date;
+  sourceTaskGuard?: SessionRecoverySourceTaskGuard;
+  /** Automatic eviction callbacks and cron retries share one non-decaying budget. */
+  automaticEvictionRecovery?: boolean;
+};
+
+export function claimSessionSnapshotRecovery(
   db: Db,
   env: Env,
-  input: {
-    chatSessionId: string;
-    userId: string;
-    taskId: string;
-    recoveryAttemptId?: string;
-    now?: Date;
-    sourceTaskGuard?: SessionRecoverySourceTaskGuard;
-    /** Automatic eviction callbacks and cron retries share one non-decaying budget. */
-    automaticEvictionRecovery?: boolean;
-  }
+  input: SessionSnapshotRecoveryClaimInput
+): Promise<SessionSnapshotRecoveryClaim> {
+  return claimOnce(db, env, input, true);
+}
+
+async function claimOnce(
+  db: Db,
+  env: Env,
+  input: SessionSnapshotRecoveryClaimInput,
+  mayRetry: boolean
 ): Promise<SessionSnapshotRecoveryClaim> {
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
@@ -256,11 +267,20 @@ export async function claimSessionSnapshotRecovery(
         return { status: 'claimed', taskId: input.taskId };
       }
       const winner = await db
-        .select({ taskId: schema.sessionSnapshots.recoveryTaskId })
+        .select({
+          taskId: schema.sessionSnapshots.recoveryTaskId,
+          recoveryStatus: schema.sessionSnapshots.recoveryStatus,
+        })
         .from(schema.sessionSnapshots)
         .where(eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId))
         .get();
-      if (winner?.taskId) return { status: 'waking', taskId: winner.taskId };
+      if (winner?.recoveryStatus === 'waking' && winner.taskId) {
+        return { status: 'waking', taskId: winner.taskId };
+      }
+      // The dead-wake sweep (`scheduled/session-wake-claim-reconciliation.ts`) ended the
+      // stale claim between our read and our re-claim. The row is claimable again, so
+      // reporting `waking` would point the caller at a dead task. Claim once more.
+      if (mayRetry) return claimOnce(db, env, input, false);
     }
   }
   if (!snapshot) return { status: 'unavailable', reason: 'snapshot_missing' };
