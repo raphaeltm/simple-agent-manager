@@ -322,10 +322,11 @@ export async function writeRotatedAgentCredential(
     ccMirror,
     legacyMirror,
   ]);
-  const idsOf = (result: D1Result | undefined) =>
-    ((result?.results ?? []) as Array<{ id?: unknown }>)
-      .map((row) => row.id)
-      .filter((id): id is string => typeof id === 'string');
+  const idsOf = (result: D1Result | undefined): string[] =>
+    (result?.results ?? []).flatMap((row) => {
+      const id = maybeJsonRecord(row)?.id;
+      return typeof id === 'string' ? [id] : [];
+    });
   const mirroredReferences = [
     ...idsOf(ccResult).map((id) => `cc_credentials:${id}`),
     ...idsOf(legacyResult).map((id) => `credentials:${id}`),
