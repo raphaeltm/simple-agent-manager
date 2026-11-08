@@ -82,6 +82,10 @@
       "registryUrl": "https://www.npmjs.com/package/@vitest/coverage-v8",
       "necessity": "Generates V8 coverage for workspace gates."
     },
+    "astro": {
+      "registryUrl": "https://www.npmjs.com/package/astro",
+      "necessity": "Compiles the shared brand Astro components (packages/ui/src/brand) into the installer's static pages and checks them; same pinned version the marketing site already uses."
+    },
     "eslint": {
       "registryUrl": "https://www.npmjs.com/package/eslint",
       "necessity": "Runs authoritative lint and local rule fixtures."

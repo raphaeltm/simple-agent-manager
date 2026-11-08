@@ -1,5 +1,10 @@
 import { api } from './installer/api.js';
-import { forgetCleanup, rememberCleanup, renderCleanup, restoreSavedCleanup } from './installer/cleanup.js';
+import {
+  forgetCleanup,
+  rememberCleanup,
+  renderCleanup,
+  restoreSavedCleanup,
+} from './installer/cleanup.js';
 import { invalidatePlan, loadZones, runPreview } from './installer/plan.js';
 import { message, progress, returnToConnect, screen, stepIndex } from './installer/screens.js';
 import { $, state } from './installer/state.js';

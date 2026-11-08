@@ -41,7 +41,8 @@ export function forgetCleanup() {
 export function restoreSavedCleanup() {
   try {
     const saved = JSON.parse(sessionStorage.getItem(cleanupStorageKey) || 'null');
-    if (saved) rememberCleanup({ cleanupReceipt: saved.receipt, cleanupAccountId: saved.accountId });
+    if (saved)
+      rememberCleanup({ cleanupReceipt: saved.receipt, cleanupAccountId: saved.accountId });
   } catch {
     /* No valid saved cleanup receipt. No credential is stored here. */
   }

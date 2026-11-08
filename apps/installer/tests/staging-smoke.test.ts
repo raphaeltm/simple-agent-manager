@@ -27,8 +27,7 @@ function setup(statuses: number[]) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: string, init?: RequestInit) => {
-      if (input.endsWith('/health'))
-        return Response.json({ ok: true, kind: 'sam-maintenance' });
+      if (input.endsWith('/health')) return Response.json({ ok: true, kind: 'sam-maintenance' });
       if (input.endsWith('/claim'))
         return new Response(null, {
           status: 200,

@@ -283,15 +283,15 @@ Raphaël approved the paid cold build, then asked for iteration until it works. 
 3. Throwaway probe `7283f0b3` (`sam-build-proof-87bf18007091`, branch deleted): every download source returned 2xx from the container egress (AMS, IPv6), so the 404 was a transient CDN error.
 4. `601bb681` (`sam-build-proof-53fbd16d2b0f`): `fetch_pinned` retries versioned sources with failover; the checksum decides acceptance. **Completed every phase in 29m33s**:
 
-| Phase | Duration |
-|---|---|
-| Bootstrap (OS, Go, Rust, pnpm, Pulumi, Docker, `pnpm install`) | ~3m00s |
-| Codex runtime from source | 16m41s |
-| `pnpm build` | 1m37s |
-| CLI `build-all` | 1m33s |
-| VM agent `prepare-container` + `build-all` | 3m32s |
-| VM-agent runtime image build + compiled-Codex verify | 1m50s |
-| Sandbox image build | 0m55s |
+| Phase                                                          | Duration |
+| -------------------------------------------------------------- | -------- |
+| Bootstrap (OS, Go, Rust, pnpm, Pulumi, Docker, `pnpm install`) | ~3m00s   |
+| Codex runtime from source                                      | 16m41s   |
+| `pnpm build`                                                   | 1m37s    |
+| CLI `build-all`                                                | 1m33s    |
+| VM agent `prepare-container` + `build-all`                     | 3m32s    |
+| VM-agent runtime image build + compiled-Codex verify           | 1m50s    |
+| Sandbox image build                                            | 0m55s    |
 
 Peak disk 7.9 GB, 7.7 GB free at the end. Memory peak is unobserved: cgroup `memory.peak` is not readable inside the managed container. No OOM kill occurred on the 8 GiB instance. The elapsed-time compute estimate is about $0.11, about $0.14 across all four runs, before allowances; actual billing is not reconciled. Evidence: `tasks/evidence/2026-11-03-installer-cold-build/result.json` and `progress.jsonl`.
 

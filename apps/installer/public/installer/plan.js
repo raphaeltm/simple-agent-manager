@@ -29,12 +29,13 @@ function conflictText(plan) {
   const kind = (record) =>
     record.type === 'certificate' ? 'certificate' : record.type === 'route' ? 'route' : 'dns';
   const names = (group) =>
-    plan.conflicts.filter((record) => kind(record) === group).map((record) => record.name).join(', ');
+    plan.conflicts
+      .filter((record) => kind(record) === group)
+      .map((record) => record.name)
+      .join(', ');
   const parts = [];
-  if (names('dns'))
-    parts.push(`Existing DNS records block installation: ${names('dns')}.`);
-  if (names('route'))
-    parts.push(`Existing Workers routes block installation: ${names('route')}.`);
+  if (names('dns')) parts.push(`Existing DNS records block installation: ${names('dns')}.`);
+  if (names('route')) parts.push(`Existing Workers routes block installation: ${names('route')}.`);
   if (names('certificate'))
     parts.push(`No active Cloudflare certificate covers ${names('certificate')}.`);
   return parts.join(' ');
@@ -94,7 +95,8 @@ export function renderPlanSummary(plan, context) {
   // The app hostname is the server's own plan output, not a client-side
   // reconstruction from the raw domain input (which may differ after the
   // server's own normalization).
-  const appHost = plan.hostnames.find((host) => host.startsWith('app.')) ?? `app.${context.baseDomain}`;
+  const appHost =
+    plan.hostnames.find((host) => host.startsWith('app.')) ?? `app.${context.baseDomain}`;
   line.textContent = `SAM will live at ${appHost}${context.accountName ? ` in ${context.accountName}` : ''}. Cloudflare usage charges apply.`;
   details.replaceChildren(renderCreatedDetails(plan));
   state.approvedPlan = plan;

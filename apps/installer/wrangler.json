@@ -19,9 +19,7 @@
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": [
-        "InstallerSession"
-      ]
+      "new_sqlite_classes": ["InstallerSession"]
     }
   ],
   "observability": {
