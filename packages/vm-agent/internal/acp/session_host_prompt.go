@@ -657,6 +657,13 @@ func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promp
 	}
 
 	if isCrashPromptError(err) && !errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
+		// An eviction's docker stop disconnects the agent before the stop returns.
+		// That disconnect is the eviction, not a crash: no recovery, no verdict.
+		if h.parkPromptCrashForEviction(func() {
+			h.finishPromptAttemptWithError(attempt, promptCtx, reqID, info, err)
+		}) {
+			return
+		}
 		agentType, stderr, proc, missing, _, ok := h.beginCrashRecoveryWithPrerequisites(reqID, info.viewerID, info.recovery)
 		if ok {
 			slog.Warn("ACP Prompt failed because agent disconnected; deferring to crash recovery", "error", err, "agentType", agentType)

@@ -1464,6 +1464,14 @@ func (s *Server) makeTaskCompletionCallback(
 		strings.TrimRight(controlPlaneURL, "/"), projectID, taskID)
 
 	return func(stopReason string, promptErr error) {
+		if stopReason == acp.EvictedStopReason {
+			// The eviction delivery owns this task's outcome: it reports the interrupted
+			// work and the control plane resumes the conversation on another workspace.
+			// Any status posted here would race it ("failed" stranded tasks on 2026-11-08).
+			slog.Info("Prompt ended by workspace eviction; task status left to the eviction delivery",
+				"taskId", taskID, "workspaceId", workspaceID)
+			return
+		}
 		if isPromptCancellation(stopReason, promptErr) {
 			s.postTaskCallback(
 				callbackURL,

@@ -34,6 +34,27 @@ func (h *SessionHost) monitorProcessExit(process agentProcess, agentType string,
 	exitInfo := agentExitInfo(err)
 	slog.Info("Agent process exited", "agentType", agentType, "uptime", uptime.Round(time.Millisecond), "exitInfo", exitInfo, "stderrBytes", len(stderrOutput))
 
+	exit := processExitObservation{stderr: stderrOutput, uptime: uptime, exitInfo: exitInfo}
+	if h.parkProcessExitForEviction(process, func() {
+		h.handleProcessExit(process, agentType, cred, settings, exit)
+	}) {
+		return
+	}
+	h.handleProcessExit(process, agentType, cred, settings, exit)
+}
+
+// processExitObservation is what monitorProcessExit read once from the exited process.
+type processExitObservation struct {
+	stderr   string
+	uptime   time.Duration
+	exitInfo string
+}
+
+// handleProcessExit decides what an observed agent exit means: restart, crash-recovery
+// resume, or a terminal verdict. It runs immediately, or later as a replay when an
+// eviction that owned the exit was rolled back.
+func (h *SessionHost) handleProcessExit(process agentProcess, agentType string, cred *agentCredential, settings *agentSettingsPayload, exit processExitObservation) {
+	stderrOutput, uptime, exitInfo := exit.stderr, exit.uptime, exit.exitInfo
 	isRapidExit := uptime < 5*time.Second
 	h.mu.Lock()
 	if h.process != process {

@@ -113,6 +113,17 @@ func (s *Server) removeWorkspaceContainer(workspaceID string) {
 }
 
 func (s *Server) stopSessionHostsForWorkspace(workspaceID string) {
+	s.stopSessionHostsForWorkspaceWith(workspaceID, (*acp.SessionHost).Stop)
+}
+
+// stopSessionHostsForWorkspaceEviction stops a committed eviction's hosts. Their
+// in-flight prompts complete as evicted rather than cancelled: the eviction delivery,
+// not a prompt callback, reports the interrupted work to the control plane.
+func (s *Server) stopSessionHostsForWorkspaceEviction(workspaceID string) {
+	s.stopSessionHostsForWorkspaceWith(workspaceID, (*acp.SessionHost).StopForEviction)
+}
+
+func (s *Server) stopSessionHostsForWorkspaceWith(workspaceID string, stop func(*acp.SessionHost)) {
 	s.cancelSecretExecutionsForOwner(workspaceID, "")
 	prefix := workspaceID + ":"
 
@@ -131,7 +142,7 @@ func (s *Server) stopSessionHostsForWorkspace(workspaceID string) {
 	}
 	s.sessionHostMu.Unlock()
 	for _, host := range hosts {
-		host.Stop()
+		stop(host)
 	}
 
 	// Clean up all persisted MCP servers for this workspace (best-effort).

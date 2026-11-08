@@ -418,7 +418,7 @@ func (s *Server) finishLocalWorkspaceEviction(result resourcemon.EvictionResult)
 	}
 
 	s.stopPortScanner(workspaceID)
-	s.stopSessionHostsForWorkspace(workspaceID)
+	s.stopSessionHostsForWorkspaceEviction(workspaceID)
 	s.appendNodeEvent(workspaceID, "warn", "workspace.evicted", "Workspace evicted due to resource pressure", map[string]interface{}{
 		"reason":           string(result.Target.Reason),
 		"containerId":      result.Target.ContainerID,

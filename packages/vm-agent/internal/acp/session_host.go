@@ -303,6 +303,7 @@ type SessionHost struct {
 	guardedCancelProcess agentProcess   // promptMu: fence survives detach until this process exits
 	guardedCancelPending bool           // promptMu: a matched process stop still owns admission
 	evictionPending      bool           // promptMu: durable eviction owns this runtime; reject new work
+	evictionParked       evictionParked // promptMu: crash handling deferred while evictionPending
 	promptSeq            uint64
 	// promptAttempt remains attached until the next accepted prompt so late
 	// terminal signals from the same runtime are absorbed by its exact-once
