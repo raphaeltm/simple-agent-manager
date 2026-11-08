@@ -122,3 +122,14 @@ exploit. This task checks each claim against current `main` and fixes only what 
 | cloudflare-specialist | PASS | 2 optional LOWs: D1 fault → 500 on MCP auth (a genuine fault, intended); duplicated workspace⋈node join (not consolidated — AI proxy needs extra columns, MCP needs per-reason logs) |
 | doc-sync-validator | ADDRESSED | MEDIUM: rule copied to `packages/vm-agent/.claude/rules/34`; LOW: full ending-node list in security.md |
 | task-completion-validator | PASS | All six checks pass; it independently confirmed the AI-proxy guard discriminates (14/19 red); only staging remained pending |
+
+## Staging Verification (2026-11-08, run 42517040887, branch rebased on main a84ae0859)
+
+- One Instant chat in project Potato (staging smoke user, Claude Code profile on the Instant runtime): the agent replied, so agent-key and message callbacks were accepted.
+- The session slept on its own, with workspace and node both `sleeping`. Replaying the session's MCP token (read from staging KV) gave **401**.
+- A follow-up woke the session. The woken agent called `get_instructions` and got "Potato". The original token gave **200** again: rejected while inactive, kept for the same session.
+- After a session stop (`workspaceDeleted: true`), the token gave **401**, and both of the session's KV MCP tokens were revoked (KV key gone after replay). The workspace row is gone; the node is `deleted`.
+- "Agent credential fetched" was recorded for both container generations, and there were no new platform errors.
+- Not exercised live: the AI proxy refusal path. Staging has no platform-proxy (`sam`) sessions (all recent sessions are `direct`/user credential), and the callback token can't be extracted (encrypted at rest; agents only see it in proxy mode). It is covered by `ai-proxy-auth-lifecycle.test.ts` with real JWTs and real SQL through `prepareAIProxyRequest`.
+- Not run: the Playwright UI pass. The restored workspace lacks Chromium system libraries and the node disk is full. The PR changes no UI. API-level checks (dashboard, project, sessions and nodes endpoints, app root) all returned 200.
+- Cleanup: 0 live VM nodes; the test workspace and node are deleted; local token and cookie files are deleted.
