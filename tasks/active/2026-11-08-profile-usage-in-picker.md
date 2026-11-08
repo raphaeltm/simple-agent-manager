@@ -46,7 +46,7 @@ and approved "A's wording inside C's layout" on 2026-11-08, with staging explici
 - [x] `useAccountsData` / `useProfileBudgets` accept `enabled`
 - [x] Usage model `profile-picker/usage.ts` (state, left, reset, words, alternative)
 - [x] `ProfileUsageAvatar` ring component
-- [x] Cards: ring, low/out/paused/none line, dim when out, a11y label
+- [x] Cards: ring, low/out/paused/none line, a11y label (no dimming: see notes)
 - [x] Sheet rows: ring, trailing low/out/paused/none text, a11y label
 - [x] Sheet: "Out for now" folded section (`pickerSections` out ids)
 - [x] To chip: ring + a11y label

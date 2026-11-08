@@ -187,6 +187,17 @@ describe('roomierProfile', () => {
     expect(roomierProfile(opus, candidates, usageFor)?.profile.id).toBe('claudiii');
   });
 
+  it('never offers another profile on the same account, however much room it shows', () => {
+    // Same credential as the selected profile, but read with room (e.g. a fresher sample).
+    const shared = new Map(usages);
+    shared.set('twin', { ...profileUsage(ROOMY, NOW), accountKey: 'cc_credentials:support' });
+    const candidates = [opus, profile('twin')];
+    expect(roomierProfile(opus, candidates, (id) => shared.get(id))).toBeNull();
+    // Control: the same profile on a different account is offered.
+    shared.set('twin', profileUsage(ROOMY, NOW));
+    expect(roomierProfile(opus, candidates, (id) => shared.get(id))?.profile.id).toBe('twin');
+  });
+
   it('offers nothing when no other account has room for that model', () => {
     const candidates = [opus, profile('same-account'), profile('other-model', { model: 'x' })];
     expect(roomierProfile(opus, candidates, usageFor)).toBeNull();

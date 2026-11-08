@@ -5,8 +5,11 @@
  * will stop the profile first (`profileHeadroom`, as on the Profiles page), and the
  * levels are the server's, so the picker cannot disagree with the usage dialog.
  */
-import type { AgentProfile, CredentialLimitLevel } from '@simple-agent-manager/shared';
-import { credentialLimitSummaryAsOf } from '@simple-agent-manager/shared';
+import type { AgentProfile } from '@simple-agent-manager/shared';
+import {
+  credentialLimitSummaryAsOf,
+  worstCredentialLimitLevel,
+} from '@simple-agent-manager/shared';
 import { useMemo } from 'react';
 
 import { formatMsSpan } from '../../../lib/time-utils';
@@ -30,8 +33,6 @@ export interface ProfileUsage {
   accountKey: string | null;
 }
 
-const ORDER: CredentialLimitLevel[] = ['ok', 'warning', 'critical', 'rejected'];
-
 export function profileUsage(budget: ProfileBudget | undefined, now: number): ProfileUsage {
   const quiet = { left: null, color: LEVEL_STYLES.ok.color, resetIn: null, accountKey: null };
   if (!budget) return { ...quiet, state: 'unknown', accountLabel: null };
@@ -42,15 +43,18 @@ export function profileUsage(budget: ProfileBudget | undefined, now: number): Pr
 
   const left = profileHeadroom(budget, now);
   if (left === null) return { ...quiet, state: 'unknown', accountLabel: budget.label };
-  // The window that stops the profile first: a refused one, else the fullest.
+  // The window that stops the profile first: the worst level, then the fullest.
   const windows = credentialLimitSummaryAsOf(budget.usage, now).windows;
-  const binding = windows.reduce<(typeof windows)[number] | undefined>((worst, window) => {
-    if (!worst) return window;
-    const rank = ORDER.indexOf(window.level) - ORDER.indexOf(worst.level);
-    if (rank !== 0) return rank > 0 ? window : worst;
-    return (window.utilizationPercent ?? -1) > (worst.utilizationPercent ?? -1) ? window : worst;
-  }, undefined);
-  const level = binding?.level ?? 'ok';
+  const level = worstCredentialLimitLevel(windows.map((window) => window.level));
+  const binding = windows
+    .filter((window) => window.level === level)
+    .reduce<(typeof windows)[number] | undefined>(
+      (fullest, window) =>
+        !fullest || (window.utilizationPercent ?? -1) > (fullest.utilizationPercent ?? -1)
+          ? window
+          : fullest,
+      undefined
+    );
   const resetsAt = binding?.resetsAt ?? null;
   return {
     state: left <= 0 ? 'out' : level === 'ok' ? 'ok' : 'low',
@@ -124,10 +128,11 @@ export function useProfileUsages(
   const budgets = useProfileBudgets(profiles, { enabled });
   // Recomputed when a limits poll lands, which also refreshes the reset countdowns.
   return useMemo(() => {
-    if (!budgets) return null;
+    // Disabled means off screen: cached rows from an earlier visit are not shown either.
+    if (!enabled || !budgets) return null;
     const now = Date.now();
     return new Map(
       profiles.map((profile) => [profile.id, profileUsage(budgets.get(profile.id), now)])
     );
-  }, [budgets, profiles]);
+  }, [budgets, enabled, profiles]);
 }
