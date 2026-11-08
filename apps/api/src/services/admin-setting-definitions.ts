@@ -64,6 +64,7 @@ export type AdminSettingName =
   | 'operations.evictionRecoveryRetryBatchSize'
   | 'operations.evictionRecoveryRetryWallMs'
   | 'operations.evictionRecoveryRetryDelayMs'
+  | 'operations.deadWakeReconcileBatchSize'
   | 'operations.resourceLinkTouchIntervalMs'
   | 'operations.resourceLinkWeakPerTarget'
   | 'operations.resourceLinkWeakCleanupBatchSize'

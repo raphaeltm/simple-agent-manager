@@ -113,7 +113,7 @@ describe('findAnomalies', () => {
 
     const report = await findAnomalies(env, FLEET_OPS_DEFAULTS, { now: NOW });
 
-    expect(report.classes).toHaveLength(8);
+    expect(report.classes).toHaveLength(9);
     for (const entry of report.classes) {
       expect(entry.error, entry.class).toBeUndefined();
       expect(entry.findings, entry.class).toEqual([]);
@@ -274,6 +274,71 @@ describe('findAnomalies', () => {
     expect(entry.findings[0]?.reason).toContain('sleep_error');
     // Error text is never inlined into the sweep; the story tool returns it fenced.
     expect(entry.findings[0]?.reason).not.toContain('boom');
+  });
+
+  it('finds wakes older than the waking threshold, weeks old included, but not a fresh wake', async () => {
+    const threshold = FLEET_OPS_DEFAULTS.wakingMinutes * MIN;
+    const snap = (id: string, extra: Record<string, unknown>) =>
+      insert(main, 'session_snapshots', {
+        id,
+        user_id: 'user-a',
+        project_id: 'proj-1',
+        chat_session_id: `chat-${id}`,
+        runtime: 'vm',
+        status: 'available',
+        recovery_status: 'waking',
+        updated_at: iso(MIN),
+        ...extra,
+      });
+    task('task-dead', { status: 'sleeping', updated_at: iso(threshold) });
+    task('task-live', { status: 'queued' });
+    task('task-fresh', { status: 'queued' });
+    // Weeks old, far outside the snapshot-failure lookback window.
+    snap('s-dead', {
+      recovery_task_id: 'task-dead',
+      recovery_claimed_at: iso(30 * 24 * 60 * MIN),
+      updated_at: iso(MIN),
+    });
+    snap('s-live', { recovery_task_id: 'task-live', recovery_claimed_at: iso(threshold + MIN) });
+    snap('s-missing', {
+      recovery_task_id: 'task-gone',
+      recovery_claimed_at: null,
+      updated_at: iso(threshold + 2 * MIN),
+    });
+    snap('s-fresh', { recovery_task_id: 'task-fresh', recovery_claimed_at: iso(threshold - MIN) });
+    snap('s-failed', { recovery_status: 'failed', recovery_claimed_at: iso(threshold + MIN) });
+
+    const report = await findAnomalies(env, FLEET_OPS_DEFAULTS, { now: NOW });
+    const entry = findingIds(report, 'session_wake_stalled');
+
+    expect(entry.findings.map((f) => f.ids.snapshotId)).toEqual(['s-dead', 's-missing', 's-live']);
+    expect(entry.total).toBe(3);
+    expect(entry.findings[0]?.reason).toContain('recovery task sleeping');
+    expect(entry.findings[0]?.reason).toContain('dead claim');
+    expect(entry.findings[1]?.reason).toContain('recovery task missing');
+    expect(entry.findings[2]?.reason).toContain('still running');
+    expect(report.thresholds.wakingMinutes).toBe(FLEET_OPS_DEFAULTS.wakingMinutes);
+  });
+
+  it('honours a configured waking threshold', async () => {
+    insert(main, 'session_snapshots', {
+      id: 's-30',
+      user_id: 'user-a',
+      chat_session_id: 'chat-30',
+      runtime: 'vm',
+      status: 'available',
+      recovery_status: 'waking',
+      recovery_claimed_at: iso(30 * MIN),
+      updated_at: iso(MIN),
+    });
+    const ids = async (wakingMinutes: number) =>
+      findingIds(
+        await findAnomalies(env, { ...FLEET_OPS_DEFAULTS, wakingMinutes }, { now: NOW }),
+        'session_wake_stalled'
+      ).findings.map((f) => f.ids.snapshotId);
+
+    expect(await ids(60)).toEqual([]);
+    expect(await ids(20)).toEqual(['s-30']);
   });
 
   it('finds deletion quarantine reports for workspaces that still exist', async () => {

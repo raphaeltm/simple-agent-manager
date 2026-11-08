@@ -76,6 +76,14 @@ export const FLEET_OPS_SETTINGS = [
     range: { min: 1, max: 30 * 24 },
   },
   {
+    name: 'operations.opsAnomalyWakingMinutes',
+    key: 'wakingMinutes',
+    defaultValue: 60,
+    description:
+      'Minutes a sleeping chat may stay waking, counted from its wake claim, before the wake counts as an anomaly.',
+    range: { min: 1, max: 30 * 24 * 60 },
+  },
+  {
     name: 'operations.opsAnomalyLookbackHours',
     key: 'lookbackHours',
     defaultValue: 24,

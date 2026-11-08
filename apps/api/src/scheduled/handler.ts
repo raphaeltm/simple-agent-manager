@@ -41,6 +41,7 @@ import { runSessionSleepSweep } from './session-sleep';
 import { runSessionSleepLifecycleRepair } from './session-sleep-lifecycle-repair';
 import { runScheduledSessionSnapshotPurge } from './session-snapshot-purge';
 import { runSessionTaskReconciliation } from './session-task-reconciliation';
+import { runDeadWakeClaimReconciliation } from './session-wake-claim-reconciliation';
 import { runSetupSessionSweep } from './setup-session-sweep';
 import { recoverStuckTasks } from './stuck-tasks';
 import { createSweepIsolator } from './sweep-isolation';
@@ -172,6 +173,9 @@ export async function scheduled(
   );
   const evictionRecovery = await sweeps.isolate('workspace_eviction_recovery', () =>
     runWorkspaceEvictionRecovery(env, ctx.waitUntil.bind(ctx))
+  );
+  const deadWakeClaims = await sweeps.isolate('dead_wake_claim_reconciliation', () =>
+    runDeadWakeClaimReconciliation(env, ctx.waitUntil.bind(ctx))
   );
   const nodeCleanup = await sweeps.isolate('node_cleanup', () => runNodeCleanupSweep(env));
   await sweeps.isolate('deployment_node_cleanup', () =>
@@ -344,6 +348,7 @@ export async function scheduled(
     observabilityPurgedByAge: observabilityPurge?.deletedByAge,
     observabilityPurgedByCount: observabilityPurge?.deletedByCount,
     evictionRecovery,
+    deadWakeClaims,
     githubTriggerRecovery,
     agentEmailRecovery,
     cronTriggersChecked: cronTriggers?.checked,
