@@ -200,6 +200,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   BETTER_AUTH_SECRET?: string; // BetterAuth session management
   CREDENTIAL_ENCRYPTION_KEY?: string; // AES-GCM user credential encryption
   GITHUB_WEBHOOK_SECRET?: string; // GitHub webhook HMAC verification
+  BOOTSTRAP_OWNER_EMAIL?: string; // Installer-only first-admin binding; must match a verified login email
   SETUP_TOKEN?: string; // Plaintext first-run setup token, dashboard-readable while setup is incomplete
   SETUP_FORCE?: string; // "true" reopens /setup for lockout recovery
   SETUP_RATE_LIMIT_MAX_ATTEMPTS?: string; // Max setup-token attempts per identifier/window (default: 10)

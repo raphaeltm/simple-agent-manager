@@ -3,28 +3,53 @@
 set -euo pipefail
 [[ $# -eq 1 ]] || { echo "usage: $0 <reviewed-runtime.tar.gz>" >&2; exit 2; }
 : "${R2_BUCKET:?R2_BUCKET is required}"
+: "${CLOUDFLARE_ACCOUNT_ID:?CLOUDFLARE_ACCOUNT_ID is required}"
+: "${AWS_ACCESS_KEY_ID:?AWS_ACCESS_KEY_ID is required}"
+: "${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY is required}"
 [[ "$R2_BUCKET" =~ ^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$ ]] || exit 1
+[[ "$CLOUDFLARE_ACCOUNT_ID" =~ ^[a-f0-9]{32}$ ]] || exit 1
 release='384d0071527848b68df318c04f2e6e040f2eea67131bbd5b6f66cc58f5bd65bd'
 size=136243963
-# Pinned Wrangler R2 REST upload transport rejects objects above 300 MiB.
-(( size <= 300 * 1024 * 1024 )) || { echo 'Artifact exceeds Wrangler upload limit' >&2; exit 1; }
+# R2's S3 API moves this archive in seconds; Wrangler's REST object transport
+# took over 180 s to read it back on an installer builder (2026-11-07).
+# 136 MB within 300 s needs only ~0.45 MB/s per transfer.
+transfer_timeout=${CODEX_PUBLISH_TRANSFER_TIMEOUT_SECONDS:-300}
+[[ "$transfer_timeout" =~ ^[1-9][0-9]{0,4}$ ]] || exit 1
 private=$(mktemp -d)
 trap 'rm -rf -- "$private"' EXIT
 timeout 120 head -c "$((size + 1))" -- "$1" > "$private/runtime.tar"
 [[ $(stat -c %s "$private/runtime.tar") == "$size" ]]
 printf '%s  %s\n' "$release" "$private/runtime.tar" | sha256sum --check --status
-object="$R2_BUCKET/acp/codex/releases/$release/codex-runtime-linux-amd64.tar.gz"
-if result=$(timeout 180 pnpm --filter @simple-agent-manager/api exec wrangler r2 object get "$object" --file "$private/existing.tar" --remote 2>&1); then
-  printf '%s  %s\n' "$release" "$private/existing.tar" | sha256sum --check --status
-  echo 'Reusing identical immutable Codex runtime artifact'
-  exit 0
-fi
-# Only an explicit missing-key response permits publication; auth/network errors
-# must not be mistaken for absence. Do not print arbitrary provider error text.
-if [[ "$result" != *'The specified key does not exist.'* ]]; then
-  echo 'Cannot establish immutable artifact absence' >&2; exit 1
-fi
-timeout 180 pnpm --filter @simple-agent-manager/api exec wrangler r2 object put "$object" --file "$private/runtime.tar" --remote
-timeout 180 pnpm --filter @simple-agent-manager/api exec wrangler r2 object get "$object" --file "$private/published.tar" --remote
-printf '%s  %s\n' "$release" "$private/published.tar" | sha256sum --check --status
-echo 'Published and read-back verified immutable Codex runtime artifact'
+url="https://$CLOUDFLARE_ACCOUNT_ID.r2.cloudflarestorage.com/$R2_BUCKET/acp/codex/releases/$release/codex-runtime-linux-amd64.tar.gz"
+s3() {
+  local seconds=$1; shift
+  curl --silent --show-error --max-time "$seconds" \
+    --aws-sigv4 'aws:amz:auto:s3' --user "$AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY" \
+    -H 'x-amz-content-sha256: UNSIGNED-PAYLOAD' "$@" "$url"
+}
+# Prints the HTTP status; a stored object whose bytes have the pinned SHA-256 is
+# reported as "match". R2's S3 API reads the archive back in seconds.
+stored() {
+  local status
+  status=$(s3 30 --head --output /dev/null --dump-header "$private/headers" --write-out '%{http_code}') || return 1
+  if [[ "$status" != 200 ]]; then echo "$status"; return 0; fi
+  if ! grep -qix "content-length: $size"$'\r' "$private/headers"; then echo mismatch; return 0; fi
+  rm -f "$private/stored.tar"
+  s3 "$transfer_timeout" --fail --output "$private/stored.tar" || return 1
+  if printf '%s  %s\n' "$release" "$private/stored.tar" | sha256sum --check --status; then
+    echo match
+  else
+    echo mismatch
+  fi
+}
+case $(stored || echo error) in
+  match) echo 'Reusing identical immutable Codex runtime artifact'; exit 0 ;;
+  # Only an explicit absence permits publication; auth/network errors must not
+  # be mistaken for absence. Provider error text is not printed.
+  404) ;;
+  mismatch) echo 'Existing Codex runtime artifact does not match the pinned release' >&2; exit 1 ;;
+  *) echo 'Cannot establish immutable artifact absence' >&2; exit 1 ;;
+esac
+s3 "$transfer_timeout" --fail --output /dev/null --upload-file "$private/runtime.tar"
+[[ $(stored || echo error) == match ]] || { echo 'Published Codex runtime artifact failed verification' >&2; exit 1; }
+echo 'Published and verified immutable Codex runtime artifact'

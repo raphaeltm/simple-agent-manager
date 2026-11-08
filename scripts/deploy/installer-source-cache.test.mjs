@@ -1,0 +1,342 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import * as fs from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import * as crypto from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { canonicalSourceBootstrap } from './installer-source-cache.mjs';
+import { publishSourceBundle } from './installer-build-cache.mjs';
+import { filesUnder, withFakeR2 } from './installer-fake-r2.mjs';
+import { createRequire } from 'node:module';
+const installerRequire = createRequire(
+  new URL('../../apps/installer/package.json', import.meta.url)
+);
+const wranglerRequire = createRequire(installerRequire.resolve('wrangler/package.json'));
+const { transform } = wranglerRequire('esbuild');
+const transformed = await transform(
+  'export const source = ' + JSON.stringify(canonicalSourceBootstrap),
+  { format: 'esm', keepNames: true }
+);
+const moduleUrl = (source) =>
+  `data:text/javascript;base64,${Buffer.from(source).toString('base64')}`;
+const compiled = await import(moduleUrl(transformed.code));
+const { default: restoreCanonicalSource } = await import(
+  moduleUrl('export default ' + compiled.source)
+);
+test('keepNames compiled bootstrap runs cleanly, restores full history offline and rejects tampering', async () => {
+  const root = fs.mkdtempSync(join(tmpdir(), 'sam-source-cache-'));
+  try {
+    const remote = join(root, 'upstream');
+    fs.mkdirSync(remote);
+    const git = (...args) =>
+      execFileSync('/usr/bin/git', args, {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+    git('init', remote);
+    git('-C', remote, 'config', 'user.email', 'test@example.com');
+    git('-C', remote, 'config', 'user.name', 'Test');
+    fs.writeFileSync(join(remote, 'source'), 'baseline');
+    git('-C', remote, 'add', '.');
+    git('-C', remote, 'commit', '-m', 'first');
+    const first = git('-C', remote, 'rev-parse', 'HEAD');
+    fs.writeFileSync(join(remote, 'source'), 'approved');
+    git('-C', remote, 'commit', '-am', 'second');
+    const commit = git('-C', remote, 'rev-parse', 'HEAD');
+    const objects = new Map();
+    const store = {
+      get(key, file) {
+        if (!objects.has(key)) return false;
+        fs.writeFileSync(file, objects.get(key));
+        return true;
+      },
+      put(key, file) {
+        if (!objects.has(key)) objects.set(key, fs.readFileSync(file));
+      },
+    };
+    const environment = { SAM_SOURCE_COMMIT: commit };
+    const one = await restoreCanonicalSource({
+      environment,
+      store,
+      remote,
+      directory: join(root, 'first'),
+      work: join(root, 'work'),
+    });
+    environment.SAM_SOURCE_IDENTITY = JSON.stringify(one);
+    fs.rmSync(remote, { recursive: true });
+    const two = await restoreCanonicalSource({
+      environment,
+      store,
+      remote,
+      directory: join(root, 'restored'),
+      work: join(root, 'work'),
+    });
+    assert.deepEqual(one, two);
+    assert.equal(git('-C', join(root, 'restored'), 'show', `${first}:source`), 'baseline');
+    assert.equal(fs.readFileSync(join(root, 'restored', 'source'), 'utf8'), 'approved');
+    const savedManifest = objects.get(`${commit}.json`);
+    objects.delete(`${commit}.json`);
+    await assert.rejects(
+      restoreCanonicalSource({
+        environment,
+        store,
+        remote,
+        directory: join(root, 'missing'),
+        work: join(root, 'work'),
+      }),
+      /manifest missing/
+    );
+    for (const changed of [
+      { ...one, tree: 'f'.repeat(40) },
+      { ...one, bundleSHA256: 'f'.repeat(64) },
+      { ...one, bundleBytes: one.bundleBytes + 1 },
+    ]) {
+      objects.set(`${commit}.json`, Buffer.from(JSON.stringify(changed)));
+      await assert.rejects(
+        restoreCanonicalSource({
+          environment,
+          store,
+          remote,
+          directory: join(root, 'changed'),
+          work: join(root, 'work'),
+        }),
+        /identity changed/
+      );
+    }
+    objects.set(`${commit}.json`, savedManifest);
+    objects.set(`objects/${one.bundleSHA256}.bundle`, Buffer.from('tampered'));
+    await assert.rejects(
+      restoreCanonicalSource({
+        environment,
+        store,
+        remote,
+        directory: join(root, 'broken'),
+        work: join(root, 'work'),
+      }),
+      /integrity/
+    );
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// The real repository has thousands of agent branches. '--all' bundled every
+// one of them (1.02 GiB), exceeding the 1 GiB source-object ceiling, and the
+// first real full install failed at read-back (staging, 2026-11-06). The
+// bundle must carry only the approved commit's own full history.
+test('publishes only the approved commit history, not unrelated branches', async () => {
+  const root = fs.mkdtempSync(join(tmpdir(), 'sam-source-scope-'));
+  try {
+    const remote = join(root, 'upstream');
+    fs.mkdirSync(remote);
+    const git = (...args) =>
+      execFileSync('/usr/bin/git', args, {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+    git('init', '-b', 'main', remote);
+    git('-C', remote, 'config', 'user.email', 'test@example.com');
+    git('-C', remote, 'config', 'user.name', 'Test');
+    fs.writeFileSync(join(remote, 'source'), 'baseline');
+    git('-C', remote, 'add', '.');
+    git('-C', remote, 'commit', '-m', 'first');
+    const first = git('-C', remote, 'rev-parse', 'HEAD');
+    git('-C', remote, 'checkout', '-b', 'unrelated');
+    fs.writeFileSync(join(remote, 'large-review-artifact'), 'x'.repeat(4096));
+    git('-C', remote, 'add', '.');
+    git('-C', remote, 'commit', '-m', 'unrelated branch');
+    const unrelated = git('-C', remote, 'rev-parse', 'HEAD');
+    git('-C', remote, 'checkout', 'main');
+    fs.writeFileSync(join(remote, 'source'), 'approved');
+    git('-C', remote, 'commit', '-am', 'second');
+    const commit = git('-C', remote, 'rev-parse', 'HEAD');
+    const objects = new Map();
+    const store = {
+      get(key, file) {
+        if (!objects.has(key)) return false;
+        fs.writeFileSync(file, objects.get(key));
+        return true;
+      },
+      put(key, file) {
+        if (!objects.has(key)) objects.set(key, fs.readFileSync(file));
+      },
+    };
+    const environment = { SAM_SOURCE_COMMIT: commit };
+    const published = await restoreCanonicalSource({
+      environment,
+      store,
+      remote,
+      directory: join(root, 'first'),
+      work: join(root, 'work'),
+    });
+    environment.SAM_SOURCE_IDENTITY = JSON.stringify(published);
+    fs.rmSync(remote, { recursive: true });
+    await restoreCanonicalSource({
+      environment,
+      store,
+      remote,
+      directory: join(root, 'restored'),
+      work: join(root, 'work'),
+    });
+    const restored = join(root, 'restored');
+    assert.equal(git('-C', restored, 'show', `${first}:source`), 'baseline');
+    assert.equal(git('-C', restored, 'rev-parse', '--is-shallow-repository'), 'false');
+    assert.throws(() => git('-C', restored, 'cat-file', '-e', `${unrelated}^{commit}`));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// A new installation of the same account and domain has an empty per-installation
+// store but the shared state-bucket cache. Reach it the way production does: the
+// restore keeps an upstream bundle, the engine's publisher offers it, and a later
+// restore uses it instead of the network; a corrupted entry falls back and is repaired.
+test('fresh installations reuse a verified shared source bundle and survive a corrupted one', async () => {
+  const root = fs.mkdtempSync(join(tmpdir(), 'sam-source-shared-'));
+  try {
+    const remote = join(root, 'upstream');
+    fs.mkdirSync(remote);
+    const git = (...args) =>
+      execFileSync('/usr/bin/git', args, {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+    git('init', remote);
+    git('-C', remote, 'config', 'user.email', 'test@example.com');
+    git('-C', remote, 'config', 'user.name', 'Test');
+    fs.writeFileSync(join(remote, 'source'), 'approved');
+    git('-C', remote, 'add', '.');
+    git('-C', remote, 'commit', '-m', 'only');
+    const commit = git('-C', remote, 'rev-parse', 'HEAD');
+    const memory = (overwrite) => {
+      const objects = new Map();
+      return {
+        objects,
+        get: async (key, file) => {
+          if (!objects.has(key)) return false;
+          fs.writeFileSync(file, objects.get(key));
+          return true;
+        },
+        put: async (key, file) => {
+          if (overwrite || !objects.has(key)) objects.set(key, fs.readFileSync(file));
+        },
+      };
+    };
+    // The state bucket's `installer-cache/` prefix, and the restore's `source/` view of it.
+    const stateBucket = memory(true);
+    const shared = {
+      get: (key, file) => stateBucket.get(`source/${key}`, file),
+      put: () => assert.fail('the restore never writes the shared cache'),
+    };
+    const install = async (name) => {
+      const directory = join(root, name);
+      const manifest = await restoreCanonicalSource({
+        environment: { SAM_SOURCE_COMMIT: commit },
+        store: memory(false),
+        shared,
+        remote,
+        directory,
+        work: join(root, `${name}-work`),
+      });
+      return {
+        directory,
+        manifest,
+        published: await publishSourceBundle({ store: stateBucket, root: directory, commit }),
+      };
+    };
+    const first = await install('first');
+    assert.equal(first.published, 'published');
+    assert.equal(
+      fs.existsSync(join(first.directory, '.wrangler/installer-source-upstream.bundle')),
+      false
+    );
+    fs.renameSync(remote, `${remote}-offline`);
+    const second = await install('second');
+    assert.deepEqual(second.manifest, first.manifest);
+    assert.equal(second.published, 'skipped');
+    assert.equal(fs.readFileSync(join(second.directory, 'source'), 'utf8'), 'approved');
+    const object = `source/objects/${first.manifest.bundleSHA256}.bundle`;
+    const original = stateBucket.objects.get(object);
+    stateBucket.objects.set(object, Buffer.alloc(original.length, 0x78));
+    // Offline, a corrupted shared bundle is a miss that needs the network, never a hit.
+    await assert.rejects(install('offline'));
+    fs.renameSync(`${remote}-offline`, remote);
+    const third = await install('third');
+    assert.equal(third.published, 'published');
+    // Repaired: the next fresh installation needs no network again.
+    fs.renameSync(remote, `${remote}-offline`);
+    assert.equal((await install('fourth')).manifest.commit, commit);
+    // A planted entry for the right commit and tree, but carrying extra refs (here a
+    // tag that would rewrite `git describe`), is rejected even with a matching digest.
+    fs.renameSync(`${remote}-offline`, remote);
+    git('-C', remote, 'tag', 'v99.0.0');
+    const planted = join(root, 'planted.bundle');
+    git('-C', remote, 'bundle', 'create', planted, 'HEAD', '--tags');
+    const bytes = fs.readFileSync(planted);
+    const digest = crypto.createHash('sha256').update(bytes).digest('hex');
+    stateBucket.objects.set(`source/objects/${digest}.bundle`, bytes);
+    stateBucket.objects.set(
+      `source/${commit}.json`,
+      Buffer.from(
+        JSON.stringify({ ...first.manifest, bundleSHA256: digest, bundleBytes: bytes.length })
+      )
+    );
+    fs.renameSync(remote, `${remote}-offline`);
+    await assert.rejects(install('planted'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('restore over the real R2 transport leaves no storage credential behind', async () => {
+  await withFakeR2(async ({ root, log }) => {
+    const remote = join(root, 'upstream');
+    fs.mkdirSync(remote);
+    const git = (...args) =>
+      execFileSync('/usr/bin/git', args, {
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+    git('init', remote);
+    git('-C', remote, 'config', 'user.email', 'test@example.com');
+    git('-C', remote, 'config', 'user.name', 'Test');
+    fs.writeFileSync(join(remote, 'source'), 'approved');
+    git('-C', remote, 'add', '.');
+    git('-C', remote, 'commit', '-m', 'only');
+    const secret = 'd'.repeat(64);
+    const environment = {
+      SAM_SOURCE_COMMIT: git('-C', remote, 'rev-parse', 'HEAD'),
+      CF_ACCOUNT_ID: 'a'.repeat(32),
+      SAM_ARTIFACTS_BUCKET: 'installation-builds',
+      SAM_BUILD_CACHE_BUCKET: 's123abc-pulumi-state-production',
+      R2_ACCESS_KEY_ID: 'b'.repeat(32),
+      R2_SECRET_ACCESS_KEY: secret,
+    };
+    const work = join(root, 'work');
+    const directory = join(root, 'source');
+    const accepted = await restoreCanonicalSource({ environment, remote, directory, work });
+    // A failed restore (tampered saved bundle) must not leave the credential either.
+    const saved = join(
+      root,
+      'bucket/installation-builds/installer/source/objects',
+      `${accepted.bundleSHA256}.bundle`
+    );
+    fs.writeFileSync(saved, Buffer.alloc(fs.statSync(saved).size, 0x78));
+    await assert.rejects(
+      restoreCanonicalSource({
+        environment: { ...environment, SAM_SOURCE_IDENTITY: JSON.stringify(accepted) },
+        remote,
+        directory: join(root, 'resumed'),
+        work,
+      }),
+      /integrity/
+    );
+    // The per-installation bundle went through the transport with the credential...
+    assert.ok(fs.readFileSync(log, 'utf8').includes(secret));
+    assert.ok(filesUnder(join(root, 'bucket', 'installation-builds')).length >= 2);
+    // ...and no file left in the checkout or scratch space holds it.
+    for (const file of [...filesUnder(work), ...filesUnder(directory)])
+      assert.ok(!fs.readFileSync(file).includes(secret), file);
+  });
+});

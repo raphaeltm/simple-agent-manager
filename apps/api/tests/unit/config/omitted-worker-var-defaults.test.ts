@@ -19,6 +19,7 @@
  */
 import { isDeepStrictEqual } from 'node:util';
 
+import { generateCloudInit } from '@simple-agent-manager/cloud-init';
 import { resolveOrchestratorConfig } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
@@ -96,6 +97,7 @@ import { resolveMonthlyCap, resolveWorkspaceTtlMs } from '../../../src/services/
 import { resolveTrialsEnabledKvKey } from '../../../src/services/trial/kill-switch';
 import { resolveTrialRunnerConfig } from '../../../src/services/trial/trial-runner';
 import { getVmAdmissionConfig } from '../../../src/services/vm-admission-control-types';
+import { errorReportCloudInitVariables } from '../../../src/services/vm-error-report-config';
 import {
   areWebhookTriggersEnabled,
   getWebhookTriggerLimits,
@@ -417,6 +419,25 @@ const READ_PATHS: readonly ReadPath[] = [
     label: 'project event source outbox config',
     sources: [`${API}/services/project-event-source-outbox-contract.ts`],
     read: (env) => resolveProjectEventSourceOutboxConfig(asEnv(env)),
+  },
+  {
+    // The VM agent reads these from its systemd unit, so compare the rendered cloud-init lines.
+    label: 'VM agent error-report cloud-init settings',
+    sources: [`${API}/services/vm-error-report-config.ts`],
+    read: (env) =>
+      generateCloudInit(
+        {
+          nodeId: 'node-probe',
+          hostname: 'sam-probe',
+          controlPlaneUrl: 'https://api.example.com',
+          jwksUrl: 'https://api.example.com/.well-known/jwks.json',
+          callbackToken: 'callback-probe',
+          ...errorReportCloudInitVariables(asEnv(env)),
+        },
+        { validateSize: false }
+      )
+        .split('\n')
+        .filter((line) => line.includes('Environment=ERROR_REPORT_')),
   },
   {
     label: 'credential limit config',

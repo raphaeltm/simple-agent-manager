@@ -66,6 +66,12 @@ const CLOUDFLARE_WORKER_TEXT_BINDING_MAX = 350;
 const CLOUDFLARE_WORKER_TEXT_BINDING_HEADROOM = 10;
 export const CLOUDFLARE_WORKER_TEXT_BINDING_GUARD_LIMIT =
   CLOUDFLARE_WORKER_TEXT_BINDING_MAX - CLOUDFLARE_WORKER_TEXT_BINDING_HEADROOM;
+/**
+ * Text-binding limit on an ordinary Workers Paid account. SAM's own accounts run with a raised
+ * limit (the guard above); a self-hosted install fails `wrangler secret bulk` with code 10055
+ * above this one, so the checked-in configuration must fit it (sync-wrangler-config.test.ts).
+ */
+export const CLOUDFLARE_STANDARD_WORKER_TEXT_BINDING_MAX = 128;
 
 const EVENTING_OPTIONAL_PROCESS_ENV_VARS = [
   'PROJECT_EVENT_MAX_ACTIVE_SUBSCRIPTIONS_PER_PROJECT',
@@ -282,11 +288,40 @@ function getConfiguredContainerMaxInstances(
   return parseContainerMaxInstances(config.envVar, config.defaultValue);
 }
 
+const ACCOUNT_IMAGE_REFERENCE =
+  /^registry\.cloudflare\.com\/[a-f0-9]{32}\/[a-z0-9][a-z0-9._-]{0,127}@sha256:[a-f0-9]{64}$/;
+
+/**
+ * Digest-pinned images the installer engine already pushed to the account
+ * registry, by container class (`SAM_CONTAINER_IMAGE_OVERRIDES`). Wrangler then
+ * deploys them instead of building the Dockerfile. Anything malformed fails the
+ * sync rather than silently building something else.
+ */
+export function containerImageOverrides(
+  raw: string | undefined = process.env.SAM_CONTAINER_IMAGE_OVERRIDES
+): Record<string, string> {
+  if (!raw) return {};
+  const parsed: unknown = JSON.parse(raw);
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))
+    throw new Error('SAM_CONTAINER_IMAGE_OVERRIDES must be a JSON object');
+  for (const [className, reference] of Object.entries(parsed)) {
+    if (!/^[A-Za-z][A-Za-z0-9]{0,63}$/.test(className) || typeof reference !== 'string')
+      throw new Error('Invalid container image override');
+    if (!ACCOUNT_IMAGE_REFERENCE.test(reference))
+      throw new Error(
+        `Container image override for ${className} is not a digest-pinned registry image`
+      );
+  }
+  return parsed as Record<string, string>;
+}
+
 function generateContainerBindings(
   containers: ContainerBinding[] | undefined
 ): ContainerBinding[] | undefined {
+  const overrides = containerImageOverrides();
   return containers?.map((container) => ({
     ...container,
+    image: overrides[container.class_name] ?? container.image,
     max_instances: getConfiguredContainerMaxInstances(
       container.class_name,
       container.max_instances

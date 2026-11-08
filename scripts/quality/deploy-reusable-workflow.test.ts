@@ -601,7 +601,8 @@ describe('deploy reusable workflow', () => {
 
     it('embeds only reviewed installers, each included as a release input', () => {
       const agentRoot = fileURLToPath(new URL('../../packages/vm-agent', import.meta.url));
-      const found = spawnSync('grep', ['-rn', '--include=*.go', 'go:embed', agentRoot], {
+      // Match directives only; a comment that mentions go:embed is not an embed.
+      const found = spawnSync('grep', ['-rn', '--include=*.go', '^//go:embed', agentRoot], {
         encoding: 'utf8',
       });
       expect(found.status, `grep failed: ${found.stderr}`).toBe(0);
@@ -615,11 +616,9 @@ describe('deploy reusable workflow', () => {
       // All installers live under the agent source path, which the release resolver hashes
       // (it excludes only .claude, AGENTS.md and tests), so editing any rotates the release.
       expect(embeds).toEqual([
-        'internal/acp/antigravity.go:\t_ "embed" // Register go:embed support for the shared installer below.',
         'internal/acp/antigravity.go://go:embed antigravity_install.sh',
         'internal/acp/codex_runtime_distribution.go://go:embed codex_runtime_installer.sh',
         'internal/acp/opencode_install.go://go:embed opencode_install.sh',
-        'internal/acp/opencode_install.go:import _ "embed" // Register go:embed support for the shared installer below.',
       ]);
       withAgentReleaseRepo((repo) => {
         for (const installer of [
@@ -773,7 +772,11 @@ describe('deploy reusable workflow', () => {
       'Sync Wrangler Config \\(API \\+ Tail Worker\\)',
       'Deploy API Worker',
     ]) {
-      expect(stepBlock(name)).toContain('if: ${{ inputs.dry_run != true }}');
+      // Legacy mutations require both normal execution and the legacy route.
+      // Shared-engine runs must never fall through into a second deployment.
+      expect(stepBlock(name)).toContain(
+        'if: ${{ !inputs.use_shared_engine && (inputs.dry_run != true) }}'
+      );
     }
   });
 

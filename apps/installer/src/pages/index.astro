@@ -1,0 +1,279 @@
+---
+import "../../../../packages/ui/src/brand/brand.css";
+import "../../../../packages/ui/src/glass/glass.css";
+import "../installer.css";
+
+import Badge from "../../../../packages/ui/src/brand/Badge.astro";
+import Footer from "../../../../packages/ui/src/brand/Footer.astro";
+import Header from "../../../../packages/ui/src/brand/Header.astro";
+import ThemeInit from '../../../../packages/ui/src/brand/ThemeInit.astro';
+---
+<!doctype html>
+<html lang="en">
+  <head><ThemeInit external />
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta
+      name="description"
+      content="Start setting up SAM in your own Cloudflare account. An open-source installer, with you in control."
+    />
+    <title>Set up your cloud · SAM</title>
+    <link rel="icon" href="/sam-head.png" />
+    <link
+      rel="preload"
+      href="/fonts/Chillax-Variable.woff2"
+      as="font"
+      type="font/woff2"
+      crossorigin
+    />
+    
+    
+    
+    <script is:inline type="module" src="/app.js"></script>
+    <script is:inline type="module" src="/scene.js"></script>
+  </head>
+  <body class="installer-page sam-form">
+    <div class="installer-environment" aria-hidden="true">
+      <div class="ambient-light"></div>
+      <div class="installer-floor" data-installer-field></div>
+      <div class="floor-haze"></div>
+    </div>
+    <a class="skip-link" href="#setup">Skip to setup</a>
+    <Header compact icon="/brand-icon.png" />
+    <main>
+      <div class="intro-layout">
+        <div class="hero-copy" id="hero-copy">
+          <Badge>Open Source &amp; Self-Hosted</Badge>
+          <h1 class="hero-title">Your cloud.<br /><span class="gradient-text">Ready for SAM.</span></h1>
+          <p class="intro">
+            <span class="desktop-intro">Give your agents a place of their own. </span>Start with an
+            installation service in your Cloudflare account.
+          </p>
+          <p class="sign-in-note">No GitHub needed to install. Signing in to SAM afterwards requires GitHub, GitLab or Google.</p>
+          <a id="explore" class="hero-start" href="#setup"
+            ><span id="explore-label">Set up your cloud</span> <span aria-hidden="true">↗</span></a
+          >
+
+        </div>
+        <div class="slim-header" id="slim-header" hidden>
+          <span class="slim-header-mark">SAM</span>
+          <span>Setting up your installation</span>
+        </div>
+        <div class="setup-column" id="setup" tabindex="-1">
+          <div class="setup-card sam-glass sam-glass-rim">
+
+            <ol class="steps" aria-label="Setup progress">
+              <li id="step-connect" aria-current="step">
+                <span class="step-number">1</span><span>Connect</span>
+              </li>
+              <li id="step-choose"><span class="step-number">2</span><span>Choose</span></li>
+              <li id="step-review"><span class="step-number">3</span><span>Review</span></li>
+              <li id="step-handoff"><span class="step-number">4</span><span>Handoff</span></li>
+            </ol>
+            <div class="setup-content">
+              <div id="message" role="status" aria-live="polite"></div>
+              <section id="connect" aria-labelledby="connect-title">
+                <h2 id="connect-title">Start with Cloudflare</h2>
+                <p>
+                  Create an installation service in your Cloudflare account.
+                </p>
+                <form method="post" action="/oauth/start">
+                  <button class="sam-btn sam-btn--primary" id="login" disabled>
+                    <svg
+                      width="22"
+                      height="22"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="1.7"
+                      aria-hidden="true"
+                    >
+                      <path d="M7 18a5 5 0 1 1 1-9.9A6 6 0 0 1 20 10a4 4 0 0 1-1 8Z" /></svg
+                    ><span>Sign in with Cloudflare</span>&nbsp;<span aria-hidden="true">↗</span>
+                  </button>
+                </form>
+                <p class="reassurance">
+                  <svg
+                    width="14"
+                    height="16"
+                    viewBox="0 0 16 18"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="1.3"
+                    aria-hidden="true"
+                  >
+                    <rect x="2" y="7" width="12" height="9" rx="2" />
+                    <path d="M5 7V4a3 3 0 0 1 6 0v3" /></svg
+                  >Your password stays with Cloudflare.
+                </p>
+                <details class="permission-details">
+                  <summary>What will SAM be allowed to do?</summary>
+                  <p>
+                    Our installer temporarily receives account read and Worker deployment permissions.
+                    These may allow changes to existing Workers in the selected account, not only SAM
+                    resources. You approve access on Cloudflare before continuing.
+                  </p>
+                  <p id="full-permissions" hidden>
+                    Full installation also requests account-token provisioning and access to the
+                    Cloudflare services SAM uses. It creates separate deployment, runtime and storage
+                    credentials in your account. These permissions can affect existing resources;
+                    review Cloudflare’s consent screen carefully.
+                  </p>
+                  <a href="/privacy.html">Read the permissions &amp; privacy details →</a>
+                </details>
+              </section>
+              <section id="choose" hidden aria-labelledby="choose-title">
+                <h2 id="choose-title">Choose your account</h2>
+                <p>This is where your installation service will live.</p>
+                <form id="install-form">
+                  <label for="account-id">Cloudflare account</label
+                  ><select id="account-id" required></select>
+                  <p class="small">
+                    Missing an account? Reconnect and select it on Cloudflare’s consent screen. Up
+                    to 50 authorized accounts are shown.
+                  </p>
+                  <fieldset id="deployment-settings" hidden>
+                    <legend>Your SAM installation</legend>
+                    <label for="zone-id">Cloudflare domain</label
+                    ><select id="zone-id"></select>
+                    <p class="small" id="base-domain-preview">
+                      SAM will live at this domain: <strong id="base-domain-shown"></strong>
+                    </p>
+                    <details id="subdomain-details">
+                      <summary>Use a subdomain instead</summary>
+                      <label for="base-domain">Install under</label
+                      ><input
+                        id="base-domain"
+                        type="text"
+                        placeholder="sam.example.com"
+                        autocomplete="off"
+                      />
+                      <p class="small">
+                        Subdomains need a Cloudflare Advanced Certificate to serve HTTPS; the domain
+                        itself is already covered automatically.
+                      </p>
+                    </details>
+                    <label for="owner-email">Your administrator email</label
+                    ><input id="owner-email" type="email" autocomplete="email" />
+                    <p class="small">
+                      Use this verified email for your administrator account when you configure sign-in.
+                    </p>
+                    <button id="preview" type="button" class="sam-btn sam-btn--primary">
+                      Review installation&nbsp;<span aria-hidden="true">→</span>
+                    </button>
+                  </fieldset>
+                  <div id="choose-simple-actions">
+                    <label class="check"
+                      ><input id="confirm" type="checkbox" required /><span
+                        ><span id="approval-copy"
+                          >Create one new <code>sam-maintenance-…</code> Worker and enable its
+                          workers.dev address. Cloudflare usage charges may apply.</span
+                        ></span
+                      ></label
+                    >
+                    <button class="sam-btn sam-btn--primary" id="install-simple" type="submit" disabled>
+                      Create my installation service&nbsp;<span aria-hidden="true">→</span>
+                    </button>
+                  </div>
+                </form>
+              </section>
+              <section id="review" hidden aria-labelledby="review-title">
+                <h2 id="review-title">Review your installation</h2>
+                <p id="plan-summary-line"></p>
+                <details id="plan-details">
+                  <summary>What will be created</summary>
+                  <div id="plan-summary"></div>
+                </details>
+                <div id="review-blocked" hidden>
+                  <button type="button" id="use-different-domain" class="sam-btn sam-btn--primary">
+                    Use a different domain
+                  </button>
+                  <p class="quiet-actions">
+                    <button type="button" id="check-again" class="sam-link-quiet">
+                      I've removed them — check again
+                    </button>
+                  </p>
+                </div>
+                <form id="review-form" hidden>
+                  <label class="check"
+                    ><input id="confirm-full" type="checkbox" required /><span
+                      >Build and deploy this approved installation in my account. Workers Paid and
+                      usage charges apply.</span
+                    ></label
+                  >
+                  <button class="sam-btn sam-btn--primary" id="install" type="submit" disabled>
+                    Install SAM in my account&nbsp;<span aria-hidden="true">→</span>
+                  </button>
+                </form>
+                <p class="quiet-actions">
+                  <button type="button" id="back-to-choose" class="sam-link-quiet">← Back</button>
+                </p>
+              </section>
+              <section id="ready" hidden aria-labelledby="ready-title">
+                <div class="success-icon" aria-hidden="true">✓</div>
+                <h2 id="ready-title">Over to you.</h2>
+                <p>
+                  Your installation service is ready in your Cloudflare account. Continue to verify
+                  ownership and end this installer session.
+                </p>
+                <p id="worker-name" class="resource"></p>
+                <form method="post" action="/handoff">
+                  <button class="sam-btn sam-btn--primary">Continue to my service&nbsp;<span aria-hidden="true">→</span></button>
+                </form>
+                <p class="small">
+                  Save the recovery credential shown by your service. It keeps your access
+                  independent of this temporary installer session.
+                </p>
+              </section>
+              <section id="cleanup-panel" hidden aria-labelledby="cleanup-title">
+                <h3 id="cleanup-title">Finish an interrupted setup</h3>
+                <p class="small" id="cleanup-description">
+                  Reconnect to remove unused setup credentials safely. Credentials already owned by
+                  your installation service are preserved.
+                </p>
+                <form id="cleanup-reconnect-form" method="post" action="/oauth/start">
+                  <button id="cleanup-reconnect" class="sam-btn sam-btn--secondary">Reconnect for cleanup</button>
+                </form>
+                <button id="cleanup-resume" class="sam-btn sam-btn--secondary" type="button" hidden>
+                  Finish cleanup
+                </button>
+              </section>
+              <p class="quiet-actions">
+                <button id="disconnect" class="sam-link-quiet" hidden>Disconnect and clear session</button>
+              </p>
+              <noscript
+                ><p class="notice">
+                  Enable JavaScript to connect your account and use the guided setup.
+                </p></noscript
+              >
+            </div>
+            <aside class="mode-note" id="mode-note">
+              <strong>Your installation, in your account.</strong>
+              <p id="installer-mode-note">
+                Creates a protected installation service. Full SAM installation, builds, and updates
+                aren’t connected yet.
+              </p>
+            </aside>
+          </div>
+          <p class="setup-footnote">
+            No analytics <span aria-hidden="true">·</span> Open source
+          </p>
+        </div>
+      </div>
+      <div class="trust" id="trust">
+        <div>
+          <h2>Nothing behind the curtain.</h2>
+          <p>Public source. Temporary access. Host it here, or host it yourself.</p>
+        </div>
+        <nav aria-label="Source and self-hosting">
+          <a id="source" href="https://github.com/raphaeltm/simple-agent-manager"
+            >Inspect the source <span aria-hidden="true">↗</span></a
+          ><a id="docs" href="/self-host.html"
+            >Self-host the installer <span aria-hidden="true">↗</span></a
+          >
+        </nav>
+      </div>
+    </main>
+    <Footer compact icon="/sam-head.png"><a href="/privacy.html">Permissions & privacy</a><a href="/self-host.html">Self-host</a><span id="version"></span></Footer>
+  </body>
+</html>

@@ -553,7 +553,9 @@ describe('deployment workflow safety wiring', () => {
     expect(release).toContain('git tag -a');
     expect(release).toContain('gh release create');
     expect(release).toContain('--verify-tag');
-    expect(release).toContain('--latest');
+    // Latest only after the installer artifacts job, which installers read from.
+    expect(release).toContain('--latest=false');
+    expect(release).toContain('gh release edit "$TAG_NAME" --repo "$GH_REPOSITORY" --latest');
     // Notes are generated through the API and length-checked before the
     // release call, rather than via `--generate-notes`, which summarises the
     // entire history when no previous release exists.
@@ -662,6 +664,7 @@ describe('deployment workflow safety wiring', () => {
       PATH: `${bin}:${process.env.PATH ?? ''}`,
       GIT_CONFIG_NOSYSTEM: '1',
       RUNNER_TEMP: root,
+      GITHUB_OUTPUT: join(root, 'github-output'),
       TAG_NAME: 'v2026.09.21',
       TAG_EXISTS: 'false',
       DEPLOY_SHA: deploySha,
@@ -698,6 +701,10 @@ describe('deployment workflow safety wiring', () => {
       origin,
       ghInvocations: () => (existsSync(ghLog) ? readFileSync(ghLog, 'utf8') : ''),
       releaseBody: () => readFileSync(capturedNotes, 'utf8'),
+      outputs: () =>
+        existsSync(join(root, 'github-output'))
+          ? readFileSync(join(root, 'github-output'), 'utf8')
+          : '',
     };
   }
 
@@ -711,6 +718,8 @@ describe('deployment workflow safety wiring', () => {
         'empty ident name'
       );
       expect(run.result.status, run.result.stderr ?? '').toBe(0);
+      // The installer-artifacts job runs only for a release this step created.
+      expect(run.outputs()).toContain('created=true');
 
       // The tag must be annotated, point at the deployed commit, and reach
       // origin. Production never got past the first of those.
