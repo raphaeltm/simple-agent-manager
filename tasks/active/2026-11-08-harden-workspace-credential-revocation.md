@@ -113,3 +113,12 @@ exploit. This task checks each claim against current `main` and fixes only what 
 
 - `.claude/rules/28-credential-resolution-fallback-tests.md`, `11-fail-fast-patterns.md`,
   `apps/api/.claude/rules/34-vm-agent-callback-auth.md`, `apps/api/.claude/rules/49-*`
+
+## Review Results (Phase 5)
+
+| Reviewer | Status | Outcome |
+|---|---|---|
+| security-auditor (independent adversarial) | PASS | 0 CRITICAL/HIGH/MEDIUM. LOW-1 self-host note added to security.md; LOW-2 per-request (not mid-stream) check accepted as the architecture-wide admission pattern |
+| cloudflare-specialist | PASS | 2 optional LOWs: D1 fault → 500 on MCP auth (a genuine fault, intended); duplicated workspace⋈node join (not consolidated — AI proxy needs extra columns, MCP needs per-reason logs) |
+| doc-sync-validator | ADDRESSED | MEDIUM: rule copied to `packages/vm-agent/.claude/rules/34`; LOW: full ending-node list in security.md |
+| task-completion-validator | PASS | All six checks pass; it independently confirmed the AI-proxy guard discriminates (14/19 red); only staging remained pending |
