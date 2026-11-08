@@ -424,7 +424,7 @@ describe('GcpCredentialForm', () => {
       expect(within(notice).getByText(/turned off in this project/)).toBeInTheDocument();
       expect(within(notice).getByText(/Price unavailable/)).toBeInTheDocument();
       const link = within(notice).getByRole('link', {
-        name: 'Enable in Google Cloud',
+        name: /^Enable in Google Cloud/,
       });
       expect(link).toHaveAttribute(
         'href',
@@ -462,7 +462,11 @@ describe('GcpCredentialForm', () => {
         <GcpCredentialForm
           credential={{
             ...serviceAccountCredential,
-            gcp: { ...serviceAccountCredential.gcp, apiIssues: [billingIssue] },
+            gcp: {
+              ...serviceAccountCredential.gcp,
+              gcpProjectId: 'acme-prod-01',
+              apiIssues: [billingIssue],
+            },
           }}
           onUpdate={onUpdate}
         />
@@ -470,12 +474,36 @@ describe('GcpCredentialForm', () => {
       const notice = screen.getByTestId('gcp-api-issues');
       expect(
         within(notice).getByText(
-          'gcloud services enable cloudbilling.googleapis.com --project="proj-long-name-世界"'
+          'gcloud services enable cloudbilling.googleapis.com --project="acme-prod-01"'
         )
       ).toBeInTheDocument();
       expect(
         within(notice).queryByRole('button', { name: 'Re-run Google setup' })
       ).not.toBeInTheDocument();
+    });
+
+    it('does not offer a shell command or link for values that are not Google identifiers', () => {
+      render(
+        <GcpCredentialForm
+          credential={{
+            ...serviceAccountCredential,
+            gcp: {
+              ...serviceAccountCredential.gcp,
+              gcpProjectId: 'proj"; rm -rf ~; "',
+              apiIssues: [billingIssue, { ...billingIssue, service: 'not a service' }],
+            },
+          }}
+          onUpdate={onUpdate}
+        />
+      );
+      const notice = screen.getByTestId('gcp-api-issues');
+      // Liveness: the notice still explains the problem.
+      expect(within(notice).getAllByText(/turned off in this project/)).toHaveLength(2);
+      expect(within(notice).queryByText(/gcloud services enable/)).not.toBeInTheDocument();
+      // The valid service keeps its link; the invalid one gets none.
+      expect(within(notice).getAllByRole('link', { name: /^Enable in Google Cloud/ })).toHaveLength(
+        1
+      );
     });
 
     it('Check again re-verifies, refreshes the credential in place, and reports the result', async () => {

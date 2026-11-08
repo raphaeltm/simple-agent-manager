@@ -45,7 +45,7 @@ import {
 import { decrypt, encrypt } from '../services/encryption';
 import { getTimeoutMs } from '../services/fetch-timeout';
 import {
-  deleteGcpApiHealth,
+  deleteGcpApiHealthSafely,
   toGcpCredentialMetadataWithApiIssues,
 } from '../services/gcp-api-health';
 import {
@@ -328,7 +328,7 @@ credentialsRoutes.post('/', jsonValidator(CreateCredentialSchema), async (c) => 
       )
       .limit(1);
     const stored = await replaceUserGcpCredential(c.env, userId, credential);
-    if (existing) await deleteGcpApiHealth(c.env, existing.id);
+    if (existing) await deleteGcpApiHealthSafely(c.env, existing.id);
     await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'user', userId });
     const response: CredentialResponse = {
       id: stored.id,
@@ -465,7 +465,7 @@ credentialsRoutes.delete('/:provider', async (c) => {
     }
 
     await deleteUserGcpCredential(c.env, userId);
-    await deleteGcpApiHealth(c.env, stored.id);
+    await deleteGcpApiHealthSafely(c.env, stored.id);
     if (credential) {
       try {
         await clearGcpAccessTokenCache(c.env, userId, credential);

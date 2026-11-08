@@ -32,7 +32,8 @@ const BILLING_OFF = {
   observedAt: '2026-11-07T23:10:47.052Z',
 };
 
-const LONG_PROJECT = `acme-${'corporation-production-'.repeat(4)}gcp`.slice(0, 120);
+/** Google caps project ids at 30 characters; this is the longest shape. */
+const LONG_PROJECT = 'acme-corporation-production-01';
 
 interface Scenario {
   authType?: 'workload-identity' | 'service-account-key';
@@ -125,9 +126,17 @@ function surfaceTests(viewport: 'mobile' | 'desktop') {
     await shot(page, 'banner');
 
     await banner.getByRole('button', { name: 'Review' }).click();
+    const sheet = page.getByRole('dialog');
+    // Reviewing is not replacing: no "becomes your default" copy, no step counter.
+    await expect(
+      sheet.getByRole('heading', { name: 'Your Google Cloud connection' })
+    ).toBeVisible();
+    await expect(sheet).toContainText('Nothing changes unless you act below.');
+    await expect(sheet).not.toContainText('becomes your');
+    await expect(sheet).not.toContainText('Step 1 of 2');
     const notice = page.getByTestId('gcp-api-issues');
     await expect(notice).toBeVisible();
-    await expect(notice.getByRole('link', { name: 'Enable in Google Cloud' })).toHaveAttribute(
+    await expect(notice.getByRole('link', { name: /^Enable in Google Cloud/ })).toHaveAttribute(
       'href',
       'https://console.cloud.google.com/apis/library/cloudbilling.googleapis.com?project=sam-byoc-test'
     );

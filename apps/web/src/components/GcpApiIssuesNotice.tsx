@@ -1,5 +1,6 @@
 import {
   GCP_CLOUD_BILLING_SERVICE,
+  GCP_PROJECT_ID_PATTERN,
   type GcpApiIssue,
   type GcpCredentialMetadata,
   gcpEnableApiUrl,
@@ -47,7 +48,10 @@ export function GcpApiIssuesNotice({
   const issues = metadata.apiIssues ?? [];
   if (issues.length === 0) return null;
   const project = metadata.gcpProjectId;
-  const enableCommand = `gcloud services enable ${issues.map((issue) => issue.service).join(' ')} --project="${project}"`;
+  // Shown for the owner to paste into a shell, so only offered for a well-formed project id.
+  const enableCommand = GCP_PROJECT_ID_PATTERN.test(project)
+    ? `gcloud services enable ${issues.map((issue) => issue.service).join(' ')} --project="${project}"`
+    : null;
 
   return (
     <Alert variant="warning" data-testid="gcp-api-issues">
@@ -61,6 +65,7 @@ export function GcpApiIssuesNotice({
         <ul className="m-0 flex list-none flex-col gap-3 p-0">
           {issues.map((issue) => {
             const consequence = consequenceText(issue.service);
+            const enableUrl = gcpEnableApiUrl(issue.service, project);
             return (
               <li key={issue.service} className="flex min-w-0 flex-col gap-1">
                 <span className="flex min-w-0 flex-col">
@@ -71,19 +76,22 @@ export function GcpApiIssuesNotice({
                   {reasonText(issue)}
                   {consequence ? ` ${consequence}` : ''}
                 </span>
-                <a
-                  href={gcpEnableApiUrl(issue.service, project)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="w-fit font-medium underline underline-offset-2"
-                >
-                  Enable in Google Cloud
-                </a>
+                {enableUrl && (
+                  <a
+                    href={enableUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-fit font-medium underline underline-offset-2"
+                  >
+                    Enable in Google Cloud
+                    <span className="sr-only"> (opens in a new tab)</span>
+                  </a>
+                )}
               </li>
             );
           })}
         </ul>
-        {metadata.authType === 'service-account-key' && (
+        {metadata.authType === 'service-account-key' && enableCommand && (
           <div className="flex min-w-0 flex-col gap-1">
             <span>Or run:</span>
             <pre className="m-0 max-w-full overflow-x-auto whitespace-pre-wrap break-all rounded-sm bg-inset p-2 text-xs text-fg-primary">

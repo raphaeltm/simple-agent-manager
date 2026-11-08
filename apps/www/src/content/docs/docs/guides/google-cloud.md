@@ -38,7 +38,7 @@ SAM tells you when this happens (`listGcpApiIssues()` in `apps/api/src/services/
 
 - **Settings → Infrastructure** shows a warning naming your Google Cloud project and the API.
   **Review** opens the Google Cloud connection.
-- The connection card lists each API with the reason and an **Enable it in Google Cloud** link that opens that API's enable page for your project.
+- The connection card lists each API with the reason and an **Enable in Google Cloud** link that opens that API's enable page for your project.
 - **Re-run Google setup** (Workload Identity) signs in to Google again and re-runs setup for the same project and zone. Setup reuses the existing pool, provider and service account, and enables the full current API list.
 - A service-account key connection shows the `gcloud services enable` command to run instead.
 - **Check again** re-tests the connection and asks Google whether the API is usable now. The warning clears as soon as a call succeeds.

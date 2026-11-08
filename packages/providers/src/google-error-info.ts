@@ -22,6 +22,8 @@ const ERROR_INFO_TYPE = 'type.googleapis.com/google.rpc.ErrorInfo';
 /** Google's reasons and service names are short identifiers; anything longer is not one. */
 const MAX_FIELD_CHARS = 128;
 const IDENTIFIER = /^[A-Za-z0-9_.-]+$/;
+/** Google puts ErrorInfo among a handful of details; scanning more only costs time. */
+const MAX_DETAILS_SCANNED = 10;
 
 function identifier(value: unknown): string | undefined {
   return typeof value === 'string' && value.length <= MAX_FIELD_CHARS && IDENTIFIER.test(value)
@@ -35,7 +37,7 @@ export function parseGoogleErrorInfo(
 ): GoogleErrorInfo | null {
   const details = error?.details;
   if (!Array.isArray(details)) return null;
-  for (const detail of details) {
+  for (const detail of details.slice(0, MAX_DETAILS_SCANNED)) {
     if (!detail || typeof detail !== 'object' || Array.isArray(detail)) continue;
     const entry = detail as Record<string, unknown>;
     if (entry['@type'] !== ERROR_INFO_TYPE) continue;

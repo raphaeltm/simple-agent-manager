@@ -269,12 +269,48 @@ describe('GCP service-account route vertical slice', () => {
 
     billingDisabled = false;
     const on = await createApp().request('/api/gcp/verify', { method: 'POST' }, env);
+    expect(on.status).toBe(200);
     expect(await on.json()).toEqual({
       success: true,
       verified: true,
       billingCheck: 'ok',
       apiIssues: [],
     });
+  });
+
+  it('a KV failure while recording the result does not turn a passing check into a fault', async () => {
+    const saved = await createApp().request(
+      '/api/gcp/service-account',
+      saveRequest('kv-down-key-id'),
+      env
+    );
+    expect(saved.status).toBe(200);
+    const put = kv.namespace.put as unknown as ReturnType<typeof vi.fn>;
+    put.mockImplementation(async (key: string, value: string) => {
+      if (key.startsWith('gcp-api-health:')) throw new Error('KV unavailable');
+      kv.values.set(key, value);
+    });
+
+    const response = await createApp().request('/api/gcp/verify', { method: 'POST' }, env);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ verified: true, billingCheck: 'ok' });
+  });
+
+  it('Check again is rate-limited per user, since each check calls Google', async () => {
+    env = { ...env, RATE_LIMIT_CREDENTIAL_UPDATE: '2' } as Env;
+    const saved = await createApp().request(
+      '/api/gcp/service-account',
+      saveRequest('limited-key-id'),
+      env
+    );
+    expect(saved.status).toBe(200);
+
+    const statuses = [];
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      statuses.push((await createApp().request('/api/gcp/verify', { method: 'POST' }, env)).status);
+    }
+    expect(statuses).toEqual([200, 200, 429]);
   });
 
   it('preserves the prior encrypted snapshot when Compute verification rejects a rotation', async () => {

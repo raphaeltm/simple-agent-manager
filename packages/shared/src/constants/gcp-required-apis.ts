@@ -43,6 +43,9 @@ export const GCP_CLOUD_BILLING_SERVICE = 'cloudbilling.googleapis.com';
 /** Google Cloud console API library page; append `/<service>?project=<projectId>`. */
 export const GCP_CONSOLE_API_LIBRARY_URL = 'https://console.cloud.google.com/apis/library';
 
+/** Google project ids: 6-30 lowercase letters, digits and hyphens (plus legacy `domain:` ids). */
+export const GCP_PROJECT_ID_PATTERN = /^(?:[a-z][a-z0-9.-]*:)?[a-z][a-z0-9-]{4,28}[a-z0-9]$/;
+
 /** A Google service name as Google reports it (`<name>.googleapis.com`). */
 export const GCP_SERVICE_NAME_PATTERN = /^[a-z0-9][a-z0-9-]*(?:\.[a-z0-9-]+)*\.googleapis\.com$/;
 
@@ -51,7 +54,11 @@ export function gcpApiLabel(service: string): string {
   return GCP_REQUIRED_APIS.find((api) => api.service === service)?.label ?? service;
 }
 
-/** Console link that opens the enable page for `service` in `gcpProjectId`. */
-export function gcpEnableApiUrl(service: string, gcpProjectId: string): string {
+/**
+ * Console link that opens the enable page for `service` in `gcpProjectId`, or null when `service`
+ * is not a Google service name (the link is built from stored data, so it checks for itself).
+ */
+export function gcpEnableApiUrl(service: string, gcpProjectId: string): string | null {
+  if (!GCP_SERVICE_NAME_PATTERN.test(service)) return null;
   return `${GCP_CONSOLE_API_LIBRARY_URL}/${encodeURIComponent(service)}?project=${encodeURIComponent(gcpProjectId)}`;
 }

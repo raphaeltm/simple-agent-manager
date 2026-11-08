@@ -96,4 +96,5 @@ grows, every older credential drifts, and nothing tells the owner.
   2. Notify on every failed refresh → exactly sweep-vertical "does not report ..." red.
   3. Widen owner-fixable to `ACCESS_TOKEN_SCOPE_INSUFFICIENT` → 3 red incl. sweep-vertical "reports a fault ...".
 - Fixed a test-harness fidelity gap: `gcp-service-account-vertical` KV mock ignored the `'json'` read type.
-- Known pre-existing UX: opening the connect sheet for an already-connected provider shows "This becomes your default…" copy above the card.
+- Review fixes: the banner opens the connect sheet in a review mode (`?review=1`: "Your Google Cloud connection", no replace-default copy or step counter); `POST /api/gcp/verify` shares the credential-mutation rate limit (`gcp-verify` scope); console link and gcloud command are only built from valid Google identifiers; ErrorInfo scan bounded to 10 details; health bookkeeping is isolated through `updateGcpApiHealthSafely`/`deleteGcpApiHealthSafely` so a KV error never changes a probe result or fails a credential mutation.
+- Declined (LOW, Cloudflare reviewer): KV expiry on health records. `confirmed` must outlive the issue TTL or a manual enablement re-flags; records are tiny and deleted with the credential. Documented on `writeStored`.

@@ -28,6 +28,7 @@ import {
   confirmGcpApi,
   recordGcpApiIssue,
   safeProviderErrorFields,
+  updateGcpApiHealthSafely,
 } from './gcp-api-health';
 import { createGcpTokenProvider } from './gcp-token-provider';
 import { parseGcpCredential } from './provider-credential-codecs';
@@ -161,9 +162,8 @@ async function refreshFromCandidates(
       const fetchedAt = now.toISOString();
       await env.KV.put(GCP_PRICE_TABLE_KV_KEY, JSON.stringify({ fetchedAt, table }));
       await env.KV.delete(GCP_PRICE_TABLE_ATTEMPT_KV_KEY);
-      await updateApiHealth(
-        () => confirmGcpApi(env, candidate.id, GCP_CLOUD_BILLING_SERVICE),
-        candidate.id
+      await updateGcpApiHealthSafely(candidate.id, () =>
+        confirmGcpApi(env, candidate.id, GCP_CLOUD_BILLING_SERVICE)
       );
       return {
         status: 'refreshed',
@@ -174,9 +174,8 @@ async function refreshFromCandidates(
     } catch (error) {
       const ownerFixable = classifyGcpApiError(error, GCP_CLOUD_BILLING_SERVICE);
       if (ownerFixable) {
-        await updateApiHealth(
-          () => recordGcpApiIssue(env, candidate.id, ownerFixable, now),
-          candidate.id
+        await updateGcpApiHealthSafely(candidate.id, () =>
+          recordGcpApiIssue(env, candidate.id, ownerFixable, now)
         );
       } else {
         faults += 1;
@@ -195,18 +194,6 @@ async function refreshFromCandidates(
   // Billing do not hold every retry while another credential could.
   await recordFailure(env, now, offset + attempts);
   return { status: 'failed', attempts, faults };
-}
-
-/** Health bookkeeping is advisory: its failure must not change the refresh outcome. */
-async function updateApiHealth(update: () => Promise<void>, credentialId: string) {
-  try {
-    await update();
-  } catch (error) {
-    log.warn('gcp_price_table.api_health_update_failed', {
-      credentialId,
-      ...serializeError(error),
-    });
-  }
 }
 
 function hasUsableRate(table: GcpPriceTable): boolean {

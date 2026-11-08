@@ -17,7 +17,7 @@ export function SettingsInfrastructure() {
 
   return (
     <div className="flex min-w-0 flex-col gap-8">
-      <GcpApiIssuesBanner onReview={() => sheet.open('gcp')} />
+      <GcpApiIssuesBanner onReview={() => sheet.review('gcp')} />
       <AccountsSection
         title="Cloud accounts"
         description="The cloud accounts SAM can start machines in, and which projects bill to each one."
@@ -49,6 +49,7 @@ export function SettingsInfrastructure() {
         <ConnectAccountSheet
           kind="compute"
           providerId={sheet.providerId}
+          reviewing={sheet.reviewing}
           groups={groups ?? []}
           onClose={sheet.close}
         />

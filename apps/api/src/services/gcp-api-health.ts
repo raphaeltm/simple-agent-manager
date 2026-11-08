@@ -51,7 +51,13 @@ interface StoredGcpApiHealth {
   confirmed: string[];
 }
 
-/** IAM refusals the project owner fixes with a grant; anything else is not theirs to fix. */
+/**
+ * IAM refusals the project owner fixes with a grant; anything else is not theirs to fix. The
+ * Catalog API needs no IAM grant at all for an authenticated principal, so on that call these
+ * reasons mean the owner's project (or its organization policy) refuses the call, not that SAM
+ * minted the wrong token: that case is `ACCESS_TOKEN_SCOPE_INSUFFICIENT`, which stays a fault.
+ * https://cloud.google.com/apis/design/errors#error_info
+ */
 const OWNER_FIXABLE_DENIALS = new Set(['IAM_PERMISSION_DENIED', 'USER_PROJECT_DENIED']);
 
 /**
@@ -119,6 +125,15 @@ async function readStored(env: Env, credentialId: string): Promise<StoredGcpApiH
   return { issues, confirmed };
 }
 
+/**
+ * Whole-record read-modify-write with no CAS: the cron refresh and a user's "Check again" can
+ * race on one credential, and the later write wins. That is accepted: the record is advisory
+ * display state, and both writers re-derive it from Google on their next call.
+ *
+ * No KV expiry on purpose: `confirmed` must outlive the issue TTL, or a credential whose owner
+ * enabled an API by hand would be flagged again once it expired. A record holds at most one
+ * entry per required API and is deleted with its credential (`deleteGcpApiHealthSafely`).
+ */
 async function writeStored(env: Env, credentialId: string, health: StoredGcpApiHealth) {
   if (health.issues.length === 0 && health.confirmed.length === 0) {
     await env.KV.delete(healthKey(credentialId));
@@ -156,9 +171,27 @@ export async function confirmGcpApi(env: Env, credentialId: string, service: str
   });
 }
 
+/**
+ * Run a health-record update without letting its failure change the caller's outcome: the
+ * record is advisory, so a KV error is logged, never thrown.
+ */
+export async function updateGcpApiHealthSafely(
+  credentialId: string,
+  update: () => Promise<void>
+): Promise<void> {
+  try {
+    await update();
+  } catch (error) {
+    log.warn('gcp_api_health.update_failed', {
+      credentialId,
+      errorName: error instanceof Error ? error.name : 'unknown',
+    });
+  }
+}
+
 /** Forget everything recorded for a credential that was deleted or replaced. */
-export async function deleteGcpApiHealth(env: Env, credentialId: string): Promise<void> {
-  await env.KV.delete(healthKey(credentialId));
+export async function deleteGcpApiHealthSafely(env: Env, credentialId: string): Promise<void> {
+  await updateGcpApiHealthSafely(credentialId, () => env.KV.delete(healthKey(credentialId)));
 }
 
 /**
@@ -249,11 +282,13 @@ export async function probeGcpCloudBilling(
       scopes: [GCP_PRICE_CATALOG_SCOPE],
     })();
     await probeGcpBillingAccess(token, { requestTimeoutMs });
-    await confirmGcpApi(env, credentialId, GCP_CLOUD_BILLING_SERVICE);
-    return 'ok';
   } catch (error) {
     const ownerFixable = classifyGcpApiError(error, GCP_CLOUD_BILLING_SERVICE);
-    if (ownerFixable) await recordGcpApiIssue(env, credentialId, ownerFixable, now);
+    if (ownerFixable) {
+      await updateGcpApiHealthSafely(credentialId, () =>
+        recordGcpApiIssue(env, credentialId, ownerFixable, now)
+      );
+    }
     log.warn('gcp_api_health.cloud_billing_probe_failed', {
       credentialId,
       ownerFixable: ownerFixable?.reason ?? null,
@@ -262,4 +297,8 @@ export async function probeGcpCloudBilling(
     });
     return ownerFixable ? 'owner_fixable' : 'fault';
   }
+  await updateGcpApiHealthSafely(credentialId, () =>
+    confirmGcpApi(env, credentialId, GCP_CLOUD_BILLING_SERVICE)
+  );
+  return 'ok';
 }

@@ -24,7 +24,7 @@ import { enforceCredentialMutationRateLimit } from '../services/credential-mutat
 import { decrypt } from '../services/encryption';
 import { getTimeoutMs } from '../services/fetch-timeout';
 import {
-  deleteGcpApiHealth,
+  deleteGcpApiHealthSafely,
   listGcpApiIssuesSafely,
   probeGcpCloudBilling,
   toGcpCredentialMetadataWithApiIssues,
@@ -101,15 +101,7 @@ async function forgetReplacedCredential(
   previous: StoredGcpCredential
 ): Promise<void> {
   await clearCredentialCache(env, userId, previous.credential);
-  try {
-    await deleteGcpApiHealth(env, previous.id);
-  } catch (err) {
-    log.warn('gcp.api_health_cleanup_failed', {
-      userId,
-      credentialId: previous.id,
-      error: err instanceof Error ? err.name : 'unknown',
-    });
-  }
+  await deleteGcpApiHealthSafely(env, previous.id);
 }
 
 async function clearCredentialCache(
@@ -263,6 +255,8 @@ gcpRoutes.post('/setup', jsonValidator(GcpSetupSchema), async (c) => {
  */
 gcpRoutes.post('/verify', async (c) => {
   const userId = getUserId(c);
+  // Each check mints Google tokens and calls Google, so it shares the credential-mutation budget.
+  await enforceCredentialMutationRateLimit(c.env, userId, 'gcp-verify');
   const stored = await getStoredGcpCredential(c.env, userId);
   if (!stored) {
     throw errors.notFound('GCP credential not configured');
