@@ -300,10 +300,13 @@ describe('findAnomalies', () => {
       updated_at: iso(MIN),
     });
     snap('s-live', { recovery_task_id: 'task-live', recovery_claimed_at: iso(threshold + MIN) });
+    // No claim time: age falls back to created_at, which no other writer moves; a fresh
+    // updated_at (another writer touched the row) must not hide it.
     snap('s-missing', {
       recovery_task_id: 'task-gone',
       recovery_claimed_at: null,
-      updated_at: iso(threshold + 2 * MIN),
+      created_at: iso(threshold + 2 * MIN),
+      updated_at: iso(MIN),
     });
     snap('s-fresh', { recovery_task_id: 'task-fresh', recovery_claimed_at: iso(threshold - MIN) });
     snap('s-failed', { recovery_status: 'failed', recovery_claimed_at: iso(threshold + MIN) });
@@ -318,6 +321,36 @@ describe('findAnomalies', () => {
     expect(entry.findings[1]?.reason).toContain('recovery task missing');
     expect(entry.findings[2]?.reason).toContain('still running');
     expect(report.thresholds.wakingMinutes).toBe(FLEET_OPS_DEFAULTS.wakingMinutes);
+  });
+
+  it('reports a waking row with an unreadable timestamp first instead of dropping it', async () => {
+    insert(main, 'session_snapshots', {
+      id: 's-garbled',
+      user_id: 'user-a',
+      chat_session_id: 'chat-garbled',
+      runtime: 'vm',
+      status: 'available',
+      recovery_status: 'waking',
+      recovery_claimed_at: 'not a time',
+      created_at: iso(MIN),
+      updated_at: iso(MIN),
+    });
+    insert(main, 'session_snapshots', {
+      id: 's-old',
+      user_id: 'user-a',
+      chat_session_id: 'chat-old',
+      runtime: 'vm',
+      status: 'available',
+      recovery_status: 'waking',
+      recovery_claimed_at: iso((FLEET_OPS_DEFAULTS.wakingMinutes + 5) * MIN),
+      updated_at: iso(MIN),
+    });
+    const entry = findingIds(
+      await findAnomalies(env, FLEET_OPS_DEFAULTS, { now: NOW }),
+      'session_wake_stalled'
+    );
+    expect(entry.findings.map((f) => f.ids.snapshotId)).toEqual(['s-garbled', 's-old']);
+    expect(entry.findings[0]?.reason).toContain('an unknown number of min');
   });
 
   it('honours a configured waking threshold', async () => {

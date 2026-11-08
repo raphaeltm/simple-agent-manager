@@ -175,13 +175,51 @@ describe('dead wake claim sweep', () => {
     expect(await sweep()).toEqual({ selected: 1, released: 1 });
   });
 
-  it('ends a claim whose recovery task no longer exists, anchoring the failure now', async () => {
-    seed('gone', { task: null });
+  it('ends a claim whose recovery task no longer exists, but keeps its attempt counted', async () => {
+    seed('gone', { task: null, snapshot: { recovery_attempts: 3 } });
     expect(await sweep()).toEqual({ selected: 1, released: 1 });
-    expect(snapshot('gone')).toMatchObject({
-      recovery_status: 'failed',
-      recovery_failed_at: NOW.toISOString(),
+    // No task means no report that the attempt ended, so the budget gets no decay anchor
+    // (rule 61): the banner clears, but a spent budget stays spent.
+    expect(snapshot('gone')).toMatchObject({ recovery_status: 'failed', recovery_failed_at: null });
+    expect(await userWake('gone', new Date('2026-11-08T08:00:00.000Z'))).toEqual({
+      status: 'unavailable',
+      reason: 'recovery_attempts_exhausted',
     });
+  });
+
+  it('does not anchor the budget on a task last written before the claim', async () => {
+    // The wake stopped after claiming but before reactivating the task, so the task's only
+    // timestamp predates this attempt and is no evidence that it ended.
+    seed('early', {
+      task: { status: 'sleeping', updated_at: '2026-11-08T02:00:00.000Z' },
+      snapshot: { recovery_attempts: 3 },
+    });
+    expect(await sweep()).toEqual({ selected: 1, released: 1 });
+    expect(snapshot('early')).toMatchObject({
+      recovery_status: 'failed',
+      recovery_failed_at: null,
+    });
+    expect(await userWake('early')).toEqual({
+      status: 'unavailable',
+      reason: 'recovery_attempts_exhausted',
+    });
+  });
+
+  it('a claim with budget left is wakeable again even without an anchor', async () => {
+    seed('left', { task: null });
+    expect(await sweep()).toEqual({ selected: 1, released: 1 });
+    expect(await userWake('left')).toEqual({ status: 'claimed', taskId: 'task-left' });
+  });
+
+  it('skips a malformed candidate row without failing the tick (good, bad, good)', async () => {
+    seed('good1', { snapshot: { recovery_claimed_at: '2026-11-08T01:00:00.000Z' } });
+    seed('bad', { snapshot: { recovery_claimed_at: '2026-11-08T02:00:00.000Z' } });
+    seed('good2');
+    sqlite.exec(`UPDATE session_snapshots SET project_id = X'2A' WHERE id = 'snapshot-bad'`);
+    expect(await sweep()).toEqual({ selected: 2, released: 2 });
+    expect(snapshot('good1')).toMatchObject({ recovery_status: 'failed' });
+    expect(snapshot('good2')).toMatchObject({ recovery_status: 'failed' });
+    expect(snapshot('bad')).toMatchObject({ recovery_status: 'waking' });
   });
 
   it('ends a legacy claim with no project without notifying a ProjectData object', async () => {

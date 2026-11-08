@@ -26,9 +26,12 @@
  * compare-and-sets, and N best-effort ProjectData pushes in `waitUntil`
  * (N ≤ `operations.deadWakeReconcileBatchSize`).
  */
+import * as v from 'valibot';
+
 import { notifyWakeSettled } from '../durable-objects/task-runner/wake-progress-notifier';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { parseRowsSkippingInvalid } from '../lib/runtime-validation';
 import { resolveAdminSettingDetailsMany } from '../services/admin-settings';
 import { sessionLifecycleError } from '../services/session-snapshot-artifacts';
 import {
@@ -40,16 +43,18 @@ import {
 export const DEAD_WAKE_CLAIM_ERROR =
   'The last wake attempt stopped without finishing. Send a message to wake this chat again.';
 
-interface DeadWakeCandidate {
-  id: string;
-  projectId: string | null;
-  chatSessionId: string;
-  recoveryTaskId: string | null;
-  recoveryAttemptId: string | null;
-  recoveryClaimedAt: string | null;
-  taskStatus: string | null;
-  taskUpdatedAt: string | null;
-}
+const nullableText = v.nullable(v.string());
+const DeadWakeCandidateSchema = v.object({
+  id: v.string(),
+  projectId: nullableText,
+  chatSessionId: v.string(),
+  recoveryTaskId: nullableText,
+  recoveryAttemptId: nullableText,
+  recoveryClaimedAt: nullableText,
+  taskStatus: nullableText,
+  taskUpdatedAt: nullableText,
+});
+type DeadWakeCandidate = v.InferOutput<typeof DeadWakeCandidateSchema>;
 
 export interface DeadWakeReconciliationResult {
   selected: number;
@@ -98,8 +103,10 @@ export async function runDeadWakeClaimReconciliation(
       LIMIT ?`
   )
     .bind(staleBefore, staleBefore, batchSize)
-    .all<DeadWakeCandidate>();
-  const candidates = rows.results ?? [];
+    .all();
+  const candidates = parseRowsSkippingInvalid(DeadWakeCandidateSchema, rows.results, (reason) =>
+    log.warn('session_recovery.dead_wake_candidate_skipped', { reason })
+  );
   if (candidates.length === 0) return { selected: 0, released: 0 };
 
   const error = sessionLifecycleError(env, DEAD_WAKE_CLAIM_ERROR);
@@ -115,9 +122,7 @@ export async function runDeadWakeClaimReconciliation(
             AND ${DEAD_WAKE_CLAIM_SQL}`
       ).bind(
         error,
-        // The attempt ended when its task left the live statuses: a reported end, so the
-        // budget may decay from it (rule 61). A missing task has no time; use now.
-        normalizedIso(row.taskUpdatedAt) ?? nowIso,
+        attemptEndedAt(row),
         nowIso,
         row.id,
         row.recoveryTaskId,
@@ -159,6 +164,18 @@ export async function runDeadWakeClaimReconciliation(
     );
   }
   return { selected: candidates.length, released: released.length };
+}
+
+/**
+ * The budget decays only from positive evidence that this attempt ended (rule 61): its task
+ * changed after the claim, by returning to sleep or being terminalized. A missing task, or a
+ * task last written before the claim (a wake that stopped before reactivating it), never
+ * reported back, so the anchor stays NULL and the slot stays spent.
+ */
+function attemptEndedAt(row: DeadWakeCandidate): string | null {
+  const ended = normalizedIso(row.taskUpdatedAt);
+  const claimed = normalizedIso(row.recoveryClaimedAt);
+  return ended && claimed && ended >= claimed ? ended : null;
 }
 
 function normalizedIso(value: string | null): string | null {

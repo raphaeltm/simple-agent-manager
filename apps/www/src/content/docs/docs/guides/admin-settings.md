@@ -212,8 +212,11 @@ fails. If that task stops partway, or something else cancels it, the claim can o
 chat then keeps showing a wake that never finishes, and new messages can be refused. A scheduled
 sweep ends such claims once the claim is older than the wake lease
 (`SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS`, default 10 minutes) and its task is no longer waking and
-has not changed for that long. The chat then shows the wake as failed, the saved conversation is
-kept, and the next message wakes it again. The sweep never touches a wake whose task is still
+has not changed for that long. The chat then shows the wake as failed and the saved conversation is
+kept. The next message wakes it again while the snapshot is unexpired and the wake budget allows: the
+budget recovers from the recorded failure after `SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS` (15
+minutes by default), and only when the ended task proves the attempt finished. A wake whose task is
+missing keeps its attempt counted. The sweep never touches a wake whose task is still
 queued, delegated, in progress or awaiting follow-up.
 
 | Setting                                 | Default | Range | What it controls                      |

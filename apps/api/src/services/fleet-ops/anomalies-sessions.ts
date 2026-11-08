@@ -68,7 +68,9 @@ export async function snapshotFailures(ctx: SweepContext): Promise<AnomalyClassR
 /**
  * Wakes still `waking` past `operations.opsAnomalyWakingMinutes`, oldest first, with no
  * lookback bound: a stuck wake can be weeks old, and that is what this class is for. Age
- * counts from the claim (`recovery_claimed_at`), which a renewal moves forward. A row whose
+ * counts from the claim (`recovery_claimed_at`), which a renewal moves forward; a legacy row
+ * without one falls back to the snapshot's `created_at`, which no other writer moves. A row
+ * whose timestamp is unreadable is reported first rather than dropped. A row whose
  * recovery task is no longer waking is a dead claim that `dead_wake_claim_reconciliation`
  * ends once the claim lease passes. A live task means a slow wake (for example a
  * provider-limit wait).
@@ -77,14 +79,16 @@ export async function stalledWakes(ctx: SweepContext): Promise<AnomalyClassResul
   const rows = await ctx.env.DATABASE.prepare(
     `SELECT s.id, s.project_id, s.chat_session_id, s.workspace_id, s.user_id, s.runtime,
             s.recovery_task_id, s.recovery_attempts,
-            COALESCE(s.recovery_claimed_at, s.updated_at) AS waking_since,
+            COALESCE(s.recovery_claimed_at, s.created_at) AS waking_since,
             t.status AS task_status, t.execution_step, t.admission_state,
             COUNT(*) OVER () AS total
      FROM session_snapshots s
      LEFT JOIN tasks t ON t.id = s.recovery_task_id
      WHERE s.recovery_status = 'waking'
-       AND julianday(COALESCE(s.recovery_claimed_at, s.updated_at)) < julianday(?)
-     ORDER BY julianday(COALESCE(s.recovery_claimed_at, s.updated_at)) ASC, s.id ASC
+       AND (julianday(COALESCE(s.recovery_claimed_at, s.created_at)) < julianday(?)
+         OR julianday(COALESCE(s.recovery_claimed_at, s.created_at)) IS NULL)
+     ORDER BY julianday(COALESCE(s.recovery_claimed_at, s.created_at)) IS NOT NULL,
+       julianday(COALESCE(s.recovery_claimed_at, s.created_at)) ASC, s.id ASC
      LIMIT ?`
   )
     .bind(isoMinus(ctx.now, ctx.settings.wakingMinutes * 60_000), ctx.cap)
@@ -111,7 +115,8 @@ export async function stalledWakes(ctx: SweepContext): Promise<AnomalyClassResul
       },
       reason:
         `${text(row.runtime) ?? 'unknown'} session has been waking for ` +
-        `${minutesSince(since, ctx.now) ?? '?'} min (${int(row.recovery_attempts)} attempts); ` +
+        `${minutesSince(since, ctx.now) ?? 'an unknown number of'} min ` +
+        `(${int(row.recovery_attempts)} attempts); ` +
         `${task}. ${verdict}`,
       observedAt: since,
     };
