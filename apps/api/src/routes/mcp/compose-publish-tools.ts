@@ -208,6 +208,20 @@ export async function handleBuildAndPublish(
         occurredAt: Date.now(),
       });
 
+    if (!changed) {
+      // Cancellation can commit before the VM has registered the runner. Retry
+      // after acceptance so the earlier 404 cannot leave that runner working.
+      const [current] = await db
+        .select()
+        .from(schema.deploymentPublishJobs)
+        .where(eq(schema.deploymentPublishJobs.id, job.id))
+        .limit(1);
+      if (current?.status === 'canceled')
+        await cancelDeploymentPublishJobOnVmBestEffort(env, {
+          ...job,
+          requestedBy: tokenData.userId,
+        });
+    }
     return jsonRpcSuccess(requestId, {
       content: [
         {

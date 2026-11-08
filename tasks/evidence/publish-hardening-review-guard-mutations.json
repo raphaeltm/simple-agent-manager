@@ -1,0 +1,76 @@
+{
+  "checks": [
+    {
+      "guard": "F7 service rejects inconsistent terminal flag",
+      "removedGuardExitCode": 1,
+      "intendedFailure": "expected true to be false",
+      "restored": true
+    },
+    {
+      "guard": "F7 route returns 400",
+      "removedGuardExitCode": 1,
+      "intendedFailure": "expected 409 to be 400",
+      "restored": true
+    },
+    {
+      "guard": "F8 atomic release metadata fence",
+      "removedGuardExitCode": 1,
+      "intendedFailure": "expected true to be false",
+      "restored": true
+    },
+    {
+      "guard": "F9 progress refreshes liveness",
+      "removedGuardExitCode": 1,
+      "intendedFailure": "not to be",
+      "restored": true
+    },
+    {
+      "guard": "F1 cancel again after registration",
+      "removedGuardExitCode": 1,
+      "intendedFailure": "to be called 1 times",
+      "restored": true
+    },
+    {
+      "guard": "F4 fence before provisioning",
+      "removedGuardExitCode": 1,
+      "intendedFailure": "not be called",
+      "restored": true
+    },
+    {
+      "guard": "F6 registry minimum matches real VM cadence",
+      "removedGuardExitCode": 1,
+      "intendedFailure": "to not throw",
+      "restored": true
+    },
+    {
+      "guard": "F10 publishJobId literal wire key",
+      "removedGuardExitCode": 1,
+      "intendedFailure": "literal release fence wire keys",
+      "restored": true
+    },
+    {
+      "guard": "F11 sync validates attempt",
+      "removedGuardExitCode": 1,
+      "intendedFailure": "expected validation before build",
+      "restored": true
+    },
+    {
+      "guard": "F8 service requires releaseId for metadata",
+      "removedGuardExitCode": 1,
+      "intendedFailure": "expected true to be false",
+      "restored": true
+    },
+    {
+      "guard": "F8 route requires releaseId for metadata",
+      "removedGuardExitCode": 1,
+      "intendedFailure": "expected 409 to be 400",
+      "restored": true
+    },
+    {
+      "guard": "F10 attempt literal wire key",
+      "removedGuardExitCode": 1,
+      "intendedFailure": "literal release fence wire keys",
+      "restored": true
+    }
+  ]
+}

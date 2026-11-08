@@ -3,6 +3,7 @@ import { fileURLToPath } from 'node:url';
 
 import { expect, it } from 'vitest';
 
+import { DEPLOYMENT_PUBLISH_SETTINGS } from '../../../src/services/admin-settings-deployment-publish-definitions';
 import { DEFAULT_DEPLOY_PUBLISH_JOB_DEADLINE_MARGIN_MS } from '../../../src/services/deployment-publish-job-defaults';
 import { getDeploymentPublishJobSettings } from '../../../src/services/deployment-publish-job-settings';
 import { createAdminSettingsEnv } from '../../helpers/admin-settings-env';
@@ -34,6 +35,11 @@ it.skipIf(process.env.SAM_PUBLISH_TIMEOUT_CONTRACT !== '1')(
               SAM_TEST_API_PUBLISH_DEADLINE_MS: String(settings.deadlineMs),
               SAM_TEST_API_PUBLISH_MARGIN_MS: String(DEFAULT_DEPLOY_PUBLISH_JOB_DEADLINE_MARGIN_MS),
               SAM_TEST_API_PUBLISH_STALL_MS: String(settings.stallMs),
+              SAM_TEST_API_PUBLISH_STALL_MIN_MS: String(
+                DEPLOYMENT_PUBLISH_SETTINGS.find(
+                  (setting) => setting.name === 'deployments.publishJobStallMs'
+                )!.range!.min
+              ),
             },
             timeout: 120_000,
             maxBuffer: 64 * 1024,

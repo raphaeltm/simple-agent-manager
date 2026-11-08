@@ -101,6 +101,12 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
   if (event.terminal && (!status || !PUBLISH_JOB_TERMINAL_STATUSES.has(status))) {
     throw errors.badRequest('Terminal publish job event requires a terminal status');
   }
+  if (
+    !optionalString(event.releaseId) &&
+    (event.releaseVersion !== undefined || event.releaseStatus !== undefined)
+  ) {
+    throw errors.badRequest('Release metadata requires releaseId');
+  }
   const currentStep = optionalString(event.currentStep) ?? optionalString(event.step);
   await assertCurrent();
   const accepted = await appendDeploymentPublishJobEvent(db, {

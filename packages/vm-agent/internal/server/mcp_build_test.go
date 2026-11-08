@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/rsa"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -805,5 +806,24 @@ func TestMcpBuildAndPublishJobCancel_RealHandlerCancelsRunner(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("cancel did not stop runner")
+	}
+}
+
+func TestMcpBuildAndPublish_RequiresAttemptBeforeBuild(t *testing.T) {
+	for _, attempt := range []int{0, -1, 1} {
+		t.Run(fmt.Sprint(attempt), func(t *testing.T) {
+			s, key := mcpBuildTestServer(t)
+			body := validMcpBuildRequest()
+			body.PublishJobID = "fenced-job"
+			body.Attempt = attempt
+			rec := mcpBuildPOST(t, s, key, "/workspaces/ws-001/mcp/build-and-publish", "ws-001", body)
+			if attempt <= 0 {
+				if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), "positive attempt") {
+					t.Fatalf("expected validation before build; status=%d body=%s", rec.Code, rec.Body.String())
+				}
+			} else if rec.Code != http.StatusNotFound || !strings.Contains(rec.Body.String(), "workspace") {
+				t.Fatalf("valid attempt should reach workspace lookup; status=%d body=%s", rec.Code, rec.Body.String())
+			}
+		})
 	}
 }

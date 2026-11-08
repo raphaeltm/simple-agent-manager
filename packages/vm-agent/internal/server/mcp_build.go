@@ -210,6 +210,13 @@ func (s *Server) prepareMcpBuildAndPublish(w http.ResponseWriter, r *http.Reques
 		return nil, false
 	}
 
+	// Async starts supply an attempt default for older callers. The synchronous
+	// path has no such admission step and must reject an incomplete release fence.
+	if r.PathValue("jobId") == "" && req.PublishJobID != "" && req.Attempt <= 0 {
+		writeError(w, http.StatusBadRequest, "publishJobId requires a positive attempt")
+		return nil, false
+	}
+
 	reference := strings.TrimSpace(req.Reference)
 	if reference == "" {
 		reference = "latest"

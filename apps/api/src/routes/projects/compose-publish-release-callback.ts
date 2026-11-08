@@ -7,13 +7,14 @@ import {
   resolveDeploymentManifestReservation,
   type ResolvedResourceReservation,
 } from '@simple-agent-manager/shared';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, isNull, notInArray } from 'drizzle-orm';
 import { Hono } from 'hono';
 import type { InferOutput } from 'valibot';
 import * as v from 'valibot';
 import { parse as parseYaml } from 'yaml';
 
 import * as schema from '../../db/schema';
+import { PUBLISH_JOB_TERMINAL_STATUSES } from '../../services/deployment-publish-jobs';
 import type { Env } from '../../env';
 import { log, serializeError } from '../../lib/logger';
 import { parsePositiveInt } from '../../lib/route-helpers';
@@ -363,6 +364,28 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
   }
   if (requiresVolumes && placement) {
     await assertCurrent();
+    if (submission.publishJobId) {
+      const [job] = await db
+        .select({ id: schema.deploymentPublishJobs.id })
+        .from(schema.deploymentPublishJobs)
+        .where(
+          and(
+            eq(schema.deploymentPublishJobs.id, submission.publishJobId),
+            eq(schema.deploymentPublishJobs.attempt, submission.attempt!),
+            eq(schema.deploymentPublishJobs.projectId, projectId),
+            eq(schema.deploymentPublishJobs.workspaceId, workspaceId),
+            eq(schema.deploymentPublishJobs.requestedBy, userId),
+            eq(schema.deploymentPublishJobs.environmentId, environmentId),
+            notInArray(schema.deploymentPublishJobs.status, [...PUBLISH_JOB_TERMINAL_STATUSES]),
+            isNull(schema.deploymentPublishJobs.releaseId)
+          )
+        )
+        .limit(1);
+      if (!job) throw errors.conflict('Publish job release fence does not match');
+    }
+    // Provisioning can still race cancellation. Volumes belong to the environment;
+    // createMissingDeclaredVolumes reuses existing names on the next release.
+    // The later atomic release fence remains authoritative after provider I/O.
     await createMissingDeclaredVolumes(db, c.env, userId, {
       environmentId,
       volumes: volumeDeclarations,

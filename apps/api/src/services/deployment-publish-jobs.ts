@@ -150,6 +150,8 @@ export async function appendDeploymentPublishJobEvent(
   const now = new Date().toISOString();
   const status = normalizeStatus(input.status);
   if (input.terminal && (!status || !PUBLISH_JOB_TERMINAL_STATUSES.has(status))) return false;
+  if (input.releaseId == null && (input.releaseVersion != null || input.releaseStatus != null))
+    return false;
   const terminal = input.terminal || (status ? PUBLISH_JOB_TERMINAL_STATUSES.has(status) : false);
   const predicate = and(
     eq(schema.deploymentPublishJobs.id, input.publishJobId),

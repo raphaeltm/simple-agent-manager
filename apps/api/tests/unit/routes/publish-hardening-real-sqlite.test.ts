@@ -22,6 +22,11 @@ vi.mock('../../../src/routes/mcp/workspace-tools', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/routes/mcp/workspace-tools')>()),
   cancelBuildPublishJobOnVm: cancelVm,
 }));
+const provisionVolumes = vi.hoisted(() => vi.fn(async () => []));
+vi.mock('../../../src/services/deployment-volumes', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/deployment-volumes')>()),
+  createMissingDeclaredVolumes: provisionVolumes,
+}));
 const lifecycle = vi.hoisted(() => vi.fn(async () => undefined));
 vi.mock('../../../src/routes/projects/_callback-auth', () => ({
   verifyWorkspacePublishCallback: async () => ({
@@ -102,10 +107,27 @@ beforeEach(() => {
     "INSERT INTO deployment_publish_jobs(id,project_id,workspace_id,environment_id,node_id,requested_by,status,attempt) VALUES('job','project','workspace','environment','node','user','building',1)"
   );
   lifecycle.mockClear();
+  provisionVolumes.mockClear();
   cancelVm.mockClear();
 });
 afterEach(() => sqlite.close());
 describe('publish callback routes with real SQL', () => {
+  it('rejects a canceled volume release before provisioning, while the live owner provisions', async () => {
+    const volumeSubmission = {
+      composeYaml:
+        'services:\n  web:\n    image: nginx:latest\n    volumes:\n      - data:/data\nvolumes:\n  data: {}\n',
+    };
+    sqlite.exec("UPDATE deployment_publish_jobs SET status = 'canceled'");
+    const late = await submit(volumeSubmission);
+    expect(late.status, await late.clone().text()).toBe(409);
+    expect(provisionVolumes).not.toHaveBeenCalled();
+    expect(releases()).toHaveLength(0);
+    sqlite.exec("UPDATE deployment_publish_jobs SET status = 'building'");
+    const owner = await submit(volumeSubmission);
+    expect(owner.status, await owner.clone().text()).toBe(200);
+    expect(provisionVolumes).toHaveBeenCalledOnce();
+  });
+
   it.each([undefined, 'building'])(
     'rejects malformed terminal status %s before writes',
     async (status) => {
@@ -139,6 +161,15 @@ describe('publish callback routes with real SQL', () => {
   it('returns 409 on conflicting release metadata and accepts the linked release', async () => {
     sqlite.exec("UPDATE deployment_publish_jobs SET release_id = 'owner', release_version = 1");
     const before = sqlite.prepare('SELECT * FROM deployment_publish_jobs').get();
+    expect(
+      (
+        await request('deployment-publish-jobs/job/events', {
+          eventType: 'publish.release',
+          message: 'release',
+          releaseVersion: 9,
+        })
+      ).status
+    ).toBe(400);
     const event = {
       eventType: 'publish.release',
       message: 'release',

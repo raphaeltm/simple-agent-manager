@@ -34,6 +34,10 @@ func TestPublishDeadlineDefaultContract(t *testing.T) {
 	if time.Duration(deadline)*time.Millisecond <= cfg.DeployBuildPublishTimeout+time.Duration(margin)*time.Millisecond {
 		t.Fatalf("API deadline %dms must exceed resolved VM timeout %v plus %dms admission/callback margin", deadline, cfg.DeployBuildPublishTimeout, margin)
 	}
+	minimum, err := strconv.ParseInt(os.Getenv("SAM_TEST_API_PUBLISH_STALL_MIN_MS"), 10, 64)
+	if err != nil || time.Duration(minimum)*time.Millisecond < 2*cfg.DeployPublishHeartbeatInterval+cfg.HTTPCallbackTimeout {
+		t.Fatalf("API minimum stall %dms must cover two heartbeat intervals %v plus callback timeout %v", minimum, cfg.DeployPublishHeartbeatInterval, cfg.HTTPCallbackTimeout)
+	}
 	stall, err := strconv.ParseInt(os.Getenv("SAM_TEST_API_PUBLISH_STALL_MS"), 10, 64)
 	if err != nil || time.Duration(stall)*time.Millisecond <= cfg.DeployPublishHeartbeatInterval+cfg.HTTPCallbackTimeout {
 		t.Fatalf("API stall %dms must exceed resolved heartbeat interval %v plus callback timeout %v", stall, cfg.DeployPublishHeartbeatInterval, cfg.HTTPCallbackTimeout)

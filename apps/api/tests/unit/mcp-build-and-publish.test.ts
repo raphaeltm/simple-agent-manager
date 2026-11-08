@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 let nodeRuntime = 'vm';
+let currentStatus = 'building';
+const cancelAccepted = vi.hoisted(() => vi.fn(async () => undefined));
+vi.mock('../../src/services/deployment-publish-job-cancel', () => ({
+  cancelDeploymentPublishJobOnVmBestEffort: cancelAccepted,
+}));
 const mockAssertAgentDeploymentAllowed = vi.fn();
 const mockLoadDeploymentBuildInterpolationEnv = vi.fn();
 const mockLookupWorkspaceForVmAgent = vi.fn();
@@ -16,7 +21,9 @@ vi.mock('drizzle-orm/d1', () => ({
   drizzle: vi.fn(() => ({
     mockedDb: true,
     select: () => ({
-      from: () => ({ where: () => ({ limit: async () => [{ runtime: nodeRuntime }] }) }),
+      from: () => ({
+        where: () => ({ limit: async () => [{ runtime: nodeRuntime, status: currentStatus }] }),
+      }),
     }),
   })),
 }));
@@ -76,6 +83,7 @@ describe('async build_and_publish MCP tools', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     nodeRuntime = 'vm';
+    currentStatus = 'building';
     mockAppendDeploymentPublishJobEvent.mockResolvedValue(true);
     mockAssertAgentDeploymentAllowed.mockResolvedValue({
       environmentId: 'env-1',
@@ -106,6 +114,16 @@ describe('async build_and_publish MCP tools', () => {
     });
     mockStartBuildPublishJobOnVm.mockResolvedValue({ publishJobId: 'job-1', status: 'accepted' });
   });
+
+  it.each(['canceled', 'building'])(
+    'retries VM cancel after acceptance only when the job became %s',
+    async (status) => {
+      currentStatus = status;
+      mockAppendDeploymentPublishJobEvent.mockResolvedValue(false);
+      await handleBuildAndPublish('race', { environment: 'staging' }, tokenData(), env());
+      expect(cancelAccepted).toHaveBeenCalledTimes(status === 'canceled' ? 1 : 0);
+    }
+  );
 
   it('rejects Instant sessions before creating or starting a job', async () => {
     nodeRuntime = 'cf-container';
@@ -213,8 +231,10 @@ describe('async build_and_publish MCP tools', () => {
       occurredAt: '2026-08-28T12:00:00.000Z',
     });
 
-    expect(recordDeploymentPublishJobLifecycleEventBestEffort).toHaveBeenCalledWith(testEnv,
-      expect.objectContaining({ status: 'starting', source: 'mcp.build_and_publish.accepted' }));
+    expect(recordDeploymentPublishJobLifecycleEventBestEffort).toHaveBeenCalledWith(
+      testEnv,
+      expect.objectContaining({ status: 'starting', source: 'mcp.build_and_publish.accepted' })
+    );
     const payload = JSON.parse(result.result?.content?.[0]?.text as string);
     expect(payload).toMatchObject({
       publishJobId: 'job-1',
@@ -255,8 +275,14 @@ describe('async build_and_publish MCP tools', () => {
         message: expect.not.stringContaining('X-Amz-Signature=secret'),
       })
     );
-    expect(recordDeploymentPublishJobLifecycleEventBestEffort).toHaveBeenCalledWith(expect.anything(),
-      expect.objectContaining({ status: 'failed', source: 'mcp.build_and_publish.failed_to_start', terminal: true }));
+    expect(recordDeploymentPublishJobLifecycleEventBestEffort).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({
+        status: 'failed',
+        source: 'mcp.build_and_publish.failed_to_start',
+        terminal: true,
+      })
+    );
     const payload = JSON.parse(result.result?.content?.[0]?.text as string);
     expect(payload.status).toBe('failed');
     expect(payload.publishJobId).toBe('job-1');

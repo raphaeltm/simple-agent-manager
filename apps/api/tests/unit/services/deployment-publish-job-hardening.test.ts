@@ -122,6 +122,9 @@ describe('publish job atomic guards on SQLite', () => {
       )
       .run();
     const before = row();
+    expect(await appendDeploymentPublishJobEvent(db(), { ...event, releaseVersion: 99 })).toBe(
+      false
+    );
     expect(
       await appendDeploymentPublishJobEvent(db(), {
         ...event,
