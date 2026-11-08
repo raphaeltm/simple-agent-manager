@@ -86,15 +86,34 @@ user row in step with the default, so it does not cause or fix this.
 
 ## Implementation Checklist
 
-- [ ] Shared resolver + loader + CAS writer (+ Codex auth.json identity parser)
-- [ ] CodexRefreshLock uses candidates, possession matching, credential-bound grace entries,
+- [x] Shared resolver + loader + CAS writer (+ Codex auth.json identity parser)
+- [x] CodexRefreshLock uses candidates, possession matching, credential-bound grace entries,
       CAS writer; payload carries `credentialReferences`
-- [ ] codex-refresh route resolves references via the shared resolver
-- [ ] agent-credential-sync route uses resolver + account-identity guard + CAS writer
-- [ ] Remove `syncActiveAgentCredentialSecret`; update comments (make-default.ts) and docs
-- [ ] Real-SQL tests (createSqliteD1 + real encryption): project pin, profile pin, user default,
+- [x] codex-refresh route resolves references via the shared resolver
+- [x] agent-credential-sync route uses resolver + account-identity guard + CAS writer
+- [x] Remove `syncActiveAgentCredentialSecret`; update comments (make-default.ts) and docs
+- [x] Real-SQL tests (createSqliteD1 + real encryption): project pin, profile pin, user default,
       legacy rows, inactive pin blocks fallback, no row, mid-refresh default switch (CAS),
       stale response omits refresh_token, grace bound to credential, concurrency exactly-once,
       sync account mismatch; each guard proven discriminating
-- [ ] Vertical slice: agent-key callback records the pin → refresh rotates the pinned row only
+- [x] Vertical slice: agent-key callback records the pin → refresh rotates the pinned row only
 - [ ] Staging: pinned non-default Codex account refresh lands on the pinned credential
+
+## Implementation Notes
+
+- Discrimination proofs (each guard deleted once, `.tmp/discriminate.py`; 94 tests across the DO,
+  vertical-slice and make-default files):
+  - pre-fix legacy-only lookup → 10 red (profile pin, project pin, stale attack, re-pin, sync cases); legacy-only controls stay green
+  - load owner predicate + post-query owner check (both, defence in depth) → forged-reference attack + user-2 owner case red
+  - primary CAS ciphertext → default-switch-mid-refresh red
+  - mirror gated on primary → lost-CAS mirror test red
+  - mirror owner predicate → foreign-user copy test red
+  - primary is_active → pin-deactivated-mid-refresh red
+  - grace credential binding → both cross-credential grace cases red
+  - inactive candidate skip (DO) / sync inactive skip → the two inactive-pin tests red
+  - ambiguous-stale guard / possession match → several-candidates-no-proof test red
+  - stale omits refresh_token → 8 red (CRITICAL #1 cases)
+  - sync account mismatch → account attack red
+- Old `configurable-limits` source test passed only because the moved sync handler contained its
+  string; repointed at the real messages-route enforcement (`readRequestBodyWithLimit`).
+- `routes/workspaces/runtime.ts` shrank 1863 → 1676 by extracting the sync route.
