@@ -65,7 +65,12 @@ type SyncSelection =
         | 'credential_stale';
     };
 
-/** Issue time (JWT `iat`, seconds) of a Codex auth file's access token, else its id token. */
+/**
+ * Issue time (JWT `iat`, seconds) of a Codex auth file's access token, else its id token.
+ * Decoded without verifying the signature: it only orders two generations of a credential
+ * the authenticated workspace may already write, so a forged `iat` reaches nothing the
+ * caller could not write anyway. It is an ordering hint, not proof of origin.
+ */
 function codexIssuedAt(identity: CodexAuthIdentity): number | null {
   for (const token of [identity.accessToken, identity.idToken]) {
     const iat = token ? decodeJwtPayload(token)?.iat : undefined;
