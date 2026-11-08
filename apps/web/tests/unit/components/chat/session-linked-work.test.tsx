@@ -335,6 +335,7 @@ describe('chat linked work — the Related panel', () => {
   it('Escape closes the preview and leaves the Related panel open', async () => {
     await renderChat();
     const drawer = await openRelated();
+    within(drawer).getByTestId('linked-work-file').focus();
     fireEvent.click(within(drawer).getByTestId('linked-work-file'));
     await screen.findByRole('region', { name: 'Preview of report.png' });
 
@@ -344,6 +345,8 @@ describe('chat linked work — the Related panel', () => {
       expect(screen.queryByRole('dialog', { name: 'report.png' })).not.toBeInTheDocument()
     );
     expect(screen.getByTestId('session-linked-work-drawer')).toBeInTheDocument();
+    // Focus goes back to the row that opened it, through the loading frame's handoff.
+    expect(within(drawer).getByTestId('linked-work-file')).toHaveFocus();
 
     // The panel's own Escape works again once the preview is gone.
     fireEvent.keyDown(document, { key: 'Escape' });

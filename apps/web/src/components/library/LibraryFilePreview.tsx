@@ -8,12 +8,13 @@
 import { IconButton, paneClassName, Spinner } from '@simple-agent-manager/ui';
 import { useQuery } from '@tanstack/react-query';
 import { X } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
 import { downloadLibraryFile, getLibraryFilePreviewUrl } from '../../lib/api/library';
 import { libraryFileQueryOptions } from '../../lib/query-options';
+import { useDialogFocusTrap } from '../chat/useDialogFocusTrap';
 import { FilePreviewModal } from './FilePreviewModal';
 
 export interface LibraryFilePreviewProps {
@@ -32,21 +33,13 @@ function PreviewPlaceholder({
 }: Readonly<{ title: string; error: boolean; onClose: () => void }>) {
   const dialogRef = useRef<HTMLDivElement>(null);
 
+  useDialogFocusTrap(dialogRef, onClose);
+
   // Hand focus back to the opener on unmount. React runs this cleanup before the real viewer's
   // mount effect, so the viewer records the opener — not this frame — as where focus returns.
-  useEffect(() => {
-    const opener = document.activeElement as HTMLElement | null;
-    dialogRef.current?.focus();
-    return () => opener?.focus();
-  }, []);
-
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose();
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [onClose]);
+  // `useState` captures the opener during the first render, before the trap moves focus.
+  const [opener] = useState(() => document.activeElement as HTMLElement | null);
+  useEffect(() => () => opener?.focus(), [opener]);
 
   return createPortal(
     <div className="sam-void fixed inset-0 z-dialog-backdrop flex flex-col overflow-hidden pb-[max(env(safe-area-inset-bottom),0.375rem)] pl-[max(env(safe-area-inset-left),0.375rem)] pr-[max(env(safe-area-inset-right),0.375rem)] pt-[max(env(safe-area-inset-top),0.375rem)] md:p-2.5">
@@ -95,7 +88,10 @@ export function LibraryFilePreview({
   onClose,
 }: LibraryFilePreviewProps) {
   const queryScope = useQueryScope();
-  const metadata = useQuery(libraryFileQueryOptions(queryScope, projectId, fileId));
+  const metadata = useQuery({
+    ...libraryFileQueryOptions(queryScope, projectId, fileId),
+    enabled: Boolean(queryScope),
+  });
 
   if (!metadata.data) {
     return (
