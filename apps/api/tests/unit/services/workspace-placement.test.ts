@@ -1208,8 +1208,10 @@ describe('startup backlog fairness guard in the atomic reservation', () => {
 
   /**
    * K starts that observe the same backlog counts at the same moment, rank the shortest queue
-   * first (node id breaks ties, as the strategy would), and race the real reservation. Losers
-   * re-read the counts and rank again: the TaskRunner's replan, minus the mocks.
+   * first (node id breaks ties, standing in for the strategy), and race the real reservation.
+   * Losers re-read the counts and rank again. This models the SQL race only: the conflict budget
+   * and the real comparator run through the TaskRunner DO in
+   * `tests/workers/startup-backlog-placement-loop.test.ts`.
    */
   async function placeBurst(
     database: D1Database,
@@ -1266,7 +1268,9 @@ describe('startup backlog fairness guard in the atomic reservation', () => {
     expect(rounds).toBe(5);
   });
 
-  it('queues the same burst on one node when the guard is absent (the incident shape)', async () => {
+  // Ranking alone cannot spread a burst whose members all read the same counts at once; without
+  // the guard every one of them reserves the node they all ranked first.
+  it('queues the same burst on one node when the guard is absent', async () => {
     const database = createDb();
     seedTwoNodes();
 

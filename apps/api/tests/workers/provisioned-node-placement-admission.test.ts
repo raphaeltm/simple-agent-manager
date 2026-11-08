@@ -458,7 +458,9 @@ describe('a node provisioned for a task admits that task', () => {
       // Fairness, not capacity: no failure, no budget spent, a fresh selection next.
       expect(state.completed).toBe(false);
       expect(state.currentStep).toBe('node_selection');
-      expect(state.workspacePlacementRejections).toBe(DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS - 1);
+      expect(state.workspacePlacementRejections).toBe(
+        DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS - 1
+      );
       expect(state.startupBacklogConflicts).toBe(1);
       expect(state.stepResults.rankedStartupBacklog).toBeNull();
       expect(await activeWorkspacesOn(nodeId)).toBe(1);
@@ -500,7 +502,10 @@ describe('a node provisioned for a task admits that task', () => {
       const { state } = await fireAlarm(taskId);
 
       expect(state.currentStep).toBe('node_selection');
-      expect(state.startupBacklogConflicts).toBe(DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES);
+      expect(state.workspacePlacementRejections ?? 0).toBe(0);
+      expect(state.startupBacklogConflicts).toBe(
+        DEFAULT_WORKSPACE_PLACEMENT_BACKLOG_CONFLICT_RETRIES
+      );
       expect(await activeWorkspacesOn(nodeId)).toBe(1);
     });
 
