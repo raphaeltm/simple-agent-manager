@@ -290,8 +290,8 @@ describe('policy management identifiers survive de-duplication', () => {
     const { parsed } = await getPayload();
     const instructions = JSON.stringify(parsed.instructions);
 
-    expect(instructions).toContain('update_policy');
-    expect(instructions).toContain('remove_policy');
+    expect(instructions).toContain('`policies_write` method `update`');
+    expect(instructions).toContain('`policies_write` method `remove`');
     expect(instructions).toContain('(id: ...)');
   });
 });
@@ -329,7 +329,7 @@ describe('empty knowledge and policy paths still degrade correctly', () => {
     expect(String(parsed.knowledgeDirectives)).toContain(OBSERVATION_A);
     expect(parsed).not.toHaveProperty('policyDirectives');
     // The policy maintenance instructions are suppressed when there are no policies.
-    expect(JSON.stringify(parsed.instructions)).not.toContain('remove_policy');
+    expect(JSON.stringify(parsed.instructions)).not.toContain('`policies_write` method `remove`');
   });
 
   it('survives a knowledge retrieval failure without emitting either field', async () => {
@@ -356,7 +356,7 @@ describe('empty knowledge and policy paths still degrade correctly', () => {
     expect(parsed).not.toHaveProperty('policyContext');
     // Knowledge is unaffected, and the policy instructions are correctly suppressed.
     expect(String(parsed.knowledgeDirectives)).toContain(OBSERVATION_A);
-    expect(JSON.stringify(parsed.instructions)).not.toContain('remove_policy');
+    expect(JSON.stringify(parsed.instructions)).not.toContain('`policies_write` method `remove`');
   });
 });
 

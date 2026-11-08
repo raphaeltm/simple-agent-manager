@@ -63,16 +63,27 @@ func validateDeletionRoot(path string) error {
 	return nil
 }
 
-// Each attempt makes bounded progress and can resume after interruption. os.Root
+// errDeletionAttemptInterrupted marks a walk stopped by its attempt deadline or
+// cancellation. Removal is idempotent, so the next attempt resumes where it stopped.
+// deletionDirReadBatch bounds memory per directory read. It is a buffer size, not a
+// work limit: an attempt keeps reading batches until the directory is empty or its
+// deadline expires.
+const deletionDirReadBatch = 4096
+
+var errDeletionAttemptInterrupted = errors.New("workspace filesystem cleanup interrupted; retry required")
+
+// Each attempt is bounded by its context deadline (WORKSPACE_DELETION_ATTEMPT_TIMEOUT)
+// and resumes after interruption. It is deliberately not bounded by an entry count:
+// a 512-entry cap turned a ~10k-file clone into ~20 one-minute attempts. os.Root
 // confines traversal to the captured directory even if child symlinks change.
-func removeDeletionRoot(ctx context.Context, path string, device, inode uint64, budget int) error {
+func removeDeletionRoot(ctx context.Context, path string, device, inode uint64) error {
 	if _, err := os.Lstat(path); os.IsNotExist(err) {
 		return nil
 	}
-	return removeDeletionRootWithOpener(ctx, path, device, inode, budget, os.OpenRoot)
+	return removeDeletionRootWithOpener(ctx, path, device, inode, os.OpenRoot)
 }
 
-func removeDeletionRootWithOpener(ctx context.Context, path string, device, inode uint64, budget int, open func(string) (*os.Root, error)) error {
+func removeDeletionRootWithOpener(ctx context.Context, path string, device, inode uint64, open func(string) (*os.Root, error)) error {
 	root, err := open(path)
 	if err != nil {
 		return err
@@ -86,49 +97,59 @@ func removeDeletionRootWithOpener(ctx context.Context, path string, device, inod
 	if !ok || uint64(stat.Dev) != device || stat.Ino != inode {
 		return errors.New("opened workspace root does not match deletion identity")
 	}
+	interrupted := func() error {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("%w: %w", errDeletionAttemptInterrupted, err)
+		}
+		return nil
+	}
 	var removeChildren func(string) error
 	removeChildren = func(dir string) error {
-		if err := ctx.Err(); err != nil {
+		if err := interrupted(); err != nil {
 			return err
 		}
 		if err := validateDeletionRoot(filepath.Join(path, dir)); err != nil {
 			return err
 		}
-		file, err := root.Open(dir)
-		if err != nil {
-			return err
-		}
-		entries, err := file.ReadDir(budget + 1)
-		file.Close()
-		if err != nil && err != io.EOF {
-			return err
-		}
-		for _, entry := range entries {
-			if err := ctx.Err(); err != nil {
-				return err
-			}
-			if budget <= 0 {
-				return errors.New("workspace filesystem cleanup budget exhausted; retry required")
-			}
-			budget--
-			name := filepath.Join(dir, entry.Name())
-			info, err := root.Lstat(name)
-			if os.IsNotExist(err) {
-				continue
-			}
+		// Read in bounded batches, reopening the directory after each batch is
+		// removed: entries unlinked during a partial read on one handle may or may
+		// not be returned by later reads, and one unbounded read of a huge
+		// directory would spike agent memory.
+		for {
+			file, err := root.Open(dir)
 			if err != nil {
 				return err
 			}
-			if info.IsDir() {
-				if err := removeChildren(name); err != nil {
+			entries, err := file.ReadDir(deletionDirReadBatch)
+			file.Close()
+			if err != nil && err != io.EOF {
+				return err
+			}
+			for _, entry := range entries {
+				if err := interrupted(); err != nil {
+					return err
+				}
+				name := filepath.Join(dir, entry.Name())
+				info, err := root.Lstat(name)
+				if os.IsNotExist(err) {
+					continue
+				}
+				if err != nil {
+					return err
+				}
+				if info.IsDir() {
+					if err := removeChildren(name); err != nil {
+						return err
+					}
+				}
+				if err := root.Remove(name); err != nil && !os.IsNotExist(err) {
 					return err
 				}
 			}
-			if err := root.Remove(name); err != nil && !os.IsNotExist(err) {
-				return err
+			if len(entries) < deletionDirReadBatch {
+				return nil
 			}
 		}
-		return nil
 	}
 	if err := removeChildren("."); err != nil {
 		return err

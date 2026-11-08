@@ -215,6 +215,8 @@ export async function answerAgentInteraction(
   const db = drizzle(env.DATABASE, { schema });
 
   await requireProjectCapability(db, projectId, userId, 'task:write');
+  // Not an agent wake (lib/agent-wake-policy.ts): this answers a request inside a turn the
+  // agent already started and is blocked on, so only session control is checked.
   const writer = await requireSessionWriter(env, projectId, sessionId, userId, {
     db,
     action: 'answer the agent in this session',

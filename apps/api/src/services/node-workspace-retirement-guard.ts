@@ -2,7 +2,11 @@ import { DEFAULT_NODE_WORKSPACE_IDLE_TIMEOUT_MS } from '@simple-agent-manager/sh
 
 import type { Env } from '../env';
 import type { BoundedStrandedRetirement } from './bounded-stranded-retirement-authority';
-import { type PreservedVmRetirement, preservedVmSourceSql } from './preserved-vm-retirement';
+import {
+  type PreservedVmRetirement,
+  preservedVmSourceSql,
+  snapshotConversationMatchesSql,
+} from './preserved-vm-retirement';
 import { boundedWarmPlacementClaimGuardSql } from './warm-placement-claims';
 
 /** Authority from the SAME durable deletion operation, never a generic retirement waiver. */
@@ -44,7 +48,7 @@ export function workspaceArtifactsRetirementGuardSql(
       ${
         allowPreservedVm
           ? `AND NOT (artifact_snapshot.user_id IS ${nodeAlias}.user_id
-            AND artifact_snapshot.chat_session_id IS source_workspace.chat_session_id
+            AND ${snapshotConversationMatchesSql('artifact_snapshot', 'source_workspace')}
             AND artifact_snapshot.project_id IS source_workspace.project_id
             AND ${preservedVmSourceSql('source_workspace', nodeAlias)})`
           : allowExactTarget

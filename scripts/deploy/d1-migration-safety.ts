@@ -7,6 +7,16 @@ import {
   DEFAULT_D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT,
   DEFAULT_D1_MIGRATION_CHURNING_TABLES,
 } from './d1-migration-churning-tables.js';
+import { executeD1VerificationRead } from './d1-migration-read-retry.js';
+import {
+  MigrationSafetyError,
+  parseD1Rows,
+  parseWranglerJsonOutput,
+  quoteSqlIdentifier,
+  quoteSqlLiteral,
+} from './d1-migration-io.js';
+
+export { MigrationSafetyError, parseWranglerJsonOutput } from './d1-migration-io.js';
 
 export {
   DEFAULT_D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT,
@@ -77,75 +87,9 @@ const SYSTEM_TABLES = new Set(['_cf_KV', D1_MIGRATIONS_TABLE, 'sqlite_sequence']
 
 const REVIEWED_CHURNING_TABLES = new Set<string>(DEFAULT_D1_MIGRATION_CHURNING_TABLES);
 
-export class MigrationSafetyError extends Error {}
-/**
- * Wrangler 4.118 can append a human-readable diagnostic after a valid `--json`
- * response. Keep the migration gate fail-closed for leading garbage and
- * malformed JSON while accepting that documented output shape.
- */
-export function parseWranglerJsonOutput(output: string): unknown {
-  const trimmedStart = output.trimStart();
-  const first = trimmedStart[0];
-  if (first !== '[' && first !== '{') {
-    throw new MigrationSafetyError('Wrangler D1 output did not begin with JSON');
-  }
-
-  let depth = 0;
-  let inString = false;
-  let escaped = false;
-  let end = -1;
-
-  for (let index = 0; index < trimmedStart.length; index += 1) {
-    const character = trimmedStart[index];
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (character === '\\') {
-        escaped = true;
-      } else if (character === '"') {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (character === '"') {
-      inString = true;
-    } else if (character === '[' || character === '{') {
-      depth += 1;
-    } else if (character === ']' || character === '}') {
-      depth -= 1;
-      if (depth < 0) {
-        throw new MigrationSafetyError('Wrangler D1 output contained malformed JSON');
-      }
-      if (depth === 0) {
-        end = index + 1;
-        break;
-      }
-    }
-  }
-
-  if (end < 0 || inString || depth !== 0) {
-    throw new MigrationSafetyError('Wrangler D1 output contained incomplete JSON');
-  }
-
-  return JSON.parse(trimmedStart.slice(0, end)) as unknown;
-}
-
-function quoteSqlIdentifier(identifier: string): string {
-  return `"${identifier.replaceAll('"', '""')}"`;
-}
-
-function quoteSqlLiteral(value: string): string {
-  return `'${value.replaceAll("'", "''")}'`;
-}
-
 export class ExecD1MigrationSafetyRunner implements D1MigrationSafetyRunner {
   executeJson(command: string, args: string[], options: { cwd?: string } = {}): unknown {
-    const output = execFileSync(command, args, {
-      cwd: options.cwd,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    const output = executeD1VerificationRead(command, args, options);
     return parseWranglerJsonOutput(output);
   }
 
@@ -179,19 +123,6 @@ function wranglerArgs(environment: string, dbName: string, command: string): str
     command,
     '--json',
   ];
-}
-
-function parseD1Rows(value: unknown): Record<string, unknown>[] {
-  if (!Array.isArray(value)) {
-    throw new MigrationSafetyError('Wrangler D1 JSON response was not an array');
-  }
-
-  const results = (value[0] as { results?: unknown } | undefined)?.results;
-  if (!Array.isArray(results)) {
-    throw new MigrationSafetyError('Wrangler D1 JSON response did not include a results array');
-  }
-
-  return results as Record<string, unknown>[];
 }
 
 function parseCountValue(value: unknown, db: D1DatabaseTarget, table: string): number {
@@ -356,7 +287,9 @@ function countOneTable(
     );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new MigrationSafetyError(`Failed to count ${db.binding}.${table}: ${message}`);
+    throw new MigrationSafetyError(`Failed to count ${db.binding}.${table}: ${message}`, {
+      cause: error,
+    });
   }
 
   if (rows.length !== 1 || !('count' in rows[0])) {

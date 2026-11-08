@@ -247,7 +247,8 @@ const LAZY_ROUTES = [
   { name: 'project-chat', path: `/projects/${PROJECT_ID}/chat`, allowHeavy: [] },
   { name: 'settings', path: '/settings/cloud-provider', allowHeavy: [] },
   { name: 'admin-analytics', path: '/admin/analytics', allowHeavy: ['recharts'] },
-  { name: 'account-map', path: '/account-map', allowHeavy: ['xyflow'] },
+  // The map is plain DOM and SVG now; it must not pull in the workflow graph's xyflow chunk.
+  { name: 'account-map', path: '/account-map', allowHeavy: [] },
   { name: 'nodes', path: '/nodes', allowHeavy: [] },
   // The workspace route is the whole justification for the `vendor-terminal` chunk
   // group, so it must be audited even though it renders outside the AppShell.

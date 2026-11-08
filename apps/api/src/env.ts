@@ -306,7 +306,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SESSION_RECOVERY_LINEAGE_MAX_DEPTH?: string; // Wake→wake links followed to the conversation's first run when deciding whether its location is pinned (default: 256)
   SESSION_SLEEP_AFTER_MS?: string; // Idle duration before verified snapshot teardown (default: 900000)
   HARNESS_BACKGROUND_WORK_LEASE_MS?: string; // Fresh normalized harness-work report lease before sleep is allowed (default: 300000)
-  HARNESS_BACKGROUND_WORK_MAX_DURATION_MS?: string; // Absolute ceiling, from the last lifecycle progress edge, on harness-work sleep deferral (default: 1800000)
+  HARNESS_BACKGROUND_WORK_MAX_DURATION_MS?: string; // Absolute ceiling, from the last real session work, on harness-work sleep deferral (default: 7200000)
   ACP_ACTIVITY_ADMISSION_ENABLED?: string; // "false" disables activity callback coalescing/admission control (default: true)
   ACP_ACTIVITY_COALESCE_WINDOW_MS?: string; // Minimum interval between redundant intermediate ProjectData activity writes (default: 2000)
   ACP_ACTIVITY_COALESCE_TTL_MS?: string; // Max age of coalesced intermediate reports before reconciliation is relied on (default: 60000)

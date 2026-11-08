@@ -1,6 +1,7 @@
 import { queryOptions } from '@tanstack/react-query';
 
 import {
+  getNodeResourceUsage,
   getProviderCatalog,
   listNodes,
   listWorkspacePorts,
@@ -58,6 +59,8 @@ function workspacePortTokenCacheMarker(token: string): string {
 export const nodeQueryKeys = {
   all: (queryScope: string) => ['auth', queryScope, 'nodes'] as const,
   list: (queryScope: string) => [...nodeQueryKeys.all(queryScope), 'list'] as const,
+  resourceUsage: (queryScope: string) =>
+    [...nodeQueryKeys.all(queryScope), 'resource-usage'] as const,
   catalog: (queryScope: string, options?: ProviderCatalogRequestOptions) =>
     [
       ...nodeQueryKeys.all(queryScope),
@@ -84,6 +87,13 @@ export function nodeListQueryOptions(queryScope: string) {
   return queryOptions({
     queryKey: nodeQueryKeys.list(queryScope),
     queryFn: listNodes,
+  });
+}
+
+export function nodeResourceUsageQueryOptions(queryScope: string) {
+  return queryOptions({
+    queryKey: nodeQueryKeys.resourceUsage(queryScope),
+    queryFn: getNodeResourceUsage,
   });
 }
 

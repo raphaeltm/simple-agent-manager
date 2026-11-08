@@ -117,6 +117,23 @@ This checklist exists because the durable diagnosis runner added `cancelled` in 
 without widening the shipped D1 `CHECK`, and used unconditional terminal writes that could overwrite
 cancellation after an awaited model/tool call.
 
+## Never Add a Trigger That Writes on a Table With Compare-And-Set Writers
+
+D1 counts rows written by triggers in `meta.changes` (verified on Miniflare and staging D1: a
+one-row `UPDATE nodes SET status = ...` with two `AFTER UPDATE` triggers reported `changes: 3`).
+SAM's lifecycle code guards status writes with `meta.changes === 1` compare-and-sets in dozens of
+places. On 2026-11-04 a draft lifecycle-latency migration added status-change triggers to
+`workspaces`, `nodes` and `session_snapshots`; on staging every successful `provisionNode` final
+write read as a lost race and destroyed the VM it had just created (fixed by
+`0219_drop_lifecycle_status_triggers.sql`).
+
+- Do not add triggers that INSERT, UPDATE or DELETE rows to a table whose writers check
+  `meta.changes`. `BEFORE ... RAISE(ABORT)` guard triggers that write nothing are fine.
+- Record derived data from the code path that owns it, or observe it from a scheduled job
+  (`services/lifecycle-latency/watchdog.ts` samples states instead of using triggers).
+- `tests/workers/lifecycle-latency-monitoring.test.ts` asserts a one-row status update on these
+  tables reports `changes === 1` through the full migration chain; keep that guard.
+
 ## The CASCADE Map Changes Over Time
 
 A table that has no children today may have children tomorrow. When adding a new `ON DELETE CASCADE` foreign key, you are also making the parent table more dangerous to recreate in the future. Consider whether `ON DELETE SET NULL` or `ON DELETE RESTRICT` would be more appropriate.

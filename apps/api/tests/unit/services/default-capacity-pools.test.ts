@@ -37,6 +37,9 @@ import {
   scrubCapacitySourceCredentialSecrets,
 } from '../../../src/services/default-capacity-source-credentials';
 import { encrypt } from '../../../src/services/encryption';
+import { listManagedGcpCredentialMirrors } from '../../../src/services/gcp-credential-mirrors';
+import { replaceUserGcpCredential } from '../../../src/services/gcp-credential-store';
+import { reconcileManagedGcpPoolMirror } from '../../../src/services/gcp-pool-mirror-reconciliation';
 import {
   capacityPlacementSnapshotForTaskStart,
   PlacementResolutionError,
@@ -45,6 +48,7 @@ import {
   resolveTaskStartPlacement,
 } from '../../../src/services/placement-resolver';
 import { buildCapacityPoolSelection } from '../../../src/services/placement-resolver-capacity';
+import { listUserProviderCatalogSeeds } from '../../../src/services/provider-catalogs';
 import { applyCapacityPoolSchemaMigrations } from '../../helpers/capacity-pool-migrations';
 import { createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
@@ -6154,5 +6158,900 @@ describe('empty live Hetzner inventory through the credential-backed catalog pat
       env: catalogEnv(),
     });
     expect(fetchMock.mock.calls.length).toBeGreaterThan(firstPassCalls);
+  });
+});
+
+describe('GCP managed compatibility copies', () => {
+  async function saveGcp(db: ReturnType<typeof createDb>) {
+    await replaceUserGcpCredential(
+      catalogEnv(createSqliteD1WithBindLimit(sqlite!, 100)),
+      'user-1',
+      {
+        version: 1,
+        provider: 'gcp',
+        authType: 'workload-identity',
+        gcpProjectId: 'example-vms',
+        gcpProjectNumber: '123456',
+        serviceAccountEmail: 'sam@example-vms.iam.gserviceaccount.com',
+        wifPoolId: 'sam-pool',
+        wifProviderId: 'sam-provider',
+        defaultZone: 'europe-west3-a',
+      }
+    );
+    return db;
+  }
+
+  // Google adds zones over time. A zone outside the labelled suggestion list used to fail
+  // `isValidLocationForProvider`, so `normalizeCapacityCandidate` silently dropped it.
+  it('keeps a candidate in a zone outside the labelled list through placement selection', async () => {
+    const db = await saveGcp(createDb());
+    const gcpOffering = (location: string) =>
+      liveHetznerOffering({
+        provider: 'gcp',
+        location,
+        providerInstanceType: 'e2-standard-2',
+        displayName: 'e2-standard-2',
+        machineSize: 'medium',
+        vcpu: 2,
+        ramGb: 8,
+        memoryGb: 8,
+        memoryMb: 8192,
+        storageGb: 50,
+        diskGb: 50,
+        price: '~$49/mo',
+        priceMonthly: 49,
+        priceHourly: 0.067,
+        currency: 'USD',
+      });
+    const newZone = 'northamerica-northeast2-b';
+    expect(getLocationsForProvider('gcp').map((l) => l.id)).not.toContain(newZone);
+    await ensureDefaultCapacityPoolsForExistingCredentials(db, {
+      userId: 'user-1',
+      includeInstallation: false,
+      offeringResolver: async () => [gcpOffering('us-central1-a'), gcpOffering(newZone)],
+    });
+    const summary = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
+      userId: 'user-1',
+      projectId: null,
+      ensure: false,
+      includeInstallation: false,
+    });
+    const placement = resolveTaskStartPlacement({
+      entryPoint: 'task-submit',
+      taskId: 'gcp-new-zone-task',
+      projectId: 'project-1',
+      userId: 'user-1',
+      project: {
+        id: 'project-1',
+        defaultProvider: 'gcp',
+        defaultLocation: 'us-central1-a',
+        defaultVmSize: 'medium',
+      },
+      credentialProjectPolicy: 'current-project-unless-inherited',
+      taskModeDefault: 'task',
+      resourceRequirements: {},
+    });
+
+    const selection = buildCapacityPoolSelection(summary!, placement, 'workspace');
+
+    expect(selection?.candidates.map((c) => c.location).sort()).toEqual(
+      [newZone, 'us-central1-a'].sort()
+    );
+  });
+
+  it('discovers one catalog and one editor-visible source after real WIF credential storage', async () => {
+    const db = await saveGcp(createDb());
+    expect(await listUserProviderCatalogSeeds(db, { userId: 'user-1' })).toHaveLength(1);
+    const result = await ensureDefaultCapacityPoolsForExistingCredentials(db, {
+      userId: 'user-1',
+      includeInstallation: false,
+    });
+    expect(result.user?.sources).toHaveLength(1);
+    expect(new Set(result.user?.candidates.map((c) => c.capacitySourceId)).size).toBe(1);
+  });
+
+  it.each([
+    ['unmarked', "UPDATE cc_configurations SET settings_json = '{}'"],
+    ['malformed metadata', "UPDATE cc_configurations SET settings_json = '{'"],
+    [
+      'wrong explicit legacy ID',
+      `UPDATE cc_configurations SET settings_json = '{"managedBy":"legacy-gcp-credential","legacyCredentialId":"another"}'`,
+    ],
+    ['different ciphertext', "UPDATE cc_credentials SET encrypted_token = 'different'"],
+    ['different IV', "UPDATE cc_credentials SET iv = 'different'"],
+    ['another credential owner', "UPDATE cc_credentials SET owner_id = 'user-2'"],
+    ['project attachment', "UPDATE cc_attachments SET project_id = 'project-1'"],
+    ['disabled connection', 'UPDATE cc_attachments SET is_active = 0'],
+    ['disabled legacy', 'UPDATE credentials SET is_active = 0'],
+  ])('does not collapse %s records', async (_label, mutation) => {
+    const db = await saveGcp(createDb());
+    sqlite!.exec(mutation);
+    expect(await listManagedGcpCredentialMirrors(db, 'user-1')).toEqual([]);
+  });
+
+  it('keeps unmarked equal credentials and ambiguous legacy matches as separate accounts', async () => {
+    const db = await saveGcp(createDb());
+    sqlite!.exec("UPDATE cc_configurations SET settings_json = '{}'");
+    expect(await listUserProviderCatalogSeeds(db, { userId: 'user-1' })).toHaveLength(2);
+    sqlite!
+      .exec(`UPDATE cc_configurations SET settings_json = '{"managedBy":"legacy-gcp-credential"}';
+      INSERT INTO credentials (id,user_id,provider,credential_type,encrypted_token,iv)
+      SELECT 'another-legacy',user_id,provider,credential_type,encrypted_token,iv FROM credentials LIMIT 1`);
+    expect(await listManagedGcpCredentialMirrors(db, 'user-1')).toEqual([]);
+    expect(await listUserProviderCatalogSeeds(db, { userId: 'user-1' })).toHaveLength(3);
+  });
+
+  async function existingCopies() {
+    const db = await saveGcp(createDb());
+    sqlite!.exec("UPDATE cc_configurations SET settings_json = '{}'");
+    const options = { userId: 'user-1', includeInstallation: false };
+    const before = await ensureDefaultCapacityPoolsForExistingCredentials(db, options);
+    const canonical = before.user!.sources.find((source) => !source.externalSourceRef)!;
+    const mirror = before.user!.sources.find((source) => source.externalSourceRef)!;
+    sqlite!
+      .prepare(
+        "UPDATE capacity_pool_candidates SET status = 'deleted' WHERE capacity_source_id = ?"
+      )
+      .run(canonical.id);
+    sqlite!.exec(
+      `UPDATE cc_configurations SET settings_json = '{"managedBy":"legacy-gcp-credential"}'`
+    );
+    return { db, options, canonical, mirror };
+  }
+
+  it('retains mirror protection when the relationship changes after seed selection', async () => {
+    const { db, options, canonical, mirror } = await existingCopies();
+    let changed = false;
+    await ensureDefaultCapacityPoolsForExistingCredentials(db, {
+      ...options,
+      afterCredentialSeedSelection: async ({ scope }) => {
+        if (scope.scope !== 'user') return;
+        changed = true;
+        sqlite!.exec("UPDATE cc_credentials SET iv = 'rotated-after-selection'");
+      },
+    });
+    expect(changed).toBe(true);
+    expect(
+      sqlite!.prepare('SELECT status FROM capacity_sources WHERE id = ?').get(mirror.id)
+    ).toEqual({ status: 'active' });
+    expect(
+      sqlite!
+        .prepare(
+          "SELECT count(*) count FROM capacity_pool_candidates WHERE capacity_source_id = ? AND status = 'active'"
+        )
+        .get(canonical.id)
+    ).toEqual({ count: 0 });
+  });
+
+  it('does not suppress a usable composable connection for a null legacy ID', async () => {
+    const db = await saveGcp(createDb());
+    sqlite!
+      .exec(`UPDATE cc_configurations SET settings_json = '{"managedBy":"legacy-gcp-credential"}';
+      UPDATE credentials SET id = NULL WHERE credential_type = 'cloud-provider'`);
+    expect(await listManagedGcpCredentialMirrors(db, 'user-1')).toEqual([]);
+    const seeds = await listUserProviderCatalogSeeds(db, { userId: 'user-1' });
+    expect(seeds.some((seed) => seed.externalSourceRef?.startsWith('cc_attachments:'))).toBe(true);
+  });
+
+  it('preserves canonical-only and mirror-only selections without enabling jointly excluded offerings', async () => {
+    const { db, options, canonical, mirror } = await existingCopies();
+    const rows = getRows<{ id: string; location: string }>(
+      `SELECT id, location FROM capacity_pool_candidates WHERE capacity_source_id = '${canonical.id}' ORDER BY id`
+    );
+    const locations = [...new Set(rows.map((row) => row.location))];
+    expect(locations.length).toBeGreaterThanOrEqual(3);
+    const [canonicalOnly, mirrorOnly] = locations;
+    sqlite!
+      .prepare(
+        "UPDATE capacity_pool_candidates SET status = CASE WHEN location = ? THEN 'active' ELSE 'deleted' END WHERE capacity_source_id = ?"
+      )
+      .run(canonicalOnly, canonical.id);
+    sqlite!
+      .prepare(
+        "UPDATE capacity_pool_candidates SET status = CASE WHEN location = ? THEN 'active' ELSE 'deleted' END WHERE capacity_source_id = ?"
+      )
+      .run(mirrorOnly, mirror.id);
+    const after = await ensureDefaultCapacityPoolsForExistingCredentials(db, options);
+    expect(after.user?.sources.map((source) => source.id)).toEqual([canonical.id]);
+    expect(
+      new Set(
+        after.user?.candidates
+          .filter((candidate) => candidate.status === 'active')
+          .map((candidate) => candidate.location)
+      )
+    ).toEqual(new Set([canonicalOnly, mirrorOnly]));
+    expect(
+      after.user?.candidates
+        .filter((candidate) => ![canonicalOnly, mirrorOnly].includes(candidate.location!))
+        .every((candidate) => candidate.status !== 'active')
+    ).toBe(true);
+  });
+
+  it.each([
+    'pool edit',
+    'source refresh',
+    'credential rotation',
+    'candidate insert',
+    'candidate price update',
+  ])('defers the entire repair on a concurrent %s', async (race) => {
+    const { options, canonical, mirror } = await existingCopies();
+    const database = createSqliteD1WithBindLimit(sqlite!, 100);
+    const repairStatements = new WeakSet<object>();
+    let raced = false;
+    const racingDatabase = {
+      ...database,
+      prepare(query: string) {
+        const statement = database.prepare(query);
+        return {
+          ...statement,
+          bind(...values: unknown[]) {
+            const bound = statement.bind(...values);
+            if (query.includes('pair.legacyId')) repairStatements.add(bound);
+            return bound;
+          },
+        };
+      },
+      async batch(statements: D1PreparedStatement[]) {
+        if (!raced && statements.some((statement) => repairStatements.has(statement))) {
+          raced = true;
+          if (race === 'pool edit')
+            sqlite!.exec('UPDATE capacity_pools SET revision = revision + 1');
+          if (race === 'source refresh')
+            sqlite!
+              .prepare(
+                'UPDATE capacity_sources SET source_generation = source_generation + 100 WHERE id = ?'
+              )
+              .run(mirror.id);
+          if (race === 'credential rotation')
+            sqlite!.exec("UPDATE cc_credentials SET iv = 'rotated'");
+          if (race === 'candidate insert') {
+            const columns = getRows<{ name: string }>(
+              'PRAGMA table_info(capacity_pool_candidates)'
+            ).map((column) => column.name);
+            sqlite!
+              .prepare(
+                `INSERT INTO capacity_pool_candidates (${columns.join(',')})
+                SELECT ${columns.map((column) => (column === 'id' ? "'racing-new-candidate'" : column)).join(',')}
+                FROM capacity_pool_candidates WHERE capacity_source_id = ? LIMIT 1`
+              )
+              .run(canonical.id);
+          }
+          if (race === 'candidate price update')
+            sqlite!
+              .prepare(
+                'UPDATE capacity_pool_candidates SET provider_instance_price_hourly_micros = 999 WHERE capacity_source_id = ?'
+              )
+              .run(canonical.id);
+        }
+        return database.batch(statements);
+      },
+    } as D1Database;
+    await ensureDefaultCapacityPoolsForExistingCredentials(
+      drizzleD1(racingDatabase, { schema }),
+      options
+    );
+    expect(raced).toBe(true);
+    expect(
+      sqlite!.prepare('SELECT status FROM capacity_sources WHERE id = ?').get(mirror.id)
+    ).toEqual({ status: 'active' });
+    expect(
+      sqlite!
+        .prepare(
+          "SELECT count(*) count FROM capacity_pool_candidates WHERE capacity_source_id = ? AND status = 'active'"
+        )
+        .get(canonical.id)
+    ).toEqual({ count: 0 });
+  });
+
+  async function repairInputs(db: ReturnType<typeof createDb>, canonicalId: string) {
+    const [pool] = await db.select().from(schema.capacityPools);
+    const source = (await db.select().from(schema.capacitySources)).find(
+      (row) => row.id === canonicalId
+    )!;
+    const [mirror] = await listManagedGcpCredentialMirrors(db, 'user-1');
+    return {
+      scope: { scope: 'user' as const, ownerUserId: 'user-1', ownerProjectId: null },
+      pool: pool!,
+      mirror: mirror!,
+      guard: {
+        revision: pool!.revision,
+        updatedAt: pool!.updatedAt,
+        status: pool!.status,
+        sourceGenerations: [{ id: source.id, generation: source.sourceGeneration }],
+      },
+    };
+  }
+
+  it('does not adopt a newer canonical publisher that has not completed its candidates', async () => {
+    const { db, canonical, mirror } = await existingCopies();
+    const input = await repairInputs(db, canonical.id);
+    sqlite!
+      .prepare('UPDATE capacity_sources SET source_generation = source_generation + 1 WHERE id = ?')
+      .run(canonical.id);
+    expect(
+      await reconcileManagedGcpPoolMirror(
+        db,
+        input.scope,
+        input.pool.id,
+        input.guard,
+        input.mirror,
+        Number.MAX_SAFE_INTEGER
+      )
+    ).toBeNull();
+    expect(
+      sqlite!.prepare('SELECT status FROM capacity_sources WHERE id = ?').get(mirror.id)
+    ).toEqual({ status: 'active' });
+  });
+
+  it('refreshes retained matching mirror catalog rows while leaving unmatched overrides intact', async () => {
+    const { db, canonical, mirror } = await existingCopies();
+    const oldRows = getRows<{
+      id: string;
+      location: string;
+      workload_role: string;
+      provider_instance_type: string;
+    }>(
+      `SELECT * FROM capacity_pool_candidates WHERE capacity_source_id = '${mirror.id}' ORDER BY id`
+    );
+    const unmatched = oldRows[0]!;
+    const matched = oldRows[1]!;
+    sqlite!
+      .prepare(
+        "UPDATE capacity_pool_candidates SET provider_instance_image = 'custom-image' WHERE id = ?"
+      )
+      .run(unmatched.id);
+    const preserved = sqlite!
+      .prepare('SELECT * FROM capacity_pool_candidates WHERE id = ?')
+      .get(unmatched.id);
+    const originalAuthority = sqlite!
+      .prepare('SELECT authority_generation FROM capacity_sources WHERE id = ?')
+      .get(mirror.id);
+    sqlite!
+      .prepare(
+        `UPDATE capacity_pool_candidates SET provider_instance_price_hourly_micros = 98765,
+      catalog_availability = 'last-known-unavailable' WHERE capacity_source_id = ?`
+      )
+      .run(canonical.id);
+    const input = await repairInputs(db, canonical.id);
+    const result = await reconcileManagedGcpPoolMirror(
+      db,
+      input.scope,
+      input.pool.id,
+      input.guard,
+      input.mirror,
+      Number.MAX_SAFE_INTEGER,
+      2
+    );
+    expect(result).not.toBeNull();
+    expect(
+      sqlite!.prepare('SELECT * FROM capacity_pool_candidates WHERE id = ?').get(unmatched.id)
+    ).toEqual(preserved);
+    expect(
+      sqlite!
+        .prepare(
+          'SELECT provider_instance_price_hourly_micros, catalog_availability FROM capacity_pool_candidates WHERE id = ?'
+        )
+        .get(matched.id)
+    ).toEqual({
+      provider_instance_price_hourly_micros: 98765,
+      catalog_availability: 'last-known-unavailable',
+    });
+    expect(
+      sqlite!.prepare('SELECT status FROM capacity_sources WHERE id = ?').get(mirror.id)
+    ).toEqual({ status: 'active' });
+    expect(
+      sqlite!
+        .prepare('SELECT authority_generation FROM capacity_sources WHERE id = ?')
+        .get(mirror.id)
+    ).toEqual(originalAuthority);
+    expect(
+      await reconcileManagedGcpPoolMirror(
+        db,
+        input.scope,
+        input.pool.id,
+        result!,
+        input.mirror,
+        Number.MAX_SAFE_INTEGER,
+        2
+      )
+    ).toBeNull();
+    expect(
+      sqlite!
+        .prepare(
+          "SELECT count(*) count FROM capacity_pool_candidates WHERE capacity_source_id = ? AND status = 'active'"
+        )
+        .get(canonical.id)
+    ).toEqual({ count: 0 });
+  });
+
+  it('bounds authority payloads with a small publication budget and thousands of historical rows', async () => {
+    const { db, canonical, mirror } = await existingCopies();
+    const columns = getRows<{ name: string }>('PRAGMA table_info(capacity_pool_candidates)').map(
+      (column) => column.name
+    );
+    sqlite!
+      .prepare(
+        `WITH RECURSIVE history(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM history WHERE n < 2000)
+      INSERT INTO capacity_pool_candidates (${columns.join(',')})
+      SELECT ${columns.map((column) => (column === 'id' ? "'historical-' || history.n" : column === 'provider_instance_type' ? "'historical-type-' || history.n" : 'base.' + column)).join(',')}
+      FROM history CROSS JOIN (SELECT * FROM capacity_pool_candidates WHERE capacity_source_id = ? LIMIT 1) base`
+      )
+      .run(canonical.id);
+    const input = await repairInputs(db, canonical.id);
+    const database = createSqliteD1WithBindLimit(sqlite!, 100);
+    const payloadLengths: number[] = [];
+    const tracked = {
+      ...database,
+      prepare(query: string) {
+        const statement = database.prepare(query);
+        return {
+          ...statement,
+          bind(...values: unknown[]) {
+            if (
+              query.startsWith('update "capacity_pool_candidates"') &&
+              query.includes('json_each')
+            ) {
+              for (const value of values)
+                if (typeof value === 'string' && value.startsWith('[{'))
+                  payloadLengths.push(JSON.parse(value).length);
+            }
+            return statement.bind(...values);
+          },
+        };
+      },
+    } as D1Database;
+    await reconcileManagedGcpPoolMirror(
+      drizzleD1(tracked, { schema }),
+      input.scope,
+      input.pool.id,
+      input.guard,
+      input.mirror,
+      Number.MAX_SAFE_INTEGER,
+      2
+    );
+    expect(payloadLengths.length).toBeGreaterThan(1);
+    expect(Math.max(...payloadLengths)).toBeLessThanOrEqual(2);
+    expect(
+      sqlite!.prepare('SELECT status FROM capacity_sources WHERE id = ?').get(mirror.id)
+    ).toEqual({ status: 'disabled' });
+    expect(
+      sqlite!
+        .prepare("SELECT count(*) count FROM capacity_pool_candidates WHERE id LIKE 'historical-%'")
+        .get()
+    ).toEqual({ count: 2000 });
+  });
+
+  it('rolls back selection transfer if retirement fails', async () => {
+    const { db, options, canonical, mirror } = await existingCopies();
+    sqlite!.exec(`CREATE TRIGGER fail_gcp_retirement BEFORE UPDATE ON capacity_sources
+      WHEN NEW.id = '${mirror.id}' AND NEW.status = 'disabled'
+      BEGIN SELECT RAISE(ABORT, 'injected retirement failure'); END`);
+    await expect(ensureDefaultCapacityPoolsForExistingCredentials(db, options)).rejects.toThrow();
+    expect(
+      sqlite!.prepare('SELECT status FROM capacity_sources WHERE id = ?').get(mirror.id)
+    ).toEqual({ status: 'active' });
+    expect(
+      sqlite!
+        .prepare(
+          "SELECT count(*) count FROM capacity_pool_candidates WHERE capacity_source_id = ? AND status = 'active'"
+        )
+        .get(canonical.id)
+    ).toEqual({ count: 0 });
+  });
+
+  it.each([
+    'provider_instance_type',
+    'provider_instance_image',
+    'provider_instance_boot_disk_size_gb',
+  ])('preserves unmatched selected %s rather than retiring it', async (column) => {
+    const { db, options, mirror } = await existingCopies();
+    sqlite!
+      .prepare(`UPDATE capacity_pool_candidates SET ${column} = ? WHERE capacity_source_id = ?`)
+      .run(column.endsWith('_gb') ? 100 : 'custom-value', mirror.id);
+    const after = await ensureDefaultCapacityPoolsForExistingCredentials(db, options);
+    expect(after.user?.sources).toHaveLength(2);
+    expect(
+      sqlite!.prepare('SELECT status FROM capacity_sources WHERE id = ?').get(mirror.id)
+    ).toEqual({ status: 'active' });
+  });
+
+  it('keeps a separately connected GCP account in catalog and pool', async () => {
+    const db = await saveGcp(createDb());
+    seedComposableCloudCredential({
+      credentialId: 'other-gcp',
+      configurationId: 'other-config',
+      attachmentId: 'other-attachment',
+      provider: 'gcp',
+      encryptedToken: 'independent',
+      iv: 'independent-iv',
+    });
+    expect(await listUserProviderCatalogSeeds(db, { userId: 'user-1' })).toHaveLength(2);
+    const result = await ensureDefaultCapacityPoolsForExistingCredentials(db, {
+      userId: 'user-1',
+      includeInstallation: false,
+    });
+    expect(result.user?.sources).toHaveLength(2);
+  });
+
+  it('repairs existing duplicate sources once, preserving selections and historical rows', async () => {
+    const db = await saveGcp(createDb());
+    // Reproduce the shipped duplicate materialization, then restore its actual managed marker.
+    sqlite!.exec("UPDATE cc_configurations SET settings_json = '{}'");
+    const options = { userId: 'user-1', includeInstallation: false };
+    const before = await ensureDefaultCapacityPoolsForExistingCredentials(db, options);
+    expect(before.user?.sources).toHaveLength(2);
+    const canonical = before.user!.sources.find((s) => !s.externalSourceRef)!;
+    const mirror = before.user!.sources.find((s) => s.externalSourceRef)!;
+    const chosen = before.user!.candidates.find((c) => c.capacitySourceId === canonical.id)!;
+    sqlite!
+      .prepare(
+        "UPDATE capacity_pool_candidates SET status = 'deleted' WHERE capacity_source_id = ?"
+      )
+      .run(canonical.id);
+    sqlite!
+      .prepare(
+        "UPDATE capacity_pool_candidates SET status = 'deleted' WHERE capacity_source_id = ? AND location != ?"
+      )
+      .run(mirror.id, chosen.location);
+    sqlite!
+      .prepare(
+        `INSERT INTO nodes (id,user_id,name,status,capacity_source_id,capacity_pool_candidate_id)
+      VALUES ('gcp-running-node','user-1','Existing GCP node','running',?,?)`
+      )
+      .run(mirror.id, before.user!.candidates.find((c) => c.capacitySourceId === mirror.id)!.id);
+    const nodeBefore = sqlite!.prepare('SELECT * FROM nodes WHERE id = ?').get('gcp-running-node');
+    const originalCount = getRows<{ count: number }>(
+      'SELECT count(*) count FROM capacity_pool_candidates'
+    )[0]!.count;
+    sqlite!.exec(
+      `UPDATE cc_configurations SET settings_json = '{"managedBy":"legacy-gcp-credential"}'`
+    );
+    const after = await ensureDefaultCapacityPoolsForExistingCredentials(db, options);
+    expect(after.user?.sources.map((s) => s.id)).toEqual([canonical.id]);
+    expect(
+      after.user?.candidates
+        .filter((c) => c.status === 'active')
+        .every((c) => c.location === chosen.location)
+    ).toBe(true);
+    expect(after.user?.candidates.some((c) => c.status === 'active')).toBe(true);
+    expect(
+      getRows<{ count: number }>('SELECT count(*) count FROM capacity_pool_candidates')[0]!.count
+    ).toBe(originalCount);
+    expect(
+      getRows<{ status: string }>(
+        `SELECT status FROM capacity_sources WHERE id = '${mirror.id}'`
+      )[0]!.status
+    ).toBe('disabled');
+    expect(sqlite!.prepare('SELECT * FROM nodes WHERE id = ?').get('gcp-running-node')).toEqual(
+      nodeBefore
+    );
+    expect(after.user?.pool.configurationState).toBe('configured-ready');
+    const digest = sqlite!
+      .prepare('SELECT selection_digest FROM capacity_pools WHERE id = ?')
+      .get(after.user!.pool.id);
+    const stable = await ensureDefaultCapacityPoolsForExistingCredentials(db, options);
+    expect(stable.user?.pool.revision).toBe(after.user?.pool.revision);
+    expect(
+      sqlite!
+        .prepare('SELECT selection_digest FROM capacity_pools WHERE id = ?')
+        .get(after.user!.pool.id)
+    ).toEqual(digest);
+    // User removes the merged selection. A later reconciliation must not resurrect the old copy.
+    sqlite!
+      .prepare(
+        "UPDATE capacity_pool_candidates SET status = 'deleted' WHERE capacity_source_id = ?"
+      )
+      .run(canonical.id);
+    const again = await ensureDefaultCapacityPoolsForExistingCredentials(db, options);
+    expect(again.user?.sources).toHaveLength(1);
+    expect(again.user?.candidates.some((c) => c.status === 'active')).toBe(false);
+  });
+});
+
+describe('pool provider order (idea 01M6NXTF2RQ5QXHM7YZ4ZF0XBK)', () => {
+  const LARGE_ENOUGH = {
+    vcpu: 4,
+    ramGb: 16,
+    memoryGb: 16,
+    memoryMb: 16_384,
+    storageGb: 160,
+    diskGb: 160,
+  };
+  /** A user pool with a cheap Hetzner offering and a pricier Vultr one, both medium. */
+  async function seedTwoProviderPool() {
+    const db = createDb();
+    seedUserCredential({ id: 'user-hetzner' });
+    seedUserCredential({ id: 'user-vultr', provider: 'vultr' });
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      candidatePublishBatchSize: 1000,
+      offeringResolver: async (seed) =>
+        seed.provider === 'vultr'
+          ? [
+              {
+                ...liveHetznerOffering({
+                  location: 'ewr',
+                  providerInstanceType: 'vc2-4c-16gb',
+                  displayName: 'vc2-4c-16gb',
+                  machineSize: 'medium',
+                  ...LARGE_ENOUGH,
+                }),
+                provider: 'vultr',
+                price: '$24.00/mo',
+                priceMonthly: 24,
+                priceHourly: 0.033,
+                currency: 'USD',
+              },
+            ]
+          : [
+              liveHetznerOffering({
+                location: 'fsn1',
+                providerInstanceType: 'cx43',
+                displayName: 'CX43',
+                machineSize: 'medium',
+                ...LARGE_ENOUGH,
+              }),
+            ],
+    });
+    const summary = await readDefaultCapacityPoolSummaries(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      includeDisabled: true,
+    });
+    const sourceFor = (provider: string) =>
+      summary.user?.candidates.find((candidate) => candidate.provider === provider)
+        ?.capacitySourceId as string;
+    return { db, hetznerSource: sourceFor('hetzner'), vultrSource: sourceFor('vultr') };
+  }
+
+  function poolRow() {
+    return getRows<{
+      revision: number;
+      selection_digest: string | null;
+      source_order_json: string | null;
+    }>(
+      "SELECT revision, selection_digest, source_order_json FROM capacity_pools WHERE scope = 'user'"
+    )[0]!;
+  }
+
+  function unpinnedPlacement() {
+    return resolveTaskStartPlacement({
+      entryPoint: 'task-submit',
+      taskId: 'order-task',
+      projectId: 'project-1',
+      userId: 'user-1',
+      project: { id: 'project-1', defaultProvider: null, defaultVmSize: 'medium' },
+      credentialProjectPolicy: 'current-project-unless-inherited',
+      taskModeDefault: 'task',
+      resourceRequirements: {},
+    });
+  }
+
+  async function firstCandidateProvider(db: ReturnType<typeof createDb>) {
+    const summary = await resolveEffectiveDefaultCapacityPoolSummary(db as never, {
+      userId: 'user-1',
+      projectId: null,
+      ensure: false,
+      includeInstallation: false,
+    });
+    const selection = buildCapacityPoolSelection(summary!, unpinnedPlacement(), 'workspace');
+    return selection?.candidates.map((candidate) => [
+      candidate.provider,
+      candidate.sourceRank ?? null,
+    ]);
+  }
+
+  it('ranks new VMs by provider order ahead of strategy, and leaves order unchanged without one', async () => {
+    const { db, hetznerSource, vultrSource } = await seedTwoProviderPool();
+    // Control: no order, so both sources are unranked and the pool's existing order applies.
+    const unordered = await firstCandidateProvider(db);
+    expect(unordered?.map(([, rank]) => rank)).toEqual([null, null]);
+    const naturalFirst = unordered?.[0]?.[0];
+    const preferred = naturalFirst === 'hetzner' ? vultrSource : hetznerSource;
+    const preferredProvider = naturalFirst === 'hetzner' ? 'vultr' : 'hetzner';
+    const other = preferred === vultrSource ? hetznerSource : vultrSource;
+
+    const update = await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      sourceOrder: [preferred, other],
+    });
+
+    expect(update.conflict).toBe(false);
+    expect(update.summary?.pool.sourceOrder).toEqual([preferred, other]);
+    expect(await firstCandidateProvider(db)).toEqual([
+      [preferredProvider, 1],
+      [naturalFirst, 2],
+    ]);
+  });
+
+  it('stores an order without bumping the pool revision or selection digest', async () => {
+    const { db, hetznerSource, vultrSource } = await seedTwoProviderPool();
+    const before = poolRow();
+
+    await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      sourceOrder: [vultrSource, hetznerSource],
+    });
+
+    // Reuse authority requires a node's recorded pool revision to match; a reorder that bumped
+    // it would make every running node non-reusable.
+    expect(poolRow()).toEqual({
+      revision: before.revision,
+      selection_digest: before.selection_digest,
+      source_order_json: JSON.stringify([vultrSource, hetznerSource]),
+    });
+  });
+
+  it.each([null, []])('clears the order with %j', async (cleared) => {
+    const { db, hetznerSource, vultrSource } = await seedTwoProviderPool();
+    await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      sourceOrder: [vultrSource, hetznerSource],
+    });
+
+    const update = await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      sourceOrder: cleared,
+    });
+
+    expect(update.summary?.pool.sourceOrder ?? null).toBeNull();
+    expect(poolRow().source_order_json).toBeNull();
+  });
+
+  it("rejects another user's source and an unknown id, writing nothing", async () => {
+    const { db, hetznerSource } = await seedTwoProviderPool();
+    seedUserCredential({ id: 'user-2-hetzner', userId: 'user-2' });
+    await ensureDefaultCapacityPoolsForExistingCredentials(db as never, {
+      userId: 'user-2',
+      includeInstallation: false,
+      offeringResolver: async () => [
+        liveHetznerOffering({
+          location: 'fsn1',
+          providerInstanceType: 'cx33',
+          displayName: 'CX33',
+          machineSize: 'medium',
+        }),
+      ],
+    });
+    const foreignSource = getRows<{ capacity_source_id: string }>(
+      "SELECT c.capacity_source_id FROM capacity_pool_candidates c JOIN capacity_pools p ON p.id = c.pool_id WHERE p.owner_user_id = 'user-2' LIMIT 1"
+    )[0]!.capacity_source_id;
+
+    const update = await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      sourceOrder: [hetznerSource, foreignSource, 'no-such-source'],
+    });
+
+    expect(update.missingSourceIds).toEqual([foreignSource, 'no-such-source']);
+    expect(poolRow().source_order_json).toBeNull();
+
+    // Owner-path control: the user's own source alone is accepted.
+    const own = await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      sourceOrder: [hetznerSource],
+    });
+    expect(own.missingSourceIds).toEqual([]);
+    expect(poolRow().source_order_json).toBe(JSON.stringify([hetznerSource]));
+  });
+
+  it('stores the order with a policy edit in the same revision bump', async () => {
+    const { db, hetznerSource, vultrSource } = await seedTwoProviderPool();
+    const before = poolRow();
+
+    await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      policy: { exhaustionPolicy: 'fallback-chain' },
+      sourceOrder: [vultrSource, hetznerSource],
+    });
+
+    expect(poolRow()).toMatchObject({
+      revision: before.revision + 1,
+      source_order_json: JSON.stringify([vultrSource, hetznerSource]),
+    });
+  });
+
+  it('lets exactly one of two concurrent reorders win; the other reports a conflict', async () => {
+    const { db, hetznerSource, vultrSource } = await seedTwoProviderPool();
+    const reorder = (sourceOrder: string[]) =>
+      updateDefaultCapacityPool(db as never, {
+        scope: 'user',
+        ownerUserId: 'user-1',
+        ownerProjectId: null,
+        sourceOrder,
+      });
+    const first = [hetznerSource, vultrSource];
+    const second = [vultrSource, hetznerSource];
+
+    const [a, b] = await Promise.all([reorder(first), reorder(second)]);
+
+    // Both editors read the same unordered pool. A reorder does not bump the revision, so only
+    // the order-value fence can stop the later write from silently replacing the earlier one.
+    expect([a.conflict, b.conflict].sort()).toEqual([false, true]);
+    const winner = a.conflict ? second : first;
+    expect(poolRow().source_order_json).toBe(JSON.stringify(winner));
+    expect((a.conflict ? b : a).summary?.pool.sourceOrder).toEqual(winner);
+  });
+
+  it('fences a policy edit that rewrites the order against a concurrent reorder', async () => {
+    const { db, hetznerSource, vultrSource } = await seedTwoProviderPool();
+    const before = poolRow();
+    const reorderOnly = updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      sourceOrder: [hetznerSource, vultrSource],
+    });
+    const policyAndOrder = updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      policy: { exhaustionPolicy: 'fallback-chain' },
+      sourceOrder: [vultrSource, hetznerSource],
+    });
+
+    const [a, b] = await Promise.all([reorderOnly, policyAndOrder]);
+
+    expect([a.conflict, b.conflict].sort()).toEqual([false, true]);
+    const row = getRows<{ exhaustion_policy: string; revision: number }>(
+      "SELECT exhaustion_policy, revision FROM capacity_pools WHERE scope = 'user'"
+    )[0]!;
+    if (a.conflict) {
+      // The combined edit won: its order and its policy landed together, in one revision bump.
+      expect(poolRow().source_order_json).toBe(JSON.stringify([vultrSource, hetznerSource]));
+      expect(row).toEqual({ exhaustion_policy: 'fallback-chain', revision: before.revision + 1 });
+    } else {
+      // The reorder won: the combined edit published nothing, policy included.
+      expect(poolRow().source_order_json).toBe(JSON.stringify([hetznerSource, vultrSource]));
+      expect(row.revision).toBe(before.revision);
+      expect(row.exhaustion_policy).not.toBe('fallback-chain');
+    }
+  });
+
+  it('treats a source whose candidates are all deleted as not serving the pool', async () => {
+    const { db, hetznerSource, vultrSource } = await seedTwoProviderPool();
+    sqlite
+      ?.prepare(
+        `UPDATE capacity_pool_candidates SET status = 'deleted' WHERE capacity_source_id = ?`
+      )
+      .run(vultrSource);
+
+    const update = await updateDefaultCapacityPool(db as never, {
+      scope: 'user',
+      ownerUserId: 'user-1',
+      ownerProjectId: null,
+      sourceOrder: [vultrSource, hetznerSource],
+    });
+
+    expect(update.missingSourceIds).toEqual([vultrSource]);
+    expect(poolRow().source_order_json).toBeNull();
+  });
+
+  it('reads a malformed stored order as no order instead of failing the pool', async () => {
+    const { db } = await seedTwoProviderPool();
+    sqlite?.prepare(`UPDATE capacity_pools SET source_order_json = '{"not":"a list"}'`).run();
+
+    const summary = await readDefaultCapacityPoolSummaries(db as never, {
+      userId: 'user-1',
+      includeInstallation: false,
+      includeDisabled: true,
+    });
+
+    expect(summary.user?.pool.sourceOrder ?? null).toBeNull();
+    expect(summary.user?.candidates.length).toBeGreaterThan(0);
   });
 });

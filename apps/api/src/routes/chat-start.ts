@@ -15,6 +15,7 @@ import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
 import { requireOpenIdeaForWorkStart } from '../operations/start-work-core';
 import { jsonValidator, StartChatSessionSchema } from '../schemas';
+import { resolveTaskAgentOverrides } from '../services/agent-profiles';
 import { acceptInstantSession, continueInstantSessionLaunch } from '../services/instant-session';
 import { enrichMessageWithMentions } from '../services/mention-enrichment';
 import { inheritedCredentialAttributionForCaller } from '../services/placement-field-resolution';
@@ -174,6 +175,8 @@ chatStartRoutes.post(
       project.defaultAgentType ??
       c.env.DEFAULT_TASK_AGENT_TYPE ??
       'opencode';
+    // Before any effect: an effort the resolved agent cannot run is rejected here.
+    const agentRun = resolveTaskAgentOverrides(agentType, body, resolvedProfile ?? {});
 
     const parentTask = await resolveParentLineage(
       db,
@@ -243,8 +246,7 @@ chatStartRoutes.post(
       skillId: resolvedProfile?.skillId ?? null,
       sourceIdeaId: sourceIdea?.ideaId ?? null,
       overrides: {
-        model: resolvedProfile?.model ?? null,
-        effort: resolvedProfile?.effort ?? null,
+        ...agentRun,
         permissionMode: resolvedProfile?.permissionMode ?? null,
       },
     };

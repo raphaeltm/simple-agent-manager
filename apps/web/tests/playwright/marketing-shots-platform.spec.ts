@@ -108,15 +108,9 @@ const CHILD_TESTS_SESSION_ID = 'sess-refund-tests';
 const CHILD_SIGNOFF_TASK_ID = 'task-refund-signoff';
 
 /**
- * Session recency drives real UI behavior: `isStaleSession()`
- * (`lib/chat-session-utils.ts`) compares `lastMessageAt` against `Date.now()`
- * with a 3-hour window (`STALE_SESSION_THRESHOLD_MS`) and collapses anything
- * older into a click-to-expand "Older" bucket in the sidebar. Fixed
- * `2026-09-14T09:40` timestamps looked deterministic but silently fell
- * outside that window whenever the suite ran later in the day (the sandbox
- * clock is real — `date -u` returns the actual current time) — every
- * requested sidebar session collapsed into "Older (8)" and only the exempt
- * sleeping session stayed visible. Anchor everything to the real run time.
+ * Anchor every timestamp to the real run time. Relative times in the sidebar
+ * ("1m ago") are computed against `Date.now()`, so fixed timestamps drift into
+ * implausible ages whenever the suite runs later than they were written.
  */
 const NOW = Date.now();
 function agoMs(minutes: number): number {
@@ -172,9 +166,8 @@ const SESSION_LIST = [
     topic: 'Stripe webhook signature rotation',
     status: 'sleeping',
     messageCount: 14,
-    // Sleeping sessions are exempt from the staleness cutoff (they stay
-    // discoverable so the same-chat wake gesture keeps working), so this can
-    // stay narratively "older" without falling into the sidebar's Older bucket.
+    // Sleeping sessions sit in their own open section, so this can stay
+    // narratively "older" and still show in the sidebar.
     startedAt: agoMs(170),
     endedAt: null,
     createdAt: agoMs(170),

@@ -79,6 +79,7 @@ type Server struct {
 	buildQueue             chan struct{}
 	readyRetryMu           sync.Mutex // guards retryPendingReadyCallbacks — only one run at a time
 	evictionDeliveryMu     sync.Mutex // One bounded eviction callback delivery at a time.
+	evictionFinalizing     sync.Map   // Workspaces between the eviction stop intent and the recorded eviction.
 	eventMu                sync.RWMutex
 	nodeEvents             []EventRecord
 	workspaceEvents        map[string][]EventRecord
@@ -114,6 +115,7 @@ type Server struct {
 	portScanners           map[string]*ports.Scanner
 	portDiscoveries        map[string]*container.Discovery // per-workspace container discovery
 	bootstrapComplete      atomic.Bool
+	selfRestartRequested   atomic.Bool // set once an Operations-approved restart is pending
 	callbackTokenMu        sync.RWMutex
 	callbackToken          string
 	tokenRenewal           workspaceTokenRenewal // workspace callback token renewal (workspace_callback_token_renewal.go)
@@ -140,6 +142,7 @@ type Server struct {
 
 	workspaceDeletionCancel context.CancelFunc
 	workspaceDeletionDone   chan struct{}
+	workspaceDeletionWake   chan struct{}
 	workspaceLifecycleMu    sync.Mutex
 	workspaceLifecycleLocks map[string]*workspaceLifecycleEntry
 
@@ -452,6 +455,7 @@ func New(cfg *config.Config) (*Server, error) {
 		PongTimeout:                      cfg.ACPPongTimeout,
 		PromptTimeout:                    cfg.ACPPromptTimeout,
 		PromptCancelGracePeriod:          cfg.ACPPromptCancelGrace,
+		SteerTimeout:                     cfg.ACPSteerTimeout,
 		PromptRetryMaxRetries:            cfg.ACPPromptRetryMaxRetries,
 		PromptRetryInitialDelay:          cfg.ACPPromptRetryInitial,
 		PromptRetryMaxDelay:              cfg.ACPPromptRetryMax,
@@ -469,7 +473,6 @@ func New(cfg *config.Config) (*Server, error) {
 		RestartAttemptTimeout:            cfg.ACPRestartAttemptTimeout,
 		RecoveryWatchdogTimeout:          cfg.ACPRecoveryWatchdog,
 		RestartDecayWindow:               cfg.ACPRestartDecayWindow,
-		SAMEnvFallback:                   cfg.BuildSAMEnvFallback(),
 		HTTPClient:                       config.NewControlPlaneClient(cfg.HTTPCallbackTimeout),
 	}
 
@@ -1046,9 +1049,18 @@ func (s *Server) startResourceGuard() {
 		return
 	}
 	if s.resourceEviction != nil {
-		if err := s.resourceEviction.Start(context.Background()); err != nil {
-			slog.Warn("Resource eviction controller failed to start", "error", err)
-		}
+		// Reap helpers a crashed agent left behind before any new capture can create
+		// one: the reaper removes every helper, so it must not race a live capture.
+		go func() {
+			reapCtx, cancel := context.WithTimeout(context.Background(), s.config.EvictionSnapshotTimeout)
+			if err := s.reapSnapshotHelpers(reapCtx, ""); err != nil {
+				slog.Warn("Startup snapshot helper reap failed; workspace deletion reaps per workspace", "error", err)
+			}
+			cancel()
+			if err := s.resourceEviction.Start(context.Background()); err != nil {
+				slog.Warn("Resource eviction controller failed to start", "error", err)
+			}
+		}()
 		return
 	}
 	go func() {
@@ -1150,6 +1162,8 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/resume", s.handleResumeAgentSession)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/prompt", s.handleSendPrompt)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/agent-sessions/{sessionId}/prompt-receipts/{deliveryId}", s.handleGetPromptReceipt)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/steer", s.handleSteerPrompt)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/agent-sessions/{sessionId}/steer-receipts/{deliveryId}", s.handleGetSteerReceipt)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/interactions/{interactionId}/answer", s.handleAcpInteractionAnswer)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/checkpoint-rollovers", s.handleCheckpointRollover)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/agent-sessions/{sessionId}/checkpoint-rollovers/{operationId}", s.handleGetCheckpointRollover)
@@ -1176,6 +1190,7 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /workspaces/{workspaceId}/worktrees", s.handleRemoveWorktree)
 
 	mux.HandleFunc("GET /debug-package", s.handleDebugPackage)
+	mux.HandleFunc("POST /admin/restart-agent", s.handleRestartAgent)
 	mux.HandleFunc("GET /events", s.handleListNodeEvents)
 	mux.HandleFunc("GET /events/export", s.handleExportEvents)
 	mux.HandleFunc("GET /metrics/export", s.handleExportMetrics)

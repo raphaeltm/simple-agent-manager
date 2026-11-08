@@ -61,9 +61,11 @@ import { handleChannelTool } from './project-event-channel-tools';
 import { handleListSubscriptionEvents } from './project-event-tools';
 import { handleScheduleTool } from './project-schedule-tools';
 import { handleSecretExec } from './secret-exec-tools';
+import { MCP_SERVER_INSTRUCTIONS } from './server-instructions';
 import { handleGetArchivedToolPayloads } from './session-tools';
 import { handleTaskPullRequestAssociation } from './task-pr-association-tools';
 import { handleCompleteTask } from './task-tools';
+import { isResolvedToolCall, resolveGroupedToolCall } from './tool-group-dispatch';
 import { MCP_TOOL_HANDLERS } from './tool-handler-table';
 import { listMcpToolsForToken } from './tool-listing';
 import { webhookClaimRoutes } from './webhook-claims';
@@ -178,8 +180,15 @@ mcpRoutes.post('/', async (c) => {
 
     // MCP protocol: call a tool
     case 'tools/call': {
-      const toolName = (rpc.params as { name?: string })?.name;
-      const toolArgs = (rpc.params as { arguments?: Record<string, unknown> })?.arguments ?? {};
+      // A domain group call (`ideas_read`) resolves to the member tool it stands for.
+      const resolved = resolveGroupedToolCall(
+        requestId,
+        (rpc.params as { name?: string })?.name,
+        (rpc.params as { arguments?: Record<string, unknown> })?.arguments ?? {}
+      );
+      if (!isResolvedToolCall(resolved)) return c.json(resolved);
+      const toolName = resolved.toolName;
+      const toolArgs = resolved.toolArgs;
 
       try {
         switch (toolName) {
@@ -392,7 +401,7 @@ mcpRoutes.post('/', async (c) => {
         }
         const message = err instanceof Error ? err.message : 'Tool execution failed';
         const name = toolName ?? '<unknown>';
-        log.error('mcp.tool_call_failed', { tool: name, error: String(err) });
+        log.error('mcp.tool_call_failed', { tool: name, via: resolved.via, error: String(err) });
         return c.json(jsonRpcError(requestId, INTERNAL_ERROR, `Tool '${name}' failed: ${message}`));
       }
     }
@@ -404,6 +413,7 @@ mcpRoutes.post('/', async (c) => {
           protocolVersion: MCP_PROTOCOL_VERSION,
           capabilities: { tools: { listChanged: false } },
           serverInfo: { name: MCP_SERVER_NAME, version: MCP_SERVER_VERSION },
+          instructions: MCP_SERVER_INSTRUCTIONS,
         })
       );
     }

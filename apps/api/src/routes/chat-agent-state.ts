@@ -173,6 +173,7 @@ async function resolveChatAgentState(
       runtimeWorkSource: state?.runtimeWorkSource ?? null,
       runtimeWorkUpdatedAt: state?.runtimeWorkUpdatedAt ?? null,
       runtimeWorkProgressAt: state?.runtimeWorkProgressAt ?? null,
+      steeringSupported: state?.steeringSupported ?? null,
       currentPlan: planSource.currentPlan,
       planUpdatedAt: planSource.planUpdatedAt,
     };

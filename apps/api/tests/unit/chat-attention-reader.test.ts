@@ -98,6 +98,18 @@ describe('notification question reader route', () => {
     expect(mocks.marker).toHaveBeenCalledWith(expect.anything(), 'p-1', 's-1', 'a-1', 'user-1');
     expect(mocks.messages).not.toHaveBeenCalled();
   });
+  it('returns the stored category, and null when it is absent or not a known category', async () => {
+    const base = await mocks.marker();
+    const read = async (metadata: string | null) => {
+      mocks.marker.mockResolvedValue({ ...base, metadata });
+      return (await (await app().request(path, {}, { DATABASE: {} })).json()).request.category;
+    };
+    expect(await read(JSON.stringify({ category: 'approval', options: ['Go'] }))).toBe('approval');
+    expect(await read(JSON.stringify({ options: ['Go'] }))).toBeNull();
+    expect(await read(JSON.stringify({ category: 'rm -rf' }))).toBeNull();
+    expect(await read('not json')).toBeNull();
+    expect(await read(null)).toBeNull();
+  });
   it('reads a small window before the request, not the latest conversation page', async () => {
     const response = await app().request(path + '?context=true', {}, { DATABASE: {} });
     expect((await response.json()).messages[0].content).toBe('Previous context');

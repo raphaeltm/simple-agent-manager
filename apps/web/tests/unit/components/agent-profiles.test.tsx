@@ -49,6 +49,11 @@ vi.mock(
   '../../../src/components/agent-profiles/ProfileAccountFormSection',
   () => accountSectionMock
 );
+// The list's usage column reads the account queries; its own vertical-slice test
+// (tests/unit/components/accounts/profile-list-usage.test.tsx) covers it.
+vi.mock('../../../src/components/agent-profiles/useProfileBudgets', () => ({
+  useProfileBudgets: () => null,
+}));
 vi.mock('../../../src/components/agent-models/AgentModelAccessField', () => ({
   AgentModelAccessField: ({ value }: { value: string[] | null }) => (
     <div data-testid="agent-model-access-field">{value ? value.join(',') : 'inherit'}</div>
@@ -201,6 +206,15 @@ describe('ProfileSelector', () => {
 // ProfileList
 // ---------------------------------------------------------------------------
 
+async function chooseAction(
+  user: ReturnType<typeof userEvent.setup>,
+  profileName: string,
+  action: 'Edit' | 'Delete'
+) {
+  await user.click(screen.getByLabelText(`Actions for ${profileName}`));
+  await user.click(screen.getByRole('menuitem', { name: action }));
+}
+
 describe('ProfileList', () => {
   const defaultProps = {
     profiles: PROFILES,
@@ -245,12 +259,20 @@ describe('ProfileList', () => {
     expect(screen.getByText(/no profiles yet/i)).toBeInTheDocument();
   });
 
-  it('shows edit/delete buttons for all profiles including built-in', () => {
+  it('shows an actions menu with edit and delete for every profile including built-in', async () => {
+    const user = userEvent.setup();
     render(<ProfileList {...defaultProps} />, { wrapper: Wrapper });
-    const editButtons = screen.getAllByLabelText(/^Edit /);
-    expect(editButtons).toHaveLength(3); // All profiles including built-in
-    const deleteButtons = screen.getAllByLabelText(/^Delete /);
-    expect(deleteButtons).toHaveLength(3);
+    expect(screen.getAllByLabelText(/^Actions for /)).toHaveLength(3);
+    await user.click(screen.getByLabelText('Actions for default'));
+    expect(screen.getByRole('menuitem', { name: 'Edit' })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: 'Delete' })).toBeInTheDocument();
+  });
+
+  it('opens the edit dialog when the profile name is clicked', async () => {
+    const user = userEvent.setup();
+    render(<ProfileList {...defaultProps} />, { wrapper: Wrapper });
+    await user.click(screen.getByRole('button', { name: 'Fast Implementer' }));
+    expect(screen.getByText('Edit Profile')).toBeInTheDocument();
   });
 
   it('opens create dialog when New Profile is clicked', async () => {
@@ -263,21 +285,21 @@ describe('ProfileList', () => {
   it('opens edit dialog when edit button is clicked', async () => {
     const user = userEvent.setup();
     render(<ProfileList {...defaultProps} />, { wrapper: Wrapper });
-    await user.click(screen.getByLabelText('Edit Fast Implementer'));
+    await chooseAction(user, 'Fast Implementer', 'Edit');
     expect(screen.getByText('Edit Profile')).toBeInTheDocument();
   });
 
   it('opens edit dialog for built-in profile', async () => {
     const user = userEvent.setup();
     render(<ProfileList {...defaultProps} />, { wrapper: Wrapper });
-    await user.click(screen.getByLabelText('Edit default'));
+    await chooseAction(user, 'default', 'Edit');
     expect(screen.getByText('Edit Profile')).toBeInTheDocument();
   });
 
   it('shows delete confirmation when delete button is clicked', async () => {
     const user = userEvent.setup();
     render(<ProfileList {...defaultProps} />, { wrapper: Wrapper });
-    await user.click(screen.getByLabelText('Delete Fast Implementer'));
+    await chooseAction(user, 'Fast Implementer', 'Delete');
     expect(screen.getByText('Confirm')).toBeInTheDocument();
     expect(screen.getByText('Cancel')).toBeInTheDocument();
   });
@@ -286,7 +308,7 @@ describe('ProfileList', () => {
     const user = userEvent.setup();
     const onDelete = vi.fn().mockResolvedValue(undefined);
     render(<ProfileList {...defaultProps} onDeleteProfile={onDelete} />, { wrapper: Wrapper });
-    await user.click(screen.getByLabelText('Delete default'));
+    await chooseAction(user, 'default', 'Delete');
     await user.click(screen.getByLabelText('Confirm delete default'));
     expect(onDelete).toHaveBeenCalledWith('prof-builtin');
   });
@@ -295,7 +317,7 @@ describe('ProfileList', () => {
     const user = userEvent.setup();
     const onDelete = vi.fn().mockResolvedValue(undefined);
     render(<ProfileList {...defaultProps} onDeleteProfile={onDelete} />, { wrapper: Wrapper });
-    await user.click(screen.getByLabelText('Delete Fast Implementer'));
+    await chooseAction(user, 'Fast Implementer', 'Delete');
     await user.click(screen.getByText('Confirm'));
     expect(onDelete).toHaveBeenCalledWith('prof-1');
   });
@@ -304,23 +326,24 @@ describe('ProfileList', () => {
     const user = userEvent.setup();
     const onDelete = vi.fn().mockResolvedValue(undefined);
     render(<ProfileList {...defaultProps} onDeleteProfile={onDelete} />, { wrapper: Wrapper });
-    await user.click(screen.getByLabelText('Delete Fast Implementer'));
+    await chooseAction(user, 'Fast Implementer', 'Delete');
     await user.click(screen.getByText('Cancel'));
     expect(onDelete).not.toHaveBeenCalled();
   });
 
-  it('shows profile metadata: agent type, model, permission mode', () => {
+  it('shows profile metadata: agent, model, effort, permission mode', () => {
     render(<ProfileList {...defaultProps} />, { wrapper: Wrapper });
-    expect(screen.getAllByText('claude-code').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Claude Code').length).toBeGreaterThan(0);
     expect(screen.getAllByText('claude-sonnet-4-5-20250929').length).toBeGreaterThan(0);
-    expect(screen.getAllByText('acceptEdits').length).toBeGreaterThan(0);
+    expect(screen.getByText('Extra high effort')).toBeInTheDocument();
+    expect(screen.getAllByText('Accept Edits').length).toBeGreaterThan(0);
   });
 
   it('shows delete error in role="alert" when onDeleteProfile rejects', async () => {
     const user = userEvent.setup();
     const onDelete = vi.fn().mockRejectedValue(new Error('Cannot delete: in use'));
     render(<ProfileList {...defaultProps} onDeleteProfile={onDelete} />, { wrapper: Wrapper });
-    await user.click(screen.getByLabelText('Delete Fast Implementer'));
+    await chooseAction(user, 'Fast Implementer', 'Delete');
     await user.click(screen.getByText('Confirm'));
     await screen.findByRole('alert');
     expect(screen.getByRole('alert')).toHaveTextContent('Cannot delete: in use');
@@ -345,7 +368,7 @@ describe('ProfileList', () => {
     const user = userEvent.setup();
     const onUpdate = vi.fn().mockResolvedValue(makeProfile());
     render(<ProfileList {...defaultProps} onUpdateProfile={onUpdate} />, { wrapper: Wrapper });
-    await user.click(screen.getByLabelText('Edit Fast Implementer'));
+    await chooseAction(user, 'Fast Implementer', 'Edit');
     // Name should be pre-filled
     const nameInput = screen.getByDisplayValue('Fast Implementer');
     expect(nameInput).toBeInTheDocument();

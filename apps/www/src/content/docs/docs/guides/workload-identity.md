@@ -9,7 +9,7 @@ You configure the trust relationship **in the receiving service**. SAM proves th
 
 ## 1. Find your identity
 
-Open a running chat, choose **Details**, then expand **Workload identity (OIDC)**. Copy the issuer, subject, and relevant IDs. The panel also shows readable names and automation origin when available. Viewing it does not mint a token. The chat has to be awake: on a sleeping chat the panel says "Identity details are unavailable. Reopen this section to retry. If this chat is asleep, wake it first."
+Open a running chat, choose **Details** in the chat's tool rail (on a phone you can also tap the chat's title at the top), then expand **Workload identity (OIDC)**. Copy the issuer, subject, and relevant IDs. The panel also shows readable names and automation origin when available. Viewing it does not mint a token. The chat has to be awake: on a sleeping chat the panel says "Identity details are unavailable. Reopen this section to retry. If this chat is asleep, wake it first."
 
 For an installation at `example.com`:
 

@@ -68,18 +68,18 @@ When agent deploys are off for the environment, each **Ask an agent…** button 
 
 ## For agents: publishing a release
 
-Agents can discover this whole flow at runtime by calling the `get_deployment_guide` MCP tool, which returns a briefing on the agent-first model and the order in which to call the deployment tools. It takes no arguments and is the recommended starting point whenever a user asks to deploy, launch, publish, ship, or release an app.
+Agents can discover this whole flow at runtime by calling the `deployments_read` MCP tool with `{"method": "guide"}`, which returns a briefing on the agent-first model and the order in which to call the deployment tools. It needs no other arguments.
 
 Publishing is a two-step, asynchronous flow:
 
-1. `build_and_publish(environment, reference?, workingDir?)` starts a build/publish job on the SAM VM and immediately returns a durable `publishJobId`. The job builds the workspace's Docker Compose stack, pushes built service images with SAM-owned registry credentials, and records the release server-side. Agents never run docker or registry commands and never receive registry credentials.
-2. `get_publish_status(publishJobId)` reports progress. Poll it until the status is terminal — `succeeded`, `failed`, `canceled`, or `unknown` — rather than retrying `build_and_publish` blindly.
+1. `deployments_write` with `method: "publish"` (`environment`, optional `reference` and `workingDir`) starts a build/publish job on the SAM VM and immediately returns a durable `publishJobId`. The job builds the workspace's Docker Compose stack, pushes built service images with SAM-owned registry credentials, and records the release server-side. Agents never run docker or registry commands and never receive registry credentials.
+2. `deployments_read` with `method: "publish_status"` and the `publishJobId` reports progress. Poll it until the status is terminal — `succeeded`, `failed`, `canceled`, or `unknown` — rather than retrying `deployments_write` method `publish` blindly.
 
-After a successful publish, agents can verify runtime health with `read_deployment_logs(environment, ...)`.
+After a successful publish, agents can verify runtime health with `deployments_read` (`method: "logs"`).
 
-`build_and_publish` requires the named deployment environment to be active — or in `error`, awaiting a recovery release — agent deployment to be enabled by a user, and the agent profile to satisfy that environment's policy. An environment that a previous release left in `error` stays available to agents precisely so the next release can recover it; environments that are starting, stopping, stopped, or being deleted are not agent-deployable.
+`deployments_write` method `publish` requires the named deployment environment to be active — or in `error`, awaiting a recovery release — agent deployment to be enabled by a user, and the agent profile to satisfy that environment's policy. An environment that a previous release left in `error` stays available to agents precisely so the next release can recover it; environments that are starting, stopping, stopped, or being deleted are not agent-deployable.
 
-Agents can preview route behavior before publishing with `preview_deployment_routes(environment, composeYaml)` and inspect the latest release's generated routes and custom domains with `list_deployment_routes(environment)`.
+Agents can preview route behavior before publishing with `deployments_read` (`method: "preview_routes"`, `environment`, `composeYaml`) and inspect the latest release's generated routes and custom domains with `deployments_read` (`method: "routes"`).
 
 The release submission format is Docker Compose YAML with SAM extensions. SAM supports multi-service Compose stacks, preserves service topology including Docker Model Runner `provider:` services, and derives route hints from either `x-sam-routes` or compose service `ports:`. Compose long-syntax `ports:` entries with `mode: host` are treated as internal/private route hints; other `ports:` entries are public by default unless an explicit private `x-sam-routes` entry suppresses them.
 
@@ -126,14 +126,14 @@ SAM accepts `application/yaml`, `text/yaml`, `application/x-yaml`, and `text/x-y
 
 Configure values on each deployment environment in its **Settings your app reads** section. Use **Add**, and turn on **Keep it secret** for a secret:
 
-- **Variables** are visible after save. SAM supplies them to `build_and_publish` and to deployment-node Compose apply commands, so they can be used for image tags, build args, domains, and runtime environment values.
+- **Variables** are visible after save. SAM supplies them to `deployments_write` method `publish` and to deployment-node Compose apply commands, so they can be used for image tags, build args, domains, and runtime environment values.
 - **Secrets** are hidden after save. SAM supplies them only to deployment-node Compose apply commands as process environment for Compose interpolation. Secrets are not sent to build nodes and should not be used in build args, image tags, route fields, or other build/publish-control fields.
 
 Compose interpolation only affects placeholders such as `${DATABASE_URL}`. It does not override literal Compose values like `NODE_ENV: production`.
 
 `x-sam-secret` and older explicit secret references remain supported for compatibility, but new deployments should prefer normal Compose `${VAR}` placeholders backed by per-environment Variables and Secrets.
 
-For compose-publish releases, `build_and_publish` supports safe named Docker Compose volumes when each service mount references a top-level named volume declaration. SAM creates missing provider-backed block volumes for those declarations and rewrites service mounts to SAM-managed volume roots before deployment apply. Host bind mounts, Docker socket mounts, anonymous volumes, undeclared named volumes, `volumes_from`, `tmpfs`, external volumes, custom volume drivers, and driver options are rejected.
+For compose-publish releases, `deployments_write` method `publish` supports safe named Docker Compose volumes when each service mount references a top-level named volume declaration. SAM creates missing provider-backed block volumes for those declarations and rewrites service mounts to SAM-managed volume roots before deployment apply. Host bind mounts, Docker socket mounts, anonymous volumes, undeclared named volumes, `volumes_from`, `tmpfs`, external volumes, custom volume drivers, and driver options are rejected.
 
 ```yaml
 services:
@@ -150,7 +150,7 @@ volumes:
 Deployment machines run a restricted subset of Compose. Settings that would give a container power
 over the machine itself, such as `privileged`, `cap_add`, `network_mode`, `devices`, and
 `use_api_socket` (access to the Docker Engine API), aren't allowed: a release that includes one is
-refused with a message naming the setting, and `build_and_publish` removes them from the services it
+refused with a message naming the setting, and `deployments_write` method `publish` removes them from the services it
 publishes. A deployment machine can host several of your environments, so this keeps one app from
 reaching another.
 
@@ -162,7 +162,7 @@ If an app needs to know its public hostname before it starts, agents should prev
 
 Provider-backed block volumes give a deployment environment durable storage that survives container restarts and the stop/start lifecycle. They are real cloud block volumes created through the deployment environment's provider and attached to the deployment node.
 
-- Volumes are created automatically from safe Compose named volume declarations during `build_and_publish`. They can also be created, viewed, and deleted in the environment's **Saved data** section, and attached or detached by hand under **Behind the scenes**.
+- Volumes are created automatically from safe Compose named volume declarations during `deployments_write` method `publish`. They can also be created, viewed, and deleted in the environment's **Saved data** section, and attached or detached by hand under **Behind the scenes**.
 - Each volume is mounted at a SAM-managed path derived from the environment id, and the deployment apply payload tells the node which provider volume to mount where.
 - All volumes in one environment must share the same provider **and** the same location. A single VM can only attach volumes that live in its own provider/location, so an environment that mixes providers or regions is rejected before a node is provisioned.
 - When an environment has volumes (or is marked as requiring volumes), provisioning is pinned to the volumes' provider and location so the node lands where the volumes can attach.

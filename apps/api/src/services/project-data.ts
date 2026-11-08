@@ -2701,6 +2701,7 @@ export async function reportAcpSessionActivity(
     runtimeWorkCount?: number;
     runtimeWorkSource?: string;
     runtimeWorkProgressAt?: number | null;
+    steeringSupported?: boolean;
   }
 ): Promise<ActivityReportOutcome> {
   const stub = await getStub(env, projectId);
@@ -3370,6 +3371,21 @@ export function hasPendingSessionHumanInput(
 ): Promise<boolean> {
   return callProjectDataNoRetry(env, projectId, 'hasPendingSessionHumanInput', (stub) =>
     stub.hasPendingSessionHumanInput(sessionId, taskId, now)
+  );
+}
+
+export async function syncProviderLimitAttention(
+  env: Env,
+  projectId: string,
+  taskId: string,
+  sessionId: string
+) {
+  return callProjectDataWithRetry(
+    env,
+    projectId,
+    'syncProviderLimitAttention',
+    (stub) => stub.syncProviderLimitAttention({ projectId, taskId, sessionId }),
+    'mutation'
   );
 }
 

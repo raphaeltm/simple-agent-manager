@@ -68,7 +68,14 @@ export const PROJECT_EVENT_CHANNEL_TOOLS = [
         channel: string,
         cursor: string,
         idempotencyKey: string,
-        requestedDelivery: { type: 'string', enum: ['record_only', 'existing_session_prompt'] },
+        requestedDelivery: {
+          type: 'string',
+          enum: ['record_only', 'runtime_steer', 'existing_session_prompt'],
+          description:
+            'Omit (record_only) for a history feed you read on demand. runtime_steer wakes you on new messages: ' +
+            'added to your running turn when steering is supported, otherwise as a wake prompt. ' +
+            'existing_session_prompt always waits for your turn to end.',
+        },
         reason: string,
         expiresAt: limit,
         minWakeIntervalSeconds: MIN_WAKE_INTERVAL_SECONDS_PROPERTY,

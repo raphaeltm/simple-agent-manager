@@ -106,6 +106,32 @@ describe('get_credential_limits MCP tool', () => {
     expect(body.credentials).toEqual(RESPONSE.credentials);
   });
 
+  it('says a window reset rather than presenting 0% as a fresh measurement', async () => {
+    const [credential] = RESPONSE.credentials;
+    mocks.listProjectCredentialLimits.mockResolvedValue({
+      ...RESPONSE,
+      credentials: [
+        {
+          ...credential,
+          level: 'ok',
+          windows: [
+            {
+              ...credential.windows[0],
+              status: 'allowed',
+              level: 'ok',
+              utilizationPercent: 0,
+              resetElapsed: true,
+            },
+          ],
+        },
+      ],
+    });
+    const body = parseContent(await handleGetCredentialLimits('5', {}, token(), env));
+    expect(body.summary).toEqual([
+      'Codex 5h (user credential): 0% used, level ok, reset at 2023-11-14T23:13:20.000Z (no sample since)',
+    ]);
+  });
+
   it('reads every visible credential with scope=project and no session lookup', async () => {
     const response = await handleGetCredentialLimits('2', { scope: 'project' }, token(), env);
     expect(mocks.resolveAgentSessionCredentialReference).not.toHaveBeenCalled();

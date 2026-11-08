@@ -993,10 +993,8 @@ func (s *Server) handleListTabs(w http.ResponseWriter, r *http.Request) {
 	// Accept both workspace session cookies (browser) and management tokens (control plane).
 	// Also accept workspace JWT token via ?token= query param for first-load scenarios
 	// before a session cookie has been established.
-	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
-		if !s.requireNodeManagementAuth(w, r, workspaceID) {
-			return
-		}
+	if !s.requireWorkspaceOrManagementAuth(w, r, workspaceID) {
+		return
 	}
 
 	if s.store == nil {
@@ -1028,10 +1026,8 @@ func (s *Server) handleListAgentSessions(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	// Accept both workspace session cookies (browser) and management tokens (control plane).
-	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
-		if !s.requireNodeManagementAuth(w, r, workspaceID) {
-			return
-		}
+	if !s.requireWorkspaceOrManagementAuth(w, r, workspaceID) {
+		return
 	}
 
 	sessions := s.agentSessions.List(workspaceID)
@@ -1126,6 +1122,11 @@ func (s *Server) handleCreateAgentSession(w http.ResponseWriter, r *http.Request
 	if _, exists := s.agentSessions.Get(workspaceID, strings.TrimSpace(body.SessionID)); !exists && s.workspaceRestorePendingLocked(workspaceID) {
 		s.sessionHostMu.Unlock()
 		writeError(w, http.StatusConflict, "workspace snapshot restore is in progress")
+		return
+	}
+	if s.requestProjectConflicts(workspaceID, projectID) {
+		s.sessionHostMu.Unlock()
+		writeError(w, http.StatusBadRequest, "projectId does not match the workspace's project")
 		return
 	}
 	session, idempotentHit, err := s.agentSessions.CreateRouted(workspaceID, strings.TrimSpace(body.SessionID), strings.TrimSpace(body.Label), idempotencyKey, projectID, chatSID)
@@ -1315,6 +1316,11 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusConflict, "workspace session bootstrap is in progress")
 		return
 	}
+	if s.requestProjectConflicts(workspaceID, body.ProjectID) {
+		s.sessionHostMu.Unlock()
+		writeError(w, http.StatusBadRequest, "projectId does not match the workspace's project")
+		return
+	}
 	if s.sessionTaskCtx == nil {
 		s.sessionTaskCtx = make(map[string]taskCallbackContext)
 	}
@@ -1364,6 +1370,7 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		writeError(w, http.StatusConflict, "workspace snapshot restore is in progress")
 		return
 	}
+	s.refreshSessionSAMEnv(host, hostKey, workspaceID, session, runtime)
 	s.appendNodeEvent(workspaceID, "info", "agent_session.starting", "Starting agent with initial prompt", map[string]interface{}{
 		"sessionId": sessionID,
 		"agentType": body.AgentType,
@@ -1557,8 +1564,7 @@ func (s *Server) handleSendPrompt(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body sendPromptRequest
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+	if !decodePromptRequestBody(w, r, &body) {
 		return
 	}
 	body.Prompt = strings.TrimSpace(body.Prompt)
@@ -1900,6 +1906,7 @@ func (s *Server) agentCapabilities() map[string]interface{} {
 			"noWaiterStatus":    "no_waiter",
 			"staleStatus":       "stale_generation",
 		},
+		"steering": steeringCapability(),
 		"checkpointRollover": map[string]interface{}{
 			"supported": true,
 			"automatic": false,

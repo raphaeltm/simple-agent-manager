@@ -150,7 +150,7 @@ function normalizeMinWakeIntervalMs(
   if (deliveryPreference.resolved !== 'queued_for_prompt_delivery') {
     throw new ProjectEventValidationError(
       'minimum wake interval applies only to subscriptions that wake the chat ' +
-        '(requestedDelivery existing_session_prompt or runtime_interrupt)'
+        '(requestedDelivery existing_session_prompt, runtime_interrupt or runtime_steer)'
     );
   }
   if (value > limits.wakeSubscriptionLifetimeMs) {

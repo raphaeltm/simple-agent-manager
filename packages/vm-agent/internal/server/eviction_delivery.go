@@ -46,7 +46,9 @@ func (s *Server) prepareWorkspaceEvictionStop(ctx context.Context, target resour
 	if err := s.writeWorkspaceMetadata(runtime); err != nil {
 		return err
 	}
-	delivery := s.workspaceEvictionDelivery(resourcemon.EvictionResult{Target: target})
+	// The controller stops a container only after its pre-stop capture succeeded, so the
+	// intent records that. A reconciled intent must not report the snapshot as missing.
+	delivery := s.workspaceEvictionDelivery(resourcemon.EvictionResult{Target: target, SnapshotCaptured: true})
 	// Capture before Docker stop and before finishLocalWorkspaceEviction clears activity.
 	// Retain the admission fence once the durable intent owns this runtime.
 	committed := false
@@ -183,6 +185,11 @@ func (s *Server) deliverPendingWorkspaceEvictionAt(parent context.Context, id st
 	delivery, err := s.store.ClaimEvictionDelivery(ctx, id, now, s.config.EvictionDebounceWindow, s.config.EvictionCallbackRetryMaxInterval, s.evictionDeliveryOperationTimeout())
 	if err != nil || delivery == nil {
 		return err
+	}
+	if !delivery.ContainerStopped && s.isEvictionFinalizing(delivery.WorkspaceID) {
+		// This agent is still finishing the eviction (stop, then final capture). It records
+		// the eviction, which makes this row due again, and delivers it itself.
+		return nil
 	}
 	if !delivery.ContainerStopped {
 		obsolete, reconcileErr := s.reconcilePendingEvictionStop(ctx, delivery)

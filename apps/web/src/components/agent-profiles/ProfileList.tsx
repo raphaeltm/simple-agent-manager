@@ -1,16 +1,24 @@
 import type {
-  AgentEffort,
   AgentProfile,
   CreateAgentProfileRequest,
   UpdateAgentProfileRequest,
 } from '@simple-agent-manager/shared';
-import { DEFAULT_AGENT_EFFORT } from '@simple-agent-manager/shared';
-import { Button, Spinner } from '@simple-agent-manager/ui';
-import { Bot, Pencil, Plus, Trash2 } from 'lucide-react';
+import { Button, SegmentedControl, Spinner } from '@simple-agent-manager/ui';
+import { Bot, Plus } from 'lucide-react';
 import { type FC, useCallback, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
 import { ProfileFormDialog } from './ProfileFormDialog';
+import { PROFILE_ROW_GRID, ProfileRow } from './ProfileRow';
+import { profileHeadroom } from './ProfileUsageStrip';
+import { useProfileBudgets } from './useProfileBudgets';
+
+type ProfileSort = 'name' | 'room';
+
+const SORT_OPTIONS: { value: ProfileSort; label: string }[] = [
+  { value: 'name', label: 'Name' },
+  { value: 'room', label: 'Most room' },
+];
 
 interface ProfileListProps {
   profiles: AgentProfile[];
@@ -25,37 +33,6 @@ interface ProfileListProps {
   projectId: string;
 }
 
-function formatGitHubCliPolicySummary(profile: AgentProfile): string | null {
-  const policy = profile.githubCliPolicy;
-  if (policy?.mode !== 'custom') return null;
-
-  const denied = Object.entries(policy.permissions)
-    .filter(([, level]) => level === 'none')
-    .map(([name]) => name);
-  const readableNames: Record<string, string> = {
-    contents: 'code',
-    pullRequests: 'PRs',
-    issues: 'issues',
-    actions: 'actions',
-    packages: 'packages',
-  };
-
-  if (denied.length > 0) {
-    return `GitHub CLI: no ${denied.map((name) => readableNames[name] ?? name).join(', ')}`;
-  }
-
-  return 'GitHub CLI: repository scoped';
-}
-
-const EFFORT_LABELS: Record<AgentEffort, string> = {
-  auto: 'auto',
-  low: 'low',
-  medium: 'medium',
-  high: 'high',
-  xhigh: 'xhigh',
-  max: 'max',
-};
-
 export const ProfileList: FC<ProfileListProps> = ({
   profiles,
   loading,
@@ -69,6 +46,18 @@ export const ProfileList: FC<ProfileListProps> = ({
   const [searchParams, setSearchParams] = useSearchParams();
   const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [sort, setSort] = useState<ProfileSort>('name');
+  const budgets = useProfileBudgets(profiles);
+  const sortedProfiles = useMemo(() => {
+    if (sort === 'name') return profiles;
+    // Most room first: ranked by the window that will stop each profile first.
+    // Profiles without plan usage (platform, API keys, no samples) go last.
+    const now = Date.now();
+    const headroom = new Map(
+      profiles.map((profile) => [profile.id, profileHeadroom(budgets?.get(profile.id), now) ?? -1])
+    );
+    return [...profiles].sort((a, b) => (headroom.get(b.id) ?? -1) - (headroom.get(a.id) ?? -1));
+  }, [profiles, budgets, sort]);
 
   // URL-driven edit modal — `?edit=profileId` or `?edit=new`
   const editParam = searchParams.get('edit');
@@ -108,9 +97,12 @@ export const ProfileList: FC<ProfileListProps> = ({
     openForm();
   };
 
-  const handleEdit = (profile: AgentProfile) => {
-    openForm(profile.id);
-  };
+  const handleEdit = useCallback((profile: AgentProfile) => openForm(profile.id), [openForm]);
+
+  const handleDeleteRequest = useCallback((profile: AgentProfile) => {
+    setDeleteConfirmId(profile.id);
+    setDeleteError(null);
+  }, []);
 
   const handleSave = async (data: CreateAgentProfileRequest | UpdateAgentProfileRequest) => {
     if (editingProfile) {
@@ -168,92 +160,67 @@ export const ProfileList: FC<ProfileListProps> = ({
           No profiles yet. Create one to bundle agent and infrastructure settings.
         </div>
       ) : (
-        <div className="grid gap-2">
-          {profiles.map((profile) => (
-            <div key={profile.id} className="overflow-hidden rounded-md glass-surface">
-              <div className="flex items-start gap-3 p-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 min-w-0">
-                    <span className="text-sm font-medium text-fg-primary truncate">
-                      {profile.name}
-                    </span>
-                    {profile.isBuiltin && (
-                      <span className="shrink-0 px-1.5 py-0.5 text-[10px] font-medium rounded bg-[rgba(34,197,94,0.08)] border border-[rgba(34,197,94,0.15)] text-accent">
-                        built-in
-                      </span>
-                    )}
-                  </div>
-                  {profile.description && (
-                    <p className="text-xs text-fg-muted mt-0.5 line-clamp-2">
-                      {profile.description}
-                    </p>
-                  )}
-                  <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5 text-xs text-fg-muted">
-                    <span>{profile.agentType}</span>
-                    {profile.model && <span>{profile.model}</span>}
-                    {profile.effort !== DEFAULT_AGENT_EFFORT && (
-                      <span>Effort: {EFFORT_LABELS[profile.effort]}</span>
-                    )}
-                    {profile.permissionMode && <span>{profile.permissionMode}</span>}
-                    {profile.vmSizeOverride && <span>VM: {profile.vmSizeOverride}</span>}
-                    {profile.taskMode && <span>Mode: {profile.taskMode}</span>}
-                    {formatGitHubCliPolicySummary(profile) && (
-                      <span>{formatGitHubCliPolicySummary(profile)}</span>
-                    )}
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1 shrink-0">
-                  <button
-                    type="button"
-                    onClick={() => handleEdit(profile)}
-                    aria-label={`Edit ${profile.name}`}
-                    className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded text-fg-muted hover:text-fg-primary hover:bg-surface cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring"
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </button>
-                  {deleteConfirmId !== profile.id && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDeleteConfirmId(profile.id);
-                        setDeleteError(null);
-                      }}
-                      aria-label={`Delete ${profile.name}`}
-                      className="p-2 min-w-[44px] min-h-[44px] flex items-center justify-center rounded text-fg-muted hover:text-danger hover:bg-danger-tint cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
-                  )}
-                </div>
-              </div>
-
-              {deleteConfirmId === profile.id && (
-                <div className="flex items-center justify-end gap-2 px-3 pb-3">
-                  <span className="text-xs text-fg-muted mr-auto">Delete this profile?</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setDeleteConfirmId(null);
-                      setDeleteError(null);
-                    }}
-                    aria-label="Cancel delete"
-                    className="px-3 py-2 min-w-[44px] min-h-[44px] rounded text-xs text-fg-muted hover:text-fg-primary cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void handleDelete(profile.id)}
-                    aria-label={`Confirm delete ${profile.name}`}
-                    className="px-3 py-2 min-h-[44px] rounded text-xs text-danger bg-danger-tint hover:bg-danger hover:text-white cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring"
-                  >
-                    Confirm
-                  </button>
-                </div>
-              )}
+        <div className="flex flex-col gap-3">
+          {profiles.length > 1 && (
+            <SegmentedControl
+              label="Sort profiles"
+              className="w-44"
+              value={sort}
+              onChange={setSort}
+              options={SORT_OPTIONS}
+            />
+          )}
+          <div className="min-w-0 overflow-hidden rounded-md glass-surface">
+            <div
+              aria-hidden="true"
+              className={`hidden border-b border-[var(--sam-hairline)] py-2 pl-3 pr-1.5 text-[10.5px] font-medium uppercase tracking-[0.08em] text-fg-muted ${PROFILE_ROW_GRID}`}
+            >
+              <span>Profile</span>
+              <span>Model</span>
+              <span>Resources</span>
+              <span>Usage</span>
+              <span className="w-9" />
             </div>
-          ))}
+            <ul className="m-0 list-none p-0">
+              {sortedProfiles.map((profile) => (
+                <li
+                  key={profile.id}
+                  className="border-t border-[var(--sam-hairline)] first:border-t-0"
+                >
+                  <ProfileRow
+                    profile={profile}
+                    budget={budgets?.get(profile.id)}
+                    onEdit={handleEdit}
+                    onDelete={handleDeleteRequest}
+                  />
+                  {deleteConfirmId === profile.id && (
+                    <div className="flex items-center justify-end gap-2 px-3 pb-3">
+                      <span className="mr-auto text-xs text-fg-muted">Delete this profile?</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeleteConfirmId(null);
+                          setDeleteError(null);
+                        }}
+                        aria-label="Cancel delete"
+                        className="px-3 py-2 min-w-[44px] min-h-[44px] rounded text-xs text-fg-muted hover:text-fg-primary cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void handleDelete(profile.id)}
+                        aria-label={`Confirm delete ${profile.name}`}
+                        className="px-3 py-2 min-h-[44px] rounded text-xs text-danger bg-danger-tint hover:bg-danger hover:text-white cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-focus-ring"
+                      >
+                        Confirm
+                      </button>
+                    </div>
+                  )}
+                </li>
+              ))}
+            </ul>
+          </div>
         </div>
       )}
 

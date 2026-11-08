@@ -1219,6 +1219,199 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     await expect(wakeGate()).resolves.toBeUndefined();
   });
 
+  // Production 2026-11-04 (idea 01M6K6R2255R7414WSER4N3STJ, node 01M6F4WPF51FYE55F3FVHJ6YAZ): a
+  // wake claims the snapshot and releases the old workspace's chat binding in the same transaction
+  // (`createRecoveryTask` in `session-recovery.ts`). The cron safety net then queued the old
+  // workspace's deletion from the unbound row, the preservation check could not find its snapshot,
+  // and the entry deferred forever. The wake's own fence waited on that deletion, so the wake
+  // stuck at node selection for 26 hours and the node could only be retired by the stranded-node
+  // deadline.
+  describe('a slept workspace whose wake released its chat binding', () => {
+    async function sleptWorkspaceUnderWake(
+      label: string,
+      options: { wakeClaim: 'held' | 'stale' | 'none' }
+    ) {
+      const nodeId = `nl-released-binding-${label}`;
+      const wsId = `ws-released-binding-${label}`;
+      const taskId = `task-released-binding-${label}`;
+      await seedTestNode(nodeId);
+      await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'sleeping' });
+      const workspace = await loadSleepWorkspace(env as Env, wsId, TEST_USER_ID);
+      await seedTask(taskId, workspace.projectId, TEST_USER_ID, {
+        status: 'queued',
+        workspaceId: wsId,
+      });
+      // The two rows `createRecoveryTask` writes for these records: the snapshot claim, and the
+      // old workspace's released binding.
+      // A stale claim is what a completed sleep leaves behind: it resets recovery_status but never
+      // clears recovery_task_id.
+      if (options.wakeClaim !== 'none') {
+        await env.DATABASE.prepare(
+          `UPDATE session_snapshots SET recovery_status = ?, recovery_task_id = ?,
+             recovery_attempt_id = 'wake-1' WHERE workspace_id = ?`
+        )
+          .bind(options.wakeClaim === 'held' ? 'waking' : null, taskId, wsId)
+          .run();
+      }
+      await env.DATABASE.prepare('UPDATE workspaces SET chat_session_id = NULL WHERE id = ?')
+        .bind(wsId)
+        .run();
+      return { nodeId, wsId, taskId, projectId: workspace.projectId };
+    }
+
+    /** The cron safety net enqueues from the current (unbound) row, as in production. */
+    async function scheduleAndRunDeletion(nodeId: string, wsId: string) {
+      const stub = getStub(nodeId);
+      await pauseNodeAlarms(nodeId);
+      const scheduled = await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID);
+      await runInDurableObject(stub, async (instance) => {
+        const pending = await instance.ctx.storage.get<PendingWorkspaceDeletion>(
+          `ws-delete:${wsId}`
+        );
+        if (!pending) return;
+        await putIndexedWorkspaceDeletion(instance.ctx.storage, {
+          ...pending,
+          deleteAt: Date.now() - 1,
+        });
+        await instance.alarm();
+      });
+      return { stub, scheduled };
+    }
+
+    it('deletes it with VM-confirmed proof, which releases the wake fence', async () => {
+      const f = await sleptWorkspaceUnderWake('claimed', { wakeClaim: 'held' });
+      const fetchMock = vi.fn(async () => deletionResponse(f.wsId));
+      vi.stubGlobal('fetch', fetchMock);
+      const wakeGate = () =>
+        assertReplacementDeletionConfirmed(env as Env, {
+          sourceTaskId: f.taskId,
+          projectId: f.projectId,
+          userId: TEST_USER_ID,
+        });
+
+      const { stub, scheduled } = await scheduleAndRunDeletion(f.nodeId, f.wsId);
+
+      expect(scheduled).toBe(true);
+      await vi.waitFor(async () => {
+        expect(
+          await env.DATABASE.prepare(
+            'SELECT status, runtime_deletion_proof FROM workspaces WHERE id = ?'
+          )
+            .bind(f.wsId)
+            .first()
+        ).toEqual({ status: 'deleted', runtime_deletion_proof: 'vm_agent_confirmed' });
+        expect(await stub.getWorkspaceDeletionAttemptState(f.wsId)).toEqual({
+          pending: false,
+          attemptStarted: false,
+        });
+      });
+      expect(fetchMock).toHaveBeenCalledOnce();
+      await expect(wakeGate()).resolves.toBeUndefined();
+    });
+
+    it.each([
+      ['no wake claim', 'none'],
+      ['only a stale wake task', 'stale'],
+    ] as const)(
+      'keeps an unbound workspace whose snapshot carries %s (control)',
+      async (_label, wakeClaim) => {
+        const f = await sleptWorkspaceUnderWake(`unclaimed-${wakeClaim}`, { wakeClaim });
+        const fetchMock = vi.fn(async () => deletionResponse(f.wsId));
+        vi.stubGlobal('fetch', fetchMock);
+
+        const { stub, scheduled } = await scheduleAndRunDeletion(f.nodeId, f.wsId);
+
+        // Refused at enqueue: no preserved snapshot can be tied to an unbound workspace.
+        expect(scheduled).toBe(false);
+        expect(await stub.getWorkspaceDeletionAttemptState(f.wsId)).toEqual({
+          pending: false,
+          attemptStarted: false,
+        });
+        expect(fetchMock).not.toHaveBeenCalled();
+        expect(
+          await env.DATABASE.prepare(
+            'SELECT status, runtime_deletion_proof FROM workspaces WHERE id = ?'
+          )
+            .bind(f.wsId)
+            .first()
+        ).toEqual({ status: 'sleeping', runtime_deletion_proof: null });
+      }
+    );
+  });
+
+  // Production 2026-11-05 (workspace 01M6MK1T8EQA8QNS3HMRRSN753): the deletion was queued while
+  // the workspace still held its chat, then a wake released that binding. Every queued and
+  // claimed identity compared chat_session_id exactly, so the next attempt was dead-lettered
+  // ("identity or status changed") and the workspace stayed `stopping` with no proof.
+  describe('a queued deletion whose chat binding a wake released after enqueue', () => {
+    async function queuedThenDetached(label: string, rebindTo: string | null) {
+      const nodeId = `nl-detach-${label}`;
+      const wsId = `ws-detach-${label}`;
+      await seedTestNode(nodeId);
+      await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'sleeping' });
+      const stub = getStub(nodeId);
+      await pauseNodeAlarms(nodeId);
+      // Queued from the bound row, as the sleep path does.
+      expect(await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID)).toBe(true);
+      // The wake's binding release (and the wake claim that explains it).
+      await env.DATABASE.prepare(
+        `UPDATE session_snapshots SET recovery_status = 'waking', recovery_task_id = 'wake-task',
+           recovery_attempt_id = 'wake-1' WHERE workspace_id = ?`
+      )
+        .bind(wsId)
+        .run();
+      await env.DATABASE.prepare('UPDATE workspaces SET chat_session_id = ? WHERE id = ?')
+        .bind(rebindTo, wsId)
+        .run();
+      await runInDurableObject(stub, async (instance) => {
+        const pending = await instance.ctx.storage.get<PendingWorkspaceDeletion>(
+          `ws-delete:${wsId}`
+        );
+        await putIndexedWorkspaceDeletion(instance.ctx.storage, {
+          ...pending!,
+          deleteAt: Date.now() - 1,
+        });
+        await instance.alarm();
+      });
+      return { stub, wsId };
+    }
+    const row = (wsId: string) =>
+      env.DATABASE.prepare('SELECT status, runtime_deletion_proof FROM workspaces WHERE id = ?')
+        .bind(wsId)
+        .first();
+
+    it('completes the deletion with VM proof instead of quarantining it', async () => {
+      const fetchMock = vi.fn(async () => deletionResponse('ws-detach-released'));
+      vi.stubGlobal('fetch', fetchMock);
+      const { stub, wsId } = await queuedThenDetached('released', null);
+      await vi.waitFor(async () => {
+        expect(await row(wsId)).toEqual({
+          status: 'deleted',
+          runtime_deletion_proof: 'vm_agent_confirmed',
+        });
+        expect(await stub.getWorkspaceDeletionAttemptState(wsId)).toEqual({
+          pending: false,
+          attemptStarted: false,
+        });
+      });
+      expect(fetchMock).toHaveBeenCalledOnce();
+    });
+
+    it('still fences a workspace rebound to a different chat (control)', async () => {
+      const fetchMock = vi.fn(async () => deletionResponse('ws-detach-rebound'));
+      vi.stubGlobal('fetch', fetchMock);
+      const { stub, wsId } = await queuedThenDetached('rebound', 'another-chat');
+      await vi.waitFor(async () => {
+        const entry = await runInDurableObject(stub, async (instance) =>
+          instance.ctx.storage.get<PendingWorkspaceDeletion>(`ws-delete:${wsId}`)
+        );
+        expect(entry?.deadLetteredAt).toEqual(expect.any(Number));
+      });
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(await row(wsId)).toMatchObject({ runtime_deletion_proof: null });
+    });
+  });
+
   it('does not schedule physical cleanup for unpreserved or expired source data', async () => {
     const nodeId = 'nl-protected-no-snapshot';
     const wsId = 'ws-protected-no-snapshot';

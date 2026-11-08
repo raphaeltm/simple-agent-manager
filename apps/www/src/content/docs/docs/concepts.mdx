@@ -47,6 +47,8 @@ https://ws-{workspaceId}--{port}.{baseDomain}
 
 For example, if your dev server starts on port 3000 in workspace `abc123`, you can open it at `https://ws-abc123--3000.example.com`. Common development ports get friendly labels automatically.
 
+In Instant workspaces the SAM workspace agent shares the workspace's network and listens on port 8080 by default. That port is reserved and cannot be opened this way, so run your own services on a different port.
+
 ## Nodes
 
 A **node** is a cloud VM that hosts one or more workspaces. You normally never think about nodes — SAM assigns your workspace to a healthy node or provisions a new one for you, from the machine types your [compute pool](#compute-pools) permits. To see them, select **Infrastructure** in the main navigation, which opens the **Nodes** page; each machine lists its workspaces.
@@ -97,7 +99,7 @@ An **agent profile** is a saved, reusable configuration for running an agent: wh
 
 ## Skills
 
-A **skill** is a reusable layer of instructions, environment, and files you can apply on top of a profile for a particular kind of work. A skill only overrides the settings it sets: anything it leaves empty, including the agent and model, comes from the profile you pick, following the resolution order **skill → profile → project → platform**. Pick a skill per chat under **Chat options**, the sliders button above the message box. A skill saved before 21 October 2026 may still set an agent; see [AI Agents](/docs/guides/agents/#agent-profiles).
+A **skill** is a reusable layer of instructions, environment, and files you can apply on top of a profile for a particular kind of work. A skill only overrides the settings it sets: anything it leaves empty, including the agent and model, comes from the profile you pick, following the resolution order **skill → profile → project → platform**. Pick a skill per chat under **Chat options**, the sliders button above the message box, where you can also change the model and effort for that one chat. A skill saved before 21 October 2026 may still set an agent; see [AI Agents](/docs/guides/agents/#agent-profiles).
 
 ## Automation
 
@@ -140,16 +142,17 @@ See [What Happens When You Send Work](/docs/guides/idea-execution/#agent-to-agen
 
 An **agent session** is an AI coding agent conversation running inside a workspace container. Sessions use the **Agent Communication Protocol (ACP)** to communicate between the browser and the agent process.
 
-SAM supports six AI coding agents:
+SAM supports seven AI coding agents:
 
-| Agent            | Provider                   | API Key Variable    |
-| ---------------- | -------------------------- | ------------------- |
-| **Claude Code**  | Anthropic                  | `ANTHROPIC_API_KEY` |
-| **OpenAI Codex** | OpenAI                     | `OPENAI_API_KEY`    |
-| **Gemini CLI**   | Google                     | `GEMINI_API_KEY`    |
-| **Mistral Vibe** | Mistral                    | `MISTRAL_API_KEY`   |
-| **OpenCode**     | OpenCode managed inference | `OPENCODE_API_KEY`  |
-| **Amp**          | Sourcegraph                | `AMP_API_KEY`       |
+| Agent                  | Provider                   | API Key Variable    |
+| ---------------------- | -------------------------- | ------------------- |
+| **Claude Code**        | Anthropic                  | `ANTHROPIC_API_KEY` |
+| **OpenAI Codex**       | OpenAI                     | `OPENAI_API_KEY`    |
+| **Gemini CLI**         | Google                     | `GEMINI_API_KEY`    |
+| **Google Antigravity** | Google                     | `GEMINI_API_KEY`    |
+| **Mistral Vibe**       | Mistral                    | `MISTRAL_API_KEY`   |
+| **OpenCode**           | OpenCode managed inference | `OPENCODE_API_KEY`  |
+| **Amp**                | Sourcegraph                | `AMP_API_KEY`       |
 
 You choose which agent to run by selecting an **agent profile** in the chat. See the [AI Agents guide](/docs/guides/agents/) for how to connect credentials and configure profiles.
 

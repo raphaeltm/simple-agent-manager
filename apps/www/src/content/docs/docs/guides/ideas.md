@@ -207,8 +207,8 @@ work, and mark ideas done, parked or open again, where the page offers the butto
 
 ## For agents
 
-Agents work with ideas through their SAM tools: `create_idea`, `get_idea` (the plan plus the chats,
-files, pull requests, related ideas and recent updates linked to it), `update_idea` (with `note`
-to post an update without changing the plan), `list_idea_updates`, `get_linked_context`,
-`link_idea`, `link_to_idea` and `search_ideas`. See the tool table in
+Agents work with ideas through their SAM tools: `ideas_write` method `create`, `ideas_read` method `get` (the plan plus the chats,
+files, pull requests, related ideas and recent updates linked to it), `ideas_write` method `update` (with `note`
+to post an update without changing the plan), `ideas_read` method `updates`, `ideas_read` method `context`,
+`ideas_write` method `link_session`, `ideas_write` method `link` and `ideas_read` method `search`. See the tool table in
 [AI Agents](/docs/guides/agents/#mcp-tools) for what each one does.

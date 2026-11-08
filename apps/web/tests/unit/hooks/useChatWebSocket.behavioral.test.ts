@@ -241,10 +241,35 @@ describe('useChatWebSocket (behavioral)', () => {
     });
 
     expect(onAgentActivity).toHaveBeenCalledTimes(4);
-    expect(onAgentActivity).toHaveBeenNthCalledWith(1, 'prompting', 123);
-    expect(onAgentActivity).toHaveBeenNthCalledWith(2, 'recovering', 123);
-    expect(onAgentActivity).toHaveBeenNthCalledWith(3, 'error', 123);
-    expect(onAgentActivity).toHaveBeenNthCalledWith(4, 'idle', 123);
+    expect(onAgentActivity).toHaveBeenNthCalledWith(1, 'prompting', 123, undefined);
+    expect(onAgentActivity).toHaveBeenNthCalledWith(2, 'recovering', 123, undefined);
+    expect(onAgentActivity).toHaveBeenNthCalledWith(3, 'error', 123, undefined);
+    expect(onAgentActivity).toHaveBeenNthCalledWith(4, 'idle', 123, undefined);
+  });
+
+  it('forwards steering support from session.activity only when the server sent it', () => {
+    const onAgentActivity = vi.fn();
+    renderHook(() => useChatWebSocket({ ...defaultProps, onAgentActivity }));
+
+    act(() => {
+      MockWebSocket.instances[0]!.simulateOpen();
+      for (const steeringSupported of [false, true, null, undefined]) {
+        MockWebSocket.instances[0]!.simulateMessage({
+          type: 'session.activity',
+          sessionId: 'sess-1',
+          activity: 'prompting',
+          promptStartedAt: 123,
+          steeringSupported,
+        });
+      }
+    });
+
+    expect(onAgentActivity.mock.calls.map((call) => call[2])).toEqual([
+      false,
+      true,
+      undefined,
+      undefined,
+    ]);
   });
 
   it('forwards a session.wake_progress event with its parsed phase', () => {
@@ -1063,7 +1088,7 @@ describe('useChatWebSocket (behavioral)', () => {
     });
 
     expect(onAgentActivity).toHaveBeenCalledOnce();
-    expect(onAgentActivity).toHaveBeenCalledWith('prompting', null);
+    expect(onAgentActivity).toHaveBeenCalledWith('prompting', null, undefined);
   });
 
   it('calls onAgentActivity with "idle" on session.activity event', () => {
@@ -1085,7 +1110,7 @@ describe('useChatWebSocket (behavioral)', () => {
     });
 
     expect(onAgentActivity).toHaveBeenCalledOnce();
-    expect(onAgentActivity).toHaveBeenCalledWith('idle', null);
+    expect(onAgentActivity).toHaveBeenCalledWith('idle', null, undefined);
   });
 
   it('ignores session.activity for different sessions', () => {

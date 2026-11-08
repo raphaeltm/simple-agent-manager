@@ -102,7 +102,8 @@ func TestOtherHarnessInstalledChecksRejectStaleVersions(t *testing.T) {
 	t.Parallel()
 	for _, tt := range []struct{ agent, bin, current, stale string }{
 		{"google-gemini", "gemini", "0.61.0", "0.50.0"},
-		{"opencode", "opencode", "opencode v2.2.5", "1.18.32"},
+		// Stock v2.2.5 lacks ACP steering, so SAM's build replaces it.
+		{"opencode", "opencode", "opencode v2.2.5-sam-s1", "opencode v2.2.5"},
 		{"mistral-vibe", "vibe-acp", "vibe-acp 2.25.8", "vibe-acp 2.19.1"},
 		{"amp", "amp", "0.0.1790261352-g2ab14a (released today)", "0.0.1783785389-g0da70d (released yesterday)"},
 	} {

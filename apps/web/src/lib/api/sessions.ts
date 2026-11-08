@@ -1,8 +1,8 @@
 import type {
+  AgentEffort,
   AgentProfileRuntime,
   SessionAccessSummary,
   SessionViewerAccess,
-  TaskAttachment,
   TaskExecutionStep,
   WakeWaitReason,
 } from '@simple-agent-manager/shared';
@@ -16,6 +16,9 @@ import { request } from './client';
 
 /** Task embed shape — populated in the detail response, added via enrichment for list items. */
 export interface ChatSessionTaskEmbed {
+  providerLimitReason?: string | null;
+  /** Opaque wait generation; changes when a new blocked wait replaces an accepted resume. */
+  providerLimitVersion?: string | null;
   triggeredBy?: string;
   connectorClientName?: string | null;
   id: string;
@@ -135,6 +138,8 @@ export interface SessionStateSnapshot {
   runtimeWorkSource: string | null;
   runtimeWorkUpdatedAt: number | null;
   runtimeWorkProgressAt: number | null;
+  /** Whether the session's agent adapter can steer; null until the VM agent reports it. */
+  steeringSupported?: boolean | null;
   recoveryStatus?: 'waking' | 'restored' | 'failed' | null;
   /**
    * Execution step of the replacement TaskRunner waking this session. Drives
@@ -166,13 +171,24 @@ export interface ChatMessagesListResponse {
 
 export async function listChatSessions(
   projectId: string,
-  params: { status?: string; limit?: number; offset?: number; scope?: 'my' | 'all' } = {}
+  params: {
+    status?: string;
+    limit?: number;
+    offset?: number;
+    scope?: 'my' | 'all';
+    /**
+     * Also return every awake and sleeping session in scope that the newest page left out
+     * (first page, no status filter). The chat sidebar groups by state, not by age.
+     */
+    includeLive?: boolean;
+  } = {}
 ): Promise<ChatSessionListResponse> {
   const searchParams = new URLSearchParams();
   if (params.status) searchParams.set('status', params.status);
   if (params.limit !== undefined) searchParams.set('limit', String(params.limit));
   if (params.offset !== undefined) searchParams.set('offset', String(params.offset));
   if (params.scope) searchParams.set('scope', params.scope);
+  if (params.includeLive) searchParams.set('include', 'live');
 
   const qs = searchParams.toString();
   const endpoint = qs
@@ -345,6 +361,10 @@ export interface StartInstantChatSessionRequest {
   agentProfileId?: string;
   skillId?: string;
   parentTaskId?: string;
+  /** Model for this chat only; omitted inherits the skill/profile model. */
+  model?: string;
+  /** Effort for this chat only; must be supported by the resolved agent. */
+  effort?: AgentEffort;
   /** An open idea in this project this conversation starts from. The server links it
    * (`discusses`) before the agent receives its first prompt. */
   sourceIdeaId?: string;
@@ -396,34 +416,6 @@ export async function stopChatSession(
     `/api/projects/${projectId}/sessions/${sessionId}/stop`,
     {
       method: 'POST',
-    }
-  );
-}
-
-export async function resetIdleTimer(
-  projectId: string,
-  sessionId: string
-): Promise<{ cleanupAt: number }> {
-  return request<{ cleanupAt: number }>(
-    `/api/projects/${projectId}/sessions/${sessionId}/idle-reset`,
-    {
-      method: 'POST',
-    }
-  );
-}
-
-/** Send a follow-up prompt to the running agent via the REST API. */
-export async function sendFollowUpPrompt(
-  projectId: string,
-  sessionId: string,
-  content: string,
-  attachments?: TaskAttachment[]
-): Promise<{ status: string; sessionId?: string; message?: string }> {
-  return request<{ status: string; sessionId?: string; message?: string }>(
-    `/api/projects/${projectId}/sessions/${sessionId}/prompt`,
-    {
-      method: 'POST',
-      body: JSON.stringify({ content, attachments }),
     }
   );
 }

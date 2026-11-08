@@ -599,7 +599,7 @@ describe('deploy reusable workflow', () => {
       expect(goflags).toContain('-buildvcs=false');
     });
 
-    it('embeds only the reviewed installers, which are release inputs', () => {
+    it('embeds only reviewed installers, each included as a release input', () => {
       const agentRoot = fileURLToPath(new URL('../../packages/vm-agent', import.meta.url));
       // Match directives only; a comment that mentions go:embed is not an embed.
       const found = spawnSync('grep', ['-rn', '--include=*.go', '^//go:embed', agentRoot], {
@@ -613,18 +613,23 @@ describe('deploy reusable workflow', () => {
         .map((line) => line.replace(`${agentRoot}/`, '').replace(/:\d+:/, ':'))
         // grep walks directories in filesystem order, which differs between machines.
         .sort();
-      // Both installers live under the agent source path, which the release resolver hashes
-      // (it excludes only .claude, AGENTS.md and tests), so editing either rotates the release.
+      // All installers live under the agent source path, which the release resolver hashes
+      // (it excludes only .claude, AGENTS.md and tests), so editing any rotates the release.
       expect(embeds).toEqual([
+        'internal/acp/antigravity.go://go:embed antigravity_install.sh',
         'internal/acp/codex_runtime_distribution.go://go:embed codex_runtime_installer.sh',
         'internal/acp/opencode_install.go://go:embed opencode_install.sh',
       ]);
-      for (const installer of ['codex_runtime_installer.sh', 'opencode_install.sh']) {
-        withAgentReleaseRepo((repo) => {
+      withAgentReleaseRepo((repo) => {
+        for (const installer of [
+          'codex_runtime_installer.sh',
+          'opencode_install.sh',
+          'antigravity_install.sh',
+        ]) {
           const path = join(repo.directory, 'packages/vm-agent/internal/acp', installer);
           writeFileSync(path, '#!/bin/bash\necho installer-v2\n');
           execFileSync('git', ['add', '.'], { cwd: repo.directory });
-          execFileSync('git', ['commit', '-m', 'embedded installer change'], {
+          execFileSync('git', ['commit', '-m', `embedded installer change: ${installer}`], {
             cwd: repo.directory,
           });
           const head = execFileSync('git', ['rev-parse', 'HEAD'], {
@@ -632,10 +637,10 @@ describe('deploy reusable workflow', () => {
             encoding: 'utf8',
           }).trim();
           const result = runReleaseResolver(repo.directory, head);
-          expect(result.status).toBe(0);
-          expect(releaseFieldsFrom(result.stdout).release).toBe(head);
-        });
-      }
+          expect(result.status, installer).toBe(0);
+          expect(releaseFieldsFrom(result.stdout).release, installer).toBe(head);
+        }
+      });
     });
 
     it('fails closed on a shallow clone instead of falling back to the deploy commit', () => {

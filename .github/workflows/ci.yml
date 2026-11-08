@@ -594,6 +594,9 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Enforce source file size limits
+        run: pnpm quality:file-sizes
+
       - name: Type check deployment scripts
         run: npx tsc --project scripts/deploy/tsconfig.json --noEmit
 

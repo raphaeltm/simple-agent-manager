@@ -6,12 +6,15 @@ import type {
   TaskMode,
   UpdateAgentProfileRequest,
 } from '@simple-agent-manager/shared';
+import { paneClassName } from '@simple-agent-manager/ui';
 import { Paperclip } from 'lucide-react';
 import type { MutableRefObject } from 'react';
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 
 import { ProfileFormDialog } from '../../components/agent-profiles/ProfileFormDialog';
 import {
+  chatAgentDefaults,
+  type ChatAgentOverrides,
   ComposerOptionsButton,
   composerOptionsCount,
   ComposerOptionsPanel,
@@ -19,6 +22,10 @@ import {
   ProfilePickerSheet,
   ProfileToControl,
 } from '../../components/project-chat/profile-picker';
+import {
+  effectiveChatAgent,
+  EMPTY_CHAT_AGENT_OVERRIDES,
+} from '../../components/project-chat/profile-picker/agent-overrides';
 import { ProjectChatComposer } from '../../components/project-chat/ProjectChatComposer';
 import {
   hasValidationErrors,
@@ -63,6 +70,8 @@ type ChatInputProps = Readonly<{
   onTaskResourceReqsChange: (next: ResourceRequirementsFormState) => void;
   taskResourceErrors: ResourceValidationErrors;
   onTaskResourceErrorsClear: () => void;
+  agentOverrides: ChatAgentOverrides;
+  onAgentOverridesChange: (next: ChatAgentOverrides) => void;
   profileWizard: ProfileWizardState;
   onOpenProfileWizard: () => void;
   onCloseProfileWizard: () => void;
@@ -123,6 +132,8 @@ export function ChatInput({
   onTaskResourceReqsChange,
   taskResourceErrors,
   onTaskResourceErrorsClear,
+  agentOverrides,
+  onAgentOverridesChange,
   profileWizard,
   onOpenProfileWizard,
   onCloseProfileWizard,
@@ -154,6 +165,23 @@ export function ChatInput({
     wizardOpen: profileWizard.open,
     placeholder,
   });
+  const selectedSkill = selectedSkillId
+    ? (skills.find((skill) => skill.id === selectedSkillId) ?? null)
+    : null;
+  const agentDefaults = chatAgentDefaults(selectedProfile, selectedSkill);
+  const effectiveAgent = effectiveChatAgent(agentDefaults, agentOverrides);
+  // Overrides belong to the agent they were picked for: a profile or skill that switches the
+  // agent clears them, so switching back starts from that agent's defaults again.
+  const effectiveAgentType = agentDefaults.agentType;
+  useEffect(() => {
+    if (
+      agentOverrides.agentType &&
+      effectiveAgentType &&
+      agentOverrides.agentType !== effectiveAgentType
+    ) {
+      onAgentOverridesChange(EMPTY_CHAT_AGENT_OVERRIDES);
+    }
+  }, [agentOverrides.agentType, effectiveAgentType, onAgentOverridesChange]);
   const options: ComposerOptionsValue = {
     skills,
     selectedSkillId,
@@ -162,13 +190,17 @@ export function ChatInput({
     onTaskResourceReqsChange,
     taskResourceErrors,
     onTaskResourceErrorsClear,
+    agentDefaults,
+    agentOverrides,
+    onAgentOverridesChange,
     disabled: submitting,
   };
   const showOptions = optionsOpen || hasResourceErrors;
   const optionsPanelId = useId();
 
   return (
-    <div className="relative shrink-0 glass-chrome border-x-0 border-b-0 px-4 py-3 before:content-[''] before:absolute before:top-0 before:left-[15%] before:right-[15%] before:h-px before:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.18)_0%,transparent_70%)] before:pointer-events-none">
+    // The new-chat message box is a SAM Glass slab, like the follow-up composer in a chat.
+    <div className={`${paneClassName('slab')} shrink-0 px-3 py-3 md:px-4`}>
       {error && (
         <div role="alert" className="p-2 px-3 mb-2 rounded-sm bg-danger-tint text-danger text-xs">
           {error}
@@ -201,6 +233,7 @@ export function ChatInput({
           <div className="@container min-w-0 flex-1">
             <ProfileToControl
               profile={selectedProfile}
+              effective={effectiveAgent}
               loading={profilePicker.picker.status === 'loading'}
               disabled={submitting}
               onOpen={onOpenProfileSheet}

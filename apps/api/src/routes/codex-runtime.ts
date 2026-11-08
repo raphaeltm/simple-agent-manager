@@ -5,8 +5,8 @@ import { streamBinary } from './binary-artifacts';
 
 // Reviewed distribution bytes, including licenses/provenance. Never a floating key.
 export const CODEX_RUNTIME_RELEASE =
-  '1fd3c07846581888284ed9c9d02bc1f51e3673610c3688d8da98db47030bfb95';
-export const CODEX_RUNTIME_ARCHIVE_BYTES = 136245837;
+  '384d0071527848b68df318c04f2e6e040f2eea67131bbd5b6f66cc58f5bd65bd';
+export const CODEX_RUNTIME_ARCHIVE_BYTES = 136243963;
 const ARCHIVE_NAME = 'codex-runtime-linux-amd64.tar.gz';
 
 // Existing VM agents pin the previous digest until they drain. Keep its exact
@@ -14,8 +14,8 @@ const ARCHIVE_NAME = 'codex-runtime-linux-amd64.tar.gz';
 const SUPPORTED_RELEASES = [
   { release: CODEX_RUNTIME_RELEASE, bytes: CODEX_RUNTIME_ARCHIVE_BYTES },
   {
-    release: 'e85e7bfee875bb0bc0397a546073b324258d4cba2c0e54cb3808c3596825b292',
-    bytes: 132578703,
+    release: '1fd3c07846581888284ed9c9d02bc1f51e3673610c3688d8da98db47030bfb95',
+    bytes: 136245837,
   },
 ] as const;
 

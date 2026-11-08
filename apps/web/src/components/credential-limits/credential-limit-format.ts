@@ -52,11 +52,11 @@ export function formatUtilizationPercent(value: number | null): string {
   return `${Math.round(value)}%`;
 }
 
-/** "resets in 2h 10m", "reset due" once the time has passed, null when unknown. */
+/** "resets in 2h 10m", "reset 40m ago" once the time has passed, null when unknown. */
 export function formatResetCountdown(resetsAt: number | null, now: number): string | null {
   if (resetsAt === null || !Number.isFinite(resetsAt)) return null;
   const remaining = resetsAt - now;
-  if (remaining <= 0) return 'reset due';
+  if (remaining <= 0) return `reset ${formatMsSpan(Math.max(MINUTE_MS, now - resetsAt))} ago`;
   return `resets in ${formatMsSpan(remaining)}`;
 }
 

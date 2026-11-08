@@ -45,6 +45,12 @@ const AGENTS = [
   { id: 'openai-codex', name: 'Codex', description: 'OpenAI', configured: true },
   { id: 'opencode', name: 'OpenCode', description: 'OpenCode', configured: true },
   { id: 'google-gemini', name: 'Gemini CLI', description: 'Google', configured: false },
+  {
+    id: 'google-antigravity',
+    name: 'Google Antigravity',
+    description: 'Google',
+    configured: false,
+  },
 ];
 
 const NORMAL_ROWS = mergeRows(
@@ -386,6 +392,22 @@ function surfaceTests(viewport: 'mobile' | 'desktop') {
     await step.getByRole('button', { name: 'Close' }).click();
     await expect(page.getByRole('dialog')).toHaveCount(0);
     expect(new URL(page.url()).search).toBe('');
+  });
+
+  test('connect sheet offers Google Antigravity with a Gemini API key', async ({ page }) => {
+    await openPage(page, '/settings/agents', { rows: NORMAL_ROWS });
+    await page.getByRole('button', { name: 'Connect account' }).click();
+    const sheet = page.getByRole('dialog', { name: 'Connect an agent account' });
+    await sheet.getByRole('button', { name: /Google Antigravity/ }).click();
+    const step = page.getByRole('dialog', { name: 'Connect Google Antigravity' });
+    await expect(step).toBeVisible();
+    await expect(step.getByLabel('API key')).toBeVisible();
+    await expect(step.getByRole('link', { name: /google console/i })).toHaveAttribute(
+      'href',
+      'https://aistudio.google.com/apikey'
+    );
+    await assertNoOverflow(page);
+    await shot(page, 'connect-antigravity');
   });
 
   test('use an existing account in projects from its card', async ({ page }) => {

@@ -146,6 +146,14 @@ export const PROJECT_EVENT_REQUESTED_DELIVERY_MODES = [
 export type ProjectEventRequestedDeliveryMode =
   (typeof PROJECT_EVENT_REQUESTED_DELIVERY_MODES)[number];
 
+/**
+ * The delivery a subscription gets when its creator does not choose one, and the one SAM uses
+ * for agent-message notices: add the batch to the target chat's running turn without stopping
+ * it, or wake an idle or sleeping chat with an ordinary prompt.
+ */
+export const DEFAULT_PROJECT_EVENT_REQUESTED_DELIVERY =
+  'runtime_steer' as const satisfies ProjectEventRequestedDeliveryMode;
+
 export const PROJECT_EVENT_RESOLVED_DELIVERY_MODES = [
   'record_only',
   'recorded_not_injected',

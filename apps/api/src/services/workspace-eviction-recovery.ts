@@ -1,5 +1,6 @@
 import type { Env } from '../env';
 import { ensureSessionRecovery, type SessionRecoveryResult } from './session-recovery';
+import { preservationReceiptStatement } from './workspace-preservation-receipt';
 
 export interface WorkspaceEvictionRecoveryIdentity {
   projectId: string;
@@ -37,7 +38,20 @@ export function evictedWorkspaceSnapshotSleepStatement(
               THEN ? ELSE eviction_recovery_interrupted_work END,
             eviction_recovery_generation = ?,
             sleep_status = 'sleeping', sleep_after = NULL, sleep_error = NULL,
-            sleep_claim_id = NULL, sleep_claimed_at = NULL, updated_at = ?
+            sleep_claim_id = NULL, sleep_claimed_at = NULL, updated_at = ?,
+            -- A final capture taken from the stopped source with no other writer
+            -- (VM-reported quiesced) proves the source's last state was preserved,
+            -- exactly like a verified full sleep. A live pre-stop capture never does.
+            cleanup_identity_json = CASE
+              WHEN status = 'available' AND degradation = 'none' AND capture_generation IS NULL
+                AND json_valid(cleanup_identity_json)
+                AND json_extract(cleanup_identity_json, '$.quiesced') = 1
+                AND json_extract(cleanup_identity_json, '$.snapshotGeneration') = snapshot_generation
+                AND json_extract(cleanup_identity_json, '$.workspaceId') = workspace_id
+                AND json_extract(cleanup_identity_json, '$.nodeId') = ?
+                AND json_extract(cleanup_identity_json, '$.workspaceGeneration') = COALESCE(?, '')
+              THEN json_set(cleanup_identity_json, '$.preserved', 1)
+              ELSE cleanup_identity_json END
       WHERE chat_session_id = ?
         AND workspace_id = ?
         AND project_id = ?
@@ -69,6 +83,8 @@ export function evictedWorkspaceSnapshotSleepStatement(
       identity.interruptedWork === undefined ? null : Number(identity.interruptedWork),
       identity.generation,
       now,
+      identity.nodeId,
+      identity.generation,
       identity.chatSessionId,
       identity.workspaceId,
       identity.projectId,
@@ -88,12 +104,28 @@ export async function markEvictedWorkspaceSnapshotSleeping(
   env: Env,
   identity: WorkspaceEvictionRecoveryIdentity
 ): Promise<boolean> {
-  const sleeping = await evictedWorkspaceSnapshotSleepStatement(
-    env.DATABASE,
-    identity,
-    new Date().toISOString()
-  ).run();
-  return (sleeping.meta.changes ?? 0) > 0;
+  const now = new Date().toISOString();
+  const [sleeping] = await env.DATABASE.batch([
+    evictedWorkspaceSnapshotSleepStatement(env.DATABASE, identity, now),
+    evictedWorkspacePreservationReceiptStatement(env.DATABASE, identity, now),
+  ]);
+  return (sleeping?.meta.changes ?? 0) > 0;
+}
+
+/**
+ * Receipt for a quiesced eviction capture, batched after the sleep statement that grants
+ * it. A no-op for a live capture, which is never granted preservation.
+ */
+export function evictedWorkspacePreservationReceiptStatement(
+  database: D1Database,
+  identity: Pick<WorkspaceEvictionRecoveryIdentity, 'chatSessionId'>,
+  now: string
+): D1PreparedStatement {
+  return preservationReceiptStatement(database, {
+    chatSessionId: identity.chatSessionId,
+    reason: 'quiesced_eviction',
+    nowIso: now,
+  });
 }
 
 export async function recoverWorkspaceAfterEviction(

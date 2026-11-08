@@ -4,6 +4,8 @@ import {
   DEFAULT_GITHUB_TRIGGER_QUEUE_MAX_PENDING_LIMIT,
   DEFAULT_GITHUB_TRIGGER_QUEUE_TTL_SECONDS_LIMIT,
   DEFAULT_NODE_CLEANUP_BLOCKED_RETIREMENT_MS,
+  DEFAULT_NODE_LIFETIME_ADMISSION_CUTOFF_PERCENT,
+  DEFAULT_NODE_LIFETIME_FORCE_SLEEP_AFTER_MS,
   DEFAULT_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
   MAX_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS,
 } from '@simple-agent-manager/shared';
@@ -18,6 +20,8 @@ import {
 import { agentModelSettingDefinitions } from './agent-models/settings-definition';
 import { CONNECTOR_DEFAULTS, type ConnectorSettingKey } from './connector-settings-definition';
 import { ENV_KEYS, SECRET_KINDS, SETTING_KEYS } from './platform-config-store';
+import { DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER } from './provisioning-attempt-limits';
+import { DEFAULT_SESSION_STALE_TURN_NO_WORK_MINUTES } from './session-idleness';
 export const CORE_SETTINGS: AdminSettingDefinition[] = [
   integerDefinition(
     'operations.nodeCleanupRefusalWarnAfterMs',
@@ -39,6 +43,27 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     'Operations',
     'Maximum continuous node cleanup refusal in milliseconds before automatic VM retirement or ownership alert.',
     { min: 1, max: 86400000 }
+  ),
+  integerDefinition(
+    'operations.nodeLifetimeForceSleepAfterMs',
+    DEFAULT_NODE_LIFETIME_FORCE_SLEEP_AFTER_MS,
+    'Operations',
+    'Leeway in milliseconds after a node reaches its absolute lifetime before any session whose agent turn is still running is stopped and force-slept.',
+    { min: 1, max: 86400000 }
+  ),
+  integerDefinition(
+    'operations.sessionStaleTurnNoWorkMinutes',
+    DEFAULT_SESSION_STALE_TURN_NO_WORK_MINUTES,
+    'Operations',
+    'Minutes an open agent turn may go with no new message and no background-work progress before it no longer keeps its session awake, so the session can sleep. Applies to sessions whose task is still running. 0 turns the bound off.',
+    { min: 0, max: 10080 }
+  ),
+  integerDefinition(
+    'operations.nodeLifetimeAdmissionCutoffPercent',
+    DEFAULT_NODE_LIFETIME_ADMISSION_CUTOFF_PERCENT,
+    'Operations',
+    'Percent of the absolute node lifetime, at its end, during which a node takes no new workspace placements. 0 disables the cutoff.',
+    { min: 0, max: 99 }
   ),
 
   integerDefinition(
@@ -194,6 +219,13 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     'Operations',
     'External workload identity token lifetime in seconds. Changes apply to newly issued tokens.',
     { min: 1, max: MAX_WORKLOAD_IDENTITY_TOKEN_TTL_SECONDS }
+  ),
+  integerDefinition(
+    'operations.provisioningAttemptsPerProviderTier',
+    DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER,
+    'Operations',
+    "Most offerings one task tries from a single provider source before moving to the pool's next-ranked provider (or giving up), under the fallback-chain exhaustion policy.",
+    { min: 1, max: 50 }
   ),
   ...Object.keys(CONNECTOR_DEFAULTS).map((key) => connectorDefinition(key as ConnectorSettingKey)),
   ...agentModelSettingDefinitions(),

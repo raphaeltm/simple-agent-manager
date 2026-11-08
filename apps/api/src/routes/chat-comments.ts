@@ -28,16 +28,17 @@ import {
   CreateCommentThreadSchema,
   SendCommentDirectiveSchema,
 } from '../schemas/comments';
+import { authorizeAgentWake } from '../services/agent-wake-authorization';
 import { notifyCommentActivity } from '../services/collaboration-notifications';
 import { getCommentContextLimits } from '../services/collaboration-settings';
 import { resolveCommentMentions } from '../services/comment-mentions';
+import { sendMessageCommentDirective } from '../services/message-comment-directive';
 import {
   createProjectDataMessageCommentAdapter,
   isMessageCommentServiceError,
-  sendMessageCommentDirective,
 } from '../services/message-comments';
 import * as projectDataService from '../services/project-data';
-import { requireSessionWriter, toSessionViewerAccess } from '../services/session-access';
+import { toSessionViewerAccess } from '../services/session-access';
 import { getDefaultCompactMode } from './chat-message-query';
 
 export const chatCommentRoutes = new Hono<{ Bindings: Env }>();
@@ -322,8 +323,9 @@ async function updateCommentStatus(
 /**
  * POST /api/projects/:projectId/sessions/:sessionId/comments/:threadId/send
  * The explicit "Send to agent" action — the only way a comment reaches the agent. It queues
- * a prompt on the session owner's agent and credentials, so only session writers (the owner
- * or an active grantee) may do it.
+ * a prompt on the session owner's agent and credentials, so the agent-wake policy decides who
+ * may do it (`lib/agent-wake-policy.ts`; today: session writers, the owner or an active
+ * grantee).
  */
 chatCommentRoutes.post(
   '/:sessionId/comments/:threadId/send',
@@ -337,7 +339,11 @@ chatCommentRoutes.post(
     const db = drizzle(c.env.DATABASE, { schema });
 
     await requireProjectCapability(db, projectId, userId, 'task:write');
-    const writer = await requireSessionWriter(c.env, projectId, sessionId, userId, {
+    const { wake } = await authorizeAgentWake(c.env, {
+      projectId,
+      sessionId,
+      actorUserId: userId,
+      trigger: 'comment_directive',
       db,
       action: 'send comments to the agent in this session',
     });
@@ -349,12 +355,8 @@ chatCommentRoutes.post(
         projectId,
         sessionId,
         threadId,
-        humanUserId: userId,
+        wake,
         humanDisplayName: getCommentActor(c).name,
-        sharedAccess:
-          writer.role === 'grantee'
-            ? { ownerUserId: writer.ownerUserId, grantId: writer.grantId }
-            : null,
         body: body.body ?? null,
       });
       return c.json(

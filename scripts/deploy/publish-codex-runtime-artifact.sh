@@ -8,8 +8,8 @@ set -euo pipefail
 : "${AWS_SECRET_ACCESS_KEY:?AWS_SECRET_ACCESS_KEY is required}"
 [[ "$R2_BUCKET" =~ ^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$ ]] || exit 1
 [[ "$CLOUDFLARE_ACCOUNT_ID" =~ ^[a-f0-9]{32}$ ]] || exit 1
-release='1fd3c07846581888284ed9c9d02bc1f51e3673610c3688d8da98db47030bfb95'
-size=136245837
+release='384d0071527848b68df318c04f2e6e040f2eea67131bbd5b6f66cc58f5bd65bd'
+size=136243963
 # R2's S3 API moves this archive in seconds; Wrangler's REST object transport
 # took over 180 s to read it back on an installer builder (2026-11-07).
 # 136 MB within 300 s needs only ~0.45 MB/s.

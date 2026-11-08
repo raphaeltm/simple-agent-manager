@@ -19,6 +19,8 @@ export {
 // Providers & Locations
 export type { LocationMeta, ProviderHelpMeta } from './providers';
 export {
+  describeValidLocations,
+  GCP_ZONE_PATTERN,
   getDefaultLocationForProvider,
   getLocationsForProvider,
   hasByocComputeCredential,
@@ -205,6 +207,8 @@ export {
 export {
   buildVmPromptDeliveryCapabilitiesPath,
   buildVmPromptDeliveryReceiptPath,
+  buildVmSteerDeliveryPath,
+  buildVmSteerReceiptPath,
   DEFAULT_ACP_CHECKPOINT_PREEMPT_GRACE_MS,
   DEFAULT_ACP_LONG_TURN_CHECKPOINT_MS,
   DEFAULT_ACP_LONG_TURN_SUPERVISOR_ENABLED,
@@ -226,6 +230,7 @@ export {
   MAX_ORCHESTRATOR_WAIT_CHILDREN,
   VM_PROMPT_DELIVERY_PROTOCOL_VERSION,
   VM_PROMPT_DELIVERY_RECEIPTS_CAPABILITY,
+  VM_STEER_DELIVERY_PROTOCOL_VERSION,
 } from './durable-execution';
 
 // Node Pooling & Idle Timeout
@@ -243,6 +248,8 @@ export {
   DEFAULT_NODE_EMPTY_WARM_HANDOFF_GRACE_MS,
   DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS,
   DEFAULT_NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS,
+  DEFAULT_NODE_LIFETIME_ADMISSION_CUTOFF_PERCENT,
+  DEFAULT_NODE_LIFETIME_FORCE_SLEEP_AFTER_MS,
   DEFAULT_NODE_ORPHAN_IDLE_TIMEOUT_MS,
   DEFAULT_NODE_STOPPED_HANDOFF_REQUEST_TIMEOUT_MS,
   DEFAULT_NODE_STOPPED_HANDOFF_SWEEP_BUDGET_MS,
@@ -327,6 +334,7 @@ export {
   DEFAULT_SCALEWAY_ZONE,
   DEFAULT_VULTR_OS_NAME,
   DEFAULT_VULTR_REGION,
+  GCP_PRICE_CATALOG_SCOPE,
   HETZNER_IMAGE,
 } from './hetzner';
 

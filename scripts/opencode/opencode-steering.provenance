@@ -1,0 +1,3 @@
+source v2.2.5 9bbb8ce18c80f099e0e448775f59d965ead40a21 a67dc35fcc45e11314b6374cb662791cae6574e3347a87802042614b377de88d
+build bun-1.4.4 2.2.5-sam-s1 sam
+targets linux-x64-baseline linux-x64-baseline-musl linux-arm64 linux-arm64-musl

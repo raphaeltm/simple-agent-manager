@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -53,15 +54,28 @@ func newDeletionFixture(t *testing.T) deletionFixture {
 	if err := os.Mkdir(filepath.Join(state, "volume-data"), 0755); err != nil {
 		t.Fatal(err)
 	}
+	// Snapshot-helper reaping is logged separately so command counts stay about the
+	// workspace's own artifacts. A leaked helper (state file "helper") pins the volume.
 	fake := `#!/bin/sh
 set -eu
+case "$*" in
+ *sam.snapshot-helper.workspace=workspace-1*|'rm --force --volumes helper-1'|'image rm --force helper-image-1')
+  printf '%s\n' "$*" >> "$SAM_DELETE_TEST_STATE/helper-commands"
+  case "$1 $2" in
+   'ps -aq') if test -f "$SAM_DELETE_TEST_STATE/helper"; then printf '%s\n' helper-1; fi ;;
+   'image ls') if test -f "$SAM_DELETE_TEST_STATE/helper-image"; then printf '%s\n' helper-image-1; fi ;;
+   'rm --force') rm -f "$SAM_DELETE_TEST_STATE/helper" ;;
+   'image rm') rm -f "$SAM_DELETE_TEST_STATE/helper-image" ;;
+  esac
+  exit 0 ;;
+esac
 printf '%s\n' "$*" >> "$SAM_DELETE_TEST_STATE/commands"
 case "$1 $2" in
- 'ps -aq') if test -f "$SAM_DELETE_TEST_STATE/container"; then printf '%s\n' "${SAM_DELETE_TEST_CONTAINER:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}"; fi ;;
+ 'ps -aq') if test -n "${SAM_DELETE_TEST_PS_GATE:-}"; then while ! test -f "$SAM_DELETE_TEST_PS_GATE"; do sleep 0.02; done; fi; if test -f "$SAM_DELETE_TEST_STATE/container"; then printf '%s\n' "${SAM_DELETE_TEST_CONTAINER:-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa}"; fi ;;
  'rm -f') rm -f "$SAM_DELETE_TEST_STATE/container" ;;
  'volume ls') printf '%s\n' user-nested-volume; if test -f "$SAM_DELETE_TEST_STATE/volume"; then printf '%s\n' sam-ws-workspace-1; fi ;;
  'volume inspect') printf '%s\n' "sam-ws-workspace-1|created-1|$SAM_DELETE_TEST_STATE/volume-data|workspace-1|node-1|incarnation-1|${SAM_DELETE_TEST_OWNER:-user-1}" ;;
- 'volume rm') if test -f "$SAM_DELETE_TEST_STATE/fail-volume"; then echo busy >&2; exit 1; fi; rm -f "$SAM_DELETE_TEST_STATE/volume" ;;
+ 'volume rm') if test -f "$SAM_DELETE_TEST_STATE/helper"; then echo "volume is in use by helper-1" >&2; exit 1; fi; if test -f "$SAM_DELETE_TEST_STATE/fail-volume"; then if test -f "$SAM_DELETE_TEST_STATE/fail-volume-once"; then rm -f "$SAM_DELETE_TEST_STATE/fail-volume" "$SAM_DELETE_TEST_STATE/fail-volume-once"; fi; echo busy >&2; exit 1; fi; rm -f "$SAM_DELETE_TEST_STATE/volume" ;;
  *) echo unexpected >&2; exit 1 ;;
 esac
 `
@@ -258,7 +272,7 @@ func TestOwnedStandaloneRootRecordedOnlyBeforeFirstUse(t *testing.T) {
 	}
 }
 
-func TestWorkspaceDeletionFilesystemBudgetAndSymlinks(t *testing.T) {
+func TestWorkspaceDeletionFilesystemInterruptionAndSymlinks(t *testing.T) {
 	root := filepath.Join(t.TempDir(), "owned")
 	if err := os.Mkdir(root, 0755); err != nil {
 		t.Fatal(err)
@@ -280,14 +294,20 @@ func TestWorkspaceDeletionFilesystemBudgetAndSymlinks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := removeDeletionRoot(t.Context(), root, dev, ino, 2); err == nil {
-		t.Fatal("budget ignored")
+	expired, cancel := context.WithCancel(t.Context())
+	cancel()
+	err = removeDeletionRoot(expired, root, dev, ino)
+	if !errors.Is(err, errDeletionAttemptInterrupted) || !errors.Is(err, context.Canceled) {
+		t.Fatalf("interrupted attempt error = %v", err)
 	}
-	if entries, err := os.ReadDir(root); err != nil || len(entries) != 3 {
-		t.Fatalf("expected exactly 2 removals; remaining=%d err=%v", len(entries), err)
+	if entries, err := os.ReadDir(root); err != nil || len(entries) != 5 {
+		t.Fatalf("interrupted attempt removed entries; remaining=%d err=%v", len(entries), err)
 	}
-	if err := removeDeletionRoot(t.Context(), root, dev, ino, 10); err != nil {
+	if err := removeDeletionRoot(t.Context(), root, dev, ino); err != nil {
 		t.Fatal(err)
+	}
+	if _, err := os.Lstat(root); !os.IsNotExist(err) {
+		t.Fatal("resumed attempt left the root", err)
 	}
 	if got, err := os.ReadFile(marker); err != nil || string(got) != "user data" {
 		t.Fatal("symlink target changed", err)
@@ -331,7 +351,7 @@ func TestWorkspaceDeletionRootReplacementBeforeOpenPreservesSuccessor(t *testing
 	if err != nil {
 		t.Fatal(err)
 	}
-	err = removeDeletionRootWithOpener(t.Context(), root, dev, ino, 10, func(path string) (*os.Root, error) {
+	err = removeDeletionRootWithOpener(t.Context(), root, dev, ino, func(path string) (*os.Root, error) {
 		if err := os.Rename(path, path+".old"); err != nil {
 			t.Fatal(err)
 		}

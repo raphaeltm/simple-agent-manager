@@ -172,19 +172,19 @@ describe('MCP knowledge and policy route tools', () => {
     const body = await res.json();
     const tools = body.result.tools as Array<{ name: string; inputSchema: { properties: Record<string, { enum?: string[] }> } }>;
 
-    const addKnowledge = getTool(tools, 'add_knowledge');
-    expect(addKnowledge?.inputSchema.properties.entityType.enum).toEqual([...KNOWLEDGE_ENTITY_TYPES]);
-    expect(addKnowledge?.inputSchema.properties.sourceType.enum).toEqual([...KNOWLEDGE_SOURCE_TYPES]);
-    expect(getTool(tools, 'search_knowledge')?.inputSchema.properties.entityType.enum).toEqual([...KNOWLEDGE_ENTITY_TYPES]);
-    expect(getTool(tools, 'get_project_knowledge')?.inputSchema.properties.entityType.enum).toEqual([...KNOWLEDGE_ENTITY_TYPES]);
-    expect(getTool(tools, 'relate_knowledge')?.inputSchema.properties.relationType.enum).toEqual([...KNOWLEDGE_RELATION_TYPES]);
-    expect(getTool(tools, 'get_related')?.inputSchema.properties.relationType.enum).toEqual([...KNOWLEDGE_RELATION_TYPES]);
+    // Knowledge and policy tools are listed as domain groups (tool-groups.ts).
+    const knowledgeWrite = getTool(tools, 'knowledge_write');
+    expect(knowledgeWrite?.inputSchema.properties.entityType.enum).toEqual([...KNOWLEDGE_ENTITY_TYPES]);
+    expect(knowledgeWrite?.inputSchema.properties.sourceType.enum).toEqual([...KNOWLEDGE_SOURCE_TYPES]);
+    expect(knowledgeWrite?.inputSchema.properties.relationType.enum).toEqual([...KNOWLEDGE_RELATION_TYPES]);
+    const knowledgeRead = getTool(tools, 'knowledge_read');
+    expect(knowledgeRead?.inputSchema.properties.entityType.enum).toEqual([...KNOWLEDGE_ENTITY_TYPES]);
+    expect(knowledgeRead?.inputSchema.properties.relationType.enum).toEqual([...KNOWLEDGE_RELATION_TYPES]);
 
-    const addPolicy = getTool(tools, 'add_policy');
-    expect(addPolicy?.inputSchema.properties.category.enum).toEqual([...POLICY_CATEGORIES]);
-    expect(addPolicy?.inputSchema.properties.source.enum).toEqual([...POLICY_SOURCES]);
-    expect(getTool(tools, 'list_policies')?.inputSchema.properties.category.enum).toEqual([...POLICY_CATEGORIES]);
-    expect(getTool(tools, 'update_policy')?.inputSchema.properties.category.enum).toEqual([...POLICY_CATEGORIES]);
+    const policiesWrite = getTool(tools, 'policies_write');
+    expect(policiesWrite?.inputSchema.properties.category.enum).toEqual([...POLICY_CATEGORIES]);
+    expect(policiesWrite?.inputSchema.properties.source.enum).toEqual([...POLICY_SOURCES]);
+    expect(getTool(tools, 'policies_read')?.inputSchema.properties.category.enum).toEqual([...POLICY_CATEGORIES]);
   });
 
   it('advertises the lifecycle fields on add_policy and update_policy', async () => {
@@ -198,15 +198,14 @@ describe('MCP knowledge and policy route tools', () => {
       inputSchema: { properties: Record<string, { enum?: string[]; description?: string }> };
     }>;
 
-    for (const name of ['add_policy', 'update_policy']) {
-      const tool = getTool(tools, name);
-      expect(tool?.inputSchema.properties.scope?.enum).toEqual([...POLICY_SCOPES]);
-      expect(tool?.inputSchema.properties.expiresAt).toBeDefined();
-      expect(tool?.inputSchema.properties.scope?.description).toMatch(/REQUIRES expiresAt/);
-    }
+    const tool = getTool(tools, 'policies_write');
+    expect(tool?.inputSchema.properties.scope?.enum).toEqual([...POLICY_SCOPES]);
+    expect(tool?.inputSchema.properties.expiresAt).toBeDefined();
+    expect(tool?.inputSchema.properties.scope?.description).toMatch(/REQUIRES expiresAt/);
+    expect(tool?.inputSchema.properties.scope?.description).toMatch(/Methods: add, update/);
 
     // The description has to steer an agent toward expiring one-shot policies.
-    expect(getTool(tools, 'add_policy')?.description).toMatch(/scope to "task"/);
+    expect(tool?.description).toMatch(/scope "task" and expiresAt/);
   });
 
   it('returns INVALID_PARAMS for missing required knowledge and policy params', async () => {

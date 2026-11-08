@@ -1,4 +1,4 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { hashKey, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import { useQueryScope } from '../../hooks/useQueryScope';
@@ -13,6 +13,7 @@ import {
   oldestPersistedCursor,
   readMessagesAfter,
 } from '../../lib/message-paging';
+import { takeRoutePrefetchedTranscript } from '../../lib/project-route-prefetch';
 import {
   chatQueryKeys,
   chatSessionMessagesQueryOptions,
@@ -39,6 +40,8 @@ export interface SessionTranscript {
   firstItemIndex: number;
   /** Adds live rows (socket deliveries, optimistic sends) in transcript order. */
   appendMessages: (incoming: ChatMessageResponse[]) => void;
+  /** Merges server-reported fields into one loaded row's tool metadata (delivery state). */
+  patchMessageMetadata: (messageId: string, patch: Record<string, unknown>) => void;
   /**
    * Reads and adds every row persisted after the newest loaded one (the socket subscribed).
    * `afterReadsSettle` runs once no transcript read is in flight, for other state to re-read.
@@ -70,12 +73,19 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
     [projectId, queryScope, sessionId]
   );
 
+  const options = chatSessionMessagesQueryOptions(queryScope, projectId, sessionId);
+  // Read once per open, so a later render cannot change how this open reconciles.
+  const [routePrefetched] = useState(() =>
+    takeRoutePrefetchedTranscript(hashKey(options.queryKey))
+  );
   const query = useQuery({
-    ...chatSessionMessagesQueryOptions(queryScope, projectId, sessionId),
+    ...options,
     enabled: Boolean(queryScope && projectId && sessionId),
     // Opening a chat always reconciles its cached copy with the server, however
-    // fresh the cache is: a message persisted while it was closed must appear.
-    refetchOnMount: 'always',
+    // fresh the cache is: a message persisted while it was closed must appear. The
+    // exception is the open a route prefetch just read the transcript for; it
+    // reconciles only once that read has gone stale.
+    refetchOnMount: routePrefetched ? true : 'always',
   });
   const detail = query.data;
   const messages = detail?.messages ?? NO_MESSAGES;
@@ -105,6 +115,23 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
         (current) =>
           current && { ...current, messages: mergeMessages(current.messages, incoming, 'append') }
       );
+    },
+    [queryClient, queryKey]
+  );
+
+  const patchMessageMetadata = useCallback(
+    (messageId: string, patch: Record<string, unknown>) => {
+      queryClient.setQueryData<ChatSessionDetailResponse>(queryKey, (current) => {
+        if (!current?.messages.some((message) => message.id === messageId)) return current;
+        return {
+          ...current,
+          messages: current.messages.map((message) =>
+            message.id === messageId
+              ? { ...message, toolMetadata: { ...(message.toolMetadata ?? {}), ...patch } }
+              : message
+          ),
+        };
+      });
     },
     [queryClient, queryKey]
   );
@@ -267,6 +294,7 @@ export function useSessionTranscript(projectId: string, sessionId: string): Sess
     loadingMore: olderLoadsInFlight > 0,
     firstItemIndex,
     appendMessages,
+    patchMessageMetadata,
     catchUpTail,
     mergeRecentWindow,
     loadMore,

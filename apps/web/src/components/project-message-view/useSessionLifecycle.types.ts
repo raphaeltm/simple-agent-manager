@@ -8,6 +8,7 @@
 
 import type {
   NodeResponse,
+  PromptDeliveryIntent,
   SessionAccessSummary,
   TaskExecutionStep,
   WorkspaceResponse,
@@ -46,6 +47,11 @@ export interface UseSessionLifecycleResult {
   showConnectionBanner: boolean;
   retryWs: () => void;
   agentActivity: AgentActivityState;
+  /**
+   * Whether the agent's adapter can take a message mid-turn. Null until the VM agent
+   * reports it (older agents never do).
+   */
+  steeringSupported: boolean | null;
   /** Debounced working signal used only by CompletionDock to swallow brief idle reversals. */
   completionDockWorking: boolean;
   /** True while a wake is in flight (hydrated from D1 or pushed over the socket). */
@@ -72,7 +78,8 @@ export interface UseSessionLifecycleResult {
   cancelling: boolean;
   /** Message from a failed interrupt attempt, surfaced beside the control. */
   cancelError: string | null;
-  handleSendFollowUp: () => Promise<void>;
+  /** `steer` adds the message to the running turn when the agent's runtime can; else it queues. */
+  handleSendFollowUp: (deliveryIntent?: PromptDeliveryIntent) => Promise<void>;
   handleUploadFiles: (files: FileList | File[] | null) => void;
   attachments: import('../../pages/project-chat/useAttachments').AttachmentUploadState[];
   removeAttachment: (index: number) => void;

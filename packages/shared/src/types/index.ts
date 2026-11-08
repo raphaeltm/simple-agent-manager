@@ -118,6 +118,7 @@ export {
   isCapacityPoolStrategy,
   isCapacitySourceKind,
   isCapacityWorkloadRole,
+  MAX_CAPACITY_POOL_SOURCE_ORDER_LENGTH,
   SAFE_EFFECTIVE_CAPACITY_POOL_REASONS,
 } from './capacity-pool';
 
@@ -195,6 +196,7 @@ export type {
   NodeStatus,
   NodeSystemInfo,
   NodeTransport,
+  NodeWorkspaceMemoryMetric,
   PortsResponse,
   UpdateWorkspaceRequest,
   VMLocation,
@@ -402,7 +404,7 @@ export type { ProjectEventSubscriptionAgentCaller, ProjectEventSubscriptionCalle
 // prettier-ignore
 export { PROJECT_EVENT_SUBSCRIPTION_CALLER_KINDS, PROJECT_EVENT_SUBSCRIPTION_OWNER_SCOPES } from './project-event-subscriptions';
 // prettier-ignore
-export { PROJECT_EVENT_AUDIENCE_SCOPES, PROJECT_EVENT_CONTRACT_VERSION, PROJECT_EVENT_DELIVERY_ADAPTER_ACTIONS, PROJECT_EVENT_DELIVERY_ADAPTER_KINDS, PROJECT_EVENT_DELIVERY_ATTEMPT_STATES, PROJECT_EVENT_DELIVERY_BATCH_STATES, PROJECT_EVENT_DELIVERY_CAPABILITY_MODES, PROJECT_EVENT_DELIVERY_RESOLUTION_REASONS, PROJECT_EVENT_DELIVERY_TARGET_STATES, PROJECT_EVENT_FILTER_FIELDS, PROJECT_EVENT_FILTER_VERSION, PROJECT_EVENT_REQUESTED_DELIVERY_MODES, PROJECT_EVENT_RESOLVED_DELIVERY_MODES, PROJECT_EVENT_SEVERITIES, PROJECT_EVENT_SUBSCRIPTION_OWNER_TYPES, PROJECT_EVENT_SUBSCRIPTION_STATES } from './project-events';
+export { DEFAULT_PROJECT_EVENT_REQUESTED_DELIVERY, PROJECT_EVENT_AUDIENCE_SCOPES, PROJECT_EVENT_CONTRACT_VERSION, PROJECT_EVENT_DELIVERY_ADAPTER_ACTIONS, PROJECT_EVENT_DELIVERY_ADAPTER_KINDS, PROJECT_EVENT_DELIVERY_ATTEMPT_STATES, PROJECT_EVENT_DELIVERY_BATCH_STATES, PROJECT_EVENT_DELIVERY_CAPABILITY_MODES, PROJECT_EVENT_DELIVERY_RESOLUTION_REASONS, PROJECT_EVENT_DELIVERY_TARGET_STATES, PROJECT_EVENT_FILTER_FIELDS, PROJECT_EVENT_FILTER_VERSION, PROJECT_EVENT_REQUESTED_DELIVERY_MODES, PROJECT_EVENT_RESOLVED_DELIVERY_MODES, PROJECT_EVENT_SEVERITIES, PROJECT_EVENT_SUBSCRIPTION_OWNER_TYPES, PROJECT_EVENT_SUBSCRIPTION_STATES } from './project-events';
 export {
   AGENT_ACTIVITY_STATES,
   ATTACHMENT_DEFAULTS,
@@ -499,6 +501,26 @@ export type {
   WebPushSubscriptionsResponse,
 } from './notification';
 export { NOTIFICATION_CHANNELS, NOTIFICATION_TYPES, NOTIFICATION_URGENCIES } from './notification';
+export type {
+  DecideOperationsActionApprovalRequest,
+  DecideOperationsActionApprovalResponse,
+  GetOperationsActionApprovalResponse,
+  ListOperationsActionApprovalsResponse,
+  OperationsAction,
+  OperationsActionApproval,
+  OperationsActionTargetType,
+  OperationsApprovalDecision,
+  OperationsApprovalStatus,
+} from './operations-actions';
+export {
+  OPERATIONS_ACTION_LABELS,
+  OPERATIONS_ACTION_TARGET_TYPES,
+  OPERATIONS_ACTIONS,
+  OPERATIONS_APPROVAL_DECISIONS,
+  OPERATIONS_APPROVAL_STATUSES,
+  OPERATIONS_AUTO_SAFE_ACTIONS,
+  OPERATIONS_IRREVERSIBLE_ACTIONS,
+} from './operations-actions';
 
 // Shared session access
 export type {
@@ -795,16 +817,22 @@ export type {
   GetPendingMessagesResponse,
   ListMailboxResponse,
   MessageClass,
+  PromptDeliveryIntent,
   PromptDeliverySource,
   SendDurableMessageRequest,
   SendDurableMessageResponse,
   SenderType,
+  SteerOutcome,
   VmPromptDeliveryCapabilities,
   VmPromptDeliveryReceipt,
   VmPromptDeliveryResponse,
   VmPromptReceiptState,
+  VmSteerReceipt,
+  VmSteerReceiptState,
+  VmSteerResponse,
 } from './mailbox';
 export {
+  canSteerMessageClass,
   DELIVERY_STATE_TRANSITIONS,
   DELIVERY_STATES,
   DELIVERY_TERMINAL_STATES,
@@ -813,10 +841,13 @@ export {
   MAILBOX_DEFAULTS,
   MESSAGE_CLASS_URGENCY,
   MESSAGE_CLASSES,
+  PROMPT_DELIVERY_INTENTS,
   PROMPT_DELIVERY_SOURCES,
   SENDER_TYPES,
+  STEER_OUTCOMES,
   TURN_STOP_URGENCY_THRESHOLD,
   VM_PROMPT_RECEIPT_STATES,
+  VM_STEER_RECEIPT_STATES,
 } from './mailbox';
 
 // Durable execution checkpoint foundation
@@ -963,6 +994,13 @@ export type {
   SandboxFileReadResult,
 } from './sandbox';
 
+// Nodes page resource usage
+export type {
+  NodeResourceReservation,
+  NodeResourceUsageResponse,
+  NodeResourceUsageSeries,
+  NodeWorkspaceResourceUsage,
+} from './node-resource-usage';
 // Resource Requirements & Reservations
 export type {
   LegacyVmSizeResolutionInput,

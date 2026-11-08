@@ -118,6 +118,25 @@ describe('automatic deletion preservation and generation fences — real SQL', (
     sqlite.exec("UPDATE workspaces SET user_id='owner' WHERE id='target'");
     expect(await automaticDeletionPreservationAvailable(env, identity)).toBe(true);
   });
+  it.each([
+    ['grants', 'chat', true],
+    ['refuses (control)', 'other-chat', false],
+  ] as const)(
+    '%s the source a completed wake unbound when its restored target holds %s',
+    async (_verdict, targetChat, expected) => {
+      // A completed wake leaves the source unbound and moves the conversation to the target.
+      sqlite.exec(`UPDATE workspaces SET chat_session_id=NULL WHERE id='ws';
+        UPDATE session_snapshots SET sleep_status=NULL,sleeping_at=NULL,recovery_status='restored',
+          recovery_task_id='wake-task',recovery_workspace_id='target',restored_at='2026-10-28T00:00:00Z'`);
+      sqlite
+        .prepare(
+          "INSERT INTO workspaces(id,user_id,node_id,project_id,chat_session_id,status) VALUES ('target','owner','target-node','project',?,'running')"
+        )
+        .run(targetChat);
+      const unbound = { ...identity, chatSessionId: null };
+      expect(await automaticDeletionPreservationAvailable(env, unbound)).toBe(expected);
+    }
+  );
   it('allows the same durable operation to physically delete a verified preserved source', async () => {
     network.remove.mockImplementationOnce(async (_node, _workspace, _env, _owner, options) => {
       expect(options).toMatchObject({

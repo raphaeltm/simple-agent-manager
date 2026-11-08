@@ -112,6 +112,8 @@ function runAcceptedPromptDeliveryHooks(
           source: input.sourceKind,
           kind: 'durable_prompt_delivery',
           deliveryId: accepted.message.id,
+          // Matches the persisted row, so a live client shows the steer's state too.
+          ...(accepted.message.deliveryIntent === 'steer' ? { deliveryIntent: 'steer' } : {}),
         },
         createdAt: accepted.transcriptCreatedAt,
         sequence: accepted.transcriptSequence,
@@ -147,6 +149,7 @@ export async function reportActivity(
     runtimeWorkCount?: number;
     runtimeWorkSource?: string;
     runtimeWorkProgressAt?: number | null;
+    steeringSupported?: boolean;
   }
 ): Promise<ActivityReportOutcome> {
   const applied = sessionState.upsertActivityState(sql, sessionId, {
@@ -160,6 +163,7 @@ export async function reportActivity(
     runtimeWorkCount: extra?.runtimeWorkCount,
     runtimeWorkSource: extra?.runtimeWorkSource,
     runtimeWorkProgressAt: extra?.runtimeWorkProgressAt,
+    steeringSupported: extra?.steeringSupported,
   });
   if (!applied) {
     log.info('activity_report_stale_rejected', {
@@ -181,6 +185,7 @@ export async function reportActivity(
       sessionId: chatSessionId,
       activity: currentActivity,
       promptStartedAt: extra?.promptStartedAt ?? persistedState?.promptStartedAt ?? null,
+      steeringSupported: persistedState?.steeringSupported ?? null,
     },
     chatSessionId
   );

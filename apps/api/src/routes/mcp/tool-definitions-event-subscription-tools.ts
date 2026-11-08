@@ -83,9 +83,9 @@ export const PROJECT_EVENT_SUBSCRIPTION_TOOLS = [
   {
     name: 'create_project_event_subscription',
     description:
-      'Create or replay a short-lived ProjectData event subscription owned by the calling task agent. Project, owner, session, task, and agent identity are derived from the MCP token; do not provide projectId or owner. For existing_session_prompt, SAM may wake this same chat later with event IDs only after a matching event materializes; read wakeInstructions in the response, checkpoint local state before ending your turn, and use list_subscription_events/get_event/ack_event_delivery after wake or polling. ' +
+      'Create or replay a short-lived ProjectData event subscription owned by the calling task agent. Project, owner, session, task, and agent identity are derived from the MCP token; do not provide projectId or owner. With the default runtime_steer (or existing_session_prompt), SAM delivers event IDs only to this same chat after a matching event materializes: inside your running turn when steering is supported, otherwise as a wake prompt; read wakeInstructions in the response, checkpoint local state before ending your turn, and use list_subscription_events/get_event/ack_event_delivery after wake or polling. ' +
       'Waiting on a GitHub PR: filter source "github" with subjectType "pull_request" and subjectId = the PR number for review, review-comment, PR-comment and PR events; CI completion eventType values are "check_run.completed", "check_suite.completed", "workflow_run.completed" (bare names do not match); use subjectType "commit" and subjectId = the full 40-character PR head SHA. ' +
-      'Reconcile the current PR head and checks before subscribing, immediately after subscribing (to close the check/subscribe race), and after every resume. Completed checks need no new wait. Expiry is not a wake: arrange one bounded fallback check via create_project_schedule to the same session before ending your turn, or report that no supported wake is available. Only a PR comment waking an idle, live chat has been verified end to end; report reliance on the fallback.',
+      'Reconcile the current PR head and checks before subscribing, immediately after subscribing (to close the check/subscribe race), and after every resume. Completed checks need no new wait. Expiry is not a wake: arrange one bounded fallback check via `schedules_write` method `create` to the same session before ending your turn, or report that no supported wake is available. Only a PR comment waking an idle, live chat has been verified end to end; report reliance on the fallback.',
     inputSchema: {
       type: 'object' as const,
       properties: {
@@ -99,8 +99,11 @@ export const PROJECT_EVENT_SUBSCRIPTION_TOOLS = [
           type: 'string',
           enum: PROJECT_EVENT_REQUESTED_DELIVERY_MODES,
           description:
-            'Requested delivery policy. record_only stays pull-only. existing_session_prompt resolves to a durable same-chat prompt queue when the caller target supports it. ' +
-            'runtime_interrupt also rides that prompt queue but with the interrupt mailbox class: its wakes may stop an in-flight turn on the target chat so the batch is delivered immediately (stop-and-deliver). ' +
+            'Requested delivery policy. Defaults to runtime_steer: when the target chat is mid-turn on a runtime that supports live steering, ' +
+            'each batch is added to that turn without stopping it; an idle, sleeping or non-steering target gets an ordinary wake prompt. ' +
+            'existing_session_prompt always waits for the running turn to end and delivers the batch as the next prompt. ' +
+            'runtime_interrupt also rides the prompt queue but with the interrupt mailbox class: its wakes may stop an in-flight turn on the target chat so the batch is delivered immediately (stop-and-deliver). ' +
+            'record_only stays pull-only. ' +
             'Other injection modes are recorded_not_injected until their adapters are enabled.',
         },
         target: DELIVERY_TARGET_SCHEMA,
@@ -115,7 +118,7 @@ export const PROJECT_EVENT_SUBSCRIPTION_TOOLS = [
         },
         minWakeIntervalSeconds: MIN_WAKE_INTERVAL_SECONDS_PROPERTY,
       },
-      required: ['idempotencyKey', 'filter', 'requestedDelivery'],
+      required: ['idempotencyKey', 'filter'],
       additionalProperties: false,
     },
   },

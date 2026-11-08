@@ -16,17 +16,8 @@ export function SessionTriggerOrigin({
   if (!trigger) return null;
   const page = automationPaths.detail(projectId, 'trigger', trigger.id);
   return (
-    <div
-      className="flex items-start gap-2 px-2 py-1.5 rounded text-xs"
-      style={{
-        background: 'color-mix(in srgb, var(--sam-color-info, #3b82f6) 8%, transparent)',
-      }}
-    >
-      <Clock
-        size={12}
-        className="shrink-0 mt-0.5"
-        style={{ color: 'var(--sam-color-info, #3b82f6)' }}
-      />
+    <div className="flex items-start gap-2 rounded-[var(--sam-radius-control)] border border-[var(--sam-info-edge)] bg-info-tint px-3 py-2 text-xs">
+      <Clock size={13} aria-hidden="true" className="mt-0.5 shrink-0 text-info-fg" />
       <div className="flex-1 min-w-0 space-y-0.5">
         <div className="font-medium text-fg-primary">Triggered by: {trigger.name}</div>
         {trigger.cronHumanReadable && (
@@ -36,7 +27,7 @@ export function SessionTriggerOrigin({
           <div className="text-fg-muted">Run #{triggerExecution.sequenceNumber}</div>
         )}
         <div className="flex items-center gap-2 mt-1">
-          <Link to={page} className="text-accent-primary no-underline hover:underline">
+          <Link to={page} className="text-accent no-underline hover:underline">
             View automation
           </Link>
           <Link to={`${page}#runs`} className="text-fg-muted no-underline hover:underline">

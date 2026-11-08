@@ -1,4 +1,5 @@
 import type { Task } from '@simple-agent-manager/shared';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -194,6 +195,7 @@ vi.mock('../../../src/components/project-message-view', () => ({
   },
 }));
 
+import { prefetchProjectRoute } from '../../../src/lib/project-route-prefetch';
 import { ProjectChat } from '../../../src/pages/project-chat';
 import { ProvisioningIndicator } from '../../../src/pages/project-chat/ProvisioningIndicator';
 import { ProjectContext, type ProjectContextValue } from '../../../src/pages/ProjectContext';
@@ -509,6 +511,168 @@ describe('ProjectChat new chat button', () => {
     });
   });
 
+  it('shows a deep-linked conversation while the session list is still loading', async () => {
+    // A cold deep link names its session. The conversation (whose transcript loads on
+    // its own) must not wait behind the sidebar's list read.
+    let resolveList: (value: { sessions: unknown[]; total: number }) => void = () => undefined;
+    mocks.listChatSessions.mockReturnValue(
+      new Promise((resolve) => {
+        resolveList = resolve;
+      })
+    );
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/session-1`);
+
+    expect(await screen.findByTestId('message-view')).toHaveTextContent('session-1');
+    expect(mocks.listChatSessions).toHaveBeenCalled();
+    expect(screen.queryByTestId('chat-sessions-loading')).not.toBeInTheDocument();
+    // The sidebar says it is loading, not that the project has no chats.
+    expect(screen.queryByText('No chats yet. Start a new one above.')).not.toBeInTheDocument();
+    expect(screen.queryByText('What do you want to build?')).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveList({ sessions: [SESSION_1, SESSION_2], total: 2 });
+    });
+    expect(screen.getByTestId('message-view')).toHaveTextContent('session-1');
+    expect(await screen.findAllByText('First chat')).not.toHaveLength(0);
+  });
+
+  function renderWithClient(client: QueryClient, path: string) {
+    return render(
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={[path]}>
+          <ProjectContext.Provider
+            value={{ projectId: PROJECT_ID, project: null, installations: [], reload: vi.fn() }}
+          >
+            <Routes>
+              <Route path="/projects/:id/chat" element={<ProjectChat />} />
+              <Route path="/projects/:id/chat/:sessionId" element={<ProjectChat />} />
+            </Routes>
+          </ProjectContext.Provider>
+        </MemoryRouter>
+      </QueryClientProvider>
+    );
+  }
+
+  it('consumes the session list the project route prefetched, then re-reads it once the socket opens', async () => {
+    // Production order: the project route starts the list read, the chat page mounts
+    // later (after the project detail) and must join that read, not issue its own. That
+    // read predates the chat socket, which replays nothing, so the socket's first open
+    // reads the list once more (the mocked socket is already connected).
+    let resolveList: (value: { sessions: unknown[]; total: number }) => void = () => undefined;
+    mocks.listChatSessions.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveList = resolve;
+      })
+    );
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    prefetchProjectRoute(client, 'user-1', `/projects/${PROJECT_ID}/chat/session-1`);
+    expect(mocks.listChatSessions).toHaveBeenCalledTimes(1);
+
+    renderWithClient(client, `/projects/${PROJECT_ID}/chat/session-1`);
+    expect(await screen.findByTestId('message-view')).toHaveTextContent('session-1');
+    // Joined, not duplicated, while the route read is in flight.
+    expect(mocks.listChatSessions).toHaveBeenCalledTimes(1);
+
+    const created = { ...SESSION_1, id: 'session-created-before-socket', topic: 'Late arrival' };
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [created, SESSION_1, SESSION_2],
+      total: 3,
+    });
+    await act(async () => {
+      resolveList({ sessions: [SESSION_1, SESSION_2], total: 2 });
+    });
+    expect(await screen.findAllByText('Late arrival')).not.toHaveLength(0);
+    expect(mocks.listChatSessions).toHaveBeenCalledTimes(2);
+    expect(mocks.listChatSessions).toHaveBeenLastCalledWith(PROJECT_ID, {
+      limit: expect.any(Number),
+      scope: 'all',
+      includeLive: true,
+    });
+  });
+
+  it('does not re-read the list on socket open when the page read it itself', async () => {
+    mocks.listChatSessions.mockResolvedValue({ sessions: [SESSION_1, SESSION_2], total: 2 });
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+    renderWithClient(client, `/projects/${PROJECT_ID}/chat/session-1`);
+    expect(await screen.findAllByText('First chat')).not.toHaveLength(0);
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(mocks.listChatSessions).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps a deep-linked conversation when the first list read fails', async () => {
+    mocks.listChatSessions.mockRejectedValue(new Error('list unavailable'));
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/session-1`);
+
+    expect(await screen.findByTestId('message-view')).toHaveTextContent('session-1');
+    await waitFor(() => expect(mocks.listChatSessions).toHaveBeenCalled());
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(screen.getByTestId('message-view')).toHaveTextContent('session-1');
+    expect(screen.queryByText('What do you want to build?')).not.toBeInTheDocument();
+  });
+
+  it('forks a deep-linked conversation clicked before the session list arrived', async () => {
+    let resolveList: (value: { sessions: unknown[]; total: number }) => void = () => undefined;
+    mocks.listChatSessions.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveList = resolve;
+      })
+    );
+    mocks.listChatSessions.mockResolvedValue({ sessions: [SESSION_1, SESSION_2], total: 2 });
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/session-1`);
+    fireEvent.click(await screen.findByRole('button', { name: 'Fork session' }));
+    // Nothing to fork from yet: still on the conversation, not a silent no-op later.
+    expect(screen.getByTestId('message-view')).toBeInTheDocument();
+
+    await act(async () => {
+      resolveList({ sessions: [SESSION_1, SESSION_2], total: 2 });
+    });
+    // The fork went through once the list landed: the new-chat composer opens pre-filled.
+    await waitFor(() =>
+      expect(
+        (
+          screen.getByPlaceholderText(
+            'Describe what you want the agent to do...'
+          ) as HTMLTextAreaElement
+        ).value
+      ).toContain('session-1')
+    );
+  });
+
+  it('waits for the list on the bare chat route, then shows the new-chat screen', async () => {
+    let resolveList: (value: { sessions: unknown[]; total: number }) => void = () => undefined;
+    mocks.listChatSessions.mockReturnValue(
+      new Promise((resolve) => {
+        resolveList = resolve;
+      })
+    );
+
+    renderProjectChat();
+
+    expect(await screen.findByTestId('chat-sessions-loading')).toBeInTheDocument();
+    await act(async () => {
+      resolveList({ sessions: [], total: 0 });
+    });
+    expect(await screen.findByText('What do you want to build?')).toBeInTheDocument();
+    expect(screen.queryByTestId('chat-sessions-loading')).not.toBeInTheDocument();
+  });
+
+  it('falls back to the new-chat screen when a deep link resolves to a project with no chats', async () => {
+    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/session-1`);
+
+    expect(await screen.findByText('What do you want to build?')).toBeInTheDocument();
+    expect(screen.queryByTestId('message-view')).not.toBeInTheDocument();
+  });
+
   it('shows new chat input when there are no sessions', async () => {
     mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
 
@@ -603,7 +767,7 @@ describe('ProjectChat new chat button', () => {
     });
 
     // Click the "+ New Chat" button in the sidebar
-    fireEvent.click(screen.getByRole('button', { name: '+ New Chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New Chat', exact: true }));
 
     // Should show the new chat input
     await waitFor(() => {
@@ -628,7 +792,8 @@ describe('ProjectChat new chat button', () => {
       expect(screen.getByText('First chat')).toBeInTheDocument();
     });
 
-    // Click on the second session
+    // Click on the second session, a stopped one in the folded History section
+    fireEvent.click(screen.getByRole('button', { name: /^History/ }));
     fireEvent.click(screen.getByText('Second chat'));
 
     // Should show that session's messages
@@ -660,19 +825,19 @@ describe('ProjectChat new chat button', () => {
     expect(mocks.resolveAttentionAnswer).toHaveBeenCalledTimes(2);
   });
 
-  it('shows and opens hierarchy controls for stale sessions in the Older bucket', async () => {
+  it('shows and opens hierarchy controls for stopped sessions in the History section', async () => {
     setupStaleHierarchyMocks();
 
     renderProjectChat();
 
-    await waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Older (2)' })).toBeInTheDocument();
-    });
-    // Before expanding Older, no hierarchy buttons visible
+    const history = await screen.findByRole('button', { name: /^History/ });
+    expect(history).toHaveTextContent('History2');
+    expect(history).toHaveAttribute('aria-expanded', 'false');
+    // Before expanding History, no hierarchy buttons visible
     expect(screen.queryByLabelText('Has subtasks')).not.toBeInTheDocument();
     expect(screen.queryByLabelText('Subtask')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Older (2)' }));
+    fireEvent.click(history);
 
     await waitFor(() => {
       expect(screen.getByText('Child dispatched task')).toBeInTheDocument();
@@ -687,6 +852,111 @@ describe('ProjectChat new chat button', () => {
 
     const dialog = await screen.findByRole('dialog', { name: 'Task hierarchy' });
     expect(dialog).toHaveAttribute('data-focus-task-id', 'child-task');
+  });
+
+  it('groups the sidebar by state: attention, awake, sleeping, then folded history', async () => {
+    const hoursAgo = (hours: number) => Date.now() - hours * 60 * 60 * 1000;
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [
+        { ...SESSION_1, id: 'recent-active', topic: 'Recent active chat' },
+        // Awake for six hours without a message: it used to fall into a folded "Older".
+        {
+          ...SESSION_1,
+          id: 'quiet-awake',
+          topic: 'Quiet awake chat',
+          startedAt: hoursAgo(7),
+          createdAt: hoursAgo(7),
+          lastMessageAt: hoursAgo(6),
+        },
+        {
+          ...SESSION_1,
+          id: 'resting',
+          topic: 'Resting chat',
+          status: 'sleeping',
+          lastMessageAt: hoursAgo(1),
+        },
+        // Asleep and days old, but its wake failed: a person must act.
+        {
+          ...SESSION_1,
+          id: 'wake-failed',
+          topic: 'Wake failed chat',
+          status: 'sleeping',
+          lastMessageAt: hoursAgo(48),
+          attention: {
+            markerId: 'marker-1',
+            kind: 'wake_failed',
+            // The wake failed recently, on a chat whose last message is days old.
+            createdAt: hoursAgo(2),
+            expiresAt: null,
+            reason: 'provider_limit_blocked',
+            options: [],
+          },
+        },
+        { ...SESSION_2, id: 'finished', topic: 'Finished chat' },
+      ],
+      total: 5,
+    });
+
+    renderProjectChat();
+
+    const list = await screen.findByRole('navigation', { name: 'Chat sessions' });
+    await within(list).findByText('Quiet awake chat');
+    const sectionOf = (section: string) =>
+      within(list)
+        .getAllByRole('region')
+        .find((region) => region.getAttribute('aria-labelledby') === `session-section-${section}`)!;
+
+    const attention = sectionOf('attention');
+    expect(within(attention).getByRole('heading', { name: /Needs attention/ })).toBeInTheDocument();
+    expect(within(attention).getByText('Wake failed chat')).toBeInTheDocument();
+    const awake = sectionOf('awake');
+    expect(within(awake).getByText('Recent active chat')).toBeInTheDocument();
+    expect(within(awake).getByText('Quiet awake chat')).toBeInTheDocument();
+    const sleeping = sectionOf('sleeping');
+    expect(within(sleeping).getByText('Resting chat')).toBeInTheDocument();
+
+    // Sections render in priority order, not message order.
+    const headings = within(list)
+      .getAllByRole('region')
+      .map((region) => region.getAttribute('aria-labelledby'));
+    expect(headings).toEqual([
+      'session-section-attention',
+      'session-section-awake',
+      'session-section-sleeping',
+      'session-section-history',
+    ]);
+
+    // Finished work is folded until asked for.
+    const history = within(list).getByRole('button', { name: /^History/ });
+    expect(history).toHaveAttribute('aria-expanded', 'false');
+    expect(within(list).queryByText('Finished chat')).not.toBeInTheDocument();
+    fireEvent.click(history);
+    expect(within(list).getByText('Finished chat')).toBeInTheDocument();
+  });
+
+  it('keeps the open chat visible when its section is folded', async () => {
+    mocks.listChatSessions.mockResolvedValue({ sessions: [SESSION_1, SESSION_2], total: 2 });
+
+    // A deep link to a stopped chat: History is folded, but this row stays in view.
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${SESSION_2.id}`);
+
+    const list = await screen.findByRole('navigation', { name: 'Chat sessions' });
+    const history = await within(list).findByRole('button', { name: /^History/ });
+    expect(history).toHaveAttribute('aria-expanded', 'false');
+    const historySection = history.closest('section') as HTMLElement;
+    expect(within(historySection).getByText('Second chat')).toBeInTheDocument();
+    // Liveness: the awake chat renders in its own section.
+    expect(within(list).getByText('First chat')).toBeInTheDocument();
+  });
+
+  it('asks the API for live sessions outside the newest page', async () => {
+    mocks.listChatSessions.mockResolvedValue({ sessions: [SESSION_1], total: 1 });
+    renderProjectChat();
+    await screen.findAllByText('First chat');
+    expect(mocks.listChatSessions).toHaveBeenCalledWith(
+      PROJECT_ID,
+      expect.objectContaining({ includeLive: true })
+    );
   });
 
   it('derives hierarchy modal visibility from URL hash (#hierarchy-<taskId>)', async () => {
@@ -720,21 +990,6 @@ describe('ProjectChat new chat button', () => {
     expect(screen.queryByRole('dialog', { name: 'Task hierarchy' })).not.toBeInTheDocument();
   });
 
-  it('gear icon navigates to the project settings page', async () => {
-    mocks.listChatSessions.mockResolvedValue({ sessions: [], total: 0 });
-    renderProjectChat();
-
-    await waitFor(() => {
-      expect(screen.getByLabelText('Project settings')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByLabelText('Project settings'));
-
-    await waitFor(() => {
-      expect(screen.getByTestId('settings-page')).toBeInTheDocument();
-    });
-  });
-
   it('clears new chat intent and navigates to new session after task submission', async () => {
     mocks.listChatSessions.mockResolvedValue({
       sessions: [SESSION_1],
@@ -764,7 +1019,7 @@ describe('ProjectChat new chat button', () => {
     });
 
     // Click "+ New Chat"
-    fireEvent.click(screen.getByRole('button', { name: '+ New Chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New Chat', exact: true }));
 
     await waitFor(() => {
       expect(screen.getByText('What do you want to build?')).toBeInTheDocument();
@@ -791,6 +1046,38 @@ describe('ProjectChat new chat button', () => {
     await waitFor(() => {
       expect(screen.getByTestId('message-view')).toHaveTextContent('session-new');
     });
+  });
+
+  it('starts a fork from the profile, not from model and effort set in an earlier draft', async () => {
+    mocks.listChatSessions.mockResolvedValue({ sessions: [SESSION_WITH_TASK], total: 1 });
+    mocks.listCredentials.mockResolvedValue([
+      { id: 'cred-1', provider: 'hetzner', name: 'My Hetzner', createdAt: Date.now() },
+    ]);
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${SESSION_WITH_TASK.id}`);
+    await waitFor(() =>
+      expect(screen.getByTestId('message-view')).toHaveTextContent(SESSION_WITH_TASK.id)
+    );
+
+    // A draft in the new-chat composer sets a model and effort, then is left for the session.
+    fireEvent.click(screen.getByRole('button', { name: 'New Chat', exact: true }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Chat options' }));
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Model' }), {
+      target: { value: 'claude-opus-5-5' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Effort' }), {
+      target: { value: 'max' },
+    });
+    expect(screen.getByRole('button', { name: 'Chat options (2 set)' })).toBeInTheDocument();
+    // The session is stopped, so it sits in the folded History section.
+    fireEvent.click(screen.getByRole('button', { name: /^History/ }));
+    fireEvent.click(screen.getByText('Fix the login bug'));
+    await waitFor(() =>
+      expect(screen.getByTestId('message-view')).toHaveTextContent(SESSION_WITH_TASK.id)
+    );
+
+    fireEvent.click(screen.getByLabelText('Fork session'));
+    expect(screen.getByText('Forking from: Fix the login bug')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Chat options' })).toBeInTheDocument();
   });
 
   it('forks to the new chat screen with the IDs already filled in and nothing to wait for', async () => {
@@ -831,7 +1118,10 @@ describe('ProjectChat new chat button', () => {
     const textarea = screen.getByPlaceholderText(
       'Describe what you want the agent to do...'
     ) as HTMLTextAreaElement;
-    expect(textarea.value).toContain('SAM MCP tools');
+    expect(textarea.value).toContain('SAM MCP tool sessions_read');
+    expect(textarea.value).toContain(
+      'Use sessions_read method messages with the parent session ID below before relying on title or phrase search.'
+    );
     expect(textarea.value).toContain('Previous session: "Fix the login bug"');
     expect(textarea.value).toContain(`Parent project ID: ${PROJECT_ID}`);
     expect(textarea.value).toContain(`Parent session ID: ${SESSION_WITH_TASK.id}`);
@@ -1036,6 +1326,7 @@ describe('ProjectChat new chat button', () => {
 
     // Back to the same session and retry it again while the first load is still out.
     const readsBeforeReopen = mocks.getProjectTask.mock.calls.length;
+    fireEvent.click(screen.getByRole('button', { name: /^History/ }));
     fireEvent.click(screen.getByText('Fix the login bug'));
     // Reopening reads the session's task again (provisioning tracker); let that settle first.
     await waitFor(() => {
@@ -1085,7 +1376,7 @@ describe('ProjectChat new chat button', () => {
     });
 
     // Click New Chat — should clear the banner
-    fireEvent.click(screen.getByRole('button', { name: '+ New Chat' }));
+    fireEvent.click(screen.getByRole('button', { name: 'New Chat', exact: true }));
 
     await waitFor(() => {
       expect(screen.getByText('What do you want to build?')).toBeInTheDocument();
@@ -1115,11 +1406,11 @@ describe('ProvisioningIndicator', () => {
       { wrapper: QueryTestWrapper }
     );
 
-    expect(screen.getByText('Installing dependencies (3/4)')).toBeInTheDocument();
-    expect(screen.getByText(/Usually takes 2-4 minutes/)).toBeInTheDocument();
-    expect(screen.getByText('1. Provisioning VM')).toBeInTheDocument();
-    expect(screen.getByText('4. Starting agent')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'View Logs' })).toBeInTheDocument();
+    expect(screen.getByText('Installing dependencies · 3 of 4')).toBeInTheDocument();
+    expect(screen.getByText(/This usually takes 2–4 minutes/)).toBeInTheDocument();
+    expect(screen.getByText('Provisioning VM')).toBeInTheDocument();
+    expect(screen.getByText('Starting agent')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'View logs' })).toBeInTheDocument();
   });
 });
 
@@ -2013,6 +2304,171 @@ describe('ProjectChat agent profile selection', () => {
     });
   });
 
+  it('sends a per-chat model and effort set in chat options, and New chat starts clean', async () => {
+    mocks.listChatSessions.mockResolvedValueOnce({ sessions: [], total: 0 }).mockResolvedValue({
+      sessions: [{ ...SESSION_1, id: 'session-prof', topic: 'Try the bigger model' }],
+      total: 1,
+    });
+    renderProjectChat();
+
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Fast Implementer'));
+    expect(screen.queryByRole('combobox', { name: 'Model' })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Chat options' }));
+    const model = await screen.findByRole('combobox', { name: 'Model' });
+    // The profile's model is what a blank field means.
+    expect(model).toHaveAttribute('placeholder', expect.stringMatching(/^Default: /));
+    fireEvent.change(model, { target: { value: 'claude-opus-5-5' } });
+    const effort = screen.getByRole('combobox', { name: 'Effort' });
+    // Claude can run every effort level, including max.
+    expect(within(effort).getByRole('option', { name: 'Max' })).toBeInTheDocument();
+    fireEvent.change(effort, { target: { value: 'max' } });
+    expect(screen.getByRole('button', { name: 'Chat options (2 set)' })).toBeInTheDocument();
+    expect(getProfileControl()).toHaveTextContent('max effort');
+
+    fireEvent.change(screen.getByPlaceholderText('Describe what you want the agent to do...'), {
+      target: { value: 'Try the bigger model' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => {
+      expect(mocks.submitTask).toHaveBeenCalledWith(
+        PROJECT_ID,
+        expect.objectContaining({
+          agentProfileId: 'prof-1',
+          model: 'claude-opus-5-5',
+          effort: 'max',
+        })
+      );
+    });
+
+    // Overrides are for one chat: the next new chat starts from the profile again.
+    await waitFor(() =>
+      expect(screen.getByTestId('message-view')).toHaveTextContent('session-prof')
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'New Chat', exact: true }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Chat options' }));
+    expect(await screen.findByRole('combobox', { name: 'Model' })).toHaveValue('');
+    expect(screen.getByRole('combobox', { name: 'Effort' })).toHaveValue('');
+  });
+
+  it('drops a model and effort chosen for another agent when the profile changes', async () => {
+    renderProjectChat();
+
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Fast Implementer'));
+    fireEvent.click(screen.getByRole('button', { name: 'Chat options' }));
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Model' }), {
+      target: { value: 'claude-opus-5-5' },
+    });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Effort' }), {
+      target: { value: 'max' },
+    });
+    expect(screen.getByRole('button', { name: 'Chat options (2 set)' })).toBeInTheDocument();
+
+    // Reviewer runs Codex: a Claude model and a Claude-only effort mean nothing there.
+    const sheet = await openProfilePicker();
+    fireEvent.click(within(sheet).getByRole('button', { name: /Reviewer/ }));
+    expect(getProfileControl()).toHaveTextContent('Reviewer');
+    expect(screen.getByRole('button', { name: 'Chat options' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Model' })).toHaveValue('');
+    const effort = screen.getByRole('combobox', { name: 'Effort' });
+    expect(effort).toHaveValue('');
+    expect(within(effort).queryByRole('option', { name: 'Max' })).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByPlaceholderText('Describe what you want the agent to do...'), {
+      target: { value: 'Review the diff' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(mocks.submitTask).toHaveBeenCalledTimes(1));
+    const [, payload] = mocks.submitTask.mock.calls[0] as [string, Record<string, unknown>];
+    expect(payload).toMatchObject({ agentProfileId: 'prof-2', message: 'Review the diff' });
+    expect(payload).not.toHaveProperty('model');
+    expect(payload).not.toHaveProperty('effort');
+  });
+
+  it('keeps a per-chat effort across a switch to another profile on the same agent', async () => {
+    mocks.listAgentProfiles.mockResolvedValue([
+      ...TEST_PROFILES,
+      makeAgentProfile({ id: 'prof-3', name: 'Careful Builder', agentType: 'claude-code' }),
+    ]);
+    renderProjectChat();
+
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Fast Implementer'));
+    fireEvent.click(screen.getByRole('button', { name: 'Chat options' }));
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Effort' }), {
+      target: { value: 'max' },
+    });
+    expect(screen.getByRole('button', { name: 'Chat options (1 set)' })).toBeInTheDocument();
+
+    const sheet = await openProfilePicker();
+    fireEvent.click(within(sheet).getByRole('button', { name: /Careful Builder/ }));
+    expect(getProfileControl()).toHaveTextContent('Careful Builder');
+    expect(screen.getByRole('button', { name: 'Chat options (1 set)' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Effort' })).toHaveValue('max');
+
+    fireEvent.change(screen.getByPlaceholderText('Describe what you want the agent to do...'), {
+      target: { value: 'Carefully' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(mocks.submitTask).toHaveBeenCalledTimes(1));
+    const [, payload] = mocks.submitTask.mock.calls[0] as [string, Record<string, unknown>];
+    expect(payload).toMatchObject({ agentProfileId: 'prof-3', effort: 'max' });
+    expect(payload).not.toHaveProperty('model');
+  });
+
+  it('does not bring back overrides after switching to another agent and back', async () => {
+    mocks.listAgentProfiles.mockResolvedValue([
+      ...TEST_PROFILES,
+      makeAgentProfile({ id: 'prof-3', name: 'Careful Builder', agentType: 'claude-code' }),
+    ]);
+    renderProjectChat();
+
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Fast Implementer'));
+    fireEvent.click(screen.getByRole('button', { name: 'Chat options' }));
+    fireEvent.change(await screen.findByRole('combobox', { name: 'Effort' }), {
+      target: { value: 'max' },
+    });
+    expect(screen.getByRole('button', { name: 'Chat options (1 set)' })).toBeInTheDocument();
+
+    for (const name of [/Reviewer/, /Careful Builder/]) {
+      const sheet = await openProfilePicker();
+      fireEvent.click(within(sheet).getByRole('button', { name }));
+    }
+    // Back on a Claude profile: the Claude-only Max picked earlier does not return.
+    expect(getProfileControl()).toHaveTextContent('Careful Builder');
+    expect(screen.getByRole('button', { name: 'Chat options' })).toBeInTheDocument();
+    expect(screen.getByRole('combobox', { name: 'Effort' })).toHaveValue('');
+  });
+
+  it('offers the efforts of the agent a skill switches to', async () => {
+    mocks.listSkills.mockResolvedValue([
+      {
+        ...makeAgentProfile({ id: 'skill-codex', name: 'codex-review' }),
+        agentType: 'openai-codex',
+        effort: null,
+        resourceRequirementsJson: null,
+        defaultProfileId: null,
+      },
+    ]);
+    renderProjectChat();
+
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Fast Implementer'));
+    fireEvent.click(screen.getByRole('button', { name: 'Chat options' }));
+    const effort = await screen.findByRole('combobox', { name: 'Effort' });
+    expect(within(effort).getByRole('option', { name: 'Max' })).toBeInTheDocument();
+    fireEvent.change(effort, { target: { value: 'max' } });
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Skill' }), {
+      target: { value: 'skill-codex' },
+    });
+    const codexEffort = screen.getByRole('combobox', { name: 'Effort' });
+    expect(within(codexEffort).queryByRole('option', { name: 'Max' })).not.toBeInTheDocument();
+    expect(within(codexEffort).getByRole('option', { name: 'Extra high' })).toBeInTheDocument();
+    // Only the skill is counted now: the Claude-only effort no longer applies.
+    expect(screen.getByRole('button', { name: 'Chat options (1 set)' })).toBeInTheDocument();
+    // To names what will run: the skill's agent, not the profile's.
+    expect(getProfileControl()).toHaveTextContent('Codex');
+  });
+
   it('hides every profile not picked lately with the edit list’s suggestion', async () => {
     mocks.listAgentProfiles.mockResolvedValue([
       ...TEST_PROFILES,
@@ -2129,6 +2585,57 @@ describe('ProjectChat agent profile selection', () => {
     await waitFor(() => {
       expect(screen.getByTestId('message-view')).toHaveTextContent('session-instant');
     });
+  });
+
+  it('sends a per-chat model and effort with an instant session', async () => {
+    mocks.listCredentials.mockResolvedValue([]);
+    mocks.listAgentProfiles.mockResolvedValue([
+      makeAgentProfile({
+        id: 'prof-instant',
+        name: 'Instant Chat',
+        agentType: 'openai-codex',
+        model: 'gpt-6.1-sol',
+        effort: 'high',
+        runtime: 'cf-container',
+        workspaceProfile: 'lightweight',
+        taskMode: 'conversation',
+      }),
+    ]);
+    mocks.startInstantChatSession.mockResolvedValue({
+      status: 'starting',
+      runtime: { runtime: 'cf-container', reason: 'explicit-cf-container' },
+      taskId: 'task-instant',
+      sessionId: 'session-instant',
+      workspaceId: 'ws-instant',
+      nodeId: 'node-instant',
+      workspaceUrl: 'https://ws-instant.example.test',
+    });
+
+    renderProjectChat();
+    await waitFor(() => expect(getProfileControl()).toHaveTextContent('Instant Chat'));
+    fireEvent.click(screen.getByRole('button', { name: 'Chat options' }));
+    const effort = await screen.findByRole('combobox', { name: 'Effort' });
+    expect(within(effort).getByRole('option', { name: 'Default: High' })).toBeInTheDocument();
+    fireEvent.change(effort, { target: { value: 'low' } });
+    fireEvent.change(screen.getByRole('combobox', { name: 'Model' }), {
+      target: { value: 'gpt-6.1-astra' },
+    });
+
+    fireEvent.change(screen.getByPlaceholderText('Describe what you want the agent to do...'), {
+      target: { value: 'Quick question' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Send' }));
+
+    await waitFor(() => {
+      expect(mocks.startInstantChatSession).toHaveBeenCalledWith(PROJECT_ID, {
+        message: 'Quick question',
+        agentProfileId: 'prof-instant',
+        skillId: undefined,
+        model: 'gpt-6.1-astra',
+        effort: 'low',
+      });
+    });
+    expect(mocks.submitTask).not.toHaveBeenCalled();
   });
 
   it('opens the new-profile wizard from the picker sheet', async () => {

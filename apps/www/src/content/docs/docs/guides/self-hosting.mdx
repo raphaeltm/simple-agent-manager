@@ -117,6 +117,8 @@ Fresh deployments can keep most platform integration credentials out of GitHub A
 
 A superadmin can separately configure **Google infrastructure OAuth** at `/admin/integrations` for keyless GCP/WIF setup. It is intentionally absent from `/setup` so installations do not confuse it with Google login. Runtime integration values are stored encrypted and override environment fallbacks without a redeploy.
 
+Before users connect GCP accounts, follow [Connect Google Cloud](/docs/guides/google-cloud/) to enable the infrastructure OAuth-client project APIs and configure its callback. The guide also explains why disabled APIs can appear as permission errors.
+
 ### Set up GitLab sign-in
 
 To let people sign in with GitLab and create projects from GitLab repositories:
@@ -137,9 +139,9 @@ SAM's in-app **Report an Issue** flow is off until you nominate a project to rec
 
 ### Let an agent debug your installation
 
-SAM is adding debugger tools that let agents in the Operations project read across every user's
-nodes, workspaces and sessions, including raw node logs, and later act on them with approval. Today
-only `ops_get_access_status` ships; it reports what a task may do. The tools are off by default. To turn them on, set
+Debugger tools let agents in the Operations project read across every user's nodes, workspaces and
+sessions, including raw node logs and debug packages (kept for 7 days by default). Actions that
+change things, each approved by a person, arrive in a later release. The tools are off by default. To turn them on, set
 `operations.debuggerTools` in [**Admin → Settings**](/docs/guides/admin-settings/#operations-debugger-tools)
 under **Operations**. Only tasks owned by an active superadmin can use them, checked on every call,
 and every call is audited. Leave the setting `off` if you do not want any agent to see other users'
@@ -211,7 +213,7 @@ SELECT 'project: ' || pr.name, pr.id, u.email, pr.agent_defaults
 project. A project row lists every agent the project sets a mode for; read its JSON to see which.
 Set those modes to **Bypass Permissions**, or clear them: a user changes their own **Settings →
 Agents**, and any admin of a project can change its profiles and **Agent Overrides**. A skill's mode
-has no field in the app; change it with SAM's `update_skill` tool (ask an agent in the project) or
+has no field in the app; change it with SAM's `skills_write` method `update` tool (ask an agent in the project) or
 the API.
 
 ## GCP provisioning credentials
@@ -239,7 +241,7 @@ Create a dedicated least-privilege identity rather than granting Project Owner:
 PROJECT_ID="your-gcp-project-id"
 SERVICE_ACCOUNT="sam-vm-manager@${PROJECT_ID}.iam.gserviceaccount.com"
 
-gcloud services enable compute.googleapis.com --project="${PROJECT_ID}"
+gcloud services enable compute.googleapis.com cloudbilling.googleapis.com --project="${PROJECT_ID}"
 gcloud iam service-accounts create sam-vm-manager \
   --project="${PROJECT_ID}" \
   --display-name="SAM VM manager"
@@ -254,7 +256,7 @@ gcloud iam service-accounts keys create sam-service-account.json \
   --project="${PROJECT_ID}"
 ```
 
-Vertex AI access is optional and is not required for VM provisioning. If your organization policy disables service-account key creation, use WIF or ask a Google Cloud administrator to approve an appropriate key-management policy; do not weaken the policy just for SAM.
+Cloud Billing (`cloudbilling.googleapis.com`) lets SAM read Google's public list prices for the machine catalog; it grants no access to your billing account. Without it, machines are still offered but show "Price unavailable". Vertex AI access is optional and is not required for VM provisioning. If your organization policy disables service-account key creation, use WIF or ask a Google Cloud administrator to approve an appropriate key-management policy; do not weaken the policy just for SAM.
 
 SAM encrypts the complete JSON in both credential stores with the configured credential-encryption key. Only safe metadata is returned to the browser. Derived Google access tokens are short-lived and cached only up to their returned expiry. Rotation verifies the new key before atomically replacing all SAM copies. Disconnect removes SAM's encrypted copies and cached tokens, but it cannot revoke the key in Google Cloud—disable or delete the old key there after a successful rotation or disconnect.
 

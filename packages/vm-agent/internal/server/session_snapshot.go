@@ -4,8 +4,10 @@ import (
 	"archive/tar"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -99,6 +101,13 @@ type sessionSnapshotHandlerInput struct {
 	workspaceCallbackToken string
 	acpSessionID           string
 	containerTarget        *containerSnapshotTarget
+	// quiescence, when set, is re-checked immediately before completion. The capture is
+	// reported quiesced only if it passes: the source never ran and nothing else wrote.
+	quiescence func(context.Context) error
+	// finalEvictionCapture reports a degraded capture as failed instead of completing it.
+	// The eviction's pre-stop generation always exists by then, a degraded capture is never
+	// quiesced, and completing it would delete that generation's artifacts.
+	finalEvictionCapture bool
 }
 
 func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Request, restoring bool) (*sessionSnapshotHandlerInput, bool) {
@@ -139,13 +148,11 @@ func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Requ
 			return nil, false
 		}
 	}
-	// A freshly-woken container never ran create-workspace, so its
-	// runtime.CallbackToken (the workspace-scoped token used by the message
-	// reporter and the snapshot callbacks) is unset. Persist the token the
-	// control plane provides on the restore request so chat replies and
-	// snapshot callbacks can authenticate after a wake.
-	if wsToken := strings.TrimSpace(body.WorkspaceCallbackToken); wsToken != "" && !restoring {
-		s.upsertWorkspaceRuntime(workspaceID, "", "", "", wsToken, workspaceRuntimeOpts{ChatSessionID: body.ChatSessionID})
+	if !restoring {
+		if status, err := s.bindHibernateRequestRuntime(r.Context(), workspaceID, body.ChatSessionID, body.WorkspaceCallbackToken); err != nil {
+			writeError(w, status, err.Error())
+			return nil, false
+		}
 	}
 	runtime, ok := s.getWorkspaceRuntime(workspaceID)
 	if !ok {
@@ -157,9 +164,6 @@ func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Requ
 			writeError(w, http.StatusBadRequest, err.Error())
 			return nil, false
 		}
-	}
-	if !restoring {
-		s.recordWorkspaceChatSessionID(workspaceID, body.ChatSessionID)
 	}
 	callbackToken := s.callbackTokenForWorkspace(workspaceID)
 	if restoring && strings.TrimSpace(body.WorkspaceCallbackToken) != "" {
@@ -204,6 +208,10 @@ func (s *Server) handleHibernateAgentSession(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	result, err := s.captureSessionSnapshot(r.Context(), input)
+	if errors.Is(err, errWorkspaceEvicting) {
+		writeError(w, http.StatusConflict, err.Error())
+		return
+	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -213,7 +221,9 @@ func (s *Server) handleHibernateAgentSession(w http.ResponseWriter, r *http.Requ
 
 func (s *Server) hibernateSessionSnapshot(ctx context.Context, input *sessionSnapshotHandlerInput) (result map[string]interface{}, resultErr error) {
 	ctx, timings := startLifecycleTimings(ctx, "prepare")
-	defer func() { s.finishLifecycleTimings(timings, "sleep", input.runtime.ID, input.callbackToken, resultErr) }()
+	defer func() {
+		s.finishLifecycleTimings(timings, "sleep", input.runtime.ID, input.chatSessionID, input.callbackToken, resultErr)
+	}()
 	runtime := input.runtime
 	sessionID, chatSessionID := input.sessionID, input.chatSessionID
 	runtimeName, callbackToken := input.runtimeName, input.callbackToken
@@ -290,11 +300,22 @@ func (s *Server) hibernateSessionSnapshot(ctx context.Context, input *sessionSna
 	}
 	manifest.Skipped = boundSnapshotSkippedEntries(manifest.Skipped, snapshotSkippedEntriesBudget(prepare))
 	nextLifecyclePhase(ctx, "complete")
-	err = s.completeSnapshot(ctx, runtime.ID, sessionID, chatSessionID, runtimeName, prepare.Generation, callbackToken, manifest)
+	if input.finalEvictionCapture && manifest.Status != "available" {
+		return nil, &sessionSnapshotCaptureError{generation: prepare.Generation, err: fmt.Errorf("final eviction capture is %s (%s); keeping the pre-stop capture", manifest.Status, manifest.Degradation)}
+	}
+	quiesced := false
+	if input.quiescence != nil && manifest.Status == "available" {
+		if err := input.quiescence(ctx); err != nil {
+			slog.Warn("Snapshot source was not quiesced; reporting an ordinary capture", "workspaceId", runtime.ID, "chatSessionId", chatSessionID, "generation", prepare.Generation, "error", err)
+		} else {
+			quiesced = true
+		}
+	}
+	err = s.completeSnapshot(ctx, runtime.ID, sessionID, chatSessionID, runtimeName, prepare.Generation, callbackToken, manifest, quiesced)
 	if err != nil {
 		return nil, &sessionSnapshotCaptureError{generation: prepare.Generation, err: err}
 	}
-	return map[string]interface{}{"status": manifest.Status, "degradation": manifest.Degradation, "skipped": manifest.Skipped}, nil
+	return map[string]interface{}{"status": manifest.Status, "degradation": manifest.Degradation, "skipped": manifest.Skipped, "quiesced": quiesced}, nil
 }
 
 func (s *Server) downloadAndExtractTar(ctx context.Context, downloadPath, token string, idleTimeout time.Duration) error {

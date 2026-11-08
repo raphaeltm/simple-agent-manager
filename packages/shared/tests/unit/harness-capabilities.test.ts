@@ -72,6 +72,16 @@ describe('harness capability registry', () => {
           "proxyRouteSegment": "",
         },
         {
+          "agentType": "google-antigravity",
+          "authEnvVar": "GEMINI_API_KEY",
+          "authStyle": "api-key",
+          "dialects": [
+            "gemini",
+          ],
+          "proxyProviderTag": "",
+          "proxyRouteSegment": "",
+        },
+        {
           "agentType": "mistral-vibe",
           "authEnvVar": "MISTRAL_API_KEY",
           "authStyle": "api-key",

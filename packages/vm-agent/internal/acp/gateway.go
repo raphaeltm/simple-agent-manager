@@ -199,6 +199,8 @@ type GatewayConfig struct {
 	// PromptCancelGracePeriod waits after cancel for the cancelled prompt to
 	// settle before finishing it as cancelled and restarting the agent.
 	PromptCancelGracePeriod time.Duration
+	// SteerTimeout bounds one `_session/steering` request. Zero uses DefaultSteerTimeout.
+	SteerTimeout time.Duration
 	// PromptRetryMaxRetries bounds transient provider prompt retries after the initial attempt.
 	PromptRetryMaxRetries int
 	// PromptRetryInitialDelay is the first backoff before retrying a transient provider prompt error.
@@ -265,9 +267,9 @@ type GatewayConfig struct {
 	// When nil, no callback fires. The string arg is the stop reason (e.g. "end_turn", "error").
 	OnPromptComplete            func(stopReason string, promptErr error)
 	OnPromptCompleteWithContext func(string, error, PromptCompletionContext)
-	// SAMEnvFallback provides fallback SAM environment variables (KEY=value pairs)
-	// injected into ACP sessions when the bootstrap-written /etc/sam/env file is
-	// missing or incomplete. Built from the vm-agent's own config at startup.
+	// SAMEnvFallback is this session's SAM env (KEY=value pairs), built per session
+	// by the server. Session identity keys override /etc/sam/env; other keys only
+	// fill gaps in it (mergeSAMEnvFallback).
 	SAMEnvFallback []string
 	// CredentialSyncer syncs updated file-based credentials (e.g. auth.json)
 	// back to the control plane after a session ends. When nil, no sync occurs.
@@ -1056,6 +1058,14 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 			installCmd:    "npm install -g " + geminiInstallPackage,
 			validationCmd: versionCheckCommand("gemini", strings.TrimPrefix(geminiInstallPackage, "@google/gemini-cli@")),
 			isNpmBased:    true,
+		}
+	case "google-antigravity":
+		return agentCommandInfo{
+			command:       "agy-acp",
+			args:          []string{"--uid="},
+			envVarName:    "GEMINI_API_KEY",
+			installCmd:    antigravityInstallScript,
+			validationCmd: antigravityVersionCheckCommand(),
 		}
 	case "mistral-vibe":
 		return agentCommandInfo{

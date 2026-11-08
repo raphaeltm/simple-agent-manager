@@ -106,6 +106,22 @@ silently for months (rule 34) while logging at Debug (rule 39).
   instant is not stomped. Verify this test fails when the `<= observedAt`
   predicate is deleted.
 
+## When the Authority Itself Is Wedged
+
+A probe that asks the authority only helps when the authority is right. On 2026-11-04 a
+conversation's agent turn hung for 9h54m with no output (idea `01M6K6QTEE7T9KNYB7317D7Y8E`). The
+VM's SessionHost really was mid-prompt, so every probe answered `working`, every re-report kept
+the row fresh, and the sleep gate refused the session for ~10 hours on an idle VM. Nothing was
+lost or stale; the remote process was stuck.
+
+- A gate that waits on remote-reported work needs a bound on **evidence of work**, not only on
+  report staleness. Use a work clock that re-reports and probe confirmations do not move
+  (`session_state.work_at`), and a configurable bound past which "still working" no longer blocks
+  (`operations.sessionStaleTurnNoWorkMinutes`, `classifySessionIdleness()`).
+- Before blaming a lost report, check the remote's own lifecycle records for the window. Here
+  the VM's `ACP Prompt started` / `Prompt cancelled` events showed a new turn at 02:01Z that ran
+  until the cancel, which disproved the leading "lost idle report" hypothesis in minutes.
+
 ## Quick Compliance Check
 
 - [ ] Control-plane-observable transitions are written by the control plane too

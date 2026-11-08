@@ -11,6 +11,10 @@ import {
   mapBackendMessageCommentThread,
   type MessageCommentRealtimeEvent,
 } from '../lib/api/comments';
+import {
+  parsePromptDeliveryUpdate,
+  type PromptDeliveryUpdate,
+} from '../lib/prompt-delivery-update';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 
 export type ChatConnectionState = 'connecting' | 'connected' | 'reconnecting' | 'disconnected';
@@ -45,10 +49,14 @@ interface UseChatWebSocketOptions {
   ) => void;
   /** Called when the agent completes on the session. */
   onAgentCompleted?: (agentCompletedAt: number) => void;
+  /** A durable delivery changed state (`mailbox.delivery_updated`); names the transcript row. */
+  onDeliveryUpdate?: (update: PromptDeliveryUpdate) => void;
   /** Called when a session.activity event arrives (prompting/idle). */
   onAgentActivity?: (
     activity: 'prompting' | 'idle' | 'recovering' | 'error',
-    promptStartedAt?: number | null
+    promptStartedAt?: number | null,
+    /** Whether the agent's adapter can steer; absent when the server has no report yet. */
+    steeringSupported?: boolean
   ) => void;
   /** Called when the session metadata changes server-side. */
   onSessionUpdated?: (
@@ -93,6 +101,7 @@ export function useChatWebSocket({
   onCatchUp,
   onAgentCompleted,
   onAgentActivity,
+  onDeliveryUpdate,
   onSessionUpdated,
   onWakeProgress,
   onCommentEvent,
@@ -115,6 +124,7 @@ export function useChatWebSocket({
   const onCatchUpRef = useRef(onCatchUp);
   const onAgentCompletedRef = useRef(onAgentCompleted);
   const onAgentActivityRef = useRef(onAgentActivity);
+  const onDeliveryUpdateRef = useRef(onDeliveryUpdate);
   const onSessionUpdatedRef = useRef(onSessionUpdated);
   const onWakeProgressRef = useRef(onWakeProgress);
   const onCommentEventRef = useRef(onCommentEvent);
@@ -125,6 +135,7 @@ export function useChatWebSocket({
   onCatchUpRef.current = onCatchUp;
   onAgentCompletedRef.current = onAgentCompleted;
   onAgentActivityRef.current = onAgentActivity;
+  onDeliveryUpdateRef.current = onDeliveryUpdate;
   onSessionUpdatedRef.current = onSessionUpdated;
   onWakeProgressRef.current = onWakeProgress;
   onCommentEventRef.current = onCommentEvent;
@@ -279,8 +290,15 @@ export function useChatWebSocket({
               p.activity === 'recovering' ||
               p.activity === 'error'
             ) {
-              onAgentActivityRef.current?.(p.activity, p.promptStartedAt ?? null);
+              onAgentActivityRef.current?.(
+                p.activity,
+                p.promptStartedAt ?? null,
+                typeof p.steeringSupported === 'boolean' ? p.steeringSupported : undefined
+              );
             }
+          } else if (data.type === 'mailbox.delivery_updated') {
+            const update = parsePromptDeliveryUpdate(payload);
+            if (update) onDeliveryUpdateRef.current?.(update);
           } else if (data.type === 'session.wake_progress') {
             const p = payload;
             if (p.sessionId !== sessionId) return;

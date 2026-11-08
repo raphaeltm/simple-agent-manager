@@ -5,9 +5,9 @@ set -euo pipefail
 [[ $# -eq 1 ]] || { echo "usage: $0 <container-artifact-directory>" >&2; exit 2; }
 script_dir=$(cd -- "$(dirname -- "$0")" && pwd -P)
 repo_root=$(cd -- "$script_dir/../.." && pwd -P)
-release='1fd3c07846581888284ed9c9d02bc1f51e3673610c3688d8da98db47030bfb95'
-size=136245837
-url='https://github.com/raphaeltm/simple-agent-manager/releases/download/acp-codex-runtime-c2.2-codemode2/codex-runtime-linux-amd64.tar.gz'
+release='384d0071527848b68df318c04f2e6e040f2eea67131bbd5b6f66cc58f5bd65bd'
+size=136243963
+url='https://github.com/raphaeltm/simple-agent-manager/releases/download/acp-codex-runtime-c2.3-codemode2/codex-runtime-linux-amd64.tar.gz'
 private=$(mktemp -d)
 trap 'rm -rf -- "$private"' EXIT
 if [[ -n ${CODEX_RUNTIME_ARCHIVE:-} ]]; then

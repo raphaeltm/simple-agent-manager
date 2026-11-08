@@ -19,6 +19,7 @@ import {
   DEFAULT_VM_LOCATION,
   DEFAULT_VM_SIZE,
   DEFAULT_WORKSPACE_PROFILE,
+  describeValidLocations,
   getDefaultLocationForProvider,
   getLocationsForProvider,
   isValidLocationForProvider,
@@ -135,7 +136,7 @@ export function validateResolvedLocation(
   const validLocations = getLocationsForProvider(provider).map((location) => location.id);
   throw new PlacementResolutionError(
     'invalid-location',
-    `Location '${vmLocation}' is not valid for provider '${provider}'. Valid locations: ${validLocations.join(', ')}`,
+    `Location '${vmLocation}' is not valid for provider '${provider}'. Expected ${describeValidLocations(provider)}`,
     validLocations
   );
 }

@@ -80,7 +80,6 @@ func Load() (*Config, error) {
 		JWTIssuer:   getEnv("JWT_ISSUER", ""), // Will be derived from ControlPlaneURL if not set
 
 		WorkspaceDeletionTombstoneRetention: getEnvDuration("WORKSPACE_DELETION_TOMBSTONE_RETENTION", DefaultWorkspaceDeletionTombstoneRetention),
-		WorkspaceDeletionMaxEntries:         getEnvInt("WORKSPACE_DELETION_MAX_ENTRIES", DefaultWorkspaceDeletionMaxEntries),
 		WorkspaceDeletionBatchSize:          getEnvInt("WORKSPACE_DELETION_BATCH_SIZE", DefaultWorkspaceDeletionBatchSize),
 		WorkspaceDeletionAttemptTimeout:     getEnvDuration("WORKSPACE_DELETION_ATTEMPT_TIMEOUT", DefaultWorkspaceDeletionAttemptTimeout),
 		WorkspaceDeletionRetryInterval:      getEnvDuration("WORKSPACE_DELETION_RETRY_INTERVAL", DefaultWorkspaceDeletionRetryInterval),
@@ -100,6 +99,7 @@ func Load() (*Config, error) {
 		BootstrapTimeout: getEnvDuration("BOOTSTRAP_TIMEOUT", 30*time.Minute),
 
 		GracefulShutdownTimeout:   getEnvDuration("GRACEFUL_SHUTDOWN_TIMEOUT", DefaultGracefulShutdownTimeout),
+		SelfRestartDelay:          getEnvDuration("VM_AGENT_SELF_RESTART_DELAY", DefaultSelfRestartDelay),
 		SystemProvisioningTimeout: getEnvDuration("SYSTEM_PROVISIONING_TIMEOUT", DefaultSystemProvisioningTimeout),
 		CFIPFetchTimeout:          getEnvDuration("CF_IP_FETCH_TIMEOUT", DefaultCFIPFetchTimeout),
 		BootLogHTTPTimeout:        getEnvDuration("BOOT_LOG_HTTP_TIMEOUT", DefaultBootLogHTTPTimeout),
@@ -161,6 +161,7 @@ func Load() (*Config, error) {
 		ACPPongTimeout:                    getEnvDuration("ACP_PONG_TIMEOUT", 10*time.Second),
 		ACPPromptTimeout:                  getEnvDuration("ACP_PROMPT_TIMEOUT", 0),
 		ACPPromptCancelGrace:              getEnvDuration("ACP_PROMPT_CANCEL_GRACE_PERIOD", 5*time.Second),
+		ACPSteerTimeout:                   getEnvDuration("ACP_STEER_TIMEOUT", 20*time.Second),
 		ACPPromptRetryMaxRetries:          getEnvInt("ACP_PROMPT_RETRY_MAX_RETRIES", 2),
 		ACPPromptRetryInitial:             getEnvDuration("ACP_PROMPT_RETRY_INITIAL_BACKOFF", 15*time.Second),
 		ACPPromptRetryMax:                 getEnvDuration("ACP_PROMPT_RETRY_MAX_BACKOFF", 2*time.Minute),
@@ -250,6 +251,7 @@ func Load() (*Config, error) {
 		EvictionDockerStopTimeout:        time.Duration(getEnvInt(EnvDefaultEvictionDockerStopTimeoutSeconds, DefaultEvictionDockerStopTimeoutSeconds)) * time.Second,
 		EvictionCallbackRetryMaxInterval: time.Duration(getEnvInt(EnvDefaultEvictionCallbackRetryMaxSeconds, DefaultEvictionCallbackRetryMaxSeconds)) * time.Second,
 		EvictionResolveTimeout:           time.Duration(getEnvInt(EnvDefaultEvictionResolveTimeoutSeconds, DefaultEvictionResolveTimeoutSeconds)) * time.Second,
+		SnapshotHelper:                   loadSnapshotHelperConfig(),
 		ResourceHistorySampleInterval:    getEnvDuration(EnvResourceHistorySampleInterval, 5*time.Second),
 		ResourceHistoryChunkInterval:     getEnvDuration(EnvResourceHistoryChunkInterval, 15*time.Minute),
 		ResourceHistorySpoolDir:          getEnv(EnvResourceHistorySpoolDir, "/var/lib/vm-agent/resource-history"),

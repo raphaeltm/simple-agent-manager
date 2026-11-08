@@ -1,7 +1,7 @@
 import {
   DEFAULT_VM_LOCATION,
   DEFAULT_VM_SIZE,
-  getLocationsForProvider,
+  describeValidLocations,
   isValidLocationForProvider,
 } from '@simple-agent-manager/shared';
 import { and, desc, eq, ne } from 'drizzle-orm';
@@ -20,6 +20,7 @@ import { resolveCanonicalVmAllocationPlan } from '../services/canonical-vm-alloc
 import { scheduleDirectProvisioning } from '../services/direct-provisioning';
 import { getRuntimeLimits } from '../services/limits';
 import { stopWorkspaceOnNode } from '../services/node-agent';
+import { getNodeResourceUsage } from '../services/node-resource-usage';
 import { createNodeRecord, stopNodeResources } from '../services/nodes';
 import { recordNodeRoutingMetric } from '../services/telemetry';
 import { deleteNodeRoute } from './nodes/delete';
@@ -126,9 +127,8 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
 
   // Validate location against provider if provider is specified
   if (provider && !isValidLocationForProvider(provider, vmLocation)) {
-    const validLocations = getLocationsForProvider(provider).map((l) => l.id);
     throw errors.badRequest(
-      `Location '${vmLocation}' is not valid for provider '${provider}'. Valid locations: ${validLocations.join(', ')}`
+      `Location '${vmLocation}' is not valid for provider '${provider}'. Expected ${describeValidLocations(provider)}`
     );
   }
 
@@ -210,6 +210,11 @@ nodesRoutes.post('/', jsonValidator(CreateNodeSchema), async (c) => {
 
   await scheduleDirectProvisioning(c.env, { nodeId: created.id, userId });
   return c.json(created, 201);
+});
+
+// Registered before `/:id`, which would otherwise capture "resource-usage" as a node id.
+nodesRoutes.get('/resource-usage', async (c) => {
+  return c.json(await getNodeResourceUsage(c.env, getUserId(c)));
 });
 
 nodesRoutes.get('/:id', async (c) => {

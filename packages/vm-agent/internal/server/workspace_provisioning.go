@@ -105,7 +105,7 @@ func (s *Server) provisionWorkspaceRuntime(ctx context.Context, runtime *Workspa
 	}
 	ctx, timings := startLifecycleTimings(ctx, "system_wait")
 	defer func() {
-		s.finishLifecycleTimings(timings, "workspace", runtime.ID, s.runtimeCallbackToken(runtime), resultErr)
+		s.finishLifecycleTimings(timings, "workspace", runtime.ID, "", s.runtimeCallbackToken(runtime), resultErr)
 	}()
 
 	if err := s.waitForSystemProvisioning(ctx); err != nil {
@@ -151,24 +151,7 @@ func (s *Server) provisionWorkspaceRuntimeWithLifecycleLockHeld(ctx context.Cont
 		callbackToken = strings.TrimSpace(s.config.CallbackToken)
 	}
 
-	cfg := *s.config
-	cfg.WorkspaceID = runtime.ID
-	cfg.Repository = strings.TrimSpace(runtime.Repository)
-	cfg.Branch = strings.TrimSpace(runtime.Branch)
-	cfg.BaseBranch = strings.TrimSpace(runtime.BaseBranch)
-	cfg.RepoProvider = strings.TrimSpace(runtime.RepoProvider)
-	cfg.CloneURL = strings.TrimSpace(runtime.CloneURL)
-	cfg.RepositoryHost = strings.TrimSpace(runtime.RepositoryHost)
-	cfg.RepositoryPath = strings.TrimSpace(runtime.RepositoryPath)
-	cfg.WorkspaceDir = strings.TrimSpace(runtime.WorkspaceDir)
-	cfg.ContainerLabelValue = strings.TrimSpace(runtime.ContainerLabelValue)
-	cfg.ContainerWorkDir = strings.TrimSpace(runtime.ContainerWorkDir)
-	cfg.ContainerUser = strings.TrimSpace(runtime.ContainerUser)
-	if cfg.ContainerUser == "" {
-		cfg.ContainerUser = strings.TrimSpace(s.config.ContainerUser)
-	}
-	cfg.CallbackToken = callbackToken
-	applyDevcontainerCacheCredentials(&cfg, runtime.DevcontainerCache)
+	cfg := s.workspaceBootstrapConfig(runtime, callbackToken)
 
 	provisionCtx := ctx
 	cancel := func() {}
@@ -274,24 +257,7 @@ func (s *Server) recoverWorkspaceRuntime(ctx context.Context, runtime *Workspace
 
 	s.hydrateWorkspaceRuntimeForRecovery(recoveryCtx, runtime, callbackToken)
 
-	cfg := *s.config
-	cfg.WorkspaceID = runtime.ID
-	cfg.Repository = strings.TrimSpace(runtime.Repository)
-	cfg.Branch = strings.TrimSpace(runtime.Branch)
-	cfg.BaseBranch = strings.TrimSpace(runtime.BaseBranch)
-	cfg.RepoProvider = strings.TrimSpace(runtime.RepoProvider)
-	cfg.CloneURL = strings.TrimSpace(runtime.CloneURL)
-	cfg.RepositoryHost = strings.TrimSpace(runtime.RepositoryHost)
-	cfg.RepositoryPath = strings.TrimSpace(runtime.RepositoryPath)
-	cfg.WorkspaceDir = strings.TrimSpace(runtime.WorkspaceDir)
-	cfg.ContainerLabelValue = strings.TrimSpace(runtime.ContainerLabelValue)
-	cfg.ContainerWorkDir = strings.TrimSpace(runtime.ContainerWorkDir)
-	cfg.ContainerUser = strings.TrimSpace(runtime.ContainerUser)
-	if cfg.ContainerUser == "" {
-		cfg.ContainerUser = strings.TrimSpace(s.config.ContainerUser)
-	}
-	cfg.CallbackToken = callbackToken
-	applyDevcontainerCacheCredentials(&cfg, runtime.DevcontainerCache)
+	cfg := s.workspaceBootstrapConfig(runtime, callbackToken)
 
 	state := bootstrap.ProvisionState{}
 	if cfg.Repository != "" && callbackToken != "" {

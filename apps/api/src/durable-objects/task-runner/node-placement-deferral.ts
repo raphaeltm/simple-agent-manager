@@ -6,9 +6,7 @@ import {
   comparePlacementHostsByStrategy,
   type PlacementHostSignals,
 } from '../../services/placement-strategy';
-import {
-  WORKSPACE_BUSY_BUILD_QUEUE_REASON,
-} from '../../services/workspace-resource-capacity';
+import { WORKSPACE_BUSY_BUILD_QUEUE_REASON } from '../../services/workspace-resource-capacity';
 import { updatePlacementDiagnostics } from './placement-diagnostics';
 import { taskPlacementStrategy } from './task-placement-strategy';
 import type { TaskRunnerState } from './types';
@@ -26,8 +24,7 @@ export interface ReusableNodeDeferral {
 }
 
 export type ReusableNodePlacementResult =
-  | { kind: 'selected'; selection: ReusableNodeSelection }
-  | ReusableNodeDeferral;
+  { kind: 'selected'; selection: ReusableNodeSelection } | ReusableNodeDeferral;
 
 export type DeferrableReusableNodeCandidate = {
   id: string;

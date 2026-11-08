@@ -387,11 +387,18 @@ export function resolveCapacityPlacementCredentialAttribution(
   };
 }
 
+/**
+ * Which quota a provisioning attempt is charged to. `targetCandidate` is the offering actually
+ * being provisioned; it defaults to the selection's first. A TaskRunner on a later provider tier
+ * passes that tier's offering, so a user-credential tier is not charged as the platform tier
+ * ranked above it.
+ */
 export function resolveCapacityAwareQuotaCredentialSource(
   credential: PlacementCredentialSourceResult,
-  capacityPoolSelection: TaskStartCapacityPoolSelection | null
+  capacityPoolSelection: TaskStartCapacityPoolSelection | null,
+  targetCandidate: TaskStartCapacityCandidate | null = capacityPoolSelection?.candidates[0] ?? null
 ): CredentialSource {
-  const capacityCandidate = capacityPoolSelection?.candidates[0] ?? null;
+  const capacityCandidate = targetCandidate;
   if (
     credential.credentialSource === 'platform' ||
     capacityCandidate?.credentialAttributionSource === 'platform'

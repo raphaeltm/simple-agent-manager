@@ -42,6 +42,33 @@ Pools exist at three **scopes**, each edited in a different place:
 These are settings tabs. **Infrastructure** in the main navigation is something else: it opens the
 **Nodes** page, which lists your machines.
 
+### What each machine is using
+
+On the **Nodes** page each machine is named for what it is (provider, type and location, with its
+vCPU, memory and disk), not for the task that first started it; a machine whose hardware is not
+known yet is just called **Machine**. Its chart covers the last hour by default:
+memory rises above the middle line, CPU hangs below it, and the dashed lines mark what SAM set aside
+for the sessions running there. Stopped sessions stay in the list, but what was set aside for them
+no longer counts. When a running session has no reading yet, the machine's totals say **partial**. Under the chart, each session is a row with its chat's title (select
+it to open the chat), who started it, the project and how long it has been running, a small chart of
+its own, and what it is using against what was set aside, for example **2.9/4.0 GB** and
+**1.3/2.0 vCPU**.
+
+- **over limit** in red means a session is using more memory than was set aside for it. Memory is
+  what runs out: a session that keeps growing can be stopped for using too much.
+- **burst, fine** means a session is using more CPU than was set aside. That only makes work slower,
+  so it is not a problem on its own.
+
+Usage history comes from each machine in batches, every 15 minutes by default, so the right-hand end
+of a chart fills in later. When a machine reports its sessions' memory with its heartbeat, a dot
+at the right edge shows that latest reading, and the numbers use it. How far back the charts go is the admin setting `nodes.usageWindowMinutes`
+([Admin settings](/docs/guides/admin-settings/#the-settings)). Workspace links and the machine's full
+hardware details are under **Advanced**.
+
+A session in a project you have since left still shows its usage, because it runs on your machine,
+but not the project's name, the chat title or a link to the chat. If you have a very large number of
+sessions, or a session uploads unusually many history batches, the page says what it left out.
+
 Each panel sums the pool up in one sentence (which provider, which regions, the smallest and
 largest machine), lists its settings in plain words, and shows the machine types it allows with the
 regions each one is allowed in. **Edit** opens the same panel for changes, with a Save bar that stays
@@ -59,6 +86,8 @@ on screen.
 You can also see the pool in effect without leaving your work: the **workspace sidebar** and a
 chat session's **infrastructure** section both show a "Current compute pool" line with the scope,
 state, strategy, and how many offerings are available.
+
+If the same Google Cloud connection appears twice with identical offerings, see [GCP duplicate pool entries](/docs/guides/google-cloud/#google-cloud-appears-twice-in-the-node-pool).
 
 ### The other settings on the same page
 
@@ -156,13 +185,61 @@ its own section, named after the provider and where you manage it (for example *
 Infrastructure settings**, **Hetzner · Project accounts**, or **Hetzner · Project credentials**), so
 you can tell them apart without seeing credential ids.
 
+#### Provider order
+
+A pool can rank its sources: for example Google Cloud first, Hetzner second. When SAM needs a
+**new** machine, it plans from the first source in the order before any later one, whatever the
+strategy or price would otherwise prefer. Within one source, the strategy still decides. Sources the
+order does not list come after every listed one.
+
+- **A running machine with room is always used first.** The order only decides where a new machine
+  comes from, so a warm Hetzner node is reused even when Google Cloud is ranked first.
+- **No order (the default) means every source is equal**, which is how pools behaved before ordering
+  existed.
+- **Changing the order does not disturb running machines.** It applies to the next new machine.
+- A project or agent profile that sets a default provider still limits the pool to that provider.
+
+**Falling back to the next provider.** When the first source cannot create a machine, SAM moves on
+to the next source in the order and tries there. That happens when the provider:
+
+- has no capacity for the machine (for example Google Cloud's `ZONE_RESOURCE_POOL_EXHAUSTED`, or
+  Hetzner's "error during placement"),
+- refuses because an account quota is used up (a Google Cloud `QUOTA_EXCEEDED`, a Hetzner core or
+  server limit), or
+- is cooling down after an account limit (SAM records one for a Hetzner core or server limit and
+  holds new machines off that account for a while; a Google Cloud quota covers one region, so it
+  is not recorded), or has no usable credential, or
+- would go over SAM's monthly compute quota. Each source is checked against its own credential:
+  falling back from platform credentials to your own is allowed, but falling back onto platform
+  credentials still counts against the quota.
+
+These checks apply to the first source too, so a first source that is cooling down or over quota
+is skipped rather than waited on. A pool with a single source waits or fails as before.
+
+With the `fallback-chain` exhaustion policy SAM tries the best-ranked allowed offerings of a source
+(up to `operations.provisioningAttemptsPerProviderTier`, 8 by default) before moving on. With `fail` or `queue` it tries one offering per source. `queue` waits only after every
+source is exhausted, and the retry starts again from the first source.
+
+SAM does **not** move to another provider after an error that could mean a machine was created
+anyway, such as a timeout or an unclear `503`, or after a permission or configuration error. Those
+fail the run, so a broken credential is not hidden and no machine is ever created twice.
+
+Sources that share a rank do not fall back to each other; give them different ranks if you want
+one to back up the other. Without an order, nothing falls back across sources. Each attempt,
+including skipped sources and the reason, appears in the run's placement details.
+
+The order is set through the pool update API (`sourceOrder`, a list of source ids) for now.
+
 ### Allowed offerings
 
 An **offering** is one concrete, provider-native machine: a specific instance type in a specific
 region, with real vCPU, RAM, disk, and price. Not `small`/`medium`/`large` — the actual
 `cpx31`-style SKU your provider sells.
 
-When SAM refreshes a pool it discovers your provider's **full** catalog for each source. The
+When SAM refreshes a pool it discovers your provider's **full** catalog for each source. For
+Google Cloud, the catalog is the machine types an admin has chosen, in every zone where Google has
+them, priced from Google's live list prices; see
+[Google Cloud](/docs/guides/google-cloud/#machine-types-zones-and-prices). The
 editor shows one row per machine type (its vCPU, RAM, disk, and price) with a chip for every region
 your provider sells it in. Select a region to allow that machine there; select it again to stop.
 Each chip is one of:
@@ -293,9 +370,10 @@ policy** is what SAM does when no permitted machine can be obtained. New pools d
 :::note
 Fallback chain only tries alternatives **from the same pool, on the same credential, in the same
 region if you pinned one, and only offerings that still satisfy the work's requirements**. It
-never downgrades to a machine smaller than the work asked for, never borrows another account's
-capacity, and never crosses into a different pool. If every permitted alternative is exhausted,
-the failure names what was tried.
+never downgrades to a machine smaller than the work asked for and never crosses into a different
+pool. The one way it leaves a credential is a [provider order](#provider-order): when the pool
+ranks its sources, SAM moves to the next-ranked source after the current one is exhausted. If
+every permitted alternative is exhausted, the failure names what was tried.
 :::
 
 :::caution
@@ -311,12 +389,23 @@ work and retry until the overall capacity wait expires, even under **Fail**:
   that needs at least as many cores of the same kind and carries on down the chain with the ones
   that need fewer; the work waits only when none of those fits. Under **Fail** or **Queue** there is
   no chain to descend, so it waits straight away. Shared and dedicated vCPUs have separate limits
-  on Hetzner, so reaching one does not rule out the other.
+  on Hetzner, so reaching one does not rule out the other. If the pool has a
+  [provider order](#provider-order) with a source ranked after this one, SAM moves to that source
+  instead of waiting.
 - **The pool's [Machine limit](#machine-limit) is reached** and no running node
   can take the work. The fix is the limit, the requirements, or freeing a node.
 
 So **Fail** is not a guarantee of an immediate error in every capacity situation.
 :::
+
+**What counts as "sold out".** On Hetzner, a placement or resource-unavailable error for that
+machine type and location. On Google Cloud, a zone that "does not have enough resources available"
+(`ZONE_RESOURCE_POOL_EXHAUSTED`). Some failures are not sold out and stop the work at once whatever
+the policy: a rejected credential or missing permission, an invalid request, and on Google Cloud a
+project quota (for example regional CPUs), unless the pool's provider order has a source ranked
+after this one, in which case SAM moves to it. A Google Cloud create request that fails with a plain
+"service unavailable" also stops the work, because SAM cannot tell whether the machine was created
+anyway, and trying another one could leave you paying for two.
 
 While work is waiting for capacity, the chat's infrastructure section shows "Waiting for capacity"
 and the next retry time, so a queued task is visible rather than silently stuck.

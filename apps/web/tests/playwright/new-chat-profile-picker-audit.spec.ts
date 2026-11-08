@@ -319,7 +319,8 @@ async function assertCardsReadable(page: Page, minWidthPx = 140) {
 async function composerShareOfViewport(page: Page): Promise<number> {
   return page.evaluate(() => {
     const textarea = document.querySelector('textarea[role="combobox"]');
-    const root = textarea?.closest('.glass-chrome');
+    // The new-chat message box is a SAM Glass slab.
+    const root = textarea?.closest('.sam-glass--slab');
     const box = root?.getBoundingClientRect();
     return box ? box.height / window.innerHeight : 1;
   });
@@ -482,6 +483,142 @@ test.describe('New-chat profile picker', () => {
     await expect(cards(page).getByText('Your profiles')).toBeVisible();
     await expect(page.locator('body')).not.toContainText('Something went wrong');
     await screenshot(page, `new-chat-picker-error-${getProjectSuffix(testInfo.project.name)}`);
+    await assertNoOverflow(page);
+  });
+});
+
+test.describe('Chat options: per-chat model and effort', () => {
+  const optionsButton = (page: Page) => page.getByRole('button', { name: /^Chat options/ });
+  const modelBox = (page: Page) => page.getByRole('combobox', { name: 'Model' });
+  const effortBox = (page: Page) => page.getByRole('combobox', { name: 'Effort' });
+
+  /** The Model and Effort fields sit inside the panel and inside the screen. */
+  async function assertFieldsInsidePanel(page: Page) {
+    const panel = page
+      .locator('[id]')
+      .filter({ has: modelBox(page) })
+      .last();
+    const panelBox = await panel.boundingBox();
+    const viewport = page.viewportSize()!;
+    expect(panelBox).not.toBeNull();
+    expect(panelBox!.x).toBeGreaterThanOrEqual(0);
+    expect(panelBox!.x + panelBox!.width).toBeLessThanOrEqual(viewport.width + 1);
+    for (const field of [modelBox(page), effortBox(page)]) {
+      if ((await field.count()) === 0) continue;
+      const box = await field.boundingBox();
+      expect(box!.x).toBeGreaterThanOrEqual(panelBox!.x - 1);
+      expect(box!.x + box!.width).toBeLessThanOrEqual(panelBox!.x + panelBox!.width + 1);
+      expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height + 1);
+    }
+  }
+
+  /** Opening the panel must not push To, the message box or Send off the screen. */
+  async function assertComposerOnScreen(page: Page) {
+    const viewportHeight = page.viewportSize()!.height;
+    for (const control of [
+      toControl(page),
+      page.locator('textarea[role="combobox"]'),
+      page.getByRole('button', { name: 'Send' }),
+    ]) {
+      const box = await control.boundingBox();
+      expect(box).not.toBeNull();
+      expect(box!.y + box!.height).toBeLessThanOrEqual(viewportHeight + 1);
+    }
+  }
+
+  test('Claude profile: defaults shown, overrides counted and shown in To', async ({
+    page,
+  }, testInfo) => {
+    const suffix = getProjectSuffix(testInfo.project.name);
+    await openNewChat(page, {
+      profiles: [
+        makeProfile({
+          id: 'p-opus',
+          name: 'Opus 5.5 Chat',
+          agentType: 'claude-code',
+          model: 'claude-opus-5-5',
+          effort: 'high',
+        }),
+      ],
+    });
+    await optionsButton(page).click();
+    await expect(modelBox(page)).toBeVisible();
+    await expect(modelBox(page)).toHaveAttribute('placeholder', /^Default: /);
+    await expect(effortBox(page).locator('option', { hasText: 'Max' })).toHaveCount(1);
+    await screenshot(page, `chat-options-model-effort-default-${suffix}`);
+    await assertFieldsInsidePanel(page);
+    await assertNoOverflow(page);
+
+    await effortBox(page).selectOption('max');
+    await modelBox(page).fill('claude-fable-5-1');
+    await modelBox(page).press('Escape');
+    await expect(optionsButton(page)).toHaveAccessibleName('Chat options (2 set)');
+    await screenshot(page, `chat-options-model-effort-set-${suffix}`);
+    await assertComposerOnScreen(page);
+    await expect(toControl(page)).toContainText('max effort');
+    await assertFieldsInsidePanel(page);
+    await assertNoOverflow(page);
+  });
+
+  test('model list opens inside the screen', async ({ page }, testInfo) => {
+    await openNewChat(page, {
+      profiles: [
+        makeProfile({ id: 'p-sol', name: 'Sol', agentType: 'openai-codex', effort: 'high' }),
+      ],
+    });
+    await optionsButton(page).click();
+    await modelBox(page).click();
+    const list = page.getByRole('listbox');
+    await expect(list).toBeVisible();
+    await screenshot(page, `chat-options-model-list-${getProjectSuffix(testInfo.project.name)}`);
+    const box = await list.boundingBox();
+    const viewport = page.viewportSize()!;
+    expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width + 1);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(viewport.height + 1);
+  });
+
+  test('Codex offers no max effort; OpenCode hides effort entirely', async ({ page }, testInfo) => {
+    const suffix = getProjectSuffix(testInfo.project.name);
+    await openNewChat(page, {
+      profiles: [
+        makeProfile({ id: 'p-sol', name: 'Sol', agentType: 'openai-codex', effort: 'high' }),
+      ],
+    });
+    await optionsButton(page).click();
+    await expect(effortBox(page).locator('option', { hasText: 'Extra high' })).toHaveCount(1);
+    await expect(effortBox(page).locator('option', { hasText: 'Max' })).toHaveCount(0);
+
+    await openNewChat(page, {
+      profiles: [makeProfile({ id: 'p-oc', name: 'OpenCode', agentType: 'opencode' })],
+    });
+    await optionsButton(page).click();
+    await expect(modelBox(page)).toBeVisible();
+    await expect(effortBox(page)).toHaveCount(0);
+    await screenshot(page, `chat-options-opencode-no-effort-${suffix}`);
+    await assertFieldsInsidePanel(page);
+    await assertNoOverflow(page);
+  });
+
+  test('a 200-character unbroken model id stays inside the panel', async ({ page }, testInfo) => {
+    await openNewChat(page, {
+      profiles: [
+        makeProfile({
+          id: 'p-long',
+          name: 'A profile whose name is long enough to crowd the To row on a phone screen',
+          agentType: 'claude-code',
+          model: `provider/${'x'.repeat(190)}`,
+          effort: 'xhigh',
+        }),
+      ],
+    });
+    await optionsButton(page).click();
+    await modelBox(page).fill(`custom/${'very-long-model-identifier-'.repeat(8)}`);
+    await modelBox(page).press('Escape');
+    await modelBox(page).blur();
+    // After editing, the id reads from its start (provider prefix), not from the caret.
+    expect(await modelBox(page).evaluate((input) => input.scrollLeft)).toBe(0);
+    await screenshot(page, `chat-options-long-model-${getProjectSuffix(testInfo.project.name)}`);
+    await assertFieldsInsidePanel(page);
     await assertNoOverflow(page);
   });
 });

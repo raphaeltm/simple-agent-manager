@@ -1,13 +1,12 @@
-import { ChevronDown, ChevronRight, Search, Settings, X } from 'lucide-react';
-import { useState } from 'react';
-import { useNavigate } from 'react-router';
+import { SearchField, SegmentedControl } from '@simple-agent-manager/ui';
+import { Plus } from 'lucide-react';
 
-import { TriggerDropdown } from '../../components/triggers/TriggerDropdown';
-import { SessionList } from './SessionList';
+import { sessionScopeOptions } from './session-scope-options';
+import { SessionSectionList } from './SessionSectionList';
 import type { useProjectChatState } from './useProjectChatState';
 
 /**
- * Full session-sidebar content. Reused verbatim by the default-mode panel and the Zen
+ * Full session-sidebar content. Reused verbatim by the default-mode pane and the Zen
  * peek panel so the two never drift.
  */
 export function ProjectChatSidebar({
@@ -17,15 +16,13 @@ export function ProjectChatSidebar({
   state: ReturnType<typeof useProjectChatState>;
   onShowHierarchy: (taskId: string) => void;
 }>) {
-  const navigate = useNavigate();
-  const [triggerDropdownOpen, setTriggerDropdownOpen] = useState(false);
   const handleShowHierarchy = onShowHierarchy;
 
   return (
     <>
-      {/* Sidebar header: project name + action buttons */}
-      <div className="shrink-0 px-3 py-2.5 border-b border-[rgba(34,197,94,0.08)] flex items-center gap-2">
-        <span className="text-sm font-semibold text-fg-primary truncate flex-1">
+      {/* Header: the project name. Automation and project settings live in the project nav. */}
+      <div className="flex min-h-14 shrink-0 items-center gap-1 pt-2.5 pr-2 pb-1 pl-4">
+        <span className="min-w-0 flex-1 truncate text-[17px] font-semibold text-fg-primary">
           {state.project?.name || 'Project'}
         </span>
         {state.realtimeDegraded && (
@@ -34,144 +31,79 @@ export function ProjectChatSidebar({
             onClick={() => void state.loadSessions()}
             title="Realtime updates paused. Click to refresh."
             aria-label="Realtime updates paused. Click to refresh session list."
-            className="shrink-0 p-1 bg-transparent border-none cursor-pointer rounded-sm transition-colors"
-            style={{ color: 'var(--sam-color-warning, #f59e0b)' }}
+            className="inline-grid h-11 w-11 shrink-0 cursor-pointer place-items-center rounded-[var(--sam-radius-control)] border-none bg-transparent"
           >
             <span
               aria-hidden="true"
-              className="inline-block w-2 h-2 rounded-full"
-              style={{ backgroundColor: 'var(--sam-color-warning, #f59e0b)' }}
+              className="inline-block h-2 w-2 rounded-full bg-[var(--sam-color-warning)] shadow-[0_0_8px_var(--sam-color-warning)]"
             />
           </button>
         )}
-        <TriggerDropdown
-          projectId={state.projectId}
-          open={triggerDropdownOpen}
-          onToggle={() => setTriggerDropdownOpen((prev) => !prev)}
-        />
-        <button
-          type="button"
-          onClick={() => navigate(`/projects/${state.projectId}/settings`)}
-          title="Project settings"
-          aria-label="Project settings"
-          className="shrink-0 p-1 bg-transparent border-none cursor-pointer text-fg-muted rounded-sm hover:text-fg-primary transition-colors"
-        >
-          <Settings size={15} />
-        </button>
       </div>
 
-      {/* New chat button */}
-      <div className="shrink-0 p-2 border-b border-[rgba(34,197,94,0.08)]">
+      {/* New chat */}
+      <div className="shrink-0 px-3 pt-1 pb-2">
         <button
           type="button"
           onClick={state.handleNewChat}
-          className="w-full py-1.5 px-3 rounded-md border border-[rgba(34,197,94,0.15)] bg-transparent cursor-pointer text-fg-primary text-xs font-medium hover:bg-[rgba(34,197,94,0.06)] hover:border-[rgba(34,197,94,0.25)] hover:shadow-[0_0_12px_rgba(22,163,74,0.08)] transition-all"
+          className="sam-raised flex h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-[14px] border-0 text-[15px] font-medium text-[var(--sam-status-success-fg)] shadow-[inset_0_1px_0_var(--sam-glass-v2-raised-edge),inset_0_0_0_1px_var(--sam-success-edge),var(--sam-shadow-glow-active)] transition-[filter] hover:brightness-110 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
         >
-          + New Chat
+          <Plus size={18} strokeWidth={2} aria-hidden="true" />
+          New Chat
         </button>
       </div>
 
       {/* Subtle refresh indicator */}
       {state.isRefreshing && (
         <div
-          className="h-0.5 bg-accent animate-pulse"
+          className="mx-4 h-0.5 animate-pulse rounded-full bg-accent"
           role="status"
           aria-label="Refreshing sessions"
         />
       )}
 
-      {/* Search */}
+      {/* Search and the ownership filter */}
       {state.hasSessions && (
-        <div className="shrink-0 px-2 py-1.5 border-b border-[rgba(34,197,94,0.08)] space-y-1.5">
-          <div className="relative flex items-center">
-            <Search size={13} className="absolute left-2 text-fg-muted pointer-events-none" />
-            <input
-              type="text"
-              value={state.searchQuery}
-              onChange={(e) => state.setSearchQuery(e.target.value)}
-              placeholder="Search chats..."
-              className="w-full pl-7 pr-7 py-1 text-xs rounded-md border border-[rgba(34,197,94,0.1)] bg-[var(--sam-form-bg)] text-fg-primary placeholder:text-fg-muted focus:outline-none focus:border-[rgba(34,197,94,0.3)] focus:shadow-[0_0_12px_rgba(22,163,74,0.06)] transition-all"
-            />
-            {state.searchQuery && (
-              <button
-                type="button"
-                onClick={() => state.setSearchQuery('')}
-                className="absolute right-1.5 p-0.5 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary"
-                aria-label="Clear search"
-              >
-                <X size={12} />
-              </button>
-            )}
-          </div>
+        <div className="shrink-0 space-y-2 px-3 pb-2">
+          <SearchField
+            value={state.searchQuery}
+            onValueChange={state.setSearchQuery}
+            placeholder="Search chats..."
+          />
           {state.multiplayerActive && (
-            <div
-              className="grid grid-cols-2 gap-1 rounded-md border border-border-default bg-surface/40 p-0.5"
-              aria-label="Session ownership filter"
-            >
-              {(['my', 'all'] as const).map((scope) => (
-                <button
-                  key={scope}
-                  type="button"
-                  onClick={() => state.setSessionScope(scope)}
-                  aria-pressed={state.sessionScope === scope}
-                  className={`rounded-sm px-2 py-1 text-[11px] font-medium transition-colors ${
-                    state.sessionScope === scope
-                      ? 'bg-accent/15 text-accent'
-                      : 'bg-transparent text-fg-muted hover:text-fg-primary'
-                  }`}
-                >
-                  {scope === 'my' ? 'My sessions' : 'All sessions'}
-                </button>
-              ))}
-            </div>
+            <SegmentedControl
+              label="Session ownership filter"
+              value={state.sessionScope}
+              onChange={state.setSessionScope}
+              options={sessionScopeOptions(state.sessions, state.sessionScope)}
+            />
           )}
         </div>
       )}
 
       {/* Session list — scrollable */}
       {state.hasSessions ? (
-        <nav aria-label="Chat sessions" className="flex-1 overflow-y-auto min-h-0">
-          <SessionList
-            sessions={state.filteredRecent}
+        <nav aria-label="Chat sessions" className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
+          <SessionSectionList
+            sections={state.sessionList.sections}
+            isSearching={state.sessionList.isSearching}
+            openSections={state.sessionList.openSections}
+            onToggleSection={state.sessionList.toggleSection}
             selectedSessionId={state.sessionId ?? null}
             onSelect={state.handleSelect}
             taskInfoMap={state.taskInfoMap}
             onShowHierarchy={handleShowHierarchy}
             showOwnership={state.multiplayerActive}
           />
-          {state.filteredStale.length > 0 && (
-            <>
-              <button
-                type="button"
-                onClick={() => state.setShowStale(!state.effectiveShowStale)}
-                className="w-full flex items-center gap-1.5 px-3 py-2 text-xs text-fg-muted bg-transparent border-none border-b border-[rgba(34,197,94,0.06)] cursor-pointer hover:bg-[rgba(34,197,94,0.04)] transition-colors"
-              >
-                {state.effectiveShowStale ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
-                <span>Older ({state.filteredStale.length})</span>
-              </button>
-              {state.effectiveShowStale && (
-                <SessionList
-                  sessions={state.filteredStale}
-                  selectedSessionId={state.sessionId ?? null}
-                  onSelect={state.handleSelect}
-                  taskInfoMap={state.taskInfoMap}
-                  onShowHierarchy={handleShowHierarchy}
-                  showOwnership={state.multiplayerActive}
-                />
-              )}
-            </>
-          )}
-          {state.filteredRecent.length === 0 && !state.effectiveShowStale && (
-            <div className="flex items-center justify-center p-4">
-              <span className="text-xs text-fg-muted text-center">
-                {state.searchQuery ? 'No matching chats' : 'No recent chats'}
-              </span>
-            </div>
-          )}
         </nav>
+      ) : state.loading ? (
+        // Not a status region: the conversation column's spinner already announces loading.
+        <div className="flex flex-1 items-center justify-center p-4">
+          <span className="text-center text-[13px] text-fg-muted">Loading chats…</span>
+        </div>
       ) : (
-        <div className="flex-1 flex items-center justify-center p-4">
-          <span className="text-xs text-fg-muted text-center">
+        <div className="flex flex-1 items-center justify-center p-4">
+          <span className="text-center text-[13px] text-fg-muted">
             No chats yet. Start a new one above.
           </span>
         </div>

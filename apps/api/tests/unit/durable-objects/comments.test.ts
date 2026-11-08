@@ -46,41 +46,47 @@ describe('ProjectData message comments', () => {
     );
   }
 
-  it('adds append-only migration tables and indexes', () => {
+  it('creates the anchored comment tables and keeps the legacy tables in place', () => {
     const tables = sql
       .exec(
         `SELECT name FROM sqlite_master
-         WHERE type = 'table' AND name IN (
-           'comment_threads',
-           'comment_replies',
-           'comment_status_mutations'
-         )
+         WHERE type = 'table' AND name LIKE '%comment%'
          ORDER BY name ASC`
       )
       .toArray()
       .map((row) => row.name);
 
-    expect(tables).toEqual(['comment_replies', 'comment_status_mutations', 'comment_threads']);
+    expect(tables).toEqual([
+      'anchored_comment_replies',
+      'anchored_comment_status_mutations',
+      'anchored_comment_threads',
+      // Frozen legacy tables (migrations 032/033), kept as the recovery path.
+      'comment_replies',
+      'comment_status_mutations',
+      'comment_threads',
+      'library_file_comment_replies',
+      'library_file_comment_status_mutations',
+      'library_file_comment_threads',
+    ]);
 
     const indexes = sql
       .exec(
         `SELECT name FROM sqlite_master
-         WHERE type = 'index' AND name LIKE 'idx_comment_%'
+         WHERE type = 'index' AND name LIKE 'idx_anchored_comment_%'
          ORDER BY name ASC`
       )
       .toArray()
       .map((row) => row.name);
 
-    expect(indexes).toEqual(
-      expect.arrayContaining([
-        'idx_comment_replies_session',
-        'idx_comment_replies_thread_sequence',
-        'idx_comment_status_mutations_session',
-        'idx_comment_threads_message',
-        'idx_comment_threads_session_sequence',
-        'idx_comment_threads_status',
-      ])
-    );
+    expect(indexes).toEqual([
+      'idx_anchored_comment_replies_scope',
+      'idx_anchored_comment_replies_thread_sequence',
+      'idx_anchored_comment_threads_message',
+      'idx_anchored_comment_threads_scope_sequence',
+      'idx_anchored_comment_threads_scope_status',
+      'idx_anchored_comment_threads_status_updated_at',
+      'idx_anchored_comment_threads_updated_at',
+    ]);
   });
 
   it('creates, lists, and idempotently replays message-anchored threads', () => {
@@ -733,7 +739,7 @@ describe('ProjectData library file comments', () => {
     });
   });
 
-  it('keeps file threads and message threads in separate storage', () => {
+  it('keeps file threads and message threads in separate anchor scopes', () => {
     seedSession('session-x');
     seedMessage('session-x', 'message-x', 1);
 
@@ -770,12 +776,16 @@ describe('ProjectData library file comments', () => {
     expect(comments.getCommentThread(sql, 'session-x', fileThread.thread.id)).toBeNull();
     expect(fileComments.getFileCommentThread(sql, 'file-2', messageThread.thread.id)).toBeNull();
 
-    // The tables are physically distinct.
+    // One table, two anchor kinds, each row carrying only its own kind's scope.
     const messageRows = sql
-      .exec('SELECT COUNT(*) AS c FROM comment_threads')
+      .exec(
+        "SELECT COUNT(*) AS c FROM anchored_comment_threads WHERE anchor_kind = 'message' AND session_id = 'session-x' AND file_id IS NULL"
+      )
       .toArray()[0] as { c: number };
     const fileRows = sql
-      .exec('SELECT COUNT(*) AS c FROM library_file_comment_threads')
+      .exec(
+        "SELECT COUNT(*) AS c FROM anchored_comment_threads WHERE anchor_kind = 'library_file' AND file_id = 'file-2' AND session_id IS NULL"
+      )
       .toArray()[0] as { c: number };
     expect(messageRows.c).toBe(1);
     expect(fileRows.c).toBe(1);
@@ -893,7 +903,10 @@ describe('ProjectData library file comments', () => {
     // Corrupt the middle row the way legacy data or a schema tightening would:
     // SQLite is dynamically typed, so a text value survives the NOT NULL column
     // but fails the valibot v.number(). See rule 50.
-    sql.exec(`UPDATE library_file_comment_threads SET created_at = 'not-a-number' WHERE sequence = 2`);
+    sql.exec(
+      `UPDATE anchored_comment_threads SET created_at = 'not-a-number'
+       WHERE anchor_kind = 'library_file' AND scope_key = 'file-6' AND sequence = 2`
+    );
 
     const listed = fileComments.listFileCommentThreads(sql, env, { fileId: 'file-6' });
     expect(listed.threads.map((t) => t.id)).toEqual([good.id, alsoGood.id]);

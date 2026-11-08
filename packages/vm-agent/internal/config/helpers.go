@@ -372,6 +372,7 @@ func (c *Config) Validate() error {
 			errs = append(errs, fmt.Errorf("%s must be > 0, got %s", timeout.key, timeout.value))
 		}
 	}
+	errs = append(errs, c.SnapshotHelper.validate()...)
 
 	if c.ResourceEventBufferSize <= 0 {
 		errs = append(errs, fmt.Errorf("%s must be > 0", EnvDefaultResourceEventBufferSize))

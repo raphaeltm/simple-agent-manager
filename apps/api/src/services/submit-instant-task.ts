@@ -1,4 +1,9 @@
-import type { CredentialSource, TaskAttachment, TaskMode } from '@simple-agent-manager/shared';
+import type {
+  AgentEffort,
+  CredentialSource,
+  TaskAttachment,
+  TaskMode,
+} from '@simple-agent-manager/shared';
 import { DEFAULT_TASK_TITLE_MAX_LENGTH } from '@simple-agent-manager/shared';
 import type { drizzle } from 'drizzle-orm/d1';
 
@@ -7,6 +12,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { buildVisibleInitialPrompt } from './agent-bootstrap-prompt';
+import { resolveTaskAgentOverrides } from './agent-profiles';
 import {
   acceptInstantSession,
   continueInstantSessionLaunch,
@@ -42,6 +48,8 @@ export async function submitInstantTask(input: {
   historicalContext?: string;
   taskMode?: TaskMode;
   agentType?: string;
+  /** One-chat model/effort; null/absent inherits from the skill/profile/project. */
+  agentOverrides?: Readonly<{ model?: string | null; effort?: AgentEffort | null }>;
   attachments: TaskAttachment[];
   credentialAttributionUserId: string;
   credentialAttributionProjectId: string | null;
@@ -62,6 +70,10 @@ export async function submitInstantTask(input: {
     env.DEFAULT_TASK_AGENT_TYPE ??
     'opencode';
   const defaults = resolveProjectAgentDefault(project.agentDefaults, agentType);
+  const agentRun = resolveTaskAgentOverrides(agentType, input.agentOverrides ?? {}, {
+    model: profile?.model ?? defaults.model,
+    effort: profile?.effort,
+  });
   const { enrichedMessage } = await enrichMessageWithMentions(message, db, project.id, userId, env);
   const agentPrompt = input.historicalContext
     ? `${input.historicalContext}\n\nNew user prompt:\n${enrichedMessage}`
@@ -136,8 +148,8 @@ export async function submitInstantTask(input: {
     branch: input.branchName,
     attachments: input.attachments,
     overrides: {
-      model: profile?.model ?? defaults.model,
-      effort: profile?.effort,
+      model: agentRun.model,
+      effort: agentRun.effort,
       permissionMode: profile?.permissionMode ?? defaults.permissionMode,
     },
   };

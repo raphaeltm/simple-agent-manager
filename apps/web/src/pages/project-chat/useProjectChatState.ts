@@ -11,11 +11,8 @@ import { useNavigate, useParams } from 'react-router';
 
 import { selectProfileId } from '../../components/project-chat/profile-picker/model';
 import {
-  EMPTY_RESOURCE_STATE as EMPTY_RESOURCE_STATE_IMPORT,
   hasAnyResourceValue,
-  hasValidationErrors,
   toResourceRequirements,
-  validateResourceState,
 } from '../../components/resource-requirements';
 import { useAgentCatalog } from '../../hooks/useAgentCatalog';
 import { useAvailableCommands } from '../../hooks/useAvailableCommands';
@@ -28,21 +25,17 @@ import { useTrialStatus } from '../../hooks/useTrialStatus';
 import { useVisibilityAwarePoll } from '../../hooks/useVisibilityAwarePoll';
 import type { ChatSessionResponse } from '../../lib/api';
 import {
-  closeConversationTask,
   getProjectTask,
   getTranscribeApiUrl,
   listChatSessions,
   listProjectTasks,
-  sleepChatSession,
   startInstantChatSession,
-  stopChatSession,
   submitTask,
 } from '../../lib/api';
+import { CHAT_SESSION_LIST_LIMIT } from '../../lib/chat-query-config';
 import { getSessionState } from '../../lib/chat-session-utils';
-import {
-  applyMessageCommentRealtimeEventToQueryCache,
-  chatQueryKeys,
-} from '../../lib/query-options';
+import { readInitialSessionList } from '../../lib/project-route-prefetch';
+import { applyMessageCommentRealtimeEventToQueryCache } from '../../lib/query-options';
 import { stripMarkdown } from '../../lib/text-utils';
 import { useProjectContext } from '../ProjectContext';
 import { buildForkMessage } from './profileWizardHelpers';
@@ -53,19 +46,20 @@ import {
 } from './submitRequest';
 import type { ProvisioningState } from './types';
 import {
-  CHAT_SESSION_LIST_LIMIT,
   CHAT_TASK_LIST_LIMIT,
   SESSION_RECONCILE_INTERVAL_MS,
   SESSION_SYNC_INTERVAL_MS,
 } from './types';
 import { DEFAULT_ATTACHMENT_MESSAGE, useAttachments } from './useAttachments';
+import { useComposerOverrides } from './useComposerOverrides';
 import { useComposerPrefill } from './useComposerPrefill';
+import { useConversationActions } from './useConversationActions';
 import { useProfileChoice } from './useProfileChoice';
 import { useProjectSkills } from './useProjectSkills';
 import { useProvisioningTracker } from './useProvisioningTracker';
-import { useSessionFilters } from './useSessionFilters';
 import { useSessionReducer } from './useSessionReducer';
 import { rawToSessionEvent } from './useSessionReducer';
+import { useSessionSections } from './useSessionSections';
 import { useStableTaskInfoMap } from './useStableTaskInfoMap';
 
 /** Pre-filled fork/retry context shown on the new chat screen. */
@@ -95,6 +89,12 @@ export function useProjectChatState() {
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const hasLoadedRef = useRef(false);
+  // A list read has succeeded: only then does an empty list mean "no chats".
+  const [listLoaded, setListLoaded] = useState(false);
+  // The read in flight when the page mounted, for handlers that need the selected session.
+  const initialLoadRef = useRef<Promise<ChatSessionResponse[]>>(Promise.resolve([]));
+  // The first list came from the route prefetch; see the first-socket-open refresh below.
+  const listFromPrefetchRef = useRef(false);
   // Credentials, trial status, provider catalog, agent catalog and agent profiles all
   // come from shared TanStack queries. Before this migration each was fetched by a
   // mount effect local to this hook, duplicating requests that the settings pages,
@@ -107,7 +107,6 @@ export function useProjectChatState() {
 
   // Sidebar filtering
   const [searchQuery, setSearchQuery] = useState('');
-  const [showStale, setShowStale] = useState(false);
   const [sessionScope, setSessionScope] = useState<SessionScope>('all');
   const multiplayerActive = Boolean(project?.multiplayerActive);
 
@@ -183,23 +182,18 @@ export function useProjectChatState() {
   );
   const userSetTaskModeRef = useRef(false);
 
-  // Per-task resource override — blank fields inherit from profile/project
-  const [taskResourceReqs, setTaskResourceReqs] = useState<
-    import('../../components/resource-requirements').ResourceRequirementsFormState
-  >({ ...EMPTY_RESOURCE_STATE_IMPORT });
-  const [taskResourceErrors, setTaskResourceErrors] = useState<
-    import('../../components/resource-requirements').ResourceValidationErrors
-  >({});
-
-  // Reset per-task resource overrides and errors on project switch
-  const prevProjectIdRef = useRef(projectId);
-  useEffect(() => {
-    if (prevProjectIdRef.current !== projectId) {
-      prevProjectIdRef.current = projectId;
-      setTaskResourceReqs({ ...EMPTY_RESOURCE_STATE_IMPORT });
-      setTaskResourceErrors({});
-    }
-  }, [projectId]);
+  // Per-chat resource, model and effort overrides — blank fields inherit from profile/project
+  const {
+    taskResourceReqs,
+    setTaskResourceReqs,
+    taskResourceErrors,
+    setTaskResourceErrors,
+    agentOverrides,
+    setAgentOverrides,
+    resetComposerOverrides,
+    validateTaskResources,
+    agentOverrideFields,
+  } = useComposerOverrides(projectId);
 
   // Provisioning tracking
   const [provisioning, setProvisioning] = useState<ProvisioningState | null>(null);
@@ -233,18 +227,7 @@ export function useProjectChatState() {
 
   const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
 
-  // Conversation lifecycle state
-  const [sleepingConversation, setSleepingConversation] = useState(false);
-  const [sleepError, setSleepError] = useState<string | null>(null);
-  const [closingConversation, setClosingConversation] = useState(false);
-  const [closeError, setCloseError] = useState<string | null>(null);
-
-  const { filteredRecent, filteredStale, effectiveShowStale } = useSessionFilters(
-    sessions,
-    taskInfoMap,
-    searchQuery,
-    showStale
-  );
+  const sessionList = useSessionSections(sessions, taskInfoMap, searchQuery);
 
   // ---------------------------------------------------------------------------
   // Effects
@@ -271,12 +254,23 @@ export function useProjectChatState() {
     if (hasLoadedRef.current) setIsRefreshing(true);
     try {
       const scope = multiplayerActive ? sessionScope : 'all';
-      const sessionResult = await listChatSessions(projectId, {
-        limit: CHAT_SESSION_LIST_LIMIT,
-        scope,
-      });
-      resetSessions(sessionResult.sessions);
+      let sessions: ChatSessionResponse[];
+      if (!hasLoadedRef.current && scope === 'all') {
+        const initial = await readInitialSessionList(queryClient, queryScope, projectId);
+        sessions = initial.sessions;
+        listFromPrefetchRef.current = initial.prefetched;
+      } else {
+        sessions = (
+          await listChatSessions(projectId, {
+            limit: CHAT_SESSION_LIST_LIMIT,
+            scope,
+            includeLive: true,
+          })
+        ).sessions;
+      }
+      resetSessions(sessions);
       hasLoadedRef.current = true;
+      setListLoaded(true);
 
       listProjectTasks(projectId, { limit: CHAT_TASK_LIST_LIMIT })
         .then((tasksResult) => {
@@ -289,13 +283,21 @@ export function useProjectChatState() {
           /* task titles are cosmetic */
         });
 
-      return sessionResult.sessions;
+      return sessions;
     } catch {
       return [];
     } finally {
       setIsRefreshing(false);
     }
-  }, [projectId, sessionScope, multiplayerActive, resetSessions, replaceTaskInfoMap]);
+  }, [
+    projectId,
+    sessionScope,
+    multiplayerActive,
+    resetSessions,
+    replaceTaskInfoMap,
+    queryClient,
+    queryScope,
+  ]);
 
   const handleSessionEvent = useCallback(
     (raw: RawSessionEvent) => {
@@ -331,8 +333,21 @@ export function useProjectChatState() {
 
   useEffect(() => {
     setLoading(true);
-    void loadSessions().finally(() => setLoading(false));
+    const load = loadSessions();
+    initialLoadRef.current = load;
+    void load.finally(() => setLoading(false));
   }, [loadSessions]);
+
+  /**
+   * The selected session, waiting for the page's first list read when it has not landed.
+   * A deep link shows its conversation before the list arrives, so its actions must not
+   * read "not in the list yet" as "no such session".
+   */
+  const findSession = useCallback(
+    async (id: string) =>
+      sessions.find((s) => s.id === id) ?? (await initialLoadRef.current).find((s) => s.id === id),
+    [sessions]
+  );
 
   // Session-list freshness has two modes, and exactly one is active at a time.
   //
@@ -350,6 +365,13 @@ export function useProjectChatState() {
   // tabs. Reconnect catch-up is handled by `onReconnected` above; disconnect and
   // tab-return catch-up come from the hook's elapsed-gated refresh.
   const wsConnected = connectionState === 'connected';
+  // The route prefetch read the list before this socket subscribed, and the server replays
+  // nothing on subscribe: read it once more when the socket first opens.
+  useEffect(() => {
+    if (!wsConnected || !listLoaded || !listFromPrefetchRef.current) return;
+    listFromPrefetchRef.current = false;
+    void loadSessions();
+  }, [wsConnected, listLoaded, loadSessions]);
   useVisibilityAwarePoll(loadSessions, SESSION_SYNC_INTERVAL_MS, {
     enabled: !loading,
     paused: wsConnected,
@@ -408,16 +430,11 @@ export function useProjectChatState() {
     setSubmitError(null);
 
     // Fix 4: validate resource overrides before dispatch and surface per-field errors
-    const hasResources = hasAnyResourceValue(taskResourceReqs);
-    if (hasResources) {
-      const resErrors = validateResourceState(taskResourceReqs);
-      if (hasValidationErrors(resErrors)) {
-        setTaskResourceErrors(resErrors);
-        setSubmitError('Fix resource requirement errors before sending');
-        return;
-      }
+    if (!validateTaskResources()) {
+      setSubmitError('Fix resource requirement errors before sending');
+      return;
     }
-    setTaskResourceErrors({});
+    const hasResources = hasAnyResourceValue(taskResourceReqs);
 
     setSubmitting(true);
     try {
@@ -431,6 +448,7 @@ export function useProjectChatState() {
         : null;
       const attachmentRefs = getCompletedAttachmentRefs(attachments.chatAttachments);
       const selectedRuntime = selectedSkill?.runtime ?? selectedProfile?.runtime ?? null;
+      const agentFields = agentOverrideFields(selectedProfile, selectedSkill);
       const requiresTaskSubmission = attachmentRefs.length > 0;
       // Fix 2: when task has explicit resource overrides, route through submitTask
       // so the backend can honor them; Instant cannot carry resource requirements.
@@ -443,11 +461,12 @@ export function useProjectChatState() {
           agentProfileId: submitProfileId,
           skillId: selectedSkillId ?? undefined,
           parentTaskId: pendingDerived?.parentTaskId || undefined,
+          ...agentFields,
         });
         setMessage('');
         setPendingDerived(null);
         attachments.clearAttachments();
-        setTaskResourceReqs({ ...EMPTY_RESOURCE_STATE_IMPORT });
+        resetComposerOverrides();
         newChatIntentRef.current = false;
         navigate(`/projects/${projectId}/chat/${result.sessionId}`, { replace: true });
         loadSessions().catch(() => undefined);
@@ -473,12 +492,15 @@ export function useProjectChatState() {
         selectedTaskMode,
         pendingDerived,
       });
-      const result = await submitTask(projectId, withAttachmentRefs(baseRequest, attachmentRefs));
+      const result = await submitTask(
+        projectId,
+        withAttachmentRefs({ ...baseRequest, ...agentFields }, attachmentRefs)
+      );
       setMessage('');
       setPendingDerived(null);
       attachments.clearAttachments();
-      // Fix 3: reset per-task resource overrides after successful submit
-      setTaskResourceReqs({ ...EMPTY_RESOURCE_STATE_IMPORT });
+      // Fix 3: reset per-chat overrides after successful submit
+      resetComposerOverrides();
       setProvisioning({
         taskId: result.taskId,
         sessionId: result.sessionId,
@@ -510,9 +532,8 @@ export function useProjectChatState() {
     setMessage('');
     setSubmitError(null);
     setProvisioning(null);
-    setTaskResourceReqs({ ...EMPTY_RESOURCE_STATE_IMPORT });
-    setTaskResourceErrors({});
-  }, [navigate, projectId]);
+    resetComposerOverrides();
+  }, [navigate, projectId, resetComposerOverrides]);
 
   const handleSelect = useCallback(
     (id: string) => {
@@ -549,9 +570,11 @@ export function useProjectChatState() {
       newChatIntentRef.current = true;
       setSubmitError(null);
       setProvisioning(null);
+      // A derived chat starts from its profile, not from an earlier draft's options.
+      resetComposerOverrides();
       navigate(`/projects/${projectId}/chat`, { replace: true });
     },
-    [navigate, projectId]
+    [navigate, projectId, resetComposerOverrides]
   );
 
   /** Open the new-chat composer with the original task prompt re-added. */
@@ -576,6 +599,7 @@ export function useProjectChatState() {
       newChatIntentRef.current = true;
       setSubmitError(null);
       setProvisioning(null);
+      resetComposerOverrides();
       navigate(`/projects/${projectId}/chat`, { replace: true });
 
       const isCurrent = () => pendingDerivedRef.current === derived;
@@ -594,55 +618,15 @@ export function useProjectChatState() {
           );
         });
     },
-    [navigate, projectId]
+    [navigate, projectId, resetComposerOverrides]
   );
 
-  const handleSleepConversation = useCallback(async () => {
-    const selectedSession = sessions.find((s) => s.id === sessionId);
-    if (!selectedSession) return;
-    if (!selectedSession.workspaceId) {
-      setSleepError('This session has no workspace to sleep.');
-      return;
-    }
-
-    setSleepingConversation(true);
-    setSleepError(null);
-    try {
-      // Session-scoped: works for the owner and for anyone they shared the session with.
-      await sleepChatSession(projectId, selectedSession.id);
-      if (queryScope) {
-        await queryClient.invalidateQueries({
-          queryKey: chatQueryKeys.sessionMessages(queryScope, projectId, selectedSession.id),
-        });
-      }
-      void loadSessions();
-    } catch (err) {
-      console.warn('Failed to sleep conversation:', err);
-      setSleepError(err instanceof Error ? err.message : 'Failed to sleep conversation');
-    } finally {
-      setSleepingConversation(false);
-    }
-  }, [loadSessions, projectId, queryClient, queryScope, sessionId, sessions]);
-
-  const handleCloseConversation = useCallback(async () => {
-    const selectedSession = sessions.find((s) => s.id === sessionId);
-    if (!selectedSession) return;
-    setClosingConversation(true);
-    setCloseError(null);
-    try {
-      if (selectedSession.taskId) {
-        await closeConversationTask(projectId, selectedSession.taskId);
-      } else {
-        await stopChatSession(projectId, selectedSession.id);
-      }
-      void loadSessions();
-    } catch (err) {
-      console.warn('Failed to close conversation:', err);
-      setCloseError(err instanceof Error ? err.message : 'Failed to close conversation');
-    } finally {
-      setClosingConversation(false);
-    }
-  }, [projectId, sessionId, sessions, loadSessions]);
+  const conversationActions = useConversationActions({
+    projectId,
+    sessionId,
+    findSession,
+    loadSessions,
+  });
 
   const handleTaskModeChange = useCallback((mode: TaskMode) => {
     userSetTaskModeRef.current = true;
@@ -653,7 +637,9 @@ export function useProjectChatState() {
   // Derived state
   // ---------------------------------------------------------------------------
 
-  const showNewChatInput = !sessionId || sessions.length === 0;
+  // Until a list read succeeds an empty list means "not loaded", not "no chats", so a
+  // deep-linked conversation stays on screen while it loads or after it fails.
+  const showNewChatInput = !sessionId || (listLoaded && !loading && sessions.length === 0);
   const hasSessions = sessions.length > 0;
 
   return {
@@ -667,18 +653,15 @@ export function useProjectChatState() {
     hasSessions,
     showNewChatInput,
     loadSessions,
+    findSession,
     realtimeDegraded,
     sidebarOpen,
     setSidebarOpen,
     searchQuery,
     setSearchQuery,
-    showStale,
-    setShowStale,
     sessionScope,
     setSessionScope,
-    filteredRecent,
-    filteredStale,
-    effectiveShowStale,
+    sessionList,
     taskTitleMap,
     taskInfoMap,
     message,
@@ -721,6 +704,8 @@ export function useProjectChatState() {
     setTaskResourceReqs,
     taskResourceErrors,
     setTaskResourceErrors,
+    agentOverrides,
+    setAgentOverrides,
     ...attachments,
     provisioning,
     bootLogs,
@@ -730,12 +715,7 @@ export function useProjectChatState() {
     setPendingDerived,
     handleFork,
     handleRetry,
-    sleepingConversation,
-    sleepError,
-    handleSleepConversation,
-    closingConversation,
-    closeError,
-    handleCloseConversation,
+    ...conversationActions,
     transcribeApiUrl,
     getSessionState,
   };

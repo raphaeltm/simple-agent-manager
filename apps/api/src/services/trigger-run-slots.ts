@@ -12,14 +12,21 @@ import {
   TERMINAL_STATUS_VALUES,
 } from './task-status';
 
-/** Follow only verified recovery handoffs; UNION prevents malformed lineage cycles. */
+/**
+ * Follow only verified recovery handoffs; UNION prevents malformed lineage cycles.
+ *
+ * The unary `+` on `successor.project_id` keeps SQLite from looking `successor` up through
+ * `idx_tasks_project_user`. Production D1 chose that index, which read every task in the
+ * project per execution row (1.37M rows, ~7 s per admission check on 2026-11-04), instead of
+ * the primary-key lookup on `successor.id`. The project check still applies as a filter.
+ */
 export const TRIGGER_RUN_TASK_ID_SQL = `COALESCE((WITH RECURSIVE owners(id) AS (
   SELECT e.task_id
   UNION
   SELECT successor.id FROM owners JOIN tasks source ON source.id=owners.id
     JOIN tasks successor ON successor.id=source.superseded_by_task_id
     WHERE source.status='cancelled' AND successor.recovery_source_task_id=source.id
-      AND successor.triggered_by='session-recovery' AND successor.project_id=e.project_id
+      AND successor.triggered_by='session-recovery' AND +successor.project_id=e.project_id
 ) SELECT owner.id FROM owners JOIN tasks owner ON owner.id=owners.id
   WHERE owner.status NOT IN (${TERMINAL_STATUS_VALUES.map((value) => "'" + value + "'").join(',')})
   LIMIT 1),e.task_id)`;

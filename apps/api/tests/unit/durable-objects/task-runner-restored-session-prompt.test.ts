@@ -45,6 +45,10 @@ vi.mock('../../../src/services/project-data', () => ({
 }));
 vi.mock('../../../src/services/session-snapshots', () => ({
   completeSessionSnapshotRecovery: boundary.completeRecovery,
+  completeSessionSnapshotRecoveryGeneration: async (...args: unknown[]) =>
+    (await (boundary.completeRecovery as (...a: unknown[]) => Promise<boolean>)(...args))
+      ? { snapshotGeneration: 'generation-1' }
+      : null,
   failSessionSnapshotRecovery: vi.fn(async () => undefined),
 }));
 vi.mock('drizzle-orm/d1', () => ({
@@ -131,6 +135,9 @@ function makeContext(): TaskRunnerContext {
       BASE_DOMAIN: 'example.test',
       KV: { put: vi.fn(), delete: vi.fn(), get: vi.fn() },
       DATABASE: {
+        batch: vi.fn(async (statements: Array<{ run: () => Promise<unknown> }>) =>
+          Promise.all(statements.map((statement) => statement.run()))
+        ),
         prepare: vi.fn((sql: string) => ({
           bind: () => ({
             first: async () => null,

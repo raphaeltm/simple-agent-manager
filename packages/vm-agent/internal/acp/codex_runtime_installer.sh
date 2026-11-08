@@ -4,14 +4,14 @@ set -euo pipefail
 [[ $# -eq 2 ]] || { echo "usage: $0 <reviewed-archive.tar.gz> <install-root>" >&2; exit 2; }
 archive=$(realpath -- "$1")
 root=$2
-identity='sam-codex-acp-2.1.1-sam-c2.2+cli-0.160.0-sam-c2.2-codemode2'
-prior_identity='sam-codex-acp-1.13.1-sam-c2.1+cli-0.156.1-sam-c2.1-codemode2'
-prior_catalog_hash='c984a43334aab0968f8a728e8944fd36f99a613e9402eef77243d5ca3ff56d09'
-prior_notices_hash='9f84f8c07cc6b2a3dfe7df75816e18896575e0a8f622b2cb778b826f8db4e056'
-notices_hash='1b8edf18ddd7ea418024c1feb8b48697fe4e408fba33c315ac79d2ab9ef4b7cd'
-archive_hash='1fd3c07846581888284ed9c9d02bc1f51e3673610c3688d8da98db47030bfb95'
-archive_size=136245837
-catalog_hash='02c1b8818f856effeb90a076ace5ab70a9e25b81dadcbf78be000f53113c3b1e'
+identity='sam-codex-acp-2.1.1-sam-c2.3+cli-0.160.0-sam-c2.2-codemode2'
+prior_identity='sam-codex-acp-2.1.1-sam-c2.2+cli-0.160.0-sam-c2.2-codemode2'
+prior_catalog_hash='02c1b8818f856effeb90a076ace5ab70a9e25b81dadcbf78be000f53113c3b1e'
+prior_notices_hash='1b8edf18ddd7ea418024c1feb8b48697fe4e408fba33c315ac79d2ab9ef4b7cd'
+notices_hash='3e5f9feeac43307d7cd7a05516fd0824a374d7a6b28dcb9a9e3a0af555c91a3c'
+archive_hash='384d0071527848b68df318c04f2e6e040f2eea67131bbd5b6f66cc58f5bd65bd'
+archive_size=136243963
+catalog_hash='8ad7f5887ea09d76152ee9889b0055ee230b18af30eb070695b7279c550c5d58'
 [[ $(uname -m) == x86_64 && $(node -p 'process.versions.node.split(".")[0]') -ge 22 ]] || {
   echo 'candidate requires Linux x86_64 and Node 22+' >&2; exit 1;
 }
@@ -78,8 +78,8 @@ trusted_file() {
 verify_release() {
   local selected=${2:-$identity} expected_catalog cli_version adapter_version
   case "$selected" in
-    "$identity") expected_catalog=$catalog_hash; cli_version='0.160.0-sam-c2.2'; adapter_version='2.1.1-sam-c2.2' ;;
-    "$prior_identity") expected_catalog=$prior_catalog_hash; cli_version='0.156.1-sam-c2.1'; adapter_version='1.13.1-sam-c2.1' ;;
+    "$identity") expected_catalog=$catalog_hash; cli_version='0.160.0-sam-c2.2'; adapter_version='2.1.1-sam-c2.3' ;;
+    "$prior_identity") expected_catalog=$prior_catalog_hash; cli_version='0.160.0-sam-c2.2'; adapter_version='2.1.1-sam-c2.2' ;;
     *) return 1 ;;
   esac
   local release="$1/releases/$selected" catalog="$1/catalog/$selected.sha256"

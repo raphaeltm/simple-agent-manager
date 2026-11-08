@@ -24,6 +24,8 @@ Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB
 | Variable | `D1_SESSION_MODE`                                  | No (default: `first-primary`; `disabled` pins reads to primary)    |
 | Variable | `D1_MIGRATION_CHURNING_TABLES`                     | No (may narrow the reviewed built-in retention/expiry table list)  |
 | Variable | `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` | No (default: `50`; range: 0–100)                                   |
+| Variable | `D1_MIGRATION_READ_ATTEMPTS`                       | No (default: `3`; range: 1–5; verification reads only)             |
+| Variable | `D1_MIGRATION_READ_RETRY_DELAY_MS`                 | No (default: `10000`; range: 0–60000)                              |
 | Secret   | `CF_API_TOKEN`                                     | Yes (requires Account → SSL and Certificates → Edit for Origin CA) |
 | Secret   | `CF_ACCOUNT_ID`                                    | Yes                                                                |
 | Secret   | `CF_ZONE_ID`                                       | Yes                                                                |
@@ -88,10 +90,12 @@ Use the typed **Operations** admin settings below for live configuration. All ei
 
 Operations debugger tools (`apps/api/src/services/operations-access.ts`):
 
-| Admin setting key               | Default | Meaning                                                                                                   |
-| ------------------------------- | ------- | --------------------------------------------------------------------------------------------------------- |
+| Admin setting key               | Default | Meaning                                                                                                         |
+| ------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------- |
 | `operations.debuggerTools`      | `off`   | `off` / `read` / `read_ask` / `read_auto_safe`; gate for `ops_*` MCP tools in the Operations project. No cache. |
-| `operations.auditRetentionDays` | `90`    | Integer `1`–`3650`; days `operations_audit_log` rows are kept (daily `0 3 * * *` purge).                   |
+| `operations.auditRetentionDays` | `90`    | Integer `1`–`3650`; days `operations_audit_log` rows are kept (daily `0 3 * * *` purge).                        |
+
+Read-tool limits for the `ops_*` tools (`apps/api/src/services/fleet-ops/settings-definitions.ts`, resolved once per call by `resolveFleetOpsSettings`): `operations.debugPackageRetentionDays` (7), `operations.debugPackageMaxBytes` (20 MiB, max 32 MiB), `operations.debugPackagePurgeBatchSize` (50 per batch, max 90), `operations.debugPackagePurgeDeadlineMs` (20000), `operations.debugPackageCapturesPerHour` (20), `operations.opsAnomalyEmptyNodeGraceMs` (900000), `operations.opsAnomalyTerminalTaskGraceMs` (900000), `operations.opsAnomalyIdleTaskMinutes` (60), `operations.opsAnomalyDestroyingNodeHours` (6), `operations.opsAnomalyLookbackHours` (24), `operations.opsAnomalyMaxPerClass` (25), `operations.opsNodeLogMaxLines` (200), `operations.opsNodeLogMaxBytes` (65536), `operations.opsTimelineMaxEvents` (200), `operations.opsTimelinePerSourceLimit` (100), `operations.opsTimelineDefaultWindowHours` (168), `operations.opsTimelineFanoutLimit` (2), `operations.opsEntityGraphRowCap` (25), `operations.opsWorkerLogDefaultWindowMinutes` (60), `operations.opsListMaxRows` (100), `operations.opsTextFieldMaxLength` (2000). Defaults, ranges and meanings: public docs `guides/admin-settings.md#read-tool-limits`.
 
 Each refresh selects at most 25 watches and reads at most 25 events per watch: at most 325 caller D1 reads, 75 cold ProjectData RPCs, and 625 local event-reference inserts, plus fixed alarm setup. A work-card read performs at most 75 D1 reads. Each watch persists its next check and charges an attempt before I/O; the alarm uses the earliest watch deadline. Failed watches defer until that deadline and stop after the retry limit, with a visible update warning. The watch lifetime also stops observation independently; neither condition cancels project work.
 
@@ -158,7 +162,7 @@ or set a GitHub Environment variable when the name is forwarded. See `.claude/ru
 - `SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS` — Maximum replacement-VM wake attempts before the sleeping session becomes unavailable (default: `3`)
 - `SESSION_SNAPSHOT_RECOVERY_ATTEMPT_DECAY_MS` — How long a spent wake-attempt burst stays spent (default: `900000`)
 - `SESSION_RECOVERY_LINEAGE_MAX_DEPTH` — Wake→wake links followed back to the conversation's first run when deciding whether a wake must stay in its original location (default: `256`)
-- `SESSION_SLEEP_AFTER_MS` — Runtime-neutral idle time before automatic VM-session sleep; completed and failed tasks queue sleep immediately and drain for this long past the agent's last turn report (default: `900000`)
+- `SESSION_SLEEP_AFTER_MS` — Runtime-neutral idle time before automatic VM-session sleep; completed and failed tasks queue sleep immediately and drain for this long past the agent's last real work (default: `900000`)
 - `FAILED_TASK_PRESERVATION_MAX_WAIT_MS` — Longest a failed task's runtime waits for its work-preservation sleep, from the latest of the failure, an in-place wake and the agent's current turn start, before the sweep tears it down with a chat notice (default: `28800000`)
 - `SESSION_SLEEP_SWEEP_BATCH_SIZE` — Maximum due VM sleeps atomically claimed by one scheduled sweep (default: `10`)
 - `SESSION_SLEEP_RETRY_DELAY_MS` — Delay after a fail-closed automatic sleep attempt (default: `300000`)
@@ -167,7 +171,7 @@ or set a GitHub Environment variable when the name is forwarded. See `.claude/ru
 - `SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS` — Time since the sleep episode began (with at least one failure) before the transcript-and-Git fallback is tried (default: `900000`, 15 min)
 - `SESSION_SLEEP_CLAIM_LEASE_MS` — Reclaim timeout for an interrupted automatic-sleep claim (default: `600000`)
 - `HARNESS_BACKGROUND_WORK_LEASE_MS` — Finite sleep-protection lease renewed by normalized harness background-work lifecycle signals (default: `300000`)
-- `HARNESS_BACKGROUND_WORK_MAX_DURATION_MS` — Absolute ceiling, measured from the last harness lifecycle progress edge, on how long background work may defer sleep (default: `1800000`)
+- `HARNESS_BACKGROUND_WORK_MAX_DURATION_MS` — Absolute ceiling, measured from the last real session work (foreground work or harness lifecycle progress), on how long background work may defer sleep (default: `7200000`)
 - `ACP_ACTIVITY_ADMISSION_ENABLED` — Enables Worker-side admission control/coalescing for redundant intermediate ACP activity callbacks (default: `true`)
 - `ACP_ACTIVITY_COALESCE_WINDOW_MS` — Minimum interval between redundant intermediate ProjectData activity writes, and the first retry delay for a coalesced report whose flush hit a retryable ProjectData failure (including a CPU-limit reset or lost connection); each further retry doubles, capped at `ACP_ACTIVITY_COALESCE_TTL_MS`. Transitions and terminal/error reports bypass it (default: `2000`)
 - `ACP_ACTIVITY_COALESCE_TTL_MS` — Maximum lifetime for a coalesced activity report before eviction leaves convergence to probe-backed reconciliation (default: `60000`)
@@ -449,7 +453,7 @@ per-slice and per-run admission budgets, and the verified R2 manifest writes.
 - `PROJECT_EVENT_WATCH_COOLDOWN_MIN_MS` — Minimum time between standing watch executions (default: `60000`)
 - `PROJECT_EVENT_WATCH_MAX_EXECUTIONS` — Maximum configurable executions per standing watch (default: `100`)
 - `PROJECT_EVENT_WATCH_MAX_CONCURRENT` — Maximum configurable concurrent actions per standing watch (default: `3`)
-- `PROJECT_EVENT_WAKE_ENABLED` — Enables same-chat ProjectData event wake materialization for v2 `existing_session_prompt` and `runtime_interrupt` subscriptions; unset or `false` leaves event delivery pull-only (default: `false`)
+- `PROJECT_EVENT_WAKE_ENABLED` — Enables same-chat ProjectData event wake materialization for v2 `runtime_steer` (the default), `existing_session_prompt` and `runtime_interrupt` subscriptions; unset or `false` leaves event delivery pull-only (default: `false`)
 - `PROJECT_EVENT_WAKE_MATERIALIZATION_MIN_ALARM_DELAY_MS` — Minimum delay before a ProjectData alarm retries wake materialization after due matches are present (default: `1000`)
 - `PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_BASE_MS` — Initial persisted backoff for a failed event-wake materialization or retention alarm phase (default: `5000`)
 - `PROJECT_EVENT_WAKE_MATERIALIZATION_BACKOFF_MAX_MS` — Maximum persisted backoff for repeated event-wake materialization or retention alarm failures (default: `300000`)
@@ -588,8 +592,8 @@ by the read-only cron-liveness check.
 - `CHAT_SESSION_MESSAGE_LIMIT` — Default page size for chat session message REST responses when no limit is requested — used by the 3s poll and load-more (default: 500)
 - `CHAT_SESSION_MESSAGE_MAX` — Ceiling any chat session message request is clamped to; the project chat opens on the newest page, pages older history in, and never requests it (default: 50000)
 - `CHAT_SESSION_DELTA_MESSAGE_LIMIT` — Default page size for forward-cursor chat delta fetches after the newest cached browser message (default: 5000)
-- `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT` — Default result count for the `get_archived_tool_payloads` MCP tool (default: 10)
-- `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX` — Maximum result count accepted by the `get_archived_tool_payloads` MCP tool (default: 50)
+- `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_LIMIT` — Default result count for the `sessions_read` method `tool_payloads` MCP tool (default: 10)
+- `MCP_ARCHIVED_TOOL_PAYLOAD_LIST_MAX` — Maximum result count accepted by the `sessions_read` method `tool_payloads` MCP tool (default: 50)
 - `SEARCH_QUERY_MAX_LENGTH` — Maximum total UTF-8 bytes retained from idea, task, knowledge, and message search input as a DoS guard; responses disclose truncation (default: `4096`)
 - `SEARCH_QUERY_MAX_TERM_LENGTH` — Maximum LIKE-safe UTF-8 bytes retained per search term; higher values clamp to SQLite's safe pattern ceiling (default: `48`)
 - `SEARCH_QUERY_MAX_TERMS` — Maximum whitespace-delimited terms retained from those search inputs; higher values clamp to the safe D1 parameter ceiling and responses disclose truncation (default: `40`)
@@ -630,8 +634,8 @@ by the read-only cron-liveness check.
 - `TERMINAL_SESSION_RECONCILE_BATCH_SIZE` — Maximum active ProjectData `chat_sessions` candidates reconciled per project per 5-minute sweep (default: 25; capped at 200)
 - `TERMINAL_SESSION_SUMMARY_RECONCILE_BATCH_SIZE` — Maximum active D1 `session_summaries` candidates reconciled globally per 5-minute sweep (default: 25; capped at 200)
 - `TERMINAL_SESSION_RECONCILE_DEFER_MS` — Retry delay for live-head, snapshot-protected, or temporarily ineligible terminal-session ledger candidates (default: 3600000; capped at 86400000)
-- `TASK_RUN_ABSOLUTE_CEILING_MS` — Absolute runaway-cost ceiling that fails even a demonstrably live task (default: 86400000 / 24h). Aged from the current runtime generation (`workspaces.created_at`), not `tasks.started_at`. Skipped when no runtime generation is allocated or the chat session holds a restorable sleep record; a sleep that is only in flight defers it for at most `TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS`
-- `TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS` — Longest the absolute ceiling defers to a sleep still in flight (scheduled, capturing, stopping or retrying) once passed, measured on runtime-generation age so sleep retries cannot renew it; keep it above `SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS` (default: 3600000 / 1h)
+- `TASK_RUN_ABSOLUTE_CEILING_MS` — Absolute runaway-cost ceiling that first queues conversation sleep within the bounded grace, then fails runtimes unable to sleep, even a demonstrably live task (default: 86400000 / 24h). Aged from the current runtime generation (`workspaces.created_at`), not `tasks.started_at`. Skipped when no runtime generation is allocated or the chat session holds a restorable sleep record; a sleep that is only in flight defers it for at most `TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS`
+- `TASK_RUN_ABSOLUTE_CEILING_SLEEP_GRACE_MS` — Longest the absolute ceiling allows a conversation sleep request or defers to a sleep still in flight (scheduled, capturing, stopping or retrying) once passed, measured on runtime-generation age so sleep retries cannot renew it; keep it above `SESSION_SLEEP_IN_FLIGHT_MAX_AGE_MS` (default: 3600000 / 1h)
 - `SESSION_ACTIVITY_STALE_THRESHOLD_MS` — Threshold before stale working activity is checked against authoritative SessionHost inventory (default: 300000)
 - `NODE_HEARTBEAT_STALE_SECONDS` — Staleness threshold for node health
 - `TASK_LIVENESS_PROBE_TIMEOUT_MS` — Per-candidate timeout for ACP and Instant lifecycle probes used by ProjectData heartbeat deferral, idle cleanup, and stuck-task reconciliation; timeout is inconclusive (default: 5000)
@@ -782,8 +786,8 @@ Trial configuration is currently sourced from `apps/api/.env.example` and `apps/
 
 - `NODE_USER_ID` / `NODE_RUNTIME_INCARNATION_ID` — Generated node owner and boot identity. Strict physical workspace deletion fails closed when either is missing; legacy nodes do not supply physical deletion proof.
 - `WORKSPACE_DELETION_RETRY_INTERVAL` — Go duration between bounded local retries of persisted deletion intents (default: `1m`). Retries resume the same exact operation under the workspace lifecycle lock. Unknown resources are never adopted based on age or status.
-- `WORKSPACE_DELETION_ATTEMPT_TIMEOUT` — Maximum Go duration for one local retry attempt (default: `30s`).
-- `WORKSPACE_DELETION_BATCH_SIZE` / `WORKSPACE_DELETION_MAX_ENTRIES` — Retry-intent batch and per-attempt filesystem walk bounds (defaults: `32` / `512`). Partial cleanup remains pending and resumes through the same intent.
+- `WORKSPACE_DELETION_ATTEMPT_TIMEOUT` — Maximum Go duration for one deletion attempt, inline or retried (default: `30s`). This is the only per-attempt bound on the filesystem walk; an interrupted walk remains pending and resumes through the same intent. The deletion endpoint also uses it to bound the wait for the workspace lifecycle lock, then starts a fresh attempt timer once the lock is held.
+- `WORKSPACE_DELETION_BATCH_SIZE` — Retry intents processed per local retry pass (default: `32`).
 - `WORKSPACE_DELETION_TOMBSTONE_RETENTION` — Retention for finalized local deletion receipts (default: `168h`). Bounded pruning never removes unfinished deletion intents. Ownership records are removed only after verified completion.
 - `SAM_IMAGE_TRANSFER_SCRATCH_DIR` — Dedicated private image archive directory (default: `$TMPDIR/sam-image-transfers`, using the OS temporary directory when `TMPDIR` is unset). Only marked operations created by SAM's publish/deploy image transfers are candidates; previous unmarked temporary directories are preserved. The root must be private and owned by the agent user; ancestors must be root/agent-owned and not group/other-writable unless sticky. Unsafe custom roots and `TMPDIR` ancestors are rejected before creation.
 - `SAM_IMAGE_TRANSFER_SCRATCH_DRY_RUN` — Report candidates without deleting crash leftovers (default: `true`). Normal successful operations still remove their own scratch files while holding their lease.
@@ -913,6 +917,10 @@ Generated deployments validate and pass these values through cloud-init to newly
 - `DEFAULT_EVICTION_DOCKER_STOP_TIMEOUT_SECONDS` — Grace period passed to `docker stop --time` during eviction, in seconds (default: 10)
 - `DEFAULT_EVICTION_CALLBACK_RETRY_MAX_SECONDS` — Durable callback backoff cap, in seconds (default: 300). Retry eligibility also respects the complete operation lease (default: 60 seconds), which can exceed the cap; delivery is heartbeat-paced
 - `DEFAULT_EVICTION_RESOLVE_TIMEOUT_SECONDS` — Deadline for resolving a pressured Docker container to a workspace before eviction, in seconds (default: 5)
+- `EVICTION_FINAL_SNAPSHOT_TIMEOUT_SECONDS` — VM-agent deadline for the post-stop final eviction capture (default `300`); on timeout the pre-stop capture is kept
+- `SNAPSHOT_HELPER_MEMORY_LIMIT` — `docker --memory` for a stopped-workspace snapshot helper (default `1g`)
+- `SNAPSHOT_HELPER_PIDS_LIMIT` — `docker --pids-limit` for a stopped-workspace snapshot helper (default `256`)
+- `SNAPSHOT_HELPER_MIN_FREE_BYTES` — free space kept on the Docker root after committing a source's writable layer (default `1073741824`)
 
 ### Repeated agent check-ins
 

@@ -90,7 +90,7 @@ export function CommentableConversationItem({
 
   return (
     <div
-      className={`sam-message-entry px-4 pb-3${highlighted ? ' sam-message-highlight' : ''}${commentAccentClass}`}
+      className={`sam-message-entry px-3 pb-3 md:px-4${highlighted ? ' sam-message-highlight' : ''}${commentAccentClass}`}
       data-commented={itemComments.length > 0 ? 'true' : undefined}
       data-conversation-item-id={item.id}
     >

@@ -5,6 +5,13 @@ import { expect, type Page, type Route, test } from '@playwright/test';
 // `documentElement.scrollWidth`, so a document-level check alone is structurally
 // unable to see it (.claude/rules/56).
 import { assertNoOverflow, seedTheme } from './audit-helpers';
+import {
+  MOCK_AGENT_CREDENTIALS,
+  MOCK_CLOUD_CREDENTIALS,
+  MOCK_GITHUB_INSTALLATIONS,
+  MOCK_PROJECT,
+  MOCK_USER,
+} from './chat-audit-fixtures';
 
 // ---------------------------------------------------------------------------
 // CompletionDock visual audit against the REAL project chat UI.
@@ -22,79 +29,6 @@ import { assertNoOverflow, seedTheme } from './audit-helpers';
 // Captured at mobile (375x667) and desktop (1280x800), dark (sam) and light
 // (sam-light), both dock states, asserting no horizontal overflow.
 // ---------------------------------------------------------------------------
-
-const MOCK_USER = {
-  user: {
-    id: 'user-test-1',
-    email: 'test@example.com',
-    name: 'Test User',
-    image: null,
-    role: 'superadmin',
-    status: 'active',
-    emailVerified: true,
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-  session: {
-    id: 'session-test-1',
-    userId: 'user-test-1',
-    expiresAt: new Date(Date.now() + 86400000).toISOString(),
-    token: 'mock-token',
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-};
-
-const MOCK_PROJECT = {
-  id: 'proj-test-1',
-  name: 'Test Project',
-  repository: 'testuser/test-repo',
-  defaultBranch: 'main',
-  userId: 'user-test-1',
-  githubInstallationId: 'inst-1',
-  defaultVmSize: null,
-  defaultAgentType: null,
-  defaultProvider: null,
-  workspaceIdleTimeoutMs: null,
-  nodeIdleTimeoutMs: null,
-  createdAt: '2026-01-01T00:00:00Z',
-  updatedAt: '2026-01-01T00:00:00Z',
-};
-
-const MOCK_CLOUD_CREDENTIALS = [
-  {
-    id: 'cred-cloud-1',
-    provider: 'hetzner',
-    connected: true,
-    createdAt: '2026-01-01T00:00:00Z',
-  },
-];
-
-const MOCK_AGENT_CREDENTIALS = {
-  credentials: [
-    {
-      agentType: 'claude-code',
-      provider: 'anthropic',
-      credentialKind: 'api-key',
-      isActive: true,
-      maskedKey: 'sk-ant-••••test',
-      createdAt: '2026-01-01T00:00:00Z',
-      updatedAt: '2026-01-01T00:00:00Z',
-    },
-  ],
-};
-
-const MOCK_GITHUB_INSTALLATIONS = [
-  {
-    id: 'gh-inst-1',
-    userId: 'user-test-1',
-    installationId: 'inst-1',
-    accountType: 'personal',
-    accountName: 'testuser',
-    createdAt: '2026-01-01T00:00:00Z',
-    updatedAt: '2026-01-01T00:00:00Z',
-  },
-];
 
 const NOW = Date.now();
 
@@ -245,7 +179,12 @@ async function setupApiMocks(
     if (path === '/api/workspaces') {
       return respond(200, [makeWorkspace(state.mode === 'sleeping' ? 'sleeping' : 'running')]);
     }
-    if (path === '/api/workspaces/ws-1/sleep') {
+    // The dock sleeps through the session-scoped route (shared chat sessions, #2381), which a
+    // grantee can use too; the workspace route is kept so an older client is still answered.
+    if (
+      path === '/api/projects/proj-test-1/sessions/session-1/sleep' ||
+      path === '/api/workspaces/ws-1/sleep'
+    ) {
       if (route.request().method() !== 'POST') {
         return respond(405, { error: 'METHOD_NOT_ALLOWED' });
       }
@@ -348,7 +287,7 @@ for (const theme of ['dark', 'light'] as const) {
     });
 
     if (theme === 'dark') {
-      test('awake idle: clicking Sleep posts to workspace sleep and refreshes to Archive', async ({
+      test('awake idle: clicking Sleep posts the session sleep and refreshes to Archive', async ({
         page,
       }) => {
         await seedTheme(page, theme);
@@ -359,7 +298,7 @@ for (const theme of ['dark', 'light'] as const) {
 
         await expect
           .poll(() => apiState.sleepRequests)
-          .toEqual(['POST /api/workspaces/ws-1/sleep']);
+          .toEqual(['POST /api/projects/proj-test-1/sessions/session-1/sleep']);
         await expect(page.getByRole('button', { name: 'Archive conversation' })).toBeVisible();
         await expect(page.getByRole('button', { name: 'Sleep session' })).toHaveCount(0);
         await assertNoOverflow(page);

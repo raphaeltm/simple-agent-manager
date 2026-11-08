@@ -1,6 +1,6 @@
 ---
 title: Chat Features
-description: Answering an agent's permission requests and questions, message actions, the session tool rail, file browsing, tool activity cards, diagrams, conversation forking, finding past conversations, voice input, and text-to-speech in SAM's chat interface.
+description: Answering an agent's permission requests and questions, reading the conversation, message actions, the session tool rail, file browsing, tool activity cards, diagrams, conversation forking, finding past conversations, voice input, and text-to-speech in SAM's chat interface.
 ---
 
 SAM's project pages are chat-first interfaces where you interact with AI coding agents in real-time.
@@ -15,9 +15,21 @@ Use the paperclip, paste an image or file, or drag files onto the message input.
 characters of text or more turns it into a text-file attachment (`pasted-….txt`); shorter text stays
 in the input.
 
-Files upload while you compose, each as a chip showing its size or upload progress. Select **✕** on
-a chip to remove a file you don't want to send. A chip that says **Failed** blocks sending: remove
-it, then attach the file again. You can send files with no text; the agent is asked to read them.
+Files upload while you compose. Each one appears above the message input: an image as a thumbnail,
+anything else as a card with a file-type icon, its name and its size. A paste shows its first line and
+how many lines it has, so two pastes are easy to tell apart. A ring or bar shows upload progress.
+
+Tap an attachment to check it before you send. Images open full size (switch between **Fit** and
+**100%**), videos play, and text files show numbered lines with a wrap toggle. Very large text shows its
+first 2,000 lines or 256 KB, and the agent still gets the whole file. For a paste, **Edit in message**
+moves the text back into the input. Other file types show their type and size. Use the arrows to step
+through attachments, and **Remove** to drop one.
+
+Previews read the copy on your device, not the upload, so they work while a file is uploading and after
+an upload fails. A file that is empty or larger than the per-file limit is not uploaded. It still
+appears, marked **Failed** with the reason, so you can see which file it was. Select **✕** to remove an
+attachment. A failed attachment blocks sending until you remove it. You can send files with no text;
+the agent is asked to read them.
 
 The agent receives the files only when you send the message, together with each file's exact path in
 its workspace. You can attach files to a sleeping chat without waking it; sending the message wakes
@@ -31,6 +43,40 @@ lasts; the files are their own uploads and go only into that chat's workspace.
 ## Real-Time Streaming
 
 Agent output streams directly to your browser via WebSocket. You see code being written, terminal commands executing, and the agent's thought process as it happens — no waiting for a complete response.
+
+## Sending a Message While the Agent Works
+
+While the agent is in the middle of a turn, a small chip on the left of the bar above the message
+box (the bar with the red **Interrupt** button) shows how your next message will be delivered. Tap
+it to switch between the two; the message box's placeholder also says which one is selected:
+
+- **Steer** (the default) adds your message to the turn the agent is running, without stopping
+  it. The agent picks it up at its next step, so it may finish the step it is on first. Use it to
+  correct course ("use tabs, not spaces") without throwing away the work in progress. If the agent
+  can't take it, it is sent as the next message instead, and the message says so.
+- **Queue** sends your message after the current turn finishes, as the agent's next prompt.
+
+To stop the turn instead, select **Interrupt**. The chip goes back to **Steer** when the turn ends.
+A message with files attached always queues, because a steer carries text only: the chip shows
+**Queue** and can't be switched while files are attached.
+
+A message you send with **Steer** shows what happened to it underneath:
+
+| Label                     | Meaning                                                                                                                                                                                                       |
+| ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Steering…**             | SAM is handing it to the agent.                                                                                                                                                                               |
+| **Added to current turn** | The agent's runtime took it into the running turn. This doesn't mean the agent has read or acted on it yet.                                                                                                   |
+| **Sent as next message**  | It couldn't join the turn, so SAM queued it as the next prompt instead. The label says why: the turn had already ended, the agent was asleep, or the agent can't take messages mid-turn.                      |
+| **Delivery unconfirmed**  | SAM couldn't confirm whether the agent got it (for example, the agent restarted at that moment). SAM won't send it again, because a duplicate could repeat work; resend it if the agent didn't respond to it. |
+| **Not delivered**         | It never reached the agent.                                                                                                                                                                                   |
+
+Steering works with Claude Code, OpenCode, and Codex. Codex steers through SAM's Codex runtime,
+which every Codex chat and task uses unless its agent profile sets `SAM_CODEX_C2_CANDIDATE=0` (use
+that only for a devcontainer the runtime can't run in: it needs x86_64 and Node 22 or newer). When
+the agent can't steer, the composer offers no **Steer** choice while it works and every message is
+queued. On VMs started before this shipped, a steered message may still be sent as the next message
+instead, and its label says so. A sleeping chat is never woken just to steer it: the message queues and wakes the
+chat as usual.
 
 ## When the Agent Needs You
 
@@ -55,9 +101,10 @@ For every kind of request:
   [shared project](/docs/guides/collaboration/), other members see that the agent is waiting, but
   not what it asked or what was answered.
 - **No notification is sent.** Watch the session list for **Needs input**; on a phone, open the list
-  with the list icon at the right of the project-name bar. (Notifications cover a different kind of
+  with the chat list button at the right end of the app bar. (Notifications cover a different kind of
   question, the one agents ask with their `request_human_input` tool — see
-  [Notifications](/docs/guides/notifications/).)
+  [Notifications](/docs/guides/notifications/). Those questions also show as a card in the
+  conversation, where you can answer them.)
 - **You don't have to stay on the page.** A request waits in SAM, not in your browser tab, so you can
   answer later or from another device until its deadline, which the card shows. Meanwhile a VM
   session stays awake, so its machine keeps running, billed to your cloud account if it's yours. If
@@ -198,6 +245,22 @@ use a VM profile whose **Task Mode** is **Task**, such as one you create with **
 and **Cloud VM**: its agent works through to the end and pushes its branch before it finishes, and
 a script or another agent can wait for it to finish. Choosing **Build and open PRs** sets that up;
 it doesn't add an instruction to open pull requests, so ask for one.
+
+## Reading the Conversation
+
+Your own messages sit in bubbles on the right. The agent's replies have no bubble: they lie on the
+conversation at its full width, so tables, code and long links have room, especially on a phone. On
+a wide screen the replies stop at a comfortable reading width.
+
+### Showing only the conversation on a phone
+
+On a phone, the button with two outward arrows at the bottom right of the conversation hides
+everything else: the app bar, the chat's title and status, the tool rail and the message box slide
+away, and the conversation fills the screen. If a message is being read aloud, its player stays so
+you can pause or stop it. Select the button again (now two inward arrows) to
+bring them back, for example to reply. Leaving the chat or turning the phone to a wider layout
+brings them back too. The button doesn't appear on wider screens, where
+[Focus Mode](#focus-mode) collapses the sidebars instead.
 
 ## Message Actions
 
@@ -500,7 +563,7 @@ An archived or expired chat also has a **Fork** box of its own; see
 1. Open the chat you want to branch from.
 2. Select **Fork** in the [session tool rail](#the-session-tool-rail).
 3. The new-chat screen opens with the message box filled in: an instruction for the agent to read
-   the previous chat with SAM's tools (`get_session_messages`, `search_messages`), then the previous
+   the previous chat with SAM's tools (`sessions_read` method `messages`, `sessions_read` method `search`), then the previous
    chat's title and its project, session, and task IDs.
 4. Add what to do next at the end of the message, keeping the IDs, and send it. To build on what
    the original agent pushed, say so, for example "continue from the original chat's branch". If
@@ -571,7 +634,7 @@ Two different tools answer two different questions:
 
 - **"Which chat was that?"** Type in the **Search chats** box above the session list. It matches
   chat titles, session IDs, and who started the chat, among the chats loaded in the list (the 100
-  most recently active). It does not read messages, so for anything older, ask an agent.
+  most recently active, plus older awake and sleeping chats). It does not read messages, so for anything older, ask an agent.
 - **"Where did we talk about…?"** Ask an agent in the project, for example: _"Search this
   project's chats for where we chose the retry limit, and tell me what we decided."_ Agents can
   search the text of every chat in the project — sleeping, stopped, and archived ones included.
@@ -618,7 +681,7 @@ SAM also collapses platform-injected setup messages in the chat timeline. Those 
 
 Persistent chat sessions can sleep and recover on both [Instant and VM-backed runtimes](/docs/guides/instant-sessions/):
 
-- **Sleeping.** The session went idle or you manually chose **Sleep** for an awake idle conversation-mode session with a workspace. SAM writes a checkpoint, releases compute, and keeps the composer visible so sending a message wakes the same chat, with the same agent, model, and permission mode it started with (for chats started since 7 October 2026, and on a self-hosted instance only from v2026.10.08; older ones wake in Manual, see [After a chat wakes from sleep](/docs/guides/agents/#after-a-chat-wakes-from-sleep)). A message sent in the first minutes after it slept waits (up to an hour) until the old workspace has finished shutting down, then wakes it, usually within a minute or two of the shutdown. Your message, or a notification from another agent or a subscribed event, reaches the agent once the woken session has fully started.
+- **Sleeping.** The session went idle or you manually chose **Sleep** for an awake idle conversation-mode session with a workspace. If the agent is still in a turn when you ask it to sleep, SAM stops the turn first (ending the agent's process if it doesn't stop on its own), so a stuck agent can't keep the session awake. A VM that SAM created starts retiring when it is 24 hours old: its sessions then sleep as soon as their turn ends, and a turn still running 30 minutes later is stopped and slept. SAM writes a checkpoint, releases compute, and keeps the composer visible so sending a message wakes the same chat, with the same agent, model, and permission mode it started with (for chats started since 7 October 2026, and on a self-hosted instance only from v2026.10.08; older ones wake in Manual, see [After a chat wakes from sleep](/docs/guides/agents/#after-a-chat-wakes-from-sleep)). A message sent in the first minutes after it slept waits (up to an hour) until the old workspace has finished shutting down, then wakes it, usually within a minute or two of the shutdown. Your message, or a notification from another agent or a subscribed event, reaches the agent once the woken session has fully started.
 - **Archiving a sleeping conversation.** Choose **Archive** in the dock and confirm when you are finished with the chat. This also works for sleeping VM conversations. SAM immediately requests deletion of your linked workspace and discards its restore snapshots once runtime deletion is confirmed. If cleanup is interrupted, retry Archive; SAM keeps deletion retryable without completing the conversation twice. Archiving a shared conversation does not delete another member's workspace.
 - **Snapshots that keep failing.** If SAM cannot save a complete snapshot after a few tries (three, or 15 minutes, by default), it stops retrying and shuts the idle workspace down anyway, and the chat says what was kept. A VM session can fall back on an earlier snapshot: a complete one brings back everything it saved, and one that saved the repository's exact commit brings back the repository but not every other file. Otherwise SAM keeps only the conversation and any successful backups. Either way, changes made after the last successful snapshot can be lost, so push what you want to keep. [SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot) explains each case.
 - **Recovery.** SAM is rebuilding the session's runtime and restoring its saved state. Wait for it to finish instead of resending.
@@ -635,10 +698,29 @@ To send on a desktop keyboard, press **Cmd+Enter** on Mac or **Ctrl+Enter** on W
 
 ## Switching Between Chats
 
-The session list puts the chat with the most recent message first. Only a new message moves a chat
-up — from you, the agent, or SAM itself, such as a wake-failure notice. Sleeping, waking, stopping,
-or archiving a chat leaves it where it is, so an old chat you archive doesn't jump to the top. A
-chat with no messages yet is placed by when it was created.
+The session list groups chats by state, in this order:
+
+1. **Needs attention** — a chat waiting for your answer (**Needs input**) or one SAM could not wake
+   (**Wake failed**), including sleeping ones, raised in the last 24 hours. An older one moves to its
+   usual section (Awake or Sleeping) and keeps its **Needs input** or **Wake failed** label.
+2. **Awake** — chats whose agent is working or idle. An awake chat stays here however long it has
+   been quiet; the list never hides one because of its age.
+3. **Sleeping** — chats a message can wake. You can fold this section.
+4. **History** — stopped, archived, completed, failed and expired chats. Folded until you open it.
+
+Empty sections are not shown. Each heading shows how many chats it holds. On a phone, the list icon
+at the right of the project-name bar carries an amber count of chats that need attention, so you can
+see them without opening the list. Searching opens every section.
+
+Within a section, the chat with the most recent message comes first. Only a new message moves a chat
+up — from you, the agent, or SAM itself, such as a wake-failure notice. A chat moves between
+sections when its state changes (for example, when it falls asleep or is archived), but sleeping,
+waking, stopping, or archiving never makes it newer, so an old chat you archive doesn't jump to the
+top of History. A chat with no messages yet is placed by when it was created.
+
+The list loads the 100 chats with the most recent messages, plus up to 100 awake and up to 100
+sleeping chats that are older than those. Older chats that need attention are counted separately
+from that limit, so newer quiet chats cannot push them out of the list.
 
 A chat you opened in the last 24 hours opens at once from a cache in your browser, then refreshes in the background. A thin bar at the top of the page shows while the refresh runs, and messages that arrived while you were away appear when it finishes. A chat that is not cached shows a loading indicator until its newest messages arrive. The previous chat never stays on screen while the next one loads.
 
@@ -648,7 +730,7 @@ An unsent message in the composer stays with its chat when you switch to another
 
 ## Session Filters (Shared Projects)
 
-In a project shared with teammates, everyone's chat sessions appear in the same session list. A filter near the session search switches between **My sessions**, the chats you started, and **All sessions**, everything happening in the project. A chat a teammate [shared with you](/docs/guides/collaboration/#share-a-chat) isn't yours, so it's only under **All sessions**; its notification also opens it.
+In a project shared with teammates, everyone's chat sessions appear in the same session list. A filter under the session search switches between **Mine**, the chats you started, and **All**, everything happening in the project; each choice shows how many chats it holds. Rows a teammate started carry a thin line in that person's colour on their left edge, with their name under the title. A chat a teammate [shared with you](/docs/guides/collaboration/#share-a-chat) isn't yours, so it's only under **All**; its notification also opens it.
 
 For the full team workflow — inviting people, approving access, roles, and shared resources — see [Collaboration & Shared Projects](/docs/guides/collaboration/). To comment on a teammate's chat, mention someone, or drive a chat together, see [Work together in a chat](/docs/guides/collaboration/#work-together-in-a-chat).
 
@@ -660,7 +742,8 @@ On desktop, project chat has three layout levels you can cycle with the **F** ke
 - **Focus** — collapses the main navigation so you stay inside one project.
 - **Zen** — collapses the session sidebar too, for maximum reading and prompt-writing space.
 
-Reopen the sidebars whenever you need to switch projects, sessions, or settings.
+Reopen the sidebars whenever you need to switch projects, sessions, or settings. On a phone, use
+[Showing only the conversation](#showing-only-the-conversation-on-a-phone) instead.
 
 ## Command Palette
 

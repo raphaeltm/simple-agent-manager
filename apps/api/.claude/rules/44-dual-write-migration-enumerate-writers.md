@@ -70,6 +70,15 @@ When a migration creates a second representation that must stay in sync:
    (here: a freshly seeded workspace `auth.json`) reflects the latest write, not
    the stale backfill (see `.claude/rules/35`).
 
+## Readers That Combine Both Representations
+
+Inventory readers that union legacy and replacement storage. Test the real writer
+through catalog/pool output: one logical connection must appear once, while
+distinct accounts remain separate. Do not infer mirror identity only from an ID
+prefix; cover every writer’s ID format and verify ownership plus explicit linkage
+or exact encrypted identity. Repair existing duplicates without discarding user
+selections or deleting records referenced by running work.
+
 ## Quick Compliance Check
 
 Before merging any migration that introduces a synced second representation:

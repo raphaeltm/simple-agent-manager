@@ -75,6 +75,17 @@ func (s *Server) requireWorkspaceRoute(w http.ResponseWriter, r *http.Request) (
 	return workspaceID, true
 }
 
+// requireWorkspaceOrManagementAuth admits either the workspace's own credentials (a session
+// cookie, or a workspace token that also sets the cookie) or a control-plane management token.
+// Workspace credentials are checked without writing a response first: requireWorkspaceRequestAuth
+// writes a 401 on failure, and a later management-token success could not undo it.
+func (s *Server) requireWorkspaceOrManagementAuth(w http.ResponseWriter, r *http.Request, workspaceID string) bool {
+	if s.checkWorkspaceRequestAuth(r, workspaceID) {
+		return s.requireWorkspaceRequestAuth(w, r, workspaceID)
+	}
+	return s.requireNodeManagementAuth(w, r, workspaceID)
+}
+
 func (s *Server) requireWorkspaceRequestAuth(w http.ResponseWriter, r *http.Request, workspaceID string) bool {
 	routedWorkspace := s.routedWorkspaceID(r)
 	if routedWorkspace != "" && routedWorkspace != workspaceID {

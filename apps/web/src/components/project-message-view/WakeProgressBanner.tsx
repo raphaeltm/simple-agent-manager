@@ -31,7 +31,7 @@
  * idle slept session or a waking one; if that assertion ever fires, consolidate
  * rather than keep both.
  *
- * A thin strip rather than the full provisioning block is deliberate: a wake
+ * A floating capsule rather than the full provisioning slab is deliberate: a wake
  * restores an existing conversation, so the transcript stays on screen underneath.
  *
  * Extracted as its own component to keep `project-message-view/index.tsx` under the
@@ -43,9 +43,9 @@ import {
   WAKE_WAIT_REASON_LABELS,
   wakePhaseLabel,
 } from '@simple-agent-manager/shared';
-import { Spinner } from '@simple-agent-manager/ui';
 import type { FC, ReactNode } from 'react';
 
+import { StatusCapsule } from '../chat-notices/StatusCapsule';
 import type { WakeWait } from './useWakeProgress';
 
 /**
@@ -87,38 +87,27 @@ export const WakeProgressBanner: FC<WakeProgressBannerProps> = ({
   wakeWait,
   elapsed,
 }) => (
-  <div
+  // A capsule floating over the conversation (SAM Glass), not a strip in the column: a wake
+  // restores an existing conversation, so the transcript stays put underneath it.
+  <StatusCapsule
+    tone={wakeWait && wakeWaitAppliesTo(wakePhase, wakeWait) ? 'warning' : 'progress'}
     data-testid="wake-progress-banner"
-    className="flex items-center gap-2 px-4 py-1.5 border-b border-border-default bg-surface text-xs text-fg-muted"
+    trailing={elapsed}
   >
-    {/*
-      Spinner is decorative here — it carries its own role="status"/"Loading",
-      which would otherwise nest a second status region inside this one.
-    */}
-    <span className="shrink-0" aria-hidden="true">
-      <Spinner size="sm" />
-    </span>
-    {/*
-      min-w-0 + break-words: the label is short today, but this banner sits inside
-      the project Outlet wrapper where a fit-content page root can be dragged past
-      the viewport by any nowrap descendant (rule 56).
-    */}
     {/*
       The live region wraps ONLY the phase label. `role="status"` implies
       aria-atomic, so a ticking elapsed-time node inside it would re-announce the
       whole banner about once a second for the entire multi-minute wake. Keeping
-      the timer a sibling means assistive tech announces one message per phase
-      change, which is the actual signal.
+      the timer a sibling (the capsule's `trailing`) means assistive tech announces
+      one message per phase change, which is the actual signal.
     */}
     <span
       role="status"
       aria-live="polite"
       aria-label="Session wake progress"
-      className="min-w-0 flex-1 break-words"
       data-testid="wake-progress-label"
     >
       {wakeProgressLabel(wakePhase, wakeWait)}
     </span>
-    {elapsed != null && <span className="shrink-0">{elapsed}</span>}
-  </div>
+  </StatusCapsule>
 );

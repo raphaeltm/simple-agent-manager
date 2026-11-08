@@ -410,16 +410,19 @@ describe('shared coordination channels: echo suppression', () => {
     const aPrompt = await follow(f.a, 'a-prompt', 'existing_session_prompt');
     const aRecord = await follow(f.a, 'a-record', 'record_only');
     const bPrompt = await follow(f.b, 'b-prompt', 'existing_session_prompt');
+    // Steering follows wake too, so they get the same suppression.
+    const aSteer = await follow(f.a, 'a-steer', 'runtime_steer');
 
     const own = await publish(f.a, 'decision-1');
     const ownMatches = (await eventMatches(f.stub, own.event.id)).map((m) => m.subscription_id);
     expect(ownMatches.sort()).toEqual([aRecord, bPrompt].sort());
     expect(ownMatches).not.toContain(aPrompt);
+    expect(ownMatches).not.toContain(aSteer);
 
     const peer = await publish(f.b, 'note-1');
     expect(
       (await eventMatches(f.stub, peer.event.id)).map((m) => m.subscription_id).sort()
-    ).toEqual([aPrompt, aRecord].sort());
+    ).toEqual([aPrompt, aRecord, aSteer].sort());
 
     // Catch-up from the start of history admits only the other agent's events.
     const history = okBody<{ result: { cursor: string } }>(

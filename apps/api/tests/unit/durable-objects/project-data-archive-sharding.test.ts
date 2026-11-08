@@ -1132,10 +1132,10 @@ describe('ProjectData terminal archive sharding bridge', () => {
       // disjunct would be ideal; the comment-thread case is the other production-observed one).
       seedTerminalSession(source.sql, 'session-refused-comments');
       source.sql.exec(
-        `INSERT INTO comment_threads
-           (id, session_id, anchor_kind, message_id, body, author_type, author_id,
+        `INSERT INTO anchored_comment_threads
+           (id, scope_key, session_id, anchor_kind, message_id, body, author_type, author_id,
             status, created_at, updated_at, sequence, version)
-         VALUES ('thread-refused', 'session-refused-comments', 'message',
+         VALUES ('thread-refused', 'session-refused-comments', 'session-refused-comments', 'message',
                  'session-refused-comments-message-1', 'comment', 'human', 'user-1', 'open',
                  1600, 1600, 1, 1)`
       );
@@ -1216,10 +1216,10 @@ describe('ProjectData terminal archive sharding bridge', () => {
 
       seedTerminalSession(source.sql, 'session-commented');
       source.sql.exec(
-        `INSERT INTO comment_threads
-           (id, session_id, anchor_kind, message_id, body, author_type, author_id,
+        `INSERT INTO anchored_comment_threads
+           (id, scope_key, session_id, anchor_kind, message_id, body, author_type, author_id,
             status, created_at, updated_at, sequence, version)
-         VALUES ('thread-1', 'session-commented', 'message', 'session-commented-message-1',
+         VALUES ('thread-1', 'session-commented', 'session-commented', 'message', 'session-commented-message-1',
                  'comment', 'human', 'user-1', 'open', 1600, 1600, 1, 1)`
       );
       await expect(
@@ -1237,7 +1237,7 @@ describe('ProjectData terminal archive sharding bridge', () => {
       ).rejects.toMatchObject({ reason: 'message_comments_present' });
       expect(
         source.db
-          .prepare('SELECT COUNT(*) AS count FROM comment_threads WHERE session_id = ?')
+          .prepare('SELECT COUNT(*) AS count FROM anchored_comment_threads WHERE session_id = ?')
           .get('session-commented')
       ).toEqual({ count: 1 });
       expect(

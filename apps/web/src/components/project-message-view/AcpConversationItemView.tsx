@@ -13,6 +13,7 @@ import { getTtsApiUrl } from '../../lib/api';
 import type { DisplayItem } from './tool-call-groups';
 import { matchToolCard } from './tool-cards';
 import { AbsorbedConversationItemView, ToolCallGroupCard } from './ToolCallGroupCard';
+import { UserMessageDeliveryChip } from './UserMessageDeliveryChip';
 
 /** Lazily computed TTS API URL — avoids module-scope errors in test environments. */
 let _cachedTtsApiUrl: string | undefined;
@@ -200,6 +201,7 @@ function AcpConversationItemViewImpl({
             timestamp={item.timestamp}
             bubbleClassName="glass-msg-user"
           />
+          {item.delivery && <UserMessageDeliveryChip delivery={item.delivery} />}
         </>
       );
     case 'agent_message':
@@ -214,7 +216,8 @@ function AcpConversationItemViewImpl({
           ttsStorageId={item.id}
           onPlayAudio={handlePlayAudio}
           onFileClick={onFileClick}
-          bubbleClassName="glass-msg-assistant"
+          layout="flush"
+          bubbleClassName="glass-msg-agent"
         />
       );
     case 'thinking':

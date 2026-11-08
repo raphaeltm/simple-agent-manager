@@ -1,5 +1,6 @@
 import {
   createProvider,
+  type GcpPriceTable,
   GcpProvider,
   getProviderCatalogOfferings,
   type Provider as CloudProvider,
@@ -23,6 +24,8 @@ import { getCredentialEncryptionKey } from '../lib/secrets';
 import { resolveAdminSetting } from './admin-settings-resolution';
 import { decrypt } from './encryption';
 import { withDeadline } from './fetch-timeout';
+import { readGcpPriceTable } from './gcp-price-table';
+import { createGcpTokenProvider, type GcpTokenOwner } from './gcp-token-provider';
 import {
   type Db,
   DEFAULT_PROVIDER_CATALOG_TIMEOUT_MS,
@@ -115,6 +118,8 @@ export function getStaticProviderCatalogOfferings(
 export async function buildProviderCatalogForCredential(input: {
   env: Env;
   seed: ProviderCatalogCredentialSeed;
+  /** Shared GCP price-table read for a multi-credential build; read on demand when absent. */
+  gcpPriceTable?: () => Promise<GcpPriceTable | null>;
 }): Promise<ProviderCatalog> {
   const providerName = input.seed.provider;
   const decryptedToken = await decrypt(
@@ -123,7 +128,19 @@ export async function buildProviderCatalogForCredential(input: {
     getCredentialEncryptionKey(input.env)
   );
   const providerToken = extractCloudProviderToken(providerName, decryptedToken);
-  const provider = createCatalogProvider(providerName, providerToken, input.env);
+  const provider =
+    providerName === 'gcp'
+      ? await createGcpCatalogProvider(
+          providerToken,
+          input.env,
+          {
+            credentialSource: input.seed.credentialSource,
+            userId: input.seed.createdBy ?? 'installation',
+            projectId: input.seed.ownerProjectId,
+          },
+          input.gcpPriceTable ?? (() => readGcpPriceTable(input.env))
+        )
+      : createCatalogProvider(providerName, providerToken, input.env);
   const timeoutMs = Number(
     await resolveAdminSetting(input.env, 'performance.providerCatalogTimeoutMs')
   );
@@ -179,22 +196,44 @@ export async function listInstallationProviderCatalogs(
   return buildCatalogsFromCredentialRows(seeds, input.env);
 }
 
+/**
+ * A GCP provider that reads the live catalog: machine types per zone with the credential's own
+ * token (minted exactly as provisioning mints it), priced from the installation's stored price
+ * table (`gcp-price-table.ts`).
+ */
+async function createGcpCatalogProvider(
+  decryptedToken: string,
+  env: Env,
+  owner: GcpTokenOwner,
+  priceTable: () => Promise<GcpPriceTable | null>
+): Promise<CloudProvider> {
+  const gcpCred = parseGcpCredential(decryptedToken);
+  const machineTypes = await resolveAdminSetting(env, 'gcpCatalog.machineTypes');
+  return new GcpProvider(
+    gcpCred.gcpProjectId,
+    createGcpTokenProvider(gcpCred, owner, env),
+    gcpCred.defaultZone,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    {
+      machineTypes: Array.isArray(machineTypes) ? machineTypes : [],
+      priceTable,
+    }
+  );
+}
+
 export function createCatalogProvider(
-  providerName: CredentialProvider,
+  providerName: Exclude<CredentialProvider, 'gcp'>,
   decryptedToken: string,
   env: Env
 ): CloudProvider {
-  if (providerName === 'gcp') {
-    const gcpCred = parseGcpCredential(decryptedToken);
-    return new GcpProvider(
-      gcpCred.gcpProjectId,
-      async () => {
-        throw new Error('Token provider not available for catalog');
-      },
-      gcpCred.defaultZone
-    );
-  }
-
   const config = buildProviderConfig(providerName, decryptedToken, env);
   return createProvider(withCatalogProviderLogger(config, providerName));
 }
@@ -282,8 +321,11 @@ export async function buildCatalogsFromCredentialRows(
   seeds: ProviderCatalogCredentialSeed[],
   env: Env
 ): Promise<ProviderCatalogListResult> {
+  // Every GCP credential prices from the same installation table: read it once per build.
+  let gcpPriceTableRead: Promise<GcpPriceTable | null> | null = null;
+  const gcpPriceTable = () => (gcpPriceTableRead ??= readGcpPriceTable(env));
   const results = await Promise.allSettled(
-    seeds.map((seed) => buildProviderCatalogForCredential({ env, seed }))
+    seeds.map((seed) => buildProviderCatalogForCredential({ env, seed, gcpPriceTable }))
   );
 
   const catalogs: ProviderCatalog[] = [];

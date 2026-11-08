@@ -1,4 +1,5 @@
 import type {
+  HumanInputCategory,
   ListNotificationsResponse,
   NotificationPreferencesResponse,
   NotificationType,
@@ -96,6 +97,8 @@ export interface AttentionRequestContext {
     id: string;
     reason: string | null;
     options: string[];
+    /** `request_human_input` category, or null when the agent gave none. */
+    category: HumanInputCategory | null;
     createdAt: number;
     resolvedAt: number | null;
     resolvedAnswer: string | null;

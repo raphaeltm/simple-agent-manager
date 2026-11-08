@@ -415,7 +415,8 @@ async function assertDetailsInfrastructure(page: Page, viewport: MatrixViewport)
   await expect(page.getByText('References')).toBeVisible();
   await expect(page.getByText('Loading infrastructure details...')).toHaveCount(0);
 
-  const header = page.getByTestId('session-header');
+  // The details render inline in the desktop header and in the session-info sheet on a phone.
+  const header = page.getByTestId('session-header-details');
   await expect(header.getByText('Workspace:')).toBeVisible();
   await expect(header.getByText('tool-rail')).toBeVisible();
   await expect(header.locator('a[href*="/workspaces/"]')).toHaveCount(0);
@@ -602,15 +603,14 @@ test.describe('Session tool rail — layout', () => {
     await page.getByTestId('session-tool-details').click();
     await expect(page.getByText('References')).toBeVisible();
 
-    // The details panel makes the floating header taller than the viewport. The rail is
-    // anchored to the messages container rather than to the header, so it must stay on
-    // screen. Assert coordinates, not `toBeVisible()` — an element parked below the fold
-    // still counts as "visible" to Playwright.
+    // The details panel makes the header slab tall (it scrolls itself past 45vh). The rail
+    // must stay on screen with usable height. Assert coordinates, not `toBeVisible()` — an
+    // element parked below the fold still counts as "visible" to Playwright.
     const box = await page.getByTestId('session-tool-rail').boundingBox();
     const viewportHeight = page.viewportSize()?.height ?? 0;
     expect(box).not.toBeNull();
-    expect(box!.y).toBeLessThan(viewportHeight * 0.5);
-    expect(box!.height).toBeGreaterThan(100);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(viewportHeight);
+    expect(box!.height).toBeGreaterThan(80);
 
     // The header (and its details panel) must stop where the rail starts. The header is
     // absolutely positioned inside the chat column, so if the gutter spacer ever stops
@@ -619,10 +619,13 @@ test.describe('Session tool rail — layout', () => {
     // absolutely positioned inside the chat column; if that column ever stops being
     // narrowed by the rail's slot, the panel silently slides under the rail. Screenshots
     // do not reveal this — only measuring the two edges does.
-    const railLeft = box!.x;
+    // SAM Glass: the header slab and the rail never overlap — beside it on desktop (separate
+    // panes), above it on a phone (the rail lives in the conversation pane below).
     const headerBox = await page.getByTestId('session-header').boundingBox();
     expect(headerBox).not.toBeNull();
-    expect(headerBox!.x + headerBox!.width).toBeLessThanOrEqual(railLeft + 1);
+    const beside = headerBox!.x + headerBox!.width <= box!.x + 1;
+    const above = headerBox!.y + headerBox!.height <= box!.y + 1;
+    expect(beside || above).toBe(true);
 
     await capture(page, 'tool-rail-details-open');
   });
@@ -835,9 +838,14 @@ function registerSharedMatrixCases(theme: MatrixTheme, viewport: MatrixViewport)
     await capture(page, `variant-tab-hidden-${suffix}`);
   });
 
-  test('icons bar — tab flows into the bar, and does not float', async ({ page }) => {
+  test('icons bar — a pane of its own on desktop, flat inside the conversation on a phone', async ({
+    page,
+  }) => {
     await openMatrixCase(page, theme, 'icons');
-    await expectRailElevation(page, 'flat');
+    // SAM Glass: on desktop the rail is its own pane beside the conversation column, and
+    // every pane floats over the void with depth. On a phone it lives inside the
+    // conversation pane, so it is flat there and a hairline sets it apart.
+    await expectRailElevation(page, viewport === 'desktop' ? 'raised' : 'flat');
     await capture(page, `variant-bar-icons-${suffix}`);
   });
 }
@@ -857,27 +865,27 @@ for (const theme of ['dark', 'light'] as const) {
     });
 
     /*
-     * The header must butt FLUSH against the rail.
-     *
-     * The card's bottom corners are rounded so it reads as a panel hanging from the top.
-     * Beside the rail that curve leaves a lens-shaped gap between the card's rounded
-     * corner and the rail's straight edge. Squaring the right side closes it — the two
-     * edges must be at the same x, and the radius on that corner must be 0.
+     * SAM Glass keeps the session header and the rail as separate surfaces: on a phone the
+     * header slab sits above the conversation pane that holds the rail, so the two must never
+     * overlap, and the slab keeps its rounded corners (no flush, squared seam any more).
      */
-    test(`header meets the rail with no gap and no curve`, async ({ page }) => {
+    test(`header slab and rail never overlap, and the slab keeps its corners`, async ({ page }) => {
       await openMatrixCase(page, theme, 'icons');
 
       const header = (await page.getByTestId('session-header').boundingBox())!;
       const rail = (await page.getByTestId('session-tool-rail').boundingBox())!;
-      // Flush: header's right edge meets the rail's left edge.
-      expect(Math.abs(header.x + header.width - rail.x)).toBeLessThanOrEqual(1);
+      const horizontal =
+        Math.min(header.x + header.width, rail.x + rail.width) - Math.max(header.x, rail.x);
+      const vertical =
+        Math.min(header.y + header.height, rail.y + rail.height) - Math.max(header.y, rail.y);
+      expect(horizontal <= 0 || vertical <= 0).toBe(true);
+      // The rail starts below the header slab, inside the conversation pane.
+      expect(rail.y).toBeGreaterThanOrEqual(header.y + header.height);
 
-      // And square: a rounded corner would still be "flush" by bounding box while
-      // leaving a visible curve, so measure the radius itself.
       const radius = await page
         .getByTestId('session-header')
         .evaluate((el) => getComputedStyle(el).borderBottomRightRadius);
-      expect(radius).toBe('0px');
+      expect(radius).not.toBe('0px');
 
       await capture(page, `variant-header-flush-mobile-${theme}`);
     });
@@ -892,19 +900,23 @@ for (const theme of ['dark', 'light'] as const) {
      */
     test(`hidden returns the full width to the conversation`, async ({ page }) => {
       await openMatrixCase(page, theme, 'icons');
-      const narrowed = (await page.getByTestId('session-header').boundingBox())!;
+      // On a phone the rail sits inside the conversation pane, beside the message log, so the
+      // log is what it narrows (the header slab above is full width either way).
+      const log = page.getByRole('log', { name: 'Conversation' });
+      const pane = log.locator('xpath=ancestor::*[contains(@class, "sam-glass--quiet")][1]');
+      const narrowed = (await log.boundingBox())!;
 
       await page.getByTestId('session-tool-rail-cycle').click();
       await expect(page.getByTestId('session-tool-rail')).toHaveAttribute('data-mode', 'labels');
       await page.getByTestId('session-tool-rail-cycle').click();
       await expect(page.getByTestId('session-tool-rail-tab')).toBeVisible();
 
-      const collapsed = (await page.getByTestId('session-header').boundingBox())!;
-      const viewport = page.viewportSize()!.width;
-      // Reaches the edge (allowing a sub-pixel rounding margin)...
-      expect(collapsed.x + collapsed.width).toBeGreaterThanOrEqual(viewport - 1);
+      const collapsed = (await log.boundingBox())!;
+      const paneBox = (await pane.boundingBox())!;
+      // Reaches the conversation pane's edge (allowing a sub-pixel rounding margin)...
+      expect(collapsed.x + collapsed.width).toBeGreaterThanOrEqual(paneBox.x + paneBox.width - 1);
       // ...and is genuinely wider than it was with the bar out, so this cannot pass by
-      // the header having been full-width all along.
+      // the log having been full-width all along.
       expect(collapsed.width).toBeGreaterThan(narrowed.width);
       await capture(page, `variant-hidden-fullwidth-mobile-${theme}`);
     });
@@ -947,9 +959,9 @@ for (const theme of ['dark', 'light'] as const) {
 
     registerSharedMatrixCases(theme, 'desktop');
 
-    test('labels bar — elevated only where it actually overlays', async ({ page }) => {
+    test('labels bar — still its own pane on desktop', async ({ page }) => {
       await openMatrixCase(page, theme, 'labels');
-      await expectRailElevation(page, 'flat');
+      await expectRailElevation(page, 'raised');
       await capture(page, `variant-bar-labels-desktop-${theme}`);
     });
   });

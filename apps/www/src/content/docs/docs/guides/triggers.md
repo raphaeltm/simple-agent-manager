@@ -173,6 +173,9 @@ Replacing the token also cancels the agent's unused link.
 - **Repeated failures pause it.** After three failed, stopped, or expired runs in a row, SAM pauses
   the trigger the next time it would run. Fix the cause, then select **Resume**, which starts the
   count again.
+- **A schedule update failure doesn't start the same run twice.** SAM keeps the due run for the
+  next check and reuses its existing execution. Other due automations continue to be checked.
+  A run that has already completed or failed isn't restarted just to repair its schedule.
 - **A GitHub event isn't lost if its run fails to start.** SAM saves each GitHub delivery before
   acknowledging it, and if starting the run fails, it keeps trying for about two hours. Each try
   checks the trigger again, so one you pause, delete, or re-filter in the meantime doesn't run. Each

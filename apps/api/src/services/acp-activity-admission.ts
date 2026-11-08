@@ -27,6 +27,7 @@ export interface AcpActivityCallbackReport {
   runtimeWorkCount?: number;
   runtimeWorkSource?: string;
   runtimeWorkProgressAt?: number;
+  steeringSupported?: boolean;
 }
 
 export interface AcpActivityBinding {
@@ -772,6 +773,7 @@ function withoutSensitiveActivityFields(
     runtimeWorkCount: report.runtimeWorkCount,
     runtimeWorkSource: report.runtimeWorkSource,
     runtimeWorkProgressAt: report.runtimeWorkProgressAt,
+    steeringSupported: report.steeringSupported,
   };
 }
 

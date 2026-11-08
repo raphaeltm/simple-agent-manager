@@ -31,11 +31,16 @@ const mocks = vi.hoisted(() => ({
   uploadAttachmentToR2: vi.fn(),
   startVerifyDecayTimer: vi.fn(),
   stopVerifyDecayTimer: vi.fn(),
+  verifyTimerOptions: null as null | { onStateSnapshot?: (state: unknown) => void },
   connectionState: 'connected' as 'connected' | 'disconnected',
   wsOptions: [] as Array<{
     enabled: boolean;
     onMessage?: (msg: Msg) => void;
-    onAgentActivity?: (activity: 'prompting' | 'idle', promptStartedAt?: number | null) => void;
+    onAgentActivity?: (
+      activity: 'prompting' | 'idle',
+      promptStartedAt?: number | null,
+      steeringSupported?: boolean
+    ) => void;
     onCatchUp?: (messages: Msg[], session: unknown, state?: unknown) => void;
   }>,
 }));
@@ -81,10 +86,13 @@ vi.mock('../../../src/hooks/useWorkspacePorts', () => ({
   useWorkspacePorts: () => ({ ports: [] }),
 }));
 vi.mock('../../../src/components/project-message-view/useActivityVerifyTimer', () => ({
-  useActivityVerifyTimer: () => ({
-    startVerifyDecayTimer: mocks.startVerifyDecayTimer,
-    stopVerifyDecayTimer: mocks.stopVerifyDecayTimer,
-  }),
+  useActivityVerifyTimer: (options: { onStateSnapshot?: (state: unknown) => void }) => {
+    mocks.verifyTimerOptions = options;
+    return {
+      startVerifyDecayTimer: mocks.startVerifyDecayTimer,
+      stopVerifyDecayTimer: mocks.stopVerifyDecayTimer,
+    };
+  },
 }));
 vi.mock('../../../src/components/project-message-view/useConnectionRecovery', () => ({
   useConnectionRecovery: () => ({
@@ -102,7 +110,7 @@ vi.mock('../../../src/components/project-message-view/types', async (importOrigi
   CHAT_FALLBACK_POLL_MS: 1,
 }));
 
-import { SessionStatusBanners } from '../../../src/components/project-message-view/SessionStatusBanners';
+import { SessionStatusCapsules } from '../../../src/components/project-message-view/SessionStatusBanners';
 import { useSessionLifecycle } from '../../../src/components/project-message-view/useSessionLifecycle';
 import { chatQueryKeys } from '../../../src/lib/query-options';
 import { CHAT_TRANSCRIPT_CACHE_MAX_SESSIONS } from '../../../src/lib/query-persist-config';
@@ -660,14 +668,20 @@ describe('useSessionLifecycle loading semantics', () => {
     expect(mocks.sendFollowUpPrompt).not.toHaveBeenCalled();
     act(() => result.current.setFollowUp('Read the file'));
     await act(async () => result.current.handleSendFollowUp());
-    expect(mocks.sendFollowUpPrompt).toHaveBeenCalledWith('proj-1', 'sess-1', 'Read the file', [
-      {
-        uploadId: 'upload-1',
-        filename: 'context.txt',
-        size: 5,
-        contentType: 'text/plain',
-      },
-    ]);
+    expect(mocks.sendFollowUpPrompt).toHaveBeenCalledWith(
+      'proj-1',
+      'sess-1',
+      'Read the file',
+      [
+        {
+          uploadId: 'upload-1',
+          filename: 'context.txt',
+          size: 5,
+          contentType: 'text/plain',
+        },
+      ],
+      'queue'
+    );
     expect(result.current.attachments).toEqual([]);
     expect(mocks.wsSend).not.toHaveBeenCalled();
   });
@@ -798,7 +812,7 @@ describe('useSessionLifecycle loading semantics', () => {
     // Not claimed yet, so no wake is in flight; the banner is open only because
     // the send left the agent working. That gate is what makes the reason visible.
     expect(result.current.isWaking).toBe(false);
-    const banners = render(createElement(SessionStatusBanners, { lc: result.current }));
+    const banners = render(createElement(SessionStatusCapsules, { lc: result.current }));
     expect(screen.getByTestId('wake-progress-label').textContent).toBe(
       'Waiting for the previous workspace to finish shutting down...'
     );
@@ -809,7 +823,7 @@ describe('useSessionLifecycle loading semantics', () => {
       expect(result.current.wakeWait?.reason).toBe('provider_transient_capacity')
     );
     expect(result.current.isWaking).toBe(true);
-    render(createElement(SessionStatusBanners, { lc: result.current }));
+    render(createElement(SessionStatusCapsules, { lc: result.current }));
     expect(screen.getByTestId('wake-progress-label').textContent).toMatch(
       /^Your cloud provider has no capacity right now\. Retrying\.\.\. Next try at .+\.$/
     );
@@ -887,6 +901,61 @@ describe('useSessionLifecycle loading semantics', () => {
 
     await waitFor(() => expect(result.current.sessionState).toBe('sleeping'));
     expect(result.current.agentActivity).toBe('idle');
+  });
+
+  // The composer hides Steer when the agent's adapter cannot steer; the hook learns that
+  // from the loaded session state and from session.activity pushes.
+  it('takes steering support from the loaded state and from activity pushes', async () => {
+    const loaded = detail([msg('a', 1000)], false, 'active');
+    mocks.getChatSession.mockResolvedValue({
+      ...loaded,
+      state: { ...loaded.state, steeringSupported: false },
+    });
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.session?.status).toBe('active'));
+    expect(result.current.steeringSupported).toBe(false);
+
+    const socket = mocks.wsOptions.at(-1)!;
+    act(() => socket.onAgentActivity?.('prompting', Date.now(), true));
+    expect(result.current.steeringSupported).toBe(true);
+    // A push without the field (an older server) leaves the known value alone.
+    act(() => socket.onAgentActivity?.('idle', null));
+    expect(result.current.agentActivity).toBe('idle');
+    expect(result.current.steeringSupported).toBe(true);
+  });
+
+  it('takes steering support from an activity verification snapshot', async () => {
+    const loaded = detail([msg('a', 1000)], false, 'active');
+    mocks.getChatSession.mockResolvedValue(loaded);
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.session?.status).toBe('active'));
+    expect(result.current.steeringSupported).toBeNull();
+
+    // A missed capability push is caught by the next verification read.
+    act(() =>
+      mocks.verifyTimerOptions?.onStateSnapshot?.({
+        ...loaded.state,
+        activity: 'prompting',
+        steeringSupported: false,
+      })
+    );
+    expect(result.current.steeringSupported).toBe(false);
+    // A snapshot without the field (an older server) keeps it.
+    act(() => mocks.verifyTimerOptions?.onStateSnapshot?.({ ...loaded.state }));
+    expect(result.current.steeringSupported).toBe(false);
+  });
+
+  it('leaves steering support unknown when the server never reported it', async () => {
+    mocks.getChatSession.mockResolvedValue(detail([msg('a', 1000)], false, 'active'));
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+    await waitFor(() => expect(result.current.session?.status).toBe('active'));
+    expect(result.current.steeringSupported).toBeNull();
   });
 
   describe('workspace and node detail fetches', () => {

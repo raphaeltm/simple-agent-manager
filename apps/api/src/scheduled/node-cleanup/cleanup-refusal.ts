@@ -7,6 +7,7 @@ import {
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { cleanupNodeProvenanceSql } from '../../services/node-teardown-provenance';
+import { handOffEmptyWorkspaceNode } from '../../services/node-warm-handoff';
 import { workspaceArtifactsRetirementGuardSql } from '../../services/node-workspace-retirement-guard';
 import {
   type PreservedVmRetirement,
@@ -134,4 +135,45 @@ export async function recordCleanupRefusal(
   if (Date.parse(nowIso) - Date.parse(blockedSince) >= warnAfterMs)
     log.warn('node_cleanup.candidate_claim_refused', context);
   else log.info('node_cleanup.candidate_claim_refused', context);
+}
+
+/** Refusals caused only by unproven workspace or snapshot artifacts. */
+const ARTIFACT_PROOF_REFUSAL_REASONS = new Set([
+  'unproven_workspace_deletion',
+  'unproven_snapshot_source',
+]);
+
+/**
+ * A destroy sweep refused an empty running node only because its retired workspaces have
+ * no deletion proof yet. The node cannot be destroyed now, but it is idle, so hand it to
+ * the warm pool exactly as a workspace removal path would. Without this the refusal's
+ * backoff kept the node out of the empty-node handoff (which runs later in the same cron
+ * tick and skips nodes in backoff), so it stayed `running` and the stopped-node deadline
+ * never started: node 01M6MCE1 sat empty for five hours on 2026-11-05. Warm retention, the
+ * node's warm timeout and the stopped-node deadline then bound whatever remains.
+ * `handOffEmptyWorkspaceNode` re-checks occupancy, ownership, provenance and an existing
+ * warm timer itself, so this never re-arms a warm node or claims an occupied one.
+ */
+export async function handOffArtifactBlockedEmptyNode(
+  env: Env,
+  node: CleanupRefusalNode,
+  refusal: CleanupRefusal
+): Promise<void> {
+  if (
+    node.status !== 'running' ||
+    refusal.reasons.length === 0 ||
+    !refusal.reasons.every((reason) => ARTIFACT_PROOF_REFUSAL_REASONS.has(reason))
+  )
+    return;
+  const handoff = await handOffEmptyWorkspaceNode(env, {
+    nodeId: node.id,
+    expectedUserId: node.user_id,
+    reason: 'cleanup_refused_unproven_artifacts',
+  });
+  log.info('node_cleanup.artifact_blocked_node_handoff', {
+    nodeId: node.id,
+    reasons: refusal.reasons,
+    outcome: handoff.outcome,
+    ...(handoff.outcome === 'skipped' ? { skipReason: handoff.reason } : {}),
+  });
 }

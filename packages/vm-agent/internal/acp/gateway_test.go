@@ -2133,6 +2133,7 @@ func TestStartAgentWithSessionModeCodexMissingMcpTokenDoesNotLaunch(t *testing.T
 					launchCalls++
 					return nil, fmt.Errorf("unexpected launch")
 				},
+				VerifyCodexRuntime: acceptCodexRuntime,
 			}}
 
 			err := h.startAgentWithSessionMode(context.Background(), "openai-codex", &agentCredential{

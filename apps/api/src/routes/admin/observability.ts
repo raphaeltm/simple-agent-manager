@@ -14,7 +14,6 @@ import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { rateLimit } from '../../middleware/rate-limit';
 import { AdminLogQuerySchema, jsonValidator } from '../../schemas';
-import { resolveAdminSetting } from '../../services/admin-settings';
 import {
   getDiagnosticArtifactForDownload,
   getDiagnosticIncidentByErrorId,
@@ -26,10 +25,14 @@ import {
   getErrorTrends,
   getHealthSummary,
   getLogQueryRateLimit,
-  queryCloudflareLogs,
   queryErrors,
 } from '../../services/observability';
 import { runPlatformFeedbackTriage } from '../../services/platform-feedback-triage';
+import {
+  queryWorkerLogs,
+  WORKER_LOG_RATE_KEY_PREFIX,
+  WORKER_LOG_RATE_WINDOW_SECONDS,
+} from '../../services/worker-log-query';
 import { registerAdminDiagnosisRoutes } from './diagnoses';
 
 /**
@@ -288,61 +291,15 @@ adminObservabilityRoutes.post(
   async (c, next) => {
     const limiter = rateLimit({
       limit: getLogQueryRateLimit(c.env),
-      keyPrefix: 'cf-log-query',
-      windowSeconds: 60,
+      keyPrefix: WORKER_LOG_RATE_KEY_PREFIX,
+      windowSeconds: WORKER_LOG_RATE_WINDOW_SECONDS,
     });
     return limiter(c, next);
   },
   jsonValidator(AdminLogQuerySchema),
   async (c) => {
-    if (!c.env.CF_API_TOKEN || !c.env.CF_ACCOUNT_ID) {
-      throw errors.badRequest(
-        'Cloudflare API credentials not configured. Set CF_API_TOKEN and CF_ACCOUNT_ID.'
-      );
-    }
-
-    const body = c.req.valid('json');
-
-    // Validate dates
-    const startDate = new Date(body.timeRange.start);
-    const endDate = new Date(body.timeRange.end);
-    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
-      throw errors.badRequest('timeRange start and end must be valid ISO 8601 dates');
-    }
-
-    // Validate levels
-    if (body.levels) {
-      const validLogLevels = new Set(['error', 'warn', 'info', 'debug', 'log']);
-      for (const level of body.levels) {
-        if (!validLogLevels.has(level)) {
-          throw errors.badRequest(
-            `Invalid level: ${level}. Must be one of: error, warn, info, debug, log`
-          );
-        }
-      }
-    }
-
-    // Validate limit
-    if (body.limit !== undefined && (body.limit < 1 || body.limit > 500)) {
-      throw errors.badRequest('limit must be between 1 and 500');
-    }
-
     try {
-      const result = await queryCloudflareLogs({
-        timeoutMs: Number(await resolveAdminSetting(c.env, 'performance.externalReadTimeoutMs')),
-        callerSignal: c.req.raw.signal,
-        cfApiToken: c.env.CF_API_TOKEN,
-        cfAccountId: c.env.CF_ACCOUNT_ID,
-        timeRange: { start: body.timeRange.start, end: body.timeRange.end },
-        levels: body.levels ?? undefined,
-        search: body.search || undefined,
-        limit: body.limit,
-        cursor: body.cursor || undefined,
-        queryId: body.queryId || undefined,
-        scriptName: body.scriptName || undefined,
-      });
-
-      return c.json(result);
+      return c.json(await queryWorkerLogs(c.env, c.req.valid('json'), c.req.raw.signal));
     } catch (err) {
       if (err instanceof CfApiError) {
         return c.json({ error: 'CF_API_ERROR', message: err.message }, 502);

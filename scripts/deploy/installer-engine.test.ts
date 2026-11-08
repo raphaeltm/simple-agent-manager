@@ -574,7 +574,7 @@ describe('installation engine', () => {
         {
           ...f,
           environment: privateEnv,
-          emit: (event) => events.push(event as Record<string, unknown>),
+          emit: (event) => events.push(event as unknown as Record<string, unknown>),
           save() {},
         }
       )

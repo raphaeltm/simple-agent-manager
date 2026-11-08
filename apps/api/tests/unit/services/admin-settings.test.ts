@@ -20,6 +20,22 @@ afterEach(() => {
   sqlite.close();
 });
 describe('admin settings mutation and outage safety', () => {
+  it('validates provider reset tolerance bounds and invalidates cached values after changes', async () => {
+    const name = 'operations.providerLimitResetWindowToleranceMs' as const;
+    expect(await resolveAdminSetting(env, name)).toBe(60_000);
+    for (const value of [0, 1000, 300_000]) {
+      await updateAdminSettings(env, { actorUserId: 'admin', changes: [{ name, value }] });
+      expect(await resolveAdminSetting(env, name)).toBe(value);
+    }
+    for (const value of [-1, 300_001, 1.5, '1000']) {
+      await expect(
+        updateAdminSettings(env, { actorUserId: 'admin', changes: [{ name, value }] })
+      ).rejects.toMatchObject({ statusCode: 400 });
+    }
+    await updateAdminSettings(env, { actorUserId: 'admin', changes: [{ name, value: null }] });
+    expect(await resolveAdminSetting(env, name)).toBe(60_000);
+  });
+
   it('legacy atomic guard rolls back arbitrary statements when prior validation is stale', async () => {
     const changes = [
       { name: 'integration.github.clientId' as const, value: 'client-one' },

@@ -62,6 +62,7 @@ vi.mock('../../../src/middleware/auth', () => ({
 vi.mock('../../../src/middleware/project-auth', () => ({
   requireProjectAccess: mocks.requireProjectAccess,
   requireProjectCapability: mocks.requireProjectCapability,
+  hasProjectCapability: vi.fn(async () => true),
 }));
 
 vi.mock('../../../src/services/project-data', () => ({
@@ -71,6 +72,7 @@ vi.mock('../../../src/services/project-data', () => ({
   getSession: vi.fn(),
   getSessionAccess: vi.fn(),
   getSessionWithAccessGrants: vi.fn(),
+  recordActivityEvent: vi.fn(),
   getMessages: vi.fn(),
   resetIdleCleanup: vi.fn(),
   prepareAttentionAnswer: vi.fn(),
@@ -354,6 +356,7 @@ describe('POST /sessions/:sessionId/prompt', () => {
     await expect(response.json()).resolves.toEqual({
       accepted: true,
       status: 'queued',
+      deliveryIntent: 'queue',
       deliveryId: 'delivery-1',
       messageId: 'delivery-1',
     });
@@ -364,6 +367,7 @@ describe('POST /sessions/:sessionId/prompt', () => {
         targetSessionId: 'chat-1',
         displayContent: 'hello agent',
         sourceKind: 'user_followup',
+        deliveryIntent: 'queue',
       })
     );
     expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
@@ -682,6 +686,58 @@ describe('POST /sessions/:sessionId/attention/:markerId/resolve', () => {
       alreadyResolved: false,
       answer: 'Approve',
     });
+  });
+
+  it('records who woke the agent when a teammate with shared access answers', async () => {
+    // The live agent runs as the owner, so its workspace is the owner's.
+    setupDrizzle({
+      workspace: { id: 'ws-1', nodeId: 'node-1', nodeStatus: 'running', userId: 'owner-1' },
+      agentSession: { id: 'agent-sess-1' },
+    });
+    vi.mocked(projectDataService.getSessionAccess).mockResolvedValue({
+      session: { id: 'chat-1', createdByUserId: 'owner-1', status: 'active' },
+      access: {
+        found: true,
+        ownerUserId: 'owner-1',
+        sessionStatus: 'active',
+        role: 'grantee',
+        grant: {
+          id: 'grant-1',
+          sessionId: 'chat-1',
+          granteeUserId: 'user-1',
+          grantedByUserId: 'owner-1',
+          parentGrantId: null,
+          createdAt: 1,
+        },
+      },
+    } as never);
+
+    const response = await postAnswer();
+
+    expect(response.status).toBe(200);
+    expect(mocks.sendPromptToAgentOnNode).toHaveBeenCalledOnce();
+    expect(projectDataService.recordActivityEvent).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'session.shared_answer',
+      'user',
+      'user-1',
+      null,
+      'chat-1',
+      null,
+      expect.objectContaining({
+        markerId: 'marker-1',
+        grantId: 'grant-1',
+        wake: expect.objectContaining({
+          trigger: 'attention_answer',
+          triggeredByUserId: 'user-1',
+          onBehalfOfUserId: 'owner-1',
+          actorRole: 'grantee',
+          teammateInput: true,
+          grantId: 'grant-1',
+        }),
+      })
+    );
   });
 
   it('rejects an answer outside the stored options without contacting the agent', async () => {

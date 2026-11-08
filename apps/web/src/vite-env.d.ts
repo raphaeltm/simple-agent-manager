@@ -4,6 +4,11 @@ interface ImportMetaEnv {
   readonly VITE_API_URL?: string;
   readonly VITE_FILE_PREVIEW_INLINE_MAX_BYTES?: string;
   readonly VITE_FILE_PREVIEW_LOAD_MAX_BYTES?: string;
+  readonly VITE_ATTACHMENT_SNIFF_BYTES?: string;
+  readonly VITE_ATTACHMENT_PREVIEW_TEXT_MAX_BYTES?: string;
+  readonly VITE_ATTACHMENT_PREVIEW_TEXT_MAX_LINES?: string;
+  readonly VITE_ATTACHMENT_PREVIEW_LINE_MAX_CHARS?: string;
+  readonly VITE_ATTACHMENT_LINE_COUNT_MAX_BYTES?: string;
   readonly VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES?: string;
   readonly VITE_PROJECT_LIST_LIMIT?: string;
   readonly VITE_SAM_SETTINGS_POLL_MS?: string;
@@ -41,6 +46,7 @@ interface ImportMetaEnv {
   readonly VITE_PROJECT_CREATE_CONFIG_STALE_TIME_MS?: string;
   readonly VITE_CREDENTIAL_LIMITS_STALE_TIME_MS?: string;
   readonly VITE_CREDENTIAL_LIMITS_REFETCH_INTERVAL_MS?: string;
+  readonly VITE_ACCOUNT_MAP_REFETCH_INTERVAL_MS?: string;
   readonly VITE_AUTOMATION_POLL_MS?: string;
   readonly VITE_DEPLOYMENTS_ACTIVE_POLL_MS?: string;
   readonly VITE_DEPLOYMENTS_IDLE_POLL_MS?: string;

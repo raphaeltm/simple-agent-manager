@@ -60,6 +60,7 @@ import { adminCcBackfillRoutes } from './routes/admin-cc-backfill';
 import { adminCostRoutes } from './routes/admin-costs';
 import { adminGithubInstallationLeakSweepRoutes } from './routes/admin-github-installation-leak-sweep';
 import { adminGithubRepoIdBackfillRoutes } from './routes/admin-github-repo-id-backfill';
+import { adminOperationsApprovalRoutes } from './routes/admin-operations-approvals';
 import { adminPlatformConfigRoutes } from './routes/admin-platform-config';
 import { adminPlatformCredentialRoutes } from './routes/admin-platform-credentials';
 import { adminProjectEventRoutes } from './routes/admin-project-events';
@@ -187,7 +188,11 @@ import { signTerminalToken, verifyPortAccessToken, verifyTerminalToken } from '.
 import { assertSessionUserApproved } from './services/signup-approval';
 import { recordNodeRoutingMetric } from './services/telemetry';
 import { assertTerminalTokenSessionLive } from './services/terminal-token-liveness';
-import { fetchVmAgentContainer, getVmAgentContainerConfig } from './services/vm-agent-container';
+import {
+  fetchVmAgentContainer,
+  getVmAgentContainerConfig,
+  SAM_PROXIED_REQUEST_HEADER,
+} from './services/vm-agent-container';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -473,6 +478,18 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
 
     const containerId = workspace.nodeId || workspaceId;
     const vmAgentPort = containerConfig.vmAgentPort;
+    // The container shares one network namespace with its vm-agent, so the agent's
+    // own port is never a workspace port (the vm-agent refuses it too). VM routes
+    // target the workspace container's bridge IP, where the host agent does not listen.
+    if (targetPort === vmAgentPort) {
+      log.warn('ws_proxy_cf_container_reserved_port', {
+        workspaceId,
+        targetPort,
+        action: 'rejected',
+      });
+      const message = `Port ${targetPort} is reserved for the SAM workspace agent and cannot be proxied`;
+      return c.json({ error: 'PORT_RESERVED', message }, 403);
+    }
     const containerUrl = new URL(`http://localhost:${vmAgentPort}`);
     containerUrl.pathname = url.pathname;
     containerUrl.search = url.search;
@@ -504,6 +521,9 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
     headers.set('X-SAM-Workspace-Id', workspaceId);
     headers.set('X-Forwarded-Host', hostname);
     headers.set('X-Forwarded-Proto', 'https');
+    // Marks the request as relayed so the vm-agent never grants peer-address
+    // (loopback) trust to it; see packages/vm-agent/internal/server/proxy_guard.go.
+    headers.set(SAM_PROXIED_REQUEST_HEADER, '1');
 
     log.info('ws_proxy_cf_container_route', {
       workspaceId,
@@ -906,6 +926,7 @@ app.route('/api/admin/trials', adminTrialsRoutes);
 app.route('/api/admin/quotas', adminQuotaRoutes);
 app.route('/api/admin/agent-email', adminAgentEmailRoutes);
 app.route('/api/admin/runtime-controls', adminRuntimeControlRoutes);
+app.route('/api/admin/operations/approvals', adminOperationsApprovalRoutes);
 app.route('/api/admin/settings', adminSettingsRoutes);
 app.route('/api/admin/usage', adminUsageRoutes);
 app.route('/api/admin/costs', adminCostRoutes);

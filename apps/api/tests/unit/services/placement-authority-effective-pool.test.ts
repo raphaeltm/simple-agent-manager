@@ -16,6 +16,7 @@
  */
 import type { CapacityPlacementSnapshot } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
@@ -29,6 +30,7 @@ import type {
   TaskRunnerState,
 } from '../../../src/durable-objects/task-runner/types';
 import type { Env } from '../../../src/env';
+import { updateDefaultCapacityPool } from '../../../src/services/default-capacity-pool-updates';
 import { assertNodeAllocationPlanCurrent } from '../../../src/services/nodes';
 import type { TaskStartCapacityPoolSelection } from '../../../src/services/placement-resolver';
 import { filterReusableNodesByCurrentAuthority } from '../../../src/services/reusable-node-authority';
@@ -398,6 +400,45 @@ describe('reuse selection agrees with final authority admission', () => {
         env: envFor(database),
       } as TaskRunnerContext)
     ).toBeNull();
+  });
+
+  it('keeps a running node reusable after the pool provider order changes', async () => {
+    const database = createDb();
+    const pool = seedPool('user');
+    // The authority fixture leaves this policy column unset; the update writer reads it.
+    db().exec(`UPDATE capacity_pools SET deployment_strategy = 'smallest-fit'`);
+    seedNode(pool);
+    const update = (input: Omit<Parameters<typeof updateDefaultCapacityPool>[1], 'scope'>) =>
+      updateDefaultCapacityPool(drizzle(database, { schema }), { scope: 'user', ...input });
+    const reusable = () =>
+      filterReusableNodesByCurrentAuthority(database, {
+        userId: USER_ID,
+        projectId: PROJECT_ID,
+        selections: [{ nodeId: 'node-1', capacityPlacementSnapshot: snapshotFor(pool) }],
+      });
+
+    // A reorder must leave reuse alone: it does not bump the revision reuse authority checks.
+    const reorder = await update({
+      ownerUserId: USER_ID,
+      ownerProjectId: null,
+      sourceOrder: [pool.sourceId],
+    });
+    expect(reorder).toMatchObject({ conflict: false, missingSourceIds: [] });
+    expect(reorder.summary?.pool.sourceOrder).toEqual([pool.sourceId]);
+
+    expect(await reusable()).toEqual(new Set(['node-1']));
+    await expect(
+      reserveWorkspacePlacement(database, placementInput(pool), ADMISSION_POLICY)
+    ).resolves.toBe(true);
+
+    // Control: a policy edit bumps the revision, and the same node stops being reusable. Without
+    // this, the assertions above would also pass if reuse ignored the revision entirely.
+    await update({
+      ownerUserId: USER_ID,
+      ownerProjectId: null,
+      policy: { exhaustionPolicy: 'fallback-chain' },
+    });
+    expect(await reusable()).toEqual(new Set());
   });
 
   it('filters 150 hosts using grouped queries within the D1 parameter ceiling', async () => {

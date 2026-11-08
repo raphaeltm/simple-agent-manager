@@ -69,7 +69,7 @@ describe('idea work is repository agnostic', () => {
       expect(lines).toContain('repository');
       // It points at SAM's own tools, which exist for every project, not at a workflow
       // that only exists here.
-      expect(lines).toContain('get_idea');
+      expect(lines).toContain('`ideas_read` method `get`');
     }
   );
 

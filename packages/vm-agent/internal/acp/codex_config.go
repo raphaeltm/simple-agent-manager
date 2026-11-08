@@ -63,92 +63,140 @@ func isAllDigits(s string) bool {
 	return true
 }
 
-func removeManagedCodexMcpBlock(existing string) string {
-	for {
-		start := strings.Index(existing, codexManagedMcpStartMarker)
-		if start == -1 {
-			return existing
-		}
-		endRel := strings.Index(existing[start:], codexManagedMcpEndMarker)
-		if endRel == -1 {
-			return existing[:start]
-		}
-		end := start + endRel + len(codexManagedMcpEndMarker)
-		if end < len(existing) && existing[end] == '\n' {
-			end++
-		}
-		existing = existing[:start] + existing[end:]
+// removeManagedCodexBlock removes every block between a startMarker line and the next
+// endMarker line. Marker text inside a multi-line string is not a marker. An
+// unterminated block is removed through the end of the file: it holds SAM's own
+// tables, and keeping them would duplicate the tables SAM writes next, which Codex
+// rejects as invalid TOML.
+func removeManagedCodexBlock(existing, startMarker, endMarker string) string {
+	if !strings.Contains(existing, startMarker) {
+		return existing
 	}
+	lines := strings.Split(existing, "\n")
+	starts := codexTOMLStatementStarts(lines)
+	kept := make([]string, 0, len(lines))
+	inBlock := false
+	for i, line := range lines {
+		isMarker := func(marker string) bool { return starts[i] && strings.TrimSpace(line) == marker }
+		switch {
+		case !inBlock && isMarker(startMarker):
+			inBlock = true
+		case inBlock && isMarker(endMarker):
+			inBlock = false
+		case !inBlock:
+			kept = append(kept, line)
+		}
+	}
+	return strings.Join(kept, "\n")
 }
 
+// mergeManagedCodexMcpConfig replaces SAM's managed blocks in an existing config.toml:
+// the MCP/sandbox block from generateCodexMcpConfig and the feature defaults planned
+// by planCodexManagedFeatures. If adding the feature defaults would make the file
+// invalid TOML, they are left out so Codex can still start.
 func mergeManagedCodexMcpConfig(existing, managed string) string {
-	cleaned := removeManagedCodexMcpBlock(existing)
+	cleaned := removeManagedCodexBlock(existing, codexManagedMcpStartMarker, codexManagedMcpEndMarker)
+	cleaned = removeManagedCodexBlock(cleaned, codexManagedFeaturesStartMarker, codexManagedFeaturesEndMarker)
+	plan := planCodexManagedFeatures(cleaned)
+	if plan.placement != codexFeaturesNone {
+		merged := assembleManagedCodexConfig(cleaned, managed, plan)
+		err := codexConfigTOMLError(merged)
+		if err == nil {
+			return merged
+		}
+		slog.Warn("Codex config: SAM's feature defaults would make config.toml invalid; leaving Codex feature flags at their defaults",
+			"error", err)
+	}
+	merged := assembleManagedCodexConfig(cleaned, managed, codexFeaturePlan{})
+	if err := codexConfigTOMLError(merged); err != nil && codexConfigTOMLError(cleaned) == nil {
+		// The user's file was valid and SAM's merge broke it, so Codex will fail to start.
+		// This only makes the failure visible; the result is still written.
+		slog.Error("Codex config: merged config.toml is invalid TOML although the existing file was valid",
+			"error", err)
+	}
+	return merged
+}
+
+// codexConfigTOMLError returns the error go-toml reports for config, or nil if it parses.
+func codexConfigTOMLError(config string) error {
+	var parsed map[string]any
+	return toml.Unmarshal([]byte(config), &parsed)
+}
+
+// assembleManagedCodexConfig lays out the user's config (with SAM's blocks already
+// removed) around SAM's managed block and the planned feature defaults.
+func assembleManagedCodexConfig(cleaned, managed string, features codexFeaturePlan) string {
+	if features.placement == codexFeaturesUserTable {
+		cleaned = insertCodexFeaturesIntoUserTable(cleaned, features)
+	}
 	managed = strings.TrimSpace(managed)
 	managedTopLevelKeys := codexTopLevelAssignmentKeys(managed)
+	lines := strings.Split(strings.TrimRight(cleaned, "\n"), "\n")
 	if len(managedTopLevelKeys) > 0 {
-		lines := strings.Split(cleaned, "\n")
-		filtered := lines[:0]
-		atTopLevel := true
-		for _, line := range lines {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "[") {
-				atTopLevel = false
-			}
-			if atTopLevel {
-				if key, ok := codexAssignmentKey(trimmed); ok && managedTopLevelKeys[key] {
-					continue
-				}
-			}
-			filtered = append(filtered, line)
-		}
-		cleaned = strings.Join(filtered, "\n")
-	}
-	cleaned = strings.TrimRight(cleaned, "\n")
-
-	switch {
-	case cleaned == "" && managed == "":
-		return ""
-	case cleaned == "":
-		return managed + "\n"
-	case managed == "":
-		return cleaned + "\n"
-	default:
-		lines := strings.Split(cleaned, "\n")
-		firstTable := len(lines)
+		starts := codexTOMLStatementStarts(lines)
+		firstTable := codexTOMLFirstTableLine(lines, starts)
+		filtered := make([]string, 0, len(lines))
+		// Decided at each statement's first line and applied to its continuation lines,
+		// so a managed key with a multi-line value is removed whole.
+		dropping := false
 		for i, line := range lines {
-			if strings.HasPrefix(strings.TrimSpace(line), "[") {
-				firstTable = i
-				break
+			if starts[i] {
+				key, ok := codexAssignmentKey(strings.TrimSpace(codexTOMLStatementText(lines, starts, i)))
+				dropping = i < firstTable && ok && managedTopLevelKeys[key]
+			}
+			if !dropping {
+				filtered = append(filtered, line)
 			}
 		}
-		topLevel := strings.TrimSpace(strings.Join(lines[:firstTable], "\n"))
-		tables := strings.TrimSpace(strings.Join(lines[firstTable:], "\n"))
-		sections := make([]string, 0, 3)
-		if topLevel != "" {
-			sections = append(sections, topLevel)
-		}
-		sections = append(sections, managed)
-		if tables != "" {
-			sections = append(sections, tables)
-		}
-		return strings.Join(sections, "\n\n") + "\n"
+		lines = filtered
 	}
+
+	// Top-level user keys first, then SAM's block (which starts with top-level keys of
+	// its own), then tables, so no top-level assignment lands inside a table.
+	firstTable := codexTOMLFirstTableLine(lines, codexTOMLStatementStarts(lines))
+	var beforeManaged, afterManaged string
+	switch features.placement {
+	case codexFeaturesTopLevelDotted:
+		beforeManaged = renderCodexFeaturesBlock(features)
+	case codexFeaturesOwnTable:
+		afterManaged = renderCodexFeaturesBlock(features)
+	}
+	sections := make([]string, 0, 5)
+	for _, section := range []string{
+		strings.Join(lines[:firstTable], "\n"),
+		beforeManaged,
+		managed,
+		afterManaged,
+		strings.Join(lines[firstTable:], "\n"),
+	} {
+		if text := strings.TrimSpace(section); text != "" {
+			sections = append(sections, text)
+		}
+	}
+	if len(sections) == 0 {
+		return ""
+	}
+	return strings.Join(sections, "\n\n") + "\n"
 }
 
+// codexTopLevelAssignmentKeys returns the keys assigned before the first table header.
 func codexTopLevelAssignmentKeys(config string) map[string]bool {
 	keys := make(map[string]bool)
-	for _, line := range strings.Split(config, "\n") {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "[") {
-			break
+	lines := strings.Split(config, "\n")
+	starts := codexTOMLStatementStarts(lines)
+	firstTable := codexTOMLFirstTableLine(lines, starts)
+	for i := 0; i < firstTable; i++ {
+		if !starts[i] {
+			continue
 		}
-		if key, ok := codexAssignmentKey(trimmed); ok {
+		if key, ok := codexAssignmentKey(strings.TrimSpace(codexTOMLStatementText(lines, starts, i))); ok {
 			keys[key] = true
 		}
 	}
 	return keys
 }
 
+// codexAssignmentKey returns the root key a single key/value statement assigns.
 func codexAssignmentKey(line string) (string, bool) {
 	if line == "" || strings.HasPrefix(line, "#") {
 		return "", false

@@ -1,7 +1,7 @@
 import type { CredentialLimitCredentialSummary } from '@simple-agent-manager/shared';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
   getProjectCredentialLimits: vi.fn(),
@@ -33,6 +33,7 @@ function makeCredential(
   return {
     credentialReference: 'cc_credentials:cred-1',
     credentialId: 'cred-1',
+    credentialName: null,
     credentialSource: 'user',
     provider: 'anthropic',
     providerMode: 'direct',
@@ -122,8 +123,9 @@ describe('credential limit formatting', () => {
     expect(formatResetCountdown(NOW + 26 * 3_600_000, NOW)).toBe('resets in 1d 2h');
     expect(formatResetCountdown(NOW + 48 * 3_600_000, NOW)).toBe('resets in 2d');
     expect(formatResetCountdown(NOW + 3 * 3_600_000, NOW)).toBe('resets in 3h');
-    expect(formatResetCountdown(NOW, NOW)).toBe('reset due');
-    expect(formatResetCountdown(NOW - 1, NOW)).toBe('reset due');
+    expect(formatResetCountdown(NOW, NOW)).toBe('reset 1m ago');
+    expect(formatResetCountdown(NOW - 1, NOW)).toBe('reset 1m ago');
+    expect(formatResetCountdown(NOW - 2 * 3_600_000, NOW)).toBe('reset 2h ago');
     expect(formatResetCountdown(null, NOW)).toBeNull();
     expect(formatSampledAgo(NOW - 10_000, NOW)).toBe('sampled just now');
     expect(formatSampledAgo(NOW - 3 * 60_000, NOW)).toBe('sampled 3m ago');
@@ -131,6 +133,32 @@ describe('credential limit formatting', () => {
 });
 
 describe('CredentialLimitChip', () => {
+  it('reads a window whose reset passed since its sample as 0% and says it reset', () => {
+    const base = makeCredential();
+    const stale = makeCredential({
+      level: 'warning',
+      observedAt: NOW - 3 * 3_600_000,
+      windows: [
+        {
+          ...base.windows[0],
+          utilizationPercent: 81,
+          level: 'warning',
+          resetsAt: NOW - 2 * 3_600_000,
+          observedAt: NOW - 3 * 3_600_000,
+        },
+        { ...base.windows[1], level: 'ok', observedAt: NOW - 3 * 3_600_000 },
+      ],
+    });
+    render(<CredentialLimitChip credential={stale} now={NOW} />);
+    const chip = screen.getByTestId('credential-limit-chip');
+    expect(chip).toHaveTextContent('Claude · 5h 0% · Week 31%');
+    expect(chip).toHaveAccessibleName(/OK/);
+    fireEvent.click(chip);
+    const [fiveHour] = screen.getAllByTestId('credential-limit-window');
+    expect(fiveHour).toHaveTextContent('0% used');
+    expect(fiveHour).toHaveTextContent('reset 2h ago · no sample since');
+  });
+
   it('shows the compact summary and opens details with every window', () => {
     render(<CredentialLimitChip credential={makeCredential()} now={NOW} />);
     const chip = screen.getByTestId('credential-limit-chip');
@@ -140,7 +168,8 @@ describe('CredentialLimitChip', () => {
     fireEvent.click(chip);
     const details = screen.getByTestId('credential-limit-details');
     expect(details).toHaveTextContent('Claude usage');
-    expect(details).toHaveTextContent('Your credential');
+    expect(screen.getByTestId('credential-limit-account-name')).toHaveTextContent('Your account');
+    expect(details).toHaveTextContent('Claude Code');
     const windows = screen.getAllByTestId('credential-limit-window');
     expect(windows).toHaveLength(2);
     expect(windows[0]).toHaveTextContent('5h');
@@ -152,11 +181,44 @@ describe('CredentialLimitChip', () => {
   });
 });
 
+describe('CredentialLimitChip account name', () => {
+  it('titles the panel with the account name and keeps whose account it is in the meta line', () => {
+    render(
+      <CredentialLimitChip credential={makeCredential({ credentialName: 'Work Max' })} now={NOW} />
+    );
+    const chip = screen.getByTestId('credential-limit-chip');
+    expect(chip).toHaveAccessibleName(/Usage limits for Work Max/);
+    fireEvent.click(chip);
+    expect(screen.getByTestId('credential-limit-account-name')).toHaveTextContent('Work Max');
+    expect(screen.getByTestId('credential-limit-details')).toHaveTextContent(
+      'Your account · Claude Code · sampled 3m ago'
+    );
+    expect(screen.getByRole('dialog')).toHaveAccessibleName('Claude usage Work Max');
+  });
+
+  it('shows a window sample age only when it lags the newest sample', () => {
+    const credential = makeCredential();
+    credential.windows[1] = { ...credential.windows[1], observedAt: NOW - 20 * 60_000 };
+    render(<CredentialLimitChip credential={credential} now={NOW} />);
+    fireEvent.click(screen.getByTestId('credential-limit-chip'));
+    const windows = screen.getAllByTestId('credential-limit-window');
+    expect(windows[0]).not.toHaveTextContent('sampled');
+    expect(windows[1]).toHaveTextContent('sampled 20m ago');
+  });
+});
+
 describe('CredentialLimitChip with a window lacking a sample', () => {
   it('says usage unknown instead of a dash', () => {
     const credential = makeCredential({
       level: 'ok',
-      windows: [{ ...makeCredential().windows[1], windowType: 'claude.seven_day_opus', utilizationPercent: null, level: 'ok' }],
+      windows: [
+        {
+          ...makeCredential().windows[1],
+          windowType: 'claude.seven_day_opus',
+          utilizationPercent: null,
+          level: 'ok',
+        },
+      ],
     });
     render(<CredentialLimitChip credential={credential} now={NOW} />);
     expect(screen.getByTestId('credential-limit-chip')).toHaveTextContent('Claude · Opus week —');
@@ -169,7 +231,13 @@ describe('CredentialLimitChip with a window lacking a sample', () => {
     const credential = makeCredential({
       level: 'rejected',
       windows: [
-        { ...makeCredential().windows[1], windowType: 'opencode.weekly', utilizationPercent: null, status: 'rejected', level: 'rejected' },
+        {
+          ...makeCredential().windows[1],
+          windowType: 'opencode.weekly',
+          utilizationPercent: null,
+          status: 'rejected',
+          level: 'rejected',
+        },
       ],
     });
     render(<CredentialLimitChip credential={credential} now={NOW} />);
@@ -177,7 +245,7 @@ describe('CredentialLimitChip with a window lacking a sample', () => {
     expect(screen.getByTestId('credential-limit-window')).toHaveTextContent('Limit reached');
     expect(screen.getByTestId('credential-limit-window')).not.toHaveTextContent('usage unknown');
     // The dialog is labelled by its heading, not a generic string.
-    expect(screen.getByRole('dialog')).toHaveAccessibleName('OpenCode usage');
+    expect(screen.getByRole('dialog')).toHaveAccessibleName('OpenCode usage Your account');
   });
 });
 
@@ -187,8 +255,13 @@ describe('SessionCredentialLimitChip', () => {
     return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
   }
 
+  // The session chip reads the real clock; pin it to the fixtures' NOW.
   beforeEach(() => {
     mocks.getProjectCredentialLimits.mockReset();
+    vi.useFakeTimers({ toFake: ['Date'], now: NOW });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it('renders the chip for the session credential once samples arrive', async () => {

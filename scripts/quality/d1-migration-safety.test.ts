@@ -226,7 +226,7 @@ describe('D1 migration safety gates', () => {
 
     expect(
       runner.commands.filter((command) =>
-        /COUNT\(\*\) as count FROM "(users|projects|tasks)"/.test(command)
+        /COUNT\(\*\)(?: as count)? FROM "(users|projects|tasks)"/.test(command)
       )
     ).toHaveLength(0);
     expect(runner.commands.filter((command) => command.includes('migrations apply'))).toHaveLength(
@@ -271,6 +271,29 @@ describe('D1 migration safety gates', () => {
       { main: ['d1_migrations', 'users', 'projects'] },
       { 'main:users': [2] }
     );
+
+    expect(() =>
+      runSafeRemoteMigrations({
+        environment: 'production',
+        databases: [{ binding: 'DATABASE', name: 'main' }],
+        runner,
+      })
+    ).toThrow(/Failed to count DATABASE\.projects: count failure for main:projects/);
+    expect(runner.commands.some((command) => command.includes('migrations apply'))).toBe(false);
+  });
+
+  it('recounts an incomplete batch and blocks migration when a table cannot be counted', () => {
+    const runner = new FakeRunner(
+      { main: ['d1_migrations', 'users', 'projects'] },
+      { 'main:users': [2] }
+    );
+    const executeJson = runner.executeJson.bind(runner);
+    vi.spyOn(runner, 'executeJson').mockImplementation((command, args) => {
+      if (args.at(-2)?.includes('AS "c0"')) {
+        return [{ results: [{ c0: 2 }] }];
+      }
+      return executeJson(command, args);
+    });
 
     expect(() =>
       runSafeRemoteMigrations({

@@ -53,6 +53,16 @@ func (s *Server) handleWorkspaceLocalForward(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	if s.isOwnListenerTarget(targetHost, port) {
+		slog.Warn("Local forward refused: target is the vm-agent's own listener",
+			"workspaceId", workspaceID,
+			"port", port,
+			"targetHost", targetHost,
+			"action", "rejected")
+		writeError(w, http.StatusForbidden, reservedAgentPortMessage(port))
+		return
+	}
+
 	escapedForwardPath := localForwardEscapedPath(r, workspaceID, portValue)
 
 	targetURL := fmt.Sprintf("http://%s:%d", targetHost, port)
@@ -162,6 +172,7 @@ func (s *Server) serveLocalForwardProxy(w http.ResponseWriter, r *http.Request, 
 			pr.Out.Header.Set("X-Forwarded-For", "127.0.0.1")
 			pr.Out.Header.Set("X-Forwarded-Host", localAuthority)
 			pr.Out.Header.Set("X-Forwarded-Proto", "http")
+			markProxiedRequest(pr.Out.Header)
 		},
 		ErrorHandler: func(rw http.ResponseWriter, req *http.Request, proxyErr error) {
 			slog.Error("Local forward upstream error", "target", targetURLStr, "error", proxyErr)

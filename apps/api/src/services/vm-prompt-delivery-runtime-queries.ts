@@ -28,6 +28,13 @@ import type {
 
 const log = createModuleLogger('vm_prompt_delivery_adapter');
 
+/** Runs the caller's pre-side-effect authority check, if it supplied one. */
+export async function runSideEffectGuard(input: {
+  beforeSideEffect?: () => Promise<PromptDeliveryResult | null>;
+}): Promise<PromptDeliveryResult | null> {
+  return input.beforeSideEffect ? input.beforeSideEffect() : null;
+}
+
 export function httpStatus(error: unknown): number | null {
   if (error instanceof NodeAgentHttpError) return error.statusCode;
   const message = error instanceof Error ? error.message : String(error);

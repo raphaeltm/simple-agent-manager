@@ -42,13 +42,15 @@ Operations-project agents can also call `list_incident_queue`, `get_incident`, `
 
 Operations debugger tools (`ops_*`) are listed only to the Operations project while the `operations.debuggerTools` admin setting is not `off`. Each call is refused with JSON-RPC `-32602` and `data.reason` (`not_operations_project`, `mode_off`, `mode_read_only`, `not_task_scoped`, `task_not_found`, `task_owner_mismatch` or `not_superadmin`) unless the setting allows the capability, the token is a task token in the Operations project, and the task's owner is an active superadmin at call time. `ops_get_access_status` reports the mode, the allowed capabilities (`read`, `act`) and any denial reason without failing. Gated `ops_*` tools record every call in `operations_audit_log`. `ops_get_access_status` is the exception: it records task-scoped calls made inside the Operations project (outcome `allowed` or `denied`), and records nothing for calls from other projects or from tokens without a task.
 
+The read-only `ops_*` tools (`ops_find_anomalies`, `ops_list_nodes`, `ops_get_node`, `ops_get_session_story`, `ops_timeline`, `ops_search_errors`, `ops_query_worker_logs`, `ops_node_logs`, `ops_node_system_info`, `ops_node_events`, `ops_node_containers`, `ops_workspace_agent_sessions`, `ops_capture_debug_package`) need capability `read`. Each result is JSON with `untrustedContent: true`; free text from users, agents and nodes is returned inside `----- BEGIN UNTRUSTED ... -----` envelopes. Capped lists report `total`/`truncated`, and `ops_timeline` returns `continueUntil` for reading further back. See [Admin Settings](/docs/guides/admin-settings/#read-tools).
+
 Project eventing uses a pull loop over the canonical ProjectData `project_event_*` tables. Agents create a short-lived subscription with `create_project_event_subscription`, using v1 exact/set filters for `source`, `eventType`, `subjectType`, `subjectId`, and `severity`; recover existing subscriptions with `list_project_event_subscriptions`; inspect or cancel with `get_project_event_subscription` and `cancel_project_event_subscription`. Project, task, session, workspace, owner, and agent identity come from the verified MCP token, not tool arguments.
 
 `dispatch_task` accepts modern VM workload input through `resourceRequirements` with optional `minVcpu`, `minMemoryGb`, `minDiskGb`, and `exclusiveNode`. Known numeric fields must be finite and non-negative; `exclusiveNode: false` is preserved. Deprecated `vmSize` remains accepted as a legacy compatibility hint and is not expanded into hardware by the client or MCP handler.
 
 `dispatch_task` also accepts an optional `coordinationChannel`: an ordinary project event channel name (`agent-dm.` is reserved) shared by a feature's agents. When omitted, the child inherits the dispatching task's channel, so every descendant shares one channel; `retry_subtask` and session recovery copy it onto replacement tasks. The child's description gains a short "Coordination channel" section and `get_instructions` returns `task.coordinationChannel` with guidance. Channels stay project-visible, so this routes work and is not an access boundary. Implementation: `parseCoordinationChannelParam` in `apps/api/src/routes/mcp/dispatch-coordination-channel.ts`.
 
-After subscribing, call `list_subscription_events` with the `subscriptionId` to replay missed or queued matches. The list response is payload-free: it returns summaries, delivery IDs, delivery state, `hasMore`, and an opaque `nextCursor` that is valid only for the same subscription. Call `get_event` only when a summary needs full stored event details, then call `ack_event_delivery` after processing each returned `deliveryId`; ack is idempotent. The pull tools themselves record matches, delivery decisions, and pull acknowledgements only — they do not steer runtimes, spawn tasks, or expose human/UI controls. Delivery happens out of band: `existing_session_prompt` and `runtime_interrupt` subscriptions wake the target chat through the durable prompt queue, and `runtime_interrupt` wakes carry the `interrupt` mailbox class, which may cancel an in-flight turn so the wake is delivered immediately. Wakes for one subscription are at least the platform cooldown apart (`PROJECT_EVENT_WAKE_SUBSCRIPTION_COOLDOWN_MS`). A subscription created with `minWakeIntervalSeconds` is spaced by that longer interval instead, counted from when the previous wake reached the agent; events in between are bundled into the next wake. The interval is accepted only for waking subscriptions, cannot exceed `PROJECT_EVENT_WAKE_SUBSCRIPTION_LIFETIME_MS`, and is returned as the effective `minWakeIntervalMs` on the subscription.
+After subscribing, call `list_subscription_events` with the `subscriptionId` to replay missed or queued matches. The list response is payload-free: it returns summaries, delivery IDs, delivery state, `hasMore`, and an opaque `nextCursor` that is valid only for the same subscription. Call `get_event` only when a summary needs full stored event details, then call `ack_event_delivery` after processing each returned `deliveryId`; ack is idempotent. The pull tools themselves record matches, delivery decisions, and pull acknowledgements only — they do not steer runtimes, spawn tasks, or expose human/UI controls. Delivery happens out of band: `runtime_steer` (the default), `existing_session_prompt` and `runtime_interrupt` subscriptions wake the target chat through the durable prompt queue. `runtime_steer` wakes join a running turn without stopping it (see [Live steering](#live-steering)), and `runtime_interrupt` wakes carry the `interrupt` mailbox class, which may cancel an in-flight turn so the wake is delivered immediately. Wakes for one subscription are at least the platform cooldown apart (`PROJECT_EVENT_WAKE_SUBSCRIPTION_COOLDOWN_MS`). A subscription created with `minWakeIntervalSeconds` is spaced by that longer interval instead, counted from when the previous wake reached the agent; events in between are bundled into the next wake. The interval is accepted only for waking subscriptions, cannot exceed `PROJECT_EVENT_WAKE_SUBSCRIPTION_LIFETIME_MS`, and is returned as the effective `minWakeIntervalMs` on the subscription.
 
 ## Event subscriptions
 
@@ -87,7 +89,8 @@ Concurrent publications are included through either catch-up or live matching.
 Replaying a follow key retains the original watermark and deadline; a retention
 gap or expired checkpoint requires a new explicit history/follow decision.
 Omit the history cursor when only future events are wanted.
-Following defaults to recording events. With `requestedDelivery: existing_session_prompt`,
+Following defaults to recording events. With `requestedDelivery: runtime_steer` (recommended) or
+`existing_session_prompt`,
 follow and catch-up responses include the ordinary subscription checkpoint/end-turn
 instructions and explain that a no-match expiry delivers no wake prompt.
 Add `minWakeIntervalSeconds` to be woken at most once per that many seconds on a busy
@@ -101,7 +104,7 @@ Payload, fanout, channel cardinality and history page limits are configurable.
 Empty idle catalog generations may be reclaimed, while live subscriptions continue
 to follow the stable channel name.
 
-A channel publication never matches the publisher's own `existing_session_prompt` or
+A channel publication never matches the publisher's own `runtime_steer`, `existing_session_prompt` or
 `runtime_interrupt` subscription, live or through catch-up, so publishing never wakes
 the publisher (`isSelfOriginatedChannelWake`). Record-only followers still see their
 own publications in their pull feed. Channel names starting with `agent-dm.` are
@@ -120,16 +123,20 @@ prompt delivery are enabled, `send_durable_message` (classes `notify` and `deliv
 and `send_message_to_subtask` stop injecting the sender's text into the recipient's
 prompt. One ProjectData transaction (`sendAgentChannelMessage`) finds or creates the
 canonical `agent-dm.<pair digest>` channel for the two chat sessions, ensures a
-SAM-managed prompt-delivery subscription for each chat, and publishes the message
-with its server-derived sender. The recipient is woken with a SAM-authored notice
-that carries event IDs only; it reads the text with `get_event`
+SAM-managed `runtime_steer` subscription for each chat (`ensureManagedSubscription`), and
+publishes the message with its server-derived sender. The recipient gets a SAM-authored
+notice that carries event IDs only: added to its running turn when it has one and supports
+live steering, otherwise delivered or woken as an ordinary prompt. A managed subscription
+created with another delivery mode is replaced on the pair's next message: the replacement
+receives that message and later ones at once, while the old subscription loses its match keys
+and only delivers the wakes it already owed, in its original mode. The recipient reads the text with `get_event`
 (`event.metadata.actor` is the verified sender), replies with `send_durable_message`,
 and acknowledges with `ack_event_delivery`. Urgent classes keep stop-and-deliver.
 Responses report `accepted: true, delivered: false` with `transport`, `channel`,
 `eventId` and `sequence`; an optional `idempotencyKey` replays a lost-response retry,
 and changed content under the same key is rejected as a conflict. Messages are capped
 by `PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES` and pair channels by
-`AGENT_MESSAGE_CHANNEL_MAX_CHANNELS`. Managed deployments enable the transport in `wrangler.toml`; the code fallback is off and `AGENT_MESSAGE_CHANNELS_ENABLED=false` selects the legacy path.
+`AGENT_MESSAGE_CHANNEL_MAX_CHANNELS`. Managed deployments enable the transport in `wrangler.toml`; the code fallback is off and `AGENT_MESSAGE_CHANNELS_ENABLED=false` selects the legacy path. A message sent with `deliveryIntent: "steer"` never uses the pair channel: it targets the recipient's running turn, so durable delivery injects the text, fenced and labelled as another agent's message, into that turn (see [Live steering](#live-steering)).
 
 Pair-channel events match only subscriptions targeting one of the two participant
 chats (`subscriptionCanMatchProjectEvent`), `follow_event_channel` rejects
@@ -254,6 +261,8 @@ Permanently stop a running workspace and delete any retained persistent-session 
 
 Checkpoint the workspace's agent HOME, harness identity, exact Git checkout, and repository work in progress, verify the snapshot, and put the session to sleep. Git state includes the saved `HEAD`, branch or detached state, canonical upstream metadata, clean local-only commits, working tree, and index. VM compute is stopped only after SAM re-verifies the durable manifest and every artifact the manifest still claims. A complete snapshot restores and validates that state; if the saved Git state cannot be recreated, wake reports explicit degraded recovery instead of success on a different commit. Sleep requires a complete final snapshot (`verifyAndBeginSleepTeardown` in `apps/api/src/services/session-sleep-execution.ts`). If the final checkpoint is degraded, or stops reporting progress and is recorded as degraded, the sleep request fails and the workspace stays awake. SAM then retries automatically, within the bounded sleep-failure budget (`SESSION_SLEEP_FAILURE_MAX_ATTEMPTS`, `SESSION_SLEEP_FAILURE_MAX_ELAPSED_MS`); after that SAM releases the idle runtime anyway, sleeping on a verified Git recovery point when there is one and otherwise keeping only the transcript and successful backups ([SAM could not save a complete snapshot](/docs/guides/session-troubleshooting/#sam-could-not-save-a-complete-snapshot)). A session that already sleeps on an older degraded snapshot still wakes and reports the reduced restore state. Sending a follow-up in the same chat wakes the session during the seven-day retention window.
 
+This request, the chat's **Sleep** button (`POST /api/projects/:id/sessions/:sessionId/sleep`) and `sam chat sleep` are explicit sleeps, and an explicit sleep does not wait for the agent. If the agent is still in a turn, SAM first cancels it the way the chat's **Stop** button does: the agent process is stopped (SIGTERM, then SIGKILL if it does not exit) and restarted idle, and the turn ends as cancelled. The turn is not continued after wake. If the sleep then fails, the chat keeps a working agent (`endAgentTurnForRequiredSleep` in `apps/api/src/services/session-sleep-required-turn-end.ts`). If SAM cannot reach the agent, the request fails, and SAM keeps retrying the same sleep without waiting for the turn until it succeeds or the bounded fallback releases the runtime.
+
 ### `POST /api/workspaces/:id/restart`
 
 Restart a stopped or errored workspace. Provisions a new VM and recreates the container. A
@@ -338,7 +347,53 @@ The Resources drawer reads a whole chat session through two endpoints, both scop
 
 The index returns `{ sessionId, runs, chunks, totalChunkCount, omittedChunkCount, maxChunks, collection, runtime }`. `chunks` is ascending by start time and covers every workspace the session ran on (each wake is a new workspace); each carries its `summary` and a columnar per-minute `rollup` (`null` for chunks uploaded before rollups existed). `runs` groups chunks by workspace with that workspace's `reservation` (`cpuMillis`, `memoryMb`, or `null`). Past `WORKSPACE_RESOURCE_TIMELINE_MAX_CHUNKS` (1000) the oldest chunks are left out and counted in `omittedChunkCount`. When there are no chunks, `collection` explains why: `unsupported` (an Instant session), `expired` (samples passed retention; the summary remains), or `pending` (nothing uploaded yet). The chunk endpoint returns the same shape as `detail` above and `404`s for a chunk that belongs to another project or session.
 
-Agents read the same data with the `get_resource_history` MCP tool, which takes no `projectId` — the project comes from the verified token. With no arguments it returns the caller's own session; supplying any one of `sessionId`, `taskId`, or `workspaceId` replaces the caller's defaults entirely rather than narrowing within them.
+Agents read the same data with the `sessions_read` MCP tool and `{"method": "resource_history"}`, which takes no `projectId` — the project comes from the verified token. With no arguments it returns the caller's own session; supplying any one of `sessionId`, `taskId`, or `workspaceId` replaces the caller's defaults entirely rather than narrowing within them.
+
+### Live steering
+
+A message can carry a delivery intent: `queue` (the default) waits for the target's next turn,
+and `steer` adds it to the turn the target is running, without stopping it (see
+[Sending a message while the agent works](/docs/guides/chat-features/#sending-a-message-while-the-agent-works)).
+Steering needs durable prompt delivery.
+
+- `POST /api/projects/:id/sessions/:sessionId/prompt` accepts `"deliveryIntent": "steer"`. It
+  returns `409` when durable delivery is off and `400` with attachments, which travel only with a
+  queued prompt. The response echoes `deliveryIntent`.
+- The MCP tool `send_durable_message` takes `deliveryIntent` (`queue` or `steer`); `steer` is
+  accepted only with the `notify` and `deliver` classes, so a steer never stops a turn. Urgent
+  classes keep stop-and-deliver.
+- An event subscription with `requestedDelivery: "runtime_steer"` wakes its chat through the same
+  queue with the steer intent: a chat that is mid-turn on a steering runtime gets the batch in that
+  turn, and an idle, sleeping or non-steering chat gets an ordinary wake prompt. Like the other
+  prompt-delivery modes, it never matches the publisher's own channel publications.
+  `runtime_steer` is the default for `create_project_event_subscription`
+  (`DEFAULT_PROJECT_EVENT_REQUESTED_DELIVERY`) and for the notices of agent messages sent over a
+  pair channel; pass `existing_session_prompt` to wait for the running turn to end instead.
+
+A delivery ID belongs to one intent: reusing it with the other intent is rejected. Steers are a
+separate lane from queued prompts, so a steer is not held behind a queued prompt waiting for the
+turn to end, and steers for one chat are admitted one at a time, in order. Steering never wakes a
+sleeping chat. When the target cannot take the steer (no running turn, chat asleep, an agent or VM
+agent without steering, a runtime that changed), SAM converts it to an ordinary queued prompt and
+records why. A steer whose result is unknown, for example because the runtime restarted while it
+was in flight, becomes `ambiguous` and is never replayed. A steer the runtime took does not start a
+new prompt epoch, reset the turn's timeouts, or mark the chat idle.
+
+The chat socket broadcasts `mailbox.delivery_updated` with `promptMessageId` (the transcript row),
+`deliveryIntent`, `deliveryState`, and for steers `steerOutcome` (`steered` or `queued_fallback`)
+and `steerReason`. The transcript row of a message sent as a steer keeps `deliveryIntent: "steer"`
+in its `toolMetadata`, plus `steerOutcome` (`steered`, `queued_fallback`, `unconfirmed` or
+`failed`) and `steerReason` once known, so the label survives a reload.
+
+On the VM, `GET /workspaces/:workspaceId/agent-capabilities` advertises `steering` (`supported`, `version`, `lookup`,
+receipt `states`) when the VM agent can steer; older VM agents omit it and every steer to them
+falls back to the queue. The control plane calls
+`POST /workspaces/:workspaceId/agent-sessions/:sessionId/steer` with
+`{ protocolVersion, deliveryId, messageId, prompt }` and recovers a lost response from
+`GET .../steer-receipts/:deliveryId` instead of steering again. Each receipt is `accepted`,
+`in_flight`, `injected`, `not_consumed` or `ambiguous`; a repeated `deliveryId` with the same
+prompt returns its existing receipt, and with a different prompt returns `409`. The VM agent bounds
+one steering request to the adapter with `ACP_STEER_TIMEOUT` (default `20s`).
 
 ### Agent requests
 
@@ -368,7 +423,7 @@ A chat's creator can give another project member the same controls in that one c
 
 Comment threads and replies accept an optional `mentions: [{ "userId": "..." }]`. The server keeps active project members only, stores each person's display name at the time, and returns `400` above `collaboration.commentMentionsMax`.
 
-`GET /api/projects/:id/sessions/:sessionId/attention/:markerId` returns the full saved question an agent asked with `request_human_input`, for the [question reader](/docs/guides/notifications/#read-and-answer-an-agents-question) (`apps/api/src/routes/chat-attention.ts`): the request (its text, choices, whether it is resolved or expired, and `canAnswer`) and the session's id and topic. It needs `task:read`. `canAnswer` is true only for the chat's owner, or a teammate it is shared with, while the question is open. Add `?context=true` for the messages before it: `collaboration.commentContextMessages` of them by default, or `limit`, capped by the session message limit. A question from another chat, or one that isn't an agent question, returns `404`. Answer it with `POST .../attention/:markerId/resolve`.
+`GET /api/projects/:id/sessions/:sessionId/attention/:markerId` returns the full saved question an agent asked with `request_human_input`, for the [question reader](/docs/guides/notifications/#read-and-answer-an-agents-question) and the question card in the conversation (`apps/api/src/routes/chat-attention.ts`): the request (its text, choices, `category` (`decision`, `clarification`, `approval`, `error_help`, or `null`), whether it is resolved or expired, and `canAnswer`) and the session's id and topic. It needs `task:read`. `canAnswer` is true only for the chat's owner, or a teammate it is shared with, while the question is open. Add `?context=true` for the messages before it: `collaboration.commentContextMessages` of them by default, or `limit`, capped by the session message limit. A question from another chat, or one that isn't an agent question, returns `404`. Answer it with `POST .../attention/:markerId/resolve`.
 
 `GET /api/projects/:id/sessions/:sessionId/comments/:threadId/context` returns one comment thread with the chat around the message it is on, for [reading a comment in its conversation](/docs/guides/collaboration/#read-a-comment-in-its-conversation): `{ thread, session: { id, topic }, viewerAccess, anchor: { messageId, found }, messages, hasMoreBefore, hasMoreAfter }`. It needs `task:read`. `messages` is in transcript order and holds the whole commented message (an agent reply is stored as many streamed rows, and a comment can be on any of them) plus `collaboration.commentContextMessages` messages each side, reading at most `collaboration.commentContextMaxRows` rows each side. Page further with `GET .../sessions/:sessionId/messages` and `before`/`after` cursors from the first and last rows. When the commented message is no longer in the chat, `anchor.found` is `false` and `messages` is empty. A thread from another chat or another project returns `404`.
 
@@ -377,6 +432,10 @@ Comment threads and replies accept an optional `mentions: [{ "userId": "..." }]`
 ### `GET /api/nodes`
 
 List all nodes for the authenticated user.
+
+### `GET /api/nodes/resource-usage`
+
+CPU and memory for each of the caller's own workspaces on the caller's own nodes, for the Nodes page (`apps/api/src/services/node-resource-usage.ts`). Returns `{ windowMinutes, windowStart, windowEnd, bucketMs, historyOmittedCount, historyTruncatedCount, workspacesOmitted, workspaces }`. Each workspace has `workspaceId`, `nodeId`, `projectId`, `projectName`, `chatSessionId`, `title` (the chat topic, then the task title, then the workspace name), `ownerUserId`, `ownerName`, `isMine`, `status`, `holdsReservation` (true while running, creating or recovering), `createdAt`, `reservation` (`{ cpuMillis, memoryMb, diskMb, exclusiveNode }` or `null`) and `series`: per-`bucketMs` `{ start, cpuMillis, memoryBytes }` from the workspace's resource history over the last `windowMinutes` (admin setting `nodes.usageWindowMinutes`, default 60). Project fields are returned only for projects the caller is an active member of; otherwise `projectId`, `projectName` and `chatSessionId` are `null` and `title` is a neutral `Workspace <id>` label. History arrives in batches, so `historyEndsAt` says where it currently stops. At most `nodes.usageMaxWorkspaces` (default 500) workspaces are listed, running and most recently changed first; `workspacesOmitted` says whether more exist. History is read only for workspaces that are still running or changed recently, at most `nodes.usageMaxHistoryWorkspaces` (default 150) per request, running first and each machine's newest before any machine's second; `historyOmittedCount` and each workspace's `historyOmitted` say what was left out. Each read is bounded by time (`nodes.usageChunkLookbackMinutes` before the window, default 60) and by `nodes.usageMaxChunksPerWorkspace` (default 48) chunks per workspace, newest first; `historyTruncatedCount` and `historyTruncated` say which workspaces lost their oldest minutes. Live per-workspace memory is in each node's `lastMetrics.workspaceMemory` from `GET /api/nodes`.
 
 ### `GET /api/nodes/:id`
 
@@ -503,13 +562,17 @@ Latest provider usage windows for the authenticated user's personal credentials,
 `cc_credentials:<id>` references), `level` (`ok`, `warning`, `critical`, `rejected`) and its
 `windows` (`windowType`, `utilizationPercent`, `windowMinutes`, `resetsAt`, `observedAt`, `source`).
 Rows come from `credential_limit_windows`; the response is capped by `CREDENTIAL_LIMIT_READ_MAX_ROWS`.
+A window whose `resetsAt` passed after its latest sample is returned as `utilizationPercent: 0`,
+`level: "ok"`, `status: "allowed"` with `resetElapsed: true` and the original `resetsAt`
+(`credentialLimitWindowAsOf` in `packages/shared/src/credential-limits.ts`); both limit routes and the
+MCP tool apply this.
 
 ### `GET /api/projects/:id/credential-limits`
 
 Usage windows visible to the caller inside a project: the caller's own credentials plus project-
 and platform-shared ones, never another member's personal credential. Requires `project:read`.
 Optional `agentSessionId` narrows the result to the credential that agent session is attributed to,
-resolved server-side from `agent_sessions`. The MCP tool `get_credential_limits` exposes the same
+resolved server-side from `agent_sessions`. The MCP tool `workspace_read` method `credential_limits` exposes the same
 view to agents (`scope: "session" | "project"`). `credentialId` is filled in for the caller's own
 credentials; a shared credential owned by another member whose reference is longer than 71 bytes
 comes back with a `sha256:` digest as `credentialReference` and `credentialId: null`, with or
@@ -589,8 +652,9 @@ credentials.
 
 ### `PATCH /api/capacity-pools/defaults`
 
-Update the authenticated user's owned default-pool policy, candidate statuses, or provider-native
-`catalogAdditions`. This endpoint does not mutate project or installation fallback pools.
+Update the authenticated user's owned default-pool policy, candidate statuses, provider-native
+`catalogAdditions`, or provider order (`sourceOrder`). This endpoint does not mutate project or
+installation fallback pools.
 
 `catalogAdditions` reactivates a currently available provider-native offering from the same
 credential-scoped catalog used by reconciliation. It identifies the active source plus concrete
@@ -606,6 +670,23 @@ provider/location/instance type; it does not accept secret material:
       "providerInstanceType": "cpx62",
       "providerInstanceSku": null
     }
+  ]
+}
+```
+
+`sourceOrder` sets the pool's provider order: capacity source ids, most preferred first, at most 32.
+New VMs are ranked by it; an existing node with room is still reused first. Sources not listed rank
+after listed ones. `null` or `[]` clears the order. Every id must be a capacity source that serves
+this pool, otherwise the request fails with `400` and `details.missingSourceIds` lists the unknown
+ids. Changing only the order does not bump the pool revision, so existing nodes stay reusable.
+If another edit changed the order after this request read it, the request fails with `409` and
+changes nothing.
+
+```json
+{
+  "sourceOrder": [
+    "cap-source-default:user:gcp-credential-id",
+    "cap-source-default:user:hetzner-credential-id"
   ]
 }
 ```
@@ -627,8 +708,9 @@ context. Project-scoped metadata comes from active project compute credentials. 
 
 ### `PATCH /api/projects/:id/capacity-pools/defaults`
 
-Update only the project-owned default-pool policy, candidate statuses, or provider-native
-`catalogAdditions`. Requires project `secret:write`.
+Update only the project-owned default-pool policy, candidate statuses, provider-native
+`catalogAdditions`, or `sourceOrder` (same shape and `missingSourceIds` error as the user route).
+Requires project `secret:write`.
 
 ### `GET /api/admin/capacity-pools/defaults`
 
@@ -642,8 +724,9 @@ Superadmin only.
 
 ### `PATCH /api/admin/capacity-pools/defaults`
 
-Update only the installation-owned default-pool policy, candidate statuses, or provider-native
-`catalogAdditions`. Superadmin only.
+Update only the installation-owned default-pool policy, candidate statuses, provider-native
+`catalogAdditions`, or `sourceOrder` (same shape and `missingSourceIds` error as the user route).
+Superadmin only.
 
 ## GitHub
 
@@ -703,14 +786,14 @@ that was in your list has left it.
 | ------ | ------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | GET    | `/api/projects/:projectId/ideas`                             | Returns `{ items, truncated, totals }`. Each item carries `derived` (the state, its `source`, and the chat or pull request that decided it), `counts`, and a one-line `summary`. Open ideas and finished ones are capped separately, so a project that shipped a lot cannot push its open ideas off the page. |
 | GET    | `/api/projects/:projectId/ideas/:ideaId`                     | One idea: the current plan in full, its derived state, every chat linked to it and every pull request its work produced.                                                                                                                                                                                      |
-| POST   | `/api/projects/:projectId/ideas`                             | Body `{ title, content? }`; files a new idea and returns it. Goes through the same operation the MCP `create_idea` tool uses.                                                                                                                                                                                 |
-| POST   | `/api/projects/:projectId/ideas/:ideaId/status`              | Body `{ status: 'completed' \| 'cancelled' \| 'draft' }`, as **Mark done**, **Park** and **Reopen** do. One transition table is shared with `update_idea` and the generic task status route, so every surface allows the same moves.                                                                          |
+| POST   | `/api/projects/:projectId/ideas`                             | Body `{ title, content? }`; files a new idea and returns it. Goes through the same operation the MCP `ideas_write` method `create` tool uses.                                                                                                                                                                 |
+| POST   | `/api/projects/:projectId/ideas/:ideaId/status`              | Body `{ status: 'completed' \| 'cancelled' \| 'draft' }`, as **Mark done**, **Park** and **Reopen** do. One transition table is shared with `ideas_write` method `update` and the generic task status route, so every surface allows the same moves.                                                          |
 | POST   | `/api/projects/:projectId/ideas/:ideaId/keep-open`           | Records that a person answered the idea's "a pull request merged, is this done?" question with **Keep open**. Changes no status; the question simply stops being asked for that merge.                                                                                                                        |
 | GET    | `/api/projects/:projectId/ideas/:ideaId/updates`             | Returns `{ updates, nextCursor }`: the notes posted beside the plan, newest first. Pass `cursor` for older ones.                                                                                                                                                                                              |
-| POST   | `/api/projects/:projectId/ideas/:ideaId/updates`             | Body `{ body, quote? }`; posts a note without changing the plan (the same operation as `update_idea` with `note`). Length limits are the Collaboration admin settings (8,000 characters per note, 1,000 per quote by default).                                                                                |
+| POST   | `/api/projects/:projectId/ideas/:ideaId/updates`             | Body `{ body, quote? }`; posts a note without changing the plan (the same operation as `ideas_write` method `update` with `note`). Length limits are the Collaboration admin settings (8,000 characters per note, 1,000 per quote by default).                                                                |
 | DELETE | `/api/projects/:projectId/ideas/:ideaId/updates/:updateId`   | Removes a note. Only the note's author or a project owner or admin can.                                                                                                                                                                                                                                       |
 | GET    | `/api/projects/:projectId/sessions/:sessionId/ideas`         | The ideas linked to a chat.                                                                                                                                                                                                                                                                                   |
-| POST   | `/api/projects/:projectId/sessions/:sessionId/ideas`         | Body `{ taskId, context? }`; links the chat to an idea so that the chat counts as work on it (the same link `link_idea` makes).                                                                                                                                                                               |
+| POST   | `/api/projects/:projectId/sessions/:sessionId/ideas`         | Body `{ taskId, context? }`; links the chat to an idea so that the chat counts as work on it (the same link `ideas_write` method `link_session` makes).                                                                                                                                                       |
 | DELETE | `/api/projects/:projectId/sessions/:sessionId/ideas/:taskId` | Removes that link.                                                                                                                                                                                                                                                                                            |
 
 An idea is open, done or parked, and those are the only moves: an open idea can be marked
@@ -772,6 +855,8 @@ Submit an idea for autonomous execution. This is the chat-first path used by the
 `resourceRequirements` is additive modern workload input. The API validates known fields and persists the normalized JSON through task launch inputs. Legacy `vmSize` is still accepted for old clients as a deprecated compatibility hint; clients should not infer provider hardware from it. Profiles, skills, and triggers persist the same modern data as `resourceRequirementsJson` for compatibility, with explicit `null` clearing that layer and omitted fields preserving inherited behavior.
 
 Optional `sourceIdeaId` starts the work from an open idea in the same project. It is validated before anything is created — `404` for an id that is not an open idea in this project, `409` for an idea that is done or parked — and the session → idea link (`works_on` in task mode, `discusses` in conversation mode) is recorded before the agent receives its first prompt, on both the VM and the Instant path. If the link cannot be written the submit fails and the task is not left queued. Repeating the same start touches the same link rather than adding a second one. The idea is never injected into `message`; the agent receives it from `get_instructions`.
+
+Optional `model` (string, up to 200 characters) and `effort` (`auto`, `low`, `medium`, `high`, `xhigh` or `max`) set the agent's model and effort for this task only, over the skill, profile and project defaults. A blank `model` or a `null` either one inherits. The effort must be one the resolved agent supports, or the request returns `400` before anything is created: Claude Code supports every level, Codex every level except `max`, and other agents only `auto`.
 
 ### `GET /api/projects/:id/agent-profiles/picker`
 
@@ -863,7 +948,7 @@ Start an [Instant](/docs/guides/instant-sessions/) chat session. Returns **`202`
 
 Because the launch is asynchronous, the response does **not** carry `agentSessionId`, `acpSessionId`, or launch `timings` — poll the session or connect to its stream for live state.
 
-Optional `sourceIdeaId` behaves as it does on `POST /api/projects/:id/tasks/submit`, with the link recorded as `discusses`.
+Optional `sourceIdeaId` behaves as it does on `POST /api/projects/:id/tasks/submit`, with the link recorded as `discusses`. Optional `model` and `effort` behave as they do there too.
 
 This endpoint is Instant-only. It returns `409` (`Selected profile resolves to VM runtime; use task submission instead.`) whenever the runtime resolves to VM — because the profile pins `vm`, because the caller has their own or a project cloud credential, or because `CF_CONTAINER_ENABLED` is not `true` for the deployment. Use `POST /api/projects/:id/tasks/submit` for VM work.
 
@@ -886,6 +971,28 @@ Rate-limited to 20 submissions per clock hour per user (`RATE_LIMIT_REPORT_ISSUE
 ### `POST /api/admin/observability/feedback-triage`
 
 Superadmin only. Runs a platform-error triage sweep immediately instead of waiting for the hourly cron. The Operations project itself is configured from **Admin → Integrations** or the environment fallback; this endpoint remains the manual way to verify automated triage without waiting up to an hour.
+
+## Operations Approvals
+
+These endpoints back **Admin → Approvals** and require an approved, active **superadmin**. They
+decide what an Operations-project agent asked to do with `ops_request_action`; see
+[Approved actions](/docs/guides/admin-settings/#approved-actions).
+
+### `GET /api/admin/operations/approvals`
+
+Lists approvals, pending first, then newest first: `{ "approvals": [...] }`. Optional `status`
+(`pending`, `approved`, `denied`, `expired`, `executed`) and `limit` (up to 200).
+
+### `GET /api/admin/operations/approvals/:id`
+
+One approval: `{ "approval": {...} }`, or `404`.
+
+### `POST /api/admin/operations/approvals/:id/decision`
+
+Body: `{ "decision": "approve" | "deny", "note"?: string }` (note up to 1,000 characters). Decides
+a pending request once and delivers the decision to the requesting agent's chat. Returns
+`{ "approval", "delivered" }`. Returns `409` if the request was already decided or has expired,
+and `404` for an unknown ID.
 
 ## Admin Settings
 

@@ -8,6 +8,12 @@ import {
   type ResourceValidationErrors,
 } from '../../resource-requirements';
 import { SkillSelector } from '../../skills/SkillSelector';
+import {
+  activeChatAgentOverrides,
+  type ChatAgentDefaults,
+  type ChatAgentOverrides,
+} from './agent-overrides';
+import { ComposerAgentOverrideFields } from './ComposerAgentOverrideFields';
 
 export interface ComposerOptionsValue {
   skills: AgentSkill[];
@@ -17,13 +23,24 @@ export interface ComposerOptionsValue {
   onTaskResourceReqsChange: (next: ResourceRequirementsFormState) => void;
   taskResourceErrors: ResourceValidationErrors;
   onTaskResourceErrorsClear: () => void;
+  /** The agent, model and effort this chat inherits from its profile and skill. */
+  agentDefaults: ChatAgentDefaults;
+  agentOverrides: ChatAgentOverrides;
+  onAgentOverridesChange: (next: ChatAgentOverrides) => void;
   disabled: boolean;
 }
 
 /** How many per-chat options differ from the profile's defaults. */
 export function composerOptionsCount(options: ComposerOptionsValue): number {
+  const { model, effort } = activeChatAgentOverrides(
+    options.agentOverrides,
+    options.agentDefaults.agentType
+  );
   return (
-    (options.selectedSkillId ? 1 : 0) + (hasAnyResourceValue(options.taskResourceReqs) ? 1 : 0)
+    (options.selectedSkillId ? 1 : 0) +
+    (model ? 1 : 0) +
+    (effort ? 1 : 0) +
+    (hasAnyResourceValue(options.taskResourceReqs) ? 1 : 0)
   );
 }
 
@@ -49,7 +66,7 @@ export function ComposerOptionsButton({
       aria-expanded={open}
       aria-controls={open ? panelId : undefined}
       aria-label={count > 0 ? `Chat options (${count} set)` : 'Chat options'}
-      title="Skill and resources for this chat"
+      title="Skill, model, effort and resources for this chat"
       className={`relative flex h-11 w-11 shrink-0 items-center justify-center rounded-full border bg-transparent transition-colors disabled:opacity-50 ${
         open || count > 0
           ? 'border-accent/60 text-accent'
@@ -69,14 +86,19 @@ export function ComposerOptionsButton({
   );
 }
 
-/** Per-chat skill and resource overrides, moved out of the always-visible composer. */
+/** Per-chat skill, model, effort and resource overrides, out of the always-visible composer. */
 export function ComposerOptionsPanel({
   id,
   options,
   compact,
 }: Readonly<{ id: string; options: ComposerOptionsValue; compact: boolean }>) {
   return (
-    <div id={id} className="mb-2 grid gap-3 rounded-lg border border-border-default bg-surface p-3">
+    // Capped and scrollable so opening it never pushes To, the message box or Send off a
+    // phone screen. `relative` keeps absolute descendants inside the scroller.
+    <div
+      id={id}
+      className="relative mb-2 grid max-h-[50dvh] gap-3 overflow-y-auto overscroll-contain rounded-lg border border-border-default bg-surface p-3"
+    >
       {options.skills.length > 0 && (
         <div>
           <div className="mb-1 text-xs font-medium text-fg-secondary">Skill for this chat</div>
@@ -86,6 +108,17 @@ export function ComposerOptionsPanel({
             onChange={options.onSkillChange}
             disabled={options.disabled}
             compact
+          />
+        </div>
+      )}
+      {options.agentDefaults.agentType && (
+        <div>
+          <div className="mb-1 text-xs font-medium text-fg-secondary">Model and effort</div>
+          <ComposerAgentOverrideFields
+            defaults={options.agentDefaults}
+            overrides={options.agentOverrides}
+            onChange={options.onAgentOverridesChange}
+            disabled={options.disabled}
           />
         </div>
       )}
@@ -105,8 +138,8 @@ export function ComposerOptionsPanel({
           errors={options.taskResourceErrors}
           compact={compact}
         />
-        <p className="m-0 mt-1 text-[11px] text-fg-muted">Leave blank to use the profile’s.</p>
       </div>
+      <p className="m-0 -mt-1 text-[11px] text-fg-muted">Leave blank to use the profile’s.</p>
     </div>
   );
 }

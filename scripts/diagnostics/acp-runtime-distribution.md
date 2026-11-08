@@ -1,14 +1,41 @@
 # Codex C2 runtime distribution preparation
 
 This change distributes the reviewed Codex CLI/ACP adapter with a checksum-pinned
-publisher, download route, bounded VM bootstrap and baked Instant image. Fresh
-Codex hosts select it when trusted forms/URL configuration is enabled. Existing
-hosts retain their executable; permissions-only and disabled fresh hosts use stock.
-All ACP defaults remain false. Production activation is a separate release step.
+publisher, download route, bounded VM bootstrap and baked Instant image. Since
+2026-11-06 every fresh Codex host selects it (`selectSessionCodexRuntime` in
+`packages/vm-agent/internal/acp/codex_staging_candidate.go`), whatever the task mode
+or interaction configuration, because it is the only Codex adapter that can steer. A
+profile env var `SAM_CODEX_C2_CANDIDATE=0` opts that profile's sessions out to the
+stock npm adapter (no steering), for devcontainers C2 cannot run in (not x86_64, or
+Node older than 22). Existing hosts retain their executable.
+
+## November 5: live steering (C2.3 adapter)
+
+The current distribution pairs Codex CLI `0.160.0-sam-c2.2` (unchanged, byte-identical) with ACP
+adapter `2.1.1-sam-c2.3`, identity
+`sam-codex-acp-2.1.1-sam-c2.3+cli-0.160.0-sam-c2.2-codemode2`. The adapter patch
+[`codex-acp-v2.1.1-sam-c2.3.patch`](patches/codex-acp-v2.1.1-sam-c2.3.patch) backports upstream
+2.4.0's `_session/steering` idle behaviour: with `_meta.steering.idleBehavior: "promptRequired"`
+an idle session returns `promptRequired` without consuming the input, instead of starting a
+detached turn. SAM always sends that flag, so a steer that arrives as a turn ends is queued as the
+next prompt rather than run twice.
+
+The immutable archive is 136243963 bytes, SHA-256
+`384d0071527848b68df318c04f2e6e040f2eea67131bbd5b6f66cc58f5bd65bd`, under the
+`acp-codex-runtime-c2.3-codemode2` GitHub release. The Ubuntu review build is
+[run 41948124473](https://github.com/raphaeltm/simple-agent-manager/actions/runs/41948124473); it
+passed the adapter's typecheck and test suite. The installer accepts the C2.2 release as the
+predecessor and upgrades it in place, as described below. Stock npm `codex-acp` 2.1.1 sessions
+still start detached turns, so the VM agent steers a Codex adapter only when it reports this
+version or upstream 2.4.0 and later (`session_host_steering.go`); others get a visible queued
+fallback. SAM's real-process test
+(`session_host_real_adapter_steering_test.go`) drives this build through `SessionHost` with a
+local model fixture: idle steer is not consumed, a mid-turn steer reaches the turn's next model
+call, and the turn completes once.
 
 ## October 5: Sol 6.1 runtime upgrade
 
-The current distribution pairs Codex CLI `0.160.0-sam-c2.2` with ACP adapter
+That distribution paired Codex CLI `0.160.0-sam-c2.2` with ACP adapter
 `2.1.1-sam-c2.2` and the official `rust-v0.160.0` Code Mode host. The CLI includes
 `gpt-6.1-sol` metadata. SAM's explicit MCP capability, ownership, cancellation,
 and URL completion patches remain applied; the profile's model is unchanged.
@@ -128,9 +155,8 @@ or already-deployed Worker is required for a fresh installation.
 The Dockerfile installs in a separate Node22/glibc stage and copies only the
 verified runtime tree into the final image before `USER node`. The compressed
 archive is not retained in final image layers. Stock binaries remain present;
-fresh Codex hosts use the patched runtime when the trusted session-start contract
-enables forms or URL requests. Permissions-only and disabled contracts retain stock.
-An explicit profile candidate marker remains available for bounded verification. Deployment
+fresh Codex hosts use the patched runtime unless the profile marker opts out with
+`SAM_CODEX_C2_CANDIDATE=0`. Deployment
 publishes that same prepared archive to the stack's R2 before Worker publication,
 including first installation and skip-agent deployments.
 
@@ -190,11 +216,12 @@ the subsequent window below.
 
 ## Runtime selection and UI follow-through
 
-The executable is selected once per host from validated session-start interaction
-configuration. Enabling forms or URLs on a fresh Codex host selects the reviewed
-runtime; changing capabilities on an existing host does not swap its executable.
-Explicit profile marker removal/change fails closed independently of automatic
-eligibility. A separate selection mutex preserves startup's existing host-lock
+The executable is selected once per host: the reviewed runtime by default, the stock
+adapter only for a profile marker of `0`. Until 2026-11-06 selection keyed on the
+session-start interaction configuration (forms or URLs on), which the control plane
+enables only for conversation-mode tasks, so task-mode Codex sessions ran stock and
+could not steer. Changing configuration on an existing host does not swap its
+executable, and a profile marker that is removed or changed fails closed. A separate selection mutex preserves startup's existing host-lock
 contract. Focused race tests cover flags, restart, invalid markers and config.
 
 Untitled form fields now display the schema property name rather than a UUID.

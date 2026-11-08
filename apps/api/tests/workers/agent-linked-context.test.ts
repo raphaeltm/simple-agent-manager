@@ -302,7 +302,7 @@ describe('agent linked context through real MCP handlers and SQL', () => {
     expect(response.contentTruncated).toBe(true);
     expect(response.nextContentOffset).toBe(12_000);
     expect(response.content).toMatch(
-      /\[continued by SAM: call get_idea with contentOffset=12000 for the rest\]$/
+      /\[continued by SAM: call ideas_read method get with contentOffset=12000 for the rest\]$/
     );
     const second = payload(
       await handleGetIdea(
@@ -367,7 +367,7 @@ describe('agent linked context through real MCP handlers and SQL', () => {
       expect(response.nextContentOffset).toBe(offset + pages.at(-1)!.length);
       expect(response.content).toMatch(
         new RegExp(
-          `\\[continued by SAM: call get_idea with contentOffset=${response.nextContentOffset} for the rest\\]$`
+          `\\[continued by SAM: call ideas_read method get with contentOffset=${response.nextContentOffset} for the rest\\]$`
         )
       );
       offset = response.nextContentOffset;

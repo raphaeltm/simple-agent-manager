@@ -19,8 +19,13 @@ import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import type { BoundedStrandedRetirement } from '../../services/bounded-stranded-retirement-authority';
+import {
+  type NodeLifecycleDecision,
+  recordNodeLifecycleDecision,
+} from '../../services/node-lifecycle-decisions';
 import { deleteNodeResourcesStrict } from '../../services/nodes';
 import { persistError } from '../../services/observability';
+import { resolveOperationsTelemetrySetting } from '../../services/operations-telemetry-settings';
 import {
   preparePreservedVmRetirement,
   type PreservedVmRetirement,
@@ -29,7 +34,11 @@ import {
 import { repairRetiredVmSleepSnapshots } from '../../services/retired-vm-sleep-repair';
 import { finalizeWorkspaceLifecycleClosure } from '../../services/workspace-lifecycle-finalizer';
 import { claimNodeForCleanup, releaseNodeCleanupClaim } from './cleanup-claim';
-import { diagnoseCleanupRefusal, recordCleanupRefusal } from './cleanup-refusal';
+import {
+  diagnoseCleanupRefusal,
+  handOffArtifactBlockedEmptyNode,
+  recordCleanupRefusal,
+} from './cleanup-refusal';
 export { claimNodeForCleanup, sleepingContainerRetentionGuardSql } from './cleanup-claim';
 import type { CleanupConfig } from './config';
 
@@ -119,6 +128,36 @@ export const LAST_WORKSPACE_ACTIVITY_SQL = 'COALESCE(MAX(w.updated_at), n.create
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * `backoff` is the sweep's own retry clock, not a reason the node stays alive; leaving it in
+ * would make every second refusal look like a new decision and defeat the dedupe window.
+ */
+function refusalDecisionReason(reasons: readonly string[]): string {
+  const causes = reasons.filter((reason) => reason !== 'backoff');
+  return causes.length ? causes.join(',') : reasons.length ? 'backoff' : 'cleanup_claim_refused';
+}
+
+/** Best-effort decision log row. Repeating skips are deduped so a stuck node logs once per window. */
+async function recordSweepDecision(
+  env: Env,
+  node: CleanupNode,
+  options: DestroyNodeForCleanupOptions,
+  decision: NodeLifecycleDecision,
+  reason: string | null,
+  repeating = false
+): Promise<void> {
+  await recordNodeLifecycleDecision(env.DATABASE, {
+    nodeId: node.id,
+    source: 'cleanup_sweep',
+    decision,
+    reason,
+    detail: { phase: options.recoveryType, nodeStatus: node.status },
+    dedupeWindowMs: repeating
+      ? await resolveOperationsTelemetrySetting(env, 'nodeDecisionDedupeWindowMs')
+      : undefined,
+  });
 }
 
 async function persistCleanupSuccess(
@@ -276,12 +315,23 @@ export async function destroyNodeForCleanup(
         node.id,
         new Date(Date.parse(nowIso) + options.failureBackoffMs).toISOString()
       );
+      await recordSweepDecision(
+        env,
+        node,
+        options,
+        'destroy_failed',
+        'preservation_check_failed',
+        true
+      );
       return 'failed';
     }
   }
   // A partially spent sweep budget is not a defect in this candidate. Keep it due
   // for the next tick rather than synchronizing its backoff with unsafe predecessors.
-  if (options.preservedVmBudget?.exhausted) return 'skipped';
+  if (options.preservedVmBudget?.exhausted) {
+    await recordSweepDecision(env, node, options, 'skipped', 'preservation_budget_exhausted', true);
+    return 'skipped';
+  }
   const claimed = await claimNodeForCleanup(env, node, nowIso, {
     preservedVm,
     boundedStrandedRetirement: options.boundedStrandedRetirement,
@@ -307,7 +357,7 @@ export async function destroyNodeForCleanup(
         requireWorkspaceIdle: options.requireWorkspaceIdle,
       }
     );
-    if (refusal)
+    if (refusal) {
       await recordCleanupRefusal(
         env,
         node,
@@ -317,6 +367,16 @@ export async function destroyNodeForCleanup(
         options.blockedRetirementMs,
         options.refusalWarnAfterMs
       );
+      await handOffArtifactBlockedEmptyNode(env, node, refusal);
+    }
+    await recordSweepDecision(
+      env,
+      node,
+      options,
+      'skipped',
+      refusalDecisionReason(refusal?.reasons ?? []),
+      true
+    );
     return 'skipped';
   }
 
@@ -334,6 +394,7 @@ export async function destroyNodeForCleanup(
       userId: node.user_id,
       ...options.context,
     });
+    await recordSweepDecision(env, node, options, 'destroy_attempted', options.recoveryType);
 
     const strictDeletion = controller
       ? await deleteNodeResourcesStrict(node.id, node.user_id, env, {
@@ -404,10 +465,18 @@ export async function destroyNodeForCleanup(
     });
 
     await persistCleanupSuccess(env, node, options);
+    await recordSweepDecision(
+      env,
+      node,
+      options,
+      'destroyed',
+      `provider_${strictDeletion.providerVm}`
+    );
 
     return 'destroyed';
   } catch (error) {
     await handleCleanupFailure(env, node, nowIso, options, error);
+    await recordSweepDecision(env, node, options, 'destroy_failed', errorMessage(error));
     return 'failed';
   } finally {
     if (timer !== undefined) clearTimeout(timer);

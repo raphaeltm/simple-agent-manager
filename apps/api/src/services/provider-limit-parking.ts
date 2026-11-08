@@ -17,6 +17,7 @@ import {
   type ProviderLimitWait,
 } from './provider-limit-policy';
 import { repairProviderLimitRejectionObservation } from './provider-limit-rejection-intent';
+import { resolveProviderLimitResetWindowTolerance } from './provider-limit-settings';
 import { rejectedProviderWindow } from './provider-limit-window';
 import { queueWorkspaceSessionSleep } from './session-sleep';
 import {
@@ -129,6 +130,7 @@ export async function parkTaskForProviderLimit(
     wait = newProviderLimitWait({
       taskId: task.id,
       origin: 'callback',
+      resetWindowToleranceMs: await resolveProviderLimitResetWindowTolerance(env),
       incidentId,
       credentialKey: key,
       previous,

@@ -33,6 +33,10 @@ export interface ChatSession {
 }
 
 export interface ChatSessionTaskEmbed {
+  /** Current provider waiting or needs-attention reason. */
+  providerLimitReason?: string | null;
+  /** Opaque wait generation; changes when a new blocked wait replaces an accepted resume. */
+  providerLimitVersion?: string | null;
   id: string;
   /** Canonical, user-safe saved placement diagnostics, including queued runs. */
   placementExplanationJson?: string | null;
@@ -366,6 +370,16 @@ export interface SessionStateSnapshot {
    * Null on rows written before the clock existed.
    */
   workAt?: number | null;
+  /**
+   * The latest turn start the VM agent itself reported. Only grows, and only when a new prompt
+   * starts; a re-report of the same turn, a cancel or a restart leaves it unchanged.
+   */
+  reportedPromptStartedAt?: number | null;
+  /**
+   * Whether the session's loaded agent adapter can take input mid-turn (steer). Null until
+   * the VM agent reports it; older VM agents never do.
+   */
+  steeringSupported?: boolean | null;
   /** D1-sourced recovery status from session_snapshots (sleep/wake lifecycle). */
   recoveryStatus?: 'waking' | 'restored' | 'failed' | null;
   /**

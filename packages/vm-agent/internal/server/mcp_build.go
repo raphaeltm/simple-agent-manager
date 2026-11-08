@@ -229,7 +229,7 @@ func (s *Server) prepareMcpBuildAndPublish(w http.ResponseWriter, r *http.Reques
 		return nil, false
 	}
 
-	projectID := firstNonEmpty(strings.TrimSpace(runtime.ProjectID), strings.TrimSpace(s.config.ProjectID))
+	projectID := s.workspaceSAMIdentity(workspaceID, runtime, nil).ProjectID
 	if projectID == "" {
 		writeError(w, http.StatusInternalServerError, "workspace is not linked to a project")
 		return nil, false

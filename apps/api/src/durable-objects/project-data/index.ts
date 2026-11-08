@@ -103,6 +103,10 @@ import { runStandingWatchAlarm } from './project-standing-watches-runner';
 import * as standingWatches from './project-standing-watches-storage';
 import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from './prompt-delivery';
 import * as promptDelivery from './prompt-delivery';
+import {
+  type ProviderLimitAttentionResult,
+  syncProviderLimitAttention,
+} from './provider-limit-attention';
 import * as reconciliation from './reconciliation';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import { checkRuntimeHeartbeatTimeouts } from './runtime-heartbeat-policy';
@@ -1485,7 +1489,7 @@ export class ProjectData extends DurableObject<Env> {
    * inbox page costs one request instead of one per session plus one per file.
    *
    * Needs no project predicate: this Durable Object *is* the project, so every
-   * row in either comment table already belongs to it.
+   * comment row it holds already belongs to it.
    */
   listProjectCommentInbox(
     input: commentContracts.ListProjectCommentThreadsInput
@@ -2226,7 +2230,7 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   // --- Library file comments ------------------------------------------------
-  // Separate storage from message comments (DO migration 033). Callers must have
+  // File-scoped threads in the shared anchored comment tables (DO migration 073). Callers must have
   // already verified the file belongs to this project — the DO has no D1 access.
 
   listFileCommentThreads(
@@ -2456,6 +2460,31 @@ export class ProjectData extends DurableObject<Env> {
 
   async getCleanupAt(sessionId: string): Promise<number | null> {
     return idleCleanup.getCleanupAt(this.sql, sessionId);
+  }
+
+  async syncProviderLimitAttention(input: {
+    projectId: string;
+    taskId: string;
+    sessionId: string;
+  }): Promise<ProviderLimitAttentionResult> {
+    return this.ctx.blockConcurrencyWhile(async () => {
+      this.ensureProjectId(input.projectId);
+      const result = await syncProviderLimitAttention(this.sql, this.env.DATABASE, input);
+      if (result.changed) {
+        this.scheduleSummarySync();
+        this.broadcastEvent(
+          result.blocked ? 'attention.created' : 'attention.resolved',
+          {
+            sessionId: input.sessionId,
+            markerId: result.markerId,
+            kind: 'provider_limit_blocked',
+            reason: result.reason,
+          },
+          input.sessionId
+        );
+      }
+      return result;
+    });
   }
 
   async createAttentionMarker(
@@ -2715,6 +2744,7 @@ export class ProjectData extends DurableObject<Env> {
       runtimeWorkCount?: number;
       runtimeWorkSource?: string;
       runtimeWorkProgressAt?: number | null;
+      steeringSupported?: boolean;
     }
   ): Promise<ActivityReportOutcome> {
     return durability.reportActivity(this.sql, this.durabilityHooks(), sessionId, activity, extra);

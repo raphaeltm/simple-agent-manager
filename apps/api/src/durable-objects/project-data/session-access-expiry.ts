@@ -6,6 +6,7 @@
  * undelivered prompts and marks the expiry handled. The fence refuses any queued prompt whose
  * sender no longer controls the session, whichever way their access ended.
  */
+import { decideAgentWake, isHumanPromptDeliveryTrigger } from '../../lib/agent-wake-policy';
 import { createModuleLogger } from '../../lib/logger';
 import {
   cancelUndeliveredSenderPrompts,
@@ -19,7 +20,6 @@ import {
   SENDER_ACCESS_REVOKED_REASON,
   type SenderAccessEndedReason,
   SESSION_ACCESS_EXPIRY_SWEEP_LIMIT,
-  SESSION_WRITER_PROMPT_SOURCES,
   type SessionAccessGrantRecord,
 } from './session-access-store';
 
@@ -138,9 +138,10 @@ export interface SenderAccessDenial {
 }
 
 /**
- * Delivery-time fence for prompts a human session writer originated. Returns why the sender is
- * neither the session owner nor an active grantee at server time `now`, so the runner fails the
- * delivery before any side effect. Other prompt sources are unaffected.
+ * Delivery-time fence for prompts a human originated. Asks the agent-wake policy
+ * (`lib/agent-wake-policy.ts`) again at server time `now`, so a prompt queued while the sender
+ * could wake the agent is refused if they no longer can, before any side effect. Returns why.
+ * Other prompt sources are unaffected.
  */
 export function senderLacksSessionAccess(
   sql: SqlStorage,
@@ -152,16 +153,24 @@ export function senderLacksSessionAccess(
   },
   now: number = Date.now()
 ): SenderAccessDenial | null {
-  if (!(SESSION_WRITER_PROMPT_SOURCES as readonly string[]).includes(delivery.sourceKind)) {
-    return null;
-  }
+  if (!isHumanPromptDeliveryTrigger(delivery.sourceKind)) return null;
   if (delivery.senderType !== 'human') return null;
   if (!delivery.senderId) {
     return { error: 'Prompt sender identity is missing', deliveryCancelled: null };
   }
   const access = resolveSessionAccess(sql, delivery.targetSessionId, delivery.senderId, now);
   if (!access.found) return { error: 'Target session no longer exists', deliveryCancelled: null };
-  if (access.role !== 'none') return null;
+  const decision = decideAgentWake({
+    trigger: delivery.sourceKind,
+    sessionId: delivery.targetSessionId,
+    actorUserId: delivery.senderId,
+    access: {
+      role: access.role,
+      ownerUserId: access.ownerUserId,
+      grantId: access.grant?.id ?? null,
+    },
+  });
+  if (decision.allowed) return null;
   if (readUnrevokedGrant(sql, delivery.targetSessionId, delivery.senderId)) {
     return {
       error: SENDER_ACCESS_ENDED_ERRORS[SENDER_ACCESS_EXPIRED_REASON],

@@ -97,6 +97,13 @@ On iPhone and iPad, install SAM to the Home Screen before enabling push. Other s
 browsers can enable push directly. Browser permission is requested only after you select
 **Enable push**, never on page load.
 
+The question also appears in the conversation itself, as a card where the agent asked it. The card
+shows the full question (a long one starts collapsed behind **Show full question**) and the same
+answer buttons, or **Your answer** when the agent offered no choices. An answer given in the card, the
+bell or the question reader is the same answer: the card then shows **Answered** and what was chosen,
+and the others catch up. A question that expired, or that someone else answered, shows that instead
+of buttons. Teammates who can read the chat but not answer it see the question without buttons.
+
 Comment notifications are low urgency, so they stay in the app and are never pushed. Mentions and
 shared-chat notifications are pushed when push is on.
 
@@ -117,6 +124,9 @@ The tool call is non-blocking: the agent records the request and can stop its tu
 SAM waits for your answer. Ordinary typed replies continue to resolve the request. When the
 agent supplies choices, the notification also renders touch-sized answer buttons; choosing
 one records the exact answer and forwards it to the agent.
+
+The tool's result tells the agent the request was recorded, and carries the request's ID, which the
+chat uses to show the question as an answerable card (`HumanInputCard` in `apps/web`).
 
 To read the whole question, see its earlier context, and answer it from the notification, see
 [Read and answer an agent's question](#read-and-answer-an-agents-question). The reader loads the

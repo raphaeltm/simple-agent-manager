@@ -10,7 +10,7 @@ your work is safe and what to do next. Everything here applies to both
 
 - **Needs input** in the session list. The agent, or SAM, is waiting for an answer from the person
   who started the chat. → [Find what it's waiting for](#the-agent-is-waiting-for-you)
-- **"Waiting for provider limit reset at…"**, **Waiting** or **Blocked** on the task's Dashboard
+- **"Waiting for provider limit reset at…"**, **Waiting** or **Needs you** on the task's Dashboard
   card, or a red **BLOCKED** badge on the chat in the session list. The agent hit a usage limit;
   SAM carries on after the reset, unless it says **Blocked**. (A subtask with that badge also reads
   "Waiting on:" and its parent task's title, whether a usage limit or another task is holding it,
@@ -18,7 +18,7 @@ your work is safe and what to do next. Everything here applies to both
   → [Usually nothing to do](#waiting-for-a-provider-limit-reset)
 - **"SAM paused automatic check-ins…"** The agent kept stopping without finishing, or its model was
   rejected, so SAM stopped nudging it. → [Look, then reply](#sam-paused-automatic-check-ins)
-- **A strip or failure card saying the agent's connection is missing or was rejected**, or that its
+- **A notice or failure card saying the agent's connection is missing or was rejected**, or that its
   model is unavailable for your account. → [Fix the connection](#the-agent-or-a-tool-cant-sign-in)
 - **A message saying a sign-in flow requires a local callback**, or an MCP tool failing with
   `401 Unauthorized`. → [Connect the tool another way](#the-agent-or-a-tool-cant-sign-in)
@@ -26,7 +26,7 @@ your work is safe and what to do next. Everything here applies to both
   been recorded. → [Check wake compatibility](/docs/guides/agents/#after-a-chat-wakes-from-sleep)
 - **The agent stops whenever it needs your approval, and no card appears.** Check whether agent
   requests are enabled on your instance. → [Check request settings](#the-agent-stops-for-approval-and-no-card-appears)
-- **A strip with a spinner**, such as **Waking and restoring session...** or, on a VM, a step like
+- **A small floating status with a spinner** over the top of the conversation, such as **Waking and restoring session...** or, on a VM, a step like
   **Finding a server...**, or a reason it's waiting such as **Your cloud provider has no capacity
   right now. Retrying...**. A wake or a recovery is in progress.
   → [Wait, or clear what it's waiting for](#recovery-is-in-progress)
@@ -105,10 +105,12 @@ older saved sessions.
 
 ## The agent is waiting for you
 
-**Needs input** beside a chat in the session list means it is waiting for an answer. On a phone,
-open the session list with the list icon at the right of the project-name bar. A chat with no new
-messages for three hours moves into the collapsed **Older** group at the bottom of the list, so look
-there too. Open the chat and look for one of these:
+**Needs input** beside a chat in the session list means it is waiting for an answer. Such chats sit
+at the top of the list under **Needs attention** for 24 hours from when the question was asked
+(or, for **Wake failed**, from when the wake failed). Newer messages in the chat do not extend that.
+After that they move to **Awake** or **Sleeping** and keep the label. On a
+phone, open the session list with the list icon at the right of the project-name bar; an amber count
+on that icon says how many chats need attention. Open the chat and look for one of these:
 
 - **A card in the chat** — a permission request, under the step it's about, or a question or a link
   to open, at the end of the chat. Answer it there; the agent carries on once it has your answer. If
@@ -154,16 +156,16 @@ never switches to another model, profile, or credential to get around a limit.
 
 - **If Claude Code or Codex didn't say when its limit resets**, the message reads **Waiting for provider
   limit reset (time unknown); bounded retry 1/3 at 14:05 UTC.** SAM tries again after 5 minutes,
-  then 10, then 20. If the limit still hasn't lifted, the task is **Blocked**.
+  then 10, then 20. Repeated rejections before one retry do not use extra waits. If three separate unknown-reset waits don't get the work going, the task shows **Needs you**.
 - **A new VM task that uses the same credential waits too**, before its agent starts (a new Instant
   chat isn't held). Its card says **Waiting**; once its workspace is ready, the reason reads
   **Blocked before provider prompt:** followed by the reset time, and its machine stays up
   meanwhile. Despite the word "Blocked", it starts by itself after the reset.
 
-**Blocked** on its own means SAM stopped waiting. The task won't carry on by itself, and a reply in
+**Needs you**, with a reason starting **Blocked:**, means SAM stopped waiting. The task won't carry on by itself, and a reply in
 the chat doesn't restart it:
 
-- **Blocked: provider limit wait budget exhausted.** Three waits in a row didn't get the work going.
+- **Blocked: provider limit wait budget exhausted.** Three unknown-reset waits in a row didn't get the work going. A known reset does not spend this budget.
 - **Blocked: provider limit reset outlives the saved snapshot…** The reset comes after SAM stops
   keeping the saved workspace, so the chat can't be woken where it left off.
 - **Blocked: selected provider credential changed…** The account the task would run on changed
@@ -172,25 +174,16 @@ the chat doesn't restart it:
   didn't start the task on.
 - Any other reason that starts with **Blocked:** means the same thing.
 
-**Don't reply in the blocked chat.** On a VM, a reply puts the task back in the queue, still
-**Blocked**, and SAM then refuses **Complete**, so the task can't be ended from the app. Instead:
+**Select Resume task** in the chat notice or on its Dashboard card. Only the task owner can
+resume it. This accepts the currently selected provider credential and wakes the saved workspace,
+including work the agent hasn't pushed. SAM still respects an active provider limit: approving a
+resume does not bypass a limit on that account. If the workspace is still being saved, wait until
+sleep finishes and try again. If the saved snapshot has expired, use **Fork** or **Retry** to start
+from a pushed branch instead.
 
-1. Look at what the agent got done: the chat, and anything it pushed. Work it didn't push stays in
-   the chat's saved workspace, which can't be woken while the task is **Blocked**, so don't count on
-   getting it back.
-2. End the blocked task:
-   - Select **Complete** in the session tool rail. For a **Chat** that's asleep you can instead
-     **Archive** it, which, unlike **Complete**, deletes its saved workspace.
-   - If SAM refuses **Complete** (the agent never started, or someone replied), SAM's own pages can't
-     end the task. If you use [SAM from Claude or ChatGPT](/docs/guides/sam-connector/), ask it to
-     stop that chat: that cancels the task and frees its machine. Otherwise leave it: it won't run by
-     itself, but a machine already prepared for it keeps running until SAM's 24-hour limit stops it.
-3. Continue in a new chat once the limit has reset, or straight away with a profile for a different
-   agent (Codex instead of Claude Code, say): **Fork** or **Retry** in the tool rail starts one from
-   this chat (see [Conversation forking](/docs/guides/chat-features/#conversation-forking)). The new
-   chat starts from your default branch, so tell its agent which pushed branch to build on.
-
-The chat keeps its red **BLOCKED** badge in the session list even after the task has ended.
+While a task is waiting, SAM holds project event prompts until the wait is released. Credential
+limit events about the task's own credential stay recorded without prompting that agent, so a
+rejection cannot start a notification/rejection loop.
 
 ## SAM paused automatic check-ins
 
@@ -222,10 +215,10 @@ the limit is 3; to change it, add `TASK_RECONCILIATION_MAX_CHECKINS` under `[var
 
 ## The agent or a tool can't sign in
 
-When the agent can't use its provider account, the chat says so — in a strip above the conversation
+When the agent can't use its provider account, the chat says so — in a notice above the session header
 or in the failure card under the chat header (expand the card for the next step):
 
-- **A strip: "Agent connection missing."** The agent has no credential it can use for this chat. If
+- **A notice: "Agent connection missing".** The agent has no credential it can use for this chat. If
   you started the chat, select **Open agent accounts** and connect the agent under
   **Settings → Agents**; otherwise ask the person who started it. It also appears when the account
   pinned to the project or the profile is paused: the project's **Accounts** tab then says **Can't
@@ -256,7 +249,7 @@ too:
   [When a server needs sign-in](/docs/guides/mcp-servers/#when-a-server-needs-sign-in).
 - **A message: "This sign-in flow requires a local callback that this session cannot complete."**
   The server wants to finish its sign-in at `localhost`, which a remote SAM session can't do. While
-  that message is the latest in the chat, a strip above the conversation offers the person who
+  that message is the latest in the chat, a notice above the session header offers the person who
   started the chat **Review MCP connections** (anyone else is asked to tell them); connect the
   server another way.
 
@@ -276,18 +269,18 @@ in Manual, with the request switches in force at their first wake; see
 
 ## Recovery is in progress
 
-A strip with a spinner means SAM is waking the session or rebuilding it from its snapshot. Usually you
-need to do nothing: when it finishes, the chat carries on. If the strip names a reason it's waiting,
+A small status with a spinner, floating over the top of the conversation, means SAM is waking the session or rebuilding it from its snapshot. Usually you
+need to do nothing: when it finishes, the chat carries on. If the status names a reason it's waiting,
 the table below says what you can do.
 
-On Instant this finishes within two minutes. On a VM, the strip names the step it has reached —
+On Instant this finishes within two minutes. On a VM, the status names the step it has reached —
 **Finding a server...**, **Provisioning a server...**, **Restoring your session...**, **Starting
 the agent...** — because a VM wake often provisions a replacement machine, which takes a few
 minutes. The composer reads **Waking the agent — your message will be delivered...** while it
 works, and the **Nodes** page (**Infrastructure** in the main navigation) may briefly show the chat's old workspace deleted and a new one being
 created. That is normal.
 
-If a VM wake is waiting, the strip says why when SAM knows (`attachWakeState` in
+If a VM wake is waiting, the status says why when SAM knows (`attachWakeState` in
 `apps/api/src/routes/chat/wake-state.ts`):
 
 <picture>
@@ -295,7 +288,7 @@ If a VM wake is waiting, the strip says why when SAM knows (`attachWakeState` in
   <img src="/images/docs/chat-wake-waiting.png" alt="A sleeping chat titled Add tax columns to receipts. A strip with a spinner across the top reads: Your cloud provider has no capacity right now. Retrying... Next try at 02:34 PM. The last message, a follow-up question from the user, waits below, and the message box reads Waking the agent, your message will be delivered." loading="lazy" />
 </picture>
 
-| The strip says                                                         | What is happening                                                                                 | What you can do                                                                                                               |
+| The status says                                                        | What is happening                                                                                 | What you can do                                                                                                               |
 | ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | **Waiting for the previous workspace to finish shutting down...**      | SAM is still deleting the machine the chat slept on. The wake starts once it is gone.             | Wait. If it lasts, check that node on the **Nodes** page (see [A node won't go away](#a-node-wont-go-away)).                  |
 | **Your cloud provider has no capacity right now. Retrying...**         | Your provider is out of that machine type in that location.                                       | Wait, or allow more machine types or locations in your [compute pool](/docs/guides/compute-pools/).                           |
@@ -305,14 +298,14 @@ If a VM wake is waiting, the strip says why when SAM knows (`attachWakeState` in
 | **Waiting for a new server to finish starting...**                     | SAM starts one new machine at a time for your account on each cloud, and one is already starting. | Wait; it usually takes a few minutes.                                                                                         |
 | **Waiting for a server that is still setting up...**                   | A machine that can take this chat is busy setting up another workspace.                           | Wait.                                                                                                                         |
 
-When SAM has scheduled its next attempt, the strip adds **Next try at** and the time. If it shows
+When SAM has scheduled its next attempt, the status adds **Next try at** and the time. If it shows
 only **Waiting for server capacity...**, SAM has not recorded a reason yet. SAM keeps trying; if
 the wait drags on, delete machines you no longer need from the **Nodes** page. A message you sent is held for an
 hour: if the wake is still waiting then, the chat reports **Wake failed: Session is waking** (see
 [Wake failed](#wake-failed)).
 
 Until a **Wake failed** message appears, SAM still holds your message and keeps retrying the wake,
-even if the strip is gone when you reopen the chat. Don't send the message again: a second copy
+even if the status is gone when you reopen the chat. Don't send the message again: a second copy
 would be delivered as well. SAM retries a pending delivery for up to an hour, but elapsed time and
 the absence of a reply do not prove that the agent never received it. If the state is unclear,
 check the transcript, task, and linked GitHub work before resending. Send it again only when those
@@ -629,6 +622,9 @@ usually to keep something safe. Most of these clear by themselves:
 | `lost_race`                                     | The node changed while SAM was checking; it checks again shortly.                                                                                            |
 | `strict_provider_ownership_or_deletion_failure` | SAM tried to delete the server at your provider and couldn't, or couldn't prove the server is yours. See [SAM can't delete a node](#sam-cant-delete-a-node). |
 
+A running machine with no active workspaces that is blocked only by `unproven_workspace_deletion` or
+`unproven_snapshot_source` is moved to the warm pool, so it can be reused and then retired normally.
+
 A workspace machine that is stopped or being deleted, and stays blocked for 30 minutes (the admin
 setting `operations.nodeCleanupBlockedRetirementMs`), is retired anyway so it isn't billed
 indefinitely, unless a workspace on it is still running, SAM is about to reuse it, or SAM can't prove
@@ -734,7 +730,7 @@ Code, look at the skill. A skill that sets an agent replaces the profile's agent
 profile's model. Skills created from the **Skills** page before 21 October 2026 (v2026.10.22 on a
 self-hosted instance) all set the platform default agent, usually OpenCode, and the **Skills** page
 doesn't show it. Ask an agent in the project to list the project's skills and clear the agent on
-any that set one (`update_skill` with `agentType: ""`), or start the chat without that skill. See
+any that set one (`skills_write` method `update` with `agentType: ""`), or start the chat without that skill. See
 [the order SAM picks the agent in](/docs/guides/agents/#agent-profiles).
 
 ## SAM moved the session to another machine

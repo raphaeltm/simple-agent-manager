@@ -1,6 +1,14 @@
 import { QueryClientProvider } from '@tanstack/react-query';
-import { type ReactNode, Suspense } from 'react';
-import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from 'react-router';
+import { type ReactNode, Suspense, useEffect, useRef } from 'react';
+import {
+  BrowserRouter,
+  Navigate,
+  Outlet,
+  Route,
+  Routes,
+  useLocation,
+  useParams,
+} from 'react-router';
 
 import { AppShell } from './components/AppShell';
 import { AuthProvider, useAuth } from './components/AuthProvider';
@@ -11,13 +19,17 @@ import { ProtectedRoute } from './components/ProtectedRoute';
 import { RouteFallback } from './components/RouteFallback';
 import { GlobalAudioProvider } from './contexts/GlobalAudioContext';
 import { ThemeProvider } from './contexts/ThemeContext';
+import { useQueryScope } from './hooks/useQueryScope';
 import { ToastProvider } from './hooks/useToast';
 import { lazyNamed, memoizeRouteImport } from './lib/lazy-with-retry';
+import { prefetchProjectRoute } from './lib/project-route-prefetch';
 import { queryClient } from './lib/query-client';
+import { isProjectChatRoute } from './lib/shell-routes';
 // Initial landing set — statically imported per .claude/rules/60-request-io-and-bundle-budgets.md.
 // Every other page below is code-split via lazyNamed(). Do NOT add static page imports here.
 import { Dashboard } from './pages/Dashboard';
 import { Landing } from './pages/Landing';
+import { ChatLoadingLayout } from './pages/project-chat/ChatLoadingLayout';
 import { LegacyCloudProviderRedirect, SettingsRedirect } from './pages/settings-redirects';
 
 const AccountMap = lazyNamed(() => import('./pages/AccountMap'), 'AccountMap');
@@ -31,6 +43,7 @@ const AdminComputeQuotas = lazyNamed(
 const AdminComputeUsage = lazyNamed(() => import('./pages/AdminComputeUsage'), 'AdminComputeUsage');
 const AdminCosts = lazyNamed(() => import('./pages/AdminCosts'), 'AdminCosts');
 const AdminDiagnoses = lazyNamed(() => import('./pages/AdminDiagnoses'), 'AdminDiagnoses');
+const AdminApprovals = lazyNamed(() => import('./pages/AdminApprovals'), 'AdminApprovals');
 const AdminDiagnosis = lazyNamed(() => import('./pages/AdminDiagnosis'), 'AdminDiagnosis');
 const AdminErrors = lazyNamed(() => import('./pages/AdminErrors'), 'AdminErrors');
 const AdminInfrastructure = lazyNamed(
@@ -69,12 +82,36 @@ const loadProjectShell = memoizeRouteImport(() => import('./pages/Project'));
 const loadProjectChat = memoizeRouteImport(() => import('./pages/project-chat'));
 const loadProjectSettings = memoizeRouteImport(() => import('./pages/ProjectSettings'));
 const ProjectShell = lazyNamed(loadProjectShell, 'Project');
+/**
+ * The project shell's chunk fallback. On a chat route it is the chat's own loading
+ * layout, so the spinner is already where the project and transcript spinners that
+ * follow it will be.
+ */
+function ProjectRouteFallback() {
+  const { pathname } = useLocation();
+  return isProjectChatRoute(pathname) ? (
+    <ChatLoadingLayout testId="route-fallback" />
+  ) : (
+    <RouteFallback />
+  );
+}
+
 function Project() {
   const { pathname } = useLocation();
+  const queryScope = useQueryScope();
+  const projectId = useParams<{ id: string }>().id;
+  // Read the path when the project changes, not on every in-project navigation: this route
+  // element stays mounted across projects, and a session switch inside one project is read
+  // by the chat page that is already mounted.
+  const pathnameRef = useRef(pathname);
+  pathnameRef.current = pathname;
+  useEffect(() => {
+    if (projectId) prefetchProjectRoute(queryClient, queryScope, pathnameRef.current);
+  }, [projectId, queryScope]);
   void loadProjectShell().catch(() => undefined);
   if (/\/settings(?:\/|$)/.test(pathname)) {
     void loadProjectSettings().catch(() => undefined);
-  } else if (/\/projects\/[^/]+(?:\/chat(?:\/|$)|\/?$)/.test(pathname)) {
+  } else if (isProjectChatRoute(pathname)) {
     void loadProjectChat().catch(() => undefined);
   }
   return <ProjectShell />;
@@ -208,8 +245,8 @@ const Workspace = lazyNamed(() => import('./pages/workspace'), 'Workspace');
  * `.claude/rules/48-stale-while-revalidate-ui.md`: a fallback must never unmount
  * already-rendered content.
  */
-function page(element: ReactNode) {
-  return <Suspense fallback={<RouteFallback />}>{element}</Suspense>;
+function page(element: ReactNode, fallback: ReactNode = <RouteFallback />) {
+  return <Suspense fallback={fallback}>{element}</Suspense>;
 }
 
 function ProtectedLayout() {
@@ -293,10 +330,25 @@ export default function App() {
                       <Route path="/projects/invite/:token" element={page(<ProjectInvite />)} />
 
                       {/* Project detail — shell with sub-routes */}
-                      <Route path="/projects/:id" element={page(<Project />)}>
+                      <Route
+                        path="/projects/:id"
+                        element={page(<Project />, <ProjectRouteFallback />)}
+                      >
                         <Route index element={<Navigate to="chat" replace />} />
-                        <Route path="chat" element={page(<ProjectChat />)} />
-                        <Route path="chat/:sessionId" element={page(<ProjectChat />)} />
+                        <Route
+                          path="chat"
+                          element={page(
+                            <ProjectChat />,
+                            <ChatLoadingLayout testId="chat-route-fallback" />
+                          )}
+                        />
+                        <Route
+                          path="chat/:sessionId"
+                          element={page(
+                            <ProjectChat />,
+                            <ChatLoadingLayout testId="chat-route-fallback" />
+                          )}
+                        />
                         <Route path="agent" element={page(<ProjectAgentChat />)} />
                         <Route path="library" element={page(<ProjectLibrary />)} />
                         <Route path="comments" element={page(<ProjectComments />)} />
@@ -423,6 +475,7 @@ export default function App() {
                         <Route path="errors" element={page(<AdminErrors />)} />
                         <Route path="diagnoses" element={page(<AdminDiagnoses />)} />
                         <Route path="diagnoses/:runId" element={page(<AdminDiagnosis />)} />
+                        <Route path="approvals" element={page(<AdminApprovals />)} />
                         <Route path="overview" element={page(<AdminOverview />)} />
                         <Route path="project-events" element={page(<AdminProjectEvents />)} />
                         <Route path="logs" element={page(<AdminLogs />)} />

@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"os/exec"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -106,6 +105,11 @@ type SessionHostConfig struct {
 	// uses StartProcess via startAgentProcess.
 	StartProcess func(*agentStartup) (agentProcess, error)
 
+	// VerifyCodexRuntime is an internal test hook that replaces the C2 runtime
+	// verification/installation, which needs the real reviewed release. Production
+	// code leaves it nil.
+	VerifyCodexRuntime func(context.Context, agentCommandInfo) error
+
 	// BeforeCheckpointProcessStop is an internal deterministic-race test hook.
 	// Production code leaves it nil.
 	BeforeCheckpointProcessStop func()
@@ -198,8 +202,11 @@ type SessionHost struct {
 	// agentSupportsLoadSession is captured from ACP Initialize so prompt error
 	// handling can decide whether a process crash is recoverable.
 	agentSupportsLoadSession bool
-	status                   SessionHostStatus
-	statusErr                string
+	// steering is what the loaded adapter proved at ACP Initialize
+	// (session_host_steering.go). Cleared whenever the ACP connection is.
+	steering  steeringSupport
+	status    SessionHostStatus
+	statusErr string
 	// selectionInProgress is set for the duration of a selectAgent call (from
 	// beginAgentSelection until selectAgent returns). It guards the fresh-host
 	// window where h.process is still nil during the multi-second
@@ -264,6 +271,10 @@ type SessionHost struct {
 	bufMu      sync.RWMutex
 	messageBuf []BufferedMessage
 	seqCounter uint64
+
+	// steerMu admits and sends live steers one at a time per host, in order.
+	// Independent of the prompt gate: a steer never takes promptMu across an RPC.
+	steerMu sync.Mutex
 
 	// Prompt lifecycle state.
 	// promptMu guards promptInFlight (serialization gate only).
@@ -343,6 +354,7 @@ type SessionHost struct {
 	// Durable ACP permission waiters are in-memory by design: Cloudflare owns
 	// durable state, while only the live connection generation may consume an answer.
 	interactionMu           sync.Mutex
+	samEnvFallback          atomic.Pointer[[]string] // set by ConfigureSAMEnvFallback; nil means config.SAMEnvFallback
 	interactionConfig       AcpInteractionRuntimeConfig
 	interactionGeneration   string
 	interactionWaiters      map[string]*acpInteractionWaiter
@@ -644,17 +656,11 @@ func (h *SessionHost) Stop() {
 // on-demand if missing.
 func (h *SessionHost) ensureAgentInstalled(ctx context.Context, info agentCommandInfo) error {
 	if info.verifyOnly {
-		if h.config.ProcessLauncher != nil {
-			if err := exec.CommandContext(ctx, localShellPath, "-c", info.validationCmd).Run(); err != nil {
-				return fmt.Errorf("staged Codex release verification failed: %w", err)
-			}
-			return nil
+		if err := h.verifyCodexRuntime(ctx, info); err != nil {
+			h.releaseCodexRuntimeSelection()
+			return codexRuntimeUnavailable(err)
 		}
-		containerID, err := h.config.ContainerResolver()
-		if err != nil {
-			return fmt.Errorf("failed to discover devcontainer: %w", err)
-		}
-		return h.ensureCodexRuntimeInContainer(ctx, containerID, info)
+		return nil
 	}
 	if info.installCmd == "" {
 		return nil
@@ -692,6 +698,7 @@ func (h *SessionHost) stopCurrentAgentLocked() {
 	h.acpConn = nil
 	h.setSessionIDLocked("")
 	h.agentSupportsLoadSession = false
+	h.steering = steeringSupport{}
 	// Clear credential metadata so stale values don't leak across agent switches.
 	h.credInjectionMode = ""
 	h.credAuthFilePath = ""

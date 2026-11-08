@@ -272,6 +272,6 @@ export async function getDeploymentPublishJobForMcp(
       ? job.status === 'succeeded'
         ? 'Publish finished. Inspect deployment logs and release apply events to verify runtime health.'
         : 'Publish is terminal. Inspect the failed step and recent events before retrying.'
-      : 'Call get_publish_status again with publishJobId and sinceSeq until the status is terminal.',
+      : 'Call deployments_read method publish_status again with publishJobId and sinceSeq until the status is terminal.',
   };
 }

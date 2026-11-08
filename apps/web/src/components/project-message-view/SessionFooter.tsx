@@ -1,12 +1,14 @@
 import type { SlashCommand } from '@simple-agent-manager/acp-client';
 import { PlanModal } from '@simple-agent-manager/acp-client';
-import type { AgentProfile } from '@simple-agent-manager/shared';
+import type { AgentProfile, PromptDeliveryIntent } from '@simple-agent-manager/shared';
 import { isExpiredTask } from '@simple-agent-manager/shared';
-import { Button } from '@simple-agent-manager/ui';
+import { Button, Pane } from '@simple-agent-manager/ui';
 import { type ReactNode, type RefObject, useEffect, useMemo, useState } from 'react';
 
+import { IMMERSIVE_CHROME } from '../shell/chat-immersive-transition';
 import { ArchivedForkComposer } from './ArchivedForkComposer';
 import { CompletionDock } from './CompletionDock';
+import { DeliveryIntentControl, deliveryIntentPlaceholder } from './DeliveryIntentControl';
 import { FollowUpInput, ReadOnlyFollowUp } from './FollowUpInput';
 import { accessClockTime, accessTimeLeft, useServerNow } from './session-access-time';
 import { currentPlanToPlanItem, ElapsedTime } from './session-view-utils';
@@ -16,6 +18,9 @@ import {
 } from './session-viewer-access';
 import { StaleActivityNotice } from './StaleActivityNotice';
 import type { UseSessionLifecycleResult } from './useSessionLifecycle.types';
+
+/** The composer's choice while the agent works, until the user picks the other one. */
+const DEFAULT_WORKING_INTENT: PromptDeliveryIntent = 'steer';
 
 interface SessionFooterProps {
   projectId: string;
@@ -74,6 +79,24 @@ export function SessionFooter({
       lc.currentPlan && lc.currentPlan.length > 0 ? currentPlanToPlanItem(lc.currentPlan) : null,
     [lc.currentPlan]
   );
+  // Steering only means something while a turn runs. Each turn starts on "Steer now" (the
+  // runtime falls back to the queue, visibly, when it cannot take the message); a message
+  // with files always queues, because a steer carries text only.
+  const agentWorking =
+    !lc.isWaking && (lc.agentActivity === 'prompting' || lc.agentActivity === 'responding');
+  const [deliveryIntent, setDeliveryIntent] =
+    useState<PromptDeliveryIntent>(DEFAULT_WORKING_INTENT);
+  useEffect(() => {
+    if (!agentWorking) setDeliveryIntent(DEFAULT_WORKING_INTENT);
+  }, [agentWorking]);
+  const hasAttachments = lc.attachments.length > 0;
+  // An agent whose adapter reported it cannot steer gets no Steer choice: every message
+  // queues. Unknown (null, including older VM agents) keeps the choice on offer. This is the
+  // composer's choice only; the VM agent refuses a steer its adapter cannot take regardless.
+  const canSteer = lc.steeringSupported !== false;
+  const workingIntent: PromptDeliveryIntent = canSteer ? deliveryIntent : 'queue';
+  const sendIntent: PromptDeliveryIntent =
+    agentWorking && !hasAttachments ? workingIntent : 'queue';
   const sessionOwnerLabel = ownerLabelFor(lc.session);
   const viewerGrant = viewer.isGrantee
     ? lc.session?.access?.grants.find((grant) => grant.grantee.id === viewerId)
@@ -117,7 +140,14 @@ export function SessionFooter({
     lc.sessionState === 'active' || lc.sessionState === 'idle' || lc.sessionState === 'sleeping';
 
   return (
-    <>
+    // The message-box slab (SAM Glass). `empty:hidden` drops it when no footer state
+    // applies; no `overflow-hidden`, because the dock's crest rises above the slab's edge.
+    <Pane
+      variant="slab"
+      data-testid="session-footer"
+      data-immersive-chrome={IMMERSIVE_CHROME.composer}
+      className="shrink-0 empty:hidden"
+    >
       {/* Lifecycle control — a single always-mounted dock while the session is
           active. Its center button morphs between Interrupt (working), Sleep
           (awake idle), and Archive (already sleeping), so irreversible archive
@@ -142,6 +172,16 @@ export function SessionFooter({
             elapsed={
               lc.promptStartedAt ? <ElapsedTime startedAt={lc.promptStartedAt} /> : undefined
             }
+            deliveryControl={
+              agentWorking ? (
+                <DeliveryIntentControl
+                  value={deliveryIntent}
+                  onChange={setDeliveryIntent}
+                  hasAttachments={hasAttachments}
+                  steerUnavailable={!canSteer}
+                />
+              ) : undefined
+            }
           />
         )}
       {planItem && (
@@ -165,7 +205,7 @@ export function SessionFooter({
           value={lc.followUp}
           onChange={lc.setFollowUp}
           onSend={() => {
-            void lc.handleSendFollowUp();
+            void lc.handleSendFollowUp(sendIntent);
           }}
           // A teammate's files are their own uploads; the server copies them only into this
           // chat's workspace while their access lasts.
@@ -183,8 +223,8 @@ export function SessionFooter({
             // invites the duplicate wake this feature exists to prevent.
             lc.isWaking
               ? 'Waking the agent — your message will be delivered...'
-              : lc.agentActivity === 'prompting' || lc.agentActivity === 'responding'
-                ? 'Agent is working...'
+              : agentWorking
+                ? deliveryIntentPlaceholder(workingIntent, hasAttachments)
                 : lc.sessionState === 'idle'
                   ? 'Send a message to resume the agent...'
                   : lc.sessionState === 'sleeping'
@@ -218,7 +258,7 @@ export function SessionFooter({
         <ReadOnlyFollowUp ownerLabel={sessionOwnerLabel} onNewChat={onNewChat} ended />
       )}
       {lc.sessionState === 'terminated' && lc.session?.status !== 'stopped' && (
-        <div className="shrink-0 border-t border-border-default px-4 py-3 bg-surface text-center">
+        <div className="shrink-0 px-4 py-4 text-center">
           <p className="m-0 sam-type-secondary text-fg-muted">
             {isExpiredTask(lc.taskEmbed)
               ? 'The saved workspace has expired. Your transcript is still available.'
@@ -231,7 +271,7 @@ export function SessionFooter({
           )}
         </div>
       )}
-    </>
+    </Pane>
   );
 }
 
@@ -248,7 +288,7 @@ function SharedSessionNotice({
   const timeLeft = expiresAt === null ? null : accessTimeLeft(expiresAt, now);
   return (
     <div
-      className="shrink-0 border-t border-border-default bg-surface px-4 py-2 text-xs text-fg-muted"
+      className="shrink-0 border-b border-[var(--sam-hairline)] px-4 py-2.5 text-xs text-fg-muted md:px-5"
       data-testid="shared-session-notice"
     >
       <span className="font-medium text-fg-primary">

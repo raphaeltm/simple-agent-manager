@@ -30,6 +30,7 @@ const AGENT_MARKS: Record<string, { glyph: string; hue: string; company: string 
   'claude-code': { glyph: 'A\\', hue: '#d97757', company: 'Anthropic' },
   'openai-codex': { glyph: 'OA', hue: '#10a37f', company: 'OpenAI' },
   'google-gemini': { glyph: 'G', hue: '#4f8cf7', company: 'Google' },
+  'google-antigravity': { glyph: 'Ag', hue: '#34a853', company: 'Google' },
   'mistral-vibe': { glyph: 'M', hue: '#fa7a35', company: 'Mistral' },
   opencode: { glyph: 'oc', hue: '#a78bfa', company: 'OpenCode' },
   amp: { glyph: 'Am', hue: '#f43f5e', company: 'Sourcegraph' },

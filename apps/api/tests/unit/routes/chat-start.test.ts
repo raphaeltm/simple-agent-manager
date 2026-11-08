@@ -398,4 +398,75 @@ describe('chatStartRoutes', () => {
       expect(db.insert).not.toHaveBeenCalled();
     });
   });
+
+  describe('per-chat model and effort', () => {
+    async function startWith(overrides: Record<string, unknown>) {
+      return makeApp().request(
+        `${BASE_URL}${REQUEST_PATH}`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message: 'hello', agentProfileId: 'profile-1', ...overrides }),
+        },
+        makeEnv()
+      );
+    }
+
+    function launchedOverrides() {
+      return mocks.instant.acceptInstantSession.mock.calls[0]![2].overrides as Record<
+        string,
+        unknown
+      >;
+    }
+
+    it('launches with the chat model and effort, keeping the profile permission mode', async () => {
+      const res = await startWith({ model: ' claude-opus-5-5 ', effort: 'max' });
+      expect(res.status).toBe(202);
+      expect(launchedOverrides()).toEqual({
+        model: 'claude-opus-5-5',
+        effort: 'max',
+        permissionMode: 'acceptEdits',
+      });
+      // The same overrides reach the background launch, not just acceptance.
+      expect(mocks.instant.continueInstantSessionLaunch.mock.calls[0]![2].overrides).toEqual(
+        launchedOverrides()
+      );
+    });
+
+    it('inherits the profile model and effort when none is chosen', async () => {
+      const res = await startWith({ model: '', effort: null });
+      expect(res.status).toBe(202);
+      expect(launchedOverrides()).toMatchObject({
+        model: 'claude-sonnet-4-5-20250929',
+        effort: 'auto',
+      });
+    });
+
+    it('rejects an effort the resolved agent cannot run before creating anything', async () => {
+      const opencodeProfile = {
+        profileId: 'profile-1',
+        skillId: null,
+        agentType: 'opencode',
+        model: null,
+        effort: 'auto',
+        permissionMode: null,
+        provider: null,
+        runtime: 'cf-container',
+        systemPromptAppend: null,
+      };
+      mocks.skills.resolveSkillProfile.mockResolvedValue(opencodeProfile);
+      const res = await startWith({ effort: 'high' });
+      expect(res.status).toBe(400);
+      expect(await res.json<{ message: string }>()).toMatchObject({
+        message: "Effort 'high' is not supported for agent type 'opencode'",
+      });
+      expect(db.insert).not.toHaveBeenCalled();
+      expect(mocks.instant.acceptInstantSession).not.toHaveBeenCalled();
+
+      // Owner-path control: the same OpenCode profile starts with an effort it supports.
+      const ok = await startWith({ effort: 'auto' });
+      expect(ok.status).toBe(202);
+      expect(launchedOverrides()).toMatchObject({ effort: 'auto' });
+    });
+  });
 });

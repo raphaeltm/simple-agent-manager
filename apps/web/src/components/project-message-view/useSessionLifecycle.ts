@@ -1,3 +1,4 @@
+import type { PromptDeliveryIntent } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { WakeProgressUpdate } from '../../hooks/useChatWebSocket';
@@ -10,14 +11,12 @@ import type {
   MessageCommentRealtimeEvent,
   SessionStateSnapshot,
 } from '../../lib/api';
-import {
-  getTerminalToken,
-  getTranscribeApiUrl,
-  resetIdleTimer,
-  sendFollowUpPrompt,
-} from '../../lib/api';
+import { getTerminalToken, getTranscribeApiUrl, sendFollowUpPrompt } from '../../lib/api';
+import type { PromptDeliveryUpdate } from '../../lib/prompt-delivery-update';
+import { deliveryUpdateMetadataPatch } from '../../lib/prompt-delivery-update';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
 import { DEFAULT_ATTACHMENT_MESSAGE } from '../../pages/project-chat/useAttachments';
+import { optimisticUserMessage, refreshIdleCleanupAfterSend } from './send-follow-up-helpers';
 import { useSessionDraft } from './session-drafts';
 import type { FilePanelState } from './session-lifecycle-helpers';
 import { parsePlanContent } from './session-lifecycle-helpers';
@@ -44,7 +43,7 @@ export function useSessionLifecycle(
   onCommentEvent?: (event: MessageCommentRealtimeEvent) => void
 ): UseSessionLifecycleResult {
   const transcript = useSessionTranscript(projectId, sessionId);
-  const { appendMessages, catchUpTail, mergeRecentWindow } = transcript;
+  const { appendMessages, catchUpTail, mergeRecentWindow, patchMessageMetadata } = transcript;
   // Seeded from the cached transcript so a cached chat renders whole on its first
   // render; the server-snapshot effect below keeps both current from then on.
   const [session, setSession] = useState<ChatSessionResponse | null>(
@@ -76,13 +75,19 @@ export function useSessionLifecycle(
   const [currentPlan, setCurrentPlan] = useState<SessionStateSnapshot['currentPlan']>(null);
   const [promptStartedAt, setPromptStartedAt] = useState<number | null>(null);
   const [staleNotice, setStaleNotice] = useState(false);
+  // Whether the agent's adapter can take a message mid-turn. Null until the VM agent says;
+  // older VM agents never do, so null keeps Steer on offer as before.
+  const [steeringSupported, setSteeringSupported] = useState<boolean | null>(null);
   const clearActivity = useCallback(() => {
     setAgentActivity('idle');
     setPromptStartedAt(null);
   }, []);
+  // Every state snapshot (load, fallback poll, activity verification) also carries the
+  // agent's steering capability; a snapshot without it leaves the known value alone.
   const hydratePlan = useCallback((s: SessionStateSnapshot | null | undefined) => {
     if (!s) return;
     setCurrentPlan(s.currentPlan ?? null);
+    if (typeof s.steeringSupported === 'boolean') setSteeringSupported(s.steeringSupported);
   }, []);
   const handleVerifiedStale = useCallback(() => setStaleNotice(true), []);
   const dismissStaleNotice = useCallback(() => setStaleNotice(false), []);
@@ -200,6 +205,14 @@ export function useSessionLifecycle(
       },
       [hydrateState, mergeRecentWindow]
     ),
+    // What the agent's runtime did with a steer, on its transcript row.
+    onDeliveryUpdate: useCallback(
+      (update: PromptDeliveryUpdate) => {
+        const patch = deliveryUpdateMetadataPatch(update);
+        if (patch) patchMessageMetadata(update.promptMessageId, patch);
+      },
+      [patchMessageMetadata]
+    ),
     onAgentCompleted: useCallback(
       (agentCompletedAt: number) => {
         setSession((prev) =>
@@ -215,8 +228,11 @@ export function useSessionLifecycle(
     onAgentActivity: useCallback(
       (
         activity: 'prompting' | 'idle' | 'recovering' | 'error',
-        promptStartedAt?: number | null
+        promptStartedAt?: number | null,
+        reportedSteeringSupported?: boolean
       ) => {
+        if (reportedSteeringSupported !== undefined)
+          setSteeringSupported(reportedSteeringSupported);
         const working = activity === 'prompting' || activity === 'recovering';
         setAgentActivity(working ? activity : 'idle');
         setPromptStartedAt(working ? (promptStartedAt ?? Date.now()) : null);
@@ -335,8 +351,8 @@ export function useSessionLifecycle(
     hydrateWakeProgress,
   });
 
-  // ── Send follow-up via REST API ──
-  const handleSendFollowUp = async () => {
+  // ── Send follow-up via REST API ── (`steer` only matters while a turn runs.)
+  const handleSendFollowUp = async (deliveryIntent: PromptDeliveryIntent = 'queue') => {
     const trimmed = followUp.trim() || (attachments.length > 0 ? DEFAULT_ATTACHMENT_MESSAGE : '');
     if (!trimmed || sendingFollowUp || attachments.some((a) => a.status !== 'complete')) return;
     const attachmentRefs = attachments.flatMap((a) => (a.ref ? [a.ref] : []));
@@ -350,34 +366,8 @@ export function useSessionLifecycle(
     // the old error visible would attach it to work it has nothing to do with.
     clearCancelError();
     try {
-      if (sessionState === 'idle') {
-        resetIdleTimer(projectId, sessionId)
-          .then((result) => {
-            if (result.cleanupAt) {
-              setSession((prev) => {
-                if (!prev) return prev;
-                return {
-                  ...prev,
-                  cleanupAt: result.cleanupAt,
-                  isIdle: false,
-                  agentCompletedAt: null,
-                } as ChatSessionResponse;
-              });
-            }
-          })
-          .catch(() => {});
-      }
-
-      // Optimistic user message
-      const optimisticId = `optimistic-${crypto.randomUUID()}`;
-      const optimisticMessage: ChatMessageResponse = {
-        id: optimisticId,
-        sessionId,
-        role: 'user',
-        content: trimmed,
-        toolMetadata: null,
-        createdAt: Date.now(),
-      };
+      if (sessionState === 'idle') refreshIdleCleanupAfterSend(projectId, sessionId, setSession);
+      const optimisticMessage = optimisticUserMessage(sessionId, trimmed, deliveryIntent);
       // Attachment display includes canonical workspace paths, so only plain messages get
       // an optimistic row; durable acceptance persists and broadcasts the real one.
       if (attachmentRefs.length === 0) appendMessages([optimisticMessage]);
@@ -407,7 +397,7 @@ export function useSessionLifecycle(
       } else {
         // Forward prompt to the running agent via REST API
         try {
-          await sendFollowUpPrompt(projectId, sessionId, trimmed, attachmentRefs);
+          await sendFollowUpPrompt(projectId, sessionId, trimmed, attachmentRefs, deliveryIntent);
           clearAttachments();
           // Delivery confirmed — clear any stale recovery banner and the composer.
           recovery.clearResumeError();
@@ -464,6 +454,7 @@ export function useSessionLifecycle(
     showConnectionBanner: recovery.showConnectionBanner,
     retryWs,
     agentActivity,
+    steeringSupported,
     completionDockWorking,
     /** True while a wake is in flight (hydrated from D1 or pushed over the socket). */
     isWaking: wake.isWaking,

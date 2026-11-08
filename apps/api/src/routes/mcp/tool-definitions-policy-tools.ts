@@ -12,7 +12,7 @@ const SCOPE_DESCRIPTION =
 
 const EXPIRES_AT_DESCRIPTION =
   'Epoch milliseconds after which this policy stops being injected into sessions. Omit or null for a policy that never expires. ' +
-  'Must be in the future. Required when scope is "task". The policy stays readable via get_policy and visible in list_policies after it expires.';
+  'Must be in the future. Required when scope is "task". The policy stays readable via policies_read method get and visible in policies_read method list after it expires.';
 
 export const POLICY_TOOLS = [
   {

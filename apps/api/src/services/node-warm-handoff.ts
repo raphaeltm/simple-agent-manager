@@ -22,7 +22,13 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import * as nodeLifecycleService from './node-lifecycle';
+import {
+  type NodeLifecycleDecision,
+  type NodeLifecycleDecisionDetail,
+  recordNodeLifecycleDecision,
+} from './node-lifecycle-decisions';
 import { cleanupNodeProvenanceSql } from './node-teardown-provenance';
+import { resolveOperationsTelemetrySetting } from './operations-telemetry-settings';
 import { wakeVmAdmissionWaiters } from './vm-admission-wakeup';
 import { ACTIVE_WORKSPACE_RESERVATION_STATUS_SQL } from './workspace-resource-capacity';
 
@@ -109,6 +115,27 @@ async function retainedWarmTimeoutMs(env: Env, input: NodeWarmHandoffInput): Pro
   return row.warm_timeout_ms;
 }
 
+/** Best-effort decision log row; repeating skips are deduped (see node-lifecycle-decisions). */
+async function recordHandoffDecision(
+  env: Env,
+  input: NodeWarmHandoffInput,
+  decision: NodeLifecycleDecision,
+  reason: string | null,
+  detail: NodeLifecycleDecisionDetail = {},
+  repeating = false
+): Promise<void> {
+  await recordNodeLifecycleDecision(env.DATABASE, {
+    nodeId: input.nodeId,
+    source: 'warm_handoff',
+    decision,
+    reason,
+    detail: { removalPath: input.reason, ...detail },
+    dedupeWindowMs: repeating
+      ? await resolveOperationsTelemetrySetting(env, 'nodeDecisionDedupeWindowMs')
+      : undefined,
+  });
+}
+
 export async function handOffEmptyWorkspaceNode(
   env: Env,
   input: NodeWarmHandoffInput
@@ -133,6 +160,8 @@ export async function handOffEmptyWorkspaceNode(
     const skipped = skipReason(node, input.expectedUserId);
     if (skipped || !node) {
       log.info('node_warm_handoff.skipped', { ...logContext, skipReason: skipped });
+      // A missing node has nothing to explain; every other skip says why it stayed alive.
+      if (node) await recordHandoffDecision(env, input, 'handoff_skipped', skipped, {}, true);
       return { outcome: 'skipped', reason: skipped ?? 'node_missing' };
     }
 
@@ -145,6 +174,7 @@ export async function handOffEmptyWorkspaceNode(
     );
     if (state.status !== 'warm') {
       log.info('node_warm_handoff.preserved_active', { ...logContext, state: state.status });
+      await recordHandoffDecision(env, input, 'preserved_active', `node_lifecycle_${state.status}`);
       return { outcome: 'preserved_active' };
     }
 
@@ -154,6 +184,7 @@ export async function handOffEmptyWorkspaceNode(
       warmSince: state.warmSince,
       warmTimeoutOverrideMs: warmTimeoutMs,
     });
+    await recordHandoffDecision(env, input, 'handed_to_warm', null, { warmTimeoutMs });
     try {
       // A warm node is reusable capacity: let queued admissions claim it now.
       await wakeVmAdmissionWaiters(env, { userId: node.user_id, reason: 'node_marked_warm' });
@@ -167,6 +198,7 @@ export async function handOffEmptyWorkspaceNode(
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     log.error('node_warm_handoff.failed', { ...logContext, error: message });
+    await recordHandoffDecision(env, input, 'handoff_failed', message, {}, true);
     return { outcome: 'failed', error: message };
   }
 }

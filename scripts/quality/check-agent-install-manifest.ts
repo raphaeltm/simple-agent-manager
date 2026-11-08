@@ -3,7 +3,7 @@ import { join } from 'node:path';
 
 interface Spec {
   agentType: string;
-  method: 'npm' | 'uv-tool' | 'github-release';
+  method: 'npm' | 'uv-tool' | 'github-release' | 'binary-archive';
   package: string;
   version: string;
   bin: string;
@@ -57,8 +57,11 @@ for (const spec of specs) {
     const makefile = readFileSync(join(root, 'packages/vm-agent/Makefile'), 'utf8');
     if (
       spec.agentType !== 'opencode' ||
-      spec.repository !== 'anomalyco/opencode' ||
+      spec.repository !== 'raphaeltm/simple-agent-manager' ||
       !installer.includes(`version=${spec.version}\n`) ||
+      !installer.includes(
+        'https://github.com/raphaeltm/simple-agent-manager/releases/download/opencode-v$version/opencode-$target.tar.gz'
+      ) ||
       !goInstaller.includes(`const opencodeVersion = "${spec.version}"`) ||
       !goInstaller.includes('//go:embed opencode_install.sh') ||
       !goSource.includes('installCmd:    opencodeInstallScript') ||
@@ -87,6 +90,38 @@ for (const spec of specs) {
     }
     if (dockerfile.includes('opencode-ai@'))
       throw new Error('Instant still installs OpenCode v1 via npm');
+    continue;
+  }
+  if (spec.method === 'binary-archive') {
+    // Antigravity unpacks to about 1 GB, so the Instant image does not bake it in;
+    // both runtimes install it on first use with the same embedded script.
+    const installer = readFileSync(
+      join(root, 'packages/vm-agent/internal/acp/antigravity_install.sh'),
+      'utf8'
+    );
+    const goInstaller = readFileSync(
+      join(root, 'packages/vm-agent/internal/acp/antigravity.go'),
+      'utf8'
+    );
+    if (
+      spec.agentType !== 'google-antigravity' ||
+      !installer.includes(`version=${spec.version}\n`) ||
+      !goInstaller.includes(`const antigravityVersion = "${spec.version}"`) ||
+      !goInstaller.includes('//go:embed antigravity_install.sh') ||
+      !goSource.includes('installCmd:    antigravityInstallScript') ||
+      !catalog.includes(`id: '${spec.agentType}'`) ||
+      !/apt-get install[^;]*\bunzip\b/.test(dockerfile)
+    )
+      throw new Error('Antigravity release installer is not synchronized across VM and Instant');
+    for (const target of ['linux-x86_64', 'linux-arm64']) {
+      const digest = spec.assets?.[target];
+      if (
+        !digest ||
+        !/^[a-f0-9]{64}$/.test(digest) ||
+        !installer.includes(`asset=${target}\n    digest=${digest}\n`)
+      )
+        throw new Error(`Antigravity release digest missing or stale: ${target}`);
+    }
     continue;
   }
   const pin = `${spec.package}${spec.method === 'npm' ? '@' : '=='}${spec.version}`;

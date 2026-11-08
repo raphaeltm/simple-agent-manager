@@ -1,17 +1,21 @@
 import type { ToolCallItem } from '@simple-agent-manager/acp-client';
 import type { FC } from 'react';
 
+import { extractApprovalId, isApprovalCardTool } from './approval-card-data';
+import { ApprovalCard } from './ApprovalCard';
 import {
   DOCUMENT_CARD_TOOLS,
   extractDocumentCardData,
   normalizeToolName,
 } from './document-card-data';
 import { DocumentCard } from './DocumentCard';
+import { extractHumanInputRequest, isHumanInputCardTool } from './human-input-card-data';
+import { HumanInputCard } from './HumanInputCard';
 
 /** Props every typed tool-call card receives. */
 export interface ToolCardProps {
   item: ToolCallItem;
-  /** Project the card belongs to — needed for library preview URLs. */
+  /** Project the card belongs to — needed for library preview URLs and approval scoping. */
   projectId?: string;
 }
 
@@ -56,6 +60,17 @@ export function matchToolCard(item: ToolCallItem): FC<ToolCardProps> | null {
 }
 
 function resolveToolCard(item: ToolCallItem): FC<ToolCardProps> | null {
+  // Operations approval request: the card needs the approval ID from the result. While the
+  // call runs, or when it failed, the generic card shows it (and any error) instead.
+  if (isApprovalCardTool(item)) {
+    return item.status !== 'failed' && extractApprovalId(item) ? ApprovalCard : null;
+  }
+  // Agent question: the card needs the attention marker reference from the result. While the
+  // call runs, when it failed, or for results recorded before the structured payload, the
+  // generic card shows it instead.
+  if (isHumanInputCardTool(item)) {
+    return item.status !== 'failed' && extractHumanInputRequest(item) ? HumanInputCard : null;
+  }
   const base = normalizeToolName(item.toolName ?? item.title);
   if (!base || !DOCUMENT_CARD_TOOLS.has(base)) {
     return null;

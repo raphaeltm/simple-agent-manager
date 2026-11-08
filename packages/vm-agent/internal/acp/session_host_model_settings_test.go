@@ -33,6 +33,7 @@ func TestCodexRequestedModelIsSeededBeforeACPProcessStart(t *testing.T) {
 			InitTimeoutMs:       2000,
 			NewSessionTimeoutMs: 2000,
 		},
+		VerifyCodexRuntime: acceptCodexRuntime,
 		StartProcess: func(startup *agentStartup) (agentProcess, error) {
 			for _, envVar := range startup.envVars {
 				if !strings.HasPrefix(envVar, "CODEX_CONFIG=") {
@@ -112,7 +113,8 @@ func TestCodexAstraModelSelectionIsAppliedOrFailsClosed(t *testing.T) {
 					InitTimeoutMs:       2000,
 					NewSessionTimeoutMs: 2000,
 				},
-				StartProcess: func(*agentStartup) (agentProcess, error) { return process, nil },
+				StartProcess:       func(*agentStartup) (agentProcess, error) { return process, nil },
+				VerifyCodexRuntime: acceptCodexRuntime,
 			})
 			host.agentType = "openai-codex"
 
@@ -195,7 +197,8 @@ func TestCodexAstraModelRejectionStopsRestartReplacement(t *testing.T) {
 			InitTimeoutMs:       2000,
 			NewSessionTimeoutMs: 2000,
 		},
-		StartProcess: func(*agentStartup) (agentProcess, error) { return process, nil },
+		StartProcess:       func(*agentStartup) (agentProcess, error) { return process, nil },
+		VerifyCodexRuntime: acceptCodexRuntime,
 	})
 	host.agentType = "openai-codex"
 

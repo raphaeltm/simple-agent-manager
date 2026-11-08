@@ -103,6 +103,11 @@ export {
   updateSignupApprovalConfig,
 } from './admin';
 export {
+  decideOperationsApproval,
+  fetchOperationsApproval,
+  fetchOperationsApprovals,
+} from './admin-operations-approvals';
+export {
   abandonAdminProjectDataArchiveMigration,
   closeAdminProjectDataArchiveCircuitBreaker,
   fetchAdminProjectDataArchiveCircuitBreakers,
@@ -438,6 +443,7 @@ export {
   getNode,
   getNodeLogs,
   getNodeLogStreamUrl,
+  getNodeResourceUsage,
   getNodeSystemInfo,
   listNodeContainers,
   listNodeEvents,
@@ -523,6 +529,7 @@ export {
   shareSessionAccess,
   sleepChatSession,
 } from './session-access';
+export { resetIdleTimer, sendFollowUpPrompt } from './session-prompts';
 export type {
   ActivityEventResponse,
   ActivityEventsListResponse,
@@ -550,9 +557,7 @@ export {
   listActivityEvents,
   listChatMessages,
   listChatSessions,
-  resetIdleTimer,
   resolveAttentionAnswer,
-  sendFollowUpPrompt,
   startInstantChatSession,
   stopChatSession,
 } from './sessions';
@@ -579,6 +584,7 @@ export {
   listTaskEvents,
   removeTaskDependency,
   requestAttachmentUpload,
+  resumeProviderLimitTask,
   runProjectTask,
   submitTask,
   updateProjectTask,

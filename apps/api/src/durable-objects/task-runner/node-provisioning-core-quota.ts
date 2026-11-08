@@ -27,6 +27,11 @@ import type {
 export interface CoreQuotaRejection {
   limit: HetznerAccountLimit;
   vcpuCount: number;
+  /**
+   * The capacity source whose account hit the quota. A quota belongs to one provider account,
+   * so it never rules out an offering from another source (another provider tier).
+   */
+  capacitySourceId: string | null;
 }
 
 /**
@@ -40,7 +45,7 @@ export function coreQuotaRejection(
 ): CoreQuotaRejection | null {
   const vcpuCount = attempt.candidate?.providerInstanceVcpuCount ?? null;
   if (limit?.resource !== 'cores' || vcpuCount === null) return null;
-  return { limit, vcpuCount };
+  return { limit, vcpuCount, capacitySourceId: attempt.candidate?.capacitySourceId ?? null };
 }
 
 /**
@@ -55,8 +60,12 @@ export function coreQuotaExclusionReason(
   const vcpuCount = attempt.candidate?.providerInstanceVcpuCount ?? null;
   const serverType = attempt.providerInstanceType;
   if (vcpuCount === null || !serverType) return null;
+  const capacitySourceId = attempt.candidate?.capacitySourceId ?? null;
   const rejection = rejections.find(
-    (entry) => vcpuCount >= entry.vcpuCount && hetznerCoreLimitCovers(entry.limit, serverType)
+    (entry) =>
+      entry.capacitySourceId === capacitySourceId &&
+      vcpuCount >= entry.vcpuCount &&
+      hetznerCoreLimitCovers(entry.limit, serverType)
   );
   if (!rejection) return null;
   return (

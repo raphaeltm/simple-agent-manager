@@ -15,7 +15,7 @@ read -r _ adapter_tag adapter_commit adapter_patch_hash < <(sed -n '2p' "$script
 read -r _ archive_file archive_hash host_hash < <(sed -n '4p' "$script_dir/pinned-codex-local.provenance")
 read -r _ signature_file signature_hash _ < <(sed -n '5p' "$script_dir/pinned-codex-local.provenance")
 cli_patch="$script_dir/patches/codex-cli-rust-v0.160.0-explicit-mcp.patch"
-adapter_patch="$script_dir/patches/codex-acp-v2.1.1-explicit-mcp.patch"
+adapter_patch="$script_dir/patches/codex-acp-v2.1.1-sam-c2.3.patch"
 printf '%s  %s\n' "$cli_patch_hash" "$cli_patch" "$adapter_patch_hash" "$adapter_patch" | sha256sum --check --status
 
 git clone --depth 1 --branch "$cli_tag" https://github.com/openai/codex.git "$build_dir/cli"
@@ -77,7 +77,7 @@ LOCKCHECK
  cp package-lock.json "$output_dir/ADAPTER-package-lock.json"
 )
 [[ "$("$output_dir/codex" --version)" == 'codex-cli 0.160.0-sam-c2.2' ]]
-[[ "$(node "$output_dir/adapter.js" --version)" == '@agentclientprotocol/codex-acp 2.1.1-sam-c2.2' ]]
+[[ "$(node "$output_dir/adapter.js" --version)" == '@agentclientprotocol/codex-acp 2.1.1-sam-c2.3' ]]
 cp -- "$script_dir/pinned-codex-local.provenance" "$output_dir/SOURCE-PROVENANCE"
 cp -- "$build_dir/cli/LICENSE" "$output_dir/CLI-LICENSE"
 cp -- "$build_dir/adapter/LICENSE" "$output_dir/ADAPTER-LICENSE"

@@ -186,12 +186,7 @@ func (h *SessionHost) resolveAgentEnvVars(ctx context.Context, containerID strin
 	if containerID != "" {
 		envVars = ReadContainerEnvFiles(ctx, containerID)
 	}
-	for _, fallback := range h.config.SAMEnvFallback {
-		key, _, ok := strings.Cut(fallback, "=")
-		if ok && !hasEnvVar(envVars, key) {
-			envVars = append(envVars, fallback)
-		}
-	}
+	envVars = mergeSAMEnvFallback(envVars, h.samEnvFallbackSnapshot())
 
 	if h.config.GitTokenFetcher != nil && !hasManagedSecretPlaceholder(envVars, "GH_TOKEN") {
 		envVars = removeEnvVar(envVars, "GH_TOKEN")
@@ -586,6 +581,10 @@ func (h *SessionHost) writeOpenCodeStartupConfig(ctx context.Context, cred *agen
 	}
 
 	startup.envVars = append(startup.envVars, "OPENCODE_CONFIG_CONTENT="+string(configJSON))
+	// SAM pins its own OpenCode build (ACP live steering, opencode_install.go). Its
+	// updater must never replace that binary with an upstream release mid-session.
+	startup.envVars = removeEnvVar(startup.envVars, opencodeDisableAutoupdateEnvName)
+	startup.envVars = append(startup.envVars, opencodeDisableAutoupdateEnvName+"=1")
 	provider := DefaultOpencodeProvider
 	if startup.settings != nil && startup.settings.OpencodeProvider != "" {
 		provider = startup.settings.OpencodeProvider

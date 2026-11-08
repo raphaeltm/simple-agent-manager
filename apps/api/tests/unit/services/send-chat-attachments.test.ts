@@ -61,7 +61,11 @@ describe('follow-up attachment acceptance', () => {
       expect.objectContaining({
         targetSessionId: 'sleeping-chat',
         senderId: 'owner',
-        metadata: { userId: 'owner', attachments: [attachment] },
+        metadata: {
+          userId: 'owner',
+          wake: expect.objectContaining({ triggeredByUserId: 'owner', actorRole: 'owner' }),
+          attachments: [attachment],
+        },
         deliveryContent: expect.stringContaining('/workspaces/.private/upload-1/context.txt'),
       })
     );

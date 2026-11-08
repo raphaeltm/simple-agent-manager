@@ -1,8 +1,11 @@
-import { MAX_HUMAN_INPUT_OPTION_LENGTH } from '@simple-agent-manager/shared';
+import {
+  MAX_HUMAN_INPUT_OPTION_LENGTH,
+  PROMPT_DELIVERY_INTENTS,
+} from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 import { MAX_RESOURCE_ID_LENGTH } from './_validator';
-import { TaskAttachmentSchema } from './tasks';
+import { TaskAgentOverrideFields, TaskAttachmentSchema } from './tasks';
 
 // Terminal
 export const TerminalRequestSchema = v.object({
@@ -54,6 +57,8 @@ export const CreateChatSessionSchema = v.object({
 export const SendChatMessageSchema = v.object({
   content: v.optional(v.string()),
   attachments: v.optional(v.array(TaskAttachmentSchema)),
+  /** `steer` adds the message to the running turn when possible; default `queue`. */
+  deliveryIntent: v.optional(v.picklist(PROMPT_DELIVERY_INTENTS)),
 });
 
 export const ResolveAttentionAnswerSchema = v.object({
@@ -66,6 +71,7 @@ export const StartChatSessionSchema = v.object({
   skillId: v.optional(v.string()),
   parentTaskId: v.optional(v.string()),
   contextSummary: v.optional(v.string()),
+  ...TaskAgentOverrideFields,
   /** An open idea in this project this conversation starts from; linked before the agent starts. */
   sourceIdeaId: v.optional(v.pipe(v.string(), v.maxLength(MAX_RESOURCE_ID_LENGTH))),
 });

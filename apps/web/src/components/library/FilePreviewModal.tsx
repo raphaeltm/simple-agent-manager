@@ -1,19 +1,12 @@
-import { Spinner } from '@simple-agent-manager/ui';
-import { AlertTriangle, Code, Download, Eye, MessageSquare, X } from 'lucide-react';
+import { IconButton, paneClassName, SegmentedControl } from '@simple-agent-manager/ui';
+import { Code, Download, Eye, MessageSquare, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { useFileTextContent } from '../../hooks/useFileTextContent';
+import { useIsMobile } from '../../hooks/useIsMobile';
 import { useScrollLock } from '../../hooks/useScrollLock';
-import {
-  FILE_PREVIEW_LOAD_MAX_BYTES,
-  formatFileSize,
-  isHtmlMime,
-  isMarkdownMime,
-  isPdfMime,
-  isPreviewableImageMime,
-} from '../../lib/file-utils';
-import { RenderedMarkdown, SyntaxHighlightedCode } from '../MarkdownRenderer';
+import { formatFileSize } from '../../lib/file-utils';
 import {
   SelectionActionBar,
   SelectionPopover,
@@ -22,11 +15,10 @@ import {
   useCoarsePointer,
   useCommentSelection,
 } from '../project-message-view/comments/useCommentSelection';
-import { ImageViewer } from '../shared-file-viewer/ImageViewer';
 import { FileCommentPanel } from './FileCommentPanel';
 import { FileLinkedWorkSection } from './FileLinkedWorkSection';
-import { InteractiveHtmlPreview } from './InteractiveHtmlPreview';
-import { type FileWithTags, FOCUS_RING } from './types';
+import { FilePreviewContent, isTooLargeToPreview, previewKindOf } from './FilePreviewContent';
+import type { FileWithTags } from './types';
 
 export interface FilePreviewModalProps {
   projectId: string;
@@ -34,64 +26,6 @@ export interface FilePreviewModalProps {
   previewUrl: string;
   onClose: () => void;
   onDownload: () => void;
-}
-
-/** Default timeout for PDF iframe loading before showing error state (ms). */
-const DEFAULT_PDF_LOAD_TIMEOUT_MS = 15_000;
-const PDF_LOAD_TIMEOUT_MS = import.meta.env.VITE_PDF_LOAD_TIMEOUT_MS
-  ? parseInt(import.meta.env.VITE_PDF_LOAD_TIMEOUT_MS, 10)
-  : DEFAULT_PDF_LOAD_TIMEOUT_MS;
-
-const TOGGLE_BUTTON_BASE =
-  'flex items-center gap-1.5 px-2.5 py-2 text-xs border-none cursor-pointer';
-const TOGGLE_BUTTON_INACTIVE =
-  'bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_80%,transparent)] text-fg-muted hover:text-fg-primary';
-
-/**
- * Two-way primary/source view switch used by both the markdown and HTML branches so a single
- * control shape governs every "rendered vs. raw" choice in the modal header.
- */
-function ViewToggle({
-  primaryLabel,
-  primaryAriaLabel,
-  isPrimary,
-  onPrimary,
-  onSource,
-}: {
-  primaryLabel: string;
-  primaryAriaLabel: string;
-  isPrimary: boolean;
-  onPrimary: () => void;
-  onSource: () => void;
-}) {
-  return (
-    <div className="flex shrink-0 overflow-hidden rounded-lg border border-border-default">
-      <button
-        type="button"
-        onClick={onPrimary}
-        aria-label={primaryAriaLabel}
-        aria-pressed={isPrimary}
-        className={`${TOGGLE_BUTTON_BASE} ${FOCUS_RING} ${
-          isPrimary ? 'bg-accent/10 text-accent' : TOGGLE_BUTTON_INACTIVE
-        }`}
-      >
-        <Eye size={14} />
-        <span className="hidden sm:inline">{primaryLabel}</span>
-      </button>
-      <button
-        type="button"
-        onClick={onSource}
-        aria-label="Source view"
-        aria-pressed={!isPrimary}
-        className={`${TOGGLE_BUTTON_BASE} ${FOCUS_RING} ${
-          !isPrimary ? 'bg-accent/10 text-accent' : TOGGLE_BUTTON_INACTIVE
-        }`}
-      >
-        <Code size={14} />
-        <span className="hidden sm:inline">Source</span>
-      </button>
-    </div>
-  );
 }
 
 export function FilePreviewModal({
@@ -102,18 +36,12 @@ export function FilePreviewModal({
   onDownload,
 }: FilePreviewModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
-  const [pdfLoading, setPdfLoading] = useState(true);
-  const [pdfError, setPdfError] = useState(false);
+  const isMobile = useIsMobile();
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [pendingQuote, setPendingQuote] = useState<string | null>(null);
-  // Pass the filename so an octet-stream/empty stored type (agent uploads) still
-  // resolves to its real previewable type from the extension.
-  const isImage = isPreviewableImageMime(file.mimeType, file.filename);
-  const isPdf = isPdfMime(file.mimeType, file.filename);
-  const isMarkdown = isMarkdownMime(file.mimeType, file.filename);
-  const isHtml = isHtmlMime(file.mimeType, file.filename);
-  // HTML artifacts run interactively; anything above the load ceiling is download-only.
-  const htmlTooLarge = isHtml && file.sizeBytes > FILE_PREVIEW_LOAD_MAX_BYTES;
+  const kind = previewKindOf(file);
+  const isMarkdown = kind === 'markdown';
+  const isHtml = kind === 'html';
 
   const [mdViewMode, setMdViewMode] = useState<'rendered' | 'source'>('rendered');
 
@@ -206,271 +134,155 @@ export function FilePreviewModal({
     };
   }, []);
 
-  // PDF loading timeout
-  useEffect(() => {
-    if (!isPdf || !pdfLoading) return;
-    const timer = setTimeout(() => {
-      if (pdfLoading) {
-        setPdfLoading(false);
-        setPdfError(true);
-      }
-    }, PDF_LOAD_TIMEOUT_MS);
-    return () => clearTimeout(timer);
-  }, [isPdf, pdfLoading]);
+  const showMdToggle = kind === 'markdown' && mdContent !== null;
+  const showHtmlToggle = kind === 'html' && !isTooLargeToPreview(kind, file.sizeBytes);
 
   return createPortal(
-    <div className="fixed inset-0 z-dialog-backdrop overflow-hidden bg-surface">
-      <div className="fixed inset-0 glass-backdrop-dim" aria-hidden="true" />
-      <div className="fixed inset-0 h-[100dvh] overflow-hidden">
-        <div
-          ref={dialogRef}
-          tabIndex={-1}
-          role="dialog"
-          aria-modal="true"
-          aria-labelledby="preview-modal-title"
-          className="relative z-dialog flex h-[100dvh] w-full flex-col overflow-hidden bg-surface outline-none"
+    // The viewer is its own screen: a void with the header slab and the artifact pane floating
+    // on it. The frame and gutter are the shell's immersive ones, so the artifact keeps nearly
+    // the whole viewport.
+    <div className="sam-void fixed inset-0 z-dialog-backdrop flex flex-col overflow-hidden pb-[max(env(safe-area-inset-bottom),0.375rem)] pl-[max(env(safe-area-inset-left),0.375rem)] pr-[max(env(safe-area-inset-right),0.375rem)] pt-[max(env(safe-area-inset-top),0.375rem)] md:p-2.5">
+      <div
+        ref={dialogRef}
+        tabIndex={-1}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="preview-modal-title"
+        className="relative z-dialog flex min-h-0 flex-1 flex-col gap-1.5 outline-none md:gap-2.5"
+      >
+        {/* One slab: name and size, where the file came from, then the controls. */}
+        <header
+          className={`${paneClassName('slab')} relative z-10 flex shrink-0 items-center gap-1 py-1 pl-3.5 pr-1 md:pl-4`}
         >
-          {/* Header */}
-          <div
-            className="flex shrink-0 items-center gap-3 border-b border-border-default bg-surface px-4 py-3"
-            style={{
-              paddingTop: 'calc(env(safe-area-inset-top) + 0.75rem)',
-              paddingLeft: 'calc(env(safe-area-inset-left) + 1rem)',
-              paddingRight: 'calc(env(safe-area-inset-right) + 1rem)',
-            }}
+          <div className="flex min-w-0 flex-1 flex-col gap-0.5 py-1">
+            <h3
+              id="preview-modal-title"
+              className="m-0 truncate text-sm font-semibold text-fg-primary md:text-[15px]"
+              title={file.filename}
+            >
+              {file.filename}
+            </h3>
+            <div className="flex min-w-0 items-center gap-1.5 text-xs text-fg-muted">
+              <span className="shrink-0 font-mono">{formatFileSize(file.sizeBytes)}</span>
+              <FileLinkedWorkSection projectId={projectId} fileId={file.id} />
+            </div>
+          </div>
+
+          {/* Rendered/source: one control for markdown and HTML, so both behave alike. */}
+          {showMdToggle && (
+            <SegmentedControl
+              label="Markdown view"
+              size={isMobile ? 'lg' : 'md'}
+              className="shrink-0"
+              value={mdViewMode}
+              onChange={setMdViewMode}
+              options={[
+                {
+                  value: 'rendered',
+                  ariaLabel: 'Rendered view',
+                  icon: <Eye size={14} aria-hidden="true" />,
+                  label: <span className="max-md:hidden">Rendered</span>,
+                },
+                {
+                  value: 'source',
+                  ariaLabel: 'Source view',
+                  icon: <Code size={14} aria-hidden="true" />,
+                  label: <span className="max-md:hidden">Source</span>,
+                },
+              ]}
+            />
+          )}
+          {showHtmlToggle && (
+            <SegmentedControl
+              label="HTML view"
+              size={isMobile ? 'lg' : 'md'}
+              className="shrink-0"
+              value={htmlViewMode}
+              onChange={setHtmlViewMode}
+              options={[
+                {
+                  value: 'preview',
+                  ariaLabel: 'Interactive preview',
+                  icon: <Eye size={14} aria-hidden="true" />,
+                  label: <span className="max-md:hidden">Preview</span>,
+                },
+                {
+                  value: 'source',
+                  ariaLabel: 'Source view',
+                  icon: <Code size={14} aria-hidden="true" />,
+                  label: <span className="max-md:hidden">Source</span>,
+                },
+              ]}
+            />
+          )}
+
+          <IconButton
+            label={`Download ${file.filename}`}
+            icon={<Download size={18} aria-hidden="true" />}
+            onClick={onDownload}
+          />
+          <IconButton
+            label={commentsOpen ? 'Hide comments' : 'Show comments'}
+            icon={<MessageSquare size={18} aria-hidden="true" />}
+            aria-pressed={commentsOpen}
+            raised={commentsOpen}
+            onClick={() => setCommentsOpen((prev) => !prev)}
+          />
+          <IconButton
+            label="Close preview"
+            icon={<X size={18} aria-hidden="true" />}
+            onClick={onClose}
+          />
+        </header>
+
+        {/* The artifact pane, and the comments pane beside it (over it on phones). */}
+        <div className="relative flex min-h-0 flex-1 gap-2.5 md:gap-[var(--sam-space-gutter)]">
+          <section
+            aria-label={`Preview of ${file.filename}`}
+            className={`${paneClassName('quiet')} relative min-h-0 min-w-0 flex-1 ${
+              // HTML needs a flex column so its iframe can claim the full height; the other
+              // viewers scroll inside the pane.
+              kind === 'html' ? 'flex flex-col overflow-hidden' : 'overflow-auto'
+            }`}
           >
-            <div className="min-w-0 flex-1">
-              <h3
-                id="preview-modal-title"
-                className="text-sm font-semibold text-fg-primary truncate"
-                title={file.filename}
-              >
-                {file.filename}
-              </h3>
-              <span className="text-xs text-fg-muted">{formatFileSize(file.sizeBytes)}</span>
-            </div>
-
-            {/* Markdown rendered/source toggle */}
-            {isMarkdown && mdContent !== null && (
-              <ViewToggle
-                primaryLabel="Rendered"
-                primaryAriaLabel="Rendered view"
-                isPrimary={mdViewMode === 'rendered'}
-                onPrimary={() => setMdViewMode('rendered')}
-                onSource={() => setMdViewMode('source')}
-              />
-            )}
-
-            {/* HTML preview/source toggle — same control as markdown so the two behave alike and
-                the artifact viewer needs no toolbar row of its own. */}
-            {isHtml && !htmlTooLarge && (
-              <ViewToggle
-                primaryLabel="Preview"
-                primaryAriaLabel="Interactive preview"
-                isPrimary={htmlViewMode === 'preview'}
-                onPrimary={() => setHtmlViewMode('preview')}
-                onSource={() => setHtmlViewMode('source')}
-              />
-            )}
-
-            <button
-              type="button"
-              onClick={onDownload}
-              className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium rounded-md border border-border-default bg-transparent text-fg-primary cursor-pointer hover:bg-surface-hover min-h-[44px] ${FOCUS_RING}`}
-              aria-label={`Download ${file.filename}`}
-            >
-              <Download size={14} />
-              <span className="hidden sm:inline">Download</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => setCommentsOpen((prev) => !prev)}
-              aria-pressed={commentsOpen}
-              className={`flex items-center gap-1.5 px-3 py-2.5 text-xs font-medium rounded-md border cursor-pointer min-h-[44px] ${FOCUS_RING} ${
-                commentsOpen
-                  ? 'border-accent bg-accent/10 text-accent'
-                  : 'border-border-default bg-transparent text-fg-primary hover:bg-surface-hover'
-              }`}
-              aria-label={commentsOpen ? 'Hide comments' : 'Show comments'}
-            >
-              <MessageSquare size={14} />
-              <span className="hidden sm:inline">Comments</span>
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className={`p-3 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary rounded min-w-[44px] min-h-[44px] flex items-center justify-center ${FOCUS_RING}`}
-              aria-label="Close preview"
-            >
-              <X size={18} />
-            </button>
-          </div>
-
-          {/* Where this file came from — absent when nothing is linked. */}
-          <FileLinkedWorkSection projectId={projectId} fileId={file.id} />
-
-          {/* Content + optional comment panel */}
-          <div className="flex min-h-0 flex-1 overflow-hidden">
-            {/* File content area.
-                The HTML branch needs a real flex context so the preview iframe can claim the full
-                remaining height; the image/PDF/markdown branches depend on this wrapper being a
-                block `overflow-auto` scroller (PDF uses `h-full` under a block parent, markdown
-                scrolls here), so the flex context is applied only for HTML. */}
-            <div
-              className={
-                isHtml
-                  ? 'flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden'
-                  : 'min-h-0 min-w-0 flex-1 overflow-auto'
-              }
-              style={{
-                paddingBottom: 'env(safe-area-inset-bottom)',
-                paddingLeft: 'env(safe-area-inset-left)',
-                paddingRight: commentsOpen ? undefined : 'env(safe-area-inset-right)',
+            <FilePreviewContent
+              file={file}
+              kind={kind}
+              previewUrl={previewUrl}
+              onDownload={onDownload}
+              markdown={{
+                mode: mdViewMode,
+                content: mdContent,
+                loading: mdLoading,
+                error: mdError,
+                bodyRef: previewBodyRef,
               }}
+              html={{
+                mode: htmlViewMode,
+                source: htmlSource,
+                loading: htmlSourceLoading,
+                error: htmlSourceError,
+              }}
+            />
+          </section>
+
+          {commentsOpen && (
+            <aside
+              aria-label="File comments"
+              className={`${paneClassName(isMobile ? 'overlay' : 'pane')} absolute inset-0 z-10 overflow-hidden md:relative md:inset-auto md:w-80 md:shrink-0 lg:w-96`}
             >
-              {isImage && (
-                <ImageViewer src={previewUrl} fileName={file.filename} fileSize={file.sizeBytes} />
-              )}
-
-              {isPdf && (
-                <div className="relative h-full min-h-[60vh]">
-                  {pdfLoading && !pdfError && (
-                    <div className="absolute inset-0 flex items-center justify-center">
-                      <Spinner size="md" />
-                    </div>
-                  )}
-                  {pdfError ? (
-                    <div className="flex flex-col items-center justify-center gap-3 p-8 text-center min-h-[60vh]">
-                      <AlertTriangle size={32} className="text-warning" />
-                      <p className="text-sm text-fg-muted">
-                        Unable to load PDF preview. Try downloading the file instead.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={onDownload}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-border-default bg-transparent text-fg-primary cursor-pointer hover:bg-surface-hover ${FOCUS_RING}`}
-                      >
-                        <Download size={14} />
-                        Download
-                      </button>
-                    </div>
-                  ) : (
-                    // No `sandbox`: Chromium refuses to render a PDF inside any sandboxed
-                    // frame. The preview response keeps this frame inert instead: it is
-                    // served as application/pdf with nosniff, only after the bytes are
-                    // checked to be a PDF, under a CSP that forbids script
-                    // (apps/api/src/services/file-serving-policy.ts).
-                    <iframe
-                      src={previewUrl}
-                      title={`Preview of ${file.filename}`}
-                      className="h-full min-h-[60vh] w-full border-none"
-                      onLoad={() => setPdfLoading(false)}
-                      onError={() => {
-                        setPdfLoading(false);
-                        setPdfError(true);
-                      }}
-                    />
-                  )}
-                </div>
-              )}
-
-              {isMarkdown && (
-                <>
-                  {mdLoading && (
-                    <div className="flex items-center justify-center py-12">
-                      <Spinner size="md" />
-                    </div>
-                  )}
-                  {mdError && (
-                    <div className="flex flex-col items-center justify-center gap-3 p-8 text-center">
-                      <AlertTriangle size={32} className="text-warning" />
-                      <p className="text-sm text-fg-muted">
-                        Unable to load markdown preview. Try downloading the file instead.
-                      </p>
-                      <button
-                        type="button"
-                        onClick={onDownload}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-border-default bg-transparent text-fg-primary cursor-pointer hover:bg-surface-hover ${FOCUS_RING}`}
-                      >
-                        <Download size={14} />
-                        Download
-                      </button>
-                    </div>
-                  )}
-                  {mdContent !== null &&
-                    !mdLoading &&
-                    !mdError &&
-                    (mdViewMode === 'rendered' ? (
-                      <div ref={previewBodyRef} data-comment-anchor={file.id}>
-                        <RenderedMarkdown content={mdContent} />
-                      </div>
-                    ) : (
-                      <div className="overflow-auto bg-surface-inset p-4">
-                        <SyntaxHighlightedCode content={mdContent} language="markdown" />
-                      </div>
-                    ))}
-                </>
-              )}
-
-              {isHtml && htmlTooLarge && (
-                <div className="flex flex-col items-center justify-center gap-3 p-8 text-center">
-                  <AlertTriangle size={32} className="text-warning" />
-                  <p className="text-sm text-fg-muted">
-                    This file is too large to preview. Download it to view the contents.
-                  </p>
-                  <button
-                    type="button"
-                    onClick={onDownload}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-border-default bg-transparent text-fg-primary cursor-pointer hover:bg-surface-hover ${FOCUS_RING}`}
-                  >
-                    <Download size={14} />
-                    Download
-                  </button>
-                </div>
-              )}
-
-              {isHtml &&
-                !htmlTooLarge &&
-                (htmlViewMode === 'preview' ? (
-                  <InteractiveHtmlPreview file={file} />
-                ) : (
-                  <div className="min-h-0 flex-1 overflow-auto bg-surface-inset p-4">
-                    {htmlSourceLoading && htmlSource === null && (
-                      <div className="flex items-center justify-center py-12">
-                        <Spinner size="md" />
-                      </div>
-                    )}
-                    {htmlSourceError && htmlSource === null && (
-                      <p role="alert" className="text-sm text-fg-muted">
-                        Unable to load the HTML source. Try downloading the file instead.
-                      </p>
-                    )}
-                    {htmlSource !== null && (
-                      <SyntaxHighlightedCode content={htmlSource} language="markup" />
-                    )}
-                  </div>
-                ))}
-            </div>
-
-            {/* Comment panel — side panel on desktop, overlay on mobile */}
-            {commentsOpen && (
-              <div
-                className="absolute inset-y-0 right-0 w-full border-l border-border-default sm:relative sm:w-80 lg:w-96"
-                style={{ paddingRight: 'env(safe-area-inset-right)' }}
-              >
-                <FileCommentPanel
-                  projectId={projectId}
-                  fileId={file.id}
-                  pendingQuote={pendingQuote}
-                  onClearPendingQuote={() => setPendingQuote(null)}
-                  onClose={() => {
-                    setPendingQuote(null);
-                    setCommentsOpen(false);
-                  }}
-                />
-              </div>
-            )}
-          </div>
+              <FileCommentPanel
+                projectId={projectId}
+                fileId={file.id}
+                pendingQuote={pendingQuote}
+                onClearPendingQuote={() => setPendingQuote(null)}
+                onClose={() => {
+                  setPendingQuote(null);
+                  setCommentsOpen(false);
+                }}
+              />
+            </aside>
+          )}
         </div>
       </div>
 
