@@ -1,6 +1,7 @@
 import type { ResolvedResourceReservation } from '@simple-agent-manager/shared';
 import { describe, expect, it } from 'vitest';
 
+import { DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB as HOST_RESERVE_MB } from '../../src/services/workspace-resource-capacity';
 import {
   ACCEPT_STALE_HEARTBEAT_POLICY,
   AggregateCapacityTimeline,
@@ -11,8 +12,8 @@ import {
 
 const HALF_NODE: ResolvedResourceReservation = {
   cpuMillis: 2_000,
-  // Half of 8192 MiB after the default 512 MiB host reserve.
-  memoryMb: 3_840,
+  // Half of 8192 MiB after the default host reserve.
+  memoryMb: (8_192 - HOST_RESERVE_MB) / 2,
   diskMb: 40_960,
   exclusiveNode: false,
   source: 'platform',
@@ -40,7 +41,7 @@ const IDLE_BUDGET_NODE = {
 const FULL_NODE: ResolvedResourceReservation = {
   ...HALF_NODE,
   cpuMillis: 4_000,
-  memoryMb: 7_680,
+  memoryMb: 8_192 - HOST_RESERVE_MB,
   diskMb: 81_920,
 };
 
@@ -88,7 +89,8 @@ describe('aggregate capacity deterministic virtual timeline', () => {
     const small = {
       ...HALF_NODE,
       cpuMillis: 400,
-      memoryMb: 800,
+      // Exactly 40 fit the 32 GiB node after the host reserve; the 41st overflows memory.
+      memoryMb: Math.floor((32_768 - HOST_RESERVE_MB) / 40),
       diskMb: 2_048,
     };
     for (let index = 0; index < 40; index += 1) {

@@ -84,7 +84,11 @@ async function seedProvisionedCx23(
   });
 }
 
-function taskRunnerInput(taskId: string, memoryMb: number): StartTaskInput {
+function taskRunnerInput(
+  taskId: string,
+  memoryMb: number,
+  preferredNodeId: string | null = null
+): StartTaskInput {
   return {
     taskId,
     projectId: PROJECT_ID,
@@ -93,7 +97,7 @@ function taskRunnerInput(taskId: string, memoryMb: number): StartTaskInput {
       vmSize: 'small',
       vmLocation: 'nbg1',
       branch: 'main',
-      preferredNodeId: null,
+      preferredNodeId,
       userName: 'Provisioned Admission Test',
       userEmail: 'provisioned-admission@example.com',
       githubId: null,
@@ -144,18 +148,20 @@ async function startAtWorkspaceCreation(
   taskId: string,
   nodeId: string,
   memoryMb: number,
-  priorRejections = 0
+  options: { priorRejections?: number; preferred?: boolean } = {}
 ): Promise<void> {
+  const preferred = options.preferred === true;
   await runInDurableObject(taskRunner(taskId), async (instance) => {
-    await instance.start(taskRunnerInput(taskId, memoryMb));
+    await instance.start(taskRunnerInput(taskId, memoryMb, preferred ? nodeId : null));
     await instance.ctx.storage.deleteAlarm();
     const state = await instance.ctx.storage.get<TaskRunnerState>('state');
     if (!state) throw new Error('TaskRunner state was not initialized');
     state.currentStep = 'workspace_creation';
     state.stepResults.nodeId = nodeId;
-    state.stepResults.autoProvisioned = true;
+    // A specified node is one the user already had, not one this run provisioned.
+    state.stepResults.autoProvisioned = !preferred;
     state.provisioningStartedAt = Date.now();
-    state.workspacePlacementRejections = priorRejections;
+    state.workspacePlacementRejections = options.priorRejections ?? 0;
     await instance.ctx.storage.put('state', state);
   });
 }
@@ -170,6 +176,23 @@ async function fireAlarm(taskId: string): Promise<{ ran: string; state: TaskRunn
     if (!before || !after) throw new Error('TaskRunner state missing');
     return { ran: before.currentStep, state: after };
   });
+}
+
+/** The node's next heartbeat reports a new memory reading. */
+async function reportMemoryPercent(nodeId: string, memoryPercent: number): Promise<void> {
+  await env.DATABASE.prepare(
+    `UPDATE nodes SET last_heartbeat_at = ?, last_metrics = json_set(last_metrics, '$.memoryPercent', ?)
+     WHERE id = ?`
+  )
+    .bind(new Date().toISOString(), memoryPercent, nodeId)
+    .run();
+}
+
+async function warmSince(nodeId: string): Promise<string | null> {
+  const node = await env.DATABASE.prepare(`SELECT warm_since AS warmSince FROM nodes WHERE id = ?`)
+    .bind(nodeId)
+    .first<{ warmSince: string | null }>();
+  return node?.warmSince ?? null;
 }
 
 async function taskRow(taskId: string) {
@@ -208,25 +231,61 @@ describe('a node provisioned for a task admits that task', () => {
     expect(DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS).toBe(3);
   });
 
-  it('places a task at the documented cap on the cx23 it provisioned', async () => {
+  it('places a task at the documented cap on the cx23 it provisioned, ending a refusal episode', async () => {
     const nodeId = 'node-provisioned-at-cap';
     const taskId = 'task-provisioned-at-cap';
-    // 14% of 4096 = 573 MB, the production average for an idle 4 GB host. The old formula
-    // needed 573 + 512 + 3072 = 4157 MB of a 4096 MB node and refused it forever.
-    await seedProvisionedCx23(nodeId, taskId, { memoryPercent: 14 });
-    // One refusal below the cap is already on the run; a success must end that episode.
-    await startAtWorkspaceCreation(taskId, nodeId, DOCUMENTED_CAP_MEMORY_MB, 2);
+    // Start with a transient spike (60%) so two real refusals land on the run first.
+    await seedProvisionedCx23(nodeId, taskId, { memoryPercent: 60 });
+    await startAtWorkspaceCreation(taskId, nodeId, DOCUMENTED_CAP_MEMORY_MB);
+    let state: TaskRunnerState | null = null;
+    for (let i = 0; i < 40 && (state?.workspacePlacementRejections ?? 0) < 2; i++) {
+      state = (await fireAlarm(taskId)).state;
+    }
+    expect(state?.workspacePlacementRejections).toBe(2);
+    expect(state?.completed).toBe(false);
 
-    const { ran, state } = await fireAlarm(taskId);
+    // The host settles at 14% (573 MB), the production average for an idle 4 GB host. The old
+    // formula needed 573 + 512 + 3072 = 4157 MB of a 4096 MB node and refused it forever.
+    await reportMemoryPercent(nodeId, 14);
+    const ran: string[] = [];
+    for (let i = 0; i < 40 && state?.currentStep !== 'workspace_dispatch'; i++) {
+      const fired = await fireAlarm(taskId);
+      ran.push(fired.ran);
+      state = fired.state;
+    }
 
-    expect(ran).toBe('workspace_creation');
-    expect(state.currentStep).toBe('workspace_dispatch');
-    expect(state.stepResults.nodeId).toBe(nodeId);
-    expect(state.workspacePlacementRejections).toBe(0);
+    expect(ran).toContain('workspace_creation');
+    expect(state?.currentStep).toBe('workspace_dispatch');
+    expect(state?.stepResults.nodeId).toBe(nodeId);
+    // A reservation that succeeds ends the refusal episode (rule 61).
+    expect(state?.workspacePlacementRejections).toBe(0);
     const task = await taskRow(taskId);
     expect(task).toMatchObject({ status: 'delegated', errorMessage: null });
     expect(task?.workspaceId).toBeTruthy();
     expect(await activeWorkspacesOn(nodeId)).toBe(1);
+  });
+
+  it('fails a specified node on its first refusal and leaves that node alone', async () => {
+    const nodeId = 'node-specified-overrun';
+    const taskId = 'task-specified-overrun';
+    await seedProvisionedCx23(nodeId, taskId, { memoryPercent: 60 });
+    await startAtWorkspaceCreation(taskId, nodeId, DOCUMENTED_CAP_MEMORY_MB, { preferred: true });
+
+    const { ran, state } = await fireAlarm(taskId);
+
+    expect(ran).toBe('workspace_creation');
+    expect(state.completed).toBe(true);
+    const task = await taskRow(taskId);
+    expect(task?.status).toBe('failed');
+    expect(task?.errorMessage).toContain(
+      'Specified node lost capacity or became unavailable before workspace creation'
+    );
+    expect(placementNotes(task?.placement ?? null)).toEqual(
+      expect.arrayContaining([expect.stringContaining(`(1/`)])
+    );
+    // The user's own node is neither occupied nor sent to the warm pool by this failure.
+    expect(await activeWorkspacesOn(nodeId)).toBe(0);
+    expect(await warmSince(nodeId)).toBeNull();
   });
 
   it('still refuses measured use above the reserve, then fails fast after the cap and hands the node off', async () => {
@@ -263,25 +322,25 @@ describe('a node provisioned for a task admits that task', () => {
     );
     expect(task?.errorMessage).toContain(MEASURED_MEMORY_OVERRUN_REASON);
     const notes = placementNotes(task?.placement ?? null);
-    expect(notes.filter((note) => note.startsWith(WORKSPACE_PLACEMENT_REFUSED_NOTE_PREFIX))).toEqual([
+    expect(
+      notes.filter((note) => note.startsWith(WORKSPACE_PLACEMENT_REFUSED_NOTE_PREFIX))
+    ).toEqual([
       expect.stringContaining(
         `(${DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS}/${DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS} consecutive): ${MEASURED_MEMORY_OVERRUN_REASON}`
       ),
     ]);
 
     expect(await activeWorkspacesOn(nodeId)).toBe(0);
-    const node = await env.DATABASE.prepare(`SELECT status, warm_since AS warmSince FROM nodes WHERE id = ?`)
-      .bind(nodeId)
-      .first<{ status: string; warmSince: string | null }>();
-    expect(node?.status).toBe('running');
-    expect(node?.warmSince).toBeTruthy();
+    expect(await warmSince(nodeId)).toBeTruthy();
   });
 
   it('does not count a busy build queue against the cap', async () => {
     const nodeId = 'node-provisioned-busy-build';
     const taskId = 'task-provisioned-busy-build';
     await seedProvisionedCx23(nodeId, taskId, { memoryPercent: 14, creatingWorkspaces: 1 });
-    await startAtWorkspaceCreation(taskId, nodeId, 1024, DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS - 1);
+    await startAtWorkspaceCreation(taskId, nodeId, 1024, {
+      priorRejections: DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS - 1,
+    });
 
     const { ran, state } = await fireAlarm(taskId);
 

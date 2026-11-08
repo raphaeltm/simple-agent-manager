@@ -24,7 +24,7 @@ This article is about what those four words actually do.
 The single most important thing about placement is that it happens in two steps, and only the
 second one is the strategy's business.
 
-**Admission** decides whether a host *may* take a workload. That is
+**Admission** decides whether a host _may_ take a workload. That is
 `evaluateWorkspaceReservationCapacity` (`apps/api/src/services/workspace-resource-capacity.ts`),
 which is the only gate for CPU, memory and disk budgets and exclusivity. There is no
 count-based density cap: a host is full when one of its resource budgets is full.
@@ -35,46 +35,46 @@ can never widen admission".
 
 Keeping those separate matters because the intuitive mental model — "pack squeezes more onto each
 box" — is wrong in an important way. `pack` does not squeeze anything. It expresses a
-*preference* among boxes that were already willing.
+_preference_ among boxes that were already willing.
 
-### The 512 MB that surprises everyone
+### The host reserve that surprises everyone
 
 Admission subtracts a host reserve before it does any arithmetic:
-`DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB`, 512 MB by default. The host needs memory to
+`DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB`, 1 GB by default. The host needs memory to
 be a host.
 
 Which produces a result that reads like a bug the first time you hit it:
 
-| | |
-| --- | --- |
-| Platform default workload (`PLATFORM_RESOURCE_DEFAULTS`) | 2 vCPU, **4 GB** |
-| Hetzner `cx23` | 2 vCPU, **4 GB** |
-| `cx23` memory available to workloads | 4 GB − 512 MB = **3.5 GB** |
-| Fits? | **No** |
+|                                                          |                        |
+| -------------------------------------------------------- | ---------------------- |
+| Platform default workload (`PLATFORM_RESOURCE_DEFAULTS`) | 2 vCPU, **4 GB**       |
+| Hetzner `cx23`                                           | 2 vCPU, **4 GB**       |
+| `cx23` memory available to workloads                     | 4 GB − 1 GB = **3 GB** |
+| Fits?                                                    | **No**                 |
 
 A 4 GB workload does not fit a 4 GB machine. Every default-sized SAM workspace therefore needs a
 `cx33` or larger.
 
-_Update, 2026-11-08: the default reserve is now 1 GB. Idle hosts were measured using 500–770 MB on
-4 GB machines, so 512 MB let SAM start machines that admission then refused. A `cx23` now holds
-workloads of up to 3 GB, and the explorer uses the new value._ In the explorer, submit a **Standard** workload and watch which hosts refuse it.
+_Updated 2026-11-08: this post first described a 512 MB reserve. Idle hosts were measured using
+500–770 MB on 4 GB machines, so 512 MB let SAM start machines that admission then refused; the
+default is now 1 GB and the explorer uses it._ In the explorer, submit a **Standard** workload and watch which hosts refuse it.
 
 ## The four strategies
 
 Each strategy is defined by one ordering key, compared first and on its own. These are copied
 verbatim from `PLACEMENT_STRATEGY_HOST_ORDERING`:
 
-| Strategy | Picks the host with… |
-| --- | --- |
-| `pack` | highest projected utilization first |
-| `balanced` | lowest projected utilization first |
-| `spread` | fewest co-tenant workspaces first |
+| Strategy       | Picks the host with…                    |
+| -------------- | --------------------------------------- |
+| `pack`         | highest projected utilization first     |
+| `balanced`     | lowest projected utilization first      |
+| `spread`       | fewest co-tenant workspaces first       |
 | `smallest-fit` | smallest sufficient host capacity first |
 
 "Projected utilization" is dominant-resource: a host is as full as its fullest dimension, measured
-*after* the workload would land. A host at 20% CPU and 90% memory is a 90% host.
+_after_ the workload would land. A host at 20% CPU and 90% memory is a 90% host.
 
-These *host* keys are compared lexicographically rather than blended into a weighted score (unlike
+These _host_ keys are compared lexicographically rather than blended into a weighted score (unlike
 the offering ordering below, which is weighted), and there is a reason for that in the source:
 `balanced` and `spread` once shared one weighted score and were byte-identical. A strategy you selected has to stay observable no matter how the tuning weights
 are set.
@@ -96,14 +96,14 @@ of them will shake hands.
 
 ## Buying new hardware is a different ranking
 
-When no existing host is admissible, placement picks an *offering* instead of a host, and the
+When no existing host is admissible, placement picks an _offering_ instead of a host, and the
 ordering changes (`compareCapacityCandidates`, `placement-capacity-ranking.ts`):
 
-| Strategy | Buys |
-| --- | --- |
-| `pack` | the largest offering first |
+| Strategy             | Buys                                      |
+| -------------------- | ----------------------------------------- |
+| `pack`               | the largest offering first                |
 | `balanced`, `spread` | the tightest fit first, then the cheapest |
-| `smallest-fit` | the tightest fit first, then the cheapest |
+| `smallest-fit`       | the tightest fit first, then the cheapest |
 
 That is not a typo, and it surprised us too. `balanced` and `spread` reach that ordering through a
 weighted score rather than an explicit key, and the default weights are
@@ -145,15 +145,15 @@ Toggle the flame on a region in the explorer to reproduce it.
 A pool has an **exhaustion policy** for exactly this
 (`apps/api/src/durable-objects/task-runner/node-provisioning-exhaustion.ts`):
 
-| Policy | Behaviour |
-| --- | --- |
-| `fail` | one attempt; exhaustion is terminal |
-| `queue` | park on the admission queue until capacity returns or the wait deadline expires |
-| `fallback-chain` | try the pool's other permissible offerings, in ranked order, before giving up |
+| Policy           | Behaviour                                                                       |
+| ---------------- | ------------------------------------------------------------------------------- |
+| `fail`           | one attempt; exhaustion is terminal                                             |
+| `queue`          | park on the admission queue until capacity returns or the wait deadline expires |
+| `fallback-chain` | try the pool's other permissible offerings, in ranked order, before giving up   |
 
 Switch policies in the explorer with a region stocked out and watch the three outcomes diverge.
 
-Two things are worth noticing about `fallback-chain`. It walks the *same ranked list* the strategy
+Two things are worth noticing about `fallback-chain`. It walks the _same ranked list_ the strategy
 produced, so its direction is a side effect of the strategy rather than an explicit rule — under
 `pack` it descends toward smaller and cheaper machines, under the others it climbs. And its
 alternatives are drawn only from the same pool and the same capacity source, so it can never
@@ -180,7 +180,7 @@ that fired earlier.
 
 It is a teaching model, not production scheduling code.
 
-Real: the 512 MB host reserve, the four ordering keys, the offering ordering, the exhaustion
+Real: the host reserve, the four ordering keys, the offering ordering, the exhaustion
 policies, and the machine names, sizes and prices. Those are snapshotted from the provider
 catalogs in `packages/providers`, and the reserve is pinned to its real source, by tests that fail
 if any of it drifts. Earlier versions of this explorer also modelled two count-based density caps;

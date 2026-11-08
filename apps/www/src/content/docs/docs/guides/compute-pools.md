@@ -456,7 +456,8 @@ Older projects may still carry a legacy `small` / `medium` / `large` default. It
 SAM translates it into compatibility workload requirements — but it is shown as _Legacy_ in the
 resource editor with a link to clear it. Prefer explicit vCPU/memory/disk values: a legacy size is
 a label, not a statement about provider hardware. With the current compatibility adapter, `small`
-means a roughly third-node workload slice (625 mCPU, 1152 MiB memory, 13 GiB disk), while
+means a small workload slice (625 mCPU, 1152 MiB memory, 13 GiB disk; two fit a 4 GiB machine
+after the host reserve), while
 `medium` and `large` are half-node slices sized to stay off the class below them after the default
 1 GiB host memory reserve. How many such slices share a machine is decided purely by the
 machine's remaining CPU, memory, and disk.

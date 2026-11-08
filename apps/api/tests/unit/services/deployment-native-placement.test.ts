@@ -17,6 +17,7 @@ import {
   restoreDeploymentEnvironmentRelocation,
 } from '../../../src/services/deployment-provisioning';
 import { assertDeploymentProvisioningAuthority } from '../../../src/services/provisioning-authority';
+import { DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB } from '../../../src/services/workspace-resource-capacity';
 import { createAllSchemaTables, createSqliteD1WithBindLimit } from '../../helpers/sqlite-d1';
 
 const databases: Database.Database[] = [];
@@ -294,7 +295,12 @@ describe('deployment native placement SQL', () => {
             SET node_id = 'node', resolved_reservation_json = ?
           WHERE id = 'environment'`
       )
-      .run(reservationJson({ memoryMb: 7_168 }));
+      // Leaves exactly 512 MB of the 8192 MB node after the default host reserve.
+      .run(
+        reservationJson({
+          memoryMb: 8_192 - DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB - 512,
+        })
+      );
     sqlite.exec(`
       INSERT INTO deployment_environments (id, project_id, status)
       VALUES ('exact-fit', 'project', 'active'), ('overflow', 'project', 'active');
