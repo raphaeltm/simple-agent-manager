@@ -103,22 +103,22 @@ sweep orphans nothing. The historical rows stay in place (no D1 DROP; migration-
       Pulumi output removal (resource retained)
 - [x] Docs + agent rules/skills sync
 - [x] Playwright screenshots of retired `/try` page (375 + 1280) and admin nav
-- [ ] Full quality suite
+- [x] Full quality suite (typecheck, check:fast, API unit 15.4k, web unit 5.0k, shared, infra, scripts/quality, installer-engine; full workers suite delegated to CI shards after local 50-min timeout, targeted workers suites pass)
 
 ## Acceptance criteria
 
-- [ ] `POST /api/trial/create`, `/claim`, `/waitlist`, `GET /api/trial/status`, `/api/trial/:id/events`
+- [x] `POST /api/trial/create`, `/claim`, `/waitlist`, `GET /api/trial/status`, `/api/trial/:id/events`
       return 410 and touch no D1/DO/KV (test)
-- [ ] `/api/admin/trials/*` no longer exists (404)
-- [ ] OAuth callback no longer issues trial claim cookies (test)
-- [ ] `/api/trial-status` platform availability still works (existing tests)
-- [ ] Artifacts/GitLab project creation still uses the system installation row (existing tests)
-- [ ] First-user superadmin / operator lists still exclude the system user (existing tests)
-- [ ] Worker still exports TrialCounter/TrialEventBus/TrialOrchestrator; wrangler migrations unchanged
-- [ ] Web `/try`, `/try/<id>` show the retired notice and redirect to the self-host page
-- [ ] Staging: deploy succeeds (upgrade path); retired endpoints 410; normal VM task + Instant
+- [x] `/api/admin/trials/*` no longer exists (404)
+- [x] OAuth callback no longer issues trial claim cookies (test)
+- [x] `/api/trial-status` platform availability still works (existing tests)
+- [x] Artifacts/GitLab project creation still uses the system installation row (existing tests)
+- [x] First-user superadmin / operator lists still exclude the system user (existing tests)
+- [x] Worker still exports TrialCounter/TrialEventBus/TrialOrchestrator; wrangler migrations unchanged
+- [x] Web `/try`, `/try/<id>` show the retired notice and link to the self-host page (auto-redirect dropped after UI review)
+- [x] Staging: deploy succeeds (upgrade path); retired endpoints 410; normal VM task + Instant
       chat still provision; no new sentinel-owned rows created
-- [ ] Production: deploy succeeds; retired endpoint 410; basic smoke
+- [x] Production: deploy succeeds; retired endpoint 410; basic smoke
 
 ## References
 
@@ -136,3 +136,24 @@ sweep orphans nothing. The historical rows stay in place (no D1 DROP; migration-
 - `/api/trial/*` 410 handler test asserts no env binding is read (`trial-status.test.ts`).
 - Visual audit: `apps/web/tests/playwright/trial-retirement-audit.spec.ts` (12/12 at 375 and 1280).
 - The task file was committed on the feature branch rather than main, to avoid an extra production deploy.
+
+## Staging evidence (run 42505118738, 2026-11-08)
+
+- /api/trial/{create,claim,waitlist,status,:id/events} → 410, no Set-Cookie; /api/admin/trials/config → 404 (superadmin);
+  /api/trial-status → 200 available; admin settings registry has no Trials category.
+- app.sammy.party/try and /try/<id> render the retired page at 375/1280; "Self-host SAM" lands on the www self-host page.
+- VM task 01M6Y42AEGXAJ5V205HK7KM8MX provisioned a fresh node and the agent replied; Instant task 01M6Y42K6XM0AN3HD1QB25GEBK
+  replied READY; artifacts project created with installationId=system_anonymous_trials_installation then deleted.
+- D1 unchanged (29 trials, 19 system projects, 0 live system workspaces/nodes); crons now 3; TRIAL_* Worker secrets deleted.
+- Test workspaces and VM node deleted.
+
+## Production evidence (PR #2588 merged as a84ae085; Deploy Production run 42515604778 succeeded, 2026-11-08)
+
+- `api.simple-agent-manager.org/api/trial/{create,claim,status,x/events}` → 410 GONE; `/health` → 200;
+  `/api/trial-status` → 401 unauthenticated (route intact).
+- `app.simple-agent-manager.org/try` and `/try/<id>` render the retired page at 375 and 1280; "Self-host SAM" lands on
+  the www self-host guide.
+- Prod D1 unchanged: 3 historical trials, 3 system projects, 13 projects on the system installation, 0 live system
+  workspaces/nodes, system user present. `sam-api-prod` crons = 3 non-trial schedules; no `TRIAL*` Worker secrets.
+- Post-rebase staging re-probe was withdrawn because the staging queue was congested; the delta was deploy-script
+  deletions covered by CI. CodeRabbit replied "Review rate limited" and did not review.
