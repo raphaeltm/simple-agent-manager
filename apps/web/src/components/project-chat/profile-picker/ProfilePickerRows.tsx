@@ -3,7 +3,8 @@ import { Check, Eye, EyeOff, Sparkles } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { profileSubtitle } from './model';
-import { ProfileAvatar } from './ProfileAvatar';
+import { ProfileUsageAvatar } from './ProfileUsageAvatar';
+import type { ProfileUsage } from './usage';
 
 /** A heading, so screen readers can jump between the sheet's sections. */
 export function SectionLabel({ children }: Readonly<{ children: ReactNode }>) {
@@ -14,9 +15,44 @@ export function SectionLabel({ children }: Readonly<{ children: ReactNode }>) {
   );
 }
 
+/** Words on the right of a row: what's left when it matters, and when it comes back. */
+function RowUsage({ usage }: Readonly<{ usage: ProfileUsage | undefined }>) {
+  if (usage?.state === 'ok') return <span className="sr-only">{`${usage.left}% left`}</span>;
+  let primary: string | null = null;
+  let secondary: string | null = null;
+  if (usage?.state === 'low') {
+    primary = `${usage.left}% left`;
+    secondary = usage.resetIn ? `resets ${usage.resetIn}` : null;
+  } else if (usage?.state === 'out') {
+    primary = 'Out';
+    secondary = usage.resetIn ? `back in ${usage.resetIn}` : null;
+  } else if (usage?.state === 'paused') {
+    primary = 'Paused';
+  } else if (usage?.state === 'none') {
+    primary = 'No account';
+  }
+  if (!primary || !usage) return null;
+  const colored = usage.state === 'low' || usage.state === 'out';
+  return (
+    <span
+      data-testid="profile-usage-notice"
+      className="flex max-w-[45%] shrink-0 flex-col items-end text-right text-[11px] leading-tight"
+    >
+      <span
+        className={`font-medium ${colored ? '' : usage.state === 'paused' ? 'text-warning-fg' : 'text-fg-muted'}`}
+        style={colored ? { color: usage.color } : undefined}
+      >
+        {primary}
+      </span>
+      {secondary && <span className="text-fg-muted">{secondary}</span>}
+    </span>
+  );
+}
+
 /** One profile: tap to start the chat with it; in edit mode an eye toggles "hide from new chat". */
 export function ProfilePickerRow({
   profile,
+  usage,
   selected,
   hidden,
   editing,
@@ -25,6 +61,8 @@ export function ProfilePickerRow({
   onToggleHidden,
 }: Readonly<{
   profile: AgentProfile;
+  /** What's left on the profile's account; undefined where usage isn't loaded. */
+  usage?: ProfileUsage;
   selected: boolean;
   hidden: boolean;
   editing: boolean;
@@ -42,7 +80,7 @@ export function ProfilePickerRow({
         aria-pressed={selected}
         className="flex min-h-[52px] min-w-0 flex-1 items-center gap-3 bg-transparent px-2 py-2 text-left"
       >
-        <ProfileAvatar profile={profile} />
+        <ProfileUsageAvatar profile={profile} usage={usage} />
         <span className="min-w-0 flex-1">
           <span
             className={`block truncate text-sm font-medium ${hidden ? 'text-fg-muted' : 'text-fg-primary'}`}
@@ -51,6 +89,7 @@ export function ProfilePickerRow({
           </span>
           <span className="block truncate text-xs text-fg-muted">{profileSubtitle(profile)}</span>
         </span>
+        <RowUsage usage={usage} />
         {selected && <Check size={16} className="shrink-0 text-accent" aria-hidden="true" />}
       </button>
       {editing && (

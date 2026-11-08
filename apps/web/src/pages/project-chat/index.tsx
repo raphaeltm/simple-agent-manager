@@ -5,7 +5,11 @@ import { useLocation, useNavigate } from 'react-router';
 
 import { useAppShell } from '../../components/AppShell';
 import { BootLogPanel } from '../../components/chat/BootLogPanel';
-import { NewChatProfileCards, visibleProfiles } from '../../components/project-chat/profile-picker';
+import {
+  NewChatProfileCards,
+  useProfileUsages,
+  visibleProfiles,
+} from '../../components/project-chat/profile-picker';
 import { ProjectMessageView } from '../../components/project-message-view';
 import { useCommentDeepLink } from '../../components/project-message-view/comments/useCommentDeepLink';
 import { HierarchyModal } from '../../components/task-hierarchy';
@@ -224,6 +228,10 @@ export function ProjectChat() {
     return getSessionSourceContext(session.taskId, state.taskInfoMap, state.sessions);
   }, [state.sessionId, state.sessions, state.taskInfoMap]);
 
+  // Usage left on each profile's account, for the new-chat picker only: an open chat
+  // makes none of the account requests.
+  const profileUsages = useProfileUsages(state.agentProfiles, state.showNewChatInput);
+
   // A deep link names its session, so the conversation does not wait for the sidebar's
   // session list: its transcript loads (or was prefetched) on its own. Only the bare chat
   // route waits, because what it shows depends on whether the project has any chats.
@@ -297,6 +305,7 @@ export function ProjectChat() {
                   pickerState={state.profilePicker.state}
                   loading={state.profilePicker.picker.status === 'loading'}
                   selectedProfileId={state.selectedProfileId}
+                  usages={profileUsages}
                   onSelect={state.setSelectedProfileId}
                   onShowAll={() => state.openProfileSheet(null)}
                 />
@@ -349,6 +358,7 @@ export function ProjectChat() {
               selectedProfileId={state.selectedProfileId}
               onProfileChange={state.setSelectedProfileId}
               profilePicker={state.profilePicker}
+              profileUsages={profileUsages}
               profileSheet={state.profileSheet}
               onOpenProfileSheet={state.openProfileSheet}
               onCloseProfileSheet={state.closeProfileSheet}

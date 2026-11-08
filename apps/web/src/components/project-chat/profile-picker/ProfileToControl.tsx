@@ -3,12 +3,14 @@ import { ChevronDown } from 'lucide-react';
 
 import type { ChatAgentDefaults } from './agent-overrides';
 import { profileSubtitle } from './model';
-import { ProfileAvatar } from './ProfileAvatar';
+import { ProfileUsageAvatar } from './ProfileUsageAvatar';
+import { type ProfileUsage, usageSpoken } from './usage';
 
 /** The composer's single profile control: "To [avatar] Opus 5.5 Chat ⌄". Opens the picker. */
 export function ProfileToControl({
   profile,
   effective,
+  usage,
   loading,
   disabled,
   onOpen,
@@ -16,6 +18,8 @@ export function ProfileToControl({
   profile: AgentProfile | null;
   /** What this chat will launch with (skill and Chat options applied), in place of the profile's. */
   effective?: Readonly<ChatAgentDefaults>;
+  /** What's left on the account this chat will run on; omitted when it doesn't apply. */
+  usage?: ProfileUsage;
   loading: boolean;
   disabled: boolean;
   onOpen: (anchor: DOMRect) => void;
@@ -29,7 +33,7 @@ export function ProfileToControl({
       // Adjacent spans would read as "ToOpus…"; keep the visible text first (WCAG 2.5.3).
       aria-label={
         profile
-          ? `To ${profile.name}, change profile`
+          ? `To ${[profile.name, usageSpoken(usage)].filter(Boolean).join(', ')}, change profile`
           : loading
             ? 'To: loading profiles'
             : 'To: choose a profile'
@@ -40,7 +44,7 @@ export function ProfileToControl({
       <span className="hidden text-xs text-fg-muted @[10rem]:inline">To</span>
       {profile ? (
         <>
-          <ProfileAvatar profile={profile} size="sm" />
+          <ProfileUsageAvatar profile={profile} usage={usage} size="sm" />
           <span className="truncate text-sm font-medium text-fg-primary">{profile.name}</span>
           {/* Needs an `@container` ancestor; shown only when the toolbar has room for it. */}
           <span className="hidden truncate text-xs text-fg-muted @md:inline">

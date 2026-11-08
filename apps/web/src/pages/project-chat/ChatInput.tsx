@@ -21,6 +21,9 @@ import {
   type ComposerOptionsValue,
   ProfilePickerSheet,
   ProfileToControl,
+  type ProfileUsage,
+  ProfileUsageNudge,
+  visibleProfiles,
 } from '../../components/project-chat/profile-picker';
 import {
   effectiveChatAgent,
@@ -59,6 +62,8 @@ type ChatInputProps = Readonly<{
   selectedProfileId: string | null;
   onProfileChange: (profileId: string | null) => void;
   profilePicker: UseProfilePickerResult;
+  /** What's left on each profile's account; null while loading. */
+  profileUsages?: ReadonlyMap<string, ProfileUsage> | null;
   profileSheet: ProfileSheetState;
   onOpenProfileSheet: (anchor: DOMRect | null) => void;
   onCloseProfileSheet: () => void;
@@ -121,6 +126,7 @@ export function ChatInput({
   selectedProfileId,
   onProfileChange,
   profilePicker,
+  profileUsages,
   profileSheet,
   onOpenProfileSheet,
   onCloseProfileSheet,
@@ -170,6 +176,13 @@ export function ChatInput({
     : null;
   const agentDefaults = chatAgentDefaults(selectedProfile, selectedSkill);
   const effectiveAgent = effectiveChatAgent(agentDefaults, agentOverrides);
+  // Usage belongs to the account the profile's agent resolves to. A skill or Chat option
+  // that switches the agent runs on a different account, so the profile's usage would lie.
+  const selectedUsage =
+    selectedProfile &&
+    (!effectiveAgent.agentType || effectiveAgent.agentType === selectedProfile.agentType)
+      ? profileUsages?.get(selectedProfile.id)
+      : undefined;
   // Overrides belong to the agent they were picked for: a profile or skill that switches the
   // agent clears them, so switching back starts from that agent's defaults again.
   const effectiveAgentType = agentDefaults.agentType;
@@ -228,12 +241,24 @@ export function ChatInput({
         <ComposerOptionsPanel id={optionsPanelId} options={options} compact={isMobile} />
       )}
 
+      {showToolbar && selectedProfile && profileUsages && (
+        <ProfileUsageNudge
+          profile={selectedProfile}
+          usage={selectedUsage}
+          candidates={visibleProfiles(agentProfiles, profilePicker.state)}
+          usageFor={(profileId) => profileUsages.get(profileId)}
+          onSwitch={onProfileChange}
+          disabled={submitting}
+        />
+      )}
+
       {showToolbar && (
         <div className="mb-2 flex items-center gap-2">
           <div className="@container min-w-0 flex-1">
             <ProfileToControl
               profile={selectedProfile}
               effective={effectiveAgent}
+              usage={selectedUsage}
               loading={profilePicker.picker.status === 'loading'}
               disabled={submitting}
               onOpen={onOpenProfileSheet}
@@ -291,6 +316,7 @@ export function ChatInput({
         profiles={agentProfiles}
         selectedProfileId={selectedProfileId}
         pickerState={profilePicker.state}
+        usages={profileUsages}
         hiddenUpdating={profilePicker.updating}
         hiddenUpdateError={profilePicker.updateError}
         onSelect={onProfileChange}

@@ -229,11 +229,6 @@ const TrialChatGateHarness = lazyNamed(
   () => import('./pages/TrialChatGateHarness'),
   'TrialChatGateHarness'
 );
-// PROTOTYPE — remove before merge (rule 37).
-const ProfileUsagePrototype = lazyNamed(
-  () => import('./pages/profile-usage-prototype'),
-  'ProfileUsagePrototype'
-);
 const Try = lazyNamed(() => import('./pages/Try'), 'Try');
 const TryCapExceeded = lazyNamed(() => import('./pages/TryCapExceeded'), 'TryCapExceeded');
 const TryDiscovery = lazyNamed(() => import('./pages/TryDiscovery'), 'TryDiscovery');
@@ -305,7 +300,6 @@ export default function App() {
                   <Routes>
                     {/* Public routes */}
                     <Route path="/" element={<Landing />} />
-                    <Route path="/prototype/profile-usage" element={page(<ProfileUsagePrototype />)} />
                     <Route path="/try" element={page(<Try />)} />
                     <Route path="/try/cap-exceeded" element={page(<TryCapExceeded />)} />
                     <Route path="/try/waitlist/thanks" element={page(<TryWaitlistThanks />)} />

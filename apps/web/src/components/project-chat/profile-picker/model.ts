@@ -138,16 +138,22 @@ export function profileCardSet(
 }
 
 export interface PickerSection {
-  id: 'results' | 'recent' | 'chat' | 'build' | 'hidden';
+  id: 'results' | 'recent' | 'chat' | 'build' | 'out' | 'hidden';
   label: string;
   items: AgentProfile[];
 }
 
+/**
+ * The sheet's sections. `outIds` are visible profiles whose account has no usage left:
+ * they leave Recent and their group for "Out for now", above the hidden ones. A search
+ * lists every match together, out or not.
+ */
 export function pickerSections(
   profiles: AgentProfile[],
   state: ProfilePickerState | undefined,
   query: string,
-  recentLimit: number
+  recentLimit: number,
+  outIds: ReadonlySet<string> = new Set()
 ): PickerSection[] {
   const hidden = new Set(state?.hiddenProfileIds ?? []);
   const trimmed = query.trim().toLowerCase();
@@ -164,13 +170,17 @@ export function pickerSections(
       },
     ];
   }
-  const recent = recentProfiles(profiles, state, recentLimit);
+  const isOut = (profile: AgentProfile) => outIds.has(profile.id) && !hidden.has(profile.id);
+  const recent = recentProfiles(profiles, state, recentLimit).filter((profile) => !isOut(profile));
   const recentIds = new Set(recent.map((profile) => profile.id));
-  const rest = profiles.filter((profile) => !recentIds.has(profile.id) && !hidden.has(profile.id));
+  const rest = profiles.filter(
+    (profile) => !recentIds.has(profile.id) && !hidden.has(profile.id) && !isOut(profile)
+  );
   return [
     { id: 'recent' as const, label: 'Recent', items: recent },
     { id: 'chat' as const, label: 'Chat & explore', items: rest.filter((p) => !isBuildProfile(p)) },
     { id: 'build' as const, label: 'Build & open PRs', items: rest.filter(isBuildProfile) },
+    { id: 'out' as const, label: 'Out for now', items: profiles.filter(isOut) },
     {
       id: 'hidden' as const,
       label: 'Hidden from new chat',

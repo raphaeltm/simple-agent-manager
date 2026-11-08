@@ -10,8 +10,9 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router';
 
 import { useIsMobile } from '../../../hooks/useIsMobile';
-import { idleProfiles, pickerSections } from './model';
+import { idleProfiles, type PickerSection, pickerSections } from './model';
 import { IdleProfilesNudge, ProfilePickerRow, SectionLabel } from './ProfilePickerRows';
+import type { ProfileUsage } from './usage';
 
 /** Search appears once the list is long enough that scanning it is slower than typing. */
 const SEARCH_THRESHOLD = 8;
@@ -29,6 +30,8 @@ type ProfilePickerSheetProps = Readonly<{
   profiles: AgentProfile[];
   selectedProfileId: string | null;
   pickerState: ProfilePickerState | undefined;
+  /** What's left on each profile's account; omitted where the surface doesn't load usage. */
+  usages?: ReadonlyMap<string, ProfileUsage> | null;
   hiddenUpdating: boolean;
   hiddenUpdateError: string | null;
   onSelect: (profileId: string) => void;
@@ -46,6 +49,9 @@ type ProfilePickerSheetProps = Readonly<{
   layer?: 'drawer' | 'above-dialog';
 }>;
 
+/** Sections folded behind their heading until opened (outside edit mode). */
+const FOLDED_SECTIONS: ReadonlySet<PickerSection['id']> = new Set(['out', 'hidden']);
+
 const LAYER_CLASSES = {
   drawer: { backdrop: 'z-drawer-backdrop', sheet: 'z-drawer' },
   'above-dialog': { backdrop: 'z-panel', sheet: 'z-panel' },
@@ -53,11 +59,15 @@ const LAYER_CLASSES = {
 
 function sheetLayout(isMobile: boolean, anchor: DOMRect | null) {
   if (isMobile) {
-    return { className: 'fixed inset-x-0 bottom-0 max-h-[85vh] rounded-t-[var(--sam-radius-pane)]', style: undefined };
+    return {
+      className: 'fixed inset-x-0 bottom-0 max-h-[85vh] rounded-t-[var(--sam-radius-pane)]',
+      style: undefined,
+    };
   }
   if (!anchor) {
     return {
-      className: 'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-[var(--sam-radius-pane)]',
+      className:
+        'fixed left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 rounded-[var(--sam-radius-pane)]',
       style: { width: SHEET_WIDTH_PX, maxHeight: SHEET_MAX_HEIGHT_PX } satisfies CSSProperties,
     };
   }
@@ -81,12 +91,12 @@ function sheetLayout(isMobile: boolean, anchor: DOMRect | null) {
  * person's hidden profiles, with search, an edit mode for hiding, and New/Edit/Manage.
  */
 export function ProfilePickerSheet(props: ProfilePickerSheetProps) {
-  const { open, profiles, pickerState, selectedProfileId } = props;
+  const { open, profiles, pickerState, selectedProfileId, usages } = props;
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const [query, setQuery] = useState('');
   const [editing, setEditing] = useState(false);
-  const [showHidden, setShowHidden] = useState(false);
+  const [openFolds, setOpenFolds] = useState<ReadonlySet<string>>(() => new Set());
   const dialogRef = useRef<HTMLDivElement>(null);
   const { onClose } = props;
   // Focus trap, Escape, scroll lock, an inert page behind, and focus back on whatever
@@ -98,12 +108,21 @@ export function ProfilePickerSheet(props: ProfilePickerSheetProps) {
     if (open) return;
     setQuery('');
     setEditing(false);
-    setShowHidden(false);
+    setOpenFolds(new Set());
   }, [open]);
 
+  const outIds = useMemo(
+    () =>
+      new Set(
+        profiles
+          .filter((profile) => usages?.get(profile.id)?.state === 'out')
+          .map((profile) => profile.id)
+      ),
+    [profiles, usages]
+  );
   const sections = useMemo(
-    () => pickerSections(profiles, pickerState, query, RECENT_LIMIT),
-    [pickerState, profiles, query]
+    () => pickerSections(profiles, pickerState, query, RECENT_LIMIT, outIds),
+    [pickerState, profiles, query, outIds]
   );
   const hiddenIds = useMemo(
     () => new Set(pickerState?.hiddenProfileIds ?? []),
@@ -195,19 +214,26 @@ export function ProfilePickerSheet(props: ProfilePickerSheetProps) {
             />
           )}
           {sections.map((section) => {
-            const collapsible = section.id === 'hidden' && !editing;
-            const expanded = !collapsible || showHidden;
+            const collapsible = FOLDED_SECTIONS.has(section.id) && !editing;
+            const folded = collapsible && !openFolds.has(section.id);
+            const toggleFold = () =>
+              setOpenFolds((current) => {
+                const next = new Set(current);
+                if (next.has(section.id)) next.delete(section.id);
+                else next.add(section.id);
+                return next;
+              });
             return (
               <div key={section.id}>
                 {collapsible ? (
                   <h3 className="m-0">
                     <button
                       type="button"
-                      onClick={() => setShowHidden((value) => !value)}
-                      aria-expanded={showHidden}
+                      onClick={toggleFold}
+                      aria-expanded={!folded}
                       className="flex min-h-11 w-full items-center gap-1 bg-transparent px-4 pt-2 text-left text-[11px] font-semibold uppercase tracking-wide text-fg-muted hover:text-fg-secondary"
                     >
-                      {showHidden ? (
+                      {!folded ? (
                         <ChevronDown size={13} aria-hidden="true" />
                       ) : (
                         <ChevronRight size={13} aria-hidden="true" />
@@ -218,11 +244,12 @@ export function ProfilePickerSheet(props: ProfilePickerSheetProps) {
                 ) : (
                   <SectionLabel>{section.label}</SectionLabel>
                 )}
-                {expanded &&
+                {!folded &&
                   section.items.map((profile) => (
                     <ProfilePickerRow
                       key={profile.id}
                       profile={profile}
+                      usage={usages?.get(profile.id)}
                       selected={profile.id === selectedProfileId}
                       hidden={hiddenIds.has(profile.id)}
                       editing={editing}

@@ -19,9 +19,10 @@ export type ProfileBudget =
 
 /** Null while the account queries (and my profile pins) are still loading. */
 export function useProfileBudgets(
-  profiles: readonly Pick<AgentProfile, 'id' | 'agentType' | 'projectId'>[]
+  profiles: readonly Pick<AgentProfile, 'id' | 'agentType' | 'projectId'>[],
+  options?: { enabled?: boolean }
 ): ReadonlyMap<string, ProfileBudget> | null {
-  const { model, snapshot, profilePinsSettled } = useAccountsData();
+  const { model, snapshot, profilePinsSettled } = useAccountsData({ enabled: options?.enabled });
 
   return useMemo(() => {
     // Until my pins load, a pinned profile would show my usual account by mistake.
