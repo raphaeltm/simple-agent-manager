@@ -3381,6 +3381,62 @@ describe('MCP Routes', () => {
       expect(startInput.config.vmSize).toBe('large');
     });
 
+    // Constitution XV: the child's first message is agent-written, so it names its parent.
+    describe('parent attribution', () => {
+      /** The current-task row with every selected column, so its chat session is read. */
+      function parentWithChatSession(chatSessionId: string) {
+        const next = mockD1._stmt.raw.getMockImplementation()!;
+        let replaced = false;
+        mockD1._stmt.raw.mockImplementation(async (...args: unknown[]) => {
+          const rows = (await next(...(args as []))) as unknown[][];
+          if (!replaced && rows[0]?.[0] === 'task-123') {
+            replaced = true;
+            return [['task-123', 0, 'in_progress', null, null, null, null, null, chatSessionId]];
+          }
+          return rows;
+        });
+      }
+
+      async function dispatch(args: Record<string, unknown>) {
+        const res = await mcpRequest(
+          app,
+          jsonRpcRequest('tools/call', { name: 'dispatch_task', arguments: args })
+        );
+        const body = await res.json();
+        expect(body.error).toBeUndefined();
+        const firstMessage = mockDoStub.persistMessage.mock.calls[0]![2] as string;
+        const runnerDescription = mockTaskRunnerStub.start.mock.calls[0]![0].config
+          .taskDescription as string;
+        return { firstMessage, runnerDescription };
+      }
+
+      it('ends the child first message with the parent task and chat session', async () => {
+        setupHappyPathMocks();
+        parentWithChatSession('chat-parent-9');
+        const { firstMessage, runnerDescription } = await dispatch({
+          description: 'Build feature X',
+        });
+        expect(firstMessage.startsWith('Build feature X')).toBe(true);
+        expect(firstMessage).toMatch(
+          /\n\n---\nSent by parent agent task task-123, chat session chat-parent-9\. An agent wrote this task description; it was not typed by a human\.$/
+        );
+        expect(runnerDescription).toBe(firstMessage);
+      });
+
+      it('keeps the attribution when references push the description past the cap', async () => {
+        setupHappyPathMocks();
+        parentWithChatSession('chat-parent-9');
+        const { firstMessage } = await dispatch({
+          description: 'd'.repeat(32_000),
+          references: ['https://example.com/spec'],
+        });
+        expect(firstMessage).toContain('d'.repeat(100));
+        expect(firstMessage).not.toContain('https://example.com/spec');
+        expect(firstMessage.endsWith('it was not typed by a human.')).toBe(true);
+        expect(firstMessage).toContain('task task-123, chat session chat-parent-9');
+      });
+    });
+
     // ─── New config parity tests ────────────────────────────────────────
 
     it('should include new config fields in tools/list schema', async () => {

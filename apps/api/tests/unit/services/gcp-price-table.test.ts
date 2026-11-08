@@ -6,12 +6,15 @@
  */
 import { Buffer } from 'node:buffer';
 
+import { GCP_CLOUD_BILLING_SERVICE } from '@simple-agent-manager/shared';
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
+import { log } from '../../../src/lib/logger';
 import { encrypt } from '../../../src/services/encryption';
+import { listGcpApiIssues } from '../../../src/services/gcp-api-health';
 import {
   GCP_PRICE_TABLE_ATTEMPT_KV_KEY,
   GCP_PRICE_TABLE_KV_KEY,
@@ -19,6 +22,13 @@ import {
   refreshGcpPriceTableIfDue,
 } from '../../../src/services/gcp-price-table';
 import { serializeGcpCredential } from '../../../src/services/provider-credential-codecs';
+import {
+  googleBare403Body,
+  googleErrorResponse,
+  googleIamPermissionDeniedBody,
+  googleScopeInsufficientBody,
+  googleServiceDisabledBody,
+} from '../../helpers/google-api-errors';
 import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const tokenCalls: Array<{ userId: string; projectId: string; gcpProjectId: string }> = [];
@@ -112,24 +122,33 @@ function sku(description: string, price: number) {
   };
 }
 
-/** Billing API answers per token: a project whose token is listed here has the API disabled. */
-function stubBilling(disabledProjects: string[] = []) {
+type BillingFailure = 'service_disabled' | 'scope_insufficient' | 'iam_denied' | 'bare_403';
+
+const FAILURE_BODIES: Record<BillingFailure, () => unknown> = {
+  service_disabled: () => googleServiceDisabledBody(GCP_CLOUD_BILLING_SERVICE),
+  scope_insufficient: () => googleScopeInsufficientBody(GCP_CLOUD_BILLING_SERVICE),
+  iam_denied: () => googleIamPermissionDeniedBody(GCP_CLOUD_BILLING_SERVICE),
+  bare_403: () => googleBare403Body(),
+};
+
+/**
+ * Billing API answers per token: a project whose token is listed here gets that failure, by
+ * default the API being off (Google's real `SERVICE_DISABLED` body). A fresh response is minted
+ * per call so every attempt parses the full body.
+ */
+function stubBilling(
+  failingProjects: string[] | Record<string, BillingFailure> = [],
+  failure: BillingFailure = 'service_disabled'
+) {
+  const failures: Record<string, BillingFailure> = Array.isArray(failingProjects)
+    ? Object.fromEntries(failingProjects.map((project) => [project, failure]))
+    : failingProjects;
   const fetchMock = vi.fn(async (input: string | URL, init?: RequestInit) => {
     const url = new URL(String(input));
     expect(url.host).toBe('cloudbilling.googleapis.com');
     const auth = (init?.headers as Record<string, string>).Authorization ?? '';
-    if (disabledProjects.some((project) => auth.endsWith(project))) {
-      return new Response(
-        JSON.stringify({
-          error: {
-            code: 403,
-            message: 'Cloud Billing API has not been used in project 123 before or it is disabled.',
-            status: 'PERMISSION_DENIED',
-          },
-        }),
-        { status: 403 }
-      );
-    }
+    const failing = Object.entries(failures).find(([project]) => auth.endsWith(project));
+    if (failing) return googleErrorResponse(FAILURE_BODIES[failing[1]]());
     return new Response(
       JSON.stringify({
         skus: [
@@ -255,7 +274,11 @@ describe('GCP price table', () => {
     await seedOwned('cred-a', 'disabled-gcp', { updatedAt: '2026-11-06T00:00:00Z' });
     const fetchMock = stubBilling(['disabled-gcp']);
 
-    expect(await refreshGcpPriceTableIfDue(env, NOW)).toEqual({ status: 'failed', attempts: 1 });
+    expect(await refreshGcpPriceTableIfDue(env, NOW)).toEqual({
+      status: 'failed',
+      attempts: 1,
+      faults: 0,
+    });
     expect(await env.KV.get(GCP_PRICE_TABLE_ATTEMPT_KV_KEY, 'json')).toEqual({
       at: NOW.toISOString(),
       nextOffset: 1,
@@ -271,6 +294,7 @@ describe('GCP price table', () => {
     expect(await refreshGcpPriceTableIfDue(env, afterRetry)).toEqual({
       status: 'failed',
       attempts: 1,
+      faults: 0,
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
@@ -313,7 +337,12 @@ describe('GCP price table', () => {
     stubBilling(['platform-gcp-1', 'platform-gcp-2', 'platform-gcp-3']);
 
     // The failing platform credentials fill the per-refresh limit of three.
-    expect(await refreshGcpPriceTableIfDue(env, NOW)).toEqual({ status: 'failed', attempts: 3 });
+    // Platform credentials belong to operators, so even an owner-fixable reason is a fault.
+    expect(await refreshGcpPriceTableIfDue(env, NOW)).toEqual({
+      status: 'failed',
+      attempts: 3,
+      faults: 3,
+    });
     expect(tokenCalls.map((call) => call.gcpProjectId)).toEqual([
       'platform-gcp-3',
       'platform-gcp-2',
@@ -375,7 +404,12 @@ describe('GCP price table', () => {
         new Response(JSON.stringify({ skus: [sku('E2 Instance Core running in Americas', 0.02)] }))
     ) as unknown as typeof fetch;
 
-    expect(await refreshGcpPriceTableIfDue(env, NOW)).toEqual({ status: 'failed', attempts: 2 });
+    // Unusable data from a working API is a fault operators must hear about.
+    expect(await refreshGcpPriceTableIfDue(env, NOW)).toEqual({
+      status: 'failed',
+      attempts: 2,
+      faults: 2,
+    });
     expect(tokenCalls.map((call) => call.gcpProjectId)).toEqual([
       'core-only-gcp',
       'second-core-only-gcp',
@@ -402,11 +436,130 @@ describe('GCP price table', () => {
       ) as unknown as typeof fetch;
       const pending = refreshGcpPriceTableIfDue(env, NOW);
       await vi.advanceTimersByTimeAsync(10_001);
-      expect(await pending).toEqual({ status: 'failed', attempts: 1 });
+      // A spent budget is a fault, not the owner's project.
+      expect(await pending).toEqual({ status: 'failed', attempts: 1, faults: 1 });
       expect(tokenCalls.map((call) => call.gcpProjectId)).toEqual(['slow-gcp']);
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe('owner-fixable failures vs faults', () => {
+    async function issuesFor(id: string, gcpProjectId: string) {
+      return listGcpApiIssues(env, id, JSON.parse(gcpCredential(gcpProjectId)), NOW);
+    }
+
+    it('records Cloud Billing turned off on the credential and does not count it as a fault', async () => {
+      await seedOwned('cred-off', 'off-gcp', { updatedAt: '2026-11-06T00:00:00Z' });
+      stubBilling(['off-gcp'], 'service_disabled');
+      const warn = vi.spyOn(log, 'warn');
+
+      expect(await refreshGcpPriceTableIfDue(env, NOW)).toEqual({
+        status: 'failed',
+        attempts: 1,
+        faults: 0,
+      });
+      expect(await issuesFor('cred-off', 'off-gcp')).toEqual([
+        {
+          service: GCP_CLOUD_BILLING_SERVICE,
+          label: 'Cloud Billing',
+          reason: 'api_disabled',
+          observedAt: NOW.toISOString(),
+        },
+      ]);
+      // The warn log carries the structured cause, without the message text.
+      expect(warn).toHaveBeenCalledWith(
+        'gcp_price_table.refresh_attempt_failed',
+        expect.objectContaining({
+          credentialId: 'cred-off',
+          ownerFixable: 'api_disabled',
+          statusCode: 403,
+          providerCode: 'PERMISSION_DENIED',
+          googleReason: 'SERVICE_DISABLED',
+          googleService: GCP_CLOUD_BILLING_SERVICE,
+          error: '[REDACTED_ERROR_MESSAGE]',
+        })
+      );
+      warn.mockRestore();
+    });
+
+    it('records an IAM refusal as owner-fixable permission denial', async () => {
+      await seedOwned('cred-iam', 'iam-gcp', { updatedAt: '2026-11-06T00:00:00Z' });
+      stubBilling(['iam-gcp'], 'iam_denied');
+
+      expect(await refreshGcpPriceTableIfDue(env, NOW)).toMatchObject({ faults: 0 });
+      expect(await issuesFor('cred-iam', 'iam-gcp')).toMatchObject([
+        { service: GCP_CLOUD_BILLING_SERVICE, reason: 'permission_denied' },
+      ]);
+    });
+
+    it.each([
+      ['a token minted without the scope (SAM bug)', 'scope_insufficient'],
+      ['a 403 with no structured reason', 'bare_403'],
+    ] as const)(
+      'counts %s as a fault and records nothing on the credential',
+      async (_name, failure) => {
+        await seedOwned('cred-x', 'x-gcp', { updatedAt: '2026-11-06T00:00:00Z' });
+        stubBilling(['x-gcp'], failure);
+
+        expect(await refreshGcpPriceTableIfDue(env, NOW)).toEqual({
+          status: 'failed',
+          attempts: 1,
+          faults: 1,
+        });
+        // Only the setup-drift entry (this credential predates the record) remains.
+        expect(await issuesFor('cred-x', 'x-gcp')).toEqual([
+          {
+            service: GCP_CLOUD_BILLING_SERVICE,
+            label: 'Cloud Billing',
+            reason: 'not_enabled_by_setup',
+          },
+        ]);
+      }
+    );
+
+    it('keeps a platform credential with Cloud Billing off a fault, since operators own it', async () => {
+      await seedPlatform('cred-platform', 'platform-off-gcp', '2026-11-01T00:00:00Z');
+      stubBilling(['platform-off-gcp'], 'service_disabled');
+
+      expect(await refreshGcpPriceTableIfDue(env, NOW)).toEqual({
+        status: 'failed',
+        attempts: 1,
+        faults: 1,
+      });
+      // Still recorded, so the record is ready when operators get a place to see it.
+      expect(await issuesFor('cred-platform', 'platform-off-gcp')).toMatchObject([
+        { reason: 'api_disabled' },
+      ]);
+    });
+
+    it('counts faults separately when owner-fixable and genuine failures mix', async () => {
+      await seedOwned('cred-off', 'off-gcp', { updatedAt: '2026-11-06T00:00:00Z' });
+      await seedOwned('cred-bug', 'bug-gcp', { updatedAt: '2026-11-05T00:00:00Z' });
+      stubBilling({ 'off-gcp': 'service_disabled', 'bug-gcp': 'scope_insufficient' });
+
+      expect(await refreshGcpPriceTableIfDue(env, NOW)).toEqual({
+        status: 'failed',
+        attempts: 2,
+        faults: 1,
+      });
+    });
+
+    it('clears a recorded issue and confirms the API once the credential prices successfully', async () => {
+      await seedOwned('cred-a', 'fixed-gcp', { updatedAt: '2026-11-06T00:00:00Z' });
+      stubBilling(['fixed-gcp'], 'service_disabled');
+      await refreshGcpPriceTableIfDue(env, NOW);
+      expect(await issuesFor('cred-a', 'fixed-gcp')).toMatchObject([{ reason: 'api_disabled' }]);
+
+      // The owner turns the API on; the next retry prices from it.
+      stubBilling();
+      const afterRetry = new Date(NOW.getTime() + 61 * 60 * 1000);
+      expect(await refreshGcpPriceTableIfDue(env, afterRetry)).toMatchObject({
+        status: 'refreshed',
+      });
+      // Confirmed by a real call, so the setup-drift entry is gone too.
+      expect(await issuesFor('cred-a', 'fixed-gcp')).toEqual([]);
+    });
   });
 
   it('treats a malformed stored table as absent', async () => {

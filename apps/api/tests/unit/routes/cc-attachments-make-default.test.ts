@@ -20,9 +20,12 @@ import type { AuthContext } from '../../../src/middleware/auth';
 import { AppError } from '../../../src/middleware/error';
 import { ccRoutes } from '../../../src/routes/composable-credentials';
 import { getDecryptedAgentKey } from '../../../src/routes/credentials';
-import { syncActiveAgentCredentialSecret } from '../../../src/services/composable-credentials/agent-sync';
 import { resolveForConsumer } from '../../../src/services/composable-credentials/resolve';
 import { decrypt, encrypt } from '../../../src/services/encryption';
+import {
+  loadRunAgentCredential,
+  writeRotatedAgentCredential,
+} from '../../../src/services/run-agent-credential';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const ENCRYPTION_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=';
@@ -268,13 +271,13 @@ describe('POST /api/cc/attachments/default — make an existing account the defa
     expect(work).toBeDefined();
   });
 
-  it('moves the legacy row the Codex refresh path reads to the new default', async () => {
+  it('moves the active legacy row to the new default', async () => {
     expect(await activeLegacySecret()).toBe(codexAuth('work'));
 
     await makeDefault('cfg-personal');
 
-    // CodexRefreshLock compares a workspace's refresh token against this row. If it
-    // still held "work", a workspace on "personal" would be answered with work's tokens.
+    // The legacy resolver (users without cc data) answers from this row. If it still
+    // held "work", a legacy-path workspace on "personal" would get work's secret.
     expect(await activeLegacySecret()).toBe(codexAuth('personal'));
     expect(legacyRows()).toHaveLength(1);
   });
@@ -291,17 +294,29 @@ describe('POST /api/cc/attachments/default — make an existing account the defa
   it('a later token rotation lands on the new default, not the old one', async () => {
     await makeDefault('cfg-personal');
 
-    // Drive the real mirror writer CodexRefreshLock calls after a rotation.
+    // The refresh path resolves the run's credential through the same resolver as
+    // the agent-key callback, then writes with the shared compare-and-set writer.
+    const db = drizzle(env.DATABASE);
+    const reference = (await getDecryptedAgentKey(db, OWNER, CODEX, ENCRYPTION_KEY, null))
+      ?.credentialReference;
+    expect(reference).toBe('cc_credentials:cred-personal');
+    const target = await loadRunAgentCredential(env.DATABASE, {
+      userId: OWNER,
+      reference: reference ?? '',
+      agentType: CODEX,
+      credentialKind: 'oauth-token',
+    });
+    if (!target) throw new Error('target credential missing');
     const rotated = await encrypt(codexAuth('personal-rotated'), ENCRYPTION_KEY);
-    const updated = await syncActiveAgentCredentialSecret(env.DATABASE, {
+    const write = await writeRotatedAgentCredential(env.DATABASE, {
       userId: OWNER,
       agentType: CODEX,
       credentialKind: 'oauth-token',
-      encryptedToken: rotated.ciphertext,
-      iv: rotated.iv,
+      target,
+      next: { encryptedToken: rotated.ciphertext, iv: rotated.iv },
     });
 
-    expect(updated).toBe(1);
+    expect(write.applied).toBe(true);
     const secretOf = async (id: string) => {
       const row = sqlite
         .prepare(`SELECT encrypted_token AS t, iv FROM cc_credentials WHERE id = ?`)

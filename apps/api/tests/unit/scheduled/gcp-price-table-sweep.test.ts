@@ -1,7 +1,7 @@
 /**
  * The scheduled `gcp_price_table` step: a refresh where every credential failed returns
- * `failed` rather than throwing, so the handler must turn it into a failed sweep or operators
- * are never told. Driven through the real `scheduled()` handler and the real sweep isolator;
+ * `failed` rather than throwing, so the handler must turn it into a failed sweep when any
+ * failure was a fault, or operators are never told. Driven through the real `scheduled()` handler and the real sweep isolator;
  * every other sweep is stubbed out.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -54,8 +54,8 @@ const env = { DATABASE: {}, OBSERVABILITY_DATABASE: {}, KV: {} } as never;
 describe('scheduled gcp_price_table step', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('reports a refresh where every credential failed as a failed sweep', async () => {
-    refreshMock.mockResolvedValue({ status: 'failed', attempts: 3 });
+  it('reports a refresh where every credential failed and one was a fault as a failed sweep', async () => {
+    refreshMock.mockResolvedValue({ status: 'failed', attempts: 3, faults: 1 });
 
     await scheduled(controller, env, context);
 
@@ -67,6 +67,9 @@ describe('scheduled gcp_price_table step', () => {
     { status: 'backoff', retryAt: '2026-11-07T13:00:00.000Z' },
     { status: 'fresh', fetchedAt: '2026-11-07T11:00:00.000Z' },
     { status: 'no-credential' },
+    // Every credential failed for an owner-fixable reason (Cloud Billing off in their project);
+    // the end-to-end case is in gcp-price-table-sweep-vertical.test.ts.
+    { status: 'failed', attempts: 2, faults: 0 },
   ])('does not report $status as a failure', async (result) => {
     refreshMock.mockResolvedValue(result);
 

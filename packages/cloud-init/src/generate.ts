@@ -501,7 +501,7 @@ export interface CloudInitVariables {
   swapSizeMb?: string;
   /** Swap swappiness value 0-100 (default: 60). Only relevant when swap is enabled. */
   swapSwappiness?: string;
-  /** Host memory reserve in MB subtracted from the Docker workload slice (default: 512). */
+  /** Host memory reserve in MB subtracted from the Docker workload slice (default: 1024, matching the API's admission reserve). */
   vmAgentMemoryReserveMb?: string;
   /** Minimum memory protection for VM agent/system services in MB (default: 256). */
   samInfraSliceMemoryMinMb?: string;
@@ -623,7 +623,7 @@ export function generateCloudInit(
     '{{ workspace_build_queue_depth }}': variables.workspaceBuildQueueDepth ?? '1',
     '{{ swap_size_mb }}': variables.swapSizeMb ?? '2048',
     '{{ swap_swappiness }}': variables.swapSwappiness ?? '60',
-    '{{ vm_agent_memory_reserve_mb }}': variables.vmAgentMemoryReserveMb ?? '512',
+    '{{ vm_agent_memory_reserve_mb }}': variables.vmAgentMemoryReserveMb ?? '1024',
     '{{ sam_infra_slice_memory_min_mb }}': variables.samInfraSliceMemoryMinMb ?? '256',
     // The vm-agent shares the CPU with workload containers. Memory already has a
     // reservation (MemoryMin above) because starvation there KILLS the agent;

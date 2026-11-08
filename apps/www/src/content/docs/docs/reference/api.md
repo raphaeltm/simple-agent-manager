@@ -118,10 +118,8 @@ All matching and state filtering happens before the configured page limit. Conti
 
 ### Agent messages over shared channels
 
-With `AGENT_MESSAGE_CHANNELS_ENABLED=true`, and only while event wakes and durable
-prompt delivery are enabled, `send_durable_message` (classes `notify` and `deliver`)
-and `send_message_to_subtask` stop injecting the sender's text into the recipient's
-prompt. One ProjectData transaction (`sendAgentChannelMessage`) finds or creates the
+`send_durable_message` (every class and `deliveryIntent`) and `send_message_to_subtask`
+never put the sender's text into the recipient's chat or prompt (constitution principle XV). One ProjectData transaction (`sendAgentChannelMessage`) finds or creates the
 canonical `agent-dm.<pair digest>` channel for the two chat sessions, ensures a
 SAM-managed `runtime_steer` subscription for each chat (`ensureManagedSubscription`), and
 publishes the message with its server-derived sender. The recipient gets a SAM-authored
@@ -131,12 +129,18 @@ created with another delivery mode is replaced on the pair's next message: the r
 receives that message and later ones at once, while the old subscription loses its match keys
 and only delivers the wakes it already owed, in its original mode. The recipient reads the text with `get_event`
 (`event.metadata.actor` is the verified sender), replies with `send_durable_message`,
-and acknowledges with `ack_event_delivery`. Urgent classes keep stop-and-deliver.
+and acknowledges with `ack_event_delivery`. A batch holding an urgent message (`interrupt`,
+`preempt_and_replan` or `shutdown_with_final_prompt`) is delivered stop-and-deliver with that
+class (`urgentAgentMessageClass`); its notice is still IDs-only.
 Responses report `accepted: true, delivered: false` with `transport`, `channel`,
 `eventId` and `sequence`; an optional `idempotencyKey` replays a lost-response retry,
 and changed content under the same key is rejected as a conflict. Messages are capped
 by `PROJECT_EVENT_CHANNEL_MESSAGE_MAX_BYTES` and pair channels by
-`AGENT_MESSAGE_CHANNEL_MAX_CHANNELS`. Managed deployments enable the transport in `wrangler.toml`; the code fallback is off and `AGENT_MESSAGE_CHANNELS_ENABLED=false` selects the legacy path. A message sent with `deliveryIntent: "steer"` never uses the pair channel: it targets the recipient's running turn, so durable delivery injects the text, fenced and labelled as another agent's message, into that turn (see [Live steering](#live-steering)).
+`AGENT_MESSAGE_CHANNEL_MAX_CHANNELS`. The transport needs `AGENT_MESSAGE_CHANNELS_ENABLED=true`, event wakes and durable prompt
+delivery. Managed deployments enable it in `wrangler.toml` (the code fallback is off). When any of
+the three is off, both tools refuse the send with `outcome: "unavailable"` and the reason; there is
+no legacy path that posts the text. `deliveryIntent` is accepted for compatibility: the managed
+subscription already steers notices into a running turn, so `queue` and `steer` deliver alike.
 
 Pair-channel events match only subscriptions targeting one of the two participant
 chats (`subscriptionCanMatchProjectEvent`), `follow_event_channel` rejects
@@ -360,8 +364,10 @@ Steering needs durable prompt delivery.
   returns `409` when durable delivery is off and `400` with attachments, which travel only with a
   queued prompt. The response echoes `deliveryIntent`.
 - The MCP tool `send_durable_message` takes `deliveryIntent` (`queue` or `steer`); `steer` is
-  accepted only with the `notify` and `deliver` classes, so a steer never stops a turn. Urgent
-  classes keep stop-and-deliver.
+  accepted only with the `notify` and `deliver` classes. The message travels over the pair channel
+  either way (see [Agent messages over shared channels](#agent-messages-over-shared-channels)), and
+  its notice steers into a running turn through the managed subscription. Urgent classes make the
+  notice stop-and-deliver.
 - An event subscription with `requestedDelivery: "runtime_steer"` wakes its chat through the same
   queue with the steer intent: a chat that is mid-turn on a steering runtime gets the batch in that
   turn, and an idle, sleeping or non-steering chat gets an ordinary wake prompt. Like the other

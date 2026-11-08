@@ -121,6 +121,7 @@ export async function handleDispatchTask(
       credentialAttributionUserId: schema.tasks.credentialAttributionUserId,
       credentialAttributionProjectId: schema.tasks.credentialAttributionProjectId,
       credentialAttributionSource: schema.tasks.credentialAttributionSource,
+      chatSessionId: schema.tasks.chatSessionId,
     })
     .from(schema.tasks)
     .where(
@@ -279,6 +280,7 @@ export async function handleDispatchTask(
     missionId: explicitMissionId ?? currentTask.missionId ?? null,
     coordinationChannel,
     maxLength: limits.dispatchDescriptionMaxLength,
+    parent: { taskId: currentTask.id, chatSessionId: currentTask.chatSessionId },
   });
 
   // ── Create the task ─────────────────────────────────────────────────────

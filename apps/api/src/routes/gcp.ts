@@ -23,6 +23,12 @@ import {
 import { enforceCredentialMutationRateLimit } from '../services/credential-mutation-rate-limit';
 import { decrypt } from '../services/encryption';
 import { getTimeoutMs } from '../services/fetch-timeout';
+import {
+  deleteGcpApiHealthSafely,
+  listGcpApiIssuesSafely,
+  probeGcpCloudBilling,
+  toGcpCredentialMetadataWithApiIssues,
+} from '../services/gcp-api-health';
 import { replaceUserGcpCredential } from '../services/gcp-credential-store';
 import { sanitizeGcpError, toSanitizedAppError } from '../services/gcp-errors';
 import {
@@ -36,7 +42,7 @@ import {
   verifyGcpOidcSetup,
 } from '../services/gcp-sts';
 import { getGoogleInfraOAuthConfig } from '../services/platform-config';
-import { parseGcpCredential, toGcpCredentialMetadata } from '../services/provider-credentials';
+import { parseGcpCredential } from '../services/provider-credentials';
 
 const gcpRoutes = new Hono<{ Bindings: Env }>();
 
@@ -57,27 +63,51 @@ function jsonSizeLimit(env: Env): number {
     : DEFAULT_GCP_SERVICE_ACCOUNT_JSON_MAX_BYTES;
 }
 
-async function getStoredGcpCredential(env: Env, userId: string): Promise<GcpCredential | null> {
+interface StoredGcpCredential {
+  id: string;
+  credential: GcpCredential;
+}
+
+async function getStoredGcpCredential(
+  env: Env,
+  userId: string
+): Promise<StoredGcpCredential | null> {
   const db = drizzle(env.DATABASE, { schema });
   const [row] = await db
-    .select({ encryptedToken: schema.credentials.encryptedToken, iv: schema.credentials.iv })
+    .select({
+      id: schema.credentials.id,
+      encryptedToken: schema.credentials.encryptedToken,
+      iv: schema.credentials.iv,
+    })
     .from(schema.credentials)
-    .where(and(
-      eq(schema.credentials.userId, userId),
-      eq(schema.credentials.provider, 'gcp'),
-      eq(schema.credentials.credentialType, 'cloud-provider'),
-      isNull(schema.credentials.projectId),
-    ))
+    .where(
+      and(
+        eq(schema.credentials.userId, userId),
+        eq(schema.credentials.provider, 'gcp'),
+        eq(schema.credentials.credentialType, 'cloud-provider'),
+        isNull(schema.credentials.projectId)
+      )
+    )
     .limit(1);
   if (!row) return null;
   const decrypted = await decrypt(row.encryptedToken, row.iv, getCredentialEncryptionKey(env));
-  return parseGcpCredential(decrypted);
+  return { id: row.id, credential: parseGcpCredential(decrypted) };
+}
+
+/** Drop what SAM cached for a credential that was just replaced. */
+async function forgetReplacedCredential(
+  env: Env,
+  userId: string,
+  previous: StoredGcpCredential
+): Promise<void> {
+  await clearCredentialCache(env, userId, previous.credential);
+  await deleteGcpApiHealthSafely(env, previous.id);
 }
 
 async function clearCredentialCache(
   env: Env,
   userId: string,
-  credential: GcpCredential,
+  credential: GcpCredential
 ): Promise<void> {
   try {
     await clearGcpAccessTokenCache(env, userId, credential);
@@ -120,15 +150,12 @@ gcpRoutes.put(
 
     let credential: GcpCredential;
     try {
-      credential = await parseGcpServiceAccountJson(
-        body.serviceAccountJson,
-        body.defaultZone,
-      );
+      credential = await parseGcpServiceAccountJson(body.serviceAccountJson, body.defaultZone);
     } catch (err) {
       throw errors.badRequest(err instanceof Error ? err.message : 'Invalid service-account JSON');
     }
 
-    let previous: GcpCredential | null = null;
+    let previous: StoredGcpCredential | null = null;
     try {
       previous = await getStoredGcpCredential(c.env, userId);
     } catch (err) {
@@ -143,7 +170,7 @@ gcpRoutes.put(
         userId,
         'service-account-setup',
         credential,
-        c.env,
+        c.env
       );
       await verifyGcpServiceAccountAccess(credential, accessToken, c.env);
     } catch (err) {
@@ -152,7 +179,7 @@ gcpRoutes.put(
 
     const stored = await replaceUserGcpCredential(c.env, userId, credential);
     if (previous) {
-      await clearCredentialCache(c.env, userId, previous);
+      await forgetReplacedCredential(c.env, userId, previous);
     }
     return c.json({
       success: true,
@@ -161,10 +188,10 @@ gcpRoutes.put(
         provider: 'gcp' as const,
         connected: true,
         createdAt: stored.createdAt,
-        gcp: toGcpCredentialMetadata(credential),
+        gcp: await toGcpCredentialMetadataWithApiIssues(c.env, stored.id, credential),
       },
     });
-  },
+  }
 );
 
 /** Run the existing keyless WIF setup and store its metadata atomically. */
@@ -179,19 +206,14 @@ gcpRoutes.post('/setup', jsonValidator(GcpSetupSchema), async (c) => {
   const previous = await getStoredGcpCredential(c.env, userId).catch(() => null);
   let credential: Awaited<ReturnType<typeof runGcpSetup>>;
   try {
-    credential = await runGcpSetup(
-      oauthToken,
-      body.gcpProjectId,
-      body.defaultZone,
-      c.env,
-    );
+    credential = await runGcpSetup(oauthToken, body.gcpProjectId, body.defaultZone, c.env);
   } catch (err) {
     throw toSanitizedAppError(err, 'gcp-setup');
   }
 
   await replaceUserGcpCredential(c.env, userId, credential);
   if (previous) {
-    await clearCredentialCache(c.env, userId, previous);
+    await forgetReplacedCredential(c.env, userId, previous);
   }
 
   try {
@@ -209,7 +231,8 @@ gcpRoutes.post('/setup', jsonValidator(GcpSetupSchema), async (c) => {
         serviceAccountEmail: credential.serviceAccountEmail,
         defaultZone: credential.defaultZone,
       },
-      warning: 'Setup completed but OIDC verification failed. This may resolve after a few minutes of propagation.',
+      warning:
+        'Setup completed but OIDC verification failed. This may resolve after a few minutes of propagation.',
     });
   }
 
@@ -225,34 +248,48 @@ gcpRoutes.post('/setup', jsonValidator(GcpSetupSchema), async (c) => {
   });
 });
 
-/** Verify the currently stored GCP credential, regardless of auth mode. */
+/**
+ * Verify the currently stored GCP credential, regardless of auth mode, then re-check the
+ * required Google APIs SAM can probe (Cloud Billing) so an owner who just enabled one sees the
+ * warning clear. The probe outcome is recorded on the credential and returned as `apiIssues`.
+ */
 gcpRoutes.post('/verify', async (c) => {
   const userId = getUserId(c);
-  const gcpCredential = await getStoredGcpCredential(c.env, userId);
-  if (!gcpCredential) {
+  // Each check mints Google tokens and calls Google, so it shares the credential-mutation budget.
+  await enforceCredentialMutationRateLimit(c.env, userId, 'gcp-verify');
+  const stored = await getStoredGcpCredential(c.env, userId);
+  if (!stored) {
     throw errors.notFound('GCP credential not configured');
   }
+  const { id: credentialId, credential: gcpCredential } = stored;
 
   try {
     if (gcpCredential.authType === 'service-account-key') {
-      const token = await getGcpAccessToken(
-        userId,
-        'verification',
-        gcpCredential,
-        c.env,
-      );
+      const token = await getGcpAccessToken(userId, 'verification', gcpCredential, c.env);
       await verifyGcpServiceAccountAccess(gcpCredential, token, c.env);
     } else {
       await verifyGcpOidcSetup(userId, 'verification', gcpCredential, c.env);
     }
-    return c.json({ success: true, verified: true });
   } catch (err) {
     return c.json({
       success: false,
       verified: false,
       error: sanitizeGcpError(err, 'gcp-verify'),
+      apiIssues: await listGcpApiIssuesSafely(c.env, credentialId, gcpCredential),
     });
   }
+
+  const billingCheck = await probeGcpCloudBilling(c.env, credentialId, gcpCredential, {
+    credentialSource: 'user',
+    userId,
+    projectId: null,
+  });
+  return c.json({
+    success: true,
+    verified: true,
+    billingCheck,
+    apiIssues: await listGcpApiIssuesSafely(c.env, credentialId, gcpCredential),
+  });
 });
 
 export { gcpRoutes };

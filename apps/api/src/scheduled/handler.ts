@@ -41,6 +41,7 @@ import { runSessionSleepSweep } from './session-sleep';
 import { runSessionSleepLifecycleRepair } from './session-sleep-lifecycle-repair';
 import { runScheduledSessionSnapshotPurge } from './session-snapshot-purge';
 import { runSessionTaskReconciliation } from './session-task-reconciliation';
+import { runDeadWakeClaimReconciliation } from './session-wake-claim-reconciliation';
 import { runSetupSessionSweep } from './setup-session-sweep';
 import { recoverStuckTasks } from './stuck-tasks';
 import { createSweepIsolator } from './sweep-isolation';
@@ -173,6 +174,9 @@ export async function scheduled(
   const evictionRecovery = await sweeps.isolate('workspace_eviction_recovery', () =>
     runWorkspaceEvictionRecovery(env, ctx.waitUntil.bind(ctx))
   );
+  const deadWakeClaims = await sweeps.isolate('dead_wake_claim_reconciliation', () =>
+    runDeadWakeClaimReconciliation(env, ctx.waitUntil.bind(ctx))
+  );
   const nodeCleanup = await sweeps.isolate('node_cleanup', () => runNodeCleanupSweep(env));
   await sweeps.isolate('deployment_node_cleanup', () =>
     runDeploymentNodeCleanup(env, ctx.waitUntil.bind(ctx))
@@ -236,12 +240,16 @@ export async function scheduled(
   // gcpCatalog.priceRefreshBudgetMs (default 90 s); on other ticks it costs one KV read. Earlier
   // in the chain that budget would delay session_sleep (`.claude/rules/47`). Catalogs pick up a
   // refreshed table on their next build.
-  // A refresh where every credential failed throws here so it reaches failed-sweep
-  // notifications; its backoff was already recorded, so the next tick still waits.
+  // A refresh where every credential failed and at least one failure was a genuine fault throws
+  // here so it reaches failed-sweep notifications; its backoff was already recorded, so the next
+  // tick still waits. Failures that are owner-fixable states of a user's Google project (Cloud
+  // Billing API off) are shown on that credential instead, not raised to operators.
   const gcpPriceTable = await sweeps.isolate('gcp_price_table', async () => {
     const result = await refreshGcpPriceTableIfDue(env);
-    if (result.status === 'failed') {
-      throw new Error(`GCP price refresh failed for ${result.attempts} credential(s)`);
+    if (result.status === 'failed' && result.faults > 0) {
+      throw new Error(
+        `GCP price refresh failed for ${result.attempts} credential(s), ${result.faults} with a fault`
+      );
     }
     return result;
   });
@@ -340,6 +348,7 @@ export async function scheduled(
     observabilityPurgedByAge: observabilityPurge?.deletedByAge,
     observabilityPurgedByCount: observabilityPurge?.deletedByCount,
     evictionRecovery,
+    deadWakeClaims,
     githubTriggerRecovery,
     agentEmailRecovery,
     cronTriggersChecked: cronTriggers?.checked,

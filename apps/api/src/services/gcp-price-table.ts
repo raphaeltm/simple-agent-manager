@@ -12,13 +12,24 @@ import {
   type GcpPriceTable,
   parseStoredGcpPriceTable,
 } from '@simple-agent-manager/providers';
-import { type CredentialSource, GCP_PRICE_CATALOG_SCOPE } from '@simple-agent-manager/shared';
+import {
+  type CredentialSource,
+  GCP_CLOUD_BILLING_SERVICE,
+  GCP_PRICE_CATALOG_SCOPE,
+} from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { resolveAdminSetting } from './admin-settings-resolution';
 import { decrypt } from './encryption';
+import {
+  classifyGcpApiError,
+  confirmGcpApi,
+  recordGcpApiIssue,
+  safeProviderErrorFields,
+  updateGcpApiHealthSafely,
+} from './gcp-api-health';
 import { createGcpTokenProvider } from './gcp-token-provider';
 import { parseGcpCredential } from './provider-credential-codecs';
 
@@ -48,7 +59,12 @@ export type GcpPriceRefreshResult =
   | { status: 'backoff'; retryAt: string }
   | { status: 'no-credential' }
   | { status: 'refreshed'; fetchedAt: string; regions: number; credentialSource: CredentialSource }
-  | { status: 'failed'; attempts: number };
+  /**
+   * Every credential tried failed. `faults` counts failures SAM operators should hear about; the
+   * rest were owner-fixable states of the user's Google project (Cloud Billing API off, IAM
+   * denial), recorded on the credential and shown to its owner instead.
+   */
+  | { status: 'failed'; attempts: number; faults: number };
 
 /**
  * Refresh the table when it is older than the TTL. A failed refresh, or finding no Google Cloud
@@ -117,6 +133,7 @@ async function refreshFromCandidates(
   now: Date
 ): Promise<GcpPriceRefreshResult> {
   let attempts = 0;
+  let faults = 0;
   for (const candidate of candidates) {
     if (signal.aborted) break;
     attempts += 1;
@@ -145,6 +162,9 @@ async function refreshFromCandidates(
       const fetchedAt = now.toISOString();
       await env.KV.put(GCP_PRICE_TABLE_KV_KEY, JSON.stringify({ fetchedAt, table }));
       await env.KV.delete(GCP_PRICE_TABLE_ATTEMPT_KV_KEY);
+      await updateGcpApiHealthSafely(candidate.id, () =>
+        confirmGcpApi(env, candidate.id, GCP_CLOUD_BILLING_SERVICE)
+      );
       return {
         status: 'refreshed',
         fetchedAt,
@@ -152,18 +172,32 @@ async function refreshFromCandidates(
         credentialSource: candidate.credentialSource,
       };
     } catch (error) {
+      const ownerFixable = classifyGcpApiError(error, GCP_CLOUD_BILLING_SERVICE);
+      if (ownerFixable) {
+        await updateGcpApiHealthSafely(candidate.id, () =>
+          recordGcpApiIssue(env, candidate.id, ownerFixable, now)
+        );
+      }
+      // A user's or project's own Google project is theirs to fix, and their connection card
+      // shows it. A platform credential belongs to the operators, who have no such card, so its
+      // failures stay faults and keep reaching the failed-sweep notification.
+      if (!ownerFixable || candidate.credentialSource === 'platform') {
+        faults += 1;
+      }
       log.warn('gcp_price_table.refresh_attempt_failed', {
         credentialId: candidate.id,
         credentialSource: candidate.credentialSource,
         budgetExhausted: signal.aborted,
+        ownerFixable: ownerFixable?.reason ?? null,
         ...serializeError(error),
+        ...safeProviderErrorFields(error),
       });
     }
   }
   // The next retry starts after the credentials tried here, so a few that can never read
   // Billing do not hold every retry while another credential could.
   await recordFailure(env, now, offset + attempts);
-  return { status: 'failed', attempts };
+  return { status: 'failed', attempts, faults };
 }
 
 function hasUsableRate(table: GcpPriceTable): boolean {

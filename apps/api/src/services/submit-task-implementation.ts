@@ -10,7 +10,11 @@
  * See: specs/022-simplified-chat-ux/contracts/task-submit.md
  */
 import type { SubmitTaskResponse, VMSize } from '@simple-agent-manager/shared';
-import { ACP_SESSION_DEFAULTS, isValidProvider } from '@simple-agent-manager/shared';
+import {
+  ACP_SESSION_DEFAULTS,
+  CHAT_CONTEXT_SUMMARY_SOURCE,
+  isValidProvider,
+} from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type * as v from 'valibot';
@@ -582,7 +586,7 @@ export async function submitTaskImplementation(
         sessionId,
         'system',
         body.contextSummary,
-        null
+        { source: CHAT_CONTEXT_SUMMARY_SOURCE }
       );
     }
 

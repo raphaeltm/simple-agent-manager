@@ -289,7 +289,7 @@ export const ALLOCATION_ENTRYPOINT_INVENTORY: readonly AllocationEntrypointInven
     status: 'canonical',
   },
   {
-    filePath: 'apps/api/src/durable-objects/task-runner/workspace-steps.ts',
+    filePath: 'apps/api/src/durable-objects/task-runner/workspace-dispatch-step.ts',
     owner: 'createWorkspaceOnVmAgent',
     entrypoint: 'createWorkspaceOnNode',
     scope: 'task-runner',

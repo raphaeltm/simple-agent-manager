@@ -677,6 +677,21 @@ diagnostic context rather than `completed`.
 
 SAM also collapses platform-injected setup messages in the chat timeline. Those messages contain project instructions, task context, and policy that the agent received before it started. They remain available for debugging, but they no longer dominate the visible conversation.
 
+### Messages from SAM
+
+SAM puts other messages into a chat while it works: a subtask finished or failed, another agent sent a message, an approval was decided, a scheduled reminder came due, a GitHub trigger fired, the chat woke up, or SAM checked in on a quiet agent. Each one shows as a single quiet line with an icon and a plain sentence, such as **Subtask finished: Fix login redirect loop**, instead of the ID-heavy text the agent received. A green icon means something finished, a red one that it failed.
+
+Tap the line to expand it:
+
+- **Detail.** A sentence about what happened, when there is more to say.
+- **Quoted text.** Words from outside SAM, such as another agent's message or an approver's note, appear in a quote marked **not written by SAM**.
+- **Cards.** One card for each thing the message is about, up to eight. When more project updates arrive at once, failures come first and the line says how many are shown. A task card opens a quick look with the task's current status and summary, and **Open its chat**. Chat, idea and machine cards open those pages. Pull request and GitHub cards open GitHub in a new tab.
+- **Show what the agent saw.** The exact text the agent received, IDs included.
+
+System messages, such as a failed build or a wake that could not finish, use the same line: the first line of the message, with the full text under **Show full message**. A system message the workspace itself reported (for example a sign-in flow that needs a local callback) shows as **Report from the workspace**, with its text quoted, because the workspace's credentials are also available to the agent (`markRuntimeReported` in `apps/api/src/durable-objects/project-data/sam-notice-metadata.ts`). A context note you supplied when starting the chat (for example the CLI's `--context-summary`, or the summary carried into a forked chat) shows as **Context for this chat**, with your text quoted.
+
+SAM writes these descriptions itself (`samNotice` in the message's metadata, built in `apps/api/src/services/sam-notice-builders.ts`). A notice an agent tries to attach to its own message is dropped, so a line like this always comes from SAM.
+
 ### Sleeping and recovering sessions
 
 Persistent chat sessions can sleep and recover on both [Instant and VM-backed runtimes](/docs/guides/instant-sessions/):

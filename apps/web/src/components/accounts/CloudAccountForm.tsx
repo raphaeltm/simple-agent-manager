@@ -20,6 +20,8 @@ import { VultrCredentialForm } from '../VultrCredentialForm';
 type CloudFormComponent = ComponentType<{
   credential?: Parameters<typeof HetznerTokenForm>[0]['credential'];
   onUpdate: () => void;
+  /** Re-read the credential while the form stays open (Google Cloud "Check again"). */
+  onRefresh?: () => void;
 }>;
 
 const CLOUD_FORMS: Record<CredentialProvider, CloudFormComponent> = {
@@ -37,7 +39,7 @@ export function CloudAccountForm({
   onSaved,
 }: Readonly<{ providerId: string; onSaved: () => void }>) {
   const queryScope = useQueryScope();
-  const { credentials, loading } = useCredentials(queryScope);
+  const { credentials, loading, refresh } = useCredentials(queryScope);
   // `providerId` can come from the URL; only own keys are providers.
   const Form = Object.hasOwn(CLOUD_FORMS, providerId)
     ? CLOUD_FORMS[providerId as CredentialProvider]
@@ -53,6 +55,7 @@ export function CloudAccountForm({
     <Form
       credential={credentials.find((credential) => credential.provider === providerId)}
       onUpdate={onSaved}
+      onRefresh={refresh}
     />
   );
 }

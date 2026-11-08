@@ -6,3 +6,13 @@
  * most 24 creates in one step.
  */
 export const DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER = 8;
+
+/**
+ * Default for `operations.workspacePlacementMaxRejections`: consecutive times a task's final
+ * workspace reservation may be refused by the node it selected before the task fails. A refusal
+ * sends the task back through node selection, provisioning recovery and agent readiness, about
+ * 6 s per cycle on staging, so 3 bounds a node that can never admit the request to about 18 s
+ * (the configurable maximum of 20 to about 2 minutes). Before the cap the loop ran until the
+ * 15-minute provisioning timeout. The count resets when a reservation succeeds.
+ */
+export const DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS = 3;

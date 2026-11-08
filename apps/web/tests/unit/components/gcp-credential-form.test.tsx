@@ -7,8 +7,10 @@ const mocks = vi.hoisted(() => ({
   deleteCredential: vi.fn(),
   getGcpOAuthResult: vi.fn(),
   saveGcpServiceAccountCredential: vi.fn(),
+  verifyGcpSetup: vi.fn(),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
+  toastWarning: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -18,10 +20,15 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   deleteCredential: mocks.deleteCredential,
   getGcpOAuthResult: mocks.getGcpOAuthResult,
   saveGcpServiceAccountCredential: mocks.saveGcpServiceAccountCredential,
+  verifyGcpSetup: mocks.verifyGcpSetup,
 }));
 
 vi.mock('../../../src/hooks/useToast', () => ({
-  useToast: () => ({ success: mocks.toastSuccess, error: mocks.toastError }),
+  useToast: () => ({
+    success: mocks.toastSuccess,
+    error: mocks.toastError,
+    warning: mocks.toastWarning,
+  }),
 }));
 
 import { GcpCredentialForm } from '../../../src/components/GcpCredentialForm';
@@ -381,6 +388,237 @@ describe('GcpCredentialForm', () => {
       // Connect button should still be present (zone-select phase allows retry)
       expect(screen.getByRole('button', { name: 'Connect with WIF' })).toBeInTheDocument();
       expect(onUpdate).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('required Google APIs', () => {
+    const billingIssue = {
+      service: 'cloudbilling.googleapis.com',
+      label: 'Cloud Billing',
+      reason: 'api_disabled' as const,
+      observedAt: '2026-11-08T00:00:00.000Z',
+    };
+    const withIssues = {
+      ...credential,
+      gcp: { ...credential.gcp, apiIssues: [billingIssue] },
+    };
+
+    it('shows nothing extra when every required API is usable', () => {
+      render(
+        <GcpCredentialForm
+          credential={{ ...credential, gcp: { ...credential.gcp, apiIssues: [] } }}
+          onUpdate={onUpdate}
+        />
+      );
+      // Liveness: the connected card rendered.
+      expect(screen.getByText('Connected')).toBeInTheDocument();
+      expect(screen.queryByTestId('gcp-api-issues')).not.toBeInTheDocument();
+    });
+
+    it('names the API, the project, and links to the exact Google Cloud enable page', () => {
+      render(<GcpCredentialForm credential={withIssues} onUpdate={onUpdate} />);
+
+      const notice = screen.getByTestId('gcp-api-issues');
+      expect(within(notice).getByText('cloudbilling.googleapis.com')).toBeInTheDocument();
+      expect(notice).toHaveTextContent('may be off in proj-1');
+      expect(within(notice).getByText(/turned off in this project/)).toBeInTheDocument();
+      expect(within(notice).getByText(/Price unavailable/)).toBeInTheDocument();
+      const link = within(notice).getByRole('link', {
+        name: /^Enable in Google Cloud/,
+      });
+      expect(link).toHaveAttribute(
+        'href',
+        'https://console.cloud.google.com/apis/library/cloudbilling.googleapis.com?project=proj-1'
+      );
+      expect(link).toHaveAttribute('target', '_blank');
+      // Workload Identity can be repaired by re-running SAM's setup.
+      expect(
+        within(notice).getByRole('button', { name: 'Re-run Google setup' })
+      ).toBeInTheDocument();
+    });
+
+    it('explains setup drift without claiming the API is off', () => {
+      render(
+        <GcpCredentialForm
+          credential={{
+            ...credential,
+            gcp: {
+              ...credential.gcp,
+              apiIssues: [
+                { ...billingIssue, reason: 'not_enabled_by_setup' as const, observedAt: undefined },
+              ],
+            },
+          }}
+          onUpdate={onUpdate}
+        />
+      );
+      expect(
+        screen.getByText(/set up before SAM needed the Cloud Billing API/)
+      ).toBeInTheDocument();
+    });
+
+    it('offers a gcloud command instead of re-running setup for a service-account key', () => {
+      render(
+        <GcpCredentialForm
+          credential={{
+            ...serviceAccountCredential,
+            gcp: {
+              ...serviceAccountCredential.gcp,
+              gcpProjectId: 'acme-prod-01',
+              apiIssues: [billingIssue],
+            },
+          }}
+          onUpdate={onUpdate}
+        />
+      );
+      const notice = screen.getByTestId('gcp-api-issues');
+      expect(
+        within(notice).getByText(
+          'gcloud services enable cloudbilling.googleapis.com --project="acme-prod-01"'
+        )
+      ).toBeInTheDocument();
+      expect(
+        within(notice).queryByRole('button', { name: 'Re-run Google setup' })
+      ).not.toBeInTheDocument();
+    });
+
+    it('does not offer a shell command or link for values that are not Google identifiers', () => {
+      render(
+        <GcpCredentialForm
+          credential={{
+            ...serviceAccountCredential,
+            gcp: {
+              ...serviceAccountCredential.gcp,
+              gcpProjectId: 'proj"; rm -rf ~; "',
+              apiIssues: [billingIssue, { ...billingIssue, service: 'not a service' }],
+            },
+          }}
+          onUpdate={onUpdate}
+        />
+      );
+      const notice = screen.getByTestId('gcp-api-issues');
+      // Liveness: the notice still explains the problem.
+      expect(within(notice).getAllByText(/turned off in this project/)).toHaveLength(2);
+      expect(within(notice).queryByText(/gcloud services enable/)).not.toBeInTheDocument();
+      // The valid service keeps its link; the invalid one gets none.
+      expect(within(notice).getAllByRole('link', { name: /^Enable in Google Cloud/ })).toHaveLength(
+        1
+      );
+    });
+
+    it('leaves a malformed service name out of the gcloud command', () => {
+      render(
+        <GcpCredentialForm
+          credential={{
+            ...serviceAccountCredential,
+            gcp: {
+              ...serviceAccountCredential.gcp,
+              gcpProjectId: 'acme-prod-01',
+              apiIssues: [billingIssue, { ...billingIssue, service: 'x; rm -rf ~' }],
+            },
+          }}
+          onUpdate={onUpdate}
+        />
+      );
+      const notice = screen.getByTestId('gcp-api-issues');
+      expect(
+        within(notice).getByText(
+          'gcloud services enable cloudbilling.googleapis.com --project="acme-prod-01"'
+        )
+      ).toBeInTheDocument();
+    });
+
+    it('Check again re-verifies, refreshes the credential in place, and reports the result', async () => {
+      const onRefresh = vi.fn();
+      mocks.verifyGcpSetup.mockResolvedValue({
+        success: true,
+        verified: true,
+        billingCheck: 'ok',
+        apiIssues: [],
+      });
+      render(
+        <GcpCredentialForm credential={withIssues} onUpdate={onUpdate} onRefresh={onRefresh} />
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
+
+      await waitFor(() => expect(mocks.toastSuccess).toHaveBeenCalled());
+      expect(mocks.verifyGcpSetup).toHaveBeenCalledTimes(1);
+      expect(onRefresh).toHaveBeenCalledTimes(1);
+      // Refreshing in place must not advance the connect sheet.
+      expect(onUpdate).not.toHaveBeenCalled();
+    });
+
+    it('Check again warns while an API still needs attention', async () => {
+      mocks.verifyGcpSetup.mockResolvedValue({
+        success: true,
+        verified: true,
+        billingCheck: 'owner_fixable',
+        apiIssues: [billingIssue],
+      });
+      render(<GcpCredentialForm credential={withIssues} onUpdate={onUpdate} onRefresh={vi.fn()} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
+
+      await waitFor(() =>
+        expect(mocks.toastWarning).toHaveBeenCalledWith('Some Google APIs still need attention')
+      );
+    });
+
+    it('Check again reports a failed Cloud Billing check instead of success', async () => {
+      mocks.verifyGcpSetup.mockResolvedValue({
+        success: true,
+        verified: true,
+        billingCheck: 'fault',
+        apiIssues: [],
+      });
+      render(<GcpCredentialForm credential={withIssues} onUpdate={onUpdate} onRefresh={vi.fn()} />);
+
+      fireEvent.click(screen.getByRole('button', { name: 'Check again' }));
+
+      await waitFor(() =>
+        expect(mocks.toastError).toHaveBeenCalledWith('Google Cloud check could not finish')
+      );
+      expect(mocks.toastSuccess).not.toHaveBeenCalled();
+    });
+
+    it('re-running setup keeps a saved zone that is not one of the suggestions', async () => {
+      window.history.replaceState({}, '', '?gcp_setup=1');
+      render(
+        <GcpCredentialForm
+          credential={{
+            ...credential,
+            gcp: { ...credential.gcp, gcpProjectId: 'proj-2', defaultZone: 'me-west1-c' },
+          }}
+          onUpdate={onUpdate}
+        />
+      );
+
+      await waitFor(() =>
+        expect(screen.getByText('Select a GCP project to connect:')).toBeInTheDocument()
+      );
+      fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+      expect(screen.getByLabelText('Default Zone')).toHaveValue('me-west1-c');
+    });
+
+    it('re-running setup starts from the connected project and zone', async () => {
+      window.history.replaceState({}, '', '?gcp_setup=1');
+      render(
+        <GcpCredentialForm
+          credential={{
+            ...credential,
+            gcp: { ...credential.gcp, gcpProjectId: 'proj-2', defaultZone: 'europe-west1-b' },
+          }}
+          onUpdate={onUpdate}
+        />
+      );
+
+      await waitFor(() =>
+        expect(screen.getByText('Select a GCP project to connect:')).toBeInTheDocument()
+      );
+      expect(screen.getByLabelText('GCP Project')).toHaveValue('proj-2');
+      fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+      expect(screen.getByLabelText('Default Zone')).toHaveValue('europe-west1-b');
     });
   });
 });

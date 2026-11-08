@@ -3,8 +3,13 @@
  * prompt is SAM-authored and IDs-only: event content is read through the event
  * MCP tools, never injected into the prompt.
  */
-import type { ProjectEventSubscriptionRecord } from '@simple-agent-manager/shared';
+import type {
+  MessageClass,
+  ProjectEventRecord,
+  ProjectEventSubscriptionRecord,
+} from '@simple-agent-manager/shared';
 
+import { projectEventWakeNotice, safeNotice } from '../../services/sam-notice-builders';
 import {
   agentMessageChannelForSubscription,
   agentMessageWakeContent,
@@ -17,9 +22,16 @@ export type BuildWakePromptInputOptions = {
   subscription: ProjectEventSubscriptionRecord;
   sourceTaskGuard: ProjectEventWakeSourceTaskGuard;
   eventIds: string[];
+  /** The batch's events, for the chat notice only; the agent's text stays IDs-only. */
+  events?: readonly ProjectEventRecord[];
   now: number;
   ttlMs: number;
   maxMessages: number;
+  /**
+   * Set when an agent-message batch holds an urgent peer message (interrupt and above): the
+   * notice is delivered stop-and-deliver with that class. Ignored for other subscriptions.
+   */
+  urgentAgentMessageClass?: MessageClass | null;
 };
 
 export function buildWakePromptInput(
@@ -36,6 +48,7 @@ export function buildWakePromptInput(
   // sleeping target receives it as an ordinary wake prompt instead.
   const steerWake = options.subscription.deliveryPreference.requested === 'runtime_steer';
   const agentMessageChannel = agentMessageChannelForSubscription(options.subscription);
+  const urgentAgentClass = agentMessageChannel ? (options.urgentAgentMessageClass ?? null) : null;
   const urgentPrefix = interruptWake
     ? 'Urgent project event wake (runtime_interrupt) — this batch was important enough ' +
       'to stop an in-flight turn for immediate delivery. If your previous turn was cut ' +
@@ -50,6 +63,7 @@ export function buildWakePromptInput(
         batchId: options.batchId,
         channel: agentMessageChannel,
         eventIds: options.eventIds,
+        urgentClass: urgentAgentClass,
       })
     : urgentPrefix +
       `Project event wake batch ${options.batchId} is ready for this chat. ` +
@@ -64,8 +78,9 @@ export function buildWakePromptInput(
     sourceTaskId: options.sourceTaskGuard.taskId,
     senderType: 'system',
     senderId: 'project-data',
-    messageClass: interruptWake ? 'interrupt' : 'deliver',
-    deliveryIntent: steerWake ? 'steer' : 'queue',
+    messageClass: urgentAgentClass ?? (interruptWake ? 'interrupt' : 'deliver'),
+    // An urgent class never steers: stop-and-deliver is its own path.
+    deliveryIntent: steerWake && !urgentAgentClass ? 'steer' : 'queue',
     sourceKind: 'project_event_wake',
     metadata: {
       projectEventWake: true,
@@ -75,10 +90,15 @@ export function buildWakePromptInput(
       eventCount: options.eventIds.length,
       createdAt: options.now,
       payloadPolicy: 'ids_only',
-      ...(interruptWake ? { runtimeInterrupt: true } : {}),
-      ...(steerWake ? { runtimeSteer: true } : {}),
+      ...(interruptWake || urgentAgentClass ? { runtimeInterrupt: true } : {}),
+      ...(steerWake && !urgentAgentClass ? { runtimeSteer: true } : {}),
+      ...(urgentAgentClass ? { agentMessageClass: urgentAgentClass } : {}),
       ...(agentMessageChannel ? { agentMessageChannel } : {}),
     },
+    notice: safeNotice(() => projectEventWakeNotice(options.events ?? []), {
+      batchId: options.batchId,
+      subscriptionId: options.subscription.id,
+    }),
     ttlMs: options.ttlMs,
     maxMessages: options.maxMessages,
   };

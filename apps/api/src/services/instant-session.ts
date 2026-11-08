@@ -1,5 +1,9 @@
 import type { AgentProfileRuntime, TaskAttachment, TaskMode } from '@simple-agent-manager/shared';
-import { DEFAULT_TASK_TITLE_MAX_LENGTH, taskExecutionStep } from '@simple-agent-manager/shared';
+import {
+  CHAT_CONTEXT_SUMMARY_SOURCE,
+  DEFAULT_TASK_TITLE_MAX_LENGTH,
+  taskExecutionStep,
+} from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
@@ -348,7 +352,7 @@ export async function acceptInstantSession(
       chatSessionId,
       'system',
       input.contextSummary,
-      null
+      { source: CHAT_CONTEXT_SUMMARY_SOURCE }
     );
   }
   await projectDataService.persistMessage(

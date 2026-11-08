@@ -1022,6 +1022,103 @@ describe('reserveWorkspacePlacement', () => {
   });
 });
 
+/**
+ * The atomic SQL twin of `measuredHostOverheadMb`, at the default reserve resolved through the real
+ * resolver. A fresh 4 GB node reporting 14% (573 MB, the production idle average) must admit an
+ * exact-fit 3072 MB request: the old SQL charged 573 + 1024 on top of it and refused.
+ */
+describe('shared host-overhead accounting in the atomic claim', () => {
+  const defaultPolicy = (): PlacementAdmissionPolicy => ({
+    ...resolveWorkspaceAdmissionPolicy({}),
+    lifetimeAdmissionCutoffAgeMs: null,
+  });
+
+  function seedFreshCx23(memoryPercent: number): void {
+    seedNode({
+      observed_provider_instance_type: 'cx23',
+      observed_provider_instance_vcpu_count: 2,
+      observed_provider_instance_memory_mb: 4096,
+      observed_provider_instance_disk_gb: 40,
+      last_metrics: JSON.stringify({
+        version: 1,
+        cpuLoadAvg1: 0,
+        memoryPercent,
+        diskPercent: 19.5,
+        creatingWorkspaces: 0,
+      }),
+    });
+  }
+
+  it.each([
+    ['exact fit at the reserve, host use below it', 14, 3072, true],
+    ['one MB over the declared budget', 14, 3073, false],
+    ['host use above the reserve by less than the slack', 30, 2048, true],
+    ['host use above the reserve leaves no room', 60, 3072, false],
+  ])('%s', async (_name, memoryPercent, memoryMb, admitted) => {
+    const database = createDb();
+    seedFreshCx23(memoryPercent);
+    const request = reservation({ cpuMillis: 2000, memoryMb, diskMb: 10_240, exclusiveNode: true });
+    const reserved = await reserveWorkspacePlacement(
+      database,
+      { ...reserveInput(capacitySnapshot()), resolvedReservation: request },
+      defaultPolicy()
+    );
+    expect(reserved).toBe(admitted);
+    expect(countWorkspace('workspace-1')).toBe(admitted ? 1 : 0);
+
+    // The advisory evaluator must reach the same verdict from the same rows.
+    const node = sqlite
+      ?.prepare(
+        `SELECT id, node_role AS nodeRole, provider_instance_id AS providerInstanceId,
+           observed_provider_instance_vcpu_count AS observedProviderInstanceVcpuCount,
+           observed_provider_instance_memory_mb AS observedProviderInstanceMemoryMb,
+           observed_provider_instance_disk_gb AS observedProviderInstanceDiskGb,
+           observed_hardware_source AS observedHardwareSource,
+           last_metrics AS lastMetrics, last_heartbeat_at AS lastHeartbeatAt
+         FROM nodes WHERE id = 'node-1'`
+      )
+      .get() as Parameters<typeof evaluateWorkspaceReservationCapacity>[0];
+    const advisory = evaluateWorkspaceReservationCapacity(
+      node,
+      undefined,
+      request,
+      defaultPolicy()
+    );
+    expect(advisory.admitted, advisory.reasons.join('; ')).toBe(admitted);
+  });
+
+  it('still charges a co-tenant running past its reservation', async () => {
+    const database = createDb();
+    // 16 GB host using 75% (12 GB) while its one tenant declared 1 GB: about 11 GB is unattributed.
+    seedNode({
+      last_metrics: JSON.stringify({
+        version: 1,
+        cpuLoadAvg1: 0.2,
+        memoryPercent: 75,
+        diskPercent: 10,
+      }),
+    });
+    seedActiveWorkspace('overrunning-tenant', JSON.stringify(reservation({ memoryMb: 1024 })));
+    const policy = defaultPolicy();
+    const fits = reservation({ memoryMb: 3072 });
+    const overflows = reservation({ memoryMb: 4096 });
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        { ...reserveInput(capacitySnapshot()), id: 'overflow', resolvedReservation: overflows },
+        policy
+      )
+    ).resolves.toBe(false);
+    await expect(
+      reserveWorkspacePlacement(
+        database,
+        { ...reserveInput(capacitySnapshot()), id: 'fits', resolvedReservation: fits },
+        policy
+      )
+    ).resolves.toBe(true);
+  });
+});
+
 describe('attachPrecreatedWorkspacePlacement', () => {
   it('atomically attaches a placeholder workspace and writes final authority metadata', async () => {
     const database = createDb();

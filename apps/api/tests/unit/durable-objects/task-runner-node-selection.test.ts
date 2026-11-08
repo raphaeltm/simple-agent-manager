@@ -666,6 +666,28 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
     expect(rc.advanceToStep).not.toHaveBeenCalled();
   });
 
+  it('drops a persisted 4 GB plan that an older 512 MB-reserve scheduler made for 3.5 GB', async () => {
+    // 4096 - 512 >= 3584 let the old scheduler keep this candidate; the shared 1024 MB reserve
+    // does not, so the stale plan is refused before any provider is called.
+    const rc = createContext({});
+    const state = createState();
+    state.config.capacityPoolSelection = capacityPoolSelection('user');
+    state.config.capacityPoolSelection.candidates[0].providerInstanceMemoryMb = 4096;
+    state.config.resourceRequirements = { minMemoryGb: 3.5 };
+    await expect(handleNodeSelection(state, rc)).rejects.toMatchObject({ permanent: true });
+    expect(rc.advanceToStep).not.toHaveBeenCalled();
+  });
+
+  it('keeps the same persisted 4 GB plan for a request at the documented 3 GB cap', async () => {
+    const rc = createContext({});
+    const state = createState();
+    state.config.capacityPoolSelection = capacityPoolSelection('user');
+    state.config.capacityPoolSelection.candidates[0].providerInstanceMemoryMb = 4096;
+    state.config.resourceRequirements = { minMemoryGb: 3 };
+    await handleNodeSelection(state, rc);
+    expect(state.config.capacityPoolSelection.candidates).toHaveLength(1);
+  });
+
   it('does not reuse legacy nodes when the selected pool has no candidates', async () => {
     const rc = createContext({});
     const state = createState();

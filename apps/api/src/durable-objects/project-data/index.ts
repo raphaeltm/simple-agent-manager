@@ -18,6 +18,7 @@ import {
   type MessageCommentThread,
   type MessageCommentThreadEventReason,
   type MessageCursor,
+  type SchedulePromptAuthor,
   type SendAgentChannelMessageInput,
   type SendAgentChannelMessageResult,
   type SessionActivityTerminalReason,
@@ -110,6 +111,7 @@ import {
 import * as reconciliation from './reconciliation';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import { checkRuntimeHeartbeatTimeouts } from './runtime-heartbeat-policy';
+import { withoutSamNotice } from './sam-notice-metadata';
 import * as sessionAccess from './session-access';
 import * as sessionActivityProbe from './session-activity-probe';
 import * as sessionActivityReconciliation from './session-activity-reconciliation';
@@ -340,7 +342,12 @@ export class ProjectData extends DurableObject<Env> {
           input.sessionId,
           input.initialMessageRole,
           input.initialMessageContent,
-          input.initialMessageToolMetadata,
+          // Same boundary as persistMessage below: callers never write a notice here.
+          withoutSamNotice(
+            input.initialMessageToolMetadata,
+            input.sessionId,
+            input.initialMessageId
+          ),
           input.initialMessageId
         );
         return { session, message };
@@ -777,7 +784,9 @@ export class ProjectData extends DurableObject<Env> {
         sessionId,
         role,
         content,
-        toolMetadata,
+        // Worker callers never write notices this way; a notice only enters through
+        // acceptPromptDelivery or in-DO server code, so this boundary drops one.
+        withoutSamNotice(toolMetadata, sessionId, messageId ?? 'unassigned'),
         messageId,
         guard
       )
@@ -1718,6 +1727,8 @@ export class ProjectData extends DurableObject<Env> {
     creatorChatSessionId: string | null;
     /** Only a person may schedule into a chat shared with them; see `ScheduleCreator`. */
     creator: ScheduleCreator;
+    /** Who wrote the prompt; an agent-written one is delivered as a pointer (constitution XV). */
+    promptAuthor: SchedulePromptAuthor;
     request: unknown;
   }) {
     this.ensureProjectId(input.projectId);
@@ -1759,6 +1770,7 @@ export class ProjectData extends DurableObject<Env> {
         {
           userId: input.userId,
           chatSessionId: input.creatorChatSessionId,
+          promptAuthor: input.promptAuthor,
           sharedAccessGrantId: authority?.writer.grantId ?? null,
         },
         input.request,

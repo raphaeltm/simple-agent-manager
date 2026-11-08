@@ -6,6 +6,7 @@ const mockPersistOrchestrationPrompt = vi.hoisted(() => vi.fn());
 const mockAcceptPromptDelivery = vi.hoisted(() => vi.fn());
 const mockEnqueueMailboxMessage = vi.hoisted(() => vi.fn());
 const mockMarkMailboxMessageDelivered = vi.hoisted(() => vi.fn());
+const mockChannelSend = vi.hoisted(() => vi.fn());
 
 vi.mock('../../../src/services/node-agent', () => ({
   sendPromptToAgentOnNode: (...args: unknown[]) => mockSendPromptToAgentOnNode(...args),
@@ -20,6 +21,11 @@ vi.mock('../../../src/services/project-data', () => ({
   acceptPromptDelivery: (...args: unknown[]) => mockAcceptPromptDelivery(...args),
   enqueueMailboxMessage: (...args: unknown[]) => mockEnqueueMailboxMessage(...args),
   markMailboxMessageDelivered: (...args: unknown[]) => mockMarkMailboxMessageDelivered(...args),
+}));
+
+vi.mock('../../../src/services/agent-message-channels', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/agent-message-channels')>()),
+  sendAgentMessageOverChannel: (...args: unknown[]) => mockChannelSend(...args),
 }));
 
 vi.mock('../../../src/services/task-terminal-cleanup', () => ({
@@ -187,9 +193,19 @@ function createMessagingEnv(): { env: Env; sqlite: Database.Database } {
     sqlite,
     env: {
       DATABASE: createSqliteD1(sqlite),
-      DURABLE_PROMPT_DELIVERY_ENABLED: 'false',
+      DURABLE_PROMPT_DELIVERY_ENABLED: 'true',
+      PROJECT_EVENT_WAKE_ENABLED: 'true',
+      AGENT_MESSAGE_CHANNELS_ENABLED: 'true',
     } as unknown as Env,
   };
+}
+
+/** Constitution XV: nothing an agent writes is posted into another chat directly. */
+function expectNoRawDelivery() {
+  expect(mockSendPromptToAgentOnNode).not.toHaveBeenCalled();
+  expect(mockPersistOrchestrationPrompt).not.toHaveBeenCalled();
+  expect(mockAcceptPromptDelivery).not.toHaveBeenCalled();
+  expect(mockEnqueueMailboxMessage).not.toHaveBeenCalled();
 }
 
 function textPayload(response: Awaited<ReturnType<typeof handleSendMessageToSubtask>>) {
@@ -206,6 +222,15 @@ describe('project-scoped MCP agent messaging authorization', () => {
     });
     mockEnqueueMailboxMessage.mockResolvedValue({ id: 'mailbox-message-id' });
     mockMarkMailboxMessageDelivered.mockResolvedValue(true);
+    mockChannelSend.mockResolvedValue({
+      outcome: 'created',
+      channel: { name: 'agent-dm.pair' },
+      eventId: 'event-1',
+      sequence: 1,
+      recipientSubscriptionId: 'sub-recipient',
+      senderSubscriptionId: 'sub-sender',
+      retiredSubscriptionIds: [],
+    });
   });
 
   it('send_message_to_subtask allows same-project sibling agents and preserves verified-token provenance', async () => {
@@ -219,27 +244,29 @@ describe('project-scoped MCP agent messaging authorization', () => {
     );
 
     expect(response.error).toBeUndefined();
-    expect(textPayload(response)).toEqual({ delivered: true });
-    expect(mockPersistOrchestrationPrompt).toHaveBeenCalledWith({
-      env,
-      projectId: 'project-a',
-      chatSessionId: 'chat-sibling',
-      content: 'please review the auth path',
-      source: 'parent_agent',
-      kind: 'orchestration_prompt',
-      parentTaskId: 'task-caller',
-      childTaskId: 'task-sibling',
-      senderId: 'workspace-caller',
+    expect(textPayload(response)).toMatchObject({
+      accepted: true,
+      delivered: false,
+      transport: 'agent_message_channel',
     });
-    expect(mockSendPromptToAgentOnNode).toHaveBeenCalledWith(
-      'node-sibling',
-      'workspace-sibling',
-      'agent-sibling',
-      'please review the auth path',
+    expect(mockChannelSend).toHaveBeenCalledWith(
       env,
-      'user-caller',
-      'persisted-message-id'
+      expect.objectContaining({
+        projectId: 'project-a',
+        message: 'please review the auth path',
+        actor: expect.objectContaining({
+          userId: 'user-caller',
+          taskId: 'task-caller',
+          chatSessionId: 'chat-caller',
+          workspaceId: 'workspace-caller',
+        }),
+        recipient: expect.objectContaining({
+          taskId: 'task-sibling',
+          chatSessionId: 'chat-sibling',
+        }),
+      })
     );
+    expectNoRawDelivery();
   });
 
   it('send_message_to_subtask still allows direct parent-to-child messaging', async () => {
@@ -253,15 +280,14 @@ describe('project-scoped MCP agent messaging authorization', () => {
     );
 
     expect(response.error).toBeUndefined();
-    expect(mockSendPromptToAgentOnNode).toHaveBeenCalledWith(
-      'node-child',
-      'workspace-child',
-      'agent-child',
-      'parent flow still works',
+    expect(mockChannelSend).toHaveBeenCalledWith(
       env,
-      'user-caller',
-      'persisted-message-id'
+      expect.objectContaining({
+        message: 'parent flow still works',
+        recipient: expect.objectContaining({ taskId: 'task-child', chatSessionId: 'chat-child' }),
+      })
     );
+    expectNoRawDelivery();
   });
 
   it('send_message_to_subtask rejects cross-project targets without delivery side effects', async () => {
@@ -344,7 +370,6 @@ describe('project-scoped MCP agent messaging authorization', () => {
 
   it('send_durable_message allows same-project sibling agents and preserves verified-token provenance', async () => {
     const { env } = createMessagingEnv();
-    const durableEnv = { ...env, DURABLE_PROMPT_DELIVERY_ENABLED: 'true' } as Env;
 
     const response = await handleSendDurableMessage(
       1,
@@ -355,30 +380,30 @@ describe('project-scoped MCP agent messaging authorization', () => {
         metadata: { sourceTaskId: 'spoofed', senderId: 'spoofed' },
       },
       callerToken,
-      durableEnv
+      env
     );
 
     expect(response.error).toBeUndefined();
-    expect(mockAcceptPromptDelivery).toHaveBeenCalledWith(
-      durableEnv,
-      'project-a',
+    expect(mockChannelSend).toHaveBeenCalledWith(
+      env,
       expect.objectContaining({
-        targetSessionId: 'chat-sibling',
-        displayContent: 'durable handoff',
-        deliveryContent: 'durable handoff',
-        sourceTaskId: 'task-caller',
-        senderType: 'agent',
-        senderId: 'workspace-caller',
-        sourceKind: 'agent_mailbox',
-        metadata: { sourceTaskId: 'spoofed', senderId: 'spoofed' },
+        message: 'durable handoff',
+        messageClass: 'deliver',
+        // Caller metadata travels nested; the sender identity comes from the verified token.
+        senderMetadata: { sourceTaskId: 'spoofed', senderId: 'spoofed' },
+        senderSourceTaskId: 'task-caller',
+        actor: expect.objectContaining({ taskId: 'task-caller', chatSessionId: 'chat-caller' }),
+        recipient: expect.objectContaining({
+          taskId: 'task-sibling',
+          chatSessionId: 'chat-sibling',
+        }),
       })
     );
-    expect(mockSendPromptToAgentOnNode).not.toHaveBeenCalled();
+    expectNoRawDelivery();
   });
 
-  it('send_durable_message composes stop-and-deliver context for urgent classes while keeping the raw transcript message', async () => {
+  it('send_durable_message sends urgent classes over the channel, never as transcript text', async () => {
     const { env } = createMessagingEnv();
-    const durableEnv = { ...env, DURABLE_PROMPT_DELIVERY_ENABLED: 'true' } as Env;
 
     const response = await handleSendDurableMessage(
       1,
@@ -388,27 +413,23 @@ describe('project-scoped MCP agent messaging authorization', () => {
         messageClass: 'interrupt',
       },
       callerToken,
-      durableEnv
+      env
     );
 
     expect(response.error).toBeUndefined();
-    expect(mockAcceptPromptDelivery).toHaveBeenCalledTimes(1);
-    const input = mockAcceptPromptDelivery.mock.calls[0][2] as Record<string, string>;
-    // The transcript row keeps the sender's raw message...
-    expect(input.displayContent).toBe('stop the staging deploy immediately');
-    // ...while the submitted prompt carries the stop context and the fenced,
-    // untrusted-labelled directive.
-    expect(input.deliveryContent).toContain('[Urgent agent message — class: interrupt]');
-    expect(input.deliveryContent).toContain('from task task-caller');
-    expect(input.deliveryContent).toContain('stops any in-flight turn');
-    expect(input.deliveryContent).toContain('untrusted peer content');
-    expect(input.deliveryContent).toContain('<<<\nstop the staging deploy immediately\n>>>');
-    expect(mockSendPromptToAgentOnNode).not.toHaveBeenCalled();
+    expect(mockChannelSend).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({
+        message: 'stop the staging deploy immediately',
+        messageClass: 'interrupt',
+      })
+    );
+    expectNoRawDelivery();
   });
 
   it('send_durable_message rejects cross-project and terminal targets before accepting delivery', async () => {
     const { env } = createMessagingEnv();
-    const durableEnv = { ...env, DURABLE_PROMPT_DELIVERY_ENABLED: 'true' } as Env;
+    const durableEnv = env;
 
     const crossProject = await handleSendDurableMessage(
       1,
@@ -426,12 +447,13 @@ describe('project-scoped MCP agent messaging authorization', () => {
     expect(crossProject.error?.message).toContain('not found in this project');
     expect(terminal.error?.message).toContain("Target task is in 'completed' status");
     expect(mockAcceptPromptDelivery).not.toHaveBeenCalled();
+    expect(mockChannelSend).not.toHaveBeenCalled();
   });
 
   it('send_durable_message rejects a terminal caller before accepting delivery', async () => {
     const { env, sqlite } = createMessagingEnv();
     sqlite.prepare('UPDATE tasks SET status = ? WHERE id = ?').run('completed', 'task-caller');
-    const durableEnv = { ...env, DURABLE_PROMPT_DELIVERY_ENABLED: 'true' } as Env;
+    const durableEnv = env;
 
     const response = await handleSendDurableMessage(
       1,
@@ -442,12 +464,13 @@ describe('project-scoped MCP agent messaging authorization', () => {
 
     expect(response.error?.message).toContain("Calling task is in 'completed' status");
     expect(mockAcceptPromptDelivery).not.toHaveBeenCalled();
+    expect(mockChannelSend).not.toHaveBeenCalled();
     expect(mockEnqueueMailboxMessage).not.toHaveBeenCalled();
   });
 
   it('send_durable_message rejects self-targeting instead of accepting self-delivery', async () => {
     const { env } = createMessagingEnv();
-    const durableEnv = { ...env, DURABLE_PROMPT_DELIVERY_ENABLED: 'true' } as Env;
+    const durableEnv = env;
 
     const response = await handleSendDurableMessage(
       1,
@@ -458,6 +481,7 @@ describe('project-scoped MCP agent messaging authorization', () => {
 
     expect(response.error?.message).toContain('another active task agent');
     expect(mockAcceptPromptDelivery).not.toHaveBeenCalled();
+    expect(mockChannelSend).not.toHaveBeenCalled();
     expect(mockEnqueueMailboxMessage).not.toHaveBeenCalled();
   });
 
@@ -466,7 +490,7 @@ describe('project-scoped MCP agent messaging authorization', () => {
     sqlite
       .prepare('UPDATE workspaces SET project_id = ? WHERE id = ?')
       .run('project-b', 'workspace-sibling');
-    const durableEnv = { ...env, DURABLE_PROMPT_DELIVERY_ENABLED: 'true' } as Env;
+    const durableEnv = env;
 
     const response = await handleSendDurableMessage(
       1,
@@ -477,5 +501,6 @@ describe('project-scoped MCP agent messaging authorization', () => {
 
     expect(response.error?.message).toContain('workspace or node not found');
     expect(mockAcceptPromptDelivery).not.toHaveBeenCalled();
+    expect(mockChannelSend).not.toHaveBeenCalled();
   });
 });

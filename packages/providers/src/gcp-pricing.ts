@@ -184,6 +184,31 @@ export async function fetchGcpComputePriceTable(
   );
 }
 
+/**
+ * Check that a token can read the Cloud Billing Catalog with one single-SKU request. Throws the
+ * same `ProviderError` a full price download would (for example `SERVICE_DISABLED` when the
+ * Cloud Billing API is off in the token's project), so callers classify it the same way.
+ */
+export async function probeGcpBillingAccess(
+  accessToken: string,
+  options: Pick<GcpPriceFetchOptions, 'requestTimeoutMs' | 'apiBase'>,
+  context?: ProviderRequestContext
+): Promise<void> {
+  throwIfProviderRequestAborted(context);
+  const base = options.apiBase ?? GCP_BILLING_API_BASE;
+  const params = new URLSearchParams({ pageSize: '1', currencyCode: GCP_PRICE_CURRENCY });
+  const res = await providerFetch(
+    'gcp',
+    `${base}/${GCP_COMPUTE_BILLING_SERVICE}/skus?${params.toString()}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+    options.requestTimeoutMs,
+    undefined,
+    context
+  );
+  throwIfProviderRequestAborted(context);
+  expectObject(await parseProviderJson(res, 'gcp', 'billingSkus'), 'gcp', 'billingSkus');
+}
+
 /** Validate a stored price table read back from cache; null when it is not one. */
 export function parseStoredGcpPriceTable(value: unknown): GcpPriceTable | null {
   try {

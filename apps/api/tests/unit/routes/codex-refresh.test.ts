@@ -26,19 +26,47 @@ vi.mock('../../../src/services/jwt', () => ({
   verifyCallbackToken: vi.fn(),
 }));
 
+// The run's credential resolution is covered end to end against a real database in
+// tests/integration/codex-run-credential-refresh.test.ts; here it is a seam.
+vi.mock('../../../src/services/run-agent-credential', () => ({
+  resolveRunAgentCredentialReferences: vi.fn(async () => ['cc_credentials:cred-1']),
+}));
+
 // Note: rate limiting now lives inside the CodexRefreshLock DO (MEDIUM #5).
 // We simulate rate-limited responses by having the DO's fetch mock return 429.
 
 const { verifyCallbackToken } = await import('../../../src/services/jwt');
+const { resolveRunAgentCredentialReferences } =
+  await import('../../../src/services/run-agent-credential');
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mockDrizzleWithWorkspace(userId: string | null, projectId: string | null = null): any {
-  const rows = userId ? [{ userId, projectId }] : [];
+/** Drizzle stub for the workspace callback-identity read (`loadWorkspaceCallbackIdentity`). */
+function mockDrizzleWithWorkspace(
+  userId: string | null,
+  projectId: string | null = null,
+  status = 'running',
+  nodeStatus = 'running'
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+): any {
+  const rows = userId
+    ? [
+        {
+          workspaceId: 'ws-123',
+          userId,
+          projectId,
+          chatSessionId: null,
+          status,
+          nodeId: 'node-1',
+          nodeStatus,
+        },
+      ]
+    : [];
   return {
     select: vi.fn().mockReturnValue({
       from: vi.fn().mockReturnValue({
-        where: vi.fn().mockReturnValue({
-          limit: vi.fn().mockResolvedValue(rows),
+        leftJoin: vi.fn().mockReturnValue({
+          where: vi.fn().mockReturnValue({
+            limit: vi.fn().mockResolvedValue(rows),
+          }),
         }),
       }),
     }),
@@ -68,16 +96,20 @@ describe('POST /api/auth/codex-refresh', () => {
   function postRefresh(
     body: unknown,
     queryToken = 'valid-callback-token',
-    env?: Env,
+    env?: Env
   ): Promise<Response> {
     const url = queryToken
       ? `/api/auth/codex-refresh?token=${queryToken}`
       : '/api/auth/codex-refresh';
-    return app.request(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    }, env ?? makeMockEnv());
+    return app.request(
+      url,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      env ?? makeMockEnv()
+    );
   }
 
   const validBody = {
@@ -93,7 +125,10 @@ describe('POST /api/auth/codex-refresh', () => {
     app.onError((err, c) => {
       const appError = err as { statusCode?: number; error?: string; message?: string };
       if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
-        return c.json({ error: appError.error, message: appError.message }, appError.statusCode as 400 | 500);
+        return c.json(
+          { error: appError.error, message: appError.message },
+          appError.statusCode as 400 | 500
+        );
       }
       return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
     });
@@ -111,11 +146,14 @@ describe('POST /api/auth/codex-refresh', () => {
 
     // DO: default returns success
     mockDoFetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        access_token: 'new-access',
-        refresh_token: 'new-refresh',
-        id_token: 'new-id',
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+      new Response(
+        JSON.stringify({
+          access_token: 'new-access',
+          refresh_token: 'new-refresh',
+          id_token: 'new-id',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
     );
     mockIdFromName = vi.fn().mockReturnValue({ toString: () => 'do-id' });
     mockGetStub = vi.fn().mockReturnValue({ fetch: mockDoFetch });
@@ -181,7 +219,11 @@ describe('POST /api/auth/codex-refresh', () => {
   });
 
   it('returns 400 when grant_type has wrong value', async () => {
-    const res = await postRefresh({ client_id: 'test', grant_type: 'authorization_code', refresh_token: 'rt' });
+    const res = await postRefresh({
+      client_id: 'test',
+      grant_type: 'authorization_code',
+      refresh_token: 'rt',
+    });
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toBe('invalid_request');
@@ -189,11 +231,15 @@ describe('POST /api/auth/codex-refresh', () => {
 
   it('returns 400 for malformed JSON body', async () => {
     const url = '/api/auth/codex-refresh?token=valid-callback-token';
-    const res = await app.request(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: 'not-json',
-    }, makeMockEnv());
+    const res = await app.request(
+      url,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: 'not-json',
+      },
+      makeMockEnv()
+    );
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toBe('invalid_request');
@@ -207,7 +253,7 @@ describe('POST /api/auth/codex-refresh', () => {
     const res = await postRefresh(
       validBody,
       'valid-callback-token',
-      makeMockEnv({ CODEX_REFRESH_PROXY_ENABLED: 'false' }),
+      makeMockEnv({ CODEX_REFRESH_PROXY_ENABLED: 'false' })
     );
     expect(res.status).toBe(503);
     const json = await res.json();
@@ -223,13 +269,27 @@ describe('POST /api/auth/codex-refresh', () => {
   // Workspace lookup
   // -----------------------------------------------------------------------
 
-  it('returns 401 when workspace is not found', async () => {
+  it('returns the terminal 410 when the workspace no longer exists', async () => {
     vi.mocked(drizzle).mockReturnValue(mockDrizzleWithWorkspace(null));
 
     const res = await postRefresh(validBody);
-    expect(res.status).toBe(401);
-    const json = await res.json();
-    expect(json.error).toBe('refresh_token_invalidated');
+    expect(res.status).toBe(410);
+    expect(mockDoFetch).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { name: 'a stopped workspace', status: 'stopped', nodeStatus: 'running' },
+    { name: 'a workspace on a deleted node', status: 'running', nodeStatus: 'deleted' },
+  ])('refuses $name with 410 before any credential work', async ({ status, nodeStatus }) => {
+    vi.mocked(drizzle).mockReturnValue(
+      mockDrizzleWithWorkspace('user-abc', null, status, nodeStatus)
+    );
+
+    const res = await postRefresh(validBody);
+
+    expect(res.status).toBe(410);
+    expect(vi.mocked(resolveRunAgentCredentialReferences)).not.toHaveBeenCalled();
+    expect(mockDoFetch).not.toHaveBeenCalled();
   });
 
   // -----------------------------------------------------------------------
@@ -250,31 +310,46 @@ describe('POST /api/auth/codex-refresh', () => {
 
     // Verify DO fetch was called with the refresh token
     expect(mockDoFetch).toHaveBeenCalledTimes(1);
-    const doRequestBody = JSON.parse(
-      await (mockDoFetch.mock.calls[0][0] as Request).text(),
-    );
+    const doRequestBody = JSON.parse(await (mockDoFetch.mock.calls[0][0] as Request).text());
     expect(doRequestBody.refreshToken).toBe('rt_test_refresh_token');
     expect(doRequestBody.userId).toBe('user-abc');
-    // projectId is forwarded so the DO updates the correct scoped row.
-    // User-scoped workspace forwards projectId=null (default mock).
-    expect(doRequestBody.projectId).toBeNull();
+    // The DO receives the run's credential references, never a scope to re-derive.
+    expect(doRequestBody.credentialReferences).toEqual(['cc_credentials:cred-1']);
+    expect(doRequestBody.projectId).toBeUndefined();
     // encryptionKey is NOT in the DO request — DO derives it from its own env
     expect(doRequestBody.encryptionKey).toBeUndefined();
   });
 
-  it('forwards projectId to DO when workspace belongs to a project (project-scoped refresh)', async () => {
+  it('returns 401 without calling the DO when the run has no refreshable credential', async () => {
+    vi.mocked(resolveRunAgentCredentialReferences).mockResolvedValueOnce([]);
+
+    const res = await postRefresh(validBody);
+
+    expect(res.status).toBe(401);
+    expect(await res.json()).toEqual({ error: 'refresh_token_invalidated' });
+    expect(mockDoFetch).not.toHaveBeenCalled();
+  });
+
+  it('resolves the run credentials from the workspace and its project', async () => {
     vi.mocked(drizzle).mockReturnValue(mockDrizzleWithWorkspace('user-abc', 'proj-xyz'));
+    vi.mocked(resolveRunAgentCredentialReferences).mockResolvedValueOnce(['cc_credentials:pinned']);
 
     const res = await postRefresh(validBody);
     expect(res.status).toBe(200);
 
-    expect(mockDoFetch).toHaveBeenCalledTimes(1);
-    const doRequestBody = JSON.parse(
-      await (mockDoFetch.mock.calls[0][0] as Request).text(),
+    expect(vi.mocked(resolveRunAgentCredentialReferences)).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      'test-key',
+      {
+        workspaceId: 'ws-123',
+        userId: 'user-abc',
+        projectId: 'proj-xyz',
+        agentType: 'openai-codex',
+      }
     );
-    // Critical: the projectId from the workspace row must reach the DO so the DO
-    // updates the project-scoped credential, not the user-scoped one.
-    expect(doRequestBody.projectId).toBe('proj-xyz');
+    const doRequestBody = JSON.parse(await (mockDoFetch.mock.calls[0][0] as Request).text());
+    expect(doRequestBody.credentialReferences).toEqual(['cc_credentials:pinned']);
     expect(doRequestBody.userId).toBe('user-abc');
   });
 
@@ -283,7 +358,7 @@ describe('POST /api/auth/codex-refresh', () => {
       new Response(JSON.stringify({ error: 'refresh_token_invalidated' }), {
         status: 401,
         headers: { 'Content-Type': 'application/json' },
-      }),
+      })
     );
 
     const res = await postRefresh(validBody);
@@ -297,7 +372,7 @@ describe('POST /api/auth/codex-refresh', () => {
       new Response(JSON.stringify({ error: 'upstream_error' }), {
         status: 502,
         headers: { 'Content-Type': 'application/json' },
-      }),
+      })
     );
 
     const res = await postRefresh(validBody);
@@ -311,12 +386,15 @@ describe('POST /api/auth/codex-refresh', () => {
     // but intentionally OMITS refresh_token — the caller did not prove possession
     // of a current refresh token, so we must not hand one out.
     mockDoFetch.mockResolvedValue(
-      new Response(JSON.stringify({
-        access_token: 'cached-access',
-        id_token: 'cached-id',
-        // refresh_token intentionally omitted (CRITICAL #1 fix)
-        stale: true,
-      }), { status: 200, headers: { 'Content-Type': 'application/json' } }),
+      new Response(
+        JSON.stringify({
+          access_token: 'cached-access',
+          id_token: 'cached-id',
+          // refresh_token intentionally omitted (CRITICAL #1 fix)
+          stale: true,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
     );
 
     const res = await postRefresh(validBody);
@@ -348,8 +426,8 @@ describe('POST /api/auth/codex-refresh', () => {
             'Content-Type': 'application/json',
             'Retry-After': '1800',
           },
-        },
-      ),
+        }
+      )
     );
 
     const res = await postRefresh(validBody);
@@ -410,7 +488,7 @@ describe('POST /api/auth/codex-refresh', () => {
         new Response(JSON.stringify({ error: 'refresh_token_expired' }), {
           status: 401,
           headers: { 'Content-Type': 'application/json' },
-        }),
+        })
       );
 
       const res = await postRefresh(validBody);
@@ -425,7 +503,7 @@ describe('POST /api/auth/codex-refresh', () => {
         new Response(JSON.stringify({ error: 'upstream_timeout' }), {
           status: 502,
           headers: { 'Content-Type': 'application/json' },
-        }),
+        })
       );
 
       const res = await postRefresh(validBody);

@@ -1,11 +1,12 @@
 /**
  * Ordinary agent messages over SAM-managed `agent-dm.*` pair channels.
  *
- * Disabled by default (`AGENT_MESSAGE_CHANNELS_ENABLED`). The transport is only
- * effective while the canonical event wake path and durable prompt delivery are
- * both enabled; without them a recipient would never be notified, so the
- * messaging tools keep their legacy path instead of accepting a message nobody
- * will hear about.
+ * Disabled by default in code (`AGENT_MESSAGE_CHANNELS_ENABLED`; `wrangler.toml`
+ * turns it on). The transport is only effective while the canonical event wake
+ * path and durable prompt delivery are both enabled; without them a recipient
+ * would never be notified, so the messaging tools refuse the send rather than
+ * accept a message nobody will hear about (constitution XV: there is no
+ * raw-injection fallback).
  */
 import {
   type AgentChannelMessageClass,
@@ -22,12 +23,14 @@ import type { Env } from '../env';
 import * as projectData from './project-data';
 import { isSessionRecoverySourceTaskGuardValid } from './session-recovery-authority';
 
+export type AgentMessageChannelsDisabledReason =
+  | 'flag_off'
+  | 'project_event_wake_disabled'
+  | 'durable_prompt_delivery_disabled';
+
 export type AgentMessageChannelsConfig =
   | { enabled: true }
-  | {
-      enabled: false;
-      reason: 'flag_off' | 'project_event_wake_disabled' | 'durable_prompt_delivery_disabled';
-    };
+  | { enabled: false; reason: AgentMessageChannelsDisabledReason };
 
 export function resolveAgentMessageChannelsConfig(env: Env): AgentMessageChannelsConfig {
   const flag = env.AGENT_MESSAGE_CHANNELS_ENABLED?.trim();

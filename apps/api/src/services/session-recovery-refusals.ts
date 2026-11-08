@@ -46,7 +46,10 @@ const SESSION_RECOVERY_REFUSALS: Record<string, SessionRecoveryRefusalClassifica
   },
   container_runtime_unavailable: {
     action: 'report',
-    description: 'The sleeping container runtime is gone and cannot wake in place.',
+    // Snapshot restore into a fresh Instant runtime is not built (`ensureSessionRecovery`
+    // refuses cf-container), so tell the person how to continue rather than only what broke.
+    description:
+      'The sleeping container runtime is gone and cannot wake in place. Your message and this conversation are saved: fork this chat or start a new one to continue.',
   },
   sleeping_snapshot_missing: {
     action: 'report',
