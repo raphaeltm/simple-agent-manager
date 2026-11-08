@@ -302,6 +302,49 @@ describe('installation engine', () => {
     expect(JSON.stringify({ events, state })).not.toContain('secret-');
     expect(calls.join('\n')).not.toContain('secret-');
   });
+  it('prepares Email Sending on installations, before the Worker config is generated', async () => {
+    const f = fixture();
+    await runInstallerEngine(config, { ...f, environment: privateEnv, emit() {}, save() {} });
+    const email = f.commands.find((entry) =>
+      entry.args.includes('scripts/deploy/configure-agent-email.ts')
+    );
+    expect(email?.env.AGENT_EMAIL_ENABLED).toBe('true');
+    // The installation's deployment token, never the runtime one.
+    expect(email?.env.CF_API_TOKEN).toBe(privateEnv.CF_API_TOKEN);
+    const calls = f.commands.map((entry) => entry.args.join(' '));
+    expect(calls.findIndex((line) => line.includes('configure-agent-email.ts'))).toBeLessThan(
+      calls.findIndex((line) => line.includes('sync-wrangler-config.ts'))
+    );
+  });
+  it('finishes an installation with email off when preparing Email Sending fails', async () => {
+    const f = fixture('scripts/deploy/configure-agent-email.ts');
+    const events: Array<{ phase: string; status: string }> = [];
+    let state: EngineCheckpoint | undefined;
+    await runInstallerEngine(config, {
+      ...f,
+      environment: privateEnv,
+      emit: (event) => events.push(event),
+      save: (value) => {
+        state = structuredClone(value);
+      },
+    });
+    expect(events).toContainEqual(
+      expect.objectContaining({ phase: 'agent-email', status: 'failed' })
+    );
+    expect(state?.status).toBe('completed');
+    // Control: the same failure still stops a CI deploy, which has always required it.
+    await expect(
+      runInstallerEngine(
+        { ...config, ownerEmail: undefined, profile: 'legacy-ci' },
+        {
+          ...fixture('scripts/deploy/configure-agent-email.ts'),
+          environment: privateEnv,
+          emit() {},
+          save() {},
+        }
+      )
+    ).rejects.toThrow('configure-services');
+  });
   it('records phase and command durations without argument values', async () => {
     // Slow installs were invisible: only the phase name survived in stored state (2026-11-07).
     const f = fixture();

@@ -140,6 +140,20 @@ export async function runInstallerEngine(
     operation = 'worker.deploy';
     return deployEngineApi(c, runner, root, env);
   };
+  // Installations always prepare Email Sending: email sign-in codes and agent email need it.
+  // The script skips itself when the token lacks the email permissions (installs created before
+  // the installer requested them), and any other failure leaves email off instead of failing
+  // the install: sign-in then falls back to an OAuth provider during first-run setup.
+  const prepareInstallationEmail = async () => {
+    env.AGENT_EMAIL_ENABLED = 'true';
+    try {
+      await pnpm('exec', 'tsx', 'scripts/deploy/configure-agent-email.ts');
+    } catch (error) {
+      if (!(error instanceof EngineCommandFailure)) throw error;
+      // Logged as its own optional step so the install log shows why email is off.
+      options.emit({ phase: 'agent-email', status: 'failed', operation: 'configure-agent-email' });
+    }
+  };
   const phase = async (name: string, action: () => Promise<unknown>) => {
     state.status = 'running';
     state.activePhase = name;
@@ -391,6 +405,7 @@ export async function runInstallerEngine(
     });
     if (c.profile === 'legacy-ci')
       await pnpm('exec', 'tsx', 'scripts/deploy/configure-agent-email.ts');
+    else await prepareInstallationEmail();
     await sync();
     await script('configure-r2-cors.sh');
     await script('configure-ai-gateway.sh');

@@ -706,14 +706,25 @@ async function auditMaintenance(browser: Browser) {
     screenshots += await captureState(page, 'maintenance-' + state);
   }
   // Completed: one primary action; "Check for an update" is a quiet text
-  // link, not a second competing button; its body text lives in the status box.
-  await expect(page.locator('.deployment-status')).toContainText(
-    'Your instance passed its deployment health check.'
-  );
+  // link, not a second competing button.
+  await expect(page.getByRole('heading', { name: 'SAM is live' })).toBeVisible();
   const updateLink = page.getByRole('button', { name: 'Check for an update', exact: true });
   await expect(updateLink).not.toHaveClass(/sam-btn--secondary/);
-  await page.getByRole('button', { name: 'Finish setting up SAM', exact: true }).click();
-  await expect(page.getByText('synthetic-private-setup-token-for-audit')).toBeVisible();
+  await page.getByRole('button', { name: /^Finish setting up SAM/ }).click();
+  // The instruction sits directly above the token, and the button carries the token for the
+  // owner so the instance's setup page can fill it in.
+  const instruction = page.getByText('Open your instance and enter this setup token.');
+  const token = page.getByText('synthetic-private-setup-token-for-audit');
+  await expect(token).toBeVisible();
+  const instructionBox = await instruction.boundingBox();
+  const tokenBox = await token.boundingBox();
+  if (!instructionBox || !tokenBox) throw new Error('Setup handoff did not render');
+  if (tokenBox.y - (instructionBox.y + instructionBox.height) > 48)
+    throw new Error('The setup instruction is not next to the setup token');
+  await expect(page.getByRole('link', { name: /Open SAM setup/ })).toHaveAttribute(
+    'href',
+    'https://app.sam.example.com/setup#token=synthetic-private-setup-token-for-audit'
+  );
   screenshots += await captureState(page, 'maintenance-setup');
   await context.close();
   service.close();

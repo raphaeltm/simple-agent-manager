@@ -45,6 +45,9 @@ const fullScopes = [
   'aig.run',
   'aig.write',
   'workers-observability.read',
+  'zone-settings.write',
+  'email-routing-rule.write',
+  'email-sending.write',
 ];
 const bootstrapScopes = ['account-settings.read', 'workers-scripts.write'];
 // Shipped before 2026-11-06; workers-scripts.edit (Workers Editor) cannot create Workers.
