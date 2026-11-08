@@ -55,6 +55,11 @@ export async function sweepOrphanedWorkspaces(
   config: CleanupConfig,
   result: NodeCleanupResult
 ): Promise<void> {
+  // The grace runs from the later of workspace creation and the task's end. Measured
+  // from creation alone, a long-lived workspace was stopped on the first tick after its
+  // task turned terminal, which on 2026-11-08 cut off an in-flight eviction that would
+  // have resumed a falsely failed task (the eviction recovery re-queues it).
+  const orphanGraceCutoff = new Date(now.getTime() - config.orphanGracePeriodMs).toISOString();
   const candidates = await env.DATABASE.prepare(
     `SELECT w.id, w.node_id, w.user_id, w.status, w.created_at, w.project_id, w.chat_session_id
      FROM workspaces w
@@ -65,6 +70,7 @@ export async function sweepOrphanedWorkspaces(
          SELECT 1 FROM tasks t
          WHERE t.workspace_id = w.id
            AND t.status IN ('completed', 'failed', 'cancelled')
+           AND COALESCE(t.completed_at, t.updated_at) < ?
            AND NOT ${sleepLifecycleOwnsTerminalTaskWorkspaceSql('t', 'w', sessionSleepMaxAttempts(env))}
        )
        AND NOT EXISTS (
@@ -77,8 +83,9 @@ export async function sweepOrphanedWorkspaces(
      LIMIT ?`
   )
     .bind(
+      orphanGraceCutoff,
       new Date(now.getTime() - sessionSleepInFlightMaxAgeMs(env)).toISOString(),
-      new Date(now.getTime() - config.orphanGracePeriodMs).toISOString(),
+      orphanGraceCutoff,
       config.workspaceSweepLimit
     )
     .all<{

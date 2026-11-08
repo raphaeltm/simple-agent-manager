@@ -711,6 +711,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       await seedAgentSession('agent-nc-orphan', wsId, USER_ID, { status: 'running' });
       await seedTask(taskId, PROJECT_ID, USER_ID, {
         status: 'cancelled',
+        completedAt: oldDate, // ended long before this sweep
         workspaceId: wsId,
       });
 
@@ -735,6 +736,59 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       const events = await getObservabilityEvents('orphaned_workspace');
       expect(events.length).toBeGreaterThanOrEqual(1);
       expect(events[0].message).toContain('Orphaned workspace stopped');
+    });
+
+    it('gives a just-ended task the grace before stopping its long-lived workspace', async () => {
+      // Production 2026-11-08: an eviction's docker stop killed the agent, the VM agent
+      // posted a false 'failed', and this sweep stopped the hour-old workspace on the next
+      // tick, before the eviction was recorded. The eviction was then treated as superseded
+      // and never re-queued the task. The grace must run from the task's end too.
+      await seedBaseData();
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const justNow = new Date(Date.now() - 30 * 1000).toISOString();
+      for (const [suffix, endedAt] of [
+        ['just-failed', justNow],
+        ['long-failed', oldDate],
+      ] as const) {
+        const nodeId = `node-nc-grace-${suffix}`;
+        const wsId = `ws-nc-grace-${suffix}`;
+        await seedNode(nodeId, USER_ID, { status: 'running', createdAt: oldDate });
+        await seedWorkspace(wsId, nodeId, USER_ID, {
+          projectId: PROJECT_ID,
+          status: 'running',
+          chatSessionId: `session-nc-grace-${suffix}`,
+          createdAt: oldDate,
+        });
+        // An errored agent cannot be claimed by sleep, so only the orphan reaper decides.
+        await seedAgentSession(`agent-nc-grace-${suffix}`, wsId, USER_ID, { status: 'error' });
+        await seedTask(`task-nc-grace-${suffix}`, PROJECT_ID, USER_ID, {
+          status: 'failed',
+          workspaceId: wsId,
+          completedAt: endedAt,
+          updatedAt: endedAt,
+        });
+      }
+
+      // The default grace (10 minutes) applies: nothing overrides it here.
+      const result = await runNodeCleanupSweep(env as unknown as Env);
+
+      expect(await getWorkspaceStatus('ws-nc-grace-just-failed')).toMatchObject({
+        status: 'running',
+      });
+      // Control: the same workspace whose task ended an hour ago is still reaped.
+      expect(await getWorkspaceStatus('ws-nc-grace-long-failed')).toMatchObject({
+        status: 'stopped',
+      });
+      expect(result.orphanedWorkspacesFlagged).toBe(1);
+
+      // Later tests in this file shorten the grace; keep the still-running row out of them.
+      for (const table of ['agent_sessions', 'tasks']) {
+        await env.DATABASE.prepare(
+          `DELETE FROM ${table} WHERE workspace_id LIKE 'ws-nc-grace-%'`
+        ).run();
+      }
+      await env.DATABASE.prepare(`DELETE FROM workspaces WHERE id LIKE 'ws-nc-grace-%'`).run();
+      await env.DATABASE.prepare(`DELETE FROM nodes WHERE id LIKE 'node-nc-grace-%'`).run();
     });
 
     it('leaves a failed task workspace to the sleep lifecycle only while its agent session can be slept', async () => {
@@ -762,6 +816,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         });
         await seedTask(`task-nc-failed-${suffix}`, PROJECT_ID, USER_ID, {
           status: 'failed',
+          completedAt: oldDate, // ended long before this sweep
           workspaceId: wsId,
         });
       }
@@ -810,6 +865,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         });
         await seedTask(`task-nc-failed-backstop-${suffix}`, PROJECT_ID, USER_ID, {
           status: 'failed',
+          completedAt: oldDate, // ended long before this sweep
           workspaceId: wsId,
         });
         await seedPendingSleepSnapshot({
@@ -868,6 +924,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       });
       await seedTask(taskId, PROJECT_ID, USER_ID, {
         status: 'failed',
+        completedAt: oldDate, // ended long before this sweep
         workspaceId: wsId,
       });
 
