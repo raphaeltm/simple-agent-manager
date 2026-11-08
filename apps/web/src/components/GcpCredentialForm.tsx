@@ -11,42 +11,17 @@ import {
   listGcpProjects,
   runGcpSetup,
   saveGcpServiceAccountCredential,
+  verifyGcpSetup,
 } from '../lib/api';
 import { ConfirmDialog } from './ConfirmDialog';
-
-const GCP_ZONES = [
-  { id: 'us-central1-a', label: 'Iowa (us-central1-a)' },
-  { id: 'us-east1-b', label: 'South Carolina (us-east1-b)' },
-  { id: 'us-west1-a', label: 'Oregon (us-west1-a)' },
-  { id: 'europe-west1-b', label: 'Belgium (europe-west1-b)' },
-  { id: 'europe-west3-a', label: 'Frankfurt (europe-west3-a)' },
-  { id: 'europe-west2-a', label: 'London (europe-west2-a)' },
-  { id: 'asia-southeast1-a', label: 'Singapore (asia-southeast1-a)' },
-  { id: 'asia-northeast1-a', label: 'Tokyo (asia-northeast1-a)' },
-];
-
-const SETUP_STEPS = [
-  { key: 'get_project_number', label: 'Getting project info' },
-  { key: 'enable_apis', label: 'Enabling required APIs' },
-  { key: 'create_wif_pool', label: 'Creating identity pool' },
-  { key: 'create_oidc_provider', label: 'Configuring OIDC provider' },
-  { key: 'create_service_account', label: 'Creating service account' },
-  { key: 'grant_wif_user', label: 'Setting permissions' },
-  { key: 'grant_project_roles', label: 'Granting compute access' },
-];
-
-const SERVICE_ACCOUNT_COMMANDS = `PROJECT_ID="your-gcp-project-id"
-SERVICE_ACCOUNT="sam-vm-manager@\${PROJECT_ID}.iam.gserviceaccount.com"
-
-gcloud services enable compute.googleapis.com --project="\${PROJECT_ID}"
-gcloud iam service-accounts create sam-vm-manager --project="\${PROJECT_ID}" --display-name="SAM VM manager"
-gcloud projects add-iam-policy-binding "\${PROJECT_ID}" --member="serviceAccount:\${SERVICE_ACCOUNT}" --role="roles/compute.instanceAdmin.v1"
-gcloud projects add-iam-policy-binding "\${PROJECT_ID}" --member="serviceAccount:\${SERVICE_ACCOUNT}" --role="roles/compute.securityAdmin"
-gcloud iam service-accounts keys create sam-service-account.json --iam-account="\${SERVICE_ACCOUNT}" --project="\${PROJECT_ID}"`;
+import { GcpApiIssuesNotice } from './GcpApiIssuesNotice';
+import { GCP_ZONES, SERVICE_ACCOUNT_COMMANDS, SETUP_STEPS } from './gcp-credential-form-constants';
 
 interface GcpCredentialFormProps {
   credential?: CredentialResponse | null;
   onUpdate: () => void;
+  /** Re-read the credential without leaving the form, after "Check again". */
+  onRefresh?: () => void;
 }
 
 type SetupPhase =
@@ -57,8 +32,9 @@ type SetupPhase =
   | 'setting-up'
   | 'service-account';
 
-export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormProps) {
+export function GcpCredentialForm({ credential, onUpdate, onRefresh }: GcpCredentialFormProps) {
   const toast = useToast();
+  const [checking, setChecking] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [phase, setPhase] = useState<SetupPhase>('idle');
@@ -104,7 +80,14 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
     try {
       const result = await listGcpProjects(oauthHandle);
       setProjects(result.projects);
-      if (result.projects.length === 1 && result.projects[0]) {
+      // Re-running setup for a connected project starts from that project and zone.
+      const current = credential?.gcp;
+      if (current && result.projects.some((p) => p.projectId === current.gcpProjectId)) {
+        setSelectedProject(current.gcpProjectId);
+        if (GCP_ZONES.some((zone) => zone.id === current.defaultZone)) {
+          setSelectedZone(current.defaultZone);
+        }
+      } else if (result.projects.length === 1 && result.projects[0]) {
         setSelectedProject(result.projects[0].projectId);
       }
       setPhase('project-select');
@@ -114,7 +97,7 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
     } finally {
       setLoading(false);
     }
-  }, [oauthHandle]);
+  }, [oauthHandle, credential?.gcp]);
 
   useEffect(() => {
     if (phase === 'loading-projects' && oauthHandle) {
@@ -152,6 +135,21 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
       setPhase('zone-select');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCheckAgain = async () => {
+    setChecking(true);
+    try {
+      const result = await verifyGcpSetup();
+      onRefresh?.();
+      if (!result.verified) toast.error(result.error ?? 'Google Cloud verification failed');
+      else if (result.apiIssues?.length) toast.warning('Some Google APIs still need attention');
+      else toast.success('Google Cloud connection checked');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Google Cloud check failed');
+    } finally {
+      setChecking(false);
     }
   };
 
@@ -282,6 +280,14 @@ export function GcpCredentialForm({ credential, onUpdate }: GcpCredentialFormPro
             </div>
           </div>
         </div>
+        {metadata && (
+          <GcpApiIssuesNotice
+            metadata={metadata}
+            onRerunSetup={handleConnectWif}
+            onCheckAgain={() => void handleCheckAgain()}
+            checking={checking}
+          />
+        )}
         {error && <Alert variant="error">{error}</Alert>}
         <ConfirmDialog
           isOpen={showDisconnectConfirm}

@@ -9,7 +9,8 @@ export type GcpCatalogSettingName =
   | 'gcpCatalog.priceMaxPages'
   | 'gcpCatalog.priceRequestTimeoutMs'
   | 'gcpCatalog.priceRefreshCredentialAttempts'
-  | 'gcpCatalog.priceRefreshBudgetMs';
+  | 'gcpCatalog.priceRefreshBudgetMs'
+  | 'gcpCatalog.apiIssueTtlMinutes';
 
 /**
  * General-purpose shapes SAM offers from Google Cloud by default: shared-core e2-medium, and the
@@ -92,5 +93,12 @@ export const GCP_CATALOG_SETTINGS: readonly AdminSettingDefinition[] = [
     'Operations',
     'Maximum milliseconds one Google Cloud price refresh may take across all credentials it tries. It runs inside the 5-minute scheduled job, so it must stay well below that.',
     { min: 10_000, max: 240_000 }
+  ),
+  integerDefinition(
+    'gcpCatalog.apiIssueTtlMinutes',
+    7 * 24 * 60,
+    'Operations',
+    'Minutes SAM keeps showing a Google API problem (for example Cloud Billing disabled) on a Google Cloud credential after Google last reported it. A successful check clears it sooner.',
+    { min: 60, max: 30 * 24 * 60 }
   ),
 ];

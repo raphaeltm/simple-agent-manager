@@ -1,4 +1,5 @@
-import type { ProviderRequestContext } from './types';
+import { googleErrorInfoContext, parseGoogleErrorInfo } from './google-error-info';
+import type { ProviderErrorContext, ProviderRequestContext } from './types';
 import { ProviderError } from './types';
 import { expectObject } from './validation-core';
 
@@ -165,6 +166,7 @@ async function assertProviderResponseOk(
 
   let errorMessage: string;
   let providerCode: string | undefined;
+  let context: ProviderErrorContext | undefined;
   try {
     const body = await response.text();
     try {
@@ -182,6 +184,8 @@ async function assertProviderResponseOk(
         (typeof error?.status === 'string' ? error.status : undefined) ||
         (typeof json.status === 'string' && isNaN(Number(json.status)) ? json.status : undefined) ||
         undefined;
+      const googleErrorInfo = parseGoogleErrorInfo(error);
+      if (googleErrorInfo) context = googleErrorInfoContext(googleErrorInfo);
       errorMessage = boundProviderErrorDetail(
         maxErrorBodyChars,
         (typeof error?.message === 'string' ? error.message : undefined) ||
@@ -202,7 +206,7 @@ async function assertProviderResponseOk(
     providerName,
     response.status,
     `${providerName} API error (${response.status}): ${errorMessage}`,
-    { providerCode }
+    { providerCode, ...(context ? { context } : {}) }
   );
 }
 

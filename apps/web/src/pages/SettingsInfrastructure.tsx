@@ -1,5 +1,6 @@
 import { AccountsSection } from '../components/accounts/AccountsSection';
 import { ConnectAccountSheet } from '../components/accounts/ConnectAccountSheet';
+import { GcpApiIssuesBanner } from '../components/accounts/GcpApiIssuesBanner';
 import { useConnectSheetState } from '../components/accounts/useConnectSheetState';
 import { DefaultCapacityPoolsPanel } from '../components/project-settings/DefaultCapacityPoolsPanel';
 import { useAccountsData } from '../hooks/useAccounts';
@@ -16,6 +17,7 @@ export function SettingsInfrastructure() {
 
   return (
     <div className="flex min-w-0 flex-col gap-8">
+      <GcpApiIssuesBanner onReview={() => sheet.open('gcp')} />
       <AccountsSection
         title="Cloud accounts"
         description="The cloud accounts SAM can start machines in, and which projects bill to each one."

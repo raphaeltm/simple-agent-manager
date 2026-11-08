@@ -48,12 +48,12 @@ import {
   deleteUserGcpCredential,
   replaceUserGcpCredential,
 } from '../services/gcp-credential-store';
-import { clearGcpAccessTokenCache } from '../services/gcp-sts';
 import {
-  parseGcpCredential,
-  serializeCredentialToken,
-  toGcpCredentialMetadata,
-} from '../services/provider-credentials';
+  deleteGcpApiHealth,
+  toGcpCredentialMetadataWithApiIssues,
+} from '../services/gcp-api-health';
+import { clearGcpAccessTokenCache } from '../services/gcp-sts';
+import { parseGcpCredential, serializeCredentialToken } from '../services/provider-credentials';
 import {
   CredentialValidator,
   formatOnlyValidation,
@@ -268,7 +268,8 @@ credentialsRoutes.get('/', async (c) => {
       if (cred.provider !== 'gcp') return base;
       try {
         const plaintext = await decrypt(cred.encryptedToken, cred.iv, encryptionKey);
-        return { ...base, gcp: toGcpCredentialMetadata(parseGcpCredential(plaintext)) };
+        const credential = parseGcpCredential(plaintext);
+        return { ...base, gcp: await toGcpCredentialMetadataWithApiIssues(c.env, cred.id, credential) };
       } catch (err) {
         log.error('credentials.gcp_metadata_unreadable', {
           credentialId: cred.id,
@@ -324,6 +325,7 @@ credentialsRoutes.post('/', jsonValidator(CreateCredentialSchema), async (c) => 
       )
       .limit(1);
     const stored = await replaceUserGcpCredential(c.env, userId, credential);
+    if (existing) await deleteGcpApiHealth(c.env, existing.id);
     await reconcileCapacityPoolsForCredentialMutation(c.env, { scope: 'user', userId });
     const response: CredentialResponse = {
       id: stored.id,
@@ -331,7 +333,7 @@ credentialsRoutes.post('/', jsonValidator(CreateCredentialSchema), async (c) => 
       connected: true,
       createdAt: stored.createdAt,
       validation,
-      gcp: toGcpCredentialMetadata(credential),
+      gcp: await toGcpCredentialMetadataWithApiIssues(c.env, stored.id, credential),
     };
     return existing ? c.json(response) : c.json(response, 201);
   }
@@ -427,7 +429,11 @@ credentialsRoutes.delete('/:provider', async (c) => {
 
   if (provider === 'gcp') {
     const [stored] = await db
-      .select({ encryptedToken: schema.credentials.encryptedToken, iv: schema.credentials.iv })
+      .select({
+        id: schema.credentials.id,
+        encryptedToken: schema.credentials.encryptedToken,
+        iv: schema.credentials.iv,
+      })
       .from(schema.credentials)
       .where(
         and(
@@ -456,6 +462,7 @@ credentialsRoutes.delete('/:provider', async (c) => {
     }
 
     await deleteUserGcpCredential(c.env, userId);
+    await deleteGcpApiHealth(c.env, stored.id);
     if (credential) {
       try {
         await clearGcpAccessTokenCache(c.env, userId, credential);

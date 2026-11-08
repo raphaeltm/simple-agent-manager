@@ -233,6 +233,7 @@ describe('GCP routes', () => {
           serviceAccountEmail: 'sam-agent@gcp-project-1.iam.gserviceaccount.com',
           defaultZone: 'us-central1-a',
           privateKeyId: 'key-id-safe-metadata',
+          apiIssues: [],
         },
       },
     });

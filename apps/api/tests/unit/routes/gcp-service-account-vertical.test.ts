@@ -11,6 +11,7 @@ import type { Env } from '../../../src/env';
 import { gcpRoutes } from '../../../src/routes/gcp';
 import { decrypt } from '../../../src/services/encryption';
 import { parseGcpCredential } from '../../../src/services/provider-credentials';
+import { googleErrorResponse, googleServiceDisabledBody } from '../../helpers/google-api-errors';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 vi.mock('../../../src/middleware/auth', () => ({
@@ -61,7 +62,11 @@ function createKv() {
   return {
     values,
     namespace: {
-      get: vi.fn(async (key: string) => values.get(key) ?? null),
+      // Honors the `'json'` read type the way Workers KV does.
+      get: vi.fn(async (key: string, type?: string) => {
+        const value = values.get(key) ?? null;
+        return value !== null && type === 'json' ? JSON.parse(value) : value;
+      }),
       put: vi.fn(async (key: string, value: string) => {
         values.set(key, value);
       }),
@@ -125,14 +130,21 @@ describe('GCP service-account route vertical slice', () => {
   let env: Env;
   let kv: ReturnType<typeof createKv>;
   let computeAllowed: boolean;
+  let billingDisabled: boolean;
   let fetchMock: ReturnType<typeof vi.fn>;
 
   beforeEach(() => {
     sqlite = setupDatabase();
     kv = createKv();
     computeAllowed = true;
+    billingDisabled = false;
     fetchMock = vi.fn(async (input: unknown, init?: RequestInit) => {
       const url = String(input);
+      if (url.startsWith('https://cloudbilling.googleapis.com/v1/services/')) {
+        return billingDisabled
+          ? googleErrorResponse(googleServiceDisabledBody('cloudbilling.googleapis.com'))
+          : new Response(JSON.stringify({ skus: [] }), { status: 200 });
+      }
       if (url === DEFAULT_GCP_SERVICE_ACCOUNT_TOKEN_URL) {
         return new Response(
           JSON.stringify({
@@ -223,6 +235,46 @@ describe('GCP service-account route vertical slice', () => {
       count: 1,
     });
     expect(Array.from(kv.values.values())).toEqual(['vertical-short-lived-token']);
+  });
+
+  it('Check again records Cloud Billing turned off, then clears it once Google answers', async () => {
+    const saved = await createApp().request(
+      '/api/gcp/service-account',
+      saveRequest('verify-key-id'),
+      env
+    );
+    expect(saved.status).toBe(200);
+
+    billingDisabled = true;
+    const off = await createApp().request('/api/gcp/verify', { method: 'POST' }, env);
+    expect(off.status).toBe(200);
+    expect(await off.json()).toEqual({
+      success: true,
+      verified: true,
+      billingCheck: 'owner_fixable',
+      apiIssues: [
+        {
+          service: 'cloudbilling.googleapis.com',
+          label: 'Cloud Billing',
+          reason: 'api_disabled',
+          observedAt: expect.any(String),
+        },
+      ],
+    });
+    // The probe asked Google for one SKU with a read-only Cloud Billing token.
+    const billingCall = fetchMock.mock.calls.find(([url]) =>
+      String(url).startsWith('https://cloudbilling.googleapis.com/')
+    );
+    expect(new URL(String(billingCall?.[0])).searchParams.get('pageSize')).toBe('1');
+
+    billingDisabled = false;
+    const on = await createApp().request('/api/gcp/verify', { method: 'POST' }, env);
+    expect(await on.json()).toEqual({
+      success: true,
+      verified: true,
+      billingCheck: 'ok',
+      apiIssues: [],
+    });
   });
 
   it('preserves the prior encrypted snapshot when Compute verification rejects a rotation', async () => {

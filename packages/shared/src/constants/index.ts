@@ -338,6 +338,18 @@ export {
   HETZNER_IMAGE,
 } from './hetzner';
 
+// GCP required APIs
+export {
+  GCP_APIS_ENABLED_BEFORE_TRACKING,
+  GCP_CLOUD_BILLING_SERVICE,
+  GCP_CONSOLE_API_LIBRARY_URL,
+  GCP_REQUIRED_APIS,
+  GCP_SERVICE_NAME_PATTERN,
+  gcpApiLabel,
+  gcpEnableApiUrl,
+  type GcpRequiredApi,
+} from './gcp-required-apis';
+
 // GCP Deployment
 export {
   DEFAULT_GCP_COMPUTE_API_BASE_URL,

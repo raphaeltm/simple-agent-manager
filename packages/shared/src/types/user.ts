@@ -148,6 +148,11 @@ export interface GcpWorkloadIdentityCredential {
   wifPoolId: string;
   wifProviderId: string;
   defaultZone: string;
+  /**
+   * Google APIs SAM's setup enabled in the project. Absent on credentials set up before SAM
+   * recorded it, which are treated as missing every API added since.
+   */
+  enabledApis?: string[];
 }
 
 /** GCP service-account key credential. The private key is always encrypted at rest. */
@@ -174,6 +179,27 @@ export interface GcpCredentialMetadata {
   serviceAccountEmail: string;
   defaultZone: string;
   privateKeyId?: string;
+  /** Required Google APIs that are, or may be, unusable in the project. Empty when none. */
+  apiIssues?: GcpApiIssue[];
+}
+
+/**
+ * Why a required Google API is flagged on a GCP credential.
+ *
+ * - `api_disabled`: Google reported the API is not enabled in the project (`SERVICE_DISABLED`).
+ * - `permission_denied`: Google refused the call on IAM grounds for the project.
+ * - `not_enabled_by_setup`: SAM's setup for this credential predates the API being required, so
+ *   SAM never enabled it. It may still have been enabled by hand.
+ */
+export type GcpApiIssueReason = 'api_disabled' | 'permission_denied' | 'not_enabled_by_setup';
+
+export interface GcpApiIssue {
+  /** Service name, for example `cloudbilling.googleapis.com`. */
+  service: string;
+  label: string;
+  reason: GcpApiIssueReason;
+  /** When Google last reported it; absent for `not_enabled_by_setup`. */
+  observedAt?: string;
 }
 
 export interface SaveGcpServiceAccountCredentialRequest {

@@ -236,12 +236,16 @@ export async function scheduled(
   // gcpCatalog.priceRefreshBudgetMs (default 90 s); on other ticks it costs one KV read. Earlier
   // in the chain that budget would delay session_sleep (`.claude/rules/47`). Catalogs pick up a
   // refreshed table on their next build.
-  // A refresh where every credential failed throws here so it reaches failed-sweep
-  // notifications; its backoff was already recorded, so the next tick still waits.
+  // A refresh where every credential failed and at least one failure was a genuine fault throws
+  // here so it reaches failed-sweep notifications; its backoff was already recorded, so the next
+  // tick still waits. Failures that are owner-fixable states of a user's Google project (Cloud
+  // Billing API off) are shown on that credential instead, not raised to operators.
   const gcpPriceTable = await sweeps.isolate('gcp_price_table', async () => {
     const result = await refreshGcpPriceTableIfDue(env);
-    if (result.status === 'failed') {
-      throw new Error(`GCP price refresh failed for ${result.attempts} credential(s)`);
+    if (result.status === 'failed' && result.faults > 0) {
+      throw new Error(
+        `GCP price refresh failed for ${result.attempts} credential(s), ${result.faults} with a fault`
+      );
     }
     return result;
   });
