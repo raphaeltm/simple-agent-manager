@@ -73,9 +73,7 @@ describe('validateActiveWorkspaceMcpToken', () => {
     'accepts the token while its workspace is %s on a running node',
     async (status) => {
       seed({ status });
-      await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toMatchObject(
-        TOKEN_DATA
-      );
+      await expect(validateActiveWorkspaceMcpToken(env, TOKEN)).resolves.toMatchObject(TOKEN_DATA);
     }
   );
 

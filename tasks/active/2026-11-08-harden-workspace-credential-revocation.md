@@ -73,16 +73,30 @@ exploit. This task checks each claim against current `main` and fixes only what 
 
 ## Implementation Checklist
 
-- [ ] `verifyCallbackToken` requires a valid `scope` and a positive integer `iat`; `CallbackTokenPayload.scope` becomes required
-- [ ] Remove every `scope === undefined` legacy branch (dead code after the verifier change)
-- [ ] AI proxy: require the token's workspace to be active (`creating`/`running`/`recovery`) on a non-terminal node, with owner/project from the same read
-- [ ] MCP: shared lifecycle check for workspace MCP tokens (active workspace, matching user/project, non-terminal node) used by `authenticateMcpRequest` (covers `/mcp` and webhook claims) and the deployment identity endpoint; revoke the KV entry when the workspace is gone or terminal
-- [ ] Tests: legacy/malformed/missing-iat tokens rejected; wrong scope/resource/user rejected
-- [ ] Tests: AI proxy and MCP with a real SQL engine: stopped/sleeping/deleted/error workspace and stopping node rejected; active workspace accepted (owner control); user/project mismatch rejected
-- [ ] Tests: TOCTOU/renewal stays covered (existing renewal tests); stale token after stop rejected; current lifecycle succeeds
-- [ ] Update existing tests that relied on legacy acceptance
-- [ ] Docs: `architecture/security.md` (callback + MCP revocation semantics, residuals), `reference/vm-agent.md`/`configuration.md` if they mention legacy tokens; API rule 34 note
-- [ ] Note on the Instant epoch backlog task
+- [x] `verifyCallbackToken` requires a valid `scope` and a positive integer `iat`; `CallbackTokenPayload.scope` becomes required (also the shared `CallbackTokenClaimsSchema`)
+- [x] Remove every `scope === undefined` legacy branch (`_helpers.ts`, `node-callback-auth.ts` incl. the `requireExplicitScope` option, `_callback-auth.ts`, `workspace-resource-history-callback.ts`, `node-acp-heartbeat.ts`, `workspace-eviction-callback.ts`)
+- [x] `verifyNodeCallbackAuth` re-checks `payload.scope === 'node'` after verification (defence in depth)
+- [x] AI proxy: require the token's workspace to be active (`creating`/`running`/`recovery`) on a non-terminal node (`verifyAIProxyAuth`), plus a deletion-unconfirmed signal
+- [x] MCP: `validateActiveWorkspaceMcpToken` (new `services/mcp-token-lifecycle.ts`) used by `authenticateMcpRequest` (covers `/mcp` and webhook claims) and the deployment identity endpoint; revokes on deleted/missing/identity mismatch, rejects otherwise
+- [x] codex-refresh: rule-49 incarnation re-check before returning rotated OAuth tokens (the DO has already persisted them)
+- [x] build-started: lifecycle check before notifying the TaskRunner
+- [x] acp-interaction callbacks: shared lifecycle check (adds node-terminal rejection)
+- [x] Tests: legacy/missing-iat tokens rejected (`node-agent-contract`, `callback-token-unified-scope`, renewal, observability ingestion)
+- [x] Tests: AI proxy (`ai-proxy-auth-lifecycle.test.ts`) and MCP (`mcp-token-lifecycle.test.ts`) with a real SQL engine, owner controls, route-level stop→refuse; build-started and acp-interaction real-state cases; codex-refresh mid-flight stop
+- [x] Discrimination verified: removing each guard reddens exactly its attack tests (build-started 7, AI proxy 9, verifier scope 2, MCP 20, codex fence 1)
+- [x] Update existing tests that relied on legacy acceptance, or seeded no workspace for MCP tokens (`seedActiveMcpWorkspace`, `seedActiveMcpTokenWorkspace`)
+- [x] Docs: `architecture/security.md` Callback Tokens (revocation semantics, permitted cleanup, residual); API rule 34 lesson
+- [x] Note on the Instant epoch backlog task; deploy-env status gap filed as `tasks/backlog/2026-11-08-deploy-release-env-status-gate.md`
+
+### Decisions (not fixed, with reasons)
+
+- Session-snapshot routes check lifecycle at entry only (no final fence): they are sleep-time
+  writes the active workspace makes; low value, documented in the inventory.
+- Heartbeat node-token refresh has no re-read between CAS and signing: a token minted to a node
+  that turns terminal in that window grants nothing, because every node callback rejects terminal nodes.
+- Resource-history telemetry has no lifecycle gate: it is a permitted terminal flush, bound to
+  project/node identity, idempotent and size-bounded.
+- Instant generation / VM restart credential reuse: accepted residual (finding 7).
 
 ## Acceptance Criteria
 

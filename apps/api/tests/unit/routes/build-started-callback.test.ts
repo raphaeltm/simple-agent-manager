@@ -48,9 +48,8 @@ function seed(workspaceStatus: string, nodeStatus: string): void {
 }
 
 async function createTestApp(): Promise<Hono> {
-  const { buildStartedCallbackRoute } = await import(
-    '../../../src/routes/projects/build-started-callback'
-  );
+  const { buildStartedCallbackRoute } =
+    await import('../../../src/routes/projects/build-started-callback');
   const app = new Hono();
   app.route('/api/projects', buildStartedCallbackRoute);
   app.onError((err, c) => {
@@ -102,11 +101,7 @@ describe('build-started callback route', () => {
     expect(mocks.verifyCallbackToken).toHaveBeenCalledWith('callback-token', env, {
       expectedScope: 'workspace',
     });
-    expect(mocks.notifyTaskRunnerWorkspaceBuildStarted).toHaveBeenCalledWith(
-      env,
-      'task-1',
-      'ws-1'
-    );
+    expect(mocks.notifyTaskRunnerWorkspaceBuildStarted).toHaveBeenCalledWith(env, 'task-1', 'ws-1');
   });
 
   it('rejects a valid callback token for a different workspace', async () => {

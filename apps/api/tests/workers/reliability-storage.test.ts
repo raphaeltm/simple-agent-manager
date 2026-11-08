@@ -10,6 +10,7 @@ import { checkMcpRateLimit } from '../../src/routes/mcp/_helpers';
 import { appendBootLog, getBootLogs, writeBootLogs } from '../../src/services/boot-log';
 import { generateMcpToken, storeMcpToken } from '../../src/services/mcp-token';
 import { RELIABILITY_STORAGE_ACTIVATION_KEY } from '../../src/services/reliability-storage';
+import { seedActiveMcpTokenWorkspace } from './helpers/seed-d1';
 const api = env as unknown as Env;
 async function publish(rateCutoverAt = 60, bootLogCutoverAt = 60) {
   await api.DATABASE.prepare('INSERT INTO platform_settings(key, value) VALUES (?, ?)')
@@ -65,15 +66,15 @@ describe('Reliability C real SQLite storage', () => {
   it.each(['task', 'agentSession', 'workspace'] as const)(
     'preserves activated HTTP auth, %s identity and 429 headers',
     async (identityKind) => {
-      const identity = crypto.randomUUID();
       const token = generateMcpToken();
       const config = { ...activated(), MCP_RATE_LIMIT: '1' };
+      const owner = await seedActiveMcpTokenWorkspace();
+      // The workspace identity kind keys the rate limit on the token's (real) workspace.
+      const identity = identityKind === 'workspace' ? owner.workspaceId : crypto.randomUUID();
       await storeMcpToken(api.KV, token, {
         taskId: identityKind === 'task' ? identity : '',
         agentSessionId: identityKind === 'agentSession' ? identity : undefined,
-        workspaceId: identityKind === 'workspace' ? identity : crypto.randomUUID(),
-        projectId: crypto.randomUUID(),
-        userId: crypto.randomUUID(),
+        ...owner,
         createdAt: new Date().toISOString(),
       });
       const app = new Hono<{ Bindings: Env }>();
@@ -277,9 +278,7 @@ describe('Reliability C real SQLite storage', () => {
     const token = generateMcpToken();
     await storeMcpToken(api.KV, token, {
       taskId: identity,
-      workspaceId: crypto.randomUUID(),
-      projectId: crypto.randomUUID(),
-      userId: crypto.randomUUID(),
+      ...(await seedActiveMcpTokenWorkspace()),
       createdAt: new Date().toISOString(),
     });
     const app = new Hono<{ Bindings: Env }>();

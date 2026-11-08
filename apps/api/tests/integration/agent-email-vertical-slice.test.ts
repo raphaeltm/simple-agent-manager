@@ -33,9 +33,9 @@ import {
   agentEmailConfig,
 } from '../../src/services/agent-email/setup-state';
 import { type McpTokenData, storeMcpToken } from '../../src/services/mcp-token';
-import { seedActiveMcpWorkspace } from '../helpers/mcp-route';
 import type { TriggerTaskSubmitter } from '../../src/services/trigger-admission';
 import { createAgentEmailTables, markAgentEmailSetUp } from '../helpers/agent-email-tables';
+import { seedActiveMcpWorkspace } from '../helpers/mcp-route';
 import { createAllSchemaTables, createMemoryKv, createSqliteD1 } from '../helpers/sqlite-d1';
 
 // The Worker entry imports Cloudflare runtime modules that cannot load in Node. Stub only those,

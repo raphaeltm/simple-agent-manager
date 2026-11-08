@@ -127,7 +127,7 @@ returns to and warns when that host is a local program.
 
 ### Callback Tokens
 
-VM agents call the API Worker with RS256 callback tokens signed by the Worker (`apps/api/src/services/jwt.ts`). There are two scopes, and neither can stand in for the other:
+VM agents call the API Worker with RS256 callback tokens signed by the Worker (`apps/api/src/services/jwt.ts`). There are two scopes, and neither can stand in for the other. `verifyCallbackToken` rejects a token with no `scope` claim or no `iat` claim. SAM has not minted unscoped tokens since March 2026, and every signer sets `iat`:
 
 - **Node tokens** (`scope: node`) authenticate node-level callbacks such as heartbeats and error reports. They are renewed in the heartbeat response while the node is not terminal (`apps/api/src/routes/node-lifecycle.ts`).
 - **Workspace tokens** (`scope: workspace`) authenticate everything about one workspace: chat messages, session snapshots, git credentials, runtime assets, task status and ACP activity. The Worker hands one to the node when it creates or restores the workspace.
@@ -139,7 +139,20 @@ Both last `CALLBACK_TOKEN_EXPIRY_MS` (24 hours by default). A workspace token is
 
 Neither path serves Instant (cf-container) workspaces. Their container receives a fresh token on every cold wake, one per container generation, so a superseded generation cannot extend its authority past the token it started with.
 
-Deleting or stopping a workspace ends its callback authority at once: every workspace callback checks the workspace status. Moving a workspace to another node ends renewal for the old node, whose existing token then lapses within one token lifetime. A renewed token keeps its first issue time in a `gen_iat` claim, so the Instant stale-callback guard compares generations correctly (`apps/api/src/routes/_stale-callback-guard.ts`).
+Deleting, stopping or sleeping a workspace ends its callback authority at once. SAM has no per-token revocation list. Instead, each use re-reads the workspace and its node in D1, and only an active workspace (`creating`, `running` or `recovery`) on a node that is not stopping, stopped or destroyed is accepted (`assertWorkspaceAcceptsCallback` in `apps/api/src/routes/workspaces/_helpers.ts`). Endpoints that return secrets or rotate credentials re-read the full workspace incarnation again just before they respond (`assertWorkspaceCallbackIdentityCurrent`). The same check gates the SAM AI proxy (`verifyAIProxyAuth` in `apps/api/src/services/ai-proxy-auth.ts`), so a stopped workspace's token cannot keep spending model credentials. A workspace never moves to another node: placement only sets `node_id` while it is empty, and deleting the node clears it. A renewed token keeps its first issue time in a `gen_iat` claim, so the Instant stale-callback guard compares generations correctly (`apps/api/src/routes/_stale-callback-guard.ts`).
+
+The workspace's SAM MCP token follows the same rule (`validateActiveWorkspaceMcpToken` in `apps/api/src/services/mcp-token-lifecycle.ts`). MCP tool calls, webhook-claim redemption and the GCP deployment identity endpoint accept it only while its workspace is active on a live node and still belongs to the token's user and project. A deleted, missing or reassigned workspace also deletes the token.
+
+While a workspace is ending, a few cleanup calls are still accepted:
+
+- node heartbeats and error reports, while the node itself is not ending (`nodeStatusTerminatesCallbacks` in `apps/api/src/services/node-callback-auth.ts`)
+- a provisioning-failure report for a workspace already in `error`
+- idempotent replays of an eviction report
+- resource-telemetry flushes, bound to the workspace's project and node (`apps/api/src/routes/projects/workspace-resource-history-callback.ts`)
+
+A rejected call against a workspace that is being deleted is recorded as evidence that its runtime is still alive. An ending workspace cannot fetch credentials, use the AI proxy or MCP, renew its token, upload session snapshots, or change task or chat state.
+
+What this does not cover: a credential keeps working if its workspace becomes active again under the same ID while the credential is still unexpired. A VM restart or rebuild keeps the workspace's callback token by design, because the VM agent holds it across the restart. An Instant wake mints a fresh token, but the previous generation's token is not revoked. A copy taken from a workspace can therefore be used again for up to `CALLBACK_TOKEN_EXPIRY_MS` (24 hours by default) while that workspace is active. The copy cannot renew itself without the node's token.
 
 Credentials that an agent process received when it started, such as the SAM AI proxy key, are not rotated inside the running process; the process picks up the current token the next time it starts.
 

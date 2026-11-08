@@ -79,7 +79,11 @@ describe('verifyAIProxyAuth lifecycle binding', () => {
     async (status) => {
       seed(status);
       const result = await verify(await signCallbackToken('ws-1', env));
-      expect(result).toMatchObject({ workspaceId: 'ws-1', userId: 'user-1', projectId: 'project-1' });
+      expect(result).toMatchObject({
+        workspaceId: 'ws-1',
+        userId: 'user-1',
+        projectId: 'project-1',
+      });
     }
   );
 
