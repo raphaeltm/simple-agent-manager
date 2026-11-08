@@ -8,8 +8,8 @@
 import type { CatalogOffering, ProviderCatalog, Tier } from './catalog';
 
 /** Real default: `DEFAULT_WORKSPACE_ADMISSION_HOST_MEMORY_RESERVE_MB`
- * (apps/api/src/services/workspace-resource-capacity.ts). Memory the host keeps for itself. */
-export const HOST_MEMORY_RESERVE_MB = 512;
+ * (apps/api/src/services/workspace-admission-policy.ts). Memory the host keeps for itself. */
+export const HOST_MEMORY_RESERVE_MB = 1024;
 
 /** Illustrative step counts. Real equivalents are wall-clock and configurable. */
 export const LAB = {

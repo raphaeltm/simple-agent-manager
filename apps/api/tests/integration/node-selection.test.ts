@@ -81,6 +81,7 @@ const taskRunnerSource = [
   'node-selection.ts',
   'node-selection-shared.ts',
   'workspace-steps.ts',
+  'workspace-placement-rejection.ts',
   'agent-session-step.ts',
   'state-machine.ts',
   'helpers.ts',

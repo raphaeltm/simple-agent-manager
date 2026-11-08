@@ -456,9 +456,10 @@ Older projects may still carry a legacy `small` / `medium` / `large` default. It
 SAM translates it into compatibility workload requirements — but it is shown as _Legacy_ in the
 resource editor with a link to clear it. Prefer explicit vCPU/memory/disk values: a legacy size is
 a label, not a statement about provider hardware. With the current compatibility adapter, `small`
-means a roughly third-node workload slice (625 mCPU, 1152 MiB memory, 13 GiB disk), while
+means a small workload slice (625 mCPU, 1152 MiB memory, 13 GiB disk; two fit a 4 GiB machine
+after the host reserve), while
 `medium` and `large` are half-node slices sized to stay off the class below them after the default
-512 MiB host memory reserve. How many such slices share a machine is decided purely by the
+1 GiB host memory reserve. How many such slices share a machine is decided purely by the
 machine's remaining CPU, memory, and disk.
 :::
 
@@ -487,14 +488,18 @@ A node accepts additional work only if **all** of these hold:
 
 - The sum of every active workspace's reserved CPU, memory, and disk — plus this request — still
   fits the machine's real hardware. By default only memory holds headroom back for the host
-  itself (512 MB); CPU may be committed up to 100% of the machine, and disk is compared
+  itself (1024 MB); CPU may be committed up to 100% of the machine, and disk is compared
   against the whole disk, unless the deployment configures otherwise.
 - Nothing on the node asked for an exclusive machine, and this work is not asking for one.
 - A node that is **already hosting work** is reporting fresh health telemetry, and its disk
   pressure is below its threshold (80% by default). Memory admission checks both declared reservations
-  and measured headroom: current host use plus outstanding reserved memory and the new request
-  must fit after the host reserve. Fresh observations of running work avoid counting its usage twice;
-  starting work and missing observations keep the full reservation outstanding. A brand-new machine that has
+  and measured headroom: the host is charged its reserve, or its measured use when that is larger,
+  and outstanding reserved memory plus the new request must fit in the rest. The reserve already
+  covers the host's own processes, so measured use only counts against you when something on the
+  node uses more than it declared. A fresh observation of a running workspace's memory is
+  subtracted from measured use, capped at that workspace's reservation, so its usage is not counted
+  twice. A workspace that is still starting, or has no fresh observation, gets no credit: its
+  measured use counts alongside its full reservation. A brand-new machine that has
   not reported yet is not held back by this. Restarting a stopped, errored, or evicted workspace
   also requires admission; rebuilding an already active workspace retains its reservation.
 - Live CPU is treated differently from memory and disk. CPU is shared out by the kernel, so a busy
@@ -603,7 +608,7 @@ remove it so a lower scope applies.
 | "Waiting for capacity" that never clears                               | The pool's allowed offerings are sold out in the chosen region. Allow more offerings or regions, or switch the policy to **Fallback chain**.                                                                                                                                                                                                                                               |
 | Work fails immediately with a capacity error                           | Exhaustion policy is **Fail**, or the pool has no allowed offering that satisfies the requirements.                                                                                                                                                                                                                                                                                        |
 | "Capacity pool node limit (N) reached and no node can fit the request" | The user is at the pool's **Machine limit** and no running node has room. Raise the limit, lower the requirements so an existing node fits, or free a node.                                                                                                                                                                                                                                |
-| No offering satisfies the request                                      | Requirements exceed every allowed machine — remember the host memory reserve, so a 4 GiB offering tops out at a 3584 MiB reservation. Lower the requirements or allow a bigger instance type.                                                                                                                                                                                              |
+| No offering satisfies the request                                      | Requirements exceed every allowed machine — remember the host memory reserve, so a 4 GiB offering tops out at a 3072 MiB reservation. Lower the requirements or allow a bigger instance type.                                                                                                                                                                                              |
 | A new machine starts although an existing one looks free               | The existing machine's disk is at or above the deployment's disk-pressure threshold (80% by default, `TASK_RUN_NODE_DISK_PRESSURE_THRESHOLD_PERCENT`), its CPU is saturated (85% by default, or the project's **Node CPU Threshold**), or it hasn't reported fresh health readings. SAM won't add work to it until that clears; check the machine's page for its disk and CPU.             |
 | A new machine is provisioned for every task                            | Requirements ask for an exclusive node, each request fills a machine, or **Spread** has not reached the pool's **Machine limit**.                                                                                                                                                                                                                                                          |
 | Workspace machines are bigger or pricier than expected                 | Check the resolved requirements in the chat's infrastructure panel — a profile, skill, or project default may be raising the floor. Then open **Resources** on a finished session to see what it actually used ([Session Resource History](/docs/guides/session-resources/)).                                                                                                              |

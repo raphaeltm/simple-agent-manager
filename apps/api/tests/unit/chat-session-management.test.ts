@@ -44,14 +44,18 @@ const taskRunnerDoServiceSource = readFileSync(
   'utf8'
 );
 
+// workspace-steps.ts holds only the workspace_creation step and its helpers since dispatch moved
+// to workspace-dispatch-step.ts, so the module itself is the bounded creation section.
+const workspaceCreationSource = readFileSync(
+  resolve(process.cwd(), 'src/durable-objects/task-runner/workspace-steps.ts'),
+  'utf8'
+);
+
 function getWorkspaceCreationSection(): string {
-  const wsCreationStart = taskRunnerDoSource.indexOf(
-    'export async function handleWorkspaceCreation('
-  );
-  const wsCreationEnd = taskRunnerDoSource.indexOf(
-    'export async function handleWorkspaceDispatch('
-  );
-  return taskRunnerDoSource.slice(wsCreationStart, wsCreationEnd);
+  if (!workspaceCreationSource.includes('export async function handleWorkspaceCreation(')) {
+    throw new Error('workspace creation step not found in workspace-steps.ts');
+  }
+  return workspaceCreationSource;
 }
 
 // =========================================================================

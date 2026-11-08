@@ -20,7 +20,10 @@ import {
 import { agentModelSettingDefinitions } from './agent-models/settings-definition';
 import { CONNECTOR_DEFAULTS, type ConnectorSettingKey } from './connector-settings-definition';
 import { ENV_KEYS, SECRET_KINDS, SETTING_KEYS } from './platform-config-store';
-import { DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER } from './provisioning-attempt-limits';
+import {
+  DEFAULT_PROVISIONING_ATTEMPTS_PER_PROVIDER_TIER,
+  DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS,
+} from './provisioning-attempt-limits';
 import { DEFAULT_SESSION_STALE_TURN_NO_WORK_MINUTES } from './session-idleness';
 export const CORE_SETTINGS: AdminSettingDefinition[] = [
   integerDefinition(
@@ -233,6 +236,13 @@ export const CORE_SETTINGS: AdminSettingDefinition[] = [
     'Operations',
     "Most offerings one task tries from a single provider source before moving to the pool's next-ranked provider (or giving up), under the fallback-chain exhaustion policy.",
     { min: 1, max: 50 }
+  ),
+  integerDefinition(
+    'operations.workspacePlacementMaxRejections',
+    DEFAULT_WORKSPACE_PLACEMENT_MAX_REJECTIONS,
+    'Operations',
+    'Consecutive times the node a task selected may refuse its final workspace reservation before the task fails with the refusal reasons. The count resets when a reservation succeeds.',
+    { min: 1, max: 20 }
   ),
   ...Object.keys(CONNECTOR_DEFAULTS).map((key) => connectorDefinition(key as ConnectorSettingKey)),
   ...agentModelSettingDefinitions(),

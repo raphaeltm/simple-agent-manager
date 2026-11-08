@@ -24,7 +24,7 @@ const nodeLifecycleSource = readFileSync(
   'utf8'
 );
 const taskRunnerWorkspaceSource = readFileSync(
-  resolve(process.cwd(), 'src/durable-objects/task-runner/workspace-steps.ts'),
+  resolve(process.cwd(), 'src/durable-objects/task-runner/workspace-dispatch-step.ts'),
   'utf8'
 );
 const workspaceHelpersSource = readFileSync(

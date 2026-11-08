@@ -644,9 +644,17 @@ These control the live Google Cloud catalog described in [Google Cloud](/docs/gu
 | Setting                                          | Default | Allowed range | Applies to                                                                                                                     |
 | ------------------------------------------------ | ------- | ------------- | ------------------------------------------------------------------------------------------------------------------------------ |
 | `operations.provisioningAttemptsPerProviderTier` | 8       | 1–50          | Most offerings one task tries from one provider source under `fallback-chain` before moving to the pool's next-ranked provider |
+| `operations.workspacePlacementMaxRejections`     | 3       | 1–20          | Consecutive times the node a task selected may refuse its final workspace reservation before the task fails                    |
 
 See [Provider order](/docs/guides/compute-pools/#provider-order). Each attempt is a create request
 to the provider, so this bounds the work one task does before it reaches the next provider.
+
+A refused workspace reservation sends the task back through node selection, about 6 seconds per
+cycle, so `operations.workspacePlacementMaxRejections` bounds a node that can never admit the
+request to roughly 18 seconds at the default (about 2 minutes at the maximum). The failure names
+the refusal reasons, which are also recorded in the task's placement diagnostics, and a node the
+task provisioned goes to the warm pool. A refusal caused only by a busy build queue is a wait, not
+a refusal, and does not count. The count resets when a reservation succeeds.
 
 ### Session and configuration read recovery
 

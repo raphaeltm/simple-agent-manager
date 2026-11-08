@@ -47,7 +47,7 @@ function runToQuiet(lab: ReturnType<typeof createLab>, maxSteps = 60): void {
 describe('admission gate', () => {
   it('refuses the platform-default workload on a 4 GB host because of the host reserve', () => {
     // This is the 2026-09-09 incident in one assertion: cx23 has exactly 4096 MB, the platform
-    // default reserves exactly 4096 MB, and the host keeps 512 MB for itself.
+    // default reserves exactly 4096 MB, and the host keeps HOST_MEMORY_RESERVE_MB for itself.
     const lab = createLab(hetzner, EU);
     const refusal = admissionRefusal(lab, nodeOf('cx23'), 'standard');
     expect(refusal).toBe(`not enough memory after the ${HOST_MEMORY_RESERVE_MB} MB host reserve`);
