@@ -16,16 +16,15 @@ import {
   bootstrapSessionAllowed,
   bootstrapUserDecision,
 } from './services/bootstrap-owner';
+import { emailSignInPlugins } from './services/email-sign-in';
+import { refreshGitHubAccessToken } from './services/github-oauth-refresh';
 import {
   resolveLoginOAuthConfig,
   selectGitHubOAuthConfig,
   selectGitLabOAuthConfig,
   selectGoogleLoginOAuthConfig,
 } from './services/platform-config';
-import { emailSignInPlugins } from './services/email-sign-in';
 import { isSignupApprovalRequired } from './services/signup-approval';
-
-import { refreshGitHubAccessToken } from './services/github-oauth-refresh';
 
 export { refreshGitHubAccessToken };
 

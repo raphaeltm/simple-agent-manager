@@ -30,8 +30,8 @@ import {
 } from '../middleware/rate-limit';
 import { agentEmailDomain } from './agent-email/address';
 import { agentEmailSenderFor } from './agent-email/provider';
-import { hasAgentEmailBinding } from './agent-email/setup-state';
 import { getAgentEmailLimits } from './agent-email/settings';
+import { hasAgentEmailBinding } from './agent-email/setup-state';
 import { bootstrapOwnerEmail, bootstrapOwnerEstablished } from './bootstrap-owner';
 
 const log = createModuleLogger('email-sign-in');
